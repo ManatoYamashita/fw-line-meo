@@ -1,0 +1,43 @@
+# --- 環境変数・秘匿情報 ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+gcp-credentials*.json
+
+# --- Node / TypeScript ---
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+coverage/
+.npm/
+.pnpm-store/
+.yarn/
+
+# --- Go ---
+bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# --- ログ・一時ファイル ---
+*.log
+logs/
+tmp/
+.cache/
+
+# --- OS / エディタ ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- GCP / Terraform（将来用） ---
+*.tfstate
+*.tfstate.*
+.terraform/
