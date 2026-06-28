@@ -182,6 +182,10 @@ erDiagram
 - 削除は `ON DELETE RESTRICT`（階層誤削除を防止）。MVP では論理削除/アーカイブは設けない（Non-Goal）。
 - `dashboard_users`: `role='operator' ⇒ agency_id IS NULL AND operator_id IS NOT NULL`／`role='agency' ⇒ agency_id IS NOT NULL`（CHECK）。
 - `rating_snapshots`: `subject_kind='self' ⇒ competitor_id IS NULL`／`subject_kind='competitor' ⇒ competitor_id IS NOT NULL`（CHECK）。
+- **複合 FK による所属境界の強制**（PR #9 レビュー対応）:
+  - `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)`（`agencies` に `UNIQUE(operator_id, id)`）。agency ロールの agency が当該 operator 配下であることを構造強制（クロスオペレータ RBAC 漏れ防止）。operator 行は `agency_id` NULL ゆえ MATCH SIMPLE で非適用。
+  - `rating_snapshots(store_id, competitor_id) → competitors(store_id, id)`（`competitors` に `UNIQUE(store_id, id)`）。競合の `store_id` がスナップショットの `store_id` と一致することを強制（店舗境界破れ防止）。self 行は `competitor_id` NULL ゆえ非適用。
+- `stores`: `CHECK ((place_status='confirmed') = (place_id IS NOT NULL))`。不変条件 `confirmed ⇔ place_id present`（pending は未確定=NULL）。部分一意 index は `WHERE place_id IS NOT NULL`（CHECK により `confirmed` と等価）。
 
 **テナント・リネージ（RBAC 支持）**:
 ```

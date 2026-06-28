@@ -2,13 +2,18 @@
 -- 各拒否は DO ブロック + EXCEPTION で捕捉。期待通り拒否されなければ FAIL を RAISE（非ゼロ終了）。
 BEGIN;
 DO $$
-DECLARE op uuid; ag uuid; ow uuid; s uuid; c uuid;
+DECLARE op uuid; ag uuid; ow uuid; s uuid; c uuid; op2 uuid; ag2 uuid; s2 uuid; cb uuid;
 BEGIN
     INSERT INTO operators(name) VALUES ('op') RETURNING id INTO op;
     INSERT INTO agencies(operator_id, name) VALUES (op, 'ag') RETURNING id INTO ag;
     INSERT INTO owners(agency_id, line_user_id) VALUES (ag, 'U_c') RETURNING id INTO ow;
     INSERT INTO stores(owner_id, name) VALUES (ow, 's') RETURNING id INTO s;
     INSERT INTO competitors(store_id, place_id) VALUES (s, 'CMP1') RETURNING id INTO c;
+    -- 別 operator 配下の agency / 別店舗とその競合（複合 FK テスト用）
+    INSERT INTO operators(name) VALUES ('op2') RETURNING id INTO op2;
+    INSERT INTO agencies(operator_id, name) VALUES (op2, 'ag2') RETURNING id INTO ag2;
+    INSERT INTO stores(owner_id, name) VALUES (ow, 's2') RETURNING id INTO s2;
+    INSERT INTO competitors(store_id, place_id) VALUES (s2, 'CMPB') RETURNING id INTO cb;
 
     -- FK 孤児拒否
     BEGIN INSERT INTO agencies(operator_id, name) VALUES (gen_random_uuid(), 'x');
@@ -110,6 +115,21 @@ BEGIN
     BEGIN INSERT INTO stores(owner_id, name, longitude) VALUES (ow, 'badlng', 200);
         RAISE EXCEPTION 'FAIL: longitude out of range'; EXCEPTION WHEN check_violation THEN NULL; END;
 
-    RAISE NOTICE 'PASS 5.1: full constraint matrix held';
+    -- 複合 FK: agency ロールに別 operator 配下の agency を紐付け → 拒否
+    BEGIN INSERT INTO dashboard_users(role, operator_id, agency_id, auth_subject)
+            VALUES ('agency', op, ag2, 'AS_xop');
+        RAISE EXCEPTION 'FAIL: cross-operator agency accepted'; EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+    -- 複合 FK: 別店舗の競合を rating_snapshots に紐付け → 拒否
+    BEGIN INSERT INTO rating_snapshots(store_id, subject_kind, competitor_id, place_id, captured_on)
+            VALUES (s, 'competitor', cb, 'x', DATE '2026-10-01');
+        RAISE EXCEPTION 'FAIL: cross-store competitor snapshot accepted'; EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+
+    -- place CHECK: confirmed + place_id NULL → 拒否 / pending + place_id 付き → 拒否
+    BEGIN INSERT INTO stores(owner_id, name, place_status) VALUES (ow, 'conf_null', 'confirmed');
+        RAISE EXCEPTION 'FAIL: confirmed with NULL place_id'; EXCEPTION WHEN check_violation THEN NULL; END;
+    BEGIN INSERT INTO stores(owner_id, name, place_id, place_status) VALUES (ow, 'pend_pid', 'PP', 'pending');
+        RAISE EXCEPTION 'FAIL: pending with place_id'; EXCEPTION WHEN check_violation THEN NULL; END;
+
+    RAISE NOTICE 'PASS 5.1: full constraint matrix held (incl composite FKs and place CHECK)';
 END $$;
 ROLLBACK;

@@ -87,6 +87,16 @@
 - **Selected**: `rank` = `store_id` の比較集合 {自店 + 当日 active 競合} 内の当日順位。指標は星評価降順、同点は review_count 降順。算出は Go バッチ責務、本モデルはカラム意味のみ確定し point-in-time 保持。
 - **Rationale**: 格納値の意味を固定し、機能1 実装の解釈ブレを排除。
 
+### Decision: 複合 FK と place CHECK による整合性ハードニング（PR #9 レビュー対応）
+- **Context**: 実機 INSERT で 4 件の整合性の穴を再現（クロスオペレータ RBAC・競合の店舗境界破れ・place_status/place_id 非連動・匿名性 denylist の脆弱性）。
+- **Selected**:
+  1. `agencies UNIQUE(operator_id, id)` ＋ `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` 複合 FK。
+  2. `competitors UNIQUE(store_id, id)` ＋ `rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` 複合 FK。
+  3. `stores CHECK ((place_status='confirmed') = (place_id IS NOT NULL))`。
+  4. `30_compliance.sql` を allowlist 化（既知 12 テーブル／tally 固定列）。テーブル allowlist は新テーブル追加時のレビューゲートを兼ねる。
+- **Rationale**: 「確定構造でテナント隔離」という spec の主眼を、CHECK/アプリ規律でなく**参照整合性そのもの**で構造強制。MATCH SIMPLE 既定により operator/self の NULL 行は自然に非適用となり、既存の正当データ・テストを壊さない。
+- **Trade-offs**: 複合 FK の参照先として冗長な複合 UNIQUE を 2 つ追加するが、構造保証の価値が上回る。
+
 ## Risks & Mitigations
 - アプリ層 RBAC の絞り込み漏れ — リネージ FK を NOT NULL 化し orphan を構造的に排除＋スコープ判定をテストで担保。将来 RLS で多層防御可能。
 - ポリモーフィック `rating_snapshots` の整合 — CHECK 制約（subject_kind と competitor_id の相関）＋部分一意 index で防御。

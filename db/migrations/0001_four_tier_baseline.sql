@@ -38,7 +38,9 @@ CREATE TABLE agencies (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     operator_id uuid NOT NULL REFERENCES operators(id) ON DELETE RESTRICT,
     name        text NOT NULL,
-    created_at  timestamptz NOT NULL DEFAULT now()
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    -- 複合 FK（dashboard_users）の参照先。id は単独でも一意だが複合一意制約が必要。
+    CONSTRAINT ux_agencies_operator_id UNIQUE (operator_id, id)
 );
 
 -- ============================================================
@@ -65,9 +67,11 @@ CREATE TABLE stores (
     longitude     numeric(9,6) CHECK (longitude BETWEEN -180 AND 180),
     place_id      text,
     place_status  place_status NOT NULL DEFAULT 'pending',
-    created_at    timestamptz NOT NULL DEFAULT now()
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    -- 不変条件: confirmed ⇔ place_id present（pending は未確定=NULL）。
+    CONSTRAINT ck_place_confirmed CHECK ((place_status = 'confirmed') = (place_id IS NOT NULL))
 );
--- 確定 place_id のみ一意（未確定 NULL の店舗は複数併存可）
+-- 確定 place_id のみ一意（未確定 NULL の店舗は複数併存可・上記 CHECK により place_status='confirmed' と等価）
 CREATE UNIQUE INDEX ux_stores_place_id ON stores (place_id) WHERE place_id IS NOT NULL;
 
 -- ============================================================
@@ -78,14 +82,18 @@ CREATE TABLE dashboard_users (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     role         dashboard_role NOT NULL,
     operator_id  uuid NOT NULL REFERENCES operators(id) ON DELETE RESTRICT,
-    agency_id    uuid REFERENCES agencies(id) ON DELETE RESTRICT,
+    agency_id    uuid,
     auth_subject text NOT NULL UNIQUE,
     display_name text,
     created_at   timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT ck_dashboard_role_scope CHECK (
         (role = 'operator' AND agency_id IS NULL)
         OR (role = 'agency' AND agency_id IS NOT NULL)
-    )
+    ),
+    -- agency が当該 operator 配下であることを構造強制（クロスオペレータ RBAC 漏れ防止）。
+    -- operator 行は agency_id NULL ゆえ MATCH SIMPLE で非適用。
+    CONSTRAINT fk_dashboard_agency_operator
+        FOREIGN KEY (operator_id, agency_id) REFERENCES agencies(operator_id, id) ON DELETE RESTRICT
 );
 
 -- ============================================================
@@ -100,7 +108,9 @@ CREATE TABLE competitors (
     longitude  numeric(9,6) CHECK (longitude BETWEEN -180 AND 180),
     active     boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT ux_competitors_store_place UNIQUE (store_id, place_id)
+    CONSTRAINT ux_competitors_store_place UNIQUE (store_id, place_id),
+    -- 複合 FK（rating_snapshots）の参照先。競合の店舗境界を強制するため。
+    CONSTRAINT ux_competitors_store_id UNIQUE (store_id, id)
 );
 
 -- ============================================================
@@ -111,7 +121,7 @@ CREATE TABLE rating_snapshots (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     store_id      uuid NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     subject_kind  snapshot_subject NOT NULL,
-    competitor_id uuid REFERENCES competitors(id) ON DELETE RESTRICT,
+    competitor_id uuid,
     place_id      text NOT NULL,
     captured_on   date NOT NULL,
     rating        numeric(2,1) CHECK (rating BETWEEN 0 AND 5),
@@ -121,7 +131,11 @@ CREATE TABLE rating_snapshots (
     CONSTRAINT ck_snapshot_subject CHECK (
         (subject_kind = 'self'       AND competitor_id IS NULL)
         OR (subject_kind = 'competitor' AND competitor_id IS NOT NULL)
-    )
+    ),
+    -- 競合の store_id がこのスナップショットの store_id と一致することを構造強制（店舗境界破れ防止）。
+    -- self 行は competitor_id NULL ゆえ MATCH SIMPLE で非適用。
+    CONSTRAINT fk_snapshot_competitor_store
+        FOREIGN KEY (store_id, competitor_id) REFERENCES competitors(store_id, id) ON DELETE RESTRICT
 );
 CREATE UNIQUE INDEX ux_rs_self ON rating_snapshots (store_id, captured_on)
     WHERE subject_kind = 'self';
