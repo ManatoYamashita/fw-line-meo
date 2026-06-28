@@ -1,0 +1,109 @@
+# Implementation Plan
+
+> 構造的前提: 全テーブル DDL は単一の baseline マイグレーション（`0001`）に集約されるため、コアスキーマ系タスク（2.x・3.x）は同一ファイル競合により逐次実行（`(P)` 不可）。独立ファイルの成果物（seed=`0002`・ERD・write-boundary・各テストスクリプト）のみ並列可能。
+
+- [x] 1. 基盤: スキーマ成果物の足場・共有定数・テストハーネス
+- [x] 1.1 スキーマ成果物の足場とスキーマテストハーネスを用意する
+  - 2 言語共有の DB スキーマ成果物ディレクトリ（migrations / ERD / write-boundary）を新設し、空の baseline/seed マイグレーションを配置する
+  - 一時 PostgreSQL を起動し、マイグレーションを適用してアサーション SQL を実行するテストハーネスを用意する
+  - 観察可能な完了: ハーネスがクリーンな PostgreSQL に初期マイグレーションを適用して成功し、アサーション失敗時に非ゼロ終了する
+  - _Requirements: 11.1_
+- [x] 1.2 共有 ENUM 型と参照テーブルを定義する
+  - dashboard_role / onboarding_status / place_status / snapshot_subject / oauth_provider の ENUM 型を baseline に定義する
+  - categories・survey_aspects 参照テーブルを定義する（値の投入は 1.3）
+  - 観察可能な完了: baseline 適用後に全 ENUM 型と 2 つの参照テーブルが存在し、後続テーブルが ENUM と FK 参照先として利用できる
+  - _Requirements: 5.5_
+- [x] 1.3 共有定数 seed（単一 SoT）を投入する
+  - categories・survey_aspects の値集合を seed マイグレーション（独立ファイル）として唯一の定義（SoT）で投入し、両言語がコード内に二重定義しない前提を確立する
+  - 観察可能な完了: seed 適用後に categories/survey_aspects を SELECT すると定義済み code 群が返り、共有定数の単一情報源が成立する
+  - _Depends: 1.2_
+  - _Requirements: 9.3_
+
+- [x] 2. コア: 階層・認証・店舗スキーマ（単一 baseline ファイル・逐次・並列不可）
+- [x] 2.1 テナント階層とリネージ（operators・agencies）を定義する
+  - operators（apex）と agencies を定義し、agencies.operator_id を NOT NULL FK・ON DELETE RESTRICT とする
+  - 観察可能な完了: 親 operator 無しで agency を INSERT すると拒否され、4 階層の上位 2 層が確定構造として存在する
+  - _Requirements: 1.1, 1.2, 2.1, 2.4_
+- [x] 2.2 オーナーと LINE 識別子（owners）を定義する
+  - owners を agency_id NOT NULL FK・line_user_id を全オーナー一意・onboarding_status を保持して定義する
+  - 観察可能な完了: 同一 line_user_id の 2 件目 owner が拒否され、line_user_id から単一 owner を解決でき、owner が agency へ一意に辿れる
+  - _Depends: 2.1_
+  - _Requirements: 1.3, 2.1, 4.1, 4.2, 4.4_
+- [x] 2.3 店舗エンティティ（stores）を定義する
+  - stores を owner_id NOT NULL FK（1 オーナー:N 店舗）・category_code FK・place_status・緯度経度で定義し、place_id は確定時のみ一意・未確定 NULL を許容する部分一意インデックスを張る
+  - 観察可能な完了: 確定 place_id の重複が拒否され、未確定 NULL の店舗は複数併存でき、1 オーナーに複数店舗を所有させられ、store が agency へ一意に辿れる
+  - _Depends: 2.2, 1.2_
+  - _Requirements: 1.4, 1.5, 1.6, 2.1, 4.3, 5.1, 5.2, 5.3, 5.4, 5.5_
+- [x] 2.4 ダッシュボード認証と RBAC スコープ（dashboard_users）を定義する
+  - role（operator/agency）・operator_id・agency_id・auth_subject 一意を定義し、role と scope の整合を CHECK 制約で強制し、資格情報を一切保持しない
+  - 観察可能な完了: role=operator かつ agency_id 非 NULL、または role=agency かつ agency_id NULL が CHECK 拒否され、agency スコープで配下のみに絞れる構造が成立する
+  - _Depends: 2.1_
+  - _Requirements: 2.2, 2.3, 3.1, 3.2, 3.3, 3.4_
+
+- [x] 3. コア: 競合データ・匿名集計・将来枠（単一 baseline ファイル・逐次・並列不可）
+- [x] 3.1 競合リスト（competitors）を churn 対応で定義する
+  - competitors を store_id FK・place_id・active フラグ・(store_id, place_id) 一意で定義し、ハード削除しない方針を構造化する
+  - 観察可能な完了: 1 店舗に複数競合を関連づけられ、競合を active=false で非活性化でき、同一店舗内の place_id 重複が拒否される
+  - _Depends: 2.3_
+  - _Requirements: 6.1, 6.2, 6.3, 6.4_
+- [x] 3.2 評価・順位の時系列（rating_snapshots）を定義する
+  - store_id FK・subject_kind・competitor_id FK・place_id 非正規化・captured_on・rating・review_count・rank を定義し、subject_kind と competitor_id の相関を CHECK、自店/競合それぞれ 1 日 1 行を部分一意で強制し、(store_id, captured_on) 検索インデックスを張る
+  - 観察可能な完了: 同一店舗・同日の self スナップショット 2 件目が拒否され、ある店舗の自店+競合の最新・過去の評価/順位を取得できる
+  - _Depends: 3.1_
+  - _Requirements: 7.1, 7.2, 7.3, 7.4_
+- [x] 3.3 アンケート匿名集計（survey_rating_tallies・survey_aspect_tallies）を定義する
+  - store × period_month × 次元（星/観点）のカウンタ表のみを定義し、顧客・個別回答・連絡先・端末識別子を表現するテーブル/カラムを一切設けない
+  - 観察可能な完了: 集計が store 単位の匿名カウンタのみで構成され、個別回答や顧客識別を永続化する格納先がスキーマ上に存在しない
+  - _Depends: 2.3, 1.2_
+  - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
+- [x] 3.4 将来の OAuth トークン格納枠（oauth_tokens）を店舗単位で定義する
+  - oauth_tokens を store_id FK・provider・token_ref・scopes・expires_at で定義のみ行い、テナント隔離を store→owner→agency で担保し、MVP では実データ運用しない
+  - 観察可能な完了: 4 階層を再編せずに店舗単位のトークン格納枠が存在し、(store_id, provider) で一意化される
+  - _Depends: 2.3_
+  - _Requirements: 10.1, 10.2, 10.3, 10.4_
+
+- [x] 4. 成果物ドキュメント（独立ファイル・並列可）
+- [x] 4.1 (P) ER 図ドキュメントを作成する
+  - 全エンティティ・関係・カーディナリティ（1:N 含む）を表す ER 図と説明を作成する
+  - 観察可能な完了: ER 図がスキーマの全テーブルと所属関係を網羅し、4 階層と Store の独立を表現する
+  - _Depends: 3.4_
+  - _Requirements: 11.1, 11.2_
+  - _Boundary: ERD ドキュメント_
+- [x] 4.2 (P) 書き込み境界ドキュメントを作成する
+  - 各テーブル→単一書込責任層（TS リアルタイム / Go バッチ / seed）の対応表を作成し、新テーブル追加時の追記規律を明記する
+  - 観察可能な完了: 全テーブルに書込責任層が 1 つだけ割り当てられ、共有定数 seed の SoT が明記される
+  - _Depends: 3.4_
+  - _Requirements: 9.1, 9.2, 9.4, 11.2_
+  - _Boundary: write-boundary ドキュメント_
+
+- [x] 5. 検証: 制約・統合・コンプライアンステスト
+- [x] 5.1 (P) スキーマ制約テストを実装する
+  - 親不在の子拒否、line_user_id 重複拒否、確定 place_id 重複拒否・未確定 NULL 併存、dashboard role↔scope の CHECK 拒否、同日 self スナップショット二重拒否をアサートする
+  - 観察可能な完了: 各制約違反 INSERT が期待通り拒否され、テストがハーネス上で全通過する
+  - _Depends: 3.4_
+  - _Requirements: 1.5, 2.4, 3.1, 3.2, 3.3, 4.4, 5.2, 5.3, 5.4, 7.1_
+  - _Boundary: 制約テスト_
+- [x] 5.2 (P) テナント分離・解決の統合テストを実装する
+  - agency スコープの店舗一覧が他 agency を含まないこと、line_user_id→owner→所有店舗の解決、ある店舗の自店+競合の最新/過去取得をアサートする
+  - 観察可能な完了: agency スコープクエリが他テナントを 1 件も返さず、LINE 解決と日次サマリー取得が成功する
+  - _Depends: 3.4_
+  - _Requirements: 2.2, 2.3, 4.2, 4.3, 7.4_
+  - _Boundary: 統合テスト_
+- [x] 5.3 (P) コンプライアンス・書込境界の構造アサーションを実装する
+  - 顧客 PII/個別回答を保持しうるテーブル・カラムが存在しないこと、集計がカウンタのみであること、各テーブルの書込責任層が一意であることを静的にアサートする
+  - 観察可能な完了: PII/個別回答の格納先不在と、テーブルごと単一書込層が機械的に検証される
+  - _Depends: 3.4, 4.2_
+  - _Requirements: 8.1, 8.4, 8.5, 9.1, 9.4_
+  - _Boundary: コンプライアンステスト_
+- [x] 5.4 全適用とレビューチェックポイント（統合）
+  - baseline と seed をクリーンに適用し、全テスト通過と ERD/write-boundary のスキーマ整合を確認し、成果物を Source of Truth として確定する
+  - 観察可能な完了: 0001+0002 がクリーン適用され、全スキーマテストが通過し、ERD と write-boundary が実スキーマと一致する
+  - _Depends: 4.1, 4.2, 5.1, 5.2, 5.3_
+  - _Requirements: 11.1, 11.2, 11.3, 11.4_
+
+## Implementation Notes
+- 検証ランタイム: apple/container は GUI インストーラ(管理者権限)が必要で本環境(macOS 15.6)に未導入。スキーマ検証は sudo 不要の native postgresql@16 (keg-only, brew) を一時クラスタ(TCP 127.0.0.1:55432)で起動して実施。納品ハーネス(Makefile/run.sh)は計画通り apple/container 既定のまま(CONTAINER_CMD で差し替え可)。
+- macOS の Unix ソケットパス上限(103 バイト)に注意。長い scratchpad パスを psql の -k ソケットに使うと失敗するため、検証は TCP 接続で行う。
+- 検証エビデンス(2026-06-28): 0001+0002 クリーン適用、categories=11 / survey_aspects=6、smoke 22 アサーション全 PASS、ハーネス RED→GREEN(exit 1 / 0)実証。
+- タスク 4-5 検証(2026-06-28): make db-test 相当(assertions 5.1/5.2/5.3 全 PASS)、smoke 回帰 OK、check_docs.sh で 12 テーブルの書込境界単一所有と ERD 整合を確認(native postgres)。
+- check_docs.sh は書込境界の単一所有を `^| ` + バッククォート table 行マッチで機械検証する。新テーブル追加時の write-boundary.md 追記漏れを検出できる(Req 9.4)。
