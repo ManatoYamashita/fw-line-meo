@@ -12,7 +12,7 @@
   - Observable: `envs/prod` で `terraform init -backend=false` 後に `terraform fmt -check` と `terraform validate` が exit 0（GCS state bucket はブートストラップ前提のためこの段階では backend 無効で検証。bucket 作成手順はタスク 4.4 runbook に記載）
   - _Requirements: 1.1, 1.3, 1.4, 1.5, 8.1_
 
-- [ ] 1.2 project-services モジュール（API 有効化）
+- [x] 1.2 project-services モジュール（API 有効化）
   - `google_project_service` を必要 API 分宣言（run / sqladmin / secretmanager / identitytoolkit / cloudscheduler / artifactregistry / iam / iamcredentials / sts / billingbudgets / cloudquotas / monitoring / firebase / places）
   - Observable: `modules/project-services` 単体 validate が exit 0、`plan`（root 経由）で全 API リソースが現れ、apply 後に手動 API 有効化が不要
   - _Requirements: 1.2_
