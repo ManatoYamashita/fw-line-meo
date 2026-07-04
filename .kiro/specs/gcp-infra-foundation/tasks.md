@@ -104,3 +104,12 @@
   - Observable: migration 12 テーブル確認・直接続拒否・accessor 交差 403・budget/quota が可視
   - _Requirements: 3.2, 3.4, 5.2, 5.4, 7.1, 7.2_
   - _Depends: 5.2_
+
+## Implementation Notes
+
+- terraform CLI は環境に未導入だったため `brew install hashicorp/tap/terraform`（v1.15.7・`/opt/homebrew/bin`）で導入済み。以降のタスクは `export PATH="/opt/homebrew/bin:$PATH"` で terraform 利用可。
+- 各モジュールは単体 `terraform init -backend=false && validate` で検証する運用。standalone validate には `required_providers` が必須のため、全モジュールに `versions.tf`（`google ~> 7.0`）を置くこと（project-services で確立したパターン）。
+- `terraform fmt` はリスト末尾コメントを整列するため、authoring 後に `make tf-fmt`（= `terraform fmt -recursive infra`）を実行してから `fmt -check` すること。
+- macOS には `timeout` が無い（GNU coreutils）。長時間コマンドを bound したい場合は `gtimeout`（`brew install coreutils`）か使わない。
+- `.terraform.lock.hcl` は現状 gitignore。CI 確立（タスク 4.1）時に `terraform providers lock -platform=linux_amd64 -platform=darwin_arm64` で複数プラットフォーム対応の lock を生成し、root の lock をコミットへ切替える。
+- SA 命名規約の単一情報源は `infra/envs/prod/locals.tf`（`sa-webhook`/`sa-survey-web`/`sa-dashboard-api`/`sa-daily-batch`）。database の IAM DB user・grants.sql・cicd-wif は必ずこれを参照し、SA email 文字列を再定義しない。
