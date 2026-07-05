@@ -37,7 +37,10 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
-# --- GCP / Terraform（将来用） ---
+# --- GCP / Terraform ---
 *.tfstate
 *.tfstate.*
 .terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example

@@ -1,0 +1,122 @@
+# root 配線（gcp-infra-foundation / Task 4.3・Req 1.2,1.5）
+#
+# 全 9 モジュールを依存方向どおり配線する:
+#   project-services → registry/database/auth/secrets → run-services/batch-job
+#     → cicd-wif/guardrails
+# モジュール間はすべて output→変数で受け渡し、逆参照はしない（非循環）。
+
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
+# --- API 有効化（全モジュールの前提） ---
+module "project_services" {
+  source     = "../../modules/project-services"
+  project_id = var.project_id
+}
+
+# --- 実行系の器・データ系・認証・秘匿 ---
+module "registry" {
+  source     = "../../modules/registry"
+  project_id = var.project_id
+  region     = var.region
+
+  depends_on = [module.project_services]
+}
+
+module "database" {
+  source     = "../../modules/database"
+  project_id = var.project_id
+  region     = var.region
+
+  depends_on = [module.project_services]
+}
+
+module "auth" {
+  source     = "../../modules/auth"
+  project_id = var.project_id
+
+  depends_on = [module.project_services]
+}
+
+module "secrets" {
+  source     = "../../modules/secrets"
+  project_id = var.project_id
+
+  depends_on = [module.project_services]
+}
+
+# --- 実行系（database/secrets の output を消費） ---
+module "run_services" {
+  source             = "../../modules/run-services"
+  project_id         = var.project_id
+  region             = var.region
+  db_instance_name   = module.database.instance_name
+  db_connection_name = module.database.connection_name
+
+  # secret id は各サービスの secret_env が保持（別途 secret_ids 変数は持たない）
+  services = {
+    "webhook" = {
+      public         = true
+      needs_cloudsql = true
+      secret_env = {
+        LINE_CHANNEL_SECRET       = module.secrets.secret_ids["line-channel-secret"]
+        LINE_CHANNEL_ACCESS_TOKEN = module.secrets.secret_ids["line-channel-access-token"]
+      }
+    }
+    "survey-web" = {
+      public         = true
+      needs_cloudsql = true
+      secret_env = {
+        GEMINI_API_KEY = module.secrets.secret_ids["gemini-api-key"]
+      }
+    }
+    "dashboard-api" = {
+      public         = true
+      needs_cloudsql = true
+      secret_env     = {}
+    }
+  }
+
+  depends_on = [module.project_services]
+}
+
+module "batch_job" {
+  source             = "../../modules/batch-job"
+  project_id         = var.project_id
+  region             = var.region
+  db_instance_name   = module.database.instance_name
+  db_connection_name = module.database.connection_name
+  places_secret_id   = module.secrets.secret_ids["places-api-key"]
+
+  depends_on = [module.project_services]
+}
+
+# --- CI 認証・ガードレール（実行系の SA / Job を参照） ---
+module "cicd_wif" {
+  source            = "../../modules/cicd-wif"
+  project_id        = var.project_id
+  project_number    = data.google_project.this.number
+  github_repository = var.github_repository
+
+  runtime_service_account_emails = concat(
+    values(module.run_services.service_account_emails),
+    [module.batch_job.job_service_account_email],
+  )
+
+  depends_on = [module.project_services]
+}
+
+module "guardrails" {
+  source             = "../../modules/guardrails"
+  project_id         = var.project_id
+  project_number     = data.google_project.this.number
+  billing_account_id = var.billing_account_id
+  budget_amount_jpy  = var.budget_amount_jpy
+  alert_email        = var.alert_email
+  job_name           = module.batch_job.job_name
+  places_quota_id    = var.places_quota_id
+  places_quota_limit = var.places_quota_limit
+
+  depends_on = [module.project_services]
+}
