@@ -1,5 +1,8 @@
 import { Pool } from 'pg';
 
+// アクセサが受け取る最小の問い合わせ面（Pool / PoolClient / テスト用モックが適合）。
+export type Queryable = Pick<Pool, 'query'>;
+
 // 接続 2 系統（design: Components/pool）:
 //   - test/local: DATABASE_URL（標準 pg・native postgres の unix socket も可）
 //   - 本番:      @google-cloud/cloud-sql-connector（IAM 認証・パスワードレス）

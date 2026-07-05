@@ -14,7 +14,7 @@
   - Observable: ローカル postgres に対し pool 経由で `SELECT 1` が通り、接続設定のユニットテストが緑
   - _Requirements: 5.5_
 
-- [ ] 1.3 (P) DB 読み取りアクセサ（stores・aspects・dashboard_users）を実装する
+- [x] 1.3 (P) DB 読み取りアクセサ（stores・aspects・dashboard_users）を実装する
   - store をアンケート用に取得（存在・名前・place_id・place_status）し、QR RBAC 用に owner 経由の agency_id を同梱して取得する
   - `survey_aspects` を seed から取得し（コード内に選択肢を二重定義しない）、`dashboard_users` を auth_subject で引く
   - Observable: seed 済み postgres で各アクセサが期待行を返し、未確定 store・不在 store・未登録 UID の分岐がユニットテストで緑
