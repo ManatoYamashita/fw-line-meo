@@ -30,8 +30,11 @@ db-test: ## TEST: migrations 適用後 db/test/assertions/*.sql を実行（task
 db-verify-docs: ## DOCS: ERD/write-boundary と実スキーマの整合・書込境界単一所有を機械検証
 	db/test/check_docs.sh
 
-tf-init: ## TF: backend 込みで初期化（要 state バケット・実運用）
-	terraform -chdir=$(TF_DIR) init
+TF_STATE_BUCKET ?=
+
+tf-init: ## TF: backend 込みで初期化（例: make tf-init TF_STATE_BUCKET=my-tfstate）
+	@test -n "$(TF_STATE_BUCKET)" || { echo "ERROR: TF_STATE_BUCKET=<GCS バケット名> を指定してください"; exit 1; }
+	terraform -chdir=$(TF_DIR) init -backend-config="bucket=$(TF_STATE_BUCKET)"
 
 tf-fmt: ## TF: 全 infra ツリーを整形（-check は CI/検証用に -recursive）
 	terraform fmt -recursive infra
