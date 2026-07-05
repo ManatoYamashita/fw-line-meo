@@ -42,7 +42,7 @@
   - _Requirements: 6.1_
   - _Boundary: Registry_
 
-- [ ] 2.5 (P) grants.sql（IAM DB ユーザーへの GRANT・版管理）
+- [x] 2.5 (P) grants.sql（IAM DB ユーザーへの GRANT・版管理）
   - `infra/sql/grants.sql` に write-boundary（`db/write-boundary.md`）と整合する GRANT のみ記述（TS 層 3 SA → TS 書込テーブル、Go 層 SA → `competitors`/`rating_snapshots`、両層に read）。ユーザー名はタスク 1.1 の SA 命名規約由来の文字列を参照（terraform 依存なし・psql 実行前提）
   - Observable: `grants.sql` が全 IAM DB ユーザー分の GRANT を列挙し、`psql --set ON_ERROR_STOP=on -f`（ローカル PG16 でユーザーを仮作成した dry-run）で構文エラーゼロ
   - _Requirements: 3.2_
