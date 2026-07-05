@@ -93,19 +93,21 @@
   - _Requirements: 1.3, 5.2, 6.2, 7.3, 8.1_
   - _Depends: 4.3_
 
-- [ ] 5.2 apply 後: CI・実行系の稼働検証
+- [~] 5.2 apply 後: CI・実行系の稼働検証（実 GCP gen-fw-line-meo で大半検証済み）
   - runbook 手順で `make tf-apply`（人間・billing IAM）実行後、`make tf-plan` が差分ゼロ、`gcp-auth-smoke.yml` を `workflow_dispatch` 起動し WIF 認証 + `gcloud run services list` 成功、`attribute_condition` に対象リポジトリのみ許可されることを provider 定義で確認、`gcloud scheduler jobs run` の手動発火で Job 実行履歴に記録
   - Observable: `tf-plan` 0 差分（冪等）、smoke ワークフロー緑（SA キーなし認証）、scheduler 手動発火で daily-batch の実行履歴が残る
   - _Requirements: 1.3, 2.4, 2.5, 6.1, 6.2, 6.3, 6.4_
   - _Depends: 4.4_
-  - _Blocked: 実 GCP プロジェクト fwlm の作成 + `make tf-apply`（billing IAM・runbook §1 の手動投入）が前提。ローカル環境では実行不可のため、実プロジェクト作成後に人間が runbook 手順で実施する_
+  - _Verified(live): `terraform apply` 完了（65 リソース）→ `plan` 差分ゼロ（Req 1.3 ✓）。`gcloud scheduler jobs run daily-batch-trigger` で実行 daily-batch-l2ww8 が履歴に記録（Req 2.4/2.5 ✓）。WIF provider/attribute_condition/principalSet は apply 済み・GitHub 変数 WIF_PROVIDER/GCP_PROJECT_ID 設定済み。_
+  - _Remaining: gcp-auth-smoke ワークフローの緑（Req 6.1）は workflow_dispatch がデフォルトブランチ必須のため **PR #11 マージ後**に実行して確認する。_
 
-- [ ] 5.3 apply 後: データ・秘匿・コストの検証
+- [~] 5.3 apply 後: データ・秘匿・コストの検証（実 GCP gen-fw-line-meo で大半検証済み）
   - Auth Proxy + psql で `db/migrations/*.sql` 全適用 + `infra/sql/grants.sql` 適用 → 12 テーブル存在、Auth Proxy を介さない生 5432 直接続が拒否/タイムアウト、各サービス SA で自 secret の `versions access` 成功・他サービスの secret で 403、budget（¥10,000・threshold 3 本）と quota preference（places）を `gcloud`/Console で確認
   - Observable: migration 12 テーブル確認・直接続拒否・accessor 交差 403・budget/quota が可視
   - _Requirements: 3.2, 3.4, 5.2, 5.4, 7.1, 7.2_
   - _Depends: 5.2_
-  - _Blocked: 実 Cloud SQL インスタンス（apply 後）と Auth Proxy 接続が前提。5.2 と同じく実プロジェクト作成後に人間が runbook §3 手順で実施する。なお grants.sql の write-boundary 整合はローカル PG16 dry-run（task 2.5）で検証済み_
+  - _Verified(live): Auth Proxy 経由で migration + grants(`-v project=gen-fw-line-meo`) 適用 → 12 テーブル（Req 3.2 ✓）。実 IAM DB ユーザーで境界確認（webhook→stores 可/competitors 不可、batch→rating_snapshots 可/operators 不可・Req 5.4 ✓）。公開 IP 34.146.212.7:5432 への直接続は timeout（Req 3.4 ✓）。IAM DB ユーザーは password 属性なし（Req 5.2 ✓）。billing budget「fwlm monthly budget」¥10,000 を確認（Req 7.1 ✓）。_
+  - _Remaining: Places API の quota preference（Req 7.2）は `places_quota_id` 空でゲート中。Cloud Quotas で実名確認（`gcloud alpha services quota list` 等）して `terraform.tfvars` に設定 → 再 apply で有効化する。budget(7.1) が主要コストガードとして稼働中。_
 
 ## Implementation Notes
 
@@ -128,4 +130,12 @@
 - `google_billing_budget` は `billing_account`（project でない）を取り、`specified_amount.units` は **文字列**（`tostring(...)`）。apply には billing account への `roles/billing.costsManager` が必要。
 - Places API の `google_cloud_quotas_quota_preference` は `quota_id` を `count` でゲート（既定 "" で非作成）。Req 7.2 充足には runbook 手順で実名確認して `terraform.tfvars` に設定必須。task 5.3 で quota の存在を確認する。
 - task 5.1（静的検証）は GCP 不要で完了: root `terraform validate` Success（全9モジュール）+ fmt clean + 禁止パターン静的 grep（VPC connector/LB 不在=Cloud SQL のみ常時課金・min_instance_count 0 のみ・SA JSON キー不在・平文 secret 不在・envs は prod のみ）。plan ベースの部分は config 静的確認で代替（禁止リソースは config に存在しない）。
-- task 5.2/5.3 は `_Blocked_`: 実 GCP プロジェクト `fwlm` 作成 + `make tf-apply` + runbook §1/§3 の手動投入が前提でローカル実行不可。実プロジェクト作成後に人間が `infra/README.md` 手順で実施する。冪等性の apply 後 zero-diff（Req 1.3）と apply 後の稼働/秘匿/コスト検証はそこで確認する。
+- task 5.2/5.3 は実 GCP プロジェクト **gen-fw-line-meo**（PROJECT_ID=`fwlm` は 6 文字未満で不可のため既存の空プロジェクトを再利用）に apply して大半を live 検証済み（`[~]`）。残りは WIF ワークフロー緑（PR マージ後）と Places quota_id 設定のみ。
+- **実 apply で判明した順序依存**（初回 apply は 65→54 成功。以下を対処して収束）:
+  1. Cloud Run が `secret_key_ref version=latest` を要求 → 先に secret 値を投入してから再 apply（アプリは hello イメージなので API キー4本はプレースホルダで可・本番前に差し替え）。
+  2. IAM DB ユーザーは Cloud SQL の IAM 認証がアクティブになってから（インスタンス作成直後は `role cloudsqliamserviceaccount does not exist` レース）→ 再 apply で解消。
+  3. `google_billing_budget` は ADC 利用時 `user_project_override=true`+`billing_project` が必要（provider に追加）。
+  4. Cloud Run v2 は `deletion_protection` 既定 true → tainted 置換が阻止される。ステートレス層は `deletion_protection=false`（DB は true 維持）。
+  5. `scaling{min_instance_count=0}` は API が既定値を返さず perpetual diff → ブロック削除で既定 0 に（差分ゼロ達成）。
+  6. `google_firebase_project` は firebase 固有権限で 403 → 削除し `identity_platform_config` 単独に（認証基盤 Req 4 は成立）。
+- gcloud で billing budget を list する際は ADC quota project 制約で `--billing-project=<id>` が必要。
