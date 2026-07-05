@@ -113,3 +113,7 @@
 - macOS には `timeout` が無い（GNU coreutils）。長時間コマンドを bound したい場合は `gtimeout`（`brew install coreutils`）か使わない。
 - `.terraform.lock.hcl` は現状 gitignore。CI 確立（タスク 4.1）時に `terraform providers lock -platform=linux_amd64 -platform=darwin_arm64` で複数プラットフォーム対応の lock を生成し、root の lock をコミットへ切替える。
 - SA 命名規約の単一情報源は `infra/envs/prod/locals.tf`（`sa-webhook`/`sa-survey-web`/`sa-dashboard-api`/`sa-daily-batch`）。database の IAM DB user・grants.sql・cicd-wif は必ずこれを参照し、SA email 文字列を再定義しない。
+- `google-beta` provider の初回 DL は重い（~150MB）。`terraform init` は registry 往復でネットワーク待ちに陥ることがある。回避策: 同一 provider で初期化済みモジュール（例 project-services）の `.terraform` と `.terraform.lock.hcl` を検証対象モジュールにコピーして `validate` する（オフライン・高速）。または `TF_PLUGIN_CACHE_DIR` を種付けして共有。
+- Cloud SQL の IAM DB ユーザー名 = SA email から `.gserviceaccount.com` を除いた形（例 `sa-webhook@fwlm.iam`）。`@`/`.` を含むため SQL では二重引用符が必要。`grants.sql` は psql の `:"var"`（識別子引用展開）を使う。task 3.x の `google_sql_user` も `name = "<account_id>@<project>.iam"` 形式で作る。
+- grants.sql のローカル dry-run: scratchpad パスは unix socket の 103byte 制限を超える。native PG は `-c unix_socket_directories=''`（unix socket 無効）+ `listen_addresses=127.0.0.1` で起動し TCP 接続する。
+- `google_identity_platform_config` は `deletion_policy` 引数を持たない。削除不可の事故防止は `lifecycle { prevent_destroy = true }` を使用（auth モジュールで確立）。
