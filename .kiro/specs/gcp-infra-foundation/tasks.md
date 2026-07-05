@@ -93,13 +93,12 @@
   - _Requirements: 1.3, 5.2, 6.2, 7.3, 8.1_
   - _Depends: 4.3_
 
-- [~] 5.2 apply 後: CI・実行系の稼働検証（実 GCP gen-fw-line-meo で大半検証済み）
+- [x] 5.2 apply 後: CI・実行系の稼働検証（実 GCP gen-fw-line-meo で検証済み）
   - runbook 手順で `make tf-apply`（人間・billing IAM）実行後、`make tf-plan` が差分ゼロ、`gcp-auth-smoke.yml` を `workflow_dispatch` 起動し WIF 認証 + `gcloud run services list` 成功、`attribute_condition` に対象リポジトリのみ許可されることを provider 定義で確認、`gcloud scheduler jobs run` の手動発火で Job 実行履歴に記録
   - Observable: `tf-plan` 0 差分（冪等）、smoke ワークフロー緑（SA キーなし認証）、scheduler 手動発火で daily-batch の実行履歴が残る
   - _Requirements: 1.3, 2.4, 2.5, 6.1, 6.2, 6.3, 6.4_
   - _Depends: 4.4_
-  - _Verified(live): `terraform apply` 完了（65 リソース）→ `plan` 差分ゼロ（Req 1.3 ✓）。`gcloud scheduler jobs run daily-batch-trigger` で実行 daily-batch-l2ww8 が履歴に記録（Req 2.4/2.5 ✓）。WIF provider/attribute_condition/principalSet は apply 済み・GitHub 変数 WIF_PROVIDER/GCP_PROJECT_ID 設定済み。_
-  - _Remaining: gcp-auth-smoke ワークフローの緑（Req 6.1）は workflow_dispatch がデフォルトブランチ必須のため **PR #11 マージ後**に実行して確認する。_
+  - _Verified(live): `terraform apply` 完了（65 リソース）→ `plan` 差分ゼロ（Req 1.3 ✓）。`gcloud scheduler jobs run daily-batch-trigger` で実行 daily-batch-l2ww8 が履歴に記録（Req 2.4/2.5 ✓）。PR #11 マージ後、gcp-auth-smoke ワークフロー（run 28738415700）が **success**: 「Authenticate (Direct WIF, no SA key)」「list Cloud Run services」ステップ成功＝キーレス認証がエンドツーエンド動作（Req 6.1/6.2/6.3 ✓）。デプロイ失敗時の旧リビジョン維持は Cloud Run リビジョン機構で担保（Req 6.4）。_
 
 - [~] 5.3 apply 後: データ・秘匿・コストの検証（実 GCP gen-fw-line-meo で大半検証済み）
   - Auth Proxy + psql で `db/migrations/*.sql` 全適用 + `infra/sql/grants.sql` 適用 → 12 テーブル存在、Auth Proxy を介さない生 5432 直接続が拒否/タイムアウト、各サービス SA で自 secret の `versions access` 成功・他サービスの secret で 403、budget（¥10,000・threshold 3 本）と quota preference（places）を `gcloud`/Console で確認
