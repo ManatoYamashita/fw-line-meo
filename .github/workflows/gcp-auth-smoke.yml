@@ -1,0 +1,32 @@
+# gcp-infra-foundation / Req 6.1,6.2: WIF 認証の観察可能な検証（キーレス）
+#
+# Direct WIF の疎通確認のみ。service_account 入力なし・SA JSON キー不使用。
+# 事前に GitHub リポジトリ変数を設定:
+#   vars.WIF_PROVIDER   = terraform output の wif_provider_name
+#   vars.GCP_PROJECT_ID = fwlm
+# per-app のビルド/デプロイは各アプリ spec がこのワークフローを雛形に追加する。
+# CI デプロイ契約: イメージ更新のみ（gcloud run services/jobs update --image）。
+# 構成変更は Terraform 専権。
+name: gcp-auth-smoke
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # WIF の OIDC トークン発行に必須
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud (Direct WIF, no SA key)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Prove access (list Cloud Run services)
+        run: gcloud run services list --project="${{ vars.GCP_PROJECT_ID }}" --region=asia-northeast1

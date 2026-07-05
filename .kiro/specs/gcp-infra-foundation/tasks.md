@@ -62,7 +62,7 @@
   - _Boundary: BatchJob_
 
 - [ ] 4. Integration: CI 認証・ガードレール・root 配線・runbook
-- [ ] 4.1 (P) cicd-wif モジュール + WIF 検証ワークフロー
+- [x] 4.1 (P) cicd-wif モジュール + WIF 検証ワークフロー
   - `google_iam_workload_identity_pool` + `_provider`（GitHub OIDC issuer・attribute mapping `attribute.repository=assertion.repository`・`attribute_condition` に `assertion.repository == var.github_repository`）、principalSet へ `roles/run.developer` + `roles/artifactregistry.writer` + 各ランタイム SA への `roles/iam.serviceAccountUser`（SA email は変数入力・配線は 4.3）。**deployer SA を作らない**（Direct WIF）。`.github/workflows/gcp-auth-smoke.yml`（`google-github-actions/auth@v2`・`workload_identity_provider` のみ・`service_account` 入力なし・`workflow_dispatch`・`gcloud run services list` まで）
   - Observable: 単体 validate exit 0、`plan` に pool+provider（`attribute_condition` に `github_repository` が反映）・SA キー resource 皆無。ワークフローが SA キーなしで認証する構成
   - _Requirements: 6.1, 6.2, 6.3, 6.4_
