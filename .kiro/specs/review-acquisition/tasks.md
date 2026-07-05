@@ -8,7 +8,7 @@
   - Observable: `make ts-install` 成功後、空のワークスペースで `make ts-lint` と `make ts-test` が exit 0
   - _Requirements: 1.1, 2.1_
 
-- [ ] 1.2 共有 DB 接続層（pool・型）を実装する
+- [x] 1.2 共有 DB 接続層（pool・型）を実装する
   - Cloud SQL Connector ＋ pg Pool で IAM DB 認証（パスワードレス・`CLOUDSQL_CONNECTION_NAME`）接続を確立し、テスト用に `DATABASE_URL` フォールバックを設ける
   - 使用する既存テーブルの行型（stores・survey_aspects・dashboard_users・tallies）を定義する
   - Observable: ローカル postgres に対し pool 経由で `SELECT 1` が通り、接続設定のユニットテストが緑
