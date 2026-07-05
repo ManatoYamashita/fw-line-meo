@@ -55,7 +55,7 @@
   - _Requirements: 2.1, 2.2, 2.6, 2.7, 5.2, 5.3, 5.4, 6.4, 7.3_
   - _Boundary: RunServices_
 
-- [ ] 3.2 (P) batch-job モジュール
+- [x] 3.2 (P) batch-job モジュール
   - job 専用 SA、Cloud Run v2 job（hello placeholder image + `ignore_changes=[image]`・`max_retries=1`・`task_timeout=30m`）、Cloud Scheduler（cron `0 6 * * *`・`Asia/Tokyo`・target は `run.googleapis.com/v2/.../jobs/daily-batch:run`・**`oauth_token`**（OIDC でない）・scheduler SA に `roles/run.invoker`）、`places-api-key` の accessor binding、自 SA 分の IAM DB ユーザー（password なし・`instance` は Database output）、`roles/cloudsql.client`+`instanceUser`。失敗**検知**（アラートポリシー）は Guardrails 所有のため本モジュールには置かない
   - Observable: 単体 validate exit 0、`plan` に job + scheduler + job SA + scheduler SA invoker + 1 accessor + 1 IAM DB user、scheduler が `oauth_token` を使用。Job 実行履歴が要件 2.5 の「記録」を満たす
   - _Requirements: 2.3, 2.4, 2.5, 2.6, 2.7, 5.2, 5.3, 5.4_
