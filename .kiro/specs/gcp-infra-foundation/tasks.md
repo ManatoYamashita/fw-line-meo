@@ -24,7 +24,7 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 5.2, 7.3_
   - _Boundary: Database_
 
-- [ ] 2.2 (P) auth モジュール
+- [x] 2.2 (P) auth モジュール
   - `google_firebase_project` + `google_identity_platform_config`（google-beta・`deletion_policy=ABANDON`）。Google IdP 有効化・OAuth クライアントは TF 管理外（runbook 手動手順）
   - Observable: 単体 validate exit 0、`plan` に `identity_platform_config`、パスワードプロバイダの定義が無い
   - _Requirements: 4.1, 4.2, 4.3, 5.2_
