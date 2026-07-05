@@ -30,7 +30,7 @@
   - _Requirements: 4.1, 4.2, 4.3, 5.2_
   - _Boundary: Auth_
 
-- [ ] 2.3 (P) secrets モジュール（枠のみ）
+- [x] 2.3 (P) secrets モジュール（枠のみ）
   - secret 枠 ×5（`line-channel-secret` / `line-channel-access-token` / `gemini-api-key` / `places-api-key` / `db-admin-password`）を作成し secret id を output。**値も accessor IAM も所有しない**
   - Observable: 単体 validate exit 0、`plan` に 5 secret・secret version（値）ゼロ・accessor binding ゼロ
   - _Requirements: 5.1, 5.2_
