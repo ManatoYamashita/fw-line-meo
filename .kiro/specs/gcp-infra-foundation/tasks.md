@@ -87,7 +87,7 @@
   - _Depends: 4.3_
 
 - [ ] 5. Validation: 静的検証と apply 後の観察可能検証
-- [ ] 5.1 静的検証（apply 前・GCP 不要）
+- [x] 5.1 静的検証（apply 前・GCP 不要）
   - 全モジュール + root で `terraform fmt -check` / `validate`、`terraform plan` 出力に平文 secret / password / client_secret が皆無であること、`plan` に VPC connector / Load Balancer / `min_instance_count>0` / SA JSON キー / dev 専用リソースが存在しないことを確認
   - Observable: fmt-check + validate exit 0、`plan` の grep で禁止パターン 0 件（秘匿値ゼロ・常時課金リソースは Cloud SQL のみ）
   - _Requirements: 1.3, 5.2, 6.2, 7.3, 8.1_
@@ -98,12 +98,14 @@
   - Observable: `tf-plan` 0 差分（冪等）、smoke ワークフロー緑（SA キーなし認証）、scheduler 手動発火で daily-batch の実行履歴が残る
   - _Requirements: 1.3, 2.4, 2.5, 6.1, 6.2, 6.3, 6.4_
   - _Depends: 4.4_
+  - _Blocked: 実 GCP プロジェクト fwlm の作成 + `make tf-apply`（billing IAM・runbook §1 の手動投入）が前提。ローカル環境では実行不可のため、実プロジェクト作成後に人間が runbook 手順で実施する_
 
 - [ ] 5.3 apply 後: データ・秘匿・コストの検証
   - Auth Proxy + psql で `db/migrations/*.sql` 全適用 + `infra/sql/grants.sql` 適用 → 12 テーブル存在、Auth Proxy を介さない生 5432 直接続が拒否/タイムアウト、各サービス SA で自 secret の `versions access` 成功・他サービスの secret で 403、budget（¥10,000・threshold 3 本）と quota preference（places）を `gcloud`/Console で確認
   - Observable: migration 12 テーブル確認・直接続拒否・accessor 交差 403・budget/quota が可視
   - _Requirements: 3.2, 3.4, 5.2, 5.4, 7.1, 7.2_
   - _Depends: 5.2_
+  - _Blocked: 実 Cloud SQL インスタンス（apply 後）と Auth Proxy 接続が前提。5.2 と同じく実プロジェクト作成後に人間が runbook §3 手順で実施する。なお grants.sql の write-boundary 整合はローカル PG16 dry-run（task 2.5）で検証済み_
 
 ## Implementation Notes
 
@@ -125,3 +127,5 @@
 - root 配線の offline 検証: `terraform init -backend=false`（`TF_PLUGIN_CACHE_DIR` 種付け + 既存 lock）でローカルモジュール登録＋provider キャッシュ利用。project number は `data "google_project"` で取得し budget filter と WIF principalSet に供給。
 - `google_billing_budget` は `billing_account`（project でない）を取り、`specified_amount.units` は **文字列**（`tostring(...)`）。apply には billing account への `roles/billing.costsManager` が必要。
 - Places API の `google_cloud_quotas_quota_preference` は `quota_id` を `count` でゲート（既定 "" で非作成）。Req 7.2 充足には runbook 手順で実名確認して `terraform.tfvars` に設定必須。task 5.3 で quota の存在を確認する。
+- task 5.1（静的検証）は GCP 不要で完了: root `terraform validate` Success（全9モジュール）+ fmt clean + 禁止パターン静的 grep（VPC connector/LB 不在=Cloud SQL のみ常時課金・min_instance_count 0 のみ・SA JSON キー不在・平文 secret 不在・envs は prod のみ）。plan ベースの部分は config 静的確認で代替（禁止リソースは config に存在しない）。
+- task 5.2/5.3 は `_Blocked_`: 実 GCP プロジェクト `fwlm` 作成 + `make tf-apply` + runbook §1/§3 の手動投入が前提でローカル実行不可。実プロジェクト作成後に人間が `infra/README.md` 手順で実施する。冪等性の apply 後 zero-diff（Req 1.3）と apply 後の稼働/秘匿/コスト検証はそこで確認する。
