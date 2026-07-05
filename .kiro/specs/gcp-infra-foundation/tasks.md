@@ -80,7 +80,7 @@
   - _Requirements: 1.2, 1.5_
   - _Depends: 1.2, 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 4.1, 4.2_
 
-- [ ] 4.4 bootstrap runbook（infra/README.md）
+- [x] 4.4 bootstrap runbook（infra/README.md）
   - IaC 例外リスト（プロジェクト作成 / billing 紐付け / GCS state bucket 作成（versioning 有効）/ Terraform 実行者の初期 API 有効化 / OAuth 同意画面 + Google IdP 有効化 / secret 値投入 / `postgres` 管理パスワード設定）、`make tf-*` 手順と実行者権限（Owner 相当 + billing account への `roles/billing.costsManager`）、`identity_platform_config` 既有効化時の `terraform import` 手順、migration 適用手順（Auth Proxy + psql → `db/migrations/*.sql` 番号順 → `infra/sql/grants.sql`）、staging 論理 DB（`fwlm_staging`）追加手順と「追加インスタンス禁止」明記、CI デプロイ契約（イメージ更新のみ・構成変更は Terraform 専権）、dev はローカル `make db-*` 完結の境界宣言
   - Observable: runbook が全手動手順を列挙し、各 IaC 例外に対応する具体手順が存在する
   - _Requirements: 1.2, 3.2, 3.5, 4.1, 8.1, 8.2, 8.3_
