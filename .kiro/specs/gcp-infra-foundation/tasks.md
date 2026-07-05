@@ -18,7 +18,7 @@
   - _Requirements: 1.2_
 
 - [ ] 2. Core: データ層・認証・秘匿の独立モジュール（file-disjoint・並列）
-- [ ] 2.1 (P) database モジュール
+- [x] 2.1 (P) database モジュール
   - Cloud SQL PostgreSQL 16 / `edition=ENTERPRISE` / `tier=db-f1-micro` / `availability_type=ZONAL` / SSD 10GB / `deletion_protection=true`、`backup_configuration`（有効・7 世代・PITR 無効）、`database_flags` に `cloudsql.iam_authentication=on`、`authorized_networks` 空、論理 DB `fwlm`。**IAM DB ユーザーは作らない**（consumer 側で co-locate）。instance 接続名を output
   - Observable: 単体 validate exit 0、`plan` に 1 インスタンス・backup 有効・iam 認証 on・authorized_networks 空・`google_sql_user` 不在
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 5.2, 7.3_
