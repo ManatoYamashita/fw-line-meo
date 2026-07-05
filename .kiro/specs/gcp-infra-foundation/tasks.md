@@ -121,3 +121,7 @@
 - Scheduler → Cloud Run v2 job 起動: `google_cloud_scheduler_job.http_target.uri = "https://run.googleapis.com/v2/projects/${p}/locations/${r}/jobs/${name}:run"` + `oauth_token`（`*.googleapis.com` 宛は OIDC でなく OAuth）。scheduler SA に `roles/run.invoker`。
 - batch-job は job SA（`sa-daily-batch`・DB/Places アクセス）と scheduler SA（`sa-scheduler`・invoker のみ）を分離。**scheduler SA は DB ユーザーにしない**（grants.sql の 4 ユーザーに含めない）。
 - run-services の `services` 変数は `default = {}`。実体 3 サービスの map は Task 4.3 の root 配線で渡す（標準 validate は値不要で成立）。task 4.3 wiring では secret_env に secrets output の secret id、db_instance_name/db_connection_name に database output を渡す。
+- run-services には **独立した `secret_ids` 変数は無い**（secret id は `services[].secret_env` が保持）。root から `secret_ids=...` を渡すと `terraform init` が "argument not expected" で失敗する。
+- root 配線の offline 検証: `terraform init -backend=false`（`TF_PLUGIN_CACHE_DIR` 種付け + 既存 lock）でローカルモジュール登録＋provider キャッシュ利用。project number は `data "google_project"` で取得し budget filter と WIF principalSet に供給。
+- `google_billing_budget` は `billing_account`（project でない）を取り、`specified_amount.units` は **文字列**（`tostring(...)`）。apply には billing account への `roles/billing.costsManager` が必要。
+- Places API の `google_cloud_quotas_quota_preference` は `quota_id` を `count` でゲート（既定 "" で非作成）。Req 7.2 充足には runbook 手順で実名確認して `terraform.tfvars` に設定必須。task 5.3 で quota の存在を確認する。
