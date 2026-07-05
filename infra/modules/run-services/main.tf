@@ -43,12 +43,15 @@ resource "google_cloud_run_v2_service" "svc" {
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
 
+  # ステートレスなアプリサービスは置換・削除を許可（DB のみ deletion_protection=true）
+  deletion_protection = false
+
   template {
     service_account = google_service_account.svc[each.key].email
 
-    scaling {
-      min_instance_count = 0 # ゼロスケール（Req 2.2・7.3）
-    }
+    # min_instance_count は Cloud Run 既定の 0（ゼロスケール・Req 2.2・7.3）。
+    # 明示的に scaling{min=0} を書くと API が既定値を返さず perpetual diff になるため
+    # ブロック自体を書かない（既定で 0 スケールが担保される）。
 
     containers {
       image = var.image

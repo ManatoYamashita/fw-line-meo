@@ -18,12 +18,19 @@ terraform {
   }
 }
 
+# user_project_override + billing_project: 請求先アカウントスコープの API
+# （billingbudgets 等）が「quota project」を要求するため、当プロジェクトを
+# quota/billing プロジェクトとして送る（ADC 利用時の SERVICE_DISABLED 回避）。
 provider "google" {
-  project = var.project_id
-  region  = var.region
+  project               = var.project_id
+  region                = var.region
+  billing_project       = var.project_id
+  user_project_override = true
 }
 
 provider "google-beta" {
-  project = var.project_id
-  region  = var.region
+  project               = var.project_id
+  region                = var.region
+  billing_project       = var.project_id
+  user_project_override = true
 }

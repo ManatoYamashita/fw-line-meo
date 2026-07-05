@@ -24,6 +24,8 @@ resource "google_cloud_run_v2_job" "batch" {
   name     = var.job_name
   location = var.region
 
+  deletion_protection = false
+
   template {
     template {
       service_account = google_service_account.job.email
