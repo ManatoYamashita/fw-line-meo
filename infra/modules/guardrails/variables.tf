@@ -29,18 +29,12 @@ variable "job_name" {
   type        = string
 }
 
-variable "places_quota_id" {
+variable "places_quota_caps" {
   description = <<-EOT
-    Places API のクォータ ID（Req 7.2）。**推測で書かない**: apply 前に
-    `gcloud services quota list --service=places.googleapis.com --project=PROJECT`
-    で実名を確認して設定する（runbook）。未設定（空文字）ならクォータ上限を作らない。
+    Places API のクォータ上限マップ（Req 7.2）: quota_id => preferred_value。
+    quota_id は Cloud Quotas の実名（例: SearchTextRequestPerDayPerProject）。
+    空マップ {} なら上限を作らない。バッチが使う日次エンドポイントをまとめて絞る。
   EOT
-  type        = string
-  default     = ""
-}
-
-variable "places_quota_limit" {
-  description = "Places API クォータ上限値（preferred_value）。places_quota_id 設定時に必須。"
-  type        = number
-  default     = 0
+  type        = map(number)
+  default     = {}
 }

@@ -115,8 +115,7 @@ module "guardrails" {
   budget_amount_jpy  = var.budget_amount_jpy
   alert_email        = var.alert_email
   job_name           = module.batch_job.job_name
-  places_quota_id    = var.places_quota_id
-  places_quota_limit = var.places_quota_limit
+  places_quota_caps  = var.places_quota_caps
 
   depends_on = [module.project_services]
 }
