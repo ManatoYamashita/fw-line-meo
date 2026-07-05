@@ -36,7 +36,7 @@
   - _Requirements: 5.1, 5.2_
   - _Boundary: Secrets_
 
-- [ ] 2.4 (P) registry モジュール
+- [x] 2.4 (P) registry モジュール
   - Artifact Registry の docker リポジトリを 1 つ宣言（Cloud Run デプロイ先。イメージは Docker Hub でなく AR を使う方針）
   - Observable: 単体 validate exit 0、`plan` に docker リポジトリ 1
   - _Requirements: 6.1_
