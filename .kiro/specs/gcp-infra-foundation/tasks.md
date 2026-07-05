@@ -117,3 +117,7 @@
 - Cloud SQL の IAM DB ユーザー名 = SA email から `.gserviceaccount.com` を除いた形（例 `sa-webhook@fwlm.iam`）。`@`/`.` を含むため SQL では二重引用符が必要。`grants.sql` は psql の `:"var"`（識別子引用展開）を使う。task 3.x の `google_sql_user` も `name = "<account_id>@<project>.iam"` 形式で作る。
 - grants.sql のローカル dry-run: scratchpad パスは unix socket の 103byte 制限を超える。native PG は `-c unix_socket_directories=''`（unix socket 無効）+ `listen_addresses=127.0.0.1` で起動し TCP 接続する。
 - `google_identity_platform_config` は `deletion_policy` 引数を持たない。削除不可の事故防止は `lifecycle { prevent_destroy = true }` を使用（auth モジュールで確立）。
+- `google_cloud_run_v2_job` は **template が二重ネスト**（`template { template { containers {...} } }`）。image の `ignore_changes` パスは `template[0].template[0].containers[0].image`（service は `template[0].containers[0].image`）。
+- Scheduler → Cloud Run v2 job 起動: `google_cloud_scheduler_job.http_target.uri = "https://run.googleapis.com/v2/projects/${p}/locations/${r}/jobs/${name}:run"` + `oauth_token`（`*.googleapis.com` 宛は OIDC でなく OAuth）。scheduler SA に `roles/run.invoker`。
+- batch-job は job SA（`sa-daily-batch`・DB/Places アクセス）と scheduler SA（`sa-scheduler`・invoker のみ）を分離。**scheduler SA は DB ユーザーにしない**（grants.sql の 4 ユーザーに含めない）。
+- run-services の `services` 変数は `default = {}`。実体 3 サービスの map は Task 4.3 の root 配線で渡す（標準 validate は値不要で成立）。task 4.3 wiring では secret_env に secrets output の secret id、db_instance_name/db_connection_name に database output を渡す。
