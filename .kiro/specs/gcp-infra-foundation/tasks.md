@@ -68,7 +68,7 @@
   - _Requirements: 6.1, 6.2, 6.3, 6.4_
   - _Boundary: CicdWif_
 
-- [ ] 4.2 (P) guardrails モジュール
+- [x] 4.2 (P) guardrails モジュール
   - `google_monitoring_notification_channel`（email=`alert_email`）、`google_billing_budget`（`budget_amount_jpy`・`budget_filter.projects=[fwlm]`・threshold 50/90/100%・通知チャネル配線）、`google_cloud_quotas_quota_preference`（`places.googleapis.com`・**quota_id は実装時に `gcloud`/Cloud Quotas で実名確認してから固定**・推測で書かない）、daily-batch 失敗の `google_monitoring_alert_policy`（BatchJob の Job を名前で参照・通知チャネルへ配線）
   - Observable: 単体 validate exit 0、`plan` に budget（threshold 3 本）+ quota preference（places）+ notification channel + alert policy（channel と job に接続）
   - _Requirements: 2.5, 7.1, 7.2, 7.3_
