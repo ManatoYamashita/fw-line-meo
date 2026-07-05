@@ -49,7 +49,7 @@
   - _Boundary: DatabaseGrants_
 
 - [ ] 3. Core: 実行系モジュール（SA・DB user・accessor を自モジュールに co-locate・並列）
-- [ ] 3.1 (P) run-services モジュール
+- [x] 3.1 (P) run-services モジュール
   - ユーザー管理 SA ×3（命名規約準拠・Compute default SA 不使用）、Cloud Run v2 service ×3（`for_each`・hello placeholder image + `lifecycle.ignore_changes=[image]`・`ingress=INGRESS_TRAFFIC_ALL`・invoker を `allUsers`・`min_instance_count=0`）、自 SA 分の secret accessor binding（secret 単位・計 3: webhook→`line-channel-secret`+`line-channel-access-token`、survey-web→`gemini-api-key`、dashboard-api→なし）、自 SA 分の IAM DB ユーザー（`google_sql_user` type=CLOUD_IAM_SERVICE_ACCOUNT・password なし・`instance` は Database output を変数受け）、`roles/cloudsql.client`+`roles/cloudsql.instanceUser`、接続名 env。secret id・接続名は変数入力（配線は 4.3）
   - Observable: 単体 validate exit 0、`plan` に 3 service + 3 SA + 3 invoker binding + **3 accessor binding** + 3 IAM DB user・`min_instance_count>0` 皆無・SA JSON キー生成皆無
   - _Requirements: 2.1, 2.2, 2.6, 2.7, 5.2, 5.3, 5.4, 6.4, 7.3_
