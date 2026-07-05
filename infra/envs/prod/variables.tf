@@ -34,3 +34,15 @@ variable "github_repository" {
   description = "WIF が許可する単一 GitHub リポジトリ（owner/repo 形式）。Req 6.3。"
   type        = string
 }
+
+variable "places_quota_id" {
+  description = "Places API クォータ ID（Req 7.2）。apply 前に gcloud で実名確認して設定（runbook）。空なら上限を作らない。"
+  type        = string
+  default     = ""
+}
+
+variable "places_quota_limit" {
+  description = "Places API クォータ上限値。places_quota_id 設定時に指定。"
+  type        = number
+  default     = 0
+}

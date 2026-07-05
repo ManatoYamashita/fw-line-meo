@@ -74,7 +74,7 @@
   - _Requirements: 2.5, 7.1, 7.2, 7.3_
   - _Boundary: Guardrails_
 
-- [ ] 4.3 root モジュール配線 + outputs
+- [x] 4.3 root モジュール配線 + outputs
   - `envs/prod/main.tf` に全 9 モジュール呼び出しを依存方向どおり配線し、モジュール間 output→変数を解決（database 接続名→run-services/batch-job、secrets secret id→run-services/batch-job、run-services/batch-job SA email→cicd-wif、batch-job Job→guardrails）。`outputs.tf` に service URL・SQL 接続名・WIF provider 名
   - Observable: root で `terraform init`（backend 有効・要 state bucket）後 `terraform validate` exit 0、全モジュール参照が解決、`terraform graph` に循環なし
   - _Requirements: 1.2, 1.5_

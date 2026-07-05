@@ -7,3 +7,9 @@ billing_account_id = "000000-000000-000000" # 実際の請求先アカウント 
 budget_amount_jpy  = 10000
 alert_email        = "ops@example.com"
 github_repository  = "ManatoYamashita/fw-line-meo"
+
+# Places API クォータ上限（Req 7.2）。apply 前に実名確認して設定:
+#   gcloud services quota list --service=places.googleapis.com --project=fwlm
+# 空のままだと上限は作られない（runbook のコンプライアンス手順で必須化）。
+places_quota_id    = ""
+places_quota_limit = 0
