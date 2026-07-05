@@ -72,16 +72,20 @@ resource "google_monitoring_alert_policy" "batch_failure" {
   notification_channels = [google_monitoring_notification_channel.email.id]
 }
 
-# Places API クォータ上限（Req 7.2）。quota_id は実名確認後に設定（未設定なら作らない）。
+# Places API クォータ上限（Req 7.2）。バッチが使う日次エンドポイントを quota_id 単位で
+# 上限設定（空マップなら作らない）。既定からの減量で安全チェックに掛かる場合に備え
+# ignore_safety_checks を付与。
 resource "google_cloud_quotas_quota_preference" "places" {
-  count = var.places_quota_id == "" ? 0 : 1
+  for_each = var.places_quota_caps
 
   parent   = "projects/${var.project_id}"
-  name     = "places-requests-cap"
+  name     = each.key
   service  = "places.googleapis.com"
-  quota_id = var.places_quota_id
+  quota_id = each.key
 
   quota_config {
-    preferred_value = var.places_quota_limit
+    preferred_value = each.value
   }
+
+  ignore_safety_checks = "QUOTA_DECREASE_PERCENTAGE_TOO_HIGH"
 }

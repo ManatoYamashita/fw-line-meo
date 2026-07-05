@@ -35,14 +35,8 @@ variable "github_repository" {
   type        = string
 }
 
-variable "places_quota_id" {
-  description = "Places API クォータ ID（Req 7.2）。apply 前に gcloud で実名確認して設定（runbook）。空なら上限を作らない。"
-  type        = string
-  default     = ""
-}
-
-variable "places_quota_limit" {
-  description = "Places API クォータ上限値。places_quota_id 設定時に指定。"
-  type        = number
-  default     = 0
+variable "places_quota_caps" {
+  description = "Places API クォータ上限マップ（Req 7.2）: quota_id => preferred_value。空 {} なら上限なし。"
+  type        = map(number)
+  default     = {}
 }
