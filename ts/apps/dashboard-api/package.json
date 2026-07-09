@@ -1,0 +1,23 @@
+{
+  "name": "@fwlm/dashboard-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@fwlm/db": "workspace:*",
+    "@hono/node-server": "^1",
+    "firebase-admin": "^13",
+    "hono": "^4",
+    "qrcode": "^1.5"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5"
+  }
+}

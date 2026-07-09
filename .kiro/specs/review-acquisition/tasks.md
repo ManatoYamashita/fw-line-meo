@@ -132,7 +132,7 @@
   - _Depends: 4.3_
 
 - [ ] 5. Core: 管理 API（dashboard-api）による QR 提供
-- [ ] 5.1 (P) dashboard-api アプリ雛形を確立する
+- [x] 5.1 (P) dashboard-api アプリ雛形を確立する
   - Hono で最小 API を初期化し、`PORT` 対応の起動・`SURVEY_BASE_URL` 等 env 検証・Dockerfile を用意する（firebase-admin・qrcode・pg を導入）
   - Observable: ローカル起動でヘルス相当ルートが 200、必須 env 欠落時に起動が明示エラーで停止
   - _Requirements: 1.1_
