@@ -30,7 +30,7 @@
   - _Boundary: packages/db tallies_
   - _Depends: 1.2_
 
-- [ ] 2. (P) インフラ拡張：セッション鍵シークレットと環境変数配線
+- [x] 2. (P) インフラ拡張：セッション鍵シークレットと環境変数配線
   - `secrets` モジュールに `survey-session-key` の枠を追加する（値は帯域外注入・gcp-infra-foundation の規約どおり frame のみ）
   - `run-services` モジュールにサービス別 plain env（非シークレット）対応を追加し、survey-web へ `SESSION_SIGNING_KEY`（secret_env・accessor は consumer 側 co-locate）と `GEMINI_MODEL`、dashboard-api へ `SURVEY_BASE_URL` を root で配線する
   - `GEMINI_API_KEY` は既存 infra で survey-web に secret_env 配線済み（本タスク対象外・存在確認のみ）
@@ -195,3 +195,6 @@
 - **[Task 1 実装知見] TS モノレポ規約**: NodeNext のため相対 import は `.js` 拡張子必須（vitest/vite は `.js`→`.ts` 解決可）。`Queryable = Pick<Pool,'query'>` をアクセサの最小問い合わせ面に採用。`pnpm -r` で空/未定義スクリプトは exit 0。共有ツールチェーンは ts/ root、各パッケージが `build/lint/test` を持つ。
 - **[Task 1 実装知見] tallies の JST 月境界**: `now` 引数注入でテスト。now 未指定（`now()` フォールバック）時、同一 TX 内 rating/aspect の 2 クエリが真夜中の月境界を跨ぐ極小の隙間があるが確率ほぼ0で本番許容。将来厳密化するなら period_month を CTE で一度確定して両クエリへ渡す。
 - **[Task 1 レビュー] 1.4 の reviewer サブエージェントは watchdog stall。メインコンテキストで kiro-review を実施し APPROVED（reviewer が長時間 DB/検証待ちで stall する場合の確立済みフォールバック）。
+- **[Task 2 実装知見] offline validate**: fresh worktree には `.terraform`（provider 234M）が無く `terraform init` の provider DL が数分でタイムアウトするため、初期化済みの gcp-infra worktree（`../fw-line-meo-gcp-infra/infra/envs/prod/.terraform`＋lock）を流用コピーして `terraform validate`（backend/creds 不要）を実行する。この Observable は validate 成功＋fmt＋git diff の additive 監査。live `terraform plan`（additive 差分）は backend/tfvars/state/creds を要するため **デプロイ時 runbook のゲート**（design Revalidation Trigger）で確認する。
+- **[Task 2 実装知見] env 追加の後方互換**: run-services の services object へ `env = optional(map(string), {})` を足すと既存 service 定義（env 未指定）は {} 既定で不変。SESSION_SIGNING_KEY を survey-web の secret_env に足すだけで accessor は `service_secret_pairs` flatten により secret 単位で自動 co-locate される。
+- **[Task 2 レビュー] reviewer サブエージェントが API error（connection closed・約20分）で判定を返せず。メインコンテキスト kiro-review にフォールバックし APPROVED（本セッション 2 度目の reviewer 失敗・terraform/長時間タスクで頻発）。

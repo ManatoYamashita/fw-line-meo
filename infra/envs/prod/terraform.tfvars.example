@@ -16,3 +16,8 @@ places_quota_caps = {
   SearchNearbyRequestPerDayPerProject = 1000
   GetPlaceRequestPerDayPerProject     = 1000
 }
+
+# review-acquisition（機能3）の env。gemini_model は既定で足りるため通常は省略可。
+# survey_base_url は survey-web 初回デプロイ後の Cloud Run URL（またはカスタムドメイン）を設定。
+# gemini_model    = "gemini-3.1-flash-lite"
+# survey_base_url = "https://survey-web-xxxxxxxxxx-an.a.run.app"

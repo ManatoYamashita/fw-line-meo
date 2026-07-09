@@ -40,3 +40,20 @@ variable "places_quota_caps" {
   type        = map(number)
   default     = {}
 }
+
+# --- review-acquisition（機能3）が追加する env（gcp-infra への additive 拡張） ---
+
+variable "gemini_model" {
+  description = "口コミ下書き生成に使う Gemini モデル ID（survey-web の GEMINI_MODEL env）。差替可能。"
+  type        = string
+  default     = "gemini-3.1-flash-lite"
+}
+
+variable "survey_base_url" {
+  description = <<-EOT
+    客向けアンケート Web の公開ベース URL（dashboard-api の SURVEY_BASE_URL env・QR 生成に使用）。
+    survey-web の初回デプロイ後にその Cloud Run URL（またはカスタムドメイン）を設定する。
+  EOT
+  type        = string
+  default     = ""
+}

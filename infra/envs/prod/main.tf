@@ -68,13 +68,20 @@ module "run_services" {
       public         = true
       needs_cloudsql = true
       secret_env = {
-        GEMINI_API_KEY = module.secrets.secret_ids["gemini-api-key"]
+        GEMINI_API_KEY      = module.secrets.secret_ids["gemini-api-key"]
+        SESSION_SIGNING_KEY = module.secrets.secret_ids["survey-session-key"]
+      }
+      env = {
+        GEMINI_MODEL = var.gemini_model
       }
     }
     "dashboard-api" = {
       public         = true
       needs_cloudsql = true
       secret_env     = {}
+      env = {
+        SURVEY_BASE_URL = var.survey_base_url
+      }
     }
   }
 

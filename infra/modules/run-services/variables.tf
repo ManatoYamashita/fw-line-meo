@@ -31,12 +31,14 @@ variable "services" {
     - public: invoker を allUsers にするか
     - secret_env: 環境変数名 → Secret Manager secret id（accessor と env mount を導出）
     - needs_cloudsql: cloudsql ロール + IAM DB ユーザーを付与するか
-    実体マップは Task 4.3 の root 配線で渡す。
+    - env: 平文（非シークレット）環境変数名 → 値（GEMINI_MODEL / SURVEY_BASE_URL 等・省略時 {}）
+    実体マップは root 配線で渡す。
   EOT
   type = map(object({
     public         = bool
     secret_env     = map(string)
     needs_cloudsql = bool
+    env            = optional(map(string), {})
   }))
   default = {}
 }

@@ -78,6 +78,15 @@ resource "google_cloud_run_v2_service" "svc" {
           value = env.value
         }
       }
+
+      # 平文 env（非シークレット・GEMINI_MODEL / SURVEY_BASE_URL 等）
+      dynamic "env" {
+        for_each = each.value.env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
     }
   }
 
