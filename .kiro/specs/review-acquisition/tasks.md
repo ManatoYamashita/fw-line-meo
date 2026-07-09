@@ -92,7 +92,7 @@
   - _Boundary: survey-web RateLimit_
   - _Depends: 3.1_
 
-- [ ] 4. Core: survey-web の API と UI
+- [x] 4. Core: survey-web の API と UI
 - [x] 4.1 (P) 回答受付 API（/api/responses）を実装する
   - pageToken を検証（storeId 一致・5 分以内）し、入力を再検証したうえで、集計 UPSERT と初回下書き生成を並行実行する
   - 集計失敗は応答に影響させず WARN ログのみ（自由記述はログに出さない）、sessionToken は生成成否に関わらず必ず発行し、生成失敗は `200 generation:'failed'` で返す。共有レート制限モジュール（3.7）を適用する
@@ -123,7 +123,7 @@
   - _Boundary: survey-web SurveyForm_
   - _Depends: 3.3, 4.3_
 
-- [ ] 4.5 (P) 下書きパネル UI（葉コンポーネント）を実装する
+- [x] 4.5 (P) 下書きパネル UI（葉コンポーネント）を実装する
   - 4.3 が定義する props 契約に対し、生成中インジケータ・編集可能な下書き表示・再生成トリガー（残回数表示・失敗時再試行）・生成失敗時も維持される投稿導線を描画する（再生成/投稿の実行はシェルが所有）
   - コピーは表示済み下書きをジェスチャー内で同期 writeText し完了を明示、自動コピー不可時は手動選択可能表示にフォールバック、星の高低に関わらず同一の投稿導線を表示する
   - Observable: コピー→writereview URL 遷移、低評価でも同一導線、生成失敗時に再試行 UI と投稿導線が残ることがテストで緑
