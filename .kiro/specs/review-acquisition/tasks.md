@@ -153,7 +153,7 @@
   - _Boundary: dashboard-api QrRoute_
   - _Depends: 5.2_
 
-- [ ] 6. Validation: 統合・E2E・性能
+- [x] 6. Validation: 統合・E2E・性能
 - [x] 6.1 survey-web 統合テストを実装する
   - 正常回答の UPSERT 加算、集計障害でも draft 返却（5.4）、再生成上限、pageToken 欠落/期限切れ/他店の拒否、生成失敗→/api/drafts 再試行で tallies が二重加算されないことを検証する
   - Observable: ローカル postgres ＋ Gemini モックで上記シナリオが緑
@@ -173,7 +173,7 @@
   - _Requirements: 2.9, 3.9, 4.1, 4.2, 4.3, 4.4, 4.6_
   - _Depends: 4.4, 4.5_
 
-- [ ] 6.4 (P) 客向けページの性能検証を実装する
+- [x] 6.4 (P) 客向けページの性能検証を実装する
   - モバイル 4G シミュレートで survey ページの FCP/LCP を計測し 3 秒以内を確認、初回 JS 転送量に予算（目安 150KB gzip）を設ける
   - Observable: Lighthouse モバイルで表示到達が 3 秒以内、予算超過が検知される
   - _Requirements: 2.8_

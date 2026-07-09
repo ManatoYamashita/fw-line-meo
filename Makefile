@@ -14,7 +14,7 @@ TF_DIR ?= infra/envs/prod
 .PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf help
 
 help: ## 利用可能なターゲットを表示
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
 
 db-migrate: ## BUILD: 一時postgresへ migrations をクリーン適用
 	$(RUN)
@@ -65,3 +65,6 @@ ts-test-db: ## TS: native postgres を起動し DB 依存テストを実行（do
 
 ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。実行は CI 前提（要ブラウザ・起動アプリ・Gemini モック）
 	pnpm -C $(TS_DIR) --filter @fwlm/survey-web exec playwright test
+
+ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は CI）
+	pnpm -C $(TS_DIR) --filter @fwlm/survey-web run perf:budget

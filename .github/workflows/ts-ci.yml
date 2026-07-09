@@ -1,0 +1,117 @@
+name: ts-ci
+
+# TypeScript モノレポ（ts/）の lint/build/test と、Task 6.3/6.4 の E2E・性能を CI で実行する。
+# gcp-auth-smoke.yml の「CI はイメージ更新のみ・構成変更は Terraform 専権」契約に反しない（テスト実行のみ）。
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+jobs:
+  lint-build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fwlm
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - run: pnpm -C ts install --frozen-lockfile
+      - run: pnpm -C ts run lint
+      - run: pnpm -C ts run build
+      - name: apply migrations
+        run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+      - name: unit + integration tests (DB 込み)
+        run: pnpm -C ts -r test
+      - name: JS バンドル予算（性能プロキシ・Req 2.8）
+        run: pnpm -C ts --filter @fwlm/survey-web run perf:budget
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fwlm
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
+      SESSION_SIGNING_KEY: e2e-ci-signing-key
+      GEMINI_API_KEY: e2e-ci-dummy-key
+      E2E_STORE_ID: '44444444-4444-4444-4444-444444444444'
+      # next プロセスに MSW Gemini モックを読み込ませる（本番コードは非変更）。
+      NODE_OPTIONS: --import ./e2e/mock-gemini.mjs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - run: pnpm -C ts install --frozen-lockfile
+      - run: pnpm -C ts run build
+      - name: apply migrations & seed store
+        run: |
+          for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/seed.sql
+      - name: install Playwright browsers
+        run: pnpm -C ts --filter @fwlm/survey-web exec playwright install --with-deps chromium
+      - name: E2E（QR→回答→下書き→コピー→writereview）
+        run: pnpm -C ts --filter @fwlm/survey-web exec playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: ts/apps/survey-web/playwright-report/
+
+  lighthouse:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fwlm
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
+      SESSION_SIGNING_KEY: lhci-signing-key
+      GEMINI_API_KEY: lhci-dummy-key
+      NODE_OPTIONS: --import ./e2e/mock-gemini.mjs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - run: pnpm -C ts install --frozen-lockfile
+      - run: pnpm -C ts run build
+      - name: apply migrations & seed store
+        run: |
+          for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/seed.sql
+      - name: Lighthouse（mobile・LCP 3 秒・Req 2.8）
+        working-directory: ts/apps/survey-web
+        run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
