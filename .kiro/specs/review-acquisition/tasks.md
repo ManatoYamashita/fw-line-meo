@@ -108,7 +108,7 @@
   - _Boundary: survey-web DraftsAPI_
   - _Depends: 3.2, 3.6, 3.7_
 
-- [ ] 4.3 アンケートページ SSR とクライアント合成シェルを実装する（統合）
+- [x] 4.3 アンケートページ SSR とクライアント合成シェルを実装する（統合）
   - `/s/{storeId}` で store と aspects を SSR 取得し、不在・place 未確定はエラー/準備中、正常時は pageToken・googleReviewUrl を同梱してクライアントシェルを描画する
   - クライアントシェルが回答フェーズ（回答中／下書き）と結果 state を所有し、/api/responses・/api/drafts を呼び出して SurveyForm と DraftPanel の props 契約（aspects・onSubmit ／ draft・sessionToken・googleReviewUrl・onRegenerate 等）を定義・受け渡す。localStorage の回答済みフラグ（storeId＋完了時刻）で 24 時間以内は回答済み画面＋投稿導線を表示する（サーバーは端末を識別しない）
   - Observable: 有効 store で設問シェルが SSR 表示、不在/未確定でエラー/準備中、送信後にフォームが下書き表示へ遷移、生成失敗時に再試行しても投稿導線が維持され集計が二重加算されないテストが緑
