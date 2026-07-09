@@ -154,7 +154,7 @@
   - _Depends: 5.2_
 
 - [ ] 6. Validation: 統合・E2E・性能
-- [ ] 6.1 survey-web 統合テストを実装する
+- [x] 6.1 survey-web 統合テストを実装する
   - 正常回答の UPSERT 加算、集計障害でも draft 返却（5.4）、再生成上限、pageToken 欠落/期限切れ/他店の拒否、生成失敗→/api/drafts 再試行で tallies が二重加算されないことを検証する
   - Observable: ローカル postgres ＋ Gemini モックで上記シナリオが緑
   - _Requirements: 3.1, 3.8, 3.9, 5.2, 5.3, 5.4_
