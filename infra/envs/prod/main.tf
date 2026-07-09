@@ -53,6 +53,7 @@ module "run_services" {
   region             = var.region
   db_instance_name   = module.database.instance_name
   db_connection_name = module.database.connection_name
+  db_name            = module.database.database_name
 
   # secret id は各サービスの secret_env が保持（別途 secret_ids 変数は持たない）
   services = {

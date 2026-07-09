@@ -70,9 +70,16 @@ resource "google_cloud_run_v2_service" "svc" {
         }
       }
 
-      # Cloud SQL 接続名（needs_cloudsql の場合のみ平文 env）
+      # Cloud SQL 接続用の平文 env（needs_cloudsql の場合のみ）。
+      # pool（packages/db）の IAM 認証経路が要求する 3 値を単一情報源から注入する:
+      #   CLOUDSQL_CONNECTION_NAME=接続名 / DB_NAME=論理DB名 / DB_IAM_USER=SA 派生ユーザー名
+      #   （DB_IAM_USER は google_sql_user と同じ trimsuffix 名で一致させる）。
       dynamic "env" {
-        for_each = each.value.needs_cloudsql ? { "CLOUDSQL_CONNECTION_NAME" = var.db_connection_name } : {}
+        for_each = each.value.needs_cloudsql ? {
+          CLOUDSQL_CONNECTION_NAME = var.db_connection_name
+          DB_NAME                  = var.db_name
+          DB_IAM_USER              = trimsuffix(google_service_account.svc[each.key].email, ".gserviceaccount.com")
+        } : {}
         content {
           name  = env.key
           value = env.value

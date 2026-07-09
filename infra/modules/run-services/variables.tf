@@ -19,6 +19,11 @@ variable "db_connection_name" {
   type        = string
 }
 
+variable "db_name" {
+  description = "アプリ用論理データベース名（env DB_NAME 用・database output）。IAM 認証で pg が接続する DB。"
+  type        = string
+}
+
 variable "image" {
   description = "初期プレースホルダイメージ。実イメージは CI が更新（TF は ignore_changes で追従しない）。"
   type        = string
