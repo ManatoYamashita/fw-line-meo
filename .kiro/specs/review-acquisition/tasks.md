@@ -167,7 +167,7 @@
   - _Boundary: test dashboard-api QR RBAC_
   - _Depends: 5.3_
 
-- [ ] 6.3 E2E フロー（Playwright・Gemini モック）を実装する
+- [x] 6.3 E2E フロー（Playwright・Gemini モック）を実装する
   - QR URL→回答（星のみ）→下書き表示→編集→コピー→writereview 遷移リンク、低評価でも同一導線、回答済み再訪、生成失敗時の再試行と導線維持を通す
   - Observable: Issue #3 完了条件の一連フローが E2E で緑、star による導線分岐が存在しないことを確認
   - _Requirements: 2.9, 3.9, 4.1, 4.2, 4.3, 4.4, 4.6_
@@ -199,6 +199,7 @@
 - **[Task 2 実装知見] env 追加の後方互換**: run-services の services object へ `env = optional(map(string), {})` を足すと既存 service 定義（env 未指定）は {} 既定で不変。SESSION_SIGNING_KEY を survey-web の secret_env に足すだけで accessor は `service_secret_pairs` flatten により secret 単位で自動 co-locate される。
 - **[Task 2 レビュー] reviewer サブエージェントが API error（connection closed・約20分）で判定を返せず。メインコンテキスト kiro-review にフォールバックし APPROVED（本セッション 2 度目の reviewer 失敗・terraform/長時間タスクで頻発）。
 - **[中間 validation 修正] ランタイム env 契約の seam を解消**: pool.ts(1.2) の cloud-sql-iam 経路が要求する DB_IAM_USER/DB_NAME を run-services が needs_cloudsql サービスへ注入（CLOUDSQL_CONNECTION_NAME と同様）。DB_IAM_USER は `trimsuffix(SA.email, ".gserviceaccount.com")`＝google_sql_user.name と同一式で、pg 接続ユーザーが実在 IAM DB ユーザーと一致。コード層が requireEnv するキーとインフラが set するキーの一致を今後の env 追加時に必ず確認する。
+- **[Task 6.3/6.4 実装知見] E2E/性能は CI 委譲（ユーザー決定）**: サンドボックスにシステム Chrome が無くフル Lighthouse 不可・E2E は重量。よって Playwright spec・playwright.config・MSW Gemini モック（`e2e/mock-gemini.mjs`＝本番 route 非変更・CI が `NODE_OPTIONS=--import` で読込）・Lighthouse 設定・CI ワークフロー（`.github/workflows/ts-ci.yml`）を authoring し、**実行は CI**（Chrome あり）。ローカルは `playwright test --list`（spec 発見）と JS バンドル予算（ブラウザ不要）でサニティ。vitest は `vitest.config.ts` で `e2e/**` を除外（Playwright spec を拾わない）。生成失敗再試行(3.9)の E2E はシェルの component テストで担保済み。
 - **[Task 6 実装知見] DB テストの cross-file 一意キー衝突**: 全 `*.db.test.ts` は同一 postgres（1 ts-test-db run）を共有するため、`dashboard_users.auth_subject`・`owners.line_user_id` 等の UNIQUE 列はファイル固有プレフィクス（accessors='op-uid'／qr='rbac-op-uid' 等）で衝突回避する。UUID PK・seed 値も同様にファイル間で分離する。
 - **[Task 3.3 実装知見] wire フィールド名は aspectCodes に統一**: /api/responses のリクエストは `aspectCodes: string[]`（validate・tallies・wire で一致）。design.md の初期スケッチは `aspects` だったが `aspectCodes` に修正済み。4.4 フォームは `aspectCodes` を送信、4.1 route は追加マッピングなしで validate に渡す（silent drop 防止）。同一回答内の重複 aspect は validate/tallies とも受理し tallies が dedup する（1 回答=各 aspect 1 加算）。
 - **[Task 3.1 実装知見] Next.js 16 monorepo**: Turbopack がワークスペースルートを誤推論するため next.config.ts に `turbopack.root` と `outputFileTracingRoot` を `import.meta.dirname` 由来（cwd 非依存）の ts/ で明示する。survey-web の tsconfig は Next 標準（moduleResolution=bundler・jsx は next build が react-jsx に自動設定）で packages/db の NodeNext とは別系統（意図的）。テスト0件の app は `vitest run --passWithNoTests`。docker 不在のため Dockerfile は CI/デプロイ時に検証（起動確認は next start + curl /healthz で代替）。

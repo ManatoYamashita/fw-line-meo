@@ -17,6 +17,9 @@ coverage/
 .pnpm-store/
 .yarn/
 .next/
+playwright-report/
+test-results/
+.lighthouseci/
 
 # --- Go ---
 bin/
