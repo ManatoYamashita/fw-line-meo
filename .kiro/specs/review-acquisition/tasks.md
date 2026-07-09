@@ -139,7 +139,7 @@
   - _Boundary: dashboard-api scaffold_
   - _Depends: 1.1_
 
-- [ ] 5.2 Firebase ID トークン検証と RBAC ミドルウェアを実装する
+- [x] 5.2 Firebase ID トークン検証と RBAC ミドルウェアを実装する
   - Authorization Bearer の ID トークンを firebase-admin で検証し、auth_subject から dashboard_users を引いて role を判定、operator は全店・agency は担当店（stores→owners.agency_id 一致）のみ許可する
   - Observable: operator 許可・agency 担当店許可・agency 他店 403・未登録 UID 403・トークン無し 401 の RBAC マトリクスがテストで緑（firebase-admin モック）
   - _Requirements: 1.4_
