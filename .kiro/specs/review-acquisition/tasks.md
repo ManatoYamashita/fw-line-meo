@@ -93,7 +93,7 @@
   - _Depends: 3.1_
 
 - [ ] 4. Core: survey-web の API と UI
-- [ ] 4.1 (P) 回答受付 API（/api/responses）を実装する
+- [x] 4.1 (P) 回答受付 API（/api/responses）を実装する
   - pageToken を検証（storeId 一致・5 分以内）し、入力を再検証したうえで、集計 UPSERT と初回下書き生成を並行実行する
   - 集計失敗は応答に影響させず WARN ログのみ（自由記述はログに出さない）、sessionToken は生成成否に関わらず必ず発行し、生成失敗は `200 generation:'failed'` で返す。共有レート制限モジュール（3.7）を適用する
   - Observable: 正常 POST で tallies 加算＋draft/token 返却、pageToken 無効は 400、集計 DB 障害でも 200 で応答するテストが緑
