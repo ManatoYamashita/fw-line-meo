@@ -39,7 +39,7 @@
   - _Boundary: infra/modules/secrets, infra/modules/run-services, infra/envs/prod_
 
 - [ ] 3. Core: 客向け Web（survey-web）アプリとロジック層
-- [ ] 3.1 survey-web アプリ雛形（Next.js standalone）を確立する
+- [x] 3.1 survey-web アプリ雛形（Next.js standalone）を確立する
   - Next.js 16（App Router）を `output: 'standalone'` で初期化し、`PORT` 対応の Dockerfile（`public/`・`.next/static` の明示コピー含む）を用意する
   - 必要依存（@google/genai・pg・cloud-sql-connector）を導入し、ヘルスに相当する最小ページで起動を確認する
   - survey-web の共有ドメイン型（素材の形状 `DraftMaterial` 等）を確立し、SessionToken・PromptBuilder・DraftGenerator が同一定義を参照する前提を固定する（並列実装時の二重定義を防ぐ）
@@ -199,3 +199,4 @@
 - **[Task 2 実装知見] env 追加の後方互換**: run-services の services object へ `env = optional(map(string), {})` を足すと既存 service 定義（env 未指定）は {} 既定で不変。SESSION_SIGNING_KEY を survey-web の secret_env に足すだけで accessor は `service_secret_pairs` flatten により secret 単位で自動 co-locate される。
 - **[Task 2 レビュー] reviewer サブエージェントが API error（connection closed・約20分）で判定を返せず。メインコンテキスト kiro-review にフォールバックし APPROVED（本セッション 2 度目の reviewer 失敗・terraform/長時間タスクで頻発）。
 - **[中間 validation 修正] ランタイム env 契約の seam を解消**: pool.ts(1.2) の cloud-sql-iam 経路が要求する DB_IAM_USER/DB_NAME を run-services が needs_cloudsql サービスへ注入（CLOUDSQL_CONNECTION_NAME と同様）。DB_IAM_USER は `trimsuffix(SA.email, ".gserviceaccount.com")`＝google_sql_user.name と同一式で、pg 接続ユーザーが実在 IAM DB ユーザーと一致。コード層が requireEnv するキーとインフラが set するキーの一致を今後の env 追加時に必ず確認する。
+- **[Task 3.1 実装知見] Next.js 16 monorepo**: Turbopack がワークスペースルートを誤推論するため next.config.ts に `turbopack.root` と `outputFileTracingRoot` を `import.meta.dirname` 由来（cwd 非依存）の ts/ で明示する。survey-web の tsconfig は Next 標準（moduleResolution=bundler・jsx は next build が react-jsx に自動設定）で packages/db の NodeNext とは別系統（意図的）。テスト0件の app は `vitest run --passWithNoTests`。docker 不在のため Dockerfile は CI/デプロイ時に検証（起動確認は next start + curl /healthz で代替）。
