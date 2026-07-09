@@ -55,7 +55,7 @@
   - _Boundary: survey-web SessionToken_
   - _Depends: 3.1_
 
-- [ ] 3.3 (P) 入力検証層を実装する
+- [x] 3.3 (P) 入力検証層を実装する
   - 星必須（1〜5）・aspects は取得済み code のみ許容・comment ≤ 200 字をサーバー側で再検証する（クライアント検証を信用しない）
   - Observable: 星欠落・不正 aspect code・201 字入力が拒否され、正常入力が通るユニットテストが緑
   - _Requirements: 2.3, 2.5, 2.6, 2.4_
@@ -199,4 +199,5 @@
 - **[Task 2 実装知見] env 追加の後方互換**: run-services の services object へ `env = optional(map(string), {})` を足すと既存 service 定義（env 未指定）は {} 既定で不変。SESSION_SIGNING_KEY を survey-web の secret_env に足すだけで accessor は `service_secret_pairs` flatten により secret 単位で自動 co-locate される。
 - **[Task 2 レビュー] reviewer サブエージェントが API error（connection closed・約20分）で判定を返せず。メインコンテキスト kiro-review にフォールバックし APPROVED（本セッション 2 度目の reviewer 失敗・terraform/長時間タスクで頻発）。
 - **[中間 validation 修正] ランタイム env 契約の seam を解消**: pool.ts(1.2) の cloud-sql-iam 経路が要求する DB_IAM_USER/DB_NAME を run-services が needs_cloudsql サービスへ注入（CLOUDSQL_CONNECTION_NAME と同様）。DB_IAM_USER は `trimsuffix(SA.email, ".gserviceaccount.com")`＝google_sql_user.name と同一式で、pg 接続ユーザーが実在 IAM DB ユーザーと一致。コード層が requireEnv するキーとインフラが set するキーの一致を今後の env 追加時に必ず確認する。
+- **[Task 3.3 実装知見] wire フィールド名は aspectCodes に統一**: /api/responses のリクエストは `aspectCodes: string[]`（validate・tallies・wire で一致）。design.md の初期スケッチは `aspects` だったが `aspectCodes` に修正済み。4.4 フォームは `aspectCodes` を送信、4.1 route は追加マッピングなしで validate に渡す（silent drop 防止）。同一回答内の重複 aspect は validate/tallies とも受理し tallies が dedup する（1 回答=各 aspect 1 加算）。
 - **[Task 3.1 実装知見] Next.js 16 monorepo**: Turbopack がワークスペースルートを誤推論するため next.config.ts に `turbopack.root` と `outputFileTracingRoot` を `import.meta.dirname` 由来（cwd 非依存）の ts/ で明示する。survey-web の tsconfig は Next 標準（moduleResolution=bundler・jsx は next build が react-jsx に自動設定）で packages/db の NodeNext とは別系統（意図的）。テスト0件の app は `vitest run --passWithNoTests`。docker 不在のため Dockerfile は CI/デプロイ時に検証（起動確認は next start + curl /healthz で代替）。

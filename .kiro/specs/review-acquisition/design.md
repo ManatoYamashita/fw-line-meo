@@ -266,7 +266,7 @@ sequenceDiagram
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
-| POST | /api/responses | `{ pageToken: string, storeId: uuid, star: 1..5, aspects: string[], comment?: string }` | `200 { generation: 'ok'\|'failed', draft: string\|null, sessionToken, regenerationsLeft: 3 }` | 400 VALIDATION / PAGE_TOKEN_INVALID（画面再読込を案内）, 404 STORE_NOT_AVAILABLE, 429 RATE_LIMITED |
+| POST | /api/responses | `{ pageToken: string, storeId: uuid, star: 1..5, aspectCodes: string[], comment?: string }` | `200 { generation: 'ok'\|'failed', draft: string\|null, sessionToken, regenerationsLeft: 3 }` | 400 VALIDATION / PAGE_TOKEN_INVALID（画面再読込を案内）, 404 STORE_NOT_AVAILABLE, 429 RATE_LIMITED |
 
 - Preconditions: store が存在し `place_status = 'confirmed'`・pageToken（SSR 発行・5 分・HMAC）が有効
 - Postconditions: **sessionToken は生成の成否に関わらず必ず発行**（tallies 加算後）。tallies は高々 1 回加算（失敗許容）・draft は出力検証済み（generation=ok 時）
