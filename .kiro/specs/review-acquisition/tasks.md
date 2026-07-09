@@ -62,7 +62,7 @@
   - _Boundary: survey-web validate_
   - _Depends: 3.1_
 
-- [ ] 3.4 (P) Google 投稿 URL 組立層を実装する
+- [x] 3.4 (P) Google 投稿 URL 組立層を実装する
   - Place ID から writereview 形式の投稿 URL を組み立て、形式変更の追随点を単一モジュールに隔離する（代理投稿はしない＝遷移 URL のみ）
   - Observable: placeid が正しく URL エンコードされ、既知 Place ID で期待 URL を返すユニットテストが緑
   - _Requirements: 4.3, 4.5_
