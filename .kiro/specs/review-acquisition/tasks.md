@@ -101,7 +101,7 @@
   - _Boundary: survey-web ResponsesAPI_
   - _Depends: 1.4, 3.2, 3.3, 3.6, 3.7_
 
-- [ ] 4.2 (P) 再生成 API（/api/drafts）を実装する
+- [x] 4.2 (P) 再生成 API（/api/drafts）を実装する
   - sessionToken を検証し同一素材から再生成する。集計には一切触れず、attempt は生成成功時のみ +1、attempt ≥ 3 の再生成要求は 409 を返す。共有レート制限モジュール（3.7）を適用する
   - Observable: 3 回の再生成成功後 4 回目が 409、生成失敗試行が回数を消費しない、再生成が tallies を変えないテストが緑
   - _Requirements: 3.8, 3.9_

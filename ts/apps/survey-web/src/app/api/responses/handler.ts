@@ -6,6 +6,7 @@ import type { PlaceStatus } from '@fwlm/db';
 import type { SessionTokenService } from '../../../lib/session-token';
 import { validateSurveyAnswer } from '../../../lib/validate';
 import { jsonError, jsonOk } from '../../../lib/http';
+import { REGEN_MAX } from '../../../lib/limits';
 
 // 回答受付 API の中核ロジック（依存を注入してテスト可能にする）。route.ts が実依存を配線する。
 
@@ -31,8 +32,6 @@ export interface ResponsesDeps {
   clientKey: (req: Request) => string;
   log: (level: 'warn' | 'error' | 'info', event: string) => void;
 }
-
-const REGEN_MAX = 3;
 
 export async function handleResponses(req: Request, deps: ResponsesDeps): Promise<Response> {
   let body: unknown;
