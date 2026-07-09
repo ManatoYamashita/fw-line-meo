@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Foundation: TS モノレポと共有 DB 層
+- [x] 1. Foundation: TS モノレポと共有 DB 層
 - [x] 1.1 TS モノレポ基盤とツーリングを確立する
   - `ts/` に pnpm workspace（`pnpm-workspace.yaml`・ルート `package.json`）と strict な `tsconfig.base.json`（`any` 禁止）を作成する
   - vitest・ESLint・TypeScript の共通設定と、`apps/`・`packages/` のワークスペース解決を通す
@@ -22,7 +22,7 @@
   - _Boundary: packages/db stores/aspects/dashboard-users_
   - _Depends: 1.2_
 
-- [ ] 1.4 (P) DB 集計書込（月次 tallies UPSERT）を実装する
+- [x] 1.4 (P) DB 集計書込（月次 tallies UPSERT）を実装する
   - 1 回答につき rating を 1 行、選択 aspect ごとに 1 行を単一トランザクションで `count = count + 1` UPSERT する
   - `period_month` を Asia/Tokyo 基準の月初日として SQL 側で確定し、既存 UNIQUE 制約に整合させる
   - Observable: 同一 store・同一月への複数回答で count が加算され、月末 23:59 JST の回答が正しい月に入るユニットテストが緑
@@ -191,3 +191,7 @@
 - **集計非接触の再試行**: 生成失敗でも sessionToken を発行し再試行は /api/drafts に一本化。/api/responses の再 POST（=二重加算）を構造的に排除。
 - **共有定数**: `survey_aspects` はコード内に列挙せず seed の code/label を参照（write-boundary.md）。
 - **インフラ変更は gcp-infra-foundation の規約に従う**: secret は frame のみ・accessor は consumer 側 co-locate・`tf-plan` 差分を additive のみに保つ。
+- **[Task 1 実装知見] native postgres テストハーネス**: docker/apple-container 不在環境のため `ts/scripts/with-test-db.sh`（initdb + pg_ctl の一時インスタンス・unix socket のみ）を確立。DB 依存テストは `make ts-test-db`、ユニットは `make ts-test`（`DATABASE_URL` 無しで `describe.skipIf` により自動 skip）。DB テストは `*.db.test.ts` 命名。
+- **[Task 1 実装知見] TS モノレポ規約**: NodeNext のため相対 import は `.js` 拡張子必須（vitest/vite は `.js`→`.ts` 解決可）。`Queryable = Pick<Pool,'query'>` をアクセサの最小問い合わせ面に採用。`pnpm -r` で空/未定義スクリプトは exit 0。共有ツールチェーンは ts/ root、各パッケージが `build/lint/test` を持つ。
+- **[Task 1 実装知見] tallies の JST 月境界**: `now` 引数注入でテスト。now 未指定（`now()` フォールバック）時、同一 TX 内 rating/aspect の 2 クエリが真夜中の月境界を跨ぐ極小の隙間があるが確率ほぼ0で本番許容。将来厳密化するなら period_month を CTE で一度確定して両クエリへ渡す。
+- **[Task 1 レビュー] 1.4 の reviewer サブエージェントは watchdog stall。メインコンテキストで kiro-review を実施し APPROVED（reviewer が長時間 DB/検証待ちで stall する場合の確立済みフォールバック）。
