@@ -131,7 +131,7 @@
   - _Boundary: survey-web DraftPanel_
   - _Depends: 4.3_
 
-- [ ] 5. Core: 管理 API（dashboard-api）による QR 提供
+- [x] 5. Core: 管理 API（dashboard-api）による QR 提供
 - [x] 5.1 (P) dashboard-api アプリ雛形を確立する
   - Hono で最小 API を初期化し、`PORT` 対応の起動・`SURVEY_BASE_URL` 等 env 検証・Dockerfile を用意する（firebase-admin・qrcode・pg を導入）
   - Observable: ローカル起動でヘルス相当ルートが 200、必須 env 欠落時に起動が明示エラーで停止
@@ -146,7 +146,7 @@
   - _Boundary: dashboard-api AuthMw_
   - _Depends: 1.3, 5.1_
 
-- [ ] 5.3 QR エンドポイントを実装する
+- [x] 5.3 QR エンドポイントを実装する
   - 認証・RBAC を通過した要求に対し `{SURVEY_BASE_URL}/s/{storeId}` を符号化した PNG を返す。size は 128〜1024 に clamp（既定 512）、place 未確定 store は 409 を返す
   - Observable: 有効要求で image/png の QR が返り、pending store で 409、URL に storeId(UUID) が入ることがテストで緑
   - _Requirements: 1.1, 1.2, 1.3_
