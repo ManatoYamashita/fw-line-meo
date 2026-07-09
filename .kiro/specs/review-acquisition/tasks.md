@@ -47,7 +47,7 @@
   - _Requirements: 2.1, 2.8_
   - _Depends: 1.1_
 
-- [ ] 3.2 (P) セッショントークン層（pageToken・sessionToken）を実装する
+- [x] 3.2 (P) セッショントークン層（pageToken・sessionToken）を実装する
   - Node crypto の HMAC-SHA256 で pageToken（storeId・exp 5 分）と sessionToken（素材・attempt・exp 30 分）を署名/検証し、kind をペイロードに封入して相互流用を拒否する
   - 署名鍵は `SESSION_SIGNING_KEY` を用いる
   - Observable: sign→verify 往復・改ざん検知・exp 失効・attempt 上限・pageToken を sessionToken として使えないことがユニットテストで緑
