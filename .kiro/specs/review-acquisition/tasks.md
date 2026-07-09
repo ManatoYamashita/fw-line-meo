@@ -77,7 +77,7 @@
   - _Boundary: survey-web PromptBuilder_
   - _Depends: 3.1_
 
-- [ ] 3.6 下書き生成層（Gemini）を実装する
+- [x] 3.6 下書き生成層（Gemini）を実装する
   - @google/genai で `gemini-3.1-flash-lite`（env で差替可）を呼び、`responseMimeType: application/json` ＋ responseSchema で下書き文字列を強制、temperature ≈ 1.0・seed 非固定にする
   - safetySettings で HARASSMENT／HATE_SPEECH／SEXUALLY_EXPLICIT／DANGEROUS_CONTENT を BLOCK_MEDIUM_AND_ABOVE に明示設定し、429/5xx に指数バックオフ 1 回、出力の非空・長さ・スキーマ準拠を検証する
   - Observable: safetySettings 4 カテゴリが必ず付与されること・不正出力が INVALID_OUTPUT として弾かれることがユニットテストで緑（Gemini はモック）
