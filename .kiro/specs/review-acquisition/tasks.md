@@ -38,7 +38,7 @@
   - _Requirements: 1.1, 3.3, 3.8, 5.3_
   - _Boundary: infra/modules/secrets, infra/modules/run-services, infra/envs/prod_
 
-- [ ] 3. Core: 客向け Web（survey-web）アプリとロジック層
+- [x] 3. Core: 客向け Web（survey-web）アプリとロジック層
 - [x] 3.1 survey-web アプリ雛形（Next.js standalone）を確立する
   - Next.js 16（App Router）を `output: 'standalone'` で初期化し、`PORT` 対応の Dockerfile（`public/`・`.next/static` の明示コピー含む）を用意する
   - 必要依存（@google/genai・pg・cloud-sql-connector）を導入し、ヘルスに相当する最小ページで起動を確認する
@@ -85,7 +85,7 @@
   - _Boundary: survey-web DraftGenerator_
   - _Depends: 3.5_
 
-- [ ] 3.7 (P) インスタンス内レート制限層を実装する
+- [x] 3.7 (P) インスタンス内レート制限層を実装する
   - 公開エンドポイントの生成コスト濫用に対する簡易レート制限（ベストエフォート・ゼロスケール前提で完全防御は狙わない）を独立モジュールとして実装し、/api/responses と /api/drafts の双方が依存できる形にする
   - Observable: 閾値超過の連続要求が抑止され、ウィンドウ経過で解放されるユニットテストが緑
   - _Requirements: 3.8_
