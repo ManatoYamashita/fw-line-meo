@@ -59,7 +59,7 @@
 
 ## 3. Core: 店舗特定サービスと会話フロー
 
-- [ ] 3.1 (P) 店舗特定サービス（検索・確定トランザクション）
+- [x] 3.1 (P) 店舗特定サービス（検索・確定トランザクション）
   - `onboarding/store-identification.ts`: `searchCandidates`（2.3 に委譲）、`confirmStore` 単一トランザクション（stores 作成＋owners 状態遷移）、`ux_stores_place_id` UNIQUE 違反を `place_already_registered` に正規化
   - 完了状態: `*.db.test.ts` で確定の原子性と重複 place_id の拒否が確認できる
   - _Requirements: 3.1, 4.2, 4.4_
@@ -142,3 +142,4 @@
 - 1.2: 本 feature の実装は専用 worktree `/Users/manatoy_mba/Desktop/dev/fw-line-meo-line-onboarding`（ブランチ `feat/line-onboarding`）で行う（root worktree は `main` を維持）。`ts/scripts/with-test-db.sh` は docker/container 不要で native postgres を自前起動するため `ts-test-db` はそのまま利用可能。webhook イベント重複排除は `INSERT ... ON CONFLICT DO NOTHING` + rowCount 判定でアトミックに実装（read-then-write は不可）。confirmStore 系のトランザクション所有は 3.1（StoreIdentificationService）に意図的に委譲。
 - 2.2: postback 符号化スキームは `a=select&i=<index>`（+ `a=confirm`/`a=restart`/`a=resume`）を採用（research.md Decision 5 準拠）。design.md 本文中の例示（`a=sel&i=<0-9>`）と表記が異なる箇所があるが、research.md を正としたドキュメント間の軽微な不整合であり実装への影響なし。2.5（メッセージビルダー）・4.3（リッチメニュー resume postback）は `a=select`/`a=confirm`/`a=restart`/`a=resume` の実表記に合わせること。
 - 2.4: レビュー1周目で「事前発行済み長期トークン Secret（`line-channel-access-token`）」というシークレット名をコードコメントに literal 記載していた点が secrets-hygiene 観点で REJECTED（値の漏洩ではなく命名の言及のみだが、grep ゲートはゼロ許容）。以後、未使用の既存 Secret Manager シークレット名をコードコメントに書く際は resource 名を直接書かず「事前発行された長期トークン（Secret Manager 管理）」等の言い換えに留めること。またトークン有効期限のマージン境界テストは「マージン超過直前 vs マージン超過直後・raw expiry 未到達」の2点を跨いで初めてマージン独自ロジックを証明できる（片側の閾値だけを大きく超えるテストは raw expiry 到達と区別できない）。
+- 3.1: `line-webhook` は `pg` を直接依存に持たない（`@fwlm/db` 経由のみ）ため、`Queryable` を拡張した自前の `TransactionClient`/`ConnectablePool` インターフェースで構造的型合わせを行いトランザクションを張る（`pg.Pool`/`PoolClient` を直接 import しない）。`ux_stores_place_id` は `0001_four_tier_baseline.sql` で部分 UNIQUE INDEX として定義されており、node-postgres の `err.constraint` にはインデックス名がそのまま入る（`ALTER TABLE ADD CONSTRAINT` でなくても同様）。単一トランザクション内の2書込みで「どちらが失敗しても同一 catch→ROLLBACK を通る」ことがコード構造で確認できれば、両失敗パターンを個別にテスト強制する必要は必ずしもない（`tallies.ts` の先例と同判断）。`make ts-test-db` は全パッケージ共有DBで実行されるため、新規 `.db.test.ts` の UUID フィクスチャは既存 prefix と衝突しないことを grep で確認すること（本タスクは `e7` を使用）。
