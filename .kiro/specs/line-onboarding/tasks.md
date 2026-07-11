@@ -44,7 +44,7 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.5_
   - _Boundary: PlacesSearchAdapter_
 
-- [ ] 2.4 (P) LINE メッセンジャーアダプタ
+- [x] 2.4 (P) LINE メッセンジャーアダプタ
   - `line/client.ts`: stateless チャネルアクセストークンの発行＋メモリキャッシュ、`reply`、`getProfile`（displayName のみ返す）、`linkRichMenu`
   - 完了状態: モックで token 発行・reply 呼び出し・profile 404 時の null 返却が確認できる（ユニットテスト緑）
   - _Requirements: 4.3, 5.5, 6.3, 7.2_
@@ -141,3 +141,4 @@
 - 1.1: サンドボックスに docker/apple-container が存在しないため `make db-migrate`/`db-test`/`db-verify-docs` は直接実行不可。native Homebrew postgres（`initdb`＋カスタムソケットdir）で `db/migrations/*.sql`→`db/test/assertions/*.sql`→`db/test/check_docs.sh`（`MANAGE_CONTAINER=0 PSQL_EXEC=psql`）を代替実行し GREEN 確認済み（実装者・レビュアー双方が独立再現）。以降の DB 系タスク（1.2・5.1・5.2）も同じ代替手順を踏襲する。
 - 1.2: 本 feature の実装は専用 worktree `/Users/manatoy_mba/Desktop/dev/fw-line-meo-line-onboarding`（ブランチ `feat/line-onboarding`）で行う（root worktree は `main` を維持）。`ts/scripts/with-test-db.sh` は docker/container 不要で native postgres を自前起動するため `ts-test-db` はそのまま利用可能。webhook イベント重複排除は `INSERT ... ON CONFLICT DO NOTHING` + rowCount 判定でアトミックに実装（read-then-write は不可）。confirmStore 系のトランザクション所有は 3.1（StoreIdentificationService）に意図的に委譲。
 - 2.2: postback 符号化スキームは `a=select&i=<index>`（+ `a=confirm`/`a=restart`/`a=resume`）を採用（research.md Decision 5 準拠）。design.md 本文中の例示（`a=sel&i=<0-9>`）と表記が異なる箇所があるが、research.md を正としたドキュメント間の軽微な不整合であり実装への影響なし。2.5（メッセージビルダー）・4.3（リッチメニュー resume postback）は `a=select`/`a=confirm`/`a=restart`/`a=resume` の実表記に合わせること。
+- 2.4: レビュー1周目で「事前発行済み長期トークン Secret（`line-channel-access-token`）」というシークレット名をコードコメントに literal 記載していた点が secrets-hygiene 観点で REJECTED（値の漏洩ではなく命名の言及のみだが、grep ゲートはゼロ許容）。以後、未使用の既存 Secret Manager シークレット名をコードコメントに書く際は resource 名を直接書かず「事前発行された長期トークン（Secret Manager 管理）」等の言い換えに留めること。またトークン有効期限のマージン境界テストは「マージン超過直前 vs マージン超過直後・raw expiry 未到達」の2点を跨いで初めてマージン独自ロジックを証明できる（片側の閾値だけを大きく超えるテストは raw expiry 到達と区別できない）。
