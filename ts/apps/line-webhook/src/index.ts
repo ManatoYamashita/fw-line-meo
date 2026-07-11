@@ -1,39 +1,72 @@
 import { serve } from '@hono/node-server';
+import {
+  getPool,
+  recordWebhookEventOnce as dbRecordWebhookEventOnce,
+  getOrCreateSession,
+  updateSession,
+  findOwnerByLineUserId,
+  createOwner,
+  findActiveInviteCode,
+} from '@fwlm/db';
 import { createApp, type AppDeps } from './app.js';
 import { loadConfig } from './config.js';
 import { createSignatureVerifier } from './webhook/signature.js';
+import { createPlacesSearchAdapter } from './places/search.js';
+import { createLineMessenger } from './line/client.js';
+import { createStoreIdentificationService } from './onboarding/store-identification.js';
+import { createConversationHandlers } from './onboarding/conversation.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
-// 本タスク（4.1）は createApp(deps) の配線とエラー境界（署名検証・イベントディスパッチャ・
-// 会話ハンドラの結線、内部例外時の再試行案内 reply 試行）の構築のみを担当する。
-// pg pool・Places fetch クライアント・LINE messenger 等の実依存の配線は次タスク（4.2・
-// 「実依存注入とアプリレベルフローテスト」）の責務であり、本タスクでは意図的に持ち込まない。
-//
-// createApp が deps を必須引数に取るようになったため（署名検証を素通りさせないための
-// Requirement 7.1 の構造的強制）、ビルドを通す最小限の措置として、まだ実配線されていない
-// 依存はここでは「呼び出されたら明示的に失敗する」プレースホルダに留める。サイレントに
-// 誤動作する（例: recordWebhookEventOnce が常に true を返す等）よりも、実際に呼ばれた際に
-// 即座にエラーとして顕在化する方が安全なため。タスク 4.2 でこれらを実依存に置き換える。
+// 本タスク（4.2）は、タスク 4.1 が構築した createApp(deps) のエラー境界に対し、
+// すべての実依存（pg pool・Places fetch クライアント・LINE messenger・会話ハンドラ一式）を
+// 実配線する。プレースホルダ（notWiredYet）は本タスクで全廃する。
 const config = loadConfig();
 
-function notWiredYet(name: string): never {
-  throw new Error(
-    `line-webhook: ${name} is not wired to a real dependency yet (pending task 4.2)`,
-  );
-}
+// pg.Pool は Queryable（.query を持つ）と ConnectablePool（.connect() が
+// TransactionClient 互換のオブジェクトを返す）の両方に構造的に適合するため、
+// 同一の pool 値を db/pool 両方のフィールドに渡せる（onboarding/conversation.ts の
+// ConversationDeps 設計コメント・onboarding/store-identification.ts と同じ前提）。
+const pool = await getPool();
+
+const placesAdapter = createPlacesSearchAdapter({ apiKey: config.placesApiKey, fetch });
+
+const lineMessenger = createLineMessenger({
+  channelId: config.lineChannelId,
+  channelSecret: config.lineChannelSecret,
+  fetch,
+  logger: {
+    warn: (message, meta) => {
+      console.warn(message, meta ?? {});
+    },
+  },
+});
+
+const storeIdentificationService = createStoreIdentificationService({
+  pool,
+  places: placesAdapter,
+});
+
+const conversationHandlers = createConversationHandlers({
+  db: pool,
+  pool,
+  sessions: { getOrCreateSession, updateSession },
+  owners: { findOwnerByLineUserId, createOwner },
+  inviteCodes: { findActiveInviteCode },
+  identification: storeIdentificationService,
+  messenger: lineMessenger,
+  now: () => new Date(),
+  lineRichMenuCompletedId: config.lineRichMenuCompletedId,
+});
 
 const deps: AppDeps = {
-  // 署名検証は LINE_CHANNEL_SECRET のみで構築可能な純粋な暗号検証であり、
-  // pool/fetch のような未配線の外部依存を必要としないため、ここで実配線する。
+  // 署名検証は LINE_CHANNEL_SECRET のみで構築可能な純粋な暗号検証。
   signatureVerifier: createSignatureVerifier(config.lineChannelSecret),
-  recordWebhookEventOnce: () => notWiredYet('recordWebhookEventOnce (DB pool)'),
-  conversationHandlers: {
-    handleEvent: () => notWiredYet('ConversationHandlers (DB pool / Places / LINE messenger)'),
-  },
-  messenger: {
-    reply: () => notWiredYet('LineMessenger.reply'),
-  },
+  // recordWebhookEventOnce は pool 束縛済みの関数として渡す
+  // （createApp が内部で EventDispatcher を構築する際にそのまま使う）。
+  recordWebhookEventOnce: (webhookEventId) => dbRecordWebhookEventOnce(pool, webhookEventId),
+  conversationHandlers,
+  messenger: lineMessenger,
   logger: {
     // LINE はログを提供しないため自前で標準出力へ記録する。
     error: (message, meta) => {

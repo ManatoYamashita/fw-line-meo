@@ -95,7 +95,7 @@
   - _Requirements: 5.4, 5.5, 7.1, 7.5_
   - _Depends: 1.4, 2.1, 3.4_
 
-- [ ] 4.2 実依存注入とアプリレベルフローテスト
+- [x] 4.2 実依存注入とアプリレベルフローテスト
   - `index.ts`: pool／bot-sdk／fetch アダプタの実配線と `serve` 起動。fake messenger／fake places を使った `app.request` での全経路フロー（follow→招待コード→店名検索→候補選択→確認→確定→完了）テスト
   - 完了状態: ハッピーパス全通しテストと ping／署名不正／重複イベントの境界テストが緑
   - _Requirements: 1.1, 2.1, 3.1, 4.1, 4.2, 4.3, 5.4, 6.3, 7.1_
@@ -147,3 +147,4 @@
 - 3.3: candidate 選択の postback はセッションに保存済みの `candidates`/`selectedIndex` スナップショットのみを信頼し、index の範囲外・candidates 無しの両ケースで graceful fallback（`buildCandidateSelectionExpiredMessage`）とすること（confirmStore は絶対に呼ばない）。`place_already_registered` は stage・candidates を変更しない（Req 4.4 はステージ変更を要求しない）。レビューで軽微な指摘: `await_confirmation`→新店名テキストの empty/error 分岐では `candidates`/`selected_index` が stale のまま残る（found・restart は明示クリアするのに非対称）。クラッシュや誤店舗確定リスクはないが、次回このパスに触れる際は一貫性のため一緒にクリアするとよい。
 - 3.4: `buildStageGuidanceMessage(session)` を共有ヘルパーとして抽出し、follow の既存owner再訪（Req1.2/5.2）・`resume` postback（Req6.2）・段階外入力フォールバック（Req5.3）の3箇所で同一関数を再利用する（フォールバックは各段階の入場案内と文言を完全一致させること＝Req5.3の「現在の段階で必要な操作の案内を再送する」の字義）。`linkRichMenu` は `handleConfirm` の `confirmed` 分岐1箇所のみで呼び、失敗しても reply 自体は既に送信済みのため handleEvent 全体をクラッシュさせない（try/catchで握り潰し。ロガー未注入のため現状ログ出力なし＝4.x でロガー導入時に対応）。本タスクはRED-first手続きを厳密に踏まなかったため、レビュー側で3箇所のミューテーションテスト（completed早期ガード×2・linkRichMenu呼び出し）を実施しテストの実効性を機械的に確認した。今後もRED未実施タスクのレビューでは同様の変異テストを行うこと。
 - 4.1: `POST /webhook` のエラー境界で「現在処理中の replyToken」を追跡する可変状態（`inFlightReplyToken`）と `EventDispatcher` インスタンスは、**必ずリクエストハンドラ本体の内側**で生成すること（`createApp()` スコープ＝アプリインスタンス生存期間で共有すると、Cloud Run の同時実行下で並行リクエストが同一変数を破壊し合い、遅い失敗リクエストの reply が握り潰される重大バグになる。レビューで実際に revert→再現→復元まで検証済み）。内部例外時のHTTPステータスは200固定（design.mdのError Handlingが明記・5xxはrecordWebhookEventOnceが既に記録済みのため再配信しても回復効果がなく無意味）。structured logには `x-line-request-id` ヘッダを必ず併記すること（design.md Monitoring節の明示要求）。
+- 4.2: `pool`（`pg.Pool`）は `Queryable`／`ConnectablePool` の両方に構造的に適合するため、`index.ts` では同一値を `db`/`pool` 両フィールドへそのまま渡せる（アダプタ不要）。アプリレベルフローテストは `index.ts` を経由せず `createApp(deps)` に直接同型の deps（フェイクmessenger/places＋実DBプール）を組み立てる方式を踏襲する（design.md「App-level Flow Tests」の想定と整合）。重複排除テストは「同一 webhookEventId を2回送る」ことを厳密に用いること — dedup が壊れていても他の制約（UNIQUE等）やステージ遷移後の別分岐で偶然テストが通ってしまわないか反証確認すること（5.1/5.2でも同深度のチェックを踏襲）。DBフィクスチャの UUID prefix は `e1`〜`e9`+`f0` まで使用済み（次は `f1` 以降を使うこと）。
