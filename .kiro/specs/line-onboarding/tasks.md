@@ -8,7 +8,7 @@
   - 完了状態: `make db-migrate && make db-test && make db-verify-docs` が緑
   - _Requirements: 2.4, 2.5, 5.1, 5.4_
 
-- [ ] 1.2 DB アクセサ追加（owners/invite-codes/sessions/webhook-events）
+- [x] 1.2 DB アクセサ追加（owners/invite-codes/sessions/webhook-events）
   - `@fwlm/db` に `owners.ts`（findOwnerByLineUserId/createOwner/markOwnerStoreIdentified）、`invite-codes.ts`、`onboarding-sessions.ts`、`webhook-events.ts` を追加。`stores.ts` に `findStoreByPlaceId`/`createConfirmedStore` を追加
   - アクセサは owners/stores/invite-codes/sessions/webhook-events のみを対象とし、来店客（customer）系テーブルへの参照を一切持たない
   - 完了状態: 各アクセサの基本 `*.db.test.ts` が実 postgres で緑
@@ -139,3 +139,4 @@
 ## Implementation Notes
 <!-- 実装中に得られた横断的な知見をここに追記する -->
 - 1.1: サンドボックスに docker/apple-container が存在しないため `make db-migrate`/`db-test`/`db-verify-docs` は直接実行不可。native Homebrew postgres（`initdb`＋カスタムソケットdir）で `db/migrations/*.sql`→`db/test/assertions/*.sql`→`db/test/check_docs.sh`（`MANAGE_CONTAINER=0 PSQL_EXEC=psql`）を代替実行し GREEN 確認済み（実装者・レビュアー双方が独立再現）。以降の DB 系タスク（1.2・5.1・5.2）も同じ代替手順を踏襲する。
+- 1.2: 本 feature の実装は専用 worktree `/Users/manatoy_mba/Desktop/dev/fw-line-meo-line-onboarding`（ブランチ `feat/line-onboarding`）で行う（root worktree は `main` を維持）。`ts/scripts/with-test-db.sh` は docker/container 不要で native postgres を自前起動するため `ts-test-db` はそのまま利用可能。webhook イベント重複排除は `INSERT ... ON CONFLICT DO NOTHING` + rowCount 判定でアトミックに実装（read-then-write は不可）。confirmStore 系のトランザクション所有は 3.1（StoreIdentificationService）に意図的に委譲。
