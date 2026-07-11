@@ -924,6 +924,84 @@ describe('createConversationHandlers', () => {
     });
   });
 
+  describe('テキスト以外の送信（unsupported message・Req 5.3）', () => {
+    it('未登録ユーザー（セッション新規作成＝await_invite_code）→ 招待コード入力案内を再送する', async () => {
+      // 未知ユーザーの unsupported は getOrCreateSession が await_invite_code の新規
+      // セッションを返すため、テキスト入力の未知ユーザーと同様に招待コード案内へ倒れる。
+      const session = baseSession({ stage: 'await_invite_code' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session, existingOwner: null });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'unsupported',
+        lineUserId: 'U1',
+        replyToken: 'rt-31',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      expect(messenger.replies).toHaveLength(1);
+      expect(messenger.replies[0]?.replyToken).toBe('rt-31');
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildGreetingMessage());
+    });
+
+    it('await_store_name 段階でのスタンプ等 → 店名入力案内を再送する', async () => {
+      const session = baseSession({ stage: 'await_store_name', owner_id: 'owner-1' });
+      const { deps, sessionsFake, identificationFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'unsupported',
+        lineUserId: 'U1',
+        replyToken: 'rt-32',
+      });
+
+      // 検索は起動されず、セッションも変更されない（案内の再送のみ）。
+      expect(identificationFake.searchCalls).toHaveLength(0);
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildStoreNameInputGuidanceMessage());
+    });
+
+    it('await_confirmation 段階でのスタンプ等 → 選択済み候補の確認案内を再送する', async () => {
+      const candidates = storeCandidates(2);
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates,
+        selected_index: 1,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'unsupported',
+        lineUserId: 'U1',
+        replyToken: 'rt-33',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildConfirmationMessageForAssertion(candidates[1]!));
+    });
+
+    it('completed 段階でのスタンプ等 → 固定の完了案内のみ・セッション更新なし（Req 4.6 と整合）', async () => {
+      const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'unsupported',
+        lineUserId: 'U1',
+        replyToken: 'rt-34',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildAlreadyCompletedMessage());
+    });
+  });
+
   describe('リッチメニューからの resume postback（Req 6.2）', () => {
     it('await_invite_code 段階での resume → 招待コード入力案内を再送する', async () => {
       const session = baseSession({ stage: 'await_invite_code' });

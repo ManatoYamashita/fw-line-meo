@@ -2,7 +2,9 @@
 // Requirement 1.1: events: []（接続確認 ping）は何もせず解決する（呼び出し側が 200 を返す）。
 // Requirement 5.4: 同一 webhookEventId の再処理を防ぐ（LINE 再配信の isRedelivery も同一経路で救済）。
 //
-// 正規化対象は follow / message(text) / postback のみ。source.userId 欠落イベントや
+// 正規化対象は follow / message / postback。message のうち text 以外のサブタイプ
+// （スタンプ・画像等）は Requirement 5.3（期待外入力への案内再送）の対象であるため、
+// 黙殺せず `unsupported` として会話層へ渡す。source.userId・replyToken 欠落イベントや
 // unfollow・join 等の未知イベント型は前方互換のため黙って無視する（拒否しない）。
 //
 // JSON パースに失敗した場合はここで握りつぶさず例外を伝播させる。
@@ -11,7 +13,10 @@
 export type InboundEvent =
   | { kind: 'follow'; lineUserId: string; replyToken: string }
   | { kind: 'text'; lineUserId: string; replyToken: string; text: string }
-  | { kind: 'postback'; lineUserId: string; replyToken: string; data: string };
+  | { kind: 'postback'; lineUserId: string; replyToken: string; data: string }
+  // Requirement 5.3: text 以外の message（スタンプ・画像等）。メッセージ内容自体は
+  // 会話層で一切使用しないため保持しない（客・オーナーの送信内容を不必要に持ち回らない）。
+  | { kind: 'unsupported'; lineUserId: string; replyToken: string };
 
 export interface EventDispatcher {
   dispatch(rawWebhookBody: string): Promise<void>;
@@ -77,7 +82,13 @@ function parseEvent(raw: RawLineEvent): ParsedInboundEvent | null {
       return { webhookEventId, event: { kind: 'follow', lineUserId, replyToken } };
 
     case 'message': {
-      const text = raw.message?.type === 'text' ? raw.message.text : undefined;
+      if (raw.message?.type !== 'text') {
+        // Requirement 5.3: スタンプ・画像等のテキスト以外の message は、黙殺せず
+        // unsupported として会話層へ渡す（会話層が現在の段階の案内を再送する）。
+        // replyToken 等の欠落は本関数冒頭のガードで既に除外済み（reply 不能な入力は無視）。
+        return { webhookEventId, event: { kind: 'unsupported', lineUserId, replyToken } };
+      }
+      const text = raw.message.text;
       if (typeof text !== 'string') {
         return null;
       }

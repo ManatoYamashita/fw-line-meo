@@ -92,9 +92,26 @@ export function createConversationHandlers(deps: ConversationDeps): Conversation
           return handleText(deps, event);
         case 'postback':
           return handlePostback(deps, event);
+        case 'unsupported':
+          return handleUnsupported(deps, event);
       }
     },
   };
+}
+
+/**
+ * Req 5.3: テキスト以外の送信（スタンプ・画像等）への fallback。
+ * セッションは一切更新せず、現在の段階で必要な操作の案内を再送するのみ。
+ * 未知ユーザーの場合は getOrCreateSession が await_invite_code の新規セッションを返すため、
+ * テキスト入力での未知ユーザーと同様に招待コード入力案内（buildGreetingMessage）へ倒れる。
+ * completed 段階は buildStageGuidanceMessage 経由で固定の完了案内となる（Req 4.6 と整合）。
+ */
+async function handleUnsupported(
+  deps: ConversationDeps,
+  event: Extract<InboundEvent, { kind: 'unsupported' }>,
+): Promise<void> {
+  const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
+  await deps.messenger.reply(event.replyToken, [buildStageGuidanceMessage(session)]);
 }
 
 async function handleFollow(

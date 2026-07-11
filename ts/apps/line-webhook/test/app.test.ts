@@ -111,6 +111,36 @@ describe('line-webhook app', () => {
       });
     });
 
+    it('テキスト以外の message（スタンプ）も黙殺されず、unsupported として会話ハンドラへ渡り 200 を返す（Req 5.3）', async () => {
+      const conversationHandlers = fakeConversationHandlers();
+      const app = createApp(baseDeps({ conversationHandlers }));
+
+      const res = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': 'valid-signature' },
+        body: JSON.stringify({
+          destination: 'Uxxxx',
+          events: [
+            {
+              type: 'message',
+              replyToken: 'reply-sticker',
+              source: { type: 'user', userId: 'U1' },
+              webhookEventId: 'evt-sticker',
+              message: { type: 'sticker', id: 'msg-1', packageId: '446', stickerId: '1988' },
+            },
+          ],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(conversationHandlers.handleEvent).toHaveBeenCalledTimes(1);
+      expect(conversationHandlers.handleEvent).toHaveBeenCalledWith({
+        kind: 'unsupported',
+        lineUserId: 'U1',
+        replyToken: 'reply-sticker',
+      });
+    });
+
     it('署名不正は 401 を返し、会話ハンドラ（dispatcher）は一切呼ばれない', async () => {
       const conversationHandlers = fakeConversationHandlers();
       const app = createApp(

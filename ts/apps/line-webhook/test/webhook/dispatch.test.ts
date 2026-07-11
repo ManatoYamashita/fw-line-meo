@@ -74,7 +74,7 @@ describe('createEventDispatcher', () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it('text 以外の message サブタイプ（image 等）は無視される', async () => {
+  it('text 以外の message サブタイプ（image）は unsupported として正規化され onEvent に渡される（Req 5.3）', async () => {
     const onEvent = vi.fn(async () => {});
     const dispatcher = createEventDispatcher({
       recordWebhookEventOnce: createFakeRecordWebhookEventOnce(),
@@ -95,7 +95,94 @@ describe('createEventDispatcher', () => {
     };
 
     await dispatcher.dispatch(JSON.stringify(body));
+
+    const expected: InboundEvent = {
+      kind: 'unsupported',
+      lineUserId: 'U1',
+      replyToken: 'reply-3',
+    };
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(expected);
+  });
+
+  it('スタンプ（sticker）message も unsupported として正規化され onEvent に渡される（Req 5.3）', async () => {
+    const onEvent = vi.fn(async () => {});
+    const dispatcher = createEventDispatcher({
+      recordWebhookEventOnce: createFakeRecordWebhookEventOnce(),
+      onEvent,
+    });
+
+    const body = {
+      destination: 'Uxxxx',
+      events: [
+        {
+          type: 'message',
+          replyToken: 'reply-sticker',
+          source: { type: 'user', userId: 'U1' },
+          webhookEventId: 'evt-sticker',
+          message: { type: 'sticker', id: 'msg-2', packageId: '446', stickerId: '1988' },
+        },
+      ],
+    };
+
+    await dispatcher.dispatch(JSON.stringify(body));
+
+    const expected: InboundEvent = {
+      kind: 'unsupported',
+      lineUserId: 'U1',
+      replyToken: 'reply-sticker',
+    };
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(expected);
+  });
+
+  it('replyToken を持たない非 text message は unsupported にせず無視される（reply 不能な入力へのガード維持）', async () => {
+    const onEvent = vi.fn(async () => {});
+    const dispatcher = createEventDispatcher({
+      recordWebhookEventOnce: createFakeRecordWebhookEventOnce(),
+      onEvent,
+    });
+
+    const body = {
+      destination: 'Uxxxx',
+      events: [
+        {
+          type: 'message',
+          source: { type: 'user', userId: 'U1' },
+          webhookEventId: 'evt-no-reply-token',
+          message: { type: 'image', id: 'msg-3' },
+        },
+      ],
+    };
+
+    await dispatcher.dispatch(JSON.stringify(body));
     expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('unsupported イベントも同一 webhookEventId の重複配信は dedup でスキップされる（Req 5.4）', async () => {
+    const onEvent = vi.fn(async () => {});
+    const dispatcher = createEventDispatcher({
+      recordWebhookEventOnce: createFakeRecordWebhookEventOnce(),
+      onEvent,
+    });
+
+    const body = {
+      destination: 'Uxxxx',
+      events: [
+        {
+          type: 'message',
+          replyToken: 'reply-dup-sticker',
+          source: { type: 'user', userId: 'U1' },
+          webhookEventId: 'evt-dup-sticker',
+          message: { type: 'sticker', id: 'msg-4', packageId: '446', stickerId: '1988' },
+        },
+      ],
+    };
+
+    await dispatcher.dispatch(JSON.stringify(body));
+    await dispatcher.dispatch(JSON.stringify(body));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
   it('follow イベントは正規化されて onEvent に渡される', async () => {
