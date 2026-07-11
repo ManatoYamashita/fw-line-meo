@@ -106,6 +106,25 @@ function pingBody(): string {
   return JSON.stringify({ destination: 'Uxxxxbotxxxx', events: [] });
 }
 
+// Req 5.5 の応答時間（5 秒以内）に対する軽量な回帰ガード。
+// 注意: これは本番 SLA の充足を証明するテストではない。この sandbox テスト環境の
+// messenger/places アダプタはフェイク（ネットワーク往復なし）で応答が近瞬時であるため、
+// ここで検証できるのは「リクエスト処理経路そのものに大きな事故的劣化がないこと」のみ。
+// 本番での実 5 秒予算は LINE の reply token 有効期限内に、実 Places API・実 LINE API への
+// ネットワークレイテンシを含めて収める必要があり（design.md 「Performance & Scalability」
+// 応答予算 5.5 の記述を参照）、それは実ネットワークを経由しないこの環境では再現できない。
+const RESPONSE_TIME_SANITY_BUDGET_MS = 5000;
+
+async function timeWebhookRequest(
+  app: ReturnType<typeof createApp>,
+  init: { method: string; headers?: Record<string, string>; body: string },
+): Promise<{ res: Response; elapsedMs: number }> {
+  const startedAt = performance.now();
+  const res = await app.request('/webhook', init);
+  const elapsedMs = performance.now() - startedAt;
+  return { res, elapsedMs };
+}
+
 function candidate(overrides: Partial<StoreCandidate> = {}): StoreCandidate {
   return {
     placeId: 'ChIJ_f0_default',
@@ -196,17 +215,19 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       const app = buildApp({ messenger, places, pool });
 
       // 1. follow（Req 1.1）: 未登録ユーザーへ挨拶＋招待コード入力案内。
-      const followRes = await app.request('/webhook', {
+      const { res: followRes, elapsedMs: followElapsedMs } = await timeWebhookRequest(app, {
         method: 'POST',
         headers: { 'x-line-signature': sign(followBody(userId, 'reply-f0-1', 'f0-evt-follow'), CHANNEL_SECRET) },
         body: followBody(userId, 'reply-f0-1', 'f0-evt-follow'),
       });
       expect(followRes.status).toBe(200);
       expect(messenger.reply).toHaveBeenNthCalledWith(1, 'reply-f0-1', [buildGreetingMessage()]);
+      // Req 5.5 サニティ: この応答経路に事故的な大幅劣化がないことの回帰ガード（上記コメント参照）。
+      expect(followElapsedMs).toBeLessThan(RESPONSE_TIME_SANITY_BUDGET_MS);
 
       // 2. 招待コード（Req 2.1）: 有効なコードで owner 作成・await_store_name へ遷移。
       const inviteBody = textBody(userId, 'reply-f0-2', 'f0-evt-invite', INVITE_CODE);
-      const inviteRes = await app.request('/webhook', {
+      const { res: inviteRes, elapsedMs: inviteElapsedMs } = await timeWebhookRequest(app, {
         method: 'POST',
         headers: { 'x-line-signature': sign(inviteBody, CHANNEL_SECRET) },
         body: inviteBody,
@@ -215,6 +236,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(messenger.reply).toHaveBeenNthCalledWith(2, 'reply-f0-2', [
         buildStoreNameInputGuidanceMessage(),
       ]);
+      expect(inviteElapsedMs).toBeLessThan(RESPONSE_TIME_SANITY_BUDGET_MS);
 
       const ownerAfterInvite = await findOwnerByLineUserId(pool, userId);
       expect(ownerAfterInvite).not.toBeNull();
@@ -223,7 +245,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
 
       // 3. 店名検索（Req 3.1）: found → 候補カルーセル提示、stage は await_store_name のまま。
       const searchBody = textBody(userId, 'reply-f0-3', 'f0-evt-search', '福多郎食堂');
-      const searchRes = await app.request('/webhook', {
+      const { res: searchRes, elapsedMs: searchElapsedMs } = await timeWebhookRequest(app, {
         method: 'POST',
         headers: { 'x-line-signature': sign(searchBody, CHANNEL_SECRET) },
         body: searchBody,
@@ -232,11 +254,13 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(messenger.reply).toHaveBeenNthCalledWith(3, 'reply-f0-3', [
         buildCandidateCarouselMessage([candidate0, candidate1]),
       ]);
+      // Places 検索（フェイクだが実処理経路を通す）を含む段で、想定より大幅に遅くないことを確認する。
+      expect(searchElapsedMs).toBeLessThan(RESPONSE_TIME_SANITY_BUDGET_MS);
 
       // 4. 候補選択 postback（Req 4.1）: index 0 を選択 → await_confirmation へ。
       const selectData = encodePostback({ kind: 'select_candidate', index: 0 });
       const selectBody = postbackBody(userId, 'reply-f0-4', 'f0-evt-select', selectData);
-      const selectRes = await app.request('/webhook', {
+      const { res: selectRes, elapsedMs: selectElapsedMs } = await timeWebhookRequest(app, {
         method: 'POST',
         headers: { 'x-line-signature': sign(selectBody, CHANNEL_SECRET) },
         body: selectBody,
@@ -245,17 +269,20 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(messenger.reply).toHaveBeenNthCalledWith(4, 'reply-f0-4', [
         buildConfirmationMessage(candidate0),
       ]);
+      expect(selectElapsedMs).toBeLessThan(RESPONSE_TIME_SANITY_BUDGET_MS);
 
       // 5. 確定 postback（Req 4.2, 4.3）: stores 作成＋owner 遷移＋completed 案内。
       const confirmData = encodePostback({ kind: 'confirm' });
       const confirmBody = postbackBody(userId, 'reply-f0-5', 'f0-evt-confirm', confirmData);
-      const confirmRes = await app.request('/webhook', {
+      const { res: confirmRes, elapsedMs: confirmElapsedMs } = await timeWebhookRequest(app, {
         method: 'POST',
         headers: { 'x-line-signature': sign(confirmBody, CHANNEL_SECRET) },
         body: confirmBody,
       });
       expect(confirmRes.status).toBe(200);
       expect(messenger.reply).toHaveBeenNthCalledWith(5, 'reply-f0-5', [buildCompletionMessage()]);
+      // stores 作成＋owner 遷移＋リッチメニュー切替を1トランザクションで行う最も重い段。
+      expect(confirmElapsedMs).toBeLessThan(RESPONSE_TIME_SANITY_BUDGET_MS);
 
       // --- 完了状態の検証 ---
       const ownerFinal = await findOwnerByLineUserId(pool, userId);
@@ -280,8 +307,20 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
     const places = createFakePlaces({ kind: 'empty' });
     const app = buildApp({ messenger, places, pool });
 
-    const ownersBefore = await pool.query('SELECT COUNT(*)::int AS count FROM owners');
-    const sessionsBefore = await pool.query('SELECT COUNT(*)::int AS count FROM onboarding_sessions');
+    // このテスト専用の line_user_id で COUNT を絞り込む（Vitest の fileParallelism により
+    // 他ファイル・他ワークスペースパッケージのテストが同一 DB に並行して行を書き込むため、
+    // 絞り込みなしの全表 COUNT(*) は他テストの書き込みと競合し flaky になる）。
+    // ping は events: [] で何の line_user_id にも触れないため、この ID に対する行数は
+    // 常に 0 のはず（＝before/after とも 0 のまま変化しない）ことを「書き込みなし」の証拠とする。
+    const PING_PROBE_USER_ID = 'Uf0-ping-probe-user';
+    const ownersBefore = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM owners WHERE line_user_id = $1',
+      [PING_PROBE_USER_ID],
+    );
+    const sessionsBefore = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM onboarding_sessions WHERE line_user_id = $1',
+      [PING_PROBE_USER_ID],
+    );
 
     const res = await app.request('/webhook', {
       method: 'POST',
@@ -291,8 +330,14 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
 
     expect(res.status).toBe(200);
 
-    const ownersAfter = await pool.query('SELECT COUNT(*)::int AS count FROM owners');
-    const sessionsAfter = await pool.query('SELECT COUNT(*)::int AS count FROM onboarding_sessions');
+    const ownersAfter = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM owners WHERE line_user_id = $1',
+      [PING_PROBE_USER_ID],
+    );
+    const sessionsAfter = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM onboarding_sessions WHERE line_user_id = $1',
+      [PING_PROBE_USER_ID],
+    );
     expect(ownersAfter.rows[0]?.count).toBe(ownersBefore.rows[0]?.count);
     expect(sessionsAfter.rows[0]?.count).toBe(sessionsBefore.rows[0]?.count);
 
