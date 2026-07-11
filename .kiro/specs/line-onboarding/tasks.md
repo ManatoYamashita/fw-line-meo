@@ -19,7 +19,7 @@
   - 完了状態: `app.request('/healthz')` が 200、必須 env 欠落で config が明示エラーを投げる（ユニットテスト緑）
   - _Requirements: 7.1_
 
-- [ ] 1.4 Webhook 署名検証
+- [x] 1.4 Webhook 署名検証
   - `webhook/signature.ts`: raw body の HMAC-SHA256 検証（`@line/bot-sdk` の `validateSignature` を使用。パース前の raw body に適用）
   - 完了状態: 正しい署名は true、改竄 body やヘッダ欠落は false（ユニットテスト緑）
   - _Requirements: 7.1_

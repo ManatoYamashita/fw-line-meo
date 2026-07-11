@@ -13,6 +13,7 @@
   "dependencies": {
     "@fwlm/db": "workspace:*",
     "@hono/node-server": "^1",
+    "@line/bot-sdk": "^11",
     "hono": "^4"
   }
 }
