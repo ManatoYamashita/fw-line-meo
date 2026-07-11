@@ -14,7 +14,7 @@
   - 完了状態: 各アクセサの基本 `*.db.test.ts` が実 postgres で緑
   - _Requirements: 2.1, 2.4, 2.5, 4.2, 4.4, 5.1, 5.4, 7.3_
 
-- [ ] 1.3 (P) line-webhook アプリ雛形（Hono・Node22・config検証）
+- [x] 1.3 (P) line-webhook アプリ雛形（Hono・Node22・config検証）
   - `package.json`/`tsconfig.json`/`Dockerfile`（node:22-slim）、`config.ts`（`LINE_CHANNEL_ID`/`LINE_CHANNEL_SECRET`/`PLACES_API_KEY`/`LINE_RICHMENU_COMPLETED_ID`/`PORT` の必須検証）、`index.ts` skeleton、`GET /healthz`
   - 完了状態: `app.request('/healthz')` が 200、必須 env 欠落で config が明示エラーを投げる（ユニットテスト緑）
   - _Requirements: 7.1_
