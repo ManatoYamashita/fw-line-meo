@@ -26,7 +26,7 @@
 
 ## 2. Core: 外部統合・会話基盤コンポーネント
 
-- [ ] 2.1 (P) イベント正規化・重複排除ディスパッチャ
+- [x] 2.1 (P) イベント正規化・重複排除ディスパッチャ
   - `webhook/dispatch.ts`: `events: []` 接続確認への 200 対応、follow/message(text)/postback の正規化、`source.userId` 欠落・未知イベント型の無視、`webhookEventId` による冪等化
   - 完了状態: 同一 `webhookEventId` の 2 回目の処理がスキップされる（ユニットテスト緑）
   - _Requirements: 1.1, 5.4_
