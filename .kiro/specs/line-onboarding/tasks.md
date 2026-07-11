@@ -123,7 +123,7 @@
   - _Requirements: 2.1, 2.4, 2.5_
   - _Depends: 3.2_
 
-- [ ] 5.2 (P) 重複防止と継続性の統合検証
+- [x] 5.2 (P) 重複防止と継続性の統合検証
   - `*.db.test.ts`: 同一 `webhookEventId` の二重処理防止、既存 owner の再 follow での重複作成なし、中断→再訪でのセッション stage 保持
   - 完了状態: 上記シナリオがすべて `*.db.test.ts` で緑
   - _Requirements: 1.2, 5.1, 5.2, 5.4_
@@ -151,3 +151,4 @@
 - 4.3: `scripts/` は `src` と別 rootDir のため専用 `tsconfig.scripts.json`（emit可）が必要。ワークスペース共通の `build`/`typecheck` スクリプトから確実に呼ばれるよう `tsc -p tsconfig.json && tsc -p tsconfig.scripts.json` の形で必ずチェーンすること（分離したままだと `pnpm -r run build/typecheck` の定期実行網から漏れ、将来 `stages.ts` の型変更が検知されない静かな回帰リスクになる。本タスクでレビュー指摘を受けて是正済み）。画像アップロードは `api-data.line.me`（`api.line.me` ではない）・デフォルト設定は必ずオンボーディング用menuId（完了用ではない）を対象にすること。PNGはNode組込み`zlib`＋自前CRC-32実装で外部ライブラリなしに生成可能（800×540で比率1.481を満たし軽量）。
 - 4.4: `gcp-infra-foundation`（既存マージ済みspec）が先行して用意していた Cloud Run サービスキー `"webhook"`（`secret_env` に未使用の `LINE_CHANNEL_ACCESS_TOKEN` を含む）は、design.md が明示的に `line-webhook` という名前を指定しているため `"line-webhook"` へリネームし、`locals.tf`（`service_accounts` map）・`infra/sql/grants.sql`（`sa-webhook`→`sa-line-webhook`、psql変数名も含め）へ一貫して伝播させた（`terraform validate` は HCL 内部整合のみでSQLファイルの整合は検知しないため、リネーム時は grep で全体を確認すること）。`line-channel-access-token` シークレット資源自体は削除せず、このサービスの env 配線からのみ外した（Console運用・将来用に温存）。`places-api-key`/`line-channel-secret` は `infra/modules/secrets` に既存のため新規シークレット追加は不要。
 - 5.1: 統合検証タスク（5.1・5.2）は既存の単体アクセサテスト（1.2）・単発ハッピーパスの app-flow テスト（4.2）と重複させず、複数オーナーにまたがるビジネスルール固有のシナリオ（同一コード2人目再利用・無効化後拒否等）に特化して追加すること。CHECK制約や状態遷移の検証は `handleEvent` の戻り値ではなく実DBへの直接SQLクエリで確認する（`handleEvent` は `Promise<void>` を返すため戻り値からは検証できない）。DBフィクスチャの UUID prefix は `f1` まで使用済み（次は `f2` 以降）。
+- 5.2: **要修正（5.3でブロッキング対応）**: `test/app-flow.db.test.ts`（Task 4.2）の「ping is a no-op」テストが `owners`/`onboarding_sessions` を WHERE 句なしの全表 `COUNT(*)` で検証しており、vitest の既定 `fileParallelism: true` ＋ `with-test-db.sh` が全ファイル共有の単一 Postgres インスタンスを使う構成のため、他ファイル（`dashboard-api`/`survey-web` の `.db.test.ts` を含む・`make ts-test-db` は `pnpm -r test` で全パッケージ並行実行）の同時書込とレースし約数%〜20%の頻度で偽陽性失敗する（レビューで実際に再現・確認済み）。5.3 でこのテストの該当 COUNT クエリに `WHERE line_user_id = $1` 等のフィクスチャスコープを追加して根本修正すること（parallelism 設定変更だけではワークスペース横断のレースは閉じないため不十分）。DBフィクスチャの UUID prefix は `f2` まで使用済み（次は `f3` 以降）。
