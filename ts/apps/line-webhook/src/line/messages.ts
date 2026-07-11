@@ -297,3 +297,20 @@ export function buildCandidateSelectionExpiredMessage(): LineMessage {
       'お手数ですが、もう一度お店の名前を送信して検索し直してください。',
   };
 }
+
+/**
+ * Requirement 7.5: オーナーの操作を処理できなかった内部障害発生時の、汎用の再試行案内
+ * （運営への問い合わせ方法を含む）。app.ts のエラー境界（タスク 4.1）が、dispatch() 内で
+ * 捕捉されなかった内部例外の発生時にベストエフォートで送信を試みる文言。
+ * どの段階（招待コード／店名検索／確認）で発生した障害かに関わらず共通の汎用文言とする
+ * （design.md ConversationHandlers「汎用の再試行案内 reply」）。
+ */
+export function buildInternalErrorRetryMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      '申し訳ございません、処理中にエラーが発生しました。\n' +
+      'お手数ですが、少し時間をおいてもう一度お試しください。\n' +
+      '解決しない場合は、運営までお問い合わせください。',
+  };
+}

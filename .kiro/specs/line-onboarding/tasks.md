@@ -89,7 +89,7 @@
 
 ## 4. Integration: アプリ配線・リッチメニュー・インフラ
 
-- [ ] 4.1 Hono アプリの配線とエラー境界
+- [x] 4.1 Hono アプリの配線とエラー境界
   - `app.ts`: `createApp(deps)` で signature verifier＋dispatcher＋conversation handlers を配線、`POST /webhook` で 200/401、内部例外時は汎用の再試行案内 reply を試行
   - 完了状態: `app.request` で署名 OK/NG・内部例外時の挙動がテストで確認できる
   - _Requirements: 5.4, 5.5, 7.1, 7.5_
@@ -146,3 +146,4 @@
 - 3.2: design.md の `ConversationDeps` 簡略スケッチ（`updateSession(lineUserId, patch)` 等、db 引数なし）は実アクセサ（タスク1.2、全て明示的 `Queryable` 第一引数）と食い違う。実装では `ConversationDeps` に `db: Queryable`（日常読み書き）＋`pool: ConnectablePool`（3.1 と同一パターンでトランザクションを張る用）の両方を持たせて解決した。`createOwner`＋`updateSession(stage→await_store_name, ownerId)` は同一 `pool.connect()` client を使い1回の `updateSession` 呼び出しに stage と ownerId を同時に渡すこと（`ck_session_owner_stage` CHECK を単一 UPDATE で満たすため。2回に分けると中間状態で違反する）。ロック判定・設定は必ず `deps.now()` を経由し `new Date()` を直書きしないこと（テスト可能性・10分境界の正確性のため）。
 - 3.3: candidate 選択の postback はセッションに保存済みの `candidates`/`selectedIndex` スナップショットのみを信頼し、index の範囲外・candidates 無しの両ケースで graceful fallback（`buildCandidateSelectionExpiredMessage`）とすること（confirmStore は絶対に呼ばない）。`place_already_registered` は stage・candidates を変更しない（Req 4.4 はステージ変更を要求しない）。レビューで軽微な指摘: `await_confirmation`→新店名テキストの empty/error 分岐では `candidates`/`selected_index` が stale のまま残る（found・restart は明示クリアするのに非対称）。クラッシュや誤店舗確定リスクはないが、次回このパスに触れる際は一貫性のため一緒にクリアするとよい。
 - 3.4: `buildStageGuidanceMessage(session)` を共有ヘルパーとして抽出し、follow の既存owner再訪（Req1.2/5.2）・`resume` postback（Req6.2）・段階外入力フォールバック（Req5.3）の3箇所で同一関数を再利用する（フォールバックは各段階の入場案内と文言を完全一致させること＝Req5.3の「現在の段階で必要な操作の案内を再送する」の字義）。`linkRichMenu` は `handleConfirm` の `confirmed` 分岐1箇所のみで呼び、失敗しても reply 自体は既に送信済みのため handleEvent 全体をクラッシュさせない（try/catchで握り潰し。ロガー未注入のため現状ログ出力なし＝4.x でロガー導入時に対応）。本タスクはRED-first手続きを厳密に踏まなかったため、レビュー側で3箇所のミューテーションテスト（completed早期ガード×2・linkRichMenu呼び出し）を実施しテストの実効性を機械的に確認した。今後もRED未実施タスクのレビューでは同様の変異テストを行うこと。
+- 4.1: `POST /webhook` のエラー境界で「現在処理中の replyToken」を追跡する可変状態（`inFlightReplyToken`）と `EventDispatcher` インスタンスは、**必ずリクエストハンドラ本体の内側**で生成すること（`createApp()` スコープ＝アプリインスタンス生存期間で共有すると、Cloud Run の同時実行下で並行リクエストが同一変数を破壊し合い、遅い失敗リクエストの reply が握り潰される重大バグになる。レビューで実際に revert→再現→復元まで検証済み）。内部例外時のHTTPステータスは200固定（design.mdのError Handlingが明記・5xxはrecordWebhookEventOnceが既に記録済みのため再配信しても回復効果がなく無意味）。structured logには `x-line-request-id` ヘッダを必ず併記すること（design.md Monitoring節の明示要求）。
