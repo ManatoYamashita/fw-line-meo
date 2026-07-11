@@ -25,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -56,11 +58,11 @@ jobs:
       SESSION_SIGNING_KEY: e2e-ci-signing-key
       GEMINI_API_KEY: e2e-ci-dummy-key
       E2E_STORE_ID: '44444444-4444-4444-4444-444444444444'
-      # next プロセスに MSW Gemini モックを読み込ませる（本番コードは非変更）。
-      NODE_OPTIONS: --import ./e2e/mock-gemini.mjs
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -75,6 +77,10 @@ jobs:
       - name: install Playwright browsers
         run: pnpm -C ts --filter @fwlm/survey-web exec playwright install --with-deps chromium
       - name: E2E（QR→回答→下書き→コピー→writereview）
+        # MSW Gemini モックは next サーバープロセスにのみ読み込ませる（絶対パス指定）。
+        # job 全体 env に置くと checkout 等の node アクションまで巻き込み ERR_MODULE_NOT_FOUND になる。
+        env:
+          NODE_OPTIONS: --import ${{ github.workspace }}/ts/apps/survey-web/e2e/mock-gemini.mjs
         run: pnpm -C ts --filter @fwlm/survey-web exec playwright test
       - uses: actions/upload-artifact@v4
         if: always()
@@ -97,10 +103,11 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
       SESSION_SIGNING_KEY: lhci-signing-key
       GEMINI_API_KEY: lhci-dummy-key
-      NODE_OPTIONS: --import ./e2e/mock-gemini.mjs
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -114,4 +121,7 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/seed.sql
       - name: Lighthouse（mobile・LCP 3 秒・Req 2.8）
         working-directory: ts/apps/survey-web
+        # MSW Gemini モックは startServerCommand の next プロセスに継承させる（絶対パス指定）。
+        env:
+          NODE_OPTIONS: --import ${{ github.workspace }}/ts/apps/survey-web/e2e/mock-gemini.mjs
         run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
