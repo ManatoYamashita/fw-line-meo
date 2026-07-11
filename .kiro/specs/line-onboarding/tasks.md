@@ -66,7 +66,7 @@
   - _Boundary: StoreIdentificationService_
   - _Depends: 1.2, 2.3_
 
-- [ ] 3.2 招待コード段階の会話ロジック
+- [x] 3.2 招待コード段階の会話ロジック
   - `onboarding/conversation.ts`（一部）: follow 処理（挨拶＋案内、既存 owner は重複作成なしで進捗案内）、招待コード検証→owner 作成＋セッション遷移（同一トランザクション）、無効コード連続 5 回で 10 分ロック
   - 完了状態: モック deps で無効コード 5 回目のロック案内、有効コードでの owner 作成＋stage 遷移がテストで確認できる
   - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5_
@@ -143,3 +143,4 @@
 - 2.2: postback 符号化スキームは `a=select&i=<index>`（+ `a=confirm`/`a=restart`/`a=resume`）を採用（research.md Decision 5 準拠）。design.md 本文中の例示（`a=sel&i=<0-9>`）と表記が異なる箇所があるが、research.md を正としたドキュメント間の軽微な不整合であり実装への影響なし。2.5（メッセージビルダー）・4.3（リッチメニュー resume postback）は `a=select`/`a=confirm`/`a=restart`/`a=resume` の実表記に合わせること。
 - 2.4: レビュー1周目で「事前発行済み長期トークン Secret（`line-channel-access-token`）」というシークレット名をコードコメントに literal 記載していた点が secrets-hygiene 観点で REJECTED（値の漏洩ではなく命名の言及のみだが、grep ゲートはゼロ許容）。以後、未使用の既存 Secret Manager シークレット名をコードコメントに書く際は resource 名を直接書かず「事前発行された長期トークン（Secret Manager 管理）」等の言い換えに留めること。またトークン有効期限のマージン境界テストは「マージン超過直前 vs マージン超過直後・raw expiry 未到達」の2点を跨いで初めてマージン独自ロジックを証明できる（片側の閾値だけを大きく超えるテストは raw expiry 到達と区別できない）。
 - 3.1: `line-webhook` は `pg` を直接依存に持たない（`@fwlm/db` 経由のみ）ため、`Queryable` を拡張した自前の `TransactionClient`/`ConnectablePool` インターフェースで構造的型合わせを行いトランザクションを張る（`pg.Pool`/`PoolClient` を直接 import しない）。`ux_stores_place_id` は `0001_four_tier_baseline.sql` で部分 UNIQUE INDEX として定義されており、node-postgres の `err.constraint` にはインデックス名がそのまま入る（`ALTER TABLE ADD CONSTRAINT` でなくても同様）。単一トランザクション内の2書込みで「どちらが失敗しても同一 catch→ROLLBACK を通る」ことがコード構造で確認できれば、両失敗パターンを個別にテスト強制する必要は必ずしもない（`tallies.ts` の先例と同判断）。`make ts-test-db` は全パッケージ共有DBで実行されるため、新規 `.db.test.ts` の UUID フィクスチャは既存 prefix と衝突しないことを grep で確認すること（本タスクは `e7` を使用）。
+- 3.2: design.md の `ConversationDeps` 簡略スケッチ（`updateSession(lineUserId, patch)` 等、db 引数なし）は実アクセサ（タスク1.2、全て明示的 `Queryable` 第一引数）と食い違う。実装では `ConversationDeps` に `db: Queryable`（日常読み書き）＋`pool: ConnectablePool`（3.1 と同一パターンでトランザクションを張る用）の両方を持たせて解決した。`createOwner`＋`updateSession(stage→await_store_name, ownerId)` は同一 `pool.connect()` client を使い1回の `updateSession` 呼び出しに stage と ownerId を同時に渡すこと（`ck_session_owner_stage` CHECK を単一 UPDATE で満たすため。2回に分けると中間状態で違反する）。ロック判定・設定は必ず `deps.now()` を経由し `new Date()` を直書きしないこと（テスト可能性・10分境界の正確性のため）。

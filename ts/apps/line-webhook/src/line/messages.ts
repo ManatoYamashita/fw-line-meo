@@ -132,6 +132,44 @@ export function buildInvalidInviteCodeMessage(): LineMessage {
 }
 
 /**
+ * Requirement 2.3: 連続 5 回の無効コード送信によるロック中（またはロック発生時）の案内。
+ * ロック中の以後の入力にもこの案内のみを返し、コード再検証や失敗カウント加算は行わない
+ * （判定自体は ConversationHandlers・タスク 3.2 の責務）。
+ */
+export function buildInviteCodeLockedMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      '招待コードの入力に複数回失敗したため、しばらくの間コードの入力を停止しています。\n' +
+      '10分ほど時間をおいてから、もう一度お試しください。',
+  };
+}
+
+/** Requirement 2.1: 有効な招待コード確認後、店名の入力を案内する。 */
+export function buildStoreNameInputGuidanceMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      '招待コードを確認しました。\n' +
+      '続いて、お店の名前をこのトークに送信してください。候補からお店を選んでいただきます。',
+  };
+}
+
+/**
+ * Requirement 1.2: 登録済みオーナーの再友だち追加時、進捗に応じた次の手順を案内する。
+ * 段階別の精密な再開文言はタスク 3.3/3.4 が担うため、本メッセージは
+ * 「登録済み・続きから再開できる」ことのみを伝える汎用の最小案内とする。
+ */
+export function buildResumeGuidanceMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      'すでにご登録いただいています。\n' +
+      '前回の続きから手続きを再開できますので、案内に従って操作してください。',
+  };
+}
+
+/**
  * Requirement 3.1: 店舗候補一覧（最大 10 件・店名＋住所）を選択可能な Flex カルーセルで提示する。
  * 入力は 1〜10 件を前提とする契約（PlacesSearchAdapter が pageSize:10 で保証）。
  * 0 件・11 件以上は呼び出し側の契約違反として例外を投げる（design.md「候補一覧（最大10件）」）。
