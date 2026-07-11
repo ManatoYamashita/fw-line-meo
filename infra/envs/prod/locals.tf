@@ -7,7 +7,7 @@
 # database モジュールが consumer の SA リソースを参照する循環を避けられる。
 locals {
   service_accounts = {
-    webhook       = "sa-webhook"
+    line_webhook  = "sa-line-webhook"
     survey_web    = "sa-survey-web"
     dashboard_api = "sa-dashboard-api"
     daily_batch   = "sa-daily-batch"

@@ -109,7 +109,7 @@
   - _Boundary: RichMenuSetupScript_
   - _Depends: 2.4_
 
-- [ ] 4.4 (P) インフラ追記（Cloud Run line-webhook サービス）
+- [x] 4.4 (P) インフラ追記（Cloud Run line-webhook サービス）
   - `infra/envs/prod` のサービス定義に `line-webhook` を追加（secret_env: `LINE_CHANNEL_SECRET`/`PLACES_API_KEY`、env: `LINE_CHANNEL_ID`/`LINE_RICHMENU_COMPLETED_ID`、needs_cloudsql）
   - 完了状態: `terraform -chdir=infra/envs/prod validate` が成功
   - _Requirements: 7.1_
@@ -149,3 +149,4 @@
 - 4.1: `POST /webhook` のエラー境界で「現在処理中の replyToken」を追跡する可変状態（`inFlightReplyToken`）と `EventDispatcher` インスタンスは、**必ずリクエストハンドラ本体の内側**で生成すること（`createApp()` スコープ＝アプリインスタンス生存期間で共有すると、Cloud Run の同時実行下で並行リクエストが同一変数を破壊し合い、遅い失敗リクエストの reply が握り潰される重大バグになる。レビューで実際に revert→再現→復元まで検証済み）。内部例外時のHTTPステータスは200固定（design.mdのError Handlingが明記・5xxはrecordWebhookEventOnceが既に記録済みのため再配信しても回復効果がなく無意味）。structured logには `x-line-request-id` ヘッダを必ず併記すること（design.md Monitoring節の明示要求）。
 - 4.2: `pool`（`pg.Pool`）は `Queryable`／`ConnectablePool` の両方に構造的に適合するため、`index.ts` では同一値を `db`/`pool` 両フィールドへそのまま渡せる（アダプタ不要）。アプリレベルフローテストは `index.ts` を経由せず `createApp(deps)` に直接同型の deps（フェイクmessenger/places＋実DBプール）を組み立てる方式を踏襲する（design.md「App-level Flow Tests」の想定と整合）。重複排除テストは「同一 webhookEventId を2回送る」ことを厳密に用いること — dedup が壊れていても他の制約（UNIQUE等）やステージ遷移後の別分岐で偶然テストが通ってしまわないか反証確認すること（5.1/5.2でも同深度のチェックを踏襲）。DBフィクスチャの UUID prefix は `e1`〜`e9`+`f0` まで使用済み（次は `f1` 以降を使うこと）。
 - 4.3: `scripts/` は `src` と別 rootDir のため専用 `tsconfig.scripts.json`（emit可）が必要。ワークスペース共通の `build`/`typecheck` スクリプトから確実に呼ばれるよう `tsc -p tsconfig.json && tsc -p tsconfig.scripts.json` の形で必ずチェーンすること（分離したままだと `pnpm -r run build/typecheck` の定期実行網から漏れ、将来 `stages.ts` の型変更が検知されない静かな回帰リスクになる。本タスクでレビュー指摘を受けて是正済み）。画像アップロードは `api-data.line.me`（`api.line.me` ではない）・デフォルト設定は必ずオンボーディング用menuId（完了用ではない）を対象にすること。PNGはNode組込み`zlib`＋自前CRC-32実装で外部ライブラリなしに生成可能（800×540で比率1.481を満たし軽量）。
+- 4.4: `gcp-infra-foundation`（既存マージ済みspec）が先行して用意していた Cloud Run サービスキー `"webhook"`（`secret_env` に未使用の `LINE_CHANNEL_ACCESS_TOKEN` を含む）は、design.md が明示的に `line-webhook` という名前を指定しているため `"line-webhook"` へリネームし、`locals.tf`（`service_accounts` map）・`infra/sql/grants.sql`（`sa-webhook`→`sa-line-webhook`、psql変数名も含め）へ一貫して伝播させた（`terraform validate` は HCL 内部整合のみでSQLファイルの整合は検知しないため、リネーム時は grep で全体を確認すること）。`line-channel-access-token` シークレット資源自体は削除せず、このサービスの env 配線からのみ外した（Console運用・将来用に温存）。`places-api-key`/`line-channel-secret` は `infra/modules/secrets` に既存のため新規シークレット追加は不要。
