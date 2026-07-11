@@ -53,6 +53,7 @@ module "run_services" {
   region             = var.region
   db_instance_name   = module.database.instance_name
   db_connection_name = module.database.connection_name
+  db_name            = module.database.database_name
 
   # secret id は各サービスの secret_env が保持（別途 secret_ids 変数は持たない）
   services = {
@@ -68,13 +69,20 @@ module "run_services" {
       public         = true
       needs_cloudsql = true
       secret_env = {
-        GEMINI_API_KEY = module.secrets.secret_ids["gemini-api-key"]
+        GEMINI_API_KEY      = module.secrets.secret_ids["gemini-api-key"]
+        SESSION_SIGNING_KEY = module.secrets.secret_ids["survey-session-key"]
+      }
+      env = {
+        GEMINI_MODEL = var.gemini_model
       }
     }
     "dashboard-api" = {
       public         = true
       needs_cloudsql = true
       secret_env     = {}
+      env = {
+        SURVEY_BASE_URL = var.survey_base_url
+      }
     }
   }
 

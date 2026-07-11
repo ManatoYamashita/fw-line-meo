@@ -11,6 +11,7 @@ locals {
     "gemini-api-key",            # 口コミ下書き生成
     "places-api-key",            # 競合データ取得
     "db-admin-password",         # postgres 管理ユーザー（ランタイム SA には非付与）
+    "survey-session-key",        # 機能3 再生成上限の HMAC 署名鍵（review-acquisition・値は out-of-band 投入）
   ]
 }
 

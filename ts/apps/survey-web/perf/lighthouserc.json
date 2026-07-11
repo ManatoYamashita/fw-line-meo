@@ -1,0 +1,21 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "pnpm --filter @fwlm/survey-web start",
+      "startServerReadyPattern": "Ready",
+      "url": ["http://127.0.0.1:3000/s/44444444-4444-4444-4444-444444444444"],
+      "numberOfRuns": 3,
+      "settings": {
+        "formFactor": "mobile",
+        "throttlingMethod": "simulate",
+        "onlyCategories": ["performance"]
+      }
+    },
+    "assert": {
+      "assertions": {
+        "largest-contentful-paint": ["error", { "maxNumericValue": 3000 }],
+        "first-contentful-paint": ["warn", { "maxNumericValue": 2000 }]
+      }
+    }
+  }
+}

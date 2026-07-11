@@ -11,10 +11,10 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf help
 
 help: ## 利用可能なターゲットを表示
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
 
 db-migrate: ## BUILD: 一時postgresへ migrations をクリーン適用
 	$(RUN)
@@ -44,3 +44,27 @@ tf-plan: ## TF: 差分計画を表示（要 terraform.tfvars）
 
 tf-apply: ## TF: 適用（billing IAM 保持者が runbook 手順で実行）
 	terraform -chdir=$(TF_DIR) apply
+
+# TypeScript モノレポ（ts/ pnpm workspace・review-acquisition ほかリアルタイム応答層）
+TS_DIR ?= ts
+
+ts-install: ## TS: pnpm workspace の依存を導入
+	pnpm -C $(TS_DIR) install
+
+ts-build: ## TS: 全ワークスペースパッケージを tsc ビルド
+	pnpm -C $(TS_DIR) run build
+
+ts-lint: ## TS: 全ワークスペースパッケージを ESLint 検査
+	pnpm -C $(TS_DIR) run lint
+
+ts-test: ## TS: 全ワークスペースパッケージのテスト（DB 不要・DB 依存は自動 skip）
+	pnpm -C $(TS_DIR) run test
+
+ts-test-db: ## TS: native postgres を起動し DB 依存テストを実行（docker/container 不要）
+	$(TS_DIR)/scripts/with-test-db.sh pnpm -C $(TS_DIR) run test
+
+ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。実行は CI 前提（要ブラウザ・起動アプリ・Gemini モック）
+	pnpm -C $(TS_DIR) --filter @fwlm/survey-web exec playwright test
+
+ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は CI）
+	pnpm -C $(TS_DIR) --filter @fwlm/survey-web run perf:budget
