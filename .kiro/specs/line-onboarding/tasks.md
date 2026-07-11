@@ -32,7 +32,7 @@
   - _Requirements: 1.1, 5.4_
   - _Boundary: EventDispatcher_
 
-- [ ] 2.2 (P) オンボーディング状態機械の型と postback 符号化
+- [x] 2.2 (P) オンボーディング状態機械の型と postback 符号化
   - `onboarding/stages.ts`: `OnboardingStage` 型、`PostbackAction` 判別 union、`encodePostback`/`decodePostback`（300 字以内保証）
   - 完了状態: 全遷移の符号化/復号往復テストと、不正 data で null が返るテストが緑
   - _Requirements: 1.3, 4.5, 4.6_
@@ -140,3 +140,4 @@
 <!-- 実装中に得られた横断的な知見をここに追記する -->
 - 1.1: サンドボックスに docker/apple-container が存在しないため `make db-migrate`/`db-test`/`db-verify-docs` は直接実行不可。native Homebrew postgres（`initdb`＋カスタムソケットdir）で `db/migrations/*.sql`→`db/test/assertions/*.sql`→`db/test/check_docs.sh`（`MANAGE_CONTAINER=0 PSQL_EXEC=psql`）を代替実行し GREEN 確認済み（実装者・レビュアー双方が独立再現）。以降の DB 系タスク（1.2・5.1・5.2）も同じ代替手順を踏襲する。
 - 1.2: 本 feature の実装は専用 worktree `/Users/manatoy_mba/Desktop/dev/fw-line-meo-line-onboarding`（ブランチ `feat/line-onboarding`）で行う（root worktree は `main` を維持）。`ts/scripts/with-test-db.sh` は docker/container 不要で native postgres を自前起動するため `ts-test-db` はそのまま利用可能。webhook イベント重複排除は `INSERT ... ON CONFLICT DO NOTHING` + rowCount 判定でアトミックに実装（read-then-write は不可）。confirmStore 系のトランザクション所有は 3.1（StoreIdentificationService）に意図的に委譲。
+- 2.2: postback 符号化スキームは `a=select&i=<index>`（+ `a=confirm`/`a=restart`/`a=resume`）を採用（research.md Decision 5 準拠）。design.md 本文中の例示（`a=sel&i=<0-9>`）と表記が異なる箇所があるが、research.md を正としたドキュメント間の軽微な不整合であり実装への影響なし。2.5（メッセージビルダー）・4.3（リッチメニュー resume postback）は `a=select`/`a=confirm`/`a=restart`/`a=resume` の実表記に合わせること。
