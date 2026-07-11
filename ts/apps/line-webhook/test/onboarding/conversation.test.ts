@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch } from '@fwlm/db';
+import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
 import {
   createConversationHandlers,
   type ConversationDeps,
@@ -10,11 +10,18 @@ import {
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessenger, LineMessage } from '../../src/line/client.js';
 import type { ConnectablePool, TransactionClient } from '../../src/onboarding/store-identification.js';
+import type {
+  ConfirmOutcome,
+  StoreIdentificationService,
+} from '../../src/onboarding/store-identification.js';
+import type { SearchOutcome } from '../../src/places/search.js';
+import { encodePostback } from '../../src/onboarding/stages.js';
 
-// タスク 3.2「招待コード段階の会話ロジック」のモック deps テスト。
-// Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5
+// タスク 3.2「招待コード段階の会話ロジック」／タスク 3.3「店名検索〜確定段階の会話ロジック」の
+// モック deps テスト。
+// Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5（3.2）／3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.4, 4.5（3.3）
 // Design: 「ConversationHandlers」「データ層 Implementation Notes」（createOwner と
-//   updateSession(stage→await_store_name) は同一 TX）。
+//   updateSession(stage→await_store_name) は同一 TX）。「StoreIdentificationService（拡張縫）」。
 
 const FIXED_NOW = new Date('2026-07-11T00:00:00.000Z');
 const AGENCY_ID = 'agency-1';
@@ -32,6 +39,24 @@ function baseSession(overrides: Partial<OnboardingSessionRow> = {}): OnboardingS
     updated_at: FIXED_NOW,
     ...overrides,
   };
+}
+
+function storeCandidate(overrides: Partial<StoreCandidate> = {}): StoreCandidate {
+  return {
+    placeId: 'ChIJ-place-1',
+    name: 'テスト食堂',
+    address: '東京都渋谷区1-1-1',
+    latitude: 35.1,
+    longitude: 139.1,
+    types: ['restaurant', 'food'],
+    ...overrides,
+  };
+}
+
+function storeCandidates(count: number): StoreCandidate[] {
+  return Array.from({ length: count }, (_, i) =>
+    storeCandidate({ placeId: `ChIJ-place-${i}`, name: `テスト食堂${i}` }),
+  );
 }
 
 function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
@@ -104,6 +129,33 @@ function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: st
   return { accessor, findCalls };
 }
 
+// タスク 3.1 で構築済みの StoreIdentificationService のフェイク実装。
+// searchCandidates/confirmStore の戻り値をテストごとに差し替えられるようにし、
+// confirmStore に渡された引数（ownerId・candidate）を記録して「セッションに保存された
+// 実際に提示済みの候補」がそのまま渡されたことを検証できるようにする。
+function createFakeIdentificationService(config: {
+  searchOutcome?: SearchOutcome;
+  confirmOutcome?: ConfirmOutcome;
+}): {
+  service: StoreIdentificationService;
+  searchCalls: string[];
+  confirmCalls: { ownerId: string; candidate: StoreCandidate }[];
+} {
+  const searchCalls: string[] = [];
+  const confirmCalls: { ownerId: string; candidate: StoreCandidate }[] = [];
+  const service: StoreIdentificationService = {
+    async searchCandidates(storeName: string) {
+      searchCalls.push(storeName);
+      return config.searchOutcome ?? { kind: 'empty' };
+    },
+    async confirmStore(ownerId: string, candidate: StoreCandidate) {
+      confirmCalls.push({ ownerId, candidate });
+      return config.confirmOutcome ?? { kind: 'confirmed', storeId: 'store-1' };
+    },
+  };
+  return { service, searchCalls, confirmCalls };
+}
+
 function createFakeMessenger(): LineMessenger & { replies: { replyToken: string; messages: readonly LineMessage[] }[] } {
   const replies: { replyToken: string; messages: readonly LineMessage[] }[] = [];
   return {
@@ -156,17 +208,24 @@ function buildDeps(overrides: {
   existingOwner?: OwnerRow | null;
   validCodes?: Record<string, { agencyId: string }>;
   now?: Date;
+  searchOutcome?: SearchOutcome;
+  confirmOutcome?: ConfirmOutcome;
 }): {
   deps: ConversationDeps;
   sessionsFake: ReturnType<typeof createFakeSessionsAccessor>;
   ownersFake: ReturnType<typeof createFakeOwnersAccessor>;
   inviteCodesFake: ReturnType<typeof createFakeInviteCodesAccessor>;
+  identificationFake: ReturnType<typeof createFakeIdentificationService>;
   messenger: ReturnType<typeof createFakeMessenger>;
   poolFake: ReturnType<typeof createFakePool>;
 } {
   const sessionsFake = createFakeSessionsAccessor(overrides.session);
   const ownersFake = createFakeOwnersAccessor(overrides.existingOwner ?? null);
   const inviteCodesFake = createFakeInviteCodesAccessor(overrides.validCodes ?? {});
+  const identificationFake = createFakeIdentificationService({
+    searchOutcome: overrides.searchOutcome,
+    confirmOutcome: overrides.confirmOutcome,
+  });
   const messenger = createFakeMessenger();
   const poolFake = createFakePool();
   const db: Queryable = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) } as unknown as Queryable;
@@ -177,11 +236,12 @@ function buildDeps(overrides: {
     sessions: sessionsFake.accessor,
     owners: ownersFake.accessor,
     inviteCodes: inviteCodesFake.accessor,
+    identification: identificationFake.service,
     messenger,
     now: () => overrides.now ?? FIXED_NOW,
   };
 
-  return { deps, sessionsFake, ownersFake, inviteCodesFake, messenger, poolFake };
+  return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake };
 }
 
 describe('createConversationHandlers', () => {
@@ -355,6 +415,327 @@ describe('createConversationHandlers', () => {
       expect(sessionsFake.updateCalls).toHaveLength(0);
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { text: string }).text).toContain('停止');
+    });
+  });
+
+  describe('店名検索段階（await_store_name）のテキスト入力', () => {
+    it('検索で候補が見つかる → セッションに候補を保存し stage は await_store_name のまま・カルーセル reply（Req 3.1）', async () => {
+      const candidates = storeCandidates(3);
+      const session = baseSession({ stage: 'await_store_name', owner_id: 'owner-1' });
+      const { deps, sessionsFake, identificationFake, messenger } = buildDeps({
+        session,
+        searchOutcome: { kind: 'found', candidates },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-8',
+        text: 'テスト食堂',
+      });
+
+      expect(identificationFake.searchCalls).toEqual(['テスト食堂']);
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.stage).toBe('await_store_name');
+      expect(patch.candidates).toEqual(candidates);
+      expect(patch.selectedIndex).toBeNull();
+
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message?.type).toBe('flex');
+    });
+
+    it('検索結果 0 件 → 見つからなかった旨の案内、stage は変更しない（Req 3.2）', async () => {
+      const session = baseSession({ stage: 'await_store_name', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session,
+        searchOutcome: { kind: 'empty' },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-9',
+        text: '存在しないお店',
+      });
+
+      // すでに await_store_name のため updateSession は一切呼ばれない（stage 不変を構造的に証明）。
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('見つかりませんでした');
+    });
+
+    it('検索が外部要因で失敗 → エラー案内、進捗（セッション）は一切変更しない（Req 3.3）', async () => {
+      const session = baseSession({
+        stage: 'await_store_name',
+        owner_id: 'owner-1',
+        candidates: storeCandidates(2),
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session,
+        searchOutcome: { kind: 'error' },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-10',
+        text: 'テスト食堂',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('エラー');
+    });
+
+    it('別の店名テキストが届いたら再検索し候補を提示し直す（Req 3.4）', async () => {
+      const firstCandidates = storeCandidates(2);
+      const secondCandidates = storeCandidates(4);
+      const session = baseSession({
+        stage: 'await_store_name',
+        owner_id: 'owner-1',
+        candidates: firstCandidates,
+      });
+      const { deps, identificationFake, sessionsFake, messenger } = buildDeps({
+        session,
+        searchOutcome: { kind: 'found', candidates: secondCandidates },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-11',
+        text: '別のお店',
+      });
+
+      expect(identificationFake.searchCalls).toEqual(['別のお店']);
+      expect(sessionsFake.updateCalls[0]?.patch.candidates).toEqual(secondCandidates);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message?.type).toBe('flex');
+    });
+  });
+
+  describe('確認待ち段階（await_confirmation）中の新しい店名テキスト（Req 3.4）', () => {
+    it('await_confirmation 中に別の店名テキストが届くと再検索し await_store_name へ戻す', async () => {
+      const previousCandidates = storeCandidates(2);
+      const newCandidates = storeCandidates(3);
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates: previousCandidates,
+        selected_index: 0,
+      });
+      const { deps, sessionsFake, identificationFake } = buildDeps({
+        session,
+        searchOutcome: { kind: 'found', candidates: newCandidates },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-12',
+        text: 'やっぱり別のお店',
+      });
+
+      expect(identificationFake.searchCalls).toEqual(['やっぱり別のお店']);
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.stage).toBe('await_store_name');
+      expect(patch.candidates).toEqual(newCandidates);
+      expect(patch.selectedIndex).toBeNull();
+    });
+
+    it('await_confirmation 中に検索が 0 件でも stage を await_store_name へ戻す（取りやめと同等の離脱）', async () => {
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates: storeCandidates(2),
+        selected_index: 0,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session,
+        searchOutcome: { kind: 'empty' },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-13',
+        text: '存在しないお店',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('await_store_name');
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('見つかりませんでした');
+    });
+  });
+
+  describe('候補選択の postback（select_candidate・Req 4.1, 3.4）', () => {
+    it('有効な index → セッションの候補と照合し、確認メッセージ reply・stage は await_confirmation へ（Req 4.1）', async () => {
+      const candidates = storeCandidates(3);
+      const session = baseSession({
+        stage: 'await_store_name',
+        owner_id: 'owner-1',
+        candidates,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-14',
+        data: encodePostback({ kind: 'select_candidate', index: 1 }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.stage).toBe('await_confirmation');
+      expect(patch.selectedIndex).toBe(1);
+
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message?.type).toBe('flex');
+      expect((message as { altText: string }).altText).toContain(candidates[1]!.name);
+    });
+
+    it('範囲外の index（古いカルーセルからの選択）→ クラッシュせず安全側フォールバック案内、stage は変更しない', async () => {
+      const candidates = storeCandidates(2);
+      const session = baseSession({
+        stage: 'await_store_name',
+        owner_id: 'owner-1',
+        candidates,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-15',
+        data: encodePostback({ kind: 'select_candidate', index: 5 }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('選択できませんでした');
+    });
+
+    it('候補が一件もセッションに保存されていない状態での選択 → クラッシュせず安全側フォールバック案内', async () => {
+      const session = baseSession({
+        stage: 'await_store_name',
+        owner_id: 'owner-1',
+        candidates: null,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-16',
+        data: encodePostback({ kind: 'select_candidate', index: 0 }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('選択できませんでした');
+    });
+  });
+
+  describe('確定・取りやめの postback（confirm/restart・Req 4.2, 4.4, 4.5）', () => {
+    it('確定 → confirmStore が session 由来の ownerId・candidate で呼ばれ、完了 reply・stage は completed（Req 4.2）', async () => {
+      const candidates = storeCandidates(3);
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates,
+        selected_index: 2,
+      });
+      const { deps, sessionsFake, identificationFake, messenger } = buildDeps({
+        session,
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-17',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(identificationFake.confirmCalls).toHaveLength(1);
+      expect(identificationFake.confirmCalls[0]).toEqual({
+        ownerId: 'owner-1',
+        candidate: candidates[2],
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('completed');
+
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('完了');
+    });
+
+    it('確定 → place_already_registered → 運営問い合わせ案内、stage は変更せず、linkRichMenu は呼ばれない（Req 4.4）', async () => {
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates: storeCandidates(1),
+        selected_index: 0,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session,
+        confirmOutcome: { kind: 'place_already_registered' },
+      });
+      const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-18',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      expect(linkRichMenuSpy).not.toHaveBeenCalled();
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('運営');
+    });
+
+    it('取りやめ（restart）→ await_store_name へ戻り、候補・選択インデックスはクリアされる（Req 4.5）', async () => {
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates: storeCandidates(2),
+        selected_index: 0,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-19',
+        data: encodePostback({ kind: 'restart' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.stage).toBe('await_store_name');
+      expect(patch.candidates).toBeNull();
+      expect(patch.selectedIndex).toBeNull();
+
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('お店の名前');
     });
   });
 });

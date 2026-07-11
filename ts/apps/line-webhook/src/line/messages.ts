@@ -249,3 +249,50 @@ export function buildCompletionMessage(): LineMessage {
       'これで機能1（競合店舗の日次サマリー）がご利用いただけます。トークやメニューからご確認ください。',
   };
 }
+
+/** Requirement 3.2: 店舗候補が 0 件だったときの、表記を変えた再入力案内。 */
+export function buildStoreNotFoundMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      '該当する店舗が見つかりませんでした。\n' +
+      '正式名称やカタカナ表記など、表記を変えてもう一度お店の名前を送信してください。',
+  };
+}
+
+/** Requirement 3.3: 店舗候補の検索が外部要因で失敗したときのエラー案内。進捗は保持される。 */
+export function buildSearchFailedMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      '店舗の検索中にエラーが発生しました。\n' +
+      '時間をおいて、もう一度お店の名前を送信してください。',
+  };
+}
+
+/**
+ * Requirement 4.4: 選択された店舗がすでに他のオーナーの店舗として登録済みのため、
+ * 確定を行わなかった旨と運営への問い合わせ方法の案内。
+ */
+export function buildPlaceAlreadyRegisteredMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      'この店舗はすでに別のオーナー様の店舗として登録されているため、確定できませんでした。\n' +
+      '心当たりがない場合は、お手数ですが運営までお問い合わせください。',
+  };
+}
+
+/**
+ * 古いカルーセルからの選択・セッションに候補が保存されていない状態での選択など、
+ * セッション上の候補と一致しない select_candidate postback を受け取った際の安全側フォールバック案内
+ * （Requirement 3.4 隣接: クラッシュや誤選択を避け、店名からの再検索を促す）。
+ */
+export function buildCandidateSelectionExpiredMessage(): LineMessage {
+  return {
+    type: 'text',
+    text:
+      'この候補は選択できませんでした（表示から時間が経っている可能性があります）。\n' +
+      'お手数ですが、もう一度お店の名前を送信して検索し直してください。',
+  };
+}

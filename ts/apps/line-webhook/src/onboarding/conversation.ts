@@ -1,19 +1,31 @@
-import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch } from '@fwlm/db';
+import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
 import type { InboundEvent } from '../webhook/dispatch.js';
 import type { LineMessenger } from '../line/client.js';
-import type { ConnectablePool, TransactionClient } from './store-identification.js';
+import type {
+  ConnectablePool,
+  StoreIdentificationService,
+  TransactionClient,
+} from './store-identification.js';
+import { decodePostback } from './stages.js';
 import {
+  buildCandidateCarouselMessage,
+  buildCandidateSelectionExpiredMessage,
+  buildCompletionMessage,
+  buildConfirmationMessage,
   buildGreetingMessage,
   buildInvalidInviteCodeMessage,
   buildInviteCodeLockedMessage,
+  buildPlaceAlreadyRegisteredMessage,
   buildResumeGuidanceMessage,
+  buildSearchFailedMessage,
   buildStoreNameInputGuidanceMessage,
+  buildStoreNotFoundMessage,
 } from '../line/messages.js';
 
-// オンボーディング会話ロジック（design.md「ConversationHandlers」）の最初のスライス（タスク 3.2）。
-// 対象は follow 処理（Req 1.1, 1.2）と招待コード段階（Req 2.1-2.5）のみ。
-// await_store_name / await_confirmation / completed 段階の本実装はタスク 3.3・3.4 が担う。
-// このファイルは今後（3.3, 3.4）同一ファイルに追記されていく前提で構成する。
+// オンボーディング会話ロジック（design.md「ConversationHandlers」）。
+// タスク 3.2 は follow 処理（Req 1.1, 1.2）と招待コード段階（Req 2.1-2.5）を実装した。
+// 本タスク（3.3）は店名検索〜確定段階（Req 3.1-3.4, 4.1, 4.2, 4.4, 4.5）を追記する。
+// completed 段階の精密な fallback・リッチメニュー再開導線（Req 4.6, 5.3, 6.2）はタスク 3.4 が担う。
 //
 // ConversationDeps の設計上の適応（design.md の簡略化を実アクセサに合わせて調整）:
 // design.md の Service Interface スケッチは `updateSession(lineUserId, patch)` のように
@@ -51,6 +63,8 @@ export interface ConversationDeps {
   sessions: SessionsAccessor;
   owners: OwnersAccessor;
   inviteCodes: InviteCodesAccessor;
+  // 店名検索・店舗確定（タスク 3.1 で構築済み・会話非依存のサービス）。
+  identification: StoreIdentificationService;
   messenger: LineMessenger;
   // 現在時刻を注入する（ロック判定・ロック設定の両方でテスト可能性のため `new Date()` を直接使わない）。
   now(): Date;
@@ -73,9 +87,7 @@ export function createConversationHandlers(deps: ConversationDeps): Conversation
         case 'text':
           return handleText(deps, event);
         case 'postback':
-          // select_candidate/confirm/restart/resume の実処理はタスク 3.3・3.4 の対象範囲。
-          // このタスクでは無応答のまま放置しない正直な最小フォールバックのみ返す。
-          return handleUnhandledPostback(deps, event);
+          return handlePostback(deps, event);
       }
     },
   };
@@ -108,8 +120,17 @@ async function handleText(
 ): Promise<void> {
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
+  if (session.stage === 'await_store_name' || session.stage === 'await_confirmation') {
+    // Req 3.1: 店名入力待ちのテキストは検索を起動する。
+    // Req 3.4（design.md stateDiagram-v2「await_confirmation --> await_store_name : 取りやめ
+    // または 新店名テキスト」）: 確認待ち中に別の店名テキストが届いた場合も同じ再検索経路で
+    // 処理し、以前の選択（selected_index）は新しい検索結果に置き換えられて破棄される。
+    await handleStoreNameSearch(deps, event, session);
+    return;
+  }
+
   if (session.stage !== 'await_invite_code') {
-    // await_store_name / await_confirmation / completed 段階のテキスト処理はタスク 3.3・3.4 が実装する。
+    // completed 段階のテキストに対する精密な fallback（Req 5.3/4.6 の全般）はタスク 3.4 が実装する。
     // このタスクでは無応答のまま放置しない正直な最小フォールバックのみ返す。
     await deps.messenger.reply(event.replyToken, [buildResumeGuidanceMessage()]);
     return;
@@ -195,10 +216,166 @@ async function handleValidInviteCode(
   await deps.messenger.reply(event.replyToken, [buildStoreNameInputGuidanceMessage()]);
 }
 
+// --- 店名検索〜確定段階（タスク 3.3: Req 3.1-3.4, 4.1, 4.2, 4.4, 4.5） ---
+
+/**
+ * Req 3.1: 店名テキストから候補検索を起動する。
+ * Req 3.2: 0 件は再入力案内（stage は変更しない＝呼び出し元がすでに await_store_name なら不変）。
+ * Req 3.3: 外部要因の検索失敗はエラー案内（進捗を失わない＝同上）。
+ * Req 3.4: await_confirmation から届いた新しい店名テキストも本関数で処理し、以前の選択
+ * （selected_index・以前の candidates）は新しい検索結果で置き換えられる形で await_store_name へ戻す。
+ */
+async function handleStoreNameSearch(
+  deps: ConversationDeps,
+  event: Extract<InboundEvent, { kind: 'text' }>,
+  session: OnboardingSessionRow,
+): Promise<void> {
+  const outcome = await deps.identification.searchCandidates(event.text);
+
+  switch (outcome.kind) {
+    case 'found': {
+      // 提示した候補をそのままセッションへ保存する（postback 選択時に手元の候補と照合するため）。
+      // まだ候補が選択されたわけではないため stage は await_store_name のまま
+      // （design.md「候補提示（3.1）は await_store_name に留まり、postback 選択の受理で
+      // await_confirmation へ入る」）。
+      await deps.sessions.updateSession(deps.db, event.lineUserId, {
+        stage: 'await_store_name',
+        candidates: [...outcome.candidates],
+        selectedIndex: null,
+      });
+      await deps.messenger.reply(event.replyToken, [buildCandidateCarouselMessage(outcome.candidates)]);
+      return;
+    }
+    case 'empty': {
+      // Req 3.2: 進捗（候補等）は変更しない。await_confirmation から来た場合のみ
+      // await_store_name へ戻す（Req 3.4 の状態遷移。すでに await_store_name なら no-op）。
+      if (session.stage !== 'await_store_name') {
+        await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'await_store_name' });
+      }
+      await deps.messenger.reply(event.replyToken, [buildStoreNotFoundMessage()]);
+      return;
+    }
+    case 'error': {
+      // Req 3.3: 外部要因の失敗。進捗（候補等）は失わない。
+      if (session.stage !== 'await_store_name') {
+        await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'await_store_name' });
+      }
+      await deps.messenger.reply(event.replyToken, [buildSearchFailedMessage()]);
+      return;
+    }
+  }
+}
+
+async function handlePostback(
+  deps: ConversationDeps,
+  event: Extract<InboundEvent, { kind: 'postback' }>,
+): Promise<void> {
+  const action = decodePostback(event.data);
+  if (!action) {
+    // 不正・破損した postback data。5.3 と同様の安全側フォールバック。
+    return handleUnhandledPostback(deps, event);
+  }
+
+  const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
+
+  if (session.stage === 'await_store_name' && action.kind === 'select_candidate') {
+    return handleSelectCandidate(deps, event, session, action.index);
+  }
+  if (session.stage === 'await_confirmation' && action.kind === 'confirm') {
+    return handleConfirm(deps, event, session);
+  }
+  if (session.stage === 'await_confirmation' && action.kind === 'restart') {
+    return handleRestart(deps, event);
+  }
+
+  // stage と action の組み合わせがこのタスクの対象外（例: completed 中の操作・resume 導線・
+  // stage 不一致の select_candidate/confirm/restart）。completed 段階の精密な fallback・
+  // resume 導線の実処理はタスク 3.4 の対象範囲のため、このタスクでは無応答のまま放置しない
+  // 正直な最小フォールバックのみ返す。
+  return handleUnhandledPostback(deps, event);
+}
+
+/**
+ * Req 4.1: 候補選択の postback を受け取り、セッションに保存された候補配列と index を照合する。
+ * Req 3.4 隣接: 古いカルーセル（再検索前）からの選択や、候補未保存状態での選択など、
+ * 範囲外・不整合な index は例外を投げずに安全側フォールバック案内へ倒す
+ * （`noUncheckedIndexedAccess` により配列の範囲外アクセスは型上も `undefined` となる）。
+ */
+async function handleSelectCandidate(
+  deps: ConversationDeps,
+  event: Extract<InboundEvent, { kind: 'postback' }>,
+  session: OnboardingSessionRow,
+  index: number,
+): Promise<void> {
+  const candidate: StoreCandidate | undefined = session.candidates?.[index];
+
+  if (!candidate) {
+    await deps.messenger.reply(event.replyToken, [buildCandidateSelectionExpiredMessage()]);
+    return;
+  }
+
+  await deps.sessions.updateSession(deps.db, event.lineUserId, {
+    stage: 'await_confirmation',
+    selectedIndex: index,
+  });
+  await deps.messenger.reply(event.replyToken, [buildConfirmationMessage(candidate)]);
+}
+
+/**
+ * Req 4.2: 確定 postback。セッションに保存された「実際に提示された候補」（session.candidates と
+ * selected_index から導出）をそのまま StoreIdentificationService.confirmStore に渡す
+ * （再検索・再取得は行わない＝提示内容と確定内容の不一致を防ぐ）。
+ * Req 4.4: 既に他オーナーへ登録済みの Place は確定を行わず、運営への問い合わせ案内を返す。
+ * stage は据え置く（候補自体が確定不能と判明しただけで、要件は「確定を行わず案内する」のみを
+ * 求めており stage 変更を要求しないため。ユーザーはやり直す postback で再検索に戻れる）。
+ */
+async function handleConfirm(
+  deps: ConversationDeps,
+  event: Extract<InboundEvent, { kind: 'postback' }>,
+  session: OnboardingSessionRow,
+): Promise<void> {
+  const candidate: StoreCandidate | undefined =
+    session.selected_index !== null ? session.candidates?.[session.selected_index] : undefined;
+
+  if (!session.owner_id || !candidate) {
+    // 構造的には CHECK 制約（await_confirmation では owner_id 必須）と本会話フロー
+    // （選択済みでなければ await_confirmation に入らない）により起こり得ないが、
+    // セッション不整合時にクラッシュさせないための防御的フォールバック。
+    await deps.messenger.reply(event.replyToken, [buildCandidateSelectionExpiredMessage()]);
+    return;
+  }
+
+  const outcome = await deps.identification.confirmStore(session.owner_id, candidate);
+
+  if (outcome.kind === 'place_already_registered') {
+    await deps.messenger.reply(event.replyToken, [buildPlaceAlreadyRegisteredMessage()]);
+    return;
+  }
+
+  await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'completed' });
+  await deps.messenger.reply(event.replyToken, [buildCompletionMessage()]);
+  // リッチメニューの完了後メニューへの個別リンク（Req 6.3）はタスク 3.4 の対象範囲。
+  // ここでは linkRichMenu を呼び出さない。
+}
+
+/** Req 4.5: 確認段階での取りやめ。店名入力からやり直せる状態に戻す。 */
+async function handleRestart(
+  deps: ConversationDeps,
+  event: Extract<InboundEvent, { kind: 'postback' }>,
+): Promise<void> {
+  await deps.sessions.updateSession(deps.db, event.lineUserId, {
+    stage: 'await_store_name',
+    candidates: null,
+    selectedIndex: null,
+  });
+  await deps.messenger.reply(event.replyToken, [buildStoreNameInputGuidanceMessage()]);
+}
+
 async function handleUnhandledPostback(
   deps: ConversationDeps,
   event: Extract<InboundEvent, { kind: 'postback' }>,
 ): Promise<void> {
-  // select_candidate/confirm/restart/resume の実処理はタスク 3.3・3.4 の対象範囲。
+  // completed 段階中の操作・resume 導線（リッチメニュー再開）・stage 不一致の
+  // select_candidate/confirm/restart・不正 data の実処理はタスク 3.4 の対象範囲。
   await deps.messenger.reply(event.replyToken, [buildResumeGuidanceMessage()]);
 }
