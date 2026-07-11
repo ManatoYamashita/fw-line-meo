@@ -156,16 +156,17 @@ export function buildStoreNameInputGuidanceMessage(): LineMessage {
 }
 
 /**
- * Requirement 1.2: 登録済みオーナーの再友だち追加時、進捗に応じた次の手順を案内する。
- * 段階別の精密な再開文言はタスク 3.3/3.4 が担うため、本メッセージは
- * 「登録済み・続きから再開できる」ことのみを伝える汎用の最小案内とする。
+ * Requirement 4.6: 「店舗特定済み」到達後の入力に対する固定案内。
+ * Requirement 4.3 の完了直後メッセージ（buildCompletionMessage）とは異なる場面
+ * （「たった今完了した」ではなく「すでに完了済みであり追加操作は不要」）のための、
+ * 意図的に別立てのメッセージ。
  */
-export function buildResumeGuidanceMessage(): LineMessage {
+export function buildAlreadyCompletedMessage(): LineMessage {
   return {
     type: 'text',
     text:
-      'すでにご登録いただいています。\n' +
-      '前回の続きから手続きを再開できますので、案内に従って操作してください。',
+      'オンボーディングはすでに完了しています。\n' +
+      '機能1（競合店舗の日次サマリー）をご利用いただけます。追加の操作は必要ありません。',
   };
 }
 

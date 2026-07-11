@@ -80,7 +80,7 @@
   - _Boundary: ConversationHandlers_
   - _Depends: 3.1, 3.2_
 
-- [ ] 3.4 完了段階・フォールバック・リッチメニュー再開導線
+- [x] 3.4 完了段階・フォールバック・リッチメニュー再開導線
   - `onboarding/conversation.ts`（続き）: `completed` 段階の固定案内、各段階の期待外入力へのフォールバック文言、リッチメニューからの `resume` postback 処理、完了時の完了メッセージ＋リッチメニュー個別リンク呼び出し
   - 完了状態: `completed` 状態への入力が完了案内のみを返し、各段階の期待外入力にフォールバックが返ることがテストで確認できる
   - _Requirements: 4.3, 4.6, 5.2, 5.3, 6.2, 6.3_
@@ -145,3 +145,4 @@
 - 3.1: `line-webhook` は `pg` を直接依存に持たない（`@fwlm/db` 経由のみ）ため、`Queryable` を拡張した自前の `TransactionClient`/`ConnectablePool` インターフェースで構造的型合わせを行いトランザクションを張る（`pg.Pool`/`PoolClient` を直接 import しない）。`ux_stores_place_id` は `0001_four_tier_baseline.sql` で部分 UNIQUE INDEX として定義されており、node-postgres の `err.constraint` にはインデックス名がそのまま入る（`ALTER TABLE ADD CONSTRAINT` でなくても同様）。単一トランザクション内の2書込みで「どちらが失敗しても同一 catch→ROLLBACK を通る」ことがコード構造で確認できれば、両失敗パターンを個別にテスト強制する必要は必ずしもない（`tallies.ts` の先例と同判断）。`make ts-test-db` は全パッケージ共有DBで実行されるため、新規 `.db.test.ts` の UUID フィクスチャは既存 prefix と衝突しないことを grep で確認すること（本タスクは `e7` を使用）。
 - 3.2: design.md の `ConversationDeps` 簡略スケッチ（`updateSession(lineUserId, patch)` 等、db 引数なし）は実アクセサ（タスク1.2、全て明示的 `Queryable` 第一引数）と食い違う。実装では `ConversationDeps` に `db: Queryable`（日常読み書き）＋`pool: ConnectablePool`（3.1 と同一パターンでトランザクションを張る用）の両方を持たせて解決した。`createOwner`＋`updateSession(stage→await_store_name, ownerId)` は同一 `pool.connect()` client を使い1回の `updateSession` 呼び出しに stage と ownerId を同時に渡すこと（`ck_session_owner_stage` CHECK を単一 UPDATE で満たすため。2回に分けると中間状態で違反する）。ロック判定・設定は必ず `deps.now()` を経由し `new Date()` を直書きしないこと（テスト可能性・10分境界の正確性のため）。
 - 3.3: candidate 選択の postback はセッションに保存済みの `candidates`/`selectedIndex` スナップショットのみを信頼し、index の範囲外・candidates 無しの両ケースで graceful fallback（`buildCandidateSelectionExpiredMessage`）とすること（confirmStore は絶対に呼ばない）。`place_already_registered` は stage・candidates を変更しない（Req 4.4 はステージ変更を要求しない）。レビューで軽微な指摘: `await_confirmation`→新店名テキストの empty/error 分岐では `candidates`/`selected_index` が stale のまま残る（found・restart は明示クリアするのに非対称）。クラッシュや誤店舗確定リスクはないが、次回このパスに触れる際は一貫性のため一緒にクリアするとよい。
+- 3.4: `buildStageGuidanceMessage(session)` を共有ヘルパーとして抽出し、follow の既存owner再訪（Req1.2/5.2）・`resume` postback（Req6.2）・段階外入力フォールバック（Req5.3）の3箇所で同一関数を再利用する（フォールバックは各段階の入場案内と文言を完全一致させること＝Req5.3の「現在の段階で必要な操作の案内を再送する」の字義）。`linkRichMenu` は `handleConfirm` の `confirmed` 分岐1箇所のみで呼び、失敗しても reply 自体は既に送信済みのため handleEvent 全体をクラッシュさせない（try/catchで握り潰し。ロガー未注入のため現状ログ出力なし＝4.x でロガー導入時に対応）。本タスクはRED-first手続きを厳密に踏まなかったため、レビュー側で3箇所のミューテーションテスト（completed早期ガード×2・linkRichMenu呼び出し）を実施しテストの実効性を機械的に確認した。今後もRED未実施タスクのレビューでは同様の変異テストを行うこと。

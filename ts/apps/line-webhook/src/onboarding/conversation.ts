@@ -1,6 +1,6 @@
 import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
 import type { InboundEvent } from '../webhook/dispatch.js';
-import type { LineMessenger } from '../line/client.js';
+import type { LineMessage, LineMessenger } from '../line/client.js';
 import type {
   ConnectablePool,
   StoreIdentificationService,
@@ -8,6 +8,7 @@ import type {
 } from './store-identification.js';
 import { decodePostback } from './stages.js';
 import {
+  buildAlreadyCompletedMessage,
   buildCandidateCarouselMessage,
   buildCandidateSelectionExpiredMessage,
   buildCompletionMessage,
@@ -16,7 +17,6 @@ import {
   buildInvalidInviteCodeMessage,
   buildInviteCodeLockedMessage,
   buildPlaceAlreadyRegisteredMessage,
-  buildResumeGuidanceMessage,
   buildSearchFailedMessage,
   buildStoreNameInputGuidanceMessage,
   buildStoreNotFoundMessage,
@@ -24,8 +24,9 @@ import {
 
 // オンボーディング会話ロジック（design.md「ConversationHandlers」）。
 // タスク 3.2 は follow 処理（Req 1.1, 1.2）と招待コード段階（Req 2.1-2.5）を実装した。
-// 本タスク（3.3）は店名検索〜確定段階（Req 3.1-3.4, 4.1, 4.2, 4.4, 4.5）を追記する。
-// completed 段階の精密な fallback・リッチメニュー再開導線（Req 4.6, 5.3, 6.2）はタスク 3.4 が担う。
+// タスク 3.3 は店名検索〜確定段階（Req 3.1-3.4, 4.1, 4.2, 4.4, 4.5）を追記した。
+// 本タスク（3.4）は completed 段階の固定案内・段階別 fallback・resume postback・
+// 完了時のリッチメニュー個別リンク（Req 4.3, 4.6, 5.2, 5.3, 6.2, 6.3）を追記する。
 //
 // ConversationDeps の設計上の適応（design.md の簡略化を実アクセサに合わせて調整）:
 // design.md の Service Interface スケッチは `updateSession(lineUserId, patch)` のように
@@ -68,6 +69,9 @@ export interface ConversationDeps {
   messenger: LineMessenger;
   // 現在時刻を注入する（ロック判定・ロック設定の両方でテスト可能性のため `new Date()` を直接使わない）。
   now(): Date;
+  // Req 6.3: 店舗特定完了時に切り替える「完了後」リッチメニューの ID。
+  // タスク 4.2 が config.ts の LINE_RICHMENU_COMPLETED_ID（既にタスク 1.3 で検証済み）から配線する。
+  lineRichMenuCompletedId: string;
 }
 
 export interface ConversationHandlers {
@@ -108,10 +112,38 @@ async function handleFollow(
     return;
   }
 
-  // Req 1.2: 既存オーナーの再友だち追加（ブロック解除等）。重複作成せず進捗案内のみ返す。
-  // 段階別の精密な再開文言はタスク 3.3/3.4 が担うため、このタスクでは
-  // 「登録済み・続きから再開できる」ことのみを伝える汎用の最小案内とする。
-  await deps.messenger.reply(event.replyToken, [buildResumeGuidanceMessage()]);
+  // Req 1.2/5.2: 既存オーナーの再友だち追加（ブロック解除等）。重複作成せず、現在の段階に
+  // 応じた精密な次の手順を再送する（resume postback・段階外入力 fallback と同じ
+  // buildStageGuidanceMessage を再利用し、「進捗に応じた案内」の文言を三重化しない）。
+  await deps.messenger.reply(event.replyToken, [buildStageGuidanceMessage(session)]);
+}
+
+/**
+ * Req 5.2（中断後の再開）・5.3（段階外/期待外入力への fallback）・6.2（リッチメニュー resume
+ * postback）で共通に必要な「現在の段階で必要な操作の案内を再送する」処理を一箇所に集約する。
+ * 各段階へ実際に入った際に送信したのと同一の文言をそのまま返す（5.3 の要件文言「案内を再送する」
+ * を字義通り満たす＝新しい汎用の「わかりません」文言を作らない）。
+ */
+function buildStageGuidanceMessage(session: OnboardingSessionRow): LineMessage {
+  switch (session.stage) {
+    case 'await_invite_code':
+      return buildGreetingMessage();
+    case 'await_store_name':
+      return buildStoreNameInputGuidanceMessage();
+    case 'await_confirmation': {
+      const candidate: StoreCandidate | undefined =
+        session.selected_index !== null ? session.candidates?.[session.selected_index] : undefined;
+      if (!candidate) {
+        // CHECK 制約・本会話フローの構造上は起こり得ないが（await_confirmation は必ず選択済み
+        // 候補を伴う）、セッション不整合時にクラッシュさせない防御的フォールバック
+        // （handleConfirm と同じ方針）。
+        return buildCandidateSelectionExpiredMessage();
+      }
+      return buildConfirmationMessage(candidate);
+    }
+    case 'completed':
+      return buildAlreadyCompletedMessage();
+  }
 }
 
 async function handleText(
@@ -119,6 +151,13 @@ async function handleText(
   event: Extract<InboundEvent, { kind: 'text' }>,
 ): Promise<void> {
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
+
+  if (session.stage === 'completed') {
+    // Req 4.6: completed 段階への入力は、内容を問わず固定案内のみを返す。
+    // セッション更新・再検索・その他の処理は一切行わない。
+    await deps.messenger.reply(event.replyToken, [buildAlreadyCompletedMessage()]);
+    return;
+  }
 
   if (session.stage === 'await_store_name' || session.stage === 'await_confirmation') {
     // Req 3.1: 店名入力待ちのテキストは検索を起動する。
@@ -129,13 +168,7 @@ async function handleText(
     return;
   }
 
-  if (session.stage !== 'await_invite_code') {
-    // completed 段階のテキストに対する精密な fallback（Req 5.3/4.6 の全般）はタスク 3.4 が実装する。
-    // このタスクでは無応答のまま放置しない正直な最小フォールバックのみ返す。
-    await deps.messenger.reply(event.replyToken, [buildResumeGuidanceMessage()]);
-    return;
-  }
-
+  // ここに到達するのは session.stage === 'await_invite_code' のみ（残り 3 段階は上で処理済み）。
   if (session.locked_until && session.locked_until.getTime() > deps.now().getTime()) {
     // Req 2.3: ロック中はコード再検証・失敗カウント加算を一切行わず、待機案内のみ返す。
     await deps.messenger.reply(event.replyToken, [buildInviteCodeLockedMessage()]);
@@ -270,13 +303,25 @@ async function handlePostback(
   deps: ConversationDeps,
   event: Extract<InboundEvent, { kind: 'postback' }>,
 ): Promise<void> {
-  const action = decodePostback(event.data);
-  if (!action) {
-    // 不正・破損した postback data。5.3 と同様の安全側フォールバック。
-    return handleUnhandledPostback(deps, event);
+  const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
+
+  if (session.stage === 'completed') {
+    // Req 4.6: completed 段階では postback の種類（resume 導線含む）を問わず固定案内のみ返す。
+    // セッション更新・その他の処理は一切行わない。data の decode すら行う必要がない
+    // （decode 結果に関わらず結論は変わらないため）。
+    await deps.messenger.reply(event.replyToken, [buildAlreadyCompletedMessage()]);
+    return;
   }
 
-  const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
+  const action = decodePostback(event.data);
+
+  if (!action || action.kind === 'resume') {
+    // action === null: 不正・破損した postback data（Req 5.3 の安全側フォールバック）。
+    // action.kind === 'resume': リッチメニューからの再開導線（Req 6.2）。
+    // いずれも「現在の段階で必要な操作の案内」を再送する（completed はすでに上で処理済み）。
+    await deps.messenger.reply(event.replyToken, [buildStageGuidanceMessage(session)]);
+    return;
+  }
 
   if (session.stage === 'await_store_name' && action.kind === 'select_candidate') {
     return handleSelectCandidate(deps, event, session, action.index);
@@ -288,11 +333,9 @@ async function handlePostback(
     return handleRestart(deps, event);
   }
 
-  // stage と action の組み合わせがこのタスクの対象外（例: completed 中の操作・resume 導線・
-  // stage 不一致の select_candidate/confirm/restart）。completed 段階の精密な fallback・
-  // resume 導線の実処理はタスク 3.4 の対象範囲のため、このタスクでは無応答のまま放置しない
-  // 正直な最小フォールバックのみ返す。
-  return handleUnhandledPostback(deps, event);
+  // Req 5.3: stage と action の組み合わせが一致しない（例: await_invite_code 中の confirm、
+  // await_confirmation 中の select_candidate 等）。現在の段階の案内を再送する。
+  await deps.messenger.reply(event.replyToken, [buildStageGuidanceMessage(session)]);
 }
 
 /**
@@ -354,8 +397,21 @@ async function handleConfirm(
 
   await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'completed' });
   await deps.messenger.reply(event.replyToken, [buildCompletionMessage()]);
-  // リッチメニューの完了後メニューへの個別リンク（Req 6.3）はタスク 3.4 の対象範囲。
-  // ここでは linkRichMenu を呼び出さない。
+
+  // Req 6.3: 完了時にリッチメニューを完了後メニューへ即時切り替える。
+  // owner の状態遷移（onboarding_status='store_identified'）はすでに confirmStore 内の
+  // トランザクションで commit 済みであり、この呼び出しはそれに付随するベストエフォートな
+  // UX 補助動作（LINE 側のリッチメニュー割り当て）に過ぎない。ここで失敗しても
+  // 巻き戻すべきトランザクションは存在せず、また reply は既に送信済みのため、
+  // handleEvent 全体を失敗させることなく握りつぶす
+  // （design.md「LineMessenger」の reply 失敗時の扱いと同じ「例外にしない」方針）。
+  // ConversationDeps には専用ロガーが注入されていないため、ここでは記録しない
+  // （将来ロガーが追加された場合はここに warn を追加すること）。
+  try {
+    await deps.messenger.linkRichMenu(event.lineUserId, deps.lineRichMenuCompletedId);
+  } catch {
+    // 意図的に無視する（上記コメント参照）。
+  }
 }
 
 /** Req 4.5: 確認段階での取りやめ。店名入力からやり直せる状態に戻す。 */
@@ -369,13 +425,4 @@ async function handleRestart(
     selectedIndex: null,
   });
   await deps.messenger.reply(event.replyToken, [buildStoreNameInputGuidanceMessage()]);
-}
-
-async function handleUnhandledPostback(
-  deps: ConversationDeps,
-  event: Extract<InboundEvent, { kind: 'postback' }>,
-): Promise<void> {
-  // completed 段階中の操作・resume 導線（リッチメニュー再開）・stage 不一致の
-  // select_candidate/confirm/restart・不正 data の実処理はタスク 3.4 の対象範囲。
-  await deps.messenger.reply(event.replyToken, [buildResumeGuidanceMessage()]);
 }

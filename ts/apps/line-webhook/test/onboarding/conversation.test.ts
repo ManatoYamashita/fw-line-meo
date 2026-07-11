@@ -16,15 +16,23 @@ import type {
 } from '../../src/onboarding/store-identification.js';
 import type { SearchOutcome } from '../../src/places/search.js';
 import { encodePostback } from '../../src/onboarding/stages.js';
+import {
+  buildAlreadyCompletedMessage,
+  buildConfirmationMessage as buildConfirmationMessageForAssertion,
+  buildGreetingMessage,
+  buildStoreNameInputGuidanceMessage,
+} from '../../src/line/messages.js';
 
-// タスク 3.2「招待コード段階の会話ロジック」／タスク 3.3「店名検索〜確定段階の会話ロジック」の
-// モック deps テスト。
-// Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5（3.2）／3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.4, 4.5（3.3）
+// タスク 3.2「招待コード段階の会話ロジック」／タスク 3.3「店名検索〜確定段階の会話ロジック」／
+// タスク 3.4「完了段階・フォールバック・リッチメニュー再開導線」のモック deps テスト。
+// Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5（3.2）／3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.4, 4.5（3.3）／
+//   4.3, 4.6, 5.2, 5.3, 6.2, 6.3（3.4）
 // Design: 「ConversationHandlers」「データ層 Implementation Notes」（createOwner と
 //   updateSession(stage→await_store_name) は同一 TX）。「StoreIdentificationService（拡張縫）」。
 
 const FIXED_NOW = new Date('2026-07-11T00:00:00.000Z');
 const AGENCY_ID = 'agency-1';
+const RICHMENU_COMPLETED_ID = 'richmenu-completed-1';
 
 function baseSession(overrides: Partial<OnboardingSessionRow> = {}): OnboardingSessionRow {
   return {
@@ -210,6 +218,7 @@ function buildDeps(overrides: {
   now?: Date;
   searchOutcome?: SearchOutcome;
   confirmOutcome?: ConfirmOutcome;
+  messenger?: ReturnType<typeof createFakeMessenger>;
 }): {
   deps: ConversationDeps;
   sessionsFake: ReturnType<typeof createFakeSessionsAccessor>;
@@ -226,7 +235,7 @@ function buildDeps(overrides: {
     searchOutcome: overrides.searchOutcome,
     confirmOutcome: overrides.confirmOutcome,
   });
-  const messenger = createFakeMessenger();
+  const messenger = overrides.messenger ?? createFakeMessenger();
   const poolFake = createFakePool();
   const db: Queryable = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) } as unknown as Queryable;
 
@@ -239,6 +248,7 @@ function buildDeps(overrides: {
     identification: identificationFake.service,
     messenger,
     now: () => overrides.now ?? FIXED_NOW,
+    lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
   };
 
   return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake };
@@ -264,7 +274,7 @@ describe('createConversationHandlers', () => {
       expect((message as { text: string }).text).toContain('招待コード');
     });
 
-    it('既存オーナーの再友だち追加 → owner を重複作成しない（Req 1.2）', async () => {
+    it('既存オーナーの再友だち追加 → owner を重複作成せず、現在の段階の精密な案内を再送する（Req 1.2/5.2）', async () => {
       const existingOwner = baseOwner();
       const session = baseSession({
         stage: 'await_store_name',
@@ -279,8 +289,9 @@ describe('createConversationHandlers', () => {
       expect(ownersFake.createOwnerCalls).toHaveLength(0);
       expect(messenger.replies).toHaveLength(1);
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect(message?.type).toBe('text');
-      expect((message as { text: string }).text).toContain('ご登録いただいています');
+      // タスク 3.4: 汎用の「ご登録いただいています」ではなく、await_store_name に実際に
+      // 入った際に送信したのと同一の文言（buildStoreNameInputGuidanceMessage）を再送する。
+      expect(message).toEqual(buildStoreNameInputGuidanceMessage());
     });
   });
 
@@ -662,6 +673,7 @@ describe('createConversationHandlers', () => {
         session,
         confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
       });
+      const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
       const handlers = createConversationHandlers(deps);
 
       await handlers.handleEvent({
@@ -680,6 +692,45 @@ describe('createConversationHandlers', () => {
       expect(sessionsFake.updateCalls).toHaveLength(1);
       expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('completed');
 
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('完了');
+
+      // Req 6.3: 完了時にリッチメニューを完了後メニューへ即時リンクする。
+      expect(linkRichMenuSpy).toHaveBeenCalledTimes(1);
+      expect(linkRichMenuSpy).toHaveBeenCalledWith('U1', RICHMENU_COMPLETED_ID);
+    });
+
+    it('確定 → linkRichMenu が reject しても handleEvent はクラッシュせず完了 reply は送信済みのまま解決する（Req 6.3 の副作用の扱い）', async () => {
+      const candidates = storeCandidates(1);
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates,
+        selected_index: 0,
+      });
+      const messenger = createFakeMessenger();
+      messenger.linkRichMenu = vi.fn(async () => {
+        throw new Error('linkRichMenu failed (simulated LINE API error)');
+      });
+      const { deps, sessionsFake } = buildDeps({
+        session,
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+        messenger,
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await expect(
+        handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-17b',
+          data: encodePostback({ kind: 'confirm' }),
+        }),
+      ).resolves.toBeUndefined();
+
+      // DB 状態遷移（completed）は linkRichMenu の失敗と無関係にすでに確定している。
+      expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('completed');
+      // 完了案内 reply はすでに送信済み。
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { text: string }).text).toContain('完了');
     });
@@ -736,6 +787,216 @@ describe('createConversationHandlers', () => {
 
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { text: string }).text).toContain('お店の名前');
+    });
+  });
+
+  describe('completed 段階（Req 4.6）', () => {
+    it('text イベント → 固定の完了案内のみ・セッション更新なし', async () => {
+      const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-20',
+        text: 'まだ何か送ってみる',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      expect(messenger.replies).toHaveLength(1);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildAlreadyCompletedMessage());
+    });
+
+    it('postback イベント（confirm 等の任意の action）→ 固定の完了案内のみ・セッション更新なし', async () => {
+      const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-21',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildAlreadyCompletedMessage());
+    });
+
+    it('不正な postback data（decode 不能）でも固定の完了案内のみ・セッション更新なし', async () => {
+      const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-22',
+        data: 'garbage-data',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildAlreadyCompletedMessage());
+    });
+  });
+
+  describe('段階外・期待外の入力への fallback（Req 5.3）', () => {
+    it('await_invite_code 段階に stage 不一致の postback（confirm）→ 招待コード入力案内を再送する', async () => {
+      const session = baseSession({ stage: 'await_invite_code' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-23',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildGreetingMessage());
+    });
+
+    it('await_store_name 段階に stage 不一致の postback（confirm）→ 店名入力案内を再送する', async () => {
+      const session = baseSession({
+        stage: 'await_store_name',
+        owner_id: 'owner-1',
+        candidates: storeCandidates(2),
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-24',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildStoreNameInputGuidanceMessage());
+    });
+
+    it('await_confirmation 段階に stage 不一致の postback（select_candidate）→ 選択済み候補の確認案内を再送する', async () => {
+      const candidates = storeCandidates(2);
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates,
+        selected_index: 1,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-25',
+        data: encodePostback({ kind: 'select_candidate', index: 0 }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildConfirmationMessageForAssertion(candidates[1]!));
+    });
+
+    it('不正・破損した postback data（decode 不能）→ 現在の段階（await_store_name）の案内を再送する', async () => {
+      const session = baseSession({ stage: 'await_store_name', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-26',
+        data: 'not-a-valid-postback',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildStoreNameInputGuidanceMessage());
+    });
+  });
+
+  describe('リッチメニューからの resume postback（Req 6.2）', () => {
+    it('await_invite_code 段階での resume → 招待コード入力案内を再送する', async () => {
+      const session = baseSession({ stage: 'await_invite_code' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-27',
+        data: encodePostback({ kind: 'resume' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildGreetingMessage());
+    });
+
+    it('await_store_name 段階での resume → 店名入力案内を再送する', async () => {
+      const session = baseSession({ stage: 'await_store_name', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-28',
+        data: encodePostback({ kind: 'resume' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildStoreNameInputGuidanceMessage());
+    });
+
+    it('await_confirmation 段階での resume → 選択済み候補の確認案内を再送する', async () => {
+      const candidates = storeCandidates(2);
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates,
+        selected_index: 0,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-29',
+        data: encodePostback({ kind: 'resume' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildConfirmationMessageForAssertion(candidates[0]!));
+    });
+
+    it('completed 段階での resume → 固定の完了案内（他の段階の resume と異なり以後の操作を要求しない）', async () => {
+      const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
+      const { deps, sessionsFake, messenger } = buildDeps({ session });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-30',
+        data: encodePostback({ kind: 'resume' }),
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect(message).toEqual(buildAlreadyCompletedMessage());
     });
   });
 });
