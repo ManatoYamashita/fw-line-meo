@@ -153,3 +153,7 @@
   - 観察可能な完了: 実 LINE で Flex Message の受信が確認され、summary_deliveries に delivered 行が残る
   - _Depends: 6.3, 7.1_
   - _Requirements: 3.1, 4.1, 5.1_
+
+## Implementation Notes
+- この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
+- `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
