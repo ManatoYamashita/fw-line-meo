@@ -50,7 +50,7 @@
   - _Requirements: 4.3, 5.5, 6.3, 7.2_
   - _Boundary: LineMessenger_
 
-- [ ] 2.5 (P) メッセージビルダー
+- [x] 2.5 (P) メッセージビルダー
   - `line/messages.ts`: 挨拶・招待コード案内・候補カルーセル（最大 10 バブル・altText 必須）・確認・完了メッセージ（すべて日本語）
   - 完了状態: カルーセルのバブル数上限・altText 付与・postback data 形式がテストで確認できる
   - _Requirements: 1.1, 3.1, 4.1, 4.3, 7.4_
