@@ -5,10 +5,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src test",
-    "test": "vitest run --passWithNoTests"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
+    "build:scripts": "tsc -p tsconfig.scripts.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "lint": "eslint src test scripts",
+    "test": "vitest run --passWithNoTests",
+    "setup-rich-menus": "node dist-scripts/scripts/setup-rich-menus.js"
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",

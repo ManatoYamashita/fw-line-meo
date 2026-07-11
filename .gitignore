@@ -10,6 +10,7 @@ gcp-credentials*.json
 # --- Node / TypeScript ---
 node_modules/
 dist/
+dist-scripts/
 build/
 *.tsbuildinfo
 coverage/
