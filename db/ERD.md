@@ -20,6 +20,8 @@ erDiagram
     stores ||--o{ survey_aspect_tallies : aggregates
     survey_aspects ||--o{ survey_aspect_tallies : classifies
     stores ||--o{ oauth_tokens : "future authorizes"
+    agencies ||--o{ agency_invite_codes : issues
+    owners ||--o{ onboarding_sessions : "progress of"
 ```
 
 ## エンティティ一覧（PK / 自然キー / 主な FK）
@@ -38,6 +40,9 @@ erDiagram
 | survey_rating_tallies | id (uuid) | (store_id, period_month, star) unique | store_id → stores | 星評価の匿名集計カウンタ |
 | survey_aspect_tallies | id (uuid) | (store_id, period_month, aspect_code) unique | store_id → stores, aspect_code → survey_aspects | 観点別の匿名集計カウンタ |
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
+| agency_invite_codes | id (uuid) | code (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
+| onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
+| line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
 
 ## 凡例・補足
 
@@ -48,3 +53,5 @@ erDiagram
 - 共有定数 `categories`・`survey_aspects` は seed（`0002`）が唯一の定義（SoT）。
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
+- `onboarding_sessions`: `stage='await_invite_code' ⇔ owner_id IS NULL`（`ck_session_owner_stage`）。owner 誕生前の LINE ユーザー状態も本表が唯一保持する。
+- `agency_invite_codes`: `code` は代理店ごとに共有・使い回し可能（`disabled_at` が無効化するまで複数オーナーが同一コードで登録できる。Req 2.5）。
