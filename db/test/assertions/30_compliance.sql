@@ -12,7 +12,8 @@ BEGIN
       AND table_name NOT IN (
         'operators','agencies','owners','stores','dashboard_users','categories',
         'competitors','rating_snapshots','survey_aspects','survey_rating_tallies',
-        'survey_aspect_tallies','oauth_tokens'
+        'survey_aspect_tallies','oauth_tokens',
+        'daily_summaries','summary_deliveries'
       );
     IF bad IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: allowlist 外のテーブル（顧客/個別回答の疑い・要レビュー）: %', bad;

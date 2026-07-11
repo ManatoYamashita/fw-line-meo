@@ -1,7 +1,7 @@
 # Implementation Plan — competitive-daily-summary
 
 - [ ] 1. Foundation: DB スキーマと言語間契約の確立
-- [ ] 1.1 日次サマリー・配信記録・配信時刻設定のスキーマを追加する
+- [x] 1.1 日次サマリー・配信記録・配信時刻設定のスキーマを追加する
   - migration 0004 として daily_summaries（store×日付一意・status/順位/前日比/新着/競合一覧）・summary_deliveries（store×日付一意・retry_key・結果）・owners の配信時刻（時単位・default 7・0-23 CHECK）を追加のみで定義する
   - PK/FK の型・命名は 0001 の規約に厳密準拠する
   - 一意制約・CHECK・delivery_hour 範囲を検証する assertion SQL を追加する
