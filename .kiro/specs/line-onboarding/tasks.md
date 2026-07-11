@@ -38,7 +38,7 @@
   - _Requirements: 1.3, 4.5, 4.6_
   - _Boundary: OnboardingStages_
 
-- [ ] 2.3 (P) Google Places 検索アダプタ
+- [x] 2.3 (P) Google Places 検索アダプタ
   - `places/search.ts`: `searchText` 呼び出し（FieldMask を `id,displayName,formattedAddress,location,types` に固定）、1.5 秒タイムアウト、`found`/`empty`/`error` の型付き結果
   - 完了状態: fetch モックで FieldMask ヘッダ固定・タイムアウト時 error・0 件時 empty が確認できる（ユニットテスト緑）
   - _Requirements: 3.1, 3.2, 3.3, 3.5_
