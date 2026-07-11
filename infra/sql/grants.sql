@@ -12,10 +12,11 @@
 -- 書込境界（db/write-boundary.md・"整合する GRANT のみ"）:
 --   TS 層（line_webhook / survey_web / dashboard_api）→ DML on
 --     operators, agencies, dashboard_users, owners, stores,
---     survey_rating_tallies, survey_aspect_tallies, oauth_tokens
+--     survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
+--     agency_invite_codes, onboarding_sessions, line_webhook_events
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots
 --   categories, survey_aspects は seed 所有 → runtime は read のみ
---   読み取りは両層に許容 → 全 SA が全 12 テーブルを SELECT 可
+--   読み取りは両層に許容 → 全 SA が全 15 テーブルを SELECT 可
 
 \if :{?project}
 \else
@@ -31,15 +32,20 @@ BEGIN;
 -- スキーマ利用権限（全ランタイム SA）
 GRANT USAGE ON SCHEMA public TO :"line_webhook", :"survey", :"dashboard", :"batch";
 
--- 読み取りは両層に許容（全 12 テーブル SELECT）。categories / survey_aspects は
+-- 読み取りは両層に許容（全 15 テーブル SELECT）。categories / survey_aspects は
 -- ここでの SELECT のみ = seed read-only（下の DML 付与に含めない）。
 GRANT SELECT ON ALL TABLES IN SCHEMA public
   TO :"line_webhook", :"survey", :"dashboard", :"batch";
 
--- TS 層書込テーブルへの DML（3 TS SA）
+-- TS 層書込テーブルへの DML（3 TS SA）。
+-- 付与単位は write-boundary.md の「TS 層書込所有」宣言に合わせる（SA 別の最小化はしない既存方針）。
+-- agency_invite_codes は line_webhook の実行時利用が SELECT のみ（招待コード発行は MVP 境界外・
+-- 運営側の事前オペレーション）だが、write-boundary.md が TS 層書込所有と宣言しているため、
+-- oauth_tokens（第2フェーズまで休眠）と同じ扱いで DML を付与する。
 GRANT INSERT, UPDATE, DELETE ON
   operators, agencies, dashboard_users, owners, stores,
-  survey_rating_tallies, survey_aspect_tallies, oauth_tokens
+  survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
+  agency_invite_codes, onboarding_sessions, line_webhook_events
   TO :"line_webhook", :"survey", :"dashboard";
 
 -- Go 層書込テーブルへの DML（batch SA）
