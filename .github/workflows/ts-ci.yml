@@ -121,7 +121,7 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/seed.sql
       - name: Lighthouse（mobile・LCP 3 秒・Req 2.8）
         working-directory: ts/apps/survey-web
-        # MSW Gemini モックは startServerCommand の next プロセスに継承させる（絶対パス指定）。
-        env:
-          NODE_OPTIONS: --import ${{ github.workspace }}/ts/apps/survey-web/e2e/mock-gemini.mjs
+        # Lighthouse は /s/{storeId} のページ描画のみ計測する。SSR は Gemini を呼ばない
+        # （生成は /api/responses のクライアント操作のみ）ため Gemini モックは不要。
+        # npx --yes は実行時に lhci をレジストリ取得するため、ここに --import mock を被せると npm が壊れる。
         run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
