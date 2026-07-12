@@ -98,11 +98,21 @@ export interface DailySummaryNewReview {
 }
 
 // jsonb 列 competitors の要素形。表示順は rank 順。
+//
+// rating/starDiff は number（string ではない）: go/internal/repo/summaries.go の
+// SummaryCompetitor は Rating/StarDiff を float64 で保持し encoding/json でそのまま JSON数値と
+// して書き込む（go/internal/batch/run.go の書込元も同様、フォーマット処理を挟まない）。これは
+// daily_summaries.rating のような「テーブル直下の numeric 列は pg ドライバが精度保持のため
+// 文字列で返す」という規約（このファイル冒頭コメント）とは無関係で、jsonb 内にネストされた
+// 数値は Go の json.Marshal → jsonb パーサ経由であり pg の numeric 文字列化は適用されない。
+// task 7.1（クロスランタイム契約検証）で発見: 修正前は `string | null` と誤って宣言されていた
+// （実行時の値は常に number で null にもならない。詳細は
+// ts/apps/delivery-job/test/cross-runtime.e2e.test.ts のコメント参照）。
 export interface DailySummaryCompetitor {
   name: string;
-  rating: string | null;
-  reviewCount: number | null;
-  starDiff: string | null;
+  rating: number;
+  reviewCount: number;
+  starDiff: number;
 }
 
 // 日次サマリー（Go 書込・店舗×日付で一意・生成後は不変）。

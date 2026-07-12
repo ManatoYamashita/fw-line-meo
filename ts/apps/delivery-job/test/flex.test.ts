@@ -30,10 +30,12 @@ function baseSummary(overrides: Partial<DailySummaryRow> = {}): DailySummaryRow 
       { authorName: '佐藤花子', publishTime: '2026-07-11T09:00:00Z', rating: 4, textExcerpt: '接客が丁寧でした。' },
       { authorName: '鈴木一郎', publishTime: '2026-07-11T10:00:00Z', rating: 3, textExcerpt: '雰囲気が良かったです。' },
     ],
+    // rating/starDiff は number（jsonb 内の Go 実出力に一致。task 7.1 で発見・是正した
+    // DailySummaryCompetitor の型 — ts/packages/db/src/types.ts のコメント参照）。
     competitors: [
-      { name: '近隣カフェA', rating: '4.5', reviewCount: 200, starDiff: '+0.3' },
-      { name: '近隣カフェB', rating: '3.9', reviewCount: 80, starDiff: '-0.3' },
-      { name: '近隣カフェC', rating: '4.0', reviewCount: 60, starDiff: '-0.2' },
+      { name: '近隣カフェA', rating: 4.5, reviewCount: 200, starDiff: 0.3 },
+      { name: '近隣カフェB', rating: 3.9, reviewCount: 80, starDiff: -0.3 },
+      { name: '近隣カフェC', rating: 4.0, reviewCount: 60, starDiff: -0.2 },
     ],
     created_at: new Date('2026-07-11T22:00:00Z'),
     ...overrides,
@@ -225,7 +227,7 @@ describe('buildDailySummaryFlex', () => {
     it('異常に長いデータが入力されても 400 字を超えない（切り詰め）', () => {
       const longName = 'あ'.repeat(1000);
       const result = buildDailySummaryFlex(
-        baseSummary({ competitors: [{ name: longName, rating: '4.0', reviewCount: 1, starDiff: '+0.1' }] }),
+        baseSummary({ competitors: [{ name: longName, rating: 4.0, reviewCount: 1, starDiff: 0.1 }] }),
         LIFF_URL,
       );
       expect(result.altText.length).toBeLessThanOrEqual(ALT_TEXT_MAX_LENGTH);
@@ -259,9 +261,9 @@ describe('buildDailySummaryFlex', () => {
       const hugeExcerpt = 'い'.repeat(4000);
       const hugeCompetitors: DailySummaryCompetitor[] = Array.from({ length: 5 }, (_, i) => ({
         name: `${hugeName}${i}`,
-        rating: '4.0',
+        rating: 4.0,
         reviewCount: 10,
-        starDiff: '+0.1',
+        starDiff: 0.1,
       }));
       const hugeReviews: DailySummaryNewReview[] = Array.from({ length: 3 }, (_, i) => ({
         authorName: `匿名希望さん${i}`,

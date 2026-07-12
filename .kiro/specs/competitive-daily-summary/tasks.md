@@ -150,7 +150,7 @@
   - _Requirements: 2.1, 3.1_
 
 - [ ] 7. Validation: 横断検証
-- [ ] 7.1 言語間契約の整合検証を実装する
+- [x] 7.1 言語間契約の整合検証を実装する
   - Go バッチが生成した daily_summaries を TS 配信ジョブが読み取って配信するクロスランタイム統合テスト（実 postgres・フェイク Places・LINE モック）を通す
   - 競合リスト再抽出・調整手段およびオプトアウト手段が存在しないこと（能力の不在）を確認項目として記録する
   - 観察可能な完了: バッチ→配信の一気通貫テストが CI 相当環境で成功し、`make db-verify-docs` を含む全 make ターゲットが通る
@@ -184,4 +184,6 @@
   - また `infra/modules/project-services` に `cloudbuild.googleapis.com` を追加（ローカル docker 不在のため Cloud Build 必須）、`ts/.gcloudignore` を新設（node_modules 除外漏れで 659MB アップロードが発生していた）。
 - **task 6.3: 実インフラの運用上の欠落2件を発見・修正**（コードの変更ではなく実 Cloud SQL への直接対応）: (1) 実 `fwlm-pg` に migration 0004 が未適用だった → Cloud SQL Auth Proxy 経由で適用。(2) `postgres` 管理者パスワードが `db-admin-password` シークレットの値と不一致（gcp-infra-foundation 時からの out-of-band drift）→ パスワードをリセットしシークレットへ新バージョンとして同期。`infra/sql/grants.sql` は `-v project=gen-fw-line-meo` で明示上書きして適用（デフォルトは `fwlm` 固定のプレースホルダ）。
 - **task 6.3 レビューで発見（follow-up・未対応）**: `daily-batch-xpfrj`（2026-07-11 21:00 UTC・placeholder イメージ時代の Scheduler 定時実行）が 1800秒タイムアウトで失敗していた。これは本タスクの実イメージ反映前の既存事象で対応不要だが、次回 06:00 JST の Scheduler 定時実行（v1 の Go 実体イメージに対して）が手動実行と同様にクリーンに完了するか、実運用開始後に確認すること。
+- **task 7.1 で発見・修正した実スキーマ契約バグ**: `ts/packages/db/src/types.ts` の `DailySummaryCompetitor.rating`/`starDiff` が `string | null` と誤って宣言されていた。同ファイルの慣例（トップレベルの numeric 列は pg ドライバが精度保持のため文字列で返す）を jsonb 内のネスト値にも誤って適用したもの。実際は Go 側（`repo.SummaryCompetitor` は `float64`）が JSON数値としてマーシャルするため、pg の jsonb パーサは Node 側で `number` を返す。task 4.1/4.4 のテストがそれぞれ独自に誤った文字列型フィクスチャ（`rating: '4.5'`）を発明していたため今まで検出されず、Go の実オーケストレーションと TS の実オーケストレーションを同一 postgres 上で直結するクロスランタイムテスト（本タスクの核心）で初めて型不一致が表面化した。`number` へ修正し `flex.ts` の表示整形（`.toFixed(1)`）を追加。既存 Flex スナップショットは無変更（表示自体はたまたま正しかった）。
+- **task 7.1 で発見・修正した bash 実行時バグ**: 全角括弧に隣接する未ブレースの `$VAR` が `set -u` 下で変数名を破損させ `unbound variable` を起こす（例: `"$x（text）"`）。新設した `db/test/check_no_optional_capabilities.sh` の R1.4/R3.10 違反検知時の診断メッセージ内に2箇所存在し、まさに検知すべき違反が発生した瞬間にスクリプト自身がクラッシュして診断が失われるという皮肉な不良だった（レビュー1回目で発見、`${VAR}` 化で修正・2回目レビューで独立に失敗パス再現確認済み）。
 - **task 6.1 で発見（非ブロッキング follow-up 2件）**: (1) `line-channel-access-token` の accessor は design.md の指示通り delivery-job SA へ付与したが、実装（line.ts）は Stateless client_credentials 発行方式のためこの secret を消費しない未使用grant。害はないが design.md の記述と実装の乖離として残っている。(2) `infra/README.md` の runbook 例（gcp-infra-foundation task 4.4 由来・本specより前）が migration 0004 を含んでおらず、記載通りに実行すると本specのgrants.sqlが失敗する。両者とも6.1のスコープ外（前者はdesign.md追記、後者はinfra/README.md修正）。task 6.2 実施時に合わせて対応するのが効率的。

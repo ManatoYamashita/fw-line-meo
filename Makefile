@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test image-build image-push help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -77,6 +77,9 @@ go-build: ## Go: go/ 配下の全パッケージをビルド
 
 go-test: ## Go: go/ 配下の全パッケージのテストを実行
 	cd $(GO_DIR) && go test ./...
+
+cross-runtime-test: ## VALIDATE: Go バッチ→TS 配信の一気通貫（実postgres・フェイクPlaces/LINE）＋能力不在チェック（task 7.1）
+	db/test/cross_runtime_integration.sh
 
 # コンテナイメージ（competitive-daily-summary / task 6.3）: daily-batch・summary-delivery・store-detail。
 # 上の CONTAINER_CMD（既定 container・db-* 用に export 済み）とは独立に IMAGE_CONTAINER_CMD を持つ

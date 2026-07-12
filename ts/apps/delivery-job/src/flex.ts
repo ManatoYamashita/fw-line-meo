@@ -237,9 +237,22 @@ function buildNewReviewsSection(summary: DailySummaryRow): FlexBox {
   };
 }
 
+/**
+ * competitor.starDiff（自店 - 競合、design.md 定義）を符号付きの表示文字列に整形する。
+ * 正の値には「+」を付与し、0・負値はそのまま toFixed(1) の符号表現に従う。
+ */
+function formatStarDiff(diff: number): string {
+  return diff > 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1);
+}
+
 function formatCompetitorLine(competitor: DailySummaryCompetitor): FlexBox {
-  const ratingText = competitor.rating ?? '—';
-  const diffText = competitor.starDiff ?? '—';
+  // task 7.1（クロスランタイム契約検証）で発見: competitor.rating/starDiff は jsonb 内の
+  // number であり（Go の SummaryCompetitor は文字列化せず float64 をそのまま json.Marshal
+  // する）、あらかじめフォーマット済みの文字列ではない。表示直前に本関数で明示的に文字列化する
+  // （旧コードは `?? '—'` で string 型を期待しており、型を number に是正した際に
+  // コンパイルエラーで顕在化した。詳細は ts/packages/db/src/types.ts のコメント参照）。
+  const ratingText = competitor.rating.toFixed(1);
+  const diffText = formatStarDiff(competitor.starDiff);
   return {
     type: 'box',
     layout: 'horizontal',
