@@ -108,7 +108,7 @@
   - _Requirements: 3.1, 3.8, 5.1, 5.2_
 
 - [ ] 5. (P) Core: 詳細閲覧（LIFF・読取専用）
-- [ ] 5.1 (P) LIFF 認可ライブラリを実装する
+- [x] 5.1 (P) LIFF 認可ライブラリを実装する
   - ID トークンのサーバーサイド検証→sub→オーナー・自店解決までを単体ライブラリとして実装し、URL/ボディ由来の店舗指定を受け付けない
   - 観察可能な完了: 検証モック相手に有効トークン→自店解決・無効トークン→検証エラーがユニットテストで通る
   - _Requirements: 4.1, 4.2_
@@ -117,7 +117,8 @@
 - [ ] 5.2 詳細データの読取 API を実装する
   - 認可ライブラリを組み込んだ読取専用 API として、当日サマリー・自店/競合の指標・直近 30 日の推移を返し、競合 0 店では自店のみ返す
   - 無効トークン→401・店舗未特定→404 のルート挙動を含めて実装する（ルートの所有は本タスク）
-  - 観察可能な完了: テスト DB で 30 日窓・競合なし分岐・401/404 のレスポンスが検証される
+  - **task 5.1 で発見**: `resolveOwnerStore`（liff-auth）は confirmed 店舗が複数（1オーナー:N店舗）の場合 `AMBIGUOUS_STORE` を返す。design.md の API Contract 更新に従い、これも 404 として扱う（店舗未特定と同じ扱い・詳細は design.md「既知の制約」参照。誤った店舗の情報を返さないことを優先する）
+  - 観察可能な完了: テスト DB で 30 日窓・競合なし分岐・401/404（店舗未特定・AMBIGUOUS_STORE 双方）のレスポンスが検証される
   - _Requirements: 4.1, 4.2, 4.3_
   - _Boundary: store-detail/data_
   - _Depends: 5.1_
@@ -174,3 +175,4 @@
 - タスク3.6を追加した理由: Cloud SQL IAM 接続の実配線が config.go(2.1)→repo/db.go(3.3)→main.go(3.5) と3タスクにわたり先送りされ、誰も実装しないまま残っていたため。実GCPのbatch-jobモジュールはCLOUDSQL_CONNECTION_NAMEのみ配線しており、このままではtask 6.3が実GCPで起動失敗する。
 - task 3.6 の初回レビューは REJECTED（テストが旧stub文字列の不在のみを確認しfalse green リスクあり）。cloudsqlconn由来の型エラー（errtype.RefreshError等）をerrors.Asで積極確認するよう修復し2回目レビューでAPPROVED。実装（db.go/main.go）自体は初回から正しく、テストのみの問題だった。
 - task 3.6 レビューでさらに発見: `infra/modules/batch-job/main.tf` に `DB_IAM_USER`・`DB_NAME` env が未配線（`CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみ）。task 6.3 のスコープに追記済み。
+- **task 5.1 で発見（設計レベルの既知の制約）**: `four-tier-data-model` の1オーナー:N店舗仕様と、本 spec の LIFF URL 契約（storeId 非包含・IDOR対策）が緊張関係にある。複数店舗オーナーは `AMBIGUOUS_STORE` により詳細画面を解決できない（安全側フェイル）。design.md の Open Questions / Risks・API Contract に既知の制約として明記し、task 5.2 は AMBIGUOUS_STORE を 404 として扱う。第2フェーズで per-store 署名付きトークン方式の再設計が必要。

@@ -351,9 +351,10 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
-| GET | /api/detail | Authorization: Bearer {LIFF ID token} | 自店＋競合の詳細 JSON（30日推移含む） | 401（検証失敗）, 404（店舗未特定）, 500 |
+| GET | /api/detail | Authorization: Bearer {LIFF ID token} | 自店＋競合の詳細 JSON（30日推移含む） | 401（検証失敗）, 404（店舗未特定・**または sub に紐づく confirmed 店舗が複数で一意に解決不能＝AMBIGUOUS_STORE**）, 500 |
 
 - LIFF URL 契約: Flex ボタン → `https://liff.line.me/{liffId}`（storeId をパスに含めない — 認可主体は ID トークンの sub であり、URL パラメータを信頼しない）
+- **既知の制約（MVP・task 5.1 実装時に発見）**: `four-tier-data-model` は オーナー:店舗 = 1:N を確定仕様とする。しかし本コンポーネントの認可は sub のみを信頼し LIFF URL に storeId を含めないため、1 オーナーが confirmed 店舗を複数持つ場合、`sub` だけでは「詳細を見る」がどの店舗を指すか一意に解決できない。安全側に倒し、複数該当時は店舗を推測せず 404（AMBIGUOUS_STORE）を返す（誤店舗の情報を見せるリスクを避ける）。MVP は個人店（1オーナー:1店舗）を主要ユーザー像と想定しこの制約を許容する。複数店舗オーナーへの対応（例: delivery-job が店舗ごとに署名付きトークンを LIFF URL へ付与する方式）は第2フェーズで再検討する。
 
 ### TS / packages/db 拡張（配信時刻設定の契約）
 
@@ -487,3 +488,4 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - Places Service Specific Terms の「30日キャッシュ」条文の原文確認（実装前 Follow-up。確認までは30日保持を上限として実装）
 - LIFF 用 LINE Login チャネルの作成タイミング（**Messaging API チャネルと同一プロバイダー必須**）— #6 と共同の runbook 手順として調整
 - 配信時刻設定 UI の webhook 配線は #6 完了後の統合タスク（本 spec は契約と関数のみ提供）
+- **複数店舗オーナーの LIFF 詳細画面が一意に解決できない**（task 5.1 実装時に発見。詳細は Components and Interfaces / TS store-detail の「既知の制約」参照）。MVP は個人店（1オーナー:1店舗）想定で許容するが、`four-tier-data-model` が確定する 1オーナー:N店舗 の仕様と本 spec の LIFF URL 契約（storeId 非包含）が根本的に緊張関係にある。複数店舗運用が実際に始まる前に、per-store 署名付きトークンの LIFF URL 付与などの対応を第2フェーズで設計すること。
