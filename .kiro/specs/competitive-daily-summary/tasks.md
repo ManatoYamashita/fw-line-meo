@@ -14,7 +14,7 @@
   - _Requirements: 2.3, 3.9_
 
 - [ ] 2. Foundation: 3 ランタイムの骨格確立
-- [ ] 2.1 (P) Go バッチ層の骨格を新設する
+- [x] 2.1 (P) Go バッチ層の骨格を新設する
   - リポジトリ初の go.mod・エントリポイント・env 設定読取・コンテナイメージ定義を確立する
   - 後続タスクが go.mod/go.sum を書き換えないよう、本タスクで pgx を含む依存一式を確定させる（3.1/3.3 の並列安全の前提）
   - Makefile に Go のビルド/テストターゲットを追加し、確立したコマンドを CLAUDE.md のビルド/テスト節へ追記する
@@ -157,3 +157,4 @@
 ## Implementation Notes
 - この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
 - `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
+- go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。

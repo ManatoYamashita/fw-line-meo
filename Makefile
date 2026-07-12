@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -68,3 +68,12 @@ ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。実行は CI 前提
 
 ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は CI）
 	pnpm -C $(TS_DIR) --filter @fwlm/survey-web run perf:budget
+
+# Go モジュール（go/ 日次バッチ層・competitive-daily-summary）
+GO_DIR ?= go
+
+go-build: ## Go: go/ 配下の全パッケージをビルド
+	cd $(GO_DIR) && go build ./...
+
+go-test: ## Go: go/ 配下の全パッケージのテストを実行
+	cd $(GO_DIR) && go test ./...
