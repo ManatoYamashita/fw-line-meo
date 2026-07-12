@@ -69,11 +69,19 @@
   - 観察可能な完了: 6件ヒット→5件固定・自店除外・0件時の状態が places クライアントのフェイクとテスト DB で検証される
   - _Requirements: 1.1, 1.2, 1.3_
 
-- [ ] 3.5 日次バッチのオーケストレーションを実装する
+- [x] 3.5 日次バッチのオーケストレーションを実装する
   - 確定済み店舗の抽出（競合未固定店舗はまず抽出）、店舗単位ワーカープールとエラー隔離、取得不能競合の無効化、サマリー確定、パージ、起動ジッター、固定フィールドの実行サマリーログを統合する
   - 1 店舗あたり約 6 コール（自店 1＋競合最大 5）に収まることをテストで数え上げる
   - 観察可能な完了: フェイク Places＋実 postgres の一気通貫実行で snapshots/summaries が生成され、再実行しても行数が増えない
   - _Requirements: 1.5, 2.1, 2.5, 2.6, 2.7, 5.1, 5.2_
+
+- [ ] 3.6 Cloud SQL IAM ダイヤラを配線する
+  - **背景（task 3.5 レビューで発見）**: `config.go`(2.1)→`repo/db.go`(3.3)→`cmd/daily-batch/main.go`(3.5) の3タスクにわたり Cloud SQL IAM 接続の実配線が「次のタスクへ」と先送りされ続けた結果、どのタスクにも属さない未実装のまま残った。実 GCP の `infra/modules/batch-job` は `CLOUDSQL_CONNECTION_NAME` を配線しており `DATABASE_URL` を渡さないため、現状の Go バイナリは `DBModeCloudSQLIAM` で起動できず即エラー終了する。このままでは task 6.3（daily-batch Job の Go 実体化）が実 GCP で必ず失敗する。
+  - `go/internal/repo/db.go` に Cloud SQL Go Connector（`cloud.google.com/go/cloudsqlconn`、公式ライブラリ）を用いた IAM 認証ダイヤラを実装し、`DBModeCloudSQLIAM` で `pgxpool.Pool` を確立できるようにする（`config.go` が既に読み取っている `CLOUDSQL_CONNECTION_NAME`/`DB_IAM_USER`/`DB_NAME` を使用）
+  - `go/cmd/daily-batch/main.go` の `buildPool` から両モード（DATABASE_URL・Cloud SQL IAM）を実際に配線する
+  - 観察可能な完了: `DBModeCloudSQLIAM` 指定時にダイヤラが呼ばれpgxpool確立を試みることをユニットテストで検証する（実 Cloud SQL への実接続は統合/実環境検証（7.1/7.2）の範囲。ここでは配線の正しさ＝関数呼び出しとエラーハンドリングを検証）
+  - _Requirements: 2.1_
+  - _Boundary: repo/db, cmd/daily-batch_
 
 - [ ] 4. (P) Core: TS 配信ジョブ（Flex 組立・Push・記録）
 - [ ] 4.1 (P) Flex Message 組立を実装する
@@ -161,3 +169,5 @@
 - `summary/compute.Rank` は rank_prev を算出しない（design.md の Service Interface に rank_prev 専用関数が無いため）。task 3.3/3.5 の実装者は前日の active 競合集合（self含む）を用意し、`Rank` を再適用して rank_prev を得ること。
 - go.mod の `go` ディレクティブは `go mod tidy` により pgx v5.10.0 の要求で 1.24→1.25.0 に自動昇格した（design.md「Go 1.24+」の範囲内）。CI/デプロイイメージが 1.24.x 固定の場合は task 6.x で toolchain バージョンの確認が必要。
 - `stores.category_code` → Places `primaryType` のマッピングは既存コードに無かったため task 3.4 で新設した（`go/internal/competitor/extract.go` の `categoryToPrimaryType`）。seeded 全11カテゴリを網羅、Table A に対応語が無い一部（izakaya/washoku/curry→japanese_restaurant, yakiniku→barbecue_restaurant）は近似。より正確なマッピングが必要になった場合はオンボーディング時に実 primaryType を取得する方式への変更を検討。
+- rank_prev の比較集合は「今日成功取得した競合のうち、昨日分のスナップショットが存在するもの」の交差を採用（同日churnした競合は今日・昨日どちらの比較集合からも除外）。design.md に厳密な規定が無いための判断。同日churn時のrank_prevテストは未整備（follow-up）。
+- タスク3.6を追加した理由: Cloud SQL IAM 接続の実配線が config.go(2.1)→repo/db.go(3.3)→main.go(3.5) と3タスクにわたり先送りされ、誰も実装しないまま残っていたため。実GCPのbatch-jobモジュールはCLOUDSQL_CONNECTION_NAMEのみ配線しており、このままではtask 6.3が実GCPで起動失敗する。
