@@ -64,7 +64,7 @@
   - _Boundary: repo_
   - _Depends: 1.1_
 
-- [ ] 3.4 競合の自動抽出・固定ロジックを実装する
+- [x] 3.4 競合の自動抽出・固定ロジックを実装する
   - 検索結果から自店を除外して近い順上位 5 店を固定し、5 店未満はある分のみ、0 店は競合なし状態として扱う
   - 観察可能な完了: 6件ヒット→5件固定・自店除外・0件時の状態が places クライアントのフェイクとテスト DB で検証される
   - _Requirements: 1.1, 1.2, 1.3_
@@ -160,3 +160,4 @@
 - go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。
 - `summary/compute.Rank` は rank_prev を算出しない（design.md の Service Interface に rank_prev 専用関数が無いため）。task 3.3/3.5 の実装者は前日の active 競合集合（self含む）を用意し、`Rank` を再適用して rank_prev を得ること。
 - go.mod の `go` ディレクティブは `go mod tidy` により pgx v5.10.0 の要求で 1.24→1.25.0 に自動昇格した（design.md「Go 1.24+」の範囲内）。CI/デプロイイメージが 1.24.x 固定の場合は task 6.x で toolchain バージョンの確認が必要。
+- `stores.category_code` → Places `primaryType` のマッピングは既存コードに無かったため task 3.4 で新設した（`go/internal/competitor/extract.go` の `categoryToPrimaryType`）。seeded 全11カテゴリを網羅、Table A に対応語が無い一部（izakaya/washoku/curry→japanese_restaurant, yakiniku→barbecue_restaurant）は近似。より正確なマッピングが必要になった場合はオンボーディング時に実 primaryType を取得する方式への変更を検討。
