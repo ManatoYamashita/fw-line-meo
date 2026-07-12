@@ -6,5 +6,6 @@ INSERT INTO agencies (id, operator_id, name)
   VALUES ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'E2E代理店') ON CONFLICT DO NOTHING;
 INSERT INTO owners (id, agency_id, line_user_id, onboarding_status)
   VALUES ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222', 'U-e2e', 'active') ON CONFLICT DO NOTHING;
+-- place_id は実際の Google Place ID（Places API Text Search で取得・住所一致確認済み）。
 INSERT INTO stores (id, owner_id, name, place_id, place_status)
-  VALUES ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', 'E2E店', 'ChIJ_e2e', 'confirmed') ON CONFLICT DO NOTHING;
+  VALUES ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', 'スターバックス コーヒー リザーブ ロースタリー 東京', 'ChIJq_fYt4iLGGARrOojmQ4IMyE', 'confirmed') ON CONFLICT DO NOTHING;
