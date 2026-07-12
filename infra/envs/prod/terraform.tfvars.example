@@ -21,3 +21,9 @@ places_quota_caps = {
 # survey_base_url は survey-web 初回デプロイ後の Cloud Run URL（またはカスタムドメイン）を設定。
 # gemini_model    = "gemini-3.1-flash-lite"
 # survey_base_url = "https://survey-web-xxxxxxxxxx-an.a.run.app"
+
+# competitive-daily-summary（機能1）の env。delivery-job（毎時配信）が要求する。
+# line_channel_id は LINE Developers コンソールの Messaging API チャネル ID。
+# liff_url は store-detail の LIFF チャネル発行後（task 6.2・#6 と共同の runbook 手順）に設定する。
+# line_channel_id = "1234567890"
+# liff_url        = "https://liff.line.me/1234567890-abcdefgh"

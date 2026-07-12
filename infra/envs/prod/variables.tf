@@ -57,3 +57,23 @@ variable "survey_base_url" {
   type        = string
   default     = ""
 }
+
+# --- competitive-daily-summary（機能1）が追加する env（gcp-infra への additive 拡張） ---
+
+variable "line_channel_id" {
+  description = <<-EOT
+    LINE チャネル ID（delivery-job の LINE_CHANNEL_ID env・Stateless token 発行の client_id）。
+    デプロイ前に terraform.tfvars で実値を設定する（既定は空文字列＝未設定）。
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "liff_url" {
+  description = <<-EOT
+    delivery-job の LIFF_URL env（「詳細を見る」ボタンの遷移先）。
+    LIFF チャネル作成（task 6.2・#6 LINE 基盤と共同の runbook 手順）後にその ID を用いて設定する。
+  EOT
+  type        = string
+  default     = ""
+}

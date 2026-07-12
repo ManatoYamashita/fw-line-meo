@@ -7,9 +7,10 @@
 # database モジュールが consumer の SA リソースを参照する循環を避けられる。
 locals {
   service_accounts = {
-    webhook       = "sa-webhook"
-    survey_web    = "sa-survey-web"
-    dashboard_api = "sa-dashboard-api"
-    daily_batch   = "sa-daily-batch"
+    webhook          = "sa-webhook"
+    survey_web       = "sa-survey-web"
+    dashboard_api    = "sa-dashboard-api"
+    daily_batch      = "sa-daily-batch"
+    summary_delivery = "sa-summary-delivery" # competitive-daily-summary: infra/modules/delivery-job
   }
 }

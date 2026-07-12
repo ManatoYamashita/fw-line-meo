@@ -100,6 +100,22 @@ module "batch_job" {
   depends_on = [module.project_services]
 }
 
+# competitive-daily-summary: TS 配信ジョブ（毎時 HH:00 JST・design.md「infra/delivery-job」）
+module "delivery_job" {
+  source                              = "../../modules/delivery-job"
+  project_id                          = var.project_id
+  region                              = var.region
+  db_instance_name                    = module.database.instance_name
+  db_connection_name                  = module.database.connection_name
+  db_name                             = module.database.database_name
+  line_channel_secret_id              = module.secrets.secret_ids["line-channel-secret"]
+  line_channel_access_token_secret_id = module.secrets.secret_ids["line-channel-access-token"]
+  line_channel_id                     = var.line_channel_id
+  liff_url                            = var.liff_url
+
+  depends_on = [module.project_services]
+}
+
 # --- CI 認証・ガードレール（実行系の SA / Job を参照） ---
 module "cicd_wif" {
   source            = "../../modules/cicd-wif"
@@ -110,6 +126,7 @@ module "cicd_wif" {
   runtime_service_account_emails = concat(
     values(module.run_services.service_account_emails),
     [module.batch_job.job_service_account_email],
+    [module.delivery_job.job_service_account_email],
   )
 
   depends_on = [module.project_services]

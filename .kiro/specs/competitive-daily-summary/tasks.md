@@ -130,7 +130,7 @@
   - _Requirements: 4.1, 4.2, 4.4_
 
 - [ ] 6. Integration: インフラ配線と実体化
-- [ ] 6.1 配信ジョブのインフラモジュールを新設する
+- [x] 6.1 配信ジョブのインフラモジュールを新設する
   - 既存バッチジョブモジュールのパターンで、TS 配信 Job・毎時 Scheduler（JST）・専用 SA・LINE チャネルトークンの accessor・IAM DB ユーザーを co-locate し、root へ配線する
   - grants.sql に新テーブルへの GRANT（Go バッチ user・配信 user・閲覧 user）を追記する
   - 観察可能な完了: terraform validate/plan が成功し plan に Job・Scheduler・accessor が現れる。かつローカル postgres で grants.sql を適用し、Go バッチ user が daily_summaries に INSERT 可・配信 user が summary_deliveries に INSERT 可であることを確認する
@@ -176,3 +176,4 @@
 - task 3.6 の初回レビューは REJECTED（テストが旧stub文字列の不在のみを確認しfalse green リスクあり）。cloudsqlconn由来の型エラー（errtype.RefreshError等）をerrors.Asで積極確認するよう修復し2回目レビューでAPPROVED。実装（db.go/main.go）自体は初回から正しく、テストのみの問題だった。
 - task 3.6 レビューでさらに発見: `infra/modules/batch-job/main.tf` に `DB_IAM_USER`・`DB_NAME` env が未配線（`CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみ）。task 6.3 のスコープに追記済み。
 - **task 5.1 で発見（設計レベルの既知の制約）**: `four-tier-data-model` の1オーナー:N店舗仕様と、本 spec の LIFF URL 契約（storeId 非包含・IDOR対策）が緊張関係にある。複数店舗オーナーは `AMBIGUOUS_STORE` により詳細画面を解決できない（安全側フェイル）。design.md の Open Questions / Risks・API Contract に既知の制約として明記し、task 5.2 は AMBIGUOUS_STORE を 404 として扱う。第2フェーズで per-store 署名付きトークン方式の再設計が必要。
+- **task 6.1 で発見（非ブロッキング follow-up 2件）**: (1) `line-channel-access-token` の accessor は design.md の指示通り delivery-job SA へ付与したが、実装（line.ts）は Stateless client_credentials 発行方式のためこの secret を消費しない未使用grant。害はないが design.md の記述と実装の乖離として残っている。(2) `infra/README.md` の runbook 例（gcp-infra-foundation task 4.4 由来・本specより前）が migration 0004 を含んでおらず、記載通りに実行すると本specのgrants.sqlが失敗する。両者とも6.1のスコープ外（前者はdesign.md追記、後者はinfra/README.md修正）。task 6.2 実施時に合わせて対応するのが効率的。
