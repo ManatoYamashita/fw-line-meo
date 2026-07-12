@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 
@@ -80,22 +79,14 @@ func main() {
 
 // buildPool は config.Config から実行時の DB プールを構築する。
 //
-// DBModeDatabaseURL（ローカル/テスト。native postgres の unix socket も可）は
-// repo.NewPool にそのまま委ねる。
-//
-// DBModeCloudSQLIAM（本番の Cloud SQL IAM 認証・cloudsql-go-connector によるダイヤラ配線）は
-// 本タスクの境界では未配線。config.go・repo/db.go の両コメントが「実際のダイヤラ配線は
-// 別タスクの責務」とだけ記し実装元を確定していなかったため、本関数で明確なエラーとして
-// 停止させる（無断で新規外部依存 cloud.google.com/go/cloudsqlconn を追加しない — 実配線は
-// tasks.md task 6.x「各イメージの push と既設ジョブの実体化手順を確立する」の境界で
-// 改めて設計・実装すべき判断とする。CONCERNS 参照）。
+// DBModeDatabaseURL（ローカル/テスト。native postgres の unix socket も可）・
+// DBModeCloudSQLIAM（本番の Cloud SQL IAM 認証・cloudsqlconn によるダイヤラ配線、
+// task 3.6）のいずれも repo.NewPool に委ねる。両モードの実配線は repo 層（唯一の DB
+// アクセス点）に集約し、本関数は cfg.DBMode の分岐を repo に委譲するだけの薄い配線に留める。
 func buildPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 	switch cfg.DBMode {
-	case config.DBModeDatabaseURL:
+	case config.DBModeDatabaseURL, config.DBModeCloudSQLIAM:
 		return repo.NewPool(ctx, cfg)
-	case config.DBModeCloudSQLIAM:
-		return nil, fmt.Errorf("daily-batch: Cloud SQL IAM dialer wiring not yet implemented (mode=%s); "+
-			"use DATABASE_URL for local/staging runs until task 6.x wires the production connector", cfg.DBMode)
 	default:
 		return nil, errors.New("daily-batch: unknown DB mode")
 	}

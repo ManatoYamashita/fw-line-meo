@@ -75,7 +75,7 @@
   - 観察可能な完了: フェイク Places＋実 postgres の一気通貫実行で snapshots/summaries が生成され、再実行しても行数が増えない
   - _Requirements: 1.5, 2.1, 2.5, 2.6, 2.7, 5.1, 5.2_
 
-- [ ] 3.6 Cloud SQL IAM ダイヤラを配線する
+- [x] 3.6 Cloud SQL IAM ダイヤラを配線する
   - **背景（task 3.5 レビューで発見）**: `config.go`(2.1)→`repo/db.go`(3.3)→`cmd/daily-batch/main.go`(3.5) の3タスクにわたり Cloud SQL IAM 接続の実配線が「次のタスクへ」と先送りされ続けた結果、どのタスクにも属さない未実装のまま残った。実 GCP の `infra/modules/batch-job` は `CLOUDSQL_CONNECTION_NAME` を配線しており `DATABASE_URL` を渡さないため、現状の Go バイナリは `DBModeCloudSQLIAM` で起動できず即エラー終了する。このままでは task 6.3（daily-batch Job の Go 実体化）が実 GCP で必ず失敗する。
   - `go/internal/repo/db.go` に Cloud SQL Go Connector（`cloud.google.com/go/cloudsqlconn`、公式ライブラリ）を用いた IAM 認証ダイヤラを実装し、`DBModeCloudSQLIAM` で `pgxpool.Pool` を確立できるようにする（`config.go` が既に読み取っている `CLOUDSQL_CONNECTION_NAME`/`DB_IAM_USER`/`DB_NAME` を使用）
   - `go/cmd/daily-batch/main.go` の `buildPool` から両モード（DATABASE_URL・Cloud SQL IAM）を実際に配線する
@@ -143,8 +143,9 @@
 
 - [ ] 6.3 各イメージの push と既設ジョブの実体化手順を確立する
   - Go バッチ・配信ジョブ・詳細閲覧の各イメージを Artifact Registry へ push する手順（スクリプト or CI）を確立し、既設 daily-batch Job（placeholder・ignore_changes[image]）を Go 実体イメージへ更新する apply 外の更新手順を runbook 化して実行する
-  - 観察可能な完了: 3 イメージが registry に存在し、daily-batch Job の実行が Go 実体で成功する（実行サマリーログが出る）
-  - _Depends: 3.5, 4.4, 5.3, 6.1, 6.2_
+  - **task 3.6 レビューで発見**: `infra/modules/batch-job/main.tf` は daily-batch Job に `CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみを配線しており、Go 側 `config.Load()` が Cloud SQL IAM モードで必須とする `DB_IAM_USER`・`DB_NAME` が未配線。このままでは Go バイナリは env 読取の時点で起動失敗する。`DB_IAM_USER` は `google_sql_user.job_iam.name`（`trimsuffix(google_service_account.job.email, ".gserviceaccount.com")`）から、`DB_NAME` は database モジュールの DB 名から導出し、Job テンプレートの env に追加すること
+  - 観察可能な完了: 3 イメージが registry に存在し、daily-batch Job の実行が Go 実体で成功する（実行サマリーログが出る）。Job の env に `DB_IAM_USER`・`DB_NAME`・`CLOUDSQL_CONNECTION_NAME` が揃っていることを terraform plan で確認する
+  - _Depends: 3.5, 3.6, 4.4, 5.3, 6.1, 6.2_
   - _Requirements: 2.1, 3.1_
 
 - [ ] 7. Validation: 横断検証
@@ -171,3 +172,5 @@
 - `stores.category_code` → Places `primaryType` のマッピングは既存コードに無かったため task 3.4 で新設した（`go/internal/competitor/extract.go` の `categoryToPrimaryType`）。seeded 全11カテゴリを網羅、Table A に対応語が無い一部（izakaya/washoku/curry→japanese_restaurant, yakiniku→barbecue_restaurant）は近似。より正確なマッピングが必要になった場合はオンボーディング時に実 primaryType を取得する方式への変更を検討。
 - rank_prev の比較集合は「今日成功取得した競合のうち、昨日分のスナップショットが存在するもの」の交差を採用（同日churnした競合は今日・昨日どちらの比較集合からも除外）。design.md に厳密な規定が無いための判断。同日churn時のrank_prevテストは未整備（follow-up）。
 - タスク3.6を追加した理由: Cloud SQL IAM 接続の実配線が config.go(2.1)→repo/db.go(3.3)→main.go(3.5) と3タスクにわたり先送りされ、誰も実装しないまま残っていたため。実GCPのbatch-jobモジュールはCLOUDSQL_CONNECTION_NAMEのみ配線しており、このままではtask 6.3が実GCPで起動失敗する。
+- task 3.6 の初回レビューは REJECTED（テストが旧stub文字列の不在のみを確認しfalse green リスクあり）。cloudsqlconn由来の型エラー（errtype.RefreshError等）をerrors.Asで積極確認するよう修復し2回目レビューでAPPROVED。実装（db.go/main.go）自体は初回から正しく、テストのみの問題だった。
+- task 3.6 レビューでさらに発見: `infra/modules/batch-job/main.tf` に `DB_IAM_USER`・`DB_NAME` env が未配線（`CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみ）。task 6.3 のスコープに追記済み。
