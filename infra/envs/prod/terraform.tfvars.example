@@ -1,7 +1,7 @@
 # gcp-infra-foundation ルート変数のサンプル
 # 実ファイルは terraform.tfvars にコピーして値を埋める（*.tfvars は gitignore 対象）。
 
-project_id         = "fwlm"
+project_id         = "gen-fw-line-meo"
 region             = "asia-northeast1"
 billing_account_id = "000000-000000-000000" # 実際の請求先アカウント ID に置換
 budget_amount_jpy  = 10000

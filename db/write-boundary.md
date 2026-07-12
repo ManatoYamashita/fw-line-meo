@@ -16,6 +16,9 @@
 | `survey_rating_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
+| `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
+| `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
+| `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
 | `competitors` | Go 日次バッチ層 | Places API による競合探索・churn 更新 |
 | `rating_snapshots` | Go 日次バッチ層 | Places API による毎朝の評価/順位スナップショット |
 | `categories` | マイグレーション seed | 共有定数 SoT（`0002`）・実行時は両層 read のみ |

@@ -57,3 +57,20 @@ variable "survey_base_url" {
   type        = string
   default     = ""
 }
+
+# --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---
+
+variable "line_channel_id" {
+  description = "LINE チャネル ID（line-webhook の LINE_CHANNEL_ID env・非秘匿）。"
+  type        = string
+  default     = ""
+}
+
+variable "line_richmenu_completed_id" {
+  description = <<-EOT
+    完了後リッチメニューの richMenuId（line-webhook の LINE_RICHMENU_COMPLETED_ID env）。
+    `setup-rich-menus.ts` を実チャネルに対して実行した後に得られる値を設定する。
+  EOT
+  type        = string
+  default     = ""
+}

@@ -57,12 +57,16 @@ module "run_services" {
 
   # secret id は各サービスの secret_env が保持（別途 secret_ids 変数は持たない）
   services = {
-    "webhook" = {
+    "line-webhook" = {
       public         = true
       needs_cloudsql = true
       secret_env = {
-        LINE_CHANNEL_SECRET       = module.secrets.secret_ids["line-channel-secret"]
-        LINE_CHANNEL_ACCESS_TOKEN = module.secrets.secret_ids["line-channel-access-token"]
+        LINE_CHANNEL_SECRET = module.secrets.secret_ids["line-channel-secret"]
+        PLACES_API_KEY      = module.secrets.secret_ids["places-api-key"]
+      }
+      env = {
+        LINE_CHANNEL_ID            = var.line_channel_id
+        LINE_RICHMENU_COMPLETED_ID = var.line_richmenu_completed_id
       }
     }
     "survey-web" = {

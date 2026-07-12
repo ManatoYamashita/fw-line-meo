@@ -75,3 +75,59 @@ export interface SurveyAspectTallyRow {
   aspect_code: string;
   count: number;
 }
+
+// db/migrations/0003_line_onboarding.sql の DDL に厳密一致する列挙・行型。
+// LINE オンボーディング（line-onboarding spec）が書込責任を持つ 3 表を対象とする。
+
+// --- 会話段階 ENUM（0003 冒頭の CREATE TYPE と 1:1）---
+export type OnboardingStage =
+  | 'await_invite_code'
+  | 'await_store_name'
+  | 'await_confirmation'
+  | 'completed';
+
+// Google Places 由来の店舗候補（onboarding_sessions.candidates jsonb の要素型）。
+// stores テーブルには address/types の格納列が無いため、確定時は name/lat/lng/place_id のみ永続化する。
+export interface StoreCandidate {
+  placeId: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  types: readonly string[];
+}
+
+export interface AgencyInviteCodeRow {
+  id: string;
+  agency_id: string;
+  code: string;
+  disabled_at: Date | null;
+  created_at: Date;
+}
+
+export interface OnboardingSessionRow {
+  line_user_id: string;
+  stage: OnboardingStage;
+  owner_id: string | null;
+  candidates: StoreCandidate[] | null;
+  selected_index: number | null;
+  invite_failures: number;
+  locked_until: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// updateSession のパッチ入力。未指定キーは既存値を変更しない（undefined=不変・null=NULL に設定）。
+export interface SessionPatch {
+  stage?: OnboardingStage;
+  ownerId?: string | null;
+  candidates?: StoreCandidate[] | null;
+  selectedIndex?: number | null;
+  inviteFailures?: number;
+  lockedUntil?: Date | null;
+}
+
+export interface WebhookEventRow {
+  webhook_event_id: string;
+  received_at: Date;
+}

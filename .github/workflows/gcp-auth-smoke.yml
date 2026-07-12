@@ -3,7 +3,7 @@
 # Direct WIF の疎通確認のみ。service_account 入力なし・SA JSON キー不使用。
 # 事前に GitHub リポジトリ変数を設定:
 #   vars.WIF_PROVIDER   = terraform output の wif_provider_name
-#   vars.GCP_PROJECT_ID = fwlm
+#   vars.GCP_PROJECT_ID = gen-fw-line-meo
 # per-app のビルド/デプロイは各アプリ spec がこのワークフローを雛形に追加する。
 # CI デプロイ契約: イメージ更新のみ（gcloud run services/jobs update --image）。
 # 構成変更は Terraform 専権。
