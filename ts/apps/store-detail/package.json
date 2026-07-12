@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@line/liff": "^2.29.1",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
