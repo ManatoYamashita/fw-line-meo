@@ -114,7 +114,7 @@
   - _Requirements: 4.1, 4.2_
   - _Boundary: store-detail/liff-auth_
 
-- [ ] 5.2 詳細データの読取 API を実装する
+- [x] 5.2 詳細データの読取 API を実装する
   - 認可ライブラリを組み込んだ読取専用 API として、当日サマリー・自店/競合の指標・直近 30 日の推移を返し、競合 0 店では自店のみ返す
   - 無効トークン→401・店舗未特定→404 のルート挙動を含めて実装する（ルートの所有は本タスク）
   - **task 5.1 で発見**: `resolveOwnerStore`（liff-auth）は confirmed 店舗が複数（1オーナー:N店舗）の場合 `AMBIGUOUS_STORE` を返す。design.md の API Contract 更新に従い、これも 404 として扱う（店舗未特定と同じ扱い・詳細は design.md「既知の制約」参照。誤った店舗の情報を返さないことを優先する）
