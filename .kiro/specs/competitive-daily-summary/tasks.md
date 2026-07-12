@@ -57,7 +57,7 @@
   - _Requirements: 1.3, 2.4, 3.5, 3.7_
   - _Boundary: summary/compute_
 
-- [ ] 3.3 (P) Go リポジトリ層を実装する
+- [x] 3.3 (P) Go リポジトリ層を実装する
   - 対象店舗・競合の読取、競合の固定と無効化（active=false・履歴保持）、スナップショットとサマリーの同日再実行安全な書込、30日超のパージを実装する
   - 観察可能な完了: 実 postgres 相手に同日 2 回書込で行が重複せず、パージが 30 日境界で正しく削除するテストが通る
   - _Requirements: 1.5, 2.3, 2.6_
@@ -159,3 +159,4 @@
 - `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
 - go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。
 - `summary/compute.Rank` は rank_prev を算出しない（design.md の Service Interface に rank_prev 専用関数が無いため）。task 3.3/3.5 の実装者は前日の active 競合集合（self含む）を用意し、`Rank` を再適用して rank_prev を得ること。
+- go.mod の `go` ディレクティブは `go mod tidy` により pgx v5.10.0 の要求で 1.24→1.25.0 に自動昇格した（design.md「Go 1.24+」の範囲内）。CI/デプロイイメージが 1.24.x 固定の場合は task 6.x で toolchain バージョンの確認が必要。
