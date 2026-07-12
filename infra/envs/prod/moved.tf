@@ -49,3 +49,14 @@ moved {
   from = module.run_services.google_project_iam_member.cloudsql["webhook.roles/cloudsql.instanceUser"]
   to   = module.run_services.google_project_iam_member.cloudsql["line-webhook.roles/cloudsql.instanceUser"]
 }
+
+# cicd_wif.act_as は SA の email 文字列そのものを for_each キーに使う
+# （runtime_service_account_emails = concat(values(run_services.service_account_emails), ...)）。
+# SA の account_id リネームで email 自体が変わるため、このキーも別物になる。
+# moved ブロックのインデックスは静的リテラルのみ許可されるため（変数式・補間不可）、
+# 本プロジェクトが単一 GCP プロジェクト運用（dev/prod 分離なし）であることを踏まえ、
+# 実プロジェクト ID を直書きする。
+moved {
+  from = module.cicd_wif.google_service_account_iam_member.act_as["sa-webhook@gen-fw-line-meo.iam.gserviceaccount.com"]
+  to   = module.cicd_wif.google_service_account_iam_member.act_as["sa-line-webhook@gen-fw-line-meo.iam.gserviceaccount.com"]
+}
