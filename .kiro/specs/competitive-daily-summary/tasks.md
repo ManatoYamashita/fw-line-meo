@@ -8,7 +8,7 @@
   - 観察可能な完了: `make db-migrate` と `make db-test` がクリーン環境で成功する
   - _Requirements: 2.3, 2.6, 3.2, 3.9_
 
-- [ ] 1.2 書込境界と ERD の文書を新テーブルへ拡張する
+- [x] 1.2 書込境界と ERD の文書を新テーブルへ拡張する
   - daily_summaries=Go・summary_deliveries=TypeScript の単一所有を write-boundary.md に明記し、ERD.md に関係を追記する
   - 観察可能な完了: `make db-verify-docs` が新テーブル込みで成功する
   - _Requirements: 2.3, 3.9_

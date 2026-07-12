@@ -1,6 +1,6 @@
-# ER 図: four-tier-data-model
+# ER 図: four-tier-data-model / competitive-daily-summary
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -20,6 +20,8 @@ erDiagram
     stores ||--o{ survey_aspect_tallies : aggregates
     survey_aspects ||--o{ survey_aspect_tallies : classifies
     stores ||--o{ oauth_tokens : "future authorizes"
+    stores ||--o{ daily_summaries : "summarized as"
+    stores ||--o{ summary_deliveries : "delivered to"
 ```
 
 ## エンティティ一覧（PK / 自然キー / 主な FK）
@@ -38,6 +40,8 @@ erDiagram
 | survey_rating_tallies | id (uuid) | (store_id, period_month, star) unique | store_id → stores | 星評価の匿名集計カウンタ |
 | survey_aspect_tallies | id (uuid) | (store_id, period_month, aspect_code) unique | store_id → stores, aspect_code → survey_aspects | 観点別の匿名集計カウンタ |
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
+| daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
+| summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 配信記録（店舗×日付で一意の「配信事実」・`retry_key` で冪等再送・TS 書込） |
 
 ## 凡例・補足
 
@@ -48,3 +52,5 @@ erDiagram
 - 共有定数 `categories`・`survey_aspects` は seed（`0002`）が唯一の定義（SoT）。
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
+- `daily_summaries`（Go 書込）と `summary_deliveries`（TS 書込）は `competitive-daily-summary` spec で追加。両テーブルとも `stores` に対する `(store_id, summary_date)` 一意制約を持ち、日次バッチ（Go）→ 配信ジョブ（TS）のパイプラインで `daily_summaries` を TS が read → `summary_deliveries` へ結果を書込む、というクロス言語 seam を構成する（`db/write-boundary.md` 参照）。
+- `owners.delivery_hour`（`competitive-daily-summary`・`0004`）: 日次サマリー配信時刻（時単位・デフォルト 7・0-23）。`owners` は既存 TS 境界のため書込責任は変わらず TS。
