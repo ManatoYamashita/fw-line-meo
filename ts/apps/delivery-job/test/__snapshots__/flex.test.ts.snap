@@ -1,0 +1,769 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildDailySummaryFlex > 前日データなし（rank_prev=null, R3.7） > スナップショット: 前日なしの Flex JSON 1`] = `
+{
+  "altText": "【今朝のポジション】近隣4店中2位。★4.2（クチコミ128件）。 新着クチコミ3件あり。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "★4.2（クチコミ 128件）",
+              "type": "text",
+              "weight": "bold",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "新着クチコミ",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "3件の新着クチコミ",
+              "type": "text",
+              "weight": "bold",
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "田中太郎さん ★★★★★「とても美味しかったです。」",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "佐藤花子さん ★★★★「接客が丁寧でした。」",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "鈴木一郎さん ★★★「雰囲気が良かったです。」",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェA",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★4.5",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "+0.3",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェB",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★3.9",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "-0.3",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェC",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★4.0",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "-0.2",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "label": "詳細を見る",
+            "type": "uri",
+            "uri": "https://liff.line.me/1234567890-abcdefgh",
+          },
+          "height": "sm",
+          "style": "primary",
+          "type": "button",
+        },
+        {
+          "align": "center",
+          "color": "#aaaaaa",
+          "size": "xxs",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "xl",
+          "text": "近隣4店中 2位",
+          "type": "text",
+          "weight": "bold",
+        },
+      ],
+      "layout": "vertical",
+      "type": "box",
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`buildDailySummaryFlex > 新着クチコミなし（new_review_count=0, R3.6） > スナップショット: 新着なしの Flex JSON 1`] = `
+{
+  "altText": "【今朝のポジション】近隣4店中2位（前日比↑ 上昇）。★4.2（クチコミ128件）。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "★4.2（クチコミ 128件）",
+              "type": "text",
+              "weight": "bold",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "新着クチコミ",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "新着なし",
+              "type": "text",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェA",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★4.5",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "+0.3",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェB",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★3.9",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "-0.3",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェC",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★4.0",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "-0.2",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "label": "詳細を見る",
+            "type": "uri",
+            "uri": "https://liff.line.me/1234567890-abcdefgh",
+          },
+          "height": "sm",
+          "style": "primary",
+          "type": "button",
+        },
+        {
+          "align": "center",
+          "color": "#aaaaaa",
+          "size": "xxs",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "xl",
+          "text": "近隣4店中 2位",
+          "type": "text",
+          "weight": "bold",
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "前日比: ↑ 上昇",
+          "type": "text",
+        },
+      ],
+      "layout": "vertical",
+      "type": "box",
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`buildDailySummaryFlex > 正常系（前日比あり・新着あり・競合あり） > スナップショット: 正常系の Flex JSON 1`] = `
+{
+  "altText": "【今朝のポジション】近隣4店中2位（前日比↑ 上昇）。★4.2（クチコミ128件）。 新着クチコミ3件あり。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "★4.2（クチコミ 128件）",
+              "type": "text",
+              "weight": "bold",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "新着クチコミ",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "3件の新着クチコミ",
+              "type": "text",
+              "weight": "bold",
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "田中太郎さん ★★★★★「とても美味しかったです。」",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "佐藤花子さん ★★★★「接客が丁寧でした。」",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "鈴木一郎さん ★★★「雰囲気が良かったです。」",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェA",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★4.5",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "+0.3",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェB",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★3.9",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "-0.3",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "flex": 3,
+                  "size": "sm",
+                  "text": "近隣カフェC",
+                  "type": "text",
+                  "wrap": true,
+                },
+                {
+                  "align": "end",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "★4.0",
+                  "type": "text",
+                },
+                {
+                  "align": "end",
+                  "color": "#aaaaaa",
+                  "flex": 1,
+                  "size": "sm",
+                  "text": "-0.2",
+                  "type": "text",
+                },
+              ],
+              "layout": "horizontal",
+              "type": "box",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "label": "詳細を見る",
+            "type": "uri",
+            "uri": "https://liff.line.me/1234567890-abcdefgh",
+          },
+          "height": "sm",
+          "style": "primary",
+          "type": "button",
+        },
+        {
+          "align": "center",
+          "color": "#aaaaaa",
+          "size": "xxs",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "xl",
+          "text": "近隣4店中 2位",
+          "type": "text",
+          "weight": "bold",
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "前日比: ↑ 上昇",
+          "type": "text",
+        },
+      ],
+      "layout": "vertical",
+      "type": "box",
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`buildDailySummaryFlex > 競合なし（competitors=[], status=no_competitors, R1.3） > スナップショット: 競合なしの Flex JSON 1`] = `
+{
+  "altText": "【今朝のポジション】近隣1店中1位。★4.2（クチコミ128件）。 新着クチコミ3件あり。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "★4.2（クチコミ 128件）",
+              "type": "text",
+              "weight": "bold",
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "新着クチコミ",
+              "type": "text",
+            },
+            {
+              "size": "md",
+              "text": "3件の新着クチコミ",
+              "type": "text",
+              "weight": "bold",
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "田中太郎さん ★★★★★「とても美味しかったです。」",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "佐藤花子さん ★★★★「接客が丁寧でした。」",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "鈴木一郎さん ★★★「雰囲気が良かったです。」",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+        {
+          "margin": "md",
+          "type": "separator",
+        },
+        {
+          "contents": [
+            {
+              "color": "#aaaaaa",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "size": "sm",
+              "text": "競合が見つかっていません（自店のみの計測です）",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "label": "詳細を見る",
+            "type": "uri",
+            "uri": "https://liff.line.me/1234567890-abcdefgh",
+          },
+          "height": "sm",
+          "style": "primary",
+          "type": "button",
+        },
+        {
+          "align": "center",
+          "color": "#aaaaaa",
+          "size": "xxs",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+        },
+      ],
+      "layout": "vertical",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "xl",
+          "text": "近隣1店中 1位",
+          "type": "text",
+          "weight": "bold",
+        },
+      ],
+      "layout": "vertical",
+      "type": "box",
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
