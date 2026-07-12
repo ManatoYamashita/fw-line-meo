@@ -118,6 +118,27 @@ describe.skipIf(!process.env.DATABASE_URL)('StoreIdentificationService (DB)', ()
       expect(store?.owner_id).toBe(ownerA.id);
     });
 
+    it('同一オーナーが同一 place_id を2回確定しようとしても（連打・遅延再送）冪等に confirmed を返す（PR #15 レビュー是正）', async () => {
+      const pool = await getPool();
+      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-ident-3' });
+      const service = createStoreIdentificationService({
+        pool,
+        places: stubPlaces({ kind: 'empty' }),
+      });
+
+      const first = await service.confirmStore(owner.id, candidate('ChIJ_confirm_self_dup', '確定店舗C'));
+      expect(first.kind).toBe('confirmed');
+      if (first.kind !== 'confirmed') throw new Error('unreachable');
+
+      const second = await service.confirmStore(owner.id, candidate('ChIJ_confirm_self_dup', '確定店舗C'));
+      expect(second).toEqual({ kind: 'confirmed', storeId: first.storeId });
+
+      // store 行は1件のみ（2回目で新規 INSERT はされていない）。
+      const store = await findStoreByPlaceId(pool, 'ChIJ_confirm_self_dup');
+      expect(store?.id).toBe(first.storeId);
+      expect(store?.owner_id).toBe(owner.id);
+    });
+
     it('原子性: owner_id が存在しない場合、store INSERT ごとロールバックされ何も残らない', async () => {
       const pool = await getPool();
       const service = createStoreIdentificationService({

@@ -1,5 +1,6 @@
 import {
   createConfirmedStore,
+  findStoreByPlaceId,
   markOwnerStoreIdentified,
   type Queryable,
   type StoreCandidate,
@@ -90,6 +91,14 @@ export function createStoreIdentificationService(
       } catch (err) {
         await client.query('ROLLBACK');
         if (isPlaceIdUniqueViolation(err)) {
+          // 連打・遅延再送による自分自身の重複試行は、他オーナー競合と区別する
+          // （区別しないと「既に別のオーナー様の店舗として登録されている」という
+          // 事実と異なる案内を本人に返してしまう）。1回目の呼び出しで owner の
+          // 状態遷移は既に commit 済みのため、再実行はせず冪等に成功扱いする。
+          const existing = await findStoreByPlaceId(client, candidate.placeId);
+          if (existing && existing.owner_id === ownerId) {
+            return { kind: 'confirmed', storeId: existing.id };
+          }
           return { kind: 'place_already_registered' };
         }
         throw err;
