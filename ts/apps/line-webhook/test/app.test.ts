@@ -251,12 +251,12 @@ describe('line-webhook app', () => {
 
     it(
       '並行 POST /webhook: 遅く失敗するリクエストの再試行案内は、その間に完了する別リクエストの' +
-        '成功に巻き込まれず、自分自身の replyToken で送信される（inFlightReplyToken のリクエスト間共有を禁止する回帰テスト）',
+        '成功に巻き込まれず、自分自身の replyToken で送信される（リクエスト間の状態共有が無いことの回帰テスト）',
       async () => {
         // 遅いリクエスト（slow）の会話ハンドラは、速いリクエスト（fast）の処理完了を
-        // 明示的に待ってから失敗する。これにより「fast の成功が inFlightReplyToken を
-        // クリアした“後”に slow が失敗する」という、createApp() スコープ共有バグが
-        // 顕在化する実行順序を、実際の並行 app.request() 呼び出しで確定的に再現する。
+        // 明示的に待ってから失敗する。onEvent はイベントごとに自身の replyToken を
+        // クロージャで直接使い、リクエスト間で共有する状態を持たないため、この実行順序でも
+        // fast の成功が slow の再試行案内を握りつぶすことは構造的に起こり得ないことを確認する。
         let resolveFastDone!: () => void;
         const fastDone = new Promise<void>((resolve) => {
           resolveFastDone = resolve;
@@ -292,9 +292,8 @@ describe('line-webhook app', () => {
         expect(fastRes.status).toBe(200);
         expect(slowRes.status).toBe(200);
 
-        // 修正前のバグ: inFlightReplyToken が createApp() スコープ（アプリ生存期間で1つ）
-        // だと、fast の成功によるクリアが slow の失敗時に観測され、
-        // slow 自身の replyToken を使った再試行案内 reply が silently スキップされる。
+        // fast の成功と slow の失敗は、それぞれの onEvent 呼び出しの中で完結しており
+        // 共有状態を経由しないため、slow 自身の replyToken での再試行案内が確実に送られる。
         expect(messenger.reply).toHaveBeenCalledTimes(1);
         expect(messenger.reply).toHaveBeenCalledWith('reply-slow-fail', [
           buildInternalErrorRetryMessage(),
@@ -303,15 +302,15 @@ describe('line-webhook app', () => {
     );
 
     it(
-      '1リクエスト内の複数イベント: 先行イベントの成功で一旦クリアされた追跡状態が、' +
-        '後続イベントの失敗時に取り違えられず、後続イベント自身の replyToken で再試行案内が送られる',
+      '1リクエスト内の複数イベント: 先行イベントの成功後に後続イベントが失敗しても、' +
+        '取り違えられず後続イベント自身の replyToken で再試行案内が送られる',
       async () => {
         const conversationHandlers: ConversationHandlers = {
           handleEvent: vi.fn(async (event) => {
             if (event.replyToken === 'reply-evt2') {
               throw new Error('boom: second event handler failure');
             }
-            // event1 は正常終了（この時点で追跡状態は一旦クリアされる）。
+            // event1 は正常終了。
           }),
         };
         const messenger = fakeMessenger();
@@ -326,6 +325,63 @@ describe('line-webhook app', () => {
 
         expect(res.status).toBe(200);
         expect(conversationHandlers.handleEvent).toHaveBeenCalledTimes(2);
+        expect(messenger.reply).toHaveBeenCalledTimes(1);
+        expect(messenger.reply).toHaveBeenCalledWith('reply-evt2', [buildInternalErrorRetryMessage()]);
+      },
+    );
+
+    it(
+      '1リクエスト内の複数イベント: 途中（2番目）のイベントが失敗しても、後続（3番目）の' +
+        'イベントは処理が継続され黙って失われない（PR #15 レビュー是正の回帰テスト）',
+      async () => {
+        const conversationHandlers: ConversationHandlers = {
+          handleEvent: vi.fn(async (event) => {
+            if (event.replyToken === 'reply-evt2') {
+              throw new Error('boom: second event handler failure');
+            }
+            // event1・event3 は正常終了。
+          }),
+        };
+        const messenger = fakeMessenger();
+        const logger = fakeLogger();
+        const app = createApp(baseDeps({ conversationHandlers, messenger, logger }));
+
+        const body = JSON.stringify({
+          destination: 'Uxxxx',
+          events: [
+            {
+              type: 'follow',
+              replyToken: 'reply-evt1',
+              source: { type: 'user', userId: 'U1' },
+              webhookEventId: 'evt-1',
+            },
+            {
+              type: 'follow',
+              replyToken: 'reply-evt2',
+              source: { type: 'user', userId: 'U2' },
+              webhookEventId: 'evt-2',
+            },
+            {
+              type: 'follow',
+              replyToken: 'reply-evt3',
+              source: { type: 'user', userId: 'U3' },
+              webhookEventId: 'evt-3',
+            },
+          ],
+        });
+
+        const res = await app.request('/webhook', {
+          method: 'POST',
+          headers: { 'x-line-signature': 'valid-signature' },
+          body,
+        });
+
+        expect(res.status).toBe(200);
+        // 3件とも処理される（2番目の失敗で後続が打ち切られない）。
+        expect(conversationHandlers.handleEvent).toHaveBeenCalledTimes(3);
+        expect(conversationHandlers.handleEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ replyToken: 'reply-evt3' }),
+        );
         expect(messenger.reply).toHaveBeenCalledTimes(1);
         expect(messenger.reply).toHaveBeenCalledWith('reply-evt2', [buildInternalErrorRetryMessage()]);
       },
