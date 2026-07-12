@@ -22,7 +22,7 @@
   - _Requirements: 2.1_
   - _Boundary: Go batch（go/ ツリー全体）_
 
-- [ ] 2.2 (P) 配信ジョブアプリの骨格を新設する
+- [x] 2.2 (P) 配信ジョブアプリの骨格を新設する
   - pnpm workspace に新アプリとして組込み、strict TS・vitest・コンテナイメージ定義を既存アプリの規約で確立する
   - 観察可能な完了: エントリポイントが実行サマリー形式のログ 1 行を出して正常終了し、ビルドとテストが workspace で成功する
   - _Requirements: 3.1_
