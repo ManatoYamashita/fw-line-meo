@@ -20,7 +20,10 @@ RUN pnpm install --frozen-lockfile
 # --- ビルド（@fwlm/db を tsc、store-detail を next build standalone） ---
 FROM base AS build
 WORKDIR /repo
-COPY --from=deps /repo/node_modules ./node_modules
+# deps ステージ全体をコピー（pnpm はパッケージ単位で node_modules を持つため、
+# ルートの node_modules だけでなく packages/db・apps/store-detail 配下の
+# node_modules シンボリックリンクも必要）。
+COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
 RUN pnpm -C apps/store-detail run build

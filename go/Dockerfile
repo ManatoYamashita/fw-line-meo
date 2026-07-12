@@ -3,7 +3,7 @@
 #   docker build -t daily-batch go/
 # 注記: このマシンには docker/apple-container が無いため、本 Dockerfile の実ビルドは CI/デプロイ時に検証する。
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

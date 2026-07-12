@@ -19,6 +19,7 @@ locals {
     "monitoring.googleapis.com",       # Monitoring（バッチ失敗アラート）
     "firebase.googleapis.com",         # Firebase プロジェクト（Identity Platform 前提）
     "places.googleapis.com",           # Places API (New)（競合データ取得）
+    "cloudbuild.googleapis.com",       # Cloud Build（イメージビルド・push、task 6.3）
   ]
 }
 

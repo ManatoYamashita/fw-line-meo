@@ -142,7 +142,7 @@
   - _Requirements: 4.1_
   - _Depends: 6.1_
 
-- [ ] 6.3 各イメージの push と既設ジョブの実体化手順を確立する
+- [x] 6.3 各イメージの push と既設ジョブの実体化手順を確立する
   - Go バッチ・配信ジョブ・詳細閲覧の各イメージを Artifact Registry へ push する手順（スクリプト or CI）を確立し、既設 daily-batch Job（placeholder・ignore_changes[image]）を Go 実体イメージへ更新する apply 外の更新手順を runbook 化して実行する
   - **task 3.6 レビューで発見**: `infra/modules/batch-job/main.tf` は daily-batch Job に `CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみを配線しており、Go 側 `config.Load()` が Cloud SQL IAM モードで必須とする `DB_IAM_USER`・`DB_NAME` が未配線。このままでは Go バイナリは env 読取の時点で起動失敗する。`DB_IAM_USER` は `google_sql_user.job_iam.name`（`trimsuffix(google_service_account.job.email, ".gserviceaccount.com")`）から、`DB_NAME` は database モジュールの DB 名から導出し、Job テンプレートの env に追加すること
   - 観察可能な完了: 3 イメージが registry に存在し、daily-batch Job の実行が Go 実体で成功する（実行サマリーログが出る）。Job の env に `DB_IAM_USER`・`DB_NAME`・`CLOUDSQL_CONNECTION_NAME` が揃っていることを terraform plan で確認する
@@ -176,4 +176,12 @@
 - task 3.6 の初回レビューは REJECTED（テストが旧stub文字列の不在のみを確認しfalse green リスクあり）。cloudsqlconn由来の型エラー（errtype.RefreshError等）をerrors.Asで積極確認するよう修復し2回目レビューでAPPROVED。実装（db.go/main.go）自体は初回から正しく、テストのみの問題だった。
 - task 3.6 レビューでさらに発見: `infra/modules/batch-job/main.tf` に `DB_IAM_USER`・`DB_NAME` env が未配線（`CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみ）。task 6.3 のスコープに追記済み。
 - **task 5.1 で発見（設計レベルの既知の制約）**: `four-tier-data-model` の1オーナー:N店舗仕様と、本 spec の LIFF URL 契約（storeId 非包含・IDOR対策）が緊張関係にある。複数店舗オーナーは `AMBIGUOUS_STORE` により詳細画面を解決できない（安全側フェイル）。design.md の Open Questions / Risks・API Contract に既知の制約として明記し、task 5.2 は AMBIGUOUS_STORE を 404 として扱う。第2フェーズで per-store 署名付きトークン方式の再設計が必要。
+- **task 6.3: 実 GCP デプロイで発見・修正した実ビルド不良4件**（ローカル検証・native postgresテストでは検出できず、Cloud Build での実ビルドで初めて顕在化）:
+  1. `go/Dockerfile` の `golang:1.24-alpine` が `go.mod`（1.25.8・task 3.3/3.6 の pgx/cloudsqlconn 依存で自動昇格）と不整合 → `golang:1.25-alpine` に修正。
+  2. `ts/package.json` に `packageManager` 固定・`pnpm.onlyBuiltDependencies` 未設定 → Docker の `corepack enable` が最新pnpm（11.x）を取得し `[ERR_PNPM_IGNORED_BUILDS]` で `pnpm install --frozen-lockfile` が失敗。`packageManager: "pnpm@10.33.2"`（CI が既に固定していたバージョンと同一）と `onlyBuiltDependencies: ["esbuild","msw"]` を追加。
+  3. `ts/apps/delivery-job/Dockerfile`・`ts/apps/store-detail/Dockerfile` の `build` ステージで `COPY --from=deps /repo/node_modules ./node_modules` がルート node_modules のみコピーし、pnpm がパッケージ単位で作る `packages/db/node_modules`（`pg`/`@google-cloud/cloud-sql-connector` 等の非hoistシンボリックリンク）が欠落 → `COPY --from=deps /repo ./` に変更。
+  4. さらに `delivery-job` の `runner` ステージで `/app` へ再配置した結果、pnpm workspace の相対シンボリックリンク（`apps/delivery-job/node_modules/@fwlm/db -> ../../../../packages/db`）の深さが崩れ実行時 `ERR_MODULE_NOT_FOUND` （tscのビルド時チェックでは検出不可・実行して初めて判明）→ runner ステージも `WORKDIR /repo` を維持し同一相対階層でコピーするよう修正（`CMD` パスも変更）。store-detail は Next.js standalone 出力（実体ファイルに解決済み）のため同種の修正は不要と確認。
+  - また `infra/modules/project-services` に `cloudbuild.googleapis.com` を追加（ローカル docker 不在のため Cloud Build 必須）、`ts/.gcloudignore` を新設（node_modules 除外漏れで 659MB アップロードが発生していた）。
+- **task 6.3: 実インフラの運用上の欠落2件を発見・修正**（コードの変更ではなく実 Cloud SQL への直接対応）: (1) 実 `fwlm-pg` に migration 0004 が未適用だった → Cloud SQL Auth Proxy 経由で適用。(2) `postgres` 管理者パスワードが `db-admin-password` シークレットの値と不一致（gcp-infra-foundation 時からの out-of-band drift）→ パスワードをリセットしシークレットへ新バージョンとして同期。`infra/sql/grants.sql` は `-v project=gen-fw-line-meo` で明示上書きして適用（デフォルトは `fwlm` 固定のプレースホルダ）。
+- **task 6.3 レビューで発見（follow-up・未対応）**: `daily-batch-xpfrj`（2026-07-11 21:00 UTC・placeholder イメージ時代の Scheduler 定時実行）が 1800秒タイムアウトで失敗していた。これは本タスクの実イメージ反映前の既存事象で対応不要だが、次回 06:00 JST の Scheduler 定時実行（v1 の Go 実体イメージに対して）が手動実行と同様にクリーンに完了するか、実運用開始後に確認すること。
 - **task 6.1 で発見（非ブロッキング follow-up 2件）**: (1) `line-channel-access-token` の accessor は design.md の指示通り delivery-job SA へ付与したが、実装（line.ts）は Stateless client_credentials 発行方式のためこの secret を消費しない未使用grant。害はないが design.md の記述と実装の乖離として残っている。(2) `infra/README.md` の runbook 例（gcp-infra-foundation task 4.4 由来・本specより前）が migration 0004 を含んでおらず、記載通りに実行すると本specのgrants.sqlが失敗する。両者とも6.1のスコープ外（前者はdesign.md追記、後者はinfra/README.md修正）。task 6.2 実施時に合わせて対応するのが効率的。
