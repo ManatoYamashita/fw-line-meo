@@ -97,7 +97,7 @@
   - _Requirements: 3.1, 3.8, 3.9_
   - _Boundary: delivery-job/line_
 
-- [ ] 4.3 配信対象抽出と配信記録を実装する
+- [x] 4.3 配信対象抽出と配信記録を実装する
   - 現在時（JST）の配信時刻・当日サマリー有・未配信の対象抽出、retry_key 付き行の事前確保（一意制約衝突は処理済みスキップ）、結果とエラー分類（delivered/failed/skipped_no_summary/quota_exceeded）の記録を実装する
   - 観察可能な完了: テスト DB で同一対象への 2 回実行が 1 通分の記録に収束し、サマリー欠損対象が skip として記録される
   - _Requirements: 3.1, 3.2, 3.8, 3.9, 3.10_
