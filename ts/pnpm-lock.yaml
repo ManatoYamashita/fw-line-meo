@@ -55,6 +55,34 @@ importers:
         specifier: workspace:*
         version: link:../../packages/db
 
+  apps/store-detail:
+    dependencies:
+      '@fwlm/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      next:
+        specifier: ^16
+        version: 16.2.10(@opentelemetry/api@1.9.1)(@playwright/test@1.61.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19
+        version: 19.2.7
+      react-dom:
+        specifier: ^19
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.17)
+      jsdom:
+        specifier: ^25
+        version: 25.0.1
+
   apps/survey-web:
     dependencies:
       '@fwlm/db':
