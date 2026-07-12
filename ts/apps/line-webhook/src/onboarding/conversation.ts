@@ -207,7 +207,12 @@ async function handleInvalidInviteCode(
   event: Extract<InboundEvent, { kind: 'text' }>,
   session: OnboardingSessionRow,
 ): Promise<void> {
-  const nextFailures = session.invite_failures + 1;
+  // ロックが既に期限切れの場合、失敗カウンタを 0 起点で数え直す（ロック時点の
+  // 値のまま計算すると、解除直後の1回目の誤入力で新しい5回分の猶予無しに
+  // 即座に再ロックしてしまうため）。
+  const lockExpired = session.locked_until !== null && session.locked_until.getTime() <= deps.now().getTime();
+  const currentFailures = lockExpired ? 0 : session.invite_failures;
+  const nextFailures = currentFailures + 1;
 
   if (nextFailures >= INVITE_CODE_LOCK_THRESHOLD) {
     // Req 2.3: 連続 5 回目の無効コードでロックする。
@@ -223,6 +228,7 @@ async function handleInvalidInviteCode(
   // Req 2.2: 登録は行わず、失敗カウンタのみ加算して再入力案内を返す。
   await deps.sessions.updateSession(deps.db, event.lineUserId, {
     inviteFailures: nextFailures,
+    ...(lockExpired ? { lockedUntil: null } : {}),
   });
   await deps.messenger.reply(event.replyToken, [buildInvalidInviteCodeMessage()]);
 }

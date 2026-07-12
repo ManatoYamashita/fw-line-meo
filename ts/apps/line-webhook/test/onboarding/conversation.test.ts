@@ -427,6 +427,31 @@ describe('createConversationHandlers', () => {
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { text: string }).text).toContain('停止');
     });
+
+    it(
+      'ロック解除後（locked_until が過去日時）の1回目の誤入力は invite_failures を' +
+        '1にリセットするのみで再ロックしない（PR #15 レビュー是正）',
+      async () => {
+        const expiredLockedUntil = new Date(FIXED_NOW.getTime() - 60 * 1000); // 既に解除済み
+        const session = baseSession({ invite_failures: 5, locked_until: expiredLockedUntil });
+        const { deps, sessionsFake, messenger } = buildDeps({ session, validCodes: {} });
+        const handlers = createConversationHandlers(deps);
+
+        await handlers.handleEvent({
+          kind: 'text',
+          lineUserId: 'U1',
+          replyToken: 'rt-7b',
+          text: 'WRONGCODE',
+        });
+
+        expect(sessionsFake.updateCalls).toHaveLength(1);
+        const patch = sessionsFake.updateCalls[0]!.patch;
+        expect(patch.inviteFailures).toBe(1);
+        expect(patch.lockedUntil).toBeNull();
+        const [message] = messenger.replies[0]?.messages ?? [];
+        expect((message as { text: string }).text).not.toContain('停止');
+      },
+    );
   });
 
   describe('店名検索段階（await_store_name）のテキスト入力', () => {
