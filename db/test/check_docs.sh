@@ -40,8 +40,11 @@ tables=$($PSQL_EXEC -tAq -c "SELECT table_name FROM information_schema.tables WH
 
 # grants.sql の GRANT 文を「コメント除去 → 1 文 1 行」に平坦化し、
 # TS 層 SA / Go 層 SA への DML（INSERT を含む GRANT）文を抽出する。
+# TS 層は複数 SA（line_webhook/survey/dashboard の共有文＋delivery の最小権限文）に
+# DML が分かれるため、いずれかの TS 層 SA への GRANT に現れれば「TS 層に付与済み」とみなす
+# （detail は読取専用で DML を持たないため対象外）。
 grants_flat=$(sed 's/--.*//' "$GRANTS" | tr '\n' ' ' | tr ';' '\n')
-ts_dml=$(printf '%s\n' "$grants_flat" | grep -E 'GRANT[[:space:]]+INSERT' | grep -F ':"line_webhook"' || true)
+ts_dml=$(printf '%s\n' "$grants_flat" | grep -E 'GRANT[[:space:]]+INSERT' | grep -E ':"(line_webhook|survey|dashboard|delivery)"' || true)
 go_dml=$(printf '%s\n' "$grants_flat" | grep -E 'GRANT[[:space:]]+INSERT' | grep -F ':"batch"' || true)
 
 bq='`'; fail=0; n=0
