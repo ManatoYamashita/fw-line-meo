@@ -84,6 +84,17 @@ module "run_services" {
         SURVEY_BASE_URL = var.survey_base_url
       }
     }
+    # competitive-daily-summary: LIFF 詳細閲覧（読取専用・design.md「TS / store-detail」）。
+    # secret を持たない（LIFF_CHANNEL_ID・NEXT_PUBLIC_LIFF_ID は非秘匿の識別子・平文 env で足りる）。
+    "store-detail" = {
+      public         = true
+      needs_cloudsql = true
+      secret_env     = {}
+      env = {
+        LIFF_CHANNEL_ID     = var.liff_channel_id
+        NEXT_PUBLIC_LIFF_ID = var.liff_id
+      }
+    }
   }
 
   depends_on = [module.project_services]

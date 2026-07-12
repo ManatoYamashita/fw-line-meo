@@ -473,6 +473,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - API キー・チャネルトークンは Secret Manager 経由（env 直書き禁止・既存パターン準拠）
 - LIFF 認可は ID トークンのサーバーサイド検証のみを信頼。storeId を URL・リクエストボディから受けない
 - store-detail・delivery-job の SA は最小権限（DB read + 必要 secret accessor のみ。delivery-job のみ LINE token accessor）
+- **既知の乖離（task 6.1 で発見・非ブロッキング follow-up）**: `line-channel-access-token` の accessor は本節の指示通り delivery-job SA へ付与済みだが、現行実装（Stateless token 発行方式・line.ts）はこの secret を env としては消費しない未使用 grant。害はないが実装と本節の記述に乖離がある（対応は任意・infra/modules/delivery-job/variables.tf にも同旨のコメントあり）。
 
 ## Performance & Scalability
 - Places 呼出: 1店舗 6コール/日（R2.7）。ワーカープール既定5・起動ジッター 0–120s（一斉リクエスト回避）

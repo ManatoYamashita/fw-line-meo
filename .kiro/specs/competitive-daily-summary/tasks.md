@@ -136,7 +136,7 @@
   - 観察可能な完了: terraform validate/plan が成功し plan に Job・Scheduler・accessor が現れる。かつローカル postgres で grants.sql を適用し、Go バッチ user が daily_summaries に INSERT 可・配信 user が summary_deliveries に INSERT 可であることを確認する
   - _Requirements: 3.1, 5.1_
 
-- [ ] 6.2 詳細閲覧サービスのインフラを追加する
+- [x] 6.2 詳細閲覧サービスのインフラを追加する
   - run-services へ読取専用サービスを追加し root へ配線する（LIFF チャネル作成は runbook 手順として記録・実施は LINE 基盤と調整）
   - 観察可能な完了: terraform validate/plan が成功し、plan にサービスと SA が現れる
   - _Requirements: 4.1_

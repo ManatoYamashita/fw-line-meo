@@ -12,5 +12,6 @@ locals {
     dashboard_api    = "sa-dashboard-api"
     daily_batch      = "sa-daily-batch"
     summary_delivery = "sa-summary-delivery" # competitive-daily-summary: infra/modules/delivery-job
+    store_detail     = "sa-store-detail"     # competitive-daily-summary: run-services "store-detail" key
   }
 }
