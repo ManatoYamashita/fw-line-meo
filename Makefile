@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf db-dev-setup db-dev-reset ts-dev-survey help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push db-dev-setup db-dev-reset ts-dev-survey help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -68,6 +68,30 @@ ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。実行は CI 前提
 
 ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は CI）
 	pnpm -C $(TS_DIR) --filter @fwlm/survey-web run perf:budget
+
+# Go モジュール（go/ 日次バッチ層・competitive-daily-summary）
+GO_DIR ?= go
+
+go-build: ## Go: go/ 配下の全パッケージをビルド
+	cd $(GO_DIR) && go build ./...
+
+go-test: ## Go: go/ 配下の全パッケージのテストを実行
+	cd $(GO_DIR) && go test ./...
+
+cross-runtime-test: ## VALIDATE: Go バッチ→TS 配信の一気通貫（実postgres・フェイクPlaces/LINE）＋能力不在チェック（task 7.1）
+	db/test/cross_runtime_integration.sh
+
+# コンテナイメージ（competitive-daily-summary / task 6.3）: daily-batch・summary-delivery・store-detail。
+# 上の CONTAINER_CMD（既定 container・db-* 用に export 済み）とは独立に IMAGE_CONTAINER_CMD を持つ
+# （Artifact Registry push は docker 系 CLI + `gcloud auth configure-docker` 前提のため既定 docker）。
+# 例: make image-push IMAGE_CONTAINER_CMD=podman TAG=v0.1.0
+IMAGE_CONTAINER_CMD ?= docker
+
+image-build: ## IMG: 3イメージ（daily-batch/summary-delivery/store-detail）をローカル build のみ（push無し）
+	CONTAINER_CMD=$(IMAGE_CONTAINER_CMD) scripts/push-images.sh --build-only
+
+image-push: ## IMG: 3イメージを build して Artifact Registry へ push（要 gcloud 認証・infra/README.md 参照）
+	CONTAINER_CMD=$(IMAGE_CONTAINER_CMD) scripts/push-images.sh
 
 # ローカル開発・デモ用の常駐DB（fwlm_dev）。with-test-db.sh（CI/テスト用の使い捨てDB）とは別系統。
 # 要 Homebrew: brew install postgresql@16

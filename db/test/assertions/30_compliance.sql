@@ -13,6 +13,7 @@ BEGIN
         'operators','agencies','owners','stores','dashboard_users','categories',
         'competitors','rating_snapshots','survey_aspects','survey_rating_tallies',
         'survey_aspect_tallies','oauth_tokens',
+        'daily_summaries','summary_deliveries',
         'agency_invite_codes','onboarding_sessions','line_webhook_events'
       );
     IF bad IS NOT NULL THEN

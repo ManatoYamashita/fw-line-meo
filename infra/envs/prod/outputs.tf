@@ -24,3 +24,8 @@ output "daily_batch_job_name" {
   description = "日次バッチジョブ名（手動発火・アラート参照用）。"
   value       = module.batch_job.job_name
 }
+
+output "summary_delivery_job_name" {
+  description = "配信ジョブ名（手動発火・アラート参照用）。"
+  value       = module.delivery_job.job_name
+}

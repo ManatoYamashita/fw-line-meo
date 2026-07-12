@@ -88,6 +88,17 @@ module "run_services" {
         SURVEY_BASE_URL = var.survey_base_url
       }
     }
+    # competitive-daily-summary: LIFF 詳細閲覧（読取専用・design.md「TS / store-detail」）。
+    # secret を持たない（LIFF_CHANNEL_ID・NEXT_PUBLIC_LIFF_ID は非秘匿の識別子・平文 env で足りる）。
+    "store-detail" = {
+      public         = true
+      needs_cloudsql = true
+      secret_env     = {}
+      env = {
+        LIFF_CHANNEL_ID     = var.liff_channel_id
+        NEXT_PUBLIC_LIFF_ID = var.liff_id
+      }
+    }
   }
 
   depends_on = [module.project_services]
@@ -99,7 +110,24 @@ module "batch_job" {
   region             = var.region
   db_instance_name   = module.database.instance_name
   db_connection_name = module.database.connection_name
+  db_name            = module.database.database_name
   places_secret_id   = module.secrets.secret_ids["places-api-key"]
+
+  depends_on = [module.project_services]
+}
+
+# competitive-daily-summary: TS 配信ジョブ（毎時 HH:00 JST・design.md「infra/delivery-job」）
+module "delivery_job" {
+  source                              = "../../modules/delivery-job"
+  project_id                          = var.project_id
+  region                              = var.region
+  db_instance_name                    = module.database.instance_name
+  db_connection_name                  = module.database.connection_name
+  db_name                             = module.database.database_name
+  line_channel_secret_id              = module.secrets.secret_ids["line-channel-secret"]
+  line_channel_access_token_secret_id = module.secrets.secret_ids["line-channel-access-token"]
+  line_channel_id                     = var.line_channel_id
+  liff_url                            = var.liff_url
 
   depends_on = [module.project_services]
 }
@@ -114,6 +142,7 @@ module "cicd_wif" {
   runtime_service_account_emails = concat(
     values(module.run_services.service_account_emails),
     [module.batch_job.job_service_account_email],
+    [module.delivery_job.job_service_account_email],
   )
 
   depends_on = [module.project_services]

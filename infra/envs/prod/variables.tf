@@ -61,7 +61,7 @@ variable "survey_base_url" {
 # --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---
 
 variable "line_channel_id" {
-  description = "LINE チャネル ID（line-webhook の LINE_CHANNEL_ID env・非秘匿）。"
+  description = "LINE チャネル ID（line-webhook の LINE_CHANNEL_ID env・非秘匿）。competitive-daily-summary の delivery-job（LINE_CHANNEL_ID env・Stateless token 発行の client_id）も同一値を共有する。"
   type        = string
   default     = ""
 }
@@ -70,6 +70,40 @@ variable "line_richmenu_completed_id" {
   description = <<-EOT
     完了後リッチメニューの richMenuId（line-webhook の LINE_RICHMENU_COMPLETED_ID env）。
     `setup-rich-menus.ts` を実チャネルに対して実行した後に得られる値を設定する。
+  EOT
+  type        = string
+  default     = ""
+}
+
+# --- competitive-daily-summary（機能1）が追加する env（gcp-infra への additive 拡張） ---
+
+variable "liff_url" {
+  description = <<-EOT
+    delivery-job の LIFF_URL env（「詳細を見る」ボタンの遷移先）。
+    LIFF チャネル作成（task 6.2・#6 LINE 基盤と共同の runbook 手順）後にその ID を用いて設定する。
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "liff_channel_id" {
+  description = <<-EOT
+    store-detail の LIFF_CHANNEL_ID env（LINE Login チャネル ID。ID トークン検証
+    `POST /oauth2/v2.1/verify` の client_id・ts/apps/store-detail/lib/liff-auth.ts）。
+    LIFF チャネル作成（task 6.2・#6 LINE 基盤と共同の runbook 手順・
+    Messaging API チャネルと同一プロバイダー必須）後に設定する。既定は空文字列＝未設定
+    （store-detail は起動時に必須 env 欠落を検知しエラーを返す設計・app/api/detail/route.ts）。
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "liff_id" {
+  description = <<-EOT
+    store-detail の NEXT_PUBLIC_LIFF_ID env（`liff.init({ liffId })` に渡す LIFF アプリ ID・
+    ts/apps/store-detail/app/store/page.tsx）。delivery-job の `liff_url`
+    （`https://liff.line.me/{liffId}` の {liffId} 部分）と同一の値を指す。
+    LIFF チャネル作成後に設定する。既定は空文字列＝未設定。
   EOT
   type        = string
   default     = ""
