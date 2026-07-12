@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf db-dev-setup db-dev-reset ts-dev-survey help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -68,3 +68,25 @@ ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。実行は CI 前提
 
 ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は CI）
 	pnpm -C $(TS_DIR) --filter @fwlm/survey-web run perf:budget
+
+# ローカル開発・デモ用の常駐DB（fwlm_dev）。with-test-db.sh（CI/テスト用の使い捨てDB）とは別系統。
+# 要 Homebrew: brew install postgresql@16
+db-dev-setup: ## DEV: 常駐DB(fwlm_dev)を初回セットアップ（既にあれば何もしない・作り直すには db-dev-reset）
+	brew services start postgresql@16 >/dev/null
+	@if psql -lqt | cut -d'|' -f1 | grep -qw fwlm_dev; then \
+		echo "fwlm_dev already exists — skipping (use 'make db-dev-reset' to rebuild)"; \
+	else \
+		createdb fwlm_dev && \
+		for f in db/migrations/*.sql; do psql -d fwlm_dev -v ON_ERROR_STOP=1 -f "$$f" >/dev/null || exit 1; done && \
+		psql -d fwlm_dev -v ON_ERROR_STOP=1 -f $(TS_DIR)/apps/survey-web/e2e/seed.sql >/dev/null && \
+		echo "fwlm_dev created and seeded"; \
+	fi
+
+db-dev-reset: ## DEV: 常駐DB(fwlm_dev)を破棄して db-dev-setup をやり直す
+	brew services start postgresql@16 >/dev/null
+	dropdb --if-exists fwlm_dev
+	$(MAKE) db-dev-setup
+
+ts-dev-survey: ## DEV: 常駐DB(fwlm_dev)で survey-web を起動（要 db-dev-setup 済み・env は .env.local）
+	brew services start postgresql@16 >/dev/null
+	pnpm -C $(TS_DIR) --filter @fwlm/survey-web dev
