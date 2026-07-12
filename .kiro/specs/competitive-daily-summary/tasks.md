@@ -51,7 +51,7 @@
   - _Requirements: 1.1, 2.1, 2.2, 2.7_
   - _Boundary: places/client_
 
-- [ ] 3.2 (P) 順位・前日比・新着差分の計算を純関数で実装する
+- [x] 3.2 (P) 順位・前日比・新着差分の計算を純関数で実装する
   - 星評価降順・同率クチコミ総数降順の順位付け、前日なし時の差分省略、新着件数（総数差分が正）とレビュー抜粋（publishTime 差分・帰属情報付き）を実装する
   - 観察可能な完了: 同率決着・自店単独・前日なし・抜粋取りこぼしの各ケースがユニットテストで通る
   - _Requirements: 1.3, 2.4, 3.5, 3.7_
@@ -158,3 +158,4 @@
 - この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
 - `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
 - go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。
+- `summary/compute.Rank` は rank_prev を算出しない（design.md の Service Interface に rank_prev 専用関数が無いため）。task 3.3/3.5 の実装者は前日の active 競合集合（self含む）を用意し、`Rank` を再適用して rank_prev を得ること。
