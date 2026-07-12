@@ -2,6 +2,7 @@ package batch
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -69,6 +70,46 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			t.Fatalf("seed exec failed (%s): %v", sql, err)
 		}
 	}
+
+	// このテストは固定 UUID を共有 postgres へ直接 INSERT するため、他テストファイル
+	// （特に run_test.go の TestRun_EndToEnd_MixedStores）が unscoped に「全 confirmed 店舗」を
+	// 数える箇所（result.StoresTotal 等）を汚染しないよう、必ず自分で片付ける。全 FK が
+	// ON DELETE RESTRICT（db/migrations/0001_four_tier_baseline.sql・0004_competitive_daily_summary.sql）
+	// のため、子→親の順で明示 DELETE する。t.Cleanup はテスト関数の return 後（Fatal による
+	// 中断時も含む）に必ず実行される（defer と異なり FailNow でスキップされない）。
+	//
+	// 例外: `make cross-runtime-test`（db/test/cross_runtime_steps.sh）は本テストを
+	// `go test -run '^TestCrossRuntimeContract_...$'` として単独実行した直後に、同じ postgres
+	// インスタンスへ TS 側（cross-runtime.e2e.test.ts）を接続し、ここで書いた daily_summaries 行を
+	// 読ませて配信させる（Go の test バイナリが完全終了＝t.Cleanup も全て完了した後に TS が起動する
+	// シェルの逐次実行のため、タイミング自体は安全）。しかし t.Cleanup で行を消してしまうと、
+	// 直後に起動する TS 側が読むべき行そのものが無くなり cross-runtime 契約テストが壊れる。
+	// そのため cross_runtime_steps.sh はこの Go ステップの直前で CROSS_RUNTIME_SKIP_CLEANUP=1 を
+	// export し、本テストはそれを見てクリーンアップを抑制する（プレーンな `go test ./...`／
+	// `make go-test` では未設定のため通常通り片付く）。
+	skipCleanup := os.Getenv("CROSS_RUNTIME_SKIP_CLEANUP") == "1"
+	t.Cleanup(func() {
+		if skipCleanup {
+			t.Logf("cross-runtime cleanup skipped (CROSS_RUNTIME_SKIP_CLEANUP=1): rows left for TS step to read")
+			return
+		}
+		cleanupCtx := context.Background()
+		storeIDs := []string{readyStoreID, nocompStoreID}
+		ownerIDs := []string{readyOwnerID, nocompOwnerID}
+		cleanupExec := func(sql string, args ...any) {
+			if _, err := pool.Exec(cleanupCtx, sql, args...); err != nil {
+				t.Logf("cross-runtime cleanup: %s failed: %v", sql, err)
+			}
+		}
+		cleanupExec(`DELETE FROM daily_summaries WHERE store_id = ANY($1)`, storeIDs)
+		cleanupExec(`DELETE FROM summary_deliveries WHERE store_id = ANY($1)`, storeIDs)
+		cleanupExec(`DELETE FROM rating_snapshots WHERE store_id = ANY($1)`, storeIDs)
+		cleanupExec(`DELETE FROM competitors WHERE store_id = ANY($1)`, storeIDs)
+		cleanupExec(`DELETE FROM stores WHERE id = ANY($1)`, storeIDs)
+		cleanupExec(`DELETE FROM owners WHERE id = ANY($1)`, ownerIDs)
+		cleanupExec(`DELETE FROM agencies WHERE id = $1`, agencyID)
+		cleanupExec(`DELETE FROM operators WHERE id = $1`, operatorID)
+	})
 
 	mustExec(`INSERT INTO operators (id, name) VALUES ($1, $2)`, operatorID, "cross-runtime-operator")
 	mustExec(`INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)`, agencyID, operatorID, "cross-runtime-agency")

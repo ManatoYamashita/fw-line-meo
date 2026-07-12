@@ -21,6 +21,14 @@ echo "=================================================================="
 echo ">> [cross-runtime 1/3] Go: 実バッチオーケストレーション（batch.Run）を"
 echo "   フェイク Places + 実 postgres（${DATABASE_URL}）に対して実行し daily_summaries を書き込む"
 echo "=================================================================="
+# crossruntime_test.go はプレーンな `go test ./...`（make go-test）実行時に他テストファイルの
+# unscoped クエリ（例: run_test.go の TestRun_EndToEnd_MixedStores の StoresTotal 集計）を
+# 汚染しないよう、通常はテスト終了時に自分が seed した行を t.Cleanup で片付ける。しかし本フロー
+# （cross-runtime 契約テスト）では直後の 2/3 ステップ（TS）がまさにその行を読んで配信する必要が
+# あるため、ここで CROSS_RUNTIME_SKIP_CLEANUP=1 を export してクリーンアップを抑制する。
+# Go の test バイナリが完全終了（＝全 t.Cleanup 完了）してから逐次シェルで 2/3 が起動するため、
+# 抑制しても TS 側が読むタイミングとの競合は生じない。
+export CROSS_RUNTIME_SKIP_CLEANUP=1
 (cd "$ROOT/go" && go test ./internal/batch/... -run '^TestCrossRuntimeContract_GoWritesReadableSummaries$' -v)
 
 echo "=================================================================="
