@@ -582,9 +582,43 @@ describe('createConversationHandlers', () => {
       });
 
       expect(sessionsFake.updateCalls).toHaveLength(1);
-      expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('await_store_name');
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.stage).toBe('await_store_name');
+      // Req 3.2: 進捗（候補等）は変更しない。stage 以外のフィールドは patch に含めない。
+      expect(patch.candidates).toBeUndefined();
+      expect(patch.selectedIndex).toBeUndefined();
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { text: string }).text).toContain('見つかりませんでした');
+    });
+
+    it('await_confirmation 中に検索が外部要因で失敗しても stage を await_store_name へ戻す（Req 3.3・3.4）', async () => {
+      const session = baseSession({
+        stage: 'await_confirmation',
+        owner_id: 'owner-1',
+        candidates: storeCandidates(2),
+        selected_index: 0,
+      });
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session,
+        searchOutcome: { kind: 'error' },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-13b',
+        text: 'タイムアウトするお店',
+      });
+
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.stage).toBe('await_store_name');
+      // Req 3.3: 進捗（候補等）は変更しない。stage 以外のフィールドは patch に含めない。
+      expect(patch.candidates).toBeUndefined();
+      expect(patch.selectedIndex).toBeUndefined();
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('エラーが発生しました');
     });
   });
 
