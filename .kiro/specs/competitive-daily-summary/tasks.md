@@ -163,6 +163,13 @@
   - 観察可能な完了: 実 LINE で Flex Message の受信が確認され、summary_deliveries に delivered 行が残る
   - _Depends: 6.3, 7.1_
   - _Requirements: 3.1, 4.1, 5.1_
+  - **実施結果（2026-07-12・実GCP gen-fw-line-meo）**: 技術的に実施可能な範囲はすべて実施・成功。残る「実LINE受信確認」は外部依存によりブロック。
+    - ✅ 実店舗1件を投入（一蘭 渋谷店・実 Place ID `ChIJOWucdKiMGGARbppa4b4CKA8`・category=ramen）
+    - ✅ daily-batch 実行成功（`daily-batch-crm6v`）: 実 Places API で渋谷エリアの実在ラーメン店5件を競合自動抽出、自店指標取得、daily_summaries生成（rank=1/6・rating=4.4・review_count=5149・competitor_count=5）。実行サマリーログ: `extract_ran=1;fetch_ok=1;stores_total=1;summaries_written=1`
+    - ✅ summary-delivery 実行: `LINE_CHANNEL_ID is required` で config 読取段階にて正しく fail-fast（Push試行前に停止、silent dropではなく構造化ログに記録）
+    - ✅ store-detail `/api/detail` の LIFF 起動確認代替（設計文言通りの代替パス）: 実サービスへ直接リクエストし `LIFF_CHANNEL_ID is required` による 500（`store-detail.config_error` としてログ記録、silent dropではない）を確認
+    - ❌ **`_Blocked: LINE基盤（Issue #6）完了待ち_`** — 実LINE受信確認・summary_deliveriesへのdelivered行生成には実LINEチャネル認証情報（`LINE_CHANNEL_ID`/`LINE_CHANNEL_SECRET`）とLIFFチャネル（`LIFF_CHANNEL_ID`/`LIFF_ID`/`LIFF_URL`）が必要。両方とも現時点でSecret Manager/terraform.tfvarsにプレースホルダー値のみ（`line-channel-access-token`は10文字、実トークンではない）。Issue #6（LINE基盤・別セッションで進行中）完了後、運用者は以下を実施すること: (1) LINE Developers コンソールで Messaging API チャネル・LINE Login チャネル（同一プロバイダー）を作成、(2) `line-channel-access-token`/`line-channel-secret` シークレットに実値を投入、(3) `infra/envs/prod/terraform.tfvars` に `line_channel_id`/`liff_channel_id`/`liff_id`/`liff_url` を設定し `terraform apply`、(4) 既存のスモークテスト店舗（owner_id=`a0000000-0000-0000-0000-000000000003`・line_user_id はダミー値のため実LINEユーザーIDへ更新が必要）を使うか新規に実オーナーを友だち登録の上、(5) `gcloud run jobs execute summary-delivery` を実行し実LINE受信・`summary_deliveries` の delivered 行を確認。
+    - 実DBに残したスモークテストデータ（operators/agencies/owners/stores の `a0000000-...` 系4行）はテストと分かる命名（"smoke test"）。delivery_hour=7で有効だが配信ジョブはLINE設定欠如により即fail-fastするため実害なし。Issue #6完了後の実配信テストの足がかりとして意図的に残置。
 
 ## Implementation Notes
 - この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
