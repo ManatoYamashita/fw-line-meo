@@ -58,16 +58,24 @@ variable "survey_base_url" {
   default     = ""
 }
 
-# --- competitive-daily-summary（機能1）が追加する env（gcp-infra への additive 拡張） ---
+# --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---
 
 variable "line_channel_id" {
+  description = "LINE チャネル ID（line-webhook の LINE_CHANNEL_ID env・非秘匿）。competitive-daily-summary の delivery-job（LINE_CHANNEL_ID env・Stateless token 発行の client_id）も同一値を共有する。"
+  type        = string
+  default     = ""
+}
+
+variable "line_richmenu_completed_id" {
   description = <<-EOT
-    LINE チャネル ID（delivery-job の LINE_CHANNEL_ID env・Stateless token 発行の client_id）。
-    デプロイ前に terraform.tfvars で実値を設定する（既定は空文字列＝未設定）。
+    完了後リッチメニューの richMenuId（line-webhook の LINE_RICHMENU_COMPLETED_ID env）。
+    `setup-rich-menus.ts` を実チャネルに対して実行した後に得られる値を設定する。
   EOT
   type        = string
   default     = ""
 }
+
+# --- competitive-daily-summary（機能1）が追加する env（gcp-infra への additive 拡張） ---
 
 variable "liff_url" {
   description = <<-EOT

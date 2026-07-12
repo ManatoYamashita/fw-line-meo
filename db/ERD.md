@@ -22,6 +22,8 @@ erDiagram
     stores ||--o{ oauth_tokens : "future authorizes"
     stores ||--o{ daily_summaries : "summarized as"
     stores ||--o{ summary_deliveries : "delivered to"
+    agencies ||--o{ agency_invite_codes : issues
+    owners ||--o{ onboarding_sessions : "progress of"
 ```
 
 ## エンティティ一覧（PK / 自然キー / 主な FK）
@@ -42,6 +44,9 @@ erDiagram
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
 | daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
 | summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 配信記録（店舗×日付で一意の「配信事実」・`retry_key` で冪等再送・TS 書込） |
+| agency_invite_codes | id (uuid) | code (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
+| onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
+| line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
 
 ## 凡例・補足
 
@@ -54,3 +59,5 @@ erDiagram
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
 - `daily_summaries`（Go 書込）と `summary_deliveries`（TS 書込）は `competitive-daily-summary` spec で追加。両テーブルとも `stores` に対する `(store_id, summary_date)` 一意制約を持ち、日次バッチ（Go）→ 配信ジョブ（TS）のパイプラインで `daily_summaries` を TS が read → `summary_deliveries` へ結果を書込む、というクロス言語 seam を構成する（`db/write-boundary.md` 参照）。
 - `owners.delivery_hour`（`competitive-daily-summary`・`0004`）: 日次サマリー配信時刻（時単位・デフォルト 7・0-23）。`owners` は既存 TS 境界のため書込責任は変わらず TS。
+- `onboarding_sessions`: `stage='await_invite_code' ⇔ owner_id IS NULL`（`ck_session_owner_stage`）。owner 誕生前の LINE ユーザー状態も本表が唯一保持する。
+- `agency_invite_codes`: `code` は代理店ごとに共有・使い回し可能（`disabled_at` が無効化するまで複数オーナーが同一コードで登録できる。Req 2.5）。

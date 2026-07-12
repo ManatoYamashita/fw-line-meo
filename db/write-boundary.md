@@ -17,6 +17,9 @@
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
 | `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`: TS 配信ジョブによる LINE Push 配信記録・`retry_key` で冪等再送（`0004`） |
+| `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
+| `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
+| `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
 | `competitors` | Go 日次バッチ層 | Places API による競合探索・churn 更新 |
 | `rating_snapshots` | Go 日次バッチ層 | Places API による毎朝の評価/順位スナップショット |
 | `daily_summaries` | Go 日次バッチ層 | `competitive-daily-summary`: Go 日次バッチによる順位/前日比算出・確定「配信素材」生成（`0004`） |

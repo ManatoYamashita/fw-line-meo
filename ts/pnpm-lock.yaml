@@ -55,6 +55,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/db
 
+  apps/line-webhook:
+    dependencies:
+      '@fwlm/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@hono/node-server':
+        specifier: ^1
+        version: 1.19.14(hono@4.12.28)
+      '@line/bot-sdk':
+        specifier: ^11
+        version: 11.2.0
+      hono:
+        specifier: ^4
+        version: 4.12.28
+
   apps/store-detail:
     dependencies:
       '@fwlm/db':
@@ -935,6 +950,10 @@ packages:
   '@line/bot-sdk@10.8.0':
     resolution: {integrity: sha512-1Mdpw/WPS3QP6fGiwPRTL27k8MgmMe7rVKCKsItP/kPzogX7a/X1ipQqk/F6RkorP9DNyJIx590hnVUkfBQf3w==}
     engines: {node: '>=20'}
+
+  '@line/bot-sdk@11.2.0':
+    resolution: {integrity: sha512-JKYFa3jaPYWqgI4hnc0ls+7tMmUEgnFF0Jb48kscKcGOO8qh4hddJyiq8/TFqaTWWxXQeSgYd1o5zrHjt6FrpQ==}
+    engines: {node: '>=22'}
 
   '@line/liff@2.29.1':
     resolution: {integrity: sha512-8SM0aWBe0sPDwGSgq1Qod5T9kCMSt7FECXq2cuc5w5LUcJsLhD+N2G4QuwKX62e6iMFHouRhmewew9Sit/TPMw==}
@@ -3926,6 +3945,10 @@ snapshots:
     transitivePeerDependencies:
       - debug
       - supports-color
+
+  '@line/bot-sdk@11.2.0':
+    dependencies:
+      '@types/node': 24.13.3
 
   '@line/liff@2.29.1':
     dependencies:

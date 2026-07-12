@@ -1,0 +1,21 @@
+{
+  "name": "@fwlm/line-webhook",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
+    "build:scripts": "tsc -p tsconfig.scripts.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "lint": "eslint src test scripts",
+    "test": "vitest run --passWithNoTests",
+    "setup-rich-menus": "node dist-scripts/scripts/setup-rich-menus.js"
+  },
+  "dependencies": {
+    "@fwlm/db": "workspace:*",
+    "@hono/node-server": "^1",
+    "@line/bot-sdk": "^11",
+    "hono": "^4"
+  }
+}

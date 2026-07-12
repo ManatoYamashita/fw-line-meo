@@ -5,7 +5,7 @@
 DO $$
 DECLARE bad text;
 BEGIN
-    -- テーブル allowlist: public の BASE TABLE は既知 12 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
+    -- テーブル allowlist: public の BASE TABLE は既知 15 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
     SELECT string_agg(table_name, ', ') INTO bad
     FROM information_schema.tables
     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -13,7 +13,8 @@ BEGIN
         'operators','agencies','owners','stores','dashboard_users','categories',
         'competitors','rating_snapshots','survey_aspects','survey_rating_tallies',
         'survey_aspect_tallies','oauth_tokens',
-        'daily_summaries','summary_deliveries'
+        'daily_summaries','summary_deliveries',
+        'agency_invite_codes','onboarding_sessions','line_webhook_events'
       );
     IF bad IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: allowlist 外のテーブル（顧客/個別回答の疑い・要レビュー）: %', bad;

@@ -1,5 +1,8 @@
 import type { Queryable } from './pool.js';
-import type { PlaceStatus } from './types.js';
+import type { PlaceStatus, StoreRow } from './types.js';
+
+const STORE_COLUMNS =
+  'id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at';
 
 // アンケート表示に必要な最小の店舗情報。
 export interface SurveyStore {
@@ -70,4 +73,52 @@ export async function findStoreWithAgency(
     ownerId: row.owner_id,
     agencyId: row.agency_id,
   };
+}
+
+export interface CreateConfirmedStoreInput {
+  ownerId: string;
+  placeId: string;
+  name: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  categoryCode?: string | null;
+}
+
+/**
+ * 店舗確定オンボーディング（line-onboarding spec）が候補確定時に呼ぶ。place_status='confirmed'・
+ * place_id 設定済みで作成する（既存 CHECK `ck_place_confirmed` を満たす。Req 4.2）。
+ * stores テーブルに address/types の格納列は無いため、StoreCandidate のうち name/lat/lng/place_id のみ永続化する。
+ */
+export async function createConfirmedStore(
+  db: Queryable,
+  input: CreateConfirmedStoreInput,
+): Promise<StoreRow> {
+  const res = await db.query<StoreRow>(
+    `INSERT INTO stores (owner_id, category_code, name, latitude, longitude, place_id, place_status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'confirmed')
+     RETURNING ${STORE_COLUMNS}`,
+    [
+      input.ownerId,
+      input.categoryCode ?? null,
+      input.name,
+      input.latitude ?? null,
+      input.longitude ?? null,
+      input.placeId,
+    ],
+  );
+  const row = res.rows[0];
+  if (!row) throw new Error('createConfirmedStore: insert did not return a row');
+  return row;
+}
+
+/**
+ * place_id で既存店舗を検索する。既に他オーナーの店舗として登録済みかどうかの判定に使う
+ * （Req 4.4: 登録済み Place は確定拒否）。未登録は null。
+ */
+export async function findStoreByPlaceId(db: Queryable, placeId: string): Promise<StoreRow | null> {
+  const res = await db.query<StoreRow>(
+    `SELECT ${STORE_COLUMNS} FROM stores WHERE place_id = $1`,
+    [placeId],
+  );
+  return res.rows[0] ?? null;
 }
