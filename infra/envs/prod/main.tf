@@ -106,6 +106,7 @@ module "batch_job" {
   region             = var.region
   db_instance_name   = module.database.instance_name
   db_connection_name = module.database.connection_name
+  db_name            = module.database.database_name
   places_secret_id   = module.secrets.secret_ids["places-api-key"]
 
   depends_on = [module.project_services]

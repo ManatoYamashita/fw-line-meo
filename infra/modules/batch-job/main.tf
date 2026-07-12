@@ -53,6 +53,18 @@ resource "google_cloud_run_v2_job" "batch" {
           name  = "CLOUDSQL_CONNECTION_NAME"
           value = var.db_connection_name
         }
+
+        # task 3.6/6.3 レビューで発見: config.Load() が DBModeCloudSQLIAM で必須とする
+        # DB_IAM_USER・DB_NAME が未配線だった（delivery-job モジュールの配線パターンを踏襲）。
+        env {
+          name  = "DB_NAME"
+          value = var.db_name
+        }
+
+        env {
+          name  = "DB_IAM_USER"
+          value = trimsuffix(google_service_account.job.email, ".gserviceaccount.com")
+        }
       }
     }
   }

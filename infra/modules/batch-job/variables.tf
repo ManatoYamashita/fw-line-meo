@@ -25,6 +25,16 @@ variable "db_connection_name" {
   type        = string
 }
 
+variable "db_name" {
+  description = <<-EOT
+    アプリ用論理データベース名（env DB_NAME 用・database output）。
+    task 3.6/6.3 レビューで発見: config.Load() が DBModeCloudSQLIAM で必須とする DB_IAM_USER・DB_NAME が
+    未配線のまま残っており Go バイナリが起動時に fail-fast していた。delivery-job モジュールと同じ3値
+    （CLOUDSQL_CONNECTION_NAME・DB_NAME・DB_IAM_USER）を揃える。
+  EOT
+  type        = string
+}
+
 variable "places_secret_id" {
   description = "Places API キーの Secret Manager secret id（secrets output）。"
   type        = string

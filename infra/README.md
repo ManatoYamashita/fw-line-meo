@@ -118,3 +118,76 @@ gcloud sql databases create fwlm_staging --instance=fwlm-pg --project=fwlm
   make db-verify-docs
   ```
 - クラウド上での検証が必要な場合は本番相当の単一環境（および §4 の論理 DB）で行い、恒常的な検証環境を新設しない（Req 8.3）。
+
+---
+
+## 7. コンテナイメージの push と既設 Job/Service の実体化（competitive-daily-summary / task 6.3）
+
+daily-batch Job・summary-delivery Job・store-detail Service はいずれも `lifecycle { ignore_changes = [image] }`（§5 の CI デプロイ契約と同じ理由）でプレースホルダイメージ（`us-docker.pkg.dev/cloudrun/container/hello`）のまま Terraform 管理外に置かれている。実イメージへの反映は **`terraform apply` の外** で行う手動（または CI）手順であり、以下がその単一の手順書。
+
+### 7-0. 前提
+
+- **既知のブロッカー**: `infra/modules/batch-job/main.tf` は現状 `CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみを Job env に配線しており、Go 側 `config.Load()` が Cloud SQL IAM モードで必須とする `DB_IAM_USER`・`DB_NAME` が未配線（task 3.6/6.3 レビューで発見・delivery-job モジュールは同じ配線漏れを踏まないよう最初から3値を揃え済み・`infra/modules/delivery-job/main.tf` 冒頭コメント参照）。**この Terraform 変更（`google_sql_user.job_iam.name` の trimsuffix 導出値を `DB_IAM_USER` に、`database` モジュールの DB 名を `DB_NAME` に追加する）が先に `terraform apply` されていないと、daily-batch は本手順でイメージを実体化しても起動直後に env 読取エラーで即終了する**。本 README の変更はこの Terraform 修正そのものを含まない（別タスクで `infra/modules/batch-job/main.tf` を修正し apply すること）。
+- Artifact Registry: `infra/modules/registry`（既定 `repository_id=fwlm`・`region=asia-northeast1`）。push 先ベース URL は `asia-northeast1-docker.pkg.dev/fwlm/fwlm`（`terraform output` の `registry` module 出力 `repository_url` と一致させる）。
+- 実行者は `roles/artifactregistry.writer`（push）・対象 Job/Service への `roles/run.developer` 相当（`gcloud run jobs update`/`gcloud run services update`）を持つこと。`gcloud auth login`（人間）または WIF（CI・§5 の契約範囲内）で認証済みであること。
+
+### 7-1. 3イメージの build + push
+
+```bash
+# 3イメージまとめて（既定 PROJECT_ID=fwlm REGION=asia-northeast1 REPOSITORY=fwlm・TAG=git短SHA）
+make image-push
+
+# 1イメージだけ・タグを明示する場合
+scripts/push-images.sh --image daily-batch
+TAG=v0.1.0 scripts/push-images.sh
+
+# push せずローカル build のみ確認したい場合（CI の検証ジョブ・動作確認用）
+make image-build
+```
+
+`scripts/push-images.sh` は内部で `gcloud auth configure-docker asia-northeast1-docker.pkg.dev` を実行してから `docker build`/`docker push` する（Dockerfile とビルドコンテキストは `go/Dockerfile`・`ts/apps/delivery-job/Dockerfile`・`ts/apps/store-detail/Dockerfile` 冒頭コメントの規約と一致）。push 完了時に次の 7-2 コマンドをタグ入りで標準出力に表示する。
+
+### 7-2. 既設 Job/Service へのイメージ反映（apply 外・`ignore_changes=[image]` の運用側）
+
+```bash
+IMAGE_BASE=asia-northeast1-docker.pkg.dev/fwlm/fwlm
+TAG=<7-1 で push したタグ>
+
+# daily-batch（Go・毎朝 06:00 JST Scheduler・infra/modules/batch-job）
+gcloud run jobs update daily-batch \
+  --image="${IMAGE_BASE}/daily-batch:${TAG}" \
+  --region=asia-northeast1 --project=fwlm
+
+# summary-delivery（TS 配信ジョブ・毎時 Scheduler・infra/modules/delivery-job）
+gcloud run jobs update summary-delivery \
+  --image="${IMAGE_BASE}/summary-delivery:${TAG}" \
+  --region=asia-northeast1 --project=fwlm
+
+# store-detail（TS LIFF 詳細閲覧・常時公開 Service・infra/modules/run-services）
+gcloud run services update store-detail \
+  --image="${IMAGE_BASE}/store-detail:${TAG}" \
+  --region=asia-northeast1 --project=fwlm
+```
+
+適用後、`make tf-plan` を実行して差分ゼロ（Req 1.3 相当）を確認する。`image` 以外に差分が出た場合はイメージ更新の副作用ではなく別の drift のため原因を切り分けること。
+
+### 7-3. daily-batch の手動実行と実行サマリーログの確認
+
+```bash
+# 手動トリガー（毎朝 06:00 JST の Scheduler を待たずに検証する場合）
+gcloud run jobs execute daily-batch --region=asia-northeast1 --project=fwlm --wait
+
+# 実行結果の一覧（最新の execution を確認）
+gcloud run jobs executions list --job=daily-batch --region=asia-northeast1 --project=fwlm --limit=5
+
+# 実行サマリーログ（go/cmd/daily-batch/main.go が出す構造化ログ 1 行・固定フィールド）を Cloud Logging から取得
+gcloud logging read \
+  'resource.type="cloud_run_job" AND resource.labels.job_name="daily-batch"' \
+  --project=fwlm --limit=20 --format=json
+```
+
+summary-delivery（毎時 Job）も同様に `gcloud run jobs execute summary-delivery ...`／`resource.labels.job_name="summary-delivery"` で確認できる。「成功」の観察可能な証拠は、この実行サマリーログ 1 行が出力され、かつ `daily_summaries`（Go 書込）／`summary_deliveries`（TS 書込）に該当日の行が増えていること（§3 の Auth Proxy 経由 `psql` で確認）。
+
+### 7-4. CI 化する場合
+
+§5 の CI デプロイ契約（イメージ更新のみ・WIF・SA キー不使用）に従う。`scripts/push-images.sh` は CI からもそのまま呼び出せる（`gcloud auth configure-docker` は WIF 認証後であれば動作する）。ワークフロー追加自体は本 spec のスコープ外（§5 に「per-app のビルド/デプロイワークフローは各アプリ spec がこの雛形を基に追加する」と既定のとおり、追加は別タスクで行う）。
