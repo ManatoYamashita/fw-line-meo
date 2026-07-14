@@ -1,0 +1,87 @@
+# 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 の CI 化フォロー）
+#
+# main への push で ts-ci が緑になった後、3イメージ（daily-batch / summary-delivery / store-detail）を
+# build → Artifact Registry へ push → Cloud Run へ image-only 反映する。gcp-auth-smoke.yml の
+# Direct WIF 雛形を踏襲（service_account 入力なし・SA JSON キー不使用）。
+#
+# CI デプロイ契約（gcp-auth-smoke.yml と同一・厳守）:
+#   - イメージ更新のみ（gcloud run services/jobs update --image）。
+#   - 構成変更（env・scaling・resource）は Terraform 専権。gcloud run deploy は使わない。
+#   - terraform state には触れない。
+#
+# 必要な GitHub リポジトリ変数（vars.*・いずれも非秘匿）:
+#   vars.WIF_PROVIDER        = terraform output wif_provider_name
+#   vars.GCP_PROJECT_ID      = gen-fw-line-meo
+#   vars.NEXT_PUBLIC_LIFF_ID = tfvars の liff_id と同値（store-detail の build-arg。Next.js は
+#                              next build 時にクライアントバンドルへインライン化するため、
+#                              Cloud Run のランタイム env では反映されない＝ビルド時に渡す必要がある）
+name: deploy-prod
+
+on:
+  # ts-ci（lint/build/test・E2E・Lighthouse）が main で成功したら反映（テスト赤のまま出荷しない）。
+  workflow_run:
+    workflows: [ts-ci]
+    types: [completed]
+    branches: [main]
+  # 初回検証・手動再デプロイ用。
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # WIF の OIDC トークン発行に必須
+
+jobs:
+  deploy:
+    # workflow_run 経由はテスト成功時のみ。workflow_dispatch（手動）は無条件で実行。
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout（検証済みコミットを反映）
+        uses: actions/checkout@v4
+        with:
+          # workflow_run 時は ts-ci が緑になった正確な commit を反映する。
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: TAG を確定（git 短SHA・push と反映で一致させる）
+        id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud (Direct WIF, no SA key)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build & push 3 images（store-detail は NEXT_PUBLIC_LIFF_ID を build-arg で焼き込み）
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: asia-northeast1
+          REPOSITORY: fwlm
+          TAG: ${{ steps.meta.outputs.tag }}
+          NEXT_PUBLIC_LIFF_ID: ${{ vars.NEXT_PUBLIC_LIFF_ID }}
+        # push-images.sh 内で gcloud auth configure-docker → docker build（build-arg）→ push。
+        # NEXT_PUBLIC_LIFF_ID 未設定なら store-detail の push を hard-fail（空焼き込みを構造的に防止）。
+        run: scripts/push-images.sh
+
+      - name: Reflect images to Cloud Run（image-only update・契約遵守）
+        env:
+          IMAGE_BASE: asia-northeast1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/fwlm
+          TAG: ${{ steps.meta.outputs.tag }}
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs update daily-batch \
+            --image="${IMAGE_BASE}/daily-batch:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run jobs update summary-delivery \
+            --image="${IMAGE_BASE}/summary-delivery:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update store-detail \
+            --image="${IMAGE_BASE}/store-detail:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
