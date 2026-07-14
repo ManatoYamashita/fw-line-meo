@@ -67,6 +67,9 @@ module "run_services" {
       env = {
         LINE_CHANNEL_ID            = var.line_channel_id
         LINE_RICHMENU_COMPLETED_ID = var.line_richmenu_completed_id
+        # Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
+        # store-detail の LIFF アプリ URL（liff_url）と同一値を line-webhook にも配線する。
+        LIFF_STORE_DETAIL_URL = var.liff_url
       }
     }
     "survey-web" = {

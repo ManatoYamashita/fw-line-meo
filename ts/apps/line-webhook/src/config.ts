@@ -5,6 +5,9 @@ export interface LineWebhookConfig {
   lineChannelSecret: string;
   placesApiKey: string;
   lineRichMenuCompletedId: string;
+  // 完了メッセージ（Issue #21）が機能1の詳細（store-detail LIFF）への導線ボタンに使う URL。
+  // 環境依存（本番/検証で liff_id が異なる）のため env から注入する。
+  liffStoreDetailUrl: string;
   port: number;
 }
 
@@ -22,6 +25,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LineWebhookCon
     lineChannelSecret: required(env, 'LINE_CHANNEL_SECRET'),
     placesApiKey: required(env, 'PLACES_API_KEY'),
     lineRichMenuCompletedId: required(env, 'LINE_RICHMENU_COMPLETED_ID'),
+    liffStoreDetailUrl: required(env, 'LIFF_STORE_DETAIL_URL'),
     port: Number(env.PORT ?? '8080'),
   };
 }

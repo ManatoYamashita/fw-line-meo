@@ -33,6 +33,7 @@ import {
 const FIXED_NOW = new Date('2026-07-11T00:00:00.000Z');
 const AGENCY_ID = 'agency-1';
 const RICHMENU_COMPLETED_ID = 'richmenu-completed-1';
+const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 
 function baseSession(overrides: Partial<OnboardingSessionRow> = {}): OnboardingSessionRow {
   return {
@@ -249,6 +250,7 @@ function buildDeps(overrides: {
     messenger,
     now: () => overrides.now ?? FIXED_NOW,
     lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+    liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
   };
 
   return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake };
@@ -751,8 +753,10 @@ describe('createConversationHandlers', () => {
       expect(sessionsFake.updateCalls).toHaveLength(1);
       expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('completed');
 
+      // Issue #21: 完了メッセージは Flex 化されたため altText で内容を確認する。
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect((message as { text: string }).text).toContain('完了');
+      expect((message as { type: string }).type).toBe('flex');
+      expect((message as { altText: string }).altText).toContain('完了');
 
       // Req 6.3: 完了時にリッチメニューを完了後メニューへ即時リンクする。
       expect(linkRichMenuSpy).toHaveBeenCalledTimes(1);
@@ -789,9 +793,9 @@ describe('createConversationHandlers', () => {
 
       // DB 状態遷移（completed）は linkRichMenu の失敗と無関係にすでに確定している。
       expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('completed');
-      // 完了案内 reply はすでに送信済み。
+      // 完了案内 reply はすでに送信済み（Issue #21 で Flex 化）。
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect((message as { text: string }).text).toContain('完了');
+      expect((message as { altText: string }).altText).toContain('完了');
     });
 
     it('確定 → place_already_registered → 運営問い合わせ案内、stage は変更せず、linkRichMenu は呼ばれない（Req 4.4）', async () => {
@@ -817,8 +821,10 @@ describe('createConversationHandlers', () => {
 
       expect(sessionsFake.updateCalls).toHaveLength(0);
       expect(linkRichMenuSpy).not.toHaveBeenCalled();
+      // Issue #21: 登録済エラーは Flex 化され「やり直す」ボタンを持つ。altText で内容を確認する。
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect((message as { text: string }).text).toContain('運営');
+      expect((message as { type: string }).type).toBe('flex');
+      expect((message as { altText: string }).altText).toContain('確定できませんでした');
     });
 
     it('取りやめ（restart）→ await_store_name へ戻り、候補・選択インデックスはクリアされる（Req 4.5）', async () => {

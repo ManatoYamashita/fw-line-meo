@@ -57,6 +57,7 @@ const conversationHandlers = createConversationHandlers({
   messenger: lineMessenger,
   now: () => new Date(),
   lineRichMenuCompletedId: config.lineRichMenuCompletedId,
+  liffStoreDetailUrl: config.liffStoreDetailUrl,
 });
 
 const deps: AppDeps = {

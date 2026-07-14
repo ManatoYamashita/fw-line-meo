@@ -6,6 +6,7 @@ const validEnv = {
   LINE_CHANNEL_SECRET: 'channel-secret',
   PLACES_API_KEY: 'places-key',
   LINE_RICHMENU_COMPLETED_ID: 'richmenu-completed',
+  LIFF_STORE_DETAIL_URL: 'https://liff.line.me/test-liff-id',
 };
 
 function withoutKey(key: keyof typeof validEnv): Record<string, string> {
@@ -22,6 +23,7 @@ describe('loadConfig', () => {
       lineChannelSecret: 'channel-secret',
       placesApiKey: 'places-key',
       lineRichMenuCompletedId: 'richmenu-completed',
+      liffStoreDetailUrl: 'https://liff.line.me/test-liff-id',
       port: 8080,
     });
   });
@@ -47,6 +49,10 @@ describe('loadConfig', () => {
     expect(() => loadConfig(withoutKey('LINE_RICHMENU_COMPLETED_ID'))).toThrow(
       /LINE_RICHMENU_COMPLETED_ID/,
     );
+  });
+
+  it('LIFF_STORE_DETAIL_URL 欠落は明示エラー', () => {
+    expect(() => loadConfig(withoutKey('LIFF_STORE_DETAIL_URL'))).toThrow(/LIFF_STORE_DETAIL_URL/);
   });
 
   it('全 env 欠落は最初に検証した必須項目のエラーを投げる', () => {

@@ -7,10 +7,12 @@ import {
   buildCandidateCarouselMessage,
   buildConfirmationMessage,
   buildCompletionMessage,
+  buildPlaceAlreadyRegisteredMessage,
   type FlexCarouselContents,
   type FlexBubbleContents,
   type FlexBoxComponent,
   type FlexButtonComponent,
+  type FlexPostbackAction,
 } from '../../src/line/messages.js';
 
 // design.md「MessageBuilders」/ research.md 準拠のテスト。
@@ -58,6 +60,15 @@ function findButton(box: FlexBoxComponent, index: number): FlexButtonComponent {
     throw new Error(`expected button at index ${index}`);
   }
   return found;
+}
+
+// button.action は postback|uri の union のため、postback 固有フィールド（data/displayText）に
+// 触れるテストではここで postback へ絞り込む。
+function asPostback(button: FlexButtonComponent): FlexPostbackAction {
+  if (button.action.type !== 'postback') {
+    throw new Error('expected postback action');
+  }
+  return button.action;
 }
 
 describe('buildGreetingMessage', () => {
@@ -157,7 +168,7 @@ describe('buildCandidateCarouselMessage', () => {
     contents.contents.forEach((bubble: FlexBubbleContents, index: number) => {
       const button = findButton(bubble.footer, 0);
       expect(button.action.type).toBe('postback');
-      const decoded = decodePostback(button.action.data);
+      const decoded = decodePostback(asPostback(button).data);
       expect(decoded).toEqual({ kind: 'select_candidate', index });
     });
   });
@@ -171,7 +182,7 @@ describe('buildCandidateCarouselMessage', () => {
       const button = findButton(bubble.footer, 0);
       assertContainsJapanese(button.action.label);
       assertNoObviousEnglishPlaceholder(button.action.label);
-      assertNoObviousEnglishPlaceholder(button.action.displayText);
+      assertNoObviousEnglishPlaceholder(asPostback(button).displayText);
     }
   });
 });
@@ -205,8 +216,8 @@ describe('buildConfirmationMessage', () => {
     const confirmButton = findButton(contents.footer, 0);
     const restartButton = findButton(contents.footer, 1);
 
-    expect(decodePostback(confirmButton.action.data)).toEqual({ kind: 'confirm' });
-    expect(decodePostback(restartButton.action.data)).toEqual({ kind: 'restart' });
+    expect(decodePostback(asPostback(confirmButton).data)).toEqual({ kind: 'confirm' });
+    expect(decodePostback(asPostback(restartButton).data)).toEqual({ kind: 'restart' });
   });
 
   it('ボタンラベルは日本語で英語プレースホルダを含まない', () => {
@@ -222,13 +233,78 @@ describe('buildConfirmationMessage', () => {
 });
 
 describe('buildCompletionMessage', () => {
-  it('text メッセージとして完了案内＋機能1利用可能の旨を返す（Req 4.3）', () => {
-    const message = buildCompletionMessage();
-    expect(message.type).toBe('text');
-    if (message.type !== 'text') throw new Error('unreachable');
-    expect(message.text.length).toBeGreaterThan(0);
-    expect(message.text).toContain('機能1');
-    assertContainsJapanese(message.text);
-    assertNoObviousEnglishPlaceholder(message.text);
+  const LIFF_URL = 'https://liff.line.me/2010693573-NxEVPPoc';
+
+  it('flex メッセージ・altText 必須（非空・400字以内・機能1に言及）を満たす（Req 4.3）', () => {
+    const message = buildCompletionMessage(LIFF_URL);
+    expect(message.type).toBe('flex');
+    if (message.type !== 'flex') throw new Error('unreachable');
+    expect(message.altText.length).toBeGreaterThan(0);
+    expect(message.altText.length).toBeLessThanOrEqual(400);
+    expect(message.altText).toContain('機能1');
+    assertContainsJapanese(message.altText);
+    assertNoObviousEnglishPlaceholder(message.altText);
+  });
+
+  it('本文に完了案内＋機能1利用可能の旨を含む', () => {
+    const message = buildCompletionMessage(LIFF_URL);
+    if (message.type !== 'flex') throw new Error('unreachable');
+    const contents = message.contents as FlexBubbleContents;
+    const joined = contents.body.contents
+      .filter((c): c is Extract<typeof c, { type: 'text' }> => c.type === 'text')
+      .map((t) => t.text)
+      .join('\n');
+    expect(joined).toContain('完了');
+    expect(joined).toContain('機能1');
+    assertContainsJapanese(joined);
+    assertNoObviousEnglishPlaceholder(joined);
+  });
+
+  it('footer に機能1の詳細（store-detail LIFF）への URI 導線ボタンを持つ', () => {
+    const message = buildCompletionMessage(LIFF_URL);
+    if (message.type !== 'flex') throw new Error('unreachable');
+    const contents = message.contents as FlexBubbleContents;
+    const button = findButton(contents.footer, 0);
+    expect(button.action.type).toBe('uri');
+    if (button.action.type !== 'uri') throw new Error('unreachable');
+    expect(button.action.uri).toBe(LIFF_URL);
+    assertContainsJapanese(button.action.label);
+    assertNoObviousEnglishPlaceholder(button.action.label);
+  });
+});
+
+describe('buildPlaceAlreadyRegisteredMessage', () => {
+  it('flex メッセージ・altText 必須（非空・400字以内）を満たす（Req 4.4）', () => {
+    const message = buildPlaceAlreadyRegisteredMessage();
+    expect(message.type).toBe('flex');
+    if (message.type !== 'flex') throw new Error('unreachable');
+    expect(message.altText.length).toBeGreaterThan(0);
+    expect(message.altText.length).toBeLessThanOrEqual(400);
+    assertContainsJapanese(message.altText);
+    assertNoObviousEnglishPlaceholder(message.altText);
+  });
+
+  it('本文に確定不可＋運営問い合わせの案内を含む', () => {
+    const message = buildPlaceAlreadyRegisteredMessage();
+    if (message.type !== 'flex') throw new Error('unreachable');
+    const contents = message.contents as FlexBubbleContents;
+    const joined = contents.body.contents
+      .filter((c): c is Extract<typeof c, { type: 'text' }> => c.type === 'text')
+      .map((t) => t.text)
+      .join('\n');
+    expect(joined).toContain('登録');
+    expect(joined).toContain('運営');
+    assertContainsJapanese(joined);
+    assertNoObviousEnglishPlaceholder(joined);
+  });
+
+  it('footer の「やり直す」ボタンが restart postback を往復復号できる（エラー後の再開導線）', () => {
+    const message = buildPlaceAlreadyRegisteredMessage();
+    if (message.type !== 'flex') throw new Error('unreachable');
+    const contents = message.contents as FlexBubbleContents;
+    const button = findButton(contents.footer, 0);
+    expect(decodePostback(asPostback(button).data)).toEqual({ kind: 'restart' });
+    assertContainsJapanese(button.action.label);
+    assertNoObviousEnglishPlaceholder(button.action.label);
   });
 });

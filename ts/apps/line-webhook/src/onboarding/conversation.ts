@@ -72,6 +72,9 @@ export interface ConversationDeps {
   // Req 6.3: 店舗特定完了時に切り替える「完了後」リッチメニューの ID。
   // タスク 4.2 が config.ts の LINE_RICHMENU_COMPLETED_ID（既にタスク 1.3 で検証済み）から配線する。
   lineRichMenuCompletedId: string;
+  // Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
+  // config.ts の LIFF_STORE_DETAIL_URL から配線する。
+  liffStoreDetailUrl: string;
 }
 
 export interface ConversationHandlers {
@@ -419,7 +422,7 @@ async function handleConfirm(
   }
 
   await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'completed' });
-  await deps.messenger.reply(event.replyToken, [buildCompletionMessage()]);
+  await deps.messenger.reply(event.replyToken, [buildCompletionMessage(deps.liffStoreDetailUrl)]);
 
   // Req 6.3: 完了時にリッチメニューを完了後メニューへ即時切り替える。
   // owner の状態遷移（onboarding_status='store_identified'）はすでに confirmStore 内の
