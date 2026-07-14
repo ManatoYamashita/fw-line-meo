@@ -44,6 +44,8 @@ Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で
 ### GCP 単一帝国
 Cloud Run（Webhook/客向けWeb/ダッシュボードAPI・ゼロスケール）／ Cloud Scheduler（日次バッチ起動）／ Cloud SQL(PostgreSQL)／ Identity Platform=Firebase Auth（ダッシュボードの Google ログイン、パスワード自前管理しない）／ Gemini API（生成）。
 
+**Cloud Run の env 注入はサーバー側のみ**: Next.js の `NEXT_PUBLIC_*`（クライアントに露出する値）は `next build` 時にクライアントバンドルへインライン化されるため、Cloud Run のランタイム env 注入では反映されない。必ず Dockerfile の build-arg（`ARG`+`ENV`・`next build` 前）で渡すこと（正典は steering `tech.md`、機械強制は `scripts/check-next-public-buildargs.sh`）。
+
 ### マルチテナント
 運営保有の **単一 LINE 公式アカウント** に全オーナーが友だち登録。客向け機能（機能3）は LINE を経由しない。
 

@@ -24,6 +24,9 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v4
+      - name: NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）
+        # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
+        run: bash scripts/check-next-public-buildargs.sh
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.2
