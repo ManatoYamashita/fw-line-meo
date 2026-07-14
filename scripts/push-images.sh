@@ -116,7 +116,13 @@ declare -A BUILD_ARGS=(
   [store-detail]="--build-arg NEXT_PUBLIC_LIFF_ID=${NEXT_PUBLIC_LIFF_ID:-}"
 )
 if [ -z "${NEXT_PUBLIC_LIFF_ID:-}" ] && { [ -z "$ONLY_IMAGE" ] || [ "$ONLY_IMAGE" = "store-detail" ]; }; then
-  echo "WARNING: NEXT_PUBLIC_LIFF_ID 未設定。store-detail のクライアントバンドルに空の LIFF ID が焼き込まれ、LIFF 起動が失敗します（tfvars の liff_id と同値を渡すこと）。" >&2
+  # push 経路（--build-only 以外）では空の LIFF ID を焼き込んだ壊れイメージを出荷させない（hard-fail）。
+  # --build-only（ローカル検証・CI 検証ジョブ）は LIFF 不要な確認もあり得るため警告に留めて続行する。
+  if [ "$BUILD_ONLY" -eq 0 ]; then
+    echo "ERROR: NEXT_PUBLIC_LIFF_ID 未設定のまま store-detail を push しようとしています。空の LIFF ID が焼き込まれ LIFF 起動が必ず失敗します（tfvars の liff_id と同値を指定してください）。ローカルビルド確認のみなら --build-only を指定。" >&2
+    exit 1
+  fi
+  echo "WARNING: NEXT_PUBLIC_LIFF_ID 未設定。store-detail のクライアントバンドルに空の LIFF ID が焼き込まれます（--build-only のため続行。push 時は tfvars の liff_id と同値を渡すこと）。" >&2
 fi
 
 if [ -n "$ONLY_IMAGE" ]; then
