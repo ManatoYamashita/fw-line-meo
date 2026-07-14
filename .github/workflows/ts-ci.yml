@@ -23,14 +23,14 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -62,11 +62,11 @@ jobs:
       GEMINI_API_KEY: e2e-ci-dummy-key
       E2E_STORE_ID: '44444444-4444-4444-4444-444444444444'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -85,7 +85,7 @@ jobs:
         env:
           NODE_OPTIONS: --import ${{ github.workspace }}/ts/apps/survey-web/e2e/mock-gemini.mjs
         run: pnpm -C ts --filter @fwlm/survey-web exec playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: playwright-report
@@ -107,11 +107,11 @@ jobs:
       SESSION_SIGNING_KEY: lhci-signing-key
       GEMINI_API_KEY: lhci-dummy-key
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
