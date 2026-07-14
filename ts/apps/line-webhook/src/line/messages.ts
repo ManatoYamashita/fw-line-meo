@@ -26,6 +26,15 @@ export interface FlexPostbackAction {
   readonly displayText: string;
 }
 
+// 外部リンク（LIFF 等）へ遷移する action。postback と異なり data を持たず uri を持つ。
+export interface FlexUriAction {
+  readonly type: 'uri';
+  readonly label: string;
+  readonly uri: string;
+}
+
+export type FlexAction = FlexPostbackAction | FlexUriAction;
+
 export interface FlexTextComponent {
   readonly type: 'text';
   readonly text: string;
@@ -33,12 +42,15 @@ export interface FlexTextComponent {
   readonly size?: string;
   readonly color?: string;
   readonly wrap?: boolean;
+  readonly align?: 'start' | 'center' | 'end';
+  readonly margin?: string;
 }
 
 export interface FlexButtonComponent {
   readonly type: 'button';
   readonly style: 'primary' | 'secondary';
-  readonly action: FlexPostbackAction;
+  readonly color?: string;
+  readonly action: FlexAction;
 }
 
 export type FlexBoxContent = FlexTextComponent | FlexButtonComponent;
@@ -47,12 +59,26 @@ export interface FlexBoxComponent {
   readonly type: 'box';
   readonly layout: 'horizontal' | 'vertical';
   readonly spacing?: string;
+  readonly margin?: string;
+  readonly paddingAll?: string;
   readonly contents: readonly FlexBoxContent[];
+}
+
+// Bubble の各ブロックの装飾（背景色・区切り線）。references/flex-message.md「Bubble Styles」準拠。
+export interface FlexBlockStyle {
+  readonly backgroundColor?: string;
+  readonly separator?: boolean;
+}
+
+export interface FlexBubbleStyles {
+  readonly body?: FlexBlockStyle;
+  readonly footer?: FlexBlockStyle;
 }
 
 export interface FlexBubbleContents {
   readonly type: 'bubble';
   readonly size?: string;
+  readonly styles?: FlexBubbleStyles;
   readonly body: FlexBoxComponent;
   readonly footer: FlexBoxComponent;
 }
@@ -241,13 +267,76 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
   };
 }
 
-/** Requirement 4.3: 店舗特定完了案内（機能1＝競合日次サマリーが利用可能になる旨）。 */
-export function buildCompletionMessage(): LineMessage {
+/**
+ * Requirement 4.3: 店舗特定完了案内（機能1＝競合日次サマリーが利用可能になる旨）。
+ * 長いオンボーディングの完走を祝う装飾 Flex とし、機能1の詳細（store-detail LIFF）への
+ * 明確な導線ボタン（URI アクション）を添える（Issue #21・完了演出のリッチ化）。
+ * storeDetailUrl は環境依存のため呼び出し側（config 由来）から注入する。
+ */
+export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
+  const contents: FlexBubbleContents = {
+    type: 'bubble',
+    size: 'kilo',
+    styles: {
+      body: { backgroundColor: '#F0FBF4' },
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'md',
+      paddingAll: 'lg',
+      contents: [
+        {
+          type: 'text',
+          text: '🎉 登録が完了しました',
+          weight: 'bold',
+          size: 'lg',
+          align: 'center',
+          color: '#1DB446',
+          wrap: true,
+        },
+        {
+          type: 'text',
+          text: 'お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。',
+          size: 'sm',
+          color: '#333333',
+          align: 'center',
+          wrap: true,
+          margin: 'md',
+        },
+        {
+          type: 'text',
+          text: '毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。',
+          size: 'xs',
+          color: '#888888',
+          align: 'center',
+          wrap: true,
+        },
+      ],
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          color: '#1DB446',
+          action: {
+            type: 'uri',
+            label: '店舗の詳細を見る',
+            uri: storeDetailUrl,
+          },
+        },
+      ],
+    },
+  };
+
   return {
-    type: 'text',
-    text:
-      '店舗の登録が完了しました。\n' +
-      'これで機能1（競合店舗の日次サマリー）がご利用いただけます。トークやメニューからご確認ください。',
+    type: 'flex',
+    altText: '店舗の登録が完了しました。機能1（競合店舗の日次サマリー）がご利用いただけます。',
+    contents,
   };
 }
 
@@ -276,11 +365,49 @@ export function buildSearchFailedMessage(): LineMessage {
  * 確定を行わなかった旨と運営への問い合わせ方法の案内。
  */
 export function buildPlaceAlreadyRegisteredMessage(): LineMessage {
+  const contents: FlexBubbleContents = {
+    type: 'bubble',
+    size: 'kilo',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        { type: 'text', text: '確定できませんでした', weight: 'bold', size: 'md', wrap: true },
+        {
+          type: 'text',
+          text:
+            'この店舗はすでに別のオーナー様の店舗として登録されているため、確定できませんでした。' +
+            '心当たりがない場合は、お手数ですが運営までお問い合わせください。',
+          size: 'sm',
+          color: '#666666',
+          wrap: true,
+        },
+      ],
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          action: {
+            type: 'postback',
+            label: '別のお店でやり直す',
+            data: encodePostback({ kind: 'restart' }),
+            displayText: 'やり直す',
+          },
+        },
+      ],
+    },
+  };
+
   return {
-    type: 'text',
-    text:
-      'この店舗はすでに別のオーナー様の店舗として登録されているため、確定できませんでした。\n' +
-      '心当たりがない場合は、お手数ですが運営までお問い合わせください。',
+    type: 'flex',
+    altText: 'この店舗はすでに登録されているため確定できませんでした。別のお店でやり直せます。',
+    contents,
   };
 }
 
