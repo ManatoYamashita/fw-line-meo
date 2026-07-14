@@ -347,6 +347,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 - 認可: `liff.getIDToken()` → サーバーで `POST /oauth2/v2.1/verify` → `sub`（=userId）→ `owners.line_user_id` 突合 → 自店のみ返却。**getProfile の userId を認可に使わない**
 - 表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示
 - 書込 API を一切持たない（4.2 の構造的担保）
+- **設定値の注入経路（2種を混同しないこと）**: サーバー側の `LIFF_CHANNEL_ID`（`/api/detail` の IDトークン検証 client_id）は Cloud Run のランタイム env で注入する。一方 **クライアント側の `NEXT_PUBLIC_LIFF_ID`（`liff.init` の liffId）は Next.js が `next build` 時にクライアントバンドルへインライン化する値であり、ランタイム env では一切反映されない — 必ず Dockerfile の build-arg（`ARG NEXT_PUBLIC_LIFF_ID`）でビルド時に渡す**。terraform の `liff_id` 変数はランタイム env として設定しても LIFF 起動には効かず、イメージビルド時に同値を build-arg として渡して初めて機能する（2026-07-14 に本番で発覚・修正。tasks.md Implementation Notes 参照）。
 
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
