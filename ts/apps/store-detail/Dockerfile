@@ -25,6 +25,11 @@ WORKDIR /repo
 # node_modules シンボリックリンクも必要）。
 COPY --from=deps /repo ./
 COPY . .
+# NEXT_PUBLIC_* はクライアントバンドルへ next build 時にインライン化される（ランタイム env では
+# クライアントに反映されない）。LIFF アプリ ID をビルド時に渡さないと liff.init に空値が焼き込まれ、
+# LIFF 起動時に必ず失敗する。build-arg 未指定なら空のままとなるため、デプロイ側で必ず渡すこと。
+ARG NEXT_PUBLIC_LIFF_ID
+ENV NEXT_PUBLIC_LIFF_ID=$NEXT_PUBLIC_LIFF_ID
 RUN pnpm -C packages/db run build
 RUN pnpm -C apps/store-detail run build
 

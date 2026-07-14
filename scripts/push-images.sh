@@ -109,6 +109,22 @@ declare -A CONTEXT=(
   [store-detail]="ts"
 )
 
+# ビルド時 build-arg（イメージ別）。store-detail は Next.js の NEXT_PUBLIC_LIFF_ID を
+# クライアントバンドルへ next build 時にインライン化する必要がある（ランタイム env では効かない）。
+# 値は環境変数 NEXT_PUBLIC_LIFF_ID から取得（未設定なら空のまま=LIFF起動が失敗するため警告）。
+declare -A BUILD_ARGS=(
+  [store-detail]="--build-arg NEXT_PUBLIC_LIFF_ID=${NEXT_PUBLIC_LIFF_ID:-}"
+)
+if [ -z "${NEXT_PUBLIC_LIFF_ID:-}" ] && { [ -z "$ONLY_IMAGE" ] || [ "$ONLY_IMAGE" = "store-detail" ]; }; then
+  # push 経路（--build-only 以外）では空の LIFF ID を焼き込んだ壊れイメージを出荷させない（hard-fail）。
+  # --build-only（ローカル検証・CI 検証ジョブ）は LIFF 不要な確認もあり得るため警告に留めて続行する。
+  if [ "$BUILD_ONLY" -eq 0 ]; then
+    echo "ERROR: NEXT_PUBLIC_LIFF_ID 未設定のまま store-detail を push しようとしています。空の LIFF ID が焼き込まれ LIFF 起動が必ず失敗します（tfvars の liff_id と同値を指定してください）。ローカルビルド確認のみなら --build-only を指定。" >&2
+    exit 1
+  fi
+  echo "WARNING: NEXT_PUBLIC_LIFF_ID 未設定。store-detail のクライアントバンドルに空の LIFF ID が焼き込まれます（--build-only のため続行。push 時は tfvars の liff_id と同値を渡すこと）。" >&2
+fi
+
 if [ -n "$ONLY_IMAGE" ]; then
   IMAGE_NAMES=("$ONLY_IMAGE")
 fi
@@ -129,8 +145,10 @@ for name in "${IMAGE_NAMES[@]}"; do
   context="${CONTEXT[$name]}"
   image_ref="${IMAGE_BASE}/${name}:${TAG}"
 
-  echo "==> build ${name}: ${CONTAINER_CMD} build -f ${dockerfile} -t ${image_ref} ${context}"
-  "$CONTAINER_CMD" build -f "${ROOT}/${dockerfile}" -t "${image_ref}" "${ROOT}/${context}"
+  build_args="${BUILD_ARGS[$name]:-}"
+  echo "==> build ${name}: ${CONTAINER_CMD} build ${build_args} -f ${dockerfile} -t ${image_ref} ${context}"
+  # shellcheck disable=SC2086 # build_args は意図的に単語分割する（--build-arg K=V の並び）
+  "$CONTAINER_CMD" build ${build_args} -f "${ROOT}/${dockerfile}" -t "${image_ref}" "${ROOT}/${context}"
 
   if [ "$BUILD_ONLY" -eq 1 ]; then
     echo "==> --build-only: push をスキップ（${image_ref}）"
