@@ -34,7 +34,7 @@ erDiagram
 | agencies | id (uuid) | — | operator_id → operators | 代理店（第2層） |
 | owners | id (uuid) | line_user_id (unique) | agency_id → agencies | 飲食店オーナー（第3層・LINE ユーザ） |
 | stores | id (uuid) | place_id (確定時のみ部分一意) | owner_id → owners, category_code → categories | 店舗（Owner 所有・1:N） |
-| dashboard_users | id (uuid) | auth_subject (unique) | operator_id → operators, agency_id → agencies | ダッシュボード認証主体（運営/代理店・RBAC） |
+| dashboard_users | id (uuid) | auth_subject (unique), email (自然キー・lower(email) 部分一意) | operator_id → operators, agency_id → agencies | ダッシュボード認証主体（運営/代理店・RBAC）。`disabled_at` で無効化（agency-dashboard・0005） |
 | categories | code (text) | — | — | 店舗ジャンル（共有定数・seed SoT） |
 | competitors | id (uuid) | (store_id, place_id) unique | store_id → stores | 競合プレイス（active で churn 表現） |
 | rating_snapshots | id (uuid) | 部分一意（自店/競合×日） | store_id → stores, competitor_id → competitors | 評価・順位の追記型時系列（自店+競合） |

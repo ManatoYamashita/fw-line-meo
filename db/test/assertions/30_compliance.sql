@@ -37,10 +37,14 @@ BEGIN
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: survey_aspect_tallies に想定外の列: %', bad; END IF;
     RAISE NOTICE 'PASS 5.3b: survey tallies are fixed anonymous counters (allowlist)';
 
-    -- 二次ガード: 来店客 PII を匂わす列名の denylist（owners.line_user_id はオーナー識別子で対象外）
+    -- 二次ガード: 来店客 PII を匂わす列名の denylist（owners.line_user_id はオーナー識別子で対象外）。
+    -- 運営/代理店の内部スタッフ身元テーブル（operators/agencies/dashboard_users）は対象外＝
+    -- これらは来店客データを一切持たず、dashboard_users.email は Google ログイン用のスタッフ識別子（agency-dashboard 設計）。
+    -- 来店客側テーブル（stores/competitors/survey_* 等）に対するガードは維持する。
     SELECT string_agg(table_name || '.' || column_name, ', ') INTO bad
     FROM information_schema.columns
     WHERE table_schema = 'public'
+      AND table_name NOT IN ('operators','agencies','dashboard_users')
       AND column_name IN ('email','phone','phone_number','tel','address','ip_address','device_id','customer_id','customer_name');
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: PII-bearing column(s): %', bad; END IF;
     RAISE NOTICE 'PASS 5.3c: no customer PII columns (denylist secondary guard)';

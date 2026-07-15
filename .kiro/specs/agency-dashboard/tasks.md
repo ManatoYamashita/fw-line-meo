@@ -8,7 +8,7 @@
 
 ## 1. Foundation: DB スキーマ・共有パッケージ・DAL
 
-- [ ] 1.1 migration 0005（dashboard_users 拡張）と DB アサーション
+- [x] 1.1 migration 0005（dashboard_users 拡張）と DB アサーション
   - migration `0005_agency_dashboard.sql`: `dashboard_users` に `email text`・`disabled_at timestamptz` を追加、`auth_subject` の NOT NULL を解除、CHECK `ck_dashboard_users_identity`（`auth_subject IS NOT NULL OR email IS NOT NULL`）、`lower(email)` の部分 UNIQUE インデックス `ux_dashboard_users_email`（`WHERE email IS NOT NULL`）を追加。追加のみで既存行・既存制約を破壊しない
   - `db/ERD.md` の `dashboard_users` エンティティ一覧に `email`（自然キー・部分一意）/`disabled_at` を追記。`db/write-boundary.md` は新テーブルなしのため変更なし。`infra/sql/grants.sql` も新テーブルなし・既存 DML 付与済みのため変更なし（本タスクで変更不要を確認）
   - `db/test/assertions/50_agency_dashboard.sql`: 両方 NULL の行を CHECK が拒否・大文字小文字違いの email 重複を拒否・`auth_subject` NULL の保留行を作成可・`WHERE auth_subject IS NULL` 前提の二重リンク UPDATE が 0 行、を検証
@@ -162,3 +162,6 @@
 
 ## Implementation Notes
 <!-- 実装中に得られた横断的な知見をここに追記する -->
+- 環境: docker/apple-container 不在。DB スキーマ検証（`make db-migrate`/`db-test`/`db-verify-docs` 相当）は native postgres で代替する。正典レシピ: `ts/scripts/with-test-db.sh bash -c 'for f in db/test/assertions/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done; MANAGE_CONTAINER=0 PSQL_EXEC="psql" db/test/check_docs.sh'`（with-test-db.sh が native postgres 起動＋全 migrations 適用＋PG 環境変数 export を行う）。TS の `*.db.test.ts` は `make ts-test-db` でそのまま可。
+- 1.1: **`db/test/assertions/30_compliance.sql` の PII denylist（5.3c）は全列を走査するため、`dashboard_users.email`（運営/代理店スタッフのログイン識別子）追加で誤検知 FAIL する**。denylist を `table_name NOT IN ('operators','agencies','dashboard_users')` でスタッフ識別テーブル除外に scope 修正（来店客テーブルへのガードは完全維持・reviewer が stores.email/survey_rating_tallies.phone 注入で発火継続を実証）。今後スタッフ系テーブルに login 識別列を足す際は同 denylist を確認すること。`30_compliance.sql` の table allowlist（5.3a）は新テーブル追加時に更新必須だが、0005 は列追加のみ（新テーブルなし）のため allowlist 変更不要。
+- 1.1: assertion で「特定の CHECK 制約が発火したこと」を証明するには `GET STACKED DIAGNOSTICS v = CONSTRAINT_NAME`（`PG_EXCEPTION_CONSTRAINT` ではない）を使う。二重リンク検証は `GET DIAGNOSTICS n = ROW_COUNT` で UPDATE 影響行数（1回目=1・2回目=0）を確認する。
