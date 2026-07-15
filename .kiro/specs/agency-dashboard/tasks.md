@@ -30,7 +30,7 @@
   - _Boundary: @fwlm/db_
   - _Depends: 1.1_
 
-- [ ] 1.4 ダッシュボード利用者アクセサ（解決・初回リンク・事前登録・無効化）
+- [x] 1.4 ダッシュボード利用者アクセサ（解決・初回リンク・事前登録・無効化）
   - `@fwlm/db` の `dashboard-users.ts` を拡張: `findByAuthSubject` を無効化状態を含む解決（`DashboardUserResolution`）へ、`linkAuthSubjectByEmail`（`WHERE lower(email)=$1 AND auth_subject IS NULL AND disabled_at IS NULL` の原子的 UPDATE）、`createPendingDashboardUser`（email のみの保留行・role/agency 整合）、`listDashboardUsers`（operator スコープ）、`disableDashboardUser`（operator スコープ）
   - 完了状態: `*.db.test.ts` で「保留行の原子的リンク成功」「二重リンクが 0 行」「disabled 行はリンク不可」「email 大文字小文字を無視した一意性」が緑
   - _Requirements: 6.2, 6.4_

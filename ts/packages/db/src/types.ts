@@ -245,3 +245,17 @@ export interface AgencyItem {
   name: string;
   createdAt: Date;
 }
+
+// ダッシュボード利用者の管理（運営）向け戻り型（作成・一覧・無効化）。
+// design.md は本型の形状を明示していないため dashboard_users DDL＋consumer 需要から派生:
+// disabled_at → disabled boolean に写像し、email/display_name は保留行/既存行で NULL があり得るため nullable。
+export interface DashboardUserItem {
+  id: string;
+  role: DashboardRole;
+  operatorId: string;
+  agencyId: string | null;
+  email: string | null;
+  displayName: string | null;
+  disabled: boolean;
+  createdAt: Date;
+}
