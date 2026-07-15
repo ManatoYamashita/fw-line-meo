@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import QRCode from 'qrcode';
-import { getPool, findByAuthSubject, findStoreWithAgency } from '@fwlm/db';
+import { getPool, findByAuthSubject, findStoreWithAgency, linkAuthSubjectByEmail } from '@fwlm/db';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 
@@ -16,8 +16,20 @@ const auth = getAuth();
 const app = createApp({
   qr: {
     auth: {
-      verifier: { verifyIdToken: (token) => auth.verifyIdToken(token) },
+      // firebase-admin の DecodedIdToken を VerifiedToken に写像する（検証済みクレームのみ使う）。
+      verifier: {
+        verifyIdToken: async (token) => {
+          const decoded = await auth.verifyIdToken(token);
+          return {
+            uid: decoded.uid,
+            email: decoded.email ?? null,
+            emailVerified: decoded.email_verified ?? false,
+            signInProvider: decoded.firebase.sign_in_provider ?? null,
+          };
+        },
+      },
       findUser: async (uid) => findByAuthSubject(await getPool(), uid),
+      linkByEmail: async (email, uid) => linkAuthSubjectByEmail(await getPool(), email, uid),
     },
     findStore: async (id) => findStoreWithAgency(await getPool(), id),
     renderQr: (text, size) => QRCode.toBuffer(text, { width: size, margin: 1 }),

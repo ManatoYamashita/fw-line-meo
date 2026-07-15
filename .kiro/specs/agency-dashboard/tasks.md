@@ -39,7 +39,7 @@
 
 ## 2. Core: dashboard-api 認証・スコープと業務ハンドラ
 
-- [ ] 2.1 認証拡張（初回リンク・無効化）と RBAC スコープ中核
+- [x] 2.1 認証拡張（初回リンク・無効化）と RBAC スコープ中核
   - `dashboard-api` の `auth.ts` を拡張: `AuthOutcome` に `disabled`(403) を追加、`TokenVerifier` を `VerifiedToken`（uid/email/emailVerified/signInProvider）へ拡張、未登録かつ `signInProvider==='google.com' && emailVerified===true` のとき正規化 email（trim+lower）で `linkByEmail` を試行、無効化行は `disabled` を返す。資格情報は一切保持しない（Identity Platform 委譲）
   - `scope.ts` を新設: `resolveAgencyScope`（agency は常に自代理店・operator は指定時 single/未指定 all・agency の他代理店指定は 403）、`requireOperator`（管理 API 前置ガード）
   - 既存 `qr.ts`・`index.ts` の配線を新 `TokenVerifier`/`findUser` シグネチャへ更新（`disabled`→403 に写像し後方互換）
@@ -167,3 +167,5 @@
 - 1.1: assertion で「特定の CHECK 制約が発火したこと」を証明するには `GET STACKED DIAGNOSTICS v = CONSTRAINT_NAME`（`PG_EXCEPTION_CONSTRAINT` ではない）を使う。二重リンク検証は `GET DIAGNOSTICS n = ROW_COUNT` で UPDATE 影響行数（1回目=1・2回目=0）を確認する。
 - 1.2: `@fwlm/store-identification` の公開契約は line-onboarding が依存する再検証トリガ。移設は git rename 検出される byte-identical 移動で行った。移設タスクのコミットは削除ファイルが既に staged（`D ` 列1）な場合があり、`git add <deleted-path>` は "did not match" で invocation 全体が失敗する。対処: `git status` の列1を先に確認し、削除は既 staged 分を活かして modified/新規のみ明示 add する（または `git add -A -- <明示パス>`）。
 - 1.3: `AgencyItem` は design.md に明示ボディが無く `{ id, operatorId, name, createdAt }` を agencies DDL から導出した。`/agencies` API（2.5・6.x）はこの shape を response 封筒に合わせること。`findOwnerWithAgency` は design 署名どおり UUID ガード無し → 呼び出し側（2.3）が有効 UUID を渡すこと。共有 DB テストの UUID prefix は `f3` を使用（次タスクは `f4` 以降）。
+- 1.4: `DashboardUserItem` も design 未定義のため `{ id, role, operatorId, agencyId, email, displayName, disabled, createdAt }` を導出（2.5 の API はこれに合わせる）。UUID prefix `f4` 使用済み（次は `f5` 以降）。
+- 2.1: `AuthOutcome` は4値（unauthenticated/unregistered/disabled/authenticated）。disabled と unregistered は QR/API とも**同一封筒の 403**（存在有無を漏らさない）。リンク適格は `eligibleLinkEmail`（google.com && email_verified && email 有・trim+lower）に隔離済み — 以降のハンドラは authenticate の結果だけ見ればよい。実行が中断された実装 subagent の残骸が worktree に残ることがある — 後続 subagent は「既存未コミット変更を spec と突き合わせ検証→採用/破棄」を明示的に行うこと（今回2.1で実施し成功）。

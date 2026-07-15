@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import QRCode from 'qrcode';
-import { getPool, closePool, findByAuthSubject, findStoreWithAgency } from '@fwlm/db';
+import { getPool, closePool, findByAuthSubject, findStoreWithAgency, linkAuthSubjectByEmail } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で QR RBAC マトリクスを app.request 経由で検証。
@@ -19,8 +19,12 @@ function buildApp(): ReturnType<typeof createApp> {
   const deps: AppDeps = {
     qr: {
       auth: {
-        verifier: { verifyIdToken: (t) => Promise.resolve({ uid: t }) },
+        verifier: {
+          verifyIdToken: (t) =>
+            Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
+        },
         findUser: async (uid) => findByAuthSubject(await getPool(), uid),
+        linkByEmail: async (email, uid) => linkAuthSubjectByEmail(await getPool(), email, uid),
       },
       findStore: async (id) => findStoreWithAgency(await getPool(), id),
       renderQr: (text, size) => QRCode.toBuffer(text, { width: size }),

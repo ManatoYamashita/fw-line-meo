@@ -7,8 +7,12 @@ import type { QrDeps } from '../src/qr.js';
 function fakeQrDeps(): QrDeps {
   return {
     auth: {
-      verifier: { verifyIdToken: (t) => Promise.resolve({ uid: t }) },
+      verifier: {
+        verifyIdToken: (t) =>
+          Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
+      },
       findUser: () => Promise.resolve(null),
+      linkByEmail: () => Promise.resolve(null),
     },
     findStore: () => Promise.resolve(null),
     renderQr: () => Promise.resolve(Buffer.from([0x89, 0x50, 0x4e, 0x47])),

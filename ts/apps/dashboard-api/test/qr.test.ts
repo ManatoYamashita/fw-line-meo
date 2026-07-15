@@ -23,8 +23,12 @@ function store(over: Partial<StoreWithAgency> = {}): StoreWithAgency {
 function deps(over: Partial<QrDeps> = {}, user: DashboardUserIdentity | null = OP): QrDeps {
   return {
     auth: {
-      verifier: { verifyIdToken: (t) => Promise.resolve({ uid: `uid-${t}` }) },
-      findUser: () => Promise.resolve(user),
+      verifier: {
+        verifyIdToken: (t) =>
+          Promise.resolve({ uid: `uid-${t}`, email: null, emailVerified: false, signInProvider: null }),
+      },
+      findUser: () => Promise.resolve(user === null ? null : { ...user, disabled: false }),
+      linkByEmail: () => Promise.resolve(null),
     },
     findStore: () => Promise.resolve(store()),
     renderQr: () => Promise.resolve(Buffer.from([0x89, 0x50, 0x4e, 0x47])),
@@ -47,6 +51,14 @@ describe('handleQr', () => {
   it('未登録 UID は 403', async () => {
     const res = await handleQr(deps({}, null), req());
     expect(res.status).toBe(403);
+  });
+
+  it('無効化済みユーザーは 403（disabled → 403 写像・未登録と同一メッセージ）', async () => {
+    const d = deps();
+    d.auth.findUser = () => Promise.resolve({ ...AG_OWN, disabled: true });
+    const res = await handleQr(d, req());
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe('FORBIDDEN');
   });
 
   it('店舗不在は 404', async () => {
