@@ -62,7 +62,7 @@
   - _Boundary: dashboard-api store-registration, owners-list_
   - _Depends: 2.1, 1.2, 1.3_
 
-- [ ] 2.4 (P) 招待コードハンドラとコード生成
+- [x] 2.4 (P) 招待コードハンドラとコード生成
   - `invite-code-gen.ts`（`crypto.randomInt`・`23456789ABCDEFGHJKMNPQRSTUVWXYZ` の 8 文字・UNIQUE 衝突時は最大 3 回再生成・外部ライブラリ不使用）と、`GET /invite-codes`（スコープ絞り込み）・`POST /invite-codes`（agency は自代理店・operator は agencyId 指定）・`POST /invite-codes/:id/disable`（agency スコープ検証・不一致は 404）の純粋ハンドラを実装
   - 完了状態: ユニットテストでコードの文字集合・長さ・衝突リトライ・3 回失敗で 500、発行/無効化のスコープ強制が確認できる
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
@@ -171,3 +171,4 @@
 - 2.1: `AuthOutcome` は4値（unauthenticated/unregistered/disabled/authenticated）。disabled と unregistered は QR/API とも**同一封筒の 403**（存在有無を漏らさない）。リンク適格は `eligibleLinkEmail`（google.com && email_verified && email 有・trim+lower）に隔離済み — 以降のハンドラは authenticate の結果だけ見ればよい。実行が中断された実装 subagent の残骸が worktree に残ることがある — 後続 subagent は「既存未コミット変更を spec と突き合わせ検証→採用/破棄」を明示的に行うこと（今回2.1で実施し成功）。
 - 2.2: 新ハンドラのエラーコードは design コード体系どおり小文字（`unauthenticated`/`forbidden`）。既存 qr.ts は大文字のまま → **3.1 で統一を検討**。3.1 への引き継ぎ: (a) `MeDeps.findAgencyName`/`findDisplayName` は狭い注入関数で DAL 未実装 — 配線時に実クエリで裏付ける（@fwlm/db に既存 SELECT の再利用または小アクセサ追加）。(b) ルート層で空文字 `?agencyId=` を `undefined` に正規化してからハンドラへ渡すこと（ハンドラは undefined のみを「未指定」と解釈）。
 - 2.3: 決定事項: GET /owners で operator の agencyId 未指定は 400（オーナー選択には具体的代理店が必要・design ウィザードの代理店先行選択と整合）。不正 UUID の ownerId は findOwner 未到達の 404（存在秘匿）。**3.1 への最重要引き継ぎ: `registerStore({ownerId, candidate, categoryCode})` dep の実装合成** — 凍結契約 `confirmStore(ownerId, candidate)` は categoryCode を受けないため、共有 TX 意味論（stores INSERT confirmed → owner store_identified 単一TX・`ux_stores_place_id` 違反の冪等/409 正規化）を保ったまま category を設定する合成が必要（例: `createConfirmedStore` ベースの自前 TX か confirmStore＋同一TX category UPDATE）。
+- 2.4: GET /invite-codes・POST /invite-codes とも operator は agencyId 指定必須（400）・agency は自代理店強制（2.3 と同型）。disable は operator のみ body `{agencyId}` 必須（design 表の Request「—」からの拡張・DAL の scope 列契約による。`InviteCodeDisableRequest` JSDoc に文書化済み）。3.1 への引き継ぎ: (a) `issueCode` = `createUniqueInviteCode`＋`createInviteCode` の合成を配線側で組む。(b) 発行失敗（3試行切れ）の error は handler が握り潰すため、**配線側の issueCode 内でログ出力**してから rethrow すること（design Monitoring「5xx 詳細はログへ」）。
