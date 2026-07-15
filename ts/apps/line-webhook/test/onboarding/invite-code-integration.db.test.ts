@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool, findOwnerByLineUserId } from '@fwlm/db';
 import { createConversationHandlers } from '../../src/onboarding/conversation.js';
-import { createStoreIdentificationService } from '../../src/onboarding/store-identification.js';
+import { createStoreIdentificationService } from '@fwlm/store-identification';
 import {
   getOrCreateSession,
   updateSession,
@@ -10,7 +10,7 @@ import {
 } from '@fwlm/db';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessenger } from '../../src/line/client.js';
-import type { PlacesSearchAdapter } from '../../src/places/search.js';
+import type { PlacesSearchAdapter } from '@fwlm/store-identification';
 import {
   buildGreetingMessage,
   buildStoreNameInputGuidanceMessage,

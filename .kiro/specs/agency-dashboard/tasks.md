@@ -15,7 +15,7 @@
   - 完了状態: `make db-migrate && make db-test && make db-verify-docs`（または native postgres 代替）が緑
   - _Requirements: 6.2, 6.4_
 
-- [ ] 1.2 (P) 店舗特定ロジックを共有パッケージ `@fwlm/store-identification` へ移設
+- [x] 1.2 (P) 店舗特定ロジックを共有パッケージ `@fwlm/store-identification` へ移設
   - `ts/packages/store-identification` を新設し、`line-webhook` の `places/search.ts`（PlacesSearchAdapter・FieldMask 固定）と `onboarding/store-identification.ts`（searchCandidates/confirmStore・重複 place 冪等処理）を挙動変更なしで移設。公開契約（`SearchOutcome`/`ConfirmOutcome`/`createPlacesSearchAdapter`/`createStoreIdentificationService`）を維持（line-onboarding の再検証トリガのため署名変更禁止）
   - `line-webhook` の import を新パッケージへ差し替え、`package.json` に依存追加。FieldMask・1.5s タイムアウト・pageSize 10・ja/JP は不変
   - 完了状態: `line-webhook` の既存テスト（店舗特定・会話フロー）が回帰なしで緑、新パッケージが単体でビルド・テスト緑

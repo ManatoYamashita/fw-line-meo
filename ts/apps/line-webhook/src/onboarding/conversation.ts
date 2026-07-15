@@ -5,7 +5,7 @@ import type {
   ConnectablePool,
   StoreIdentificationService,
   TransactionClient,
-} from './store-identification.js';
+} from '@fwlm/store-identification';
 import { decodePostback } from './stages.js';
 import {
   buildAlreadyCompletedMessage,
