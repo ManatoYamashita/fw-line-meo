@@ -32,6 +32,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/store-identification':
+        specifier: workspace:*
+        version: link:../../packages/store-identification
       '@hono/node-server':
         specifier: ^1
         version: 1.19.14(hono@4.12.28)

@@ -55,7 +55,7 @@
   - _Boundary: dashboard-api stores-list, me_
   - _Depends: 2.1, 1.3_
 
-- [ ] 2.3 (P) 店舗登録ハンドラ（オーナー選択・検索・確定・カテゴリ）
+- [x] 2.3 (P) 店舗登録ハンドラ（オーナー選択・検索・確定・カテゴリ）
   - `GET /owners`（スコープ内オーナー一覧・空配列で 3.3 の UI 案内を可能に）、`GET /categories`、`POST /stores/search`（`PlacesSearchAdapter` 委譲・最大 10 件・0 件は空配列 200・`error` は 502）、`POST /stores`（`ownerId` がスコープ内 agency 配下かの検証→`confirmStore` 委譲、`place_already_registered`→409、`categoryCode` は存在コードのみ）の純粋ハンドラを実装
   - 完了状態: 注入 deps のユニットテストでスコープ外 owner→403・候補 0 件→空配列 200・検索失敗→502・重複 place→409・確定成功→201 が確認できる
   - _Requirements: 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10_
@@ -170,3 +170,4 @@
 - 1.4: `DashboardUserItem` も design 未定義のため `{ id, role, operatorId, agencyId, email, displayName, disabled, createdAt }` を導出（2.5 の API はこれに合わせる）。UUID prefix `f4` 使用済み（次は `f5` 以降）。
 - 2.1: `AuthOutcome` は4値（unauthenticated/unregistered/disabled/authenticated）。disabled と unregistered は QR/API とも**同一封筒の 403**（存在有無を漏らさない）。リンク適格は `eligibleLinkEmail`（google.com && email_verified && email 有・trim+lower）に隔離済み — 以降のハンドラは authenticate の結果だけ見ればよい。実行が中断された実装 subagent の残骸が worktree に残ることがある — 後続 subagent は「既存未コミット変更を spec と突き合わせ検証→採用/破棄」を明示的に行うこと（今回2.1で実施し成功）。
 - 2.2: 新ハンドラのエラーコードは design コード体系どおり小文字（`unauthenticated`/`forbidden`）。既存 qr.ts は大文字のまま → **3.1 で統一を検討**。3.1 への引き継ぎ: (a) `MeDeps.findAgencyName`/`findDisplayName` は狭い注入関数で DAL 未実装 — 配線時に実クエリで裏付ける（@fwlm/db に既存 SELECT の再利用または小アクセサ追加）。(b) ルート層で空文字 `?agencyId=` を `undefined` に正規化してからハンドラへ渡すこと（ハンドラは undefined のみを「未指定」と解釈）。
+- 2.3: 決定事項: GET /owners で operator の agencyId 未指定は 400（オーナー選択には具体的代理店が必要・design ウィザードの代理店先行選択と整合）。不正 UUID の ownerId は findOwner 未到達の 404（存在秘匿）。**3.1 への最重要引き継ぎ: `registerStore({ownerId, candidate, categoryCode})` dep の実装合成** — 凍結契約 `confirmStore(ownerId, candidate)` は categoryCode を受けないため、共有 TX 意味論（stores INSERT confirmed → owner store_identified 単一TX・`ux_stores_place_id` 違反の冪等/409 正規化）を保ったまま category を設定する合成が必要（例: `createConfirmedStore` ベースの自前 TX か confirmStore＋同一TX category UPDATE）。
