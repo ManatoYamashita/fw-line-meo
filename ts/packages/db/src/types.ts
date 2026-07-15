@@ -204,3 +204,44 @@ export interface WebhookEventRow {
   webhook_event_id: string;
   received_at: Date;
 }
+
+// --- agency-dashboard（ダッシュボード一覧・作成アクセサの戻り型・camelCase）---
+// DAL の行→camelCase 写像規約に従う。書込は TS 層所有テーブルのみ（competitors は read のみ）。
+
+// 店舗一覧の 1 行（stores×owners×agencies JOIN＋competitors(active) EXISTS）。
+export interface StoreListItem {
+  id: string;
+  name: string;
+  placeStatus: PlaceStatus;
+  competitorConfigured: boolean; // EXISTS competitors WHERE store_id=... AND active
+  ownerId: string;
+  ownerDisplayName: string | null;
+  agencyId: string;
+  agencyName: string;
+  createdAt: Date;
+}
+
+// 代理店配下オーナー一覧の 1 行。
+export interface OwnerListItem {
+  id: string;
+  displayName: string | null;
+  onboardingStatus: OnboardingStatus;
+  createdAt: Date;
+}
+
+// 招待コード一覧・作成・無効化の戻り型（disabled = disabled_at IS NOT NULL）。
+export interface InviteCodeItem {
+  id: string;
+  agencyId: string;
+  code: string;
+  disabled: boolean;
+  createdAt: Date;
+}
+
+// 代理店の作成・一覧の戻り型。
+export interface AgencyItem {
+  id: string;
+  operatorId: string;
+  name: string;
+  createdAt: Date;
+}

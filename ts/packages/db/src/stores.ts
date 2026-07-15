@@ -1,5 +1,5 @@
 import type { Queryable } from './pool.js';
-import type { PlaceStatus, StoreRow } from './types.js';
+import type { PlaceStatus, StoreListItem, StoreRow } from './types.js';
 
 const STORE_COLUMNS =
   'id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at';
@@ -121,4 +121,59 @@ export async function findStoreByPlaceId(db: Queryable, placeId: string): Promis
     [placeId],
   );
   return res.rows[0] ?? null;
+}
+
+interface StoreListRow {
+  id: string;
+  name: string;
+  place_status: PlaceStatus;
+  competitor_configured: boolean;
+  owner_id: string;
+  owner_display_name: string | null;
+  agency_id: string;
+  agency_name: string;
+  created_at: Date;
+}
+
+/**
+ * ダッシュボードの店舗一覧を取得する（agency-dashboard spec）。
+ * stores×owners×agencies を JOIN し、competitors(active) の EXISTS で competitorConfigured を導出する
+ * （Req 4.1, 4.2, 4.3）。competitors は read のみ（本アクセサは競合を変更しない・Req 4.5）。
+ * filter.agencyId 指定時は当該代理店の店舗のみ（agency スコープ・Req 2.1）、未指定時は全代理店（Req 2.2）。
+ * 来店客系テーブルには一切触れない（Req 7.2）。
+ */
+export async function listStoresWithStatus(
+  db: Queryable,
+  filter: { agencyId?: string },
+): Promise<StoreListItem[]> {
+  const res = await db.query<StoreListRow>(
+    `SELECT s.id,
+            s.name,
+            s.place_status,
+            EXISTS (
+              SELECT 1 FROM competitors c WHERE c.store_id = s.id AND c.active
+            ) AS competitor_configured,
+            s.owner_id,
+            o.display_name AS owner_display_name,
+            a.id           AS agency_id,
+            a.name         AS agency_name,
+            s.created_at
+       FROM stores s
+       JOIN owners o   ON o.id = s.owner_id
+       JOIN agencies a ON a.id = o.agency_id
+      WHERE $1::uuid IS NULL OR a.id = $1
+      ORDER BY s.created_at DESC`,
+    [filter.agencyId ?? null],
+  );
+  return res.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    placeStatus: row.place_status,
+    competitorConfigured: row.competitor_configured,
+    ownerId: row.owner_id,
+    ownerDisplayName: row.owner_display_name,
+    agencyId: row.agency_id,
+    agencyName: row.agency_name,
+    createdAt: row.created_at,
+  }));
 }

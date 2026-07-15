@@ -22,7 +22,7 @@
   - _Requirements: 3.4, 3.5, 3.6, 3.8, 3.9, 3.10, 3.11_
   - _Boundary: store-identification pkg, line-webhook_
 
-- [ ] 1.3 (P) 店舗一覧・オーナー・代理店・カテゴリ・招待コードのアクセサ追加
+- [x] 1.3 (P) 店舗一覧・オーナー・代理店・カテゴリ・招待コードのアクセサ追加
   - `@fwlm/db` に追加: `listStoresWithStatus`（stores×owners×agencies JOIN＋competitors(active) EXISTS で `competitorConfigured`・agency 絞り込み可）、`listOwnersByAgency`/`findOwnerWithAgency`、`createAgency`/`listAgencies`、`listCategories`（seed が SoT・コード内定義禁止）、`listInviteCodes`/`createInviteCode`/`disableInviteCode`（agency_id をスコープ列として WHERE に含める）
   - `competitors` は read のみ（書込アクセサを持たない＝競合設定は変更不可）。来店客系テーブルへの参照を一切持たない
   - 完了状態: 各アクセサの `*.db.test.ts` が緑。特に agency 絞り込みで他代理店の店舗・オーナー・コードが漏れないこと、`competitorConfigured` が competitors(active) の有無を反映することを確認
@@ -165,3 +165,5 @@
 - 環境: docker/apple-container 不在。DB スキーマ検証（`make db-migrate`/`db-test`/`db-verify-docs` 相当）は native postgres で代替する。正典レシピ: `ts/scripts/with-test-db.sh bash -c 'for f in db/test/assertions/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done; MANAGE_CONTAINER=0 PSQL_EXEC="psql" db/test/check_docs.sh'`（with-test-db.sh が native postgres 起動＋全 migrations 適用＋PG 環境変数 export を行う）。TS の `*.db.test.ts` は `make ts-test-db` でそのまま可。
 - 1.1: **`db/test/assertions/30_compliance.sql` の PII denylist（5.3c）は全列を走査するため、`dashboard_users.email`（運営/代理店スタッフのログイン識別子）追加で誤検知 FAIL する**。denylist を `table_name NOT IN ('operators','agencies','dashboard_users')` でスタッフ識別テーブル除外に scope 修正（来店客テーブルへのガードは完全維持・reviewer が stores.email/survey_rating_tallies.phone 注入で発火継続を実証）。今後スタッフ系テーブルに login 識別列を足す際は同 denylist を確認すること。`30_compliance.sql` の table allowlist（5.3a）は新テーブル追加時に更新必須だが、0005 は列追加のみ（新テーブルなし）のため allowlist 変更不要。
 - 1.1: assertion で「特定の CHECK 制約が発火したこと」を証明するには `GET STACKED DIAGNOSTICS v = CONSTRAINT_NAME`（`PG_EXCEPTION_CONSTRAINT` ではない）を使う。二重リンク検証は `GET DIAGNOSTICS n = ROW_COUNT` で UPDATE 影響行数（1回目=1・2回目=0）を確認する。
+- 1.2: `@fwlm/store-identification` の公開契約は line-onboarding が依存する再検証トリガ。移設は git rename 検出される byte-identical 移動で行った。移設タスクのコミットは削除ファイルが既に staged（`D ` 列1）な場合があり、`git add <deleted-path>` は "did not match" で invocation 全体が失敗する。対処: `git status` の列1を先に確認し、削除は既 staged 分を活かして modified/新規のみ明示 add する（または `git add -A -- <明示パス>`）。
+- 1.3: `AgencyItem` は design.md に明示ボディが無く `{ id, operatorId, name, createdAt }` を agencies DDL から導出した。`/agencies` API（2.5・6.x）はこの shape を response 封筒に合わせること。`findOwnerWithAgency` は design 署名どおり UUID ガード無し → 呼び出し側（2.3）が有効 UUID を渡すこと。共有 DB テストの UUID prefix は `f3` を使用（次タスクは `f4` 以降）。
