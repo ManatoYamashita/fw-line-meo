@@ -48,7 +48,7 @@
   - _Boundary: dashboard-api auth, scope_
   - _Depends: 1.4_
 
-- [ ] 2.2 (P) 自己紹介・店舗一覧ハンドラ
+- [x] 2.2 (P) 自己紹介・店舗一覧ハンドラ
   - `GET /me`（ロール・所属代理店・表示名）と `GET /stores`（スコープ解決→`listStoresWithStatus`→店舗特定/競合設定ステータス同梱。operator は代理店名同梱・agency は自代理店のみ）の純粋ハンドラを実装。エラー封筒は既存 `jsonError` 形式（日本語 message）
   - 完了状態: 注入 deps のユニットテストで operator=全件・agency=自代理店のみ・0 件時の応答が確認できる
   - _Requirements: 2.1, 2.2, 4.1, 4.2, 4.3, 4.4_
@@ -169,3 +169,4 @@
 - 1.3: `AgencyItem` は design.md に明示ボディが無く `{ id, operatorId, name, createdAt }` を agencies DDL から導出した。`/agencies` API（2.5・6.x）はこの shape を response 封筒に合わせること。`findOwnerWithAgency` は design 署名どおり UUID ガード無し → 呼び出し側（2.3）が有効 UUID を渡すこと。共有 DB テストの UUID prefix は `f3` を使用（次タスクは `f4` 以降）。
 - 1.4: `DashboardUserItem` も design 未定義のため `{ id, role, operatorId, agencyId, email, displayName, disabled, createdAt }` を導出（2.5 の API はこれに合わせる）。UUID prefix `f4` 使用済み（次は `f5` 以降）。
 - 2.1: `AuthOutcome` は4値（unauthenticated/unregistered/disabled/authenticated）。disabled と unregistered は QR/API とも**同一封筒の 403**（存在有無を漏らさない）。リンク適格は `eligibleLinkEmail`（google.com && email_verified && email 有・trim+lower）に隔離済み — 以降のハンドラは authenticate の結果だけ見ればよい。実行が中断された実装 subagent の残骸が worktree に残ることがある — 後続 subagent は「既存未コミット変更を spec と突き合わせ検証→採用/破棄」を明示的に行うこと（今回2.1で実施し成功）。
+- 2.2: 新ハンドラのエラーコードは design コード体系どおり小文字（`unauthenticated`/`forbidden`）。既存 qr.ts は大文字のまま → **3.1 で統一を検討**。3.1 への引き継ぎ: (a) `MeDeps.findAgencyName`/`findDisplayName` は狭い注入関数で DAL 未実装 — 配線時に実クエリで裏付ける（@fwlm/db に既存 SELECT の再利用または小アクセサ追加）。(b) ルート層で空文字 `?agencyId=` を `undefined` に正規化してからハンドラへ渡すこと（ハンドラは undefined のみを「未指定」と解釈）。
