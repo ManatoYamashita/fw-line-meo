@@ -78,7 +78,7 @@
 
 ## 3. Integration: dashboard-api の配線
 
-- [ ] 3.1 config・CORS・ルート配線・実依存注入
+- [x] 3.1 config・CORS・ルート配線・実依存注入
   - `config.ts` に `DASHBOARD_WEB_ORIGIN`・`PLACES_API_KEY` を必須 env として追加。`app.ts` で全業務ルートを `authenticate` 前置で登録し、`hono/cors` を `DASHBOARD_WEB_ORIGIN` 単一オリジン許可（Authorization 許可・credentials 不使用）。`index.ts` で firebase verifier（email/emailVerified/signInProvider 抽出）・pool・`PlacesSearchAdapter`＋`StoreIdentificationService`・全 DAL を実配線
   - 完了状態: `app.request` 経由の `*.db.test.ts` で未認証→401・許可外オリジン遮断・`/healthz` は認証不要・agency→管理 API 403・operator 全許可の認可マトリクスが緑
   - _Requirements: 2.3, 6.5, 7.1, 7.3_
@@ -172,3 +172,4 @@
 - 2.2: 新ハンドラのエラーコードは design コード体系どおり小文字（`unauthenticated`/`forbidden`）。既存 qr.ts は大文字のまま → **3.1 で統一を検討**。3.1 への引き継ぎ: (a) `MeDeps.findAgencyName`/`findDisplayName` は狭い注入関数で DAL 未実装 — 配線時に実クエリで裏付ける（@fwlm/db に既存 SELECT の再利用または小アクセサ追加）。(b) ルート層で空文字 `?agencyId=` を `undefined` に正規化してからハンドラへ渡すこと（ハンドラは undefined のみを「未指定」と解釈）。
 - 2.3: 決定事項: GET /owners で operator の agencyId 未指定は 400（オーナー選択には具体的代理店が必要・design ウィザードの代理店先行選択と整合）。不正 UUID の ownerId は findOwner 未到達の 404（存在秘匿）。**3.1 への最重要引き継ぎ: `registerStore({ownerId, candidate, categoryCode})` dep の実装合成** — 凍結契約 `confirmStore(ownerId, candidate)` は categoryCode を受けないため、共有 TX 意味論（stores INSERT confirmed → owner store_identified 単一TX・`ux_stores_place_id` 違反の冪等/409 正規化）を保ったまま category を設定する合成が必要（例: `createConfirmedStore` ベースの自前 TX か confirmStore＋同一TX category UPDATE）。
 - 2.4: GET /invite-codes・POST /invite-codes とも operator は agencyId 指定必須（400）・agency は自代理店強制（2.3 と同型）。disable は operator のみ body `{agencyId}` 必須（design 表の Request「—」からの拡張・DAL の scope 列契約による。`InviteCodeDisableRequest` JSDoc に文書化済み）。3.1 への引き継ぎ: (a) `issueCode` = `createUniqueInviteCode`＋`createInviteCode` の合成を配線側で組む。(b) 発行失敗（3試行切れ）の error は handler が握り潰すため、**配線側の issueCode 内でログ出力**してから rethrow すること（design Monitoring「5xx 詳細はログへ」）。
+- 3.1: dashboard-api バックエンドは配線完了（14ルート・単一オリジンCORS・/healthz 認証免除・app.request 認可マトリクスDBテスト）。決定事項: (a) `registerStore` は凍結 `confirmStore` を再利用し、category は confirmed 時のみ **best-effort な別 UPDATE**（非原子的・失敗時は storeId のみログ・Go バッチ fallback あり）。(b) **qr.ts のエラーコードは大文字のまま未統一**（group-2 は小文字）— 契約変更＋既存テスト影響のため別途明示決定が必要（現状は機能上無害・別エンドポイント）。(c) POST の不正JSON body は authenticate 前に固定封筒 400（情報漏洩なし・全 body ルートで同一）。CORS 許可オリジンは `DASHBOARD_WEB_ORIGIN` env。dashboard-web は build 時 `NEXT_PUBLIC_API_BASE_URL` でこの API を指す。

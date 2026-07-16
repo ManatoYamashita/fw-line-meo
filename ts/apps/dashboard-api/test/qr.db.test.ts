@@ -15,8 +15,13 @@ const S1 = 'ffffffff-0000-0000-0000-000000000006'; // AG1・confirmed
 const S2 = 'ffffffff-0000-0000-0000-000000000007'; // AG2・confirmed
 const S_PENDING = 'ffffffff-0000-0000-0000-000000000008'; // AG1・pending
 
+// QR 経路のみを検証する最小 deps 型（他業務 deps は本テストで未使用のため corsOrigin と qr のみ）。
+type QrOnlyDeps = Pick<AppDeps, 'corsOrigin' | 'qr'>;
+
 function buildApp(): ReturnType<typeof createApp> {
-  const deps: AppDeps = {
+  // CORS ミドルウェアのため corsOrigin は必須。
+  const deps: QrOnlyDeps = {
+    corsOrigin: 'https://dash.example',
     qr: {
       auth: {
         verifier: {

@@ -2,38 +2,199 @@ import { serve } from '@hono/node-server';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import QRCode from 'qrcode';
-import { getPool, findByAuthSubject, findStoreWithAgency, linkAuthSubjectByEmail } from '@fwlm/db';
+import {
+  getPool,
+  findByAuthSubject,
+  findStoreWithAgency,
+  linkAuthSubjectByEmail,
+  listStoresWithStatus,
+  listOwnersByAgency,
+  findOwnerWithAgency,
+  listCategories,
+  listAgencies,
+  createAgency,
+  listInviteCodes,
+  createInviteCode,
+  disableInviteCode,
+  listDashboardUsers,
+  createPendingDashboardUser,
+  disableDashboardUser,
+} from '@fwlm/db';
+import {
+  createPlacesSearchAdapter,
+  createStoreIdentificationService,
+  type ConfirmOutcome,
+} from '@fwlm/store-identification';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
+import type { AuthDeps } from './auth.js';
+import { createUniqueInviteCode, generateInviteCode } from './invite-code-gen.js';
+import type { RegisterStoreInput } from './store-registration.js';
 
-// Cloud Run エントリ。必須 env を検証し、firebase-admin / DB / qrcode の実依存を配線する。
+// Cloud Run エントリ。必須 env を検証し、firebase-admin / DB / Places / qrcode の実依存を配線する。
 const config = loadConfig();
 
 // 添付 SA の ADC を使用（Cloud Run）。
 initializeApp();
-const auth = getAuth();
+const firebaseAuth = getAuth();
+
+// 認証依存（全業務ハンドラと qr 経路で共有）。
+// firebase-admin の DecodedIdToken を VerifiedToken へ写像する（検証済みクレームのみ使う）。
+// 認可の真実は Postgres（dashboard_users）にのみ置く（Firebase カスタムクレームは使わない）。
+const authDeps: AuthDeps = {
+  verifier: {
+    verifyIdToken: async (token) => {
+      const decoded = await firebaseAuth.verifyIdToken(token);
+      return {
+        uid: decoded.uid,
+        email: decoded.email ?? null,
+        emailVerified: decoded.email_verified ?? false,
+        signInProvider: decoded.firebase.sign_in_provider ?? null,
+      };
+    },
+  },
+  findUser: async (uid) => findByAuthSubject(await getPool(), uid),
+  linkByEmail: async (email, uid) => linkAuthSubjectByEmail(await getPool(), email, uid),
+};
+
+// Places 検索アダプタ（Node ネイティブ fetch）と店舗特定サービス（confirmStore の凍結 TX 契約）。
+// ConnectablePool は getPool() の遅延解決で満たす（pg Pool.connect() が TransactionClient を返す）。
+const places = createPlacesSearchAdapter({ apiKey: config.placesApiKey, fetch });
+const storeIdentification = createStoreIdentificationService({
+  pool: { connect: async () => (await getPool()).connect() },
+  places,
+});
+
+// registerStore 合成（2.3 handoff）: 凍結契約 confirmStore（stores INSERT confirmed →
+// owner store_identified の単一 TX・ux_stores_place_id 違反の冪等/409 正規化）はそのまま再利用し、
+// confirmed かつ categoryCode 指定時のみ非クリティカルな category を後追いで設定する
+// （category はメタデータで Go バッチ側にフォールバックがあるため、設定失敗は登録全体を失敗させない）。
+async function registerStore(input: RegisterStoreInput): Promise<ConfirmOutcome> {
+  const outcome = await storeIdentification.confirmStore(input.ownerId, input.candidate);
+  if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
+    try {
+      const pool = await getPool();
+      await pool.query('UPDATE stores SET category_code = $1 WHERE id = $2', [
+        input.categoryCode,
+        outcome.storeId,
+      ]);
+    } catch {
+      // category 設定は非クリティカル（登録本体は既に成立済み）。PII・クエリは出さない。
+      console.error('registerStore: category follow-up update failed', {
+        storeId: outcome.storeId,
+      });
+    }
+  }
+  return outcome;
+}
+
+// issueCode 合成（2.4 handoff）: 一意コード発行（衝突は最大 3 回再生成）。
+// リトライ切れ・DB 障害はここでログ出力（PII・クエリは出さない）してから rethrow し、
+// ハンドラが 500 internal に写像する（design Monitoring「5xx 詳細はログへ」）。
+async function issueCode(agencyId: string) {
+  try {
+    return await createUniqueInviteCode({
+      generate: generateInviteCode,
+      create: async (code) => createInviteCode(await getPool(), { agencyId, code }),
+    });
+  } catch (err) {
+    console.error('issueCode: failed to issue invite code (retry exhausted or db error)');
+    throw err;
+  }
+}
+
+// findAgencyName / findDisplayName（2.2 handoff）: 読み取り専用の小クエリで裏付ける
+// （既存 DAL に単一取得アクセサが無いため、合成根の index.ts で inline pool.query を用いる）。
+async function findAgencyName(agencyId: string): Promise<string | null> {
+  const pool = await getPool();
+  const res = await pool.query<{ name: string }>('SELECT name FROM agencies WHERE id = $1', [
+    agencyId,
+  ]);
+  return res.rows[0]?.name ?? null;
+}
+
+async function findDisplayName(userId: string): Promise<string | null> {
+  const pool = await getPool();
+  const res = await pool.query<{ display_name: string | null }>(
+    'SELECT display_name FROM dashboard_users WHERE id = $1',
+    [userId],
+  );
+  return res.rows[0]?.display_name ?? null;
+}
 
 const app = createApp({
+  corsOrigin: config.corsOrigin,
   qr: {
-    auth: {
-      // firebase-admin の DecodedIdToken を VerifiedToken に写像する（検証済みクレームのみ使う）。
-      verifier: {
-        verifyIdToken: async (token) => {
-          const decoded = await auth.verifyIdToken(token);
-          return {
-            uid: decoded.uid,
-            email: decoded.email ?? null,
-            emailVerified: decoded.email_verified ?? false,
-            signInProvider: decoded.firebase.sign_in_provider ?? null,
-          };
-        },
-      },
-      findUser: async (uid) => findByAuthSubject(await getPool(), uid),
-      linkByEmail: async (email, uid) => linkAuthSubjectByEmail(await getPool(), email, uid),
-    },
+    auth: authDeps,
     findStore: async (id) => findStoreWithAgency(await getPool(), id),
     renderQr: (text, size) => QRCode.toBuffer(text, { width: size, margin: 1 }),
     surveyBaseUrl: config.surveyBaseUrl,
+  },
+  me: {
+    auth: authDeps,
+    findAgencyName,
+    findDisplayName,
+  },
+  stores: {
+    auth: authDeps,
+    listStores: async (filter) => listStoresWithStatus(await getPool(), filter),
+  },
+  owners: {
+    auth: authDeps,
+    listOwners: async (agencyId) => listOwnersByAgency(await getPool(), agencyId),
+  },
+  categories: {
+    auth: authDeps,
+    listCategories: async () => listCategories(await getPool()),
+  },
+  storeRegistration: {
+    search: {
+      auth: authDeps,
+      searchCandidates: (query) => storeIdentification.searchCandidates(query),
+    },
+    register: {
+      auth: authDeps,
+      findOwner: async (ownerId) => findOwnerWithAgency(await getPool(), ownerId),
+      isValidCategory: async (code) =>
+        (await listCategories(await getPool())).some((cat) => cat.code === code),
+      registerStore,
+    },
+  },
+  inviteCodes: {
+    list: {
+      auth: authDeps,
+      listInviteCodes: async (agencyId) => listInviteCodes(await getPool(), agencyId),
+    },
+    issue: {
+      auth: authDeps,
+      issueCode,
+    },
+    disable: {
+      auth: authDeps,
+      disableCode: async (id, agencyId) => disableInviteCode(await getPool(), id, agencyId),
+    },
+  },
+  admin: {
+    agenciesList: {
+      auth: authDeps,
+      listAgencies: async (operatorId) => listAgencies(await getPool(), operatorId),
+    },
+    agencyCreate: {
+      auth: authDeps,
+      createAgency: async (input) => createAgency(await getPool(), input),
+    },
+    usersList: {
+      auth: authDeps,
+      listUsers: async (operatorId) => listDashboardUsers(await getPool(), operatorId),
+    },
+    userCreate: {
+      auth: authDeps,
+      createUser: async (input) => createPendingDashboardUser(await getPool(), input),
+    },
+    userDisable: {
+      auth: authDeps,
+      disableUser: async (id, operatorId) => disableDashboardUser(await getPool(), id, operatorId),
+    },
   },
 });
 
