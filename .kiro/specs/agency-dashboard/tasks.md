@@ -69,7 +69,7 @@
   - _Boundary: dashboard-api invite-codes, invite-code-gen_
   - _Depends: 2.1, 1.3_
 
-- [ ] 2.5 (P) 管理ハンドラ（代理店・ダッシュボード利用者）
+- [x] 2.5 (P) 管理ハンドラ（代理店・ダッシュボード利用者）
   - `admin.ts`: 冒頭に `requireOperator` 前置ガード（agency ロールは 403）。`GET/POST /agencies`、`GET /dashboard-users`、`POST /dashboard-users`（role・（agency 時のみ必須の）所属代理店・email・表示名の検証、email 重複は 409、`createPendingDashboardUser` 委譲）、`POST /dashboard-users/:id/disable` の純粋ハンドラを実装
   - 完了状態: ユニットテストで agency→全管理 API 403・代理店ロールの agencyId 欠落→400・email 重複→409・作成成功が確認できる
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
