@@ -86,7 +86,7 @@
 
 ## 4. Core: dashboard-web（Next.js UI）
 
-- [ ] 4.1 dashboard-web 雛形（standalone・Dockerfile・healthz）
+- [x] 4.1 dashboard-web 雛形（standalone・Dockerfile・healthz）
   - `ts/apps/dashboard-web` を新設: `package.json`（`@fwlm/dashboard-web`・next/react/firebase・**`@fwlm/db` に依存しない**＝ブラウザから dashboard-api を HTTP 呼び出しするため DB 直結しない）、`next.config.ts`（`output:'standalone'`・turbopack/outputFileTracing root=`ts/`）、`tsconfig.json`/`vitest.config.ts`/`.env.example`、4 ステージ `Dockerfile`（`next build` 前に `NEXT_PUBLIC_*`（Firebase 設定・API ベース URL）を `ARG`+`ENV` で焼き込み）、`healthz` ルート（force-static）
   - 完了状態: `pnpm -C ts --filter @fwlm/dashboard-web build` が成功、`check-next-public-buildargs.sh` が緑（参照する全 `NEXT_PUBLIC_*` に対応する ARG が Dockerfile に存在）
   - _Requirements: 7.3_
