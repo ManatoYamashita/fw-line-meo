@@ -130,7 +130,7 @@
   - _Boundary: CI scripts, deploy workflow_
   - _Depends: 4.1_
 
-- [ ] 5.2 (P) Terraform: dashboard-web サービス追加・dashboard-api env 追加
+- [x] 5.2 (P) Terraform: dashboard-web サービス追加・dashboard-api env 追加
   - `infra/envs/prod/main.tf`（＋`variables.tf`）に `dashboard-web` Cloud Run サービスを追加（public・ゼロスケール・DB 直結なし＝needs_cloudsql 不要・NEXT_PUBLIC は build-time のため runtime secret 不要）。既存 `dashboard-api` サービスに `DASHBOARD_WEB_ORIGIN` env と `PLACES_API_KEY`（secret_env）を追加。grants.sql は変更不要（新テーブルなし・DML 付与済み）
   - 完了状態: `terraform -chdir=infra/envs/prod validate` が成功
   - _Requirements: 7.1_
