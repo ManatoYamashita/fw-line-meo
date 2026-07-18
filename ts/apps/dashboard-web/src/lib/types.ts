@@ -54,3 +54,13 @@ export interface Category {
   code: string;
   label: string;
 }
+
+// GET /invite-codes の 1 件（@fwlm/db InviteCodeItem と同一契約。design: invite-codes.ts）。
+// disabled=true は無効化済み（以後のオーナー紐付けに使えない。Req 5.1/5.3）。
+export interface InviteCodeItem {
+  id: string;
+  agencyId: string;
+  code: string;
+  disabled: boolean;
+  createdAt: string;
+}

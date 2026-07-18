@@ -2,6 +2,7 @@ import { getFirebaseAuth } from './firebase';
 import type {
   AgencyItem,
   Category,
+  InviteCodeItem,
   OwnerListItem,
   StoreCandidate,
   StoreListItem,
@@ -191,4 +192,50 @@ export async function registerStore(
   options: ApiClientOptions = {},
 ): Promise<ApiResult<{ storeId: string }>> {
   return apiFetch<{ storeId: string }>('/stores', { ...options, method: 'POST', body: input });
+}
+
+// GET /invite-codes: 招待コード一覧。agency は自代理店分（引数不要）、operator は agencyId 指定が必須（未指定は API が 400）。
+export async function getInviteCodes(
+  params: { agencyId?: string } = {},
+  options: ApiClientOptions = {},
+): Promise<ApiResult<InviteCodeItem[]>> {
+  const result = await apiFetch<{ inviteCodes: InviteCodeItem[] }>(
+    `/invite-codes${buildQuery({ agencyId: params.agencyId })}`,
+    options,
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.inviteCodes };
+}
+
+// POST /invite-codes: 新しい招待コードを発行。agency は agencyId 省略（自代理店）、operator は agencyId 指定。
+// 201 で { inviteCode }。生成衝突が続くと 500。
+export async function issueInviteCode(
+  params: { agencyId?: string } = {},
+  options: ApiClientOptions = {},
+): Promise<ApiResult<InviteCodeItem>> {
+  const result = await apiFetch<{ inviteCode: InviteCodeItem }>('/invite-codes', {
+    ...options,
+    method: 'POST',
+    body: params.agencyId === undefined ? {} : { agencyId: params.agencyId },
+  });
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.inviteCode };
+}
+
+// POST /invite-codes/:id/disable: 招待コードを無効化。operator は対象代理店を agencyId で指定、agency は自代理店スコープ。
+// 200 で { inviteCode }（既無効への再実行も現状値を返し冪等）。スコープ外/不明 id は 404(not_found)。
+export async function disableInviteCode(
+  params: { id: string; agencyId?: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<InviteCodeItem>> {
+  const result = await apiFetch<{ inviteCode: InviteCodeItem }>(
+    `/invite-codes/${encodeURIComponent(params.id)}/disable`,
+    {
+      ...options,
+      method: 'POST',
+      body: params.agencyId === undefined ? {} : { agencyId: params.agencyId },
+    },
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.inviteCode };
 }

@@ -107,7 +107,7 @@
   - _Boundary: dashboard-web stores UI_
   - _Depends: 4.2_
 
-- [ ] 4.4 (P) 招待コード画面
+- [x] 4.4 (P) 招待コード画面
   - `invite-codes/page.tsx`（有効/無効バッジ付き一覧・発行・無効化、operator は代理店セレクタ付き）。全文言日本語
   - 完了状態: モック api で一覧表示・発行後のコード提示・無効化後の状態反映が描画テストで確認できる
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 7.3_
