@@ -61,8 +61,14 @@ export interface DashboardUserRow {
   role: DashboardRole;
   operator_id: string;
   agency_id: string | null;
-  auth_subject: string;
+  // 0005: 保留（未ログイン）行を email のみで表現するため NULL 許容。
+  // ck_dashboard_users_identity により auth_subject / email の少なくとも一方は非 NULL。
+  auth_subject: string | null;
+  // 0005: Google ログイン用のスタッフ識別子（小文字正規化保存・lower(email) 部分一意）。
+  email: string | null;
   display_name: string | null;
+  // 0005: 無効化時刻（非 NULL = ログイン拒否・Req 6.4）。
+  disabled_at: Date | null;
   created_at: Date;
 }
 
@@ -203,4 +209,59 @@ export interface SessionPatch {
 export interface WebhookEventRow {
   webhook_event_id: string;
   received_at: Date;
+}
+
+// --- agency-dashboard（ダッシュボード一覧・作成アクセサの戻り型・camelCase）---
+// DAL の行→camelCase 写像規約に従う。書込は TS 層所有テーブルのみ（competitors は read のみ）。
+
+// 店舗一覧の 1 行（stores×owners×agencies JOIN＋competitors(active) EXISTS）。
+export interface StoreListItem {
+  id: string;
+  name: string;
+  placeStatus: PlaceStatus;
+  competitorConfigured: boolean; // EXISTS competitors WHERE store_id=... AND active
+  ownerId: string;
+  ownerDisplayName: string | null;
+  agencyId: string;
+  agencyName: string;
+  createdAt: Date;
+}
+
+// 代理店配下オーナー一覧の 1 行。
+export interface OwnerListItem {
+  id: string;
+  displayName: string | null;
+  onboardingStatus: OnboardingStatus;
+  createdAt: Date;
+}
+
+// 招待コード一覧・作成・無効化の戻り型（disabled = disabled_at IS NOT NULL）。
+export interface InviteCodeItem {
+  id: string;
+  agencyId: string;
+  code: string;
+  disabled: boolean;
+  createdAt: Date;
+}
+
+// 代理店の作成・一覧の戻り型。
+export interface AgencyItem {
+  id: string;
+  operatorId: string;
+  name: string;
+  createdAt: Date;
+}
+
+// ダッシュボード利用者の管理（運営）向け戻り型（作成・一覧・無効化）。
+// design.md は本型の形状を明示していないため dashboard_users DDL＋consumer 需要から派生:
+// disabled_at → disabled boolean に写像し、email/display_name は保留行/既存行で NULL があり得るため nullable。
+export interface DashboardUserItem {
+  id: string;
+  role: DashboardRole;
+  operatorId: string;
+  agencyId: string | null;
+  email: string | null;
+  displayName: string | null;
+  disabled: boolean;
+  createdAt: Date;
 }

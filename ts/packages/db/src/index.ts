@@ -7,5 +7,7 @@ export * from './tallies.js';
 export * from './delivery-settings.js';
 export * from './owners.js';
 export * from './invite-codes.js';
+export * from './agencies.js';
+export * from './categories.js';
 export * from './onboarding-sessions.js';
 export * from './webhook-events.js';

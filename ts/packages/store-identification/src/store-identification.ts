@@ -5,7 +5,7 @@ import {
   type Queryable,
   type StoreCandidate,
 } from '@fwlm/db';
-import type { PlacesSearchAdapter, SearchOutcome } from '../places/search.js';
+import type { PlacesSearchAdapter, SearchOutcome } from './places-search.js';
 
 // 店舗特定サービス（design.md「StoreIdentificationService（拡張縫）」）。
 // Requirement 3.1: 店名検索は PlacesSearchAdapter（2.3）にそのまま委譲する。

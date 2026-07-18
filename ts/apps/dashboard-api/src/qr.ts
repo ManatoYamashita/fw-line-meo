@@ -25,7 +25,8 @@ export async function handleQr(deps: QrDeps, req: QrRequest): Promise<Response> 
   if (auth.kind === 'unauthenticated') {
     return jsonError(401, 'UNAUTHENTICATED', 'ログインが必要です');
   }
-  if (auth.kind === 'unregistered') {
+  if (auth.kind === 'unregistered' || auth.kind === 'disabled') {
+    // 未登録・無効化はいずれもアクセス権なし（403）。存在有無を漏らさない同一メッセージ。
     return jsonError(403, 'FORBIDDEN', 'アクセス権がありません');
   }
 

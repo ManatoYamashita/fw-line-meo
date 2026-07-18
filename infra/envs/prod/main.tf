@@ -86,10 +86,25 @@ module "run_services" {
     "dashboard-api" = {
       public         = true
       needs_cloudsql = true
-      secret_env     = {}
+      # agency-dashboard: 店舗登録フローが Places 検索をサーバー側で実行するため
+      # PLACES_API_KEY を注入（batch_job と同一の places-api-key secret）。
+      secret_env = {
+        PLACES_API_KEY = module.secrets.secret_ids["places-api-key"]
+      }
       env = {
         SURVEY_BASE_URL = var.survey_base_url
+        # agency-dashboard: CORS 許可元（単一オリジン・design.md Security）。dashboard-web の Cloud Run URL。
+        DASHBOARD_WEB_ORIGIN = var.dashboard_web_origin
       }
+    }
+    # agency-dashboard: 運営・代理店向け Next.js UI（ゼロスケール公開 Web・design.md「Infra」）。
+    # ランタイム secret を持たず DB も持たない（NEXT_PUBLIC_* は build-time で Dockerfile に焼き込む・
+    # dashboard-api へ HTTP で問い合わせるため Cloud SQL 不要 = needs_cloudsql=false）。
+    "dashboard-web" = {
+      public         = true
+      needs_cloudsql = false
+      secret_env     = {}
+      env            = {}
     }
     # competitive-daily-summary: LIFF 詳細閲覧（読取専用・design.md「TS / store-detail」）。
     # secret を持たない（LIFF_CHANNEL_ID・NEXT_PUBLIC_LIFF_ID は非秘匿の識別子・平文 env で足りる）。

@@ -22,6 +22,10 @@ places_quota_caps = {
 # gemini_model    = "gemini-3.1-flash-lite"
 # survey_base_url = "https://survey-web-xxxxxxxxxx-an.a.run.app"
 
+# agency-dashboard（代理店ダッシュボード）の env。
+# dashboard_web_origin は dashboard-web 初回デプロイ後の Cloud Run URL（CORS 許可元）を設定。
+# dashboard_web_origin = "https://dashboard-web-xxxxxxxxxx-an.a.run.app"
+
 # competitive-daily-summary（機能1）の env。delivery-job（毎時配信）・store-detail（LIFF詳細閲覧）が要求する。
 # line_channel_id は LINE Developers コンソールの Messaging API チャネル ID。
 # liff_url / liff_channel_id / liff_id は store-detail の LIFF チャネル発行後

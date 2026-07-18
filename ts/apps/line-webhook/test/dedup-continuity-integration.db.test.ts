@@ -14,9 +14,9 @@ import type { StoreCandidate } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
 import { createSignatureVerifier } from '../src/webhook/signature.js';
 import { createConversationHandlers } from '../src/onboarding/conversation.js';
-import { createStoreIdentificationService } from '../src/onboarding/store-identification.js';
+import { createStoreIdentificationService } from '@fwlm/store-identification';
 import type { LineMessenger } from '../src/line/client.js';
-import type { PlacesSearchAdapter, SearchOutcome } from '../src/places/search.js';
+import type { PlacesSearchAdapter, SearchOutcome } from '@fwlm/store-identification';
 import {
   buildGreetingMessage,
   buildStoreNameInputGuidanceMessage,

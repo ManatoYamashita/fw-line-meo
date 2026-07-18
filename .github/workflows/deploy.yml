@@ -1,6 +1,7 @@
-# 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 の CI 化フォロー）
+# 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 / agency-dashboard task 5.1 の CI 化フォロー）
 #
-# main への push で ts-ci が緑になった後、3イメージ（daily-batch / summary-delivery / store-detail）を
+# main への push で ts-ci が緑になった後、5イメージ
+# （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web）を
 # build → Artifact Registry へ push → Cloud Run へ image-only 反映する。gcp-auth-smoke.yml の
 # Direct WIF 雛形を踏襲（service_account 入力なし・SA JSON キー不使用）。
 #
@@ -15,6 +16,11 @@
 #   vars.NEXT_PUBLIC_LIFF_ID = tfvars の liff_id と同値（store-detail の build-arg。Next.js は
 #                              next build 時にクライアントバンドルへインライン化するため、
 #                              Cloud Run のランタイム env では反映されない＝ビルド時に渡す必要がある）
+#   vars.NEXT_PUBLIC_API_BASE_URL         = dashboard-web が叩く dashboard-api の URL（build-arg）
+#   vars.NEXT_PUBLIC_FIREBASE_API_KEY     = dashboard-web の Firebase Web SDK 設定（build-arg）
+#   vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN = 同上（build-arg）
+#   vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID  = 同上（build-arg。いずれも store-detail の LIFF ID と同理由で
+#                                           next build 時にクライアントバンドルへインライン化される）
 name: deploy-prod
 
 on:
@@ -58,15 +64,20 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Build & push 3 images（store-detail は NEXT_PUBLIC_LIFF_ID を build-arg で焼き込み）
+      - name: Build & push 5 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: asia-northeast1
           REPOSITORY: fwlm
           TAG: ${{ steps.meta.outputs.tag }}
           NEXT_PUBLIC_LIFF_ID: ${{ vars.NEXT_PUBLIC_LIFF_ID }}
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
         # push-images.sh 内で gcloud auth configure-docker → docker build（build-arg）→ push。
-        # NEXT_PUBLIC_LIFF_ID 未設定なら store-detail の push を hard-fail（空焼き込みを構造的に防止）。
+        # NEXT_PUBLIC_LIFF_ID 未設定なら store-detail の push を、dashboard-web の NEXT_PUBLIC_* が
+        # 1つでも未設定なら dashboard-web の push を hard-fail（空焼き込みを構造的に防止）。
         run: scripts/push-images.sh
 
       - name: Reflect images to Cloud Run（image-only update・契約遵守）
@@ -84,4 +95,10 @@ jobs:
             --region=asia-northeast1 --project="${PROJECT_ID}"
           gcloud run services update store-detail \
             --image="${IMAGE_BASE}/store-detail:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update dashboard-api \
+            --image="${IMAGE_BASE}/dashboard-api:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update dashboard-web \
+            --image="${IMAGE_BASE}/dashboard-web:${TAG}" \
             --region=asia-northeast1 --project="${PROJECT_ID}"

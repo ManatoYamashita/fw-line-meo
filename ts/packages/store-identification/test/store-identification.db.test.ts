@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool, createOwner, findOwnerByLineUserId, findStoreByPlaceId } from '@fwlm/db';
 import type { StoreCandidate } from '@fwlm/db';
-import { createStoreIdentificationService } from '../../src/onboarding/store-identification.js';
-import type { SearchOutcome, PlacesSearchAdapter } from '../../src/places/search.js';
+import { createStoreIdentificationService } from '../src/store-identification.js';
+import type { SearchOutcome, PlacesSearchAdapter } from '../src/places-search.js';
 
 // 実 postgres（ts-test-db）で確定の原子性と重複 place_id の拒否を検証する。
 // 他ファイルと衝突しない専用 UUID プレフィックス（e7）。DATABASE_URL 無しは skip。

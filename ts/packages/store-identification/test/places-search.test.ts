@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createPlacesSearchAdapter } from '../../src/places/search.js';
+import { createPlacesSearchAdapter } from '../src/places-search.js';
 
 const FIXED_FIELD_MASK =
   'places.id,places.displayName,places.formattedAddress,places.location,places.types';

@@ -9,12 +9,12 @@ import {
 } from '../../src/onboarding/conversation.js';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessenger, LineMessage } from '../../src/line/client.js';
-import type { ConnectablePool, TransactionClient } from '../../src/onboarding/store-identification.js';
+import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type {
   ConfirmOutcome,
   StoreIdentificationService,
-} from '../../src/onboarding/store-identification.js';
-import type { SearchOutcome } from '../../src/places/search.js';
+} from '@fwlm/store-identification';
+import type { SearchOutcome } from '@fwlm/store-identification';
 import { encodePostback } from '../../src/onboarding/stages.js';
 import {
   buildAlreadyCompletedMessage,

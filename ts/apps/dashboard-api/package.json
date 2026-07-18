@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@fwlm/store-identification": "workspace:*",
     "@hono/node-server": "^1",
     "firebase-admin": "^13",
     "hono": "^4",
