@@ -123,7 +123,7 @@
 
 ## 5. Integration: CI・デプロイ・インフラ配線
 
-- [ ] 5.1 (P) push-images.sh・deploy.yml に dashboard-api/dashboard-web を追加
+- [x] 5.1 (P) push-images.sh・deploy.yml に dashboard-api/dashboard-web を追加
   - `scripts/push-images.sh` の `IMAGE_NAMES`＋`DOCKERFILE`/`CONTEXT`/`BUILD_ARGS` 連想配列に `dashboard-api`（context `ts`・build-arg なし）と `dashboard-web`（context `ts`・`NEXT_PUBLIC_*` 一式を `--build-arg`）を登録し、`--image` の case 検証・usage も更新。`deploy.yml` に両サービスの image-only 反映（`gcloud run services update`）を追加し、dashboard-web の build-arg 用 `NEXT_PUBLIC_*` vars を push ステップへ受け渡し
   - 完了状態: `scripts/push-images.sh` の usage/検証に両イメージが現れ、`check-next-public-buildargs.sh` が緑（dashboard-web の ARG 整合）。実ビルドは CI/Cloud Build で初検証（docker 不在のためローカルは規約準拠まで）
   - _Requirements: 7.1_
