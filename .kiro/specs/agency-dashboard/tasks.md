@@ -146,7 +146,7 @@
   - _Depends: 3.1_
   - 6.2 と別ファイル・別 UUID prefix でスコープし共有 DB 上で並行安全にする
 
-- [ ] 6.2 (P) 招待コード整合と初回ログインリンクの統合検証
+- [x] 6.2 (P) 招待コード整合と初回ログインリンクの統合検証
   - `*.db.test.ts`: ダッシュボード発行の招待コードが `findActiveInviteCode`（line-onboarding 経路）で解決可能・無効化後は解決不可。保留利用者（email のみ）が初回 Google ログイン（email_verified）でリンクされ再ログインで uid が安定、disabled 利用者はログイン拒否、非 google/未検証は非リンク
   - 完了状態: 上記シナリオがすべて `*.db.test.ts` で緑
   - _Requirements: 1.2, 5.2, 5.3, 6.2, 6.4_
