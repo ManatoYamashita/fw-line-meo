@@ -138,7 +138,7 @@
 
 ## 6. Validation: 統合検証と受け入れ
 
-- [ ] 6.1 (P) 店舗登録・重複拒否・オーナー遷移の統合検証
+- [x] 6.1 (P) 店舗登録・重複拒否・オーナー遷移の統合検証
   - `dashboard-api` の `*.db.test.ts`: `POST /stores` 経由の `confirmStore` 実トランザクションで stores 行作成＋owner の `store_identified` 遷移が同時成立、他店舗として登録済み place→409、スコープ外 owner への登録→403 を実 DB で検証
   - 完了状態: 上記シナリオがすべて `*.db.test.ts` で緑
   - _Requirements: 2.4, 3.8, 3.9, 3.10_
