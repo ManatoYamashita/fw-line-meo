@@ -8,6 +8,9 @@ import {
   findStoreWithAgency,
   linkAuthSubjectByEmail,
   listStoresWithStatus,
+  setStoreCategory,
+  findAgencyName,
+  findDashboardUserDisplayName,
   listOwnersByAgency,
   findOwnerWithAgency,
   listCategories,
@@ -73,11 +76,7 @@ async function registerStore(input: RegisterStoreInput): Promise<ConfirmOutcome>
   const outcome = await storeIdentification.confirmStore(input.ownerId, input.candidate);
   if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
     try {
-      const pool = await getPool();
-      await pool.query('UPDATE stores SET category_code = $1 WHERE id = $2', [
-        input.categoryCode,
-        outcome.storeId,
-      ]);
+      await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
     } catch {
       // category 設定は非クリティカル（登録本体は既に成立済み）。PII・クエリは出さない。
       console.error('registerStore: category follow-up update failed', {
@@ -103,25 +102,6 @@ async function issueCode(agencyId: string) {
   }
 }
 
-// findAgencyName / findDisplayName（2.2 handoff）: 読み取り専用の小クエリで裏付ける
-// （既存 DAL に単一取得アクセサが無いため、合成根の index.ts で inline pool.query を用いる）。
-async function findAgencyName(agencyId: string): Promise<string | null> {
-  const pool = await getPool();
-  const res = await pool.query<{ name: string }>('SELECT name FROM agencies WHERE id = $1', [
-    agencyId,
-  ]);
-  return res.rows[0]?.name ?? null;
-}
-
-async function findDisplayName(userId: string): Promise<string | null> {
-  const pool = await getPool();
-  const res = await pool.query<{ display_name: string | null }>(
-    'SELECT display_name FROM dashboard_users WHERE id = $1',
-    [userId],
-  );
-  return res.rows[0]?.display_name ?? null;
-}
-
 const app = createApp({
   corsOrigin: config.corsOrigin,
   qr: {
@@ -132,8 +112,8 @@ const app = createApp({
   },
   me: {
     auth: authDeps,
-    findAgencyName,
-    findDisplayName,
+    findAgencyName: async (agencyId) => findAgencyName(await getPool(), agencyId),
+    findDisplayName: async (userId) => findDashboardUserDisplayName(await getPool(), userId),
   },
   stores: {
     auth: authDeps,

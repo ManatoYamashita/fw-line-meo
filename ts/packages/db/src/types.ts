@@ -61,8 +61,14 @@ export interface DashboardUserRow {
   role: DashboardRole;
   operator_id: string;
   agency_id: string | null;
-  auth_subject: string;
+  // 0005: 保留（未ログイン）行を email のみで表現するため NULL 許容。
+  // ck_dashboard_users_identity により auth_subject / email の少なくとも一方は非 NULL。
+  auth_subject: string | null;
+  // 0005: Google ログイン用のスタッフ識別子（小文字正規化保存・lower(email) 部分一意）。
+  email: string | null;
   display_name: string | null;
+  // 0005: 無効化時刻（非 NULL = ログイン拒否・Req 6.4）。
+  disabled_at: Date | null;
   created_at: Date;
 }
 

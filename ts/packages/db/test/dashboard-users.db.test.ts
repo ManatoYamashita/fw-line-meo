@@ -6,6 +6,7 @@ import {
   createPendingDashboardUser,
   listDashboardUsers,
   disableDashboardUser,
+  findDashboardUserDisplayName,
 } from '../src/dashboard-users.js';
 
 // 共有テスト DB での衝突回避のため専用 UUID プレフィックス（f4）を用いる（f3 までは他ファイルで使用済み）。
@@ -253,6 +254,30 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users accessors (DB)', () 
       const pool = await getPool();
       expect(
         await disableDashboardUser(pool, 'f4000000-0000-0000-0000-d0000000ffff', OP_A),
+      ).toBeNull();
+    });
+  });
+
+  describe('findDashboardUserDisplayName', () => {
+    // 掃除は afterAll の operator_id スコープ DELETE（OP_A 配下）に含まれる。
+    const DU_NAMED = 'f4000000-0000-0000-0000-d00000000007';
+
+    it('display_name 設定行は表示名・未設定行は null を返す（GET /me の displayName 用）', async () => {
+      const pool = await getPool();
+      await pool.query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, display_name)
+         VALUES ($1, 'operator', $2, NULL, $3, $4)`,
+        [DU_NAMED, OP_A, 'authsub-f4-named', 'f4表示名テスト'],
+      );
+      expect(await findDashboardUserDisplayName(pool, DU_NAMED)).toBe('f4表示名テスト');
+      // フィクスチャの既存行は display_name 未設定＝null。
+      expect(await findDashboardUserDisplayName(pool, DU_ENABLED_LINKED)).toBeNull();
+    });
+
+    it('不在の id は null', async () => {
+      const pool = await getPool();
+      expect(
+        await findDashboardUserDisplayName(pool, 'f4000000-0000-0000-0000-d0000000fffe'),
       ).toBeNull();
     });
   });

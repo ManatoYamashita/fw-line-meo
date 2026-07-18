@@ -170,3 +170,15 @@ export async function disableDashboardUser(
   const row = res.rows[0];
   return row ? mapDashboardUser(row) : null;
 }
+
+/** 利用者の表示名を単一取得する（GET /me の displayName 用・不在は null）。 */
+export async function findDashboardUserDisplayName(
+  db: Queryable,
+  userId: string,
+): Promise<string | null> {
+  const res = await db.query<{ display_name: string | null }>(
+    'SELECT display_name FROM dashboard_users WHERE id = $1',
+    [userId],
+  );
+  return res.rows[0]?.display_name ?? null;
+}

@@ -7,6 +7,7 @@ import {
   findStoreWithAgency,
   linkAuthSubjectByEmail,
   listStoresWithStatus,
+  setStoreCategory,
   listOwnersByAgency,
   findOwnerWithAgency,
   listCategories,
@@ -96,15 +97,11 @@ function buildApp(): ReturnType<typeof createApp> {
     places,
   });
 
-  // index.ts の実 registerStore 合成を忠実に複製する（凍結 confirmStore TX ＋ best-effort category UPDATE）。
+  // index.ts の実 registerStore 合成を忠実に複製する（凍結 confirmStore TX ＋ best-effort setStoreCategory）。
   const registerStore = async (input: RegisterStoreInput): Promise<ConfirmOutcome> => {
     const outcome = await service.confirmStore(input.ownerId, input.candidate);
     if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
-      const pool = await getPool();
-      await pool.query('UPDATE stores SET category_code = $1 WHERE id = $2', [
-        input.categoryCode,
-        outcome.storeId,
-      ]);
+      await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
     }
     return outcome;
   };

@@ -177,3 +177,16 @@ export async function listStoresWithStatus(
     createdAt: row.created_at,
   }));
 }
+
+/**
+ * 店舗のカテゴリを設定する（店舗登録の後追い設定・design「registerStore 合成」参照）。
+ * confirmStore の凍結 TX 契約の外で呼ばれる best-effort 更新のため、
+ * 失敗時の扱い（登録本体を失敗させない）は呼び出し側が決める。
+ */
+export async function setStoreCategory(
+  db: Queryable,
+  storeId: string,
+  categoryCode: string,
+): Promise<void> {
+  await db.query('UPDATE stores SET category_code = $1 WHERE id = $2', [categoryCode, storeId]);
+}

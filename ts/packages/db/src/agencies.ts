@@ -46,3 +46,11 @@ export async function listAgencies(db: Queryable, operatorId: string): Promise<A
   );
   return res.rows.map(mapAgency);
 }
+
+/** 代理店名を単一取得する（GET /me の agencyName 用・不在は null）。 */
+export async function findAgencyName(db: Queryable, agencyId: string): Promise<string | null> {
+  const res = await db.query<{ name: string }>('SELECT name FROM agencies WHERE id = $1', [
+    agencyId,
+  ]);
+  return res.rows[0]?.name ?? null;
+}

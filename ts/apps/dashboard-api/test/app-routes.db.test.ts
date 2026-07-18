@@ -7,17 +7,20 @@ import {
   findStoreWithAgency,
   linkAuthSubjectByEmail,
   listStoresWithStatus,
+  setStoreCategory,
   listOwnersByAgency,
   findOwnerWithAgency,
   listCategories,
   listAgencies,
   createAgency,
+  findAgencyName,
   listInviteCodes,
   createInviteCode,
   disableInviteCode,
   listDashboardUsers,
   createPendingDashboardUser,
   disableDashboardUser,
+  findDashboardUserDisplayName,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -72,11 +75,7 @@ function buildApp(): ReturnType<typeof createApp> {
   const registerStore = async (input: RegisterStoreInput): Promise<ConfirmOutcome> => {
     const outcome = await service.confirmStore(input.ownerId, input.candidate);
     if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
-      const pool = await getPool();
-      await pool.query('UPDATE stores SET category_code = $1 WHERE id = $2', [
-        input.categoryCode,
-        outcome.storeId,
-      ]);
+      await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
     }
     return outcome;
   };
@@ -87,22 +86,6 @@ function buildApp(): ReturnType<typeof createApp> {
       create: async (code: string) => createInviteCode(await getPool(), { agencyId, code }),
     });
 
-  const findAgencyName = async (agencyId: string): Promise<string | null> => {
-    const res = await (
-      await getPool()
-    ).query<{ name: string }>('SELECT name FROM agencies WHERE id = $1', [agencyId]);
-    return res.rows[0]?.name ?? null;
-  };
-  const findDisplayName = async (userId: string): Promise<string | null> => {
-    const res = await (
-      await getPool()
-    ).query<{ display_name: string | null }>(
-      'SELECT display_name FROM dashboard_users WHERE id = $1',
-      [userId],
-    );
-    return res.rows[0]?.display_name ?? null;
-  };
-
   const deps: AppDeps = {
     corsOrigin: config.corsOrigin,
     qr: {
@@ -111,7 +94,11 @@ function buildApp(): ReturnType<typeof createApp> {
       renderQr: (text, size) => QRCode.toBuffer(text, { width: size }),
       surveyBaseUrl: config.surveyBaseUrl,
     },
-    me: { auth: authDeps, findAgencyName, findDisplayName },
+    me: {
+      auth: authDeps,
+      findAgencyName: async (agencyId) => findAgencyName(await getPool(), agencyId),
+      findDisplayName: async (userId) => findDashboardUserDisplayName(await getPool(), userId),
+    },
     stores: {
       auth: authDeps,
       listStores: async (filter) => listStoresWithStatus(await getPool(), filter),

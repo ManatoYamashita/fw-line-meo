@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool } from '../src/pool.js';
-import { listStoresWithStatus } from '../src/stores.js';
+import { listStoresWithStatus, setStoreCategory } from '../src/stores.js';
 import { listOwnersByAgency, findOwnerWithAgency } from '../src/owners.js';
-import { createAgency, listAgencies } from '../src/agencies.js';
+import { createAgency, listAgencies, findAgencyName } from '../src/agencies.js';
 import { listCategories } from '../src/categories.js';
 import {
   listInviteCodes,
@@ -225,6 +225,41 @@ describe.skipIf(!process.env.DATABASE_URL)('agency-dashboard accessors (DB)', ()
       const pool = await getPool();
       expect(await findActiveInviteCode(pool, 'F3AG1ACT')).toEqual({ agencyId: AG_A1 });
       expect(await findActiveInviteCode(pool, 'F3AG1DIS')).toBeNull();
+    });
+  });
+
+  describe('findAgencyName', () => {
+    it('存在する代理店は名前を返す（GET /me の agencyName 用）', async () => {
+      const pool = await getPool();
+      expect(await findAgencyName(pool, AG_A1)).toBe('f3代理店A1');
+    });
+
+    it('不在の id は null', async () => {
+      const pool = await getPool();
+      expect(await findAgencyName(pool, 'f3000000-0000-0000-0000-00000000dead')).toBeNull();
+    });
+  });
+
+  describe('setStoreCategory', () => {
+    it('seed カテゴリのコードを店舗に設定できる（registerStore の後追い設定用）', async () => {
+      const pool = await getPool();
+      const categories = await listCategories(pool);
+      const code = categories[0]?.code;
+      expect(code).toBeTruthy();
+      await setStoreCategory(pool, ST_A1_2, code as string);
+      const res = await pool.query<{ category_code: string | null }>(
+        'SELECT category_code FROM stores WHERE id = $1',
+        [ST_A1_2],
+      );
+      expect(res.rows[0]?.category_code).toBe(code);
+    });
+
+    it('不在の store id は no-op（例外を投げない）', async () => {
+      const pool = await getPool();
+      const categories = await listCategories(pool);
+      await expect(
+        setStoreCategory(pool, 'f3000000-0000-0000-0000-00000000dead', categories[0]?.code as string),
+      ).resolves.toBeUndefined();
     });
   });
 });
