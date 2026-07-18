@@ -1,4 +1,11 @@
 import { getFirebaseAuth } from './firebase';
+import type {
+  AgencyItem,
+  Category,
+  OwnerListItem,
+  StoreCandidate,
+  StoreListItem,
+} from './types';
 
 // dashboard-api（Hono）呼び出しの型付き窓口。Bearer 付与・エラー封筒の解釈を一箇所に集約する。
 // 設計: dashboard-web「AuthProvider / api client」（requirements 1.1, 1.2, 1.3, 1.4, 7.4）。
@@ -103,11 +110,85 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   }
 }
 
+// 型付きクライアントメソッド共通のオプション（method/body は各メソッドが固定するため受けない）。
+export type ApiClientOptions = Pick<ApiFetchOptions, 'getToken' | 'fetchImpl' | 'baseUrl'>;
+
+// undefined/空文字を除いたクエリ文字列を組み立てる（付与すべき値が無ければ空文字を返す）。
+function buildQuery(params: Record<string, string | undefined>): string {
+  const usp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') usp.set(key, value);
+  }
+  const query = usp.toString();
+  return query.length > 0 ? `?${query}` : '';
+}
+
 // GET /me: 認証済み利用者の自己情報。200 の { user } を value にアンラップする。
-export async function getMe(
-  options: Pick<ApiFetchOptions, 'getToken' | 'fetchImpl' | 'baseUrl'> = {},
-): Promise<ApiResult<Me>> {
+export async function getMe(options: ApiClientOptions = {}): Promise<ApiResult<Me>> {
   const result = await apiFetch<{ user: Me }>('/me', options);
   if (!result.ok) return result;
   return { ok: true, value: result.value.user };
+}
+
+// GET /stores: スコープ付き店舗一覧。agency は自代理店分（引数不要）、operator は agencyId 未指定で全件・指定で絞り込み。
+export async function getStores(
+  params: { agencyId?: string } = {},
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreListItem[]>> {
+  const result = await apiFetch<{ stores: StoreListItem[] }>(
+    `/stores${buildQuery({ agencyId: params.agencyId })}`,
+    options,
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.stores };
+}
+
+// GET /owners: 登録対象オーナー一覧。agency は無指定で自代理店、operator は agencyId 指定が必須（未指定は API が 400）。
+export async function getOwners(
+  params: { agencyId?: string } = {},
+  options: ApiClientOptions = {},
+): Promise<ApiResult<OwnerListItem[]>> {
+  const result = await apiFetch<{ owners: OwnerListItem[] }>(
+    `/owners${buildQuery({ agencyId: params.agencyId })}`,
+    options,
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.owners };
+}
+
+// GET /agencies: 代理店一覧（operator 専用。agency ロールは API が 403）。
+export async function getAgencies(options: ApiClientOptions = {}): Promise<ApiResult<AgencyItem[]>> {
+  const result = await apiFetch<{ agencies: AgencyItem[] }>('/agencies', options);
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.agencies };
+}
+
+// GET /categories: 業態カテゴリ一覧（seed が単一情報源）。
+export async function getCategories(options: ApiClientOptions = {}): Promise<ApiResult<Category[]>> {
+  const result = await apiFetch<{ categories: Category[] }>('/categories', options);
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.categories };
+}
+
+// POST /stores/search: 店名から店舗候補（最大10件）を検索。0 件は空配列で 200、外部要因失敗は 502(places_error)。
+export async function searchStores(
+  query: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreCandidate[]>> {
+  const result = await apiFetch<{ candidates: StoreCandidate[] }>('/stores/search', {
+    ...options,
+    method: 'POST',
+    body: { query },
+  });
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.candidates };
+}
+
+// POST /stores: 選択候補を確定登録。候補はサーバー側で再検証されるため、検索応答をそのまま verbatim で送る。
+// 201 で { storeId }、既登録 Place は 409(place_already_registered)、権限外は 403。
+export async function registerStore(
+  input: { ownerId: string; candidate: StoreCandidate; categoryCode?: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<{ storeId: string }>> {
+  return apiFetch<{ storeId: string }>('/stores', { ...options, method: 'POST', body: input });
 }
