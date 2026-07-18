@@ -138,6 +138,7 @@ ts/apps/dashboard-api/src/
 ├── stores-list.ts               # GET /stores ハンドラ（スコープ付き一覧＋ステータス）
 ├── store-registration.ts        # POST /stores/search・POST /stores ハンドラ
 ├── owners-list.ts               # GET /owners ハンドラ（登録対象オーナー選択用）
+├── categories.ts                # GET /categories ハンドラ（認証必須・seed 由来一覧の封筒化）
 ├── invite-codes.ts              # GET/POST /invite-codes・POST /invite-codes/:id/disable
 ├── invite-code-gen.ts           # コード生成（crypto・紛らわしい文字除外・衝突リトライ）
 └── admin.ts                     # /agencies・/dashboard-users 系ハンドラ（operator 専用）
@@ -150,7 +151,8 @@ ts/apps/dashboard-web/
     ├── lib/
     │   ├── firebase.ts          # Firebase JS SDK 初期化（NEXT_PUBLIC_* から）
     │   ├── auth-context.tsx     # ログイン状態・IDトークン・me 情報の Context/Provider
-    │   └── api.ts               # dashboard-api 呼び出し（Bearer 付与・エラー封筒の型付き解釈）
+    │   ├── api.ts               # dashboard-api 呼び出し（Bearer 付与・エラー封筒の型付き解釈）
+    │   └── types.ts             # API レスポンス型の再定義（@fwlm/db 非依存の帰結・HTTP 契約が SoT）
     ├── components/              # ナビゲーション・認可ガード・フォーム部品（日本語 UI）
     └── app/
         ├── layout.tsx           # 全体レイアウト＋AuthProvider
@@ -164,7 +166,7 @@ ts/apps/dashboard-web/
         └── healthz/route.ts     # ヘルスチェック（force-static）
 
 ts/packages/db/src/
-├── agencies.ts                  # createAgency / listAgencies
+├── agencies.ts                  # createAgency / listAgencies / findAgencyName（/me の agencyName 用）
 └── categories.ts                # listCategories（seed が SoT・コード内定義禁止）
 
 db/migrations/0005_agency_dashboard.sql   # dashboard_users 列追加（詳細は Data Models）
@@ -180,12 +182,13 @@ db/test/assertions/50_agency_dashboard.sql # 0005 の制約検証
 - `ts/apps/dashboard-api/src/index.ts` — 新依存（PlacesSearchAdapter・StoreIdentificationService・追加 DAL）の配線
 - `ts/apps/dashboard-api/package.json` — `@fwlm/store-identification` 依存追加
 - `ts/packages/db/src/types.ts` — `DashboardUserRow` に `email`/`disabled_at`、一覧用型の追加
-- `ts/packages/db/src/dashboard-users.ts` — `findByAuthSubject` の disabled 対応、`linkAuthSubjectByEmail`・`createPendingDashboardUser`・`listDashboardUsers`・`disableDashboardUser`
-- `ts/packages/db/src/stores.ts` — `listStoresWithStatus`（JOIN＋competitors EXISTS）
+- `ts/packages/db/src/dashboard-users.ts` — `findByAuthSubject` の disabled 対応、`linkAuthSubjectByEmail`・`createPendingDashboardUser`・`listDashboardUsers`・`disableDashboardUser`・`findDashboardUserDisplayName`（/me 用の単一取得）
+- `ts/packages/db/src/stores.ts` — `listStoresWithStatus`（JOIN＋competitors EXISTS）・`setStoreCategory`（registerStore の best-effort category 反映用）
 - `ts/packages/db/src/owners.ts` — `listOwnersByAgency`・`findOwnerWithAgency`
 - `ts/packages/db/src/invite-codes.ts` — `listInviteCodes`・`createInviteCode`・`disableInviteCode`
 - `ts/packages/db/src/index.ts` — 新規 re-export
 - `db/ERD.md` — `dashboard_users` の属性追記
+- `db/test/assertions/30_compliance.sql` — PII denylist（5.3c）の対象からスタッフ身元テーブル（operators/agencies/dashboard_users）を除外（`dashboard_users.email` はスタッフ識別子であり来店客 PII ではない。来店客側テーブルへのガードは維持し、stores.email 注入で発火継続することを反証済み）
 - `scripts/push-images.sh` — `dashboard-api`・`dashboard-web` イメージ登録（BUILD_ARGS に NEXT_PUBLIC_* 一式）
 - `.github/workflows/deploy.yml` — 両サービスの image-only 反映追加・build-arg 用 vars 受け渡し
 - `infra/envs/prod/main.tf`（+ `variables.tf`） — `dashboard-web` サービス追加・dashboard-api の env（`DASHBOARD_WEB_ORIGIN`・`PLACES_API_KEY` secret）追加
@@ -400,13 +403,13 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 |--------|----------|---------|--------------------|--------|
 | GET | /me | — | `{ user: { role, agencyId, agencyName, displayName } }` | 401, 403(unregistered/disabled) |
 | GET | /stores | `?agencyId=`（operator のみ有効） | `{ stores: StoreListItem[] }` | 401, 403 |
-| GET | /owners | `?agencyId=` | `{ owners: OwnerListItem[] }` | 401, 403 |
+| GET | /owners | `?agencyId=`（operator は必須） | `{ owners: OwnerListItem[] }` | 400(operator の agencyId 未指定), 401, 403 |
 | GET | /categories | — | `{ categories: { code, label }[] }` | 401, 403 |
 | POST | /stores/search | `{ query: string }` | `{ candidates: StoreCandidate[] }`（最大10・0件は空配列で 200） | 400, 401, 403, 502(places_error) |
 | POST | /stores | `{ ownerId, candidate: StoreCandidate, categoryCode? }` | `{ storeId }` | 400, 401, 403, 409(place_already_registered) |
-| GET | /invite-codes | `?agencyId=` | `{ inviteCodes: InviteCodeItem[] }` | 401, 403 |
-| POST | /invite-codes | `{ agencyId? }`（agency は省略＝自代理店） | `{ inviteCode: InviteCodeItem }` | 401, 403, 500 |
-| POST | /invite-codes/:id/disable | — | `{ inviteCode: InviteCodeItem }` | 401, 403, 404 |
+| GET | /invite-codes | `?agencyId=`（operator は必須） | `{ inviteCodes: InviteCodeItem[] }` | 400(operator の agencyId 未指定), 401, 403 |
+| POST | /invite-codes | `{ agencyId? }`（agency は省略＝自代理店・operator は必須） | `{ inviteCode: InviteCodeItem }` | 400, 401, 403, 500 |
+| POST | /invite-codes/:id/disable | `{ agencyId? }`（agency は省略＝自代理店・operator は必須） | `{ inviteCode: InviteCodeItem }` | 400, 401, 403, 404 |
 | GET | /agencies | — | `{ agencies: AgencyItem[] }` | 401, 403(非operator) |
 | POST | /agencies | `{ name: string }` | `{ agency: AgencyItem }` | 400, 401, 403 |
 | GET | /dashboard-users | — | `{ users: DashboardUserItem[] }` | 401, 403(非operator) |
@@ -416,6 +419,8 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 - エラー封筒は既存 `jsonError` の `{ error: { code, message } }` に統一。message は日本語（7.3, 7.4）。
 - 検索の `empty`（0件）は 200＋空配列で返す（UI が 3.5 の再検索案内を出す）。`error` のみ 502。
 - POST /stores のサーバー側検証: `ownerId` がスコープ内 agency 配下であること（2.3, 2.4）、`candidate` の形状検証、`categoryCode` は categories に存在するコードのみ（無指定可）。
+- POST /stores の `categoryCode` 反映は、凍結 TX 契約 `confirmStore`（stores INSERT confirmed ＋ owner 遷移）の**外**で行う best-effort 更新（`@fwlm/db` の `setStoreCategory`）。設定に失敗しても登録本体は成立済みのため 201 を維持し、storeId のみログに記録する（category は Go バッチ側にフォールバックがあるメタデータであり、Req 3.8/3.10 の中核＝Place 紐付け確定と owner 遷移は単一 TX で担保される）。
+- オーナー選択・招待コード操作は「具体的な 1 代理店」を要するため、operator のスコープ all をそのまま流用せず `agencyId` の明示指定を必須とする（未指定は 400 `validation_failed`）。運営は全代理店を横断ビューではなく代理店セレクタで 1 代理店ずつ操作する（5.4 を満たす採用 UX）。
 - 無効化系は disable エンドポイント（DELETE 非採用）。既無効への再実行は現状値を返し冪等。
 
 #### invite-code-gen（`src/invite-code-gen.ts`）
