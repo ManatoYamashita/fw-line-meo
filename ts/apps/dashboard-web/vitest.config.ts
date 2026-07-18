@@ -1,7 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
-// dashboard-web は現状ユニット/ルートハンドラのテストのみ（E2E なし）。
-// vitest 既定の include（**/*.test.ts）・node 環境で十分。
+// dashboard-web はユニット（api クライアント・ルートハンドラ）とコンポーネント（auth-context / login 画面）
+// のテストを持つ。survey-web と同規約で、jsdom が必要なテストはファイル先頭の
+// `// @vitest-environment jsdom` ディレクティブで個別指定する（既定は node 環境・E2E は無い）。
 export default defineConfig({
   test: {},
 });

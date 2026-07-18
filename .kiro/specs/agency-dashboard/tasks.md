@@ -92,7 +92,7 @@
   - _Requirements: 7.3_
   - _Boundary: dashboard-web_
 
-- [ ] 4.2 Firebase ログイン・認証コンテキスト・API クライアント
+- [x] 4.2 Firebase ログイン・認証コンテキスト・API クライアント
   - `lib/firebase.ts`（`NEXT_PUBLIC_*` から初期化）、`lib/auth-context.tsx`（`signInWithPopup(GoogleAuthProvider)`・ログイン後 `GET /me`・`unregistered`/`disabled` は即 `signOut` して案内表示・管理情報を一切描画しない・token は SDK 管理）、`lib/api.ts`（`getIdToken()` を Bearer 付与・エラー封筒 `{error:{code,message}}` を判別共用体で解釈）、`login/page.tsx`、共有ナビゲーション/認可ガード部品
   - 完了状態: ユニットテストで「unregistered 時に signOut し管理データを描画しない」「api クライアントがエラー封筒を型付きで判別」が緑
   - Identity Platform の Google プロバイダ有効化（design の Open Question・tf 未定義）が前提。エンドツーエンドのログイン確認前に有効化状態を確認する（tf 化の要否は 6.3 の手動検証フックで判断）
@@ -172,4 +172,5 @@
 - 2.2: 新ハンドラのエラーコードは design コード体系どおり小文字（`unauthenticated`/`forbidden`）。既存 qr.ts は大文字のまま → **3.1 で統一を検討**。3.1 への引き継ぎ: (a) `MeDeps.findAgencyName`/`findDisplayName` は狭い注入関数で DAL 未実装 — 配線時に実クエリで裏付ける（@fwlm/db に既存 SELECT の再利用または小アクセサ追加）。(b) ルート層で空文字 `?agencyId=` を `undefined` に正規化してからハンドラへ渡すこと（ハンドラは undefined のみを「未指定」と解釈）。
 - 2.3: 決定事項: GET /owners で operator の agencyId 未指定は 400（オーナー選択には具体的代理店が必要・design ウィザードの代理店先行選択と整合）。不正 UUID の ownerId は findOwner 未到達の 404（存在秘匿）。**3.1 への最重要引き継ぎ: `registerStore({ownerId, candidate, categoryCode})` dep の実装合成** — 凍結契約 `confirmStore(ownerId, candidate)` は categoryCode を受けないため、共有 TX 意味論（stores INSERT confirmed → owner store_identified 単一TX・`ux_stores_place_id` 違反の冪等/409 正規化）を保ったまま category を設定する合成が必要（例: `createConfirmedStore` ベースの自前 TX か confirmStore＋同一TX category UPDATE）。
 - 2.4: GET /invite-codes・POST /invite-codes とも operator は agencyId 指定必須（400）・agency は自代理店強制（2.3 と同型）。disable は operator のみ body `{agencyId}` 必須（design 表の Request「—」からの拡張・DAL の scope 列契約による。`InviteCodeDisableRequest` JSDoc に文書化済み）。3.1 への引き継ぎ: (a) `issueCode` = `createUniqueInviteCode`＋`createInviteCode` の合成を配線側で組む。(b) 発行失敗（3試行切れ）の error は handler が握り潰すため、**配線側の issueCode 内でログ出力**してから rethrow すること（design Monitoring「5xx 詳細はログへ」）。
+- 4.2: **Firebase クライアント初期化は必ず遅延アクセサ（`getFirebaseAuth()`）にする**。モジュール評価時に `getAuth()` を呼ぶ eager 版は `next build` の静的プリレンダで build-arg 未注入（空 apiKey）により `auth/invalid-api-key` を投げ build 失敗する（store-detail の LIFF 起動障害と同型）。`getApps()` 再初期化ガードも必須。/me 403（forbidden）は auth-context が即 firebaseSignOut→status='unregistered'→me=null（`handlingUnregistered` ref で onAuthStateChanged(null) の status 上書きを防止）。AuthGuard/TopNav は 4.2 で共有部品として先行実装済み・4.3–4.5 で結線。dashboard-web の ESLint scope は `src` のみ（test 未 lint・survey-web と同じ既存設定）。
 - 3.1: dashboard-api バックエンドは配線完了（14ルート・単一オリジンCORS・/healthz 認証免除・app.request 認可マトリクスDBテスト）。決定事項: (a) `registerStore` は凍結 `confirmStore` を再利用し、category は confirmed 時のみ **best-effort な別 UPDATE**（非原子的・失敗時は storeId のみログ・Go バッチ fallback あり）。(b) **qr.ts のエラーコードは大文字のまま未統一**（group-2 は小文字）— 契約変更＋既存テスト影響のため別途明示決定が必要（現状は機能上無害・別エンドポイント）。(c) POST の不正JSON body は authenticate 前に固定封筒 400（情報漏洩なし・全 body ルートで同一）。CORS 許可オリジンは `DASHBOARD_WEB_ORIGIN` env。dashboard-web は build 時 `NEXT_PUBLIC_API_BASE_URL` でこの API を指す。

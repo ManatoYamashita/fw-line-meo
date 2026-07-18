@@ -17,7 +17,9 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@testing-library/react": "^16",
     "@types/react": "^19",
-    "@types/react-dom": "^19"
+    "@types/react-dom": "^19",
+    "jsdom": "^25"
   }
 }
