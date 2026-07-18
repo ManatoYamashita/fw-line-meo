@@ -64,3 +64,17 @@ export interface InviteCodeItem {
   disabled: boolean;
   createdAt: string;
 }
+
+// GET /dashboard-users の 1 件（design: dashboard-api DashboardUserItemJson・operator 専用）。
+// role='agency' は agencyId 非 null、role='operator' は agencyId=null（ck_dashboard_role_scope に対応・Req 6.3）。
+// disabled=true は無効化済み（以後のログイン不可・Req 6.4）。email/displayName は保留行では null になり得る。
+export interface DashboardUserItem {
+  id: string;
+  role: 'operator' | 'agency';
+  operatorId: string;
+  agencyId: string | null;
+  email: string | null;
+  displayName: string | null;
+  disabled: boolean;
+  createdAt: string;
+}

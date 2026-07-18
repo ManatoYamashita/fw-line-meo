@@ -114,7 +114,7 @@
   - _Boundary: dashboard-web invite UI_
   - _Depends: 4.2_
 
-- [ ] 4.5 (P) 管理画面（代理店・利用者）
+- [x] 4.5 (P) 管理画面（代理店・利用者）
   - `admin/agencies/page.tsx`（代理店作成・一覧）、`admin/users/page.tsx`（利用者登録＝role・（agency 時のみ）所属代理店・email・表示名、一覧、無効化）。agency ロールにはナビ非表示＋直接アクセス時 403 案内。全文言日本語
   - 完了状態: モック api で代理店作成・利用者登録フォーム・無効化が描画テストで確認でき、agency ロールで管理画面が拒否表示になる
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.3_

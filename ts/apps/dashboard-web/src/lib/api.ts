@@ -2,6 +2,7 @@ import { getFirebaseAuth } from './firebase';
 import type {
   AgencyItem,
   Category,
+  DashboardUserItem,
   InviteCodeItem,
   OwnerListItem,
   StoreCandidate,
@@ -162,6 +163,65 @@ export async function getAgencies(options: ApiClientOptions = {}): Promise<ApiRe
   const result = await apiFetch<{ agencies: AgencyItem[] }>('/agencies', options);
   if (!result.ok) return result;
   return { ok: true, value: result.value.agencies };
+}
+
+// POST /agencies: 代理店を作成（operator 専用。agency ロールは API が 403）。201 で { agency }。
+// operatorId はサーバー側が認証ユーザーから設定するため送らない。空名は API が 400(validation_failed)。
+export async function createAgency(
+  input: { name: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<AgencyItem>> {
+  const result = await apiFetch<{ agency: AgencyItem }>('/agencies', {
+    ...options,
+    method: 'POST',
+    body: { name: input.name },
+  });
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.agency };
+}
+
+// GET /dashboard-users: ダッシュボード利用者一覧（operator 専用。agency ロールは API が 403）。
+export async function getDashboardUsers(
+  options: ApiClientOptions = {},
+): Promise<ApiResult<DashboardUserItem[]>> {
+  const result = await apiFetch<{ users: DashboardUserItem[] }>('/dashboard-users', options);
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.users };
+}
+
+// POST /dashboard-users: 利用者を登録（operator 専用）。201 で { user }。
+// role='agency' は agencyId 必須・role='operator' は agencyId を送らない（ck_dashboard_role_scope・Req 6.3）。
+// email 重複は 409(email_conflict)、role/agencyId 不整合や email 形式不正は 400(validation_failed)。
+export async function createDashboardUser(
+  input: { role: DashboardRole; agencyId?: string; email: string; displayName?: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<DashboardUserItem>> {
+  // agencyId/displayName は指定時のみ載せる（operator 登録では agencyId を送らないことが契約上の要件）。
+  const body: Record<string, unknown> = { role: input.role, email: input.email };
+  if (input.agencyId !== undefined) body.agencyId = input.agencyId;
+  if (input.displayName !== undefined) body.displayName = input.displayName;
+  const result = await apiFetch<{ user: DashboardUserItem }>('/dashboard-users', {
+    ...options,
+    method: 'POST',
+    body,
+  });
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.user };
+}
+
+// POST /dashboard-users/:id/disable: 利用者を無効化（operator 専用）。200 で { user }。
+// operatorId はサーバー側が認証ユーザーから解決する。不在・スコープ外 id は 404(not_found)。
+// 既無効への再実行も現状値を返し冪等。
+export async function disableDashboardUser(
+  input: { id: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<DashboardUserItem>> {
+  const result = await apiFetch<{ user: DashboardUserItem }>(
+    `/dashboard-users/${encodeURIComponent(input.id)}/disable`,
+    { ...options, method: 'POST' },
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.user };
 }
 
 // GET /categories: 業態カテゴリ一覧（seed が単一情報源）。
