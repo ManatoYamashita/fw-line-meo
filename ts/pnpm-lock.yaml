@@ -60,6 +60,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/gemini':
+        specifier: workspace:*
+        version: link:../../packages/gemini
       '@hono/node-server':
         specifier: ^1
         version: 1.19.14(hono@4.12.28)

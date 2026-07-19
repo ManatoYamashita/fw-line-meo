@@ -50,7 +50,7 @@
   - _Requirements: 1.3, 3.3, 4.3_
   - _Boundary: GbpPostback_
 
-- [ ] 2.4 (P) 投稿・返信の下書き生成を実装する
+- [x] 2.4 (P) 投稿・返信の下書き生成を実装する
   - 投稿素材（店舗名・オーナー入力要点）と返信素材（店舗名・評価・本文・投稿者名）の型とプロンプトを実装し、素材外の事実を注入しない構造にする
   - 低評価（1–2 星）返信の節度あるトーン指示・variation seed・修正指示の反映を実装する
   - 日本語検証・投稿 1500 字・返信 4096 バイトの検証と、超過時の内部再生成（1 回）を実装する
@@ -138,6 +138,9 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 2.4: **プロンプトインジェクション対策の正典** — 自由記述（クチコミ本文・オーナー入力・修正指示・前回下書き）は `sanitizeFreeText` で **不動点まで反復除去**する（単一パス `replaceAll` は `<<<E<<<END>>>ND>>>` のような入れ子で再構成され突破される）。異種トークン間再構成・全挿入位置入れ子・10 万件ファズ・フィールド跨ぎ分割で検証済み。`GbpPromptsService` の修正指示引数は design の `revision?: string` ではなく `RevisionContext { instruction, previousDraft }`。`rating` は範囲外・非有限値を低評価トーンへ倒す fail-safe。
+- **【別 spec への申し送り・未修正】`ts/apps/survey-web/src/lib/draft/prompt.ts` に同型のプロンプトインジェクション脆弱性が残存**（単一パス除去）。review-acquisition spec の所有物のため本 spec の境界外。同じ不動点方式の適用が必要。
+- 2.4 → 6.1 への申し送り: リテラル以外の擬似デリミタ（`<<<end>>>` 小文字・`<<< END >>>` 空白入り・`＜＜＜END＞＞＞` 全角）・Markdown 見出し・`system:` ロール偽装は構造破壊しないがガードレール文への依存が残る。6.1 のセキュリティ検証で扱うこと。4.2 の配線時は `rating` の呼出側ガードを入れること。
 - 2.3: `isGbpPostbackData(data)` が conversation.ts のディスパッチ判定関数（design 追記済み）。`g_disconnect` の storeId は decode 層で UUID 形式検証のみ・**所有検証は GbpFlows が必ず行う**（3.3 の実装点）。300 字超の `g_*` data は `isGbpPostbackData` が false になり onboarding 側へ流れる（自前ボタンからは encode が throw するため到達不能）。
 - 2.2: **GbpFlows（4.x）への必須申し送り** — `GbpApiError` は design の 4 kind に `not_linked`・`crypto_error`・`incomplete_listing` を追加（design 更新済み）。**`crypto_error` にオーナーへの「再連携してください」を出してはならない**（鍵誤投入時に全店舗が誤誘導され、誤鍵下の再連携が鍵復旧後に連鎖破損する）。一過性障害の文面＋運用側への別シグナルで扱い、再連携導線は `token_invalid` / `not_linked` に限定。`incomplete_listing` も「管理権限なし」と結論させず再試行導線へ。また **`listReviews` は orderBy を送らないため GBP の返却順は未保証** — 「新着順・未返信優先で最大 5 件」の整列は `createTime`/`hasReply` を使って呼び出し側で必ず実施すること。
 - 2.1: **後続タスクへの必須申し送り** — `createGoogleRefreshGrantClient.fetchAccessToken` は生の `GaxiosError` を throw する。google-auth-library の `GaxiosError.config.data` にはリクエストボディ（`refresh_token=...` 平文）が載るため、**3.1 以降で直接呼ぶ場合は必ず `sanitizeRefreshError` 相当を通すこと**（現状の唯一の呼び出し元 `getAccessTokenForStore` はサニタイズ済み）。TokenStore の全メソッドは `StoreKey { ownerId, storeId }` を受ける（design 更新済み）。token-store.ts 冒頭コメントが不変条件の正典。
