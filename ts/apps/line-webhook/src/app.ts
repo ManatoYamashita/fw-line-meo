@@ -4,6 +4,7 @@ import type { SignatureVerifier } from './webhook/signature.js';
 import type { ConversationHandlers } from './onboarding/conversation.js';
 import type { LineMessenger } from './line/client.js';
 import { buildInternalErrorRetryMessage } from './line/messages.js';
+import type { GbpOauthCallbackRoute } from './gbp/callback.js';
 
 // 構造化ログの最小契約（design.md「Monitoring」: LINE はログを提供しないため自前で記録する）。
 // オーナーの自由入力テキストや displayName は本境界では扱わない（渡していない）ため、
@@ -21,6 +22,9 @@ export interface AppDeps {
   // LineMessenger 全体ではなく reply のみを要求する（狭い契約 = 誤用の余地を減らす）。
   messenger: Pick<LineMessenger, 'reply'>;
   logger: AppLogger;
+  // GBP OAuth callback（gbp-post-review-reply spec task 3.2）。結果別の HTML 生成と
+  // LINE Push は gbp/callback.ts が所有し、本境界は HTTP の受け渡しのみを行う。
+  gbpOauthCallback: GbpOauthCallbackRoute;
 }
 
 const SIGNATURE_HEADER = 'x-line-signature';
@@ -36,6 +40,24 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
+
+  // Google 認可のリダイレクト先（design.md「CallbackRoute（app.ts）」・Req 1.4, 1.5, 1.6）。
+  // LINE の署名検証は適用しない（Google → ユーザーのブラウザ経由で来る一般公開の GET であり、
+  // 正当性は URL の state を DB 裏付けのワンタイム値として照合することで担保する）。
+  app.get('/gbp/oauth/callback', async (c) => {
+    const { status, html } = await deps.gbpOauthCallback({
+      code: c.req.query('code'),
+      state: c.req.query('state'),
+      error: c.req.query('error'),
+    });
+
+    // この URL には認可コードと state が載る。中間キャッシュへの保存と、
+    // 外部リソース要求時の Referer 経由の流出を封じる（Req 2.1）。
+    return c.html(html, status, {
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    });
+  });
 
   app.post('/webhook', async (c) => {
     const requestId = c.req.header(REQUEST_ID_HEADER);

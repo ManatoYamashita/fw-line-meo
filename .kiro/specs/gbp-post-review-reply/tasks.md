@@ -67,7 +67,7 @@
   - _Depends: 2.1, 2.2_
   - _Requirements: 1.2, 1.4, 1.5, 1.6, 1.8_
 
-- [ ] 3.2 OAuth コールバック受け口と結果通知を実装する
+- [x] 3.2 OAuth コールバック受け口と結果通知を実装する
   - callback ルートで code/state/error を受け、結果別（連携成立・拒否/中断・state 不一致・権限なし）の最小 HTML と LINE Push 通知を返す
   - Google エンドポイントをモックした 4 経路の integration テストが DB 状態と Push 内容込みで通過する
   - _Requirements: 1.4, 1.5, 1.6_
@@ -138,6 +138,7 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 3.2: `LineMessenger.push`（`src/line/client.ts`）と `@fwlm/db` の `findOwnerById`（Push 先の line_user_id 解決）を新設。`AppDeps.gbpOauthCallback` が必須化されたため既存 DB テストの fake messenger に `push` スタブ追加が必要（削除行ゼロの純追加）。ownerId=null（state 未照合の denied・state_mismatch）では Push 不能 → warn ログのみ・再試行案内は HTML 側が唯一の伝達手段。6.1 への申し送り: callback は未認証公開ルートでレート制限なし・CSP なし（可変値が危険文脈に到達しないため実害は現状なし）。`LineMessenger` 全般にリクエストタイムアウトが無い。
 - 3.1: **3.2 への必須申し送り** — state 形式は `<ownerId>.<nonce>`（nonce = `randomBytes(32).base64url`・`timingSafeEqual` で state 全体を比較・照合成功の瞬間に消費）。callback ルートはこの形式に依存する。`OauthCallbackResult` の各 variant は `ownerId`/`storeId` を持つ（**LINE Push の通知先解決に必須**・design 更新済み）。`error` の reason には `persist_failed`（DB 失敗・revoke 済み）・`listing_incomplete`（ページ上限）・`listing_failed` がある。**`persistLink` の throw は捕捉して revoke + persist_failed に倒す規律**（未捕捉だと Google 側 refresh token が孤児化し通知も出ない）。非阻却の既知エッジ: COMMIT 成功後に `client.release()` が throw すると persist_failed 扱いになる（pg の二重 release でのみ発生・再試行で自己修復）。
 - 2.4: **プロンプトインジェクション対策の正典** — 自由記述（クチコミ本文・オーナー入力・修正指示・前回下書き）は `sanitizeFreeText` で **不動点まで反復除去**する（単一パス `replaceAll` は `<<<E<<<END>>>ND>>>` のような入れ子で再構成され突破される）。異種トークン間再構成・全挿入位置入れ子・10 万件ファズ・フィールド跨ぎ分割で検証済み。`GbpPromptsService` の修正指示引数は design の `revision?: string` ではなく `RevisionContext { instruction, previousDraft }`。`rating` は範囲外・非有限値を低評価トーンへ倒す fail-safe。
 - **【別 spec への申し送り・未修正】`ts/apps/survey-web/src/lib/draft/prompt.ts` に同型のプロンプトインジェクション脆弱性が残存**（単一パス除去）。review-acquisition spec の所有物のため本 spec の境界外。同じ不動点方式の適用が必要。

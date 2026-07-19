@@ -23,6 +23,19 @@ export async function findOwnerByLineUserId(
 }
 
 /**
+ * owner id から owner を取得する（未存在は null）。
+ * OAuth callback など「LINE の webhook 起点ではない経路」から通知先の line_user_id を
+ * 解決するために使う（gbp-post-review-reply Req 1.4, 1.5, 1.6）。
+ */
+export async function findOwnerById(db: Queryable, ownerId: string): Promise<OwnerRow | null> {
+  const res = await db.query<OwnerRow>(
+    `SELECT ${OWNER_COLUMNS} FROM owners WHERE id = $1`,
+    [ownerId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/**
  * 有効な招待コード検証後に owner を新規作成する（Req 2.1）。
  * agency_id は非 null 必須（呼び出し側の型で強制・DB の NOT NULL とあわせて Req 2.4 を構造保証）。
  * onboarding_status は列デフォルト 'pending' のまま作成される。

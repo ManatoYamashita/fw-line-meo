@@ -5,6 +5,7 @@ import {
   getOrCreateSession,
   updateSession,
   findOwnerByLineUserId,
+  findOwnerById,
   createOwner,
   findActiveInviteCode,
 } from '@fwlm/db';
@@ -15,6 +16,14 @@ import { createPlacesSearchAdapter } from './places/search.js';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from './onboarding/store-identification.js';
 import { createConversationHandlers } from './onboarding/conversation.js';
+import { createGbpClient } from './gbp/client.js';
+import { createGoogleRefreshGrantClient, createTokenStore } from './gbp/token-store.js';
+import {
+  createDefaultGbpOauthAccessors,
+  createGbpOauthService,
+  createGoogleOauthCodeClient,
+} from './gbp/oauth.js';
+import { createGbpOauthCallbackRoute } from './gbp/callback.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -60,6 +69,47 @@ const conversationHandlers = createConversationHandlers({
   liffStoreDetailUrl: config.liffStoreDetailUrl,
 });
 
+// GBP OAuth（gbp-post-review-reply spec task 3.1・3.2）。
+// callback ルートが必要とする最小構成のみをここで組み立てる（会話フロー側の配線は task 3.3）。
+const gbpTokenStore = createTokenStore({
+  cipherKeyBase64: config.gbpTokenCipherKey,
+  refreshClient: createGoogleRefreshGrantClient({
+    clientId: config.gbpOauthClientId,
+    clientSecret: config.gbpOauthClientSecret,
+  }),
+});
+
+const gbpClient = createGbpClient({ tokenStore: gbpTokenStore, fetch });
+
+const gbpOauthService = createGbpOauthService({
+  db: pool,
+  pool,
+  oauthClient: createGoogleOauthCodeClient({
+    clientId: config.gbpOauthClientId,
+    clientSecret: config.gbpOauthClientSecret,
+    redirectUrl: config.gbpOauthRedirectUrl,
+  }),
+  gbpClient,
+  tokenStore: gbpTokenStore,
+  ...createDefaultGbpOauthAccessors(),
+  now: () => new Date(),
+});
+
+const gbpOauthCallback = createGbpOauthCallbackRoute({
+  db: pool,
+  oauth: gbpOauthService,
+  messenger: lineMessenger,
+  owners: { findOwnerById },
+  logger: {
+    error: (message, meta) => {
+      console.error(message, meta ?? {});
+    },
+    warn: (message, meta) => {
+      console.warn(message, meta ?? {});
+    },
+  },
+});
+
 const deps: AppDeps = {
   // 署名検証は LINE_CHANNEL_SECRET のみで構築可能な純粋な暗号検証。
   signatureVerifier: createSignatureVerifier(config.lineChannelSecret),
@@ -68,6 +118,7 @@ const deps: AppDeps = {
   recordWebhookEventOnce: (webhookEventId) => dbRecordWebhookEventOnce(pool, webhookEventId),
   conversationHandlers,
   messenger: lineMessenger,
+  gbpOauthCallback,
   logger: {
     // LINE はログを提供しないため自前で標準出力へ記録する。
     error: (message, meta) => {

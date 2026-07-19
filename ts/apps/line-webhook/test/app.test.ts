@@ -31,6 +31,13 @@ function fakeRecordWebhookEventOnce(): (webhookEventId: string) => Promise<boole
   return vi.fn(async () => true);
 }
 
+// GBP OAuth callback ルート（タスク 3.2）の注入点。既定は呼ばれても何も起きない最小応答。
+function fakeGbpOauthCallback(
+  impl?: AppDeps['gbpOauthCallback'],
+): AppDeps['gbpOauthCallback'] {
+  return vi.fn(impl ?? (async () => ({ status: 200, html: '<p>ok</p>' })));
+}
+
 function baseDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   return {
     signatureVerifier: fakeSignatureVerifier(true),
@@ -38,6 +45,7 @@ function baseDeps(overrides: Partial<AppDeps> = {}): AppDeps {
     conversationHandlers: fakeConversationHandlers(),
     messenger: fakeMessenger(),
     logger: fakeLogger(),
+    gbpOauthCallback: fakeGbpOauthCallback(),
     ...overrides,
   };
 }
@@ -433,6 +441,61 @@ describe('line-webhook app', () => {
 
       expect(res2.status).toBe(200);
       expect(conversationHandlers.handleEvent).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // タスク 3.2: OAuth callback の HTTP 受け口（design.md「CallbackRoute（app.ts）」）。
+  // ハンドラ本体の結果分岐は test/gbp/callback.test.ts が担い、ここでは配線のみを見る。
+  describe('GET /gbp/oauth/callback', () => {
+    it('クエリの code / state / error をハンドラへ渡し、HTML と status を返す', async () => {
+      const gbpOauthCallback = fakeGbpOauthCallback(async () => ({
+        status: 200,
+        html: '<!doctype html><html><body>連携が完了しました</body></html>',
+      }));
+      const app = createApp(baseDeps({ gbpOauthCallback }));
+
+      const res = await app.request('/gbp/oauth/callback?code=abc&state=xyz');
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/html');
+      expect(await res.text()).toContain('連携が完了しました');
+      expect(gbpOauthCallback).toHaveBeenCalledWith({
+        code: 'abc',
+        state: 'xyz',
+        error: undefined,
+      });
+    });
+
+    it('error パラメータのみの callback もそのまま委譲する（認可拒否・中断）', async () => {
+      const gbpOauthCallback = fakeGbpOauthCallback();
+      const app = createApp(baseDeps({ gbpOauthCallback }));
+
+      await app.request('/gbp/oauth/callback?error=access_denied&state=xyz');
+
+      expect(gbpOauthCallback).toHaveBeenCalledWith({
+        code: undefined,
+        state: 'xyz',
+        error: 'access_denied',
+      });
+    });
+
+    it('ハンドラの 400 / 500 をそのまま HTTP ステータスに反映する', async () => {
+      for (const status of [400, 500] as const) {
+        const app = createApp(
+          baseDeps({ gbpOauthCallback: fakeGbpOauthCallback(async () => ({ status, html: '<p>ng</p>' })) }),
+        );
+        const res = await app.request('/gbp/oauth/callback?state=xyz');
+        expect(res.status).toBe(status);
+      }
+    });
+
+    it('認可コード・state が URL に載るため、キャッシュ・リファラ流出を防ぐヘッダを付ける', async () => {
+      const app = createApp(baseDeps());
+
+      const res = await app.request('/gbp/oauth/callback?code=abc&state=xyz');
+
+      expect(res.headers.get('cache-control')).toContain('no-store');
+      expect(res.headers.get('referrer-policy')).toBe('no-referrer');
     });
   });
 });
