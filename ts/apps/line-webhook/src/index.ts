@@ -25,6 +25,7 @@ import {
 } from './gbp/oauth.js';
 import { createGbpOauthCallbackRoute } from './gbp/callback.js';
 import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flows.js';
+import { createDefaultGbpPrompts } from './gbp/prompts.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -85,14 +86,19 @@ const gbpOauthService = createGbpOauthService({
 });
 
 // task 3.3: 連携系（connect / status / disconnect）の会話フロー。
+// task 4.1: 投稿フロー（下書き生成 → 承認 → 投稿）を同ハンドラへ追加配線する。
 // pool は Queryable（db）と ConnectablePool（pool）の両方に構造的に適合する
 // （conversationHandlers と同じ前提）。
+const gbpPrompts = await createDefaultGbpPrompts();
+
 const gbpFlowHandlers = createGbpFlowHandlers({
   db: pool,
   pool,
   oauth: gbpOauthService,
   tokenStore: gbpTokenStore,
   ...createDefaultGbpFlowAccessors(),
+  prompts: gbpPrompts,
+  gbpClient,
   messenger: lineMessenger,
   now: () => new Date(),
 });

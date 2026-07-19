@@ -118,3 +118,66 @@ export async function clearGbpSession(db: Queryable, ownerId: string): Promise<b
   const res = await db.query('DELETE FROM gbp_sessions WHERE owner_id = $1', [ownerId]);
   return (res.rowCount ?? 0) > 0;
 }
+
+// --- 承認実行の CAS ガード（design「GbpFlows > State Management」・Req 3.6, 4.5）---
+//
+// 承認（g_approve）から GBP へ書き込む経路は「executing への条件付き遷移 → 実行 →
+// 成功なら削除／失敗なら await_decision へ戻す」の 3 手に分解される。各手はいずれも
+// **現在の stage を WHERE に含む単一文**であり、以下を同時に保証する:
+// - 二重タップ・並行リクエストでも `executing` を獲得できるのは高々 1 リクエスト
+//   （＝ GBP 書込は高々 1 回）。
+// - 実行中に別フロー（例: 連携開始）がセッションを置換した場合、完了処理は
+//   `stage = 'executing'` に一致しないため他フローのセッションを巻き込んで破壊しない。
+
+/**
+ * 承認実行の権利を獲得する（`await_decision` → `executing` の条件付き更新）。
+ * 獲得できたときのみ更新後の行を返す。null は「他リクエストが実行中」または
+ * 「stage が承認待ちではない」を意味し、呼び出し側は **実行してはならない**。
+ */
+export async function beginGbpSessionExecution(
+  db: Queryable,
+  ownerId: string,
+): Promise<GbpSessionRow | null> {
+  const res = await db.query<GbpSessionRow>(
+    `UPDATE gbp_sessions
+        SET stage = 'executing', updated_at = now()
+      WHERE owner_id = $1 AND stage = 'await_decision'
+      RETURNING ${SESSION_COLUMNS}`,
+    [ownerId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/**
+ * 実行成功時の後始末（`executing` の行のみ削除）。戻り値は行が消えたか。
+ * false は「実行中に別のセッションへ置換された」ことを意味する（新セッションは温存される）。
+ */
+export async function completeGbpSessionExecution(
+  db: Queryable,
+  ownerId: string,
+): Promise<boolean> {
+  const res = await db.query(
+    `DELETE FROM gbp_sessions WHERE owner_id = $1 AND stage = 'executing'`,
+    [ownerId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * 実行失敗時の巻き戻し（`executing` → `await_decision`）。`draft_text` と `payload` は
+ * 触れないため承認済みの下書きが失われない（Req 3.7・4.7）。期限は再試行のため延長する。
+ */
+export async function revertGbpSessionExecution(
+  db: Queryable,
+  ownerId: string,
+  expiresAt: Date,
+): Promise<GbpSessionRow | null> {
+  const res = await db.query<GbpSessionRow>(
+    `UPDATE gbp_sessions
+        SET stage = 'await_decision', expires_at = $2, updated_at = now()
+      WHERE owner_id = $1 AND stage = 'executing'
+      RETURNING ${SESSION_COLUMNS}`,
+    [ownerId, expiresAt],
+  );
+  return res.rows[0] ?? null;
+}

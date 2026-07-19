@@ -156,6 +156,17 @@ function createHarness(options: HarnessOptions = {}): Harness {
         clearCalls.push(ownerId);
         return true;
       },
+      // 承認実行の CAS（task 4.1）。連携系フローからは到達しないため、呼ばれたら失敗させる。
+      // 投稿フローの検証は test/gbp/flows-post.test.ts が所有する。
+      async beginGbpSessionExecution() {
+        throw new Error('beginGbpSessionExecution must not be called from connect flows');
+      },
+      async completeGbpSessionExecution() {
+        throw new Error('completeGbpSessionExecution must not be called from connect flows');
+      },
+      async revertGbpSessionExecution() {
+        throw new Error('revertGbpSessionExecution must not be called from connect flows');
+      },
     },
     locations: {
       async deleteGbpLocation(_db, key) {
@@ -166,6 +177,18 @@ function createHarness(options: HarnessOptions = {}): Harness {
     stores: {
       async listConfirmedStoresByOwner() {
         return stores;
+      },
+    },
+    // 下書き生成と GBP 書込（task 4.1）は連携系フローからは到達しない（Req 3.6 の
+    // 承認ゲート）。到達したら即座に失敗させ、経路の混入を検知できるようにする。
+    prompts: {
+      async generatePostDraft() {
+        throw new Error('generatePostDraft must not be called from connect flows');
+      },
+    },
+    gbpClient: {
+      async createLocalPost() {
+        throw new Error('createLocalPost must not be called from connect flows');
       },
     },
     messenger: {
@@ -444,8 +467,11 @@ describe('createGbpFlowHandlers（連携系フロー・task 3.3）', () => {
       expect(h.replies).toEqual([[buildGbpCancelledMessage()]]);
     });
 
-    it('投稿・返信の action は本タスク範囲外として準備中案内を返す', async () => {
-      for (const action of ['g_post', 'g_reply', 'g_approve'] as const) {
+    // task 4.1 で投稿（g_post / g_approve / g_regen / g_revise）が解禁されたため、
+    // 準備中案内が残るのはクチコミ返信（機能1-b・task 4.2）の action のみ。
+    // 投稿フローの検証は test/gbp/flows-post.test.ts が所有する。
+    it('返信の action は task 4.2 の範囲として準備中案内を返す', async () => {
+      for (const action of ['g_reply', 'g_overwrite'] as const) {
         const h = createHarness();
         await h.handlers.handleGbpPostback(postback(encodeGbpPostback({ action })));
         expect(h.replies).toEqual([[buildGbpFlowNotAvailableMessage()]]);

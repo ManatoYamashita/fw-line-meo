@@ -2,7 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool } from '../src/pool.js';
 import { upsertOauthToken, getOauthToken, deleteOauthToken } from '../src/oauth-tokens.js';
 import { upsertGbpLocation, getGbpLocation, deleteGbpLocation } from '../src/gbp-locations.js';
-import { getActiveGbpSession, upsertGbpSession, clearGbpSession } from '../src/gbp-sessions.js';
+import {
+  getActiveGbpSession,
+  upsertGbpSession,
+  clearGbpSession,
+  beginGbpSessionExecution,
+  completeGbpSessionExecution,
+  revertGbpSessionExecution,
+} from '../src/gbp-sessions.js';
 import type { Result } from '../src/types.js';
 
 // 専用 UUID プレフィックス `fc`（ワークスペース全体で未使用であること）。
@@ -364,6 +371,98 @@ describe.skipIf(!process.env.DATABASE_URL)('gbp accessors (DB)', () => {
       // OWNER_B のセッションは残っている。
       const lookupB = await getActiveGbpSession(pool, OWNER_B);
       expect(lookupB.kind).toBe('expired');
+    });
+  });
+
+  // 承認実行の CAS ガード（spec task 4.1・design「GbpFlows > State Management」）。
+  // 二重タップ・並行リクエストでも GBP 書込が高々 1 回になることの DB 側の根拠。
+  describe('gbp-sessions の承認実行 CAS', () => {
+    const FUTURE = (): Date => new Date(Date.now() + 30 * 60 * 1000);
+
+    async function seedDecisionSession(): Promise<void> {
+      const pool = await getPool();
+      unwrap(
+        await upsertGbpSession(pool, {
+          ownerId: OWNER_A,
+          storeId: STORE_A1,
+          flow: 'post',
+          stage: 'await_decision',
+          payload: { material: { ownerInput: '本日から新メニュー' } },
+          draftText: '本日から新メニューを始めました。',
+          expiresAt: FUTURE(),
+        }),
+      );
+    }
+
+    it('beginGbpSessionExecution: await_decision の行のみ executing へ遷移し、行を返す', async () => {
+      const pool = await getPool();
+      await seedDecisionSession();
+
+      const claimed = await beginGbpSessionExecution(pool, OWNER_A);
+      expect(claimed).not.toBeNull();
+      expect(claimed?.stage).toBe('executing');
+      expect(claimed?.store_id).toBe(STORE_A1);
+      expect(claimed?.draft_text).toBe('本日から新メニューを始めました。');
+    });
+
+    it('beginGbpSessionExecution: 既に executing の行は獲得できない（二重タップの排他）', async () => {
+      const pool = await getPool();
+      const second = await beginGbpSessionExecution(pool, OWNER_A);
+      expect(second).toBeNull();
+    });
+
+    it('revertGbpSessionExecution: executing → await_decision へ戻し draft を温存する', async () => {
+      const pool = await getPool();
+      const reverted = await revertGbpSessionExecution(pool, OWNER_A, FUTURE());
+      expect(reverted?.stage).toBe('await_decision');
+      expect(reverted?.draft_text).toBe('本日から新メニューを始めました。');
+      // executing 以外には作用しない（冪等ではなく条件付き）。
+      expect(await revertGbpSessionExecution(pool, OWNER_A, FUTURE())).toBeNull();
+    });
+
+    it('completeGbpSessionExecution: executing の行のみ削除する', async () => {
+      const pool = await getPool();
+      // await_decision の状態では削除されない（他フローのセッションを巻き込まない保証）。
+      expect(await completeGbpSessionExecution(pool, OWNER_A)).toBe(false);
+      expect((await getActiveGbpSession(pool, OWNER_A)).kind).toBe('active');
+
+      await beginGbpSessionExecution(pool, OWNER_A);
+      expect(await completeGbpSessionExecution(pool, OWNER_A)).toBe(true);
+      expect(await getActiveGbpSession(pool, OWNER_A)).toEqual({ kind: 'none' });
+    });
+
+    it('並行 2 リクエストのうち executing を獲得できるのは高々 1 つ', async () => {
+      const pool = await getPool();
+      await seedDecisionSession();
+
+      const [a, b] = await Promise.all([
+        beginGbpSessionExecution(pool, OWNER_A),
+        beginGbpSessionExecution(pool, OWNER_A),
+      ]);
+      expect([a, b].filter((row) => row !== null)).toHaveLength(1);
+
+      await completeGbpSessionExecution(pool, OWNER_A);
+    });
+
+    it('他オーナーの executing セッションには到達しない', async () => {
+      const pool = await getPool();
+      unwrap(
+        await upsertGbpSession(pool, {
+          ownerId: OWNER_B,
+          storeId: STORE_B1,
+          flow: 'post',
+          stage: 'await_decision',
+          payload: {},
+          draftText: 'B の下書き',
+          expiresAt: FUTURE(),
+        }),
+      );
+
+      expect(await beginGbpSessionExecution(pool, OWNER_A)).toBeNull();
+      const claimedB = await beginGbpSessionExecution(pool, OWNER_B);
+      expect(claimedB?.owner_id).toBe(OWNER_B);
+      expect(await completeGbpSessionExecution(pool, OWNER_A)).toBe(false);
+      expect((await getActiveGbpSession(pool, OWNER_B)).kind).toBe('active');
     });
   });
 });

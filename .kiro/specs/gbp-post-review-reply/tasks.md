@@ -81,7 +81,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 2.4, 2.5_
 
 - [ ] 4. コア: 投稿・返信の会話フロー
-- [ ] 4.1 Google 投稿作成フローを実装する
+- [x] 4.1 Google 投稿作成フローを実装する
   - 未連携時の連携誘導分岐、要点入力受付、下書き生成と全文提示、承認/再生成/修正指示の 3 択、修正反映の再提示を実装する
   - 承認は executing への条件付き更新（CAS）で排他し、成功時のみセッションをクリア、失敗時は下書きを温存して再試行導線を返す
   - トークン失効時は処理を実行せず再連携誘導を返す。生成失敗時の案内と再試行を実装する
@@ -138,6 +138,7 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 4.1: **4.2 への必須申し送り（TOCTOU 脆弱性・要対応）** — `beginGbpSessionExecution`（`ts/packages/db/src/gbp-sessions.ts`）の CAS は `WHERE owner_id = $1 AND stage = 'await_decision'` のみで **`flow` 条件が無い**。4.1 単体では返信セッションが存在せず到達不能だが、**4.2 が同一アクセサを再利用すると、`loadSession` と CAS の間でセッションが reply/`await_decision` に置換された場合に返信下書きが `createLocalPost` で投稿される**。4.2 では `AND flow = $n` を追加するか、フロー別 CAS に分けること。あわせて `buildGbpCurrentStateMessage` の `await_input`/`await_decision`/`await_revision` 分岐は `flow` で分岐していないため、返信フローで投稿向けの文面が出る（4.2 で対応）。承認ゲートは `g_approve` → `handleApprove` → `executeLocalPost` → `createLocalPost` の 4 段すべて単一分岐で構造保証（`isPostStage` が `flow === 'post'` を要求）。CAS アクセサは `beginGbpSessionExecution`/`completeGbpSessionExecution`/`revertGbpSessionExecution` の 3 つ。既知トレードオフ: 投稿失敗後に再連携するとセッション upsert が下書きを上書きする（owner 単位 1 セッション制約由来）。
 - 3.3: `ConversationDeps.gbp?: GbpFlowHandlers`（optional）+ `resolveGbpDelegation` ゲート（completed stage + 配線済み + owner_id 非 null）が委譲の単一分岐点。`handlePostback` は `isGbpPostbackData` で委譲、`handleText` は `not_handled` で既存案内へフォールスルー。**所有検証は多層**（`isLinked` ゲート + 全アクセサの SQL `WHERE s.owner_id = $n`）で、`g_pick_store` はセッション snapshot の index 解決後に**現在の所有店舗一覧で再検証**する。4.1 への申し送り: `handleConnect` の単一店舗経路は既存 `await_store` セッションを明示クリアしない（`startConnect` の upsert が上書きするため現状無害だが、他 stage のセッションが増えたら再確認）。**`@fwlm/db` のソース変更後は `pnpm --filter @fwlm/db run build` が必要**（`dist/*.d.ts` 経由で解決されるため、未ビルドだと TS2305 が出る）。
 - 3.2: `LineMessenger.push`（`src/line/client.ts`）と `@fwlm/db` の `findOwnerById`（Push 先の line_user_id 解決）を新設。`AppDeps.gbpOauthCallback` が必須化されたため既存 DB テストの fake messenger に `push` スタブ追加が必要（削除行ゼロの純追加）。ownerId=null（state 未照合の denied・state_mismatch）では Push 不能 → warn ログのみ・再試行案内は HTML 側が唯一の伝達手段。6.1 への申し送り: callback は未認証公開ルートでレート制限なし・CSP なし（可変値が危険文脈に到達しないため実害は現状なし）。`LineMessenger` 全般にリクエストタイムアウトが無い。
 - 3.1: **3.2 への必須申し送り** — state 形式は `<ownerId>.<nonce>`（nonce = `randomBytes(32).base64url`・`timingSafeEqual` で state 全体を比較・照合成功の瞬間に消費）。callback ルートはこの形式に依存する。`OauthCallbackResult` の各 variant は `ownerId`/`storeId` を持つ（**LINE Push の通知先解決に必須**・design 更新済み）。`error` の reason には `persist_failed`（DB 失敗・revoke 済み）・`listing_incomplete`（ページ上限）・`listing_failed` がある。**`persistLink` の throw は捕捉して revoke + persist_failed に倒す規律**（未捕捉だと Google 側 refresh token が孤児化し通知も出ない）。非阻却の既知エッジ: COMMIT 成功後に `client.release()` が throw すると persist_failed 扱いになる（pg の二重 release でのみ発生・再試行で自己修復）。

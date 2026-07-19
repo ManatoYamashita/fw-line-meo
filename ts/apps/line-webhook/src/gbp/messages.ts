@@ -394,8 +394,288 @@ export function buildGbpCancelledMessage(): LineMessage {
   });
 }
 
+// =====================================================================
+// 投稿フロー（機能2・spec task 4.1）
+// Requirements: 3.1（要点入力受付）, 3.2（下書きの全文提示）, 3.3（承認/再生成/修正の 3 択）,
+//   3.4（修正指示の受付）, 3.5（結果通知）, 3.7（失敗時の再試行導線）, 3.9（未連携の誘導）,
+//   6.6（生成失敗の案内）。
+// =====================================================================
+
+const CANCEL_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'secondary',
+  action: {
+    type: 'postback',
+    label: 'やめる',
+    data: encodeGbpPostback({ action: 'g_cancel' }),
+    displayText: 'やめる',
+  },
+};
+
+const APPROVE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: '承認して投稿',
+    data: encodeGbpPostback({ action: 'g_approve' }),
+    displayText: '承認して投稿',
+  },
+};
+
+const RETRY_APPROVE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: 'もう一度投稿する',
+    data: encodeGbpPostback({ action: 'g_approve' }),
+    displayText: 'もう一度投稿する',
+  },
+};
+
+const REGENERATE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'secondary',
+  action: {
+    type: 'postback',
+    label: '再生成',
+    data: encodeGbpPostback({ action: 'g_regen' }),
+    displayText: '再生成',
+  },
+};
+
+const REVISE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'secondary',
+  action: {
+    type: 'postback',
+    label: '修正を指示',
+    data: encodeGbpPostback({ action: 'g_revise' }),
+    displayText: '修正を指示',
+  },
+};
+
+const POST_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: 'Google 投稿を作成',
+    data: encodeGbpPostback({ action: 'g_post' }),
+    displayText: 'Google 投稿を作成',
+  },
+};
+
 /**
- * 本 spec の投稿（機能2）・クチコミ返信（機能1-b）フローは task 4.1 / 4.2 で解禁される。
+ * Req 3.9: 未連携の店舗で投稿（返信）を開始しようとしたときの連携誘導。
+ * 状態機械には入らず、連携の導線（g_connect）だけを提示する。
+ */
+export function buildGbpConnectRequiredMessage(storeName: string | null): LineMessage {
+  const target = storeName === null ? 'このお店' : `「${storeName}」`;
+  return bubbleMessage({
+    altText: `${target}はまだ Google と連携していません。`,
+    title: '先に Google 連携が必要です',
+    lines: [
+      `${target}はまだ Google ビジネスプロフィールと連携していません。`,
+      '連携が完了すると、LINE から Google 投稿の作成とクチコミ返信ができるようになります。',
+    ],
+    buttons: [CONNECT_BUTTON, STATUS_BUTTON],
+  });
+}
+
+/** Req 3.1: 投稿したい内容（要点）の入力受付。 */
+export function buildGbpPostInputPromptMessage(storeName: string): LineMessage {
+  return bubbleMessage({
+    altText: `「${storeName}」の Google 投稿の内容を送ってください。`,
+    title: '投稿したい内容を送ってください',
+    lines: [
+      `「${storeName}」の Google 投稿を作成します。`,
+      'お知らせしたいことの要点を、このトークにメッセージで送ってください。',
+      '例:「今週末まで生ビール半額」「新メニューの海鮮丼を始めました」',
+    ],
+    buttons: [CANCEL_BUTTON],
+  });
+}
+
+/** 複数店舗オーナー向けの投稿対象の選択（状態機械の await_store・投稿フロー）。 */
+export function buildGbpPostStorePickerMessage(
+  stores: readonly GbpSelectableStore[],
+): LineMessage {
+  assertWithinCarouselContract(stores.length, 'buildGbpPostStorePickerMessage');
+
+  const contents: FlexCarouselContents = {
+    type: 'carousel',
+    contents: stores.map(
+      (store, index): FlexBubbleContents => ({
+        type: 'bubble',
+        size: 'kilo',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: store.name, weight: 'bold', size: 'md', wrap: true },
+            {
+              type: 'text',
+              text: 'このお店の Google 投稿を作成します。',
+              size: 'sm',
+              color: '#666666',
+              wrap: true,
+            },
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              color: LINKED_COLOR,
+              action: {
+                type: 'postback',
+                label: 'このお店で作成',
+                data: encodeGbpPostback({ action: 'g_pick_store', index }),
+                displayText: `${store.name} の投稿を作成`,
+              },
+            },
+          ],
+        },
+      }),
+    ),
+  };
+
+  return {
+    type: 'flex',
+    altText: '投稿を作成するお店を選択してください。',
+    contents,
+  };
+}
+
+/**
+ * Req 3.2, 3.3: 下書きの提示。**全文をそのまま読めること**が要件のため、下書きは
+ * 独立したテキストメッセージとして送り、選択肢（承認/再生成/修正指示）を別バブルで添える
+ * （Flex のバブル内に長文を押し込むと折り返しと省略で全文性が保証できないため）。
+ */
+export function buildGbpPostDraftMessages(input: {
+  storeName: string;
+  draft: string;
+}): LineMessage[] {
+  return [
+    textMessage(input.draft),
+    bubbleMessage({
+      altText: `「${input.storeName}」の投稿の下書きができました。内容をご確認ください。`,
+      title: '下書きができました',
+      lines: [
+        `「${input.storeName}」の Google 投稿の下書きです。上のメッセージが投稿される全文です。`,
+        'このまま投稿する場合は「承認して投稿」を選んでください。',
+      ],
+      buttons: [APPROVE_BUTTON, REGENERATE_BUTTON, REVISE_BUTTON, CANCEL_BUTTON],
+    }),
+  ];
+}
+
+/** Req 3.4: 修正指示の入力受付。 */
+export function buildGbpRevisionPromptMessage(): LineMessage {
+  return bubbleMessage({
+    altText: '修正したい点を送ってください。',
+    title: '修正したい点を送ってください',
+    lines: [
+      'どのように直したいかを、このトークにメッセージで送ってください。',
+      '例:「もっと短く」「価格を強調して」「もう少しやわらかい表現で」',
+    ],
+    buttons: [CANCEL_BUTTON],
+  });
+}
+
+/** Req 6.6: 下書きの生成に失敗したときの案内（stage は進めず、同じ入力で再試行できる）。 */
+export function buildGbpGenerationFailedMessage(): LineMessage {
+  return bubbleMessage({
+    altText: '下書きの作成に失敗しました。もう一度お試しください。',
+    title: '下書きを作成できませんでした',
+    lines: [
+      '文章の作成に失敗しました。',
+      'お手数ですが、内容をもう一度メッセージで送ってお試しください。',
+    ],
+    buttons: [CANCEL_BUTTON],
+  });
+}
+
+/** Req 3.5: 投稿の成功通知。 */
+export function buildGbpPostSucceededMessage(storeName: string | null): LineMessage {
+  const target = storeName === null ? 'お店' : `「${storeName}」`;
+  return bubbleMessage({
+    altText: `${target}の Google 投稿が完了しました。`,
+    title: 'Google に投稿しました',
+    lines: [
+      `${target}の Google ビジネスプロフィールに投稿しました。`,
+      '反映まで少し時間がかかる場合があります。',
+    ],
+    buttons: [POST_BUTTON, STATUS_BUTTON],
+  });
+}
+
+/**
+ * 投稿実行が失敗したときの案内の種別（Error Handling のカテゴリ対応）。
+ * - `reauth`: 認可の失効・未連携（`token_invalid` / `not_linked`）。**再連携のみがこの分類**。
+ * - `transient`: 一過性障害（`rate_limited` / `upstream_error` / `incomplete_listing`）と
+ *   復号不能（`crypto_error`）。**復号不能で再連携を促してはならない**ため同じ文面に倒す
+ *   （鍵事故はオーナーの操作で解決せず、誤鍵下の再連携は鍵復旧後に連鎖破損する）。
+ * - `permission`: 権限不足（`permission_denied`）。
+ */
+export type GbpPostFailureReason = 'reauth' | 'transient' | 'permission';
+
+/**
+ * Req 3.7: 投稿の失敗通知。いずれの分類でも **下書きは保持されている**ことを明示し、
+ * 再試行の導線を必ず添える（下書きの作り直しをオーナーに強いない）。
+ */
+export function buildGbpPostFailedMessage(reason: GbpPostFailureReason): LineMessage {
+  const detail: { lines: readonly string[]; buttons: readonly FlexBoxContent[] } = ((): {
+    lines: readonly string[];
+    buttons: readonly FlexBoxContent[];
+  } => {
+    switch (reason) {
+      case 'reauth':
+        return {
+          lines: [
+            'Google との連携が切れているため投稿できませんでした。',
+            'もう一度連携すると、この下書きから投稿をやり直せます。',
+          ],
+          buttons: [CONNECT_BUTTON, CANCEL_BUTTON],
+        };
+      case 'permission':
+        return {
+          lines: [
+            'このお店のビジネスプロフィールへの投稿が許可されていないため、投稿できませんでした。',
+            'お店を管理している Google アカウントの権限をご確認ください。',
+          ],
+          buttons: [STATUS_BUTTON, CANCEL_BUTTON],
+        };
+      case 'transient':
+        return {
+          lines: [
+            '通信または Google 側の一時的な問題で投稿できませんでした。',
+            '少し時間をおいてから、下のボタンでもう一度お試しください。',
+          ],
+          buttons: [RETRY_APPROVE_BUTTON, REVISE_BUTTON, CANCEL_BUTTON],
+        };
+    }
+  })();
+
+  return bubbleMessage({
+    altText: '投稿に失敗しました。下書きは保存しています。',
+    title: '投稿できませんでした',
+    lines: ['下書きは保存していますので、作り直す必要はありません。', ...detail.lines],
+    buttons: detail.buttons,
+  });
+}
+
+/**
+ * 本 spec のクチコミ返信（機能1-b）フローは task 4.2 で解禁される。
  * それまでの間、当該 action が届いた場合は何も実行せず現在利用できる操作のみを案内する。
  */
 export function buildGbpFlowNotAvailableMessage(): LineMessage {
@@ -445,7 +725,47 @@ export function buildGbpCurrentStateMessage(session: GbpSessionRow | null): Line
     });
   }
 
-  // 投稿・返信フロー（task 4.1 / 4.2 が実装する stage）は本タスクでは開始されない。
+  // 投稿フロー（task 4.1）の各 stage。いずれも「案内を再送するだけ」で遷移を伴わない。
+  if (session.stage === 'await_input') {
+    return bubbleMessage({
+      altText: '投稿したい内容をメッセージで送ってください。',
+      title: '投稿したい内容をお待ちしています',
+      lines: ['お知らせしたいことの要点を、このトークにメッセージで送ってください。'],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  if (session.stage === 'await_decision') {
+    return bubbleMessage({
+      altText: '下書きを確認して、トーク内のボタンから操作してください。',
+      title: '下書きの確認をお待ちしています',
+      lines: [
+        '先ほどお送りした下書きをご確認のうえ、トーク内のボタンから操作してください。',
+        '「承認して投稿」「再生成」「修正を指示」から選べます。',
+      ],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  if (session.stage === 'await_revision') {
+    return bubbleMessage({
+      altText: '修正したい点をメッセージで送ってください。',
+      title: '修正の指示をお待ちしています',
+      lines: ['どのように直したいかを、このトークにメッセージで送ってください。'],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  if (session.stage === 'executing') {
+    // 二重タップの 2 打目が到達する経路。実行中であることだけを伝え、操作を促さない
+    // （ボタンを出すと二重実行を誘発するため、意図的にテキストのみとする）。
+    return textMessage(
+      '先ほどの承認を受けて、Google へ送信しています。\n' +
+        '完了すると結果をお知らせしますので、そのままお待ちください。',
+    );
+  }
+
+  // 返信フロー（task 4.2 が実装する stage）は本タスクでは開始されない。
   // 将来それらの stage が到達した場合も、状態を壊さない汎用案内へ倒す。
   return bubbleMessage({
     altText: '進行中の手続きがあります。トーク内のボタンから操作してください。',
