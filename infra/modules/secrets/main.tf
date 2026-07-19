@@ -12,6 +12,8 @@ locals {
     "places-api-key",            # 競合データ取得
     "db-admin-password",         # postgres 管理ユーザー（ランタイム SA には非付与）
     "survey-session-key",        # 機能3 再生成上限の HMAC 署名鍵（review-acquisition・値は out-of-band 投入）
+    "gbp-oauth-client-secret",   # GBP OAuth クライアントシークレット（gbp-post-review-reply / Req 2.1・値は out-of-band 投入）
+    "gbp-token-cipher-key",      # refresh token 暗号化鍵（AES-256-GCM・32 byte base64・値は out-of-band 投入）
   ]
 }
 

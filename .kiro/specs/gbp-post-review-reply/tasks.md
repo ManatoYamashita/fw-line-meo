@@ -21,7 +21,7 @@
   - _Requirements: 3.2, 4.2, 6.2, 6.6_
   - _Boundary: PkgGemini, survey-web_
 
-- [ ] 1.4 (P) シークレット枠と実行環境設定を配線する
+- [x] 1.4 (P) シークレット枠と実行環境設定を配線する
   - infra に gbp-oauth-client-secret・gbp-token-cipher-key の secret 枠を追加し、line-webhook サービスへ両者と既存 gemini-api-key の secret_env 配線を追加する
   - line-webhook の設定モジュールに GBP_OAUTH_CLIENT_ID / GBP_OAUTH_CLIENT_SECRET / GBP_OAUTH_REDIRECT_URL / GBP_TOKEN_CIPHER_KEY / GEMINI_API_KEY を必須として追加する
   - terraform fmt/validate が通過し、必須 env 欠落時に設定読込が fail-fast する unit テストが通過する

@@ -63,6 +63,11 @@ module "run_services" {
       secret_env = {
         LINE_CHANNEL_SECRET = module.secrets.secret_ids["line-channel-secret"]
         PLACES_API_KEY      = module.secrets.secret_ids["places-api-key"]
+        # gbp-post-review-reply（Req 2.1）: OAuth クライアントシークレット・トークン暗号化鍵。
+        # GEMINI_API_KEY は既存 secret の line-webhook への配線追加（survey-web と共有・投稿/返信の下書き生成）。
+        GBP_OAUTH_CLIENT_SECRET = module.secrets.secret_ids["gbp-oauth-client-secret"]
+        GBP_TOKEN_CIPHER_KEY    = module.secrets.secret_ids["gbp-token-cipher-key"]
+        GEMINI_API_KEY          = module.secrets.secret_ids["gemini-api-key"]
       }
       env = {
         LINE_CHANNEL_ID            = var.line_channel_id
@@ -70,6 +75,9 @@ module "run_services" {
         # Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
         # store-detail の LIFF アプリ URL（liff_url）と同一値を line-webhook にも配線する。
         LIFF_STORE_DETAIL_URL = var.liff_url
+        # gbp-post-review-reply: OAuth クライアント ID・リダイレクト URL（非秘匿・平文 env で足りる）。
+        GBP_OAUTH_CLIENT_ID    = var.gbp_oauth_client_id
+        GBP_OAUTH_REDIRECT_URL = var.gbp_oauth_redirect_url
       }
     }
     "survey-web" = {
