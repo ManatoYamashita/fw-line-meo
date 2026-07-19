@@ -29,7 +29,7 @@
   - _Boundary: infra, line-webhook config_
 
 - [ ] 2. コア: トークン保管・GBP クライアント・共通部品
-- [ ] 2.1 認可情報の暗号化保管層を実装する
+- [x] 2.1 認可情報の暗号化保管層を実装する
   - AES-256-GCM による暗号化/復号と token_ref v1 形式（iv/authTag/暗号文）を実装する
   - 保存・取得・削除・連携判定と、操作ごとの refresh grant によるアクセストークン供給を実装する
   - invalid_grant を失効（token_invalid）として分類する
@@ -138,5 +138,6 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 2.1: **後続タスクへの必須申し送り** — `createGoogleRefreshGrantClient.fetchAccessToken` は生の `GaxiosError` を throw する。google-auth-library の `GaxiosError.config.data` にはリクエストボディ（`refresh_token=...` 平文）が載るため、**3.1 以降で直接呼ぶ場合は必ず `sanitizeRefreshError` 相当を通すこと**（現状の唯一の呼び出し元 `getAccessTokenForStore` はサニタイズ済み）。TokenStore の全メソッドは `StoreKey { ownerId, storeId }` を受ける（design 更新済み）。token-store.ts 冒頭コメントが不変条件の正典。
 - 1.3: `@fwlm/gemini` の実行核 API は `generateText(client, {model, contents, config?, validateOutput?, backoff?})` + `createDefaultGenAiClient()`。検証関数は `(text) => string | null`（抽出兼検証）。消費者渡し `config.safetySettings` より実行核の既定が優先される。task 2.4 はこの API を消費する。
 - 1.2: DB テスト fixture の固定 UUID は **ts/ ワークスペース全体で一意** が必要（with-test-db.sh の一時 DB は 1 実行を全パッケージで共有）。gbp 系は `fc` プレフィックスを使用。テナント隔離クエリ形状の正典は `ts/packages/db/src/oauth-tokens.ts`。oauth_tokens+gbp_locations の同時作成/削除の原子性はトランザクションを張る呼び出し側（TokenStore/flows）の責務。`make ts-build` は `store-detail/next-env.d.ts` を汚すことがある（コミット前に確認・復元）。

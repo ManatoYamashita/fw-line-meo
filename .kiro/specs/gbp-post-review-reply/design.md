@@ -377,22 +377,28 @@ interface GbpOauthService {
 ##### Service Interface
 
 ```typescript
+// 実装確定形（task 2.1）: 全メソッドが StoreKey { ownerId, storeId } を受け取る。
+// packages/db のアクセサが ownerId 必須で所有検証を構造強制しているため（2.6）、
+// storeId 単独のシグネチャは採用しない。
 type TokenStoreError =
   | { kind: 'not_linked' }        // 行が存在しない
-  | { kind: 'token_invalid' }     // invalid_grant 等（2.3）
+  | { kind: 'token_invalid' }     // invalid_grant（2.3）
   | { kind: 'crypto_error' };
 
+interface StoreKey { ownerId: string; storeId: string }
+
 interface TokenStoreService {
-  saveToken(q: Queryable, input: {
-    storeId: string; refreshToken: string; scopes: string;
-  }): Promise<void>;
-  getAccessTokenForStore(q: Queryable, storeId: string):
+  saveToken(q: Queryable, key: StoreKey, input: {
+    refreshToken: string; scopes: string;
+  }): Promise<Result<void, 'STORE_NOT_OWNED'>>;
+  getAccessTokenForStore(q: Queryable, key: StoreKey):
     Promise<Result<string, TokenStoreError>>;
-  deleteToken(q: Queryable, storeId: string): Promise<void>;
-  isLinked(q: Queryable, storeId: string): Promise<boolean>;
+  deleteToken(q: Queryable, key: StoreKey): Promise<boolean>;
+  isLinked(q: Queryable, key: StoreKey): Promise<boolean>;
 }
 ```
 - Invariants: 保存されるのは暗号化ペイロードのみ。store_id × provider('google') 一意（既存 DDL の UNIQUE 制約）
+- **refresh grant のエラーは必ずサニタイズしてから伝播する**: google-auth-library の `GaxiosError` は `config.data` にリクエストボディ（`refresh_token=...`）を保持するため、原エラーを `cause`・プロパティ・stack で持ち回ってはならない。`status` と検証済みエラーコードのみを抽出した新規 Error に詰め替える（2.1）
 
 #### GbpClient
 
