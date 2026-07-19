@@ -616,3 +616,85 @@ describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded (DB)', (
     expect(after.rows[0]?.disabled_at.getTime()).toBe(before.rows[0]?.disabled_at.getTime());
   });
 });
+
+// 並行安全性（Req 2.5・write-skew の決定的検証）。
+// design「並行ガードの正当性」の直列化機構を、テナント advisory ロックを別接続で保持して
+// トランザクション制御で決定的に検証する。タイミング依存（Promise.all）ではなく、
+// 「先行操作がロック保持中はガードがブロックし、解放後に最新状態を観測して0人化を防ぐ」ことを
+// 100% 再現する。ガードから advisory ロックを外すと本テストは必ず失敗する（非空虚性の担保）。
+const F8C_OP = 'f8000000-0000-0000-0000-000000009003'; // 有効運営ちょうど2名のテナント
+const F8C_OP1 = 'f8000000-0000-0000-0000-e10000000001';
+const F8C_OP2 = 'f8000000-0000-0000-0000-e10000000002';
+// disableDashboardUserGuarded と同一の advisory ロッククラス（src の DISABLE_LOCK_CLASS と一致させる）。
+const DISABLE_LOCK_CLASS = 0x64756c31;
+
+describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded 並行安全性 (DB)', () => {
+  beforeAll(async () => {
+    const pool = await getPool();
+    await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [F8C_OP, 'f8c並行運営']);
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject)
+       VALUES ($1, 'operator', $3, NULL, $4), ($2, 'operator', $3, NULL, $5)`,
+      [F8C_OP1, F8C_OP2, F8C_OP, 'authsub-f8c-op1', 'authsub-f8c-op2'],
+    );
+  });
+
+  afterAll(async () => {
+    const pool = await getPool();
+    await pool.query('DELETE FROM dashboard_users WHERE operator_id = $1', [F8C_OP]);
+    await pool.query('DELETE FROM operators WHERE id = $1', [F8C_OP]);
+    await closePool();
+  });
+
+  it('先行無効化がロック保持中はガードがブロックし、解放後 last_operator で0人化を防ぐ（Req 2.5・決定的）', async () => {
+    const pool = await getPool();
+    const holder = await pool.connect();
+    let holderCommitted = false;
+    try {
+      // 「先行する無効化操作」を模す: テナント advisory ロックを取得し op2 を無効化して未コミットで保持。
+      await holder.query('BEGIN');
+      await holder.query('SELECT pg_advisory_xact_lock($1::int4, hashtext($2)::int4)', [
+        DISABLE_LOCK_CLASS,
+        F8C_OP,
+      ]);
+      await holder.query('UPDATE dashboard_users SET disabled_at = now() WHERE id = $1', [F8C_OP2]);
+
+      // 「後続の無効化操作」= 本物のガード。同じテナントロックを取りに行きブロックする。
+      let settled = false;
+      const guard = disableDashboardUserGuarded(pool, F8C_OP1, F8C_OP).then((r) => {
+        settled = true;
+        return r;
+      });
+
+      // 有界待機の間、ガードはロック待ちで解決しない（＝直列化機構が働いている決定的証拠）。
+      // advisory ロックを外した実装ではここでガードが先行し settled=true になり本アサートが失敗する。
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(settled).toBe(false);
+
+      // 先行操作を確定（op2 無効化を commit・ロック解放）。
+      await holder.query('COMMIT');
+      holderCommitted = true;
+
+      // ガードが処理を進める。op2 は無効化済みのため有効運営は op1 のみ＝op1 は最後の運営 → last_operator。
+      // 直列化が無ければガードは op2 無効化を観測できず（未コミット）op1 を無効化し 0 人化する。
+      const result = await guard;
+      expect(result.kind).toBe('last_operator');
+    } finally {
+      if (!holderCommitted) await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
+
+    // 0人化していない: op1 は有効のまま・有効運営は1名（op1）残る（ロックアウト不能性）。
+    const op1 = await pool.query<{ disabled_at: Date | null }>(
+      'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+      [F8C_OP1],
+    );
+    expect(op1.rows[0]?.disabled_at).toBeNull();
+    const active = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM dashboard_users
+        WHERE operator_id = $1 AND role = 'operator' AND disabled_at IS NULL`,
+      [F8C_OP],
+    );
+    expect(active.rows[0]?.n).toBe(1);
+  });
+});
