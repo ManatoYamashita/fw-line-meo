@@ -6,6 +6,7 @@ import {
   createPendingDashboardUser,
   listDashboardUsers,
   disableDashboardUser,
+  disableDashboardUserGuarded,
   findDashboardUserDisplayName,
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
@@ -474,5 +475,144 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users lifecycle accessors 
         await findDashboardUserByEmailInOperator(pool, 'f8-no-such@example.com', F8_OP_A),
       ).toBeNull();
     });
+  });
+});
+
+// 保護付き無効化（disableDashboardUserGuarded）専用フィクスチャ。
+// operator は 9001（複数運営テナント）/ 9002（単独運営テナント）、利用者は e0000000XXXX 帯で
+// 上の lifecycle ブロック（a1/b2・d0000000000X）と非干渉。
+const F8G_OP_MULTI = 'f8000000-0000-0000-0000-000000009001'; // 有効運営2名のテナント
+const F8G_OP_SINGLE = 'f8000000-0000-0000-0000-000000009002'; // 有効運営1名のテナント
+const F8G_AG = 'f8000000-0000-0000-0000-000000009a01'; // F8G_OP_MULTI 配下の代理店
+
+const F8G_OP1 = 'f8000000-0000-0000-0000-e00000000001'; // operator・リンク済み・有効
+const F8G_OP2_PENDING = 'f8000000-0000-0000-0000-e00000000002'; // operator・保留(未ログイン)・有効
+const F8G_PREDISABLED = 'f8000000-0000-0000-0000-e00000000003'; // operator・無効（冪等検証用）
+const F8G_AGENCY_USER = 'f8000000-0000-0000-0000-e00000000004'; // agency・有効
+const F8G_SOLO_OP = 'f8000000-0000-0000-0000-e00000000005'; // operator・単独テナント・有効
+const F8G_MISSING = 'f8000000-0000-0000-0000-e0000000ffff';
+
+describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded (DB)', () => {
+  beforeAll(async () => {
+    const pool = await getPool();
+    await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2), ($3, $4)', [
+      F8G_OP_MULTI,
+      'f8g複数運営',
+      F8G_OP_SINGLE,
+      'f8g単独運営',
+    ]);
+    await pool.query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [
+      F8G_AG,
+      F8G_OP_MULTI,
+      'f8g代理店',
+    ]);
+    // 複数運営テナント: リンク済み有効 operator + 保留(未ログイン)有効 operator + 無効 operator + 有効 agency。
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, email, disabled_at)
+       VALUES ($1, 'operator', $2, NULL,  $3,   NULL, NULL),
+              ($4, 'operator', $2, NULL,  NULL, $5,   NULL),
+              ($6, 'operator', $2, NULL,  $7,   NULL, now()),
+              ($8, 'agency',   $2, $9,    $10,  NULL, NULL)`,
+      [
+        F8G_OP1,
+        F8G_OP_MULTI,
+        'authsub-f8g-op1',
+        F8G_OP2_PENDING,
+        'f8g-pending-op@example.com',
+        F8G_PREDISABLED,
+        'authsub-f8g-predisabled',
+        F8G_AGENCY_USER,
+        F8G_AG,
+        'authsub-f8g-agency',
+      ],
+    );
+    // 単独運営テナント: 有効 operator 1名のみ。
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject)
+       VALUES ($1, 'operator', $2, NULL, $3)`,
+      [F8G_SOLO_OP, F8G_OP_SINGLE, 'authsub-f8g-solo'],
+    );
+  });
+
+  afterAll(async () => {
+    const pool = await getPool();
+    await pool.query('DELETE FROM dashboard_users WHERE operator_id = ANY($1)', [
+      [F8G_OP_MULTI, F8G_OP_SINGLE],
+    ]);
+    await pool.query('DELETE FROM agencies WHERE id = $1', [F8G_AG]);
+    await pool.query('DELETE FROM operators WHERE id = ANY($1)', [[F8G_OP_MULTI, F8G_OP_SINGLE]]);
+    await closePool();
+  });
+
+  it('有効運営が2名以上なら運営を無効化できる・保留運営も有効として計上（Req 2.4）', async () => {
+    const pool = await getPool();
+    // F8G_OP1 を無効化。相方 F8G_OP2_PENDING は未ログインだが disabled_at IS NULL のため有効に計上され、
+    // 無効化後も有効運営が1名残るため許可される。
+    const res = await disableDashboardUserGuarded(pool, F8G_OP1, F8G_OP_MULTI);
+    expect(res.kind).toBe('disabled');
+    if (res.kind === 'disabled') {
+      expect(res.user.id).toBe(F8G_OP1);
+      expect(res.user.disabled).toBe(true);
+    }
+    const check = await pool.query<{ disabled_at: Date | null }>(
+      'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+      [F8G_OP1],
+    );
+    expect(check.rows[0]?.disabled_at).not.toBeNull();
+  });
+
+  it('有効運営が1名のみならその運営は last_operator で拒否され、行は無効化されない（Req 2.3）', async () => {
+    const pool = await getPool();
+    const res = await disableDashboardUserGuarded(pool, F8G_SOLO_OP, F8G_OP_SINGLE);
+    expect(res.kind).toBe('last_operator');
+    // 行は有効なまま（ロックアウトを防止）。
+    const check = await pool.query<{ disabled_at: Date | null }>(
+      'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+      [F8G_SOLO_OP],
+    );
+    expect(check.rows[0]?.disabled_at).toBeNull();
+  });
+
+  it('代理店ロールは運営数に関わらず常に無効化できる（Req 2.4）', async () => {
+    const pool = await getPool();
+    const res = await disableDashboardUserGuarded(pool, F8G_AGENCY_USER, F8G_OP_MULTI);
+    expect(res.kind).toBe('disabled');
+    if (res.kind === 'disabled') {
+      expect(res.user.id).toBe(F8G_AGENCY_USER);
+      expect(res.user.disabled).toBe(true);
+    }
+  });
+
+  it('範囲外（他 operator スコープ）・不在は not_found（越権秘匿・Req 4.1）', async () => {
+    const pool = await getPool();
+    // 単独テナントの id を複数テナントのスコープで無効化 → not_found（かつ無効化されない）。
+    const wrong = await disableDashboardUserGuarded(pool, F8G_SOLO_OP, F8G_OP_MULTI);
+    expect(wrong.kind).toBe('not_found');
+    const stillActive = await pool.query<{ disabled_at: Date | null }>(
+      'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+      [F8G_SOLO_OP],
+    );
+    expect(stillActive.rows[0]?.disabled_at).toBeNull();
+    // 不在 id → not_found。
+    expect((await disableDashboardUserGuarded(pool, F8G_MISSING, F8G_OP_MULTI)).kind).toBe(
+      'not_found',
+    );
+  });
+
+  it('既に無効な対象は disabled を冪等に返す（再スタンプしない）', async () => {
+    const pool = await getPool();
+    const before = await pool.query<{ disabled_at: Date }>(
+      'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+      [F8G_PREDISABLED],
+    );
+    const res = await disableDashboardUserGuarded(pool, F8G_PREDISABLED, F8G_OP_MULTI);
+    expect(res.kind).toBe('disabled');
+    if (res.kind === 'disabled') expect(res.user.disabled).toBe(true);
+    // disabled_at は据え置き（再スタンプなし）。
+    const after = await pool.query<{ disabled_at: Date }>(
+      'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+      [F8G_PREDISABLED],
+    );
+    expect(after.rows[0]?.disabled_at.getTime()).toBe(before.rows[0]?.disabled_at.getTime());
   });
 });

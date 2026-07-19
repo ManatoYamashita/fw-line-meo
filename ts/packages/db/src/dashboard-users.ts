@@ -1,4 +1,4 @@
-import type { Queryable } from './pool.js';
+import type { Queryable, TransactionCapable } from './pool.js';
 import type { DashboardRole, DashboardUserItem } from './types.js';
 
 // RBAC 判定に必要な認証主体の身元（auth_subject = Identity Platform UID から解決）。
@@ -169,6 +169,86 @@ export async function disableDashboardUser(
   );
   const row = res.rows[0];
   return row ? mapDashboardUser(row) : null;
+}
+
+// 保護付き無効化の結果（判別共用体・design「Component Contracts / DAL」）。
+// 呼び出し側（ハンドラ）が 200 / 409 / 404 へ写像する。
+export type DisableOutcome =
+  | { kind: 'disabled'; user: DashboardUserItem } // 無効化成功／既に無効（冪等）
+  | { kind: 'last_operator' } // 最後の有効な運営のため拒否（Req 2.3）
+  | { kind: 'not_found' }; // 不在・越権（呼び出し側で 404 に写像）
+
+// operator_id を鍵とする advisory ロックの名前空間（他用途の advisory ロックと衝突させない固定クラス）。
+const DISABLE_LOCK_CLASS = 0x64756c31; // 'dul1'（dashboard-user-lifecycle）相当の固定 int4 定数
+
+/**
+ * 最後の有効な運営を保護する無効化（Req 2.3, 2.4, 2.5）。
+ * トランザクション内でテナント（operator_id）単位の advisory ロックを取得して同一テナントの無効化を
+ * 直列化し（design「並行ガードの正当性」）、対象を無効化すると有効な運営（role=operator かつ
+ * disabled_at IS NULL・保留＝未ログイン運営を含む）が0人になる場合のみ 'last_operator' を返す。
+ * ロックによる直列化のため残数判定は自明に正しく（write-skew を排除）、並行実行下でも0人化しない。
+ * operator_id をスコープ列に含め、越権・不在は 'not_found'。既に無効な対象は現状を返し冪等（'disabled'）。
+ */
+export async function disableDashboardUserGuarded(
+  pool: TransactionCapable,
+  id: string,
+  operatorId: string,
+): Promise<DisableOutcome> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // テナント単位の advisory ロックで無効化操作を直列化する（TX 終了で自動解放）。
+    await client.query('SELECT pg_advisory_xact_lock($1::int4, hashtext($2)::int4)', [
+      DISABLE_LOCK_CLASS,
+      operatorId,
+    ]);
+
+    // 対象行を operator_id スコープで取得（越権・不在は not_found）。
+    const target = await client.query<DashboardUserItemRow>(
+      `SELECT ${DASHBOARD_USER_COLUMNS} FROM dashboard_users WHERE id = $1 AND operator_id = $2`,
+      [id, operatorId],
+    );
+    const row = target.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return { kind: 'not_found' };
+    }
+
+    // 既に無効なら冪等に現状を返す（有効運営数を減らさないためガード判定は不要）。
+    if (row.disabled_at !== null) {
+      await client.query('COMMIT');
+      return { kind: 'disabled', user: mapDashboardUser(row) };
+    }
+
+    // 運営を無効化する場合のみ、最後の有効な運営の保護を判定する（保留運営も disabled_at IS NULL で計上）。
+    if (row.role === 'operator') {
+      const active = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM dashboard_users
+          WHERE operator_id = $1 AND role = 'operator' AND disabled_at IS NULL`,
+        [operatorId],
+      );
+      if ((active.rows[0]?.n ?? 0) <= 1) {
+        await client.query('ROLLBACK');
+        return { kind: 'last_operator' };
+      }
+    }
+
+    const updated = await client.query<DashboardUserItemRow>(
+      `UPDATE dashboard_users SET disabled_at = now()
+        WHERE id = $1 AND operator_id = $2
+        RETURNING ${DASHBOARD_USER_COLUMNS}`,
+      [id, operatorId],
+    );
+    await client.query('COMMIT');
+    const updatedRow = updated.rows[0];
+    if (!updatedRow) throw new Error('disableDashboardUserGuarded: update did not return a row');
+    return { kind: 'disabled', user: mapDashboardUser(updatedRow) };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
