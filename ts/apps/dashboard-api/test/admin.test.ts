@@ -12,7 +12,7 @@ import {
   type DashboardUserDisableDeps,
 } from '../src/admin.js';
 import type { AuthDeps } from '../src/auth.js';
-import type { AgencyItem, DashboardUserIdentity, DashboardUserItem } from '@fwlm/db';
+import type { AgencyItem, DashboardUserIdentity, DashboardUserItem, DisableOutcome } from '@fwlm/db';
 
 // 運営（operator）は全管理 API 許可、代理店（agency）は全管理 API 拒否（Req 6.5）。
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
@@ -113,7 +113,9 @@ const guardCases: GuardCase[] = [
   {
     name: 'POST /dashboard-users/:id/disable',
     invoke: ({ user, disabled = false, authorization }) => {
-      const dep = vi.fn(() => Promise.resolve(userItem()));
+      const dep = vi.fn(() =>
+        Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ disabled: true }) }),
+      );
       const res = handleDashboardUserDisable({ auth: authDeps(user, disabled), disableUser: dep }, {
         authorization,
         id: USER_ID,
@@ -449,14 +451,20 @@ describe('handleDashboardUserCreate', () => {
 function userDisableDeps(over: Partial<DashboardUserDisableDeps> = {}, user: DashboardUserIdentity | null = OP): DashboardUserDisableDeps {
   return {
     auth: authDeps(user),
-    disableUser: (id) => Promise.resolve(userItem({ id, disabled: true })),
+    disableUser: (id) =>
+      Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
     ...over,
   };
 }
 
+// 認証ユーザー自身の id が UUID 形式となる operator（自己無効化ガードは UUID 事前ガード通過後に評価される）。
+const SELF_OP: DashboardUserIdentity = { id: USER_ID, role: 'operator', operatorId: 'op1', agencyId: null };
+
 describe('handleDashboardUserDisable', () => {
   it('UUID 形式でない id は 404 で disableUser 未呼出（存在の探り当てを許さない）', async () => {
-    const disableUser = vi.fn((id: string) => Promise.resolve(userItem({ id, disabled: true })));
+    const disableUser = vi.fn((id: string) =>
+      Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
+    );
     const res = await handleDashboardUserDisable(userDisableDeps({ disableUser }), {
       authorization: 'Bearer tok',
       id: 'not-a-uuid',
@@ -466,17 +474,50 @@ describe('handleDashboardUserDisable', () => {
     expect(disableUser).not.toHaveBeenCalled();
   });
 
-  it('依存が null（不在または他運営スコープ）なら 404（存在の秘匿）', async () => {
+  it('自分自身の無効化は 409 self_disable_forbidden で disableUser 未呼出（DB 前・Req 2.1）', async () => {
+    const disableUser = vi.fn((id: string) =>
+      Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
+    );
+    // 認証ユーザー(SELF_OP) 自身の id を対象に無効化を試みる。
+    const res = await handleDashboardUserDisable(userDisableDeps({ disableUser }, SELF_OP), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe('self_disable_forbidden');
+    expect(json.error.message).toBe('自分自身は無効化できません');
+    // DB 到達前に拒否されるため依存は呼ばれない（対象状態も変えない・Req 2.6）。
+    expect(disableUser).not.toHaveBeenCalled();
+  });
+
+  it('依存が not_found（不在または他運営スコープ）なら 404（存在の秘匿・Req 1.5）', async () => {
     const res = await handleDashboardUserDisable(
-      userDisableDeps({ disableUser: () => Promise.resolve(null) }),
+      userDisableDeps({ disableUser: () => Promise.resolve<DisableOutcome>({ kind: 'not_found' }) }),
       { authorization: 'Bearer tok', id: USER_ID },
     );
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe('not_found');
   });
 
-  it('無効化成功は 200・disableUser は (id, operatorId) で呼ばれる', async () => {
-    const disableUser = vi.fn((id: string) => Promise.resolve(userItem({ id, disabled: true })));
+  it('依存が last_operator なら 409（最後の有効な運営の保護・Req 2.3）', async () => {
+    const disableUser = vi.fn(() => Promise.resolve<DisableOutcome>({ kind: 'last_operator' }));
+    const res = await handleDashboardUserDisable(userDisableDeps({ disableUser }), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe('last_operator');
+    expect(json.error.message).toBe('最後の運営は無効化できないため、先に別の運営を追加してください');
+    // ガードは実行され、拒否は DAL 結果由来（DAL が ROLLBACK 済み・対象状態不変・Req 2.6）。
+    expect(disableUser).toHaveBeenCalledWith(USER_ID, 'op1');
+  });
+
+  it('無効化成功（disabled）は 200・disableUser は (id, operatorId) で呼ばれる（Req 2.4）', async () => {
+    const disableUser = vi.fn((id: string) =>
+      Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
+    );
     const res = await handleDashboardUserDisable(userDisableDeps({ disableUser }), {
       authorization: 'Bearer tok',
       id: USER_ID,
@@ -488,9 +529,12 @@ describe('handleDashboardUserDisable', () => {
     expect(json.user.createdAt).toBe('2026-07-01T12:34:56.000Z');
   });
 
-  it('既に無効の利用者も依存が現状値を返せば 200（冪等）', async () => {
+  it('既に無効の利用者も依存が disabled を返せば 200（冪等・Req 2.4）', async () => {
     const res = await handleDashboardUserDisable(
-      userDisableDeps({ disableUser: (id) => Promise.resolve(userItem({ id, disabled: true })) }),
+      userDisableDeps({
+        disableUser: (id) =>
+          Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
+      }),
       { authorization: 'Bearer tok', id: USER_ID },
     );
     expect(res.status).toBe(200);

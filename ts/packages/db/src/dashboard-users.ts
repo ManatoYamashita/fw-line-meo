@@ -151,26 +151,6 @@ export async function listDashboardUsers(
   return res.rows.map(mapDashboardUser);
 }
 
-/**
- * ダッシュボード利用者を無効化する（Req 6.4）。operator_id をスコープ列として WHERE に含め、
- * 越権（他運営の id 指定）は 0 行更新 → null を返す（呼び出し側は 404 に写像する・2.3 の二重防御）。
- */
-export async function disableDashboardUser(
-  db: Queryable,
-  id: string,
-  operatorId: string,
-): Promise<DashboardUserItem | null> {
-  const res = await db.query<DashboardUserItemRow>(
-    `UPDATE dashboard_users
-        SET disabled_at = now()
-      WHERE id = $1 AND operator_id = $2
-      RETURNING ${DASHBOARD_USER_COLUMNS}`,
-    [id, operatorId],
-  );
-  const row = res.rows[0];
-  return row ? mapDashboardUser(row) : null;
-}
-
 // 保護付き無効化の結果（判別共用体・design「Component Contracts / DAL」）。
 // 呼び出し側（ハンドラ）が 200 / 409 / 404 へ写像する。
 export type DisableOutcome =

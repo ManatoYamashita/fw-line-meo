@@ -1,4 +1,10 @@
-import type { AgencyItem, DashboardRole, DashboardUserIdentity, DashboardUserItem } from '@fwlm/db';
+import type {
+  AgencyItem,
+  DashboardRole,
+  DashboardUserIdentity,
+  DashboardUserItem,
+  DisableOutcome,
+} from '@fwlm/db';
 import { authenticate, type AuthDeps } from './auth.js';
 import { requireOperator } from './scope.js';
 import { isUniqueViolation } from './invite-code-gen.js';
@@ -72,9 +78,11 @@ export interface DashboardUserCreateDeps {
 
 export interface DashboardUserDisableDeps {
   auth: AuthDeps;
-  // disableDashboardUser（@fwlm/db）委譲。operator_id をスコープ列に含む UPDATE で、
-  // 不在・越権（他運営の id）はいずれも null（本ハンドラが 404 に写像・存在の秘匿）。
-  disableUser: (id: string, operatorId: string) => Promise<DashboardUserItem | null>;
+  // disableDashboardUserGuarded（@fwlm/db）委譲。operator_id をスコープ列に含む保護付き無効化で、
+  // 結果を判別共用体 DisableOutcome で返す（本ハンドラが 200 / 409 / 404 に写像する）:
+  //   - 'disabled'（成功／既に無効・冪等）／'last_operator'（最後の有効な運営で拒否・Req 2.3）／
+  //     'not_found'（不在・越権の秘匿・Req 1.5）。拒否時は DAL が ROLLBACK 済みで対象状態不変（Req 2.6）。
+  disableUser: (id: string, operatorId: string) => Promise<DisableOutcome>;
 }
 
 // --- リクエスト形 ---
@@ -202,12 +210,29 @@ export async function handleDashboardUserDisable(
     return jsonError(404, 'not_found', '利用者が見つかりません');
   }
 
-  // 無効化。null（不在・他運営スコープ）は 404。既無効は現状値が返り 200（冪等・Req 6.4）。
-  const user = await deps.disableUser(req.id, guard.user.operatorId);
-  if (user === null) {
-    return jsonError(404, 'not_found', '利用者が見つかりません');
+  // 自己無効化拒否（DB 到達前・Req 2.1）。運営が自分自身を無効化するとテナントごとロックアウトし得るため
+  // 構造的に禁止する。guard.user.id は認証ユーザー由来（UUID）で、クライアント入力は信用しない。
+  if (req.id === guard.user.id) {
+    return jsonError(409, 'self_disable_forbidden', '自分自身は無効化できません');
   }
-  return jsonOk(200, { user: toUserJson(user) });
+
+  // 保護付き無効化。結果を HTTP へ写像する（Req 2.3, 2.4, 2.6, 1.5）。拒否時は DAL が ROLLBACK 済みで
+  // 対象状態は変わらない（成功と誤認されない明確な表示・Req 2.6）。
+  const outcome = await deps.disableUser(req.id, guard.user.operatorId);
+  if (outcome.kind === 'disabled') {
+    // 無効化成功／既に無効（冪等）。現状の利用者行を 200 で返す（Req 2.4）。
+    return jsonOk(200, { user: toUserJson(outcome.user) });
+  }
+  if (outcome.kind === 'last_operator') {
+    // 最後の有効な運営は無効化できない（ロックアウト防止・Req 2.3）。
+    return jsonError(
+      409,
+      'last_operator',
+      '最後の運営は無効化できないため、先に別の運営を追加してください',
+    );
+  }
+  // outcome.kind === 'not_found'（不在・越権）は不在と同じ 404（存在の秘匿・Req 1.5）。
+  return jsonError(404, 'not_found', '利用者が見つかりません');
 }
 
 // --- 共通ガード ---

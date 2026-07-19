@@ -18,7 +18,7 @@ import {
   disableInviteCode,
   listDashboardUsers,
   createPendingDashboardUser,
-  disableDashboardUser,
+  disableDashboardUserGuarded,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -203,7 +203,8 @@ function buildApp(): ReturnType<typeof createApp> {
       },
       userDisable: {
         auth: authDeps,
-        disableUser: async (id, operatorId) => disableDashboardUser(await getPool(), id, operatorId),
+        disableUser: async (id, operatorId) =>
+          disableDashboardUserGuarded(await getPool(), id, operatorId),
       },
     },
   };

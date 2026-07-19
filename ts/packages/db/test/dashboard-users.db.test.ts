@@ -5,7 +5,6 @@ import {
   linkAuthSubjectByEmail,
   createPendingDashboardUser,
   listDashboardUsers,
-  disableDashboardUser,
   disableDashboardUserGuarded,
   findDashboardUserDisplayName,
   enableDashboardUser,
@@ -77,7 +76,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users accessors (DB)', () 
         SUB_DISABLE_TARGET,
       ],
     );
-    // 別 operator のリンク済み利用者（listDashboardUsers/disableDashboardUser のスコープ検証用）。
+    // 別 operator のリンク済み利用者（listDashboardUsers の operator スコープ検証用）。
     await pool.query(
       `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject)
        VALUES ($1, 'operator', $2, NULL, $3)`,
@@ -234,32 +233,10 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users accessors (DB)', () 
     });
   });
 
-  describe('disableDashboardUser', () => {
-    it('operator 不一致は null かつ無効化しない、一致は無効化する（Req 6.4）', async () => {
-      const pool = await getPool();
-      // 越権（別 operator スコープ）では無効化拒否（null）かつ実際に無効化されない。
-      const wrong = await disableDashboardUser(pool, DU_DISABLE_TARGET, OP_B);
-      expect(wrong).toBeNull();
-      const stillEnabled = await findByAuthSubject(pool, SUB_DISABLE_TARGET);
-      expect(stillEnabled?.disabled).toBe(false);
-
-      // 正しい operator スコープでは無効化される。
-      const ok = await disableDashboardUser(pool, DU_DISABLE_TARGET, OP_A);
-      expect(ok).not.toBeNull();
-      expect(ok?.id).toBe(DU_DISABLE_TARGET);
-      expect(ok?.disabled).toBe(true);
-      // 以後 findByAuthSubject は disabled: true（ログイン拒否に写像される）。
-      const nowDisabled = await findByAuthSubject(pool, SUB_DISABLE_TARGET);
-      expect(nowDisabled?.disabled).toBe(true);
-    });
-
-    it('存在しない id は null', async () => {
-      const pool = await getPool();
-      expect(
-        await disableDashboardUser(pool, 'f4000000-0000-0000-0000-d0000000ffff', OP_A),
-      ).toBeNull();
-    });
-  });
+  // 注: 旧 disableDashboardUser（ガードなし単純版）のテストは Task 2.1 で撤去（保護付き
+  // disableDashboardUserGuarded に置換）。無効化の網羅は下部の disableDashboardUserGuarded ブロック
+  // （f8g 帯）と並行安全性ブロック（f8c 帯）が担う。DU_DISABLE_TARGET/SUB_DISABLE_TARGET のフィクスチャ行は
+  // findByAuthSubject など他ブロックのスコープ検証で参照されるため残置する。
 
   describe('findDashboardUserDisplayName', () => {
     // 掃除は afterAll の operator_id スコープ DELETE（OP_A 配下）に含まれる。

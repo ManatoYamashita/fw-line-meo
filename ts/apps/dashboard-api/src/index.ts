@@ -21,7 +21,7 @@ import {
   disableInviteCode,
   listDashboardUsers,
   createPendingDashboardUser,
-  disableDashboardUser,
+  disableDashboardUserGuarded,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -173,7 +173,10 @@ const app = createApp({
     },
     userDisable: {
       auth: authDeps,
-      disableUser: async (id, operatorId) => disableDashboardUser(await getPool(), id, operatorId),
+      // 保護付き無効化（自己無効化拒否はハンドラ側・最後の運営保護と並行直列化は DAL 側）。
+      // getPool() の戻り値 Pool は TransactionCapable（connect を持つ）に構造適合する。
+      disableUser: async (id, operatorId) =>
+        disableDashboardUserGuarded(await getPool(), id, operatorId),
     },
   },
 });
