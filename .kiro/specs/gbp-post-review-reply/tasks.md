@@ -60,7 +60,7 @@
   - _Boundary: GbpPrompts, PkgGemini_
 
 - [ ] 3. コア: Google 連携（OAuth）フロー
-- [ ] 3.1 認可フローの中核を実装する
+- [x] 3.1 認可フローの中核を実装する
   - business.manage 単一スコープの認可 URL 生成（offline・consent）と DB 裏付け state の発行・照合・消費を実装する
   - 認可コード交換・アカウント/ロケーション列挙・placeId 突合・不一致時の revoke を実装する
   - 突合成功時に oauth_tokens と gbp_locations が同一トランザクションで永続化され、不一致時は何も残らない
@@ -138,6 +138,7 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 3.1: **3.2 への必須申し送り** — state 形式は `<ownerId>.<nonce>`（nonce = `randomBytes(32).base64url`・`timingSafeEqual` で state 全体を比較・照合成功の瞬間に消費）。callback ルートはこの形式に依存する。`OauthCallbackResult` の各 variant は `ownerId`/`storeId` を持つ（**LINE Push の通知先解決に必須**・design 更新済み）。`error` の reason には `persist_failed`（DB 失敗・revoke 済み）・`listing_incomplete`（ページ上限）・`listing_failed` がある。**`persistLink` の throw は捕捉して revoke + persist_failed に倒す規律**（未捕捉だと Google 側 refresh token が孤児化し通知も出ない）。非阻却の既知エッジ: COMMIT 成功後に `client.release()` が throw すると persist_failed 扱いになる（pg の二重 release でのみ発生・再試行で自己修復）。
 - 2.4: **プロンプトインジェクション対策の正典** — 自由記述（クチコミ本文・オーナー入力・修正指示・前回下書き）は `sanitizeFreeText` で **不動点まで反復除去**する（単一パス `replaceAll` は `<<<E<<<END>>>ND>>>` のような入れ子で再構成され突破される）。異種トークン間再構成・全挿入位置入れ子・10 万件ファズ・フィールド跨ぎ分割で検証済み。`GbpPromptsService` の修正指示引数は design の `revision?: string` ではなく `RevisionContext { instruction, previousDraft }`。`rating` は範囲外・非有限値を低評価トーンへ倒す fail-safe。
 - **【別 spec への申し送り・未修正】`ts/apps/survey-web/src/lib/draft/prompt.ts` に同型のプロンプトインジェクション脆弱性が残存**（単一パス除去）。review-acquisition spec の所有物のため本 spec の境界外。同じ不動点方式の適用が必要。
 - 2.4 → 6.1 への申し送り: リテラル以外の擬似デリミタ（`<<<end>>>` 小文字・`<<< END >>>` 空白入り・`＜＜＜END＞＞＞` 全角）・Markdown 見出し・`system:` ロール偽装は構造破壊しないがガードレール文への依存が残る。6.1 のセキュリティ検証で扱うこと。4.2 の配線時は `rating` の呼出側ガードを入れること。
