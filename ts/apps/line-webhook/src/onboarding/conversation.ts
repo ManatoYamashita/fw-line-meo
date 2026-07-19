@@ -7,6 +7,8 @@ import type {
   TransactionClient,
 } from './store-identification.js';
 import { decodePostback } from './stages.js';
+import type { GbpFlowHandlers } from '../gbp/flows.js';
+import { isGbpPostbackData } from '../gbp/postback.js';
 import {
   buildAlreadyCompletedMessage,
   buildCandidateCarouselMessage,
@@ -75,6 +77,11 @@ export interface ConversationDeps {
   // Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
   // config.ts の LIFF_STORE_DETAIL_URL から配線する。
   liffStoreDetailUrl: string;
+  // gbp-post-review-reply spec task 3.3: completed 段階から委譲する GBP 会話フロー。
+  // **任意** にしているのは、本フローが未配線の環境（GBP 用 env が揃っていない検証環境・
+  // 既存のオンボーディング専用テスト）でも completed 段階が従来どおり動作しなければ
+  // ならないため（未配線時は委譲判定自体を行わず、既存の固定案内へ倒れる）。
+  gbp?: GbpFlowHandlers;
 }
 
 export interface ConversationHandlers {
@@ -166,6 +173,27 @@ function buildStageGuidanceMessage(session: OnboardingSessionRow): LineMessage {
   }
 }
 
+/**
+ * gbp-post-review-reply spec task 3.3: GBP 会話フローへ委譲できる状態かを判定する。
+ *
+ * 委譲は **completed 段階に限る**（店舗特定が終わっていないオーナーに GBP の導線は無い。
+ * design.md「Onboarding -. completed 委譲 .-> GbpFlows」）。委譲先は ownerId を前提に
+ * 所有検証を行うため、`owner_id` が解決できないセッションは委譲せず既存案内へ倒す
+ * （CHECK 制約上 completed では owner_id は必ず存在するが、不整合時にクラッシュさせない）。
+ *
+ * 戻り値が null の場合、呼び出し側は既存のオンボーディング挙動をそのまま実行する
+ * （＝この関数が「回帰ゼロ」の唯一のゲートになる）。
+ */
+function resolveGbpDelegation(
+  deps: ConversationDeps,
+  session: OnboardingSessionRow,
+): { gbp: GbpFlowHandlers; ownerId: string } | null {
+  if (deps.gbp === undefined) return null;
+  if (session.stage !== 'completed') return null;
+  if (session.owner_id === null) return null;
+  return { gbp: deps.gbp, ownerId: session.owner_id };
+}
+
 async function handleText(
   deps: ConversationDeps,
   event: Extract<InboundEvent, { kind: 'text' }>,
@@ -173,6 +201,20 @@ async function handleText(
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
   if (session.stage === 'completed') {
+    // task 3.3: GBP の手続きが進行中（アクティブな gbp_session がある）テキストのみ
+    // GbpFlows が引き受ける。`not_handled` は「GBP の入力ではない」を意味し、
+    // 下の既存の固定案内へそのまま落ちる（Req 4.6 の挙動を変えない）。
+    const delegation = resolveGbpDelegation(deps, session);
+    if (delegation !== null) {
+      const handled = await delegation.gbp.handleGbpText({
+        ownerId: delegation.ownerId,
+        lineUserId: event.lineUserId,
+        replyToken: event.replyToken,
+        text: event.text,
+      });
+      if (handled === 'handled') return;
+    }
+
     // Req 4.6: completed 段階への入力は、内容を問わず固定案内のみを返す。
     // セッション更新・再検索・その他の処理は一切行わない。
     await deps.messenger.reply(event.replyToken, [buildAlreadyCompletedMessage()]);
@@ -332,6 +374,21 @@ async function handlePostback(
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
   if (session.stage === 'completed') {
+    // task 3.3: `g_` プレフィックスの postback のみ GbpFlows へ委譲する
+    // （design.md ディスパッチ規則）。判定は data の形式のみで行い、action の妥当性は見ない
+    // ＝未知の `g_*` も GbpFlows が引き受ける。これにより GBP のボタンが
+    // onboarding の固定案内へ誤って吸われることがなくなる。
+    const delegation = resolveGbpDelegation(deps, session);
+    if (delegation !== null && isGbpPostbackData(event.data)) {
+      await delegation.gbp.handleGbpPostback({
+        ownerId: delegation.ownerId,
+        lineUserId: event.lineUserId,
+        replyToken: event.replyToken,
+        data: event.data,
+      });
+      return;
+    }
+
     // Req 4.6: completed 段階では postback の種類（resume 導線含む）を問わず固定案内のみ返す。
     // セッション更新・その他の処理は一切行わない。data の decode すら行う必要がない
     // （decode 結果に関わらず結論は変わらないため）。

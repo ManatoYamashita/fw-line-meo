@@ -24,6 +24,7 @@ import {
   createGoogleOauthCodeClient,
 } from './gbp/oauth.js';
 import { createGbpOauthCallbackRoute } from './gbp/callback.js';
+import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flows.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -56,21 +57,9 @@ const storeIdentificationService = createStoreIdentificationService({
   places: placesAdapter,
 });
 
-const conversationHandlers = createConversationHandlers({
-  db: pool,
-  pool,
-  sessions: { getOrCreateSession, updateSession },
-  owners: { findOwnerByLineUserId, createOwner },
-  inviteCodes: { findActiveInviteCode },
-  identification: storeIdentificationService,
-  messenger: lineMessenger,
-  now: () => new Date(),
-  lineRichMenuCompletedId: config.lineRichMenuCompletedId,
-  liffStoreDetailUrl: config.liffStoreDetailUrl,
-});
-
 // GBP OAuth（gbp-post-review-reply spec task 3.1・3.2）。
-// callback ルートが必要とする最小構成のみをここで組み立てる（会話フロー側の配線は task 3.3）。
+// task 3.3 で会話フロー（GbpFlows）も配線したため、conversationHandlers より先に構築する
+// （conversationHandlers が GbpFlows を委譲先として受け取るため）。
 const gbpTokenStore = createTokenStore({
   cipherKeyBase64: config.gbpTokenCipherKey,
   refreshClient: createGoogleRefreshGrantClient({
@@ -93,6 +82,33 @@ const gbpOauthService = createGbpOauthService({
   tokenStore: gbpTokenStore,
   ...createDefaultGbpOauthAccessors(),
   now: () => new Date(),
+});
+
+// task 3.3: 連携系（connect / status / disconnect）の会話フロー。
+// pool は Queryable（db）と ConnectablePool（pool）の両方に構造的に適合する
+// （conversationHandlers と同じ前提）。
+const gbpFlowHandlers = createGbpFlowHandlers({
+  db: pool,
+  pool,
+  oauth: gbpOauthService,
+  tokenStore: gbpTokenStore,
+  ...createDefaultGbpFlowAccessors(),
+  messenger: lineMessenger,
+  now: () => new Date(),
+});
+
+const conversationHandlers = createConversationHandlers({
+  db: pool,
+  pool,
+  sessions: { getOrCreateSession, updateSession },
+  owners: { findOwnerByLineUserId, createOwner },
+  inviteCodes: { findActiveInviteCode },
+  identification: storeIdentificationService,
+  messenger: lineMessenger,
+  now: () => new Date(),
+  lineRichMenuCompletedId: config.lineRichMenuCompletedId,
+  liffStoreDetailUrl: config.liffStoreDetailUrl,
+  gbp: gbpFlowHandlers,
 });
 
 const gbpOauthCallback = createGbpOauthCallbackRoute({
