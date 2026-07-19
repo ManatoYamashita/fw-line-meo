@@ -432,11 +432,15 @@ interface GbpReview {
   replyComment: string | null;
 }
 
+// 実装確定形（task 2.2）: design の 4 kind に 3 kind を追加（純粋追加・破壊的変更なし）
 type GbpApiError =
-  | { kind: 'token_invalid' }              // TokenStore 由来を透過（2.3）
+  | { kind: 'token_invalid' }              // TokenStore 由来を透過（2.3）→ 再連携誘導
+  | { kind: 'not_linked' }                 // 未連携（行なし）→ 連携誘導（3.9・4.8。token_invalid とは文面が異なる）
+  | { kind: 'crypto_error' }               // 復号不能（鍵誤投入等）→ **オーナーに再連携を促してはならない**
   | { kind: 'permission_denied' }
   | { kind: 'rate_limited' }
-  | { kind: 'upstream_error'; status: number };
+  | { kind: 'incomplete_listing' }         // 列挙のページ上限到達 → 部分結果を成功にしない（1.6 の誤判定防止）
+  | { kind: 'upstream_error'; status: number };  // status 0 = TokenStore の throw・ネットワーク断
 
 interface GbpClientService {
   listAccountsAndLocations(accessToken: string):
@@ -683,6 +687,7 @@ CREATE TABLE gbp_sessions (
 | state 不一致・期限切れ | callback 照合 | 最初からやり直す案内 | 400 応答・警告ログ |
 | 管理権限なし（1.6） | placeId 突合ゼロ件 | 権限のあるアカウントでの再連携案内 | token revoke・永続化なし |
 | トークン失効（2.3） | refresh grant `invalid_grant` | 再連携誘導（`g_connect` ボタン） | 行は温存（再連携で上書き）・処理は実行しない |
+| 復号不能（crypto_error） | token_ref の復号失敗 | **一過性障害の文面**（時間をおいて再試行・下書き温存） | 鍵誤投入の可能性。運用側へ別シグナルとして通知。**再連携を促さない**（誤鍵下での再連携は鍵復旧後に連鎖破損する） |
 | GBP API 失敗（3.7・4.7） | 429/5xx（1 リトライ後） | 失敗の旨 + 平易な理由 + 再試行ボタン | session・draft_text 温存 |
 | 生成失敗（6.6） | Gemini エラー・検証不合格 | 生成失敗の旨 + 再試行ボタン | session 温存 |
 | 期限切れ session | 次回入力時 | 途中終了の案内 + 最初からの導線 | 行削除 |
