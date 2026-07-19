@@ -171,6 +171,50 @@ export async function disableDashboardUser(
   return row ? mapDashboardUser(row) : null;
 }
 
+/**
+ * 無効化済みダッシュボード利用者を再有効化する（Req 1.1, 1.4）。disabled_at を NULL へ戻すのみ。
+ * operator_id をスコープ列として WHERE に含め、越権（他運営の id 指定）・不在は 0 行更新 → null を返す
+ * （呼び出し側は 404 に写像・Req 1.5, 4.1）。disabled_at をフィルタしないため、既に有効な行でも
+ * 同じ内容を返して冪等に振る舞う（Req 1.4）。リンク済み行はロール・所属を保持したまま復帰し（Req 1.2）、
+ * 保留行は disabled_at IS NULL 復帰により linkAuthSubjectByEmail（無変更）の対象へ再び入る（Req 1.3）。
+ */
+export async function enableDashboardUser(
+  db: Queryable,
+  id: string,
+  operatorId: string,
+): Promise<DashboardUserItem | null> {
+  const res = await db.query<DashboardUserItemRow>(
+    `UPDATE dashboard_users
+        SET disabled_at = NULL
+      WHERE id = $1 AND operator_id = $2
+      RETURNING ${DASHBOARD_USER_COLUMNS}`,
+    [id, operatorId],
+  );
+  const row = res.rows[0];
+  return row ? mapDashboardUser(row) : null;
+}
+
+/**
+ * 一意衝突時の 409 案内強化用スコープ限定ルックアップ（Req 3.2）。呼び出し運営（operator_id）配下に
+ * 同一メール（lower(email) 照合）が存在する場合のみ { id, disabled } を返す。
+ * operator_id をスコープ列に含めることで、他運営配下の同一メールは 0 行 → null で秘匿し越境を漏らさない
+ * （Req 3.2, 4.1）。normalizedEmail は呼び出し側で trim + 小文字化済みである前提だが、照合自体は
+ * lower(email) で行い格納値の大文字小文字を無視する。disabled は disabled_at の非 NULL 性で判定する。
+ */
+export async function findDashboardUserByEmailInOperator(
+  db: Queryable,
+  normalizedEmail: string,
+  operatorId: string,
+): Promise<{ id: string; disabled: boolean } | null> {
+  const res = await db.query<{ id: string; disabled_at: Date | null }>(
+    'SELECT id, disabled_at FROM dashboard_users WHERE lower(email) = $1 AND operator_id = $2',
+    [normalizedEmail, operatorId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return { id: row.id, disabled: row.disabled_at !== null };
+}
+
 /** 利用者の表示名を単一取得する（GET /me の displayName 用・不在は null）。 */
 export async function findDashboardUserDisplayName(
   db: Queryable,

@@ -7,6 +7,8 @@ import {
   listDashboardUsers,
   disableDashboardUser,
   findDashboardUserDisplayName,
+  enableDashboardUser,
+  findDashboardUserByEmailInOperator,
 } from '../src/dashboard-users.js';
 
 // 共有テスト DB での衝突回避のため専用 UUID プレフィックス（f4）を用いる（f3 までは他ファイルで使用済み）。
@@ -284,5 +286,193 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users accessors (DB)', () 
 
   it('掃除対象の f4 利用者 id はすべて既知（テスト自己検証）', () => {
     expect(new Set(F4_IDS).size).toBe(F4_IDS.length);
+  });
+});
+
+// ============================================================
+// Task 1.1: 再有効化（enableDashboardUser）とスコープ限定メールルックアップ
+//           （findDashboardUserByEmailInOperator）。
+// f4 とは operator_id が異なる独立フィクスチャ（接頭辞 f8・f7 まで使用済み）。
+// enable 系は disabled_at を書き換えるため lookup 系（read-only）と id を分離する。
+// ============================================================
+const F8_OP_A = 'f8000000-0000-0000-0000-0000000000a1';
+const F8_OP_B = 'f8000000-0000-0000-0000-0000000000b2';
+
+// enable 系ターゲット（OP_A、disabled_at を書き換える）。
+const F8_DU_DISABLED_LINKED = 'f8000000-0000-0000-0000-d00000000001'; // auth_subject 設定済・無効
+const F8_DU_PENDING_DISABLED = 'f8000000-0000-0000-0000-d00000000002'; // auth_subject NULL・email 設定・無効（保留無効）
+const F8_DU_ENABLED_LINKED = 'f8000000-0000-0000-0000-d00000000003'; // auth_subject 設定済・有効
+const F8_DU_OTHER_OP = 'f8000000-0000-0000-0000-d00000000004'; // OP_B（越境・不在検証用）
+
+// lookup 系ターゲット（read-only、enable 系とは非重複）。
+const F8_LOOKUP_DISABLED = 'f8000000-0000-0000-0000-d00000000005'; // OP_A・email 設定・無効
+const F8_LOOKUP_ENABLED = 'f8000000-0000-0000-0000-d00000000006'; // OP_A・email 設定（大小混在）・有効
+const F8_LOOKUP_OTHER_OP = 'f8000000-0000-0000-0000-d00000000007'; // OP_B・email 設定（越境秘匿検証）
+
+const SUB_F8_DISABLED_LINKED = 'authsub-f8-disabled-linked';
+const SUB_F8_ENABLED_LINKED = 'authsub-f8-enabled-linked';
+const SUB_F8_OTHER_OP = 'authsub-f8-otherop';
+const SUB_F8_LOOKUP_ENABLED = 'authsub-f8-lookup-enabled';
+
+const F8_PENDING_DISABLED_EMAIL = 'f8pending-disabled@example.com';
+const F8_LOOKUP_DISABLED_EMAIL = 'f8lookup-disabled@example.com';
+// 大小混在で格納し、lower(email) 照合が効くことを検証する。
+const F8_LOOKUP_ENABLED_EMAIL_STORED = 'F8Lookup-Enabled@Example.COM';
+const F8_LOOKUP_ENABLED_EMAIL_NORMALIZED = 'f8lookup-enabled@example.com';
+const F8_LOOKUP_OTHER_EMAIL = 'f8lookup-other@example.com';
+
+describe.skipIf(!process.env.DATABASE_URL)('dashboard-users lifecycle accessors (DB)', () => {
+  beforeAll(async () => {
+    const pool = await getPool();
+    await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2), ($3, $4)', [
+      F8_OP_A,
+      'f8運営A',
+      F8_OP_B,
+      'f8運営B',
+    ]);
+    // enable 系（OP_A）: リンク済み無効・有効、保留無効。
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, email, disabled_at)
+       VALUES ($1, 'operator', $2, NULL, $3,   NULL, now()),
+              ($4, 'operator', $2, NULL, $5,   NULL, NULL),
+              ($6, 'operator', $2, NULL, NULL, $7,   now())`,
+      [
+        F8_DU_DISABLED_LINKED,
+        F8_OP_A,
+        SUB_F8_DISABLED_LINKED,
+        F8_DU_ENABLED_LINKED,
+        SUB_F8_ENABLED_LINKED,
+        F8_DU_PENDING_DISABLED,
+        F8_PENDING_DISABLED_EMAIL,
+      ],
+    );
+    // 越境検証用（OP_B・有効）。
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject)
+       VALUES ($1, 'operator', $2, NULL, $3)`,
+      [F8_DU_OTHER_OP, F8_OP_B, SUB_F8_OTHER_OP],
+    );
+    // lookup 系: OP_A の無効・有効（大小混在 email）、OP_B の同名スコープ外。
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, email, disabled_at)
+       VALUES ($1, 'operator', $2, NULL, NULL, $3, now()),
+              ($4, 'operator', $2, NULL, $5,   $6, NULL),
+              ($7, 'operator', $8, NULL, NULL, $9, NULL)`,
+      [
+        F8_LOOKUP_DISABLED,
+        F8_OP_A,
+        F8_LOOKUP_DISABLED_EMAIL,
+        F8_LOOKUP_ENABLED,
+        SUB_F8_LOOKUP_ENABLED,
+        F8_LOOKUP_ENABLED_EMAIL_STORED,
+        F8_LOOKUP_OTHER_OP,
+        F8_OP_B,
+        F8_LOOKUP_OTHER_EMAIL,
+      ],
+    );
+  });
+
+  afterAll(async () => {
+    const pool = await getPool();
+    await pool.query('DELETE FROM dashboard_users WHERE operator_id = ANY($1)', [[F8_OP_A, F8_OP_B]]);
+    await pool.query('DELETE FROM operators WHERE id = ANY($1)', [[F8_OP_A, F8_OP_B]]);
+    await closePool();
+  });
+
+  describe('enableDashboardUser', () => {
+    it('リンク済み無効行を有効化し disabled_at を NULL・行を返して再ログイン可能に戻す（Req 1.1, 1.2）', async () => {
+      const pool = await getPool();
+      const res = await enableDashboardUser(pool, F8_DU_DISABLED_LINKED, F8_OP_A);
+      expect(res).not.toBeNull();
+      expect(res?.id).toBe(F8_DU_DISABLED_LINKED);
+      expect(res?.operatorId).toBe(F8_OP_A);
+      expect(res?.disabled).toBe(false);
+
+      // disabled_at が実際に NULL へ戻ったこと。
+      const check = await pool.query<{ disabled_at: Date | null }>(
+        'SELECT disabled_at FROM dashboard_users WHERE id = $1',
+        [F8_DU_DISABLED_LINKED],
+      );
+      expect(check.rows[0]?.disabled_at).toBeNull();
+
+      // 従前のロール・所属のまま findByAuthSubject が有効判定に戻る（再ログイン可能・1.2）。
+      const resolved = await findByAuthSubject(pool, SUB_F8_DISABLED_LINKED);
+      expect(resolved?.id).toBe(F8_DU_DISABLED_LINKED);
+      expect(resolved?.role).toBe('operator');
+      expect(resolved?.disabled).toBe(false);
+    });
+
+    it('保留無効行: 有効化前はリンク不可・有効化後に初回ログイン紐付けが再開できる（Req 1.3）', async () => {
+      const pool = await getPool();
+      // 無効なうちは linkAuthSubjectByEmail の対象外（disabled_at IS NULL 条件を満たさない）。
+      const beforeLink = await linkAuthSubjectByEmail(pool, F8_PENDING_DISABLED_EMAIL, 'uid-f8-pre');
+      expect(beforeLink).toBeNull();
+
+      // 有効化（disabled_at を NULL に戻す）。
+      const enabled = await enableDashboardUser(pool, F8_DU_PENDING_DISABLED, F8_OP_A);
+      expect(enabled?.id).toBe(F8_DU_PENDING_DISABLED);
+      expect(enabled?.disabled).toBe(false);
+
+      // 有効化後は初回ログイン紐付けが再び可能（linkAuthSubjectByEmail は無変更）。
+      const afterLink = await linkAuthSubjectByEmail(pool, F8_PENDING_DISABLED_EMAIL, 'uid-f8-relink');
+      expect(afterLink?.id).toBe(F8_DU_PENDING_DISABLED);
+    });
+
+    it('既に有効な行の有効化は状態を変えず冪等に行を返す（Req 1.4）', async () => {
+      const pool = await getPool();
+      const res = await enableDashboardUser(pool, F8_DU_ENABLED_LINKED, F8_OP_A);
+      expect(res).not.toBeNull();
+      expect(res?.id).toBe(F8_DU_ENABLED_LINKED);
+      expect(res?.disabled).toBe(false);
+    });
+
+    it('範囲外（他 operator）・不在の id は同一の null（越権秘匿・Req 1.5, 4.1）', async () => {
+      const pool = await getPool();
+      // 他 operator 配下の id を自 operator スコープで有効化 → null。
+      expect(await enableDashboardUser(pool, F8_DU_OTHER_OP, F8_OP_A)).toBeNull();
+      // 不在 id → null。
+      expect(
+        await enableDashboardUser(pool, 'f8000000-0000-0000-0000-d0000000ffff', F8_OP_A),
+      ).toBeNull();
+    });
+  });
+
+  describe('findDashboardUserByEmailInOperator', () => {
+    it('自運営の無効化済みメールは { disabled: true } を返す（Req 3.2）', async () => {
+      const pool = await getPool();
+      const res = await findDashboardUserByEmailInOperator(pool, F8_LOOKUP_DISABLED_EMAIL, F8_OP_A);
+      expect(res).not.toBeNull();
+      expect(res?.id).toBe(F8_LOOKUP_DISABLED);
+      expect(res?.disabled).toBe(true);
+    });
+
+    it('自運営の有効メールは { disabled: false } を返す・lower(email) で照合する（Req 3.2）', async () => {
+      const pool = await getPool();
+      // 格納は 'F8Lookup-Enabled@Example.COM'、正規化済み小文字で照合できる。
+      const res = await findDashboardUserByEmailInOperator(
+        pool,
+        F8_LOOKUP_ENABLED_EMAIL_NORMALIZED,
+        F8_OP_A,
+      );
+      expect(res?.id).toBe(F8_LOOKUP_ENABLED);
+      expect(res?.disabled).toBe(false);
+    });
+
+    it('他運営配下のみに存在するメールは自運営スコープでは null（越境秘匿・Req 3.2, 4.1）', async () => {
+      const pool = await getPool();
+      // OP_A スコープでは存在を漏らさない（null）。
+      expect(await findDashboardUserByEmailInOperator(pool, F8_LOOKUP_OTHER_EMAIL, F8_OP_A)).toBeNull();
+      // 正しいスコープ（OP_B）では見つかることで、上の null が越境秘匿であることを担保する。
+      const inScope = await findDashboardUserByEmailInOperator(pool, F8_LOOKUP_OTHER_EMAIL, F8_OP_B);
+      expect(inScope?.id).toBe(F8_LOOKUP_OTHER_OP);
+      expect(inScope?.disabled).toBe(false);
+    });
+
+    it('該当メールが無い場合は null', async () => {
+      const pool = await getPool();
+      expect(
+        await findDashboardUserByEmailInOperator(pool, 'f8-no-such@example.com', F8_OP_A),
+      ).toBeNull();
+    });
   });
 });
