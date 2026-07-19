@@ -13,7 +13,7 @@
   - アクセサの unit テストが通過し、packages/db の公開 index から export されている
   - _Requirements: 1.7, 2.6_
 
-- [ ] 1.3 (P) Gemini 実行核を共有パッケージへ抽出する
+- [x] 1.3 (P) Gemini 実行核を共有パッケージへ抽出する
   - survey-web から GenAiClient 抽象・safetySettings・リトライ・出力検証の実行核を packages/gemini へ移設し、公開インターフェース形状を維持する
   - @google/genai 依存をパッケージへ移動し、survey-web は import 差し替えのみで移行する
   - Result 型はパッケージ自前 export とする（既存 2 定義の統合はしない）
@@ -138,4 +138,5 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 1.3: `@fwlm/gemini` の実行核 API は `generateText(client, {model, contents, config?, validateOutput?, backoff?})` + `createDefaultGenAiClient()`。検証関数は `(text) => string | null`（抽出兼検証）。消費者渡し `config.safetySettings` より実行核の既定が優先される。task 2.4 はこの API を消費する。
 - 1.2: DB テスト fixture の固定 UUID は **ts/ ワークスペース全体で一意** が必要（with-test-db.sh の一時 DB は 1 実行を全パッケージで共有）。gbp 系は `fc` プレフィックスを使用。テナント隔離クエリ形状の正典は `ts/packages/db/src/oauth-tokens.ts`。oauth_tokens+gbp_locations の同時作成/削除の原子性はトランザクションを張る呼び出し側（TokenStore/flows）の責務。`make ts-build` は `store-detail/next-env.d.ts` を汚すことがある（コミット前に確認・復元）。

@@ -4,7 +4,7 @@ import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { handleResponses, type ResponsesDeps } from './handler';
 
-// pg / @google/genai を使うため Node ランタイム・動的（POST）。
+// pg / @fwlm/gemini（内部で @google/genai）を使うため Node ランタイム・動的（POST）。
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

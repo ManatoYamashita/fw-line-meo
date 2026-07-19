@@ -571,18 +571,19 @@ interface GbpPromptsService {
 **Contracts**: Service [x]
 
 ```typescript
+// 実装確定形（task 1.3）: File Structure Plan の executor.ts + client.ts 構成
 interface GenerateTextOptions {
   model: string;
-  maxRetries: 1;
-  safetySettings: SafetySetting[];   // 既存 survey-web の設定を既定値として同梱
-  responseValidation: (text: string) => boolean;
+  contents: string;
+  config?: GenAiRequestConfig;                    // safetySettings は実行核の既定を付与
+  validateOutput?: (text: string) => string | null; // 抽出兼検証（null = INVALID_OUTPUT）
+  backoff?: (attempt: number) => Promise<void>;   // テスト注入用・既定は指数バックオフ
 }
-interface GeminiExecutor {
-  generateText(prompt: string, options: GenerateTextOptions):
-    Promise<Result<string, GenerationError>>;
-}
-function createDefaultGeminiExecutor(): GeminiExecutor; // GEMINI_API_KEY 自動検出
+function generateText(client: GenAiClient, options: GenerateTextOptions):
+  Promise<Result<string, GenerationError>>;        // リトライ(1回)・安全性ブロック分類を内包
+function createDefaultGenAiClient(): GenAiClient;  // @google/genai 動的 import・GEMINI_API_KEY 自動検出
 ```
+- 検証関数が `string | null`（抽出兼検証）なのは、survey-web の「JSON 抽出 + trim 済み draft を返す」公開挙動を二重パースなしに維持するため（review で確定）
 
 **Implementation Notes**
 - Integration: survey-web の `generator.ts` は本パッケージ消費へ書き換え（`DraftGenerator` の公開 API・挙動不変）。回帰は survey-web の既存テストスイートで検証

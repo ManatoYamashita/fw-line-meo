@@ -106,9 +106,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@google/genai':
-        specifier: ^1
-        version: 1.52.0
+      '@fwlm/gemini':
+        specifier: workspace:*
+        version: link:../../packages/gemini
       next:
         specifier: ^16
         version: 16.2.10(@opentelemetry/api@1.9.1)(@playwright/test@1.61.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -153,6 +153,12 @@ importers:
       '@types/pg':
         specifier: ^8
         version: 8.20.0
+
+  packages/gemini:
+    dependencies:
+      '@google/genai':
+        specifier: ^1
+        version: 1.52.0
 
 packages:
 
