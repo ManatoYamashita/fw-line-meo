@@ -526,7 +526,9 @@ type GbpPostbackAction =
 
 function encodeGbpPostback(action: GbpPostbackAction): string;
 function decodeGbpPostback(data: string): GbpPostbackAction | null;
+function isGbpPostbackData(data: string): boolean;  // ディスパッチ判定（a が g_ 始まりか）
 ```
+- `g_disconnect` の storeId は decode 層では **UUID 形式検証のみ**。所有検証は GbpFlows の責務（Security Considerations の「postback data の storeId は信用しない」を単一箇所で担保する）
 
 #### GbpPrompts
 

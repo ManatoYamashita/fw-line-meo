@@ -43,7 +43,7 @@
   - name 変換とエラー分類の unit テストが通過する
   - _Requirements: 3.5, 4.1, 4.4, 5.3_
 
-- [ ] 2.3 (P) GBP 系 postback の符号化を実装する
+- [x] 2.3 (P) GBP 系 postback の符号化を実装する
   - g_ プレフィックスの全 action（連携・店舗選択・状態・解除・投稿・返信・クチコミ選択・承認・再生成・修正・上書き確認・キャンセル）の型と encode/decode を実装する
   - 不正 data の null フォールバックと 300 字上限検証を既存規約どおりに実装する
   - 全 action の encode/decode 対称性 unit テストが通過する
@@ -138,6 +138,7 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 2.3: `isGbpPostbackData(data)` が conversation.ts のディスパッチ判定関数（design 追記済み）。`g_disconnect` の storeId は decode 層で UUID 形式検証のみ・**所有検証は GbpFlows が必ず行う**（3.3 の実装点）。300 字超の `g_*` data は `isGbpPostbackData` が false になり onboarding 側へ流れる（自前ボタンからは encode が throw するため到達不能）。
 - 2.2: **GbpFlows（4.x）への必須申し送り** — `GbpApiError` は design の 4 kind に `not_linked`・`crypto_error`・`incomplete_listing` を追加（design 更新済み）。**`crypto_error` にオーナーへの「再連携してください」を出してはならない**（鍵誤投入時に全店舗が誤誘導され、誤鍵下の再連携が鍵復旧後に連鎖破損する）。一過性障害の文面＋運用側への別シグナルで扱い、再連携導線は `token_invalid` / `not_linked` に限定。`incomplete_listing` も「管理権限なし」と結論させず再試行導線へ。また **`listReviews` は orderBy を送らないため GBP の返却順は未保証** — 「新着順・未返信優先で最大 5 件」の整列は `createTime`/`hasReply` を使って呼び出し側で必ず実施すること。
 - 2.1: **後続タスクへの必須申し送り** — `createGoogleRefreshGrantClient.fetchAccessToken` は生の `GaxiosError` を throw する。google-auth-library の `GaxiosError.config.data` にはリクエストボディ（`refresh_token=...` 平文）が載るため、**3.1 以降で直接呼ぶ場合は必ず `sanitizeRefreshError` 相当を通すこと**（現状の唯一の呼び出し元 `getAccessTokenForStore` はサニタイズ済み）。TokenStore の全メソッドは `StoreKey { ownerId, storeId }` を受ける（design 更新済み）。token-store.ts 冒頭コメントが不変条件の正典。
 - 1.3: `@fwlm/gemini` の実行核 API は `generateText(client, {model, contents, config?, validateOutput?, backoff?})` + `createDefaultGenAiClient()`。検証関数は `(text) => string | null`（抽出兼検証）。消費者渡し `config.safetySettings` より実行核の既定が優先される。task 2.4 はこの API を消費する。
