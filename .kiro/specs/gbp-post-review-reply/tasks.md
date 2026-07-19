@@ -1,7 +1,7 @@
 # Implementation Plan
 
 - [ ] 1. 基盤: DB スキーマ・共有パッケージ・シークレット配線
-- [ ] 1.1 GBP 連携用の DB スキーマを確立する
+- [x] 1.1 GBP 連携用の DB スキーマを確立する
   - migration 0005 として gbp_locations（store 一意・account/location リソース名・placeId・投稿可否）と gbp_sessions（owner 一意・flow/stage enum・payload・draft・期限）を追加する
   - ERD と書込境界ドキュメントに 2 テーブル（書込責任 = TypeScript）を追記する
   - make db-migrate / db-smoke / db-test / db-verify-docs がすべて成功する
@@ -133,3 +133,8 @@
   - 実 Google アカウント・検証用店舗で 連携→投稿→返信→解除 の一連を確認する（CI 外・GBP 利用審査承認後）
   - 連携済み店舗が LINE から Google 投稿・返信を実行できる（Issue #8 完了条件の実証）
   - _Requirements: 1.4, 2.2, 3.5, 4.4_
+
+## Implementation Notes
+
+- 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
+- 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
