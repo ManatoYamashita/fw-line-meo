@@ -24,9 +24,8 @@ PUSH_SCRIPT="${ROOT}/scripts/push-images.sh"
 DEPLOY_YML="${ROOT}/.github/workflows/deploy.yml"
 
 # 意図的にデプロイパイプラインへ含めないサービス（必ず理由と Issue を明記すること）。
-# line-webhook: 手動 push イメージで稼働中。パイプライン組込は Issue #35 で別途対応
-#               （survey-web 初回デプロイと LINE Webhook の挙動更新を結合させないための一時除外）。
-WHITELIST=(line-webhook)
+# 現在は空（Issue #35 で line-webhook を組込済み）。追加時は `WHITELIST=(name1 name2)` 形式。
+WHITELIST=()
 
 for f in "$TF_FILE" "$PUSH_SCRIPT" "$DEPLOY_YML"; do
   if [ ! -f "$f" ]; then
@@ -65,7 +64,8 @@ in_list() {
 fail=0
 checked=0
 for svc in $tf_services; do
-  if in_list "$svc" "${WHITELIST[@]}"; then
+  # ${arr[@]+...} は空配列でも set -u（bash 3.2 含む）で unbound エラーにしない安全な展開。
+  if in_list "$svc" ${WHITELIST[@]+"${WHITELIST[@]}"}; then
     # ホワイトリスト項目が実はカバー済みなら、無意味な除外を残さないよう警告する。
     # shellcheck disable=SC2086 # image_names は意図的に単語分割する
     if in_list "$svc" $image_names; then
