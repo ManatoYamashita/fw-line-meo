@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# competitive-daily-summary（task 6.3）/ agency-dashboard（task 5.1）: 5イメージ
-# （daily-batch・summary-delivery・store-detail・dashboard-api・dashboard-web）を
+# competitive-daily-summary（task 6.3）/ agency-dashboard（task 5.1）/ Issue #33: 6イメージ
+# （daily-batch・summary-delivery・store-detail・dashboard-api・dashboard-web・survey-web）を
 # ビルドし、Artifact Registry（infra/modules/registry・既定 repository_id=fwlm）へ push する。
 #
 # 前提（実 GCP 接続が必要な手順・ローカル検証環境には無い）:
@@ -11,15 +11,15 @@
 #   - docker（または CONTAINER_CMD で指定する互換 CLI）が利用可能であること
 #
 # 使い方:
-#   scripts/push-images.sh                    # 5イメージを build + push（既定 TAG=gitの短SHA）
+#   scripts/push-images.sh                    # 6イメージを build + push（既定 TAG=gitの短SHA）
 #   scripts/push-images.sh --build-only        # push せず build のみ（ローカル検証・CI の検証ジョブ向け）
 #   scripts/push-images.sh --image daily-batch # 対象を1イメージに絞る
-#     （daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web）
+#     （daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web|survey-web）
 #   PROJECT_ID=fwlm REGION=asia-northeast1 REPOSITORY=fwlm TAG=v0.1.0 scripts/push-images.sh
 #
 # 各イメージの Dockerfile とビルドコンテキストは go/Dockerfile・ts/apps/delivery-job/Dockerfile・
-# ts/apps/store-detail/Dockerfile・ts/apps/dashboard-api/Dockerfile・ts/apps/dashboard-web/Dockerfile
-# 冒頭コメントに記載の規約と一致させている。
+# ts/apps/store-detail/Dockerfile・ts/apps/dashboard-api/Dockerfile・ts/apps/dashboard-web/Dockerfile・
+# ts/apps/survey-web/Dockerfile 冒頭コメントに記載の規約と一致させている。
 #
 # push 後の daily-batch Job 実体化手順（terraform apply の外・ignore_changes[image]）は
 # infra/README.md 「7. コンテナイメージの push と既設 Job/Service の実体化」を参照。
@@ -38,7 +38,7 @@ ONLY_IMAGE=""
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/push-images.sh [--build-only]
-       [--image daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web]
+       [--image daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web|survey-web]
 
 env vars: CONTAINER_CMD (既定 docker) / PROJECT_ID (既定 fwlm) / REGION (既定 asia-northeast1)
           REPOSITORY (既定 fwlm) / TAG (既定 git 短SHA。dirty working tree なら -dirty 付与)
@@ -76,9 +76,9 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ -n "$ONLY_IMAGE" ]; then
   case "$ONLY_IMAGE" in
-    daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web) ;;
+    daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web|survey-web) ;;
     *)
-      echo "ERROR: 不明なイメージ名: ${ONLY_IMAGE}（daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web）" >&2
+      echo "ERROR: 不明なイメージ名: ${ONLY_IMAGE}（daily-batch|summary-delivery|store-detail|dashboard-api|dashboard-web|survey-web）" >&2
       exit 2
       ;;
   esac
@@ -104,13 +104,14 @@ REGISTRY_HOST="${REGION}-docker.pkg.dev"
 IMAGE_BASE="${REGISTRY_HOST}/${PROJECT_ID}/${REPOSITORY}"
 
 # name / Dockerfile / build context（Dockerfile 冒頭コメントの docker build 例と一致させる）
-IMAGE_NAMES=(daily-batch summary-delivery store-detail dashboard-api dashboard-web)
+IMAGE_NAMES=(daily-batch summary-delivery store-detail dashboard-api dashboard-web survey-web)
 declare -A DOCKERFILE=(
   [daily-batch]="go/Dockerfile"
   [summary-delivery]="ts/apps/delivery-job/Dockerfile"
   [store-detail]="ts/apps/store-detail/Dockerfile"
   [dashboard-api]="ts/apps/dashboard-api/Dockerfile"
   [dashboard-web]="ts/apps/dashboard-web/Dockerfile"
+  [survey-web]="ts/apps/survey-web/Dockerfile"
 )
 declare -A CONTEXT=(
   [daily-batch]="go"
@@ -118,6 +119,7 @@ declare -A CONTEXT=(
   [store-detail]="ts"
   [dashboard-api]="ts"
   [dashboard-web]="ts"
+  [survey-web]="ts"
 )
 
 # ビルド時 build-arg（イメージ別）。store-detail は Next.js の NEXT_PUBLIC_LIFF_ID を、
@@ -191,5 +193,6 @@ if [ "$BUILD_ONLY" -eq 0 ]; then
   echo "  gcloud run services update store-detail --image=${IMAGE_BASE}/store-detail:${TAG} --region=${REGION} --project=${PROJECT_ID}"
   echo "  gcloud run services update dashboard-api --image=${IMAGE_BASE}/dashboard-api:${TAG} --region=${REGION} --project=${PROJECT_ID}"
   echo "  gcloud run services update dashboard-web --image=${IMAGE_BASE}/dashboard-web:${TAG} --region=${REGION} --project=${PROJECT_ID}"
+  echo "  gcloud run services update survey-web --image=${IMAGE_BASE}/survey-web:${TAG} --region=${REGION} --project=${PROJECT_ID}"
   echo "詳細手順は infra/README.md 「7. コンテナイメージの push と既設 Job/Service の実体化」を参照。"
 fi

@@ -19,7 +19,10 @@ RUN pnpm install --frozen-lockfile
 # --- ビルド（@fwlm/db を tsc、survey-web を next build standalone） ---
 FROM base AS build
 WORKDIR /repo
-COPY --from=deps /repo/node_modules ./node_modules
+# deps ステージ全体をコピー（pnpm はパッケージ単位で node_modules を持つため、
+# ルートの node_modules だけでなく packages/db・apps/survey-web 配下の
+# node_modules シンボリックリンクも必要）。
+COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
 RUN pnpm -C apps/survey-web run build
@@ -29,9 +32,10 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # standalone は依存を内包した server.js を出力（node_modules 不要）。
+# survey-web は public/ ディレクトリを持たないため static のみコピーする（存在しない
+# パスの COPY はビルドエラーになる）。
 COPY --from=build /repo/apps/survey-web/.next/standalone ./
 COPY --from=build /repo/apps/survey-web/.next/static ./apps/survey-web/.next/static
-COPY --from=build /repo/apps/survey-web/public ./apps/survey-web/public
 EXPOSE 8080
 ENV PORT=8080
 ENV HOSTNAME=0.0.0.0
