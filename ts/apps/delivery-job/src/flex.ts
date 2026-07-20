@@ -24,6 +24,18 @@ export interface FlexUriAction {
   readonly uri: string;
 }
 
+/**
+ * postback アクション（Task 5.1）。タップ時に `data` を webhook へ送る。
+ * `data` の形式は line-webhook の `src/gbp/postback.ts` の `encodeGbpPostback`/
+ * `decodeGbpPostback` と一致させること（GBP 系は `g_` プレフィックス）。
+ */
+export interface FlexPostbackAction {
+  readonly type: 'postback';
+  readonly data: string;
+  readonly label: string;
+  readonly displayText?: string;
+}
+
 export interface FlexText {
   readonly type: 'text';
   readonly text: string;
@@ -42,7 +54,7 @@ export interface FlexSeparator {
 
 export interface FlexButton {
   readonly type: 'button';
-  readonly action: FlexUriAction;
+  readonly action: FlexUriAction | FlexPostbackAction;
   readonly style?: 'primary' | 'secondary' | 'link';
   readonly height?: 'sm' | 'md';
 }
@@ -83,6 +95,17 @@ const GOOGLE_ATTRIBUTION_TEXT = 'データ提供: Google Maps';
 const DETAIL_BUTTON_LABEL = '詳細を見る';
 const NO_NEW_REVIEWS_TEXT = '新着なし';
 const NO_COMPETITORS_TEXT = '競合が見つかっていません（自店のみの計測です）';
+
+// GBP アクションボタン（Task 5.1・R5.1）。footer に無条件で付与し、連携状態の分岐は
+// webhook 側（GbpFlows）に集約する。data 文字列は line-webhook の encodeGbpPostback と
+// 一致する必要がある（src/gbp/postback.ts: `g_reply`/`g_post` は index/storeId を取らない
+// 単純 action のため `a=g_reply` / `a=g_post`）。delivery-job は line-webhook を import できない
+// ため文字列をハードコードするが、postback.ts の decodeGbpPostback が受理する形式であることを
+// ここで固定する（契約変更時は両側を同時更新すること）。
+const REPLY_BUTTON_LABEL = 'クチコミに返信';
+const REPLY_POSTBACK_DATA = 'a=g_reply';
+const POST_BUTTON_LABEL = 'Google 投稿作成';
+const POST_POSTBACK_DATA = 'a=g_post';
 
 /** 新着クチコミ抜粋として本文に表示する最大件数（bubble サイズ抑制のための表示上限）。 */
 const MAX_DISPLAYED_NEW_REVIEWS = 3;
@@ -315,6 +338,20 @@ function buildFooter(liffUrl: string): FlexBox {
         style: 'primary',
         height: 'sm',
         action: { type: 'uri', label: DETAIL_BUTTON_LABEL, uri: liffUrl },
+      },
+      // GBP アクション導線（R5.1）。連携状態で分岐せず常時付与する。未連携店舗での
+      // タップ時の連携誘導（R5.2）は webhook 側の責務であり、ここでは判定しない。
+      {
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: { type: 'postback', label: REPLY_BUTTON_LABEL, data: REPLY_POSTBACK_DATA },
+      },
+      {
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        action: { type: 'postback', label: POST_BUTTON_LABEL, data: POST_POSTBACK_DATA },
       },
       {
         type: 'text',
