@@ -17,6 +17,8 @@ export type DashboardRole = 'operator' | 'agency';
 
 // GET /me の 200 応答内 user（design の API 契約表: { role, agencyId, agencyName, displayName }）。
 export interface Me {
+  // 利用者 ID（UI が「自分の行」を識別し自己無効化ボタンを非表示にするために使う）。
+  id: string;
   role: DashboardRole;
   agencyId: string | null;
   agencyName: string | null;
@@ -218,6 +220,21 @@ export async function disableDashboardUser(
 ): Promise<ApiResult<DashboardUserItem>> {
   const result = await apiFetch<{ user: DashboardUserItem }>(
     `/dashboard-users/${encodeURIComponent(input.id)}/disable`,
+    { ...options, method: 'POST' },
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.user };
+}
+
+// POST /dashboard-users/:id/enable: 無効化済み利用者を再有効化（operator 専用）。200 で { user }。
+// operatorId はサーバー側が認証ユーザーから解決する。不在・スコープ外 id は 404(not_found)。
+// 既に有効な利用者への再実行も現状値を返し冪等。
+export async function enableDashboardUser(
+  input: { id: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<DashboardUserItem>> {
+  const result = await apiFetch<{ user: DashboardUserItem }>(
+    `/dashboard-users/${encodeURIComponent(input.id)}/enable`,
     { ...options, method: 'POST' },
   );
   if (!result.ok) return result;

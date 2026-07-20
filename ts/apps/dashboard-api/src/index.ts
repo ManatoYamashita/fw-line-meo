@@ -21,7 +21,9 @@ import {
   disableInviteCode,
   listDashboardUsers,
   createPendingDashboardUser,
-  disableDashboardUser,
+  disableDashboardUserGuarded,
+  enableDashboardUser,
+  findDashboardUserByEmailInOperator,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -170,10 +172,22 @@ const app = createApp({
     userCreate: {
       auth: authDeps,
       createUser: async (input) => createPendingDashboardUser(await getPool(), input),
+      // 409 強化のスコープ限定ルックアップ。DAL の引数順は (db, normalizedEmail, operatorId) のため
+      // ハンドラ契約 (operatorId, email) から順序を入れ替えて渡す（Req 3.2・越境秘匿）。
+      findUserByEmailInOperator: async (operatorId, email) =>
+        findDashboardUserByEmailInOperator(await getPool(), email, operatorId),
     },
     userDisable: {
       auth: authDeps,
-      disableUser: async (id, operatorId) => disableDashboardUser(await getPool(), id, operatorId),
+      // 保護付き無効化（自己無効化拒否はハンドラ側・最後の運営保護と並行直列化は DAL 側）。
+      // getPool() の戻り値 Pool は TransactionCapable（connect を持つ）に構造適合する。
+      disableUser: async (id, operatorId) =>
+        disableDashboardUserGuarded(await getPool(), id, operatorId),
+    },
+    userEnable: {
+      auth: authDeps,
+      // 再有効化（disabled_at を NULL に戻す・operator_id スコープ）。不在・越権は null → 404。
+      enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
     },
   },
 });

@@ -25,11 +25,13 @@ import {
   handleDashboardUsersList,
   handleDashboardUserCreate,
   handleDashboardUserDisable,
+  handleDashboardUserEnable,
   type AgenciesListDeps,
   type AgencyCreateDeps,
   type DashboardUsersListDeps,
   type DashboardUserCreateDeps,
   type DashboardUserDisableDeps,
+  type DashboardUserEnableDeps,
 } from './admin.js';
 import { jsonError } from './http.js';
 
@@ -58,6 +60,7 @@ export interface AppDeps {
     usersList: DashboardUsersListDeps;
     userCreate: DashboardUserCreateDeps;
     userDisable: DashboardUserDisableDeps;
+    userEnable: DashboardUserEnableDeps;
   };
 }
 
@@ -214,6 +217,14 @@ export function createApp(deps: AppDeps): Hono {
   // 無効化は body 不要（対象は :id・スコープは認証ユーザーの operatorId）。
   app.post('/dashboard-users/:id/disable', (c) =>
     handleDashboardUserDisable(deps.admin.userDisable, {
+      authorization: authHeader(c),
+      id: c.req.param('id'),
+    }),
+  );
+
+  // 再有効化も body 不要（対象は :id・スコープは認証ユーザーの operatorId）。
+  app.post('/dashboard-users/:id/enable', (c) =>
+    handleDashboardUserEnable(deps.admin.userEnable, {
       authorization: authHeader(c),
       id: c.req.param('id'),
     }),

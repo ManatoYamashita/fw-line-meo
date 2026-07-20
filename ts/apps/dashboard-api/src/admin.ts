@@ -1,4 +1,10 @@
-import type { AgencyItem, DashboardRole, DashboardUserIdentity, DashboardUserItem } from '@fwlm/db';
+import type {
+  AgencyItem,
+  DashboardRole,
+  DashboardUserIdentity,
+  DashboardUserItem,
+  DisableOutcome,
+} from '@fwlm/db';
 import { authenticate, type AuthDeps } from './auth.js';
 import { requireOperator } from './scope.js';
 import { isUniqueViolation } from './invite-code-gen.js';
@@ -68,13 +74,31 @@ export interface DashboardUserCreateDeps {
   // createPendingDashboardUser（@fwlm/db）委譲（保留行の事前登録・案B）。
   // email UNIQUE 衝突（pg 23505）は本ハンドラが 409 email_conflict に写像する。
   createUser: (input: DashboardUserCreateInput) => Promise<DashboardUserItem>;
+  // 409 強化用のスコープ限定ルックアップ（findDashboardUserByEmailInOperator を委譲・Req 3.2）。
+  // 一意違反（23505）捕捉時に、自運営（operatorId）配下の同一メールの無効化状態を引く。
+  // 見つかり disabled なら 409 email_conflict_disabled（再有効化での復旧を案内）、そうでなければ
+  // （有効な自運営衝突・または越境で null）汎用 email_conflict を維持し越境の存在を漏らさない（Req 4.4）。
+  findUserByEmailInOperator: (
+    operatorId: string,
+    normalizedEmail: string,
+  ) => Promise<{ id: string; disabled: boolean } | null>;
 }
 
 export interface DashboardUserDisableDeps {
   auth: AuthDeps;
-  // disableDashboardUser（@fwlm/db）委譲。operator_id をスコープ列に含む UPDATE で、
-  // 不在・越権（他運営の id）はいずれも null（本ハンドラが 404 に写像・存在の秘匿）。
-  disableUser: (id: string, operatorId: string) => Promise<DashboardUserItem | null>;
+  // disableDashboardUserGuarded（@fwlm/db）委譲。operator_id をスコープ列に含む保護付き無効化で、
+  // 結果を判別共用体 DisableOutcome で返す（本ハンドラが 200 / 409 / 404 に写像する）:
+  //   - 'disabled'（成功／既に無効・冪等）／'last_operator'（最後の有効な運営で拒否・Req 2.3）／
+  //     'not_found'（不在・越権の秘匿・Req 1.5）。拒否時は DAL が ROLLBACK 済みで対象状態不変（Req 2.6）。
+  disableUser: (id: string, operatorId: string) => Promise<DisableOutcome>;
+}
+
+export interface DashboardUserEnableDeps {
+  auth: AuthDeps;
+  // enableDashboardUser（@fwlm/db）委譲。operator_id をスコープ列に含む再有効化（disabled_at を
+  // NULL に戻す）で、行があればその利用者を返す（既に有効でも冪等に行を返す・Req 1.1, 1.4）。
+  // 不在・越権は null（本ハンドラが 404 に写像・存在の秘匿・Req 1.5, 4.1）。
+  enableUser: (id: string, operatorId: string) => Promise<DashboardUserItem | null>;
 }
 
 // --- リクエスト形 ---
@@ -100,6 +124,11 @@ export interface DashboardUserCreateRequest {
 export interface DashboardUserDisableRequest {
   authorization: string | undefined;
   id: string; // パスパラメータ :id（UUID 形式を事前検証する）。
+}
+
+export interface DashboardUserEnableRequest {
+  authorization: string | undefined;
+  id: string; // パスパラメータ :id（UUID 形式を事前検証する・disable と同型）。
 }
 
 // UUID 形式でない id は DB を叩かず 404 扱い（存在の探り当てを許さない・invite-codes と同じ規律）。
@@ -181,6 +210,19 @@ export async function handleDashboardUserCreate(
     // email UNIQUE 衝突（pg 23505）のみ 409 に写像。auth_subject は保留行では NULL のため
     // 衝突し得る UNIQUE は email に限られる。それ以外の障害は詳細を漏らさず 500（Req 7.4）。
     if (isUniqueViolation(err)) {
+      // スコープ限定ルックアップで衝突相手の状態を引く（parsed.email は trim + 小文字化済み・
+      // operatorId は認証ユーザー由来）。他運営配下の衝突は operator_id スコープで null が返るため
+      // 自動的に汎用 email_conflict になり、越境相手の存在・状態を漏らさない（Req 4.4・越境秘匿）。
+      const existing = await deps.findUserByEmailInOperator(guard.user.operatorId, parsed.email);
+      if (existing !== null && existing.disabled) {
+        // 自運営配下の無効化済みメール。復旧は再有効化に一本化するため専用コードで案内する（Req 3.2）。
+        return jsonError(
+          409,
+          'email_conflict_disabled',
+          'このメールアドレスは無効化済みの利用者です。復旧するには利用者管理から有効化してください',
+        );
+      }
+      // 有効な自運営衝突・または越境（null）は汎用の重複案内を維持する（Req 3.1・越境秘匿 4.4）。
       return jsonError(409, 'email_conflict', '既に登録済みのメールアドレスです');
     }
     return jsonError(500, 'internal', '利用者の登録に失敗しました。時間をおいて再試行してください');
@@ -202,9 +244,56 @@ export async function handleDashboardUserDisable(
     return jsonError(404, 'not_found', '利用者が見つかりません');
   }
 
-  // 無効化。null（不在・他運営スコープ）は 404。既無効は現状値が返り 200（冪等・Req 6.4）。
-  const user = await deps.disableUser(req.id, guard.user.operatorId);
+  // UUID を小文字へ正規化してから自己判定・DAL へ渡す。UUID_RE は /i のため大文字表記も通過するが、
+  // PostgreSQL の uuid 比較は大文字小文字を無視するため、厳密文字列一致だけでは大文字表記で
+  // 自己無効化ガードを迂回できてしまう（guard.user.id は PG 由来で小文字正規形）。
+  const targetId = req.id.toLowerCase();
+
+  // 自己無効化拒否（DB 到達前・Req 2.1）。運営が自分自身を無効化するとテナントごとロックアウトし得るため
+  // 構造的に禁止する。guard.user.id は認証ユーザー由来（UUID）で、クライアント入力は信用しない。
+  if (targetId === guard.user.id) {
+    return jsonError(409, 'self_disable_forbidden', '自分自身は無効化できません');
+  }
+
+  // 保護付き無効化。結果を HTTP へ写像する（Req 2.3, 2.4, 2.6, 1.5）。拒否時は DAL が ROLLBACK 済みで
+  // 対象状態は変わらない（成功と誤認されない明確な表示・Req 2.6）。
+  const outcome = await deps.disableUser(targetId, guard.user.operatorId);
+  if (outcome.kind === 'disabled') {
+    // 無効化成功／既に無効（冪等）。現状の利用者行を 200 で返す（Req 2.4）。
+    return jsonOk(200, { user: toUserJson(outcome.user) });
+  }
+  if (outcome.kind === 'last_operator') {
+    // 最後の有効な運営は無効化できない（ロックアウト防止・Req 2.3）。
+    return jsonError(
+      409,
+      'last_operator',
+      '最後の運営は無効化できないため、先に別の運営を追加してください',
+    );
+  }
+  // outcome.kind === 'not_found'（不在・越権）は不在と同じ 404（存在の秘匿・Req 1.5）。
+  return jsonError(404, 'not_found', '利用者が見つかりません');
+}
+
+// --- POST /dashboard-users/:id/enable ---
+
+export async function handleDashboardUserEnable(
+  deps: DashboardUserEnableDeps,
+  req: DashboardUserEnableRequest,
+): Promise<Response> {
+  const guard = await requireOperatorUser(deps.auth, req.authorization);
+  if (!guard.ok) return guard.response;
+
+  // UUID 事前ガード（DAL に到達させない）。不正形式は不在と同じ 404（存在の秘匿・disable と同じ規律）。
+  if (!UUID_RE.test(req.id)) {
+    return jsonError(404, 'not_found', '利用者が見つかりません');
+  }
+
+  // 再有効化（disabled_at を NULL に戻す・既に有効でも冪等に行を返す・Req 1.1, 1.4）。
+  // operator_id スコープで引くため、不在・越権は null（Req 1.5, 4.1）。紐付けの安全条件は不変で、
+  // 保留行はこれにより初回ログイン紐付けの対象に再び入る（linkAuthSubjectByEmail は無変更・Req 4.3）。
+  const user = await deps.enableUser(req.id, guard.user.operatorId);
   if (user === null) {
+    // 不在・越権は不在と同じ 404（存在の秘匿・Req 1.5, 4.1）。
     return jsonError(404, 'not_found', '利用者が見つかりません');
   }
   return jsonOk(200, { user: toUserJson(user) });

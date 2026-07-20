@@ -72,7 +72,7 @@ describe('apiFetch', () => {
 
 describe('getMe', () => {
   it('200 の { user } を value にアンラップする', async () => {
-    const me = { role: 'agency', agencyId: 'a1', agencyName: '代理店A', displayName: null };
+    const me = { id: 'u1', role: 'agency', agencyId: 'a1', agencyName: '代理店A', displayName: null };
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { user: me }));
     const result = await getMe({ getToken: async () => 'tok', fetchImpl });
     expect(result).toEqual({ ok: true, value: me });

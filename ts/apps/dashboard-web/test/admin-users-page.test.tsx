@@ -18,16 +18,19 @@ const api = vi.hoisted(() => ({
   getDashboardUsers: vi.fn(),
   createDashboardUser: vi.fn(),
   disableDashboardUser: vi.fn(),
+  enableDashboardUser: vi.fn(),
   getAgencies: vi.fn(),
 }));
 vi.mock('../src/lib/api', () => api);
 
 import AdminUsersPage from '../src/app/admin/users/page';
 
+// operator の me.id は operatorUser（u1）と一致させ、自己行判定（自己無効化ボタン非表示）を検証可能にする。
 function ready(role: 'operator' | 'agency') {
   useAuthMock.mockReturnValue({
     status: 'ready',
     me: {
+      id: role === 'operator' ? 'u1' : 'u2',
       role,
       agencyId: role === 'agency' ? 'a1' : null,
       agencyName: role === 'agency' ? '代理店A' : null,
@@ -146,6 +149,75 @@ describe('利用者管理ページ（operator）', () => {
     expect(api.disableDashboardUser).toHaveBeenCalledWith({ id: 'u2' });
     // 無効化済みの行に無効化ボタンは提供しない。
     expect(scope.queryByRole('button', { name: '無効化' })).toBeNull();
+  });
+
+  it('自分自身の行には無効化ボタンを出さない・他人の有効行には出す（Req 2.2）', async () => {
+    ready('operator'); // me.id = 'u1' = operatorUser
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [operatorUser, agencyUser] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    // 自分（op@example.com=u1）の行には無効化ボタンが無い。
+    const selfRow = (await scope.findByText('op@example.com')).closest('tr') as HTMLElement;
+    expect(within(selfRow).queryByRole('button', { name: '無効化' })).toBeNull();
+    // 他人（agency@example.com=u2）の有効行には無効化ボタンがある。
+    const otherRow = scope.getByText('agency@example.com').closest('tr') as HTMLElement;
+    expect(within(otherRow).getByRole('button', { name: '無効化' })).toBeTruthy();
+  });
+
+  it('無効化済み行に有効化ボタンを出し、enableDashboardUser({id}) を呼び行が有効に戻る（Req 1.6）', async () => {
+    ready('operator');
+    api.getDashboardUsers
+      .mockResolvedValueOnce({ ok: true, value: [{ ...agencyUser, disabled: true }] }) // 初期（無効）
+      .mockResolvedValueOnce({ ok: true, value: [{ ...agencyUser, disabled: false }] }); // 有効化後
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.enableDashboardUser.mockResolvedValue({ ok: true, value: { ...agencyUser, disabled: false } });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    expect(await scope.findByText('無効')).toBeTruthy();
+    fireEvent.click(scope.getByRole('button', { name: '有効化' }));
+    expect(await scope.findByText('有効')).toBeTruthy();
+    expect(api.enableDashboardUser).toHaveBeenCalledWith({ id: 'u2' });
+    // 有効に戻った行に有効化ボタンは残らない。
+    expect(scope.queryByRole('button', { name: '有効化' })).toBeNull();
+  });
+
+  it('無効化が last_operator を返すと専用文言を表示し、行は有効のまま（Req 2.6）', async () => {
+    ready('operator');
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [agencyUser] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.disableDashboardUser.mockResolvedValue({ ok: false, code: 'last_operator', message: 'x' });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    fireEvent.click(await scope.findByRole('button', { name: '無効化' }));
+    expect(await scope.findByText(/最後の運営は無効化できません/)).toBeTruthy();
+    // 成功扱いされず、行は有効のまま（無効化ボタンが残る・再取得しない）。
+    expect(scope.getByRole('button', { name: '無効化' })).toBeTruthy();
+    expect(api.getDashboardUsers).toHaveBeenCalledTimes(1); // reload していない
+  });
+
+  it('無効化が self_disable_forbidden を返すと専用文言を表示する（Req 2.6）', async () => {
+    ready('operator');
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [agencyUser] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.disableDashboardUser.mockResolvedValue({ ok: false, code: 'self_disable_forbidden', message: 'x' });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    fireEvent.click(await scope.findByRole('button', { name: '無効化' }));
+    expect(await scope.findByText(/自分自身は無効化できません/)).toBeTruthy();
+  });
+
+  it('登録が email_conflict_disabled を返すと有効化での復旧を案内する（Req 3.2）', async () => {
+    ready('operator');
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.createDashboardUser.mockResolvedValue({ ok: false, code: 'email_conflict_disabled', message: 'x' });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    fireEvent.change(await scope.findByLabelText('所属代理店'), { target: { value: 'a1' } });
+    fireEvent.change(scope.getByLabelText('メールアドレス'), { target: { value: 'disabled@example.com' } });
+    fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
+    expect(await scope.findByText(/このメールアドレスは無効化済みの利用者です。利用者一覧から有効化してください/)).toBeTruthy();
   });
 });
 

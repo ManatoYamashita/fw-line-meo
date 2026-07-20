@@ -1,4 +1,4 @@
-import type { Queryable } from './pool.js';
+import type { Queryable, TransactionCapable } from './pool.js';
 import type { DashboardRole, DashboardUserItem } from './types.js';
 
 // RBAC 判定に必要な認証主体の身元（auth_subject = Identity Platform UID から解決）。
@@ -151,24 +151,128 @@ export async function listDashboardUsers(
   return res.rows.map(mapDashboardUser);
 }
 
+// 保護付き無効化の結果（判別共用体・design「Component Contracts / DAL」）。
+// 呼び出し側（ハンドラ）が 200 / 409 / 404 へ写像する。
+export type DisableOutcome =
+  | { kind: 'disabled'; user: DashboardUserItem } // 無効化成功／既に無効（冪等）
+  | { kind: 'last_operator' } // 最後の有効な運営のため拒否（Req 2.3）
+  | { kind: 'not_found' }; // 不在・越権（呼び出し側で 404 に写像）
+
+// operator_id を鍵とする advisory ロックの名前空間（他用途の advisory ロックと衝突させない固定クラス）。
+const DISABLE_LOCK_CLASS = 0x64756c31; // 'dul1'（dashboard-user-lifecycle）相当の固定 int4 定数
+
 /**
- * ダッシュボード利用者を無効化する（Req 6.4）。operator_id をスコープ列として WHERE に含め、
- * 越権（他運営の id 指定）は 0 行更新 → null を返す（呼び出し側は 404 に写像する・2.3 の二重防御）。
+ * 最後の有効な運営を保護する無効化（Req 2.3, 2.4, 2.5）。
+ * トランザクション内でテナント（operator_id）単位の advisory ロックを取得して同一テナントの無効化を
+ * 直列化し（design「並行ガードの正当性」）、対象を無効化すると有効な運営（role=operator かつ
+ * disabled_at IS NULL・保留＝未ログイン運営を含む）が0人になる場合のみ 'last_operator' を返す。
+ * ロックによる直列化のため残数判定は自明に正しく（write-skew を排除）、並行実行下でも0人化しない。
+ * operator_id をスコープ列に含め、越権・不在は 'not_found'。既に無効な対象は現状を返し冪等（'disabled'）。
  */
-export async function disableDashboardUser(
+export async function disableDashboardUserGuarded(
+  pool: TransactionCapable,
+  id: string,
+  operatorId: string,
+): Promise<DisableOutcome> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // テナント単位の advisory ロックで無効化操作を直列化する（TX 終了で自動解放）。
+    await client.query('SELECT pg_advisory_xact_lock($1::int4, hashtext($2)::int4)', [
+      DISABLE_LOCK_CLASS,
+      operatorId,
+    ]);
+
+    // 対象行を operator_id スコープで取得（越権・不在は not_found）。
+    const target = await client.query<DashboardUserItemRow>(
+      `SELECT ${DASHBOARD_USER_COLUMNS} FROM dashboard_users WHERE id = $1 AND operator_id = $2`,
+      [id, operatorId],
+    );
+    const row = target.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return { kind: 'not_found' };
+    }
+
+    // 既に無効なら冪等に現状を返す（有効運営数を減らさないためガード判定は不要）。
+    if (row.disabled_at !== null) {
+      await client.query('COMMIT');
+      return { kind: 'disabled', user: mapDashboardUser(row) };
+    }
+
+    // 運営を無効化する場合のみ、最後の有効な運営の保護を判定する（保留運営も disabled_at IS NULL で計上）。
+    if (row.role === 'operator') {
+      const active = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM dashboard_users
+          WHERE operator_id = $1 AND role = 'operator' AND disabled_at IS NULL`,
+        [operatorId],
+      );
+      if ((active.rows[0]?.n ?? 0) <= 1) {
+        await client.query('ROLLBACK');
+        return { kind: 'last_operator' };
+      }
+    }
+
+    const updated = await client.query<DashboardUserItemRow>(
+      `UPDATE dashboard_users SET disabled_at = now()
+        WHERE id = $1 AND operator_id = $2
+        RETURNING ${DASHBOARD_USER_COLUMNS}`,
+      [id, operatorId],
+    );
+    await client.query('COMMIT');
+    const updatedRow = updated.rows[0];
+    if (!updatedRow) throw new Error('disableDashboardUserGuarded: update did not return a row');
+    return { kind: 'disabled', user: mapDashboardUser(updatedRow) };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 無効化済みダッシュボード利用者を再有効化する（Req 1.1, 1.4）。disabled_at を NULL へ戻すのみ。
+ * operator_id をスコープ列として WHERE に含め、越権（他運営の id 指定）・不在は 0 行更新 → null を返す
+ * （呼び出し側は 404 に写像・Req 1.5, 4.1）。disabled_at をフィルタしないため、既に有効な行でも
+ * 同じ内容を返して冪等に振る舞う（Req 1.4）。リンク済み行はロール・所属を保持したまま復帰し（Req 1.2）、
+ * 保留行は disabled_at IS NULL 復帰により linkAuthSubjectByEmail（無変更）の対象へ再び入る（Req 1.3）。
+ */
+export async function enableDashboardUser(
   db: Queryable,
   id: string,
   operatorId: string,
 ): Promise<DashboardUserItem | null> {
   const res = await db.query<DashboardUserItemRow>(
     `UPDATE dashboard_users
-        SET disabled_at = now()
+        SET disabled_at = NULL
       WHERE id = $1 AND operator_id = $2
       RETURNING ${DASHBOARD_USER_COLUMNS}`,
     [id, operatorId],
   );
   const row = res.rows[0];
   return row ? mapDashboardUser(row) : null;
+}
+
+/**
+ * 一意衝突時の 409 案内強化用スコープ限定ルックアップ（Req 3.2）。呼び出し運営（operator_id）配下に
+ * 同一メール（lower(email) 照合）が存在する場合のみ { id, disabled } を返す。
+ * operator_id をスコープ列に含めることで、他運営配下の同一メールは 0 行 → null で秘匿し越境を漏らさない
+ * （Req 3.2, 4.1）。normalizedEmail は呼び出し側で trim + 小文字化済みである前提だが、照合自体は
+ * lower(email) で行い格納値の大文字小文字を無視する。disabled は disabled_at の非 NULL 性で判定する。
+ */
+export async function findDashboardUserByEmailInOperator(
+  db: Queryable,
+  normalizedEmail: string,
+  operatorId: string,
+): Promise<{ id: string; disabled: boolean } | null> {
+  const res = await db.query<{ id: string; disabled_at: Date | null }>(
+    'SELECT id, disabled_at FROM dashboard_users WHERE lower(email) = $1 AND operator_id = $2',
+    [normalizedEmail, operatorId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return { id: row.id, disabled: row.disabled_at !== null };
 }
 
 /** 利用者の表示名を単一取得する（GET /me の displayName 用・不在は null）。 */
