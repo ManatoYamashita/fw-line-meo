@@ -1,0 +1,22 @@
+{
+  "feature_name": "ui-design-foundation",
+  "created_at": "2026-07-20T13:35:36Z",
+  "updated_at": "2026-07-20T14:50:38Z",
+  "language": "ja",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
