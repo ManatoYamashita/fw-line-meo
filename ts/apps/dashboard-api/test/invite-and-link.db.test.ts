@@ -19,6 +19,7 @@ import {
   listDashboardUsers,
   createPendingDashboardUser,
   disableDashboardUserGuarded,
+  enableDashboardUser,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -205,6 +206,10 @@ function buildApp(): ReturnType<typeof createApp> {
         auth: authDeps,
         disableUser: async (id, operatorId) =>
           disableDashboardUserGuarded(await getPool(), id, operatorId),
+      },
+      userEnable: {
+        auth: authDeps,
+        enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
       },
     },
   };

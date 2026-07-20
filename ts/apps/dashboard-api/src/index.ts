@@ -22,6 +22,7 @@ import {
   listDashboardUsers,
   createPendingDashboardUser,
   disableDashboardUserGuarded,
+  enableDashboardUser,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -177,6 +178,11 @@ const app = createApp({
       // getPool() の戻り値 Pool は TransactionCapable（connect を持つ）に構造適合する。
       disableUser: async (id, operatorId) =>
         disableDashboardUserGuarded(await getPool(), id, operatorId),
+    },
+    userEnable: {
+      auth: authDeps,
+      // 再有効化（disabled_at を NULL に戻す・operator_id スコープ）。不在・越権は null → 404。
+      enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
     },
   },
 });

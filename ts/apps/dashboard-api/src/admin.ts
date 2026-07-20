@@ -85,6 +85,14 @@ export interface DashboardUserDisableDeps {
   disableUser: (id: string, operatorId: string) => Promise<DisableOutcome>;
 }
 
+export interface DashboardUserEnableDeps {
+  auth: AuthDeps;
+  // enableDashboardUser（@fwlm/db）委譲。operator_id をスコープ列に含む再有効化（disabled_at を
+  // NULL に戻す）で、行があればその利用者を返す（既に有効でも冪等に行を返す・Req 1.1, 1.4）。
+  // 不在・越権は null（本ハンドラが 404 に写像・存在の秘匿・Req 1.5, 4.1）。
+  enableUser: (id: string, operatorId: string) => Promise<DashboardUserItem | null>;
+}
+
 // --- リクエスト形 ---
 
 export interface AgenciesListRequest {
@@ -108,6 +116,11 @@ export interface DashboardUserCreateRequest {
 export interface DashboardUserDisableRequest {
   authorization: string | undefined;
   id: string; // パスパラメータ :id（UUID 形式を事前検証する）。
+}
+
+export interface DashboardUserEnableRequest {
+  authorization: string | undefined;
+  id: string; // パスパラメータ :id（UUID 形式を事前検証する・disable と同型）。
 }
 
 // UUID 形式でない id は DB を叩かず 404 扱い（存在の探り当てを許さない・invite-codes と同じ規律）。
@@ -233,6 +246,31 @@ export async function handleDashboardUserDisable(
   }
   // outcome.kind === 'not_found'（不在・越権）は不在と同じ 404（存在の秘匿・Req 1.5）。
   return jsonError(404, 'not_found', '利用者が見つかりません');
+}
+
+// --- POST /dashboard-users/:id/enable ---
+
+export async function handleDashboardUserEnable(
+  deps: DashboardUserEnableDeps,
+  req: DashboardUserEnableRequest,
+): Promise<Response> {
+  const guard = await requireOperatorUser(deps.auth, req.authorization);
+  if (!guard.ok) return guard.response;
+
+  // UUID 事前ガード（DAL に到達させない）。不正形式は不在と同じ 404（存在の秘匿・disable と同じ規律）。
+  if (!UUID_RE.test(req.id)) {
+    return jsonError(404, 'not_found', '利用者が見つかりません');
+  }
+
+  // 再有効化（disabled_at を NULL に戻す・既に有効でも冪等に行を返す・Req 1.1, 1.4）。
+  // operator_id スコープで引くため、不在・越権は null（Req 1.5, 4.1）。紐付けの安全条件は不変で、
+  // 保留行はこれにより初回ログイン紐付けの対象に再び入る（linkAuthSubjectByEmail は無変更・Req 4.3）。
+  const user = await deps.enableUser(req.id, guard.user.operatorId);
+  if (user === null) {
+    // 不在・越権は不在と同じ 404（存在の秘匿・Req 1.5, 4.1）。
+    return jsonError(404, 'not_found', '利用者が見つかりません');
+  }
+  return jsonOk(200, { user: toUserJson(user) });
 }
 
 // --- 共通ガード ---

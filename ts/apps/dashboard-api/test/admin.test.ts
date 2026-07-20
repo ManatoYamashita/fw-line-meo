@@ -5,11 +5,13 @@ import {
   handleDashboardUsersList,
   handleDashboardUserCreate,
   handleDashboardUserDisable,
+  handleDashboardUserEnable,
   type AgenciesListDeps,
   type AgencyCreateDeps,
   type DashboardUsersListDeps,
   type DashboardUserCreateDeps,
   type DashboardUserDisableDeps,
+  type DashboardUserEnableDeps,
 } from '../src/admin.js';
 import type { AuthDeps } from '../src/auth.js';
 import type { AgencyItem, DashboardUserIdentity, DashboardUserItem, DisableOutcome } from '@fwlm/db';
@@ -117,6 +119,19 @@ const guardCases: GuardCase[] = [
         Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ disabled: true }) }),
       );
       const res = handleDashboardUserDisable({ auth: authDeps(user, disabled), disableUser: dep }, {
+        authorization,
+        id: USER_ID,
+      });
+      return { res, dep };
+    },
+  },
+  {
+    name: 'POST /dashboard-users/:id/enable',
+    invoke: ({ user, disabled = false, authorization }) => {
+      const dep = vi.fn(() =>
+        Promise.resolve<DashboardUserItem | null>(userItem({ disabled: false })),
+      );
+      const res = handleDashboardUserEnable({ auth: authDeps(user, disabled), enableUser: dep }, {
         authorization,
         id: USER_ID,
       });
@@ -539,5 +554,59 @@ describe('handleDashboardUserDisable', () => {
     );
     expect(res.status).toBe(200);
     expect((await res.json()).user.disabled).toBe(true);
+  });
+});
+
+// --- POST /dashboard-users/:id/enable ---
+
+function userEnableDeps(over: Partial<DashboardUserEnableDeps> = {}, user: DashboardUserIdentity | null = OP): DashboardUserEnableDeps {
+  return {
+    auth: authDeps(user),
+    enableUser: (id) =>
+      Promise.resolve<DashboardUserItem | null>(userItem({ id, disabled: false })),
+    ...over,
+  };
+}
+
+describe('handleDashboardUserEnable', () => {
+  it('UUID 形式でない id は 404 で enableUser 未呼出（存在の探り当てを許さない）', async () => {
+    const enableUser = vi.fn((id: string) =>
+      Promise.resolve<DashboardUserItem | null>(userItem({ id, disabled: false })),
+    );
+    const res = await handleDashboardUserEnable(userEnableDeps({ enableUser }), {
+      authorization: 'Bearer tok',
+      id: 'not-a-uuid',
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe('not_found');
+    expect(enableUser).not.toHaveBeenCalled();
+  });
+
+  it('依存が null（不在または他運営スコープ）なら 404（存在の秘匿・Req 1.5, 4.1）', async () => {
+    const enableUser = vi.fn(() => Promise.resolve<DashboardUserItem | null>(null));
+    const res = await handleDashboardUserEnable(userEnableDeps({ enableUser }), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe('not_found');
+    // ガードは実行され（operator スコープで引く）、拒否は DAL 結果由来。
+    expect(enableUser).toHaveBeenCalledWith(USER_ID, 'op1');
+  });
+
+  it('有効化成功（row）は 200・enableUser は (id, operatorId) で呼ばれ disabled=false（Req 1.1）', async () => {
+    const enableUser = vi.fn((id: string) =>
+      Promise.resolve<DashboardUserItem | null>(userItem({ id, disabled: false })),
+    );
+    const res = await handleDashboardUserEnable(userEnableDeps({ enableUser }), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+    });
+    expect(res.status).toBe(200);
+    expect(enableUser).toHaveBeenCalledWith(USER_ID, 'op1');
+    const json = await res.json();
+    expect(json.user.id).toBe(USER_ID);
+    expect(json.user.disabled).toBe(false);
+    expect(json.user.createdAt).toBe('2026-07-01T12:34:56.000Z');
   });
 });

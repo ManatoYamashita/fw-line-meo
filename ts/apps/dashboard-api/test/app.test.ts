@@ -65,6 +65,7 @@ function fakeAppDeps(): AppDeps {
       usersList: { auth, listUsers: notCalled },
       userCreate: { auth, createUser: notCalled },
       userDisable: { auth, disableUser: notCalled },
+      userEnable: { auth, enableUser: notCalled },
     },
   };
 }

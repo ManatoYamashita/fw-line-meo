@@ -20,6 +20,7 @@ import {
   listDashboardUsers,
   createPendingDashboardUser,
   disableDashboardUserGuarded,
+  enableDashboardUser,
   findDashboardUserDisplayName,
 } from '@fwlm/db';
 import {
@@ -45,6 +46,7 @@ const OW1 = 'f5000000-0000-0000-0000-000000000004';
 const OW2 = 'f5000000-0000-0000-0000-000000000005';
 const S1 = 'f5000000-0000-0000-0000-000000000006'; // AG1・confirmed
 const S2 = 'f5000000-0000-0000-0000-000000000007'; // AG2・confirmed
+const DU_DISABLED = 'f5000000-0000-0000-0000-000000000010'; // OP1 配下・無効化済み（enable 対象）
 
 const OP_TOKEN = 'f5-op-uid';
 const AG1_TOKEN = 'f5-ag1-uid';
@@ -151,6 +153,10 @@ function buildApp(): ReturnType<typeof createApp> {
         disableUser: async (id, operatorId) =>
           disableDashboardUserGuarded(await getPool(), id, operatorId),
       },
+      userEnable: {
+        auth: authDeps,
+        enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
+      },
     },
   };
   return createApp(deps);
@@ -202,6 +208,12 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
         ('agency', $1, $3, $4, '代理店スタッフ')`,
       [OP1, OP_TOKEN, AG1, AG1_TOKEN],
     );
+    // enable ルートの operator-200 検証用: OP1 配下の無効化済み利用者。
+    await pool.query(
+      `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, display_name, disabled_at)
+       VALUES ($1, 'agency', $2, $3, 'f5-disabled-uid', '無効スタッフ', now())`,
+      [DU_DISABLED, OP1, AG1],
+    );
   });
 
   afterAll(async () => {
@@ -225,6 +237,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       ['/dashboard-users', { method: 'POST', body: JSON.stringify({}) }],
       [`/invite-codes/${DUMMY_UUID}/disable`, { method: 'POST' }],
       [`/dashboard-users/${DUMMY_UUID}/disable`, { method: 'POST' }],
+      [`/dashboard-users/${DUMMY_UUID}/enable`, { method: 'POST' }],
     ];
     for (const [path, init] of cases) {
       const res = await app.request(path, init);
@@ -253,6 +266,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
         },
       ],
       [`/dashboard-users/${DUMMY_UUID}/disable`, { method: 'POST', headers: h(AG1_TOKEN) }],
+      [`/dashboard-users/${DUMMY_UUID}/enable`, { method: 'POST', headers: h(AG1_TOKEN) }],
     ];
     for (const [path, init] of cases) {
       const res = await app.request(path, init);
@@ -271,6 +285,25 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     // 全代理店が見える（S1=AG1・S2=AG2 の双方が含まれる）。
     expect(stores.some((s) => s.id === S1)).toBe(true);
     expect(stores.some((s) => s.id === S2)).toBe(true);
+  });
+
+  it('operator の POST /dashboard-users/:id/enable は無効化済み利用者を 200 で再有効化する（Req 1.1, 4.2）', async () => {
+    const app = buildApp();
+    const res = await app.request(`/dashboard-users/${DU_DISABLED}/enable`, {
+      method: 'POST',
+      headers: h(OP_TOKEN),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { user: { id: string; disabled: boolean } };
+    expect(body.user.id).toBe(DU_DISABLED);
+    expect(body.user.disabled).toBe(false);
+    // DB でも有効化されている。
+    const check = await (
+      await getPool()
+    ).query<{ disabled_at: Date | null }>('SELECT disabled_at FROM dashboard_users WHERE id = $1', [
+      DU_DISABLED,
+    ]);
+    expect(check.rows[0]?.disabled_at).toBeNull();
   });
 
   it('agency ロールの GET /stores は自代理店のみ・他代理店指定は 403', async () => {
