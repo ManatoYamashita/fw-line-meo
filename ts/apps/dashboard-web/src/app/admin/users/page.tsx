@@ -7,6 +7,7 @@ import { useAuth } from '../../../lib/auth-context';
 import {
   createDashboardUser,
   disableDashboardUser,
+  enableDashboardUser,
   getAgencies,
   getDashboardUsers,
   type DashboardRole,
@@ -109,6 +110,11 @@ function UsersView() {
       setDisplayName('');
       setAgencyId('');
       await reloadUsers();
+    } else if (result.code === 'email_conflict_disabled') {
+      // 自運営配下の無効化済み利用者との衝突は、新規登録ではなく有効化で復旧する（Req 3.2）。
+      setFormError(
+        'このメールアドレスは無効化済みの利用者です。利用者一覧から有効化してください。',
+      );
     } else if (result.code === 'email_conflict') {
       setFormError('既に登録済みのメールアドレスです。');
     } else if (result.code === 'validation_failed') {
@@ -119,13 +125,29 @@ function UsersView() {
   }
 
   // 無効化（Req 6.4）。成功時は一覧を取り直して当該行を無効表示にする。
+  // ガード拒否（自己無効化・最後の運営）は成功と誤認させない専用文言で表示し、対象状態は変えない（Req 2.6）。
   async function handleDisable(id: string) {
     setActionError(null);
     const result = await disableDashboardUser({ id });
     if (result.ok) {
       await reloadUsers();
+    } else if (result.code === 'self_disable_forbidden') {
+      setActionError('自分自身は無効化できません。');
+    } else if (result.code === 'last_operator') {
+      setActionError('最後の運営は無効化できません。先に別の運営を追加してください。');
     } else {
       setActionError('無効化に失敗しました。時間をおいて再試行してください。');
+    }
+  }
+
+  // 再有効化（Req 1.6）。成功時は一覧を取り直して当該行を有効表示にする。
+  async function handleEnable(id: string) {
+    setActionError(null);
+    const result = await enableDashboardUser({ id });
+    if (result.ok) {
+      await reloadUsers();
+    } else {
+      setActionError('有効化に失敗しました。時間をおいて再試行してください。');
     }
   }
 
@@ -223,8 +245,14 @@ function UsersView() {
                 {/* 有効/無効バッジ（Req 6.4） */}
                 <td>{user.disabled ? '無効' : '有効'}</td>
                 <td>
-                  {/* 無効化は有効な利用者にのみ提供する（Req 6.4。API は冪等） */}
-                  {!user.disabled && (
+                  {/* 無効化済み行には有効化ボタンを提供する（Req 1.6・API は冪等） */}
+                  {user.disabled && (
+                    <button type="button" onClick={() => void handleEnable(user.id)}>
+                      有効化
+                    </button>
+                  )}
+                  {/* 無効化は有効な利用者にのみ提供し、自分自身の行には出さない（Req 6.4, 2.2） */}
+                  {!user.disabled && user.id !== me?.id && (
                     <button type="button" onClick={() => void handleDisable(user.id)}>
                       無効化
                     </button>
