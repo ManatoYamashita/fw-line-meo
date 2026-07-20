@@ -132,3 +132,24 @@ jobs:
         # （生成は /api/responses のクライアント操作のみ）ため Gemini モックは不要。
         # npx --yes は実行時に lhci をレジストリ取得するため、ここに --import mock を被せると npm が壊れる。
         run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
+
+  docker-build:
+    # Issue #33/#35 再発防止: Dockerfile の腐敗（pnpm workspace 追従漏れ等）が deploy-prod で
+    # 初めて発覚する穴を塞ぎ、PR 段階で 7 イメージの実ビルドを検証する。
+    # --build-only は push せず GCP 認証も不要（NEXT_PUBLIC_* 未設定は warning 続行）。
+    # main push では deploy-prod 自身が実ビルドするため PR イベント時のみ実行する
+    # （skipped ジョブは workflow_run の conclusion=success を妨げない＝デプロイを遅延させない）。
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1行定義を維持すること（scripts/check-deploy-image-coverage.sh が IMAGE_NAMES との
+        # ドリフトを grep で機械検証する）。
+        image: [daily-batch, summary-delivery, store-detail, dashboard-api, dashboard-web, survey-web, line-webhook]
+    steps:
+      - uses: actions/checkout@v5
+      # pnpm install は行わない（クリーン checkout のままビルドコンテキストへ渡す。
+      # deploy-prod の push-images.sh 実行時と同一条件）。
+      - run: scripts/push-images.sh --build-only --image ${{ matrix.image }}
