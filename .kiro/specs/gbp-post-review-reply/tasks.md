@@ -98,14 +98,14 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.3_
 
 - [ ] 5. 統合: 導線解禁
-- [ ] 5.1 (P) 日次サマリーへアクションボタンを追加する
+- [x] 5.1 (P) 日次サマリーへアクションボタンを追加する
   - Flex のローカル型に postback アクションを追加し、footer に「クチコミに返信」「Google 投稿作成」ボタンを無条件で追加する
   - 30KB サイズ検証を含む既存テストが拡張後も通過する
   - _Depends: 2.3_
   - _Requirements: 5.1_
   - _Boundary: FlexBuilder_
 
-- [ ] 5.2 (P) 完了後リッチメニューを 4 領域化する
+- [x] 5.2 (P) 完了後リッチメニューを 4 領域化する
   - ステータス確認・Google 投稿作成・クチコミ返信・Google 連携/設定の 4 領域と postback data を設定する（messaging-api skill の references を参照）
   - セットアップスクリプトの dry-run で領域座標と postback data が検証できる
   - _Depends: 2.3_
@@ -138,6 +138,7 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 5.1/5.2: サマリー Flex（`delivery-job/src/flex.ts`）とリッチメニュー（`line-webhook/scripts/setup-rich-menus.ts`）の postback data は **line-webhook を import できないためリテラルハードコード**（`a=g_reply`/`a=g_post`/`a=g_status`）。`encodeGbpPostback` 出力と一致することを decode 往復テストで機械検証済み。**契約変更時は両側同時更新が必須**（design の Revalidation Trigger「postback action の名称・データ形式変更」）。サマリーボタンは無条件付与（連携状態分岐は webhook 側=5.3 で検証）。リッチメニュー完了後メニューは 2×2・4 領域（ステータス確認/g_post/g_reply/g_status）。
 - 4.2: **TOCTOU 修正済み** — `beginGbpSessionExecution`/`completeGbpSessionExecution`/`revertGbpSessionExecution` の 3 CAS アクセサすべてが `WHERE owner_id=$1 AND flow=$2 AND stage=...` を持ち、`handlePostApprove`→'post'・`handleReplyApprove`→'reply' で分離。承認書込（`upsertReviewReply`/`createLocalPost`）は CAS が返した `claimed` 行の payload から reviewName/storeId を読む（**偽造 postback で別クチコミへ返信されない**）。レビューゲーティング禁止（4.9）: `selectReviewCandidates` の整列は「未返信優先 → createTime 降順」のみで星評価を比較に使わない。`crypto_error` は transient 扱い（`toGbpFailureReason`）で再連携を促さない。5.x への申し送り: 5.3 の統合検証は未連携店舗の全入口（`g_post`・`g_reply`・サマリーボタン）で連携誘導が返ることを確認する。
 - 4.1: **4.2 への必須申し送り（TOCTOU 脆弱性・要対応）** — `beginGbpSessionExecution`（`ts/packages/db/src/gbp-sessions.ts`）の CAS は `WHERE owner_id = $1 AND stage = 'await_decision'` のみで **`flow` 条件が無い**。4.1 単体では返信セッションが存在せず到達不能だが、**4.2 が同一アクセサを再利用すると、`loadSession` と CAS の間でセッションが reply/`await_decision` に置換された場合に返信下書きが `createLocalPost` で投稿される**。4.2 では `AND flow = $n` を追加するか、フロー別 CAS に分けること。あわせて `buildGbpCurrentStateMessage` の `await_input`/`await_decision`/`await_revision` 分岐は `flow` で分岐していないため、返信フローで投稿向けの文面が出る（4.2 で対応）。承認ゲートは `g_approve` → `handleApprove` → `executeLocalPost` → `createLocalPost` の 4 段すべて単一分岐で構造保証（`isPostStage` が `flow === 'post'` を要求）。CAS アクセサは `beginGbpSessionExecution`/`completeGbpSessionExecution`/`revertGbpSessionExecution` の 3 つ。既知トレードオフ: 投稿失敗後に再連携するとセッション upsert が下書きを上書きする（owner 単位 1 セッション制約由来）。
 - 3.3: `ConversationDeps.gbp?: GbpFlowHandlers`（optional）+ `resolveGbpDelegation` ゲート（completed stage + 配線済み + owner_id 非 null）が委譲の単一分岐点。`handlePostback` は `isGbpPostbackData` で委譲、`handleText` は `not_handled` で既存案内へフォールスルー。**所有検証は多層**（`isLinked` ゲート + 全アクセサの SQL `WHERE s.owner_id = $n`）で、`g_pick_store` はセッション snapshot の index 解決後に**現在の所有店舗一覧で再検証**する。4.1 への申し送り: `handleConnect` の単一店舗経路は既存 `await_store` セッションを明示クリアしない（`startConnect` の upsert が上書きするため現状無害だが、他 stage のセッションが増えたら再確認）。**`@fwlm/db` のソース変更後は `pnpm --filter @fwlm/db run build` が必要**（`dist/*.d.ts` 経由で解決されるため、未ビルドだと TS2305 が出る）。

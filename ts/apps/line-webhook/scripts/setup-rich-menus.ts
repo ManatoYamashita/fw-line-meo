@@ -43,19 +43,24 @@ const SET_DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
 const RICH_MENU_WIDTH = 800;
 const RICH_MENU_HEIGHT = 540;
 
-interface RichMenuAction {
+// 完了後メニュー（gbp task 5.2）の 2×2 グリッド分割座標。800×540 を 4 等分（各セル 400×270）し、
+// 重複なく画像全面を被覆する（references/rich-menu.md: bounds は左上原点・px 指定）。
+const COMPLETED_MENU_COL_WIDTH = RICH_MENU_WIDTH / 2;
+const COMPLETED_MENU_ROW_HEIGHT = RICH_MENU_HEIGHT / 2;
+
+export interface RichMenuAction {
   type: 'postback' | 'message';
   label?: string;
   data?: string;
   text?: string;
 }
 
-interface RichMenuArea {
+export interface RichMenuArea {
   bounds: { x: number; y: number; width: number; height: number };
   action: RichMenuAction;
 }
 
-interface RichMenuObject {
+export interface RichMenuObject {
   size: { width: number; height: number };
   selected: boolean;
   name: string;
@@ -175,7 +180,7 @@ async function setDefaultRichMenu(
   }
 }
 
-function buildOnboardingRichMenu(): RichMenuObject {
+export function buildOnboardingRichMenu(): RichMenuObject {
   return {
     size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
     selected: false,
@@ -194,7 +199,31 @@ function buildOnboardingRichMenu(): RichMenuObject {
   };
 }
 
-function buildCompletedRichMenu(): RichMenuObject {
+// 完了後（店舗特定済み）オーナー向けの常設メニュー。
+//
+// gbp-post-review-reply spec task 5.2 / Requirement 5.4（サマリー配信時刻に依存しない常設導線）に従い、
+// design.md「RichMenu 拡張（setup-rich-menus.ts）」の指定どおり 4 領域化する:
+//   ステータス確認（既存 message）/ Google 投稿作成（g_post）/ クチコミ返信（g_reply）/ Google 連携・設定（g_status）
+//
+// レイアウト（800×540 を 4 分割・重複なし・画像全面を被覆）:
+//   ┌───────────────┬────────────────┐
+//   │ ステータス確認 │ Google 投稿作成 │
+//   ├───────────────┼────────────────┤
+//   │ クチコミ返信   │ Google 連携・設定│
+//   └───────────────┴────────────────┘
+//
+// postback data の整合性（重要）: 各 postback 領域の data は src/gbp/postback.ts の
+//   `encodeGbpPostback` の出力と完全一致させる。g_post / g_reply / g_status は引数を持たない
+//   単純 action であり、encodeGbpPostback は該当 case で `a=${action.action}` を返すため、
+//     encodeGbpPostback({ action: 'g_post' })   === 'a=g_post'
+//     encodeGbpPostback({ action: 'g_reply' })  === 'a=g_reply'
+//     encodeGbpPostback({ action: 'g_status' }) === 'a=g_status'
+//   となる（postback.ts を確認済み）。よって下記リテラルは webhook 側 `decodeGbpPostback` /
+//   `isGbpPostbackData`（`g_` プレフィックス判定）で正しく受理される。
+//   postback.ts をここから import せずリテラルにするのは、ワンショット script のコンパイル対象
+//   （tsconfig.scripts.json）へ src/gbp を引き込まないため。整合は test/scripts の dry-run で
+//   `decodeGbpPostback` により機械検証している。
+export function buildCompletedRichMenu(): RichMenuObject {
   return {
     size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
     selected: false,
@@ -202,17 +231,56 @@ function buildCompletedRichMenu(): RichMenuObject {
     chatBarText: 'メニュー',
     areas: [
       {
-        bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
-        // Requirement 6.3 は「完了後の案内へ切替」を求めるのみで、完了後メニューのタップに
-        // 特定の挙動は要求していない（本 stateDiagram では linkRichMenu による切替のみが前提）。
-        // message アクションはタップ時にテキストメッセージとして送信されるだけなので、
-        // ConversationHandlers 側は completed 段階の既存 fallback（handleText の
-        // buildAlreadyCompletedMessage）がそのまま応答でき、新規サーバロジックが不要となる
-        // 最小の選択肢として採用する。
+        // 左上: ステータス確認。既存の message アクションを踏襲する。タップ時はテキストとして
+        // 送信されるだけで、completed 段階の既存 fallback（handleText の buildAlreadyCompletedMessage）が
+        // そのまま応答でき、新規サーバロジックを増やさない。
+        bounds: { x: 0, y: 0, width: COMPLETED_MENU_COL_WIDTH, height: COMPLETED_MENU_ROW_HEIGHT },
         action: {
           type: 'message',
           label: 'ステータス確認',
           text: 'ステータス確認',
+        },
+      },
+      {
+        // 右上: Google 投稿作成。data === encodeGbpPostback({ action: 'g_post' })。
+        bounds: {
+          x: COMPLETED_MENU_COL_WIDTH,
+          y: 0,
+          width: COMPLETED_MENU_COL_WIDTH,
+          height: COMPLETED_MENU_ROW_HEIGHT,
+        },
+        action: {
+          type: 'postback',
+          label: 'Google 投稿作成',
+          data: 'a=g_post',
+        },
+      },
+      {
+        // 左下: クチコミ返信。data === encodeGbpPostback({ action: 'g_reply' })。
+        bounds: {
+          x: 0,
+          y: COMPLETED_MENU_ROW_HEIGHT,
+          width: COMPLETED_MENU_COL_WIDTH,
+          height: COMPLETED_MENU_ROW_HEIGHT,
+        },
+        action: {
+          type: 'postback',
+          label: 'クチコミ返信',
+          data: 'a=g_reply',
+        },
+      },
+      {
+        // 右下: Google 連携・設定。data === encodeGbpPostback({ action: 'g_status' })。
+        bounds: {
+          x: COMPLETED_MENU_COL_WIDTH,
+          y: COMPLETED_MENU_ROW_HEIGHT,
+          width: COMPLETED_MENU_COL_WIDTH,
+          height: COMPLETED_MENU_ROW_HEIGHT,
+        },
+        action: {
+          type: 'postback',
+          label: 'Google 連携・設定',
+          data: 'a=g_status',
         },
       },
     ],
