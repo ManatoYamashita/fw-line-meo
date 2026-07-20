@@ -18,8 +18,10 @@ export interface MeRequest {
   authorization: string | undefined;
 }
 
-// GET /me の 200 応答形（design の API 契約表: { user: { role, agencyId, agencyName, displayName } }）。
+// GET /me の 200 応答形（design の API 契約表: { user: { id, role, agencyId, agencyName, displayName } }）。
+// id は UI が「自分の行」を識別するための利用者 ID（自己無効化ボタンの非表示等に使用・加算的変更）。
 export interface MeUser {
+  id: string;
   role: DashboardRole;
   agencyId: string | null;
   agencyName: string | null;
@@ -45,6 +47,7 @@ export async function handleMe(deps: MeDeps, req: MeRequest): Promise<Response> 
   ]);
 
   const me: MeUser = {
+    id: user.id,
     role: user.role,
     agencyId: user.agencyId,
     agencyName,

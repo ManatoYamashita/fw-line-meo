@@ -57,7 +57,7 @@ describe('handleMe', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/json');
     expect(await res.json()).toEqual({
-      user: { role: 'operator', agencyId: null, agencyName: null, displayName: '山田太郎' },
+      user: { id: 'u1', role: 'operator', agencyId: null, agencyName: null, displayName: '山田太郎' },
     });
     // operator に代理店は無いので名前解決を呼ばない（不要な DB アクセスをしない）
     expect(findAgencyName).not.toHaveBeenCalled();
@@ -67,7 +67,7 @@ describe('handleMe', () => {
     const res = await handleMe(deps({}, AG), req());
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      user: { role: 'agency', agencyId: 'ag1', agencyName: 'テスト代理店', displayName: '山田太郎' },
+      user: { id: 'u2', role: 'agency', agencyId: 'ag1', agencyName: 'テスト代理店', displayName: '山田太郎' },
     });
   });
 });
