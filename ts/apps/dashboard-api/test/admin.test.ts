@@ -583,6 +583,22 @@ describe('handleDashboardUserDisable', () => {
     expect(disableUser).not.toHaveBeenCalled();
   });
 
+  it('大文字表記の自己 UUID でも 409 self_disable_forbidden で disableUser 未呼出（正規化して自己判定・Req 2.1）', async () => {
+    const disableUser = vi.fn((id: string) =>
+      Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
+    );
+    // SELF_OP.id は小文字 UUID。同一 UUID を大文字で渡す。UUID_RE は /i で通過するが、
+    // PostgreSQL の uuid 比較は大小無視で同一行を指すため、厳密文字列一致だけでは大文字表記で
+    // 自己無効化ガードを迂回できてしまう（退行防止）。
+    const res = await handleDashboardUserDisable(userDisableDeps({ disableUser }, SELF_OP), {
+      authorization: 'Bearer tok',
+      id: USER_ID.toUpperCase(),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('self_disable_forbidden');
+    expect(disableUser).not.toHaveBeenCalled();
+  });
+
   it('依存が not_found（不在または他運営スコープ）なら 404（存在の秘匿・Req 1.5）', async () => {
     const res = await handleDashboardUserDisable(
       userDisableDeps({ disableUser: () => Promise.resolve<DisableOutcome>({ kind: 'not_found' }) }),

@@ -244,15 +244,20 @@ export async function handleDashboardUserDisable(
     return jsonError(404, 'not_found', '利用者が見つかりません');
   }
 
+  // UUID を小文字へ正規化してから自己判定・DAL へ渡す。UUID_RE は /i のため大文字表記も通過するが、
+  // PostgreSQL の uuid 比較は大文字小文字を無視するため、厳密文字列一致だけでは大文字表記で
+  // 自己無効化ガードを迂回できてしまう（guard.user.id は PG 由来で小文字正規形）。
+  const targetId = req.id.toLowerCase();
+
   // 自己無効化拒否（DB 到達前・Req 2.1）。運営が自分自身を無効化するとテナントごとロックアウトし得るため
   // 構造的に禁止する。guard.user.id は認証ユーザー由来（UUID）で、クライアント入力は信用しない。
-  if (req.id === guard.user.id) {
+  if (targetId === guard.user.id) {
     return jsonError(409, 'self_disable_forbidden', '自分自身は無効化できません');
   }
 
   // 保護付き無効化。結果を HTTP へ写像する（Req 2.3, 2.4, 2.6, 1.5）。拒否時は DAL が ROLLBACK 済みで
   // 対象状態は変わらない（成功と誤認されない明確な表示・Req 2.6）。
-  const outcome = await deps.disableUser(req.id, guard.user.operatorId);
+  const outcome = await deps.disableUser(targetId, guard.user.operatorId);
   if (outcome.kind === 'disabled') {
     // 無効化成功／既に無効（冪等）。現状の利用者行を 200 で返す（Req 2.4）。
     return jsonOk(200, { user: toUserJson(outcome.user) });
