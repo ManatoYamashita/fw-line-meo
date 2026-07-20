@@ -124,7 +124,7 @@
   - 二重承認 CAS・セッション期限切れ・stale postback の各テストが通過する
   - _Requirements: 2.3, 2.6, 3.6, 4.5_
 
-- [ ] 6.2 全体回帰を検証する
+- [x] 6.2 全体回帰を検証する
   - make db-migrate/db-test/db-verify-docs、TS 全パッケージの build/test、Go の build/test（無変更の確認）を実行する
   - 全スイートが成功し、survey-web・オンボーディング・配信の既存テストに回帰がない
   - _Requirements: 1.4, 2.2, 3.5, 4.4, 5.1, 5.4_
@@ -138,6 +138,7 @@
 
 - 1.1: DB テーブル追加の変更対象は 5 点セット — migration / db/ERD.md / db/write-boundary.md / infra/sql/grants.sql（check_docs が DML GRANT を機械検証）/ db/test/assertions/30_compliance.sql の allowlist（テーブル追加のレビューゲート）。
 - 検証はこのマシンでは native postgres: `ts/scripts/with-test-db.sh <cmd>`（migrations 適用 + DATABASE_URL 供給）、check_docs は `MANAGE_CONTAINER=0 PSQL_EXEC="psql $DATABASE_URL"`。worktree では初回に `pnpm install`（ts/ 配下）+ `make ts-build` が必要（ts-test の前提）。
+- 6.2: 全体回帰 green を確認（2026-07-20）— ts-lint/ts-build/ts-test-db 全 exit 0（line-webhook 499+ passed・survey-web 96・delivery-job 52・gemini 14・db・dashboard-api 25・store-detail 22 回帰ゼロ）／db-migrate/db-test/db-verify-docs 全 green（19 テーブル整合）／go-build/go-test exit 0・**Go 層 diff 空（無変更を確認）**。6.3 は GBP 利用審査承認後の手動 E2E のため未実施（optional・CI 外）。
 - 5.1/5.2: サマリー Flex（`delivery-job/src/flex.ts`）とリッチメニュー（`line-webhook/scripts/setup-rich-menus.ts`）の postback data は **line-webhook を import できないためリテラルハードコード**（`a=g_reply`/`a=g_post`/`a=g_status`）。`encodeGbpPostback` 出力と一致することを decode 往復テストで機械検証済み。**契約変更時は両側同時更新が必須**（design の Revalidation Trigger「postback action の名称・データ形式変更」）。サマリーボタンは無条件付与（連携状態分岐は webhook 側=5.3 で検証）。リッチメニュー完了後メニューは 2×2・4 領域（ステータス確認/g_post/g_reply/g_status）。
 - 4.2: **TOCTOU 修正済み** — `beginGbpSessionExecution`/`completeGbpSessionExecution`/`revertGbpSessionExecution` の 3 CAS アクセサすべてが `WHERE owner_id=$1 AND flow=$2 AND stage=...` を持ち、`handlePostApprove`→'post'・`handleReplyApprove`→'reply' で分離。承認書込（`upsertReviewReply`/`createLocalPost`）は CAS が返した `claimed` 行の payload から reviewName/storeId を読む（**偽造 postback で別クチコミへ返信されない**）。レビューゲーティング禁止（4.9）: `selectReviewCandidates` の整列は「未返信優先 → createTime 降順」のみで星評価を比較に使わない。`crypto_error` は transient 扱い（`toGbpFailureReason`）で再連携を促さない。5.x への申し送り: 5.3 の統合検証は未連携店舗の全入口（`g_post`・`g_reply`・サマリーボタン）で連携誘導が返ることを確認する。
 - 4.1: **4.2 への必須申し送り（TOCTOU 脆弱性・要対応）** — `beginGbpSessionExecution`（`ts/packages/db/src/gbp-sessions.ts`）の CAS は `WHERE owner_id = $1 AND stage = 'await_decision'` のみで **`flow` 条件が無い**。4.1 単体では返信セッションが存在せず到達不能だが、**4.2 が同一アクセサを再利用すると、`loadSession` と CAS の間でセッションが reply/`await_decision` に置換された場合に返信下書きが `createLocalPost` で投稿される**。4.2 では `AND flow = $n` を追加するか、フロー別 CAS に分けること。あわせて `buildGbpCurrentStateMessage` の `await_input`/`await_decision`/`await_revision` 分岐は `flow` で分岐していないため、返信フローで投稿向けの文面が出る（4.2 で対応）。承認ゲートは `g_approve` → `handleApprove` → `executeLocalPost` → `createLocalPost` の 4 段すべて単一分岐で構造保証（`isPostStage` が `flow === 'post'` を要求）。CAS アクセサは `beginGbpSessionExecution`/`completeGbpSessionExecution`/`revertGbpSessionExecution` の 3 つ。既知トレードオフ: 投稿失敗後に再連携するとセッション upsert が下書きを上書きする（owner 単位 1 セッション制約由来）。
