@@ -1,7 +1,8 @@
 # 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 / agency-dashboard task 5.1 の CI 化フォロー）
 #
-# main への push で ts-ci が緑になった後、6イメージ
-# （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web / survey-web）を
+# main への push で ts-ci が緑になった後、7イメージ
+# （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web / survey-web /
+# line-webhook）を
 # build → Artifact Registry へ push → Cloud Run へ image-only 反映する。gcp-auth-smoke.yml の
 # Direct WIF 雛形を踏襲（service_account 入力なし・SA JSON キー不使用）。
 #
@@ -64,7 +65,7 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Build & push 6 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
+      - name: Build & push 7 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: asia-northeast1
@@ -104,6 +105,9 @@ jobs:
             --region=asia-northeast1 --project="${PROJECT_ID}"
           gcloud run services update survey-web \
             --image="${IMAGE_BASE}/survey-web:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update line-webhook \
+            --image="${IMAGE_BASE}/line-webhook:${TAG}" \
             --region=asia-northeast1 --project="${PROJECT_ID}"
 
       - name: Placeholder 稼働検出（Issue #33 再発防止・デプロイ漏れサービスを fail させる）
