@@ -1,7 +1,7 @@
 # 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 / agency-dashboard task 5.1 の CI 化フォロー）
 #
-# main への push で ts-ci が緑になった後、5イメージ
-# （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web）を
+# main への push で ts-ci が緑になった後、6イメージ
+# （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web / survey-web）を
 # build → Artifact Registry へ push → Cloud Run へ image-only 反映する。gcp-auth-smoke.yml の
 # Direct WIF 雛形を踏襲（service_account 入力なし・SA JSON キー不使用）。
 #
@@ -64,7 +64,7 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Build & push 5 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
+      - name: Build & push 6 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: asia-northeast1
@@ -102,3 +102,35 @@ jobs:
           gcloud run services update dashboard-web \
             --image="${IMAGE_BASE}/dashboard-web:${TAG}" \
             --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update survey-web \
+            --image="${IMAGE_BASE}/survey-web:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+
+      - name: Placeholder 稼働検出（Issue #33 再発防止・デプロイ漏れサービスを fail させる）
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        # Cloud Run 初期作成イメージ（cloudrun/container/hello）のまま稼働しているサービスは
+        # 「tf で作成されたのに CI のデプロイ対象から漏れている」サイン。QR 飛び先が
+        # placeholder のまま放置される事故（Issue #33）を再発させないため、検出したら fail する。
+        run: |
+          set -euo pipefail
+          bad=0
+          for svc in $(gcloud run services list --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(metadata.name)'); do
+            rev="$(gcloud run services describe "$svc" --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(status.latestReadyRevisionName)')"
+            if [ -z "$rev" ]; then
+              echo "ERROR: ${svc} に Ready なリビジョンがありません。" >&2
+              bad=1
+              continue
+            fi
+            img="$(gcloud run revisions describe "$rev" --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(spec.containers[0].image)')"
+            case "$img" in
+              us-docker.pkg.dev/cloudrun/container/hello*)
+                echo "ERROR: ${svc} が Cloud Run 初期 placeholder（${img}）のまま稼働しています。scripts/push-images.sh と deploy.yml への追加漏れを疑ってください。" >&2
+                bad=1
+                ;;
+              *)
+                echo "OK: ${svc} → ${img}"
+                ;;
+            esac
+          done
+          exit "$bad"
