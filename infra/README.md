@@ -193,3 +193,64 @@ summary-delivery（毎時 Job）も同様に `gcloud run jobs execute summary-de
 §5 の CI デプロイ契約（イメージ更新のみ・WIF・SA キー不使用）に従う。`scripts/push-images.sh` は CI からもそのまま呼び出せる（`gcloud auth configure-docker` は WIF 認証後であれば動作する）。
 
 **実装済み（Issue #23）**: `.github/workflows/deploy.yml`（`deploy-prod`）が本フローを自動化する。`ts-ci` が `main` で緑になった後（`workflow_run`・テスト赤のまま出荷しない）、または `workflow_dispatch`（手動）で、3イメージを build → push → `gcloud run jobs/services update --image` で反映する。契約遵守のため `gcloud run deploy` や env/scaling 変更・terraform state 操作は一切行わない。**追加で必要なリポジトリ変数**: `vars.NEXT_PUBLIC_LIFF_ID`（tfvars `liff_id` と同値。store-detail の client bundle へ `next build` 時にインライン化される値のため build-arg で渡す。ランタイム env では効かない）。値未設定なら push-images.sh が hard-fail し、空の LIFF ID を焼き込んだイメージの出荷を防ぐ。LIFF ID を変更する際は tfvars `liff_id` と `vars.NEXT_PUBLIC_LIFF_ID` の両方を更新すること。
+
+---
+
+## 8. GBP 連携のオンボーディング（gbp-post-review-reply / 機能2・機能1-b）
+
+Google ビジネスプロフィール（GBP）への投稿作成・クチコミ返信を解禁するための手動手順。**コード（`ts/apps/line-webhook/src/gbp/`）は実装・検証済みだが、以下 2 つの Google 審査を通り認証情報を投入するまで本番では動かない**。両審査とも所要期間が非公開で**クリティカルパス**のため、実装完了を待たず前倒しで着手すること。プロジェクトは §1 と同じ `gen-fw-line-meo`。
+
+### 8-0. 全体像（2 つの Google 関門）
+
+| 関門 | 何を承認するか | 通らないと | 実施主体 |
+|---|---|---|---|
+| GBP API 利用審査 | v4 API（投稿・返信）の呼び出しクォータ | クォータ 0 で全呼び出しが権限エラー | 運営（verified GBP 保有者） |
+| OAuth アプリ検証 | `business.manage` スコープの同意画面 | Testing のままだと **refresh token が 7 日で失効**＝全店舗が毎週再連携 | 運営（GCP プロジェクト管理者） |
+
+### 8-1. GBP API 利用審査（access request・人手）
+
+GCP コンソールで GBP API を有効化しただけでは使えない。**別途の利用申請が承認されるまでクォータは 0**（承認で 300 QPM）。
+
+- **前提条件**（満たさないと申請が通らない）: 申請アカウントが **60 日以上 verified かつ active な GBP を管理**・その GBP に Web サイト登録済み・オーナー/マネージャー権限・GCP の **Project Number**（`gen-fw-line-meo`）。
+- **手順**: GBP API のコンタクトフォームから申請 → メールで可否連絡 + クォータ反映。
+- **承認の観察可能な証拠**: `gcloud services quota list --service=mybusiness.googleapis.com --project=gen-fw-line-meo` 等でクォータが 0 → 300 QPM になること（未承認は 0）。
+- **スケジュール上の最大リスク**: 「60 日以上稼働の verified GBP」は運営が事前に用意する必要がある。今日申請しても審査に時間がかかるため、**本番ローンチの律速はここ**。
+
+### 8-2. OAuth クライアント作成 + 同意画面検証 + Published 化（人手）
+
+店舗オーナーが LINE から連携する際の Google 認可画面。§1.4 の Identity Platform 用同意画面とは**別の OAuth クライアント**を作る（用途が異なる）。
+
+1. **OAuth 同意画面を構成**（External）: `https://www.googleapis.com/auth/business.manage` スコープを追加（コードの `GBP_SCOPE` と一致・単一）。プライバシーポリシー URL・承認済みドメインを設定。
+2. **OAuth クライアント（Web アプリケーション）を作成**し、**承認済みリダイレクト URI** に line-webhook の公開 URL + **`/gbp/oauth/callback`** を設定する（コードの callback ルート `app.get('/gbp/oauth/callback')` と 1 文字も違わせないこと。OAuth 失敗の第 1 位はここの不一致）。得られる client_id / client_secret を 8-3 で投入。
+3. **検証を申請**: `business.manage` は sensitive スコープのため Google の OAuth 検証（スコープ正当性説明・デモ動画・ドメイン検証）が必要。
+4. **Published へ切り替え**: これを怠り Testing のままだと「未確認アプリ」警告＋**refresh token 7 日失効**で、IT に不慣れなオーナーに毎週再連携を強いることになる（本サービスの存在意義に反する）。
+
+コードの認可要求は `access_type=offline` + `prompt=consent`（refresh token を確実に取得）で固定済み（`ts/apps/line-webhook/src/gbp/oauth.ts`）。
+
+### 8-3. 認証情報の投入（§1.5 と同じ out-of-band 規律）
+
+secret 枠は Terraform 済み（`infra/modules/secrets/main.tf` の `gbp-oauth-client-secret`・`gbp-token-cipher-key`）。値のみ手動投入する。
+
+```bash
+# 8-2 で作成した OAuth クライアントシークレット
+printf %s "<CLIENT_SECRET>" | gcloud secrets versions add gbp-oauth-client-secret --data-file=- --project=gen-fw-line-meo
+
+# refresh token 暗号化鍵（AES-256-GCM・32 byte base64・コードが GBP_TOKEN_CIPHER_KEY で消費）
+openssl rand -base64 32 | gcloud secrets versions add gbp-token-cipher-key --data-file=- --project=gen-fw-line-meo
+```
+
+非秘匿の 2 値は `terraform.tfvars` へ設定して `make tf-apply`（`infra/envs/prod/main.tf` が line-webhook へ env 配線済み）:
+
+```hcl
+gbp_oauth_client_id    = "000000000000-xxxxxxxx.apps.googleusercontent.com"   # 8-2 の client_id
+gbp_oauth_redirect_url = "https://<line-webhook の Cloud Run URL>/gbp/oauth/callback"  # 8-2 のリダイレクト URI と同一値
+```
+
+コード側の env は `GBP_OAUTH_CLIENT_ID`・`GBP_OAUTH_CLIENT_SECRET`・`GBP_OAUTH_REDIRECT_URL`・`GBP_TOKEN_CIPHER_KEY`・`GEMINI_API_KEY` を必須とし、欠落時は `config.Load()` 相当で起動時 fail-fast する（`ts/apps/line-webhook/src/config.ts`）。`gemini-api-key` は既存枠を line-webhook へも配線済み（機能2/1-b の下書き生成で使用）。
+
+### 8-4. 稼働確認
+
+1. **設定の健全性**: secret 投入 + tfvars apply 後にデプロイ。env 欠落があれば line-webhook が起動時に落ちる（fail-fast が防波堤）。
+2. **鍵の注意**: `openssl rand -base64 32` の出力は末尾改行を含むが、コードの base64 デコードは空白を無視するため 32 byte が正しく得られる（実装確認済み）。
+3. **手動 E2E（tasks.md 6.3・両審査承認後にのみ実施可能）**: 実 Google アカウント・検証用店舗で 連携 → 投稿 → 返信 → 解除 の一連を確認する。これが Issue #8 完了条件（連携済み店舗が LINE から Google 投稿・返信を実行できる）の実証。
+4. **契約の同期**: サマリー Flex・リッチメニューの postback data（`a=g_post`/`a=g_reply`/`a=g_status`）は line-webhook の `encodeGbpPostback` とリテラルで整合させている（apps 間 import 不可のため）。action 名を変える際は両側同時更新（design の Revalidation Trigger）。
