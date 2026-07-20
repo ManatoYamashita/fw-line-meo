@@ -11,7 +11,13 @@ vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(() => ({ currentUser: null })),
 }));
 
-import { createAgency, getDashboardUsers, createDashboardUser, disableDashboardUser } from '../src/lib/api';
+import {
+  createAgency,
+  getDashboardUsers,
+  createDashboardUser,
+  disableDashboardUser,
+  enableDashboardUser,
+} from '../src/lib/api';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -112,6 +118,16 @@ describe('管理 API クライアント', () => {
     if (result.ok) expect(result.value.disabled).toBe(true);
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(String(url)).toContain('/dashboard-users/u2/disable');
+    expect(init.method).toBe('POST');
+  });
+
+  it('enableDashboardUser は POST /dashboard-users/:id/enable を呼び { user } をアンラップする', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { user: { ...user, disabled: false } }));
+    const result = await enableDashboardUser({ id: 'u2' }, { getToken: async () => 't', fetchImpl });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.disabled).toBe(false);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain('/dashboard-users/u2/enable');
     expect(init.method).toBe('POST');
   });
 });
