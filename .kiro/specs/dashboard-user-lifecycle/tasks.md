@@ -43,7 +43,7 @@
   - _Requirements: 1.1, 1.5, 4.1, 4.2_
   - _Depends: 1.1, 2.1_
 
-- [ ] 2.3 利用者登録の重複案内をスコープ安全に強化（依存契約・全 userCreate 構築の同時更新）
+- [x] 2.3 利用者登録の重複案内をスコープ安全に強化（依存契約・全 userCreate 構築の同時更新）
   - 登録依存にスコープ限定メールルックアップを加え、重複違反時に、衝突相手が呼び出し運営配下の無効化済みならば有効化での復旧を促す専用コードで案内する。有効な衝突・他運営配下の衝突は既存の汎用重複コードを維持し越境を秘匿する。
   - ルックアップ依存が必須化されるため、登録依存を構築する全箇所（合成根・アプリ結線テスト・招待/リンク統合・店舗登録統合の各テスト）に当該依存を追加し、合成根でスコープ限定ルックアップの実依存を配線する。
   - 完了状態: 単体テストで自運営の無効化済みメールは専用コード・有効/越境の衝突は汎用コード・内部詳細非表出になり、dashboard-api パッケージ全体がビルド緑。
@@ -90,4 +90,6 @@
 - 1.2: advisory lock は `pg_advisory_xact_lock($1::int4, hashtext($2)::int4)`（第1引数=固定クラス `DISABLE_LOCK_CLASS=0x64756c31`・第2引数=hashtext(operator_id)）でテナント直列化。`TransactionCapable`=`Pick<Pool,'connect'>` 相当を pool.ts に追加（pg Pool が構造適合）。guard フィクスチャは f8 別帯（op 9001/9002・user e0000000XXXX）で 1.1 の f8（a1/b2・d0000000000X）と非交差。
 - 1.3: **並行テストは Promise.all のタイミング依存では非決定的**（環境で ~95% 自然直列化し lock 除去でも通ってしまう）。正解は**別接続でテナント advisory ロックを保持し op2 を未コミット無効化→本物ガードがブロック（500ms 有界待機で settled=false）→holder COMMIT→ガードが last_operator を返す**という TX 制御。lock 除去で 100% 失敗する（決定的・突然変異検証済み）。並行フィクスチャは f8 帯 op 9003・user e1000000XXXX。
 - レビュー規律: subagent の突然変異検証は **Edit 逆置換で復元し `git checkout` 禁止**（未コミット差分破棄の事故防止）。コミット前に親が `git diff --name-only`＋テスト再実行で独立確認する。
-- 実行環境: session limit で implementer subagent が中断する場合あり。その際は親のメインコンテキストで manual mode 実装＋独立レビュー subagent に切替（1.2/1.3 で実施）。
+- 実行環境: session limit・接続断で implementer subagent が中断する場合あり。その際は親のメインコンテキストで manual mode 実装/remediation＋独立レビュー subagent に切替（1.2/1.3/2.2 で実施）。
+- 2.2: enable の DoD「配線／実起動系テストで運営のみ200・非運営403」は app-routes.db.test に enable ルートの app.request アサート（no-auth 401・agency 403・operator 200＋DB disabled_at NULL）で満たす。ルート名破壊で当該テストが落ちることを確認（ハンドラ単体だけでは配線リグレッションを検出できない）。
+- 2.3→4.1 引き継ぎ: index.ts の DI 引数順転置（findUserByEmailInOperator の email↔operatorId）は 23505 経路の実配線 DB テストが無く突然変異が生存（未検出）。**4.1 で実配線の「自運営無効化済みメール衝突→email_conflict_disabled」「越境衝突→email_conflict」を各1ケース足して DI マッピングの回帰を捕捉すること**。

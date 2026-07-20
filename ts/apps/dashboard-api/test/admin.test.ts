@@ -105,10 +105,17 @@ const guardCases: GuardCase[] = [
     name: 'POST /dashboard-users',
     invoke: ({ user, disabled = false, authorization }) => {
       const dep = vi.fn(() => Promise.resolve(userItem()));
-      const res = handleDashboardUserCreate({ auth: authDeps(user, disabled), createUser: dep }, {
-        authorization,
-        body: { role: 'agency', agencyId: AGENCY_ID, email: 'new@example.com' },
-      });
+      const res = handleDashboardUserCreate(
+        {
+          auth: authDeps(user, disabled),
+          createUser: dep,
+          findUserByEmailInOperator: () => Promise.resolve(null),
+        },
+        {
+          authorization,
+          body: { role: 'agency', agencyId: AGENCY_ID, email: 'new@example.com' },
+        },
+      );
       return { res, dep };
     },
   },
@@ -309,6 +316,8 @@ function userCreateDeps(over: Partial<DashboardUserCreateDeps> = {}, user: Dashb
       Promise.resolve(
         userItem({ role: input.role, operatorId: input.operatorId, agencyId: input.agencyId, email: input.email, displayName: input.displayName }),
       ),
+    // 既定は「自運営配下に該当メールなし（＝越境 or 不在扱い）」。衝突分岐を検証するテストで差し替える。
+    findUserByEmailInOperator: () => Promise.resolve(null),
     ...over,
   };
 }
@@ -411,6 +420,74 @@ describe('handleDashboardUserCreate', () => {
     const json = await res.json();
     expect(json.error.code).toBe('email_conflict');
     expect(json.error.message).toBe('既に登録済みのメールアドレスです');
+  });
+
+  it('自運営配下の無効化済みメール衝突（23505）は 409 email_conflict_disabled（再有効化案内・Req 3.2）', async () => {
+    const createUser = vi.fn(() => Promise.reject(Object.assign(new Error('dup'), { code: '23505' })));
+    // 自運営スコープで同一メールが引け、無効化済み（disabled:true）。
+    const findUserByEmailInOperator = vi.fn(() =>
+      Promise.resolve<{ id: string; disabled: boolean } | null>({ id: USER_ID, disabled: true }),
+    );
+    const res = await handleDashboardUserCreate(
+      userCreateDeps({ createUser, findUserByEmailInOperator }),
+      {
+        authorization: 'Bearer tok',
+        body: { role: 'operator', email: '  Disabled@Example.COM  ' },
+      },
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe('email_conflict_disabled');
+    expect(json.error.message).toBe(
+      'このメールアドレスは無効化済みの利用者です。復旧するには利用者管理から有効化してください',
+    );
+    // ルックアップは (operatorId, 正規化 email) = 認証ユーザー由来 op1 ＋ trim+小文字化済み で呼ばれる。
+    expect(findUserByEmailInOperator).toHaveBeenCalledWith('op1', 'disabled@example.com');
+  });
+
+  it('自運営配下の有効メール衝突（23505）は汎用 409 email_conflict（Req 3.1）', async () => {
+    const createUser = vi.fn(() => Promise.reject(Object.assign(new Error('dup'), { code: '23505' })));
+    // 自運営スコープで引けるが有効（disabled:false）→ 復旧案内はしない。
+    const findUserByEmailInOperator = vi.fn(() =>
+      Promise.resolve<{ id: string; disabled: boolean } | null>({ id: USER_ID, disabled: false }),
+    );
+    const res = await handleDashboardUserCreate(
+      userCreateDeps({ createUser, findUserByEmailInOperator }),
+      {
+        authorization: 'Bearer tok',
+        body: { role: 'operator', email: 'active@example.com' },
+      },
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe('email_conflict');
+    expect(json.error.message).toBe('既に登録済みのメールアドレスです');
+    expect(findUserByEmailInOperator).toHaveBeenCalledWith('op1', 'active@example.com');
+  });
+
+  it('越境（他運営配下）の衝突は findUserByEmailInOperator が null → 汎用 409 email_conflict（存在秘匿・Req 4.4）', async () => {
+    const createUser = vi.fn(() => Promise.reject(Object.assign(new Error('dup'), { code: '23505' })));
+    // グローバル一意制約では衝突するが、operator_id スコープでは 0 行 → null（他運営の存在を漏らさない）。
+    const findUserByEmailInOperator = vi.fn(() =>
+      Promise.resolve<{ id: string; disabled: boolean } | null>(null),
+    );
+    const res = await handleDashboardUserCreate(
+      userCreateDeps({ createUser, findUserByEmailInOperator }),
+      {
+        authorization: 'Bearer tok',
+        body: { role: 'operator', email: 'crosstenant@example.com' },
+      },
+    );
+    expect(res.status).toBe(409);
+    const raw = await res.text();
+    const json = JSON.parse(raw);
+    // 無効化済み専用コードは出さない（越境相手の状態を漏らさない）。汎用コードのみ。
+    expect(json.error.code).toBe('email_conflict');
+    expect(json.error.message).toBe('既に登録済みのメールアドレスです');
+    // 内部詳細（SQL・元エラー文言）を一切表出しない。
+    expect(raw).not.toContain('dup');
+    expect(raw).not.toContain('email_conflict_disabled');
+    expect(findUserByEmailInOperator).toHaveBeenCalledWith('op1', 'crosstenant@example.com');
   });
 
   it('23505 以外のエラーは 500 internal（詳細を漏らさない）', async () => {

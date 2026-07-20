@@ -63,7 +63,7 @@ function fakeAppDeps(): AppDeps {
       agenciesList: { auth, listAgencies: notCalled },
       agencyCreate: { auth, createAgency: notCalled },
       usersList: { auth, listUsers: notCalled },
-      userCreate: { auth, createUser: notCalled },
+      userCreate: { auth, createUser: notCalled, findUserByEmailInOperator: notCalled },
       userDisable: { auth, disableUser: notCalled },
       userEnable: { auth, enableUser: notCalled },
     },

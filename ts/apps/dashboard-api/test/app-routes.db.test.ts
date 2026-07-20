@@ -21,6 +21,7 @@ import {
   createPendingDashboardUser,
   disableDashboardUserGuarded,
   enableDashboardUser,
+  findDashboardUserByEmailInOperator,
   findDashboardUserDisplayName,
 } from '@fwlm/db';
 import {
@@ -147,6 +148,8 @@ function buildApp(): ReturnType<typeof createApp> {
       userCreate: {
         auth: authDeps,
         createUser: async (input) => createPendingDashboardUser(await getPool(), input),
+        findUserByEmailInOperator: async (operatorId, email) =>
+          findDashboardUserByEmailInOperator(await getPool(), email, operatorId),
       },
       userDisable: {
         auth: authDeps,

@@ -74,6 +74,14 @@ export interface DashboardUserCreateDeps {
   // createPendingDashboardUser（@fwlm/db）委譲（保留行の事前登録・案B）。
   // email UNIQUE 衝突（pg 23505）は本ハンドラが 409 email_conflict に写像する。
   createUser: (input: DashboardUserCreateInput) => Promise<DashboardUserItem>;
+  // 409 強化用のスコープ限定ルックアップ（findDashboardUserByEmailInOperator を委譲・Req 3.2）。
+  // 一意違反（23505）捕捉時に、自運営（operatorId）配下の同一メールの無効化状態を引く。
+  // 見つかり disabled なら 409 email_conflict_disabled（再有効化での復旧を案内）、そうでなければ
+  // （有効な自運営衝突・または越境で null）汎用 email_conflict を維持し越境の存在を漏らさない（Req 4.4）。
+  findUserByEmailInOperator: (
+    operatorId: string,
+    normalizedEmail: string,
+  ) => Promise<{ id: string; disabled: boolean } | null>;
 }
 
 export interface DashboardUserDisableDeps {
@@ -202,6 +210,19 @@ export async function handleDashboardUserCreate(
     // email UNIQUE 衝突（pg 23505）のみ 409 に写像。auth_subject は保留行では NULL のため
     // 衝突し得る UNIQUE は email に限られる。それ以外の障害は詳細を漏らさず 500（Req 7.4）。
     if (isUniqueViolation(err)) {
+      // スコープ限定ルックアップで衝突相手の状態を引く（parsed.email は trim + 小文字化済み・
+      // operatorId は認証ユーザー由来）。他運営配下の衝突は operator_id スコープで null が返るため
+      // 自動的に汎用 email_conflict になり、越境相手の存在・状態を漏らさない（Req 4.4・越境秘匿）。
+      const existing = await deps.findUserByEmailInOperator(guard.user.operatorId, parsed.email);
+      if (existing !== null && existing.disabled) {
+        // 自運営配下の無効化済みメール。復旧は再有効化に一本化するため専用コードで案内する（Req 3.2）。
+        return jsonError(
+          409,
+          'email_conflict_disabled',
+          'このメールアドレスは無効化済みの利用者です。復旧するには利用者管理から有効化してください',
+        );
+      }
+      // 有効な自運営衝突・または越境（null）は汎用の重複案内を維持する（Req 3.1・越境秘匿 4.4）。
       return jsonError(409, 'email_conflict', '既に登録済みのメールアドレスです');
     }
     return jsonError(500, 'internal', '利用者の登録に失敗しました。時間をおいて再試行してください');
