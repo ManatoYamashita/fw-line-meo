@@ -72,7 +72,7 @@
   - _Depends: 3.1_
 
 - [ ] 4. 統合検証と全体受け入れ
-- [ ] 4.1 配線の統合検証（運営限定・回帰）
+- [x] 4.1 配線の統合検証（運営限定・回帰）
   - 実 DB ＋実配線で、再有効化の運営限定（代理店 403）、自己無効化 409、最後の運営 409、通常無効化・再有効化 200、登録の無効化済み衝突の専用案内、自己紹介 ID を検証する。
   - 既存挙動の回帰: 無効化中利用者のログイン拒否、代理店の管理系 403。
   - 完了状態: 配線 DB テストが緑で、上記の正・負・回帰がすべて確認される。
@@ -92,4 +92,5 @@
 - レビュー規律: subagent の突然変異検証は **Edit 逆置換で復元し `git checkout` 禁止**（未コミット差分破棄の事故防止）。コミット前に親が `git diff --name-only`＋テスト再実行で独立確認する。
 - 実行環境: session limit・接続断で implementer subagent が中断する場合あり。その際は親のメインコンテキストで manual mode 実装/remediation＋独立レビュー subagent に切替（1.2/1.3/2.2 で実施）。
 - 2.2: enable の DoD「配線／実起動系テストで運営のみ200・非運営403」は app-routes.db.test に enable ルートの app.request アサート（no-auth 401・agency 403・operator 200＋DB disabled_at NULL）で満たす。ルート名破壊で当該テストが落ちることを確認（ハンドラ単体だけでは配線リグレッションを検出できない）。
-- 2.3→4.1 引き継ぎ: index.ts の DI 引数順転置（findUserByEmailInOperator の email↔operatorId）は 23505 経路の実配線 DB テストが無く突然変異が生存（未検出）。**4.1 で実配線の「自運営無効化済みメール衝突→email_conflict_disabled」「越境衝突→email_conflict」を各1ケース足して DI マッピングの回帰を捕捉すること**。
+- 2.3→4.1 引き継ぎ: index.ts の DI 引数順転置（findUserByEmailInOperator の email↔operatorId）は 23505 経路の実配線 DB テストが無く突然変異が生存（未検出）。→ **4.1 で解消**: app-routes.db.test に「自運営無効化済みメール衝突→email_conflict_disabled」「越境衝突→email_conflict」を実 DI で追加（buildApp 複製配線の転置を 500/コード化で決定的捕捉）。
+- 4.1 の構造的制約（将来強化候補・非ブロッキング）: app-routes.db.test は `index.ts` を直接 import できない（`serve()`/`initializeApp()` のモジュールロード副作用）ため、DI を **buildApp で複製**して検証する。この複製は index.ts とバイト同一を慣例で維持するが、**index.ts 単独の乖離（複製と非同期な転置）は捕捉できない**。恒久対策は DI 構築を import 可能なファクトリへ抽出して index.ts とテストで共有する案（別 spec 候補）。全ルート配線テストに共通する既存パターンの制約であり本 feature 固有ではない。
