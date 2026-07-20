@@ -1,0 +1,8 @@
+# 全 ts イメージのビルドコンテキストは ts/（各 Dockerfile の COPY . . がここを読む）。
+# docker はコンテキストルートの .dockerignore しか読まない（apps/*/.dockerignore は無効）。
+# 成果物・依存はすべて Dockerfile のステージ内で生成するため、ホスト側の生成物を除外して
+# コンテキスト転送を軽くし、ローカルビルドでの host node_modules/.next 混入を防ぐ。
+**/node_modules
+**/.next
+**/dist
+.git
