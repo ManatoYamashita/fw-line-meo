@@ -179,21 +179,25 @@ function createHarness(options: HarnessOptions = {}): Harness {
         session = null;
         return existed;
       },
-      async beginGbpSessionExecution(_db, ownerId) {
+      // DB の CAS と同じ意味論: owner + flow + stage が一致したときのみ獲得できる
+      // （flow 条件は task 4.2 で追加。投稿承認は flow='post' でしか実行権を得られない）。
+      async beginGbpSessionExecution(_db, ownerId, flow) {
         casCalls.push(ownerId);
-        if (session === null || session.stage !== 'await_decision') return null;
+        if (session === null || session.flow !== flow || session.stage !== 'await_decision') {
+          return null;
+        }
         session = { ...session, stage: 'executing' };
         return session;
       },
-      async completeGbpSessionExecution(_db, ownerId) {
+      async completeGbpSessionExecution(_db, ownerId, flow) {
         completeCalls.push(ownerId);
-        if (session === null || session.stage !== 'executing') return false;
+        if (session === null || session.flow !== flow || session.stage !== 'executing') return false;
         session = null;
         return true;
       },
-      async revertGbpSessionExecution(_db, ownerId, expiresAt) {
+      async revertGbpSessionExecution(_db, ownerId, flow, expiresAt) {
         revertCalls.push(ownerId);
-        if (session === null || session.stage !== 'executing') return null;
+        if (session === null || session.flow !== flow || session.stage !== 'executing') return null;
         session = { ...session, stage: 'await_decision', expires_at: expiresAt };
         return session;
       },
@@ -219,6 +223,10 @@ function createHarness(options: HarnessOptions = {}): Harness {
         draftIndex += 1;
         return value ?? { ok: true, value: '生成された下書き' };
       },
+      // 返信下書きは投稿フローからは到達しないが、GbpFlowDeps の契約を満たすため配線する。
+      async generateReplyDraft() {
+        return { ok: true, value: '返信の下書き' };
+      },
     },
     gbpClient: {
       async createLocalPost(_db, input) {
@@ -229,6 +237,13 @@ function createHarness(options: HarnessOptions = {}): Harness {
         });
         if (options.postThrows) throw new Error('network down');
         return options.postResult ?? { ok: true, value: { postName: 'localPosts/1' } };
+      },
+      // 返信系は投稿フローの主題ではない（承認ゲート検証で g_reply を回すため空一覧を返す）。
+      async listReviews() {
+        return { ok: true, value: [] };
+      },
+      async upsertReviewReply() {
+        return { ok: true, value: undefined };
       },
     },
     messenger: {

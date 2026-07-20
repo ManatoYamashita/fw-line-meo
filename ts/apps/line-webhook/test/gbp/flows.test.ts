@@ -16,9 +16,9 @@ import {
   buildGbpAlreadyLinkedMessage,
   buildGbpAuthorizeMessage,
   buildGbpCancelledMessage,
+  buildGbpConnectRequiredMessage,
   buildGbpCurrentStateMessage,
   buildGbpDisconnectedMessage,
-  buildGbpFlowNotAvailableMessage,
   buildGbpNoEligibleStoreMessage,
   buildGbpNotLinkedMessage,
   buildGbpSessionExpiredMessage,
@@ -185,10 +185,19 @@ function createHarness(options: HarnessOptions = {}): Harness {
       async generatePostDraft() {
         throw new Error('generatePostDraft must not be called from connect flows');
       },
+      async generateReplyDraft() {
+        throw new Error('generateReplyDraft must not be called from connect flows');
+      },
     },
     gbpClient: {
       async createLocalPost() {
         throw new Error('createLocalPost must not be called from connect flows');
+      },
+      async listReviews() {
+        throw new Error('listReviews must not be called from connect flows');
+      },
+      async upsertReviewReply() {
+        throw new Error('upsertReviewReply must not be called from connect flows');
       },
     },
     messenger: {
@@ -467,16 +476,25 @@ describe('createGbpFlowHandlers（連携系フロー・task 3.3）', () => {
       expect(h.replies).toEqual([[buildGbpCancelledMessage()]]);
     });
 
-    // task 4.1 で投稿（g_post / g_approve / g_regen / g_revise）が解禁されたため、
-    // 準備中案内が残るのはクチコミ返信（機能1-b・task 4.2）の action のみ。
-    // 投稿フローの検証は test/gbp/flows-post.test.ts が所有する。
-    it('返信の action は task 4.2 の範囲として準備中案内を返す', async () => {
-      for (const action of ['g_reply', 'g_overwrite'] as const) {
-        const h = createHarness();
-        await h.handlers.handleGbpPostback(postback(encodeGbpPostback({ action })));
-        expect(h.replies).toEqual([[buildGbpFlowNotAvailableMessage()]]);
-        expect(h.startConnectCalls).toEqual([]);
-      }
+    // task 4.2 でクチコミ返信（g_reply / g_pick_review / g_overwrite）も解禁された。
+    // 返信フロー本体の検証は test/gbp/flows-reply.test.ts が所有する。ここでは連携系
+    // ハーネス（未連携店舗）から返信を開始しても、状態機械に入らず連携誘導へ倒れること
+    // だけを確認する（返信 API・下書き生成へ到達しないことは deps のスローで担保される）。
+    it('未連携店舗での g_reply は返信 API へ到達せず連携誘導を返す（Req 4.8）', async () => {
+      const h = createHarness();
+
+      await h.handlers.handleGbpPostback(postback(encodeGbpPostback({ action: 'g_reply' })));
+
+      expect(h.startConnectCalls).toEqual([]);
+      expect(h.replies).toEqual([[buildGbpConnectRequiredMessage('テスト食堂A')]]);
+    });
+
+    it('アクティブセッションの無い g_overwrite は何も実行せず現在状態を案内する', async () => {
+      const h = createHarness();
+
+      await h.handlers.handleGbpPostback(postback(encodeGbpPostback({ action: 'g_overwrite' })));
+
+      expect(h.replies).toEqual([[buildGbpCurrentStateMessage(null)]]);
     });
 
     it('復号できない data でも例外を投げず現在状態を案内する', async () => {

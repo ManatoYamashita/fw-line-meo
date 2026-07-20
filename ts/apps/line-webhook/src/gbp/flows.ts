@@ -4,15 +4,19 @@
 //   2.4（連携解除 = revoke + 行削除 + 未連携案内）, 2.5（連携状態の確認）,
 //   3.1–3.7・3.9（投稿の要点入力→下書き生成→承認→実行）, 6.6（生成失敗の案内）。
 //
-// 実装済みの範囲は **連携系（connect / status / disconnect）と投稿（機能2）**。
-// クチコミ返信（機能1-b）の stage は task 4.2 が本ファイルへ追加する
-// （それまで当該 action は何も実行せず準備中案内へ倒す）。
+// 実装済みの範囲は **連携系（connect / status / disconnect）・投稿（機能2）・
+// クチコミ返信（機能1-b）** の全フロー。
 //
 // 設計上の不変条件:
-// - **GBP への書込（createLocalPost）は `g_approve` ハンドラからのみ到達できる**
-//   （Req 3.6 の構造的保証）。生成直後・提示中に投稿する経路を作ってはならない。
+// - **GBP への書込（createLocalPost / upsertReviewReply）は `g_approve` ハンドラからのみ
+//   到達できる**（Req 3.6・4.5 の構造的保証）。生成直後・提示中に投稿・返信する経路を
+//   作ってはならない。投稿と返信は別ハンドラで、各々が自フローの CAS だけを打つ。
 // - 承認の実行は `executing` への **条件付き更新（CAS）** で排他する。獲得できなかった
 //   リクエストは何も実行せず現在状態を案内する（二重タップでも書込は高々 1 回）。
+//   CAS は **flow 条件付き**（TOCTOU 対策）: セッション読み取りと CAS の間に別フローの
+//   セッションへ置換されても、返信の下書きが投稿として送信されることはない。
+// - 返信対象の候補は **星評価で選別・並べ替えしない**（Req 4.9・レビューゲーティング禁止）。
+//   並び順は「未返信優先 → 新着順」のみ。
 // - 実行失敗時はセッション（`draft_text` 含む）を温存して `await_decision` へ戻す
 //   （Req 3.7: 承認済みの下書きを失わせない）。成功時のみセッションを削除する。
 // - **postback data の storeId・index は信用しない**。対象店舗は必ず
@@ -42,6 +46,7 @@ import {
   upsertGbpSession,
   deleteGbpLocation,
   type ConfirmedStoreSummary,
+  type GbpFlow,
   type GbpLocationKey,
   type GbpSessionLookup,
   type GbpSessionRow,
@@ -54,11 +59,13 @@ import type { LineMessage, LineMessenger } from '../line/client.js';
 import { CONNECT_SESSION_TTL_MS, type GbpOauthService } from './oauth.js';
 import { decodeGbpPostback, type GbpPostbackAction } from './postback.js';
 import type { StoreKey, TokenStoreService } from './token-store.js';
-import type { GbpApiError, GbpClientService } from './client.js';
+import type { GbpApiError, GbpClientService, GbpReview } from './client.js';
 import {
   pickPostVariation,
+  pickReplyVariation,
   type GbpPromptsService,
   type PostDraftMaterial,
+  type ReplyDraftMaterial,
   type RevisionContext,
 } from './prompts.js';
 import {
@@ -69,22 +76,31 @@ import {
   buildGbpConnectUnavailableMessage,
   buildGbpCurrentStateMessage,
   buildGbpDisconnectedMessage,
-  buildGbpFlowNotAvailableMessage,
   buildGbpGenerationFailedMessage,
   buildGbpNoEligibleStoreMessage,
+  buildGbpNoReviewsMessage,
   buildGbpNotLinkedMessage,
+  buildGbpOverwriteConfirmMessages,
   buildGbpPostDraftMessages,
   buildGbpPostFailedMessage,
   buildGbpPostInputPromptMessage,
   buildGbpPostStorePickerMessage,
   buildGbpPostSucceededMessage,
+  buildGbpReplyDraftMessages,
+  buildGbpReplyFailedMessage,
+  buildGbpReplyStorePickerMessage,
+  buildGbpReplySucceededMessage,
+  buildGbpReviewListFailedMessage,
+  buildGbpReviewPickerMessage,
   buildGbpRevisionPromptMessage,
   buildGbpSessionExpiredMessage,
   buildGbpStaleSelectionMessage,
   buildGbpStatusMessage,
   buildGbpStorePickerMessage,
+  MAX_REVIEW_CANDIDATES,
   MAX_SELECTABLE_STORES,
   type GbpPostFailureReason,
+  type GbpReviewSummary,
 } from './messages.js';
 
 // =====================================================================
@@ -120,14 +136,23 @@ export interface GbpSessionsAccessor {
     input: UpsertGbpSessionInput,
   ): Promise<Result<GbpSessionRow, 'STORE_NOT_OWNED'>>;
   clearGbpSession(db: Queryable, ownerId: string): Promise<boolean>;
-  /** 承認実行の CAS 獲得（await_decision → executing）。null なら実行してはならない。 */
-  beginGbpSessionExecution(db: Queryable, ownerId: string): Promise<GbpSessionRow | null>;
-  /** 実行成功の後始末（executing の行のみ削除）。 */
-  completeGbpSessionExecution(db: Queryable, ownerId: string): Promise<boolean>;
+  /**
+   * 承認実行の CAS 獲得（`flow` × await_decision → executing）。null なら実行してはならない。
+   * **flow を必ず渡す**: 読み取りと CAS の間に別フローのセッションへ置換されうるため、
+   * flow 条件が無いと返信の下書きを投稿ハンドラが獲得しうる（TOCTOU・task 4.2）。
+   */
+  beginGbpSessionExecution(
+    db: Queryable,
+    ownerId: string,
+    flow: GbpFlow,
+  ): Promise<GbpSessionRow | null>;
+  /** 実行成功の後始末（獲得したフローの executing 行のみ削除）。 */
+  completeGbpSessionExecution(db: Queryable, ownerId: string, flow: GbpFlow): Promise<boolean>;
   /** 実行失敗の巻き戻し（executing → await_decision・draft 温存）。 */
   revertGbpSessionExecution(
     db: Queryable,
     ownerId: string,
+    flow: GbpFlow,
     expiresAt: Date,
   ): Promise<GbpSessionRow | null>;
 }
@@ -153,10 +178,14 @@ export interface GbpFlowDeps {
   sessions: GbpSessionsAccessor;
   locations: GbpLocationsAccessor;
   stores: GbpStoresAccessor;
-  /** 下書き生成（機能2）。task 4.2 で generateReplyDraft を追加する。 */
-  prompts: Pick<GbpPromptsService, 'generatePostDraft'>;
-  /** GBP への書込。**`g_approve` ハンドラ以外からこれを呼んではならない**（Req 3.6）。 */
-  gbpClient: Pick<GbpClientService, 'createLocalPost'>;
+  /** 下書き生成（機能2 = 投稿・機能1-b = 返信）。 */
+  prompts: Pick<GbpPromptsService, 'generatePostDraft' | 'generateReplyDraft'>;
+  /**
+   * GBP への読み書き。**書込（`createLocalPost` / `upsertReviewReply`）は `g_approve`
+   * ハンドラ以外から呼んではならない**（Req 3.6・4.5）。`listReviews` は読み取りのみで、
+   * 返信フローの候補提示（Req 4.1）に使う。
+   */
+  gbpClient: Pick<GbpClientService, 'createLocalPost' | 'listReviews' | 'upsertReviewReply'>;
   messenger: Pick<LineMessenger, 'reply'>;
   now(): Date;
 }
@@ -643,8 +672,8 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
    *   2. CAS が返した行（＝獲得の瞬間のスナップショット）だけを実行の入力にする。
    *   3. 成功なら executing の行のみ削除、失敗なら await_decision へ戻す（draft 温存）。
    */
-  async function handleApprove(event: GbpPostbackEvent): Promise<void> {
-    const claimed = await deps.sessions.beginGbpSessionExecution(deps.db, event.ownerId);
+  async function handlePostApprove(event: GbpPostbackEvent): Promise<void> {
+    const claimed = await deps.sessions.beginGbpSessionExecution(deps.db, event.ownerId, 'post');
     if (claimed === null) {
       // 実行中（他リクエストが獲得済み）または承認待ちではない。現在状態を読み直して案内する。
       const current = await loadSession(event.ownerId);
@@ -656,7 +685,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     const draft = claimed.draft_text;
     if (storeId === null || draft === null) {
       // 承認待ちであれば必ず両方が埋まっている。到達したら状態が壊れているので実行しない。
-      await deps.sessions.completeGbpSessionExecution(deps.db, event.ownerId);
+      await deps.sessions.completeGbpSessionExecution(deps.db, event.ownerId, 'post');
       await reply(event.replyToken, buildGbpCurrentStateMessage(null));
       return;
     }
@@ -666,14 +695,19 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     const storeName = stores.find((store) => store.id === storeId)?.name ?? null;
 
     if (result.ok) {
-      await deps.sessions.completeGbpSessionExecution(deps.db, event.ownerId);
+      await deps.sessions.completeGbpSessionExecution(deps.db, event.ownerId, 'post');
       await reply(event.replyToken, buildGbpPostSucceededMessage(storeName));
       return;
     }
 
     // Req 3.7: 下書き（draft_text）を温存したまま承認待ちへ戻し、再試行導線を返す。
-    await deps.sessions.revertGbpSessionExecution(deps.db, event.ownerId, sessionExpiry());
-    await reply(event.replyToken, buildGbpPostFailedMessage(toPostFailureReason(result.error)));
+    await deps.sessions.revertGbpSessionExecution(
+      deps.db,
+      event.ownerId,
+      'post',
+      sessionExpiry(),
+    );
+    await reply(event.replyToken, buildGbpPostFailedMessage(toGbpFailureReason(result.error)));
   }
 
   /**
@@ -690,6 +724,383 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
       return await deps.gbpClient.createLocalPost(deps.db, { ownerId, storeId, summary });
     } catch {
       // 例外にはトークン・本文が含まれうるため保持しない（Req 2.1）。
+      return { ok: false, error: { kind: 'upstream_error', status: 0 } };
+    }
+  }
+
+  // ===================================================================
+  // クチコミ返信フロー（機能1-b・spec task 4.2）
+  //
+  // 状態機械（design「System Flows > 下書き承認フロー」）:
+  //   [*] → await_review_pick（単一店舗）/ await_store（複数店舗）
+  //   await_store → await_review_pick（g_pick_store）
+  //   await_review_pick → await_decision（未返信を選択・下書き生成）
+  //   await_review_pick → await_overwrite_ok（既返信を選択・Req 4.6）
+  //   await_overwrite_ok → await_decision（g_overwrite・下書き生成）
+  //   await_decision → await_decision（g_regen）/ await_revision（g_revise）
+  //   await_revision → await_decision（修正指示テキスト受領・反映再提示）
+  //   await_decision → [*]（g_approve = 実行 / g_cancel）
+  //
+  // **承認ゲートの構造的保証（Req 4.5）**: `deps.gbpClient.upsertReviewReply` の呼び出しは
+  // `handleReplyApprove` の 1 箇所のみ。候補提示・生成・上書き確認のいずれからも
+  // GBP への書込には到達しない。
+  //
+  // **レビューゲーティングの禁止（Req 4.9）**: 候補の取捨選択・並び替えに星評価を用いない。
+  // 並び順は「未返信優先 → 新着順」のみで、低評価のクチコミも同一の導線で提示する。
+  // ===================================================================
+
+  /**
+   * 候補として取得するクチコミの件数。GBP は orderBy を受け付けず返却順が未保証のため、
+   * 提示上限（5 件）より広く取得してから本モジュールで整列し、上位のみを提示する。
+   */
+  const REVIEW_FETCH_LIMIT = 20;
+
+  /** Req 4.1, 4.8: 返信フローの開始。未連携なら状態機械に入らず連携誘導へ倒す。 */
+  async function handleReplyStart(event: GbpPostbackEvent): Promise<void> {
+    const stores = await resolveEligibleStores(event.ownerId);
+
+    if (stores.length === 0) {
+      await reply(event.replyToken, buildGbpNoEligibleStoreMessage());
+      return;
+    }
+
+    const single = stores.length === 1 ? stores[0] : undefined;
+    if (single !== undefined) {
+      await beginReplyForStore(event, single);
+      return;
+    }
+
+    const upserted = await deps.sessions.upsertGbpSession(deps.db, {
+      ownerId: event.ownerId,
+      storeId: null,
+      flow: 'reply',
+      stage: 'await_store',
+      payload: { storeIds: stores.map((store) => store.id) },
+      draftText: null,
+      expiresAt: sessionExpiry(),
+    });
+    if (!upserted.ok) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    await reply(event.replyToken, buildGbpReplyStorePickerMessage(stores));
+  }
+
+  /**
+   * Req 4.1, 4.8: 対象店舗が確定した後の入口。未連携なら **クチコミを取得せず**
+   * 連携誘導を返す（連携前に外部 API を叩かない）。
+   */
+  async function beginReplyForStore(
+    event: GbpPostbackEvent,
+    store: ConfirmedStoreSummary,
+  ): Promise<void> {
+    const linked = await deps.tokenStore.isLinked(deps.db, {
+      ownerId: event.ownerId,
+      storeId: store.id,
+    });
+    if (!linked) {
+      await reply(event.replyToken, buildGbpConnectRequiredMessage(store.name));
+      return;
+    }
+
+    const listed = await listReviewsSafely(event.ownerId, store.id);
+    if (!listed.ok) {
+      // セッションは作らない（状態機械に入る前の失敗のため、やり直しは開始から）。
+      await reply(
+        event.replyToken,
+        buildGbpReviewListFailedMessage(toGbpFailureReason(listed.error)),
+      );
+      return;
+    }
+
+    const candidates = selectReviewCandidates(listed.value);
+    if (candidates.length === 0) {
+      await reply(event.replyToken, buildGbpNoReviewsMessage(store.name));
+      return;
+    }
+
+    // 提示した並び順を payload に固定し、g_pick_review の index と対応づける
+    // （postback の index はスナップショット経由でのみ意味を持つ）。
+    const upserted = await deps.sessions.upsertGbpSession(deps.db, {
+      ownerId: event.ownerId,
+      storeId: store.id,
+      flow: 'reply',
+      stage: 'await_review_pick',
+      payload: { reviews: candidates },
+      draftText: null,
+      expiresAt: sessionExpiry(),
+    });
+    if (!upserted.ok) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    await reply(
+      event.replyToken,
+      buildGbpReviewPickerMessage({ storeName: store.name, reviews: candidates }),
+    );
+  }
+
+  /**
+   * クチコミの取得。クライアントは Result を返す契約だが、注入実装や想定外の例外で
+   * フローが落ちないよう、例外は一過性障害として Result へ畳む。
+   */
+  async function listReviewsSafely(
+    ownerId: string,
+    storeId: string,
+  ): Promise<Result<GbpReview[], GbpApiError>> {
+    try {
+      return await deps.gbpClient.listReviews(deps.db, {
+        ownerId,
+        storeId,
+        limit: REVIEW_FETCH_LIMIT,
+      });
+    } catch {
+      return { ok: false, error: { kind: 'upstream_error', status: 0 } };
+    }
+  }
+
+  /** 返信フローの店舗選択（await_store）。 */
+  async function handleReplyPickStore(
+    event: GbpPostbackEvent,
+    session: GbpSessionRow,
+    index: number,
+  ): Promise<void> {
+    const store = await resolvePickedStore(event.ownerId, session, index);
+    if (store === null) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+    await beginReplyForStore(event, store);
+  }
+
+  /** Req 4.2, 4.6: 返信対象の選択。既返信は上書き確認を必ず挟む。 */
+  async function handlePickReview(
+    event: GbpPostbackEvent,
+    session: GbpSessionRow,
+    index: number,
+  ): Promise<void> {
+    const store = await resolveSessionStore(event.ownerId, session);
+    const snapshot = readReviewSnapshot(session.payload);
+    const picked = snapshot[index];
+    if (store === null || picked === undefined) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    if (picked.hasReply) {
+      // Req 4.6: 既存の返信を提示し、上書きの確認を得るまで下書き生成へ進まない。
+      const upserted = await deps.sessions.upsertGbpSession(deps.db, {
+        ownerId: event.ownerId,
+        storeId: store.id,
+        flow: 'reply',
+        stage: 'await_overwrite_ok',
+        payload: { review: picked },
+        draftText: null,
+        expiresAt: sessionExpiry(),
+      });
+      if (!upserted.ok) {
+        await reply(event.replyToken, buildGbpStaleSelectionMessage());
+        return;
+      }
+
+      await deps.messenger.reply(
+        event.replyToken,
+        buildGbpOverwriteConfirmMessages({ storeName: store.name, review: picked }),
+      );
+      return;
+    }
+
+    await generateAndPresentReplyDraft(event, store, picked);
+  }
+
+  /** Req 4.6: 上書きの同意を得たので下書き生成へ進む。 */
+  async function handleOverwriteConfirmed(
+    event: GbpPostbackEvent,
+    session: GbpSessionRow,
+  ): Promise<void> {
+    const store = await resolveSessionStore(event.ownerId, session);
+    const picked = readPickedReview(session.payload);
+    if (store === null || picked === null) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    await generateAndPresentReplyDraft(event, store, picked);
+  }
+
+  /**
+   * 返信の下書きを生成し、成功時のみ await_decision へ遷移させて全文と 3 択を提示する
+   * （Req 4.2・4.3）。生成失敗時は stage を進めず案内のみ返す（Req 6.6）。
+   */
+  async function generateAndPresentReplyDraft(
+    event: { ownerId: string; replyToken: string },
+    store: ConfirmedStoreSummary,
+    picked: GbpReviewSummary,
+    revision?: RevisionContext,
+  ): Promise<void> {
+    const material: ReplyDraftMaterial = {
+      storeName: store.name,
+      // Req 6.1: プロンプトへ渡すのは選択されたクチコミの内容と店名のみ。
+      rating: normalizeRating(picked.rating),
+      reviewComment: picked.comment,
+      authorName: picked.authorName,
+    };
+    const generated = await deps.prompts.generateReplyDraft(
+      material,
+      pickReplyVariation(),
+      revision,
+    );
+
+    if (!generated.ok) {
+      await reply(event.replyToken, buildGbpGenerationFailedMessage());
+      return;
+    }
+
+    const upserted = await deps.sessions.upsertGbpSession(deps.db, {
+      ownerId: event.ownerId,
+      storeId: store.id,
+      flow: 'reply',
+      stage: 'await_decision',
+      // 返信先（reviewName）と素材は再生成・修正反映・実行のために保持する。
+      payload: { review: picked },
+      draftText: generated.value,
+      expiresAt: sessionExpiry(),
+    });
+    if (!upserted.ok) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    await deps.messenger.reply(
+      event.replyToken,
+      buildGbpReplyDraftMessages({ storeName: store.name, draft: generated.value }),
+    );
+  }
+
+  /** Req 4.3: 再生成。素材は変えず、生成のたびに新しい variation seed を引く（Req 6.5）。 */
+  async function handleReplyRegenerate(
+    event: GbpPostbackEvent,
+    session: GbpSessionRow,
+  ): Promise<void> {
+    const store = await resolveSessionStore(event.ownerId, session);
+    const picked = readPickedReview(session.payload);
+    if (store === null || picked === null) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    await generateAndPresentReplyDraft(event, store, picked);
+  }
+
+  /** Req 4.3: 修正指示の受付開始（下書き・素材は温存したまま stage のみ進める）。 */
+  async function handleReplyReviseRequest(
+    event: GbpPostbackEvent,
+    session: GbpSessionRow,
+  ): Promise<void> {
+    const store = await resolveSessionStore(event.ownerId, session);
+    if (store === null) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    const upserted = await deps.sessions.upsertGbpSession(deps.db, {
+      ownerId: event.ownerId,
+      storeId: store.id,
+      flow: 'reply',
+      stage: 'await_revision',
+      payload: session.payload,
+      draftText: session.draft_text,
+      expiresAt: sessionExpiry(),
+    });
+    if (!upserted.ok) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    await reply(event.replyToken, buildGbpRevisionPromptMessage());
+  }
+
+  /** Req 4.3: await_revision でのテキスト受領 = 修正指示。前回下書きとともに反映する。 */
+  async function handleReplyRevision(
+    event: GbpTextEvent,
+    session: GbpSessionRow,
+  ): Promise<void> {
+    const store = await resolveSessionStore(event.ownerId, session);
+    const picked = readPickedReview(session.payload);
+    const previousDraft = session.draft_text;
+    if (store === null || picked === null || previousDraft === null) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    const instruction = event.text.trim();
+    if (instruction.length === 0) {
+      await reply(event.replyToken, buildGbpRevisionPromptMessage());
+      return;
+    }
+
+    await generateAndPresentReplyDraft(event, store, picked, { instruction, previousDraft });
+  }
+
+  /**
+   * Req 4.4, 4.5, 4.7: 返信の承認。**GBP へ返信を書き込む唯一のハンドラ**。
+   * 実行順・CAS の使い方は投稿フロー（handlePostApprove）と同一で、flow だけが異なる。
+   */
+  async function handleReplyApprove(event: GbpPostbackEvent): Promise<void> {
+    const claimed = await deps.sessions.beginGbpSessionExecution(deps.db, event.ownerId, 'reply');
+    if (claimed === null) {
+      const current = await loadSession(event.ownerId);
+      await replyStaleOrCurrentState(event, current.session, current.expired);
+      return;
+    }
+
+    const storeId = claimed.store_id;
+    const draft = claimed.draft_text;
+    // 返信先は **CAS が返した行の payload** から取る（postback 由来の値は使わない）。
+    const picked = readPickedReview(claimed.payload);
+    if (storeId === null || draft === null || picked === null) {
+      await deps.sessions.completeGbpSessionExecution(deps.db, event.ownerId, 'reply');
+      await reply(event.replyToken, buildGbpCurrentStateMessage(null));
+      return;
+    }
+
+    const result = await executeReviewReply(event.ownerId, storeId, picked.reviewName, draft);
+    const stores = await resolveEligibleStores(event.ownerId);
+    const storeName = stores.find((store) => store.id === storeId)?.name ?? null;
+
+    if (result.ok) {
+      await deps.sessions.completeGbpSessionExecution(deps.db, event.ownerId, 'reply');
+      await reply(event.replyToken, buildGbpReplySucceededMessage(storeName));
+      return;
+    }
+
+    // Req 4.7: 下書きを温存したまま承認待ちへ戻し、再試行導線を返す。
+    await deps.sessions.revertGbpSessionExecution(
+      deps.db,
+      event.ownerId,
+      'reply',
+      sessionExpiry(),
+    );
+    await reply(event.replyToken, buildGbpReplyFailedMessage(toGbpFailureReason(result.error)));
+  }
+
+  /** 返信の実行。例外は一過性障害として Result へ畳む（executing に取り残さない）。 */
+  async function executeReviewReply(
+    ownerId: string,
+    storeId: string,
+    reviewName: string,
+    comment: string,
+  ): Promise<Result<void, GbpApiError>> {
+    try {
+      return await deps.gbpClient.upsertReviewReply(deps.db, {
+        ownerId,
+        storeId,
+        reviewName,
+        comment,
+      });
+    } catch {
       return { ok: false, error: { kind: 'upstream_error', status: 0 } };
     }
   }
@@ -741,9 +1152,11 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         return reply(event.replyToken, buildGbpCancelledMessage());
       }
 
-      // --- セッション不要の入口（投稿フローの開始・Req 3.1, 3.9） ---
+      // --- セッション不要の入口（投稿・返信フローの開始・Req 3.1, 3.9, 4.1, 4.8） ---
       case 'g_post':
         return handlePostStart(event);
+      case 'g_reply':
+        return handleReplyStart(event);
 
       // --- stage を要求する遷移 ---
       case 'g_pick_store': {
@@ -752,39 +1165,50 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         }
         if (session.flow === 'connect') return handlePickStore(event, session, action.index);
         if (session.flow === 'post') return handlePostPickStore(event, session, action.index);
+        if (session.flow === 'reply') return handleReplyPickStore(event, session, action.index);
         return replyStaleOrCurrentState(event, session, expired);
       }
 
-      case 'g_regen': {
-        if (!isPostStage(session, 'await_decision')) {
+      case 'g_pick_review': {
+        if (!isReplyStage(session, 'await_review_pick')) {
           return replyStaleOrCurrentState(event, session, expired);
         }
-        return handlePostRegenerate(event, session);
+        return handlePickReview(event, session, action.index);
+      }
+
+      case 'g_overwrite': {
+        // Req 4.6: 上書きの同意はこの stage でしか受け付けない。
+        if (!isReplyStage(session, 'await_overwrite_ok')) {
+          return replyStaleOrCurrentState(event, session, expired);
+        }
+        return handleOverwriteConfirmed(event, session);
+      }
+
+      case 'g_regen': {
+        if (isPostStage(session, 'await_decision')) return handlePostRegenerate(event, session);
+        if (isReplyStage(session, 'await_decision')) return handleReplyRegenerate(event, session);
+        return replyStaleOrCurrentState(event, session, expired);
       }
 
       case 'g_revise': {
-        if (!isPostStage(session, 'await_decision')) {
-          return replyStaleOrCurrentState(event, session, expired);
+        if (isPostStage(session, 'await_decision')) {
+          return handlePostReviseRequest(event, session);
         }
-        return handlePostReviseRequest(event, session);
+        if (isReplyStage(session, 'await_decision')) {
+          return handleReplyReviseRequest(event, session);
+        }
+        return replyStaleOrCurrentState(event, session, expired);
       }
 
       case 'g_approve': {
-        // Req 3.6: ここが GBP 書込に到達しうる唯一の分岐。stage が承認待ちでなければ
-        // CAS すら行わず案内のみ返す（executing 中の 2 打目もここで止まる）。
-        if (!isPostStage(session, 'await_decision')) {
-          return replyStaleOrCurrentState(event, session, expired);
-        }
-        return handleApprove(event);
+        // Req 3.6・4.5: ここが GBP 書込に到達しうる唯一の分岐。flow ごとに別ハンドラへ
+        // 分け、各ハンドラは自フローの CAS（flow 条件付き）でしか実行権を得られない。
+        // stage が承認待ちでなければ CAS すら行わず案内のみ返す
+        // （executing 中の 2 打目もここで止まる）。
+        if (isPostStage(session, 'await_decision')) return handlePostApprove(event);
+        if (isReplyStage(session, 'await_decision')) return handleReplyApprove(event);
+        return replyStaleOrCurrentState(event, session, expired);
       }
-
-      // --- 返信（機能1-b）: task 4.2 で実装する ---
-      // 実装時はここに各 stage の遷移を追加する（default を置かないことで、
-      // action を増やした際に本 switch の更新漏れがコンパイルエラーになる）。
-      case 'g_reply':
-      case 'g_pick_review':
-      case 'g_overwrite':
-        return reply(event.replyToken, buildGbpFlowNotAvailableMessage());
     }
   }
 
@@ -820,8 +1244,9 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         return 'handled';
       }
 
-      // 投稿フロー（task 4.1）がテキストを受理するのは await_input（要点）と
-      // await_revision（修正指示）のみ。それ以外はいかなる遷移も起こさず案内のみ返す。
+      // テキストを受理するのは投稿の await_input（要点）と、投稿・返信の
+      // await_revision（修正指示）のみ。それ以外はいかなる遷移も起こさず案内のみ返す
+      // （返信フローの候補選択・上書き確認はボタン専用で、テキストでは進まない）。
       const session = lookup.session;
       if (isPostStage(session, 'await_input')) {
         await handlePostInput(event, session);
@@ -829,6 +1254,10 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
       }
       if (isPostStage(session, 'await_revision')) {
         await handlePostRevision(event, session);
+        return 'handled';
+      }
+      if (isReplyStage(session, 'await_revision')) {
+        await handleReplyRevision(event, session);
         return 'handled';
       }
 
@@ -858,6 +1287,102 @@ function isPostStage(
 }
 
 /**
+ * 返信フローの指定 stage かどうか（型の絞り込み込み）。`isPostStage` と対になり、
+ * 同名 stage（await_decision / await_revision）が相手のフローの遷移へ流れ込まないことを
+ * 構造的に保証する。**GBP への返信書込に至る分岐は必ずこの述語を通す**（Req 4.5）。
+ */
+function isReplyStage(
+  session: GbpSessionRow | null,
+  stage: GbpSessionRow['stage'],
+): session is GbpSessionRow {
+  return session !== null && session.flow === 'reply' && session.stage === stage;
+}
+
+/**
+ * 星評価の正規化（tasks.md Implementation Notes 2.4 の申し送り: 呼出側ガード）。
+ * GBP の enum が未知値・非数値の場合に生成側へ不定値を渡さないため、
+ * 1–5 の整数以外はすべて 0（評価不明）へ倒す。GbpPrompts は 0 を低評価トーンの
+ * fail-safe として扱う。**この値を候補の選別・並び順に使ってはならない（Req 4.9）**。
+ */
+function normalizeRating(rating: unknown): number {
+  if (typeof rating !== 'number' || !Number.isInteger(rating)) return 0;
+  return rating >= 1 && rating <= 5 ? rating : 0;
+}
+
+/**
+ * 取得したクチコミを提示順（未返信優先 → 新着順）に整列し、上限件数へ丸める（Req 4.1）。
+ *
+ * GBP の `reviews.list` は orderBy を受け付けず返却順が未保証のため、整列は本モジュールの
+ * 責務（tasks.md Implementation Notes 2.2 の申し送り）。**星評価は比較に一切用いない**
+ * （Req 4.9・レビューゲーティング禁止。低評価を後ろへ回すことも隠すことも行わない）。
+ */
+function selectReviewCandidates(reviews: readonly GbpReview[]): GbpReviewSummary[] {
+  const sorted = [...reviews].sort((a, b) => {
+    if (a.hasReply !== b.hasReply) return a.hasReply ? 1 : -1;
+    return parseCreateTime(b.createTime) - parseCreateTime(a.createTime);
+  });
+
+  return sorted.slice(0, MAX_REVIEW_CANDIDATES).map(
+    (item): GbpReviewSummary => ({
+      reviewName: item.reviewName,
+      rating: normalizeRating(item.rating),
+      authorName: item.authorName,
+      comment: item.comment,
+      createTime: item.createTime,
+      hasReply: item.hasReply,
+      replyComment: item.replyComment,
+    }),
+  );
+}
+
+/** 解釈できない createTime は最古として扱う（並び順のためだけに使う・例外を投げない）。 */
+function parseCreateTime(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * payload に保存したクチコミ候補のスナップショット（await_review_pick）。
+ * 形式不正な要素は落とす（安全側。index の意味が提示内容とずれるより空にする）。
+ */
+function readReviewSnapshot(payload: Record<string, unknown>): GbpReviewSummary[] {
+  const value = payload['reviews'];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => toReviewSummary(item))
+    .filter((item): item is GbpReviewSummary => item !== null);
+}
+
+/** payload に保存した選択済みクチコミ（await_overwrite_ok 以降）。不正・欠落は null。 */
+function readPickedReview(payload: Record<string, unknown>): GbpReviewSummary | null {
+  return toReviewSummary(payload['review']);
+}
+
+/**
+ * jsonb から読み戻した値を GbpReviewSummary へ検証変換する。
+ * **reviewName は返信の宛先そのもの**であるため、欠落・非文字列・空文字は null に倒す
+ * （不正な宛先で GBP を呼ばない。実際の自店突合は GbpClient が fail-closed で行う）。
+ */
+function toReviewSummary(value: unknown): GbpReviewSummary | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+
+  const reviewName = record['reviewName'];
+  if (typeof reviewName !== 'string' || reviewName.trim().length === 0) return null;
+
+  const replyComment = record['replyComment'];
+  return {
+    reviewName,
+    rating: normalizeRating(record['rating']),
+    authorName: typeof record['authorName'] === 'string' ? record['authorName'] : '',
+    comment: typeof record['comment'] === 'string' ? record['comment'] : '',
+    createTime: typeof record['createTime'] === 'string' ? record['createTime'] : '',
+    hasReply: record['hasReply'] === true,
+    replyComment: typeof replyComment === 'string' ? replyComment : null,
+  };
+}
+
+/**
  * payload に保存した投稿素材（オーナーが伝えた要点）。
  * 形式不正・欠落は null（＝再生成・修正反映を実行せずやり直しへ倒す）。
  */
@@ -877,7 +1402,7 @@ function readPostOwnerInput(payload: Record<string, unknown>): string | null {
  * （tasks.md Implementation Notes 2.2 の申し送り）。一過性障害と同じ文面で扱う。
  * `incomplete_listing` も「管理権限なし」と結論させず再試行導線へ倒す。
  */
-function toPostFailureReason(error: GbpApiError): GbpPostFailureReason {
+function toGbpFailureReason(error: GbpApiError): GbpPostFailureReason {
   switch (error.kind) {
     case 'token_invalid':
     case 'not_linked':

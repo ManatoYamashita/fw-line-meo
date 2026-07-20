@@ -123,61 +123,70 @@ export async function clearGbpSession(db: Queryable, ownerId: string): Promise<b
 //
 // 承認（g_approve）から GBP へ書き込む経路は「executing への条件付き遷移 → 実行 →
 // 成功なら削除／失敗なら await_decision へ戻す」の 3 手に分解される。各手はいずれも
-// **現在の stage を WHERE に含む単一文**であり、以下を同時に保証する:
+// **現在の flow と stage を WHERE に含む単一文**であり、以下を同時に保証する:
 // - 二重タップ・並行リクエストでも `executing` を獲得できるのは高々 1 リクエスト
 //   （＝ GBP 書込は高々 1 回）。
 // - 実行中に別フロー（例: 連携開始）がセッションを置換した場合、完了処理は
 //   `stage = 'executing'` に一致しないため他フローのセッションを巻き込んで破壊しない。
+// - **flow 条件（TOCTOU 対策・spec task 4.2）**: 呼び出し側が session を読んでから CAS を
+//   打つまでの間に、別フローのセッション（例: 投稿 → 返信）へ置換されうる。flow を
+//   WHERE に含めないと、投稿の承認ハンドラが返信の下書きを獲得して
+//   `createLocalPost` へ渡す（およびその逆の）経路が生まれる。獲得できるのは
+//   **呼び出し側が意図したフローのセッションだけ** でなければならない。
 
 /**
  * 承認実行の権利を獲得する（`await_decision` → `executing` の条件付き更新）。
- * 獲得できたときのみ更新後の行を返す。null は「他リクエストが実行中」または
- * 「stage が承認待ちではない」を意味し、呼び出し側は **実行してはならない**。
+ * 獲得できたときのみ更新後の行を返す。null は「他リクエストが実行中」「stage が承認待ちでない」
+ * または「別フローのセッションへ置換された」を意味し、呼び出し側は **実行してはならない**。
  */
 export async function beginGbpSessionExecution(
   db: Queryable,
   ownerId: string,
+  flow: GbpFlow,
 ): Promise<GbpSessionRow | null> {
   const res = await db.query<GbpSessionRow>(
     `UPDATE gbp_sessions
         SET stage = 'executing', updated_at = now()
-      WHERE owner_id = $1 AND stage = 'await_decision'
+      WHERE owner_id = $1 AND flow = $2 AND stage = 'await_decision'
       RETURNING ${SESSION_COLUMNS}`,
-    [ownerId],
+    [ownerId, flow],
   );
   return res.rows[0] ?? null;
 }
 
 /**
- * 実行成功時の後始末（`executing` の行のみ削除）。戻り値は行が消えたか。
+ * 実行成功時の後始末（獲得したフローの `executing` 行のみ削除）。戻り値は行が消えたか。
  * false は「実行中に別のセッションへ置換された」ことを意味する（新セッションは温存される）。
  */
 export async function completeGbpSessionExecution(
   db: Queryable,
   ownerId: string,
+  flow: GbpFlow,
 ): Promise<boolean> {
   const res = await db.query(
-    `DELETE FROM gbp_sessions WHERE owner_id = $1 AND stage = 'executing'`,
-    [ownerId],
+    `DELETE FROM gbp_sessions WHERE owner_id = $1 AND flow = $2 AND stage = 'executing'`,
+    [ownerId, flow],
   );
   return (res.rowCount ?? 0) > 0;
 }
 
 /**
- * 実行失敗時の巻き戻し（`executing` → `await_decision`）。`draft_text` と `payload` は
- * 触れないため承認済みの下書きが失われない（Req 3.7・4.7）。期限は再試行のため延長する。
+ * 実行失敗時の巻き戻し（獲得したフローの `executing` → `await_decision`）。`draft_text` と
+ * `payload` は触れないため承認済みの下書きが失われない（Req 3.7・4.7）。
+ * 期限は再試行のため延長する。
  */
 export async function revertGbpSessionExecution(
   db: Queryable,
   ownerId: string,
+  flow: GbpFlow,
   expiresAt: Date,
 ): Promise<GbpSessionRow | null> {
   const res = await db.query<GbpSessionRow>(
     `UPDATE gbp_sessions
-        SET stage = 'await_decision', expires_at = $2, updated_at = now()
-      WHERE owner_id = $1 AND stage = 'executing'
+        SET stage = 'await_decision', expires_at = $3, updated_at = now()
+      WHERE owner_id = $1 AND flow = $2 AND stage = 'executing'
       RETURNING ${SESSION_COLUMNS}`,
-    [ownerId, expiresAt],
+    [ownerId, flow, expiresAt],
   );
   return res.rows[0] ?? null;
 }

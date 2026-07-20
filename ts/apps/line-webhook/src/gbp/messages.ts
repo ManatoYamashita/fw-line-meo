@@ -674,19 +674,388 @@ export function buildGbpPostFailedMessage(reason: GbpPostFailureReason): LineMes
   });
 }
 
+// =====================================================================
+// クチコミ返信フロー（機能1-b・spec task 4.2）
+// Requirements: 4.1（返信対象の提示・最大 5 件）, 4.2（下書きの全文提示）,
+//   4.3（承認/再生成/修正の 3 択）, 4.4（結果通知）, 4.6（既返信の上書き確認）,
+//   4.7（失敗時の再試行導線）, 4.8（未連携の誘導）, 4.9（星評価による選別の禁止）。
+//
+// **文面の規律（Req 4.9・レビューゲーティング禁止）**: 星評価によって候補を隠す・
+// 別扱いする文面を作らない。すべてのクチコミを同一の導線・同一の見た目で提示する。
+// =====================================================================
+
 /**
- * 本 spec のクチコミ返信（機能1-b）フローは task 4.2 で解禁される。
- * それまでの間、当該 action が届いた場合は何も実行せず現在利用できる操作のみを案内する。
+ * 返信対象クチコミの提示単位（GbpClient の GbpReview と構造的に一致する読み取り専用の形）。
+ * messages は client へ依存しないため、必要な項目だけを本モジュールの契約として持つ。
  */
-export function buildGbpFlowNotAvailableMessage(): LineMessage {
+export interface GbpReviewSummary {
+  reviewName: string;
+  /** 1–5。GBP の enum が未知値の場合は 0（評価不明）。 */
+  rating: number;
+  authorName: string;
+  /** 評価のみのクチコミでは空文字。 */
+  comment: string;
+  createTime: string;
+  hasReply: boolean;
+  replyComment: string | null;
+}
+
+/** 返信対象として一度に提示するクチコミの上限（Req 4.1）。 */
+export const MAX_REVIEW_CANDIDATES = 5;
+
+/** 本文が長いクチコミはカルーセル内で省略する（全文はプロンプト素材としては保持される）。 */
+const REVIEW_EXCERPT_CHARS = 60;
+
+const REPLY_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: 'クチコミに返信',
+    data: encodeGbpPostback({ action: 'g_reply' }),
+    displayText: 'クチコミに返信',
+  },
+};
+
+const REPLY_APPROVE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: '承認して返信',
+    data: encodeGbpPostback({ action: 'g_approve' }),
+    displayText: '承認して返信',
+  },
+};
+
+const REPLY_RETRY_APPROVE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: 'もう一度返信する',
+    data: encodeGbpPostback({ action: 'g_approve' }),
+    displayText: 'もう一度返信する',
+  },
+};
+
+const OVERWRITE_BUTTON: FlexBoxContent = {
+  type: 'button',
+  style: 'primary',
+  color: LINKED_COLOR,
+  action: {
+    type: 'postback',
+    label: '上書きして返信を作成',
+    data: encodeGbpPostback({ action: 'g_overwrite' }),
+    displayText: '上書きして返信を作成',
+  },
+};
+
+/** 星評価の可視化。0（評価不明）は星を出さない。順序・選別には一切用いない（Req 4.9）。 */
+function ratingLabel(rating: number): string {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return '評価: 不明';
+  return `評価: ${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}`;
+}
+
+function excerpt(value: string): string {
+  const chars = [...value.trim()];
+  if (chars.length === 0) return '（本文なし・評価のみ）';
+  if (chars.length <= REVIEW_EXCERPT_CHARS) return chars.join('');
+  return `${chars.slice(0, REVIEW_EXCERPT_CHARS).join('')}…`;
+}
+
+/** 複数店舗オーナー向けの返信対象店舗の選択（状態機械の await_store・返信フロー）。 */
+export function buildGbpReplyStorePickerMessage(
+  stores: readonly GbpSelectableStore[],
+): LineMessage {
+  assertWithinCarouselContract(stores.length, 'buildGbpReplyStorePickerMessage');
+
+  const contents: FlexCarouselContents = {
+    type: 'carousel',
+    contents: stores.map(
+      (store, index): FlexBubbleContents => ({
+        type: 'bubble',
+        size: 'kilo',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: store.name, weight: 'bold', size: 'md', wrap: true },
+            {
+              type: 'text',
+              text: 'このお店のクチコミに返信します。',
+              size: 'sm',
+              color: '#666666',
+              wrap: true,
+            },
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              color: LINKED_COLOR,
+              action: {
+                type: 'postback',
+                label: 'このお店のクチコミ',
+                data: encodeGbpPostback({ action: 'g_pick_store', index }),
+                displayText: `${store.name} のクチコミ`,
+              },
+            },
+          ],
+        },
+      }),
+    ),
+  };
+
+  return {
+    type: 'flex',
+    altText: 'クチコミに返信するお店を選択してください。',
+    contents,
+  };
+}
+
+/**
+ * Req 4.1, 4.9: 返信対象クチコミの提示。**並び順は呼び出し側が決める**（新着順・未返信優先）。
+ * 本関数は渡された順序をそのまま提示し、星評価による並べ替え・除外・強調を一切行わない。
+ */
+export function buildGbpReviewPickerMessage(input: {
+  storeName: string;
+  reviews: readonly GbpReviewSummary[];
+}): LineMessage {
+  if (input.reviews.length === 0) {
+    throw new Error('buildGbpReviewPickerMessage: reviews must not be empty');
+  }
+  if (input.reviews.length > MAX_REVIEW_CANDIDATES) {
+    throw new Error(
+      `buildGbpReviewPickerMessage: reviews exceeds contract limit of ${MAX_REVIEW_CANDIDATES} (got ${input.reviews.length})`,
+    );
+  }
+
+  const contents: FlexCarouselContents = {
+    type: 'carousel',
+    contents: input.reviews.map(
+      (item, index): FlexBubbleContents => ({
+        type: 'bubble',
+        size: 'kilo',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: ratingLabel(item.rating), weight: 'bold', size: 'sm', wrap: true },
+            { type: 'text', text: item.authorName, size: 'xs', color: MUTED_COLOR, wrap: true },
+            { type: 'text', text: excerpt(item.comment), size: 'sm', wrap: true },
+            {
+              type: 'text',
+              text: item.hasReply ? '返信済み（上書きになります）' : '未返信',
+              size: 'xs',
+              color: item.hasReply ? MUTED_COLOR : LINKED_COLOR,
+              wrap: true,
+            },
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              color: LINKED_COLOR,
+              action: {
+                type: 'postback',
+                label: 'このクチコミに返信',
+                data: encodeGbpPostback({ action: 'g_pick_review', index }),
+                displayText: 'このクチコミに返信',
+              },
+            },
+          ],
+        },
+      }),
+    ),
+  };
+
+  return {
+    type: 'flex',
+    altText: `「${input.storeName}」の返信できるクチコミをお送りしました（${input.reviews.length}件）。`,
+    contents,
+  };
+}
+
+/** 返信対象のクチコミが 1 件も取得できなかったときの案内。 */
+export function buildGbpNoReviewsMessage(storeName: string | null): LineMessage {
+  const target = storeName === null ? 'お店' : `「${storeName}」`;
   return bubbleMessage({
-    altText: 'Google 投稿の作成とクチコミ返信は現在ご利用いただけません。',
-    title: 'この操作は準備中です',
+    altText: `${target}に返信できるクチコミはまだありません。`,
+    title: '返信できるクチコミがありません',
     lines: [
-      'Google 投稿の作成とクチコミ返信は現在準備中です。',
-      'いまは Google との連携の設定・確認をご利用いただけます。',
+      `${target}の Google ビジネスプロフィールに、いま返信できるクチコミはありませんでした。`,
+      '新しいクチコミが届いたら、またこちらからご返信いただけます。',
     ],
     buttons: [STATUS_BUTTON],
+  });
+}
+
+/**
+ * クチコミ一覧の取得に失敗したときの案内。分類は投稿の失敗通知と同一の規律に従う
+ * （`crypto_error` を再連携へ倒さない）。
+ */
+export function buildGbpReviewListFailedMessage(reason: GbpPostFailureReason): LineMessage {
+  const detail: { lines: readonly string[]; buttons: readonly FlexBoxContent[] } = ((): {
+    lines: readonly string[];
+    buttons: readonly FlexBoxContent[];
+  } => {
+    switch (reason) {
+      case 'reauth':
+        return {
+          lines: [
+            'Google との連携が切れているため、クチコミを取得できませんでした。',
+            'もう一度連携すると、クチコミへの返信をご利用いただけます。',
+          ],
+          buttons: [CONNECT_BUTTON, STATUS_BUTTON],
+        };
+      case 'permission':
+        return {
+          lines: [
+            'このお店のビジネスプロフィールのクチコミを参照できませんでした。',
+            'お店を管理している Google アカウントの権限をご確認ください。',
+          ],
+          buttons: [STATUS_BUTTON],
+        };
+      case 'transient':
+        return {
+          lines: [
+            '通信または Google 側の一時的な問題で、クチコミを取得できませんでした。',
+            '少し時間をおいてから、下のボタンでもう一度お試しください。',
+          ],
+          buttons: [REPLY_BUTTON, STATUS_BUTTON],
+        };
+    }
+  })();
+
+  return bubbleMessage({
+    altText: 'クチコミを取得できませんでした。',
+    title: 'クチコミを取得できませんでした',
+    lines: detail.lines,
+    buttons: detail.buttons,
+  });
+}
+
+/**
+ * Req 4.6: 既に返信があるクチコミを選んだときの上書き確認。
+ * **既存の返信全文を独立したテキストメッセージとして提示**してから確認を求める
+ * （何が失われるのかを読めないまま上書きの同意を取らないため）。
+ */
+export function buildGbpOverwriteConfirmMessages(input: {
+  storeName: string;
+  review: GbpReviewSummary;
+}): LineMessage[] {
+  const existing = (input.review.replyComment ?? '').trim();
+  return [
+    textMessage(
+      existing.length === 0
+        ? '【現在の返信】（本文を取得できませんでした）'
+        : `【現在の返信】\n${existing}`,
+    ),
+    bubbleMessage({
+      altText: 'このクチコミにはすでに返信があります。上書きしてよろしいですか？',
+      title: 'すでに返信があります',
+      lines: [
+        `「${input.storeName}」のこのクチコミには、すでに上のメッセージの返信が公開されています。`,
+        '新しい返信を作成すると、この内容は上書きされて元に戻せません。',
+        'よろしければ「上書きして返信を作成」を選んでください。',
+      ],
+      buttons: [OVERWRITE_BUTTON, CANCEL_BUTTON],
+    }),
+  ];
+}
+
+/**
+ * Req 4.2, 4.3: 返信の下書き提示。投稿フローと同じく、下書きは独立したテキストメッセージで
+ * 全文を送り、選択肢（承認/再生成/修正指示）を別バブルで添える。
+ */
+export function buildGbpReplyDraftMessages(input: {
+  storeName: string;
+  draft: string;
+}): LineMessage[] {
+  return [
+    textMessage(input.draft),
+    bubbleMessage({
+      altText: `「${input.storeName}」のクチコミ返信の下書きができました。内容をご確認ください。`,
+      title: '返信の下書きができました',
+      lines: [
+        `「${input.storeName}」のクチコミへの返信の下書きです。上のメッセージが公開される全文です。`,
+        'このまま返信する場合は「承認して返信」を選んでください。',
+      ],
+      buttons: [REPLY_APPROVE_BUTTON, REGENERATE_BUTTON, REVISE_BUTTON, CANCEL_BUTTON],
+    }),
+  ];
+}
+
+/** Req 4.4: 返信の成功通知。 */
+export function buildGbpReplySucceededMessage(storeName: string | null): LineMessage {
+  const target = storeName === null ? 'お店' : `「${storeName}」`;
+  return bubbleMessage({
+    altText: `${target}のクチコミへの返信を公開しました。`,
+    title: 'クチコミに返信しました',
+    lines: [
+      `${target}のクチコミに、お店からの公式返信として公開しました。`,
+      '反映まで少し時間がかかる場合があります。',
+    ],
+    buttons: [REPLY_BUTTON, STATUS_BUTTON],
+  });
+}
+
+/**
+ * Req 4.7: 返信の失敗通知。投稿フローと同一の規律で、**下書きが保持されている**ことを
+ * 明示し再試行導線を必ず添える。
+ */
+export function buildGbpReplyFailedMessage(reason: GbpPostFailureReason): LineMessage {
+  const detail: { lines: readonly string[]; buttons: readonly FlexBoxContent[] } = ((): {
+    lines: readonly string[];
+    buttons: readonly FlexBoxContent[];
+  } => {
+    switch (reason) {
+      case 'reauth':
+        return {
+          lines: [
+            'Google との連携が切れているため返信できませんでした。',
+            'もう一度連携すると、この下書きから返信をやり直せます。',
+          ],
+          buttons: [CONNECT_BUTTON, CANCEL_BUTTON],
+        };
+      case 'permission':
+        return {
+          lines: [
+            'このお店のクチコミへの返信が許可されていないため、返信できませんでした。',
+            'お店を管理している Google アカウントの権限をご確認ください。',
+          ],
+          buttons: [STATUS_BUTTON, CANCEL_BUTTON],
+        };
+      case 'transient':
+        return {
+          lines: [
+            '通信または Google 側の一時的な問題で返信できませんでした。',
+            '少し時間をおいてから、下のボタンでもう一度お試しください。',
+          ],
+          buttons: [REPLY_RETRY_APPROVE_BUTTON, REVISE_BUTTON, CANCEL_BUTTON],
+        };
+    }
+  })();
+
+  return bubbleMessage({
+    altText: '返信の公開に失敗しました。下書きは保存しています。',
+    title: '返信できませんでした',
+    lines: ['下書きは保存していますので、作り直す必要はありません。', ...detail.lines],
+    buttons: detail.buttons,
   });
 }
 
@@ -726,7 +1095,9 @@ export function buildGbpCurrentStateMessage(session: GbpSessionRow | null): Line
   }
 
   // 投稿フロー（task 4.1）の各 stage。いずれも「案内を再送するだけ」で遷移を伴わない。
-  if (session.stage === 'await_input') {
+  // **flow で分岐する**: 同名 stage（await_decision / await_revision）は投稿と返信の双方が
+  // 使うため、flow を見ずに文面を選ぶと返信フローで「承認して投稿」と案内してしまう。
+  if (session.flow === 'post' && session.stage === 'await_input') {
     return bubbleMessage({
       altText: '投稿したい内容をメッセージで送ってください。',
       title: '投稿したい内容をお待ちしています',
@@ -735,23 +1106,66 @@ export function buildGbpCurrentStateMessage(session: GbpSessionRow | null): Line
     });
   }
 
-  if (session.stage === 'await_decision') {
+  if (session.flow === 'post' && session.stage === 'await_decision') {
     return bubbleMessage({
       altText: '下書きを確認して、トーク内のボタンから操作してください。',
       title: '下書きの確認をお待ちしています',
       lines: [
-        '先ほどお送りした下書きをご確認のうえ、トーク内のボタンから操作してください。',
+        '先ほどお送りした投稿の下書きをご確認のうえ、トーク内のボタンから操作してください。',
         '「承認して投稿」「再生成」「修正を指示」から選べます。',
       ],
       buttons: [CANCEL_BUTTON],
     });
   }
 
-  if (session.stage === 'await_revision') {
+  if (session.flow === 'post' && session.stage === 'await_revision') {
     return bubbleMessage({
       altText: '修正したい点をメッセージで送ってください。',
       title: '修正の指示をお待ちしています',
-      lines: ['どのように直したいかを、このトークにメッセージで送ってください。'],
+      lines: ['投稿の下書きをどのように直したいかを、このトークにメッセージで送ってください。'],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  // 返信フロー（task 4.2）の各 stage。
+  if (session.flow === 'reply' && session.stage === 'await_review_pick') {
+    return bubbleMessage({
+      altText: '返信するクチコミをトーク内のボタンから選んでください。',
+      title: 'クチコミの選択をお待ちしています',
+      lines: ['先ほどお送りしたクチコミの中から、返信したいものを選んでください。'],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  if (session.flow === 'reply' && session.stage === 'await_overwrite_ok') {
+    return bubbleMessage({
+      altText: '既存の返信を上書きするか、トーク内のボタンでお答えください。',
+      title: '上書きの確認をお待ちしています',
+      lines: [
+        '選択されたクチコミにはすでに返信があります。',
+        '上書きしてよろしければ、トーク内の「上書きして返信を作成」を選んでください。',
+      ],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  if (session.flow === 'reply' && session.stage === 'await_decision') {
+    return bubbleMessage({
+      altText: '返信の下書きを確認して、トーク内のボタンから操作してください。',
+      title: '返信の下書きの確認をお待ちしています',
+      lines: [
+        '先ほどお送りした返信の下書きをご確認のうえ、トーク内のボタンから操作してください。',
+        '「承認して返信」「再生成」「修正を指示」から選べます。',
+      ],
+      buttons: [CANCEL_BUTTON],
+    });
+  }
+
+  if (session.flow === 'reply' && session.stage === 'await_revision') {
+    return bubbleMessage({
+      altText: '修正したい点をメッセージで送ってください。',
+      title: '修正の指示をお待ちしています',
+      lines: ['返信の下書きをどのように直したいかを、このトークにメッセージで送ってください。'],
       buttons: [CANCEL_BUTTON],
     });
   }
@@ -765,8 +1179,8 @@ export function buildGbpCurrentStateMessage(session: GbpSessionRow | null): Line
     );
   }
 
-  // 返信フロー（task 4.2 が実装する stage）は本タスクでは開始されない。
-  // 将来それらの stage が到達した場合も、状態を壊さない汎用案内へ倒す。
+  // flow と stage の組み合わせが噛み合わない（データ不整合・将来の追加）場合も、
+  // 状態を壊さない汎用案内へ倒す。
   return bubbleMessage({
     altText: '進行中の手続きがあります。トーク内のボタンから操作してください。',
     title: '進行中の手続きがあります',

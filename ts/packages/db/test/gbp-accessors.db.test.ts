@@ -398,7 +398,7 @@ describe.skipIf(!process.env.DATABASE_URL)('gbp accessors (DB)', () => {
       const pool = await getPool();
       await seedDecisionSession();
 
-      const claimed = await beginGbpSessionExecution(pool, OWNER_A);
+      const claimed = await beginGbpSessionExecution(pool, OWNER_A, 'post');
       expect(claimed).not.toBeNull();
       expect(claimed?.stage).toBe('executing');
       expect(claimed?.store_id).toBe(STORE_A1);
@@ -407,27 +407,27 @@ describe.skipIf(!process.env.DATABASE_URL)('gbp accessors (DB)', () => {
 
     it('beginGbpSessionExecution: 既に executing の行は獲得できない（二重タップの排他）', async () => {
       const pool = await getPool();
-      const second = await beginGbpSessionExecution(pool, OWNER_A);
+      const second = await beginGbpSessionExecution(pool, OWNER_A, 'post');
       expect(second).toBeNull();
     });
 
     it('revertGbpSessionExecution: executing → await_decision へ戻し draft を温存する', async () => {
       const pool = await getPool();
-      const reverted = await revertGbpSessionExecution(pool, OWNER_A, FUTURE());
+      const reverted = await revertGbpSessionExecution(pool, OWNER_A, 'post', FUTURE());
       expect(reverted?.stage).toBe('await_decision');
       expect(reverted?.draft_text).toBe('本日から新メニューを始めました。');
       // executing 以外には作用しない（冪等ではなく条件付き）。
-      expect(await revertGbpSessionExecution(pool, OWNER_A, FUTURE())).toBeNull();
+      expect(await revertGbpSessionExecution(pool, OWNER_A, 'post', FUTURE())).toBeNull();
     });
 
     it('completeGbpSessionExecution: executing の行のみ削除する', async () => {
       const pool = await getPool();
       // await_decision の状態では削除されない（他フローのセッションを巻き込まない保証）。
-      expect(await completeGbpSessionExecution(pool, OWNER_A)).toBe(false);
+      expect(await completeGbpSessionExecution(pool, OWNER_A, 'post')).toBe(false);
       expect((await getActiveGbpSession(pool, OWNER_A)).kind).toBe('active');
 
-      await beginGbpSessionExecution(pool, OWNER_A);
-      expect(await completeGbpSessionExecution(pool, OWNER_A)).toBe(true);
+      await beginGbpSessionExecution(pool, OWNER_A, 'post');
+      expect(await completeGbpSessionExecution(pool, OWNER_A, 'post')).toBe(true);
       expect(await getActiveGbpSession(pool, OWNER_A)).toEqual({ kind: 'none' });
     });
 
@@ -436,12 +436,12 @@ describe.skipIf(!process.env.DATABASE_URL)('gbp accessors (DB)', () => {
       await seedDecisionSession();
 
       const [a, b] = await Promise.all([
-        beginGbpSessionExecution(pool, OWNER_A),
-        beginGbpSessionExecution(pool, OWNER_A),
+        beginGbpSessionExecution(pool, OWNER_A, 'post'),
+        beginGbpSessionExecution(pool, OWNER_A, 'post'),
       ]);
       expect([a, b].filter((row) => row !== null)).toHaveLength(1);
 
-      await completeGbpSessionExecution(pool, OWNER_A);
+      await completeGbpSessionExecution(pool, OWNER_A, 'post');
     });
 
     it('他オーナーの executing セッションには到達しない', async () => {
@@ -458,11 +458,59 @@ describe.skipIf(!process.env.DATABASE_URL)('gbp accessors (DB)', () => {
         }),
       );
 
-      expect(await beginGbpSessionExecution(pool, OWNER_A)).toBeNull();
-      const claimedB = await beginGbpSessionExecution(pool, OWNER_B);
+      expect(await beginGbpSessionExecution(pool, OWNER_A, 'post')).toBeNull();
+      const claimedB = await beginGbpSessionExecution(pool, OWNER_B, 'post');
       expect(claimedB?.owner_id).toBe(OWNER_B);
-      expect(await completeGbpSessionExecution(pool, OWNER_A)).toBe(false);
+      expect(await completeGbpSessionExecution(pool, OWNER_A, 'post')).toBe(false);
       expect((await getActiveGbpSession(pool, OWNER_B)).kind).toBe('active');
+    });
+  });
+
+  // フロー別 CAS（spec task 4.2）。`loadSession` と CAS の間に別フローのセッションへ
+  // 置換された場合でも、獲得したフローの下書きが別フローの API 呼び出しへ渡らないことの根拠。
+  describe('gbp-sessions の CAS は flow 一致を要求する（TOCTOU 対策）', () => {
+    const FUTURE = (): Date => new Date(Date.now() + 30 * 60 * 1000);
+
+    async function seedReplyDecisionSession(): Promise<void> {
+      const pool = await getPool();
+      unwrap(
+        await upsertGbpSession(pool, {
+          ownerId: OWNER_A,
+          storeId: STORE_A1,
+          flow: 'reply',
+          stage: 'await_decision',
+          payload: { review: { reviewName: 'accounts/1/locations/2/reviews/r1' } },
+          draftText: 'ご来店ありがとうございました。',
+          expiresAt: FUTURE(),
+        }),
+      );
+    }
+
+    it('reply セッションを post フローの CAS では獲得できない（返信下書きの誤投稿を防ぐ）', async () => {
+      const pool = await getPool();
+      await seedReplyDecisionSession();
+
+      expect(await beginGbpSessionExecution(pool, OWNER_A, 'post')).toBeNull();
+
+      const claimed = await beginGbpSessionExecution(pool, OWNER_A, 'reply');
+      expect(claimed?.flow).toBe('reply');
+      expect(claimed?.stage).toBe('executing');
+      expect(claimed?.draft_text).toBe('ご来店ありがとうございました。');
+    });
+
+    it('complete / revert も flow 不一致では作用しない', async () => {
+      const pool = await getPool();
+      // 直前のテストで reply セッションが executing。
+      expect(await completeGbpSessionExecution(pool, OWNER_A, 'post')).toBe(false);
+      expect(await revertGbpSessionExecution(pool, OWNER_A, 'post', FUTURE())).toBeNull();
+
+      const reverted = await revertGbpSessionExecution(pool, OWNER_A, 'reply', FUTURE());
+      expect(reverted?.stage).toBe('await_decision');
+      expect(reverted?.draft_text).toBe('ご来店ありがとうございました。');
+
+      await beginGbpSessionExecution(pool, OWNER_A, 'reply');
+      expect(await completeGbpSessionExecution(pool, OWNER_A, 'reply')).toBe(true);
+      expect(await getActiveGbpSession(pool, OWNER_A)).toEqual({ kind: 'none' });
     });
   });
 });
