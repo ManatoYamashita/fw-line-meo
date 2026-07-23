@@ -188,6 +188,8 @@ importers:
         specifier: ^8
         version: 8.20.0
 
+  packages/design-tokens: {}
+
   packages/store-identification:
     dependencies:
       '@fwlm/db':

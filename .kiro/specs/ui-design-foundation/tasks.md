@@ -1,7 +1,7 @@
 # Implementation Plan
 
 - [ ] 1. Foundation: デザイントークン単一情報源の確立
-- [ ] 1.1 デザイントークンパッケージを新設し全トークン値を単一定義する
+- [x] 1.1 デザイントークンパッケージを新設し全トークン値を単一定義する
   - 既存パッケージ雛形（dist 配布・tsc ビルド・test 分離）を踏襲し、フレームワーク非依存（依存ゼロ）のトークンパッケージを作る
   - 色は brand（装飾用 #1DB446）と primary（アクション用・AA 準拠の暗色化緑）を分離し、text/textMuted/background/destructive/border 等の意味役割で定義する
   - LINE 用セットは現行 5 色を意味役割名（headline/body/description/caption/successBackground/action）で保持し、値は現行と同一にする
@@ -116,3 +116,10 @@
   - 完了条件: 全 CI ジョブ緑＋差分記録が実装ノートに残っている
   - _Requirements: 6.1, 6.2, 6.4_
   - _Depends: 1.3_
+
+## Implementation Notes
+
+- 1.1: shadow トークンは rgba を避け 8 桁アルファ hex（#0000000D 等）で表現 → タスク 2 の theme-sync 照合とタスク 5.1 のガード regex は 8 桁 hex を考慮すること
+- 1.1: colors.ts 冒頭コメントの「#1DB446 は白文字と約 2.2:1」は実計算 2.74:1（結論の AA 非準拠は不変）→ タスク 1.2 でコメント数値を修正
+- 1.1: primary は #15803D で仮確定（白文字と 5.016:1・レビュアーが独立計算で確認済み）。1.2 の網羅テストで最終確定
+- 1.1: workspace ビルドが store-detail/next-env.d.ts を自動書き換えする（Next の副産物・タスクと無関係なら revert する）
