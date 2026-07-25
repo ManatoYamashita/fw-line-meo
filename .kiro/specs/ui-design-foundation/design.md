@@ -151,10 +151,10 @@ ts/packages/ui/
 ### 各 Web アプリ（3 面共通パターン・パスはアプリごとに読み替え）
 
 - `ts/apps/survey-web/postcss.config.mjs` — 新規（`@tailwindcss/postcss` のみ）
-- `ts/apps/survey-web/src/app/globals.css` — 新規: `@import "tailwindcss";` → `@import "@fwlm/ui/theme.css";` → `@source "../../../../../packages/ui/src";`
+- `ts/apps/survey-web/src/app/globals.css` — 新規: `@import "tailwindcss";` → `@import "@fwlm/ui/theme.css";` → `@source "../../../../packages/ui/src";`（`src/app/` から `packages/ui/src` は4階層。タスク3.1 実装時に `path.relative` と実ビルドで確定した正値）
 - `ts/apps/survey-web/src/app/layout.tsx` — 変更: globals.css import・body へ基本クラス
 - `ts/apps/survey-web/package.json` — 変更: deps に `@fwlm/ui: workspace:*`、devDeps に `tailwindcss` / `@tailwindcss/postcss`
-- store-detail は `app/` 直下（`app/globals.css`・`@source` の相対深度が 1 浅い）、dashboard-web は survey-web と同構成
+- store-detail は `app/` 直下（`app/globals.css` から `packages/ui/src` は3階層 `../../../packages/ui/src`）、dashboard-web は survey-web と同構成（`src/app/` から4階層 `../../../../packages/ui/src`）
 
 ### Modified Files（アプリ以外）
 

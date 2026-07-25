@@ -30,7 +30,7 @@
   - _Requirements: 1.1, 1.2, 5.3_
 
 - [ ] 3. Web 3 面への基盤接続（最小適用）
-- [ ] 3.1 (P) survey-web に Tailwind を接続し基本スタイルを適用する
+- [x] 3.1 (P) survey-web に Tailwind を接続し基本スタイルを適用する
   - PostCSS 設定・globals.css（tailwindcss import → theme.css import → UI パッケージソースへの @source）・layout への読込を配線する
   - トークンに基づくフォント・文字色・背景・余白が全画面に適用され、ブラウザ標準描画から脱却する
   - DOM 構造・情報設計・機能挙動（フォーム送信・API・導線）は変更しない
@@ -125,3 +125,5 @@
 - 1.1: workspace ビルドが store-detail/next-env.d.ts を自動書き換えする（Next の副産物・タスクと無関係なら revert する）
 - 1.3: 性能予算の基準線（Tailwind + Base UI 導入前）= survey-web client JS **182.8 KB gzip / 300 KB 予算**（余地 117.2 KB）。タスク 7.2 でこの値との差分を確認する
 - 2: `@fwlm/ui` はソース直配布（build script なし・exports が src を直接指す・dist なし）。theme-sync テストの hex 抽出は `#[0-9a-fA-F]{3,8}`（8桁アルファ影対応）。shadcn 意味論変数は全て `var(--color-*)` 参照で新規 hex を持ち込まない。cn は依存ゼロ簡易実装（6.1 で shadcn 標準の clsx/tailwind-merge へ整合予定）。package.json の `./components/*` exports は 6.1 向けの前方宣言（実体は未存在）
+- 3.1: **@source 相対深度はアプリ構成で異なる**（`path.relative` と実ビルドで実証）: survey-web/dashboard-web（`src/app/`）は4階層 `../../../../packages/ui/src`、store-detail（`app/` 直下）は3階層 `../../../packages/ui/src`。design.md:154 の5階層は誤記だったため修正済み。globals.css 3点セット順 = `@import "tailwindcss"` → `@import "@fwlm/ui/theme.css"` → `@source`。Tailwind v4 はランタイム JS ゼロで perf 増分0（182.8KB 据え置き）。body は意味論クラス（text-foreground 等）を使用。横スクロール対策は globals.css の `overflow-x: clip`
+- 3.1: survey-web の Dockerfile は 5.2 まで未変更 → **5.2 完了までコンテナ build（PR docker-build ゲート）は survey-web が赤**（ローカルは workspace リンクで緑・タスク分解上の想定）。PR は 5.2 完了後に作成すること

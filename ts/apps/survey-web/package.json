@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@fwlm/ui": "workspace:*",
     "@google/genai": "^1",
     "next": "^16",
     "react": "^19",
@@ -20,11 +21,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",
     "@testing-library/user-event": "^14",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "jsdom": "^25",
-    "msw": "^2.15.0"
+    "msw": "^2.15.0",
+    "tailwindcss": "^4"
   }
 }
