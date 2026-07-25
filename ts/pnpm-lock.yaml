@@ -196,6 +196,12 @@ importers:
         specifier: workspace:*
         version: link:../db
 
+  packages/ui:
+    devDependencies:
+      '@fwlm/design-tokens':
+        specifier: workspace:*
+        version: link:../design-tokens
+
 packages:
 
   '@asamuzakjp/css-color@3.2.0':

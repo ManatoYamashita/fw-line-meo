@@ -21,7 +21,7 @@
   - _Requirements: 6.1_
   - _Boundary: 性能計測_
 
-- [ ] 2. テーマ CSS と UI パッケージの器を作成する
+- [x] 2. テーマ CSS と UI パッケージの器を作成する
   - UI パッケージをソース直配布（build script なし・exports がソースを指す）で新設する
   - theme.css に Tailwind v4 の @theme トークン（デザイントークンと同値）と shadcn 規約の意味論的 CSS 変数を定義する
   - Base UI 必須ベーススタイル（ルート isolation・body の position・グローバル focus-visible 既定）を theme.css に含める
@@ -124,3 +124,4 @@
 - 1.1: primary は #15803D で仮確定（白文字と 5.016:1・レビュアーが独立計算で確認済み）。1.2 の網羅テストで最終確定
 - 1.1: workspace ビルドが store-detail/next-env.d.ts を自動書き換えする（Next の副産物・タスクと無関係なら revert する）
 - 1.3: 性能予算の基準線（Tailwind + Base UI 導入前）= survey-web client JS **182.8 KB gzip / 300 KB 予算**（余地 117.2 KB）。タスク 7.2 でこの値との差分を確認する
+- 2: `@fwlm/ui` はソース直配布（build script なし・exports が src を直接指す・dist なし）。theme-sync テストの hex 抽出は `#[0-9a-fA-F]{3,8}`（8桁アルファ影対応）。shadcn 意味論変数は全て `var(--color-*)` 参照で新規 hex を持ち込まない。cn は依存ゼロ簡易実装（6.1 で shadcn 標準の clsx/tailwind-merge へ整合予定）。package.json の `./components/*` exports は 6.1 向けの前方宣言（実体は未存在）
