@@ -54,6 +54,9 @@ importers:
 
   apps/dashboard-web:
     dependencies:
+      '@fwlm/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       firebase:
         specifier: ^12
         version: 12.16.0
@@ -67,6 +70,9 @@ importers:
         specifier: ^19
         version: 19.2.7(react@19.2.7)
     devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4
+        version: 4.3.3
       '@testing-library/react':
         specifier: ^16
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -79,6 +85,9 @@ importers:
       jsdom:
         specifier: ^25
         version: 25.0.1
+      tailwindcss:
+        specifier: ^4
+        version: 4.3.3
 
   apps/delivery-job:
     dependencies:

@@ -46,7 +46,7 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.4_
   - _Boundary: store-detail 接続点_
 
-- [ ] 3.3 (P) dashboard-web に Tailwind を接続し基本スタイルを適用する
+- [x] 3.3 (P) dashboard-web に Tailwind を接続し基本スタイルを適用する
   - 3.1 と同一の配線。認証ガード・Firebase 初期化等の既存クライアント境界に触れない
   - 注記: lockfile 共有更新の集約は 3.1 の注記に同じ
   - 完了条件: 既存テストが全緑のまま、ログイン画面と一覧画面がトークンベースの基本スタイルで描画される
@@ -127,3 +127,4 @@
 - 2: `@fwlm/ui` はソース直配布（build script なし・exports が src を直接指す・dist なし）。theme-sync テストの hex 抽出は `#[0-9a-fA-F]{3,8}`（8桁アルファ影対応）。shadcn 意味論変数は全て `var(--color-*)` 参照で新規 hex を持ち込まない。cn は依存ゼロ簡易実装（6.1 で shadcn 標準の clsx/tailwind-merge へ整合予定）。package.json の `./components/*` exports は 6.1 向けの前方宣言（実体は未存在）
 - 3.1: **@source 相対深度はアプリ構成で異なる**（`path.relative` と実ビルドで実証）: survey-web/dashboard-web（`src/app/`）は4階層 `../../../../packages/ui/src`、store-detail（`app/` 直下）は3階層 `../../../packages/ui/src`。design.md:154 の5階層は誤記だったため修正済み。globals.css 3点セット順 = `@import "tailwindcss"` → `@import "@fwlm/ui/theme.css"` → `@source`。Tailwind v4 はランタイム JS ゼロで perf 増分0（182.8KB 据え置き）。body は意味論クラス（text-foreground 等）を使用。横スクロール対策は globals.css の `overflow-x: clip`
 - 3.1: survey-web の Dockerfile は 5.2 まで未変更 → **5.2 完了までコンテナ build（PR docker-build ゲート）は survey-web が赤**（ローカルは workspace リンクで緑・タスク分解上の想定）。PR は 5.2 完了後に作成すること
+- 3.3: dashboard-web は本タスクで**初の workspace 依存（@fwlm/ui）**を得た。現行 Dockerfile は packages/* を COPY しない前提のコメント付き → 5.2 で design-tokens + ui のマニフェスト COPY 追加が必須（3面とも 5.2 で対応）。AuthProvider のクライアント境界は不変
