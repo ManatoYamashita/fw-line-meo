@@ -39,7 +39,7 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.4_
   - _Boundary: survey-web 接続点_
 
-- [ ] 3.2 (P) store-detail に Tailwind を接続し基本スタイルを適用する
+- [x] 3.2 (P) store-detail に Tailwind を接続し基本スタイルを適用する
   - 3.1 と同一の配線（app 直下構成のため globals.css の位置と @source の相対深度が異なる点に注意）
   - 注記: lockfile 共有更新の集約は 3.1 の注記に同じ
   - 完了条件: 既存テストが全緑のまま、LIFF 想定のモバイル幅で横スクロールが発生しない
