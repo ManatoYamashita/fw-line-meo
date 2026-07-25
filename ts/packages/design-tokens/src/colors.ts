@@ -1,8 +1,8 @@
 // 色トークンの単一定義箇所（Requirements 1.1, 1.3 / design.md「@fwlm/design-tokens」）。
-// - brand は LINE ブランド緑 #1DB446（白文字と約 2.2:1 で WCAG AA 非準拠）。装飾・アイコン・
+// - brand は LINE ブランド緑 #1DB446（白文字と約 2.74:1 で WCAG AA 非準拠）。装飾・アイコン・
 //   大テキスト専用とし、アクション色には使用しない。
 // - primary はアクション用の暗色化緑。primaryForeground と 4.5:1 以上のコントラストを持つ値を
-//   採用する（網羅的な機械検証はタスク 1.2 の colors.test.ts が担い、最終値もそこで確定する）。
+//   採用する（網羅的な機械検証は test/colors.test.ts が担う）。
 // - lineColors は Flex Message（非 Web コンテンツ）用のため AA 検証対象外。値は現行
 //   messages.ts の直書き色と同一に保ち、置換時に見た目が変わらないことを保証する。
 
@@ -49,7 +49,7 @@ export interface LineColorTokens {
 export const colors: ColorTokens = {
   brand: '#1DB446',
   brandSubtle: '#F0FBF4',
-  // 仮確定値: #1DB446 系の暗色化緑（白文字と約 5.0:1）。タスク 1.2 の AA 機械検証で最終確定する。
+  // 確定値: #1DB446 系の暗色化緑（白文字と約 5.02:1）。test/colors.test.ts の AA 機械検証が担保する。
   primary: '#15803D',
   primaryForeground: '#FFFFFF',
   text: '#333333',
