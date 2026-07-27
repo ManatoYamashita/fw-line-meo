@@ -94,7 +94,7 @@
   - 完了条件: コンポーネントテストが緑（キーボードのみでの操作完結を含む）
   - _Requirements: 2.3, 2.4, 5.1_
 
-- [ ] 6.3 (P) 3 面からの利用可能性を実証する
+- [x] 6.3 (P) 3 面からの利用可能性を実証する
   - 各アプリから代表部品を import してビルドし、生成 CSS に部品のユーティリティクラスが含まれる（@source 検出が機能している）ことを確認する
   - 検証は生成 CSS の検査と import ビルド確認のみで行い、画面への恒久的な部品配置・情報設計の変更は行わない
   - 画面の情報設計は変更しない（本格置換は面ごとの子 Issue の責務）
@@ -136,5 +136,8 @@
 - 6.2: **jsdom 25 に PointerEvent が無く** Base UI の Checkbox/Radio の Space 起動が落ちる（`ownerWindow(...).PointerEvent is not a constructor`）→ テスト内に MouseEvent 継承の最小互換実装が必要。面ごと Issue（#43〜#45）で同部品をテストする際も同じ壁に当たる
 - 6.2: requirements 2.1 の成功通知を Alert `success` 変種で解消。theme.css に `--success: var(--color-primary)`（**AA 準拠の #15803D 系。brand #1DB446 は 2.74:1 で不可**）と `@theme inline` の `--color-success` を追加し、この対応付け自体を theme-sync テストで固定（brand を指すと赤）。**`@theme inline` への公開を忘れるとユーティリティが静かに生成されない**
 - 6.2: Spinner の aria-label を「読み込み中」へ日本語化（呼び出し側で上書き可）。jsdom は Tailwind を解決しないため視覚状態はクラス／data 属性の存在で検証（実描画は 6.3 の生成 CSS 検査と 7.1 の E2E が担う）
+- 6.3: 3面の利用可能性は `packages/ui/test/app-integration.test.ts`（61テスト）で**恒久ガード化**。4層検証（依存／exports 解決／3点セット配線／実 Tailwind コンパイルでの生成）。**@source は文字列比較でなく realpath 解決一致で検証**するため 4階層/3階層の構成差に追従しつつ深度誤りは検出する。破壊2形態（深度誤り・行削除）で赤化することを実証済み
+- 6.3: **部品を実 import した状態の実測は 196.1 KB gzip（+13.3 KB）**・予算 300KB に対し余地 103.9 KB（面ごと実装 #43〜#45 の判断材料）。部品未使用の現状は 182.8 KB（増分ゼロ）
+- 6.3: Next.js の private folder 規約（`_` 始まりはルーティング対象外）に注意 — 一時検証ルートを `__name` にするとビルドされず検証が空振りする
 - 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）
