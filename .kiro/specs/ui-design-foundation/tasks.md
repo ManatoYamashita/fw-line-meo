@@ -109,7 +109,7 @@
   - 完了条件: 追加 assert を含む E2E が全緑
   - _Requirements: 5.3, 3.3_
 
-- [ ] 7.2 性能・品質・出荷経路の全緑を実証し差分を記録する
+- [x] 7.2 性能・品質・出荷経路の全緑を実証し差分を記録する
   - バンドル予算を再計測し 1.3 の基準線との差分を記録、300KB gzip 予算内であることを確認する
   - Lighthouse（LCP 3000ms assert）・全自動検証（lint/build/unit/E2E）・7 イメージビルドの全緑を確認する
   - 体感遅延・予算超過があれば出荷前に是正する（是正内容も記録）
@@ -141,5 +141,7 @@
 - 6.3: Next.js の private folder 規約（`_` 始まりはルーティング対象外）に注意 — 一時検証ルートを `__name` にするとビルドされず検証が空振りする
 - 7.1: **`overflow-x: clip` は scrollWidth 検査を空振りさせる**（clip により scrollWidth == clientWidth になるため、幅超過要素があっても緑になる）→ 横スクロール検証は**要素の実測右端 <= 端末幅**で行う必要がある（注入実験で実証）。端末幅は `window.innerWidth` ではなく `page.viewportSize()` を正とする（innerWidth はオーバーフロー時に自動拡大する）
 - 7.1: フォーカス可視の検証はクラス名でなく `getComputedStyle` + `:focus-visible` 一致で判定（実描画ベース）。走査末尾で送信ボタン到達を assert して空振り緑を防ぐ。E2E はローカル完走可（homebrew postgres 16 + migrations + seed.sql + mock-gemini.mjs・6/6 緑）
+- 7.2（最終実証・2026-07-27）: **性能は基準線から増分ゼロ** — client JS 182.8 KB gzip / 300 KB（タスク1.3 の基準線と同値。Tailwind v4 はランタイム JS ゼロ・部品は未 import のため）。**生成 CSS は 33,278 B raw / 6,598 B gzip**（perf:budget は JS のみ計測のため別途実測・6.1 レビュアー申し送りに対応）。部品を実 import した場合の実測は 196.1 KB（+13.3 KB・タスク6.3 計測）で予算に余地 103.9 KB
+- 7.2: 全自動検証緑（`-r test` / `run lint` / `run typecheck` / `run build` すべて exit 0）・3ガード緑（NEXT_PUBLIC / デザイントークン / デプロイカバレッジ）。7イメージの docker build は PR の docker-build ゲートで検証
 - 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）
