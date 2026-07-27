@@ -104,7 +104,7 @@
   - _Boundary: 3 アプリのビルド検証_
 
 - [ ] 7. Validation: 非後退の総合実証
-- [ ] 7.1 E2E にフォーカス可視・横スクロール検証を追加する
+- [x] 7.1 E2E にフォーカス可視・横スクロール検証を追加する
   - survey-web の既存 E2E にキーボードフォーカスの可視確認とモバイルビューポートでの横スクロール不在 assert を追加する
   - 完了条件: 追加 assert を含む E2E が全緑
   - _Requirements: 5.3, 3.3_
@@ -139,5 +139,7 @@
 - 6.3: 3面の利用可能性は `packages/ui/test/app-integration.test.ts`（61テスト）で**恒久ガード化**。4層検証（依存／exports 解決／3点セット配線／実 Tailwind コンパイルでの生成）。**@source は文字列比較でなく realpath 解決一致で検証**するため 4階層/3階層の構成差に追従しつつ深度誤りは検出する。破壊2形態（深度誤り・行削除）で赤化することを実証済み
 - 6.3: **部品を実 import した状態の実測は 196.1 KB gzip（+13.3 KB）**・予算 300KB に対し余地 103.9 KB（面ごと実装 #43〜#45 の判断材料）。部品未使用の現状は 182.8 KB（増分ゼロ）
 - 6.3: Next.js の private folder 規約（`_` 始まりはルーティング対象外）に注意 — 一時検証ルートを `__name` にするとビルドされず検証が空振りする
+- 7.1: **`overflow-x: clip` は scrollWidth 検査を空振りさせる**（clip により scrollWidth == clientWidth になるため、幅超過要素があっても緑になる）→ 横スクロール検証は**要素の実測右端 <= 端末幅**で行う必要がある（注入実験で実証）。端末幅は `window.innerWidth` ではなく `page.viewportSize()` を正とする（innerWidth はオーバーフロー時に自動拡大する）
+- 7.1: フォーカス可視の検証はクラス名でなく `getComputedStyle` + `:focus-visible` 一致で判定（実描画ベース）。走査末尾で送信ボタン到達を assert して空振り緑を防ぐ。E2E はローカル完走可（homebrew postgres 16 + migrations + seed.sql + mock-gemini.mjs・6/6 緑）
 - 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）
