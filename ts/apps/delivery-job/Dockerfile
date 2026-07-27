@@ -13,6 +13,7 @@ FROM base AS deps
 WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
+COPY packages/design-tokens/package.json packages/design-tokens/
 COPY apps/delivery-job/package.json apps/delivery-job/
 RUN pnpm install --frozen-lockfile
 
@@ -24,6 +25,7 @@ WORKDIR /repo
 COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
+RUN pnpm -C packages/design-tokens run build
 RUN pnpm -C apps/delivery-job run build
 
 FROM base AS runner
@@ -35,6 +37,7 @@ WORKDIR /repo
 ENV NODE_ENV=production
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/db ./packages/db
+COPY --from=build /repo/packages/design-tokens ./packages/design-tokens
 COPY --from=build /repo/apps/delivery-job/node_modules ./apps/delivery-job/node_modules
 COPY --from=build /repo/apps/delivery-job/dist ./apps/delivery-job/dist
 COPY --from=build /repo/apps/delivery-job/package.json ./apps/delivery-job/package.json

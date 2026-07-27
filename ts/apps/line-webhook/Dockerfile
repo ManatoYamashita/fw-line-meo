@@ -13,6 +13,7 @@ FROM base AS deps
 WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
+COPY packages/design-tokens/package.json packages/design-tokens/
 COPY packages/store-identification/package.json packages/store-identification/
 COPY apps/line-webhook/package.json apps/line-webhook/
 RUN pnpm install --frozen-lockfile
@@ -25,6 +26,7 @@ WORKDIR /repo
 COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
+RUN pnpm -C packages/design-tokens run build
 RUN pnpm -C packages/store-identification run build
 RUN pnpm -C apps/line-webhook run build
 
@@ -37,6 +39,7 @@ WORKDIR /repo
 ENV NODE_ENV=production
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/db ./packages/db
+COPY --from=build /repo/packages/design-tokens ./packages/design-tokens
 COPY --from=build /repo/packages/store-identification ./packages/store-identification
 COPY --from=build /repo/apps/line-webhook/node_modules ./apps/line-webhook/node_modules
 COPY --from=build /repo/apps/line-webhook/dist ./apps/line-webhook/dist

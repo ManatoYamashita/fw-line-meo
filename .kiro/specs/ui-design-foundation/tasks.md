@@ -72,7 +72,7 @@
   - _Depends: 2, 4_
   - _Boundary: ガードスクリプト_
 
-- [ ] 5.2 (P) コンテナビルド経路を新パッケージ構成に整合させる
+- [x] 5.2 (P) コンテナビルド経路を新パッケージ構成に整合させる
   - Web 3 面のビルド定義に新パッケージ 2 つのマニフェストコピーを追加する（ソース直配布のためビルド段の追加は不要）
   - LINE 面は dist 配布パッケージの 3 点則（deps コピー・ビルド・runner 同梱）に従って追加する
   - 完了条件: PR 段階の 7 イメージ docker build 検証が全緑
@@ -129,4 +129,5 @@
 - 3.1: survey-web の Dockerfile は 5.2 まで未変更 → **5.2 完了までコンテナ build（PR docker-build ゲート）は survey-web が赤**（ローカルは workspace リンクで緑・タスク分解上の想定）。PR は 5.2 完了後に作成すること
 - 3.3: dashboard-web は本タスクで**初の workspace 依存（@fwlm/ui）**を得た。現行 Dockerfile は packages/* を COPY しない前提のコメント付き → 5.2 で design-tokens + ui のマニフェスト COPY 追加が必須（3面とも 5.2 で対応）。AuthProvider のクライアント境界は不変
 - 4: messages.ts の hex 8箇所を lineColors 参照へ置換（残存ゼロ）。**同値 #1DB446 は役割で使い分け**（完了見出し=headline / primary ボタン=action）。値は全て現行と同一のため見た目不変。既存139テスト全緑が Flex 構造・文言不変の証拠。line-webhook は dist 配布の design-tokens のみ依存（ソース直配布の @fwlm/ui は tsc 解決不可のため依存禁止）
+- 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）
