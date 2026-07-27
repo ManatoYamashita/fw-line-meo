@@ -100,6 +100,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/design-tokens
       '@fwlm/store-identification':
         specifier: workspace:*
         version: link:../../packages/store-identification
