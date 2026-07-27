@@ -78,6 +78,24 @@ const REPRESENTATIVE_UTILITIES: readonly { readonly componentFile: string; reado
 /** アプリ自身の layout が使う基本クラス。コンパイル自体が健全であることの対照に使う。 */
 const APP_OWN_UTILITY = 'bg-background';
 
+/** 見出しレベル（h1〜h6）。 */
+const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
+
+/**
+ * 生成 CSS から「単独セレクタの h{level} 規則」を全て取り出す。
+ * Preflight のリセットは `h1, h2, h3, h4, h5, h6 { … }` というセレクタリストのため、
+ * `h1` の直後に `{` を要求する本パターンには一致しない（後段の上書き規則だけを取れる）。
+ */
+function standaloneHeadingRules(css: string, level: number): readonly { index: number; body: string }[] {
+  const pattern = new RegExp(`(?:^|[\\s,}])(h${level}\\s*\\{([^}]*)\\})`, 'g');
+  const rules: { index: number; body: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(css)) !== null) {
+    rules.push({ index: match.index, body: match[2] ?? '' });
+  }
+  return rules;
+}
+
 /** 生成 CSS に「単独のユーティリティ規則」として現れるかを判定する（`.bg-primary { … }`）。 */
 function hasUtilityRule(css: string, utility: string): boolean {
   const escaped = utility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -237,6 +255,63 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
         ).toEqual([]);
       },
     );
+
+    // Tailwind の Preflight は `h1,h2,h3,h4,h5,h6 { font-size: inherit; font-weight: inherit }` を
+    // 敷くため、theme.css が既定を戻さないと **見出しが本文と同一サイズ・同一ウェイトで描画される**
+    // （ブラウザ標準描画より視覚階層が劣化する）。しかも CSS は無言でカスケードするため、
+    // 画面を目視するまで誰も気づけない。ここでは「Preflight より後段に h1〜h6 の既定が生成され、
+    // トークン由来のサイズを持つ」ことを実コンパイル結果で固定する（Requirements 3.1）。
+    it('見出し既定（h1〜h6）が Preflight のリセットより後段に生成される（Requirements 3.1）', () => {
+      const preflightResetIndex = compiled.search(
+        /h1,\s*h2,\s*h3,\s*h4,\s*h5,\s*h6\s*\{[^}]*font-size:\s*inherit/,
+      );
+      expect(
+        preflightResetIndex,
+        'Preflight の見出しリセットが見つかりません（Tailwind の前提が変わっています）',
+      ).toBeGreaterThanOrEqual(0);
+
+      for (const level of HEADING_LEVELS) {
+        const rules = standaloneHeadingRules(compiled, level);
+        expect(
+          rules.length,
+          `h${level} の既定規則が生成 CSS にありません（Preflight のリセットが残り、` +
+            '見出しが本文と同じ描画になります）',
+        ).toBeGreaterThan(0);
+
+        const effective = rules[rules.length - 1]!;
+        expect(
+          effective.index,
+          `h${level} の既定が Preflight のリセットより前にあるため上書きできていません`,
+        ).toBeGreaterThan(preflightResetIndex);
+        // サイズはトークン（--text-*）由来であること（生の px/rem 直書きを許さない）。
+        expect(effective.body, `h${level} の font-size がトークン参照ではありません`).toMatch(
+          /font-size:\s*var\(--text-[a-z0-9]+\)/,
+        );
+        expect(effective.body, `h${level} の font-weight が指定されていません`).toMatch(
+          /font-weight:\s*\d+/,
+        );
+      }
+    });
+
+    it('見出しのサイズ階層が h1 → h6 で単調に小さくなる（Requirements 3.1）', () => {
+      // トークン名（--text-2xl 等）を theme.css の @theme 定義値へ引き当てて実寸で比較する。
+      const themeCss = readFileSync(join(uiSrcDir, 'theme.css'), 'utf8');
+      const sizes = HEADING_LEVELS.map((level) => {
+        const rules = standaloneHeadingRules(compiled, level);
+        const body = rules[rules.length - 1]?.body ?? '';
+        const tokenName = /font-size:\s*var\((--text-[a-z0-9]+)\)/.exec(body)?.[1] ?? '';
+        const remValue = new RegExp(`${tokenName}:\\s*([0-9.]+)rem`).exec(themeCss)?.[1];
+        expect(remValue, `${tokenName} が theme.css の @theme に定義されていません`).toBeDefined();
+        return Number.parseFloat(remValue ?? '0');
+      });
+
+      for (let i = 1; i < sizes.length; i += 1) {
+        expect(
+          sizes[i]!,
+          `h${i + 1}(${sizes[i]}rem) が h${i}(${sizes[i - 1]}rem) 以上のサイズになっています`,
+        ).toBeLessThan(sizes[i - 1]!);
+      }
+    });
 
     it('@source を外すと部品のユーティリティが消える（ガードが空振りしていないことの証明）', () => {
       // ここが落ちる場合、@source 無しでも部品が拾えている＝本テストの 4 層目が意味を失っている。

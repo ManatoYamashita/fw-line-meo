@@ -27,6 +27,7 @@ import {
   FieldError,
   FieldLabel,
 } from '../src/components/field';
+import { Heading } from '../src/components/heading';
 import { Input } from '../src/components/input';
 import { RadioGroup, RadioGroupItem } from '../src/components/radio-group';
 import { Spinner } from '../src/components/spinner';
@@ -322,6 +323,86 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
     for (const alert of screen.getAllByRole('alert')) {
       expect(classesOf(alert)).not.toMatch(RAW_HEX);
       expect(classesOf(alert)).not.toMatch(RAW_PALETTE_COLOR);
+    }
+  });
+});
+
+describe('Heading — ページ見出しの役割と階層（Requirements 2.1, 3.1, 5.1）', () => {
+  it('heading ロールで公開され、支援技術に見出しとして通知される', () => {
+    render(<Heading level={1}>店舗の詳細</Heading>);
+
+    const heading = screen.getByRole('heading', { name: '店舗の詳細' });
+    expect(heading.getAttribute('data-slot')).toBe('heading');
+  });
+
+  it('level が <h1>〜<h6> のセマンティック要素に対応する', () => {
+    render(
+      <>
+        <Heading level={1}>レベル1</Heading>
+        <Heading level={2}>レベル2</Heading>
+        <Heading level={3}>レベル3</Heading>
+        <Heading level={4}>レベル4</Heading>
+        <Heading level={5}>レベル5</Heading>
+        <Heading level={6}>レベル6</Heading>
+      </>,
+    );
+
+    for (const level of [1, 2, 3, 4, 5, 6] as const) {
+      const heading = screen.getByRole('heading', { name: `レベル${level}`, level });
+      expect(heading.tagName).toBe(`H${level}`);
+      // 見出しレベルは支援技術（role/level）と視覚階層（data-level）の単一起点で表現する。
+      expect(heading.getAttribute('data-level')).toBe(String(level));
+    }
+  });
+
+  it('level ごとに異なるサイズユーティリティが既定で当たり、視覚階層が生まれる', () => {
+    render(
+      <>
+        <Heading level={1}>レベル1</Heading>
+        <Heading level={2}>レベル2</Heading>
+        <Heading level={3}>レベル3</Heading>
+      </>,
+    );
+
+    const sizes = ([1, 2, 3] as const).map((level) =>
+      classesOf(screen.getByRole('heading', { name: `レベル${level}`, level })),
+    );
+
+    // typography トークンのサイズ階層（--text-2xl / --text-xl / --text-lg）由来のユーティリティ。
+    expect(sizes[0]).toContain('text-2xl');
+    expect(sizes[1]).toContain('text-xl');
+    expect(sizes[2]).toContain('text-lg');
+    expect(new Set(sizes).size).toBe(3);
+  });
+
+  it('size で既定のサイズ階層を上書きでき、要素の意味論（level）とは独立している', () => {
+    render(
+      <Heading level={3} size="2xl">
+        大きく見せる第3階層
+      </Heading>,
+    );
+
+    const heading = screen.getByRole('heading', { name: '大きく見せる第3階層', level: 3 });
+    expect(heading.tagName).toBe('H3');
+    expect(classesOf(heading)).toContain('text-2xl');
+    expect(classesOf(heading)).not.toContain('text-lg');
+  });
+
+  it('全レベルが意味論トークンのみを使い、生の色（hex / パレット色クラス）を持たない', () => {
+    render(
+      <>
+        <Heading level={1}>レベル1</Heading>
+        <Heading level={2}>レベル2</Heading>
+        <Heading level={3}>レベル3</Heading>
+        <Heading level={4}>レベル4</Heading>
+        <Heading level={5}>レベル5</Heading>
+        <Heading level={6}>レベル6</Heading>
+      </>,
+    );
+
+    for (const heading of screen.getAllByRole('heading')) {
+      expect(classesOf(heading)).not.toMatch(RAW_HEX);
+      expect(classesOf(heading)).not.toMatch(RAW_PALETTE_COLOR);
     }
   });
 });
