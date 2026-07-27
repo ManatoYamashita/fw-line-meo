@@ -27,6 +27,10 @@ jobs:
       - name: NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
+      - name: デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）
+        # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
+        # theme.css がトークンと同値であることを照合する（read-only grep 検証）。
+        run: bash scripts/check-design-tokens.sh
       - name: run-services デプロイカバレッジガード（Issue #33）
         # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
         # 放置される事故の再発防止（同じく read-only grep 検証）。

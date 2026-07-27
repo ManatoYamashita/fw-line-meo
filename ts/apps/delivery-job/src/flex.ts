@@ -15,6 +15,7 @@
 // 厳密なローカル型として定義する（no `any`）。詳細は CONCERNS 参照。
 
 import type { DailySummaryCompetitor, DailySummaryNewReview, DailySummaryRow } from '@fwlm/db';
+import { lineColors } from '@fwlm/design-tokens';
 
 // --- Flex JSON の最小・厳密な型（このモジュールが実際に使う形のみ） -----------------
 
@@ -161,7 +162,7 @@ function buildHeader(summary: DailySummaryRow): FlexBox {
         type: 'text',
         text: `前日比: ${diffText}`,
         size: 'sm',
-        color: '#666666',
+        color: lineColors.description,
       });
     }
   }
@@ -180,7 +181,7 @@ function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
         type: 'text',
         text: '自店の評価',
         size: 'sm',
-        color: '#aaaaaa',
+        color: lineColors.muted,
       },
       {
         type: 'text',
@@ -198,7 +199,7 @@ function formatNewReviewExcerpt(review: DailySummaryNewReview): FlexText {
     type: 'text',
     text: `${review.authorName}さん ${stars}「${review.textExcerpt}」`,
     size: 'sm',
-    color: '#666666',
+    color: lineColors.description,
     wrap: true,
   };
 }
@@ -208,7 +209,7 @@ function buildNewReviewsSection(summary: DailySummaryRow): FlexBox {
     type: 'text',
     text: '新着クチコミ',
     size: 'sm',
-    color: '#aaaaaa',
+    color: lineColors.muted,
   };
 
   if (summary.new_review_count <= 0) {
@@ -259,7 +260,7 @@ function formatCompetitorLine(competitor: DailySummaryCompetitor): FlexBox {
     contents: [
       { type: 'text', text: competitor.name, size: 'sm', wrap: true, flex: 3 },
       { type: 'text', text: `★${ratingText}`, size: 'sm', align: 'end', flex: 1 },
-      { type: 'text', text: diffText, size: 'sm', align: 'end', color: '#aaaaaa', flex: 1 },
+      { type: 'text', text: diffText, size: 'sm', align: 'end', color: lineColors.muted, flex: 1 },
     ],
   };
 }
@@ -269,7 +270,7 @@ function buildCompetitorsSection(summary: DailySummaryRow): FlexBox {
     type: 'text',
     text: '競合との比較',
     size: 'sm',
-    color: '#aaaaaa',
+    color: lineColors.muted,
   };
 
   // R1.3: 競合が 1 店も見つからない場合は自店のみの旨を明示する。
@@ -320,7 +321,7 @@ function buildFooter(liffUrl: string): FlexBox {
         type: 'text',
         text: GOOGLE_ATTRIBUTION_TEXT,
         size: 'xxs',
-        color: '#aaaaaa',
+        color: lineColors.muted,
         align: 'center',
       },
     ],

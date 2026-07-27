@@ -11,15 +11,18 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@fwlm/ui": "workspace:*",
     "firebase": "^12",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "jsdom": "^25"
+    "jsdom": "^25",
+    "tailwindcss": "^4"
   }
 }

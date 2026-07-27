@@ -1,17 +1,19 @@
 {
-  "name": "@fwlm/delivery-job",
+  "name": "@fwlm/ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
+  "exports": {
+    "./theme.css": "./src/theme.css",
+    "./lib/utils": "./src/lib/utils.ts",
+    "./components/*": "./src/components/*.tsx"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
-    "@fwlm/db": "workspace:*",
+  "devDependencies": {
     "@fwlm/design-tokens": "workspace:*"
   }
 }

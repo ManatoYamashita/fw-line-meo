@@ -1,0 +1,123 @@
+/* @fwlm/ui — theme.css
+ * Tailwind CSS v4 の @theme デザイントークン（@fwlm/design-tokens と同値）・
+ * shadcn 規約の意味論的 CSS 変数・Base UI 必須ベーススタイルの単一 CSS。
+ * design.md「@fwlm/ui — theme.css」/ Requirements 1.1, 1.2, 5.3。
+ *
+ * 各 Web アプリの globals.css からは次の順で読み込む（タスク 3.x で配線）:
+ *   @import "tailwindcss";
+ *   @import "@fwlm/ui/theme.css";
+ *   @source "<相対パス>/packages/ui/src";
+ *
+ * 重要: ここに書く全 hex 値は @fwlm/design-tokens の値集合に含まれていなければならない
+ * （test/theme-sync.test.ts と scripts/check-design-tokens.sh が機械保証する）。
+ * 色を追加・変更するときは必ず @fwlm/design-tokens 側を先に更新すること。
+ */
+
+/* --- Tailwind v4 デザイントークン（@fwlm/design-tokens と同値） --- */
+@theme {
+  /* Colors（design-tokens colors） */
+  --color-brand: #1DB446;
+  --color-brand-subtle: #F0FBF4;
+  --color-primary: #15803D;
+  --color-primary-foreground: #FFFFFF;
+  --color-text: #333333;
+  --color-text-muted: #666666;
+  --color-background: #FFFFFF;
+  --color-destructive: #DC2626;
+  --color-destructive-foreground: #FFFFFF;
+  --color-border: #DDDDDD;
+
+  /* Typography（design-tokens typography） */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans", Meiryo, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+
+  /* Spacing（design-tokens spacing） */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  /* Radius（design-tokens radius） */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+
+  /* Shadow（design-tokens shadow・影色は 8 桁アルファ hex） */
+  --shadow-sm: 0 1px 2px 0 #0000000D;
+  --shadow-md: 0 4px 6px -1px #0000001A, 0 2px 4px -2px #0000001A;
+  --shadow-lg: 0 10px 15px -3px #0000001A, 0 4px 6px -4px #0000001A;
+}
+
+/* --- shadcn 規約の意味論的 CSS 変数 ---
+ * ベンダリングした Base UI ベースのコンポーネント（タスク 6.1）が無改変で機能するための下地。
+ * 値はすべて上の @theme デザイントークンを var() で参照する（hex を二重に持たない）。 */
+:root {
+  --background: var(--color-background);
+  --foreground: var(--color-text);
+  --card: var(--color-background);
+  --card-foreground: var(--color-text);
+  --popover: var(--color-background);
+  --popover-foreground: var(--color-text);
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-primary-foreground);
+  --secondary: var(--color-brand-subtle);
+  --secondary-foreground: var(--color-text);
+  --muted: var(--color-brand-subtle);
+  --muted-foreground: var(--color-text-muted);
+  --accent: var(--color-brand-subtle);
+  --accent-foreground: var(--color-text);
+  --destructive: var(--color-destructive);
+  --destructive-foreground: var(--color-destructive-foreground);
+  --border: var(--color-border);
+  --input: var(--color-border);
+  --ring: var(--color-primary);
+  --radius: var(--radius-md);
+}
+
+/* shadcn 意味論名を Tailwind の色ユーティリティ名前空間へ公開する
+ * （bg-card / text-muted-foreground / bg-secondary / border-input 等の生成に必要）。
+ * design-tokens に既存の名前（background / primary / primary-foreground / destructive /
+ * destructive-foreground / border）は @theme で定義済みのため再定義しない（循環参照防止）。 */
+@theme inline {
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+/* --- Base UI 必須ベーススタイル + グローバル focus-visible 既定 ---
+ * research.md「Base UI 必須セットアップ」/ Requirements 5.3。 */
+@layer base {
+  /* Portal 描画の z-index 競合を防ぐためルート要素に独立スタッキングコンテキストを作る。 */
+  html {
+    isolation: isolate;
+  }
+
+  /* iOS 26+ Safari での Portal 位置ずれを防ぐ。 */
+  body {
+    position: relative;
+  }
+
+  /* キーボード操作時に可視フォーカスリングを常に提示する（アクセシビリティ既定）。 */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
