@@ -47,7 +47,10 @@ describe('colors（Web 意味役割）', () => {
 });
 
 describe('lineColors（LINE Flex Message 用セット）', () => {
-  it('現行 5 色を意味役割名で保持し値が現行と同一である', () => {
+  // 値は LINE Flex の現行描画色と同一（見た目不変が不変条件）。
+  // muted は delivery-job（日次サマリー配信）の現行 #aaaaaa を意味役割化したもの。
+  // Flex の色指定は大小を区別しないため、大文字表記でも描画結果は現行と同一。
+  it('LINE Flex の現行色を意味役割名で保持し値が現行と同一である', () => {
     expect(lineColors).toEqual({
       headline: '#1DB446',
       body: '#333333',
@@ -55,6 +58,7 @@ describe('lineColors（LINE Flex Message 用セット）', () => {
       caption: '#888888',
       successBackground: '#F0FBF4',
       action: '#1DB446',
+      muted: '#AAAAAA',
     });
   });
 });

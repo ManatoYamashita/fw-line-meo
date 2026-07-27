@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@fwlm/db": "workspace:*"
+    "@fwlm/db": "workspace:*",
+    "@fwlm/design-tokens": "workspace:*"
   }
 }

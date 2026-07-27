@@ -94,6 +94,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/design-tokens
 
   apps/line-webhook:
     dependencies:

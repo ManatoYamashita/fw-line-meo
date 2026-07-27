@@ -44,6 +44,8 @@ export interface LineColorTokens {
   readonly successBackground: string;
   /** アクション・リンク（現 #1DB446）。 */
   readonly action: string;
+  /** 補助的な数値・ラベル（日次サマリーの前日比・競合星差など・現 #AAAAAA）。 */
+  readonly muted: string;
 }
 
 export const colors: ColorTokens = {
@@ -67,4 +69,5 @@ export const lineColors: LineColorTokens = {
   caption: '#888888',
   successBackground: '#F0FBF4',
   action: '#1DB446',
+  muted: '#AAAAAA',
 };
