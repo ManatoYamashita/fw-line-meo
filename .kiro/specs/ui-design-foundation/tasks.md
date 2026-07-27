@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Foundation: デザイントークン単一情報源の確立
+- [x] 1. Foundation: デザイントークン単一情報源の確立
 - [x] 1.1 デザイントークンパッケージを新設し全トークン値を単一定義する
   - 既存パッケージ雛形（dist 配布・tsc ビルド・test 分離）を踏襲し、フレームワーク非依存（依存ゼロ）のトークンパッケージを作る
   - 色は brand（装飾用 #1DB446）と primary（アクション用・AA 準拠の暗色化緑）を分離し、text/textMuted/background/destructive/border 等の意味役割で定義する
@@ -29,7 +29,7 @@
   - 完了条件: theme-sync テストが緑で、theme.css に意図的な未定義色を足すとテストが赤になる
   - _Requirements: 1.1, 1.2, 5.3_
 
-- [ ] 3. Web 3 面への基盤接続（最小適用）
+- [x] 3. Web 3 面への基盤接続（最小適用）
 - [x] 3.1 (P) survey-web に Tailwind を接続し基本スタイルを適用する
   - PostCSS 設定・globals.css（tailwindcss import → theme.css import → UI パッケージソースへの @source）・layout への読込を配線する
   - トークンに基づくフォント・文字色・背景・余白が全画面に適用され、ブラウザ標準描画から脱却する
@@ -62,7 +62,7 @@
   - _Depends: 1.1_
   - _Boundary: LINE メッセージ色置換_
 
-- [ ] 5. ガードと出荷経路の整合
+- [x] 5. ガードと出荷経路の整合
 - [x] 5.1 (P) 直書き色ガードを新設し CI に組み込む
   - アプリ層と UI コンポーネント層での hex 色リテラル混入を検出して fail する（許可箇所はトークン定義と theme.css のみ・既存ガードと同形式の read-only 検証）
   - theme.css の全 hex がトークン定義の値集合に含まれることも同時に照合する
@@ -80,21 +80,21 @@
   - _Depends: 3.1, 3.2, 3.3, 4_
   - _Boundary: Dockerfile 4 面_
 
-- [ ] 6. 共通コンポーネント基盤（段階 2）
-- [ ] 6.1 共通コンポーネントの基盤セットをベンダリングする
+- [x] 6. 共通コンポーネント基盤（段階 2）
+- [x] 6.1 共通コンポーネントの基盤セットをベンダリングする
   - shadcn（base=Base UI・registry は @shadcn）で Button/Card/Badge/Alert/Spinner/Field/Input/Textarea/Checkbox/RadioGroup/Separator を UI パッケージへソース取込する
   - CLI 設定（components.json）・cn ユーティリティ・Base UI ランタイム依存の追加は本タスクが所有する
   - 取込後、意味論クラスのみ使用（生 hex・生色クラス禁止）・use client 明記・エイリアス解決を確認して所有コードとして整える
   - 完了条件: UI パッケージの lint/typecheck が緑で、全部品が named export として公開されている
   - _Requirements: 2.1_
 
-- [ ] 6.2 コンポーネントの a11y・状態表現スモークテストを追加する
+- [x] 6.2 コンポーネントの a11y・状態表現スモークテストを追加する
   - 代表部品（Button/Checkbox/Field）の role・キーボード操作・視覚状態と aria-invalid の同期を jsdom で検証する
   - 状態表現（hover/focus/disabled/エラー）が variant/data 属性規約で表現されることを確認する
   - 完了条件: コンポーネントテストが緑（キーボードのみでの操作完結を含む）
   - _Requirements: 2.3, 2.4, 5.1_
 
-- [ ] 6.3 (P) 3 面からの利用可能性を実証する
+- [x] 6.3 (P) 3 面からの利用可能性を実証する
   - 各アプリから代表部品を import してビルドし、生成 CSS に部品のユーティリティクラスが含まれる（@source 検出が機能している）ことを確認する
   - 検証は生成 CSS の検査と import ビルド確認のみで行い、画面への恒久的な部品配置・情報設計の変更は行わない
   - 画面の情報設計は変更しない（本格置換は面ごとの子 Issue の責務）
@@ -103,13 +103,13 @@
   - _Depends: 6.1_
   - _Boundary: 3 アプリのビルド検証_
 
-- [ ] 7. Validation: 非後退の総合実証
-- [ ] 7.1 E2E にフォーカス可視・横スクロール検証を追加する
+- [x] 7. Validation: 非後退の総合実証
+- [x] 7.1 E2E にフォーカス可視・横スクロール検証を追加する
   - survey-web の既存 E2E にキーボードフォーカスの可視確認とモバイルビューポートでの横スクロール不在 assert を追加する
   - 完了条件: 追加 assert を含む E2E が全緑
   - _Requirements: 5.3, 3.3_
 
-- [ ] 7.2 性能・品質・出荷経路の全緑を実証し差分を記録する
+- [x] 7.2 性能・品質・出荷経路の全緑を実証し差分を記録する
   - バンドル予算を再計測し 1.3 の基準線との差分を記録、300KB gzip 予算内であることを確認する
   - Lighthouse（LCP 3000ms assert）・全自動検証（lint/build/unit/E2E）・7 イメージビルドの全緑を確認する
   - 体感遅延・予算超過があれば出荷前に是正する（是正内容も記録）
@@ -129,5 +129,19 @@
 - 3.1: survey-web の Dockerfile は 5.2 まで未変更 → **5.2 完了までコンテナ build（PR docker-build ゲート）は survey-web が赤**（ローカルは workspace リンクで緑・タスク分解上の想定）。PR は 5.2 完了後に作成すること
 - 3.3: dashboard-web は本タスクで**初の workspace 依存（@fwlm/ui）**を得た。現行 Dockerfile は packages/* を COPY しない前提のコメント付き → 5.2 で design-tokens + ui のマニフェスト COPY 追加が必須（3面とも 5.2 で対応）。AuthProvider のクライアント境界は不変
 - 4: messages.ts の hex 8箇所を lineColors 参照へ置換（残存ゼロ）。**同値 #1DB446 は役割で使い分け**（完了見出し=headline / primary ボタン=action）。値は全て現行と同一のため見た目不変。既存139テスト全緑が Flex 構造・文言不変の証拠。line-webhook は dist 配布の design-tokens のみ依存（ソース直配布の @fwlm/ui は tsc 解決不可のため依存禁止）
+- 6.1: shadcn 4.x の components.json は `base` 独立フィールドではなく **`style: "base-nova"` で Base UI を指定**。CLI 出力は `'use client'` 欠落・React import 欠落・JSX 整形崩れを含むため**取込後に自前で整える3点**（use client / React import / import 経路）が必須。import は `@fwlm/ui/*` エイリアスではなく**相対パス**に統一（pnpm は自己リンクを作らないため）。tsconfig は `moduleResolution: bundler`（ソース直配布＝バンドラ消費）
+- 6.1: theme.css に2行追加（**shadcn 部品の無改変動作契約に必要**・レビュアーが対照コンパイルで実証）: `@custom-variant dark (&:is(.dark *));`（無いと Tailwind v4 既定の `prefers-color-scheme` で OS ダーク端末に部品の `dark:*` が暴発。ダークモードは Non-Goals）と `*,::after,::before,… { border-color: var(--border) }`（v4 preflight の `border: 0 solid` により幅のみ指定の枠線が currentColor になるのを防ぐ）
+- 6.1 → 6.2 への申し送り: **requirements 2.1 の「通知（成功/エラー表示）」のうち成功側が未実現**（alert.tsx の variant は default/destructive のみ）。6.2 で success 変種を追加すること（brand 系は AA 非準拠のため文字色は primary 相当を使う）。`spinner.tsx` の `aria-label="Loading"` の日本語化も 6.2 で判断
+- 6.1: ts-ci は typecheck を実行していない（lint/build/test のみ）→ アプリが部品を import するまで .tsx の型エラーが CI をすり抜ける。6.3 で import ビルド検証を行う際に留意
+- 6.2: **jsdom 25 に PointerEvent が無く** Base UI の Checkbox/Radio の Space 起動が落ちる（`ownerWindow(...).PointerEvent is not a constructor`）→ テスト内に MouseEvent 継承の最小互換実装が必要。面ごと Issue（#43〜#45）で同部品をテストする際も同じ壁に当たる
+- 6.2: requirements 2.1 の成功通知を Alert `success` 変種で解消。theme.css に `--success: var(--color-primary)`（**AA 準拠の #15803D 系。brand #1DB446 は 2.74:1 で不可**）と `@theme inline` の `--color-success` を追加し、この対応付け自体を theme-sync テストで固定（brand を指すと赤）。**`@theme inline` への公開を忘れるとユーティリティが静かに生成されない**
+- 6.2: Spinner の aria-label を「読み込み中」へ日本語化（呼び出し側で上書き可）。jsdom は Tailwind を解決しないため視覚状態はクラス／data 属性の存在で検証（実描画は 6.3 の生成 CSS 検査と 7.1 の E2E が担う）
+- 6.3: 3面の利用可能性は `packages/ui/test/app-integration.test.ts`（61テスト）で**恒久ガード化**。4層検証（依存／exports 解決／3点セット配線／実 Tailwind コンパイルでの生成）。**@source は文字列比較でなく realpath 解決一致で検証**するため 4階層/3階層の構成差に追従しつつ深度誤りは検出する。破壊2形態（深度誤り・行削除）で赤化することを実証済み
+- 6.3: **部品を実 import した状態の実測は 196.1 KB gzip（+13.3 KB）**・予算 300KB に対し余地 103.9 KB（面ごと実装 #43〜#45 の判断材料）。部品未使用の現状は 182.8 KB（増分ゼロ）
+- 6.3: Next.js の private folder 規約（`_` 始まりはルーティング対象外）に注意 — 一時検証ルートを `__name` にするとビルドされず検証が空振りする
+- 7.1: **`overflow-x: clip` は scrollWidth 検査を空振りさせる**（clip により scrollWidth == clientWidth になるため、幅超過要素があっても緑になる）→ 横スクロール検証は**要素の実測右端 <= 端末幅**で行う必要がある（注入実験で実証）。端末幅は `window.innerWidth` ではなく `page.viewportSize()` を正とする（innerWidth はオーバーフロー時に自動拡大する）
+- 7.1: フォーカス可視の検証はクラス名でなく `getComputedStyle` + `:focus-visible` 一致で判定（実描画ベース）。走査末尾で送信ボタン到達を assert して空振り緑を防ぐ。E2E はローカル完走可（homebrew postgres 16 + migrations + seed.sql + mock-gemini.mjs・6/6 緑）
+- 7.2（最終実証・2026-07-27）: **性能は基準線から増分ゼロ** — client JS 182.8 KB gzip / 300 KB（タスク1.3 の基準線と同値。Tailwind v4 はランタイム JS ゼロ・部品は未 import のため）。**生成 CSS は 33,278 B raw / 6,598 B gzip**（perf:budget は JS のみ計測のため別途実測・6.1 レビュアー申し送りに対応）。部品を実 import した場合の実測は 196.1 KB（+13.3 KB・タスク6.3 計測）で予算に余地 103.9 KB
+- 7.2: 全自動検証緑（`-r test` / `run lint` / `run typecheck` / `run build` すべて exit 0）・3ガード緑（NEXT_PUBLIC / デザイントークン / デプロイカバレッジ）。7イメージの docker build は PR の docker-build ゲートで検証
 - 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）

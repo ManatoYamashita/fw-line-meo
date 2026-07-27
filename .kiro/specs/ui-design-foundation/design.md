@@ -43,7 +43,7 @@
 
 ### Allowed Dependencies
 
-- `@fwlm/ui` → `@fwlm/design-tokens`（devDependency: theme.css 同値検証テスト用）・`@base-ui/react`・`tailwindcss`
+- `@fwlm/ui` → `@fwlm/design-tokens`（devDependency: theme.css 同値検証テスト用）・`@base-ui/react`・`tailwindcss`・shadcn ベンダリングに不可分な `class-variance-authority` / `clsx` / `tailwind-merge`・アイコンの `lucide-react`（タスク6.1 実装時に確定。cva は取込物の variant 定義、clsx+tailwind-merge は `cn()` の shadcn 標準実装、lucide-react は checkbox/spinner の2アイコンのみ使用で tree-shaking 有効）
 - Web 3 アプリ → `@fwlm/ui`（コンポーネント + theme.css）。`@fwlm/design-tokens` を直接 import しない（意味論的クラス経由で使う）
 - `line-webhook` → `@fwlm/design-tokens` のみ（`@fwlm/ui` は React/tsx のため **依存禁止**）
 - 依存方向: `design-tokens` ←（ui, line-webhook）／ `ui` ←（web 3 アプリ）。逆流禁止
@@ -109,7 +109,7 @@ graph TB
 |-------|------------------|-----------------|-------|
 | スタイリング | Tailwind CSS v4（v4.3 系最新パッチ） | ユーティリティ CSS・`@theme` によるトークン定義 | `@tailwindcss/postcss` 経由。ランタイム JS ゼロ |
 | コンポーネント | Base UI `@base-ui/react`（1.6 系） | unstyled アクセシブルプリミティブ | per-component subpath import で tree-shaking |
-| コンポーネント調達 | shadcn CLI（base=`base`） | Base UI ベースの実装済みコンポーネントをソースとしてベンダリング | dev-time のみ。ランタイム依存は Base UI と Tailwind に還元される |
+| コンポーネント調達 | shadcn CLI（`components.json` の `style: "base-nova"` が base=Base UI 指定） | Base UI ベースの実装済みコンポーネントをソースとしてベンダリング | CLI 自体は dev-time のみ。取込物のランタイム依存は Base UI・Tailwind に加え cva / clsx / tailwind-merge / lucide-react |
 | トークン | `@fwlm/design-tokens`（新設・自前） | 全トークン値の SSOT | フレームワーク非依存 TS。LINE からも import |
 | フォント | システム JP スタック | 基盤段階の font-family トークン | LINE Seed JP は Open Questions（#44 で判断） |
 

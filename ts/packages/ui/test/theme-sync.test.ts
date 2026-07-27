@@ -60,3 +60,30 @@ describe('theme-sync: theme.css の全 hex ⊆ design-tokens 値集合（Require
     ).toEqual([]);
   });
 });
+
+// 成功通知（Alert の success 変種）用の意味論変数の契約（タスク 6.2 / Requirements 2.1, 5.2）。
+// ブランド緑 #1DB446 は白背景の通常文字で 2.74:1 と WCAG AA（4.5:1）に届かないため、
+// 成功色の「文字色」にはブランド緑ではなく AA 準拠の primary（#15803D・約 5.02:1）を割り当てる。
+// この対応付けが崩れると、成功メッセージだけが AA 非準拠に戻る（回帰しやすい判断のため機械固定する）。
+describe('success 意味論変数の AA 準拠参照（Requirements 2.1, 5.2）', () => {
+  /** `--name: <値>;` の値部分を取り出す（最初の宣言のみ）。 */
+  function declarationValue(name: string): string | undefined {
+    const match = new RegExp(`--${name}\\s*:\\s*([^;]+);`).exec(themeCss);
+    return match?.[1]?.trim();
+  }
+
+  it('--success が定義され、AA 準拠の primary を参照する（brand は参照しない）', () => {
+    const value = declarationValue('success');
+    expect(value, '--success が theme.css に定義されていません').toBeDefined();
+    expect(value).toContain('var(--color-primary)');
+    expect(value).not.toContain('var(--color-brand)');
+  });
+
+  it('--color-success が公開され、text-success ユーティリティが生成される', () => {
+    // @theme inline へ公開しないと Tailwind は text-success を「静かに生成しない」
+    // （design.md Error Handling の既知の落とし穴）。
+    const value = declarationValue('color-success');
+    expect(value, '--color-success が @theme inline に公開されていません').toBeDefined();
+    expect(value).toContain('var(--success)');
+  });
+});

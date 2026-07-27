@@ -56,6 +56,14 @@
   --shadow-lg: 0 10px 15px -3px #0000001A, 0 4px 6px -4px #0000001A;
 }
 
+/* --- dark バリアントの無効化（ダークモードは本 spec の Non-Goals） ---
+ * Tailwind v4 の `dark:` は既定で `@media (prefers-color-scheme: dark)` に展開されるため、
+ * 何も宣言しないと OS がダークの端末で、ベンダリングしたコンポーネントに含まれる
+ * `dark:*` クラス（dark:bg-input/30 等）が意図せず有効になる。ダークパレットを持たない
+ * 現状では中途半端な配色になるため、shadcn 標準に倣って `.dark` 祖先セレクタへ再定義し、
+ * `.dark` を付けない限り一切適用されない状態にする（ダークモード導入時はここが起点になる）。 */
+@custom-variant dark (&:is(.dark *));
+
 /* --- shadcn 規約の意味論的 CSS 変数 ---
  * ベンダリングした Base UI ベースのコンポーネント（タスク 6.1）が無改変で機能するための下地。
  * 値はすべて上の @theme デザイントークンを var() で参照する（hex を二重に持たない）。 */
@@ -76,6 +84,12 @@
   --accent-foreground: var(--color-text);
   --destructive: var(--color-destructive);
   --destructive-foreground: var(--color-destructive-foreground);
+  /* 成功通知（Alert の success 変種）の色。ブランド緑（--color-brand）は白背景の通常文字で
+   * 約 2.74:1 と WCAG AA（4.5:1）に届かないため、成功の「文字色」には AA 準拠の primary
+   * （白文字比で約 5.02:1・design-tokens の colors.test.ts が保証）を割り当てる。
+   * ブランド緑は装飾・面塗り用途に留める
+   * （Requirements 2.1, 5.2 / test/theme-sync.test.ts が対応付けを機械固定する）。 */
+  --success: var(--color-primary);
   --border: var(--color-border);
   --input: var(--color-border);
   --ring: var(--color-primary);
@@ -100,11 +114,24 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-success: var(--success);
 }
 
 /* --- Base UI 必須ベーススタイル + グローバル focus-visible 既定 ---
  * research.md「Base UI 必須セットアップ」/ Requirements 5.3。 */
 @layer base {
+  /* Tailwind v4 の preflight は `border: 0 solid` を敷くため、border 幅だけを指定した要素
+   * （Card の border-t 等）の枠線色が currentColor（＝文字色）になってしまう。
+   * shadcn 標準に倣い既定の枠線色を意味論トークンへ寄せる（ベンダリング部品が無改変で
+   * 正しい枠線色になるための下地）。 */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border);
+  }
+
   /* Portal 描画の z-index 競合を防ぐためルート要素に独立スタッキングコンテキストを作る。 */
   html {
     isolation: isolate;
