@@ -31,6 +31,7 @@
 - `ts/packages/ui`（`@fwlm/ui`）: `theme.css`（Tailwind v4 `@theme` + 意味論的 CSS 変数）と shadcn(base=Base UI) 由来の共通コンポーネント群
 - Web 3 アプリの Tailwind 接続点（`postcss.config.mjs` / `globals.css` / `layout.tsx` のスタイル読込）
 - `line-webhook` の色定義のトークン参照化（`messages.ts` の直書き色排除）
+- `delivery-job` の色定義のトークン参照化（`flex.ts`・タスク4 でスコープ拡張。要件4.1 は全 LINE Flex が対象）
 - ガード `scripts/check-design-tokens.sh` と ts-ci への組込
 - 上記に伴う Dockerfile の deps/build/runner 変更
 
@@ -162,7 +163,7 @@ ts/packages/ui/
 - `ts/apps/line-webhook/package.json` — deps に `@fwlm/design-tokens: workspace:*`
 - `scripts/check-design-tokens.sh` — 新規ガード（後述の Contract）
 - `.github/workflows/ts-ci.yml` — lint-build-test 冒頭のガード列に check-design-tokens.sh を追加
-- Dockerfile 4 面:
+- Dockerfile 5 面:
   - `ts/apps/survey-web/Dockerfile`・`ts/apps/store-detail/Dockerfile`・`ts/apps/dashboard-web/Dockerfile` — deps 段に `COPY packages/design-tokens/package.json` と `COPY packages/ui/package.json` を追加（ui はソース直配布のため build 段の tsc 追加は**不要**。standalone トレースが同梱）。dashboard-web は packages/* の COPY が初追加
   - `ts/apps/line-webhook/Dockerfile` — delivery-job 型 3 点則: deps 段 COPY + build 段 `pnpm -C packages/design-tokens run build` + runner 段 `COPY --from=build /repo/packages/design-tokens ./packages/design-tokens`
 
@@ -195,7 +196,7 @@ ts/packages/ui/
 | 5.3 | フォーカス可視 | theme.css の focus-visible 既定 | components.test + E2E |
 | 6.1 | 性能予算維持 | 導入前後の perf:budget 実測 | perf:budget + Lighthouse |
 | 6.2 | 自動検証全緑 | 既存 CI パイプライン | ts-ci |
-| 6.3 | 7 イメージ・出荷経路維持 | Dockerfile 4 面の整合変更 | PR docker-build ゲート |
+| 6.3 | 7 イメージ・出荷経路維持 | Dockerfile 5 面の整合変更 | PR docker-build ゲート |
 | 6.4 | 体感遅延の出荷前是正 | 6.1 の実測ゲート運用 | Lighthouse assert（LCP 3000ms） |
 
 ## Components and Interfaces
@@ -208,7 +209,7 @@ ts/packages/ui/
 | check-design-tokens.sh | ガード | 直書き色検出 + theme 同値照合 | 1.4, 4.4 | ts-ci（P0） | Batch |
 | アプリ接続点 ×3 | 各アプリ | globals.css/postcss/layout の配線 | 3.1–3.3, 6.1 | ui（P0） | State |
 | messages.ts 色置換 | LINE | Flex 色のトークン参照化 | 4.1, 4.3 | design-tokens（P0） | Service |
-| Dockerfile 整合 ×4 | 出荷 | deps/build/runner の 3 点則遵守 | 6.3 | 既存 CI ゲート（P0） | Batch |
+| Dockerfile 整合 ×5 | 出荷 | deps/build/runner の 3 点則遵守 | 6.3 | 既存 CI ゲート（P0） | Batch |
 
 ### トークン層
 
@@ -248,6 +249,7 @@ export interface LineColorTokens {     // Flex Message 用（現行値を意味�
   readonly caption: string;            // #888888
   readonly successBackground: string;  // #F0FBF4
   readonly action: string;             // #1DB446
+  readonly muted: string;              // #AAAAAA（タスク4 で delivery-job のトークン化時に追加）
 }
 export declare const colors: ColorTokens;
 export declare const lineColors: LineColorTokens;
@@ -322,7 +324,7 @@ export declare const shadow: Readonly<Record<'sm'|'md'|'lg', string>>;
 
 - **アプリ接続点 ×3**（3.1–3.3, 6.1）: File Structure Plan の 3 点セット（postcss.config / globals.css / layout）。機能コードに触れない。store-detail のみ `app/` 直下で `@source` 相対深度が異なる点に注意
 - **messages.ts 色置換**（4.1, 4.3): 8 箇所の hex を `lineColors.*` 参照へ置換。既存テストの Flex 構造アサーションが構造不変を保証
-- **Dockerfile 整合 ×4**（6.3): File Structure Plan の記載どおり。PR docker-build ゲートが実ビルドを検証
+- **Dockerfile 整合 ×5**（6.3): File Structure Plan の記載どおり。PR docker-build ゲートが実ビルドを検証
 
 ## Error Handling
 
@@ -361,7 +363,7 @@ graph LR
     S2 --> F45[Issue 45 dashboard-web]
 ```
 
-- **段階1（PR 1本目）**: design-tokens 新設・theme.css・3 アプリ Tailwind 接続（基本スタイル最小適用）・messages.ts トークン化・ガード新設・Dockerfile 4 面。→ 1.x / 3.x / 4.x / 6.x が完了。**LINE と Web の見た目変化は最小**（Web はフォント/背景/文字色の基本のみ）
+- **段階1（PR 1本目）**: design-tokens 新設・theme.css・3 アプリ Tailwind 接続（基本スタイル最小適用）・messages.ts トークン化・ガード新設・Dockerfile 5 面。→ 1.x / 3.x / 4.x / 6.x が完了。**LINE と Web の見た目変化は最小**（Web はフォント/背景/文字色の基本のみ）
 - **段階2（PR 2本目）**: `@fwlm/ui` に shadcn(base) 基盤セットをベンダリング・components.test・perf 実測。→ 2.x / 5.x が完了し spec 完了
 - ロールバック: 各段階は独立 PR。段階1はスタイル追加のみで機能非破壊、revert 安全
 
