@@ -88,7 +88,7 @@
   - 完了条件: UI パッケージの lint/typecheck が緑で、全部品が named export として公開されている
   - _Requirements: 2.1_
 
-- [ ] 6.2 コンポーネントの a11y・状態表現スモークテストを追加する
+- [x] 6.2 コンポーネントの a11y・状態表現スモークテストを追加する
   - 代表部品（Button/Checkbox/Field）の role・キーボード操作・視覚状態と aria-invalid の同期を jsdom で検証する
   - 状態表現（hover/focus/disabled/エラー）が variant/data 属性規約で表現されることを確認する
   - 完了条件: コンポーネントテストが緑（キーボードのみでの操作完結を含む）
@@ -133,5 +133,8 @@
 - 6.1: theme.css に2行追加（**shadcn 部品の無改変動作契約に必要**・レビュアーが対照コンパイルで実証）: `@custom-variant dark (&:is(.dark *));`（無いと Tailwind v4 既定の `prefers-color-scheme` で OS ダーク端末に部品の `dark:*` が暴発。ダークモードは Non-Goals）と `*,::after,::before,… { border-color: var(--border) }`（v4 preflight の `border: 0 solid` により幅のみ指定の枠線が currentColor になるのを防ぐ）
 - 6.1 → 6.2 への申し送り: **requirements 2.1 の「通知（成功/エラー表示）」のうち成功側が未実現**（alert.tsx の variant は default/destructive のみ）。6.2 で success 変種を追加すること（brand 系は AA 非準拠のため文字色は primary 相当を使う）。`spinner.tsx` の `aria-label="Loading"` の日本語化も 6.2 で判断
 - 6.1: ts-ci は typecheck を実行していない（lint/build/test のみ）→ アプリが部品を import するまで .tsx の型エラーが CI をすり抜ける。6.3 で import ビルド検証を行う際に留意
+- 6.2: **jsdom 25 に PointerEvent が無く** Base UI の Checkbox/Radio の Space 起動が落ちる（`ownerWindow(...).PointerEvent is not a constructor`）→ テスト内に MouseEvent 継承の最小互換実装が必要。面ごと Issue（#43〜#45）で同部品をテストする際も同じ壁に当たる
+- 6.2: requirements 2.1 の成功通知を Alert `success` 変種で解消。theme.css に `--success: var(--color-primary)`（**AA 準拠の #15803D 系。brand #1DB446 は 2.74:1 で不可**）と `@theme inline` の `--color-success` を追加し、この対応付け自体を theme-sync テストで固定（brand を指すと赤）。**`@theme inline` への公開を忘れるとユーティリティが静かに生成されない**
+- 6.2: Spinner の aria-label を「読み込み中」へ日本語化（呼び出し側で上書き可）。jsdom は Tailwind を解決しないため視覚状態はクラス／data 属性の存在で検証（実描画は 6.3 の生成 CSS 検査と 7.1 の E2E が担う）
 - 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）

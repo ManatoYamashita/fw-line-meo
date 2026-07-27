@@ -26,8 +26,11 @@
   },
   "devDependencies": {
     "@fwlm/design-tokens": "workspace:*",
+    "@testing-library/react": "^16",
+    "@testing-library/user-event": "^14",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "jsdom": "^25",
     "react": "^19",
     "react-dom": "^19"
   }

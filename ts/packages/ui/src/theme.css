@@ -84,6 +84,12 @@
   --accent-foreground: var(--color-text);
   --destructive: var(--color-destructive);
   --destructive-foreground: var(--color-destructive-foreground);
+  /* 成功通知（Alert の success 変種）の色。ブランド緑（--color-brand）は白背景の通常文字で
+   * 約 2.74:1 と WCAG AA（4.5:1）に届かないため、成功の「文字色」には AA 準拠の primary
+   * （白文字比で約 5.02:1・design-tokens の colors.test.ts が保証）を割り当てる。
+   * ブランド緑は装飾・面塗り用途に留める
+   * （Requirements 2.1, 5.2 / test/theme-sync.test.ts が対応付けを機械固定する）。 */
+  --success: var(--color-primary);
   --border: var(--color-border);
   --input: var(--color-border);
   --ring: var(--color-primary);
@@ -108,6 +114,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-success: var(--success);
 }
 
 /* --- Base UI 必須ベーススタイル + グローバル focus-visible 既定 ---

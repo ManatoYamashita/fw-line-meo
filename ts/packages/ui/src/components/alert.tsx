@@ -11,6 +11,10 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: "bg-card text-card-foreground",
+        // 成功通知。文字色は意味論トークン --success（AA 準拠の primary）を参照する。
+        // ブランド緑をそのまま文字色にすると白背景で約 2.74:1 となり WCAG AA を割るため使わない。
+        success:
+          "bg-card text-success *:data-[slot=alert-description]:text-success/90 *:[svg]:text-current",
         destructive:
           "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
       },
