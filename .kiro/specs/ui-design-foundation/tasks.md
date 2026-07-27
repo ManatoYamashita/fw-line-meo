@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Foundation: デザイントークン単一情報源の確立
+- [x] 1. Foundation: デザイントークン単一情報源の確立
 - [x] 1.1 デザイントークンパッケージを新設し全トークン値を単一定義する
   - 既存パッケージ雛形（dist 配布・tsc ビルド・test 分離）を踏襲し、フレームワーク非依存（依存ゼロ）のトークンパッケージを作る
   - 色は brand（装飾用 #1DB446）と primary（アクション用・AA 準拠の暗色化緑）を分離し、text/textMuted/background/destructive/border 等の意味役割で定義する
@@ -29,7 +29,7 @@
   - 完了条件: theme-sync テストが緑で、theme.css に意図的な未定義色を足すとテストが赤になる
   - _Requirements: 1.1, 1.2, 5.3_
 
-- [ ] 3. Web 3 面への基盤接続（最小適用）
+- [x] 3. Web 3 面への基盤接続（最小適用）
 - [x] 3.1 (P) survey-web に Tailwind を接続し基本スタイルを適用する
   - PostCSS 設定・globals.css（tailwindcss import → theme.css import → UI パッケージソースへの @source）・layout への読込を配線する
   - トークンに基づくフォント・文字色・背景・余白が全画面に適用され、ブラウザ標準描画から脱却する
@@ -62,7 +62,7 @@
   - _Depends: 1.1_
   - _Boundary: LINE メッセージ色置換_
 
-- [ ] 5. ガードと出荷経路の整合
+- [x] 5. ガードと出荷経路の整合
 - [x] 5.1 (P) 直書き色ガードを新設し CI に組み込む
   - アプリ層と UI コンポーネント層での hex 色リテラル混入を検出して fail する（許可箇所はトークン定義と theme.css のみ・既存ガードと同形式の read-only 検証）
   - theme.css の全 hex がトークン定義の値集合に含まれることも同時に照合する
@@ -80,7 +80,7 @@
   - _Depends: 3.1, 3.2, 3.3, 4_
   - _Boundary: Dockerfile 4 面_
 
-- [ ] 6. 共通コンポーネント基盤（段階 2）
+- [x] 6. 共通コンポーネント基盤（段階 2）
 - [x] 6.1 共通コンポーネントの基盤セットをベンダリングする
   - shadcn（base=Base UI・registry は @shadcn）で Button/Card/Badge/Alert/Spinner/Field/Input/Textarea/Checkbox/RadioGroup/Separator を UI パッケージへソース取込する
   - CLI 設定（components.json）・cn ユーティリティ・Base UI ランタイム依存の追加は本タスクが所有する
@@ -103,7 +103,7 @@
   - _Depends: 6.1_
   - _Boundary: 3 アプリのビルド検証_
 
-- [ ] 7. Validation: 非後退の総合実証
+- [x] 7. Validation: 非後退の総合実証
 - [x] 7.1 E2E にフォーカス可視・横スクロール検証を追加する
   - survey-web の既存 E2E にキーボードフォーカスの可視確認とモバイルビューポートでの横スクロール不在 assert を追加する
   - 完了条件: 追加 assert を含む E2E が全緑
