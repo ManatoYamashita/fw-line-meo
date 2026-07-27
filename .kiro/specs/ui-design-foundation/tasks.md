@@ -81,7 +81,7 @@
   - _Boundary: Dockerfile 4 面_
 
 - [ ] 6. 共通コンポーネント基盤（段階 2）
-- [ ] 6.1 共通コンポーネントの基盤セットをベンダリングする
+- [x] 6.1 共通コンポーネントの基盤セットをベンダリングする
   - shadcn（base=Base UI・registry は @shadcn）で Button/Card/Badge/Alert/Spinner/Field/Input/Textarea/Checkbox/RadioGroup/Separator を UI パッケージへソース取込する
   - CLI 設定（components.json）・cn ユーティリティ・Base UI ランタイム依存の追加は本タスクが所有する
   - 取込後、意味論クラスのみ使用（生 hex・生色クラス禁止）・use client 明記・エイリアス解決を確認して所有コードとして整える
@@ -129,5 +129,9 @@
 - 3.1: survey-web の Dockerfile は 5.2 まで未変更 → **5.2 完了までコンテナ build（PR docker-build ゲート）は survey-web が赤**（ローカルは workspace リンクで緑・タスク分解上の想定）。PR は 5.2 完了後に作成すること
 - 3.3: dashboard-web は本タスクで**初の workspace 依存（@fwlm/ui）**を得た。現行 Dockerfile は packages/* を COPY しない前提のコメント付き → 5.2 で design-tokens + ui のマニフェスト COPY 追加が必須（3面とも 5.2 で対応）。AuthProvider のクライアント境界は不変
 - 4: messages.ts の hex 8箇所を lineColors 参照へ置換（残存ゼロ）。**同値 #1DB446 は役割で使い分け**（完了見出し=headline / primary ボタン=action）。値は全て現行と同一のため見た目不変。既存139テスト全緑が Flex 構造・文言不変の証拠。line-webhook は dist 配布の design-tokens のみ依存（ソース直配布の @fwlm/ui は tsc 解決不可のため依存禁止）
+- 6.1: shadcn 4.x の components.json は `base` 独立フィールドではなく **`style: "base-nova"` で Base UI を指定**。CLI 出力は `'use client'` 欠落・React import 欠落・JSX 整形崩れを含むため**取込後に自前で整える3点**（use client / React import / import 経路）が必須。import は `@fwlm/ui/*` エイリアスではなく**相対パス**に統一（pnpm は自己リンクを作らないため）。tsconfig は `moduleResolution: bundler`（ソース直配布＝バンドラ消費）
+- 6.1: theme.css に2行追加（**shadcn 部品の無改変動作契約に必要**・レビュアーが対照コンパイルで実証）: `@custom-variant dark (&:is(.dark *));`（無いと Tailwind v4 既定の `prefers-color-scheme` で OS ダーク端末に部品の `dark:*` が暴発。ダークモードは Non-Goals）と `*,::after,::before,… { border-color: var(--border) }`（v4 preflight の `border: 0 solid` により幅のみ指定の枠線が currentColor になるのを防ぐ）
+- 6.1 → 6.2 への申し送り: **requirements 2.1 の「通知（成功/エラー表示）」のうち成功側が未実現**（alert.tsx の variant は default/destructive のみ）。6.2 で success 変種を追加すること（brand 系は AA 非準拠のため文字色は primary 相当を使う）。`spinner.tsx` の `aria-label="Loading"` の日本語化も 6.2 で判断
+- 6.1: ts-ci は typecheck を実行していない（lint/build/test のみ）→ アプリが部品を import するまで .tsx の型エラーが CI をすり抜ける。6.3 で import ビルド検証を行う際に留意
 - 5.2: 対象は**5面**（design 記載の4面＋スコープ拡張の delivery-job）。Next standalone 型3面（survey-web/store-detail/dashboard-web）は deps 段のマニフェスト COPY のみ（`@fwlm/ui` はソース直配布のため build 段の tsc 不要・standalone トレースが同梱）。delivery-job 型2面（line-webhook/delivery-job）は3点則（deps COPY・`pnpm -C packages/design-tokens run build`・runner 同梱）。ローカルに docker が無いため実ビルド検証は PR の docker-build ゲート（7イメージ matrix）に委ねる
 - 4（スコープ拡張・ユーザー承認済み）: **spec の色調査漏れを発見** — `delivery-job/src/flex.ts`（機能1 日次サマリー配信の LINE Flex）にも直書き色7箇所（#666666×2・#aaaaaa×5）が存在。要件 4.1 は全 LINE Flex が対象のため同時にトークン化した。`lineColors.muted: '#AAAAAA'` を新役割として追加。**Flex の色指定は大小非区別のため描画は現行と同一**だが snapshot は byte 比較のため 25 行更新（差分が `#aaaaaa`→`#AAAAAA` のみであることを機械検証済み）。delivery-job も design-tokens 依存を得たため **5.2 の Dockerfile 対応は 4面→5面**（delivery-job は delivery-job 型＝3点則が必要）

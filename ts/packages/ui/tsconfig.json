@@ -3,7 +3,20 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "noEmit": true
+    "noEmit": true,
+
+    // 本パッケージはソース直配布（dist なし）で、消費者は必ずバンドラ（Next.js / Turbopack）である。
+    // 実際の解決規則に合わせて bundler 解決を採用する（拡張子なしの相対 import を許容し、
+    // 各 Web アプリの tsconfig（module:esnext / moduleResolution:bundler）と同じ規則で型検査する）。
+    "module": "esnext",
+    "moduleResolution": "bundler",
+
+    // shadcn CLI（components.json の aliases）がファイル出力先を解決するためのエイリアス。
+    // 実装コード自体はパッケージ内相対 import を使う（自己参照解決をバンドラに依存しないため）。
+    "baseUrl": ".",
+    "paths": {
+      "@fwlm/ui/*": ["./src/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

@@ -13,7 +13,22 @@
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },
+  "dependencies": {
+    "@base-ui/react": "^1.6.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.27.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
   "devDependencies": {
-    "@fwlm/design-tokens": "workspace:*"
+    "@fwlm/design-tokens": "workspace:*",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "react": "^19",
+    "react-dom": "^19"
   }
 }
