@@ -21,7 +21,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import postcss, { type AcceptedPlugin } from 'postcss';
+import postcss, { type AcceptedPlugin, type Rule } from 'postcss';
 import { describe, it, expect, beforeAll } from 'vitest';
 
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,6 +100,36 @@ function standaloneHeadingRules(css: string, level: number): readonly { index: n
 function hasUtilityRule(css: string, utility: string): boolean {
   const escaped = utility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|[\\s,}])\\.${escaped}\\s*\\{`).test(css);
+}
+
+/**
+ * 指定のカスケードレイヤ直下から、セレクタが完全一致する規則を全て取り出す（Issue #49）。
+ *
+ * 本ファイルの他の検査は全て文字列正規表現だが、ここだけ postcss の AST を使う。
+ * 生成 CSS には `.focus-visible\:ring-3:focus-visible` のような **`:focus-visible` を含む複合
+ * セレクタが大量に出現する**ため、正規表現では「グローバルな `:focus-visible` の既定規則」だけを
+ * 取り出すのが脆い。また本欠陥の本質は「どのカスケードレイヤに属するか」であり、
+ * レイヤ所属は文字列上の出現位置では判定できない（`@layer` の順序宣言が優先順位を決めるため）。
+ * postcss は既に本ファイルで import 済みで、追加依存は発生しない。
+ */
+function rulesInLayer(css: string, layerName: string, selector: string): readonly Rule[] {
+  const matches: Rule[] = [];
+  postcss.parse(css).walkAtRules('layer', (atRule) => {
+    if (atRule.params !== layerName) return;
+    atRule.walkRules((rule) => {
+      if (rule.selector.trim() === selector) matches.push(rule);
+    });
+  });
+  return matches;
+}
+
+/** 規則の宣言を `prop -> value` のオブジェクトへ畳む。 */
+function declarationsOf(rule: Rule): Readonly<Record<string, string>> {
+  const declarations: Record<string, string> = {};
+  rule.walkDecls((decl) => {
+    declarations[decl.prop] = decl.value;
+  });
+  return declarations;
 }
 
 /** node_modules / ビルド成果物を除いたアプリ自身のソースを列挙する。 */
@@ -323,6 +353,73 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
           `@source 無しでも .${utility} が生成されました。@source 検証が空振りしています`,
         ).toBe(false);
       }
+    });
+  });
+
+  // 5. フォーカス指標（Issue #49 / Requirements 5.3）
+  //
+  // theme.css は `@layer base` にグローバルな `:focus-visible { outline: 2px solid var(--ring) }` を
+  // 「アクセシビリティ既定」として宣言している。ところが PR #46/#47 でベンダリングした部品は
+  // 全て base class に `outline-none` を持っており、これは `@layer utilities` に生成される。
+  // 生成 CSS 冒頭の `@layer theme, base, components, utilities;` がレイヤの優先順位を固定するため、
+  // **詳細度に関係なく utilities が base に勝ち**、既定は「それが守るべき部品の上でだけ」無効化されていた。
+  // 残るフォーカス指標は `ring-ring/50`（白背景 2.08:1）と、destructive では
+  // `border-destructive/40`（1.93:1）まで弱められており、SC 1.4.11 の 3:1 を満たしていなかった。
+  //
+  // 是正方針は「フォーカス指標を theme.css の base outline に一本化する」。部品は focus を自前定義せず、
+  // 全要素・全 variant・アプリの生 HTML が同一の指標で統一される。本ブロックはその状態を機械固定する。
+  describe('5. フォーカス指標が base レイヤの outline に一本化されている（Issue #49 / Requirements 5.3）', () => {
+    const globalsCss = readFileSync(globalsCssPath, 'utf8');
+    let compiled = '';
+    let compiledWithForcedOutlineNone = '';
+
+    beforeAll(async () => {
+      compiled = await compileWithAppToolchain(app, globalsCss);
+      // 否定系用: Tailwind v4 の `@source inline(...)` でユーティリティの生成を強制する。
+      compiledWithForcedOutlineNone = await compileWithAppToolchain(
+        app,
+        `${globalsCss}\n@source inline("outline-none");\n`,
+      );
+    });
+
+    it('グローバル :focus-visible の既定が base レイヤに生成される', () => {
+      const rules = rulesInLayer(compiled, 'base', ':focus-visible');
+      expect(
+        rules.length,
+        'base レイヤにグローバルな :focus-visible の既定がありません（theme.css の宣言が失われています）',
+      ).toBeGreaterThan(0);
+    });
+
+    it('その outline が無効化されておらず、色がトークン var(--ring) 由来である', () => {
+      const rule = rulesInLayer(compiled, 'base', ':focus-visible').at(-1);
+      expect(rule, 'base レイヤの :focus-visible 規則が取得できません').toBeDefined();
+      const declarations = declarationsOf(rule!);
+      const outline = declarations['outline'] ?? '';
+      expect(outline, ':focus-visible に outline 宣言がありません').not.toBe('');
+      expect(outline, `outline が無効化されています: ${outline}`).not.toMatch(/\bnone\b/);
+      // 色は必ずトークン参照であること（生の hex 直書きを許さない。見出し検証と同じ流儀）。
+      expect(outline, `outline の色がトークン参照ではありません: ${outline}`).toMatch(
+        /var\(--ring\)/,
+      );
+    });
+
+    it('.outline-none が生成されない（base の既定を打ち消す部品が存在しない証明）', () => {
+      // これが本 Issue の根本原因を直接封じる検証。Tailwind は「使われたユーティリティ」しか
+      // 生成しないため、`.outline-none` が生成 CSS に出ない＝ @source が走査する @fwlm/ui にも
+      // アプリ自身のソースにも `outline-none` が存在しない、という意味になる。
+      expect(
+        hasUtilityRule(compiled, 'outline-none'),
+        '.outline-none が生成されています。いずれかの部品またはアプリが base レイヤの ' +
+          ':focus-visible 既定を打ち消しており、その要素ではフォーカスが不可視になります',
+      ).toBe(false);
+    });
+
+    it('@source inline で強制すると .outline-none は生成される（検出が空振りでないことの証明）', () => {
+      // 上の検証が「そもそも .outline-none を検出できないから緑」になっていないことを示す対照。
+      expect(
+        hasUtilityRule(compiledWithForcedOutlineNone, 'outline-none'),
+        '@source inline で強制しても .outline-none を検出できません。検出方法が壊れています',
+      ).toBe(true);
     });
   });
 });

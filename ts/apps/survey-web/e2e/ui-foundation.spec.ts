@@ -147,6 +147,60 @@ test('キーボードでたどった操作可能要素すべてに可視フォ�
   ).toBe(true);
 });
 
+// requirements 5.3 / Issue #49: @fwlm/ui の部品そのものに可視フォーカス表示が出る。
+//
+// 上のテストが走査する回答画面は素の <button> / <textarea> / <input> で構成されており、
+// @fwlm/ui の部品を一度も通っていない。そのため「部品が base レイヤのフォーカス既定を
+// outline を打ち消すユーティリティで無効化していた」欠陥（Issue #49）を検出できなかった。
+// ここでは部品を実描画する検証面（/ui-check）を的にして、同じ実測ロジックを部品経路へ通す。
+test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出る', async ({ page }) => {
+  await page.goto('/ui-check');
+  const firstButton = page.getByRole('button', { name: '既定のボタン' });
+  await expect(firstButton).toBeVisible();
+
+  await page.keyboard.press('Tab');
+  await expect(firstButton).toBeFocused();
+
+  const checked: string[] = [];
+  for (let i = 0; i < MAX_TAB_STEPS; i += 1) {
+    const indicator = await readFocusIndicator(page);
+    if (indicator === null) break;
+    const where = `${indicator.tag}(${indicator.name})`;
+
+    expect(indicator.focusVisible, `${where} が :focus-visible に一致しない`).toBe(true);
+    // フォーカス表示は theme.css の base レイヤの outline に一本化されているため、
+    // box-shadow による代替は認めず outline が実際に描画されていることを要求する
+    // （リングでの代替を許すと、2.08:1 の薄いリングでも緑になってしまう）。
+    expect(
+      indicator.outlineStyle !== 'none',
+      `${where} の outline が無効化されている: ${JSON.stringify(indicator)}`,
+    ).toBe(true);
+    expect(
+      indicator.outlineWidth,
+      `${where} の outline 幅が 0: ${JSON.stringify(indicator)}`,
+    ).toBeGreaterThan(0);
+    expect(
+      TRANSPARENT.test(indicator.outlineColor),
+      `${where} の outline が透明: ${JSON.stringify(indicator)}`,
+    ).toBe(false);
+
+    checked.push(where);
+    await page.keyboard.press('Tab');
+  }
+
+  // 空振り緑の防止: ボタン 6 種＋入力 2 種＋チェックボックス＋ラジオまでたどれていること。
+  const trail = `たどれた操作可能要素: ${checked.join(', ')}`;
+  expect(checked.length, trail).toBeGreaterThanOrEqual(10);
+  expect(
+    checked.some((w) => w.includes('破壊的なボタン')),
+    `destructive variant に到達していない。${trail}`,
+  ).toBe(true);
+  expect(
+    checked.some((w) => w.includes('複数行入力')),
+    `Textarea に到達していない。${trail}`,
+  ).toBe(true);
+});
+
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。
 test('モバイルビューポートの回答画面で横スクロールが発生しない', async ({ page }) => {
   await page.goto(`/s/${STORE_ID}`);

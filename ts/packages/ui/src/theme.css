@@ -19,11 +19,12 @@
   --color-brand: #1DB446;
   --color-brand-subtle: #F0FBF4;
   --color-primary: #15803D;
+  --color-primary-hover: #166534;
   --color-primary-foreground: #FFFFFF;
   --color-text: #333333;
   --color-text-muted: #666666;
   --color-background: #FFFFFF;
-  --color-destructive: #DC2626;
+  --color-destructive: #B91C1C;
   --color-destructive-foreground: #FFFFFF;
   --color-border: #DDDDDD;
 

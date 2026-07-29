@@ -13,10 +13,13 @@ const alertVariants = cva(
         default: "bg-card text-card-foreground",
         // 成功通知。文字色は意味論トークン --success（AA 準拠の primary）を参照する。
         // ブランド緑をそのまま文字色にすると白背景で約 2.74:1 となり WCAG AA を割るため使わない。
-        success:
-          "bg-card text-success *:data-[slot=alert-description]:text-success/90 *:[svg]:text-current",
-        destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+        //
+        // 説明文にはかつて /90 を掛けてタイトルより弱く見せていたが、白背景での実効値が
+        // success 4.17:1 / destructive 4.30:1 と AA（4.5:1）を割っていた（Issue #50）。
+        // 「ブランド緑は AA を割るから使わない」と判断しておきながら、アルファ合成で同じ失敗を
+        // 再導入していたことになる。視覚的な強弱は不透明度ではなくフォントウェイトで表現する。
+        success: "bg-card text-success *:[svg]:text-current",
+        destructive: "bg-card text-destructive *:[svg]:text-current",
       },
     },
     defaultVariants: {

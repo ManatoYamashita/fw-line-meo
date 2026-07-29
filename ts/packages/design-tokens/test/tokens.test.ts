@@ -22,6 +22,7 @@ describe('colors（Web 意味役割）', () => {
       'brand',
       'brandSubtle',
       'primary',
+      'primaryHover',
       'primaryForeground',
       'text',
       'textMuted',
