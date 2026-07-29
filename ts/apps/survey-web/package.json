@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint src",
+    "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "perf:budget": "node perf/bundle-budget.mjs"
   },

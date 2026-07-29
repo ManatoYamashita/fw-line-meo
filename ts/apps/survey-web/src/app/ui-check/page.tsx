@@ -7,17 +7,31 @@
 // 手法（getComputedStyle による実描画判定）は正しかったが、検証対象が本番の部品経路ではなかった。
 //
 // このページは部品を実際に描画してキーボード操作の的にすることで、その穴を塞ぐ。
-// 副次的に、アプリからの初めての実 import として `next build` が @fwlm/ui の .tsx を
-// コンパイルする経路にもなる（それ以前は一度もコンパイルされていなかった・Issue #51）。
+// 副次的に、@fwlm/ui の全13部品を import する唯一の面として、`next build` が部品の .tsx を
+// コンパイルする恒久経路にもなる（Issue #51。それ以前は一度もコンパイルされていなかった）。
+// 部品を追加した際は、このページにも必ず追加してコンパイル経路に乗せること。
 //
 // 利用者向けの導線からは一切リンクせず、検索エンジンにも登録させない（下の metadata）。
 import type { Metadata } from 'next';
 
 import { Alert, AlertDescription, AlertTitle } from '@fwlm/ui/components/alert';
+import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@fwlm/ui/components/card';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
+import { Field, FieldDescription, FieldLabel } from '@fwlm/ui/components/field';
+import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
+import { Label } from '@fwlm/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@fwlm/ui/components/radio-group';
+import { Separator } from '@fwlm/ui/components/separator';
+import { Spinner } from '@fwlm/ui/components/spinner';
 import { Textarea } from '@fwlm/ui/components/textarea';
 
 export const metadata: Metadata = {
@@ -67,6 +81,29 @@ export default function UiCheckPage() {
         <AlertTitle>エラーの通知</AlertTitle>
         <AlertDescription>エラーの説明文です</AlertDescription>
       </Alert>
+
+      {/*
+        以下は残りの非対話部品（Issue #51）。全13部品を next build のコンパイル経路に
+        乗せるための恒久配置。tabbable を増やさず（Tab 巡回の起点と MAX_TAB_STEPS を
+        崩さない）、既存 E2E の locator（「〜のボタン」「〜の通知」等）と衝突する
+        role・テキストも持たせないこと。
+      */}
+      <Heading level={2}>非対話部品の検証</Heading>
+      <Badge>バッジ</Badge>
+      <Separator />
+      <Card>
+        <CardHeader>
+          <CardTitle>カードの題</CardTitle>
+          <CardDescription>カードの補足です</CardDescription>
+        </CardHeader>
+        <CardContent>カードの本文です</CardContent>
+      </Card>
+      <Field>
+        <FieldLabel>フィールドのラベル</FieldLabel>
+        <FieldDescription>フィールドの補足です</FieldDescription>
+      </Field>
+      <Label>単独のラベル</Label>
+      <Spinner />
     </main>
   );
 }
