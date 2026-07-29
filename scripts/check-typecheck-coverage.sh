@@ -75,7 +75,8 @@ fi
 if ! grep -qE 'pnpm -C ts run typecheck' "$CI_YAML"; then
   echo "ERROR: ${CI_YAML#$ROOT/} に 'pnpm -C ts run typecheck' の呼出がありません。" >&2
   echo "       → typecheck スクリプトが定義されていても CI では一度も実行されません（Issue #51 の穴の再来）。" >&2
-  echo "         lint ステップの直後に '- run: pnpm -C ts run typecheck' を追加してください。" >&2
+  echo "         build ステップの直後に '- run: pnpm -C ts run typecheck' を追加してください" >&2
+  echo "         （@fwlm/db 等が dist/ から型を export するため build 前では TS2307 で解決不能）。" >&2
   fail=1
 fi
 

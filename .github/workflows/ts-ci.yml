@@ -49,8 +49,12 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - run: pnpm -C ts install --frozen-lockfile
       - run: pnpm -C ts run lint
-      - run: pnpm -C ts run typecheck
       - run: pnpm -C ts run build
+      # typecheck は build の後に置く必要がある: @fwlm/db 等の workspace 依存は
+      # dist/ から型を export しており（package.json の types が dist を指す）、
+      # クリーン checkout では build 前に typecheck を走らせると TS2307 で解決不能になる
+      # （run 30473500416 で実証済み。アプリ側は next build が型検査済みのため損失はない）。
+      - run: pnpm -C ts run typecheck
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
       - name: unit + integration tests (DB 込み)
