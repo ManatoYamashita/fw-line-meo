@@ -59,9 +59,4 @@ function Badge({
   })
 }
 
-// Issue #51 の穴の実証プローブ（commit C で撤去する）: badge はアプリ・テストから
-// 参照されておらず、現状の CI（lint / build / test）では以下の型エラーが検出されない
-// ことを実証するための意図的な TS2322。exported のため no-unused-vars も発火しない。
-export const __typecheckProbe: number = "a"
-
 export { Badge, badgeVariants }
