@@ -109,6 +109,7 @@ const COLOR_ROLE_TO_CSS_VARIABLE: Readonly<Record<keyof ColorTokens, string>> = 
   brand: '--color-brand',
   brandSubtle: '--color-brand-subtle',
   primary: '--color-primary',
+  primaryHover: '--color-primary-hover',
   primaryForeground: '--color-primary-foreground',
   text: '--color-text',
   textMuted: '--color-text-muted',

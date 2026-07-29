@@ -13,10 +13,20 @@ const alertVariants = cva(
         default: "bg-card text-card-foreground",
         // 成功通知。文字色は意味論トークン --success（AA 準拠の primary）を参照する。
         // ブランド緑をそのまま文字色にすると白背景で約 2.74:1 となり WCAG AA を割るため使わない。
+        //
+        // 説明文への指定が必要な理由: AlertDescription は自身に text-muted-foreground を持つ。
+        // したがって親に状態色を置くだけでは説明文へ届かず、子孫指定で明示的に渡さない限り
+        // 説明文は変種によらず灰色で描画される。
+        //
+        // ただし不透明度は掛けない。かつてはタイトルより弱く見せるため説明文に 90% を掛けていたが、
+        // 白背景での実効値が success 4.17:1 / destructive 4.30:1 と AA（4.5:1）を割っていた
+        // （Issue #50）。「ブランド緑は AA を割るから使わない」と判断しておきながら、アルファ合成で
+        // 同じ失敗を再導入していたことになる。強弱はタイトル側の font-medium と文字サイズで表現し、
+        // 説明文はトークン素の色（success 5.02:1 / destructive 6.47:1）をそのまま使う。
         success:
-          "bg-card text-success *:data-[slot=alert-description]:text-success/90 *:[svg]:text-current",
+          "bg-card text-success *:data-[slot=alert-description]:text-success *:[svg]:text-current",
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive *:[svg]:text-current",
       },
     },
     defaultVariants: {

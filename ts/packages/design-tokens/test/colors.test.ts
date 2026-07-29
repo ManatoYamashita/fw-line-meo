@@ -6,45 +6,7 @@
 //   （LINE Flex Message は Web コンテンツではないため AA 検証対象外）。
 // - primary の具体 hex はこのテストを通ることをもって確定値とする。
 import { describe, it, expect } from 'vitest';
-import { colors } from '../src/index.js';
-
-/** '#RRGGBB'（6桁大文字 hex）を 0..255 の RGB 3成分へ変換する。 */
-function hexToRgb(hex: string): [number, number, number] {
-  if (!/^#[0-9A-F]{6}$/.test(hex)) {
-    throw new Error(`6桁 hex リテラルではありません: ${hex}`);
-  }
-  return [
-    Number.parseInt(hex.slice(1, 3), 16),
-    Number.parseInt(hex.slice(3, 5), 16),
-    Number.parseInt(hex.slice(5, 7), 16),
-  ];
-}
-
-/**
- * WCAG 2.1 定義の相対輝度。
- * sRGB 各成分を 0..1 化し、しきい値 0.03928 以下は /12.92、超は ((c+0.055)/1.055)^2.4 で
- * 線形化したうえで 0.2126R + 0.7152G + 0.0722B の加重和を取る。
- * 参照: https://www.w3.org/TR/WCAG21/#dfn-relative-luminance
- */
-function relativeLuminance(hex: string): number {
-  const [r, g, b] = hexToRgb(hex).map((channel) => {
-    const srgb = channel / 255;
-    return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/**
- * WCAG 2.1 定義のコントラスト比 (L1 + 0.05) / (L2 + 0.05)（L1 は明るい方の輝度）。
- * 参照: https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio
- */
-function contrastRatio(colorA: string, colorB: string): number {
-  const luminanceA = relativeLuminance(colorA);
-  const luminanceB = relativeLuminance(colorB);
-  const lighter = Math.max(luminanceA, luminanceB);
-  const darker = Math.min(luminanceA, luminanceB);
-  return (lighter + 0.05) / (darker + 0.05);
-}
+import { colors, compositeOver, contrastRatio } from '../src/index.js';
 
 /** 通常文字の WCAG 2.1 AA 基準（Requirements 5.2）。 */
 const AA_NORMAL_TEXT_RATIO = 4.5;
@@ -57,6 +19,9 @@ const AA_TEXT_PAIRS: ReadonlyArray<{
   { foreground: 'text', background: 'background' },
   { foreground: 'textMuted', background: 'background' },
   { foreground: 'primaryForeground', background: 'primary' },
+  // hover 状態のテキストも WCAG 1.4.3 の対象。通常時に AA を満たしていても hover で割る事故
+  // （Issue #50 の bg-primary/80）を再発させないため、hover 面も同じ基準で検証する。
+  { foreground: 'primaryForeground', background: 'primaryHover' },
   { foreground: 'destructiveForeground', background: 'destructive' },
 ];
 
@@ -81,6 +46,32 @@ describe('コントラスト計算ヘルパ（既知値による自己検証）'
 
   it('ブランド緑 #1DB446 と白は約 2.74:1（AA 非準拠の既知値）と計算される', () => {
     expect(contrastRatio('#1DB446', '#FFFFFF')).toBeCloseTo(2.74, 2);
+  });
+});
+
+describe('アルファ合成ヘルパ compositeOver（既知値による自己検証・Issue #50）', () => {
+  it('alpha=1 は前景そのもの・alpha=0 は背景そのものを返す', () => {
+    expect(compositeOver('#15803D', '#FFFFFF', 1)).toBe('#15803D');
+    expect(compositeOver('#15803D', '#FFFFFF', 0)).toBe('#FFFFFF');
+  });
+
+  it('黒を白に 50% 合成すると中間灰になる', () => {
+    expect(compositeOver('#000000', '#FFFFFF', 0.5)).toBe('#808080');
+  });
+
+  it('6桁大文字 hex を返す（contrastRatio へそのまま渡せる形式）', () => {
+    expect(compositeOver('#DC2626', '#FFFFFF', 0.1)).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it('alpha=1 の合成結果は元の色とコントラスト比が一致する（既存ヘルパとの接続確認）', () => {
+    expect(contrastRatio(compositeOver('#333333', '#FFFFFF', 1), '#FFFFFF')).toBe(
+      contrastRatio('#333333', '#FFFFFF'),
+    );
+  });
+
+  it('0..1 の範囲外の alpha は拒否する', () => {
+    expect(() => compositeOver('#000000', '#FFFFFF', 1.5)).toThrow();
+    expect(() => compositeOver('#000000', '#FFFFFF', -0.1)).toThrow();
   });
 });
 

@@ -14,6 +14,7 @@
 // 注: jsdom は Tailwind を解決しないため「見た目」そのものは検証できない。よって視覚状態は
 // 「その状態を分岐させるユーティリティクラス・data 属性が存在すること」で検証する
 // （＝状態表現が規約に沿って宣言されていることの検証。実際の描画は #43〜#45 の目視と E2E が担う）。
+import type { ReactElement } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -31,6 +32,7 @@ import { Heading } from '../src/components/heading';
 import { Input } from '../src/components/input';
 import { RadioGroup, RadioGroupItem } from '../src/components/radio-group';
 import { Spinner } from '../src/components/spinner';
+import { Textarea } from '../src/components/textarea';
 
 // jsdom 25 は PointerEvent を実装していない。一方 Base UI の Checkbox は、キーボード/クリックの
 // 活性化を隠し input へ `new PointerEvent('click')` で転送する（CheckboxRoot の onClick）。
@@ -94,12 +96,11 @@ describe('Button — 役割・キーボード完結・状態表現（Requirement
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('hover / focus / disabled / エラーの各状態が状態バリアントのクラスとして宣言されている', () => {
+  it('hover / disabled / エラーの各状態が状態バリアントのクラスとして宣言されている', () => {
     render(<Button>送信する</Button>);
     const classes = classesOf(screen.getByRole('button', { name: '送信する' }));
 
-    expect(classes).toContain('hover:bg-primary/80'); // hover
-    expect(classes).toContain('focus-visible:ring-ring/50'); // focus（5.3 の可視フォーカス）
+    expect(classes).toContain('hover:bg-primary-hover'); // hover
     expect(classes).toContain('disabled:opacity-50'); // disabled
     expect(classes).toContain('aria-invalid:border-destructive'); // エラー（aria-invalid 駆動）
   });
@@ -305,6 +306,63 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
     expect(classesOf(success!)).not.toBe(classesOf(destructive!));
   });
 
+  it('success / destructive は説明文にも同じ状態色を渡す（PR #56 レビュー指摘1）', () => {
+    render(
+      <>
+        <Alert variant="success">
+          <AlertTitle>成功</AlertTitle>
+          <AlertDescription>店舗情報を保存しました</AlertDescription>
+        </Alert>
+        <Alert variant="destructive">
+          <AlertTitle>失敗</AlertTitle>
+          <AlertDescription>店舗情報を保存できませんでした</AlertDescription>
+        </Alert>
+      </>,
+    );
+
+    // AlertDescription は自身に text-muted-foreground を持つ。したがって variant の状態色は
+    // 親に text-<状態色> を置くだけでは説明文へ届かず、子孫指定で明示的に渡す必要がある。
+    // この指定を消しても親のクラス集合は壊れないため、他のガードは全て緑のまま通る。
+    expect(classesOf(screen.getByText('店舗情報を保存しました'))).toContain(
+      'text-muted-foreground',
+    );
+
+    const [success, destructive] = screen.getAllByRole('alert');
+    const cases = [
+      { alert: success!, color: 'success' },
+      { alert: destructive!, color: 'destructive' },
+    ];
+    for (const { alert, color } of cases) {
+      const classes = classesOf(alert);
+      expect(classes, `variant の状態色 text-${color} が親に無い`).toContain(`text-${color}`);
+      expect(
+        classes,
+        `説明文へ text-${color} を渡す子孫指定が無い（説明文が灰色のまま描画される）`,
+      ).toContain(`*:data-[slot=alert-description]:text-${color}`);
+    }
+
+    // 不透明度を掛けると白背景での実効値が AA を割る（success 4.17:1 / destructive 4.30:1）。
+    // 数値の検証は contrast-usage.test.ts が行うので、ここでは形だけを落とす。
+    for (const { alert } of cases) {
+      expect(
+        classesOf(alert),
+        '説明文への色指定に不透明度が付いている（Issue #50 の再発）',
+      ).not.toMatch(/data-\[slot=alert-description\]:text-[a-z-]+\/\d+/);
+    }
+  });
+
+  it('既定（default）の説明文は状態色を持たず muted のままである', () => {
+    render(
+      <Alert>
+        <AlertTitle>お知らせ</AlertTitle>
+        <AlertDescription>変更はありません</AlertDescription>
+      </Alert>,
+    );
+
+    expect(classesOf(screen.getByRole('alert'))).not.toContain('data-[slot=alert-description]:text-');
+    expect(classesOf(screen.getByText('変更はありません'))).toContain('text-muted-foreground');
+  });
+
   it('全変種が意味論トークンのみを使い、生の色（hex / パレット色クラス）を持たない', () => {
     render(
       <>
@@ -419,5 +477,73 @@ describe('Spinner — 読み込み中の状態通知（Requirements 2.1, 5.1）'
   it('呼び出し側が用途に応じたアクセシブル名へ差し替えられる', () => {
     render(<Spinner aria-label="下書きを生成中" />);
     expect(screen.getByRole('status').getAttribute('aria-label')).toBe('下書きを生成中');
+  });
+});
+
+// フォーカス指標の一本化（Issue #49 / Requirements 5.3）。
+//
+// theme.css は `@layer base` にグローバルな `:focus-visible { outline: 2px solid var(--ring) }` を
+// アクセシビリティ既定として宣言している。ところがベンダリング元の shadcn 部品は base class に
+// `outline-none` を持ち、これは `@layer utilities` に生成されるため **詳細度に関係なくレイヤ順で
+// base に勝ち**、既定は「それが守るべき対話的部品の上でだけ」無効化されていた。
+// 残る指標も `ring-ring/50`（白背景 2.08:1）や destructive の `border-destructive/40`（1.93:1）と
+// SC 1.4.11 の 3:1 を満たしておらず、default Button では `border-ring` が自身の塗り（bg-primary）と
+// 同色になって完全に不可視だった。
+//
+// 是正方針は「部品は focus を自前定義せず、theme.css の base outline に一本化する」。
+// 本テストはその契約をクラス宣言レベルで固定する（実コンパイル結果は app-integration.test.ts、
+// 実描画は survey-web の E2E が担う）。
+describe('フォーカス指標は部品が自前定義しない（Issue #49 / Requirements 5.3）', () => {
+  /** `outline-none` は base レイヤの既定を打ち消すため、部品では一切許さない。 */
+  const OUTLINE_SUPPRESSION = /\boutline-none\b/;
+  /** 部品ごとの focus 上書き（variant ごとに指標の強さがばらつく原因）も許さない。 */
+  const SELF_DECLARED_FOCUS = /focus-visible:(?:ring|border|outline)-/;
+
+  const cases: ReadonlyArray<{ readonly name: string; readonly element: ReactElement }> = [
+    { name: 'Button（default）', element: <Button>既定</Button> },
+    { name: 'Button（destructive）', element: <Button variant="destructive">削除</Button> },
+    { name: 'Button（outline）', element: <Button variant="outline">枠線</Button> },
+    { name: 'Input', element: <Input aria-label="入力" /> },
+    { name: 'Textarea', element: <Textarea aria-label="複数行入力" /> },
+    { name: 'Checkbox', element: <Checkbox aria-label="同意する" /> },
+  ];
+
+  for (const { name, element } of cases) {
+    it(`${name} は outline-none も focus-visible の自前指標も持たない`, () => {
+      const { container } = render(element);
+      const classes = [...container.querySelectorAll('*')]
+        .map((node) => classesOf(node))
+        .join(' ');
+
+      expect(
+        classes,
+        `${name} が outline-none を持っています。base レイヤの :focus-visible 既定が` +
+          '打ち消され、この要素ではフォーカスが不可視になります',
+      ).not.toMatch(OUTLINE_SUPPRESSION);
+      expect(
+        classes,
+        `${name} が focus-visible の指標を自前定義しています。` +
+          'フォーカス表現は theme.css の base outline に一本化してください',
+      ).not.toMatch(SELF_DECLARED_FOCUS);
+    });
+  }
+
+  it('RadioGroupItem も同様（RadioGroup 経由でのみ描画できるため個別に検証する）', () => {
+    const { container } = render(
+      <RadioGroup aria-label="評価">
+        <RadioGroupItem value="good" aria-label="良い" />
+      </RadioGroup>,
+    );
+    const classes = [...container.querySelectorAll('*')].map((node) => classesOf(node)).join(' ');
+
+    expect(classes).not.toMatch(OUTLINE_SUPPRESSION);
+    expect(classes).not.toMatch(SELF_DECLARED_FOCUS);
+  });
+
+  it('エラー状態のリング（aria-invalid）は残す（フォーカスとは別概念のため）', () => {
+    // outline = フォーカス / ring = エラー、という役割分担を固定する。
+    render(<Input aria-label="メール" aria-invalid />);
+    const classes = classesOf(screen.getByLabelText('メール'));
+    expect(classes).toContain('aria-invalid:border-destructive');
   });
 });

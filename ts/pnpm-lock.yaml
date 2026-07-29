@@ -180,6 +180,9 @@ importers:
         specifier: ^19
         version: 19.2.7(react@19.2.7)
     devDependencies:
+      '@fwlm/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/design-tokens
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1

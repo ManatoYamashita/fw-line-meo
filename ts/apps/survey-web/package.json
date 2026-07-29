@@ -20,6 +20,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@fwlm/design-tokens": "workspace:*",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",
