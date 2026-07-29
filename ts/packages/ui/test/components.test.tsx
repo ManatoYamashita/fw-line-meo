@@ -306,6 +306,63 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
     expect(classesOf(success!)).not.toBe(classesOf(destructive!));
   });
 
+  it('success / destructive は説明文にも同じ状態色を渡す（PR #56 レビュー指摘1）', () => {
+    render(
+      <>
+        <Alert variant="success">
+          <AlertTitle>成功</AlertTitle>
+          <AlertDescription>店舗情報を保存しました</AlertDescription>
+        </Alert>
+        <Alert variant="destructive">
+          <AlertTitle>失敗</AlertTitle>
+          <AlertDescription>店舗情報を保存できませんでした</AlertDescription>
+        </Alert>
+      </>,
+    );
+
+    // AlertDescription は自身に text-muted-foreground を持つ。したがって variant の状態色は
+    // 親に text-<状態色> を置くだけでは説明文へ届かず、子孫指定で明示的に渡す必要がある。
+    // この指定を消しても親のクラス集合は壊れないため、他のガードは全て緑のまま通る。
+    expect(classesOf(screen.getByText('店舗情報を保存しました'))).toContain(
+      'text-muted-foreground',
+    );
+
+    const [success, destructive] = screen.getAllByRole('alert');
+    const cases = [
+      { alert: success!, color: 'success' },
+      { alert: destructive!, color: 'destructive' },
+    ];
+    for (const { alert, color } of cases) {
+      const classes = classesOf(alert);
+      expect(classes, `variant の状態色 text-${color} が親に無い`).toContain(`text-${color}`);
+      expect(
+        classes,
+        `説明文へ text-${color} を渡す子孫指定が無い（説明文が灰色のまま描画される）`,
+      ).toContain(`*:data-[slot=alert-description]:text-${color}`);
+    }
+
+    // 不透明度を掛けると白背景での実効値が AA を割る（success 4.17:1 / destructive 4.30:1）。
+    // 数値の検証は contrast-usage.test.ts が行うので、ここでは形だけを落とす。
+    for (const { alert } of cases) {
+      expect(
+        classesOf(alert),
+        '説明文への色指定に不透明度が付いている（Issue #50 の再発）',
+      ).not.toMatch(/data-\[slot=alert-description\]:text-[a-z-]+\/\d+/);
+    }
+  });
+
+  it('既定（default）の説明文は状態色を持たず muted のままである', () => {
+    render(
+      <Alert>
+        <AlertTitle>お知らせ</AlertTitle>
+        <AlertDescription>変更はありません</AlertDescription>
+      </Alert>,
+    );
+
+    expect(classesOf(screen.getByRole('alert'))).not.toContain('data-[slot=alert-description]:text-');
+    expect(classesOf(screen.getByText('変更はありません'))).toContain('text-muted-foreground');
+  });
+
   it('全変種が意味論トークンのみを使い、生の色（hex / パレット色クラス）を持たない', () => {
     render(
       <>

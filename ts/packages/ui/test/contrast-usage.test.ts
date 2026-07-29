@@ -8,11 +8,16 @@
 // theme.css:87-91 が「ブランド緑は 2.74:1 だから文字色に使わない」と明記しているにもかかわらず、
 // `/90` や `/80` の合成が同じ失敗を再導入していた、という構図である。
 //
-// 本テストは 2 層で構成する:
+// 本テストは 4 層で構成する:
 //   1. 数値検証 — USAGE_PAIRS の各エントリについて合成後の実効色を求め、しきい値以上を assert
 //   2. 網羅ガード — 部品ソースを走査して不透明度付きクラスを全抽出し、USAGE_PAIRS ∪ EXEMPT_UTILITIES
 //      と双方向で突き合わせる。#48 で潰した「集合包含だけでは不十分」と同じ穴を空けないため、
 //      「部品に新しい /NN を足したのに検証表へ追記し忘れた」を必ず赤化させる。
+//   3. 子孫指定の色ガード — 親 variant が子へ渡す色（`*:data-[slot=…]:text-…`）を独立に抽出して
+//      検証する。子が自前の色を持つ場合、この指定が消えると状態色は画面に出ないのに
+//      クラス名の集合は何も壊れず、1・2 は緑のまま通る（PR #56 レビュー指摘1）。
+//   4. color-mix ガード — 静的計算できない色指定を、出現箇所（file + 式）単位で許可リストと
+//      突き合わせ、実ブラウザで実測した実効色の登録を強制する（PR #56 レビュー指摘2）。
 //
 // 意味論名 → 実 hex の解決は theme.css の宣言から導出する（手書きの対応表を持たない）。
 // 対応表を手写しすると、それ自体が新たな同期漏れの発生源になるため。
@@ -312,48 +317,239 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
   });
 });
 
+// --- 子孫指定の色ガード -------------------------------------------------------------
+
+/**
+ * 親 variant が子（説明文など）へ渡す色指定（`*:data-[slot=…]:text-…`）の検証対象。
+ *
+ * なぜ上の網羅ガードと別立てが要るか:
+ * 網羅ガードは不透明度付きクラスしか見ない。しかし PR #56 のレビューで見つかった欠陥は
+ * 「不透明度を外すときに子孫指定ごと削除した」ことで起きた。子（AlertDescription）は自前で
+ * `text-muted-foreground` を持つため、親からの指定が消えると variant の状態色は説明文へ
+ * 一切届かない。それでいてクラス名の集合は何も壊れないので、既存のガードは全て緑のまま通る。
+ * 「子へ渡す色」を独立に抽出して数値検証し、消えた場合も薄すぎる場合も赤化させる。
+ */
+interface DescendantTextPair {
+  /** 部品ソースに現れる子孫指定クラス（突き合わせキー）。 */
+  readonly utility: string;
+  /** 出典（どの部品のどの variant か）。 */
+  readonly source: string;
+  /** 子へ渡す前景の意味論名。 */
+  readonly foreground: string;
+  /** 子が載る下地の意味論名。 */
+  readonly surface: string;
+  /** テキストか非テキストか（しきい値が変わる）。 */
+  readonly kind: 'text' | 'non-text';
+}
+
+const DESCENDANT_TEXT_PAIRS: readonly DescendantTextPair[] = [
+  {
+    utility: '*:data-[slot=alert-description]:text-success',
+    source: 'alert.tsx variant=success の説明文',
+    foreground: 'success',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    utility: '*:data-[slot=alert-description]:text-destructive',
+    source: 'alert.tsx variant=destructive の説明文',
+    foreground: 'destructive',
+    surface: 'card',
+    kind: 'text',
+  },
+];
+
+/**
+ * 子孫の色指定を抽出する。
+ *
+ * 不透明度付き（`…:text-success/90` 等）もあえて拾う。拾えば下の突き合わせで
+ * 「表に無いクラス」として落ちるか、表に載せた場合は合成後の値で数値検証されるため、
+ * 不透明度による AA 割れ（Issue #50）と子孫指定の消失の両方が同じ一本のガードに掛かる。
+ */
+const DESCENDANT_TEXT_PATTERN = /\*:data-\[slot=[a-z0-9-]+\]:text-[a-z0-9-]+(?:\/\d{1,3})?/g;
+
+function extractDescendantTextUtilities(source: string): readonly string[] {
+  return [...source.matchAll(DESCENDANT_TEXT_PATTERN)].map((match) => match[0]);
+}
+
+describe('子孫指定の色ガード: 親 variant が子へ渡す色（PR #56 レビュー指摘1）', () => {
+  const sources = readComponentSources();
+  const found = [
+    ...new Set(sources.flatMap(({ source }) => extractDescendantTextUtilities(source))),
+  ].sort();
+  const declared = [...new Set(DESCENDANT_TEXT_PAIRS.map((pair) => pair.utility))].sort();
+
+  it('抽出が機能している（空振り緑の防止）', () => {
+    expect(sources.length).toBeGreaterThan(0);
+    expect(
+      found.length,
+      '子孫への色指定が 1 つも見つからない。抽出が壊れているか、指定が部品から消えている',
+    ).toBeGreaterThan(0);
+  });
+
+  it('部品の子孫色指定は全て検証表にある', () => {
+    const unclassified = found.filter((utility) => !declared.includes(utility));
+    expect(
+      unclassified,
+      `検証表に無い子孫色指定が部品にあります: ${unclassified.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('検証表に部品で使われていない子孫色指定が残っていない', () => {
+    // 今回の欠陥（子孫指定の削除）はこの向きで落ちる。
+    const stale = declared.filter((utility) => !found.includes(utility));
+    expect(
+      stale,
+      `部品で使われていない子孫色指定が検証表に残っています（削除された可能性）: ${stale.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  for (const pair of DESCENDANT_TEXT_PAIRS) {
+    const threshold = pair.kind === 'text' ? AA_NORMAL_TEXT_RATIO : AA_NON_TEXT_RATIO;
+    it(`${pair.utility}（${pair.source}）は ${threshold}:1 以上`, () => {
+      const foregroundHex = resolveSemanticColor(pair.foreground);
+      const surfaceHex = resolveSemanticColor(pair.surface);
+      const ratio = contrastRatio(foregroundHex, surfaceHex);
+      expect(
+        ratio,
+        `${pair.utility}: ${foregroundHex} on ${surfaceHex} → ${ratio.toFixed(3)}:1` +
+          `（要求 ${threshold}:1・${pair.source}）`,
+      ).toBeGreaterThanOrEqual(threshold);
+    });
+  }
+});
+
 // --- color-mix ガード ---------------------------------------------------------------
 
 /**
  * `color-mix()` は不透明度付きクラスの正規表現をすり抜けるため、別途検出して
  * 実測値付きの許可リストへの登録を必須にする（ホールを塞ぐ）。
+ *
+ * 照合はファイル単位ではなく **出現箇所（file + 式）単位**で行う（PR #56 レビュー指摘2）。
+ * ファイル名だけで突き合わせると、既に許可済みの部品へ 2 個目の color-mix を足しても
+ * 集合が変わらず素通りしてしまう。
+ *
+ * 許可リストは JSON に外出しし、survey-web の E2E（実ブラウザで合成後の色を実測する側）と
+ * 同じ 1 つの値を読む。実測値を 2 箇所に手書きすれば、それ自体が drift の発生源になるため。
  */
-const COLOR_MIX_ALLOWLIST: ReadonlyArray<{
+interface ColorMixEntry {
   readonly file: string;
+  readonly expression: string;
+  /** 実ブラウザで実測した合成後の実効色（6桁 hex）。E2E が一致を検証する。 */
+  readonly measuredHex: string;
+  /** その面に載る前景の意味論名。 */
+  readonly foreground: string;
+  readonly kind: 'text' | 'non-text';
   readonly reason: string;
-}> = [
-  {
-    file: 'button.tsx',
-    reason:
-      'variant=secondary の hover。--secondary(#F0FBF4) に --foreground(#333333) を 5% 混色し、' +
-      '文字は --secondary-foreground(#333333) のまま。合成方向が「暗くする」ため元の 11.92:1 から' +
-      '悪化せず、実測でも約 10.9:1 と AA を大きく上回る。',
-  },
-];
+}
 
-describe('color-mix ガード: 静的検証できない色指定を野放しにしない（Issue #50）', () => {
+const colorMixAllowlist = (
+  JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'color-mix-allowlist.json'),
+      'utf8',
+    ),
+  ) as { readonly entries: readonly ColorMixEntry[] }
+).entries;
+
+/**
+ * `color-mix(` の各出現を、括弧の深さを数えて 1 つずつ切り出す。
+ *
+ * `var(--a)` が入れ子になるため、対応する `)` は正規表現では特定できない。
+ */
+function extractColorMixExpressions(source: string): readonly string[] {
+  const needle = 'color-mix(';
+  const found: string[] = [];
+  let from = 0;
+  for (;;) {
+    const start = source.indexOf(needle, from);
+    if (start === -1) return found;
+    let depth = 0;
+    let end = -1;
+    for (let i = start + needle.length - 1; i < source.length; i += 1) {
+      const character = source[i];
+      if (character === '(') depth += 1;
+      else if (character === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) {
+      throw new Error(`color-mix( の括弧が閉じていません: ${source.slice(start, start + 80)}`);
+    }
+    found.push(source.slice(start, end + 1));
+    from = end + 1;
+  }
+}
+
+/** 照合キー。同一ファイル内の 2 個目以降も独立に照合させるため式を含める。 */
+function colorMixKey(file: string, expression: string): string {
+  return `${file}::${expression}`;
+}
+
+describe('color-mix ガード: 静的検証できない色指定を野放しにしない（Issue #50 / PR #56 レビュー指摘2）', () => {
   const sources = readComponentSources();
-  const filesUsingColorMix = sources
-    .filter(({ source }) => source.includes('color-mix('))
-    .map(({ file }) => file)
+  const found = sources
+    .flatMap(({ file, source }) =>
+      extractColorMixExpressions(source).map((expression) => colorMixKey(file, expression)),
+    )
     .sort();
-  const allowed = [...new Set(COLOR_MIX_ALLOWLIST.map((entry) => entry.file))].sort();
+  const allowed = colorMixAllowlist
+    .map((entry) => colorMixKey(entry.file, entry.expression))
+    .sort();
 
-  it('color-mix を使う部品は全て許可リストに理由付きで登録されている', () => {
-    // color-mix は oklch 等の色空間で合成されるため、hex ベースの静的検証ができない。
-    // 使うこと自体は禁じないが、なぜ安全かを人間が書き残すことを強制する。
-    const undocumented = filesUsingColorMix.filter((file) => !allowed.includes(file));
+  it('抽出器が入れ子括弧を含む式を丸ごと取り出せる（空振り緑の防止）', () => {
+    // 許可リストが将来空になっても、抽出器が壊れたまま緑にならないようフィクスチャで自己検証する。
+    const fixture =
+      'a: color-mix(in oklch, var(--x), var(--y) 5%); b: color-mix(in srgb, #fff, #000 10%);';
+    expect(extractColorMixExpressions(fixture)).toEqual([
+      'color-mix(in oklch, var(--x), var(--y) 5%)',
+      'color-mix(in srgb, #fff, #000 10%)',
+    ]);
+    expect(extractColorMixExpressions('色指定なし')).toEqual([]);
+  });
+
+  it('color-mix の全出現が許可リストに登録されている（出現箇所単位）', () => {
+    // color-mix は oklch 等の色空間で合成されるため hex ベースの静的計算ができない。
+    // 使うこと自体は禁じないが、実ブラウザで測った実効色と理由の登録を強制する。
+    const undocumented = found.filter((key) => !allowed.includes(key));
     expect(
       undocumented,
-      `color-mix を使っているが許可リストに無い部品: ${undocumented.join(', ')}`,
+      `許可リストに無い color-mix の出現: ${undocumented.join(' / ')}`,
     ).toEqual([]);
   });
 
-  it('許可リストに color-mix を使っていない部品が残っていない', () => {
-    const stale = allowed.filter((file) => !filesUsingColorMix.includes(file));
+  it('許可リストに部品から消えた出現が残っていない', () => {
+    const stale = allowed.filter((key) => !found.includes(key));
     expect(
       stale,
-      `color-mix を使っていない部品が許可リストに残っています: ${stale.join(', ')}`,
+      `部品に存在しない color-mix が許可リストに残っています: ${stale.join(' / ')}`,
     ).toEqual([]);
   });
+
+  it('許可リストが空でない（登録対象があるうちは空振りさせない）', () => {
+    expect(colorMixAllowlist.length).toBe(found.length);
+  });
+
+  for (const entry of colorMixAllowlist) {
+    const threshold = entry.kind === 'text' ? AA_NORMAL_TEXT_RATIO : AA_NON_TEXT_RATIO;
+    it(`${entry.file} の ${entry.expression} は実測色で ${threshold}:1 以上`, () => {
+      expect(
+        entry.measuredHex,
+        `${entry.file}: measuredHex が 6桁 hex でない（実ブラウザで実測してから登録すること）`,
+      ).toMatch(/^#[0-9A-F]{6}$/);
+      expect(entry.reason.length, `${entry.file} の理由が空です`).toBeGreaterThan(20);
+
+      const foregroundHex = resolveSemanticColor(entry.foreground);
+      const ratio = contrastRatio(foregroundHex, entry.measuredHex);
+      expect(
+        ratio,
+        `${entry.expression}: ${entry.foreground}(${foregroundHex}) on 実測 ${entry.measuredHex}` +
+          ` → ${ratio.toFixed(3)}:1（要求 ${threshold}:1）`,
+      ).toBeGreaterThanOrEqual(threshold);
+    });
+  }
 });

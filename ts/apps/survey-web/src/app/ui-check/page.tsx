@@ -13,6 +13,7 @@
 // 利用者向けの導線からは一切リンクせず、検索エンジンにも登録させない（下の metadata）。
 import type { Metadata } from 'next';
 
+import { Alert, AlertDescription, AlertTitle } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
 import { Input } from '@fwlm/ui/components/input';
@@ -47,6 +48,25 @@ export default function UiCheckPage() {
         <RadioGroupItem value="first" aria-label="ラジオ1" />
         <RadioGroupItem value="second" aria-label="ラジオ2" />
       </RadioGroup>
+
+      {/*
+        Alert は非対話要素なので上の Tab 巡回には乗らない。ここでは「変種の状態色が
+        説明文まで実描画で届いているか」を測るための的として置く（PR #56 レビュー指摘1）。
+        既定の変種を基準色として並べ、success / destructive の説明文がそれと異なる色で
+        描かれることを E2E が実測する。Tab 巡回の起点（既定のボタン）を変えないよう末尾に置く。
+      */}
+      <Alert>
+        <AlertTitle>お知らせ</AlertTitle>
+        <AlertDescription>既定の説明文です</AlertDescription>
+      </Alert>
+      <Alert variant="success">
+        <AlertTitle>成功の通知</AlertTitle>
+        <AlertDescription>成功の説明文です</AlertDescription>
+      </Alert>
+      <Alert variant="destructive">
+        <AlertTitle>エラーの通知</AlertTitle>
+        <AlertDescription>エラーの説明文です</AlertDescription>
+      </Alert>
     </main>
   );
 }

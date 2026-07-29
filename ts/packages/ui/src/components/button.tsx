@@ -30,8 +30,12 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary-hover",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+        // hover の混色空間は oklab を使う。oklch で混ぜると、無彩色である --foreground(#333333) の
+        // 色相が powerless となり合成結果の hue が none（= 描画時 0 = 赤）になるため、
+        // 実描画が「わずかに暗い緑」ではなく赤寄り（実測 #F5E9EC）になっていた。
+        // oklab には色相成分が無くこの問題が起きない（実測 #E6F0E9）。
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklab,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         // focus-visible の上書き（border-destructive/40 = 1.93:1）は base の指標より弱く、
