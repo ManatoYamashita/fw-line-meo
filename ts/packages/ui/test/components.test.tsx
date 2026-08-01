@@ -272,8 +272,19 @@ describe('Field — ラベル関連付けと data-invalid / aria-invalid の同�
   });
 });
 
+/**
+ * 描画済みの Alert を引く。
+ *
+ * role で引いてはならない。読み上げ強度は変種ごとに変わる（destructive のみ alert・
+ * それ以外は status）ため、role で引くと変種によって取れたり取れなかったりする。
+ * 視覚表現の検証は読み上げ強度から独立しているべきなので data-slot を使う。
+ */
+function renderedAlerts(): readonly Element[] {
+  return [...document.querySelectorAll('[data-slot="alert"]')];
+}
+
 describe('Alert — 通知（成功 / エラー）の役割と変種（Requirements 2.1, 2.3, 5.1）', () => {
-  it('alert ロールで通知され、見出しと本文が読み上げ対象になる', () => {
+  it('ライブリージョンとして通知され、見出しと本文が読み上げ対象になる', () => {
     render(
       <Alert>
         <AlertTitle>登録しました</AlertTitle>
@@ -281,7 +292,11 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </Alert>,
     );
 
-    const alert = screen.getByRole('alert');
+    const alert = renderedAlerts()[0]!;
+    expect(
+      LIVE_REGION_ROLES.has(alert.getAttribute('role') ?? ''),
+      `Alert の役割 ${alert.getAttribute('role') ?? '（無し）'} がライブリージョンではありません`,
+    ).toBe(true);
     expect(alert.textContent).toContain('登録しました');
     expect(alert.textContent).toContain('店舗情報を保存しました');
   });
@@ -298,7 +313,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </>,
     );
 
-    const [success, destructive] = screen.getAllByRole('alert');
+    const [success, destructive] = renderedAlerts();
     expect(success).toBeDefined();
     expect(destructive).toBeDefined();
 
@@ -331,7 +346,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       'text-muted-foreground',
     );
 
-    const [success, destructive] = screen.getAllByRole('alert');
+    const [success, destructive] = renderedAlerts();
     const cases = [
       { alert: success!, color: 'success' },
       { alert: destructive!, color: 'destructive' },
@@ -363,7 +378,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </Alert>,
     );
 
-    expect(classesOf(screen.getByRole('alert'))).not.toContain('data-[slot=alert-description]:text-');
+    expect(classesOf(renderedAlerts()[0]!)).not.toContain('data-[slot=alert-description]:text-');
     expect(classesOf(screen.getByText('変更はありません'))).toContain('text-muted-foreground');
   });
 
@@ -382,7 +397,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </>,
     );
 
-    for (const alert of screen.getAllByRole('alert')) {
+    for (const alert of renderedAlerts()) {
       expect(classesOf(alert)).not.toMatch(RAW_HEX);
       expect(classesOf(alert)).not.toMatch(RAW_PALETTE_COLOR);
     }
@@ -757,6 +772,159 @@ describe('動きに関わる指定が 2 区分へ漏れなく分類されてい�
         `${entry.utility} が出力する ${entry.cssProperty} を theme.css が抑制しています。` +
           `これは到達状態であり抑制してはなりません（${entry.note}）`,
       ).toBe(false);
+    }
+  });
+});
+
+// --- 通知の読み上げ強度の出し分け（Requirements 3.1〜3.4, 5.2） -------------------------
+//
+// すべての通知が読み上げを即座に中断する強度（role="alert"）で提示されると、単なる案内文でも
+// スクリーンリーダー利用者の作業が毎回遮られる。一方でエラーは確実に気づけなければならない。
+// ここでは「エラーだけが割り込む」ことと、「どの変種も読み上げ対象から外れない」ことを固定する。
+
+/** ライブリージョンとして扱われる role。どの変種もこのいずれかでなければならない（要件 3.4）。 */
+const LIVE_REGION_ROLES: ReadonlySet<string> = new Set(['alert', 'status']);
+/** 進行中の読み上げを中断させる強度。 */
+const ASSERTIVE_ROLE = 'alert';
+
+type AlertVariant = 'default' | 'success' | 'destructive';
+
+/** 変種 → 既定の読み上げ強度。エラーのみ割り込ませる（2026-07-30 の利用者合意）。 */
+const ALERT_ROLE_BY_VARIANT: Readonly<Record<AlertVariant, string>> = {
+  default: 'status',
+  success: 'status',
+  destructive: ASSERTIVE_ROLE,
+};
+
+/**
+ * cva の variants グループ（`variant: { … }` 等）の直下キーを部品ソースから取り出す。
+ *
+ * 判定は **行単位** で行う。クラス文字列には `:` も `[` も引用符も含まれるため
+ * （`*:[svg:not([class*='size-'])]:size-4` 等）、文字単位で `key:` を探すと誤検出する。
+ * 一方 cva の変種キーは必ず行頭に現れ、クラス文字列の折り返し行は引用符で始まるので、
+ * 「行頭の識別子 + コロン」だけを拾えば十分に堅い。
+ *
+ * 注意: キーの直前に説明コメントが挟まることがある（`alert.tsx` の success がそう）。
+ * コメント行は行頭が識別子ではないため自然に除外される。カンマ直後を起点にする実装では
+ * この success を取りこぼした（実際に踏んだ）。
+ */
+function variantKeysOf(source: string, group: string): readonly string[] {
+  const start = source.indexOf(`${group}: {`);
+  if (start < 0) return [];
+  const open = source.indexOf('{', start);
+
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1;
+    else if (source[i] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return [];
+
+  const keys: string[] = [];
+  let nested = 0;
+  for (const line of source.slice(open + 1, end).split('\n')) {
+    if (nested === 0) {
+      const match = /^"?([A-Za-z_][\w-]*)"?\s*:/.exec(line.trim());
+      if (match !== null) keys.push(match[1]!);
+    }
+    nested +=
+      (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0);
+  }
+  return keys;
+}
+
+const alertSource = readFileSync(join(motionComponentsDir, 'alert.tsx'), 'utf8');
+
+describe('Alert — 読み上げ強度が重要度に応じて出し分けられる（Requirements 3.1〜3.4, 5.2）', () => {
+  it('部品が提供する変種と対応表が双方向で一致する（強度未定義の変種を作らない）', () => {
+    const declared = variantKeysOf(alertSource, 'variant');
+    expect(
+      declared.length,
+      '変種を抽出できませんでした（抽出器が壊れているか部品の書き方が変わっています）',
+    ).toBeGreaterThan(0);
+    expect([...declared].sort()).toEqual(Object.keys(ALERT_ROLE_BY_VARIANT).sort());
+  });
+
+  it.each(Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[])(
+    '%s 変種が意図した読み上げ強度で提示される',
+    (variant) => {
+      render(
+        <Alert variant={variant} data-testid="通知">
+          <AlertTitle>見出し</AlertTitle>
+        </Alert>,
+      );
+      const role = screen.getByTestId('通知').getAttribute('role');
+      expect(
+        role,
+        `${variant} 変種の読み上げ強度が ${role ?? '（無し）'} です。` +
+          `${ALERT_ROLE_BY_VARIANT[variant]} であるべきです`,
+      ).toBe(ALERT_ROLE_BY_VARIANT[variant]);
+    },
+  );
+
+  it('割り込む強度を持つのはエラーだけである（案内文で作業を中断させない）', () => {
+    const interrupting = (Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[]).filter(
+      (variant) => ALERT_ROLE_BY_VARIANT[variant] === ASSERTIVE_ROLE,
+    );
+    expect(
+      interrupting,
+      `読み上げを割り込ませる変種: ${interrupting.join(', ')}。エラーのみであるべきです`,
+    ).toEqual(['destructive']);
+  });
+
+  it('読み上げ対象から外れる変種が存在しない（Requirements 3.4）', () => {
+    for (const variant of Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[]) {
+      expect(
+        LIVE_REGION_ROLES.has(ALERT_ROLE_BY_VARIANT[variant]),
+        `${variant} 変種の役割 ${ALERT_ROLE_BY_VARIANT[variant]} はライブリージョンではありません。` +
+          'その変種の通知は支援技術へ一切伝わらなくなります',
+      ).toBe(true);
+    }
+  });
+
+  it('呼び出し側が読み上げ強度を上書きできる', () => {
+    render(
+      <Alert variant="default" role="alert" data-testid="通知">
+        <AlertTitle>緊急</AlertTitle>
+      </Alert>,
+    );
+    expect(screen.getByTestId('通知').getAttribute('role')).toBe('alert');
+  });
+
+  it('読み上げ強度の出し分けが視覚表現を変えない（Requirements 3.3）', () => {
+    // 「変更前と同一か」を literal のクラス文字列で固定するとレイアウト調整のたびに壊れる。
+    // ここでは要件の文言どおり **読み上げ強度の違いによって視覚表現が変わらないこと** を
+    // 直接測る: 同じ変種を既定の強度と上書きした強度で描画し、クラス集合が一致することを見る。
+    for (const variant of Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[]) {
+      const { container: withDefaultRole } = render(
+        <Alert variant={variant}>
+          <AlertTitle>見出し</AlertTitle>
+          <AlertDescription>説明</AlertDescription>
+        </Alert>,
+      );
+      const { container: withOverriddenRole } = render(
+        <Alert variant={variant} role="log">
+          <AlertTitle>見出し</AlertTitle>
+          <AlertDescription>説明</AlertDescription>
+        </Alert>,
+      );
+      const classesIn = (root: Element): string =>
+        [...root.querySelectorAll('*')].map((node) => classesOf(node)).join(' | ');
+      const baseline = classesIn(withDefaultRole);
+      // 空振り防止: 両方が空文字なら「一致」は自明に成立してしまう。
+      expect(baseline.length, `${variant} 変種のクラスを読み取れていません`).toBeGreaterThan(20);
+      expect(
+        classesIn(withOverriddenRole),
+        `${variant} 変種の視覚表現が読み上げ強度によって変化しています`,
+      ).toBe(baseline);
+      cleanup();
     }
   });
 });

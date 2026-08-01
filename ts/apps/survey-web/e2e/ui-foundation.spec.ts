@@ -581,7 +581,9 @@ test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出�
 // クラス assert も含めた既存の静的検証は全て緑のまま通る。ここでは実際に描かれた色を測る。
 test('Alert の説明文に変種の状態色が実描画で届いている', async ({ page }) => {
   await page.goto('/ui-check');
-  const alerts = page.getByRole('alert');
+  // role で引かないこと。読み上げ強度は変種ごとに変わる（destructive のみ alert・それ以外は
+  // status）ため、role で引くと variant によって取れたり取れなかったりする（ui-a11y-gaps 要件 3.1）。
+  const alerts = page.locator('[data-slot="alert"]');
   await expect(alerts.filter({ hasText: '成功の通知' })).toBeVisible();
 
   const partOf = (heading: string, slot: string): Locator =>
