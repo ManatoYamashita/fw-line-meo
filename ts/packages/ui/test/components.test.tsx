@@ -928,3 +928,79 @@ describe('Alert — 読み上げ強度が重要度に応じて出し分けられ
     }
   });
 });
+
+// --- 寸法区分の分類ガード（Requirements 5.4） ------------------------------------------
+//
+// タッチ操作領域の要求値は寸法区分ごとに異なる（客向け主動線の既定寸法は 44px、高density
+// 配置向けの縮小寸法は SC 2.5.8 の 24px）。区分が追加されたときに「どちらに属するのか」を
+// 誰も宣言しないまま通ると、その区分だけが検証の網から漏れる。
+//
+// 実際の px の実測は survey-web の E2E が行う（jsdom は Tailwind を解決しないため）。
+// ここでは「区分の網羅」と「分類と実装の対応」を固定する。E2E 側にも区分 → 要求 px の表が
+// あるが、片方だけずらしても必ずどちらかが落ちる: 縮小区分に 44px を要求すれば実測が、
+// 既定区分に 24px を要求すれば下の拡張面の検査が赤化する。
+const BUTTON_SIZE_CLASS = {
+  default: 'default',
+  lg: 'default',
+  icon: 'default',
+  'icon-lg': 'default',
+  xs: 'compact',
+  sm: 'compact',
+  'icon-xs': 'compact',
+  'icon-sm': 'compact',
+} as const satisfies Record<string, 'default' | 'compact'>;
+
+type ButtonSize = keyof typeof BUTTON_SIZE_CLASS;
+
+const buttonSource = readFileSync(join(motionComponentsDir, 'button.tsx'), 'utf8');
+
+describe('押しボタンの寸法区分が漏れなく分類されている（Requirements 5.4）', () => {
+  it('部品が提供する寸法区分と分類表が双方向で一致する', () => {
+    const declared = variantKeysOf(buttonSource, 'size');
+    expect(
+      declared.length,
+      '寸法区分を抽出できませんでした（抽出器が壊れているか部品の書き方が変わっています）',
+    ).toBeGreaterThan(0);
+
+    const classified = Object.keys(BUTTON_SIZE_CLASS);
+    const unclassified = declared.filter((size) => !classified.includes(size));
+    expect(
+      unclassified,
+      `いずれの要求値に属するか宣言されていない寸法区分があります: ${unclassified.join(', ')}。` +
+        '44px を要求する既定寸法なのか、24px を下限とする縮小寸法なのかを明記してください',
+    ).toEqual([]);
+
+    const stale = classified.filter((size) => !declared.includes(size));
+    expect(stale, `部品から消えた寸法区分が分類表に残っています: ${stale.join(', ')}`).toEqual([]);
+  });
+
+  it.each(Object.keys(BUTTON_SIZE_CLASS) as ButtonSize[])(
+    '%s の操作領域の拡張の有無が分類と一致する',
+    (size) => {
+      render(
+        <Button size={size} aria-label="ボタン">
+          押す
+        </Button>,
+      );
+      const classes = classesOf(screen.getByRole('button', { name: 'ボタン' }));
+      const hasExpansion = /after:-inset-/.test(classes);
+      const shouldExpand = BUTTON_SIZE_CLASS[size] === 'default';
+      expect(
+        hasExpansion,
+        shouldExpand
+          ? `${size} は既定寸法だが操作領域の拡張を持たない（44px に届かない）`
+          : `${size} は縮小寸法だが操作領域の拡張を持つ（密集配置で隣の視覚領域を覆う）`,
+      ).toBe(shouldExpand);
+      // 拡張は不可視の面で行い、部品自身の視覚寸法は変えない（Requirements 4.3）。
+      if (shouldExpand) {
+        expect(
+          classes,
+          `${size} の拡張面が絶対配置されていない（レイアウトフローに載ると周囲の余白が動く）`,
+        ).toContain('after:absolute');
+        expect(classes, `${size} に配置の基準が無く拡張面が本体を基準にできない`).toContain(
+          'relative',
+        );
+      }
+    },
+  );
+});

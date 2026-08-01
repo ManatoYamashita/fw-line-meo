@@ -50,8 +50,8 @@
 | Button（`default` / 各 variant） | 高さ 32px | **32px**（`::after` なし） | 高さ 12px 不足 |
 | Input | 高さ 32px | **32px**（`::after` なし） | 高さ 12px 不足 |
 | Textarea | 高さ 138px | 138px | 充足 |
-| Checkbox | 16×16 | **40×32** | **幅 4px・高さ 12px 不足** |
-| RadioGroupItem | 16×16 | **40×32** | **幅 4px・高さ 12px 不足** |
+| Checkbox | 16×16 | **40×32**（※実装時の再実測で **38×30** に訂正。枠線 1px 分の見落とし） | **不足** |
+| RadioGroupItem | 16×16 | **40×32**（※同上・**38×30**） | **不足** |
 
 > **Issue #52 の前提の訂正**: Issue は「Checkbox / RadioGroup は `after:-inset-x-3 after:-inset-y-2` でタッチ領域を拡大済み」とし、Button にだけ配慮が無いと述べている。拡大自体は事実だが、**実効値は 40×32 であり 44px には届いていない**。要件 4-6（既に要求寸法以上なら維持）が適用される部品は現状 Textarea のみである。
 

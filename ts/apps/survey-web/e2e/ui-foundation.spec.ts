@@ -105,6 +105,11 @@ interface Box {
 }
 
 interface TouchGeometry {
+  slot: string | null;
+  /** 押しボタンの寸法区分（data-size）。持たない部品は null。 */
+  size: string | null;
+  /** 失敗メッセージで対象を特定するための呼び名。 */
+  name: string;
   /** 利用者に見えている矩形（border box）。 */
   visual: Box;
   /** 見えている矩形と拡張面の和 ＝ 実際に指で押せる領域。 */
@@ -114,7 +119,7 @@ interface TouchGeometry {
 }
 
 /**
- * 要素の実効的な操作領域を実描画から求める。
+ * セレクタに一致する要素の実効的な操作領域を、実描画からまとめて求める。
  *
  * `::after` による拡張はレイアウトフローから外れるので `getBoundingClientRect` には現れない。
  * 疑似要素の矩形は API から直接取れないため、計算済みスタイルの inset から幾何的に求める。
@@ -122,10 +127,16 @@ interface TouchGeometry {
  *
  * 拡張量を数値として主張できない場合（`auto` 等）は本体の矩形へ倒す。不明を「広い」と
  * 読み替えると、拡張が消えた実装をそのまま緑で通してしまうため。
+ *
+ * 要素ごとに個別へ問い合わせず一括で返すのは、隣接部品どうしの位置関係（要件 4.5）を
+ * 同一時点の座標で比較する必要があるためでもある。
  */
-function readTouchGeometry(locator: Locator): Promise<TouchGeometry> {
-  return locator.evaluate((element) => {
-    const toBox = (top: number, right: number, bottom: number, left: number): Box => ({
+function readTouchGeometries(
+  page: Page,
+  selector: string,
+): Promise<readonly TouchGeometry[]> {
+  return page.evaluate((query) => {
+    const toBox = (top: number, right: number, bottom: number, left: number) => ({
       top,
       right,
       bottom,
@@ -133,56 +144,73 @@ function readTouchGeometry(locator: Locator): Promise<TouchGeometry> {
       width: right - left,
       height: bottom - top,
     });
-    const rect = element.getBoundingClientRect();
-    const visual = toBox(rect.top, rect.right, rect.bottom, rect.left);
-    const withoutExpansion = { visual, effective: visual, hasExpansion: false };
 
-    const after = getComputedStyle(element, '::after');
-    // 疑似要素が生成されない／レイアウトに参加しない／当たり判定を持たない場合は拡張なし。
-    if (
-      after.content === 'none' ||
-      after.position !== 'absolute' ||
-      after.pointerEvents === 'none'
-    ) {
-      return withoutExpansion;
-    }
+    return Array.from(document.querySelectorAll(query)).map((element) => {
+      const rect = element.getBoundingClientRect();
+      const visual = toBox(rect.top, rect.right, rect.bottom, rect.left);
+      const identity = {
+        slot: element.getAttribute('data-slot'),
+        size: element.getAttribute('data-size'),
+        name:
+          element.getAttribute('aria-label') ??
+          ((element.textContent ?? '').trim().slice(0, 20) ||
+            (element.getAttribute('data-slot') ?? '要素')),
+      };
+      const withoutExpansion = { ...identity, visual, effective: visual, hasExpansion: false };
 
-    const px = (value: string): number => Number.parseFloat(value);
-    const own = getComputedStyle(element);
-    const padTop = rect.top + px(own.borderTopWidth);
-    const padLeft = rect.left + px(own.borderLeftWidth);
-    const padRight = rect.right - px(own.borderRightWidth);
-    const padBottom = rect.bottom - px(own.borderBottomWidth);
+      const after = getComputedStyle(element, '::after');
+      // 疑似要素が生成されない／レイアウトに参加しない／当たり判定を持たない場合は拡張なし。
+      if (
+        after.content === 'none' ||
+        after.position !== 'absolute' ||
+        after.pointerEvents === 'none'
+      ) {
+        return withoutExpansion;
+      }
 
-    const insets = [after.top, after.right, after.bottom, after.left].map(px);
-    if (insets.some((value) => !Number.isFinite(value))) return withoutExpansion;
-    const [insetTop, insetRight, insetBottom, insetLeft] = insets as [
-      number,
-      number,
-      number,
-      number,
-    ];
+      const px = (value: string): number => Number.parseFloat(value);
+      const own = getComputedStyle(element);
+      const padTop = rect.top + px(own.borderTopWidth);
+      const padLeft = rect.left + px(own.borderLeftWidth);
+      const padRight = rect.right - px(own.borderRightWidth);
+      const padBottom = rect.bottom - px(own.borderBottomWidth);
 
-    // inset は含有ブロックの各辺からの距離。負の値が外側へのはみ出しになる。
-    const overlay = toBox(
-      padTop + insetTop,
-      padRight - insetRight,
-      padBottom - insetBottom,
-      padLeft + insetLeft,
-    );
-    // 実際に押せるのは本体と拡張面の和。拡張面が本体より内側でも領域は縮まない。
-    const effective = toBox(
-      Math.min(visual.top, overlay.top),
-      Math.max(visual.right, overlay.right),
-      Math.max(visual.bottom, overlay.bottom),
-      Math.min(visual.left, overlay.left),
-    );
-    return {
-      visual,
-      effective,
-      hasExpansion: effective.width > visual.width || effective.height > visual.height,
-    };
-  });
+      const insets = [after.top, after.right, after.bottom, after.left].map(px);
+      if (insets.some((value) => !Number.isFinite(value))) return withoutExpansion;
+      const [insetTop, insetRight, insetBottom, insetLeft] = insets as [
+        number,
+        number,
+        number,
+        number,
+      ];
+
+      // inset は含有ブロックの各辺からの距離。負の値が外側へのはみ出しになる。
+      const overlay = toBox(
+        padTop + insetTop,
+        padRight - insetRight,
+        padBottom - insetBottom,
+        padLeft + insetLeft,
+      );
+      // 実際に押せるのは本体と拡張面の和。拡張面が本体より内側でも領域は縮まない。
+      const effective = toBox(
+        Math.min(visual.top, overlay.top),
+        Math.max(visual.right, overlay.right),
+        Math.max(visual.bottom, overlay.bottom),
+        Math.min(visual.left, overlay.left),
+      );
+      return {
+        ...identity,
+        visual,
+        effective,
+        hasExpansion: effective.width > visual.width || effective.height > visual.height,
+      };
+    });
+  }, selector);
+}
+
+/** 2 つの矩形が面積を持って重なるか（辺で接するだけは重なりとみなさない）。 */
+function intersects(a: Box, b: Box): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
 interface HitTarget {
@@ -216,6 +244,41 @@ function readHitTarget(page: Page, x: number, y: number): Promise<HitTarget | nu
 
 /** 動きが「知覚されない」とみなす上限（秒）。research.md R-1 の実測では 1e-05s へ解決される。 */
 const IMPERCEPTIBLE_SECONDS = 0.001;
+
+/** 客向け主動線で用いる既定寸法に要求する操作領域（ui-a11y-gaps 要件 4.1）。 */
+const TOUCH_TARGET_DEFAULT_PX = 44;
+/** 高密度配置向けの縮小寸法と選択部品単体の下限（WCAG 2.2 SC 2.5.8・要件 4.2）。 */
+const TOUCH_TARGET_COMPACT_PX = 24;
+
+/**
+ * 押しボタンの寸法区分 → 要求値。
+ * 区分が増えたらここへ必ず追記する。宣言の無い区分を実描画で見つけたら失敗させる（要件 5.4）。
+ * 区分の一覧そのものが部品ソースと一致しているかは @fwlm/ui 側の分類ガードが担う。
+ */
+const BUTTON_TOUCH_REQUIREMENT: Readonly<Record<string, number>> = {
+  default: TOUCH_TARGET_DEFAULT_PX,
+  lg: TOUCH_TARGET_DEFAULT_PX,
+  icon: TOUCH_TARGET_DEFAULT_PX,
+  'icon-lg': TOUCH_TARGET_DEFAULT_PX,
+  xs: TOUCH_TARGET_COMPACT_PX,
+  sm: TOUCH_TARGET_COMPACT_PX,
+  'icon-xs': TOUCH_TARGET_COMPACT_PX,
+  'icon-sm': TOUCH_TARGET_COMPACT_PX,
+};
+
+/** 指で操作する部品。隣接時の被覆判定（要件 4.5）はこの集合の全組み合わせで見る。 */
+const OPERABLE_SELECTOR =
+  '[data-slot="button"], [data-slot="checkbox"], [data-slot="radio-group-item"], [data-slot="input"], [data-slot="textarea"]';
+
+/**
+ * ラベルを伴う構成の「行」。要件 4.7 の 44px はこの行全体で満たす。
+ *
+ * テキスト入力は指で押した位置に文字カーソルを置く性質上、選択部品は部品自身が規定する
+ * 項目間隔（ピッチ 24px）の制約上、どちらも不可視面で操作領域を広げられない。
+ * 2 つの形をとる: ラベルが制御を包む構成と、ラベルが制御の上に積まれる構成。
+ */
+const LABELLED_ROW_SELECTOR =
+  '[data-slot="field-label"]:has([data-slot="checkbox"], [data-slot="radio-group-item"]), [data-slot="field"]:has([data-slot="input"])';
 
 interface TextCue {
   /** テキストを持つ子孫が存在するか。 */
@@ -681,9 +744,8 @@ test('実描画の計測基盤と検証面が実測の前提を満たしてい�
   await expectVerificationSurfaceSane(page);
 
   // 前提 2: 拡張面を持つ部品で、見えている矩形と実効領域を区別して読める。
-  // Checkbox は `::after` で操作領域だけを広げている唯一の既存例（要件 4.8 により現状維持）。
-  const checkbox = page.locator('[data-slot="checkbox"]').first();
-  const geometry = await readTouchGeometry(checkbox);
+  // Checkbox は `::after` で操作領域だけを広げている既存例（要件 4.8 により現状維持）。
+  const geometry = (await readTouchGeometries(page, '[data-slot="checkbox"]'))[0]!;
   expect(
     geometry.hasExpansion,
     `Checkbox の拡張面を読み取れていない: ${JSON.stringify(geometry)}`,
@@ -885,6 +947,180 @@ test('押下時に到達する見た目が動き低減の有無で変わらな�
     `押下時の到達位置が設定で変わっている（動き低減時 ${suppressed}px / 通常時 ${normal}px）。` +
       '抑制の対象が動きの「経過」を超えて「到達状態」まで及んでいる',
   ).toBeCloseTo(normal, 1);
+});
+
+// ui-a11y-gaps 要件 4.1 / 4.2 / 5.3: 指で押せる大きさを実描画で保証する。
+//
+// 本プロダクトの主動線は QR → モバイル → LIFF であり、利用者は IT に不慣れであることが前提
+// （steering product.md）。押し損ねは離脱に直結するが、押しにくさは誰も報告しないため、
+// 実測でしか守れない。
+test('押しボタンの操作領域が寸法区分ごとの要求値を満たす', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  // 検証面が潰れていると寸法の検証は「部品の欠陥」に見える失敗をする。先に切り分ける。
+  await expectVerificationSurfaceSane(page);
+
+  const buttons = await readTouchGeometries(page, '[data-slot="button"]');
+  expect(
+    buttons.length,
+    '押しボタンを 1 つも実測できていない（検証面から部品が消えている）',
+  ).toBeGreaterThan(0);
+
+  // 空振り防止: 既定寸法と縮小寸法の **両方** が検証面に実在していること。
+  // 片方しか無いと、もう片方の要求値は誰にも試されないまま緑になる。
+  const measured = buttons.map((button) => BUTTON_TOUCH_REQUIREMENT[button.size ?? '']);
+  expect(
+    measured.includes(TOUCH_TARGET_DEFAULT_PX),
+    `既定寸法の押しボタンが検証面に無い（実測できた区分: ${buttons.map((b) => b.size).join(', ')}）`,
+  ).toBe(true);
+  expect(
+    measured.includes(TOUCH_TARGET_COMPACT_PX),
+    `縮小寸法の押しボタンが検証面に無い（実測できた区分: ${buttons.map((b) => b.size).join(', ')}）`,
+  ).toBe(true);
+
+  for (const button of buttons) {
+    const required = BUTTON_TOUCH_REQUIREMENT[button.size ?? ''];
+    expect(
+      required,
+      `寸法区分 ${button.size ?? '（無し）'}（${button.name}）に要求値の宣言がありません。` +
+        'BUTTON_TOUCH_REQUIREMENT へ追記してください',
+    ).toBeDefined();
+    expect(
+      button.effective.height,
+      `${button.name}（区分 ${button.size ?? '不明'}）の操作領域の高さが ` +
+        `${button.effective.height}px（要求 ${required}px・視覚寸法は ${button.visual.height}px）`,
+    ).toBeGreaterThanOrEqual(required!);
+    expect(
+      button.effective.width,
+      `${button.name}（区分 ${button.size ?? '不明'}）の操作領域の幅が ` +
+        `${button.effective.width}px（要求 ${required}px・視覚寸法は ${button.visual.width}px）`,
+    ).toBeGreaterThanOrEqual(required!);
+  }
+});
+
+// 要件 4.5: 拡張した操作領域が隣接部品の視覚領域を覆わない。
+//
+// 「まったく重ならない」ことは要求しない。部品間の余白の中で拡張どうしが接することは、
+// そこに利用者の意図が定義できない以上あってよい。**害があるのは、見えている部品を指したのに
+// 別の部品が反応する場合だけ**であり、それは「拡張が隣の視覚領域を覆う」ことと同値である。
+test('拡張した操作領域が隣接部品の視覚領域を覆わない', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const operables = await readTouchGeometries(page, OPERABLE_SELECTOR);
+  const expanded = operables.filter((item) => item.hasExpansion);
+  // 空振り防止: 拡張を持つ部品がゼロなら「覆っていない」は自明に成立する。
+  expect(
+    expanded.length,
+    '操作領域を拡張している部品が 1 つも無い。この判定は拡張が存在して初めて意味を持つ',
+  ).toBeGreaterThan(0);
+
+  for (const source of expanded) {
+    for (const other of operables) {
+      if (other === source) continue;
+      expect(
+        intersects(source.effective, other.visual),
+        `${source.name} の操作領域 ${JSON.stringify(source.effective)} が ` +
+          `${other.name} の見えている領域 ${JSON.stringify(other.visual)} を覆っています。` +
+          '見えている部品を指したのに別の部品が反応する状態です',
+      ).toBe(false);
+    }
+  }
+});
+
+// 要件 4.2 / 4.6 / 4.8: 拡張を掛けない側が下限を割っていないこと（現状維持の非後退）。
+test('選択部品と複数行入力の操作領域が下限を維持している', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const selectables = await readTouchGeometries(
+    page,
+    '[data-slot="checkbox"], [data-slot="radio-group-item"]',
+  );
+  expect(selectables.length, '選択部品を実測できていない').toBeGreaterThan(0);
+  for (const item of selectables) {
+    for (const [axis, value] of [
+      ['高さ', item.effective.height],
+      ['幅', item.effective.width],
+    ] as const) {
+      expect(
+        value,
+        `${item.slot ?? '選択部品'}（${item.name}）の操作領域の${axis}が ${value}px` +
+          `（下限 ${TOUCH_TARGET_COMPACT_PX}px）`,
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_COMPACT_PX);
+    }
+  }
+
+  // 複数行入力は変更を加えずに要求値を満たし続けること（要件 4.6）。
+  const textareas = await readTouchGeometries(page, '[data-slot="textarea"]');
+  expect(textareas.length, '複数行入力を実測できていない').toBeGreaterThan(0);
+  for (const item of textareas) {
+    expect(
+      item.effective.height,
+      `複数行入力の操作領域の高さが ${item.effective.height}px へ縮んでいる` +
+        `（要求 ${TOUCH_TARGET_DEFAULT_PX}px・本部品は変更対象外）`,
+    ).toBeGreaterThanOrEqual(TOUCH_TARGET_DEFAULT_PX);
+  }
+});
+
+// 要件 4.7: ラベルを伴う構成では、ラベルを含む行全体で 44px を満たす。
+test('ラベルを伴う行が要求寸法を満たす', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const rows = await readTouchGeometries(page, LABELLED_ROW_SELECTOR);
+  // 空振り防止: 内容が短い構成が実在すること。内容が長ければ行は自然に 44px を超えるため、
+  // 「最小高が効いているか」は短い構成でしか試されない。
+  expect(
+    rows.length,
+    'ラベルを伴う構成が検証面に無い（要件 4.7 の検証対象が存在しない）',
+  ).toBeGreaterThanOrEqual(3);
+
+  for (const row of rows) {
+    expect(
+      row.effective.height,
+      `ラベルを含む行「${row.name}」の高さが ${row.effective.height}px` +
+        `（要求 ${TOUCH_TARGET_DEFAULT_PX}px）。テキスト入力と選択部品の 44px は` +
+        'この行で満たす前提になっている',
+    ).toBeGreaterThanOrEqual(TOUCH_TARGET_DEFAULT_PX);
+  }
+});
+
+// 要件 4.7 の後半: 行を指した結果、対応する部品が実際に反応すること。
+// 高さだけを満たしても、押して何も起きなければ「操作領域」とは呼べない。
+test('ラベル領域の指定で対応する部品が反応する', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+  // テキスト入力: ラベル文字の指定でフォーカスが移る。
+  await page.getByText('ラベル付き入力', { exact: true }).click();
+  expect(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-slot') ?? null),
+    'ラベル文字を指してもテキスト入力へフォーカスが移らない',
+  ).toBe('input');
+
+  // チェックボックス: ラベル文字の指定で選択状態が変わる。
+  const checkRow = page.locator('[data-slot="field-label"]', { hasText: 'ラベル付きチェック' });
+  const checkbox = checkRow.locator('[data-slot="checkbox"]');
+  expect(await checkbox.getAttribute('aria-checked')).toBe('false');
+  await checkRow.getByText('ラベル付きチェック').click();
+  expect(
+    await checkbox.getAttribute('aria-checked'),
+    'ラベル文字を指してもチェックボックスが反応しない',
+  ).toBe('true');
+
+  // ラジオ: ラベル文字の指定で当該項目が選ばれる。
+  const betaRow = page.locator('[data-slot="field-label"]', { hasText: '選択肢ベータ' });
+  const beta = betaRow.locator('[data-slot="radio-group-item"]');
+  expect(await beta.getAttribute('aria-checked')).toBe('false');
+  await betaRow.getByText('選択肢ベータ').click();
+  expect(
+    await beta.getAttribute('aria-checked'),
+    'ラベル文字を指してもラジオが当該項目へ反応しない',
+  ).toBe('true');
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。
