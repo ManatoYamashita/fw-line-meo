@@ -89,6 +89,186 @@ function readRenderedColors(locator: Locator): Promise<RenderedColors> {
   });
 }
 
+// --- 実描画の計測基盤（ui-a11y-gaps・要件 5.1 / 5.3） ----------------------------------
+//
+// タッチ操作領域も動きの抑制も、クラス名の有無では判定できない。前者は疑似要素の幾何と
+// レイアウトの相互作用で決まり、後者はカスケードレイヤの優先順位で決まるため、いずれも
+// 「そう書いてあるのに効いていない」が起こりうる。ここでは実描画から直接測る。
+
+interface Box {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface TouchGeometry {
+  /** 利用者に見えている矩形（border box）。 */
+  visual: Box;
+  /** 見えている矩形と拡張面の和 ＝ 実際に指で押せる領域。 */
+  effective: Box;
+  /** 拡張面によって領域が実際に広がっているか。 */
+  hasExpansion: boolean;
+}
+
+/**
+ * 要素の実効的な操作領域を実描画から求める。
+ *
+ * `::after` による拡張はレイアウトフローから外れるので `getBoundingClientRect` には現れない。
+ * 疑似要素の矩形は API から直接取れないため、計算済みスタイルの inset から幾何的に求める。
+ * `::after` の含有ブロックは本体の **padding box** なので、border 幅の分だけ内側から測る。
+ *
+ * 拡張量を数値として主張できない場合（`auto` 等）は本体の矩形へ倒す。不明を「広い」と
+ * 読み替えると、拡張が消えた実装をそのまま緑で通してしまうため。
+ */
+function readTouchGeometry(locator: Locator): Promise<TouchGeometry> {
+  return locator.evaluate((element) => {
+    const toBox = (top: number, right: number, bottom: number, left: number): Box => ({
+      top,
+      right,
+      bottom,
+      left,
+      width: right - left,
+      height: bottom - top,
+    });
+    const rect = element.getBoundingClientRect();
+    const visual = toBox(rect.top, rect.right, rect.bottom, rect.left);
+    const withoutExpansion = { visual, effective: visual, hasExpansion: false };
+
+    const after = getComputedStyle(element, '::after');
+    // 疑似要素が生成されない／レイアウトに参加しない／当たり判定を持たない場合は拡張なし。
+    if (
+      after.content === 'none' ||
+      after.position !== 'absolute' ||
+      after.pointerEvents === 'none'
+    ) {
+      return withoutExpansion;
+    }
+
+    const px = (value: string): number => Number.parseFloat(value);
+    const own = getComputedStyle(element);
+    const padTop = rect.top + px(own.borderTopWidth);
+    const padLeft = rect.left + px(own.borderLeftWidth);
+    const padRight = rect.right - px(own.borderRightWidth);
+    const padBottom = rect.bottom - px(own.borderBottomWidth);
+
+    const insets = [after.top, after.right, after.bottom, after.left].map(px);
+    if (insets.some((value) => !Number.isFinite(value))) return withoutExpansion;
+    const [insetTop, insetRight, insetBottom, insetLeft] = insets as [
+      number,
+      number,
+      number,
+      number,
+    ];
+
+    // inset は含有ブロックの各辺からの距離。負の値が外側へのはみ出しになる。
+    const overlay = toBox(
+      padTop + insetTop,
+      padRight - insetRight,
+      padBottom - insetBottom,
+      padLeft + insetLeft,
+    );
+    // 実際に押せるのは本体と拡張面の和。拡張面が本体より内側でも領域は縮まない。
+    const effective = toBox(
+      Math.min(visual.top, overlay.top),
+      Math.max(visual.right, overlay.right),
+      Math.max(visual.bottom, overlay.bottom),
+      Math.min(visual.left, overlay.left),
+    );
+    return {
+      visual,
+      effective,
+      hasExpansion: effective.width > visual.width || effective.height > visual.height,
+    };
+  });
+}
+
+interface HitTarget {
+  slot: string | null;
+  name: string;
+}
+
+/**
+ * 指定した座標で実際に反応する部品を返す。
+ *
+ * 幾何の計算だけでは「その矩形が本当に当たり判定を持つか」を主張できない。座標を撃って
+ * 返ってきた要素を見ることで、幾何と実際の反応先を結びつける（この紐が無いと、
+ * `pointer-events` の欠落や他要素による被覆を素通ししてしまう）。
+ */
+function readHitTarget(page: Page, x: number, y: number): Promise<HitTarget | null> {
+  return page.evaluate(
+    ([pointX, pointY]) => {
+      const element = document.elementFromPoint(pointX as number, pointY as number);
+      if (element === null) return null;
+      const owner = element.closest('[data-slot]');
+      const named = owner ?? element;
+      return {
+        slot: owner === null ? null : owner.getAttribute('data-slot'),
+        name:
+          named.getAttribute('aria-label') ?? (named.textContent ?? '').trim().slice(0, 24),
+      };
+    },
+    [x, y],
+  );
+}
+
+interface MotionValues {
+  animationName: string;
+  animationDurationSeconds: number;
+  animationIterationCount: string;
+  transitionDurationSeconds: number;
+}
+
+/**
+ * 動きの実効値を計算済みスタイルから読む。
+ *
+ * カンマ区切りで複数指定されうるため代表値には最大を採る。1 つでも知覚できる長さが
+ * 残っていれば抑制は成立していないので、平均や先頭では甘くなる。
+ */
+function readMotion(locator: Locator): Promise<MotionValues> {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const maxSeconds = (value: string): number =>
+      value.split(',').reduce((longest, part) => {
+        const text = part.trim();
+        const amount = Number.parseFloat(text);
+        if (!Number.isFinite(amount)) return longest;
+        return Math.max(longest, text.endsWith('ms') ? amount / 1000 : amount);
+      }, 0);
+    return {
+      animationName: style.animationName,
+      animationDurationSeconds: maxSeconds(style.animationDuration),
+      animationIterationCount: style.animationIterationCount,
+      transitionDurationSeconds: maxSeconds(style.transitionDuration),
+    };
+  });
+}
+
+/**
+ * 検証面のレイアウトが degenerate になっていないことを、寸法の検証より **先に** 確かめる。
+ *
+ * これが無いと、検証面が潰れたときに寸法の検証は失敗側へ倒れるものの、原因が部品ではなく
+ * 検証面にあることに気づけない（design「失敗モードと観測性」）。
+ */
+async function expectVerificationSurfaceSane(page: Page): Promise<void> {
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
+  }
+  const width = await page
+    .locator('main')
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(
+    width,
+    `検証面の main の実幅が ${width}px しかない（端末幅 ${viewport.width}px）。` +
+      'これは部品の欠陥ではなく検証面のレイアウトが壊れている状態で、この幅で測った' +
+      'タッチ操作領域は実態を表さない。コンテナ幅に名前付きスケール（max-w-md 等）を' +
+      '使うと --spacing-* のトークン上書きに巻き込まれて実幅 32px へ潰れる（Issue #54）',
+  ).toBeGreaterThanOrEqual(viewport.width * 0.8);
+}
+
 interface FocusIndicator {
   tag: string;
   name: string;
@@ -367,6 +547,57 @@ test.describe('color-mix の実効色（ポインタのある環境）', () => {
         `${ratio.toFixed(3)}:1（要求 ${AA_NORMAL_TEXT_RATIO}:1）`,
     ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
   });
+});
+
+// ui-a11y-gaps 要件 5.3: 実測の前提そのものを検証する。
+//
+// 以降のタッチ操作領域・動きの検証は、いずれもこの計測基盤の上に立つ。基盤が壊れたまま
+// 「部品が要求を満たしていない」と報告すると原因の切り分けを誤らせるため、基盤の健全性を
+// 独立したテストとして固定する。
+test('実描画の計測基盤と検証面が実測の前提を満たしている', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+  // 前提 1: 検証面が端末幅どおりに描かれている。
+  await expectVerificationSurfaceSane(page);
+
+  // 前提 2: 拡張面を持つ部品で、見えている矩形と実効領域を区別して読める。
+  // Checkbox は `::after` で操作領域だけを広げている唯一の既存例（要件 4.8 により現状維持）。
+  const checkbox = page.locator('[data-slot="checkbox"]').first();
+  const geometry = await readTouchGeometry(checkbox);
+  expect(
+    geometry.hasExpansion,
+    `Checkbox の拡張面を読み取れていない: ${JSON.stringify(geometry)}`,
+  ).toBe(true);
+  expect(
+    geometry.effective.height,
+    `実効領域(${geometry.effective.height}px)が視覚領域(${geometry.visual.height}px)を超えていない`,
+  ).toBeGreaterThan(geometry.visual.height);
+
+  // 前提 3: 求めた幾何が実際に当たり判定を持つ（pointer-events の欠落・被覆を落とす）。
+  // 拡張領域の左上の内側 1px を撃つ。本体の外側なので、拡張が効いていなければ別要素が返る。
+  const corner = await readHitTarget(
+    page,
+    geometry.effective.left + 1,
+    geometry.effective.top + 1,
+  );
+  expect(
+    corner?.slot,
+    `拡張領域の隅(${geometry.effective.left + 1}, ${geometry.effective.top + 1})で ` +
+      `${JSON.stringify(corner)} が反応した。幾何は広いが当たり判定が無い`,
+  ).toBe('checkbox');
+
+  // 前提 4: 動きの実効値が読める。かつ「無いものを有ると言わない」。
+  const button = page.getByRole('button', { name: '既定のボタン' });
+  const motion = await readMotion(button);
+  expect(
+    motion.transitionDurationSeconds,
+    `既定のボタンの遷移時間を読み取れていない: ${JSON.stringify(motion)}`,
+  ).toBeGreaterThan(0);
+  expect(
+    motion.animationDurationSeconds,
+    `アニメーションを持たない部品に時間が現れている: ${JSON.stringify(motion)}`,
+  ).toBe(0);
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。

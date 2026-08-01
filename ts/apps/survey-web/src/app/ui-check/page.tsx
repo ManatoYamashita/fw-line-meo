@@ -48,10 +48,11 @@ export default function UiCheckPage() {
   return (
     // コンテナ幅に名前付きスケール（max-w-md 等）を使わないこと。
     // theme.css の `--spacing-md: 1rem` が Tailwind 既定の `--container-md`（28rem）を覆うため、
-    // `max-w-md` はこの検証面では **実幅 16px** へ解決される。その幅ではタッチ操作領域の実測が
-    // 実態と乖離し、部品の欠陥と検証面の欠陥を切り分けられなくなる（ui-a11y-gaps design
-    // 「失敗モードと観測性」）。ここでは衝突しない任意値で回避するにとどめ、
-    // `--spacing-*` と `--container-*` のトークン衝突そのものの是正は Issue #54 が扱う。
+    // `max-w-md` は 1rem（16px）へ解決され、内側余白に押し広げられて **実幅 32px** で描画される
+    // （端末幅 393px に対して）。その幅ではタッチ操作領域の実測が実態と乖離し、部品の欠陥と
+    // 検証面の欠陥を切り分けられなくなる（ui-a11y-gaps design「失敗モードと観測性」）。
+    // ここでは衝突しない任意値で回避するにとどめ、`--spacing-*` と `--container-*` の
+    // トークン衝突そのものの是正は Issue #54 が扱う。
     <main className="mx-auto flex max-w-[28rem] flex-col gap-4 p-4">
       <h1>UI 基盤の検証面</h1>
       <p>
