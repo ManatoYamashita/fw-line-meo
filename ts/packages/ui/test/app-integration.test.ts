@@ -162,8 +162,19 @@ const MOTION_SUPPRESSED_PROPERTIES = [
 /**
  * 抑制ブロックに現れてはならないプロパティ。
  * 到達状態を抑制対象へ紛れ込ませた瞬間に赤化させる（要件 1.4 の CSS 側の防波堤）。
+ *
+ * `translate` / `scale` / `rotate` を落としてはならない: Tailwind v4 の `translate-y-px` 等は
+ * `transform` ではなく **独立したこれらのプロパティ**へ出力される（生成 CSS で確認済み）。
+ * `transform` だけを禁止対象にすると、実際に使われている経路が素通りする。
  */
-const MOTION_FORBIDDEN_PROPERTIES = ['transition-property', 'animation-name', 'transform'] as const;
+const MOTION_FORBIDDEN_PROPERTIES = [
+  'transition-property',
+  'animation-name',
+  'transform',
+  'translate',
+  'scale',
+  'rotate',
+] as const;
 
 /** 規則の宣言を `prop -> value` のオブジェクトへ畳む。 */
 function declarationsOf(rule: Rule): Readonly<Record<string, string>> {

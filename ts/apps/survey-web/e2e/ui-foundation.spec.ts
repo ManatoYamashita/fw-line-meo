@@ -264,31 +264,44 @@ function readAnimatedElements(page: Page): Promise<readonly AnimatedElement[]> {
 }
 
 /**
- * 押下を保持したときに到達する見た目（`transform`）を測る。
+ * 押下を保持したときに到達する見た目を、**実際に描画された位置の差**として測る。
  *
  * 要件 1.4 が守るのは「動きの経過」と「到達する状態」の区別である。抑制の対象を誤って
- * `transition-property` や `transform` まで広げると、押下フィードバックのような
- * **動きではなく状態**が失われる。押したまま最終値を読んで両設定で突き合わせる。
+ * 到達状態まで広げると、押下フィードバックのような **動きではなく状態** が失われる。
+ *
+ * 計算済みスタイルの特定プロパティを読んではならない。Tailwind v4 の `translate-y-px` は
+ * `transform` ではなく独立した `translate` プロパティへ出力されるため、`transform` を読むと
+ * 押下の有無によらず常に `none` が返り、**何も測らずに緑になる**（実際にこの罠を踏んだ）。
+ * 位置そのものを測れば、どのプロパティで実現されていても、また将来別の手段へ変わっても、
+ * 「到達する見た目」を直接見ていることになる。
  */
-async function readPressedTransform(page: Page, name: string): Promise<string> {
+async function readPressedShift(page: Page, name: string): Promise<number> {
   const button = page.getByRole('button', { name });
   await expect(button).toBeVisible();
+  const readTop = (): Promise<number> =>
+    button.evaluate((element) => element.getBoundingClientRect().top);
+
+  const idle = await readTop();
   const box = await button.boundingBox();
   if (box === null) throw new Error(`${name} の矩形を取得できません`);
+
+  // 測るのは「到達した状態」なので、遷移が走り切るまで待つ必要がある。待たずに読むと
+  // 遷移の途中の値（実測 0.92px）を最終値（1px）と比べることになり、抑制の有無ではなく
+  // 遷移速度の差を検出してしまう。待ち時間は実測した遷移時間から導く（固定の勘に頼らない）。
+  const settleMs = (await readMotion(button)).transitionDurationSeconds * 1000 + 150;
 
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   try {
-    const readTransform = async (): Promise<string> =>
-      button.evaluate((element) => getComputedStyle(element).transform);
-    // 遷移が走る設定では最終値に落ち着くまで数フレームかかる。抑制が効いていれば即座に到達する。
-    await expect
-      .poll(readTransform, {
-        message: `${name} を押下しても変位が現れない（到達状態まで抑制されている疑い）`,
-        timeout: 3_000,
-      })
-      .not.toBe('matrix(1, 0, 0, 1, 0, 0)');
-    return await readTransform();
+    await page.waitForTimeout(settleMs);
+    const shift = (await readTop()) - idle;
+    // 空振り防止: 両文脈とも 0 なら「同一」は成立してしまう。到達状態の存在自体を要求する。
+    expect(
+      shift,
+      `${name}: 押下しても描画位置が変わらない（${shift}px）。押下フィードバック（到達状態）が` +
+        '失われている（抑制の対象が動きの「経過」を超えている疑い）',
+    ).toBeGreaterThan(0);
+    return shift;
   } finally {
     await page.mouse.up();
   }
@@ -679,14 +692,27 @@ test('実描画の計測基盤と検証面が実測の前提を満たしてい�
 // 「抑制規則が base レイヤに important 付きで存在する」ことしか言えない。実際にレイヤ順が
 // 逆転して utilities の animate-* / transition-* に勝っているかは実描画でしか確かめられない。
 test.describe('動き低減設定が有効な環境', () => {
-  test.use({ reducedMotion: 'reduce' });
+  // 動き低減の模擬は contextOptions 経由でしか渡せない（Playwright 1.61）。
+  // `test.use({ reducedMotion: 'reduce' })` と書くと **黙って無視される**。未知のキーは
+  // 素通りするうえ、e2e は tsconfig の exclude に入っており型検査もされないため、
+  // 「設定したつもりで通常の文脈を測り、抑制が無くても緑」という空振りになる。
+  // 下の matchMedia の assert はこの罠を実際に検出した安全網である。
+  test.use({ contextOptions: { reducedMotion: 'reduce' } });
 
   test('無限アニメーションが停止し、状態遷移が知覚できない水準まで抑制される', async ({ page }) => {
     await page.goto('/ui-check');
     await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
 
+    // 空振り防止その1: 動き低減が実際に模擬されている文脈で測っていること。
+    // これが偽なら抑制規則は最初から適用対象外であり、以降の assert は実装ではなく
+    // テスト環境を測っていることになる（hover の検証で同じ罠を踏んだ前例がある）。
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬されていない文脈で実行されている（抑制規則が適用対象外になり空振りする）',
+    ).toBe(true);
+
     const animated = await readAnimatedElements(page);
-    // 空振り防止: そもそもアニメーションを持つ要素が面から消えていたら検証は無意味。
+    // 空振り防止その2: そもそもアニメーションを持つ要素が面から消えていたら検証は無意味。
     expect(
       animated.length,
       'アニメーションを持つ要素が検証面に 1 つも無い。抑制が効いたのではなく検証対象が' +
@@ -721,11 +747,17 @@ test.describe('動き低減設定が有効な環境', () => {
 
 // 要件 1.3: 設定が無効な環境では現在の動きの表現を変更しない（非後退）。
 test.describe('動き低減設定が無効な環境', () => {
-  test.use({ reducedMotion: 'no-preference' });
+  test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
   test('従来どおりの動きが維持される', async ({ page }) => {
     await page.goto('/ui-check');
     await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+    // 対照側でも文脈を確かめる。両側が同じ文脈で走っていたら比較は無意味になる。
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬された文脈で「無効時」の検証を実行している',
+    ).toBe(false);
 
     const animated = await readAnimatedElements(page);
     expect(
@@ -754,9 +786,9 @@ test.describe('動き低減設定が無効な環境', () => {
 test('押下時に到達する見た目が動き低減の有無で変わらない', async ({ browser }, testInfo) => {
   const baseURL = testInfo.project.use.baseURL;
 
-  const pressedTransformUnder = async (
+  const pressedShiftUnder = async (
     reducedMotion: 'reduce' | 'no-preference',
-  ): Promise<string> => {
+  ): Promise<number> => {
     const context = await browser.newContext({
       ...devices['Pixel 5'],
       baseURL,
@@ -765,20 +797,25 @@ test('押下時に到達する見た目が動き低減の有無で変わらな�
     try {
       const page = await context.newPage();
       await page.goto('/ui-check');
-      return await readPressedTransform(page, '既定のボタン');
+      // 文脈が本当に切り替わっていることを確かめる（両側が同じ文脈なら比較は無意味）。
+      expect(
+        await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+        `${reducedMotion} の文脈を作れていない`,
+      ).toBe(reducedMotion === 'reduce');
+      return await readPressedShift(page, '既定のボタン');
     } finally {
       await context.close();
     }
   };
 
-  const suppressed = await pressedTransformUnder('reduce');
-  const normal = await pressedTransformUnder('no-preference');
+  const suppressed = await pressedShiftUnder('reduce');
+  const normal = await pressedShiftUnder('no-preference');
 
   expect(
     suppressed,
-    `押下時の到達状態が設定で変わっている（動き低減時 ${suppressed} / 通常時 ${normal}）。` +
+    `押下時の到達位置が設定で変わっている（動き低減時 ${suppressed}px / 通常時 ${normal}px）。` +
       '抑制の対象が動きの「経過」を超えて「到達状態」まで及んでいる',
-  ).toBe(normal);
+  ).toBeCloseTo(normal, 1);
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。
