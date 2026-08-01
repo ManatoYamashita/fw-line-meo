@@ -482,6 +482,30 @@ describe('Spinner — 読み込み中の状態通知（Requirements 2.1, 5.1）'
     render(<Spinner aria-label="下書きを生成中" />);
     expect(screen.getByRole('status').getAttribute('aria-label')).toBe('下書きを生成中');
   });
+
+  // 以下は DOM 構造の変更（単一要素 → ラッパ構造）を跨いで守るべき契約
+  // （ui-a11y-gaps Requirements 2.2, 2.3）。構造に依存しない言い方で固定する。
+
+  it('className は「実際に動く要素」へ届く（視覚的な大きさの指定が迷子にならない）', () => {
+    // 呼び出し側は <Spinner className="size-8" /> を「アイコンの大きさ」の意図で書く。
+    // ラッパ構造へ変えたときに className をラッパへ付けると、アイコンの寸法は変わらないまま
+    // **無言で意図が失われる**（画面は壊れず、誰も気づけない）。
+    // 「動きを持つ要素＝視覚的な本体」に付くことを、要素名を名指しせずに要求する。
+    const { container } = render(<Spinner className="size-8" />);
+    const animated = [...container.querySelectorAll('*')].filter((node) =>
+      classesOf(node).includes('animate-spin'),
+    );
+    expect(animated.length, 'animate-spin を持つ要素が見つかりません').toBe(1);
+    expect(
+      classesOf(animated[0]!),
+      '呼び出し側の className が、動きを持つ視覚的な本体へ届いていません',
+    ).toContain('size-8');
+  });
+
+  it('呼び出し側の任意の属性が根要素へ透過する', () => {
+    render(<Spinner data-testid="生成中" />);
+    expect(screen.getByRole('status').getAttribute('data-testid')).toBe('生成中');
+  });
 });
 
 // フォーカス指標の一本化（Issue #49 / Requirements 5.3）。

@@ -217,6 +217,37 @@ function readHitTarget(page: Page, x: number, y: number): Promise<HitTarget | nu
 /** 動きが「知覚されない」とみなす上限（秒）。research.md R-1 の実測では 1e-05s へ解決される。 */
 const IMPERCEPTIBLE_SECONDS = 0.001;
 
+interface TextCue {
+  /** テキストを持つ子孫が存在するか。 */
+  present: boolean;
+  text: string;
+  /** 実際に描画された幅。読み上げ専用（sr-only）なら 1px 程度に潰れる。 */
+  width: number;
+}
+
+/**
+ * 処理中表示が提示している「動きに依存しない手掛かり」を実描画から読む。
+ *
+ * 「見えているか」をクラス名で判定してはならない。`sr-only` と `not-sr-only` はどちらも
+ * `@layer utilities` に生成され、どちらが勝つかは生成順で決まる。クラスが付いていることと
+ * 見えていることは別問題なので、**描画された幅**で判定する。
+ */
+function readSpinnerTextCue(page: Page): Promise<TextCue> {
+  return page.locator('[data-slot="spinner"]').first().evaluate((element) => {
+    const withText = [element, ...Array.from(element.querySelectorAll('*'))].filter(
+      (node) => (node.textContent ?? '').trim().length > 0,
+    );
+    // 最も内側（テキストを直接持つ要素）を測る。
+    const target = withText[withText.length - 1];
+    if (target === undefined) return { present: false, text: '', width: 0 };
+    return {
+      present: true,
+      text: (target.textContent ?? '').trim(),
+      width: target.getBoundingClientRect().width,
+    };
+  });
+}
+
 interface MotionValues {
   animationName: string;
   animationDurationSeconds: number;
@@ -743,6 +774,28 @@ test.describe('動き低減設定が有効な環境', () => {
       ).toBeLessThanOrEqual(IMPERCEPTIBLE_SECONDS);
     }
   });
+
+  // 要件 2.1: 動きを止めたなら、動きに依存しない手段で処理中であることを伝える。
+  // 止めただけでは「画面が固まったのか処理中なのか」が判断できなくなる。
+  test('処理中表示が動きに依存しない可視の手掛かりを提示する', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.locator('[data-slot="spinner"]').first()).toBeVisible();
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬されていない文脈で実行されている',
+    ).toBe(true);
+
+    const cue = await readSpinnerTextCue(page);
+    expect(
+      cue.present,
+      '処理中表示に文言が無く、静止した図形だけになっている。動きを止めた環境では' +
+        '「処理中」なのか「画面が固まった」のかを判別できない',
+    ).toBe(true);
+    expect(
+      cue.width,
+      `処理中の文言「${cue.text}」が実描画で ${cue.width}px しかない（読み上げ専用のまま可視化されていない）`,
+    ).toBeGreaterThan(8);
+  });
 });
 
 // 要件 1.3: 設定が無効な環境では現在の動きの表現を変更しない（非後退）。
@@ -775,6 +828,20 @@ test.describe('動き低減設定が無効な環境', () => {
       motion.transitionDurationSeconds,
       `既定のボタンの遷移時間が ${motion.transitionDurationSeconds}s まで縮んでいる`,
     ).toBeGreaterThan(IMPERCEPTIBLE_SECONDS);
+  });
+
+  // 要件 1.3 / 2.1 の裏側: 代替表現は動き低減時にだけ現れること。
+  // 常時露出すると、動きが十分な環境でも表示が変わってしまう（非後退の違反）。
+  test('処理中表示の代替文言が露出しない', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.locator('[data-slot="spinner"]').first()).toBeVisible();
+
+    const cue = await readSpinnerTextCue(page);
+    expect(
+      cue.width,
+      `動き低減が無効な環境で処理中の文言「${cue.text}」が ${cue.width}px 描画されている。` +
+        '代替表現は動き低減時にだけ現れること',
+    ).toBeLessThanOrEqual(2);
   });
 });
 
