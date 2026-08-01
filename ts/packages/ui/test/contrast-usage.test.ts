@@ -165,6 +165,17 @@ const USAGE_PAIRS: readonly UsagePair[] = [
     surfaceAlpha: 0.05,
     kind: 'text',
   },
+  {
+    // 選択状態を示す唯一の輪郭であり、SC 1.4.11 の非テキスト 3:1 が掛かる（Requirements 2.1）。
+    // 枠は面塗りではなく「線」なので下地の上へ載る前景として合成する（foregroundAlpha）。
+    // 識別すべき相手は隣接する頁背景であり、内側の面塗りではない（design.md D3 / 要件 2.1）。
+    utility: 'border-primary/30',
+    source: 'field.tsx FieldLabel（has-data-checked の選択枠）',
+    foreground: 'primary',
+    foregroundAlpha: 0.3,
+    surface: 'background',
+    kind: 'non-text',
+  },
 ];
 
 /**
@@ -183,13 +194,6 @@ const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reaso
   {
     utility: 'ring-foreground/10',
     reason: 'card.tsx の外枠。情報を持たない純装飾のため SC 1.4.11 の対象外。',
-  },
-  {
-    utility: 'border-primary/30',
-    reason:
-      'field.tsx FieldLabel の選択状態表示（1.96:1）。非テキスト 3:1 未達だが、' +
-      'border-input #DDDDDD(1.35:1) と同種の「トークン素の値が薄すぎる」問題であり、' +
-      '枠線の意匠全体に関わるため別Issueで一括して扱う（#49/#50 のスコープ外）。',
   },
   {
     utility: 'bg-input/50',
