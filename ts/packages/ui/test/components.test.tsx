@@ -18,6 +18,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import postcss from 'postcss';
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -693,26 +694,23 @@ function extractMotionUtilities(source: string): readonly string[] {
 
 /**
  * theme.css の動き抑制ブロックが宣言しているプロパティを取り出す。
- * 波括弧の深さを数えて対応する閉じ括弧までを切り出す（入れ子があるため正規表現では取れない）。
+ *
+ * 文字列の切り出しと正規表現では取れない。CSS には **宣言と同じ形をしていて宣言ではないもの**
+ * が混ざるためで、素朴に `プロパティ: 値;` を拾うと次の 2 つを宣言として誤認する:
+ *   1. メディア条件 `prefers-reduced-motion: reduce` そのもの。前置きを含んだまま走査すると
+ *      これが最初の宣言として一致し、値の側が次の `;` まで伸びて **直後の第 1 宣言を丸ごと
+ *      食い潰す**（先頭に置かれた到達状態の抑制が無言で素通りする）
+ *   2. `.x:hover` のような擬似クラスを持つ選択子
+ * どちらも構文木を辿れば起こらない。app-integration.test.ts の `mediaRulesInLayer` と同じく、
+ * 宣言であることを構文で判定する（文字列上の見た目で判定しない）。
  */
 function suppressedPropertiesInTheme(css: string): ReadonlySet<string> {
-  const marker = '@media (prefers-reduced-motion: reduce)';
-  const start = css.indexOf(marker);
-  if (start < 0) return new Set();
-  let depth = 0;
-  let end = start;
-  for (let i = css.indexOf('{', start); i < css.length; i += 1) {
-    if (css[i] === '{') depth += 1;
-    else if (css[i] === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  const block = css.slice(start, end);
-  return new Set([...block.matchAll(/([a-z-]+)\s*:\s*[^;]+;/g)].map((match) => match[1]!));
+  const properties = new Set<string>();
+  postcss.parse(css).walkAtRules('media', (media) => {
+    if (!/prefers-reduced-motion\s*:\s*reduce/.test(media.params)) return;
+    media.walkDecls((declaration) => properties.add(declaration.prop));
+  });
+  return properties;
 }
 
 describe('動きに関わる指定が 2 区分へ漏れなく分類されている（Requirements 1.4, 5.5）', () => {
@@ -755,6 +753,43 @@ describe('動きに関わる指定が 2 区分へ漏れなく分類されてい�
       stale,
       `部品から消えた指定が分類表に残っています: ${stale.join(', ')}`,
     ).toEqual([]);
+  });
+
+  it('抽出器が抑制ブロックの宣言だけを漏れなく拾う（自己検証）', () => {
+    // ここが空振りすると、下の「紛れ込んでいない」判定は **見ていないものを見たと報告する**。
+    // 罠は 2 つあり、いずれも「宣言に見えるが宣言でないもの」を宣言として拾うことで起きる:
+    //   1. メディア条件 `prefers-reduced-motion: reduce` 自体が「プロパティ: 値」の形をしている。
+    //      前置きを含んだまま走査すると、これが最初の宣言として一致し、直後の
+    //      **第 1 宣言を丸ごと食い潰す**（先頭に置かれた到達状態の抑制が素通りする）。
+    //   2. `.x:hover` のような擬似クラスを持つ選択子も同じ形をしている。
+    // 到達状態が抑制ブロックのどこに書かれても検出できることを、先頭・入れ子の両方で固定する。
+    const fixture = [
+      '@layer base{',
+      '  @media (prefers-reduced-motion: reduce){',
+      '    *,::before,::after{',
+      '      translate: none !important;',
+      '      animation-duration: 0.01ms !important;',
+      '    }',
+      '    .x:hover{ color: red; }',
+      '  }',
+      '}',
+    ].join('\n');
+    expect(
+      [...suppressedPropertiesInTheme(fixture)].sort(),
+      '抑制ブロックの宣言を、先頭の 1 件も含めて漏れなく取り出せていません',
+    ).toEqual(['animation-duration', 'color', 'translate']);
+  });
+
+  it('抽出器が実ファイルでも宣言でないものを拾わない（自己検証）', () => {
+    const suppressed = suppressedPropertiesInTheme(motionThemeCss);
+    expect(
+      suppressed.has('prefers-reduced-motion'),
+      'メディアクエリの条件を宣言として拾っています（前置きを切り落とせていません）',
+    ).toBe(false);
+    expect(
+      suppressed.has('animation-duration'),
+      '抑制ブロックの第 1 宣言を取りこぼしています（前置きが直後の宣言を食い潰しています）',
+    ).toBe(true);
   });
 
   it('到達状態に分類した指定が theme.css の抑制対象へ紛れ込んでいない（Requirements 1.4）', () => {
