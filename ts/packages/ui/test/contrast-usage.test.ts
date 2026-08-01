@@ -10,9 +10,10 @@
 //
 // 本テストは 4 層で構成する:
 //   1. 数値検証 — USAGE_PAIRS の各エントリについて合成後の実効色を求め、しきい値以上を assert
-//   2. 網羅ガード — 部品ソースを走査して不透明度付きクラスを全抽出し、USAGE_PAIRS ∪ EXEMPT_UTILITIES
-//      と双方向で突き合わせる。#48 で潰した「集合包含だけでは不十分」と同じ穴を空けないため、
-//      「部品に新しい /NN を足したのに検証表へ追記し忘れた」を必ず赤化させる。
+//   2. 網羅ガード — 部品ソースを走査して色ユーティリティを**不透明度の有無に関わらず**全抽出し、
+//      USAGE_PAIRS ∪ EXEMPT_UTILITIES と双方向で突き合わせる（Requirements 5.1）。#48 で潰した
+//      「集合包含だけでは不十分」と同じ穴を空けないため、「部品に新しい色指定を足したのに
+//      検証表へ追記し忘れた」を必ず赤化させる。
 //   3. 子孫指定の色ガード — 親 variant が子へ渡す色（`*:data-[slot=…]:text-…`）を独立に抽出して
 //      検証する。子が自前の色を持つ場合、この指定が消えると状態色は画面に出ないのに
 //      クラス名の集合は何も壊れず、1・2 は緑のまま通る（PR #56 レビュー指摘1）。
@@ -100,7 +101,7 @@ describe('意味論名の hex 解決（theme.css からの導出・自己検証�
 // --- 検証表 -------------------------------------------------------------------------
 
 interface UsagePair {
-  /** 部品ソースに現れる不透明度付きクラス（網羅ガードの突き合わせキー）。 */
+  /** 部品ソースに現れる色ユーティリティ（網羅ガードの突き合わせキー）。 */
   readonly utility: string;
   /** 出典（どの部品のどの状態か）。 */
   readonly source: string;
@@ -119,7 +120,7 @@ interface UsagePair {
 }
 
 /**
- * 部品が使う不透明度付きクラスと、その実効コントラストの検証対象ペア。
+ * 部品が使う色ユーティリティと、その実効コントラストの検証対象ペア。
  *
  * 下地が指定されていない部品（Button ghost / link 等）は親の背景に載るため、
  * 既定の backdrop である `background`（#FFFFFF）を仮定する。
@@ -179,7 +180,7 @@ const USAGE_PAIRS: readonly UsagePair[] = [
 ];
 
 /**
- * 検証表に載せない不透明度付きクラスと、その理由。
+ * 検証表に載せない色ユーティリティと、その理由。
  *
  * 「合格しているから除外」ではなく「WCAG の対象外であるか、別Issueで扱う」ものだけを載せる。
  * 理由なしの除外を許すと、このガードは #48 で潰した空振りガードと同じものになる。
@@ -252,35 +253,178 @@ function readComponentSources(): ReadonlyArray<{ readonly file: string; readonly
     .map((file) => ({ file, source: readFileSync(join(componentsDir, file), 'utf8') }));
 }
 
-/** 不透明度付きの色ユーティリティ（`bg-primary/80` 等）。 */
-const ALPHA_UTILITY_PATTERN = /^(?:bg|text|border|ring|outline|fill|stroke)-[a-z0-9-]+\/\d{1,3}$/;
+/**
+ * 色ユーティリティのパターン。不透明度は**任意**とし、`bg-primary/80`（付き）と
+ * `border-input`（なし）の双方に一致する（Requirements 5.1）。
+ *
+ * 一致するのは字面だけであり、この段階では `text-sm` `border-0` `bg-transparent` のような
+ * 色でない語も通る。色か否かの判定は `isColorUtility` が担う。
+ */
+const COLOR_UTILITY_PATTERN =
+  /^(?:bg|text|border|ring|outline|fill|stroke)-[a-z0-9-]+(?:\/\d{1,3})?$/;
+
+/** ユーティリティから意味論名を取り出す。`border-input` → `input`、`bg-primary/80` → `primary`。 */
+function semanticNameOf(utility: string): string {
+  const withoutAlpha = utility.split('/')[0]!;
+  return withoutAlpha.slice(withoutAlpha.indexOf('-') + 1);
+}
 
 /**
- * ソースから不透明度付き色ユーティリティを抽出する。
+ * 意味論名が theme.css で色として解決できるかを判定する（design.md D6）。
  *
- * `dark:` を含むクラスは theme.css:65 の `@custom-variant dark (&:is(.dark *))` により
- * `.dark` 祖先が無い限り一切適用されない（ダークパレット未整備のため意図的に無効化されている）。
- * 現状 `.dark` を付与する箇所はリポジトリ内に存在しないため、検証対象から除外する。
- * ダークモード着手時にはこの除外を外し、ダーク下地での実効コントラストを検証すること。
+ * 判定は `resolveSemanticColor` が throw することをもって行い、非色語の一覧を別に持たない。
+ * 一覧を持つと Tailwind のユーティリティが増えるたびに二重更新が要り、それ自体が
+ * 同期漏れの発生源になる（意味論名 → hex の対応表を手写ししないのと同じ理由）。
  */
-function extractAlphaUtilities(source: string): readonly string[] {
+function isColorUtility(utility: string): boolean {
+  try {
+    resolveSemanticColor(semanticNameOf(utility));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ソースから「色ユーティリティの字面を持つ語」を拾う（色として解決できるかは問わない）。
+ *
+ * `dark:` を含むクラスは theme.css:66 の `@custom-variant dark (&:is(.dark *))` により
+ * `.dark` 祖先が無い限り一切適用されない（ダークパレット未整備のため意図的に無効化されている）。
+ * `.dark` を付与する箇所は現在もリポジトリ内に存在しないため、検証対象から除外する
+ * （Requirements 5.7）。抽出器を色ユーティリティ全般へ広げたことで、この除外は
+ * 不透明度付き（`dark:bg-input/30` 等）だけでなく不透明度なし（`dark:border-input`）にも
+ * 及ぶようになった。ダークモード着手時にはこの除外を外し、ダーク下地での実効コントラストを
+ * 検証すること。
+ */
+function extractUtilityTokens(source: string): readonly string[] {
   const found: string[] = [];
   for (const rawToken of source.split(/[\s"'`]+/)) {
     if (rawToken.includes('dark:')) continue;
     // 先頭の variant 連鎖（`[a]:hover:` `*:data-[slot=x]:` `focus-visible:` 等）を落として
     // ユーティリティ本体だけを見る。variant 部分に `/` は現れない。
     const utility = rawToken.slice(rawToken.lastIndexOf(':') + 1);
-    if (ALPHA_UTILITY_PATTERN.test(utility)) {
+    if (COLOR_UTILITY_PATTERN.test(utility)) {
       found.push(utility);
     }
   }
   return found;
 }
 
-describe('網羅ガード: 部品の不透明度付きクラスが全て分類されている（Issue #50）', () => {
+/** 部品ソースから色ユーティリティを抽出する（返り値は全て `isColorUtility` を満たす）。 */
+function extractColorUtilities(source: string): readonly string[] {
+  return extractUtilityTokens(source).filter(isColorUtility);
+}
+
+/** パターンには一致したが色として解決できず捨てられた語（下の固定検証だけが使う）。 */
+function extractNonColorTokens(source: string): readonly string[] {
+  return extractUtilityTokens(source).filter((utility) => !isColorUtility(utility));
+}
+
+/**
+ * 実ソースから落ちた（色として解決できなかった）語の固定値。
+ *
+ * **この一覧は色／非色の判定には一切使わない。** 判定は D6 のとおり `resolveSemanticColor` の
+ * throw のみが行う（`isColorUtility`）。ここにあるのは判定結果を写した観測値であり、
+ * 分類の入力ではない。ホワイトリストとして参照した瞬間に D6 が壊れるので、そうしないこと。
+ *
+ * なぜ集合ごと固定するか:
+ * D6 の「解決に失敗したら除外」という方式は、綴り誤り（`bg-primry`）や、意味論名でない
+ * 既定色（`text-white` / `bg-black` / `text-inherit` 等）を **未分類として赤化させずに
+ * 黙って捨てる**。不透明度を必須としていた頃は `bg-primry/50` のような語も未分類として
+ * 赤化していたため、抽出器の拡張はこの経路に限っては検出力を下げる方向に働く。
+ * 固定フィクスチャによる自己検証は実ソースを見ていないためこの穴を塞げない。
+ * そこで「落とした語の集合」そのものを実ソースから取り出して固定し、増減の双方で赤化させる。
+ *
+ * 集合が変わったときの対応: 増えた語が本当に色でない（寸法・字形・透明・切り抜き等）ことを
+ * 一件ずつ確認してからこの一覧へ加える。色のつもりの語が混ざっていれば、それは
+ * 綴り誤りか意味論トークン化されていない色であり、部品側を直すのが正しい。
+ */
+const NON_COLOR_TOKENS: readonly string[] = [
+  'bg-clip-padding',
+  'bg-transparent',
+  'border-0',
+  'border-t',
+  'border-transparent',
+  'ring-1',
+  'ring-3',
+  'text-2xl',
+  'text-balance',
+  'text-base',
+  'text-current',
+  'text-left',
+  'text-lg',
+  'text-pretty',
+  'text-sm',
+  'text-xl',
+  'text-xs',
+];
+
+describe('色ユーティリティ抽出器の自己検証（Requirements 5.1, 5.7 / design.md D6）', () => {
+  const sources = readComponentSources();
+  const colorUtilities = [
+    ...new Set(sources.flatMap(({ source }) => extractColorUtilities(source))),
+  ].sort();
+
+  it('不透明度あり・なしの双方を拾う', () => {
+    expect(extractColorUtilities('<div className="border-input bg-primary/5" />')).toEqual([
+      'border-input',
+      'bg-primary/5',
+    ]);
+  });
+
+  it('色として解決できない語は拾わない（寸法・数値・透明・切り抜き・字形）', () => {
+    expect(
+      extractColorUtilities(
+        'text-sm text-2xl border-0 border-t ring-1 ring-3 bg-transparent bg-clip-padding text-current text-balance',
+      ),
+    ).toEqual([]);
+  });
+
+  it('variant 連鎖を落としてユーティリティ本体だけを見る', () => {
+    expect(
+      extractColorUtilities(
+        'focus-visible:ring-destructive/20 *:data-[slot=alert-description]:text-success',
+      ),
+    ).toEqual(['ring-destructive/20', 'text-success']);
+  });
+
+  it('dark: 専用の指定は色として解決できても拾わない（Requirements 5.7）', () => {
+    expect(extractColorUtilities('dark:border-input hover:dark:bg-muted/50')).toEqual([]);
+  });
+
+  it('実ソースからの抽出が空でなく、不透明度あり・なしの双方を含む（空振り緑の防止）', () => {
+    // 設計の不変条件: 抽出結果が空配列なら空振りとみなして失敗させる。
+    expect(sources.length).toBeGreaterThan(0);
+    expect(colorUtilities.length).toBeGreaterThan(0);
+    // パターン拡張が実ソースへ効いていることの確認。不透明度なしが 0 件なら拡張が
+    // 効いていない（＝拡張前と同じものを見ている）。
+    expect(
+      colorUtilities.filter((utility) => utility.includes('/')),
+      '不透明度付きの色ユーティリティが 1 件も抽出できていない',
+    ).not.toEqual([]);
+    expect(
+      colorUtilities.filter((utility) => !utility.includes('/')),
+      '不透明度なしの色ユーティリティが 1 件も抽出できていない（パターンの拡張が効いていない）',
+    ).not.toEqual([]);
+  });
+
+  it('色として解決できず捨てた語の集合が固定値と一致する（黙って捨てる穴の封じ）', () => {
+    const dropped = [
+      ...new Set(sources.flatMap(({ source }) => extractNonColorTokens(source))),
+    ].sort();
+    expect(
+      dropped,
+      '色として解決できず捨てられた語の集合が変化しました。増えた語が本当に色でないことを' +
+        '一件ずつ確認し、色のつもりの語（綴り誤り・意味論トークン化されていない色）が' +
+        `混ざっていないか検めること: ${dropped.join(', ')}`,
+    ).toEqual(NON_COLOR_TOKENS);
+  });
+});
+
+describe('網羅ガード: 部品の色ユーティリティが全て分類されている（Issue #50 / Requirements 5.1, 5.2）', () => {
   const sources = readComponentSources();
   const foundUtilities = [
-    ...new Set(sources.flatMap(({ source }) => extractAlphaUtilities(source))),
+    ...new Set(sources.flatMap(({ source }) => extractColorUtilities(source))),
   ].sort();
   const classified = [
     ...new Set([
@@ -294,14 +438,15 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
     expect(foundUtilities.length).toBeGreaterThan(0);
   });
 
-  it('部品が使う不透明度付きクラスは全て検証表か除外理由付きリストにある', () => {
-    // 新しい /NN クラスを部品へ足したら、必ず USAGE_PAIRS で検証させるか
+  it('部品が使う色ユーティリティは全て検証表か除外理由付きリストにある', () => {
+    // 新しい色指定を部品へ足したら、必ず USAGE_PAIRS で検証させるか
     // EXEMPT_UTILITIES で理由を書かせるための網羅ガード
     // （theme-sync.test.ts の「役割対応表に無い色変数の混入防止」と同じ流儀）。
     const unclassified = foundUtilities.filter((utility) => !classified.includes(utility));
     expect(
       unclassified,
-      `検証表にも除外リストにも無い不透明度付きクラスが部品にあります: ${unclassified.join(', ')}`,
+      `検証表にも除外リストにも無い色ユーティリティが部品にあります（${unclassified.length} 件）: ` +
+        `${unclassified.join(', ')}`,
     ).toEqual([]);
   });
 
@@ -310,7 +455,7 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
     const stale = classified.filter((utility) => !foundUtilities.includes(utility));
     expect(
       stale,
-      `部品で使われていないクラスが検証表／除外リストに残っています: ${stale.join(', ')}`,
+      `部品で使われていない色ユーティリティが検証表／除外リストに残っています: ${stale.join(', ')}`,
     ).toEqual([]);
   });
 
@@ -327,8 +472,11 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
  * 親 variant が子（説明文など）へ渡す色指定（`*:data-[slot=…]:text-…`）の検証対象。
  *
  * なぜ上の網羅ガードと別立てが要るか:
- * 網羅ガードは不透明度付きクラスしか見ない。しかし PR #56 のレビューで見つかった欠陥は
- * 「不透明度を外すときに子孫指定ごと削除した」ことで起きた。子（AlertDescription）は自前で
+ * 網羅ガードは variant 連鎖を落としてユーティリティ本体だけを見るため、「どの子へ色を渡すか」
+ * という束縛（`*:data-[slot=…]:`）を一切見ていない。同じ色ユーティリティが他の箇所でも
+ * 使われていれば、束縛が消えても抽出される集合は変わらない。
+ * PR #56 のレビューで見つかった欠陥は「不透明度を外すときに子孫指定ごと削除した」ことで
+ * 起きた。子（AlertDescription）は自前で
  * `text-muted-foreground` を持つため、親からの指定が消えると variant の状態色は説明文へ
  * 一切届かない。それでいてクラス名の集合は何も壊れないので、既存のガードは全て緑のまま通る。
  * 「子へ渡す色」を独立に抽出して数値検証し、消えた場合も薄すぎる場合も赤化させる。
@@ -426,7 +574,7 @@ describe('子孫指定の色ガード: 親 variant が子へ渡す色（PR #56 �
 // --- color-mix ガード ---------------------------------------------------------------
 
 /**
- * `color-mix()` は不透明度付きクラスの正規表現をすり抜けるため、別途検出して
+ * `color-mix()` は色ユーティリティの正規表現をすり抜けるため、別途検出して
  * 実測値付きの許可リストへの登録を必須にする（ホールを塞ぐ）。
  *
  * 照合はファイル単位ではなく **出現箇所（file + 式）単位**で行う（PR #56 レビュー指摘2）。
