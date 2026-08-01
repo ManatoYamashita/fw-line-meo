@@ -192,4 +192,33 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+
+  /* 動き低減設定を尊重する（Issue #52 / ui-a11y-gaps Requirements 1.1, 1.2）。
+   *
+   * 無限に回り続けるアニメーションは、前庭障害・光過敏のある利用者にとって
+   * めまい・吐き気・発作の誘因になりうる。フォーカス指標と同じく「アプリ DOM を
+   * 触らずに全面へ一律に効かせる既定」として、ここ 1 箇所に集約する。
+   * 部品側で motion-reduce: による重複抑制を書かないこと（二重管理になる）。
+   *
+   * !important は装飾ではなく **動作条件** である。外すと無言で機能しなくなる。
+   * 生成 CSS 冒頭の `@layer theme, base, components, utilities` により base レイヤは
+   * utilities レイヤ（animate-* / transition-* ユーティリティの出力先）に
+   * **詳細度と無関係に負ける**（Issue #49 でフォーカス指標が消えたのと同じ構造）。
+   * !important 宣言に限りレイヤの優先順位は逆転し、先行レイヤが後続レイヤに勝つ。
+   * この挙動は Chromium で実測確認済み（research.md R-1）。
+   * test/app-integration.test.ts がレイヤ所属と !important の両方を構文木で検証する。
+   *
+   * 抑制するのは動きの「経過」だけである。transition-property や transform のような
+   * 「到達状態」を触ると、押下時の沈み込みのような **動きではなく状態** まで消えて
+   * Requirements 1.4 を破る。値を 0 ではなく極小にするのは、遷移完了イベントに
+   * 依存する実装を壊さないための一般的な作法（実測では 1e-05s へ解決される）。 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }

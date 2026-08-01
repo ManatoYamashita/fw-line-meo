@@ -35,6 +35,26 @@ const alertVariants = cva(
   }
 )
 
+// 変種に応じた既定の読み上げ強度（Issue #52 / ui-a11y-gaps Requirements 3.1, 3.2, 3.4）。
+//
+// role="alert" は assertive なライブリージョンであり、進行中の読み上げを **中断させる**。
+// 全変種を alert で提示すると、単なる案内文でもスクリーンリーダー利用者の作業が毎回遮られる。
+// エラーだけは確実に気づける必要があるため、destructive のみ alert とし、他は status
+// （polite = 区切りのよい時点で読み上げる）にする。
+//
+// role="status" / role="alert" はそれぞれ暗黙に aria-live を持つため、明示は不要。
+// **どの変種にも必ずライブリージョンの役割を与える**こと（Requirements 3.4）。役割の無い
+// 変種を作ると、その通知は支援技術へ一切伝わらなくなる。
+// 視覚表現（alertVariants）には一切手を触れない（Requirements 3.3）。
+const alertRoleByVariant = {
+  default: "status",
+  success: "status",
+  destructive: "alert",
+} as const satisfies Record<
+  NonNullable<VariantProps<typeof alertVariants>["variant"]>,
+  string
+>
+
 function Alert({
   className,
   variant,
@@ -43,7 +63,9 @@ function Alert({
   return (
     <div
       data-slot="alert"
-      role="alert"
+      // {...props} より前に置くことで、呼び出し側が role を明示した場合はそちらを優先する
+      // （spinner.tsx の aria-label と同じ作法。API の追加は不要）。
+      role={alertRoleByVariant[variant ?? "default"]}
       className={cn(alertVariants({ variant }), className)}
       {...props}
     />

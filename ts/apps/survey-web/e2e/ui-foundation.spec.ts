@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, devices, type Locator, type Page } from '@playwright/test';
 import { contrastRatio } from '@fwlm/design-tokens';
 
 // UI デザイン基盤（ui-design-foundation）の非後退 E2E。
@@ -87,6 +87,366 @@ function readRenderedColors(locator: Locator): Promise<RenderedColors> {
 
     return { color: toHex(style.color), backgroundColor: toHex(style.backgroundColor) };
   });
+}
+
+// --- 実描画の計測基盤（ui-a11y-gaps・要件 5.1 / 5.3） ----------------------------------
+//
+// タッチ操作領域も動きの抑制も、クラス名の有無では判定できない。前者は疑似要素の幾何と
+// レイアウトの相互作用で決まり、後者はカスケードレイヤの優先順位で決まるため、いずれも
+// 「そう書いてあるのに効いていない」が起こりうる。ここでは実描画から直接測る。
+
+interface Box {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface TouchGeometry {
+  slot: string | null;
+  /** 押しボタンの寸法区分（data-size）。持たない部品は null。 */
+  size: string | null;
+  /** 失敗メッセージで対象を特定するための呼び名。 */
+  name: string;
+  /** 利用者に見えている矩形（border box）。 */
+  visual: Box;
+  /** 見えている矩形と拡張面の和 ＝ 実際に指で押せる領域。 */
+  effective: Box;
+  /** 拡張面によって領域が実際に広がっているか。 */
+  hasExpansion: boolean;
+}
+
+/**
+ * セレクタに一致する要素の実効的な操作領域を、実描画からまとめて求める。
+ *
+ * `::after` による拡張はレイアウトフローから外れるので `getBoundingClientRect` には現れない。
+ * 疑似要素の矩形は API から直接取れないため、計算済みスタイルの inset から幾何的に求める。
+ * `::after` の含有ブロックは本体の **padding box** なので、border 幅の分だけ内側から測る。
+ *
+ * 拡張量を数値として主張できない場合（`auto` 等）は本体の矩形へ倒す。不明を「広い」と
+ * 読み替えると、拡張が消えた実装をそのまま緑で通してしまうため。
+ *
+ * 要素ごとに個別へ問い合わせず一括で返すのは、隣接部品どうしの位置関係（要件 4.5）を
+ * 同一時点の座標で比較する必要があるためでもある。
+ */
+function readTouchGeometries(
+  page: Page,
+  selector: string,
+): Promise<readonly TouchGeometry[]> {
+  return page.evaluate((query) => {
+    const toBox = (top: number, right: number, bottom: number, left: number) => ({
+      top,
+      right,
+      bottom,
+      left,
+      width: right - left,
+      height: bottom - top,
+    });
+
+    return Array.from(document.querySelectorAll(query)).map((element) => {
+      const rect = element.getBoundingClientRect();
+      const visual = toBox(rect.top, rect.right, rect.bottom, rect.left);
+      const identity = {
+        slot: element.getAttribute('data-slot'),
+        size: element.getAttribute('data-size'),
+        name:
+          element.getAttribute('aria-label') ??
+          ((element.textContent ?? '').trim().slice(0, 20) ||
+            (element.getAttribute('data-slot') ?? '要素')),
+      };
+      const withoutExpansion = { ...identity, visual, effective: visual, hasExpansion: false };
+
+      const after = getComputedStyle(element, '::after');
+      // 疑似要素が生成されない／レイアウトに参加しない／当たり判定を持たない場合は拡張なし。
+      if (
+        after.content === 'none' ||
+        after.position !== 'absolute' ||
+        after.pointerEvents === 'none'
+      ) {
+        return withoutExpansion;
+      }
+
+      const px = (value: string): number => Number.parseFloat(value);
+      const own = getComputedStyle(element);
+      const padTop = rect.top + px(own.borderTopWidth);
+      const padLeft = rect.left + px(own.borderLeftWidth);
+      const padRight = rect.right - px(own.borderRightWidth);
+      const padBottom = rect.bottom - px(own.borderBottomWidth);
+
+      const insets = [after.top, after.right, after.bottom, after.left].map(px);
+      if (insets.some((value) => !Number.isFinite(value))) return withoutExpansion;
+      const [insetTop, insetRight, insetBottom, insetLeft] = insets as [
+        number,
+        number,
+        number,
+        number,
+      ];
+
+      // inset は含有ブロックの各辺からの距離。負の値が外側へのはみ出しになる。
+      const overlay = toBox(
+        padTop + insetTop,
+        padRight - insetRight,
+        padBottom - insetBottom,
+        padLeft + insetLeft,
+      );
+      // 実際に押せるのは本体と拡張面の和。拡張面が本体より内側でも領域は縮まない。
+      const effective = toBox(
+        Math.min(visual.top, overlay.top),
+        Math.max(visual.right, overlay.right),
+        Math.max(visual.bottom, overlay.bottom),
+        Math.min(visual.left, overlay.left),
+      );
+      return {
+        ...identity,
+        visual,
+        effective,
+        hasExpansion: effective.width > visual.width || effective.height > visual.height,
+      };
+    });
+  }, selector);
+}
+
+/** 2 つの矩形が面積を持って重なるか（辺で接するだけは重なりとみなさない）。 */
+function intersects(a: Box, b: Box): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+interface HitTarget {
+  slot: string | null;
+  name: string;
+}
+
+/**
+ * 指定した座標で実際に反応する部品を返す。
+ *
+ * 幾何の計算だけでは「その矩形が本当に当たり判定を持つか」を主張できない。座標を撃って
+ * 返ってきた要素を見ることで、幾何と実際の反応先を結びつける（この紐が無いと、
+ * `pointer-events` の欠落や他要素による被覆を素通ししてしまう）。
+ */
+function readHitTarget(page: Page, x: number, y: number): Promise<HitTarget | null> {
+  return page.evaluate(
+    ([pointX, pointY]) => {
+      const element = document.elementFromPoint(pointX as number, pointY as number);
+      if (element === null) return null;
+      const owner = element.closest('[data-slot]');
+      const named = owner ?? element;
+      return {
+        slot: owner === null ? null : owner.getAttribute('data-slot'),
+        name:
+          named.getAttribute('aria-label') ?? (named.textContent ?? '').trim().slice(0, 24),
+      };
+    },
+    [x, y],
+  );
+}
+
+/** 動きが「知覚されない」とみなす上限（秒）。research.md R-1 の実測では 1e-05s へ解決される。 */
+const IMPERCEPTIBLE_SECONDS = 0.001;
+
+/** 客向け主動線で用いる既定寸法に要求する操作領域（ui-a11y-gaps 要件 4.1）。 */
+const TOUCH_TARGET_DEFAULT_PX = 44;
+/** 高密度配置向けの縮小寸法と選択部品単体の下限（WCAG 2.2 SC 2.5.8・要件 4.2）。 */
+const TOUCH_TARGET_COMPACT_PX = 24;
+
+/**
+ * 押しボタンの寸法区分 → 要求値。
+ * 区分が増えたらここへ必ず追記する。宣言の無い区分を実描画で見つけたら失敗させる（要件 5.4）。
+ * 区分の一覧そのものが部品ソースと一致しているかは @fwlm/ui 側の分類ガードが担う。
+ */
+const BUTTON_TOUCH_REQUIREMENT: Readonly<Record<string, number>> = {
+  default: TOUCH_TARGET_DEFAULT_PX,
+  lg: TOUCH_TARGET_DEFAULT_PX,
+  icon: TOUCH_TARGET_DEFAULT_PX,
+  'icon-lg': TOUCH_TARGET_DEFAULT_PX,
+  xs: TOUCH_TARGET_COMPACT_PX,
+  sm: TOUCH_TARGET_COMPACT_PX,
+  'icon-xs': TOUCH_TARGET_COMPACT_PX,
+  'icon-sm': TOUCH_TARGET_COMPACT_PX,
+};
+
+/** 指で操作する部品。隣接時の被覆判定（要件 4.5）はこの集合の全組み合わせで見る。 */
+const OPERABLE_SELECTOR =
+  '[data-slot="button"], [data-slot="checkbox"], [data-slot="radio-group-item"], [data-slot="input"], [data-slot="textarea"]';
+
+/**
+ * ラベルを伴う構成の「行」。要件 4.7 の 44px はこの行全体で満たす。
+ *
+ * テキスト入力は指で押した位置に文字カーソルを置く性質上、選択部品は部品自身が規定する
+ * 項目間隔（ピッチ 24px）の制約上、どちらも不可視面で操作領域を広げられない。
+ * 2 つの形をとる: ラベルが制御を包む構成と、ラベルが制御の上に積まれる構成。
+ */
+const LABELLED_ROW_SELECTOR =
+  '[data-slot="field-label"]:has([data-slot="checkbox"], [data-slot="radio-group-item"]), [data-slot="field"]:has([data-slot="input"])';
+
+interface TextCue {
+  /** テキストを持つ子孫が存在するか。 */
+  present: boolean;
+  text: string;
+  /** 実際に描画された幅。読み上げ専用（sr-only）なら 1px 程度に潰れる。 */
+  width: number;
+}
+
+/**
+ * 処理中表示が提示している「動きに依存しない手掛かり」を実描画から読む。
+ *
+ * 「見えているか」をクラス名で判定してはならない。`sr-only` と `not-sr-only` はどちらも
+ * `@layer utilities` に生成され、どちらが勝つかは生成順で決まる。クラスが付いていることと
+ * 見えていることは別問題なので、**描画された幅**で判定する。
+ */
+function readSpinnerTextCue(page: Page): Promise<TextCue> {
+  return page.locator('[data-slot="spinner"]').first().evaluate((element) => {
+    const withText = [element, ...Array.from(element.querySelectorAll('*'))].filter(
+      (node) => (node.textContent ?? '').trim().length > 0,
+    );
+    // 最も内側（テキストを直接持つ要素）を測る。
+    const target = withText[withText.length - 1];
+    if (target === undefined) return { present: false, text: '', width: 0 };
+    return {
+      present: true,
+      text: (target.textContent ?? '').trim(),
+      width: target.getBoundingClientRect().width,
+    };
+  });
+}
+
+interface MotionValues {
+  animationName: string;
+  animationDurationSeconds: number;
+  animationIterationCount: string;
+  transitionDurationSeconds: number;
+}
+
+interface AnimatedElement {
+  slot: string | null;
+  animationName: string;
+  animationDurationSeconds: number;
+  animationIterationCount: string;
+}
+
+/**
+ * 画面上でアニメーションを持つ要素を**すべて**実描画から探す。
+ *
+ * 特定の部品を名指しで測ると、部品の DOM 構造が変わったときに静かに対象を失う。また要件 1.1 が
+ * 求めるのは「その部品が止まること」ではなく「無限に繰り返すアニメーションが再生されないこと」
+ * なので、面全体を走査して 1 つでも生き残っていれば落とす方が要件に忠実である。
+ */
+function readAnimatedElements(page: Page): Promise<readonly AnimatedElement[]> {
+  return page.evaluate(() => {
+    const maxSeconds = (value: string): number =>
+      value.split(',').reduce((longest, part) => {
+        const text = part.trim();
+        const amount = Number.parseFloat(text);
+        if (!Number.isFinite(amount)) return longest;
+        return Math.max(longest, text.endsWith('ms') ? amount / 1000 : amount);
+      }, 0);
+
+    const found: AnimatedElement[] = [];
+    for (const element of Array.from(document.querySelectorAll('*'))) {
+      const style = getComputedStyle(element);
+      if (style.animationName === 'none' || style.animationName === '') continue;
+      found.push({
+        slot: element.getAttribute('data-slot'),
+        animationName: style.animationName,
+        animationDurationSeconds: maxSeconds(style.animationDuration),
+        animationIterationCount: style.animationIterationCount,
+      });
+    }
+    return found;
+  });
+}
+
+/**
+ * 押下を保持したときに到達する見た目を、**実際に描画された位置の差**として測る。
+ *
+ * 要件 1.4 が守るのは「動きの経過」と「到達する状態」の区別である。抑制の対象を誤って
+ * 到達状態まで広げると、押下フィードバックのような **動きではなく状態** が失われる。
+ *
+ * 計算済みスタイルの特定プロパティを読んではならない。Tailwind v4 の `translate-y-px` は
+ * `transform` ではなく独立した `translate` プロパティへ出力されるため、`transform` を読むと
+ * 押下の有無によらず常に `none` が返り、**何も測らずに緑になる**（実際にこの罠を踏んだ）。
+ * 位置そのものを測れば、どのプロパティで実現されていても、また将来別の手段へ変わっても、
+ * 「到達する見た目」を直接見ていることになる。
+ */
+async function readPressedShift(page: Page, name: string): Promise<number> {
+  const button = page.getByRole('button', { name });
+  await expect(button).toBeVisible();
+  const readTop = (): Promise<number> =>
+    button.evaluate((element) => element.getBoundingClientRect().top);
+
+  const idle = await readTop();
+  const box = await button.boundingBox();
+  if (box === null) throw new Error(`${name} の矩形を取得できません`);
+
+  // 測るのは「到達した状態」なので、遷移が走り切るまで待つ必要がある。待たずに読むと
+  // 遷移の途中の値（実測 0.92px）を最終値（1px）と比べることになり、抑制の有無ではなく
+  // 遷移速度の差を検出してしまう。待ち時間は実測した遷移時間から導く（固定の勘に頼らない）。
+  const settleMs = (await readMotion(button)).transitionDurationSeconds * 1000 + 150;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  try {
+    await page.waitForTimeout(settleMs);
+    const shift = (await readTop()) - idle;
+    // 空振り防止: 両文脈とも 0 なら「同一」は成立してしまう。到達状態の存在自体を要求する。
+    expect(
+      shift,
+      `${name}: 押下しても描画位置が変わらない（${shift}px）。押下フィードバック（到達状態）が` +
+        '失われている（抑制の対象が動きの「経過」を超えている疑い）',
+    ).toBeGreaterThan(0);
+    return shift;
+  } finally {
+    await page.mouse.up();
+  }
+}
+
+/**
+ * 動きの実効値を計算済みスタイルから読む。
+ *
+ * カンマ区切りで複数指定されうるため代表値には最大を採る。1 つでも知覚できる長さが
+ * 残っていれば抑制は成立していないので、平均や先頭では甘くなる。
+ */
+function readMotion(locator: Locator): Promise<MotionValues> {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const maxSeconds = (value: string): number =>
+      value.split(',').reduce((longest, part) => {
+        const text = part.trim();
+        const amount = Number.parseFloat(text);
+        if (!Number.isFinite(amount)) return longest;
+        return Math.max(longest, text.endsWith('ms') ? amount / 1000 : amount);
+      }, 0);
+    return {
+      animationName: style.animationName,
+      animationDurationSeconds: maxSeconds(style.animationDuration),
+      animationIterationCount: style.animationIterationCount,
+      transitionDurationSeconds: maxSeconds(style.transitionDuration),
+    };
+  });
+}
+
+/**
+ * 検証面のレイアウトが degenerate になっていないことを、寸法の検証より **先に** 確かめる。
+ *
+ * これが無いと、検証面が潰れたときに寸法の検証は失敗側へ倒れるものの、原因が部品ではなく
+ * 検証面にあることに気づけない（design「失敗モードと観測性」）。
+ */
+async function expectVerificationSurfaceSane(page: Page): Promise<void> {
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
+  }
+  const width = await page
+    .locator('main')
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(
+    width,
+    `検証面の main の実幅が ${width}px しかない（端末幅 ${viewport.width}px）。` +
+      'これは部品の欠陥ではなく検証面のレイアウトが壊れている状態で、この幅で測った' +
+      'タッチ操作領域は実態を表さない。コンテナ幅に名前付きスケール（max-w-md 等）を' +
+      '使うと --spacing-* のトークン上書きに巻き込まれて実幅 32px へ潰れる（Issue #54）',
+  ).toBeGreaterThanOrEqual(viewport.width * 0.8);
 }
 
 interface FocusIndicator {
@@ -284,7 +644,9 @@ test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出�
 // クラス assert も含めた既存の静的検証は全て緑のまま通る。ここでは実際に描かれた色を測る。
 test('Alert の説明文に変種の状態色が実描画で届いている', async ({ page }) => {
   await page.goto('/ui-check');
-  const alerts = page.getByRole('alert');
+  // role で引かないこと。読み上げ強度は変種ごとに変わる（destructive のみ alert・それ以外は
+  // status）ため、role で引くと variant によって取れたり取れなかったりする（ui-a11y-gaps 要件 3.1）。
+  const alerts = page.locator('[data-slot="alert"]');
   await expect(alerts.filter({ hasText: '成功の通知' })).toBeVisible();
 
   const partOf = (heading: string, slot: string): Locator =>
@@ -367,6 +729,398 @@ test.describe('color-mix の実効色（ポインタのある環境）', () => {
         `${ratio.toFixed(3)}:1（要求 ${AA_NORMAL_TEXT_RATIO}:1）`,
     ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
   });
+});
+
+// ui-a11y-gaps 要件 5.3: 実測の前提そのものを検証する。
+//
+// 以降のタッチ操作領域・動きの検証は、いずれもこの計測基盤の上に立つ。基盤が壊れたまま
+// 「部品が要求を満たしていない」と報告すると原因の切り分けを誤らせるため、基盤の健全性を
+// 独立したテストとして固定する。
+test('実描画の計測基盤と検証面が実測の前提を満たしている', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+  // 前提 1: 検証面が端末幅どおりに描かれている。
+  await expectVerificationSurfaceSane(page);
+
+  // 前提 2: 拡張面を持つ部品で、見えている矩形と実効領域を区別して読める。
+  // Checkbox は `::after` で操作領域だけを広げている既存例（要件 4.8 により現状維持）。
+  const geometry = (await readTouchGeometries(page, '[data-slot="checkbox"]'))[0]!;
+  expect(
+    geometry.hasExpansion,
+    `Checkbox の拡張面を読み取れていない: ${JSON.stringify(geometry)}`,
+  ).toBe(true);
+  expect(
+    geometry.effective.height,
+    `実効領域(${geometry.effective.height}px)が視覚領域(${geometry.visual.height}px)を超えていない`,
+  ).toBeGreaterThan(geometry.visual.height);
+
+  // 前提 3: 求めた幾何が実際に当たり判定を持つ（pointer-events の欠落・被覆を落とす）。
+  // 拡張領域の左上の内側 1px を撃つ。本体の外側なので、拡張が効いていなければ別要素が返る。
+  const corner = await readHitTarget(
+    page,
+    geometry.effective.left + 1,
+    geometry.effective.top + 1,
+  );
+  expect(
+    corner?.slot,
+    `拡張領域の隅(${geometry.effective.left + 1}, ${geometry.effective.top + 1})で ` +
+      `${JSON.stringify(corner)} が反応した。幾何は広いが当たり判定が無い`,
+  ).toBe('checkbox');
+
+  // 前提 4: 動きの実効値が読める。かつ「無いものを有ると言わない」。
+  const button = page.getByRole('button', { name: '既定のボタン' });
+  const motion = await readMotion(button);
+  expect(
+    motion.transitionDurationSeconds,
+    `既定のボタンの遷移時間を読み取れていない: ${JSON.stringify(motion)}`,
+  ).toBeGreaterThan(0);
+  expect(
+    motion.animationDurationSeconds,
+    `アニメーションを持たない部品に時間が現れている: ${JSON.stringify(motion)}`,
+  ).toBe(0);
+});
+
+// ui-a11y-gaps 要件 1.1 / 1.2 / 5.1: 動き低減設定を有効にした環境で動きが抑制される。
+//
+// この検証は生成 CSS の AST 検証（@fwlm/ui の app-integration.test.ts）と対になる。前者は
+// 「抑制規則が base レイヤに important 付きで存在する」ことしか言えない。実際にレイヤ順が
+// 逆転して utilities の animate-* / transition-* に勝っているかは実描画でしか確かめられない。
+test.describe('動き低減設定が有効な環境', () => {
+  // 動き低減の模擬は contextOptions 経由でしか渡せない（Playwright 1.61）。
+  // `test.use({ reducedMotion: 'reduce' })` と書くと **黙って無視される**。未知のキーは
+  // 素通りするうえ、e2e は tsconfig の exclude に入っており型検査もされないため、
+  // 「設定したつもりで通常の文脈を測り、抑制が無くても緑」という空振りになる。
+  // 下の matchMedia の assert はこの罠を実際に検出した安全網である。
+  test.use({ contextOptions: { reducedMotion: 'reduce' } });
+
+  test('無限アニメーションが停止し、状態遷移が知覚できない水準まで抑制される', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+    // 空振り防止その1: 動き低減が実際に模擬されている文脈で測っていること。
+    // これが偽なら抑制規則は最初から適用対象外であり、以降の assert は実装ではなく
+    // テスト環境を測っていることになる（hover の検証で同じ罠を踏んだ前例がある）。
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬されていない文脈で実行されている（抑制規則が適用対象外になり空振りする）',
+    ).toBe(true);
+
+    const animated = await readAnimatedElements(page);
+    // 空振り防止その2: そもそもアニメーションを持つ要素が面から消えていたら検証は無意味。
+    expect(
+      animated.length,
+      'アニメーションを持つ要素が検証面に 1 つも無い。抑制が効いたのではなく検証対象が' +
+        '失われている可能性がある（Spinner が検証面から消えていないか確認すること）',
+    ).toBeGreaterThan(0);
+
+    for (const element of animated) {
+      expect(
+        element.animationIterationCount,
+        `${element.slot ?? element.animationName}: 反復回数が ${element.animationIterationCount} のまま。` +
+          '無限に繰り返すアニメーションが停止していない',
+      ).toBe('1');
+      expect(
+        element.animationDurationSeconds,
+        `${element.slot ?? element.animationName}: アニメーション時間が ` +
+          `${element.animationDurationSeconds}s（要求 ${IMPERCEPTIBLE_SECONDS}s 以下）`,
+      ).toBeLessThanOrEqual(IMPERCEPTIBLE_SECONDS);
+    }
+
+    // 状態遷移（transition）も同様に抑制されていること。
+    const transitioning = ['既定のボタン', '副次のボタン'];
+    for (const name of transitioning) {
+      const motion = await readMotion(page.getByRole('button', { name }));
+      expect(
+        motion.transitionDurationSeconds,
+        `${name}: 遷移時間が ${motion.transitionDurationSeconds}s のまま` +
+          `（要求 ${IMPERCEPTIBLE_SECONDS}s 以下）。base レイヤの抑制が utilities に負けている`,
+      ).toBeLessThanOrEqual(IMPERCEPTIBLE_SECONDS);
+    }
+  });
+
+  // 要件 2.1: 動きを止めたなら、動きに依存しない手段で処理中であることを伝える。
+  // 止めただけでは「画面が固まったのか処理中なのか」が判断できなくなる。
+  test('処理中表示が動きに依存しない可視の手掛かりを提示する', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.locator('[data-slot="spinner"]').first()).toBeVisible();
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬されていない文脈で実行されている',
+    ).toBe(true);
+
+    const cue = await readSpinnerTextCue(page);
+    expect(
+      cue.present,
+      '処理中表示に文言が無く、静止した図形だけになっている。動きを止めた環境では' +
+        '「処理中」なのか「画面が固まった」のかを判別できない',
+    ).toBe(true);
+    expect(
+      cue.width,
+      `処理中の文言「${cue.text}」が実描画で ${cue.width}px しかない（読み上げ専用のまま可視化されていない）`,
+    ).toBeGreaterThan(8);
+  });
+});
+
+// 要件 1.3: 設定が無効な環境では現在の動きの表現を変更しない（非後退）。
+test.describe('動き低減設定が無効な環境', () => {
+  test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
+  test('従来どおりの動きが維持される', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+    // 対照側でも文脈を確かめる。両側が同じ文脈で走っていたら比較は無意味になる。
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬された文脈で「無効時」の検証を実行している',
+    ).toBe(false);
+
+    const animated = await readAnimatedElements(page);
+    expect(
+      animated.some(
+        (element) =>
+          element.animationIterationCount === 'infinite' &&
+          element.animationDurationSeconds > IMPERCEPTIBLE_SECONDS,
+      ),
+      `無限アニメーションが失われている: ${JSON.stringify(animated)}。` +
+        '抑制が動き低減設定と無関係に適用されている疑いがある',
+    ).toBe(true);
+
+    const motion = await readMotion(page.getByRole('button', { name: '既定のボタン' }));
+    expect(
+      motion.transitionDurationSeconds,
+      `既定のボタンの遷移時間が ${motion.transitionDurationSeconds}s まで縮んでいる`,
+    ).toBeGreaterThan(IMPERCEPTIBLE_SECONDS);
+  });
+
+  // 要件 1.3 / 2.1 の裏側: 代替表現は動き低減時にだけ現れること。
+  // 常時露出すると、動きが十分な環境でも表示が変わってしまう（非後退の違反）。
+  test('処理中表示の代替文言が露出しない', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.locator('[data-slot="spinner"]').first()).toBeVisible();
+
+    const cue = await readSpinnerTextCue(page);
+    expect(
+      cue.width,
+      `動き低減が無効な環境で処理中の文言「${cue.text}」が ${cue.width}px 描画されている。` +
+        '代替表現は動き低減時にだけ現れること',
+    ).toBeLessThanOrEqual(2);
+  });
+});
+
+// 要件 1.4: 動き低減設定の有無にかかわらず、状態変化の結果として到達する見た目を同一に保つ。
+//
+// 動きを消すことと状態を消すことは別である。抑制の対象を transition-property や transform まで
+// 広げると、押下時の沈み込みという「動きではなく状態」が失われ、押した手応えが消える。
+// 1 つのテストの中で両設定の文脈を作って突き合わせる（describe をまたぐと比較できないため）。
+test('押下時に到達する見た目が動き低減の有無で変わらない', async ({ browser }, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+
+  const pressedShiftUnder = async (
+    reducedMotion: 'reduce' | 'no-preference',
+  ): Promise<number> => {
+    const context = await browser.newContext({
+      ...devices['Pixel 5'],
+      baseURL,
+      reducedMotion,
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto('/ui-check');
+      // 文脈が本当に切り替わっていることを確かめる（両側が同じ文脈なら比較は無意味）。
+      expect(
+        await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+        `${reducedMotion} の文脈を作れていない`,
+      ).toBe(reducedMotion === 'reduce');
+      return await readPressedShift(page, '既定のボタン');
+    } finally {
+      await context.close();
+    }
+  };
+
+  const suppressed = await pressedShiftUnder('reduce');
+  const normal = await pressedShiftUnder('no-preference');
+
+  expect(
+    suppressed,
+    `押下時の到達位置が設定で変わっている（動き低減時 ${suppressed}px / 通常時 ${normal}px）。` +
+      '抑制の対象が動きの「経過」を超えて「到達状態」まで及んでいる',
+  ).toBeCloseTo(normal, 1);
+});
+
+// ui-a11y-gaps 要件 4.1 / 4.2 / 5.3: 指で押せる大きさを実描画で保証する。
+//
+// 本プロダクトの主動線は QR → モバイル → LIFF であり、利用者は IT に不慣れであることが前提
+// （steering product.md）。押し損ねは離脱に直結するが、押しにくさは誰も報告しないため、
+// 実測でしか守れない。
+test('押しボタンの操作領域が寸法区分ごとの要求値を満たす', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  // 検証面が潰れていると寸法の検証は「部品の欠陥」に見える失敗をする。先に切り分ける。
+  await expectVerificationSurfaceSane(page);
+
+  const buttons = await readTouchGeometries(page, '[data-slot="button"]');
+  expect(
+    buttons.length,
+    '押しボタンを 1 つも実測できていない（検証面から部品が消えている）',
+  ).toBeGreaterThan(0);
+
+  // 空振り防止: 既定寸法と縮小寸法の **両方** が検証面に実在していること。
+  // 片方しか無いと、もう片方の要求値は誰にも試されないまま緑になる。
+  const measured = buttons.map((button) => BUTTON_TOUCH_REQUIREMENT[button.size ?? '']);
+  expect(
+    measured.includes(TOUCH_TARGET_DEFAULT_PX),
+    `既定寸法の押しボタンが検証面に無い（実測できた区分: ${buttons.map((b) => b.size).join(', ')}）`,
+  ).toBe(true);
+  expect(
+    measured.includes(TOUCH_TARGET_COMPACT_PX),
+    `縮小寸法の押しボタンが検証面に無い（実測できた区分: ${buttons.map((b) => b.size).join(', ')}）`,
+  ).toBe(true);
+
+  for (const button of buttons) {
+    const required = BUTTON_TOUCH_REQUIREMENT[button.size ?? ''];
+    expect(
+      required,
+      `寸法区分 ${button.size ?? '（無し）'}（${button.name}）に要求値の宣言がありません。` +
+        'BUTTON_TOUCH_REQUIREMENT へ追記してください',
+    ).toBeDefined();
+    expect(
+      button.effective.height,
+      `${button.name}（区分 ${button.size ?? '不明'}）の操作領域の高さが ` +
+        `${button.effective.height}px（要求 ${required}px・視覚寸法は ${button.visual.height}px）`,
+    ).toBeGreaterThanOrEqual(required!);
+    expect(
+      button.effective.width,
+      `${button.name}（区分 ${button.size ?? '不明'}）の操作領域の幅が ` +
+        `${button.effective.width}px（要求 ${required}px・視覚寸法は ${button.visual.width}px）`,
+    ).toBeGreaterThanOrEqual(required!);
+  }
+});
+
+// 要件 4.5: 拡張した操作領域が隣接部品の視覚領域を覆わない。
+//
+// 「まったく重ならない」ことは要求しない。部品間の余白の中で拡張どうしが接することは、
+// そこに利用者の意図が定義できない以上あってよい。**害があるのは、見えている部品を指したのに
+// 別の部品が反応する場合だけ**であり、それは「拡張が隣の視覚領域を覆う」ことと同値である。
+test('拡張した操作領域が隣接部品の視覚領域を覆わない', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const operables = await readTouchGeometries(page, OPERABLE_SELECTOR);
+  const expanded = operables.filter((item) => item.hasExpansion);
+  // 空振り防止: 拡張を持つ部品がゼロなら「覆っていない」は自明に成立する。
+  expect(
+    expanded.length,
+    '操作領域を拡張している部品が 1 つも無い。この判定は拡張が存在して初めて意味を持つ',
+  ).toBeGreaterThan(0);
+
+  for (const source of expanded) {
+    for (const other of operables) {
+      if (other === source) continue;
+      expect(
+        intersects(source.effective, other.visual),
+        `${source.name} の操作領域 ${JSON.stringify(source.effective)} が ` +
+          `${other.name} の見えている領域 ${JSON.stringify(other.visual)} を覆っています。` +
+          '見えている部品を指したのに別の部品が反応する状態です',
+      ).toBe(false);
+    }
+  }
+});
+
+// 要件 4.2 / 4.6 / 4.8: 拡張を掛けない側が下限を割っていないこと（現状維持の非後退）。
+test('選択部品と複数行入力の操作領域が下限を維持している', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const selectables = await readTouchGeometries(
+    page,
+    '[data-slot="checkbox"], [data-slot="radio-group-item"]',
+  );
+  expect(selectables.length, '選択部品を実測できていない').toBeGreaterThan(0);
+  for (const item of selectables) {
+    for (const [axis, value] of [
+      ['高さ', item.effective.height],
+      ['幅', item.effective.width],
+    ] as const) {
+      expect(
+        value,
+        `${item.slot ?? '選択部品'}（${item.name}）の操作領域の${axis}が ${value}px` +
+          `（下限 ${TOUCH_TARGET_COMPACT_PX}px）`,
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_COMPACT_PX);
+    }
+  }
+
+  // 複数行入力は変更を加えずに要求値を満たし続けること（要件 4.6）。
+  const textareas = await readTouchGeometries(page, '[data-slot="textarea"]');
+  expect(textareas.length, '複数行入力を実測できていない').toBeGreaterThan(0);
+  for (const item of textareas) {
+    expect(
+      item.effective.height,
+      `複数行入力の操作領域の高さが ${item.effective.height}px へ縮んでいる` +
+        `（要求 ${TOUCH_TARGET_DEFAULT_PX}px・本部品は変更対象外）`,
+    ).toBeGreaterThanOrEqual(TOUCH_TARGET_DEFAULT_PX);
+  }
+});
+
+// 要件 4.7: ラベルを伴う構成では、ラベルを含む行全体で 44px を満たす。
+test('ラベルを伴う行が要求寸法を満たす', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const rows = await readTouchGeometries(page, LABELLED_ROW_SELECTOR);
+  // 空振り防止: 内容が短い構成が実在すること。内容が長ければ行は自然に 44px を超えるため、
+  // 「最小高が効いているか」は短い構成でしか試されない。
+  expect(
+    rows.length,
+    'ラベルを伴う構成が検証面に無い（要件 4.7 の検証対象が存在しない）',
+  ).toBeGreaterThanOrEqual(3);
+
+  for (const row of rows) {
+    expect(
+      row.effective.height,
+      `ラベルを含む行「${row.name}」の高さが ${row.effective.height}px` +
+        `（要求 ${TOUCH_TARGET_DEFAULT_PX}px）。テキスト入力と選択部品の 44px は` +
+        'この行で満たす前提になっている',
+    ).toBeGreaterThanOrEqual(TOUCH_TARGET_DEFAULT_PX);
+  }
+});
+
+// 要件 4.7 の後半: 行を指した結果、対応する部品が実際に反応すること。
+// 高さだけを満たしても、押して何も起きなければ「操作領域」とは呼べない。
+test('ラベル領域の指定で対応する部品が反応する', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+  // テキスト入力: ラベル文字の指定でフォーカスが移る。
+  await page.getByText('ラベル付き入力', { exact: true }).click();
+  expect(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-slot') ?? null),
+    'ラベル文字を指してもテキスト入力へフォーカスが移らない',
+  ).toBe('input');
+
+  // チェックボックス: ラベル文字の指定で選択状態が変わる。
+  const checkRow = page.locator('[data-slot="field-label"]', { hasText: 'ラベル付きチェック' });
+  const checkbox = checkRow.locator('[data-slot="checkbox"]');
+  expect(await checkbox.getAttribute('aria-checked')).toBe('false');
+  await checkRow.getByText('ラベル付きチェック').click();
+  expect(
+    await checkbox.getAttribute('aria-checked'),
+    'ラベル文字を指してもチェックボックスが反応しない',
+  ).toBe('true');
+
+  // ラジオ: ラベル文字の指定で当該項目が選ばれる。
+  const betaRow = page.locator('[data-slot="field-label"]', { hasText: '選択肢ベータ' });
+  const beta = betaRow.locator('[data-slot="radio-group-item"]');
+  expect(await beta.getAttribute('aria-checked')).toBe('false');
+  await betaRow.getByText('選択肢ベータ').click();
+  expect(
+    await beta.getAttribute('aria-checked'),
+    'ラベル文字を指してもラジオが当該項目へ反応しない',
+  ).toBe('true');
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。

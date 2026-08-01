@@ -25,7 +25,12 @@ import {
   CardTitle,
 } from '@fwlm/ui/components/card';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
-import { Field, FieldDescription, FieldLabel } from '@fwlm/ui/components/field';
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+  FieldTitle,
+} from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { Label } from '@fwlm/ui/components/label';
@@ -41,7 +46,14 @@ export const metadata: Metadata = {
 
 export default function UiCheckPage() {
   return (
-    <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
+    // コンテナ幅に名前付きスケール（max-w-md 等）を使わないこと。
+    // theme.css の `--spacing-md: 1rem` が Tailwind 既定の `--container-md`（28rem）を覆うため、
+    // `max-w-md` は 1rem（16px）へ解決され、内側余白に押し広げられて **実幅 32px** で描画される
+    // （端末幅 393px に対して）。その幅ではタッチ操作領域の実測が実態と乖離し、部品の欠陥と
+    // 検証面の欠陥を切り分けられなくなる（ui-a11y-gaps design「失敗モードと観測性」）。
+    // ここでは衝突しない任意値で回避するにとどめ、`--spacing-*` と `--container-*` の
+    // トークン衝突そのものの是正は Issue #54 が扱う。
+    <main className="mx-auto flex max-w-[28rem] flex-col gap-4 p-4">
       <h1>UI 基盤の検証面</h1>
       <p>
         自動検証（E2E）専用のページです。利用者向けの機能はありません。
@@ -104,6 +116,51 @@ export default function UiCheckPage() {
       </Field>
       <Label>単独のラベル</Label>
       <Spinner />
+
+      {/*
+        タッチ操作領域の実測用（ui-a11y-gaps・要件 4.2 / 4.7）。
+
+        - 縮小寸法（sm / icon-sm）は現在どの面でも使われていない。ここに実在させないと
+          「縮小寸法は 24px 以上」の検証が対象ゼロで空振りし、全緑のまま無意味になる。
+          拡張を掛けない側の下限を守っていることの証拠として置く。
+        - テキスト入力は指で押した位置に文字カーソルを置く性質上、他の部品と同じ
+          不可視面での拡張ができない。要求寸法はラベルを含む領域（Field 構成）で満たす
+          前提なので、その構成を実在させて実測の的にする。
+
+        追加は必ず末尾に置くこと。フォーカス巡回テストは「最初の Tab で『既定のボタン』へ
+        入る」ことを前提にしている。
+      */}
+      <Heading level={2}>操作領域の検証</Heading>
+      <Button size="sm">縮小のボタン</Button>
+      {/* 中身を持たせない（Spinner を入れると role="status" がボタン内に二重で現れ、
+          処理中表示の実測が対象を取り違える）。寸法は size で決まるため空でよい。 */}
+      <Button size="icon-sm" aria-label="縮小のアイコンボタン" />
+      <Field>
+        <FieldLabel htmlFor="labelled-input">ラベル付き入力</FieldLabel>
+        <Input id="labelled-input" placeholder="ラベル付き入力" />
+      </Field>
+
+      <FieldLabel>
+        <Field orientation="horizontal">
+          <Checkbox />
+          <FieldTitle>ラベル付きチェック</FieldTitle>
+        </Field>
+      </FieldLabel>
+
+      <RadioGroup aria-label="ラベル付きラジオグループ" defaultValue="alpha">
+        <FieldLabel>
+          <Field orientation="horizontal">
+            <RadioGroupItem value="alpha" />
+            <FieldTitle>選択肢アルファ</FieldTitle>
+          </Field>
+        </FieldLabel>
+        <FieldLabel>
+          <Field orientation="horizontal">
+            <RadioGroupItem value="beta" />
+            <FieldTitle>選択肢ベータ</FieldTitle>
+          </Field>
+        </FieldLabel>
+      </RadioGroup>
     </main>
   );
 }
