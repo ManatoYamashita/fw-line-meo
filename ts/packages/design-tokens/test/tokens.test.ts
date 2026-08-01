@@ -30,6 +30,7 @@ describe('colors（Web 意味役割）', () => {
       'destructive',
       'destructiveForeground',
       'border',
+      'borderInteractive',
     ] as const;
     expect(Object.keys(colors).sort()).toEqual([...roles].sort());
     for (const role of roles) {

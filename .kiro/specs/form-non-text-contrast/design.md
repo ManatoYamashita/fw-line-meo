@@ -185,7 +185,8 @@ ts/
 | ファイル | 変更内容 | 要件 |
 |---|---|---|
 | `ts/packages/design-tokens/src/colors.ts` | `ColorTokens` に `borderInteractive: string` を追加し `#767676` を定義 | 6.1 |
-| `ts/packages/design-tokens/test/colors.test.ts` | `NON_TEXT_ROLES` へ `borderInteractive` を追加（分類網羅ガードの充足） | 6.2 |
+| `ts/packages/design-tokens/test/colors.test.ts` | `NON_TEXT_ROLES` へ `borderInteractive` を追加（分類網羅ガードの充足）＋ 装飾用と別値である不変条件を固定 | 6.2, 4.1 |
+| `ts/packages/design-tokens/test/tokens.test.ts` | 役割名を列挙する第 5 の網羅ガードへ `borderInteractive` を追加（**2026-08-01 追記**。当初の設計はこのガードを数え落としていた） | 6.2 |
 | `ts/packages/ui/src/theme.css` | `@theme` へ `--color-border-interactive` を追加、`:root` の `--input` を新役割へ付け替え。`--border` は不変 | 1.1, 4.1, 4.2, 6.1 |
 | `ts/packages/ui/test/theme-sync.test.ts` | `COLOR_ROLE_TO_CSS_VARIABLE` へ `borderInteractive: '--color-border-interactive'` を追記 | 6.2 |
 | `ts/packages/ui/src/components/button.tsx` | outline variant の枠を装飾用から識別用へ | 4.5 |
@@ -353,7 +354,8 @@ interface ColorTokens {
 
 - 統合: `NON_TEXT_ROLES` へ分類する。テキスト前景として使わないため `AA_TEXT_PAIRS` には入れない（D7）。
 - 検証: `colors.test.ts` の分類網羅ガードが未分類を検出する。`theme-sync.test.ts` の両方向網羅ガードが `@theme` への未追加を検出する。
-- リスク: 役割追加は 4 箇所（`colors.ts` / `colors.test.ts` / `theme.css` / `theme-sync.test.ts`）の同時更新を要するが、**いずれの漏れも既存ガードが赤化させる**ため静かに壊れない。
+- リスク: 役割追加は **5 箇所**（`colors.ts` / `colors.test.ts` / **`tokens.test.ts`** / `theme.css` / `theme-sync.test.ts`）の同時更新を要するが、**いずれの漏れも既存ガードが赤化させる**ため静かに壊れない。
+  - **訂正（2026-08-01・タスク 2.1 実装時に判明）**: 当初この設計は 4 箇所と記載していたが、`tokens.test.ts` に `ColorTokens` の役割名を列挙する**第 5 の網羅ガード**が実在する。摂動により、この 1 行を欠くと確実に赤化することを確認済み。想定より 1 段厚い網が掛かっており、「静かに壊れない」という主張自体は強化された。
 
 ### ui / theme.css 層
 

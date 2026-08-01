@@ -26,7 +26,13 @@
   --color-background: #FFFFFF;
   --color-destructive: #B91C1C;
   --color-destructive-foreground: #FFFFFF;
+  /* 枠色は「部品の識別に必要な枠」と「情報を持たない純装飾の罫線」で意味役割が分かれる。
+   * --color-border は後者（区切り線・カード罫線・情報コンテナ外枠）で、SC 1.4.11 の対象外。
+   * --color-border-interactive は前者（フォーム入力部品と対話的部品の輪郭）で 3:1 が要る。
+   * 後者は var() 参照専用であり、border-border-interactive のようなユーティリティとしては
+   * 使わない（Tailwind は要求されたユーティリティのみ生成するため未使用の名前は生成されない）。 */
   --color-border: #DDDDDD;
+  --color-border-interactive: #767676;
 
   /* Typography（design-tokens typography） */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN",
