@@ -14,6 +14,10 @@
 // 注: jsdom は Tailwind を解決しないため「見た目」そのものは検証できない。よって視覚状態は
 // 「その状態を分岐させるユーティリティクラス・data 属性が存在すること」で検証する
 // （＝状態表現が規約に沿って宣言されていることの検証。実際の描画は #43〜#45 の目視と E2E が担う）。
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -545,5 +549,190 @@ describe('フォーカス指標は部品が自前定義しない（Issue #49 / R
     render(<Input aria-label="メール" aria-invalid />);
     const classes = classesOf(screen.getByLabelText('メール'));
     expect(classes).toContain('aria-invalid:border-destructive');
+  });
+});
+
+// --- 動きに関わる指定の分類ガード（Requirements 1.4, 5.5） -----------------------------
+//
+// 動き低減設定下の抑制は theme.css の 1 箇所で全部品に一律に効く。だからこそ、部品へ
+// 新しい動きが加わったときに「それは抑制してよい動きなのか」が誰にも問われないまま
+// 通ってしまう。ここでは部品ソースから動きに関わる指定を全抽出し、下表と双方向で
+// 突き合わせて未分類を必ず赤化させる。
+//
+// 分類は 2 区分である（design「動きの 2 区分」）。この区別を曖昧にすると、要件 1.2 を
+// 守ったつもりで要件 1.4 を破る:
+//   progress（経過）  = アニメーション・遷移の所要時間や反復。抑制してよい
+//   endstate（到達状態）= 状態変化の結果として適用される位置・不透明度・色などの最終値。
+//                        抑制すると「動きではなく状態」が失われる。抑制してはならない
+const motionComponentsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'src',
+  'components',
+);
+const motionThemeCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'theme.css'),
+  'utf8',
+);
+
+/**
+ * 動きに関わるユーティリティの本体パターン。
+ * `data-slot="spinner"` のような **クラスでない文字列**を拾わないよう、キーワードの直後に
+ * 区切りか終端を要求する（"spinner" は誤検出しない）。
+ */
+const MOTION_UTILITY_PATTERN =
+  /^-?(?:animate|transition|duration|ease|translate|scale|rotate|skew)(?:-|$)/;
+
+interface MotionClassification {
+  /** 部品ソースに現れる完全なクラス（variant 連鎖を含む）。 */
+  readonly utility: string;
+  readonly kind: 'progress' | 'endstate';
+  /**
+   * endstate のみ: この指定が実際に出力する CSS プロパティ。
+   * theme.css の抑制ブロックがこれを宣言していないことを検証する。
+   * Tailwind v4 の translate-* は `transform` ではなく `translate` へ出力される点に注意
+   * （生成 CSS で確認済み。`transform` を見張っても実際の経路は素通りする）。
+   */
+  readonly cssProperty?: string;
+  readonly note: string;
+}
+
+const MOTION_CLASSIFICATIONS: readonly MotionClassification[] = [
+  {
+    utility: 'animate-spin',
+    kind: 'progress',
+    note: 'Spinner の無限回転。動き低減設定下で最も止めるべき対象',
+  },
+  { utility: 'transition-all', kind: 'progress', note: 'Button / Badge の状態遷移' },
+  {
+    utility: 'transition-colors',
+    kind: 'progress',
+    note: 'Input / Textarea / Checkbox の色遷移',
+  },
+  {
+    utility: 'transition-none',
+    kind: 'progress',
+    note: 'Checkbox のチェック表示。もともと遷移させない指定であり抑制と衝突しない',
+  },
+  {
+    utility: 'active:not-aria-[haspopup]:translate-y-px',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '押下時の沈み込み。これは「動き」ではなく押している間の状態表現であり、'
+      + '止めると押した手応えが失われる（要件 1.4）',
+  },
+  {
+    utility: '-translate-x-1/2',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: 'RadioGroupItem の選択マークを中央へ置く静的配置。状態変化ですらない',
+  },
+  {
+    utility: '-translate-y-1/2',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '同上',
+  },
+  {
+    utility: '*:[svg]:translate-y-0.5',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: 'Alert のアイコンを本文の行と揃える静的配置',
+  },
+];
+
+/** 部品ソースから動きに関わるクラスを全て抽出する（variant 連鎖を保持したまま返す）。 */
+function extractMotionUtilities(source: string): readonly string[] {
+  const found: string[] = [];
+  for (const token of source.split(/[\s"'`]+/)) {
+    // variant 連鎖（`active:` `*:[svg]:` 等）を落としてユーティリティ本体だけを判定する。
+    const utility = token.slice(token.lastIndexOf(':') + 1);
+    if (MOTION_UTILITY_PATTERN.test(utility)) found.push(token);
+  }
+  return found;
+}
+
+/**
+ * theme.css の動き抑制ブロックが宣言しているプロパティを取り出す。
+ * 波括弧の深さを数えて対応する閉じ括弧までを切り出す（入れ子があるため正規表現では取れない）。
+ */
+function suppressedPropertiesInTheme(css: string): ReadonlySet<string> {
+  const marker = '@media (prefers-reduced-motion: reduce)';
+  const start = css.indexOf(marker);
+  if (start < 0) return new Set();
+  let depth = 0;
+  let end = start;
+  for (let i = css.indexOf('{', start); i < css.length; i += 1) {
+    if (css[i] === '{') depth += 1;
+    else if (css[i] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  const block = css.slice(start, end);
+  return new Set([...block.matchAll(/([a-z-]+)\s*:\s*[^;]+;/g)].map((match) => match[1]!));
+}
+
+describe('動きに関わる指定が 2 区分へ漏れなく分類されている（Requirements 1.4, 5.5）', () => {
+  const extracted = new Set<string>();
+  for (const file of readdirSync(motionComponentsDir).filter((name) => name.endsWith('.tsx'))) {
+    for (const utility of extractMotionUtilities(
+      readFileSync(join(motionComponentsDir, file), 'utf8'),
+    )) {
+      extracted.add(utility);
+    }
+  }
+  const classified = new Set(MOTION_CLASSIFICATIONS.map((entry) => entry.utility));
+
+  it('抽出が空振りしていない（部品から動きの指定が消えたのではないことの確認）', () => {
+    expect(
+      extracted.size,
+      '部品から動きに関わる指定が 1 つも抽出できませんでした。抽出器が壊れているか、' +
+        '部品の書き方が変わっています。分類ガードは対象ゼロでは何も守れません',
+    ).toBeGreaterThan(0);
+  });
+
+  it('抽出器が data-slot 等のクラスでない文字列を拾わない（自己検証）', () => {
+    const fixture = 'data-slot="spinner" className="animate-spin transition-all rotating"';
+    expect(extractMotionUtilities(fixture)).toEqual(['animate-spin', 'transition-all']);
+  });
+
+  it('部品にあって分類表に無い指定が存在しない（新しい動きの混入を検出する）', () => {
+    const unclassified = [...extracted].filter((utility) => !classified.has(utility));
+    expect(
+      unclassified,
+      `分類されていない動きの指定があります: ${unclassified.join(', ')}。` +
+        'それが抑制してよい「経過」なのか、抑制してはならない「到達状態」なのかを' +
+        'MOTION_CLASSIFICATIONS へ明記してください',
+    ).toEqual([]);
+  });
+
+  it('分類表にあって部品に無い指定が存在しない（死んだ項目を残さない）', () => {
+    const stale = [...classified].filter((utility) => !extracted.has(utility));
+    expect(
+      stale,
+      `部品から消えた指定が分類表に残っています: ${stale.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('到達状態に分類した指定が theme.css の抑制対象へ紛れ込んでいない（Requirements 1.4）', () => {
+    const suppressed = suppressedPropertiesInTheme(motionThemeCss);
+    expect(
+      suppressed.size,
+      'theme.css から抑制ブロックを取り出せません（抑制が失われたか、書式が変わりました）',
+    ).toBeGreaterThan(0);
+
+    for (const entry of MOTION_CLASSIFICATIONS) {
+      if (entry.kind !== 'endstate') continue;
+      expect(entry.cssProperty, `${entry.utility} に cssProperty の宣言がありません`).toBeDefined();
+      expect(
+        suppressed.has(entry.cssProperty!),
+        `${entry.utility} が出力する ${entry.cssProperty} を theme.css が抑制しています。` +
+          `これは到達状態であり抑制してはなりません（${entry.note}）`,
+      ).toBe(false);
+    }
   });
 });
