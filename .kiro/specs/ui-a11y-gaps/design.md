@@ -6,7 +6,9 @@
 
 **Users**: 前庭障害・光過敏のある利用者、スクリーンリーダー利用者、スマートフォンで指操作する来店客および飲食店オーナーが直接の受益者である。開発チームは、同種の欠落が再発したときに CI が失敗する状態を得る。
 
-**Impact**: 動きの抑制は `theme.css` の `@layer base` へ 1 箇所追加され、全 UI 面へ即時に波及する。通知とタッチ領域の変更は 4 部品に閉じる。`Spinner` の DOM 構造が単一要素からラッパ構造へ変わる点のみが契約変更である。
+**Impact**: 動きの抑制は `theme.css` の `@layer base` へ 1 箇所追加され、全 UI 面へ即時に波及する。通知とタッチ領域の変更は 3 部品（`Alert` / `Button` / `Field`）に閉じる。`Spinner` の DOM 構造が単一要素からラッパ構造へ変わる点のみが契約変更である。
+
+> **2026-08-01 の訂正**: 当初は `Checkbox` / `RadioGroupItem` の拡張量を 44 CSS ピクセルまで引き上げる設計だったが、実測により**実行不能**であることが判明した。`RadioGroup` は部品自身が項目間隔 8 CSS ピクセルを規定するためピッチが 24 に固定され、44 の領域は隣接項目の視覚領域を覆う。詳細と代替方針は requirements.md「実装着手時の訂正」に記載し、本書の該当箇所へ反映済みである。
 
 ### Goals
 
@@ -28,7 +30,9 @@
 ### This Spec Owns
 
 - `theme.css` の `@layer base` における**動き抑制規則**の存在・内容・レイヤ所属。
-- `Spinner` / `Alert` / `Button` / `Checkbox` / `RadioGroupItem` の、動き・読み上げ強度・操作領域に関する既定の振る舞い。
+- `Spinner` / `Alert` / `Button` の、動き・読み上げ強度・操作領域に関する既定の振る舞い。
+- `Field` 構成（`FieldLabel` がラベル行として提供する領域）が要求寸法を満たすこと。
+- `Checkbox` / `RadioGroupItem` の**現在の拡張量が要件 4.2 の下限を満たし、かつ隣接項目の視覚領域を覆わない**という不変条件（値そのものは変更しない）。
 - 上記を検証する 3 系統のガード（属性・生成 CSS・実描画）と、その分類表。
 - E2E 検証面 `/ui-check` における**本 spec の検証対象部品の実在性**（縮小寸法・Field 構成の入力を含む）。
 
@@ -119,8 +123,7 @@ graph TB
 | `ts/packages/ui/src/components/spinner.tsx` | ラッパ要素へ変更し、動き低減時に文言を可視化する。`role="status"` と上書き可能な読み上げ名は維持 | 2.1, 2.2, 2.3 |
 | `ts/packages/ui/src/components/alert.tsx` | variant に応じた既定 `role` を与える（`{...props}` より前に置き、上書き可能性を維持） | 3.1, 3.2, 3.3, 3.4 |
 | `ts/packages/ui/src/components/button.tsx` | 既定寸法に限り `::after` で操作領域を拡張。縮小寸法は現状維持 | 4.1, 4.3, 4.4, 4.5 |
-| `ts/packages/ui/src/components/checkbox.tsx` | `::after` の inset を要求寸法まで拡張（現状 40×32） | 4.1, 4.3, 4.4 |
-| `ts/packages/ui/src/components/radio-group.tsx` | 同上 | 4.1, 4.3, 4.4 |
+| `ts/packages/ui/src/components/field.tsx` | ラベル行（`FieldLabel` が制御を包む構成）の最小高を要求寸法まで引き上げる。現状 42px | 4.7 |
 | `ts/packages/ui/test/components.test.tsx` | variant → `role` の出し分け、寸法区分の分類、動き指定の分類を検証 | 5.2, 5.4, 5.5 |
 | `ts/packages/ui/test/app-integration.test.ts` | 生成 CSS に抑制ブロックが `base` レイヤで存在し `!important` を持つことを AST で検証 | 5.1（静的） |
 | `ts/apps/survey-web/src/app/ui-check/page.tsx` | コンテナ幅の指定を衝突しない形へ変更。縮小寸法の部品と Field 構成のテキスト入力を追加して検証対象を実在させる | 4.2, 4.7 の検証前提 |
@@ -130,9 +133,10 @@ graph TB
 
 | ファイル | 依存の理由 | 担当要件 |
 |---|---|---|
-| `ts/packages/ui/src/components/label.tsx` | 実 `<label>` 要素であり、関連付けられた入力へフォーカスを移す性質に依存する。**変更しない** | 4.7 |
-| `ts/packages/ui/src/components/field.tsx` | ラベルと入力を組む構成を提供する。合計領域が要求寸法を満たす前提に依存する。**変更しない** | 4.7 |
-| `ts/packages/ui/src/components/textarea.tsx` | 実測で要求寸法を既に満たす（高さ 138px）。要件 4.6 により**現状を維持する** | 4.6 |
+| `ts/packages/ui/src/components/label.tsx` | 実 `<label>` 要素であり、関連付けられた／内包する制御へ指定を転送する性質に依存する。**変更しない** | 4.7 |
+| `ts/packages/ui/src/components/textarea.tsx` | 実測で要求寸法を既に満たす。要件 4.6 により**現状を維持する** | 4.6 |
+| `ts/packages/ui/src/components/checkbox.tsx` | 現在の拡張量（上下各 8px・左右各 12px = 実効 40×32）が要件 4.2 の下限を満たし、かつ隣接項目の視覚領域を覆わない上限値である。**変更しない** | 4.2, 4.5, 4.8 |
+| `ts/packages/ui/src/components/radio-group.tsx` | 同上。加えて項目間隔（`gap-2`）はレイアウトであり操作領域の拡大の対象ではない（変更は要件 4.4 に抵触する）。**変更しない** | 4.2, 4.5, 4.8 |
 
 > これらは検証対象ではあるが実装対象ではない。E2E が「変更せずとも要件を満たしている」ことを実測で確かめる。満たさなくなった場合は本設計の前提が崩れるため、Revalidation Triggers の対象となる。
 
@@ -175,13 +179,14 @@ sequenceDiagram
 | 3.2 | 成功・既定は割り込まない | Alert | State | — |
 | 3.3 | 視覚表現の不変 | Alert | State | — |
 | 3.4 | ライブリージョンからの脱落禁止 | Alert | State | — |
-| 4.1 | 既定寸法 44px | Button, Checkbox, RadioGroupItem | State | — |
-| 4.2 | 縮小寸法 24px | Button（現状で充足） | State | — |
-| 4.3 | 視覚寸法の不変 | Button, Checkbox, RadioGroupItem | State | — |
-| 4.4 | 周囲レイアウトの不変 | Button, Checkbox, RadioGroupItem | State | — |
-| 4.5 | 重なり時に意図した部品のみ反応 | Button, UiCheckSurface | State | — |
+| 4.1 | 既定寸法の押しボタン 44px | Button | State | — |
+| 4.2 | 縮小寸法 24px | Button, Checkbox, RadioGroupItem（現状で充足） | State | — |
+| 4.3 | 視覚寸法の不変 | Button, Field 構成 | State | — |
+| 4.4 | 周囲レイアウトの不変 | Button, Field 構成 | State | — |
+| 4.5 | 拡張が隣接部品の視覚領域を覆わない | Button, Checkbox, RadioGroupItem, UiCheckSurface | State | — |
 | 4.6 | 既に充足する部品の維持 | Textarea（変更なし） | — | — |
-| 4.7 | ラベルを含む領域で充足 | Field 構成（Label + Input） | State | — |
+| 4.7 | ラベル行で 44px 充足・行指定で反応 | Field 構成（FieldLabel + Input / Checkbox / RadioGroupItem） | State | — |
+| 4.8 | 選択部品単体の現状維持 | Checkbox, RadioGroupItem（変更なし） | — | — |
 | 5.1 | 動き抑制の検証 | GeneratedCssGuard, RenderedMeasurementE2E | Batch（CI） | — |
 | 5.2 | 読み上げ強度の検証 | ComponentContractGuard | Batch | — |
 | 5.3 | 操作領域の検証 | RenderedMeasurementE2E | Batch | — |
@@ -201,7 +206,8 @@ sequenceDiagram
 | Spinner | 部品層 | 処理中を動きに依存せず伝える | 2.1–2.3 | MotionSuppression（P0）、Tailwind バリアント（P0） | State |
 | Alert | 部品層 | 重要度に応じた読み上げ強度で通知する | 3.1–3.4 | なし | State |
 | Button | 部品層 | 見た目を変えずに操作領域を確保する | 4.1, 4.3–4.5 | なし | State |
-| Checkbox / RadioGroupItem | 部品層 | 同上 | 4.1, 4.3, 4.4 | `@base-ui/react`（P1） | State |
+| Checkbox / RadioGroupItem | 部品層 | 現在の操作領域と不変条件を保つ（変更しない） | 4.2, 4.5, 4.8 | `@base-ui/react`（P1） | State |
+| Field 構成 | 部品層 | ラベル行で 44px を満たす | 4.7 | `Label`（P0） | State |
 | UiCheckSurface | アプリ層（検証面） | 検証対象部品を実在させ実測の的になる | 4.2 / 4.7 の検証前提 | 部品層（P0） | — |
 | ComponentContractGuard | テスト層 | 属性と分類の双方向照合 | 5.2, 5.4, 5.5, 6.2 | 部品ソース（P0） | Batch |
 | GeneratedCssGuard | テスト層 | 抑制規則の存在・レイヤ所属・`!important` を AST で検証 | 5.1（静的）, 6.1 | postcss（P0） | Batch |
@@ -309,14 +315,17 @@ sequenceDiagram
 | Field | Detail |
 |---|---|
 | Intent | 視覚的寸法と周囲のレイアウトを変えずに操作領域を確保する |
-| Requirements | 4.1, 4.3, 4.4, 4.5 |
+| Requirements | 4.1, 4.2, 4.3, 4.4, 4.5, 4.8 |
 
 **Responsibilities & Constraints**
 
 - 操作領域の拡張は**部品自身の外側へはみ出す不可視の面**として実現する。`Checkbox` / `RadioGroupItem` が既に採る作法を `Button` へ展開する。レイアウトフローから外れるため、要件 4.3 / 4.4 は構造的に満たされる。
-- **拡張は既定寸法にのみ適用する。** 縮小寸法は現状で 24 CSS ピクセル以上を満たしており（実測: `h-6` = 24px / `h-7` = 28px）、拡張すると密集配置で領域が重なり要件 4.5 と衝突する。
-- **要件 4.5 は「重ならないこと」で満たす。** 既定寸法の拡張量は上下各 6 CSS ピクセルであり、部品を並べる際の間隔がそれを上回る限り領域は重ならない（`/ui-check` の実測間隔は 16px）。重なった点でどちらが「意図した部品」かは定義できないため、**判定は重なりの有無で行う**。重なりが生じた時点で赤化させ、配置か拡張量のいずれかを見直す。
-- 現状の `Checkbox` / `RadioGroupItem` の実効領域は **40×32** であり要求に未達。要件 4.6 が適用されるのは `Textarea` のみである。
+- **44 CSS ピクセルを要求するのは押しボタンの既定寸法のみである。** 縮小寸法は現状で 24 CSS ピクセル以上を満たしており（実測: `h-6` = 24px / `h-7` = 28px）、拡張すると密集配置で領域が重なる。
+- **選択部品は 44 CSS ピクセルの対象外**であり、拡張量を変更しない（要件 4.8）。理由は物理的な不可能性である —— `RadioGroup` は部品自身が項目間隔 8 CSS ピクセルを規定し、項目の視覚寸法は 16 なのでピッチは 24 に固定される。44 の領域を与えると隣接項目の**視覚領域そのもの**を覆い、見えている選択肢を指しても別の選択肢が反応する。間隔を広げる案は要件 4.4 に抵触する。選択部品の 44 CSS ピクセルはラベル行で満たす（要件 4.7・下記 Field 構成）。
+- **要件 4.5 の不変条件は「拡張が隣接部品の視覚領域を覆わないこと」である。** 「まったく重ならないこと」ではない —— 部品間の余白の中で拡張どうしが接する（あるいは僅かに重なる）ことは、そこに利用者の意図が定義できない以上、許容してよい。**害があるのは、見えている部品を指したのに別の部品が反応する場合だけ**である。この不変条件は物理的に達成可能であり、かつ拡張が存在しなければ判定が意味を持つ（空振りしない）。
+  - 実測: 素の `RadioGroupItem` の拡張は現在の上下各 8 CSS ピクセルで隣接項目の視覚領域と**境界で接する**（`[571.2, 603.2]` と視覚 `[603.2, 619.2]`）。すなわち現在値がこの不変条件の上限であり、引き上げれば直ちに破れる。
+  - 実測: `Button` の既定寸法は `/ui-check` の間隔 16 に対し拡張上下各 6 であり、隣接ボタンの視覚領域まで 10 の余裕がある。
+- 要件 4.6 が適用されるのは `Textarea` である。`Checkbox` / `RadioGroupItem` には要件 4.8 が適用される。
 
 **Dependencies**
 
@@ -330,24 +339,27 @@ sequenceDiagram
 - Validation: `RenderedMeasurementE2E` が実描画で領域を測り、隣接時にどの部品が反応するかを座標指定で判定する。
 - Risks: 隙間なく並べる配置（`ButtonGroup` 相当）が導入されると前提が崩れる。現時点でそのような部品は存在しないため設計に織り込まないが、Revalidation Triggers に記載した。
 
-#### Field 構成（Label + Input / Textarea）
+#### Field 構成（FieldLabel + Input / Checkbox / RadioGroupItem）
 
 | Field | Detail |
 |---|---|
-| Intent | テキスト入力の操作領域をラベルを含む領域で満たす |
+| Intent | テキスト入力と選択部品の操作領域を、ラベルを含む行全体で満たす |
 | Requirements | 4.7 |
 
 **Responsibilities & Constraints**
 
-- テキスト入力は「押した位置に文字カーソルを置く」性質を持つため、他の部品と同じ不可視面による拡張を適用できない（`<input>` に疑似要素が生成されないという環境制約も併存する）。
-- `Label` は実 `<label>` 要素であり、関連付けられた入力へフォーカスを移す。**ラベルと入力を合わせた領域**で要求寸法を満たす。
-- ラベルを伴わない裸の入力は本 spec の責任範囲外（要件の Boundary Context に明記済み）。
+- テキスト入力は「押した位置に文字カーソルを置く」性質を持つため、他の部品と同じ不可視面による拡張を適用できない（`<input>` に疑似要素が生成されないという環境制約も併存する）。選択部品は上記のピッチ制約により拡張できない。**どちらもラベル行で受ける。**
+- `Label` は実 `<label>` 要素であり、関連付けられた入力へフォーカスを移し、内包する制御へ指定を転送する。実測で確認済み（ラベル文字の指定でチェックボックスが選択状態へ、ラジオが当該項目へ、入力へフォーカスが移る）。
+- **ラベル行の最小高を要求寸法まで引き上げる。** 実測では現状 42 CSS ピクセル（枠線 1 + 内側余白 10 + 内容 20 + 内側余白 10 + 枠線 1）であり 2 不足する。内側余白を増やすと他の構成の見た目も動くため、**最小高の下限のみを与える**（内容が要求寸法を超える場合は現状どおり内容に従う）。
+- 縦積みの `Field`（ラベルが入力の上）は実測 59.3 CSS ピクセルで既に充足しており変更しない。
+- ラベルを伴わない裸の入力・裸の選択部品は本 spec の 44 CSS ピクセル保証の範囲外（要件の Boundary Context に明記済み）。要件 4.2 の 24 下限は引き続き保証する。
 
 **Contracts**: State [x]
 
 **Implementation Notes**
 
-- Validation: `RenderedMeasurementE2E` がラベル領域のタップで入力へフォーカスが移ることと、合計領域が要求寸法を満たすことを検証する。
+- Validation: `RenderedMeasurementE2E` が、ラベル行の指定で対応する部品が反応することと、行全体が要求寸法を満たすことを検証する。
+- Risks: 最小高は内容が短いときだけ効く。内容が長い構成では空振りするため、**内容の短い構成を検証面に実在させる**（`/ui-check` のラベル付きチェック・ラジオがこれにあたる）。
 
 ### テスト層
 
@@ -366,7 +378,7 @@ sequenceDiagram
 |---|---|---|---|
 | ComponentContractGuard | 部品ソースの動きに関わる指定と寸法区分 | **経過／到達状態**の 2 区分（MotionSuppression 参照）、寸法区分 → 要求値 | 新しい指定がいずれの区分にも未分類／新しい寸法区分が未分類／表に残った死んだ項目 |
 | GeneratedCssGuard | 実コンパイルした CSS の AST | — | 抑制ブロックが存在しない／`base` レイヤに無い／`!important` を持たない |
-| RenderedMeasurementE2E | 実描画の計算値と矩形 | 部品 → 要求寸法 | 抑制が効いていない／到達状態まで抑制されている／領域が要求値未満／隣接部品の領域が重なる／検証面の幅が不当 |
+| RenderedMeasurementE2E | 実描画の計算値と矩形 | 部品 → 要求寸法 | 抑制が効いていない／到達状態まで抑制されている／領域が要求値未満／**拡張が隣接部品の視覚領域を覆う**／検証面の幅が不当 |
 
 **Contracts**: Batch [x]
 
@@ -422,10 +434,10 @@ sequenceDiagram
 2. **設定無効時**に、同じ部品の動きが現状のまま維持されていること（1.3）。
 2b. 動き低減設定下でも、状態変化の**到達状態**（押下時の変位など）が設定無効時と同一であること（1.4）。
 3. 動き低減設定下で `Spinner` が動きに依存しない可視の手掛かりを提示すること（2.1）。
-4. 既定寸法の Button / Checkbox / RadioGroupItem の操作領域が要求寸法以上であること（4.1, 5.3）。
-5. 縮小寸法の部品が縮小側の要求寸法以上であること（4.2）。
-6. 隣接して配置した操作可能部品どうしの操作領域が**重なっていない**こと（4.5）。
-7. ラベル領域の指定でテキスト入力へフォーカスが移り、合計領域が要求寸法を満たすこと（4.7）。
+4. 既定寸法の Button の操作領域が 44 CSS ピクセル以上であること（4.1, 5.3）。
+5. 縮小寸法の Button と、選択部品単体が 24 CSS ピクセル以上であること（4.2, 4.8）。
+6. 隣接して配置した操作可能部品について、いずれの拡張領域も**隣接部品の視覚領域を覆っていない**こと（4.5）。
+7. ラベル行の指定でテキスト入力へフォーカスが移り、チェックボックス・ラジオが当該項目へ反応し、行全体が 44 CSS ピクセル以上であること（4.7）。
 
 > E2E は既定の project（タッチ模擬）で実行する。hover に依存する検証は含まない。
 
