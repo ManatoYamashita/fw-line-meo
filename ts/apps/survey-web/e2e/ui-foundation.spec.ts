@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, devices, type Locator, type Page } from '@playwright/test';
 import { contrastRatio } from '@fwlm/design-tokens';
 
 // UI デザイン基盤（ui-design-foundation）の非後退 E2E。
@@ -214,11 +214,84 @@ function readHitTarget(page: Page, x: number, y: number): Promise<HitTarget | nu
   );
 }
 
+/** 動きが「知覚されない」とみなす上限（秒）。research.md R-1 の実測では 1e-05s へ解決される。 */
+const IMPERCEPTIBLE_SECONDS = 0.001;
+
 interface MotionValues {
   animationName: string;
   animationDurationSeconds: number;
   animationIterationCount: string;
   transitionDurationSeconds: number;
+}
+
+interface AnimatedElement {
+  slot: string | null;
+  animationName: string;
+  animationDurationSeconds: number;
+  animationIterationCount: string;
+}
+
+/**
+ * 画面上でアニメーションを持つ要素を**すべて**実描画から探す。
+ *
+ * 特定の部品を名指しで測ると、部品の DOM 構造が変わったときに静かに対象を失う。また要件 1.1 が
+ * 求めるのは「その部品が止まること」ではなく「無限に繰り返すアニメーションが再生されないこと」
+ * なので、面全体を走査して 1 つでも生き残っていれば落とす方が要件に忠実である。
+ */
+function readAnimatedElements(page: Page): Promise<readonly AnimatedElement[]> {
+  return page.evaluate(() => {
+    const maxSeconds = (value: string): number =>
+      value.split(',').reduce((longest, part) => {
+        const text = part.trim();
+        const amount = Number.parseFloat(text);
+        if (!Number.isFinite(amount)) return longest;
+        return Math.max(longest, text.endsWith('ms') ? amount / 1000 : amount);
+      }, 0);
+
+    const found: AnimatedElement[] = [];
+    for (const element of Array.from(document.querySelectorAll('*'))) {
+      const style = getComputedStyle(element);
+      if (style.animationName === 'none' || style.animationName === '') continue;
+      found.push({
+        slot: element.getAttribute('data-slot'),
+        animationName: style.animationName,
+        animationDurationSeconds: maxSeconds(style.animationDuration),
+        animationIterationCount: style.animationIterationCount,
+      });
+    }
+    return found;
+  });
+}
+
+/**
+ * 押下を保持したときに到達する見た目（`transform`）を測る。
+ *
+ * 要件 1.4 が守るのは「動きの経過」と「到達する状態」の区別である。抑制の対象を誤って
+ * `transition-property` や `transform` まで広げると、押下フィードバックのような
+ * **動きではなく状態**が失われる。押したまま最終値を読んで両設定で突き合わせる。
+ */
+async function readPressedTransform(page: Page, name: string): Promise<string> {
+  const button = page.getByRole('button', { name });
+  await expect(button).toBeVisible();
+  const box = await button.boundingBox();
+  if (box === null) throw new Error(`${name} の矩形を取得できません`);
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  try {
+    const readTransform = async (): Promise<string> =>
+      button.evaluate((element) => getComputedStyle(element).transform);
+    // 遷移が走る設定では最終値に落ち着くまで数フレームかかる。抑制が効いていれば即座に到達する。
+    await expect
+      .poll(readTransform, {
+        message: `${name} を押下しても変位が現れない（到達状態まで抑制されている疑い）`,
+        timeout: 3_000,
+      })
+      .not.toBe('matrix(1, 0, 0, 1, 0, 0)');
+    return await readTransform();
+  } finally {
+    await page.mouse.up();
+  }
 }
 
 /**
@@ -598,6 +671,114 @@ test('実描画の計測基盤と検証面が実測の前提を満たしてい�
     motion.animationDurationSeconds,
     `アニメーションを持たない部品に時間が現れている: ${JSON.stringify(motion)}`,
   ).toBe(0);
+});
+
+// ui-a11y-gaps 要件 1.1 / 1.2 / 5.1: 動き低減設定を有効にした環境で動きが抑制される。
+//
+// この検証は生成 CSS の AST 検証（@fwlm/ui の app-integration.test.ts）と対になる。前者は
+// 「抑制規則が base レイヤに important 付きで存在する」ことしか言えない。実際にレイヤ順が
+// 逆転して utilities の animate-* / transition-* に勝っているかは実描画でしか確かめられない。
+test.describe('動き低減設定が有効な環境', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('無限アニメーションが停止し、状態遷移が知覚できない水準まで抑制される', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+    const animated = await readAnimatedElements(page);
+    // 空振り防止: そもそもアニメーションを持つ要素が面から消えていたら検証は無意味。
+    expect(
+      animated.length,
+      'アニメーションを持つ要素が検証面に 1 つも無い。抑制が効いたのではなく検証対象が' +
+        '失われている可能性がある（Spinner が検証面から消えていないか確認すること）',
+    ).toBeGreaterThan(0);
+
+    for (const element of animated) {
+      expect(
+        element.animationIterationCount,
+        `${element.slot ?? element.animationName}: 反復回数が ${element.animationIterationCount} のまま。` +
+          '無限に繰り返すアニメーションが停止していない',
+      ).toBe('1');
+      expect(
+        element.animationDurationSeconds,
+        `${element.slot ?? element.animationName}: アニメーション時間が ` +
+          `${element.animationDurationSeconds}s（要求 ${IMPERCEPTIBLE_SECONDS}s 以下）`,
+      ).toBeLessThanOrEqual(IMPERCEPTIBLE_SECONDS);
+    }
+
+    // 状態遷移（transition）も同様に抑制されていること。
+    const transitioning = ['既定のボタン', '副次のボタン'];
+    for (const name of transitioning) {
+      const motion = await readMotion(page.getByRole('button', { name }));
+      expect(
+        motion.transitionDurationSeconds,
+        `${name}: 遷移時間が ${motion.transitionDurationSeconds}s のまま` +
+          `（要求 ${IMPERCEPTIBLE_SECONDS}s 以下）。base レイヤの抑制が utilities に負けている`,
+      ).toBeLessThanOrEqual(IMPERCEPTIBLE_SECONDS);
+    }
+  });
+});
+
+// 要件 1.3: 設定が無効な環境では現在の動きの表現を変更しない（非後退）。
+test.describe('動き低減設定が無効な環境', () => {
+  test.use({ reducedMotion: 'no-preference' });
+
+  test('従来どおりの動きが維持される', async ({ page }) => {
+    await page.goto('/ui-check');
+    await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+
+    const animated = await readAnimatedElements(page);
+    expect(
+      animated.some(
+        (element) =>
+          element.animationIterationCount === 'infinite' &&
+          element.animationDurationSeconds > IMPERCEPTIBLE_SECONDS,
+      ),
+      `無限アニメーションが失われている: ${JSON.stringify(animated)}。` +
+        '抑制が動き低減設定と無関係に適用されている疑いがある',
+    ).toBe(true);
+
+    const motion = await readMotion(page.getByRole('button', { name: '既定のボタン' }));
+    expect(
+      motion.transitionDurationSeconds,
+      `既定のボタンの遷移時間が ${motion.transitionDurationSeconds}s まで縮んでいる`,
+    ).toBeGreaterThan(IMPERCEPTIBLE_SECONDS);
+  });
+});
+
+// 要件 1.4: 動き低減設定の有無にかかわらず、状態変化の結果として到達する見た目を同一に保つ。
+//
+// 動きを消すことと状態を消すことは別である。抑制の対象を transition-property や transform まで
+// 広げると、押下時の沈み込みという「動きではなく状態」が失われ、押した手応えが消える。
+// 1 つのテストの中で両設定の文脈を作って突き合わせる（describe をまたぐと比較できないため）。
+test('押下時に到達する見た目が動き低減の有無で変わらない', async ({ browser }, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+
+  const pressedTransformUnder = async (
+    reducedMotion: 'reduce' | 'no-preference',
+  ): Promise<string> => {
+    const context = await browser.newContext({
+      ...devices['Pixel 5'],
+      baseURL,
+      reducedMotion,
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto('/ui-check');
+      return await readPressedTransform(page, '既定のボタン');
+    } finally {
+      await context.close();
+    }
+  };
+
+  const suppressed = await pressedTransformUnder('reduce');
+  const normal = await pressedTransformUnder('no-preference');
+
+  expect(
+    suppressed,
+    `押下時の到達状態が設定で変わっている（動き低減時 ${suppressed} / 通常時 ${normal}）。` +
+      '抑制の対象が動きの「経過」を超えて「到達状態」まで及んでいる',
+  ).toBe(normal);
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。
