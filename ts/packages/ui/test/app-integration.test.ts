@@ -21,7 +21,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import postcss, { type AcceptedPlugin, type Rule } from 'postcss';
+import postcss, { type AcceptedPlugin, type AtRule, type Rule } from 'postcss';
 import { describe, it, expect, beforeAll } from 'vitest';
 
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -122,6 +122,48 @@ function rulesInLayer(css: string, layerName: string, selector: string): readonl
   });
   return matches;
 }
+
+/**
+ * 指定のカスケードレイヤ内から、条件が一致する `@media` 規則を全て取り出す（ui-a11y-gaps）。
+ *
+ * 動き抑制の本質は「どのレイヤに属するか」である。生成 CSS 冒頭の
+ * `@layer theme, base, components, utilities` により base は utilities に負けるが、
+ * **`!important` 宣言ではレイヤの優先順位が逆転する**（CSS Cascade Layers 仕様）。
+ * したがって「base に居ること」と「important であること」の両方が動作条件になる。
+ * 文字列上の出現位置ではレイヤ所属を判定できないため、`rulesInLayer` と同じく AST を辿る。
+ */
+function mediaRulesInLayer(
+  css: string,
+  layerName: string,
+  conditionPattern: RegExp,
+): readonly AtRule[] {
+  const matches: AtRule[] = [];
+  postcss.parse(css).walkAtRules('layer', (layerRule) => {
+    if (layerRule.params !== layerName) return;
+    layerRule.walkAtRules('media', (mediaRule) => {
+      if (conditionPattern.test(mediaRule.params)) matches.push(mediaRule);
+    });
+  });
+  return matches;
+}
+
+/**
+ * 動き低減設定下で抑制するプロパティ（ui-a11y-gaps design「動きの 2 区分」）。
+ *
+ * 抑制するのは動きの **経過** だけである。`transition-property` や `transform` のような
+ * **到達状態**を触ると、押下時の沈み込みのような「動きではなく状態」まで消えて要件 1.4 を破る。
+ */
+const MOTION_SUPPRESSED_PROPERTIES = [
+  'animation-duration',
+  'animation-iteration-count',
+  'transition-duration',
+] as const;
+
+/**
+ * 抑制ブロックに現れてはならないプロパティ。
+ * 到達状態を抑制対象へ紛れ込ませた瞬間に赤化させる（要件 1.4 の CSS 側の防波堤）。
+ */
+const MOTION_FORBIDDEN_PROPERTIES = ['transition-property', 'animation-name', 'transform'] as const;
 
 /** 規則の宣言を `prop -> value` のオブジェクトへ畳む。 */
 function declarationsOf(rule: Rule): Readonly<Record<string, string>> {
@@ -420,6 +462,95 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
         hasUtilityRule(compiledWithForcedOutlineNone, 'outline-none'),
         '@source inline で強制しても .outline-none を検出できません。検出方法が壊れています',
       ).toBe(true);
+    });
+  });
+
+  // 6. 動き低減設定下の抑制（Issue #52 / ui-a11y-gaps Requirements 1.1, 1.2, 5.1）
+  //
+  // 無限に回り続けるアニメーションは前庭障害・光過敏のある利用者にとって実害となるが、
+  // 抑制が壊れても **画面は正常に見える**。実害を受けるのは動き低減設定を有効にしている
+  // 利用者だけで、開発者の画面には何も起きない。したがって「無言の失敗」を機械で捕まえる。
+  //
+  // 守るべき条件は 2 つあり、どちらか一方でも欠けると抑制は無言で効かなくなる:
+  //   (a) 規則が `@layer base` に属すること
+  //   (b) 宣言が `!important` を伴うこと
+  // (b) が要るのは、生成 CSS 冒頭の `@layer theme, base, components, utilities` により
+  // base が utilities（`animate-spin` / `transition-*` の出力先）に **詳細度と無関係に負ける**
+  // ためである（Issue #49 の原因と同じ構造）。`!important` 宣言に限りレイヤ順は逆転する。
+  describe('6. 動き低減の抑制が base レイヤに important 付きで生成される（Requirements 5.1）', () => {
+    const globalsCss = readFileSync(globalsCssPath, 'utf8');
+    const REDUCED_MOTION = /prefers-reduced-motion\s*:\s*reduce/;
+    let compiled = '';
+
+    beforeAll(async () => {
+      compiled = await compileWithAppToolchain(app, globalsCss);
+    });
+
+    it('抽出器の自己検証: base レイヤ外の同条件メディアクエリは拾わない', () => {
+      // 「レイヤ所属を見ている」ことの証明。これが無いと、抑制が別レイヤへ移動しても
+      // 文字列としては存在するため緑のまま通ってしまう。
+      const fixture = [
+        '@layer theme, base, components, utilities;',
+        '@media (prefers-reduced-motion: reduce){ .outside{ animation-duration: 0s } }',
+        '@layer utilities{ @media (prefers-reduced-motion: reduce){ .wrong-layer{ animation-duration: 0s } } }',
+        '@layer base{ @media (prefers-reduced-motion: reduce){ *{ animation-duration: 0.01ms !important } } }',
+      ].join('\n');
+      expect(
+        mediaRulesInLayer(fixture, 'base', REDUCED_MOTION).length,
+        'base レイヤ内の 1 件だけを取り出せていません（レイヤ所属の判定が効いていない）',
+      ).toBe(1);
+      expect(mediaRulesInLayer(fixture, 'utilities', REDUCED_MOTION).length).toBe(1);
+    });
+
+    it('動き低減の抑制ブロックが base レイヤに存在する', () => {
+      expect(
+        mediaRulesInLayer(compiled, 'base', REDUCED_MOTION).length,
+        'base レイヤに prefers-reduced-motion の抑制ブロックがありません。' +
+          '動き低減設定を有効にしている利用者に対して、無限アニメーションと状態遷移が' +
+          'そのまま再生されます（画面上は正常に見えるため目視では気づけません）',
+      ).toBeGreaterThan(0);
+    });
+
+    it('抑制対象のプロパティが揃っている（経過のみを止める）', () => {
+      const declared = new Set<string>();
+      for (const media of mediaRulesInLayer(compiled, 'base', REDUCED_MOTION)) {
+        media.walkDecls((decl) => declared.add(decl.prop));
+      }
+      for (const property of MOTION_SUPPRESSED_PROPERTIES) {
+        expect(
+          declared.has(property),
+          `抑制ブロックに ${property} がありません（宣言されているのは ${[...declared].join(', ') || '（無し）'}）`,
+        ).toBe(true);
+      }
+    });
+
+    it('到達状態を決めるプロパティを抑制していない（Requirements 1.4）', () => {
+      const declared = new Set<string>();
+      for (const media of mediaRulesInLayer(compiled, 'base', REDUCED_MOTION)) {
+        media.walkDecls((decl) => declared.add(decl.prop));
+      }
+      for (const property of MOTION_FORBIDDEN_PROPERTIES) {
+        expect(
+          declared.has(property),
+          `抑制ブロックが ${property} を宣言しています。これは動きの「経過」ではなく` +
+            '「到達状態」であり、抑制すると押下フィードバックのような状態表現まで失われます',
+        ).toBe(false);
+      }
+    });
+
+    it('全ての抑制宣言が important を伴う（レイヤ順の逆転がこれに依存する）', () => {
+      const weak: string[] = [];
+      for (const media of mediaRulesInLayer(compiled, 'base', REDUCED_MOTION)) {
+        media.walkDecls((decl) => {
+          if (!decl.important) weak.push(`${decl.prop}: ${decl.value}`);
+        });
+      }
+      expect(
+        weak,
+        `important を伴わない抑制宣言があります: ${weak.join(' / ')}。` +
+          'base レイヤの規則は @layer utilities の animate-* / transition-* に詳細度と無関係に' +
+          '負けるため、important が無いと抑制は一切効きません（無言で機能しなくなります）',
+      ).toEqual([]);
     });
   });
 });
