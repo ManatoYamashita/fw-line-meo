@@ -124,6 +124,18 @@ interface UsagePair {
  *
  * 下地が指定されていない部品（Button ghost / link 等）は親の背景に載るため、
  * 既定の backdrop である `background`（#FFFFFF）を仮定する。
+ *
+ * **隣接色の選び方**（Requirements 1.3, 5.5 / design.md D7）:
+ * コントラストは色単体ではなく**ペアの性質**である。同じユーティリティが複数の部品で
+ * 使われている場合、`surface` には**実際に隣り合う相手のうち最も条件の厳しいもの**を取る。
+ * 甘い相手（例: 面塗り `bg-muted` に対し `foreground` ではなく実在の `muted-foreground`）を
+ * 選ぶと、値が実際には AA を割っていても緑になる空振り検証になる。
+ * - 枠線（`border-*`）は「線」であり、識別すべき相手は**隣接する頁背景**であって内側の
+ *   面塗りではない（要件 1.1・2.1・4.5）。前景側に色を、`surface` に背景を置く。
+ * - 面塗り（`bg-*`）のうち、その面が「頁背景から部品を識別させる」役割を持つものは
+ *   非テキストとして頁背景と比べる。その面に載る文字の 4.5:1 は**文字側のエントリ**が担う。
+ * - 印・図形（白い丸など）は載る面を明示する。既定の頁背景のままにすると同じ色同士を
+ *   比べることになり、実装が正しくても永久に赤くなる。
  */
 const USAGE_PAIRS: readonly UsagePair[] = [
   {
@@ -177,6 +189,187 @@ const USAGE_PAIRS: readonly UsagePair[] = [
     surface: 'background',
     kind: 'non-text',
   },
+
+  // --- 非テキスト（SC 1.4.11・3:1）: 部品の存在と状態を識別させる色使用 ---------------
+  // いずれも「利用者が部品を見つけ、状態を読み取る」ための視覚情報であり、装飾ではない
+  // （要件 1.1, 1.2, 4.5 / design.md D2, D5, D7）。
+  {
+    // フォーム入力部品の既定枠。フォーカスも選択もしていない状態で部品の存在と境界を
+    // 伝える唯一の視覚情報であるため、隣接する頁背景と 3:1 が要る（要件 1.1, 1.2）。
+    utility: 'border-input',
+    source: 'input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx（既定の枠）',
+    foreground: 'input',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 対話的部品の輪郭。Badge は [a] variant を持ちリンクとして描画されうるため、
+    // 要件 4.4（判断できない場合は識別用に倒す）・4.5 により識別用として扱う（design.md D5）。
+    utility: 'border-border',
+    source: 'button.tsx / badge.tsx variant=outline（輪郭の枠）',
+    foreground: 'border',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // エラー状態を伝える枠。色以外の手段（可視文言・aria-invalid）と併用されるが、
+    // 目で見ている利用者にとっては枠が主要な手がかりであるため 3:1 を掛ける（要件 3.4）。
+    utility: 'border-destructive',
+    source:
+      'input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx / button.tsx / badge.tsx' +
+      '（aria-invalid のエラー枠）',
+    foreground: 'destructive',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 選択済みであることを示す枠。面塗りと印も同時に出るが、いずれも状態表示であり
+    // 「選択済みを未選択から区別する」情報を担うため 3:1 を掛ける（要件 2.1）。
+    utility: 'border-primary',
+    source: 'checkbox.tsx / radio-group.tsx（data-checked の選択枠）',
+    foreground: 'primary',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 一つの指定が二つの用途を兼ねる箇所。ここでは「選択済み／既定の状態を頁背景から
+    // 識別させる面」として非テキストで登録する。**この面に載る白文字の 4.5:1 は
+    // text-primary-foreground のエントリだけが担う**ため、そちらを取り除いてはならない。
+    utility: 'bg-primary',
+    source:
+      'button.tsx / badge.tsx variant=default（面塗り）・' +
+      'checkbox.tsx / radio-group.tsx（data-checked の面塗り）',
+    foreground: 'primary',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 選択済みを示す白い印。**選択色の面の上に載る**ため surface に選択色を明示する。
+    // 既定の頁背景のままにすると白同士を比べることになり、実装が正しくても永久に赤くなる。
+    utility: 'bg-primary-foreground',
+    source: 'radio-group.tsx RadioGroupItem の Indicator（選択済みを示す丸い印）',
+    foreground: 'primary-foreground',
+    surface: 'primary',
+    kind: 'non-text',
+  },
+
+  // --- テキスト（SC 1.4.3・4.5:1）: 文字色と、文字が載る面塗り -------------------------
+  // 面塗り側の surface には「その面に実際に載る前景のうち最も条件の厳しいもの」を取る。
+  {
+    // 面。載りうる前景のうち最も厳しいのは区切りラベルの弱い文字色。
+    utility: 'bg-background',
+    source: 'button.tsx variant=outline（面）／ field.tsx FieldSeparator の区切りラベル面',
+    foreground: 'muted-foreground',
+    surface: 'background',
+    kind: 'text',
+  },
+  {
+    // 面。載りうる前景のうち最も厳しいのは Alert variant=success の文字色。
+    utility: 'bg-card',
+    source: 'alert.tsx 全 variant の面 ／ card.tsx Card の面',
+    foreground: 'success',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    // hover / aria-expanded の面。Button は hover 時に濃い文字色へ替わるが、Badge は
+    // 弱い文字色のまま同じ面に載るため、そちらを surface の相手に取る。
+    utility: 'bg-muted',
+    source:
+      'button.tsx variant=outline / ghost（hover・aria-expanded の面）・' +
+      'badge.tsx variant=outline / ghost（hover の面）',
+    foreground: 'muted-foreground',
+    surface: 'muted',
+    kind: 'text',
+  },
+  {
+    // default variant の hover 面。白文字が載る（Issue #50 で不透明度による明化を撤去した箇所）。
+    utility: 'bg-primary-hover',
+    source: 'button.tsx / badge.tsx variant=default（hover の面）',
+    foreground: 'primary-foreground',
+    surface: 'primary-hover',
+    kind: 'text',
+  },
+  {
+    utility: 'bg-secondary',
+    source: 'button.tsx / badge.tsx variant=secondary（面）',
+    foreground: 'secondary-foreground',
+    surface: 'secondary',
+    kind: 'text',
+  },
+  {
+    utility: 'text-card-foreground',
+    source: 'alert.tsx variant=default の本文 ／ card.tsx Card の本文',
+    foreground: 'card-foreground',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    // 不透明度付きのエラー面に載る場合の比は既存の bg-destructive/10・/20 のエントリが
+    // 担うため、ここでは白い面（Alert / FieldError / invalid な Field）の出現を受け持つ。
+    utility: 'text-destructive',
+    source:
+      'alert.tsx variant=destructive ／ field.tsx FieldError・data-[invalid=true] の Field ／' +
+      'button.tsx / badge.tsx variant=destructive の文字',
+    foreground: 'destructive',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    // hover 時にこの文字色へ替わる箇所は同時に面塗りも替わるため、白背景ではなく
+    // その面を相手に取る（最も条件の厳しい隣接色）。
+    utility: 'text-foreground',
+    source:
+      'button.tsx variant=outline / ghost（hover・aria-expanded の文字）・' +
+      'badge.tsx variant=outline の文字 ／ alert.tsx のリンク hover ／ input.tsx の file ボタン',
+    foreground: 'foreground',
+    surface: 'muted',
+    kind: 'text',
+  },
+  {
+    // 白い面に載る出現が大半だが、Badge の hover ではこの文字色が面塗りと同時に出るため、
+    // そちらを相手に取る（最も条件の厳しい隣接色）。
+    utility: 'text-muted-foreground',
+    source:
+      'alert.tsx AlertDescription ／ card.tsx CardDescription ／ field.tsx FieldDescription・' +
+      '区切りラベル ／ input.tsx / textarea.tsx の placeholder ／ badge.tsx の hover の文字',
+    foreground: 'muted-foreground',
+    surface: 'muted',
+    kind: 'text',
+  },
+  {
+    utility: 'text-primary',
+    source:
+      'button.tsx / badge.tsx variant=link の文字 ／ field.tsx FieldDescription 内リンクの hover',
+    foreground: 'primary',
+    surface: 'background',
+    kind: 'text',
+  },
+  {
+    // **このエントリは取り除いてはならない。** bg-primary を非テキストとして登録している以上、
+    // 選択色の面に載る白文字の 4.5:1 を担保するのはここだけである（要件 2.2 の趣旨）。
+    utility: 'text-primary-foreground',
+    source:
+      'button.tsx / badge.tsx variant=default の文字 ／ ' +
+      'checkbox.tsx / radio-group.tsx（data-checked の印）',
+    foreground: 'primary-foreground',
+    surface: 'primary',
+    kind: 'text',
+  },
+  {
+    utility: 'text-secondary-foreground',
+    source: 'button.tsx / badge.tsx variant=secondary の文字',
+    foreground: 'secondary-foreground',
+    surface: 'secondary',
+    kind: 'text',
+  },
+  {
+    utility: 'text-success',
+    source: 'alert.tsx variant=success の文字',
+    foreground: 'success',
+    surface: 'card',
+    kind: 'text',
+  },
 ];
 
 /**
@@ -187,10 +380,16 @@ const USAGE_PAIRS: readonly UsagePair[] = [
  */
 const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reason: string }> = [
   {
+    // 根拠文の再確認（design.md「コントラスト検証ガード」の Implementation Notes / リスク）:
+    // 本仕様はエラー枠の適用範囲を広げる（チェック済みの部品でも枠がエラー色のまま維持される・
+    // design.md D4）。すなわち「エラー伝達は枠と文言が担う」という前提は、是正前に唯一
+    // 成り立っていなかった状態（エラーかつチェック済み）を含めて成り立つようになる。
+    // 根拠は弱まるどころか強まるため、除外はこのまま維持する。
     utility: 'ring-destructive/20',
     reason:
-      'aria-invalid のリングは装飾。エラーであることの伝達は同時に付く ' +
-      'aria-invalid:border-destructive（対白 6.47:1）と role="alert" の文言が担う。',
+      'aria-invalid のリングは装飾。エラーであることの伝達は同時に付くエラー枠' +
+      '（destructive・本仕様の是正後はチェック済みの状態でも維持される）と ' +
+      'role="alert" の可視文言が担う。',
   },
   {
     utility: 'ring-foreground/10',
@@ -201,6 +400,15 @@ const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reaso
     reason:
       'input / textarea の disabled 時の面塗り。WCAG 1.4.3 は無効化された部品を' +
       'コントラスト要件の対象外としている。',
+  },
+  {
+    // separator.tsx は罫線そのものを面塗りで描く（高さ 1px の要素）ため、色ユーティリティは
+    // border-* ではなく bg-* として現れる。装飾用の値のまま据え置くことは要件 4.2 の要求で
+    // あり、識別可能性を理由にこの色を濃くしてはならない。
+    utility: 'bg-border',
+    reason:
+      'separator.tsx の区切り線の面塗り。内容の区切りを示すだけで部品の存在・境界・状態を' +
+      '伝えないため、情報を持たない純装飾として SC 1.4.11 の対象外（要件 4.2）。',
   },
 ];
 
