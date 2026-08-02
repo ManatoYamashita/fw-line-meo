@@ -84,8 +84,11 @@ describe('spacing / radius / shadow', () => {
     }
   });
 
-  it('radius は sm/md/lg/full を定義する', () => {
-    const keys = ['sm', 'md', 'lg', 'full'] as const;
+  it('radius は sm/md/lg/xl/4xl/full を定義する', () => {
+    // xl は Card、4xl は Badge が使用する段。ベンダリング部品は書き換えないため、
+    // 使われている段に対応するトークンが存在しないと「対応の無い値を描画に用いる」状態になる
+    // （ui-token-collision Requirements 3.3）。
+    const keys = ['sm', 'md', 'lg', 'xl', '4xl', 'full'] as const;
     expect(Object.keys(radius).sort()).toEqual([...keys].sort());
     for (const key of keys) {
       expect(radius[key]).not.toBe('');

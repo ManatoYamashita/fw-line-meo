@@ -48,10 +48,15 @@
    *   xs = ×1 / sm = ×2 / md = ×4 / lg = ×6 / xl = ×8
    * design-tokens 側の定義は LINE Flex Message など CSS 以外の消費先のために維持する。 */
 
-  /* Radius（design-tokens radius） */
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  /* 角丸は Tailwind の既定スケールをそのまま用いる。本ファイルは段の上書きを行わない。
+   * 一部の段だけを上書きすると、上書きしなかった隣の段と同値になり視覚階層が 1 段潰れる
+   * （実際に押しボタンと容器が同径で描画されていた・Issue #54）。ベンダリングした部品は
+   * 既定スケールを前提に書かれているため、既定へ寄せると今後追加する部品も無調整で揃う。
+   * design-tokens の角丸トークンは既定と恒等対応する値を保持する（test/token-scales.test.ts が
+   * 役割ごとに機械照合する）。
+   *
+   * ピル形状の段だけは宣言を維持する。Tailwind の既定はテーマ変数を読まないリテラルであり、
+   * 宣言を外すと「描画される角丸に対応するトークンが存在しない」状態になるため。 */
   --radius-full: 9999px;
 
   /* Shadow（design-tokens shadow・影色は 8 桁アルファ hex） */
