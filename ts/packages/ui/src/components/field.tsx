@@ -98,6 +98,17 @@ function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+// ラベルが制御を包む構成では、この行そのものが操作領域になる
+// （Issue #52 / ui-a11y-gaps Requirements 4.7）。
+//
+// テキスト入力は指で押した位置に文字カーソルを置く性質上、選択部品は RadioGroup が規定する
+// 項目間隔（ピッチ 24px）の制約上、どちらも不可視面で操作領域を広げられない。ピッチ 24px の
+// 並びに 44px の領域を与えると隣の選択肢の見えている部分を覆い、見えている項目を指したのに
+// 別の項目が反応する（Requirements 4.5 と両立しない）。そこで 44px はラベル行で満たす。
+//
+// 内側余白を増やす手も取れるが、それは制御を包まない構成の見た目まで動かす。ここでは
+// **最小高の下限だけ**を与え、内容が要求値を超える構成は現状どおり内容に従わせる。
+// 実測では枠線 1 + 余白 10 + 内容 20 + 余白 10 + 枠線 1 = 42px で 2px 不足していた。
 function FieldLabel({
   className,
   ...props
@@ -107,7 +118,7 @@ function FieldLabel({
       data-slot="field-label"
       className={cn(
         "group/field-label peer/field-label flex w-fit gap-2 leading-snug group-data-[disabled=true]/field:opacity-50 has-data-checked:border-primary has-data-checked:bg-primary/5 has-[>[data-slot=field]]:rounded-lg has-[>[data-slot=field]]:border *:data-[slot=field]:p-2.5 dark:has-data-checked:border-primary/20 dark:has-data-checked:bg-primary/10",
-        "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:flex-col",
+        "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:min-h-11 has-[>[data-slot=field]]:flex-col has-[>[data-slot=field]]:justify-center",
         className
       )}
       {...props}

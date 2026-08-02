@@ -47,7 +47,14 @@ export const metadata: Metadata = {
 
 export default function UiCheckPage() {
   return (
-    <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
+    // コンテナ幅に名前付きスケール（max-w-md 等）を使わないこと。
+    // theme.css の `--spacing-md: 1rem` が Tailwind 既定の `--container-md`（28rem）を覆うため、
+    // `max-w-md` は 1rem（16px）へ解決され、内側余白に押し広げられて **実幅 32px** で描画される
+    // （端末幅 393px に対して）。その幅ではタッチ操作領域の実測が実態と乖離し、部品の欠陥と
+    // 検証面の欠陥を切り分けられなくなる（ui-a11y-gaps design「失敗モードと観測性」）。
+    // ここでは衝突しない任意値で回避するにとどめ、`--spacing-*` と `--container-*` の
+    // トークン衝突そのものの是正は Issue #54 が扱う。
+    <main className="mx-auto flex max-w-[28rem] flex-col gap-4 p-4">
       <h1>UI 基盤の検証面</h1>
       <p>
         自動検証（E2E）専用のページです。利用者向けの機能はありません。
@@ -112,6 +119,51 @@ export default function UiCheckPage() {
       <Spinner />
 
       {/*
+        タッチ操作領域の実測用（ui-a11y-gaps・要件 4.2 / 4.7）。
+
+        - 縮小寸法（sm / icon-sm）は現在どの面でも使われていない。ここに実在させないと
+          「縮小寸法は 24px 以上」の検証が対象ゼロで空振りし、全緑のまま無意味になる。
+          拡張を掛けない側の下限を守っていることの証拠として置く。
+        - テキスト入力は指で押した位置に文字カーソルを置く性質上、他の部品と同じ
+          不可視面での拡張ができない。要求寸法はラベルを含む領域（Field 構成）で満たす
+          前提なので、その構成を実在させて実測の的にする。
+
+        追加は必ず末尾に置くこと。フォーカス巡回テストは「最初の Tab で『既定のボタン』へ
+        入る」ことを前提にしている。
+      */}
+      <Heading level={2}>操作領域の検証</Heading>
+      <Button size="sm">縮小のボタン</Button>
+      {/* 中身を持たせない（Spinner を入れると role="status" がボタン内に二重で現れ、
+          処理中表示の実測が対象を取り違える）。寸法は size で決まるため空でよい。 */}
+      <Button size="icon-sm" aria-label="縮小のアイコンボタン" />
+      <Field>
+        <FieldLabel htmlFor="labelled-input">ラベル付き入力</FieldLabel>
+        <Input id="labelled-input" placeholder="ラベル付き入力" />
+      </Field>
+
+      <FieldLabel>
+        <Field orientation="horizontal">
+          <Checkbox />
+          <FieldTitle>ラベル付きチェック</FieldTitle>
+        </Field>
+      </FieldLabel>
+
+      <RadioGroup aria-label="ラベル付きラジオグループ" defaultValue="alpha">
+        <FieldLabel>
+          <Field orientation="horizontal">
+            <RadioGroupItem value="alpha" />
+            <FieldTitle>選択肢アルファ</FieldTitle>
+          </Field>
+        </FieldLabel>
+        <FieldLabel>
+          <Field orientation="horizontal">
+            <RadioGroupItem value="beta" />
+            <FieldTitle>選択肢ベータ</FieldTitle>
+          </Field>
+        </FieldLabel>
+      </RadioGroup>
+
+      {/*
         以下は状態バリエーション（Issue #57 / spec form-non-text-contrast タスク 4.1）。
         エラー・チェック済み・エラー×チェック済み・無効化の 4 状態を実描画し、E2E が
         「クラス名の集合では証明できない実際の枠色」を測るための的にする。
@@ -119,8 +171,10 @@ export default function UiCheckPage() {
         配置の規律: ここから下は **操作可能要素を増やす**。既存のキーボード巡回テスト
         （e2e/ui-foundation.spec.ts）は「最初の Tab で『既定のボタン』へ入る」ことと
         「『破壊的なボタン』『複数行入力』へ到達する」ことを前提にしているため、
-        追加は必ずそれらより後方（＝このファイルの末尾）に置く。追加後の操作可能要素は
-        16 個で巡回上限（MAX_TAB_STEPS = 24）に収まる。
+        追加は必ずそれらより後方（＝このファイルの末尾）に置く。Issue #52 の追加分と合わせて
+        この面の巡回数は実測 21 停止で、従来の上限 24 に対し余裕は 3 しかなかったため
+        MAX_TAB_STEPS を 48 へ引き上げた。上限で打ち切られるとその先はフォーカス可視性を
+        検査されないまま緑になるので、巡回テスト側で打ち切りの発生自体を失敗として扱っている。
 
         命名の規律: Playwright の getByRole({ name }) は**部分一致**で照合する。
         既存 locator（「〜のボタン」「〜の通知」「一行入力」「複数行入力」「チェックボックス」）

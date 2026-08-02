@@ -14,6 +14,11 @@
 // 注: jsdom は Tailwind を解決しないため「見た目」そのものは検証できない。よって視覚状態は
 // 「その状態を分岐させるユーティリティクラス・data 属性が存在すること」で検証する
 // （＝状態表現が規約に沿って宣言されていることの検証。実際の描画は #43〜#45 の目視と E2E が担う）。
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import postcss from 'postcss';
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -494,8 +499,19 @@ describe('FieldLabel — 選択状態の視覚表現（Requirements 2.1, 2.3 / d
   });
 });
 
+/**
+ * 描画済みの Alert を引く。
+ *
+ * role で引いてはならない。読み上げ強度は変種ごとに変わる（destructive のみ alert・
+ * それ以外は status）ため、role で引くと変種によって取れたり取れなかったりする。
+ * 視覚表現の検証は読み上げ強度から独立しているべきなので data-slot を使う。
+ */
+function renderedAlerts(): readonly Element[] {
+  return [...document.querySelectorAll('[data-slot="alert"]')];
+}
+
 describe('Alert — 通知（成功 / エラー）の役割と変種（Requirements 2.1, 2.3, 5.1）', () => {
-  it('alert ロールで通知され、見出しと本文が読み上げ対象になる', () => {
+  it('ライブリージョンとして通知され、見出しと本文が読み上げ対象になる', () => {
     render(
       <Alert>
         <AlertTitle>登録しました</AlertTitle>
@@ -503,7 +519,11 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </Alert>,
     );
 
-    const alert = screen.getByRole('alert');
+    const alert = renderedAlerts()[0]!;
+    expect(
+      LIVE_REGION_ROLES.has(alert.getAttribute('role') ?? ''),
+      `Alert の役割 ${alert.getAttribute('role') ?? '（無し）'} がライブリージョンではありません`,
+    ).toBe(true);
     expect(alert.textContent).toContain('登録しました');
     expect(alert.textContent).toContain('店舗情報を保存しました');
   });
@@ -520,7 +540,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </>,
     );
 
-    const [success, destructive] = screen.getAllByRole('alert');
+    const [success, destructive] = renderedAlerts();
     expect(success).toBeDefined();
     expect(destructive).toBeDefined();
 
@@ -553,7 +573,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       'text-muted-foreground',
     );
 
-    const [success, destructive] = screen.getAllByRole('alert');
+    const [success, destructive] = renderedAlerts();
     const cases = [
       { alert: success!, color: 'success' },
       { alert: destructive!, color: 'destructive' },
@@ -585,7 +605,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </Alert>,
     );
 
-    expect(classesOf(screen.getByRole('alert'))).not.toContain('data-[slot=alert-description]:text-');
+    expect(classesOf(renderedAlerts()[0]!)).not.toContain('data-[slot=alert-description]:text-');
     expect(classesOf(screen.getByText('変更はありません'))).toContain('text-muted-foreground');
   });
 
@@ -604,7 +624,7 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
       </>,
     );
 
-    for (const alert of screen.getAllByRole('alert')) {
+    for (const alert of renderedAlerts()) {
       expect(classesOf(alert)).not.toMatch(RAW_HEX);
       expect(classesOf(alert)).not.toMatch(RAW_PALETTE_COLOR);
     }
@@ -704,6 +724,30 @@ describe('Spinner — 読み込み中の状態通知（Requirements 2.1, 5.1）'
     render(<Spinner aria-label="下書きを生成中" />);
     expect(screen.getByRole('status').getAttribute('aria-label')).toBe('下書きを生成中');
   });
+
+  // 以下は DOM 構造の変更（単一要素 → ラッパ構造）を跨いで守るべき契約
+  // （ui-a11y-gaps Requirements 2.2, 2.3）。構造に依存しない言い方で固定する。
+
+  it('className は「実際に動く要素」へ届く（視覚的な大きさの指定が迷子にならない）', () => {
+    // 呼び出し側は <Spinner className="size-8" /> を「アイコンの大きさ」の意図で書く。
+    // ラッパ構造へ変えたときに className をラッパへ付けると、アイコンの寸法は変わらないまま
+    // **無言で意図が失われる**（画面は壊れず、誰も気づけない）。
+    // 「動きを持つ要素＝視覚的な本体」に付くことを、要素名を名指しせずに要求する。
+    const { container } = render(<Spinner className="size-8" />);
+    const animated = [...container.querySelectorAll('*')].filter((node) =>
+      classesOf(node).includes('animate-spin'),
+    );
+    expect(animated.length, 'animate-spin を持つ要素が見つかりません').toBe(1);
+    expect(
+      classesOf(animated[0]!),
+      '呼び出し側の className が、動きを持つ視覚的な本体へ届いていません',
+    ).toContain('size-8');
+  });
+
+  it('呼び出し側の任意の属性が根要素へ透過する', () => {
+    render(<Spinner data-testid="生成中" />);
+    expect(screen.getByRole('status').getAttribute('data-testid')).toBe('生成中');
+  });
 });
 
 // フォーカス指標の一本化（Issue #49 / Requirements 5.3）。
@@ -772,4 +816,452 @@ describe('フォーカス指標は部品が自前定義しない（Issue #49 / R
     const classes = classesOf(screen.getByLabelText('メール'));
     expect(classes).toContain('aria-invalid:border-destructive');
   });
+});
+
+// --- 動きに関わる指定の分類ガード（Requirements 1.4, 5.5） -----------------------------
+//
+// 動き低減設定下の抑制は theme.css の 1 箇所で全部品に一律に効く。だからこそ、部品へ
+// 新しい動きが加わったときに「それは抑制してよい動きなのか」が誰にも問われないまま
+// 通ってしまう。ここでは部品ソースから動きに関わる指定を全抽出し、下表と双方向で
+// 突き合わせて未分類を必ず赤化させる。
+//
+// 分類は 2 区分である（design「動きの 2 区分」）。この区別を曖昧にすると、要件 1.2 を
+// 守ったつもりで要件 1.4 を破る:
+//   progress（経過）  = アニメーション・遷移の所要時間や反復。抑制してよい
+//   endstate（到達状態）= 状態変化の結果として適用される位置・不透明度・色などの最終値。
+//                        抑制すると「動きではなく状態」が失われる。抑制してはならない
+const motionComponentsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'src',
+  'components',
+);
+const motionThemeCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'theme.css'),
+  'utf8',
+);
+
+/**
+ * 動きに関わるユーティリティの本体パターン。
+ * `data-slot="spinner"` のような **クラスでない文字列**を拾わないよう、キーワードの直後に
+ * 区切りか終端を要求する（"spinner" は誤検出しない）。
+ */
+const MOTION_UTILITY_PATTERN =
+  /^-?(?:animate|transition|duration|ease|translate|scale|rotate|skew)(?:-|$)/;
+
+interface MotionClassification {
+  /** 部品ソースに現れる完全なクラス（variant 連鎖を含む）。 */
+  readonly utility: string;
+  readonly kind: 'progress' | 'endstate';
+  /**
+   * endstate のみ: この指定が実際に出力する CSS プロパティ。
+   * theme.css の抑制ブロックがこれを宣言していないことを検証する。
+   * Tailwind v4 の translate-* は `transform` ではなく `translate` へ出力される点に注意
+   * （生成 CSS で確認済み。`transform` を見張っても実際の経路は素通りする）。
+   */
+  readonly cssProperty?: string;
+  readonly note: string;
+}
+
+const MOTION_CLASSIFICATIONS: readonly MotionClassification[] = [
+  {
+    utility: 'animate-spin',
+    kind: 'progress',
+    note: 'Spinner の無限回転。動き低減設定下で最も止めるべき対象',
+  },
+  { utility: 'transition-all', kind: 'progress', note: 'Button / Badge の状態遷移' },
+  {
+    utility: 'transition-colors',
+    kind: 'progress',
+    note: 'Input / Textarea / Checkbox の色遷移',
+  },
+  {
+    utility: 'transition-none',
+    kind: 'progress',
+    note: 'Checkbox のチェック表示。もともと遷移させない指定であり抑制と衝突しない',
+  },
+  {
+    utility: 'active:not-aria-[haspopup]:translate-y-px',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '押下時の沈み込み。これは「動き」ではなく押している間の状態表現であり、'
+      + '止めると押した手応えが失われる（要件 1.4）',
+  },
+  {
+    utility: '-translate-x-1/2',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: 'RadioGroupItem の選択マークを中央へ置く静的配置。状態変化ですらない',
+  },
+  {
+    utility: '-translate-y-1/2',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '同上',
+  },
+  {
+    utility: '*:[svg]:translate-y-0.5',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: 'Alert のアイコンを本文の行と揃える静的配置',
+  },
+];
+
+/** 部品ソースから動きに関わるクラスを全て抽出する（variant 連鎖を保持したまま返す）。 */
+function extractMotionUtilities(source: string): readonly string[] {
+  const found: string[] = [];
+  for (const token of source.split(/[\s"'`]+/)) {
+    // variant 連鎖（`active:` `*:[svg]:` 等）を落としてユーティリティ本体だけを判定する。
+    const utility = token.slice(token.lastIndexOf(':') + 1);
+    if (MOTION_UTILITY_PATTERN.test(utility)) found.push(token);
+  }
+  return found;
+}
+
+/**
+ * theme.css の動き抑制ブロックが宣言しているプロパティを取り出す。
+ *
+ * 文字列の切り出しと正規表現では取れない。CSS には **宣言と同じ形をしていて宣言ではないもの**
+ * が混ざるためで、素朴に `プロパティ: 値;` を拾うと次の 2 つを宣言として誤認する:
+ *   1. メディア条件 `prefers-reduced-motion: reduce` そのもの。前置きを含んだまま走査すると
+ *      これが最初の宣言として一致し、値の側が次の `;` まで伸びて **直後の第 1 宣言を丸ごと
+ *      食い潰す**（先頭に置かれた到達状態の抑制が無言で素通りする）
+ *   2. `.x:hover` のような擬似クラスを持つ選択子
+ * どちらも構文木を辿れば起こらない。app-integration.test.ts の `mediaRulesInLayer` と同じく、
+ * 宣言であることを構文で判定する（文字列上の見た目で判定しない）。
+ */
+function suppressedPropertiesInTheme(css: string): ReadonlySet<string> {
+  const properties = new Set<string>();
+  postcss.parse(css).walkAtRules('media', (media) => {
+    if (!/prefers-reduced-motion\s*:\s*reduce/.test(media.params)) return;
+    media.walkDecls((declaration) => properties.add(declaration.prop));
+  });
+  return properties;
+}
+
+describe('動きに関わる指定が 2 区分へ漏れなく分類されている（Requirements 1.4, 5.5）', () => {
+  const extracted = new Set<string>();
+  for (const file of readdirSync(motionComponentsDir).filter((name) => name.endsWith('.tsx'))) {
+    for (const utility of extractMotionUtilities(
+      readFileSync(join(motionComponentsDir, file), 'utf8'),
+    )) {
+      extracted.add(utility);
+    }
+  }
+  const classified = new Set(MOTION_CLASSIFICATIONS.map((entry) => entry.utility));
+
+  it('抽出が空振りしていない（部品から動きの指定が消えたのではないことの確認）', () => {
+    expect(
+      extracted.size,
+      '部品から動きに関わる指定が 1 つも抽出できませんでした。抽出器が壊れているか、' +
+        '部品の書き方が変わっています。分類ガードは対象ゼロでは何も守れません',
+    ).toBeGreaterThan(0);
+  });
+
+  it('抽出器が data-slot 等のクラスでない文字列を拾わない（自己検証）', () => {
+    const fixture = 'data-slot="spinner" className="animate-spin transition-all rotating"';
+    expect(extractMotionUtilities(fixture)).toEqual(['animate-spin', 'transition-all']);
+  });
+
+  it('部品にあって分類表に無い指定が存在しない（新しい動きの混入を検出する）', () => {
+    const unclassified = [...extracted].filter((utility) => !classified.has(utility));
+    expect(
+      unclassified,
+      `分類されていない動きの指定があります: ${unclassified.join(', ')}。` +
+        'それが抑制してよい「経過」なのか、抑制してはならない「到達状態」なのかを' +
+        'MOTION_CLASSIFICATIONS へ明記してください',
+    ).toEqual([]);
+  });
+
+  it('分類表にあって部品に無い指定が存在しない（死んだ項目を残さない）', () => {
+    const stale = [...classified].filter((utility) => !extracted.has(utility));
+    expect(
+      stale,
+      `部品から消えた指定が分類表に残っています: ${stale.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('抽出器が抑制ブロックの宣言だけを漏れなく拾う（自己検証）', () => {
+    // ここが空振りすると、下の「紛れ込んでいない」判定は **見ていないものを見たと報告する**。
+    // 罠は 2 つあり、いずれも「宣言に見えるが宣言でないもの」を宣言として拾うことで起きる:
+    //   1. メディア条件 `prefers-reduced-motion: reduce` 自体が「プロパティ: 値」の形をしている。
+    //      前置きを含んだまま走査すると、これが最初の宣言として一致し、直後の
+    //      **第 1 宣言を丸ごと食い潰す**（先頭に置かれた到達状態の抑制が素通りする）。
+    //   2. `.x:hover` のような擬似クラスを持つ選択子も同じ形をしている。
+    // 到達状態が抑制ブロックのどこに書かれても検出できることを、先頭・入れ子の両方で固定する。
+    const fixture = [
+      '@layer base{',
+      '  @media (prefers-reduced-motion: reduce){',
+      '    *,::before,::after{',
+      '      translate: none !important;',
+      '      animation-duration: 0.01ms !important;',
+      '    }',
+      '    .x:hover{ color: red; }',
+      '  }',
+      '}',
+    ].join('\n');
+    expect(
+      [...suppressedPropertiesInTheme(fixture)].sort(),
+      '抑制ブロックの宣言を、先頭の 1 件も含めて漏れなく取り出せていません',
+    ).toEqual(['animation-duration', 'color', 'translate']);
+  });
+
+  it('抽出器が実ファイルでも宣言でないものを拾わない（自己検証）', () => {
+    const suppressed = suppressedPropertiesInTheme(motionThemeCss);
+    expect(
+      suppressed.has('prefers-reduced-motion'),
+      'メディアクエリの条件を宣言として拾っています（前置きを切り落とせていません）',
+    ).toBe(false);
+    expect(
+      suppressed.has('animation-duration'),
+      '抑制ブロックの第 1 宣言を取りこぼしています（前置きが直後の宣言を食い潰しています）',
+    ).toBe(true);
+  });
+
+  it('到達状態に分類した指定が theme.css の抑制対象へ紛れ込んでいない（Requirements 1.4）', () => {
+    const suppressed = suppressedPropertiesInTheme(motionThemeCss);
+    expect(
+      suppressed.size,
+      'theme.css から抑制ブロックを取り出せません（抑制が失われたか、書式が変わりました）',
+    ).toBeGreaterThan(0);
+
+    for (const entry of MOTION_CLASSIFICATIONS) {
+      if (entry.kind !== 'endstate') continue;
+      expect(entry.cssProperty, `${entry.utility} に cssProperty の宣言がありません`).toBeDefined();
+      expect(
+        suppressed.has(entry.cssProperty!),
+        `${entry.utility} が出力する ${entry.cssProperty} を theme.css が抑制しています。` +
+          `これは到達状態であり抑制してはなりません（${entry.note}）`,
+      ).toBe(false);
+    }
+  });
+});
+
+// --- 通知の読み上げ強度の出し分け（Requirements 3.1〜3.4, 5.2） -------------------------
+//
+// すべての通知が読み上げを即座に中断する強度（role="alert"）で提示されると、単なる案内文でも
+// スクリーンリーダー利用者の作業が毎回遮られる。一方でエラーは確実に気づけなければならない。
+// ここでは「エラーだけが割り込む」ことと、「どの変種も読み上げ対象から外れない」ことを固定する。
+
+/** ライブリージョンとして扱われる role。どの変種もこのいずれかでなければならない（要件 3.4）。 */
+const LIVE_REGION_ROLES: ReadonlySet<string> = new Set(['alert', 'status']);
+/** 進行中の読み上げを中断させる強度。 */
+const ASSERTIVE_ROLE = 'alert';
+
+type AlertVariant = 'default' | 'success' | 'destructive';
+
+/** 変種 → 既定の読み上げ強度。エラーのみ割り込ませる（2026-07-30 の利用者合意）。 */
+const ALERT_ROLE_BY_VARIANT: Readonly<Record<AlertVariant, string>> = {
+  default: 'status',
+  success: 'status',
+  destructive: ASSERTIVE_ROLE,
+};
+
+/**
+ * cva の variants グループ（`variant: { … }` 等）の直下キーを部品ソースから取り出す。
+ *
+ * 判定は **行単位** で行う。クラス文字列には `:` も `[` も引用符も含まれるため
+ * （`*:[svg:not([class*='size-'])]:size-4` 等）、文字単位で `key:` を探すと誤検出する。
+ * 一方 cva の変種キーは必ず行頭に現れ、クラス文字列の折り返し行は引用符で始まるので、
+ * 「行頭の識別子 + コロン」だけを拾えば十分に堅い。
+ *
+ * 注意: キーの直前に説明コメントが挟まることがある（`alert.tsx` の success がそう）。
+ * コメント行は行頭が識別子ではないため自然に除外される。カンマ直後を起点にする実装では
+ * この success を取りこぼした（実際に踏んだ）。
+ */
+function variantKeysOf(source: string, group: string): readonly string[] {
+  const start = source.indexOf(`${group}: {`);
+  if (start < 0) return [];
+  const open = source.indexOf('{', start);
+
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1;
+    else if (source[i] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return [];
+
+  const keys: string[] = [];
+  let nested = 0;
+  for (const line of source.slice(open + 1, end).split('\n')) {
+    if (nested === 0) {
+      const match = /^"?([A-Za-z_][\w-]*)"?\s*:/.exec(line.trim());
+      if (match !== null) keys.push(match[1]!);
+    }
+    nested +=
+      (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0);
+  }
+  return keys;
+}
+
+const alertSource = readFileSync(join(motionComponentsDir, 'alert.tsx'), 'utf8');
+
+describe('Alert — 読み上げ強度が重要度に応じて出し分けられる（Requirements 3.1〜3.4, 5.2）', () => {
+  it('部品が提供する変種と対応表が双方向で一致する（強度未定義の変種を作らない）', () => {
+    const declared = variantKeysOf(alertSource, 'variant');
+    expect(
+      declared.length,
+      '変種を抽出できませんでした（抽出器が壊れているか部品の書き方が変わっています）',
+    ).toBeGreaterThan(0);
+    expect([...declared].sort()).toEqual(Object.keys(ALERT_ROLE_BY_VARIANT).sort());
+  });
+
+  it.each(Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[])(
+    '%s 変種が意図した読み上げ強度で提示される',
+    (variant) => {
+      render(
+        <Alert variant={variant} data-testid="通知">
+          <AlertTitle>見出し</AlertTitle>
+        </Alert>,
+      );
+      const role = screen.getByTestId('通知').getAttribute('role');
+      expect(
+        role,
+        `${variant} 変種の読み上げ強度が ${role ?? '（無し）'} です。` +
+          `${ALERT_ROLE_BY_VARIANT[variant]} であるべきです`,
+      ).toBe(ALERT_ROLE_BY_VARIANT[variant]);
+    },
+  );
+
+  it('割り込む強度を持つのはエラーだけである（案内文で作業を中断させない）', () => {
+    const interrupting = (Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[]).filter(
+      (variant) => ALERT_ROLE_BY_VARIANT[variant] === ASSERTIVE_ROLE,
+    );
+    expect(
+      interrupting,
+      `読み上げを割り込ませる変種: ${interrupting.join(', ')}。エラーのみであるべきです`,
+    ).toEqual(['destructive']);
+  });
+
+  it('読み上げ対象から外れる変種が存在しない（Requirements 3.4）', () => {
+    for (const variant of Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[]) {
+      expect(
+        LIVE_REGION_ROLES.has(ALERT_ROLE_BY_VARIANT[variant]),
+        `${variant} 変種の役割 ${ALERT_ROLE_BY_VARIANT[variant]} はライブリージョンではありません。` +
+          'その変種の通知は支援技術へ一切伝わらなくなります',
+      ).toBe(true);
+    }
+  });
+
+  it('呼び出し側が読み上げ強度を上書きできる', () => {
+    render(
+      <Alert variant="default" role="alert" data-testid="通知">
+        <AlertTitle>緊急</AlertTitle>
+      </Alert>,
+    );
+    expect(screen.getByTestId('通知').getAttribute('role')).toBe('alert');
+  });
+
+  it('読み上げ強度の出し分けが視覚表現を変えない（Requirements 3.3）', () => {
+    // 「変更前と同一か」を literal のクラス文字列で固定するとレイアウト調整のたびに壊れる。
+    // ここでは要件の文言どおり **読み上げ強度の違いによって視覚表現が変わらないこと** を
+    // 直接測る: 同じ変種を既定の強度と上書きした強度で描画し、クラス集合が一致することを見る。
+    for (const variant of Object.keys(ALERT_ROLE_BY_VARIANT) as AlertVariant[]) {
+      const { container: withDefaultRole } = render(
+        <Alert variant={variant}>
+          <AlertTitle>見出し</AlertTitle>
+          <AlertDescription>説明</AlertDescription>
+        </Alert>,
+      );
+      const { container: withOverriddenRole } = render(
+        <Alert variant={variant} role="log">
+          <AlertTitle>見出し</AlertTitle>
+          <AlertDescription>説明</AlertDescription>
+        </Alert>,
+      );
+      const classesIn = (root: Element): string =>
+        [...root.querySelectorAll('*')].map((node) => classesOf(node)).join(' | ');
+      const baseline = classesIn(withDefaultRole);
+      // 空振り防止: 両方が空文字なら「一致」は自明に成立してしまう。
+      expect(baseline.length, `${variant} 変種のクラスを読み取れていません`).toBeGreaterThan(20);
+      expect(
+        classesIn(withOverriddenRole),
+        `${variant} 変種の視覚表現が読み上げ強度によって変化しています`,
+      ).toBe(baseline);
+      cleanup();
+    }
+  });
+});
+
+// --- 寸法区分の分類ガード（Requirements 5.4） ------------------------------------------
+//
+// タッチ操作領域の要求値は寸法区分ごとに異なる（客向け主動線の既定寸法は 44px、高density
+// 配置向けの縮小寸法は SC 2.5.8 の 24px）。区分が追加されたときに「どちらに属するのか」を
+// 誰も宣言しないまま通ると、その区分だけが検証の網から漏れる。
+//
+// 実際の px の実測は survey-web の E2E が行う（jsdom は Tailwind を解決しないため）。
+// ここでは「区分の網羅」と「分類と実装の対応」を固定する。E2E 側にも区分 → 要求 px の表が
+// あるが、片方だけずらしても必ずどちらかが落ちる: 縮小区分に 44px を要求すれば実測が、
+// 既定区分に 24px を要求すれば下の拡張面の検査が赤化する。
+const BUTTON_SIZE_CLASS = {
+  default: 'default',
+  lg: 'default',
+  icon: 'default',
+  'icon-lg': 'default',
+  xs: 'compact',
+  sm: 'compact',
+  'icon-xs': 'compact',
+  'icon-sm': 'compact',
+} as const satisfies Record<string, 'default' | 'compact'>;
+
+type ButtonSize = keyof typeof BUTTON_SIZE_CLASS;
+
+const buttonSource = readFileSync(join(motionComponentsDir, 'button.tsx'), 'utf8');
+
+describe('押しボタンの寸法区分が漏れなく分類されている（Requirements 5.4）', () => {
+  it('部品が提供する寸法区分と分類表が双方向で一致する', () => {
+    const declared = variantKeysOf(buttonSource, 'size');
+    expect(
+      declared.length,
+      '寸法区分を抽出できませんでした（抽出器が壊れているか部品の書き方が変わっています）',
+    ).toBeGreaterThan(0);
+
+    const classified = Object.keys(BUTTON_SIZE_CLASS);
+    const unclassified = declared.filter((size) => !classified.includes(size));
+    expect(
+      unclassified,
+      `いずれの要求値に属するか宣言されていない寸法区分があります: ${unclassified.join(', ')}。` +
+        '44px を要求する既定寸法なのか、24px を下限とする縮小寸法なのかを明記してください',
+    ).toEqual([]);
+
+    const stale = classified.filter((size) => !declared.includes(size));
+    expect(stale, `部品から消えた寸法区分が分類表に残っています: ${stale.join(', ')}`).toEqual([]);
+  });
+
+  it.each(Object.keys(BUTTON_SIZE_CLASS) as ButtonSize[])(
+    '%s の操作領域の拡張の有無が分類と一致する',
+    (size) => {
+      render(
+        <Button size={size} aria-label="ボタン">
+          押す
+        </Button>,
+      );
+      const classes = classesOf(screen.getByRole('button', { name: 'ボタン' }));
+      const hasExpansion = /after:-inset-/.test(classes);
+      const shouldExpand = BUTTON_SIZE_CLASS[size] === 'default';
+      expect(
+        hasExpansion,
+        shouldExpand
+          ? `${size} は既定寸法だが操作領域の拡張を持たない（44px に届かない）`
+          : `${size} は縮小寸法だが操作領域の拡張を持つ（密集配置で隣の視覚領域を覆う）`,
+      ).toBe(shouldExpand);
+      // 拡張は不可視の面で行い、部品自身の視覚寸法は変えない（Requirements 4.3）。
+      if (shouldExpand) {
+        expect(
+          classes,
+          `${size} の拡張面が絶対配置されていない（レイアウトフローに載ると周囲の余白が動く）`,
+        ).toContain('after:absolute');
+        expect(classes, `${size} に配置の基準が無く拡張面が本体を基準にできない`).toContain(
+          'relative',
+        );
+      }
+    },
+  );
 });
