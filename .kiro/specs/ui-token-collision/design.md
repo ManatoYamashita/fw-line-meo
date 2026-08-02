@@ -305,8 +305,9 @@ graph TB
 | Requirements | 3.3, 5.4 |
 
 **Responsibilities & Constraints**
-- キー集合を `sm / md / lg / xl / full` へ改める（`xl` を追加）
-- 値: `sm: '0.25rem'` / `md: '0.375rem'` / `lg: '0.5rem'` / `xl: '0.75rem'` / `full: '9999px'`
+- キー集合を `sm / md / lg / xl / 4xl / full` へ改める（`xl` と `4xl` を追加）
+- 値: `sm: '0.25rem'` / `md: '0.375rem'` / `lg: '0.5rem'` / `xl: '0.75rem'` / `4xl: '2rem'` / `full: '9999px'`
+- `4xl` は Badge が使用する段。詳細は Data Models の注記を参照
 - 実行時の消費者は存在しない（実測: `@fwlm/design-tokens` を import しているのは `delivery-job/src/flex.ts` の `lineColors` のみ）。したがって値の変更による波及はない
 
 **Contracts**: Service
@@ -314,7 +315,7 @@ graph TB
 ##### Service Interface
 ```typescript
 /** 角丸トークン。値は生成 CSS の --radius-{key} と恒等対応する。 */
-export const radius: Readonly<Record<'sm' | 'md' | 'lg' | 'xl' | 'full', string>>;
+export const radius: Readonly<Record<'sm' | 'md' | 'lg' | 'xl' | '4xl' | 'full', string>>;
 ```
 - Preconditions: なし（定数）
 - Postconditions: 各値は生成 CSS の `--radius-{key}` と文字列として一致する
@@ -556,11 +557,18 @@ export function declaredThemeKeys(themeCss: string): readonly string[];
 
 | 役割キー | `design-tokens.radius` | 生成 CSS `--radius-{key}` | 主な使用部品 |
 |---|---|---|---|
-| sm | 0.25rem | 0.25rem | — |
-| md | 0.375rem | 0.375rem | `:root{--radius}`・Button 小寸法 |
+| sm | 0.25rem | 0.25rem | —（未使用。既存トークンを維持） |
+| md | 0.375rem | 0.375rem | `:root{--radius}`・Button 小寸法の `min()` 参照 |
 | lg | 0.5rem | 0.5rem | Button / Input / Textarea / Alert / Field |
 | xl | 0.75rem | 0.75rem | Card |
+| 4xl | 2rem | 2rem | Badge |
 | full | 9999px | 9999px | RadioGroup |
+
+> **`4xl` について（2026-08-02・タスク 1.2 の実装中に実測で判明し本表を補正）**: `badge.tsx` は
+> `rounded-4xl` を使用している。ベンダリング部品は書き換えない（3.4 / 6.1）ため、要件 3.3
+> 「対応の無い値を描画に用いない」を満たすには本表に `4xl`（Tailwind 既定 2rem）を含める必要がある。
+> 当初の設計はこの段を取りこぼしていた。**取りこぼしを発見したのは本 spec が新設した使用側の網羅抽出
+> そのもの**であり、両方向網羅（5.6）が機能した実例として記録する。
 
 - Invariant: 両列は**文字列として一致**する。一致しない段があれば `findRadiusMismatches` が違反を返す
 - Invariant: 右列の値は**互いに相異なる**（`findDuplicateRadiusSteps`）
