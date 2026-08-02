@@ -121,7 +121,10 @@ describe('createDraftGenerator', () => {
       const e = Object.assign(new Error('429'), { status: 429 });
       const { client, calls } = fakeClient([e, e]);
       const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
-      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR', status: 429 },
+      });
       expect(calls).toHaveLength(2);
     });
 
@@ -129,8 +132,20 @@ describe('createDraftGenerator', () => {
       const e = Object.assign(new Error('bad'), { status: 400 });
       const { client, calls } = fakeClient([e, draftResponse('よい')]);
       const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
-      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR', status: 400 },
+      });
       expect(calls).toHaveLength(1);
+    });
+
+    it('HTTP status を持たない例外は status なしの API_ERROR', async () => {
+      const { client } = fakeClient([new Error('network')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR' },
+      });
     });
   });
 });

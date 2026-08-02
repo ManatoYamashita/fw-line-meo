@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { handleDrafts, type DraftsDeps } from '../src/app/api/drafts/handler';
 import { createSessionTokenService } from '../src/lib/session-token';
 import { ok, err } from '../src/lib/result';
@@ -94,11 +94,14 @@ describe('handleDrafts', () => {
     expect(res4.status).toBe(409);
   });
 
-  it('生成失敗は attempt を消費せず 200 failed（回数据え置き）', async () => {
+  it('API 失敗は errorKind と HTTP status をログし、attempt を消費しない', async () => {
     const tokens = createSessionTokenService(KEY);
     const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 1 });
-    const failGen: DraftGenerator = { generate: () => Promise.resolve(err({ kind: 'API_ERROR' as const })) };
-    const res = await handleDrafts(req({ sessionToken }), baseDeps(tokens, { generator: failGen }));
+    const failGen: DraftGenerator = {
+      generate: () => Promise.resolve(err({ kind: 'API_ERROR' as const, status: 400 })),
+    };
+    const log = vi.fn();
+    const res = await handleDrafts(req({ sessionToken }), baseDeps(tokens, { generator: failGen, log }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.generation).toBe('failed');
@@ -106,5 +109,39 @@ describe('handleDrafts', () => {
     expect(json.regenerationsLeft).toBe(2); // 3 - 1（据え置き）
     const v = tokens.verify(json.sessionToken);
     if (v.ok) expect(v.value.attempt).toBe(1); // 消費していない
+    expect(log).toHaveBeenCalledWith('error', 'generation_failed', {
+      errorKind: 'API_ERROR',
+      status: 400,
+    });
+  });
+
+  it('INVALID_OUTPUT は errorKind のみを ERROR ログに含める', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+    const generator: DraftGenerator = {
+      generate: () => Promise.resolve(err({ kind: 'INVALID_OUTPUT' as const })),
+    };
+    const log = vi.fn();
+
+    await handleDrafts(req({ sessionToken }), baseDeps(tokens, { generator, log }));
+
+    expect(log).toHaveBeenCalledWith('error', 'generation_failed', {
+      errorKind: 'INVALID_OUTPUT',
+    });
+  });
+
+  it('SAFETY_BLOCKED は専用 INFO イベントにerrorKindを含める', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+    const generator: DraftGenerator = {
+      generate: () => Promise.resolve(err({ kind: 'SAFETY_BLOCKED' as const })),
+    };
+    const log = vi.fn();
+
+    await handleDrafts(req({ sessionToken }), baseDeps(tokens, { generator, log }));
+
+    expect(log).toHaveBeenCalledWith('info', 'generation_safety_blocked', {
+      errorKind: 'SAFETY_BLOCKED',
+    });
   });
 });
