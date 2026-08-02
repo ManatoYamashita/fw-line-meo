@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { colors, contrastRatio } from '@fwlm/design-tokens';
+import { colors, compositeOver, contrastRatio } from '@fwlm/design-tokens';
 
 // UI デザイン基盤（ui-design-foundation）の非後退 E2E。
 // requirements 5.3（キーボードフォーカス時に視認可能なフォーカス表示）と
@@ -56,6 +56,76 @@ const colorMixAllowlist = (
   ) as { readonly entries: readonly ColorMixEntry[] }
 ).entries;
 
+/** 実測した 1 レイヤ分の色。`alpha` は 0..1（1 が不透明）。 */
+interface MeasuredColor {
+  /** 不透明度を戻した色（6桁大文字 hex・`compositeOver` にそのまま渡せる形式）。 */
+  readonly hex: string;
+  /** そのレイヤ自身の不透明度（0..1）。 */
+  readonly alpha: number;
+}
+
+interface RenderedLayers {
+  color: MeasuredColor;
+  backgroundColor: MeasuredColor;
+  /** 上・右・下・左の順。 */
+  borderColors: readonly MeasuredColor[];
+  /** 枠の描画幅（px・上辺）。0 は「枠が描かれていない」ことを意味する。 */
+  borderWidth: number;
+  /** 要素全体（枠も面も子孫も）に掛かる不透明度（0..1）。計算値の色には合成されていない。 */
+  opacity: number;
+  /** 測定時点でこの要素がフォーカスされていたか（Requirements 1.2 の前提確認用）。 */
+  focused: boolean;
+}
+
+// 要素に実際に描画される色を、合成前のレイヤ単位で読む。
+//
+// getComputedStyle は color-mix() を `oklch(…)` や `oklab(…)` の書式のまま返しうるため、
+// 文字列の突き合わせでは書式に依存してしまう。canvas の fillStyle にその値をそのまま流して
+// 1px 描き、描かれたピクセルの sRGB を読むことで書式非依存の実測値にする。
+// alpha も同時に返すのは、半透明の指定（`bg-input/50` など）を上位で下地へ合成できるように
+// するため（タスク 4.3）。**ここでは合成しない**。合成は下地が何かを知る呼び出し側の責務であり、
+// 演算そのものは design-tokens の `compositeOver` に委ねる。
+//
+// 要素の `opacity` を併せて返す理由: `opacity` は要素の描画結果全体に掛かるが、計算値の色には
+// 一切反映されない。無効化状態のように `opacity` が 1 未満の要素では、利用者が見る色は
+// 計算値そのものではない（design.md D8 / Open Questions #4）。
+function readRenderedLayers(locator: Locator): Promise<RenderedLayers> {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const context = document.createElement('canvas').getContext('2d');
+    if (context === null) throw new Error('canvas の 2d コンテキストを取得できません');
+
+    const measure = (value: string): MeasuredColor => {
+      context.clearRect(0, 0, 1, 1);
+      // 解釈できない書式が来た場合に前の値が残らないよう、毎回 sentinel を置いてから代入する。
+      context.fillStyle = '#000000';
+      context.fillStyle = value;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      return {
+        hex: `#${[red, green, blue]
+          .map((channel) => (channel ?? 0).toString(16).padStart(2, '0'))
+          .join('')}`.toUpperCase(),
+        alpha: (alpha ?? 0) / 255,
+      };
+    };
+
+    return {
+      color: measure(style.color),
+      backgroundColor: measure(style.backgroundColor),
+      borderColors: [
+        style.borderTopColor,
+        style.borderRightColor,
+        style.borderBottomColor,
+        style.borderLeftColor,
+      ].map(measure),
+      borderWidth: Number.parseFloat(style.borderTopWidth),
+      opacity: Number.parseFloat(style.opacity),
+      focused: element.matches(':focus'),
+    };
+  });
+}
+
 interface RenderedColors {
   /** 実際に描画される文字色（6桁 hex）。 */
   color: string | null;
@@ -69,13 +139,10 @@ interface RenderedColors {
   focused: boolean;
 }
 
-// 要素に実際に描画される色を読む。
-//
-// getComputedStyle は color-mix() を `oklch(…)` や `color(srgb …)` の書式のまま返しうるため、
-// 文字列の突き合わせでは書式に依存してしまう。canvas の fillStyle にその値をそのまま流して
-// 1px 描き、描かれたピクセルの sRGB を読むことで書式非依存の実測値にする。
-// 透明（alpha < 255）は「その要素では色が決まらない」ことを意味するので null を返し、
+// 「その要素だけを見て色が決まる」場合の実描画色。
+// 半透明（alpha < 1）は「その要素では色が決まらない」ことを意味するので null を返し、
 // 呼び出し側に下地の要素を測らせる（無音で 0 と比較して緑になるのを防ぐ）。
+// この思想は維持する。半透明を織り込んだ実効色が要る場合は effectiveColorOver を使うこと。
 //
 // 枠色（Issue #57 / spec form-non-text-contrast タスク 4.2）:
 // 枠は意味論変数（--input など）を経由してトークンへ解決されるため、クラス集合（border-input）
@@ -83,43 +150,42 @@ interface RenderedColors {
 // 薄い装飾用へ戻る。枠色まで実測することでその経路を塞ぐ。上辺だけを代表値にすると四辺で色が
 // 食い違う要素の他の辺を見逃すため、四辺が一致したときのみ値を返す（半透明の扱いと同じ思想で、
 // 「決められないときは null を返して呼び出し側に落とさせる」）。
-function readRenderedColors(locator: Locator): Promise<RenderedColors> {
-  return locator.evaluate((element) => {
-    const style = getComputedStyle(element);
-    const context = document.createElement('canvas').getContext('2d');
-    if (context === null) throw new Error('canvas の 2d コンテキストを取得できません');
+async function readRenderedColors(locator: Locator): Promise<RenderedColors> {
+  const layers = await readRenderedLayers(locator);
+  const opaqueHex = (measured: MeasuredColor): string | null =>
+    measured.alpha === 1 ? measured.hex : null;
 
-    const toHex = (value: string): string | null => {
-      context.clearRect(0, 0, 1, 1);
-      // 解釈できない書式が来た場合に前の値が残らないよう、毎回 sentinel を置いてから代入する。
-      context.fillStyle = '#000000';
-      context.fillStyle = value;
-      context.fillRect(0, 0, 1, 1);
-      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
-      if (alpha !== 255) return null;
-      return `#${[red, green, blue]
-        .map((channel) => (channel ?? 0).toString(16).padStart(2, '0'))
-        .join('')}`.toUpperCase();
-    };
+  const sides = layers.borderColors.map(opaqueHex);
+  const [top] = sides;
 
-    const sides = [
-      style.borderTopColor,
-      style.borderRightColor,
-      style.borderBottomColor,
-      style.borderLeftColor,
-    ].map(toHex);
-    const [top] = sides;
-    const borderColor =
-      top != null && sides.every((side) => side === top) ? top : null;
+  return {
+    color: opaqueHex(layers.color),
+    backgroundColor: opaqueHex(layers.backgroundColor),
+    borderColor: top != null && sides.every((side) => side === top) ? top : null,
+    borderWidth: layers.borderWidth,
+    focused: layers.focused,
+  };
+}
 
-    return {
-      color: toHex(style.color),
-      backgroundColor: toHex(style.backgroundColor),
-      borderColor,
-      borderWidth: Number.parseFloat(style.borderTopWidth),
-      focused: element.matches(':focus'),
-    };
-  });
+// 利用者が実際に見る色（実効色）を導く。
+//
+// 2 段の合成が要る。(1) レイヤ自身の半透明（`bg-input/50`）を下地へ合成し、
+// (2) 要素全体に掛かる不透明度（`opacity-50`）でさらに下地へ合成する。
+// どちらか一方でも欠けると、計算値と実際の見た目が食い違ったまま検証が緑になる。
+//
+// 合成の演算は design-tokens の compositeOver（正典の実装）にのみ委ねる。ここで自前の
+// アルファブレンドを書くと、検証側だけが持つ第 2 の実装になり、まさに本プロジェクトのガードが
+// 防ごうとしている実装ドリフトを自分で作ることになる（contrast.ts の冒頭コメント）。
+function effectiveColorOver(
+  layer: MeasuredColor,
+  backdrop: string,
+  elementOpacity: number,
+): string {
+  return compositeOver(
+    compositeOver(layer.hex, backdrop, layer.alpha),
+    backdrop,
+    elementOpacity,
+  );
 }
 
 // 枠色を「空振りしていないこと」を確かめたうえで返す。
@@ -591,6 +657,100 @@ test('区切り線が装飾用の値のまま描画される', async ({ page }) 
     rendered.backgroundColor,
     '区切り線が識別用の枠色へ巻き込まれている。装飾用の意匠を維持する要件 4.2 に反する',
   ).not.toBe(colors.borderInteractive);
+});
+
+// Requirements 6.3 / 6.4: 枠色の変更が無効化状態の見た目を巻き添えにした結果を、
+// design.md D8 が記録した値として固定する。
+//
+// D8 が記録する実効色（利用者が実際に見る、合成後の色）。是正前は枠 #EEEEEE / 面 #F7F7F7 で、
+// `--input` を識別用役割へ向け直したことで下の値へ変化した。要件 6.4 は「変化するなら意図として
+// 記録する」ことを条件に許容しており、D8 がその記録である。ここはその記録の**写し**であり、
+// 実描画がこの値から動いたら、意匠判断をやり直して D8 を更新するまで緑にしてはならない。
+//
+// なぜトークンから再計算しないか: トークンや不透明度から導出した値と突き合わせると、
+// 値が変わったときに期待値も一緒に動いてしまい「意図せぬ変化」を検出できない。
+// 記録値は固定の literal でなければ番人にならない。
+const DISABLED_EFFECTIVE_BORDER = '#BBBBBB';
+const DISABLED_EFFECTIVE_SURFACE = '#DDDDDD';
+
+test('無効化された記入欄の枠と面が D8 の記録値どおりの実効色で描画される', async ({ page }) => {
+  await page.goto('/ui-check');
+  const disabled = page.getByRole('textbox', { name: '無効化の記入欄' });
+  await expect(disabled).toBeVisible();
+  await expect(disabled).toBeDisabled();
+
+  const pageBackground = await readPageBackground(page);
+  const layers = await readRenderedLayers(disabled);
+
+  // 枠の計算値は不透明で四辺一致（readRenderedBorder が幅 0 と食い違いを弾く）。
+  // ただしこの値は**利用者が見る色ではない**。要素の不透明度がまだ掛かっていない。
+  const rendered = await readRenderedBorder(disabled, '無効化の記入欄');
+  expect(
+    rendered.borderColor,
+    `無効化の記入欄: 枠が識別用の枠色で描画されていない（実測 ${rendered.borderColor ?? '不明'}）`,
+  ).toBe(colors.borderInteractive);
+
+  // 空振り防止 1: 面が半透明であること。不透明なら既存の測定手段だけで足り、
+  // 本 test が確立した「半透明を織り込む」経路を一度も通らないまま緑になる。
+  expect(
+    layers.backgroundColor.alpha,
+    `無効化の記入欄: 面が半透明で描画されていない（alpha=${layers.backgroundColor.alpha}）`,
+  ).toBeLessThan(1);
+  expect(layers.backgroundColor.alpha, '無効化の記入欄: 面が完全に透明').toBeGreaterThan(0);
+
+  // 空振り防止 2: 要素全体の不透明度が 1 未満であること。1 なら 2 段目の合成が恒等写像になり、
+  // 「要素の不透明度を織り込む」という本 test の主張が検証されないまま緑になる。
+  expect(
+    layers.opacity,
+    `無効化の記入欄に要素の不透明度が掛かっていない（opacity=${layers.opacity}）`,
+  ).toBeLessThan(1);
+  expect(layers.opacity, '無効化の記入欄の要素の不透明度が 0（描画されていない）').toBeGreaterThan(0);
+
+  // 既存の測定手段は半透明に対して値を返さない。その設計思想（無音で 0 と比較して緑にしない）を
+  // 保ったまま実効色を導けることが本 test の主張であり、前提としてここで固定する。
+  expect(
+    rendered.backgroundColor,
+    '半透明の面に対して既存の測定手段が値を返している。' +
+      '「決められないときは null」の規律が崩れると、下地を無視した色で無音の緑が出る',
+  ).toBeNull();
+
+  // 面の生値も枠と同じ識別用の枠色である（`--input` が枠色と面塗りの双方に使われている
+  // 既知の構造。design.md「ui / theme.css 層」で明示的に引き受けている）。
+  expect(
+    layers.backgroundColor.hex,
+    `無効化の記入欄: 面が識別用の枠色で塗られていない（実測 ${layers.backgroundColor.hex}）`,
+  ).toBe(colors.borderInteractive);
+
+  const [borderLayer] = layers.borderColors; // 四辺一致は readRenderedBorder が保証済み
+  const effectiveBorder = effectiveColorOver(borderLayer!, pageBackground, layers.opacity);
+  const effectiveSurface = effectiveColorOver(
+    layers.backgroundColor,
+    pageBackground,
+    layers.opacity,
+  );
+  const measured =
+    `枠 生値 ${borderLayer!.hex}(alpha=${borderLayer!.alpha}) → ${effectiveBorder} / ` +
+    `面 生値 ${layers.backgroundColor.hex}(alpha=${layers.backgroundColor.alpha}) → ${effectiveSurface} / ` +
+    `要素の不透明度 ${layers.opacity} / 下地 ${pageBackground}`;
+
+  expect(
+    effectiveBorder,
+    `無効化の記入欄の枠の実効色が design.md D8 の記録値と一致しない。${measured}。` +
+      '意図した意匠変更なら D8 を更新すること',
+  ).toBe(DISABLED_EFFECTIVE_BORDER);
+  expect(
+    effectiveSurface,
+    `無効化の記入欄の面の実効色が design.md D8 の記録値と一致しない。${measured}。` +
+      '意図した意匠変更なら D8 を更新すること',
+  ).toBe(DISABLED_EFFECTIVE_SURFACE);
+
+  // 要素の不透明度を織り込まなければ実効色は計算値そのものになる。両者が異なることを固定して、
+  // 「不透明度を無視した実装でも通る」検証へ退化しないようにする。
+  expect(
+    effectiveBorder,
+    `枠の実効色が計算値（${rendered.borderColor ?? '不明'}）と同じ。` +
+      '要素の不透明度が実効色に効いておらず、利用者が見る色を測れていない',
+  ).not.toBe(rendered.borderColor);
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。
