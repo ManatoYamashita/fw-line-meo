@@ -496,4 +496,5 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - 配信時刻設定 UI の webhook 配線は #6 完了後の統合タスク（本 spec は契約と関数のみ提供）
 - ~~**複数店舗オーナーの LIFF 詳細画面が一意に解決できない**~~ → **解決済み（Issue #61・task 5.4）**。サーバーが認可済み集合を候補一覧として 409 で返し、画面がリンク選択を提示する方式で解消した。詳細は Components and Interfaces / TS store-detail の「クライアント入力の不変条件」「多店舗オーナーの解決」を参照。残る派生課題は以下2件。
 - **多店舗オーナーの「1タップ」が1回分後退している**（要件 4 Objective の但し書き参照）。delivery-job が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば復帰できるが、HMAC 鍵を delivery-job と store-detail の両方へ配布する必要があり（Secret Manager + terraform 2箇所）、かつトークンの無い入口が残るため選択画面は将来も必須。第2フェーズで費用対効果を再評価すること。
-- **Flex カードに店舗名が無く、多店舗オーナーは同時刻に届く N 通を見た目で区別できない**（`delivery-job/src/flex.ts` の `buildDailySummaryFlex` の入力 `DailySummaryRow` に店舗名が無い）。Issue #61 の選択画面では店舗名が出るため実用性は回復しているが、配信カード側は未対応。別 Issue として起票済み。
+- **Flex カードに店舗名が無く、多店舗オーナーは同時刻に届く N 通を見た目で区別できない**（`delivery-job/src/flex.ts` の `buildDailySummaryFlex` の入力 `DailySummaryRow` に店舗名が無い）。Issue #61 の選択画面では店舗名が出るため実用性は回復しているが、配信カード側は未対応。**Issue #73** として起票済み。
+- **store-detail の型レベルセキュリティガードが実際には検査されていない**（`tsconfig.json` の `exclude` に `"test"` があるため、`test/liff-auth.test.ts` の型代入は typecheck でも `next build` でも走らない）。実効ガードは arity チェックと振る舞いテスト。**Issue #72** として起票済み。
