@@ -117,6 +117,10 @@ const COLOR_ROLE_TO_CSS_VARIABLE: Readonly<Record<keyof ColorTokens, string>> = 
   destructive: '--color-destructive',
   destructiveForeground: '--color-destructive-foreground',
   border: '--color-border',
+  // 識別用の枠色。装飾用（--color-border）とは別変数として宣言し、:root の意味論変数が
+  // それぞれ別の役割を指せるようにする。この 2 つが同じ変数へ潰れると、識別用だけを濃くする
+  // ことが構造的に不可能になる（design.md「意味論変数割当」State Management）。
+  borderInteractive: '--color-border-interactive',
 };
 
 describe('theme-sync: 意味役割 ↔ @theme 変数の厳密一致（Requirements 1.1, 1.3）', () => {

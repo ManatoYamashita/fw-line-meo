@@ -17,12 +17,16 @@ function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
 
 // フォーカス指標は theme.css の `@layer base` の `:focus-visible` outline に一本化しており、
 // 部品側では宣言しない（Issue #49）。
+//
+// エラーかつ選択済みの枠はエラー色を保つ（Issue #57 / design.md D4）。この複合指定は属性
+// セレクタ 2 個分の詳細度を持つため、選択状態を条件にする単一指定に生成順序と無関係に勝つ。
+// 選択済みであることは面塗りと丸い印が担うため、両方の情報が別のチャンネルで残る。
 function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props) {
   return (
     <RadioPrimitive.Root
       data-slot="radio-group-item"
       className={cn(
-        "group/radio-group-item peer relative flex aspect-square size-4 shrink-0 rounded-full border border-input after:absolute after:-inset-x-3 after:-inset-y-2 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 aria-invalid:aria-checked:border-primary dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground dark:data-checked:bg-primary",
+        "group/radio-group-item peer relative flex aspect-square size-4 shrink-0 rounded-full border border-input after:absolute after:-inset-x-3 after:-inset-y-2 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 aria-invalid:aria-checked:border-destructive dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground dark:data-checked:bg-primary",
         className
       )}
       {...props}

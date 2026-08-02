@@ -10,9 +10,10 @@
 //
 // 本テストは 4 層で構成する:
 //   1. 数値検証 — USAGE_PAIRS の各エントリについて合成後の実効色を求め、しきい値以上を assert
-//   2. 網羅ガード — 部品ソースを走査して不透明度付きクラスを全抽出し、USAGE_PAIRS ∪ EXEMPT_UTILITIES
-//      と双方向で突き合わせる。#48 で潰した「集合包含だけでは不十分」と同じ穴を空けないため、
-//      「部品に新しい /NN を足したのに検証表へ追記し忘れた」を必ず赤化させる。
+//   2. 網羅ガード — 部品ソースを走査して色ユーティリティを**不透明度の有無に関わらず**全抽出し、
+//      USAGE_PAIRS ∪ EXEMPT_UTILITIES と双方向で突き合わせる（Requirements 5.1）。#48 で潰した
+//      「集合包含だけでは不十分」と同じ穴を空けないため、「部品に新しい色指定を足したのに
+//      検証表へ追記し忘れた」を必ず赤化させる。
 //   3. 子孫指定の色ガード — 親 variant が子へ渡す色（`*:data-[slot=…]:text-…`）を独立に抽出して
 //      検証する。子が自前の色を持つ場合、この指定が消えると状態色は画面に出ないのに
 //      クラス名の集合は何も壊れず、1・2 は緑のまま通る（PR #56 レビュー指摘1）。
@@ -100,7 +101,7 @@ describe('意味論名の hex 解決（theme.css からの導出・自己検証�
 // --- 検証表 -------------------------------------------------------------------------
 
 interface UsagePair {
-  /** 部品ソースに現れる不透明度付きクラス（網羅ガードの突き合わせキー）。 */
+  /** 部品ソースに現れる色ユーティリティ（網羅ガードの突き合わせキー）。 */
   readonly utility: string;
   /** 出典（どの部品のどの状態か）。 */
   readonly source: string;
@@ -119,10 +120,22 @@ interface UsagePair {
 }
 
 /**
- * 部品が使う不透明度付きクラスと、その実効コントラストの検証対象ペア。
+ * 部品が使う色ユーティリティと、その実効コントラストの検証対象ペア。
  *
  * 下地が指定されていない部品（Button ghost / link 等）は親の背景に載るため、
  * 既定の backdrop である `background`（#FFFFFF）を仮定する。
+ *
+ * **隣接色の選び方**（Requirements 1.3, 5.5 / design.md D7）:
+ * コントラストは色単体ではなく**ペアの性質**である。同じユーティリティが複数の部品で
+ * 使われている場合、`surface` には**実際に隣り合う相手のうち最も条件の厳しいもの**を取る。
+ * 甘い相手（例: 面塗り `bg-muted` に対し `foreground` ではなく実在の `muted-foreground`）を
+ * 選ぶと、値が実際には AA を割っていても緑になる空振り検証になる。
+ * - 枠線（`border-*`）は「線」であり、識別すべき相手は**隣接する頁背景**であって内側の
+ *   面塗りではない（要件 1.1・2.1・4.5）。前景側に色を、`surface` に背景を置く。
+ * - 面塗り（`bg-*`）のうち、その面が「頁背景から部品を識別させる」役割を持つものは
+ *   非テキストとして頁背景と比べる。その面に載る文字の 4.5:1 は**文字側のエントリ**が担う。
+ * - 印・図形（白い丸など）は載る面を明示する。既定の頁背景のままにすると同じ色同士を
+ *   比べることになり、実装が正しくても永久に赤くなる。
  */
 const USAGE_PAIRS: readonly UsagePair[] = [
   {
@@ -165,37 +178,228 @@ const USAGE_PAIRS: readonly UsagePair[] = [
     surfaceAlpha: 0.05,
     kind: 'text',
   },
+
+  // --- 非テキスト（SC 1.4.11・3:1）: 部品の存在と状態を識別させる色使用 ---------------
+  // いずれも「利用者が部品を見つけ、状態を読み取る」ための視覚情報であり、装飾ではない
+  // （要件 1.1, 1.2, 4.5 / design.md D2, D5, D7）。
+  {
+    // 識別用の枠色。フォーム入力部品では、フォーカスも選択もしていない状態で部品の存在と
+    // 境界を伝える唯一の視覚情報であるため、隣接する頁背景と 3:1 が要る（要件 1.1, 1.2）。
+    // Button / Badge の outline は装飾用の枠指定を使っていたが、対話的部品の輪郭は
+    // 識別用として扱うという要件 4.5 に従い、この役割へ移した（design.md D2, D5）。
+    // Badge は [a] variant を持ちリンクとして描画されうるため、静的な出現があっても
+    // 要件 4.4（判断できない場合は識別用に倒す）により同じ扱いとする。
+    utility: 'border-input',
+    source:
+      'input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx（既定の枠）・' +
+      'button.tsx / badge.tsx variant=outline（輪郭の枠）',
+    foreground: 'input',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // エラー状態を伝える枠。色以外の手段（可視文言・aria-invalid）と併用されるが、
+    // 目で見ている利用者にとっては枠が主要な手がかりであるため 3:1 を掛ける（要件 3.4）。
+    utility: 'border-destructive',
+    source:
+      'input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx / button.tsx / badge.tsx' +
+      '（aria-invalid のエラー枠）',
+    foreground: 'destructive',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 選択済みであることを示す枠。面塗りと印も同時に出るが、いずれも状態表示であり
+    // 「選択済みを未選択から区別する」情報を担うため 3:1 を掛ける（要件 2.1）。
+    // 識別すべき相手は隣接する頁背景であって、内側の面塗りではない（design.md D3 / 要件 2.1）。
+    // FieldLabel の選択枠は不透明度を撤去してこの指定へ合流した。チェックボックス・ラジオと
+    // 語彙が一致し、アルファ合成を挟まないぶん検証も単純になる（design.md D3）。
+    utility: 'border-primary',
+    source:
+      'checkbox.tsx / radio-group.tsx（data-checked の選択枠）・' +
+      'field.tsx FieldLabel（has-data-checked の選択枠）',
+    foreground: 'primary',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 一つの指定が二つの用途を兼ねる箇所。ここでは「選択済み／既定の状態を頁背景から
+    // 識別させる面」として非テキストで登録する。**この面に載る白文字の 4.5:1 は
+    // text-primary-foreground のエントリだけが担う**ため、そちらを取り除いてはならない。
+    utility: 'bg-primary',
+    source:
+      'button.tsx / badge.tsx variant=default（面塗り）・' +
+      'checkbox.tsx / radio-group.tsx（data-checked の面塗り）',
+    foreground: 'primary',
+    surface: 'background',
+    kind: 'non-text',
+  },
+  {
+    // 選択済みを示す白い印。**選択色の面の上に載る**ため surface に選択色を明示する。
+    // 既定の頁背景のままにすると白同士を比べることになり、実装が正しくても永久に赤くなる。
+    utility: 'bg-primary-foreground',
+    source: 'radio-group.tsx RadioGroupItem の Indicator（選択済みを示す丸い印）',
+    foreground: 'primary-foreground',
+    surface: 'primary',
+    kind: 'non-text',
+  },
+
+  // --- テキスト（SC 1.4.3・4.5:1）: 文字色と、文字が載る面塗り -------------------------
+  // 面塗り側の surface には「その面に実際に載る前景のうち最も条件の厳しいもの」を取る。
+  {
+    // 面。載りうる前景のうち最も厳しいのは区切りラベルの弱い文字色。
+    utility: 'bg-background',
+    source: 'button.tsx variant=outline（面）／ field.tsx FieldSeparator の区切りラベル面',
+    foreground: 'muted-foreground',
+    surface: 'background',
+    kind: 'text',
+  },
+  {
+    // 面。載りうる前景のうち最も厳しいのは Alert variant=success の文字色。
+    utility: 'bg-card',
+    source: 'alert.tsx 全 variant の面 ／ card.tsx Card の面',
+    foreground: 'success',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    // hover / aria-expanded の面。Button は hover 時に濃い文字色へ替わるが、Badge は
+    // 弱い文字色のまま同じ面に載るため、そちらを surface の相手に取る。
+    utility: 'bg-muted',
+    source:
+      'button.tsx variant=outline / ghost（hover・aria-expanded の面）・' +
+      'badge.tsx variant=outline / ghost（hover の面）',
+    foreground: 'muted-foreground',
+    surface: 'muted',
+    kind: 'text',
+  },
+  {
+    // default variant の hover 面。白文字が載る（Issue #50 で不透明度による明化を撤去した箇所）。
+    utility: 'bg-primary-hover',
+    source: 'button.tsx / badge.tsx variant=default（hover の面）',
+    foreground: 'primary-foreground',
+    surface: 'primary-hover',
+    kind: 'text',
+  },
+  {
+    utility: 'bg-secondary',
+    source: 'button.tsx / badge.tsx variant=secondary（面）',
+    foreground: 'secondary-foreground',
+    surface: 'secondary',
+    kind: 'text',
+  },
+  {
+    utility: 'text-card-foreground',
+    source: 'alert.tsx variant=default の本文 ／ card.tsx Card の本文',
+    foreground: 'card-foreground',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    // 不透明度付きのエラー面に載る場合の比は既存の bg-destructive/10・/20 のエントリが
+    // 担うため、ここでは白い面（Alert / FieldError / invalid な Field）の出現を受け持つ。
+    utility: 'text-destructive',
+    source:
+      'alert.tsx variant=destructive ／ field.tsx FieldError・data-[invalid=true] の Field ／' +
+      'button.tsx / badge.tsx variant=destructive の文字',
+    foreground: 'destructive',
+    surface: 'card',
+    kind: 'text',
+  },
+  {
+    // hover 時にこの文字色へ替わる箇所は同時に面塗りも替わるため、白背景ではなく
+    // その面を相手に取る（最も条件の厳しい隣接色）。
+    utility: 'text-foreground',
+    source:
+      'button.tsx variant=outline / ghost（hover・aria-expanded の文字）・' +
+      'badge.tsx variant=outline の文字 ／ alert.tsx のリンク hover ／ input.tsx の file ボタン',
+    foreground: 'foreground',
+    surface: 'muted',
+    kind: 'text',
+  },
+  {
+    // 白い面に載る出現が大半だが、Badge の hover ではこの文字色が面塗りと同時に出るため、
+    // そちらを相手に取る（最も条件の厳しい隣接色）。
+    utility: 'text-muted-foreground',
+    source:
+      'alert.tsx AlertDescription ／ card.tsx CardDescription ／ field.tsx FieldDescription・' +
+      '区切りラベル ／ input.tsx / textarea.tsx の placeholder ／ badge.tsx の hover の文字',
+    foreground: 'muted-foreground',
+    surface: 'muted',
+    kind: 'text',
+  },
+  {
+    utility: 'text-primary',
+    source:
+      'button.tsx / badge.tsx variant=link の文字 ／ field.tsx FieldDescription 内リンクの hover',
+    foreground: 'primary',
+    surface: 'background',
+    kind: 'text',
+  },
+  {
+    // **このエントリは取り除いてはならない。** bg-primary を非テキストとして登録している以上、
+    // 選択色の面に載る白文字の 4.5:1 を担保するのはここだけである（要件 2.2 の趣旨）。
+    utility: 'text-primary-foreground',
+    source:
+      'button.tsx / badge.tsx variant=default の文字 ／ ' +
+      'checkbox.tsx / radio-group.tsx（data-checked の印）',
+    foreground: 'primary-foreground',
+    surface: 'primary',
+    kind: 'text',
+  },
+  {
+    utility: 'text-secondary-foreground',
+    source: 'button.tsx / badge.tsx variant=secondary の文字',
+    foreground: 'secondary-foreground',
+    surface: 'secondary',
+    kind: 'text',
+  },
+  {
+    utility: 'text-success',
+    source: 'alert.tsx variant=success の文字',
+    foreground: 'success',
+    surface: 'card',
+    kind: 'text',
+  },
 ];
 
 /**
- * 検証表に載せない不透明度付きクラスと、その理由。
+ * 検証表に載せない色ユーティリティと、その理由。
  *
  * 「合格しているから除外」ではなく「WCAG の対象外であるか、別Issueで扱う」ものだけを載せる。
  * 理由なしの除外を許すと、このガードは #48 で潰した空振りガードと同じものになる。
  */
 const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reason: string }> = [
   {
+    // 根拠文の再確認（design.md「コントラスト検証ガード」の Implementation Notes / リスク）:
+    // 本仕様はエラー枠の適用範囲を広げる（チェック済みの部品でも枠がエラー色のまま維持される・
+    // design.md D4）。すなわち「エラー伝達は枠と文言が担う」という前提は、是正前に唯一
+    // 成り立っていなかった状態（エラーかつチェック済み）を含めて成り立つようになる。
+    // 根拠は弱まるどころか強まるため、除外はこのまま維持する。
     utility: 'ring-destructive/20',
     reason:
-      'aria-invalid のリングは装飾。エラーであることの伝達は同時に付く ' +
-      'aria-invalid:border-destructive（対白 6.47:1）と role="alert" の文言が担う。',
+      'aria-invalid のリングは装飾。エラーであることの伝達は同時に付くエラー枠' +
+      '（destructive・本仕様の是正後はチェック済みの状態でも維持される）と ' +
+      'role="alert" の可視文言が担う。',
   },
   {
     utility: 'ring-foreground/10',
     reason: 'card.tsx の外枠。情報を持たない純装飾のため SC 1.4.11 の対象外。',
   },
   {
-    utility: 'border-primary/30',
-    reason:
-      'field.tsx FieldLabel の選択状態表示（1.96:1）。非テキスト 3:1 未達だが、' +
-      'border-input #DDDDDD(1.35:1) と同種の「トークン素の値が薄すぎる」問題であり、' +
-      '枠線の意匠全体に関わるため別Issueで一括して扱う（#49/#50 のスコープ外）。',
-  },
-  {
     utility: 'bg-input/50',
     reason:
       'input / textarea の disabled 時の面塗り。WCAG 1.4.3 は無効化された部品を' +
       'コントラスト要件の対象外としている。',
+  },
+  {
+    // separator.tsx は罫線そのものを面塗りで描く（高さ 1px の要素）ため、色ユーティリティは
+    // border-* ではなく bg-* として現れる。装飾用の値のまま据え置くことは要件 4.2 の要求で
+    // あり、識別可能性を理由にこの色を濃くしてはならない。
+    utility: 'bg-border',
+    reason:
+      'separator.tsx の区切り線の面塗り。内容の区切りを示すだけで部品の存在・境界・状態を' +
+      '伝えないため、情報を持たない純装飾として SC 1.4.11 の対象外（要件 4.2）。',
   },
 ];
 
@@ -248,35 +452,178 @@ function readComponentSources(): ReadonlyArray<{ readonly file: string; readonly
     .map((file) => ({ file, source: readFileSync(join(componentsDir, file), 'utf8') }));
 }
 
-/** 不透明度付きの色ユーティリティ（`bg-primary/80` 等）。 */
-const ALPHA_UTILITY_PATTERN = /^(?:bg|text|border|ring|outline|fill|stroke)-[a-z0-9-]+\/\d{1,3}$/;
+/**
+ * 色ユーティリティのパターン。不透明度は**任意**とし、`bg-primary/80`（付き）と
+ * `border-input`（なし）の双方に一致する（Requirements 5.1）。
+ *
+ * 一致するのは字面だけであり、この段階では `text-sm` `border-0` `bg-transparent` のような
+ * 色でない語も通る。色か否かの判定は `isColorUtility` が担う。
+ */
+const COLOR_UTILITY_PATTERN =
+  /^(?:bg|text|border|ring|outline|fill|stroke)-[a-z0-9-]+(?:\/\d{1,3})?$/;
+
+/** ユーティリティから意味論名を取り出す。`border-input` → `input`、`bg-primary/80` → `primary`。 */
+function semanticNameOf(utility: string): string {
+  const withoutAlpha = utility.split('/')[0]!;
+  return withoutAlpha.slice(withoutAlpha.indexOf('-') + 1);
+}
 
 /**
- * ソースから不透明度付き色ユーティリティを抽出する。
+ * 意味論名が theme.css で色として解決できるかを判定する（design.md D6）。
  *
- * `dark:` を含むクラスは theme.css:65 の `@custom-variant dark (&:is(.dark *))` により
- * `.dark` 祖先が無い限り一切適用されない（ダークパレット未整備のため意図的に無効化されている）。
- * 現状 `.dark` を付与する箇所はリポジトリ内に存在しないため、検証対象から除外する。
- * ダークモード着手時にはこの除外を外し、ダーク下地での実効コントラストを検証すること。
+ * 判定は `resolveSemanticColor` が throw することをもって行い、非色語の一覧を別に持たない。
+ * 一覧を持つと Tailwind のユーティリティが増えるたびに二重更新が要り、それ自体が
+ * 同期漏れの発生源になる（意味論名 → hex の対応表を手写ししないのと同じ理由）。
  */
-function extractAlphaUtilities(source: string): readonly string[] {
+function isColorUtility(utility: string): boolean {
+  try {
+    resolveSemanticColor(semanticNameOf(utility));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ソースから「色ユーティリティの字面を持つ語」を拾う（色として解決できるかは問わない）。
+ *
+ * `dark:` を含むクラスは theme.css:66 の `@custom-variant dark (&:is(.dark *))` により
+ * `.dark` 祖先が無い限り一切適用されない（ダークパレット未整備のため意図的に無効化されている）。
+ * `.dark` を付与する箇所は現在もリポジトリ内に存在しないため、検証対象から除外する
+ * （Requirements 5.7）。抽出器を色ユーティリティ全般へ広げたことで、この除外は
+ * 不透明度付き（`dark:bg-input/30` 等）だけでなく不透明度なし（`dark:border-input`）にも
+ * 及ぶようになった。ダークモード着手時にはこの除外を外し、ダーク下地での実効コントラストを
+ * 検証すること。
+ */
+function extractUtilityTokens(source: string): readonly string[] {
   const found: string[] = [];
   for (const rawToken of source.split(/[\s"'`]+/)) {
     if (rawToken.includes('dark:')) continue;
     // 先頭の variant 連鎖（`[a]:hover:` `*:data-[slot=x]:` `focus-visible:` 等）を落として
     // ユーティリティ本体だけを見る。variant 部分に `/` は現れない。
     const utility = rawToken.slice(rawToken.lastIndexOf(':') + 1);
-    if (ALPHA_UTILITY_PATTERN.test(utility)) {
+    if (COLOR_UTILITY_PATTERN.test(utility)) {
       found.push(utility);
     }
   }
   return found;
 }
 
-describe('網羅ガード: 部品の不透明度付きクラスが全て分類されている（Issue #50）', () => {
+/** 部品ソースから色ユーティリティを抽出する（返り値は全て `isColorUtility` を満たす）。 */
+function extractColorUtilities(source: string): readonly string[] {
+  return extractUtilityTokens(source).filter(isColorUtility);
+}
+
+/** パターンには一致したが色として解決できず捨てられた語（下の固定検証だけが使う）。 */
+function extractNonColorTokens(source: string): readonly string[] {
+  return extractUtilityTokens(source).filter((utility) => !isColorUtility(utility));
+}
+
+/**
+ * 実ソースから落ちた（色として解決できなかった）語の固定値。
+ *
+ * **この一覧は色／非色の判定には一切使わない。** 判定は D6 のとおり `resolveSemanticColor` の
+ * throw のみが行う（`isColorUtility`）。ここにあるのは判定結果を写した観測値であり、
+ * 分類の入力ではない。ホワイトリストとして参照した瞬間に D6 が壊れるので、そうしないこと。
+ *
+ * なぜ集合ごと固定するか:
+ * D6 の「解決に失敗したら除外」という方式は、綴り誤り（`bg-primry`）や、意味論名でない
+ * 既定色（`text-white` / `bg-black` / `text-inherit` 等）を **未分類として赤化させずに
+ * 黙って捨てる**。不透明度を必須としていた頃は `bg-primry/50` のような語も未分類として
+ * 赤化していたため、抽出器の拡張はこの経路に限っては検出力を下げる方向に働く。
+ * 固定フィクスチャによる自己検証は実ソースを見ていないためこの穴を塞げない。
+ * そこで「落とした語の集合」そのものを実ソースから取り出して固定し、増減の双方で赤化させる。
+ *
+ * 集合が変わったときの対応: 増えた語が本当に色でない（寸法・字形・透明・切り抜き等）ことを
+ * 一件ずつ確認してからこの一覧へ加える。色のつもりの語が混ざっていれば、それは
+ * 綴り誤りか意味論トークン化されていない色であり、部品側を直すのが正しい。
+ */
+const NON_COLOR_TOKENS: readonly string[] = [
+  'bg-clip-padding',
+  'bg-transparent',
+  'border-0',
+  'border-t',
+  'border-transparent',
+  'ring-1',
+  'ring-3',
+  'text-2xl',
+  'text-balance',
+  'text-base',
+  'text-current',
+  'text-left',
+  'text-lg',
+  'text-pretty',
+  'text-sm',
+  'text-xl',
+  'text-xs',
+];
+
+describe('色ユーティリティ抽出器の自己検証（Requirements 5.1, 5.7 / design.md D6）', () => {
+  const sources = readComponentSources();
+  const colorUtilities = [
+    ...new Set(sources.flatMap(({ source }) => extractColorUtilities(source))),
+  ].sort();
+
+  it('不透明度あり・なしの双方を拾う', () => {
+    expect(extractColorUtilities('<div className="border-input bg-primary/5" />')).toEqual([
+      'border-input',
+      'bg-primary/5',
+    ]);
+  });
+
+  it('色として解決できない語は拾わない（寸法・数値・透明・切り抜き・字形）', () => {
+    expect(
+      extractColorUtilities(
+        'text-sm text-2xl border-0 border-t ring-1 ring-3 bg-transparent bg-clip-padding text-current text-balance',
+      ),
+    ).toEqual([]);
+  });
+
+  it('variant 連鎖を落としてユーティリティ本体だけを見る', () => {
+    expect(
+      extractColorUtilities(
+        'focus-visible:ring-destructive/20 *:data-[slot=alert-description]:text-success',
+      ),
+    ).toEqual(['ring-destructive/20', 'text-success']);
+  });
+
+  it('dark: 専用の指定は色として解決できても拾わない（Requirements 5.7）', () => {
+    expect(extractColorUtilities('dark:border-input hover:dark:bg-muted/50')).toEqual([]);
+  });
+
+  it('実ソースからの抽出が空でなく、不透明度あり・なしの双方を含む（空振り緑の防止）', () => {
+    // 設計の不変条件: 抽出結果が空配列なら空振りとみなして失敗させる。
+    expect(sources.length).toBeGreaterThan(0);
+    expect(colorUtilities.length).toBeGreaterThan(0);
+    // パターン拡張が実ソースへ効いていることの確認。不透明度なしが 0 件なら拡張が
+    // 効いていない（＝拡張前と同じものを見ている）。
+    expect(
+      colorUtilities.filter((utility) => utility.includes('/')),
+      '不透明度付きの色ユーティリティが 1 件も抽出できていない',
+    ).not.toEqual([]);
+    expect(
+      colorUtilities.filter((utility) => !utility.includes('/')),
+      '不透明度なしの色ユーティリティが 1 件も抽出できていない（パターンの拡張が効いていない）',
+    ).not.toEqual([]);
+  });
+
+  it('色として解決できず捨てた語の集合が固定値と一致する（黙って捨てる穴の封じ）', () => {
+    const dropped = [
+      ...new Set(sources.flatMap(({ source }) => extractNonColorTokens(source))),
+    ].sort();
+    expect(
+      dropped,
+      '色として解決できず捨てられた語の集合が変化しました。増えた語が本当に色でないことを' +
+        '一件ずつ確認し、色のつもりの語（綴り誤り・意味論トークン化されていない色）が' +
+        `混ざっていないか検めること: ${dropped.join(', ')}`,
+    ).toEqual(NON_COLOR_TOKENS);
+  });
+});
+
+describe('網羅ガード: 部品の色ユーティリティが全て分類されている（Issue #50 / Requirements 5.1, 5.2）', () => {
   const sources = readComponentSources();
   const foundUtilities = [
-    ...new Set(sources.flatMap(({ source }) => extractAlphaUtilities(source))),
+    ...new Set(sources.flatMap(({ source }) => extractColorUtilities(source))),
   ].sort();
   const classified = [
     ...new Set([
@@ -290,14 +637,15 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
     expect(foundUtilities.length).toBeGreaterThan(0);
   });
 
-  it('部品が使う不透明度付きクラスは全て検証表か除外理由付きリストにある', () => {
-    // 新しい /NN クラスを部品へ足したら、必ず USAGE_PAIRS で検証させるか
+  it('部品が使う色ユーティリティは全て検証表か除外理由付きリストにある', () => {
+    // 新しい色指定を部品へ足したら、必ず USAGE_PAIRS で検証させるか
     // EXEMPT_UTILITIES で理由を書かせるための網羅ガード
     // （theme-sync.test.ts の「役割対応表に無い色変数の混入防止」と同じ流儀）。
     const unclassified = foundUtilities.filter((utility) => !classified.includes(utility));
     expect(
       unclassified,
-      `検証表にも除外リストにも無い不透明度付きクラスが部品にあります: ${unclassified.join(', ')}`,
+      `検証表にも除外リストにも無い色ユーティリティが部品にあります（${unclassified.length} 件）: ` +
+        `${unclassified.join(', ')}`,
     ).toEqual([]);
   });
 
@@ -306,7 +654,7 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
     const stale = classified.filter((utility) => !foundUtilities.includes(utility));
     expect(
       stale,
-      `部品で使われていないクラスが検証表／除外リストに残っています: ${stale.join(', ')}`,
+      `部品で使われていない色ユーティリティが検証表／除外リストに残っています: ${stale.join(', ')}`,
     ).toEqual([]);
   });
 
@@ -323,8 +671,11 @@ describe('網羅ガード: 部品の不透明度付きクラスが全て分類�
  * 親 variant が子（説明文など）へ渡す色指定（`*:data-[slot=…]:text-…`）の検証対象。
  *
  * なぜ上の網羅ガードと別立てが要るか:
- * 網羅ガードは不透明度付きクラスしか見ない。しかし PR #56 のレビューで見つかった欠陥は
- * 「不透明度を外すときに子孫指定ごと削除した」ことで起きた。子（AlertDescription）は自前で
+ * 網羅ガードは variant 連鎖を落としてユーティリティ本体だけを見るため、「どの子へ色を渡すか」
+ * という束縛（`*:data-[slot=…]:`）を一切見ていない。同じ色ユーティリティが他の箇所でも
+ * 使われていれば、束縛が消えても抽出される集合は変わらない。
+ * PR #56 のレビューで見つかった欠陥は「不透明度を外すときに子孫指定ごと削除した」ことで
+ * 起きた。子（AlertDescription）は自前で
  * `text-muted-foreground` を持つため、親からの指定が消えると variant の状態色は説明文へ
  * 一切届かない。それでいてクラス名の集合は何も壊れないので、既存のガードは全て緑のまま通る。
  * 「子へ渡す色」を独立に抽出して数値検証し、消えた場合も薄すぎる場合も赤化させる。
@@ -422,7 +773,7 @@ describe('子孫指定の色ガード: 親 variant が子へ渡す色（PR #56 �
 // --- color-mix ガード ---------------------------------------------------------------
 
 /**
- * `color-mix()` は不透明度付きクラスの正規表現をすり抜けるため、別途検出して
+ * `color-mix()` は色ユーティリティの正規表現をすり抜けるため、別途検出して
  * 実測値付きの許可リストへの登録を必須にする（ホールを塞ぐ）。
  *
  * 照合はファイル単位ではなく **出現箇所（file + 式）単位**で行う（PR #56 レビュー指摘2）。
