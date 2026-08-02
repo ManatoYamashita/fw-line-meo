@@ -140,14 +140,25 @@ ts/packages/ui/
 │   ├── theme.css         # @theme（Tailwind v4 トークン）+ 意味論的 CSS 変数（:root）
 │   │                     #   + Base UI 必須ベース（root isolation:isolate / body position:relative）
 │   ├── lib/utils.ts      # cn()（shadcn 標準ユーティリティ）
-│   └── components/       # shadcn(base) ベンダリング（基盤セット）
+│   └── components/       # shadcn(base) ベンダリング（基盤セット・13 部品）
 │       ├── button.tsx / card.tsx / badge.tsx / alert.tsx / spinner.tsx
 │       ├── field.tsx / input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx
-│       └── separator.tsx
+│       ├── separator.tsx / label.tsx
+│       └── heading.tsx    # 見出し（level 必須・size は独立上書き可。#48 の是正で追加）
 └── test/
+    ├── support/
+    │   ├── compile-app-css.ts   # アプリ条件／素の基準線コンパイル（ui-token-collision で切り出し）
+    │   └── token-scales.ts      # トークンスケール解析の純関数群（副作用なし）
     ├── theme-sync.test.ts    # theme.css の全 hex が design-tokens の値集合と一致することの検証
-    └── components.test.tsx   # 代表コンポーネントの a11y スモーク（role/キーボード/aria、jsdom）
+    ├── components.test.tsx   # 代表コンポーネントの a11y スモーク（role/キーボード/aria、jsdom）
+    ├── app-integration.test.ts # 3 面から追加実装なしで利用できることの実コンパイル検証（#48/#49 の恒久化）
+    ├── contrast-usage.test.ts  # アルファ合成色を含む実使用コントラストの検証（#50）
+    └── token-scales.test.ts    # 名前空間の越境衝突・角丸の段差・トークン対応（#54）
 ```
+
+> **部品数について（2026-08-02・ui-token-collision タスク 5.2 で是正）**: 本節と後述の Components 表は
+> 長らく 11 部品時点の記述のままドリフトしていた。実体は **13 部品**（上記に加え `label.tsx` と
+> `heading.tsx`）。`heading.tsx` は #48（Preflight による見出し階層の消失）の是正で追加されたもの。
 
 ### 各 Web アプリ（3 面共通パターン・パスはアプリごとに読み替え）
 
@@ -289,7 +300,7 @@ export declare const shadow: Readonly<Record<'sm'|'md'|'lg', string>>;
 
 | Field | Detail |
 |-------|--------|
-| Intent | shadcn(base=Base UI) をベンダリングした共通部品。Button / Card / Badge / Alert / Spinner / Field / Input / Textarea / Checkbox / RadioGroup / Separator |
+| Intent | shadcn(base=Base UI) をベンダリングした共通部品（13 部品）。Button / Card / Badge / Alert / Spinner / Field / Input / Textarea / Checkbox / RadioGroup / Separator / Label / Heading |
 | Requirements | 2.1, 2.2, 2.3, 2.4, 5.1 |
 
 **Responsibilities & Constraints**
@@ -297,6 +308,8 @@ export declare const shadow: Readonly<Record<'sm'|'md'|'lg', string>>;
 - フォーム系は shadcn の Field 規約（`FieldGroup`/`Field`/`data-invalid` + `aria-invalid` 同期）に従う — 視覚状態と支援技術状態の同期を部品契約として保証（2.3, 2.4）
 - スタイルは意味論クラス（`bg-primary` 等）のみ使用。生 hex・生色クラス（`bg-green-500` 等）の使用禁止はガードとレビューで強制
 - **ソース直配布**: `exports` が `./src/components/*.tsx` を直接指す。build script を持たない（Turbopack が自動トランスパイル）。`'use client'` は各コンポーネントファイル先頭に明記
+- **一括 export の入口（バレル）を設けない**（2026-08-02・ui-token-collision タスク 5.2 で理由を明文化）。`exports` は部品ごとの細粒度エントリのみを公開する。理由は 3 つ。(1) ソース直配布のためバレルを置くと、1 部品の import が全部品のトランスパイルを誘発し、消費側のビルド時間と client JS を無用に増やす。(2) 各部品は `'use client'` を持つため、バレル経由の import は未使用部品まで Client Component 境界へ引き込みうる。(3) 細粒度エントリは「どの面がどの部品を使っているか」を import 文だけで機械的に追える状態を保つ（本パッケージの検証群はこの追跡可能性に依存している）。
+- **暗色パレットは未定義のまま、部品には暗色向けクラスが残存している**（2026-08-02・ui-token-collision タスク 5.2 で記録）。ベンダリングした部品は `dark:bg-input/30` 等を含むが、`theme.css` は暗色の値を 1 つも定義していない。`@custom-variant dark (&:is(.dark *));` により `.dark` 祖先が無い限り一切適用されないため現状は無害だが、**暗色対応に着手する際の起点はこの `@custom-variant` の宣言と、`:root` の意味論変数に対応する `.dark` 側の定義を置くこと**である。パレットを定義する前に `.dark` を付けると、値の無い変数へ解決されて配色が崩れる。
 
 **Implementation Notes**
 - Integration: 各アプリの `@source "<相対>/packages/ui/src"` が className 検出の前提（欠落すると**ユーティリティが静かに生成されない** — 最重要の落とし穴）
