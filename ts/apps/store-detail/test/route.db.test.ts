@@ -1,10 +1,12 @@
 // app/api/detail/route.ts（Task 5.2）の DB テスト（実 postgres 必須）。
 //
-// 検証対象（task 5.2 の観察可能な完了条件）:
-//   - 有効トークン + 一意に解決可能な店舗 → 200 と正しい JSON
+// 検証対象（task 5.2 / task 5.4 の観察可能な完了条件）:
+//   - 有効トークン + 認可済み集合が1件 → 200 と正しい JSON（storeName / stores[] を含む）
 //   - 無効トークン → 401
 //   - 有効トークンだが店舗未特定（confirmed 店舗0件） → 404
-//   - 有効トークンだが AMBIGUOUS_STORE（confirmed 店舗が複数） → 404
+//   - 有効トークンかつ認可済み集合が複数 → 409 STORE_SELECTION_REQUIRED と候補一覧
+//   - ?storeId ヒントが集合内 → その店舗の 200
+//   - ?storeId ヒントが集合外・不正 UUID・空文字 → **未指定時と完全に同一の応答**（非オラクル）
 //   - route モジュールが GET 以外の HTTP メソッドを export しない（4.2 の構造的 no-write 保証）
 //
 // LINE の /oauth2/v2.1/verify はフェイク HTTP サーバー（node:http）でモックする
@@ -24,7 +26,7 @@ const AG = 'e8000000-0000-0000-0000-000000000002';
 
 const OWNER_VALID = 'e8000000-0000-0000-0000-000000000011'; // confirmed 店舗1件 → 200
 const OWNER_UNCONFIRMED = 'e8000000-0000-0000-0000-000000000012'; // confirmed 店舗0件 → 404
-const OWNER_MULTI = 'e8000000-0000-0000-0000-000000000013'; // confirmed 店舗2件 → 404 (AMBIGUOUS_STORE)
+const OWNER_MULTI = 'e8000000-0000-0000-0000-000000000013'; // confirmed 店舗2件 → 409 (要選択)
 
 const SUB_VALID = `U-${OWNER_VALID}`;
 const SUB_UNCONFIRMED = `U-${OWNER_UNCONFIRMED}`;
@@ -139,6 +141,14 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/detail (DB)', () => {
        VALUES ($1, $2, 'ready', 2, 4, '4.6', 120, 1, '[]'::jsonb)`,
       [ST_VALID, todayDateString()],
     );
+    // ヒントが「実際に効いている（先頭固定ではない）」ことを storeId だけでなくデータ内容でも
+    // 見分けられるよう、複数店舗オーナーの B 側にだけ識別可能なサマリーを入れる。
+    await pool.query(
+      `INSERT INTO daily_summaries
+         (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count, competitors)
+       VALUES ($1, $2, 'ready', 7, 9, '3.1', 42, 0, '[]'::jsonb)`,
+      [ST_MULTI_B, todayDateString()],
+    );
   });
 
   afterAll(async () => {
@@ -148,14 +158,24 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/detail (DB)', () => {
     process.env.LIFF_VERIFY_ENDPOINT = previousEnv.LIFF_VERIFY_ENDPOINT;
   });
 
-  async function callGet(authorization?: string): Promise<Response> {
+  /**
+   * `query` は `?` を含まない生のクエリ文字列（例: `storeId=xxx`）。未指定なら付けない。
+   * ヒントの有無で応答が変わらないことを deep-equal で比較するため、同一ヘルパから両方を呼ぶ。
+   */
+  async function callGet(authorization?: string, query?: string): Promise<Response> {
     const { GET } = await import('../app/api/detail/route.js');
     const headers = new Headers();
     if (authorization !== undefined) {
       headers.set('Authorization', authorization);
     }
-    const request = new Request('http://127.0.0.1/api/detail', { method: 'GET', headers });
+    const url = query ? `http://127.0.0.1/api/detail?${query}` : 'http://127.0.0.1/api/detail';
+    const request = new Request(url, { method: 'GET', headers });
     return GET(request);
+  }
+
+  /** status と本文をまとめて比較可能な形にする（非オラクル性の deep-equal 用）。 */
+  async function snapshotOf(res: Response): Promise<{ status: number; body: unknown }> {
+    return { status: res.status, body: await res.json() };
   }
 
   it('有効トークン + 一意に解決可能な店舗 → 200 と自店データを返す', async () => {
@@ -164,6 +184,8 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/detail (DB)', () => {
 
     const body = (await res.json()) as {
       storeId: string;
+      storeName: string;
+      stores: { storeId: string; name: string }[];
       summary: { status: string; rank: number; rankTotal: number } | null;
       competitors: unknown[];
       trend: unknown[];
@@ -172,6 +194,11 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/detail (DB)', () => {
     expect(body.summary).toMatchObject({ status: 'ready', rank: 2, rankTotal: 4 });
     expect(Array.isArray(body.competitors)).toBe(true);
     expect(Array.isArray(body.trend)).toBe(true);
+
+    // 4.7: 表示中の店舗名。多店舗では「今どの店を見ているか」の唯一の手掛かりになる。
+    expect(body.storeName).toBe('route検証・確定済み店舗');
+    // 認可済み集合は自分の1店舗のみ（切替リンクの要否を画面が判断するために返す）。
+    expect(body.stores).toEqual([{ storeId: ST_VALID, name: 'route検証・確定済み店舗' }]);
   });
 
   it('無効トークン（LINE が 400 を返す）→ 401', async () => {
@@ -193,17 +220,115 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/detail (DB)', () => {
     expect(body.error.code).toBe('STORE_NOT_FOUND');
   });
 
-  it('有効トークンだが AMBIGUOUS_STORE（confirmed店舗が複数）→ 404（誤った店舗を返さない）', async () => {
+  it('有効トークンかつ confirmed 店舗が複数 → 409 と候補一覧（店舗を推測しない）', async () => {
     const res = await callGet(`Bearer ${TOKEN_MULTI}`);
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('STORE_NOT_FOUND');
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error: { code: string };
+      stores: { storeId: string; name: string }[];
+      summary?: unknown;
+      competitors?: unknown;
+      trend?: unknown;
+    };
+    expect(body.error.code).toBe('STORE_SELECTION_REQUIRED');
 
-    // 安全性: レスポンス本文に ST_MULTI_A/B のどちらの storeId も一切含まれない
-    // （どちらの店舗のデータも漏らさない）。
-    const raw = JSON.stringify(body);
-    expect(raw).not.toContain(ST_MULTI_A);
-    expect(raw).not.toContain(ST_MULTI_B);
+    // 候補は自分の店舗のみ・決定的な順序で返る。
+    expect(body.stores).toEqual([
+      { storeId: ST_MULTI_A, name: 'route検証・複数店舗A' },
+      { storeId: ST_MULTI_B, name: 'route検証・複数店舗B' },
+    ]);
+
+    // 安全性: 他オーナーの店舗は 1 件も漏れない（旧テストは自店舗の隠蔽のみを見ていたが、
+    // 候補一覧を返す設計では「他人の店舗が混ざらないこと」こそが本質的な保証になる）。
+    expect(JSON.stringify(body)).not.toContain(ST_VALID);
+
+    // 店舗を選ぶ前に詳細データを返してしまわない（＝どちらかを推測で表示していない）。
+    expect(body.summary).toBeUndefined();
+    expect(body.competitors).toBeUndefined();
+    expect(body.trend).toBeUndefined();
+  });
+
+  describe('?storeId ヒント（認可済み集合内でのみ有効）', () => {
+    it('集合内のヒント（A）→ 200 でその店舗を返す', async () => {
+      const res = await callGet(`Bearer ${TOKEN_MULTI}`, `storeId=${ST_MULTI_A}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        storeId: string;
+        storeName: string;
+        stores: { storeId: string }[];
+        summary: unknown;
+      };
+      expect(body.storeId).toBe(ST_MULTI_A);
+      expect(body.storeName).toBe('route検証・複数店舗A');
+      expect(body.stores).toHaveLength(2);
+      // A には当日サマリーを入れていないので null（B と取り違えていないことの傍証）。
+      expect(body.summary).toBeNull();
+    });
+
+    it('集合内のヒント（B）→ 200 で B のデータを返す（先頭固定ではない）', async () => {
+      const res = await callGet(`Bearer ${TOKEN_MULTI}`, `storeId=${ST_MULTI_B}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        storeId: string;
+        storeName: string;
+        summary: { rank: number; rankTotal: number } | null;
+      };
+      expect(body.storeId).toBe(ST_MULTI_B);
+      expect(body.storeName).toBe('route検証・複数店舗B');
+      // B 固有のサマリー。ヒントが実際にデータ取得先を決めていることの直接証拠。
+      expect(body.summary).toMatchObject({ rank: 7, rankTotal: 9 });
+    });
+
+    it('集合外の「実在する」他オーナーの storeId → 未指定時と完全に同一の応答（非オラクル）', async () => {
+      // 本テストが本 Issue のセキュリティ中核。ヒントは集合の境界を広げられないだけでなく、
+      // 「その storeId が実在するか否か」すらクライアントに観測させない。
+      const withHint = await snapshotOf(await callGet(`Bearer ${TOKEN_MULTI}`, `storeId=${ST_VALID}`));
+      const withoutHint = await snapshotOf(await callGet(`Bearer ${TOKEN_MULTI}`));
+
+      expect(withHint).toEqual(withoutHint);
+      expect(withHint.status).toBe(409);
+    });
+
+    it('UUID として不正なヒント → 500 にならず未指定時と同一の応答（SQL へ到達しない）', async () => {
+      // ヒントを SQL に渡す実装だと pg の 22P02（invalid_text_representation）で 500 になる。
+      // selectAuthorizedStore が純関数であることの外形的な証拠。
+      const withoutHint = await snapshotOf(await callGet(`Bearer ${TOKEN_MULTI}`));
+
+      for (const hint of ['not-a-uuid', "'%20OR%201=1%20--", 'x'.repeat(500)]) {
+        const res = await callGet(`Bearer ${TOKEN_MULTI}`, `storeId=${hint}`);
+        expect(res.status).not.toBe(500);
+        expect(await snapshotOf(res)).toEqual(withoutHint);
+      }
+    });
+
+    it('空文字のヒント（?storeId=）→ 未指定時と同一の応答', async () => {
+      const withHint = await snapshotOf(await callGet(`Bearer ${TOKEN_MULTI}`, 'storeId='));
+      const withoutHint = await snapshotOf(await callGet(`Bearer ${TOKEN_MULTI}`));
+
+      expect(withHint).toEqual(withoutHint);
+    });
+
+    it('ヒントが重複指定された場合も決定的に最初の値を採る', async () => {
+      const res = await callGet(`Bearer ${TOKEN_MULTI}`, `storeId=${ST_MULTI_A}&storeId=${ST_MULTI_B}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { storeId: string };
+      expect(body.storeId).toBe(ST_MULTI_A);
+    });
+
+    it('認可済み集合が空なら、ヒントがあっても 404（ヒントは集合を作れない）', async () => {
+      const res = await callGet(`Bearer ${TOKEN_UNCONFIRMED}`, `storeId=${ST_MULTI_A}`);
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('STORE_NOT_FOUND');
+      expect(JSON.stringify(body)).not.toContain(ST_MULTI_A);
+    });
+
+    it('単店舗オーナーが自分の storeId をヒントに渡した場合も 200', async () => {
+      const res = await callGet(`Bearer ${TOKEN_VALID}`, `storeId=${ST_VALID}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { storeId: string };
+      expect(body.storeId).toBe(ST_VALID);
+    });
   });
 });
 
