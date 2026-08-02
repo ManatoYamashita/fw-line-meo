@@ -20,48 +20,12 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import postcss, { type AcceptedPlugin, type AtRule, type Rule } from 'postcss';
+import postcss, { type AtRule, type Rule } from 'postcss';
 import { describe, it, expect, beforeAll } from 'vitest';
-
-const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const uiSrcDir = join(uiRoot, 'src');
-const componentsDir = join(uiSrcDir, 'components');
-/** pnpm ワークスペースのルート（ts/）。 */
-const workspaceRoot = resolve(uiRoot, '..', '..');
-
-interface AppUnderTest {
-  /** package.json の name（エラーメッセージ用）。 */
-  readonly packageName: string;
-  /** アプリのルート（`next build` の cwd に相当）。 */
-  readonly dir: string;
-  /** アプリルートからの globals.css の相対パス（構成差＝@source の相対深度差の源）。 */
-  readonly globalsCssRelative: string;
-}
-
-/**
- * 検証対象の 3 面。globals.css の位置がアプリ構成で異なる（survey-web / dashboard-web は
- * `src/app/`、store-detail は `app/` 直下）ため、`@source` の相対深度も 4 階層 / 3 階層と異なる。
- * その差分こそが壊れやすい箇所なので、相対パス文字列を直接比較せず「解決先が uiSrcDir と一致するか」で
- * 検証する（構成変更に追従しつつ、間違った深度は確実に落とす）。
- */
-const APPS: readonly AppUnderTest[] = [
-  {
-    packageName: '@fwlm/survey-web',
-    dir: join(workspaceRoot, 'apps', 'survey-web'),
-    globalsCssRelative: join('src', 'app', 'globals.css'),
-  },
-  {
-    packageName: '@fwlm/store-detail',
-    dir: join(workspaceRoot, 'apps', 'store-detail'),
-    globalsCssRelative: join('app', 'globals.css'),
-  },
-  {
-    packageName: '@fwlm/dashboard-web',
-    dir: join(workspaceRoot, 'apps', 'dashboard-web'),
-    globalsCssRelative: join('src', 'app', 'globals.css'),
-  },
-];
+// アプリ定義とコンパイル手続きは support/compile-app-css.ts が単一の情報源として持つ
+// （ui-token-collision タスク 1.1 で切り出し。base をアプリディレクトリへ固定する条件を
+// 二重管理にしないため。同モジュール冒頭のコメント参照）。
+import { APPS, compileWithAppToolchain, componentsDir, uiSrcDir } from './support/compile-app-css';
 
 /**
  * 代表部品と、その部品にしか現れないユーティリティクラス。
@@ -200,27 +164,6 @@ function collectAppSourceFiles(dir: string): readonly string[] {
     }
   }
   return files;
-}
-
-/**
- * アプリ自身の Tailwind ツールチェーンで globals.css をコンパイルする。
- *
- * `next build` はアプリディレクトリを cwd として `@tailwindcss/postcss` を実行し、
- * プラグインはその cwd を自動ソース検出の起点（base）にする。ここでも base をアプリディレクトリへ
- * 明示することで同じ条件を再現する（base を取り違えるとリポジトリ全体が自動検出され、
- * `@source` が無くても部品が拾えてしまい検証が空振りする）。
- */
-async function compileWithAppToolchain(app: AppUnderTest, cssSource: string): Promise<string> {
-  const appRequire = createRequire(join(app.dir, 'noop.cjs'));
-  const pluginPath = appRequire.resolve('@tailwindcss/postcss');
-  const pluginModule = (await import(pathToFileURL(pluginPath).href)) as {
-    default: (options: { base: string; optimize: boolean }) => AcceptedPlugin;
-  };
-  const plugin = pluginModule.default({ base: app.dir, optimize: false });
-  const result = await postcss([plugin]).process(cssSource, {
-    from: join(app.dir, app.globalsCssRelative),
-  });
-  return result.css;
 }
 
 describe('代表部品のユーティリティは @fwlm/ui のみに由来する（検証前提の自己確認）', () => {

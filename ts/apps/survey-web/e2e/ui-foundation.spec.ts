@@ -596,8 +596,8 @@ async function expectVerificationSurfaceSane(page: Page): Promise<void> {
     width,
     `検証面の main の実幅が ${width}px しかない（端末幅 ${viewport.width}px）。` +
       'これは部品の欠陥ではなく検証面のレイアウトが壊れている状態で、この幅で測った' +
-      'タッチ操作領域は実態を表さない。コンテナ幅に名前付きスケール（max-w-md 等）を' +
-      '使うと --spacing-* のトークン上書きに巻き込まれて実幅 32px へ潰れる（Issue #54）',
+      'タッチ操作領域は実態を表さない。検証面のコンテナ幅の指定と、トークンスケールの' +
+      '解決先を検証する @fwlm/ui の token-scales を確認すること',
   ).toBeGreaterThanOrEqual(viewport.width * 0.8);
 }
 
