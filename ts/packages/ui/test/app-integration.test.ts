@@ -236,6 +236,106 @@ describe('代表部品のユーティリティは @fwlm/ui のみに由来する
   );
 });
 
+/**
+ * ダークモードが導入されていないことの機械検証（Requirements 6.6 / 5.7 の前提）。
+ *
+ * コントラスト検証ガード（contrast-usage.test.ts）は `dark:` を含む色指定を検出対象から
+ * 外している。要件 5.7 はこの除外を「Where ダークモード配色が導入されていない」という
+ * 条件節のもとでのみ許しており、前提が崩れれば除外は正当性を失う——それどころか、
+ * 未整備のダーク配色を**ガードが隠す**側へ反転する。theme.css の無効化宣言が消えれば
+ * 部品に現存する `dark:*` が一斉に有効化されるが、除外があるため CI は緑のまま通る。
+ *
+ * 以下はその前提そのものを固定する。除外を書いた場所（contrast-usage.test.ts）からは
+ * 本ブロックを参照している。
+ */
+describe('ダークモードが導入されていない（Requirements 6.6 / 5.7 の前提）', () => {
+  /**
+   * `dark:` を `.dark` 祖先セレクタへ再定義している宣言。
+   * Tailwind v4 の既定は `@media (prefers-color-scheme: dark)` であり、この宣言が
+   * 無ければ OS 設定だけでダーク配色が有効になる。
+   */
+  const DARK_VARIANT_DECLARATION = /@custom-variant\s+dark\s*\(\s*&:is\(\.dark\s+\*\)\s*\)\s*;/;
+
+  /**
+   * 「`.dark` 祖先クラスを要素へ付与している」痕跡。
+   *
+   * `dark` が**単独の語**として現れる箇所を探す。`className="dark"` や
+   * `classList.add('dark')` は捕らえ、`dark:bg-input/30` のようなバリアント接頭辞や
+   * `darker` のような別語は捕らえない（直後が `:` や英字なら一致しない）。
+   * 走査はスクリプトのみを対象とする。スタイルシートはセレクタを**定義**するだけで
+   * 付与はしないため、theme.css の宣言自身を誤検出しない。
+   */
+  const DARK_CLASS_APPLICATION = /(?:^|[\s"'`({[,])dark(?:[\s"'`)}\],;]|$)/;
+
+  /** 付与の有無を調べる対象。UI パッケージのソースと、それを使う 3 面すべて。 */
+  const applicationScanRoots: readonly string[] = [uiSrcDir, ...APPS.map((app) => app.dir)];
+
+  const scriptFiles = applicationScanRoots.flatMap((root) =>
+    collectAppSourceFiles(root).filter((file) => !file.endsWith('.css')),
+  );
+
+  it('theme.css が dark バリアントを .dark 祖先へ再定義している', () => {
+    const themeCss = readFileSync(join(uiSrcDir, 'theme.css'), 'utf8');
+    expect(
+      DARK_VARIANT_DECLARATION.test(themeCss),
+      'theme.css の dark バリアント無効化宣言が見つかりません。これが無いと OS が ' +
+        'ダークの端末で部品の dark:* が一斉に有効化されますが、コントラスト検証ガードは ' +
+        'それらを検出対象から外しているため CI は緑のまま通ります（要件 6.6 / 5.7 の前提）',
+    ).toBe(true);
+  });
+
+  it('宣言の検出パターンが空振りしていない（宣言を除いた入力では一致しない）', () => {
+    // 上の検証が「どんな入力でも真」になっていないことの対照。
+    const themeCss = readFileSync(join(uiSrcDir, 'theme.css'), 'utf8');
+    expect(
+      DARK_VARIANT_DECLARATION.test(themeCss.replace(DARK_VARIANT_DECLARATION, '')),
+      '宣言を取り除いても検出パターンが一致します。検出方法が壊れています',
+    ).toBe(false);
+  });
+
+  it('走査対象のソースを読めている（空振り緑の防止）', () => {
+    expect(
+      scriptFiles.length,
+      'スクリプトソースが 1 件も見つかりません。付与箇所の検証は対象ゼロでは何も守れません',
+    ).toBeGreaterThan(0);
+  });
+
+  it('.dark 祖先クラスを付与している箇所が存在しない', () => {
+    const offenders = scriptFiles.filter((file) =>
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .some((line) => DARK_CLASS_APPLICATION.test(line)),
+    );
+    expect(
+      offenders,
+      `.dark 祖先クラスを付与している箇所があります: ${offenders.join(' / ')}。` +
+        'ダークモードを導入するなら、コントラスト検証ガードの dark: 除外を外し、' +
+        'ダーク下地での実効コントラストを検証してください（要件 5.7）',
+    ).toEqual([]);
+  });
+
+  it('付与の検出器が実際の付与を捕らえ、バリアント接頭辞は捕らえない', () => {
+    // 上の検証が「何も検出できないから緑」になっていないことの対照。
+    for (const applied of [
+      '<html lang="ja" className="dark">',
+      "document.documentElement.classList.add('dark')",
+      'el.classList.toggle("dark", enabled)',
+    ]) {
+      expect(DARK_CLASS_APPLICATION.test(applied), `付与を見逃しています: ${applied}`).toBe(true);
+    }
+    for (const notApplied of [
+      'className="dark:bg-input/30 dark:border-input"',
+      'const darker = value < threshold',
+      "if (rawToken.includes('dark:')) continue;",
+    ]) {
+      expect(
+        DARK_CLASS_APPLICATION.test(notApplied),
+        `付与でないものを誤検出しています: ${notApplied}`,
+      ).toBe(false);
+    }
+  });
+});
+
 describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用できる（Requirements 2.2）', (app) => {
   const globalsCssPath = join(app.dir, app.globalsCssRelative);
 
@@ -562,6 +662,66 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
           'base レイヤの規則は @layer utilities の animate-* / transition-* に詳細度と無関係に' +
           '負けるため、important が無いと抑制は一切効きません（無言で機能しなくなります）',
       ).toEqual([]);
+    });
+  });
+
+  /**
+   * ダークモードの無効化が、実際にコンパイルされた CSS で成立していることの証明
+   * （Requirements 6.6 / 5.7 の前提）。
+   *
+   * 宣言が theme.css にあることは前段の describe が固定している。ここでは「宣言が実際に
+   * 効いて、部品の dark:* が OS 設定ではなく祖先クラスに閉じ込められているか」を、
+   * アプリ自身のツールチェーンで生成した CSS に対して確かめる。
+   */
+  describe('7. ダークモードの無効化（Requirements 6.6 / 5.7 の前提）', () => {
+    const globalsCss = readFileSync(globalsCssPath, 'utf8');
+    /** Tailwind v4 の既定。宣言が無ければ dark:* はこの形へ展開される。 */
+    const PREFERS_DARK = 'prefers-color-scheme: dark';
+    /** 無効化宣言が効いているときの形。`.dark` 祖先が無い限り適用されない。 */
+    const DARK_ANCESTOR = ':is(.dark *)';
+
+    let compiled = '';
+    let compiledWithDefaultDarkVariant = '';
+
+    beforeAll(async () => {
+      compiled = await compileWithAppToolchain(app, globalsCss);
+      // 否定系用: 後勝ちで既定のメディアクエリ形へ戻し、「無効化しなかった場合」を再現する。
+      compiledWithDefaultDarkVariant = await compileWithAppToolchain(
+        app,
+        `${globalsCss}\n@custom-variant dark (@media (${PREFERS_DARK}));\n`,
+      );
+    });
+
+    it('OS のダーク設定だけで有効になる規則が生成されない', () => {
+      expect(
+        compiled.includes(PREFERS_DARK),
+        `生成 CSS に ${PREFERS_DARK} が現れています。部品の dark:* が OS 設定だけで ` +
+          '有効になり、未整備のダーク配色が利用者に出ます。しかもコントラスト検証ガードは ' +
+          'dark: を検出対象から外しているため、この破綻は静的検証では捕捉できません',
+      ).toBe(false);
+    });
+
+    it('dark:* が祖先クラス依存の形で生成されている（無効化が空振りでない証明）', () => {
+      // 前の検証は「dark:* が 1 つも生成されていない」場合にも緑になる。部品に現存する
+      // dark:* が実際に生成され、かつ祖先クラスに閉じ込められていることをここで固定する。
+      expect(
+        compiled.includes(DARK_ANCESTOR),
+        `生成 CSS に ${DARK_ANCESTOR} が現れません。dark:* が 1 つも生成されていない場合、` +
+          '前の検証は対象ゼロで緑になり何も守っていません',
+      ).toBe(true);
+    });
+
+    it('既定のバリアント定義へ戻すと OS 設定で有効になる（検出が空振りでない証明）', () => {
+      // 上の 2 つが「そもそも検出できないから緑」になっていないことの対照。
+      expect(
+        compiledWithDefaultDarkVariant.includes(PREFERS_DARK),
+        `既定のバリアント定義へ戻しても ${PREFERS_DARK} を検出できません。検出方法が壊れています`,
+      ).toBe(true);
+      expect(
+        compiledWithDefaultDarkVariant.includes(DARK_ANCESTOR),
+        `既定のバリアント定義へ戻したのに ${DARK_ANCESTOR} が残っています。` +
+          '上書きが効いておらず、対照実験が成立していません',
+      ).toBe(false);
     });
   });
 });
