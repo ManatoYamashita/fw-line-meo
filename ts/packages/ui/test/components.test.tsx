@@ -268,6 +268,103 @@ describe('Field — ラベル関連付けと data-invalid / aria-invalid の同�
   });
 });
 
+describe('FieldLabel — 選択状態の視覚表現（Requirements 2.1, 2.3 / design.md D3）', () => {
+  /**
+   * ダーク専用（`dark:` 付き）の指定を落としたクラス列を返す。
+   *
+   * ダークモードは導入しない（要件 6.6）ため、ダーク用の選択枠は不透明度付きのまま
+   * 据え置かれており、同じ className 文字列の中に同居している。これを含めたまま
+   * 「不透明度が付いていない」を素朴な部分一致で判定すると、実装が正しくても常に落ちる。
+   */
+  function lightVariantClasses(element: Element): readonly string[] {
+    return classesOf(element)
+      .split(/\s+/)
+      .filter((token) => token !== '' && !token.includes('dark:'));
+  }
+
+  /** 選択状態を示す色指定（枠・面塗り）。先頭の variant 連鎖は残したまま拾う。 */
+  const SELECTION_COLOR = /(?:^|:)(?:border|bg)-primary(?:\/\d{1,3})?$/;
+  /** 選択枠に不透明度が付いた形。design.md D3 が撤去した指定がこれに当たる。 */
+  const SELECTION_BORDER_WITH_ALPHA = /(?:^|:)border-primary\/\d{1,3}$/;
+  /** 選択状態への束縛。これが無い色指定は未選択の選択肢にも当たってしまう。 */
+  const CHECKED_BINDING = /^has-data-checked:/;
+
+  function renderLabel(): Element {
+    render(<FieldLabel htmlFor="taste">味に満足した</FieldLabel>);
+    return screen.getByText('味に満足した');
+  }
+
+  it('選択枠は不透明度なしで宣言される（Requirements 2.1）', () => {
+    const tokens = lightVariantClasses(renderLabel());
+
+    expect(
+      tokens.filter((token) => SELECTION_BORDER_WITH_ALPHA.test(token)),
+      '選択枠に不透明度が付いています。合成後の実効色が SC 1.4.11 の 3:1 を割ります' +
+        '（Issue #50 型の再発。数値の検証は contrast-usage.test.ts が担う）',
+    ).toEqual([]);
+    // チェックボックス・ラジオの選択枠と同じ語彙へ揃える（design.md D3）。
+    expect(
+      tokens,
+      '選択枠が不透明度なしで宣言されていない（checkbox / radio-group の選択枠と語彙が揃わない）',
+    ).toContain('has-data-checked:border-primary');
+  });
+
+  it('選択状態の色指定は選択時にのみ適用される（Requirements 2.3）', () => {
+    const tokens = lightVariantClasses(renderLabel());
+    const selectionColors = tokens.filter((token) => SELECTION_COLOR.test(token));
+
+    expect(
+      selectionColors.length,
+      '選択状態を示す色指定が 1 つも無い（選択済みが未選択と区別できない）',
+    ).toBeGreaterThan(0);
+    for (const token of selectionColors) {
+      expect(
+        token,
+        `${token} が選択状態へ束縛されていません。未選択の選択肢にも選択色が当たります`,
+      ).toMatch(CHECKED_BINDING);
+    }
+  });
+
+  it('選択枠が依拠する条件は、選択時にのみ成立する（Requirements 2.3）', async () => {
+    // has-data-checked: は「data-checked を持つ子孫がいる」ことを条件にする。jsdom は
+    // Tailwind を解決しないため色そのものは見えないが、**条件が状態と連動していること**は
+    // DOM で確かめられる。条件が常に成立／常に不成立なら選択状態の表示は機能しない。
+    const user = userEvent.setup();
+    const { container } = render(
+      <FieldLabel>
+        <Checkbox name="taste" />
+        味に満足した
+      </FieldLabel>,
+    );
+
+    const label = container.querySelector('[data-slot="field-label"]');
+    expect(label).not.toBeNull();
+    expect(
+      label!.querySelector('[data-checked]'),
+      '未選択の時点で選択状態の条件が成立している（選択色が常時当たる）',
+    ).toBeNull();
+
+    await user.tab();
+    await user.keyboard(' ');
+
+    expect(screen.getByRole('checkbox').getAttribute('aria-checked')).toBe('true');
+    expect(
+      label!.querySelector('[data-checked]'),
+      '選択したのに選択状態の条件が成立していない（選択色が出ない）',
+    ).not.toBeNull();
+
+    // 要件 2.3 は「選択状態から未選択状態へ戻った」ときに視覚情報を取り下げることを課す。
+    // 往路だけでは、条件が一度成立したまま戻らない実装を見逃す。
+    await user.keyboard(' ');
+
+    expect(screen.getByRole('checkbox').getAttribute('aria-checked')).toBe('false');
+    expect(
+      label!.querySelector('[data-checked]'),
+      '未選択へ戻したのに選択状態の条件が成立したまま（選択色が残る）',
+    ).toBeNull();
+  });
+});
+
 describe('Alert — 通知（成功 / エラー）の役割と変種（Requirements 2.1, 2.3, 5.1）', () => {
   it('alert ロールで通知され、見出しと本文が読み上げ対象になる', () => {
     render(

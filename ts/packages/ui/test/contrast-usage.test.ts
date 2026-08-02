@@ -178,17 +178,6 @@ const USAGE_PAIRS: readonly UsagePair[] = [
     surfaceAlpha: 0.05,
     kind: 'text',
   },
-  {
-    // 選択状態を示す唯一の輪郭であり、SC 1.4.11 の非テキスト 3:1 が掛かる（Requirements 2.1）。
-    // 枠は面塗りではなく「線」なので下地の上へ載る前景として合成する（foregroundAlpha）。
-    // 識別すべき相手は隣接する頁背景であり、内側の面塗りではない（design.md D3 / 要件 2.1）。
-    utility: 'border-primary/30',
-    source: 'field.tsx FieldLabel（has-data-checked の選択枠）',
-    foreground: 'primary',
-    foregroundAlpha: 0.3,
-    surface: 'background',
-    kind: 'non-text',
-  },
 
   // --- 非テキスト（SC 1.4.11・3:1）: 部品の存在と状態を識別させる色使用 ---------------
   // いずれも「利用者が部品を見つけ、状態を読み取る」ための視覚情報であり、装飾ではない
@@ -222,8 +211,13 @@ const USAGE_PAIRS: readonly UsagePair[] = [
   {
     // 選択済みであることを示す枠。面塗りと印も同時に出るが、いずれも状態表示であり
     // 「選択済みを未選択から区別する」情報を担うため 3:1 を掛ける（要件 2.1）。
+    // 識別すべき相手は隣接する頁背景であって、内側の面塗りではない（design.md D3 / 要件 2.1）。
+    // FieldLabel の選択枠は不透明度を撤去してこの指定へ合流した。チェックボックス・ラジオと
+    // 語彙が一致し、アルファ合成を挟まないぶん検証も単純になる（design.md D3）。
     utility: 'border-primary',
-    source: 'checkbox.tsx / radio-group.tsx（data-checked の選択枠）',
+    source:
+      'checkbox.tsx / radio-group.tsx（data-checked の選択枠）・' +
+      'field.tsx FieldLabel（has-data-checked の選択枠）',
     foreground: 'primary',
     surface: 'background',
     kind: 'non-text',
