@@ -21,12 +21,22 @@
 //     前提条件であり、これはコード側では担保できないインフラ/運用上の制約である
 //     （research.md Open Questions 参照）。
 //
-// Security-critical な設計上の制約:
-//   resolveOwnerStore / authorizeStoreDetailRequest は、クライアントが制御しうる識別子
-//   （storeId・ownerId 等）をパラメータとして一切受け取らない。店舗解決の唯一の入力は
-//   verifyLiffIdToken が返す検証済み sub のみである。これは型システムで構造的に強制されており
-//   （test/liff-auth.test.ts の型レベル検証を参照）、実装者が誤って `resolveOwnerStore(pool, sub,
-//   storeId)` のような抜け道を追加すればコンパイルが失敗する。
+// Security-critical な設計上の制約（design.md「クライアント入力の不変条件」・Issue #61 で再定義）:
+//   認可主体（誰か）は検証済み sub のみが決める。クライアント由来の識別子は、sub から導いた
+//   「認可済み集合」の内部での絞り込みにのみ使用でき、集合の境界を広げる入力としては使えない。
+//   集合外の値は無視し、未指定時と完全に同一の応答を返す（非オラクル）。
+//
+//   これを構造で担保するため、責務を 2 つに分離している:
+//     listOwnerConfirmedStores(pool, sub)  — 集合の生成。入力は検証済み sub のみ
+//     selectAuthorizedStore(stores, hint)  — 集合内の選択。pool を受け取らない純関数であり、
+//                                            型シグネチャ上、入力配列の要素しか返せない
+//   後者が DB に触れないため、クライアント由来のヒントは SQL に一切到達しない。これは
+//   IDOR の構造的排除に加え、不正 UUID による pg 22P02（→ 500）も同時に不可能にする。
+//
+//   ⚠️ test/liff-auth.test.ts の型レベル検証は、tsconfig.json の exclude に "test" が含まれる
+//      ため tsc / next build のいずれでも検査されない（実測済み・別 Issue で是正予定）。
+//      実効ガードは同ファイルの arity チェックと純関数の振る舞いテスト、および
+//      test/route.db.test.ts の非オラクル deep-equal である。
 
 import type { Queryable, Result, StoreRow } from '@fwlm/db';
 
@@ -107,36 +117,37 @@ export async function verifyLiffIdToken(
   return { ok: true, value: parsed.sub };
 }
 
-// --- Step 2: 検証済み sub からの自店解決 -----------------------------------------------
+// --- Step 2: 検証済み sub からの「認可済み集合」の生成 -----------------------------------
 
 /**
- * resolveOwnerStore が失敗として返しうる理由。
+ * listOwnerConfirmedStores が失敗として返しうる理由。
  *
  * four-tier-data-model の確定仕様により 1 オーナーは複数店舗を持ちうる（1:N。
  * db/migrations/0001_four_tier_baseline.sql の stores に owner_id 側の UNIQUE 制約は無い）。
- * sub のみを入力とする本関数は複数の confirmed 店舗を一意に絞り込む手段を持たないため、
- * 2 件以上の confirmed 店舗が見つかった場合は誤った店舗を推測で返さず AMBIGUOUS_STORE とする
- * （安全側の失敗。task 5.2 はこれを 404 相当として扱う想定）。
+ * 本関数は集合をそのまま返すため、複数店舗は失敗ではない（Issue #61 以前に存在した
+ * AMBIGUOUS_STORE は廃止。表示対象が決まらない場合の扱いは呼出元＝ルートの責務）。
  */
 export type StoreResolutionError =
   /** sub に一致する owner が存在しない。 */
   | 'OWNER_NOT_FOUND'
   /** owner は存在するが、place_status='confirmed' の店舗が 1 件も無い（オンボーディング未完了）。 */
-  | 'STORE_NOT_IDENTIFIED'
-  /** owner に confirmed 店舗が複数あり、sub のみでは自店を一意に決定できない（1:N の実例）。 */
-  | 'AMBIGUOUS_STORE';
+  | 'STORE_NOT_IDENTIFIED';
 
 /**
- * 検証済み `sub` から自店（`stores` 行）を解決する。
+ * 検証済み `sub` が所有する confirmed 店舗の集合（＝認可済み集合）を返す。
  *
  * Security-critical: この関数のシグネチャは `(pool, sub: string)` の 2 引数のみを受け付ける。
- * `storeId`・`ownerId` 等、クライアント制御可能な識別子を受け取るパラメータは存在しない
- * （design.md「storeId を URL・リクエストボディから受けない」の構造的担保）。
+ * `storeId`・`ownerId` 等、クライアント制御可能な識別子を受け取るパラメータは存在しない。
+ * 集合の境界は常に sub のみが決め、クライアント入力が境界を広げることはできない。
+ *
+ * 並び順は `created_at ASC, id ASC`。`created_at` の既定値 `now()` は**トランザクション開始
+ * 時刻**であり、複数店舗を 1 トランザクションで登録すると同値になりうるため、`id` を
+ * tiebreaker に置いて呼出ごとの順序揺れ（＝選択リストの並び替わり）を防ぐ。
  */
-export async function resolveOwnerStore(
+export async function listOwnerConfirmedStores(
   pool: Queryable,
   sub: string,
-): Promise<Result<StoreRow, StoreResolutionError>> {
+): Promise<Result<readonly StoreRow[], StoreResolutionError>> {
   const ownerRes = await pool.query<{ id: string }>('SELECT id FROM owners WHERE line_user_id = $1', [
     sub,
   ]);
@@ -149,30 +160,57 @@ export async function resolveOwnerStore(
     `SELECT id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at
        FROM stores
       WHERE owner_id = $1 AND place_status = 'confirmed'
-      ORDER BY created_at ASC`,
+      ORDER BY created_at ASC, id ASC`,
     [ownerRow.id],
   );
 
   if (storeRes.rows.length === 0) {
     return { ok: false, error: 'STORE_NOT_IDENTIFIED' };
   }
-  if (storeRes.rows.length > 1) {
-    return { ok: false, error: 'AMBIGUOUS_STORE' };
-  }
 
-  return { ok: true, value: storeRes.rows[0]! };
+  return { ok: true, value: storeRes.rows };
 }
 
-// --- 合成: token 検証 → 自店解決 の単一エントリポイント ---------------------------------
+// --- Step 2b: 認可済み集合の「内部での」絞り込み（純関数・DB に触れない） ------------------
+
+/**
+ * 認可済み集合 `stores` の中から、クライアント由来のヒント `requestedStoreId` に一致する
+ * 店舗を返す。一致しなければ `null`。
+ *
+ * Security-critical: 本関数は `Queryable` を受け取らない純関数であり、ヒントは SQL に一切
+ * 到達しない。型シグネチャ上、戻り値は必ず入力配列の要素であるため、集合外の店舗を返す実装は
+ * 物理的に書けない（IDOR の構造的排除）。副次的に、UUID として不正な文字列を渡されても
+ * pg の 22P02（invalid_text_representation）が発生しえず、500 に化けることもない。
+ *
+ * ヒントが `null`・空文字・集合外のいずれであっても一律 `null` を返す。呼出元はこれを
+ * 「未指定」と区別してはならない（design.md の非オラクル要件。集合外の値の存在有無を
+ * クライアントに観測させないため）。
+ */
+export function selectAuthorizedStore(
+  stores: readonly StoreRow[],
+  requestedStoreId: string | null,
+): StoreRow | null {
+  if (!requestedStoreId) {
+    return null;
+  }
+  return stores.find((store) => store.id === requestedStoreId) ?? null;
+}
+
+// --- 合成: token 検証 → 認可済み集合の生成 の単一エントリポイント -------------------------
 
 /** authorizeStoreDetailRequest が返しうる失敗理由（検証エラー・解決エラーの和集合）。 */
 export type StoreDetailAuthorizationError = LiffTokenVerificationError | StoreResolutionError;
 
 /**
- * task 5.2（読取 API ルート）が使う単一のエントリポイント。
- * 「ID トークン検証 → sub → 自店解決」を一気通貫で行い、クライアントから受け取るのは
+ * 読取 API ルートが使う単一のエントリポイント。
+ * 「ID トークン検証 → sub → 認可済み集合の生成」を一気通貫で行い、クライアントから受け取るのは
  * `idToken`（Authorization ヘッダ由来）のみとする。`clientId` はサーバー環境設定
  * （LIFF チャネル ID）であり、`pool` は DB 接続。ここでも storeId 等は一切受け取らない。
+ *
+ * 表示対象の絞り込み（クライアント由来のヒントの適用）は意図的に本関数の外に置き、
+ * `selectAuthorizedStore` に分離している。「認可（集合の決定）」と「選択（集合内の絞り込み）」を
+ * 混ぜないことが不変条件の担保そのものであり、`options` にクライアント制御可能な識別子を
+ * 追加することは禁止する（arity チェックでは検出できない唯一の抜け道のため）。
  *
  * 検証が失敗した場合は DB へ問い合わせない（無効トークンで owner 解決に進まないことを保証する
  * ショートサーキット）。
@@ -182,10 +220,10 @@ export async function authorizeStoreDetailRequest(
   clientId: string,
   pool: Queryable,
   options: LiffAuthOptions = {},
-): Promise<Result<StoreRow, StoreDetailAuthorizationError>> {
+): Promise<Result<readonly StoreRow[], StoreDetailAuthorizationError>> {
   const verifyResult = await verifyLiffIdToken(idToken, clientId, options);
   if (!verifyResult.ok) {
     return verifyResult;
   }
-  return resolveOwnerStore(pool, verifyResult.value);
+  return listOwnerConfirmedStores(pool, verifyResult.value);
 }

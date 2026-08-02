@@ -17,15 +17,12 @@
 //   StoreDetailAuthorizationError = LiffTokenVerificationError | StoreResolutionError
 //     - LiffTokenVerificationError（'INVALID_TOKEN' | 'VERIFY_REQUEST_FAILED'）
 //       = トークン自体の検証失敗 → 401
-//     - StoreResolutionError（'OWNER_NOT_FOUND' | 'STORE_NOT_IDENTIFIED' | 'AMBIGUOUS_STORE'）
-//       = 検証済みトークンだが自店を一意に解決できない → 404
-//   design.md の API Contract は 404 の理由として「店舗未特定・または AMBIGUOUS_STORE」の
-//   2 種類のみを明記するが、OWNER_NOT_FOUND（sub に一致する owner が存在しない）も同じ
-//   「storeId を一意に解決できない」という性質のエラーであり、401（トークン自体は正当）と
-//   混同すべきではない。加えて OWNER_NOT_FOUND のみ 401 に倒すと「この sub は owner として
-//   未登録である」という情報をクライアントに区別可能な形で漏らすことになり、design.md
-//   「誤った店舗の情報を返さないことを優先する」の安全側方針に反する。よって
-//   StoreResolutionError の 3 値はすべて 404 として扱う（区別しない）。
+//     - StoreResolutionError（'OWNER_NOT_FOUND' | 'STORE_NOT_IDENTIFIED'）
+//       = 検証済みトークンだが認可済み集合が空 → 404
+//   OWNER_NOT_FOUND（sub に一致する owner が存在しない）も同じ「表示できる店舗が無い」という
+//   性質のエラーであり、401（トークン自体は正当）と混同すべきではない。加えて
+//   OWNER_NOT_FOUND のみ 401 に倒すと「この sub は owner として未登録である」という情報を
+//   クライアントに区別可能な形で漏らすことになる。よって 2 値とも 404 として扱う（区別しない）。
 //
 // 構造的な no-write 保証（4.2）: 本モジュールは GET のみを export する。Next.js App Router の
 // 規約上、POST/PUT/DELETE/PATCH を export すればそのメソッドが定義されてしまうため、
@@ -124,12 +121,19 @@ export async function GET(req: Request): Promise<Response> {
     if (isTokenVerificationFailure(authResult.error)) {
       return jsonError(401, 'UNAUTHORIZED', '認証に失敗しました');
     }
-    // STORE_NOT_IDENTIFIED | AMBIGUOUS_STORE | OWNER_NOT_FOUND — 上部コメント参照。
+    // STORE_NOT_IDENTIFIED | OWNER_NOT_FOUND — 上部コメント参照。
+    return jsonError(404, 'STORE_NOT_FOUND', '店舗情報が見つかりません');
+  }
+
+  const stores = authResult.value;
+  if (stores.length !== 1) {
+    // 中間状態（Issue #61）: 認可層のリファクタと外部挙動の変更を混ぜないため、複数店舗は
+    // ここでは従来どおり 404 のままとする。409 での候補一覧返却は後続コミットで実装する。
     return jsonError(404, 'STORE_NOT_FOUND', '店舗情報が見つかりません');
   }
 
   try {
-    const detail = await queryStoreDetail(pool, authResult.value.id);
+    const detail = await queryStoreDetail(pool, stores[0]!.id);
     return jsonOk(detail);
   } catch (err) {
     console.error(JSON.stringify({ event: 'store-detail.query_error', error: errorMessageOf(err) }));
