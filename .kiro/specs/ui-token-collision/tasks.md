@@ -114,7 +114,7 @@
 
 - [ ] 5. Validation: 非後退の確認と記録
 
-- [ ] 5.1 既存の品質が後退していないことを確認する
+- [x] 5.1 既存の品質が後退していないことを確認する
   - lint / build / typecheck / 全パッケージのテスト / バンドル予算 / E2E を通す
   - 見出しの視覚階層・可視フォーカス表示・動き低減設定下の抑制・色のコントラストの既存検証が緑であることを確認する
   - 部品ソースが 1 文字も変更されていないことを差分で確認する
@@ -187,6 +187,15 @@
   **Button（0.5rem）< Card（0.75rem）** となり視覚階層が復活した。`--spacing-md` は生成 CSS から消えている。
 - **[3.2 実測・小寸法の押しボタン]** `min(var(--radius-md), 10px)` の到達値が **8px → 6px** に変わった（`--radius-md` が 0.5rem → 0.375rem のため）。要件 3.2（各段が相異なる）がある以上、8px を維持する選択肢は存在しない（維持すると `rounded-md` が `rounded-lg` と同値になる）。
 - **[3.2 実測・生成 CSS サイズ]** 是正前 41,706 B raw / 7,519 B gzip → 是正後 **41,669 B raw / 7,508 B gzip**（−37 B raw / −11 B gzip）。**設計時に記載していた「47,096 → 47,043 B」はプローブを 19 件注入した探索用スクリプトの出力**であり本番入力の値ではなかった。design.md を実測値へ差し替えた。サイズの比較は必ず同一方法で行うこと。
+
+- **[5.1 前提] `pnpm -C ts run typecheck` は全面ビルドの後に走らせる。** ビルド前に実行すると `packages/store-identification` が `Property 'query' does not exist on type 'TransactionClient'` で失敗する。`@fwlm/db` が dist 配布であり、未ビルドだと型が解決できないため（実装の欠陥ではない）。`pnpm -C ts run build` 後は緑。
+- **[5.1 非後退の実測]**
+  - `pnpm -C ts run lint` 緑 / `pnpm -C ts run build` 緑（3 面すべて）/ `pnpm -C ts run typecheck` 緑
+  - `pnpm -C ts -r test`: **845 件緑・178 件 skip**（skip は `DATABASE_URL` 未設定の DB テスト。CI が供給する）。`packages/ui` は **269 件緑**（着手時のベースライン 193 件 + 新設 76 件）
+  - `perf:budget`: client JS **213.6 KB gzip / 予算 300.0 KB**
+  - `check-design-tokens.sh` 緑 / `check-typecheck-coverage.sh` 緑
+  - **部品ソースの差分 0 件**（`git diff --stat <spec 起点> -- ts/packages/ui/src/components/` が空）
+- **[5.1 E2E の扱い]** `playwright.config.ts` が「CI 実行を前提・ローカルは `--list` のサニティのみ」と明記している。ローカルでは `playwright test --list` が緑（20 tests / 2 files）であることまでを確認した。**E2E 本体は CI 判定であり、ローカルで通したとは言えない。** 検証面の実効は生成 CSS の実測（回避用ユーティリティの消失・`max-w-md` が既定のコンテナ寸法へ解決）で裏を取っている。
 
 ## 留意事項
 
