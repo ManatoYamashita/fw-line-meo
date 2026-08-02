@@ -2,6 +2,7 @@ import { getPool, findStoreForSurvey, listSurveyAspects, incrementTallies } from
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
+import { writeStructuredLog } from '../../../lib/structured-log';
 import { handleResponses, type ResponsesDeps } from './handler';
 
 // pg / @google/genai を使うため Node ランタイム・動的（POST）。
@@ -27,10 +28,7 @@ async function buildDeps(): Promise<ResponsesDeps> {
       await incrementTallies(await getPool(), input);
     },
     clientKey: (req) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown',
-    log: (level, event) => {
-      // 自由記述・下書き本文はログに出さない（イベント名のみ）。
-      console[level](JSON.stringify({ level, event }));
-    },
+    log: writeStructuredLog,
   };
 }
 
