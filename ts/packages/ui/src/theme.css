@@ -26,7 +26,13 @@
   --color-background: #FFFFFF;
   --color-destructive: #B91C1C;
   --color-destructive-foreground: #FFFFFF;
+  /* 枠色は「部品の識別に必要な枠」と「情報を持たない純装飾の罫線」で意味役割が分かれる。
+   * --color-border は後者（区切り線・カード罫線・情報コンテナ外枠）で、SC 1.4.11 の対象外。
+   * --color-border-interactive は前者（フォーム入力部品と対話的部品の輪郭）で 3:1 が要る。
+   * 後者は var() 参照専用であり、border-border-interactive のようなユーティリティとしては
+   * 使わない（Tailwind は要求されたユーティリティのみ生成するため未使用の名前は生成されない）。 */
   --color-border: #DDDDDD;
+  --color-border-interactive: #767676;
 
   /* Typography（design-tokens typography） */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN",
@@ -100,7 +106,16 @@
    * （Requirements 2.1, 5.2 / test/theme-sync.test.ts が対応付けを機械固定する）。 */
   --success: var(--color-primary);
   --border: var(--color-border);
-  --input: var(--color-border);
+  /* フォーム入力部品と対話的部品の輪郭の色（識別用・SC 1.4.11 の 3:1 対象）。
+   * 上の --border（純装飾の罫線）とは別の意味役割であり、値も別の役割トークンから供給される。
+   * 識別可能性を理由に装飾用の値を変えてはならない（Requirements 1.1, 1.2, 4.1, 4.2 /
+   * design.md「ui / theme.css 層 — 意味論変数割当」）。
+   * 既知の制約: shadcn 由来の構造として、この変数は無効化状態の面塗りからも参照されている。
+   * 本 spec はこの変数を「枠色の役割」として確定させ、面塗り用途は現状のまま残す。枠色が
+   * 濃くなることで無効化時の面塗りも濃くなるが、これは意図された変更として design.md D8 に
+   * 記録済み（WCAG は無効化部品を対象外とし、無効化がより明確に見えることは改善である）。
+   * ダークモードを導入する際は、この二重用途を必ず再設計すること。 */
+  --input: var(--color-border-interactive);
   --ring: var(--color-primary);
   --radius: var(--radius-md);
 }

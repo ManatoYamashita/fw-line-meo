@@ -2,8 +2,8 @@
 // design.md Testing Strategy Unit 1「colors.test.ts」）。
 // - WCAG 2.1 の相対輝度とコントラスト比の定義を依存ゼロで自前実装し、Web 面のテキスト
 //   前景/背景ペア全てが通常文字の AA 基準（4.5:1 以上）を満たすことを数値で assert する。
-// - 対象外: brand・brandSubtle・border（装飾・面塗り・非テキスト用途）と lineColors
-//   （LINE Flex Message は Web コンテンツではないため AA 検証対象外）。
+// - 対象外: brand・brandSubtle・border・borderInteractive（装飾・面塗り・非テキスト用途）と
+//   lineColors（LINE Flex Message は Web コンテンツではないため AA 検証対象外）。
 // - primary の具体 hex はこのテストを通ることをもって確定値とする。
 import { describe, it, expect } from 'vitest';
 import { colors, compositeOver, contrastRatio } from '../src/index.js';
@@ -30,6 +30,11 @@ const NON_TEXT_ROLES: readonly (keyof typeof colors)[] = [
   'brand',
   'brandSubtle',
   'border',
+  // 識別用の枠色。テキスト前景としては使わないため AA_TEXT_PAIRS には入れない。
+  // SC 1.4.11 の 3:1 は「隣接する背景」との関係で決まるが、トークン単体は何に隣接するかを
+  // 知らないため、比の assert は使用箇所側のガード（ui/test/contrast-usage.test.ts）が担う。
+  // ここで 3:1 を二重に主張すると、片方の変更が他方へ伝わらない二重管理になる（design.md D7）。
+  'borderInteractive',
 ];
 
 describe('コントラスト計算ヘルパ（既知値による自己検証）', () => {
@@ -96,5 +101,27 @@ describe('colors（Web 意味役割）の WCAG AA コントラスト（Requireme
       classified.add(pair.background);
     }
     expect([...classified].sort()).toEqual(Object.keys(colors).sort());
+  });
+});
+
+// 識別用（フォーム入力部品・対話的部品の輪郭）と装飾用（区切り線・カード罫線・情報コンテナ
+// 外枠）の枠色は別の意味役割である。両者が同値に潰れていると、識別用だけを濃くすることが
+// 構造的に不可能になる（本 spec 以前の実態: --input が装飾用の枠色を参照していた）。
+// 値の分離をここで不変条件として固定し、将来「片方に合わせて」統合されることを防ぐ
+// （design.md「色役割定義」State Management の不変条件 / Testing Strategy Unit 1）。
+describe('枠色の意味役割分離の不変条件（Requirements 4.1, 6.1）', () => {
+  it('識別用の枠色役割が値の単一情報源に存在する', () => {
+    expect(
+      colors.borderInteractive,
+      'colors.borderInteractive が未定義です（識別用の枠色役割が単一情報源にありません）',
+    ).toBeDefined();
+  });
+
+  it('識別用の枠色は装飾用の枠色と異なる値を持つ', () => {
+    expect(
+      colors.borderInteractive,
+      `識別用と装飾用が同値です（borderInteractive: ${colors.borderInteractive} / ` +
+        `border: ${colors.border}）。同値では識別用だけを濃くできません。`,
+    ).not.toBe(colors.border);
   });
 });

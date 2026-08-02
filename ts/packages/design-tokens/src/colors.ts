@@ -28,8 +28,15 @@ export interface ColorTokens {
   readonly destructive: string;
   /** destructive 上の前景色。 */
   readonly destructiveForeground: string;
-  /** 境界線色（非テキスト用途）。 */
+  /** 区切り線・カード罫線・情報コンテナ外枠の色（純装飾・SC 1.4.11 対象外）。 */
   readonly border: string;
+  /**
+   * フォーム入力部品と対話的部品の輪郭の色（識別用・SC 1.4.11 の 3:1 対象）。
+   * 隣接背景に対する 3:1 の検証は使用箇所側のガードが担う（トークン単体は「何に隣接するか」を
+   * 知らないため。design.md D7）。border（装飾用）と同値になってはならない
+   * （test/colors.test.ts の不変条件が固定する）。
+   */
+  readonly borderInteractive: string;
 }
 
 /** LINE Flex Message 用カラートークン（現行 5 色の意味役割化・値は現行と同一）。 */
@@ -70,6 +77,10 @@ export const colors: ColorTokens = {
   destructive: '#B91C1C',
   destructiveForeground: '#FFFFFF',
   border: '#DDDDDD',
+  // 確定値: 対白 約 4.542:1（design.md D1）。SC 1.4.11 の要求は 3:1 だが、1px の細線は
+  // subpixel アンチエイリアスで実効コントラストが落ちるため、3:1 ちょうどの灰では余裕が無い。
+  // この値はブラウザ既定の入力枠に近く、意匠上「異常に濃い」とは読まれない。
+  borderInteractive: '#767676',
 };
 
 export const lineColors: LineColorTokens = {
