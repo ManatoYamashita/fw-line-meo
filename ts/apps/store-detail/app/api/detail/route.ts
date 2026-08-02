@@ -1,17 +1,25 @@
-// 詳細データの読取 API（Task 5.2）。
+// 詳細データの読取 API（Task 5.2 / 多店舗対応は task 5.4・Issue #61）。
 //
 // design.md「TS / store-detail」API Contract:
-//   GET /api/detail
+//   GET /api/detail[?storeId={storeId}]
 //   Request:  Authorization: Bearer {LIFF ID token}
-//   Response: 自店＋競合の詳細 JSON（30日推移含む）
-//   Errors:   401（検証失敗）, 404（店舗未特定・または sub に紐づく confirmed 店舗が複数で
-//             一意に解決不能＝AMBIGUOUS_STORE）, 500
+//             ?storeId — 任意。認可済み集合内でのみ有効な「ヒント」
+//   Response: 200 = 自店＋競合の詳細 JSON（30日推移含む）＋ storeName ＋ stores[]
+//   Errors:   401（検証失敗）, 409（認可済み集合が2件以上で表示対象を決められない）,
+//             404（owner 不在・confirmed 店舗0件）, 500
 //
-// 認可（idToken → sub → storeId）は lib/liff-auth.ts（task 5.1・触れない）の
-// authorizeStoreDetailRequest に一任する。本ファイルは「ルートの所有」（HTTP ステータス
-// マッピング・入出力の組立）のみを担当し、storeId 等クライアント制御可能な識別子を
-// authorizeStoreDetailRequest の成功結果以外から一切受け取らない
-// （design.md「Security Considerations」storeId を URL・リクエストボディから受けない）。
+// 認可（idToken → sub → 認可済み集合）は lib/liff-auth.ts の authorizeStoreDetailRequest に
+// 一任する。本ファイルは「ルートの所有」（HTTP ステータスマッピング・入出力の組立）のみを
+// 担当する。
+//
+// design.md「クライアント入力の不変条件」の遵守:
+//   `?storeId` はクライアント由来だが、認可主体を決めない。表示対象の決定は必ず
+//   「認可済み集合を作る（authorizeStoreDetailRequest）→ その集合の中から選ぶ
+//   （selectAuthorizedStore）」の順で行い、ヒントが集合の境界に影響する経路は存在しない。
+//   集合外・不正・空のヒントは一律無視し、**未指定時と完全に同一の応答**を返す（非オラクル。
+//   404 等で区別すると「その storeId が実在するか」を観測させてしまうため）。
+//   selectAuthorizedStore は Queryable を受け取らない純関数なので、ヒントが SQL に到達せず、
+//   不正 UUID による pg 22P02（→500）も構造的に起きない。
 //
 // エラー分類の設計判断（design.md の 401/404 の二分法をそのまま反映）:
 //   StoreDetailAuthorizationError = LiffTokenVerificationError | StoreResolutionError
@@ -29,10 +37,15 @@
 // 「export しない」こと自体が書込 API 不在の構造的な担保となる（test/route.db.test.ts で検証）。
 
 import { getPool } from '@fwlm/db';
-import type { Queryable } from '@fwlm/db';
+import type { Queryable, StoreRow } from '@fwlm/db';
 
-import { authorizeStoreDetailRequest, type LiffAuthOptions } from '../../../lib/liff-auth';
+import {
+  authorizeStoreDetailRequest,
+  selectAuthorizedStore,
+  type LiffAuthOptions,
+} from '../../../lib/liff-auth';
 import { queryStoreDetail } from '../../../lib/data';
+import { STORE_SELECTION_REQUIRED, type StoreRef } from '../../../lib/contract';
 
 // pg / cloud-sql-connector を使うため Node ランタイムが必須（Edge 不可）。
 export const runtime = 'nodejs';
@@ -53,6 +66,21 @@ function jsonError(status: number, code: string, message: string): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+/** 認可済み集合をクライアントへ開示する最小形へ落とす（place_id・座標・owner_id は出さない）。 */
+function toStoreRefs(stores: readonly StoreRow[]): StoreRef[] {
+  return stores.map((store) => ({ storeId: store.id, name: store.name }));
+}
+
+function selectionRequired(stores: readonly StoreRow[]): Response {
+  return new Response(
+    JSON.stringify({
+      error: { code: STORE_SELECTION_REQUIRED, message: '表示する店舗を選んでください' },
+      stores: toStoreRefs(stores),
+    }),
+    { status: 409, headers: { 'Content-Type': 'application/json' } },
+  );
 }
 
 // --- Authorization ヘッダからの ID トークン抽出 ----------------------------------------
@@ -126,15 +154,34 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const stores = authResult.value;
-  if (stores.length !== 1) {
-    // 中間状態（Issue #61）: 認可層のリファクタと外部挙動の変更を混ぜないため、複数店舗は
-    // ここでは従来どおり 404 のままとする。409 での候補一覧返却は後続コミットで実装する。
-    return jsonError(404, 'STORE_NOT_FOUND', '店舗情報が見つかりません');
+
+  // ヒントの解釈。URLSearchParams#get は重複指定でも最初の値を返すため決定的。
+  const hint = new URL(req.url).searchParams.get('storeId');
+  const hinted = selectAuthorizedStore(stores, hint);
+
+  if (hint && !hinted) {
+    // 無視した事実は残す（silent drop を作らない）。ただし storeId そのものはログに書かない
+    // ——集合外の値は攻撃者由来でありうるため、ログを通じた反射・汚染の経路を作らない。
+    console.warn(
+      JSON.stringify({
+        event: 'store-detail.store_hint_ignored',
+        reason: 'not_in_authorized_set',
+        authorizedCount: stores.length,
+      }),
+    );
+  }
+
+  // 集合が1件のときのみヒント無しでも表示対象が決まる。2件以上でヒントが解決しなければ、
+  // 推測せず候補一覧を返す。この分岐の入力は「集合」と「集合内で解決したか」だけであり、
+  // ヒントの中身は結果に一切現れない（＝未指定時と同一応答＝非オラクル）。
+  const chosen = hinted ?? (stores.length === 1 ? stores[0]! : null);
+  if (chosen === null) {
+    return selectionRequired(stores);
   }
 
   try {
-    const detail = await queryStoreDetail(pool, stores[0]!.id);
-    return jsonOk(detail);
+    const detail = await queryStoreDetail(pool, chosen.id);
+    return jsonOk({ ...detail, storeName: chosen.name, stores: toStoreRefs(stores) });
   } catch (err) {
     console.error(JSON.stringify({ event: 'store-detail.query_error', error: errorMessageOf(err) }));
     return jsonError(500, 'INTERNAL', 'サーバーエラー');
