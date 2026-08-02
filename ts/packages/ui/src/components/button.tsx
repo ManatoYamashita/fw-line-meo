@@ -29,7 +29,7 @@ const buttonVariants = cva(
         // hover 時に AA を割っていた（Issue #50）。
         default: "bg-primary text-primary-foreground hover:bg-primary-hover",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-input bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         // hover の混色空間は oklab を使う。oklch で混ぜると、無彩色である --foreground の色相が
         // powerless となり合成結果の hue が none（= 描画時は 0 = 赤）になるため、実描画が
         // 「わずかに暗い緑」ではなく赤寄りになっていた。oklab には色相成分が無くこれが起きない。

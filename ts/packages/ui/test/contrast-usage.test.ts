@@ -194,20 +194,17 @@ const USAGE_PAIRS: readonly UsagePair[] = [
   // いずれも「利用者が部品を見つけ、状態を読み取る」ための視覚情報であり、装飾ではない
   // （要件 1.1, 1.2, 4.5 / design.md D2, D5, D7）。
   {
-    // フォーム入力部品の既定枠。フォーカスも選択もしていない状態で部品の存在と境界を
-    // 伝える唯一の視覚情報であるため、隣接する頁背景と 3:1 が要る（要件 1.1, 1.2）。
+    // 識別用の枠色。フォーム入力部品では、フォーカスも選択もしていない状態で部品の存在と
+    // 境界を伝える唯一の視覚情報であるため、隣接する頁背景と 3:1 が要る（要件 1.1, 1.2）。
+    // Button / Badge の outline は装飾用の枠指定を使っていたが、対話的部品の輪郭は
+    // 識別用として扱うという要件 4.5 に従い、この役割へ移した（design.md D2, D5）。
+    // Badge は [a] variant を持ちリンクとして描画されうるため、静的な出現があっても
+    // 要件 4.4（判断できない場合は識別用に倒す）により同じ扱いとする。
     utility: 'border-input',
-    source: 'input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx（既定の枠）',
+    source:
+      'input.tsx / textarea.tsx / checkbox.tsx / radio-group.tsx（既定の枠）・' +
+      'button.tsx / badge.tsx variant=outline（輪郭の枠）',
     foreground: 'input',
-    surface: 'background',
-    kind: 'non-text',
-  },
-  {
-    // 対話的部品の輪郭。Badge は [a] variant を持ちリンクとして描画されうるため、
-    // 要件 4.4（判断できない場合は識別用に倒す）・4.5 により識別用として扱う（design.md D5）。
-    utility: 'border-border',
-    source: 'button.tsx / badge.tsx variant=outline（輪郭の枠）',
-    foreground: 'border',
     surface: 'background',
     kind: 'non-text',
   },
