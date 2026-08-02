@@ -200,6 +200,135 @@ describe('RadioGroup — 役割・矢印キー操作（Requirements 2.4, 5.1）'
   });
 });
 
+describe('Checkbox / RadioGroupItem — エラーが選択済みで打ち消されない（Requirements 3.1, 3.2, 3.3, 3.5, 3.6 / design.md D4）', () => {
+  /**
+   * 「エラーかつ選択済み」を条件にする複合指定。属性セレクタ 2 個分の詳細度を持つため、
+   * 選択状態を条件にする単一指定（属性 1 個）に対し、生成順序に依存せず確定的に勝つ（design.md D4）。
+   * ダーク配色は導入しない（要件 6.6）ため、先頭を固定して `dark:` 付きの指定は対象外とする。
+   */
+  const ERROR_CHECKED_BORDER = /^aria-invalid:aria-checked:border-/;
+  /** エラーを担うチャンネル（枠）。選択済みでもこの色が維持されることが本仕様の是正の核心。 */
+  const ERROR_CHECKED_BORDER_DESTRUCTIVE = 'aria-invalid:aria-checked:border-destructive';
+  /** 選択色を指す枠。複合指定がこれだと、目で見ている利用者にだけエラー表示が消える。 */
+  const SELECTION_BORDER = /border-primary(?:\/\d{1,3})?$/;
+  /** 選択済みを担うもう一方のチャンネル（面塗り）。エラー色へ巻き込んではならない（要件 3.3）。 */
+  const CHECKED_SURFACE = 'data-checked:bg-primary';
+
+  /** エラーかつ選択済みの状態で 2 部品を描画する（状態遷移図の `選択済エラー`）。 */
+  function renderErrorChecked() {
+    render(
+      <>
+        <Checkbox name="taste" aria-label="味" aria-invalid defaultChecked />
+        <RadioGroup name="rating" aria-label="満足度" defaultValue="good">
+          <RadioGroupItem value="good" aria-label="良い" aria-invalid />
+        </RadioGroup>
+      </>,
+    );
+    return [
+      {
+        name: 'Checkbox',
+        element: screen.getByRole('checkbox', { name: '味' }),
+        indicatorSlot: 'checkbox-indicator',
+      },
+      {
+        name: 'RadioGroupItem',
+        element: screen.getByRole('radio', { name: '良い' }),
+        indicatorSlot: 'radio-group-indicator',
+      },
+    ] as const;
+  }
+
+  function classTokens(element: Element): readonly string[] {
+    return classesOf(element)
+      .split(/\s+/)
+      .filter((token) => token !== '');
+  }
+
+  // 以下 2 件は対になっている。片方だけでは「エラー色版と選択色版が並存する」状態を見逃す。
+  it('エラー×選択済みの枠がエラー色で宣言される（Requirements 3.1, 3.2）', () => {
+    for (const { name, element } of renderErrorChecked()) {
+      expect(
+        classTokens(element),
+        `${name}: エラー×選択済みの枠指定が無い。単一指定どうしが同詳細度で並び、` +
+          '勝敗が生成順序という不安定な要因へ委ねられる（design.md D4）',
+      ).toContain(ERROR_CHECKED_BORDER_DESTRUCTIVE);
+    }
+  });
+
+  it('エラー×選択済みの枠に選択色版が存在しない（Requirements 3.1, 3.2）', () => {
+    for (const { name, element } of renderErrorChecked()) {
+      const selectionColored = classTokens(element).filter(
+        (token) => ERROR_CHECKED_BORDER.test(token) && SELECTION_BORDER.test(token),
+      );
+
+      expect(
+        selectionColored,
+        `${name}: エラー状態なのに枠が選択色へ戻る指定が残っています。aria-invalid は残るため` +
+          '支援技術にはエラーが伝わる一方、目で見ている利用者にだけエラー表示が消えます',
+      ).toEqual([]);
+    }
+  });
+
+  it('選択済みであることは面塗りと印が担い続ける（Requirements 3.3）', () => {
+    for (const { name, element, indicatorSlot } of renderErrorChecked()) {
+      // 枠がエラー色を担うぶん、選択済みは別チャンネル（面塗り＋印）が担う必要がある。
+      expect(
+        classTokens(element),
+        `${name}: 選択済みを示す面塗りが無い。枠がエラー色になるため選択済みが分からなくなる`,
+      ).toContain(CHECKED_SURFACE);
+      expect(element.getAttribute('aria-checked')).toBe('true');
+      // 印は選択時にのみマウントされる（Base UI の Indicator）。エラー状態でも消えないこと。
+      expect(
+        element.querySelector(`[data-slot="${indicatorSlot}"]`),
+        `${name}: エラー状態で選択済みの印が描画されていない`,
+      ).not.toBeNull();
+    }
+  });
+
+  it('未選択エラーから選択済みへ遷移してもエラーの両チャンネルが維持される（Requirements 3.2, 3.6）', async () => {
+    const user = userEvent.setup();
+    render(<Checkbox name="taste" aria-label="味" aria-invalid />);
+
+    const checkbox = screen.getByRole('checkbox', { name: '味' });
+    expect(checkbox.getAttribute('aria-invalid')).toBe('true');
+    expect(checkbox.hasAttribute('data-checked')).toBe(false);
+
+    await user.tab();
+    await user.keyboard(' ');
+    expect(checkbox.getAttribute('aria-checked')).toBe('true');
+
+    // 非視覚チャンネル（属性）が遷移後も残ること（要件 3.6）。
+    expect(
+      checkbox.getAttribute('aria-invalid'),
+      '選択済みへ遷移したらエラーの支援技術への伝達が消えた',
+    ).toBe('true');
+    // 視覚チャンネル（枠）の分岐条件が、遷移後の属性の組み合わせと一致すること（要件 3.2）。
+    expect(classTokens(checkbox)).toContain(ERROR_CHECKED_BORDER_DESTRUCTIVE);
+  });
+
+  it('エラー時に可視の文言が提示される経路が働く（Requirements 3.5, 3.6）', () => {
+    render(
+      <Field data-invalid="true">
+        <FieldLabel>味に満足した</FieldLabel>
+        <Checkbox name="taste" aria-label="味" aria-invalid defaultChecked />
+        <FieldError>いずれか一つを選び直してください</FieldError>
+      </Field>,
+    );
+
+    // 色以外の手段（要件 3.5）: role="alert" の可視文言と、領域全体の文字色切替。
+    const alert = screen.getByRole('alert');
+    expect(alert.getAttribute('data-slot')).toBe('field-error');
+    expect(alert.textContent).toBe('いずれか一つを選び直してください');
+    expect(classTokens(screen.getByRole('group'))).toContain(
+      'data-[invalid=true]:text-destructive',
+    );
+
+    // 選択済みであってもエラーの伝達は維持される（要件 3.6）。
+    expect(screen.getByRole('checkbox').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('checkbox').getAttribute('aria-checked')).toBe('true');
+  });
+});
+
 describe('Field — ラベル関連付けと data-invalid / aria-invalid の同期（Requirements 2.3, 5.1）', () => {
   function renderField(invalid: boolean) {
     render(
