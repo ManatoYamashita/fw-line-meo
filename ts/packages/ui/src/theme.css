@@ -38,12 +38,15 @@
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
 
-  /* Spacing（design-tokens spacing） */
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
+  /* 余白は Tailwind の数値スケールで指定する。本ファイルは余白の名前付きキーを宣言しない。
+   * 名前付きキーを @theme に宣言すると、サイズ系ユーティリティ（最大幅・最小幅・幅・フレックス
+   * 基準幅）の解決先が、既定のコンテナ寸法スケールから余白スケールへ覆われる。その結果
+   * 「名前付きスケールで幅を指定したのに余白の寸法で描画される」という、画面が壊れたまま
+   * ビルドが通る状態になる（Issue #54）。test/token-scales.test.ts が機械検証する。
+   *
+   * design-tokens の余白トークンと数値スケールの対応（余白基数 0.25rem に対する倍率）:
+   *   xs = ×1 / sm = ×2 / md = ×4 / lg = ×6 / xl = ×8
+   * design-tokens 側の定義は LINE Flex Message など CSS 以外の消費先のために維持する。 */
 
   /* Radius（design-tokens radius） */
   --radius-sm: 0.25rem;
