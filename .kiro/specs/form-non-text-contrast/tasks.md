@@ -119,6 +119,37 @@
   - 観察可能な完了: CI 相当の全ステップ（ガードスクリプト・lint・build・typecheck・単体・E2E）が緑
   - _Requirements: 4.2, 6.3, 6.4, 6.5, 6.7_
 
+## E2E の実行手順（タスク 4 系で必須・2026-08-02 確立）
+
+**`reuseExistingServer` が既定で有効なため、他のセッションや開発サーバが既定ポートを握っていると Playwright はそれを再利用し、別のコードベースを測る。** 実際にこの罠を踏み、`/ui-check` の実測が主ディレクトリ（別 Issue のブランチ）のアプリに対して行われていた。症状は「触っていないはずの部品のテストが落ちる」で、原因究明に時間を溶かす。**必ず自分のサーバを隔離したポートに立て、`E2E_BASE_URL` を指すこと**（この変数を与えると Playwright は自前のサーバ管理を無効にする）。
+
+```bash
+WT=<この worktree>
+export DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/fwlm_e2e57"
+export SESSION_SIGNING_KEY="e2e-local-signing-key"
+export GEMINI_API_KEY="e2e-local-dummy-key"
+export E2E_STORE_ID="44444444-4444-4444-4444-444444444444"
+
+# 初回のみ: DB を作り migrations と seed を流す
+createdb fwlm_e2e57
+for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"; done
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f ts/apps/survey-web/e2e/seed.sql
+
+# 自分のサーバを 3157 で起動（生成 AI のモックは *サーバ側* に要る）
+cd "$WT/ts/apps/survey-web"
+PORT=3157 NODE_OPTIONS="--import $WT/ts/apps/survey-web/e2e/mock-gemini.mjs" nohup pnpm start > /tmp/e2e57-server.log 2>&1 &
+until curl -sf http://127.0.0.1:3157/healthz >/dev/null; do sleep 1; done
+
+# 測る（NODE_OPTIONS は Playwright 側には不要）
+E2E_BASE_URL="http://127.0.0.1:3157" pnpm exec playwright test
+```
+
+**サーバを止めるときは、そのプロセスの作業ディレクトリがこの worktree 配下であることを確認してから止めること。** 既定ポートのプロセスは他セッションのものである可能性がある。
+
+**部品や `theme.css` を変更したら `pnpm -C ts --filter @fwlm/survey-web run build` をしてサーバを再起動する**（本番ビルドを配信しているため、変更は再ビルドしないと反映されない）。
+
+ベースライン（タスク 3.3 完了時点）: **9 件全緑**。
+
 ## Implementation Notes
 
 - **1.1**: 枠線の不透明度は前景側で表す。面塗り側で表すと同じ値でも比が 3.295 となり**偽の緑**になる（既存 5 件が面塗り側を使っているのは「面の上に文字が載る」構造だからで、枠線とは別物）。実装前に両案を実算して確かめること。
