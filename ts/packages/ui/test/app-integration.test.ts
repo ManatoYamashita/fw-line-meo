@@ -568,7 +568,9 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
     it('抑制対象のプロパティが揃っている（経過のみを止める）', () => {
       const declared = new Set<string>();
       for (const media of mediaRulesInLayer(compiled, 'base', REDUCED_MOTION)) {
-        media.walkDecls((decl) => declared.add(decl.prop));
+        media.walkDecls((decl) => {
+          declared.add(decl.prop);
+        });
       }
       for (const property of MOTION_SUPPRESSED_PROPERTIES) {
         expect(
@@ -581,7 +583,9 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
     it('到達状態を決めるプロパティを抑制していない（Requirements 1.4）', () => {
       const declared = new Set<string>();
       for (const media of mediaRulesInLayer(compiled, 'base', REDUCED_MOTION)) {
-        media.walkDecls((decl) => declared.add(decl.prop));
+        media.walkDecls((decl) => {
+          declared.add(decl.prop);
+        });
       }
       for (const property of MOTION_FORBIDDEN_PROPERTIES) {
         expect(

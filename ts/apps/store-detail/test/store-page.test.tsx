@@ -74,7 +74,7 @@ const mockResult: StoreDetailResponse = {
       { authorName: '山田太郎', publishTime: '2026-07-11T08:00:00Z', rating: 5, textExcerpt: 'とても美味しかったです' },
     ],
   },
-  competitors: [{ name: '競合A', rating: '4.2', reviewCount: 80, starDiff: '+0.3' }],
+  competitors: [{ name: '競合A', rating: 4.2, reviewCount: 80, starDiff: 0.3 }],
   trend: [
     { capturedOn: '2026-07-10', rank: 3, rating: '4.4', reviewCount: 115 },
     { capturedOn: '2026-07-11', rank: 2, rating: '4.5', reviewCount: 120 },

@@ -67,7 +67,7 @@ describe('代理店管理ページ（operator）', () => {
     fireEvent.click(scope.getByRole('button', { name: '代理店作成' }));
     expect(await scope.findByText('新代理店')).toBeTruthy();
     expect(api.createAgency).toHaveBeenCalledTimes(1);
-    expect(api.createAgency.mock.calls[0][0]).toEqual({ name: '新代理店' });
+    expect(api.createAgency.mock.calls[0]?.[0]).toEqual({ name: '新代理店' });
   });
 
   it('空名の送信は日本語エラーを表示しクラッシュせず、createAgency を呼ばない（Req 6.1）', async () => {

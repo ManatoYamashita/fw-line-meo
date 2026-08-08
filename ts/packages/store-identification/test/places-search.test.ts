@@ -16,6 +16,9 @@ function rawPlace(overrides: Partial<Record<string, unknown>> = {}): Record<stri
   };
 }
 
+/** 注入する fetch の第 1 引数の型。グローバル fetch の宣言から導いて二重管理を避ける。 */
+type FetchInput = Parameters<typeof fetch>[0];
+
 function jsonResponse(status: number, body: unknown): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -34,14 +37,22 @@ describe('createPlacesSearchAdapter', () => {
   });
 
   it('リクエストの FieldMask ヘッダを固定文字列で送信する', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, { places: [rawPlace()] }));
+    // 引数を受け取る形で宣言する。引数なしで宣言すると mock.calls の要素型が空タプルになり、
+    // 呼び出し引数を読むために型の裏付けのないキャストが要る（Issue #70 で型検査の対象に
+    // 入って露見した）。
+    const fetchMock = vi.fn(async (_url: FetchInput, _init?: RequestInit) =>
+      jsonResponse(200, { places: [rawPlace()] }),
+    );
     const adapter = createPlacesSearchAdapter({ apiKey: 'test-api-key', fetch: fetchMock });
 
     await adapter.searchCandidates('テスト食堂');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const call = fetchMock.mock.calls[0];
+    if (call === undefined) throw new Error('fetch が呼ばれていません');
+    const [url, init] = call;
     expect(url).toBe('https://places.googleapis.com/v1/places:searchText');
+    if (init === undefined) throw new Error('fetch へ init が渡されていません');
     const headers = init.headers as Record<string, string>;
     expect(headers['X-Goog-FieldMask']).toBe(FIXED_FIELD_MASK);
     expect(headers['X-Goog-Api-Key']).toBe('test-api-key');
@@ -124,7 +135,10 @@ describe('createPlacesSearchAdapter', () => {
       return {
         ok: true,
         status: 200,
-        json: async () => {
+        // 戻り値の型を明示する。省略すると Promise<never> に推論され、Response への
+        // キャストが「型が重ならない」として弾かれる（jsonResponse が通るのは
+        // body: unknown を返しているため）。
+        json: async (): Promise<unknown> => {
           throw new SyntaxError('Unexpected token');
         },
       } as Response;
@@ -135,7 +149,9 @@ describe('createPlacesSearchAdapter', () => {
   });
 
   it('1.5秒以内にレスポンスが無いとき AbortController でタイムアウトし error を返す', async () => {
-    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+    // 第 1 引数はグローバル fetch と同じ幅で受ける。string へ狭めると引数の反変性により
+    // 注入先（fetch: typeof fetch）へ代入できない。
+    const fetchMock = vi.fn((_url: FetchInput, init?: RequestInit) => {
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           reject(new DOMException('The operation was aborted', 'AbortError'));

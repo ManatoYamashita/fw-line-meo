@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
     "build:scripts": "tsc -p tsconfig.scripts.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "lint": "eslint src test scripts",
     "test": "vitest run --passWithNoTests",
     "setup-rich-menus": "node dist-scripts/scripts/setup-rich-menus.js"

@@ -45,6 +45,7 @@ const AG = 'f2222222-2222-2222-2222-222222222221';
 
 const CHANNEL_SECRET = 'f2-test-channel-secret';
 const RICHMENU_COMPLETED_ID = 'f2-richmenu-completed';
+const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 const INVITE_CODE = 'F2ACTIVE01';
 
 function sign(body: string, secret: string): string {
@@ -166,6 +167,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook 重複防止と継続�
       messenger: deps.messenger,
       now: () => new Date(),
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
     });
 
     const appDeps: AppDeps = {

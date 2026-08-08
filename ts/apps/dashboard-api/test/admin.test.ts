@@ -12,9 +12,11 @@ import {
   type DashboardUserCreateDeps,
   type DashboardUserDisableDeps,
   type DashboardUserEnableDeps,
+  type DashboardUserItemJson,
 } from '../src/admin.js';
 import type { AuthDeps } from '../src/auth.js';
 import type { AgencyItem, DashboardUserIdentity, DashboardUserItem, DisableOutcome } from '@fwlm/db';
+import { readJson, type ErrorEnvelope } from './support/json.js';
 
 // 運営（operator）は全管理 API 許可、代理店（agency）は全管理 API 拒否（Req 6.5）。
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
@@ -152,7 +154,7 @@ describe('admin ハンドラ — 横断ガード（Req 6.5, 7.1）', () => {
     const { res, dep } = invoke({ user: OP, authorization: undefined });
     const r = await res;
     expect(r.status).toBe(401);
-    expect((await r.json()).error.code).toBe('unauthenticated');
+    expect((await readJson<ErrorEnvelope>(r)).error.code).toBe('unauthenticated');
     expect(dep).not.toHaveBeenCalled();
   });
 
@@ -160,7 +162,7 @@ describe('admin ハンドラ — 横断ガード（Req 6.5, 7.1）', () => {
     const { res, dep } = invoke({ user: AG, authorization: 'Bearer tok' });
     const r = await res;
     expect(r.status).toBe(403);
-    expect((await r.json()).error.code).toBe('forbidden');
+    expect((await readJson<ErrorEnvelope>(r)).error.code).toBe('forbidden');
     expect(dep).not.toHaveBeenCalled();
   });
 
@@ -230,7 +232,7 @@ describe('handleAgencyCreate', () => {
       body: { name: '' },
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('validation_failed');
     expect(createAgency).not.toHaveBeenCalled();
   });
 
@@ -330,7 +332,7 @@ describe('handleDashboardUserCreate', () => {
       body: { role: 'admin', email: 'x@example.com' },
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('validation_failed');
     expect(createUser).not.toHaveBeenCalled();
   });
 
@@ -417,7 +419,7 @@ describe('handleDashboardUserCreate', () => {
       body: { role: 'agency', agencyId: AGENCY_ID, email: 'dup@example.com' },
     });
     expect(res.status).toBe(409);
-    const json = await res.json();
+    const json = await readJson<ErrorEnvelope>(res);
     expect(json.error.code).toBe('email_conflict');
     expect(json.error.message).toBe('既に登録済みのメールアドレスです');
   });
@@ -436,7 +438,7 @@ describe('handleDashboardUserCreate', () => {
       },
     );
     expect(res.status).toBe(409);
-    const json = await res.json();
+    const json = await readJson<ErrorEnvelope>(res);
     expect(json.error.code).toBe('email_conflict_disabled');
     expect(json.error.message).toBe(
       'このメールアドレスは無効化済みの利用者です。復旧するには利用者管理から有効化してください',
@@ -459,7 +461,7 @@ describe('handleDashboardUserCreate', () => {
       },
     );
     expect(res.status).toBe(409);
-    const json = await res.json();
+    const json = await readJson<ErrorEnvelope>(res);
     expect(json.error.code).toBe('email_conflict');
     expect(json.error.message).toBe('既に登録済みのメールアドレスです');
     expect(findUserByEmailInOperator).toHaveBeenCalledWith('op1', 'active@example.com');
@@ -516,7 +518,7 @@ describe('handleDashboardUserCreate', () => {
       email: 'agent@example.com',
       displayName: '新担当',
     });
-    const json = await res.json();
+    const json = await readJson<{ user: DashboardUserItemJson }>(res);
     expect(json.user.role).toBe('agency');
     expect(json.user.createdAt).toBe('2026-07-01T12:34:56.000Z');
   });
@@ -562,7 +564,7 @@ describe('handleDashboardUserDisable', () => {
       id: 'not-a-uuid',
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('not_found');
     expect(disableUser).not.toHaveBeenCalled();
   });
 
@@ -576,7 +578,7 @@ describe('handleDashboardUserDisable', () => {
       id: USER_ID,
     });
     expect(res.status).toBe(409);
-    const json = await res.json();
+    const json = await readJson<ErrorEnvelope>(res);
     expect(json.error.code).toBe('self_disable_forbidden');
     expect(json.error.message).toBe('自分自身は無効化できません');
     // DB 到達前に拒否されるため依存は呼ばれない（対象状態も変えない・Req 2.6）。
@@ -595,7 +597,7 @@ describe('handleDashboardUserDisable', () => {
       id: USER_ID.toUpperCase(),
     });
     expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe('self_disable_forbidden');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('self_disable_forbidden');
     expect(disableUser).not.toHaveBeenCalled();
   });
 
@@ -605,7 +607,7 @@ describe('handleDashboardUserDisable', () => {
       { authorization: 'Bearer tok', id: USER_ID },
     );
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('not_found');
   });
 
   it('依存が last_operator なら 409（最後の有効な運営の保護・Req 2.3）', async () => {
@@ -615,7 +617,7 @@ describe('handleDashboardUserDisable', () => {
       id: USER_ID,
     });
     expect(res.status).toBe(409);
-    const json = await res.json();
+    const json = await readJson<ErrorEnvelope>(res);
     expect(json.error.code).toBe('last_operator');
     expect(json.error.message).toBe('最後の運営は無効化できないため、先に別の運営を追加してください');
     // ガードは実行され、拒否は DAL 結果由来（DAL が ROLLBACK 済み・対象状態不変・Req 2.6）。
@@ -632,7 +634,7 @@ describe('handleDashboardUserDisable', () => {
     });
     expect(res.status).toBe(200);
     expect(disableUser).toHaveBeenCalledWith(USER_ID, 'op1');
-    const json = await res.json();
+    const json = await readJson<{ user: DashboardUserItemJson }>(res);
     expect(json.user.disabled).toBe(true);
     expect(json.user.createdAt).toBe('2026-07-01T12:34:56.000Z');
   });
@@ -646,7 +648,7 @@ describe('handleDashboardUserDisable', () => {
       { authorization: 'Bearer tok', id: USER_ID },
     );
     expect(res.status).toBe(200);
-    expect((await res.json()).user.disabled).toBe(true);
+    expect((await readJson<{ user: DashboardUserItemJson }>(res)).user.disabled).toBe(true);
   });
 });
 
@@ -671,7 +673,7 @@ describe('handleDashboardUserEnable', () => {
       id: 'not-a-uuid',
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('not_found');
     expect(enableUser).not.toHaveBeenCalled();
   });
 
@@ -682,7 +684,7 @@ describe('handleDashboardUserEnable', () => {
       id: USER_ID,
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('not_found');
     // ガードは実行され（operator スコープで引く）、拒否は DAL 結果由来。
     expect(enableUser).toHaveBeenCalledWith(USER_ID, 'op1');
   });
@@ -697,7 +699,7 @@ describe('handleDashboardUserEnable', () => {
     });
     expect(res.status).toBe(200);
     expect(enableUser).toHaveBeenCalledWith(USER_ID, 'op1');
-    const json = await res.json();
+    const json = await readJson<{ user: DashboardUserItemJson }>(res);
     expect(json.user.id).toBe(USER_ID);
     expect(json.user.disabled).toBe(false);
     expect(json.user.createdAt).toBe('2026-07-01T12:34:56.000Z');

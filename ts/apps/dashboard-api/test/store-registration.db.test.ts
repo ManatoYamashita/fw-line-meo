@@ -202,12 +202,12 @@ function buildApp(): ReturnType<typeof createApp> {
   return createApp(deps);
 }
 
-function post(
+async function post(
   app: ReturnType<typeof createApp>,
   bearer: string,
   body: unknown,
 ): Promise<Response> {
-  return app.request('/stores', {
+  return await app.request('/stores', {
     method: 'POST',
     headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

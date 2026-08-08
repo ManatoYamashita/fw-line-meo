@@ -34,6 +34,7 @@ const OP = 'f1111111-1111-1111-1111-111111111110';
 const AG = 'f1111111-1111-1111-1111-111111111111';
 
 const RICHMENU_COMPLETED_ID = 'f1-richmenu-completed';
+const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 const INVITE_CODE = 'F1SHARED01';
 
 const USER1 = 'Uf1-invite-owner-1';
@@ -102,6 +103,7 @@ describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統�
         messenger,
         now: () => new Date(),
         lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       });
 
       // --- 1. 有効コードでの owner 作成（Req 2.1）＋ CHECK 制約検証（Req 2.4） ---

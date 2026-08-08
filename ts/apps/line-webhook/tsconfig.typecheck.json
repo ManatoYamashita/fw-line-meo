@@ -1,0 +1,14 @@
+{
+  // 型検査専用（Issue #70）。ビルド用の tsconfig.json は `rootDir: src` の出力契約を持つため、
+  // テストコードを include すると TS6059 で壊れ、さらに test/ 配下へ .js/.d.ts を吐き出す。
+  // 型検査は出力を伴わないので、ここで出力契約を外し src と test の双方をプログラムへ含める。
+  // scripts/check-test-code-coverage.sh が `tsc --listFiles` で実効範囲を機械検証している。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+}
