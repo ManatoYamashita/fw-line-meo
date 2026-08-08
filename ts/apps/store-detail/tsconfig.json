@@ -35,11 +35,10 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    "*.mjs"
   ],
   "exclude": [
-    "node_modules",
-    "next.config.ts",
-    "vitest.config.ts"
+    "node_modules"
   ]
 }

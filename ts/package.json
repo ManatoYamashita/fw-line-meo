@@ -11,7 +11,7 @@
     "build": "pnpm -r build",
     "lint": "eslint eslint.config.js && pnpm -r lint",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.tools.json"
   },
   "devDependencies": {
     "@eslint/js": "^9",
