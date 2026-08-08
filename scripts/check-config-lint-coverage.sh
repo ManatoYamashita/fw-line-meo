@@ -37,9 +37,16 @@ fail=0
 checked=0
 
 # (1) ignores に config を丸ごと消すパターンが無いこと。
-#     BSD grep（macOS の既定）は \b を解釈しないため使わない。ignores 配列の要素は
-#     シングルクォート文字列なので、クォートを含めた固定文字列で判定する。
-if grep -qF "'**/*.config.*'" "$ESLINT_CONFIG"; then
+#     ファイル全体を grep するとコメント中の記述（本件の経緯説明など）に誤ヒットするため、
+#     `ignores:` の行だけを取り出して判定する（1 行定義が前提。崩れたら fail して前提を守らせる）。
+#     BSD grep（macOS の既定）は \b を解釈しないため使わず、クォート込みの固定文字列で照合する。
+ignores_line="$(grep -E '^[[:space:]]*ignores:' "$ESLINT_CONFIG" || true)"
+if [ -z "$ignores_line" ]; then
+  echo "ERROR: ${ESLINT_CONFIG#$ROOT/} から 'ignores:' の行を抽出できませんでした。抽出前提が崩れています。" >&2
+  echo "       → ignores は 1 行で定義してください（本ガードが除外パターンを機械検証します）。" >&2
+  exit 1
+fi
+if printf '%s\n' "$ignores_line" | grep -qF "'**/*.config.*'"; then
   echo "ERROR: ${ESLINT_CONFIG#$ROOT/} の ignores に '**/*.config.*' があります。" >&2
   echo "       → next/postcss/vitest/playwright/eslint の設定がモノレポ全体で一度も lint されません。" >&2
   echo "         ignores は生成物のみ（dist / dist-scripts / node_modules / .next）へ絞ってください。" >&2
