@@ -18,5 +18,8 @@
       "@fwlm/ui/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  // テストコードも型検査の対象に含める（Issue #70）。テストは「実行して緑」なら通るため、
+  // include から外れていると型の破綻が CI を素通りする。scripts/check-test-code-coverage.sh が
+  // `tsc --listFiles` で「実際にプログラムへ含まれているか」を機械検証している。
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
 }

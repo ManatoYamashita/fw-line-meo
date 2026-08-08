@@ -73,7 +73,7 @@ describe('招待コードページ（agency ロール）', () => {
     expect(scope.queryByLabelText('代理店')).toBeNull();
     // 自代理店分の取得は引数なし（agencyId を渡さない）。
     expect(api.getInviteCodes).toHaveBeenCalledTimes(1);
-    expect(api.getInviteCodes.mock.calls[0][0]?.agencyId).toBeUndefined();
+    expect(api.getInviteCodes.mock.calls[0]?.[0]?.agencyId).toBeUndefined();
   });
 
   it('発行ボタンで issueInviteCode(agencyId なし)を呼び、新コードを案内表示し一覧にも出す（Req 5.2）', async () => {
@@ -97,7 +97,7 @@ describe('招待コードページ（agency ロール）', () => {
     expect(await scope.findByRole('cell', { name: 'NEWCODE9' })).toBeTruthy();
     // agencyId は渡さない（自代理店）。
     expect(api.issueInviteCode).toHaveBeenCalledTimes(1);
-    expect(api.issueInviteCode.mock.calls[0][0]?.agencyId).toBeUndefined();
+    expect(api.issueInviteCode.mock.calls[0]?.[0]?.agencyId).toBeUndefined();
   });
 
   it('無効化ボタンで disableInviteCode を呼び、行が無効に変わる（Req 5.3）', async () => {
@@ -111,7 +111,7 @@ describe('招待コードページ（agency ロール）', () => {
     fireEvent.click(scope.getByRole('button', { name: '無効化' }));
     expect(await scope.findByText('無効')).toBeTruthy();
     expect(api.disableInviteCode).toHaveBeenCalledTimes(1);
-    const arg = api.disableInviteCode.mock.calls[0][0];
+    const arg = api.disableInviteCode.mock.calls[0]?.[0];
     expect(arg).toMatchObject({ id: 'ic1' });
     expect(arg?.agencyId).toBeUndefined();
     // 無効化済みの行に無効化ボタンは提供しない。

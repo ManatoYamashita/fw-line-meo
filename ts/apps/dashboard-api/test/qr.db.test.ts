@@ -36,13 +36,14 @@ function buildApp(): ReturnType<typeof createApp> {
       surveyBaseUrl: 'https://survey.example',
     },
   };
-  return createApp(deps);
+  // QR 経路以外の deps はこのテストで一度も呼ばれないため、意図的に部分適用する。
+  return createApp(deps as AppDeps);
 }
 
-function qr(app: ReturnType<typeof createApp>, storeId: string, bearer?: string): Promise<Response> {
+async function qr(app: ReturnType<typeof createApp>, storeId: string, bearer?: string): Promise<Response> {
   const headers: Record<string, string> = {};
   if (bearer !== undefined) headers['Authorization'] = `Bearer ${bearer}`;
-  return app.request(`/stores/${storeId}/qr.png`, { headers });
+  return await app.request(`/stores/${storeId}/qr.png`, { headers });
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('QR RBAC integration (DB)', () => {

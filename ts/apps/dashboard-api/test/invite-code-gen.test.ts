@@ -37,7 +37,7 @@ describe('generateInviteCode', () => {
   });
 
   it('注入 random が常に 0 を返すと先頭文字のみ（"22222222"）', () => {
-    const random = vi.fn(() => 0);
+    const random = vi.fn((_exclusiveMax: number) => 0);
     expect(generateInviteCode(random)).toBe('22222222');
     // 1 文字につき 1 回、上限は必ずアルファベット長（31）で呼ばれる。
     expect(random).toHaveBeenCalledTimes(8);

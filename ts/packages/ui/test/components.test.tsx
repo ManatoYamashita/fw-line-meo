@@ -934,7 +934,9 @@ function suppressedPropertiesInTheme(css: string): ReadonlySet<string> {
   const properties = new Set<string>();
   postcss.parse(css).walkAtRules('media', (media) => {
     if (!/prefers-reduced-motion\s*:\s*reduce/.test(media.params)) return;
-    media.walkDecls((declaration) => properties.add(declaration.prop));
+    media.walkDecls((declaration) => {
+      properties.add(declaration.prop);
+    });
   });
   return properties;
 }

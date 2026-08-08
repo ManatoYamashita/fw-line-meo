@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleStoresList, type StoresListDeps } from '../src/stores-list.js';
 import type { DashboardUserIdentity, StoreListItem } from '@fwlm/db';
+import { readJson, type ErrorEnvelope } from './support/json.js';
 
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
 const AG: DashboardUserIdentity = { id: 'u2', role: 'agency', operatorId: 'op1', agencyId: 'ag1' };
@@ -49,20 +50,20 @@ describe('handleStoresList', () => {
   it('認証なしは 401（unauthenticated 封筒）', async () => {
     const res = await handleStoresList(deps(), req({ authorization: undefined }));
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('unauthenticated');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('unauthenticated');
   });
 
   it('未登録 UID は 403', async () => {
     const res = await handleStoresList(deps({}, null), req());
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('forbidden');
   });
 
   it('agency が他代理店を指定したら 403 で、listStores は呼ばれない（データアクセス前に遮断）', async () => {
     const listStores = vi.fn(() => Promise.resolve([item()]));
     const res = await handleStoresList(deps({ listStores }, AG), req({ agencyId: 'ag2' }));
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('forbidden');
     expect(listStores).not.toHaveBeenCalled();
   });
 

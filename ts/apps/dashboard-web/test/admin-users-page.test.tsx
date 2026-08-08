@@ -114,7 +114,7 @@ describe('利用者管理ページ（operator）', () => {
     fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
     expect(await scope.findByText('agency@example.com')).toBeTruthy();
     expect(api.createDashboardUser).toHaveBeenCalledTimes(1);
-    expect(api.createDashboardUser.mock.calls[0][0]).toMatchObject({
+    expect(api.createDashboardUser.mock.calls[0]?.[0]).toMatchObject({
       role: 'agency',
       agencyId: 'a1',
       email: 'agency@example.com',

@@ -273,7 +273,11 @@ describe('LineClient.pushMessage — 500/タイムアウトの再送', () => {
 
     const result = await client.pushMessage('test-access-token', 'Uabc123', MESSAGES, RETRY_KEY);
 
-    expect(result.status).toBe('failed');
+    // expect() は型を絞らないため、union のまま message を読むと型検査が通らない
+    // （成功結果は message を持たない）。ここで明示的に絞る。
+    if (result.status !== 'failed') {
+      throw new Error(`failed を期待しましたが ${result.status} が返りました`);
+    }
     expect(result.message).toContain('exceeded max retries');
     // 初回 + maxRetries(2) = 3 リクエスト。
     expect(server.requests).toHaveLength(3);

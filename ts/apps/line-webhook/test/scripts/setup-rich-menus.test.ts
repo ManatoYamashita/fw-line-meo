@@ -35,7 +35,8 @@ function createFetchMock(): {
   const defaultCalls: string[] = [];
   let createCount = 0;
 
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (rawUrl: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = String(rawUrl);
     if (url === TOKEN_URL) {
       return jsonResponse(200, { access_token: 'stateless-token-1', expires_in: 900 });
     }
@@ -50,7 +51,9 @@ function createFetchMock(): {
 
     if (url.startsWith('https://api-data.line.me/v2/bot/richmenu/') && url.endsWith('/content')) {
       const headers = init?.headers as Record<string, string>;
-      uploadCalls.push({ url, contentType: headers['Content-Type'], body: init?.body });
+      const contentType = headers['Content-Type'];
+      if (contentType === undefined) throw new Error('Content-Type ヘッダが送信されていません');
+      uploadCalls.push({ url, contentType, body: init?.body });
       return emptyResponse(200);
     }
 
@@ -167,7 +170,8 @@ describe('setupRichMenus', () => {
   });
 
   it('トークン発行に失敗した場合は例外を投げる', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (rawUrl: Parameters<typeof fetch>[0]) => {
+    const url = String(rawUrl);
       if (url === TOKEN_URL) {
         return jsonResponse(401, {});
       }

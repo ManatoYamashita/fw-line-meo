@@ -219,17 +219,17 @@ function buildApp(): ReturnType<typeof createApp> {
   return createApp(deps);
 }
 
-function get(app: ReturnType<typeof createApp>, bearer: string, path: string): Promise<Response> {
-  return app.request(path, { headers: { Authorization: `Bearer ${bearer}` } });
+async function get(app: ReturnType<typeof createApp>, bearer: string, path: string): Promise<Response> {
+  return await app.request(path, { headers: { Authorization: `Bearer ${bearer}` } });
 }
 
-function post(
+async function post(
   app: ReturnType<typeof createApp>,
   bearer: string,
   path: string,
   body: unknown,
 ): Promise<Response> {
-  return app.request(path, {
+  return await app.request(path, {
     method: 'POST',
     headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

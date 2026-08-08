@@ -26,7 +26,8 @@ function emptyResponse(status: number): Response {
 function routingFetchMock(
   handleOther: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): ReturnType<typeof vi.fn> {
-  return vi.fn(async (url: string, init?: RequestInit) => {
+  return vi.fn(async (rawUrl: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = String(rawUrl);
     if (url === TOKEN_URL) {
       return jsonResponse(200, { token_type: 'Bearer', access_token: 'stateless-token-1', expires_in: 900 });
     }
@@ -107,7 +108,8 @@ describe('createLineMessenger', () => {
 
     it('マージン失効点の手前ではキャッシュされたトークンを再利用する', async () => {
       let issuedCount = 0;
-      const fetchMock = vi.fn(async (url: string) => {
+      const fetchMock = vi.fn(async (rawUrl: Parameters<typeof fetch>[0]) => {
+    const url = String(rawUrl);
         if (url === TOKEN_URL) {
           issuedCount += 1;
           return jsonResponse(200, {
@@ -137,7 +139,8 @@ describe('createLineMessenger', () => {
 
     it('マージン失効点を過ぎたら raw expires_in 到達前でも再発行する', async () => {
       let issuedCount = 0;
-      const fetchMock = vi.fn(async (url: string) => {
+      const fetchMock = vi.fn(async (rawUrl: Parameters<typeof fetch>[0]) => {
+    const url = String(rawUrl);
         if (url === TOKEN_URL) {
           issuedCount += 1;
           return jsonResponse(200, {
