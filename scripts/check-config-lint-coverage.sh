@@ -40,18 +40,36 @@ checked=0
 #     ファイル全体を grep するとコメント中の記述（本件の経緯説明など）に誤ヒットするため、
 #     `ignores:` の行だけを取り出して判定する（1 行定義が前提。崩れたら fail して前提を守らせる）。
 #     BSD grep（macOS の既定）は \b を解釈しないため使わず、クォート込みの固定文字列で照合する。
+#     クォート込みの厳密文字列一致では守れない（'**/*.config.*' を "**/*.config.*" と書き換える
+#     だけで同じ穴が再発することを実測済み・PR #79 レビュー指摘）。そのため ignores の各要素を
+#     個別に取り出し、ワイルドカード（*）と `.config` を同時に含む要素をクォート種別・綴りに
+#     依らず検出する。
 ignores_line="$(grep -E '^[[:space:]]*ignores:' "$ESLINT_CONFIG" || true)"
 if [ -z "$ignores_line" ]; then
   echo "ERROR: ${ESLINT_CONFIG#$ROOT/} から 'ignores:' の行を抽出できませんでした。抽出前提が崩れています。" >&2
   echo "       → ignores は 1 行で定義してください（本ガードが除外パターンを機械検証します）。" >&2
   exit 1
 fi
-if printf '%s\n' "$ignores_line" | grep -qF "'**/*.config.*'"; then
-  echo "ERROR: ${ESLINT_CONFIG#$ROOT/} の ignores に '**/*.config.*' があります。" >&2
-  echo "       → next/postcss/vitest/playwright/eslint の設定がモノレポ全体で一度も lint されません。" >&2
-  echo "         ignores は生成物のみ（dist / dist-scripts / node_modules / .next）へ絞ってください。" >&2
-  fail=1
+
+ignore_entries="$(printf '%s\n' "$ignores_line" | grep -oE "['\"][^'\"]*['\"]" || true)"
+if [ -z "$ignore_entries" ]; then
+  echo "ERROR: ${ESLINT_CONFIG#$ROOT/} の ignores から要素を1件も抽出できませんでした。抽出前提が崩れています。" >&2
+  exit 1
 fi
+
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  case "$entry" in
+    *\**.config*|*.config*\**)
+      echo "ERROR: ${ESLINT_CONFIG#$ROOT/} の ignores に config を広く除外する疑わしい要素があります: ${entry}" >&2
+      echo "       → next/postcss/vitest/playwright/eslint の設定がモノレポ全体で lint されなくなるおそれがあります。" >&2
+      echo "         ignores は生成物のみ（dist / dist-scripts / node_modules / .next）へ絞ってください。" >&2
+      fail=1
+      ;;
+  esac
+done <<EOF
+$ignore_entries
+EOF
 
 # (2) 実在する config が所属 workspace の lint 引数に現れること。
 #     生成物・依存は除外する（.next 配下等の設定は検証対象ではない）。
