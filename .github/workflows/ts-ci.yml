@@ -39,6 +39,13 @@ jobs:
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
         run: bash scripts/check-typecheck-coverage.sh
+      - name: config lint カバレッジガード（Issue #66）
+        # next/postcss/vitest/playwright/eslint の設定 11 本がモノレポ全体で一度も lint されて
+        # いなかった穴の再発防止。穴は「ignores による除外」と「lint 引数がディレクトリ限定で
+        # パッケージ直下へ到達しない」の 2 段構えで、片方だけでは 1 本も lint されない。
+        # test/ e2e/ のディレクトリを見る check-test-code-coverage.sh の守備範囲外である
+        # （同じく read-only grep 検証。install 前に fail-fast）。
+        run: bash scripts/check-config-lint-coverage.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
