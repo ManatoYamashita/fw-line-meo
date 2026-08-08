@@ -28,15 +28,22 @@
 //
 //   これを構造で担保するため、責務を 2 つに分離している:
 //     listOwnerConfirmedStores(pool, sub)  — 集合の生成。入力は検証済み sub のみ
-//     selectAuthorizedStore(stores, hint)  — 集合内の選択。pool を受け取らない純関数であり、
-//                                            型シグネチャ上、入力配列の要素しか返せない
+//     selectAuthorizedStore(stores, hint)  — 集合内の選択。pool を受け取らない純関数
 //   後者が DB に触れないため、クライアント由来のヒントは SQL に一切到達しない。これは
 //   IDOR の構造的排除に加え、不正 UUID による pg 22P02（→ 500）も同時に不可能にする。
 //
-//   ⚠️ test/liff-auth.test.ts の型レベル検証は、tsconfig.json の exclude に "test" が含まれる
-//      ため tsc / next build のいずれでも検査されない（実測済み・別 Issue で是正予定）。
-//      実効ガードは同ファイルの arity チェックと純関数の振る舞いテスト、および
-//      test/route.db.test.ts の非オラクル deep-equal である。
+//   検証の所在（Issue #70 / PR #76・Issue #66 で是正済み）:
+//     test/liff-auth.test.ts の型レベル検証は、tsconfig.json の exclude から "test" が外れた
+//     ため typecheck（tsc -p tsconfig.json --noEmit）と next build の双方で実行される。
+//     scripts/check-test-code-coverage.sh が tsc --listFiles で「実際にプログラムへ含まれて
+//     いるか」を機械検証しているため、再び除外されれば CI が赤くなる。
+//   実効ガードは 4 つ:
+//     (a) test/liff-auth.test.ts の型ブロック — 引数タプル形状、LiffAuthOptions の鍵集合
+//         （Exclude<keyof …> による表明）、および許可鍵の型
+//     (b) 同ファイルの arity チェック（実行時。既定値付き引数は .length に数えられないため
+//         (a) の二重化にとどまり、単独では options への密輸を検出できない）
+//     (c) selectAuthorizedStore の振る舞いテスト（戻り値が必ず入力配列の要素であること）
+//     (d) test/route.db.test.ts の非オラクル deep-equal
 
 import type { Queryable, Result, StoreRow } from '@fwlm/db';
 
@@ -178,9 +185,15 @@ export async function listOwnerConfirmedStores(
  * 店舗を返す。一致しなければ `null`。
  *
  * Security-critical: 本関数は `Queryable` を受け取らない純関数であり、ヒントは SQL に一切
- * 到達しない。型シグネチャ上、戻り値は必ず入力配列の要素であるため、集合外の店舗を返す実装は
- * 物理的に書けない（IDOR の構造的排除）。副次的に、UUID として不正な文字列を渡されても
- * pg の 22P02（invalid_text_representation）が発生しえず、500 に化けることもない。
+ * 到達しない（引数タプルに Queryable が現れないことは test/liff-auth.test.ts の型ブロックが
+ * 機械検証する）。副次的に、UUID として不正な文字列を渡されても pg の 22P02
+ * （invalid_text_representation）が発生しえず、500 に化けることもない。
+ *
+ * ⚠️ 型が担保するのはここまでである。戻り値の型は `StoreRow | null` であり、「戻り値が必ず
+ *    入力配列の要素であること」は型では表現できない（新しい StoreRow を組み立てて返す実装も
+ *    型検査を通る）。この不変条件＝ IDOR の構造的排除は、test/liff-auth.test.ts の
+ *    「戻り値は必ず入力配列の要素である」振る舞いテストだけが担保している。当該テストを
+ *    削除すると根拠が失われるため、削除してはならない。
  *
  * ヒントが `null`・空文字・集合外のいずれであっても一律 `null` を返す。呼出元はこれを
  * 「未指定」と区別してはならない（design.md の非オラクル要件。集合外の値の存在有無を
@@ -209,8 +222,11 @@ export type StoreDetailAuthorizationError = LiffTokenVerificationError | StoreRe
  *
  * 表示対象の絞り込み（クライアント由来のヒントの適用）は意図的に本関数の外に置き、
  * `selectAuthorizedStore` に分離している。「認可（集合の決定）」と「選択（集合内の絞り込み）」を
- * 混ぜないことが不変条件の担保そのものであり、`options` にクライアント制御可能な識別子を
- * 追加することは禁止する（arity チェックでは検出できない唯一の抜け道のため）。
+ * 混ぜないことが不変条件の担保そのものであり、`options`（LiffAuthOptions）にクライアント
+ * 制御可能な識別子を追加することは禁止する。arity チェックは既定値付き引数を数えないため
+ * この経路を検出できないが、test/liff-auth.test.ts の型ブロックが鍵集合を
+ * `Exclude<keyof LiffAuthOptions, keyof ExpectedLiffAuthOptions>` で表明しており、許可外の鍵が
+ * 生えれば違反鍵名つきでコンパイルが失敗する（Issue #66）。
  *
  * 検証が失敗した場合は DB へ問い合わせない（無効トークンで owner 解決に進まないことを保証する
  * ショートサーキット）。

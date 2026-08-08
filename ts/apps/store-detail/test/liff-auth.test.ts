@@ -177,14 +177,20 @@ describe('verifyLiffIdToken', () => {
 //   認可主体（誰か）は検証済み sub のみが決める。クライアント由来の識別子は sub から導いた
 //   認可済み集合の内部での絞り込みにしか使えず、集合の境界を広げる入力としては使えない。
 //
-// ⚠️ 重要な限界（実測に基づく・虚偽の安心を残さないための記述）:
-//   `ts/apps/store-detail/tsconfig.json` の `exclude` に `"test"` が含まれるため、
-//   **以下の型代入は `tsc -p tsconfig.json --noEmit`（typecheck）でも `next build` でも
-//   検査されない**。lint も typescript-eslint の非型認識 recommended のみで型は見ない。
-//   したがってこのブロックは「意図の宣言」であり、破っても赤くならない。
-//   実効的に効いているガードは (a) 下の arity チェック、(b) `selectAuthorizedStore` の
-//   振る舞いテスト（戻り値が必ず入力配列の要素であること）、(c) route.db.test.ts の
-//   非オラクル deep-equal の 3 点である。tsconfig 側の是正は別 Issue で扱う。
+// 検証の所在（実測に基づく・虚偽の安心を残さないための記述）:
+//   以下の型代入は `tsc -p tsconfig.json --noEmit`（typecheck）と `next build` の双方で実行
+//   される。かつて tsconfig.json の `exclude` に `"test"` が含まれ「破っても赤くならない意図の
+//   宣言」でしかなかったが、PR #76（Issue #70）で除外が外れた。再び除外されれば
+//   scripts/check-test-code-coverage.sh が tsc --listFiles で検出して CI が赤くなる。
+//
+//   ただし「型検査が走ること」と「ガードが効くこと」は別である。実際、除外が外れた後も
+//   ExpectedAuthorizeParams が実装側の型を自己参照していたため密輸は素通りしていた
+//   （Issue #66 で是正。下の ExpectedLiffAuthOptions の注記を参照）。
+//
+//   実効ガードは (a) 以下の型ブロック、(b) 下の arity チェック（既定値付き引数を数えないため
+//   単独では options への密輸を検出できない）、(c) `selectAuthorizedStore` の振る舞いテスト
+//   （戻り値が必ず入力配列の要素であること。これは型では表現できない）、(d) route.db.test.ts の
+//   非オラクル deep-equal の 4 点である。
 
 // 以下の Expected* は、いずれも実装側の型を参照せず独立に書き下してある。
 // `Parameters<typeof …>` を使って「揃える」と、期待側が実装側に追随してしまい常に代入可能に
