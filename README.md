@@ -85,6 +85,7 @@ make go-test          # go/ 配下を全テスト
 # TypeScript 層
 make ts-install       # 依存インストール
 make ts-build         # 全アプリ・パッケージをビルド
+make ts-typecheck     # 型検査（packages を先にビルドするのでクリーン checkout でも通る）
 make ts-lint          # lint
 make ts-test          # テスト
 
