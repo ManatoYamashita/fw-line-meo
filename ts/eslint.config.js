@@ -6,10 +6,26 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/.next/**', '**/*.config.*'],
+    // 生成物のみを除外する。以前は '**/*.config.*' も含めており、next/postcss/vitest/
+    // playwright/eslint の設定がモノレポ全体で一度も lint されていなかった（Issue #78）。
+    // この除外はファイル指定で eslint を直接叩いても効くため、lint スクリプトの引数へ
+    // 足すだけでは決して届かない（走査そのものが行われない）。
+    // scripts/check-test-code-coverage.sh が eslint 自身に問い合わせて再発を機械検証する。
+    ignores: ['**/dist/**', '**/dist-scripts/**', '**/node_modules/**', '**/.next/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // typescript-eslint の eslint-recommended は no-undef を off にするが、その files は
+    // **/*.ts|tsx|mts|cts に限られる。したがって .mjs/.cjs/.js では js.configs.recommended の
+    // no-undef が生きており、Node のグローバルが未定義扱いになる。Issue #78 で
+    // survey-web/perf/bundle-budget.mjs（CI で実行される）が lint 対象に入り露見した。
+    // globals パッケージは直接依存に無いため、実際に使う識別子だけを列挙する。
+    files: ['**/*.mjs', '**/*.cjs', '**/*.js'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', URL: 'readonly' },
+    },
+  },
   {
     rules: {
       // 設計原則: TypeScript で any を禁止（Type Safety is Mandatory）。
