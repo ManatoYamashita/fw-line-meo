@@ -80,10 +80,36 @@ if ! grep -qE 'pnpm -C ts run typecheck' "$CI_YAML"; then
   fail=1
 fi
 
+# (4) root の typecheck が packages の先行ビルドを含むこと（Issue #66）。
+#     ts/packages/* は package.json の types が dist/ を指し、dist/ は .gitignore 対象である。
+#     クリーン checkout で build 前に typecheck を走らせると TS2307 で解決不能になる（実測済み）。
+#     CI は lint → build → typecheck の順序でこれを回避しているが、その順序は ts-ci.yml という
+#     「外部の約束」にしか書かれていないため、手元だけ赤くなる非対称が残る。この非対称自体が
+#     事故の温床（新規 worktree でテストが環境要因で全滅し赤化判定を誤る）なので、依存関係を
+#     script 自身に持たせ、外れたら機械検出する。
+if ! grep -qE '"build:packages"[[:space:]]*:' "$ROOT_PKG"; then
+  echo "ERROR: ${ROOT_PKG#$ROOT/} に \"build:packages\" スクリプトがありません。" >&2
+  echo "       → クリーン checkout では packages の dist/ が無く typecheck が TS2307 で落ちます。" >&2
+  echo "         \"build:packages\": \"pnpm --filter \\\"./packages/**\\\" run build\" を定義してください。" >&2
+  fail=1
+fi
+
+# typecheck の値そのものに build:packages が現れること（定義したのに呼ばれない、を防ぐ）。
+typecheck_line="$(grep -E '"typecheck"[[:space:]]*:' "$ROOT_PKG" || true)"
+case "$typecheck_line" in
+  *build:packages*) ;;
+  *)
+    echo "ERROR: ${ROOT_PKG#$ROOT/} の \"typecheck\" が build:packages を呼んでいません。" >&2
+    echo "       → CI のステップ順序に依存したままで、クリーンな手元では TS2307 で落ちます。" >&2
+    echo "         \"typecheck\": \"pnpm run build:packages && pnpm -r typecheck\" にしてください。" >&2
+    fail=1
+    ;;
+esac
+
 if [ "$fail" -ne 0 ]; then
   echo "NG: typecheck カバレッジガードに違反があります（上記参照）。" >&2
   exit 1
 fi
 
-echo "OK: typecheck カバレッジガード緑（${checked} workspace + root 定義 + CI 呼出を検証）。"
+echo "OK: typecheck カバレッジガード緑（${checked} workspace + root 定義 + CI 呼出 + packages 先行ビルドを検証）。"
 exit 0
