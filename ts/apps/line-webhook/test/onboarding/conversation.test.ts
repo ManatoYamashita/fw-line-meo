@@ -76,6 +76,8 @@ function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     display_name: null,
     onboarding_status: 'pending',
     created_at: FIXED_NOW,
+    // 0004 で owners に追加された必須列（JST・時単位・DB 既定は 7）。
+    delivery_hour: 7,
     ...overrides,
   };
 }
@@ -143,8 +145,9 @@ function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: st
 // confirmStore に渡された引数（ownerId・candidate）を記録して「セッションに保存された
 // 実際に提示済みの候補」がそのまま渡されたことを検証できるようにする。
 function createFakeIdentificationService(config: {
-  searchOutcome?: SearchOutcome;
-  confirmOutcome?: ConfirmOutcome;
+  // 呼び出し側は overrides の値をそのまま渡すため undefined が来る（exactOptionalPropertyTypes）。
+  searchOutcome?: SearchOutcome | undefined;
+  confirmOutcome?: ConfirmOutcome | undefined;
 }): {
   service: StoreIdentificationService;
   searchCalls: string[];

@@ -36,10 +36,13 @@ function buildApp(): ReturnType<typeof createApp> {
       surveyBaseUrl: 'https://survey.example',
     },
   };
-  return createApp(deps);
+  // 本テストは /stores/{id}/qr.png のみを叩くため、他業務の deps は生成しない。
+  // createApp の契約（AppDeps 全項目）を満たしていないことを型に明示したうえで通す。
+  // 別経路をこのテストへ追加する場合は、ここを埋めないと undefined 参照で落ちる。
+  return createApp(deps as unknown as AppDeps);
 }
 
-function qr(app: ReturnType<typeof createApp>, storeId: string, bearer?: string): Promise<Response> {
+async function qr(app: ReturnType<typeof createApp>, storeId: string, bearer?: string): Promise<Response> {
   const headers: Record<string, string> = {};
   if (bearer !== undefined) headers['Authorization'] = `Bearer ${bearer}`;
   return app.request(`/stores/${storeId}/qr.png`, { headers });

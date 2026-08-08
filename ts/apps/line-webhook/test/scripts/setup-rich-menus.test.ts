@@ -27,15 +27,18 @@ function emptyResponse(status: number): Response {
 function createFetchMock(): {
   fetchMock: ReturnType<typeof vi.fn>;
   createCalls: Array<{ url: string; body: Record<string, unknown> }>;
-  uploadCalls: Array<{ url: string; contentType: string; body: unknown }>;
+  uploadCalls: Array<{ url: string; contentType: string | undefined; body: unknown }>;
   defaultCalls: string[];
 } {
   const createCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
-  const uploadCalls: Array<{ url: string; contentType: string; body: unknown }> = [];
+  const uploadCalls: Array<{ url: string; contentType: string | undefined; body: unknown }> = [];
   const defaultCalls: string[] = [];
   let createCount = 0;
 
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  // 注入先は `typeof fetch`（第1引数は string | URL | Request）。本テストの実装は常に
+  // 文字列 URL で呼ばれるため、受け口を合わせたうえで文字列へ正規化して分岐する。
+  const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
     if (url === TOKEN_URL) {
       return jsonResponse(200, { access_token: 'stateless-token-1', expires_in: 900 });
     }
@@ -167,7 +170,7 @@ describe('setupRichMenus', () => {
   });
 
   it('トークン発行に失敗した場合は例外を投げる', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
       if (url === TOKEN_URL) {
         return jsonResponse(401, {});
       }

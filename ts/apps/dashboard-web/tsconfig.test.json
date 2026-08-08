@@ -1,0 +1,9 @@
+{
+  // 検証コード（test/）を型検査の対象に含める設定（Issue #66）。
+  // tsconfig.json は exclude で "test" を明示除外しているため、こちらで対象を組み直す。
+  // exclude は extends でマージされず「置換」されるため、必ず自前で列挙すること
+  // （省略すると親の "test" 除外が効いて対象 0 件になり、静かに緑になる）。
+  "extends": "./tsconfig.json",
+  "include": ["next-env.d.ts", "test/**/*.ts", "test/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "e2e", "playwright.config.ts", "vitest.config.ts"]
+}

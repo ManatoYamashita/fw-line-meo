@@ -9,7 +9,7 @@
     "./components/*": "./src/components/*.tsx"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },

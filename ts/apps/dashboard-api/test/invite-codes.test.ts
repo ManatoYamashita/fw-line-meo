@@ -6,9 +6,11 @@ import {
   type InviteCodesListDeps,
   type InviteCodeIssueDeps,
   type InviteCodeDisableDeps,
+  type InviteCodeItemJson,
 } from '../src/invite-codes.js';
 import type { AuthDeps } from '../src/auth.js';
 import type { DashboardUserIdentity, InviteCodeItem } from '@fwlm/db';
+import { readJson } from './support/json.js';
 
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
 const AG: DashboardUserIdentity = { id: 'u2', role: 'agency', operatorId: 'op1', agencyId: 'ag1' };
@@ -60,7 +62,7 @@ describe('handleInviteCodesList', () => {
       agencyId: undefined,
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('unauthenticated');
+    expect((await readJson(res)).error.code).toBe('unauthenticated');
   });
 
   it('未登録 UID と無効化済みは同一の 403 封筒（存在を漏らさない）', async () => {
@@ -84,7 +86,7 @@ describe('handleInviteCodesList', () => {
       agencyId: 'ag2',
     });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson(res)).error.code).toBe('forbidden');
     expect(listInviteCodes).not.toHaveBeenCalled();
   });
 
@@ -115,7 +117,7 @@ describe('handleInviteCodesList', () => {
       agencyId: undefined,
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
     expect(listInviteCodes).not.toHaveBeenCalled();
   });
 
@@ -177,7 +179,7 @@ describe('handleInviteCodeIssue', () => {
   it('認証なしは 401', async () => {
     const res = await handleInviteCodeIssue(issueDeps(), { authorization: undefined, body: {} });
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('unauthenticated');
+    expect((await readJson(res)).error.code).toBe('unauthenticated');
   });
 
   it('agency の agencyId 省略は自代理店へ発行して 201（5.2）', async () => {
@@ -216,7 +218,7 @@ describe('handleInviteCodeIssue', () => {
       body: { agencyId: 'ag2' },
     });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson(res)).error.code).toBe('forbidden');
     expect(issueCode).not.toHaveBeenCalled();
   });
 
@@ -227,7 +229,7 @@ describe('handleInviteCodeIssue', () => {
       body: {},
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
     expect(issueCode).not.toHaveBeenCalled();
   });
 
@@ -258,7 +260,7 @@ describe('handleInviteCodeIssue', () => {
       body: { agencyId: 123 },
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
     expect(issueCode).not.toHaveBeenCalled();
   });
 
@@ -269,7 +271,7 @@ describe('handleInviteCodeIssue', () => {
       body: {},
     });
     expect(res.status).toBe(500);
-    expect((await res.json()).error.code).toBe('internal');
+    expect((await readJson(res)).error.code).toBe('internal');
   });
 });
 
@@ -296,7 +298,7 @@ describe('handleInviteCodeDisable', () => {
       body: undefined,
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('unauthenticated');
+    expect((await readJson(res)).error.code).toBe('unauthenticated');
   });
 
   it('UUID 形式でない id は 404 で、disableCode は呼ばれない（存在の探り当てを許さない）', async () => {
@@ -309,7 +311,7 @@ describe('handleInviteCodeDisable', () => {
       body: undefined,
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson(res)).error.code).toBe('not_found');
     expect(disableCode).not.toHaveBeenCalled();
   });
 
@@ -319,7 +321,7 @@ describe('handleInviteCodeDisable', () => {
       { authorization: 'Bearer tok', id: CODE_ID, body: undefined },
     );
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson(res)).error.code).toBe('not_found');
   });
 
   it('agency は body なしで自代理店スコープの無効化になる（5.3）', async () => {
@@ -354,7 +356,7 @@ describe('handleInviteCodeDisable', () => {
       body: { agencyId: 'ag2' },
     });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson(res)).error.code).toBe('forbidden');
     expect(disableCode).not.toHaveBeenCalled();
   });
 
@@ -368,7 +370,7 @@ describe('handleInviteCodeDisable', () => {
       body: undefined,
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
     expect(disableCode).not.toHaveBeenCalled();
   });
 
@@ -394,7 +396,7 @@ describe('handleInviteCodeDisable', () => {
       { authorization: 'Bearer tok', id: CODE_ID, body: undefined },
     );
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json = await readJson<{ inviteCode: InviteCodeItemJson }>(res);
     expect(json.inviteCode.disabled).toBe(true);
   });
 });

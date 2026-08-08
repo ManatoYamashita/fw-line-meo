@@ -5,6 +5,7 @@ import {
   generateInviteCode,
   createUniqueInviteCode,
   isUniqueViolation,
+  type RandomIntFn,
 } from '../src/invite-code-gen.js';
 
 // pg の unique_violation（23505）を模したエラー。pg は Error 派生に code プロパティを持つ。
@@ -37,7 +38,8 @@ describe('generateInviteCode', () => {
   });
 
   it('注入 random が常に 0 を返すと先頭文字のみ（"22222222"）', () => {
-    const random = vi.fn(() => 0);
+    // 型引数を与えないと mock.calls の要素が空タプルになり、下の call[0] 検証が成立しない。
+    const random = vi.fn<RandomIntFn>(() => 0);
     expect(generateInviteCode(random)).toBe('22222222');
     // 1 文字につき 1 回、上限は必ずアルファベット長（31）で呼ばれる。
     expect(random).toHaveBeenCalledTimes(8);

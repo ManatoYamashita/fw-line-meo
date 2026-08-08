@@ -34,7 +34,9 @@ describe('createPlacesSearchAdapter', () => {
   });
 
   it('リクエストの FieldMask ヘッダを固定文字列で送信する', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, { places: [rawPlace()] }));
+    // 型引数を与えないと mock.calls の要素が空タプル `[]` になり、呼び出し引数を
+    // 取り出せない（= 何を送ったかの検証が成立しない）。注入先と同じ `typeof fetch` で受ける。
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(200, { places: [rawPlace()] }));
     const adapter = createPlacesSearchAdapter({ apiKey: 'test-api-key', fetch: fetchMock });
 
     await adapter.searchCandidates('テスト食堂');
@@ -120,22 +122,16 @@ describe('createPlacesSearchAdapter', () => {
   });
 
   it('JSON パース不能なレスポンスのとき例外を投げず error を返す', async () => {
-    const fetchMock = vi.fn(async () => {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new SyntaxError('Unexpected token');
-        },
-      } as Response;
-    });
+    // 壊れた本文を持つ実物の Response を返す（json() が SyntaxError で reject する）。
+    // 部分オブジェクトの Response キャストより実際の失敗経路に近い。
+    const fetchMock = vi.fn(async () => new Response('{ broken json', { status: 200 }));
     const adapter = createPlacesSearchAdapter({ apiKey: 'k', fetch: fetchMock });
 
     await expect(adapter.searchCandidates('テスト食堂')).resolves.toEqual({ kind: 'error' });
   });
 
   it('1.5秒以内にレスポンスが無いとき AbortController でタイムアウトし error を返す', async () => {
-    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           reject(new DOMException('The operation was aborted', 'AbortError'));

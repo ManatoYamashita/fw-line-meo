@@ -274,6 +274,9 @@ describe('LineClient.pushMessage — 500/タイムアウトの再送', () => {
     const result = await client.pushMessage('test-access-token', 'Uabc123', MESSAGES, RETRY_KEY);
 
     expect(result.status).toBe('failed');
+    // message を持つのは失敗系のみ（LinePushSuccess には無い）。ここで判別共用体を絞り込む。
+    // 絞り込まずに読むと、成功が返った場合に undefined 同士の比較で空振りしうる。
+    if (result.status !== 'failed') throw new Error(`失敗を期待したが status=${result.status}`);
     expect(result.message).toContain('exceeded max retries');
     // 初回 + maxRetries(2) = 3 リクエスト。
     expect(server.requests).toHaveLength(3);

@@ -202,7 +202,7 @@ function buildApp(): ReturnType<typeof createApp> {
   return createApp(deps);
 }
 
-function post(
+async function post(
   app: ReturnType<typeof createApp>,
   bearer: string,
   body: unknown,

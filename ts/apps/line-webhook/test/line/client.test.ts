@@ -107,7 +107,7 @@ describe('createLineMessenger', () => {
 
     it('マージン失効点の手前ではキャッシュされたトークンを再利用する', async () => {
       let issuedCount = 0;
-      const fetchMock = vi.fn(async (url: string) => {
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
         if (url === TOKEN_URL) {
           issuedCount += 1;
           return jsonResponse(200, {
@@ -137,7 +137,7 @@ describe('createLineMessenger', () => {
 
     it('マージン失効点を過ぎたら raw expires_in 到達前でも再発行する', async () => {
       let issuedCount = 0;
-      const fetchMock = vi.fn(async (url: string) => {
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
         if (url === TOKEN_URL) {
           issuedCount += 1;
           return jsonResponse(200, {

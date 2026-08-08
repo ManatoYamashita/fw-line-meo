@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleMe, type MeDeps } from '../src/me.js';
 import type { DashboardUserIdentity } from '@fwlm/db';
+import { readJson } from './support/json.js';
 
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
 const AG: DashboardUserIdentity = { id: 'u2', role: 'agency', operatorId: 'op1', agencyId: 'ag1' };
@@ -33,7 +34,7 @@ describe('handleMe', () => {
   it('認証なしは 401（unauthenticated 封筒）', async () => {
     const res = await handleMe(deps(), req({ authorization: undefined }));
     expect(res.status).toBe(401);
-    const body = await res.json();
+    const body = await readJson(res);
     expect(body.error.code).toBe('unauthenticated');
     expect(typeof body.error.message).toBe('string');
   });
@@ -41,7 +42,7 @@ describe('handleMe', () => {
   it('未登録 UID は 403（forbidden 封筒）', async () => {
     const res = await handleMe(deps({}, null), req());
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson(res)).error.code).toBe('forbidden');
   });
 
   it('無効化済みは 403（未登録と完全に同一の封筒・存在有無を漏らさない）', async () => {

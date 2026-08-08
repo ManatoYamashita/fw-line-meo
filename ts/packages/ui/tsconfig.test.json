@@ -1,0 +1,7 @@
+{
+  // 検証コード（test/）を型検査の対象に含める設定（Issue #66）。
+  // 本パッケージの tsconfig.json は既に noEmit かつ rootDir を持たないため、
+  // include を test/ まで広げるだけでよい（compilerOptions の上書きは不要）。
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
+}

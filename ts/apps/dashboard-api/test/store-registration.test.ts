@@ -6,6 +6,7 @@ import {
   type StoreRegistrationDeps,
 } from '../src/store-registration.js';
 import type { DashboardUserIdentity, StoreCandidate } from '@fwlm/db';
+import { readJson } from './support/json.js';
 
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
 const AG: DashboardUserIdentity = { id: 'u2', role: 'agency', operatorId: 'op1', agencyId: 'ag1' };
@@ -52,7 +53,7 @@ describe('handleStoreSearch', () => {
       body: { query: 'テスト' },
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('unauthenticated');
+    expect((await readJson(res)).error.code).toBe('unauthenticated');
   });
 
   it('未登録 UID は 403（同一封筒）', async () => {
@@ -61,7 +62,7 @@ describe('handleStoreSearch', () => {
       body: { query: 'テスト' },
     });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson(res)).error.code).toBe('forbidden');
   });
 
   it('query が空文字なら 400 で、searchCandidates は呼ばれない', async () => {
@@ -71,7 +72,7 @@ describe('handleStoreSearch', () => {
       body: { query: '' },
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
     expect(searchCandidates).not.toHaveBeenCalled();
   });
 
@@ -89,7 +90,7 @@ describe('handleStoreSearch', () => {
     for (const body of [undefined, null, 'テスト', { query: 42 }, {}]) {
       const res = await handleStoreSearch(searchDeps(), { authorization: 'Bearer tok', body });
       expect(res.status).toBe(400);
-      expect((await res.json()).error.code).toBe('validation_failed');
+      expect((await readJson(res)).error.code).toBe('validation_failed');
     }
   });
 
@@ -122,7 +123,7 @@ describe('handleStoreSearch', () => {
       { authorization: 'Bearer tok', body: { query: 'テスト' } },
     );
     expect(res.status).toBe(502);
-    const json = await res.json();
+    const json = await readJson(res);
     expect(json.error.code).toBe('places_error');
     expect(json.error.message).toContain('再試行');
   });
@@ -155,7 +156,7 @@ describe('handleStoreRegister', () => {
       body: registerBody(),
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('unauthenticated');
+    expect((await readJson(res)).error.code).toBe('unauthenticated');
   });
 
   it('body が object でないときは 400 で、registerStore は呼ばれない', async () => {
@@ -168,7 +169,7 @@ describe('handleStoreRegister', () => {
         body,
       });
       expect(res.status).toBe(400);
-      expect((await res.json()).error.code).toBe('validation_failed');
+      expect((await readJson(res)).error.code).toBe('validation_failed');
     }
     expect(registerStore).not.toHaveBeenCalled();
   });
@@ -195,7 +196,7 @@ describe('handleStoreRegister', () => {
         body: registerBody({ candidate }),
       });
       expect(res.status).toBe(400);
-      expect((await res.json()).error.code).toBe('validation_failed');
+      expect((await readJson(res)).error.code).toBe('validation_failed');
     }
     expect(registerStore).not.toHaveBeenCalled();
   });
@@ -207,7 +208,7 @@ describe('handleStoreRegister', () => {
       body: registerBody({ ownerId: 'not-a-uuid' }),
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson(res)).error.code).toBe('not_found');
     expect(findOwner).not.toHaveBeenCalled();
   });
 
@@ -217,7 +218,7 @@ describe('handleStoreRegister', () => {
       body: registerBody(),
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('not_found');
+    expect((await readJson(res)).error.code).toBe('not_found');
   });
 
   it('agency が他代理店のオーナーを指定したら 403 で、registerStore は呼ばれない（2.3, 2.4）', async () => {
@@ -232,7 +233,7 @@ describe('handleStoreRegister', () => {
       { authorization: 'Bearer tok', body: registerBody() },
     );
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('forbidden');
+    expect((await readJson(res)).error.code).toBe('forbidden');
     expect(registerStore).not.toHaveBeenCalled();
   });
 
@@ -255,7 +256,7 @@ describe('handleStoreRegister', () => {
       body: registerBody({ categoryCode: 'no-such-category' }),
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
     expect(isValidCategory).toHaveBeenCalledWith('no-such-category');
     expect(registerStore).not.toHaveBeenCalled();
   });
@@ -266,7 +267,7 @@ describe('handleStoreRegister', () => {
       body: registerBody({ categoryCode: 42 }),
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe('validation_failed');
+    expect((await readJson(res)).error.code).toBe('validation_failed');
   });
 
   it('確定成功は 201 { storeId }。categoryCode 未指定は null で registerStore へ渡す（3.8, 3.10）', async () => {
@@ -312,7 +313,7 @@ describe('handleStoreRegister', () => {
       { authorization: 'Bearer tok', body: registerBody() },
     );
     expect(res.status).toBe(409);
-    const json = await res.json();
+    const json = await readJson(res);
     expect(json.error.code).toBe('place_already_registered');
     expect(json.error.message).toContain('登録');
   });

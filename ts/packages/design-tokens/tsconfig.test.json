@@ -1,0 +1,11 @@
+{
+  // 検証コード（test/）を型検査の対象に含める設定（Issue #66）。
+  // ビルド用の tsconfig.json は rootDir: "src" のため test/ を含めると TS6059 になる。
+  // ここでは rootDir を workspace 直下へ広げ、出力を伴わない検査専用として使う。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

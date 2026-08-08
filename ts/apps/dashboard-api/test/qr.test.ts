@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import QRCode from 'qrcode';
 import { handleQr, type QrDeps } from '../src/qr.js';
 import type { StoreWithAgency, DashboardUserIdentity } from '@fwlm/db';
+import { readJson } from './support/json.js';
 
 const STORE = '44444444-4444-4444-4444-444444444444';
 const OP: DashboardUserIdentity = { id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null };
@@ -37,7 +38,7 @@ function deps(over: Partial<QrDeps> = {}, user: DashboardUserIdentity | null = O
   };
 }
 
-function req(over: Partial<{ storeId: string; size: number; authorization: string }> = {}) {
+function req(over: Partial<{ storeId: string; size: number; authorization: string | undefined }> = {}) {
   return { storeId: STORE, size: 512, authorization: 'Bearer tok', ...over };
 }
 
@@ -45,7 +46,7 @@ describe('handleQr', () => {
   it('認証なしは 401', async () => {
     const res = await handleQr(deps(), req({ authorization: undefined }));
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('UNAUTHENTICATED');
+    expect((await readJson(res)).error.code).toBe('UNAUTHENTICATED');
   });
 
   it('未登録 UID は 403', async () => {
@@ -58,7 +59,7 @@ describe('handleQr', () => {
     d.auth.findUser = () => Promise.resolve({ ...AG_OWN, disabled: true });
     const res = await handleQr(d, req());
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('FORBIDDEN');
+    expect((await readJson(res)).error.code).toBe('FORBIDDEN');
   });
 
   it('店舗不在は 404', async () => {
@@ -69,7 +70,7 @@ describe('handleQr', () => {
   it('agency 他店は 403（RBAC）', async () => {
     const res = await handleQr(deps({}, AG_OTHER), req());
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe('FORBIDDEN');
+    expect((await readJson(res)).error.code).toBe('FORBIDDEN');
   });
 
   it('place 未確定は 409', async () => {
@@ -78,7 +79,7 @@ describe('handleQr', () => {
       req(),
     );
     expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe('PLACE_NOT_CONFIRMED');
+    expect((await readJson(res)).error.code).toBe('PLACE_NOT_CONFIRMED');
   });
 
   it('agency 他店は place 未確定でも 403（RBAC が 409 より先・情報漏洩防止）', async () => {

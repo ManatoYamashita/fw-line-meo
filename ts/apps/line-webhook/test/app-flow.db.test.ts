@@ -42,6 +42,9 @@ const AG = 'f0000000-0000-0000-0000-000000000001';
 const CHANNEL_SECRET = 'f0-test-channel-secret';
 const WRONG_CHANNEL_SECRET = 'f0-wrong-channel-secret';
 const RICHMENU_COMPLETED_ID = 'f0-richmenu-completed';
+// Issue #21 で ConversationDeps に追加された完了メッセージの導線 URL。本テストの deps にも渡す
+// （欠けたまま実行すると、完了メッセージのボタン URL が undefined の状態を検証してしまう）。
+const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 const INVITE_CODE = 'F0ACTIVE01';
 
 function sign(body: string, secret: string): string {
@@ -189,6 +192,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       messenger: deps.messenger,
       now: () => new Date(),
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
     });
 
     const appDeps: AppDeps = {
@@ -280,7 +284,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
         body: confirmBody,
       });
       expect(confirmRes.status).toBe(200);
-      expect(messenger.reply).toHaveBeenNthCalledWith(5, 'reply-f0-5', [buildCompletionMessage()]);
+      expect(messenger.reply).toHaveBeenNthCalledWith(5, 'reply-f0-5', [buildCompletionMessage(LIFF_STORE_DETAIL_URL)]);
       // stores 作成＋owner 遷移＋リッチメニュー切替を1トランザクションで行う最も重い段。
       expect(confirmElapsedMs).toBeLessThan(RESPONSE_TIME_SANITY_BUDGET_MS);
 
