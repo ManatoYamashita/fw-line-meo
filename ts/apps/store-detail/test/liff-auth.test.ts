@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Queryable, StoreRow } from '@fwlm/db';
 import {
   authorizeStoreDetailRequest,
+  type LiffAuthOptions,
   listOwnerConfirmedStores,
   selectAuthorizedStore,
   verifyLiffIdToken,
@@ -185,6 +186,10 @@ describe('verifyLiffIdToken', () => {
 //   振る舞いテスト（戻り値が必ず入力配列の要素であること）、(c) route.db.test.ts の
 //   非オラクル deep-equal の 3 点である。tsconfig 側の是正は別 Issue で扱う。
 
+// 以下の Expected* は、いずれも実装側の型を参照せず独立に書き下してある。
+// `Parameters<typeof …>` を使って「揃える」と、期待側が実装側に追随してしまい常に代入可能に
+// なる（＝ガードが無力化する）。実際にそうなっていた事例は下の ExpectedLiffAuthOptions の
+// 注記を参照（Issue #66）。
 type ExpectedListOwnerConfirmedStoresParams = [pool: Queryable, sub: string];
 type ActualListOwnerConfirmedStoresParams = Parameters<typeof listOwnerConfirmedStores>;
 // 双方向の代入可能性を確認することで、パラメータのタプル形状が完全一致することを強制する。
@@ -209,17 +214,59 @@ const _selectShapeBackward: ActualSelectAuthorizedStoreParams =
 void _selectShapeForward;
 void _selectShapeBackward;
 
+// options（LiffAuthOptions）に許可する鍵と、その鍵の型。**実装側の型を参照せず独立に書き下す。**
+//
+// 以前は `options?: Parameters<typeof authorizeStoreDetailRequest>[3]` と実装側を自己参照して
+// おり、LiffAuthOptions に何を足しても期待側が追随するため密輸を検出できなかった（Issue #66。
+// PR #76 で test/ が型検査対象に入った後も、識別子を注入した状態で typecheck が exit=0 に
+// なることを実測済み）。
+//
+// 無害なオプションを正当に追加したい場合も一度赤くなるが、緑に戻す最小操作はこの型へ 1 行
+// 足すことである。レビュアーが見る場所が 1 行に固定され、`requestedStoreId` のような識別子の
+// 追加は差分で必ず目に入る。ブロックごと削除するより 1 行追加のほうが低コストであり、
+// ガードを剥がす誘因が生まれない構造になっている。
+type ExpectedLiffAuthOptions = {
+  readonly verifyEndpoint?: string;
+  readonly fetchImpl?: typeof fetch;
+};
+
+// (1) 鍵集合の表明。許可外の鍵が生えると
+//     `Type '"requestedStoreId"' is not assignable to type 'never'` で赤くなり、診断が違反鍵名を
+//     出す。「期待する形を素朴に書き下して双方向代入する」だけでは検出できない: 全プロパティが
+//     省略可能な 2 つのオブジェクト型は構造的部分型により鍵が増えても相互代入可能であり、
+//     密輸される鍵は既存の呼出を壊さないため必ず省略可能になるからである。
+type UnexpectedLiffAuthOptionKeys = Exclude<keyof LiffAuthOptions, keyof ExpectedLiffAuthOptions>;
+const _noUnexpectedOptionKeys: never = null as unknown as UnexpectedLiffAuthOptionKeys;
+void _noUnexpectedOptionKeys;
+
+// (2) 許可鍵の型の表明。既存の鍵がクライアント制御可能な識別子を運べる型へすり替わると赤くなる
+//     （鍵集合は変わらないため (1) では捕まらない）。
+const _optionsShapeForward: ExpectedLiffAuthOptions = null as unknown as LiffAuthOptions;
+const _optionsShapeBackward: LiffAuthOptions = null as unknown as ExpectedLiffAuthOptions;
+void _optionsShapeForward;
+void _optionsShapeBackward;
+
+// (3) 引数タプルの表明。位置引数として識別子が追加されると赤くなる。
 type ExpectedAuthorizeParams = [
   idToken: string,
   clientId: string,
   pool: Queryable,
-  options?: Parameters<typeof authorizeStoreDetailRequest>[3],
+  options?: ExpectedLiffAuthOptions,
 ];
 type ActualAuthorizeParams = Parameters<typeof authorizeStoreDetailRequest>;
 const _authorizeShapeForward: ExpectedAuthorizeParams = null as unknown as ActualAuthorizeParams;
 const _authorizeShapeBackward: ActualAuthorizeParams = null as unknown as ExpectedAuthorizeParams;
 void _authorizeShapeForward;
 void _authorizeShapeBackward;
+
+// verifyLiffIdToken も同じ options を受け取る（authorizeStoreDetailRequest から素通しで渡される
+// ため、こちらに識別子が足されても同じ密輸経路になる）。
+type ExpectedVerifyParams = [idToken: string, clientId: string, options?: ExpectedLiffAuthOptions];
+type ActualVerifyParams = Parameters<typeof verifyLiffIdToken>;
+const _verifyShapeForward: ExpectedVerifyParams = null as unknown as ActualVerifyParams;
+const _verifyShapeBackward: ActualVerifyParams = null as unknown as ExpectedVerifyParams;
+void _verifyShapeForward;
+void _verifyShapeBackward;
 
 describe('listOwnerConfirmedStores / selectAuthorizedStore / authorizeStoreDetailRequest — 引数形状（Security-critical）', () => {
   it('listOwnerConfirmedStores は (pool, sub) の 2 引数のみを受け付ける（storeId/ownerId パラメータが存在しない）', () => {
@@ -236,10 +283,10 @@ describe('listOwnerConfirmedStores / selectAuthorizedStore / authorizeStoreDetai
     // options はテスト用の verifyEndpoint/fetchImpl 差替えのみを目的とし、クライアント制御可能な
     // 識別子を含まない（デフォルト値付きのため .length には数えられない）。
     //
-    // ⚠️ この arity チェックは options への密輸（例: `options.requestedStoreId`）を検出できない
-    //    — デフォルト値付き引数は .length に数えられないためである。arity ガードを満たしたまま
-    //    不変条件を破れる唯一の抜け道なので、LiffAuthOptions にクライアント制御可能な識別子を
-    //    足すことは明示的に禁止する（レビュー時の必須確認項目）。
+    // この arity チェック自体は options への密輸（例: `options.requestedStoreId`）を検出できない
+    // — デフォルト値付き引数は .length に数えられないためである。その抜け道は上の型ブロック (1)
+    // （ExpectedLiffAuthOptions による鍵集合の表明）が機械検出するので、レビュー時の目視確認に
+    // 依存しない（Issue #66 で是正。それ以前は「レビュー時の必須確認項目」と書かれていた）。
     expect(authorizeStoreDetailRequest.length).toBe(3);
   });
 });
