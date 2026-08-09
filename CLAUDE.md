@@ -25,6 +25,11 @@ Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で
 - `make go-test` — `go/` 配下の全パッケージのテストを実行（`cd go && go test ./...`）
 - コンテナイメージは `go/Dockerfile`（multi-stage・distroless/static-debian12:nonroot 実行時）。このマシンには docker/apple-container が無いため実ビルド検証は CI/デプロイ時に行う
 
+CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
+- `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
+- `scripts/check-prod-image-drift.sh` — 本番稼働イメージと `origin/main` の乖離検証（Issue #91）。`PROJECT_ID` 必須。`PROD_IMAGE_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
+- `scripts/report-ci-issue.sh` — 追跡 Issue の起票／コメント／自動クローズ。`REPORT_CI_ISSUE_DRY_RUN=1` で書き込みを伴わず検証できる
+
 アプリ層のビルド・lint・テストは各層導入時に確立し追記すること。**未確立のコマンドを推測で書かない。**
 
 ## アーキテクチャの大方針（実装前に必読）

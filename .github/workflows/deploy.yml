@@ -138,3 +138,68 @@ jobs:
             esac
           done
           exit "$bad"
+
+  # 失敗通知（Issue #91）。deploy-prod は workflow_run 起動のため PR のチェック欄に現れず、
+  # 2026-08-08〜09 に 6 回連続で失敗しても誰にも通知されなかった。追跡 Issue を 1 本だけ維持し、
+  # 復旧したら自動で閉じる。
+  notify:
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    # ジョブ単位の permissions はワークフロー単位を置き換えるため、deploy ジョブへ
+    # issues: write を持たせずに済む（最小権限）。
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 追跡 Issue へ通知
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          # deploy ジョブが checkout するのと同じ commit（workflow_run 時は ts-ci が緑になった
+          # commit であり、main の HEAD とは限らない）。
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # skipped（ts-ci が緑でないため deploy 自体を実行しなかった）と cancelled は
+          # デプロイの失敗ではないので通知しない。
+          case "$DEPLOY_RESULT" in
+            success) state=green ;;
+            failure) state=red ;;
+            *)
+              echo "OK: deploy の結果は ${DEPLOY_RESULT} のため通知しません。"
+              exit 0
+              ;;
+          esac
+
+          body="$RUNNER_TEMP/issue-body.md"
+          {
+            if [ "$state" = "red" ]; then
+              echo "deploy-prod が失敗しました。**本番は旧イメージのままです。**"
+            else
+              echo "deploy-prod が成功しました。"
+            fi
+            echo ""
+            echo "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- 反映対象 commit: \`${DEPLOYED_SHA}\`"
+            echo ""
+            echo "deploy-prod は workflow_run 起動のため PR のチェック欄には現れません。"
+            echo "失敗の範囲は「最後に成功した run」まで遡って確定してください（当日分だけ見ると過小報告になります）。"
+            echo ""
+            echo "\`\`\`"
+            echo "gh run list --workflow deploy.yml"
+            echo "gh workflow run deploy.yml --ref main   # 復旧後の再実行"
+            echo "\`\`\`"
+          } > "$body"
+
+          # 署名に run ID を渡すため、連続失敗は 1 つの Issue にコメントとして積み上がる
+          # （失敗のたびに新しい Issue を立てない）。
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label deploy-prod-failure \
+            --title "chore(ci): deploy-prod が失敗しています（自動検出）" \
+            --body-file "$body" \
+            --signature "run-${GITHUB_RUN_ID}"

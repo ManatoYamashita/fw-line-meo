@@ -184,6 +184,27 @@ fx_run() {
   fi
 }
 
+fx_run_args() {
+  # $1 = ガード名、以降 = ガードへ渡す引数。出力は fx_run と同じく stdout/stderr を混ぜて OUT へ。
+  # 引数を取るガード（check-deploy-image-coverage --print-targets 等）のために用意する。
+  OUT=''
+  RC=0
+  fx_guard_name="$1"
+  shift
+  OUT="$(cd "$FX" && bash "scripts/${fx_guard_name}.sh" "$@" 2>&1)" || RC=$?
+}
+
+fx_run_stdout() {
+  # $1 = ガード名、以降 = 引数。**stdout だけ**を OUT へ入れる（stderr は捨てる）。
+  # 「機械可読な出力に人間向けの行が混ざっていないこと」「赤のとき 1 行も出さないこと」を
+  # 照合するために使う。
+  OUT=''
+  RC=0
+  fx_guard_name="$1"
+  shift
+  OUT="$(cd "$FX" && bash "scripts/${fx_guard_name}.sh" "$@" 2>/dev/null)" || RC=$?
+}
+
 expect_green() {
   assert_count=$((assert_count + 1))
   if [ "$RC" -ne 0 ]; then
@@ -217,6 +238,15 @@ expect_absent() {
     *"$1"*) _t_fail "出てはいけないメッセージが出ています: $1" ;;
     *) ;;
   esac
+}
+
+expect_output_empty() {
+  # 出力が完全に空であること。「検証が赤なら機械可読な stdout へ 1 行も出さない」のように、
+  # *出さないこと* が契約になっている経路を照合するために使う。
+  assert_count=$((assert_count + 1))
+  if [ -n "$OUT" ]; then
+    _t_fail "出力が空であることを期待しましたが、内容があります。"
+  fi
 }
 
 expect_output_matches() {
