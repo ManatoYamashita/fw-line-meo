@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-markdown-emphasis.sh の自己テスト（Issue #89 / #90）。
 #
 # 本ガードは「壊れても CI は落ちず、見た目だけが黙って壊れる」形を検出する。誤検出は逆に CI を
