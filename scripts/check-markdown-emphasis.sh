@@ -51,19 +51,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# 走査対象の列挙。git ls-files ではなく find を使う理由は 2 つある。
-#   1. 既存ガード 5 本がすべて find / grep -r であり、作法を揃える
-#   2. scripts/test/ の自己テストは mktemp の合成ツリーへガードを複製して走らせる。
-#      合成ツリーは git リポジトリではないため、git ls-files ではテストできない
-# prune 一覧は check-test-code-coverage.sh の check_js_files に倣う。
+# 走査対象は git 管理下から列挙する（Issue #82）。導入時は find + prune 一覧だったが、
+# 作業ツリーを列挙すると**未追跡の第三者文書まで走査して赤になる**（実測: main worktree の
+# 未追跡 .md 246 件のうち 2 件が違反として報告された。いずれも .agents/ 配下の外部製スキル
+# 文書で、我々が書いたものでも直せるものでもない）。CI は追跡ファイルしか見ないため緑のままで、
+# 踏むのはローカルの開発者だけである。#82 が check-test-code-coverage.sh で問題にしたのと
+# 同じ構造であり、prune 一覧へ `.agents` を足す対症療法は次のツールで再発する。
 #
-# **`-mindepth` を併用してはならない。** 深さ N 未満の述語評価そのものを飛ばすため -prune が
-# 発火せず、生成物が流れ込む（check-test-code-coverage.sh で実測済みの罠）。
-found="$(find "$ROOT" \
-  \( -name node_modules -o -name dist -o -name dist-scripts -o -name .next \
-     -o -name public -o -name coverage -o -name playwright-report -o -name test-results \
-     -o -name .git -o -name .terraform -o -name build -o -name tmp -o -name .cache \) -prune -o \
-  -type f -name '*.md' -print 2>/dev/null | sort)"
+# 副産物として prune 一覧が不要になる（生成物ディレクトリは .gitignore 済みで追跡されない）。
+#
+# git は「未 add の .md を見逃す」fail-open へ倒れるため、下の untracked 警告と**対で**運用する。
+if ! (cd "$ROOT" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+  echo "ERROR: ${ROOT} は git work tree ではありません。" >&2
+  echo "       → 本ガードは走査対象を git 管理下から列挙します（Issue #82）。" >&2
+  echo "         列挙できないまま進むと 0 件のまま緑になるため、ここで打ち切ります。" >&2
+  exit 1
+fi
+
+found=''
+while IFS= read -r md_rel; do
+  [ -n "$md_rel" ] || continue
+  found="${found}${ROOT}/${md_rel}
+"
+done <<EOF
+$( (cd "$ROOT" && git ls-files --cached -- '*.md') 2>/dev/null | sort )
+EOF
 
 # .claude/skills/ 配下は vendored（ATTRIBUTION.md に Apache-2.0・"Modifications: None. Files
 # copied verbatim" と明記された第三者文書）である。我々が書き換えてはならない文書の指摘で
@@ -255,6 +267,18 @@ if [ "${checked_pairs:-0}" -eq 0 ]; then
   echo "ERROR: 強調（**）を 1 件も検査できませんでした。ガードが空振りしています。" >&2
   echo "       → fence 除外かインラインコード masking が全文を飲み込んでいます。" >&2
   exit 1
+fi
+
+# 未追跡の .md を警告する（Issue #82）。列挙を git 管理下へ寄せた副作用として
+# 「新規作成してまだ add していない .md を見逃す」fail-open が生じるため、対で置く。
+# fail は立てない（未 add は作業途中の正常な状態であり、赤にすると誤った習慣を強いる）。
+# CI ではクリーン checkout のため 0 件になり、この警告は出ない。
+untracked_md="$( (cd "$ROOT" && git ls-files --others --exclude-standard -- '*.md') 2>/dev/null || true)"
+untracked_md_count="$(printf '%s' "$untracked_md" | grep -c . || true)"
+if [ "${untracked_md_count:-0}" -ne 0 ]; then
+  echo "WARNING: 未追跡の Markdown が ${untracked_md_count} 件あります（本ガードは走査していません）。" >&2
+  printf '%s\n' "$untracked_md" | head -n 3 | sed 's|^|         |' >&2
+  echo "         → 検査対象に含めるなら git add してください。" >&2
 fi
 
 if [ "$fail" -ne 0 ]; then

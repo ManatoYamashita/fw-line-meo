@@ -107,6 +107,16 @@ if [ ! -f "$WORKSPACE_YAML" ]; then
   exit 1
 fi
 
+# 走査対象の列挙は git 管理下を情報源にする（Issue #82）。git work tree でなければ、
+# 列挙は 0 件になり**全ガードが黙って緑**になる。それは本スクリプトが最も嫌う形なので、
+# 前提が崩れていることを明示して落とす。
+if ! (cd "$ROOT" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+  echo "ERROR: ${ROOT} は git work tree ではありません。" >&2
+  echo "       → 本ガードは走査対象を git 管理下から列挙します（Issue #82）。" >&2
+  echo "         列挙できないまま進むと 0 件のまま緑になるため、ここで打ち切ります。" >&2
+  exit 1
+fi
+
 # 走査候補。ここに無いディレクトリ名を新設した場合は追加すること
 # （網羅性はディレクトリ名の列挙に依存する。増えたら気づけるよう下の「候補外」検出を置く）。
 # `perf` を含めるのは Issue #83 の後始末である。以前は候補にも無く、下の「候補外」検出の
@@ -190,6 +200,36 @@ EOF
   return "$soe_hit"
 }
 
+# コードファイルの拡張子。列挙側とフィルタ側で二重管理しないよう 1 箇所へ置く。
+CODE_EXT_RE='\.(ts|tsx|mts|cts|mjs|cjs|js|jsx)$'
+
+# 走査対象を **git 管理下のファイル**から列挙する（Issue #82）。
+# $1 = 起点の絶対パス（末尾 / 付き）。$1 からの相対パスを返す。
+#
+# 作業ツリーを find で列挙すると、未追跡の生成物・一時ファイルまで「配線すべきコードファイル」
+# として扱ってしまう。現実に踏むのは vitest / vite が設定ファイルと同じディレクトリへ生成する
+# `<config>.timestamp-<ms>-<rand>.mjs` である（強制終了時に残る・.gitignore にも無い）。
+# その結果 **「一時ファイル名を lint 引数へ恒久的に追加せよ」という従ってはいけない指示**が出る。
+# CI では build → guard の順で一時ファイルが生じないため CI は緑のままで、踏むのはローカルの
+# 開発者だけである。ガードへの信頼を損なう類の誤爆であり、対症療法（`*.timestamp-*` の除外）は
+# 新種の一時ファイルで再発する。情報源を git へ寄せて構造的に断つ。
+#
+# 副産物として prune 一覧が不要になる。生成物ディレクトリは .gitignore 済みで追跡されないため
+# `git ls-files` に現れない（実測: node_modules / dist / dist-scripts / .next / public /
+# coverage / playwright-report / test-results の追跡ファイルはいずれも 0 件）。
+# ディレクトリ名の列挙という、本スクリプトが避けたい形をひとつ減らせる。
+#
+# 見落としの方向も変わる。find は「未追跡を過検出」する側へ、git は「未 add を見逃す」側へ倒れる。
+# 後者は fail-open であり本スクリプトの思想に反するため、下の untracked 警告と**対で**運用する。
+tracked_code_files() {
+  (cd "$1" && git ls-files --cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" || true
+}
+
+# 追跡されていない（= 上の列挙から漏れた）コードファイル。.gitignore 済みは除く。
+tracked_code_files_untracked() {
+  (cd "$1" && git ls-files --others --exclude-standard -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" || true
+}
+
 # tsc の `--listFiles` 出力が実質空か（= tsc が走らなかった／プログラムを構成できなかった）
 # を判定する（Issue #81）。**workspace 側と ts/ 直下側で同じ器を共有する。**
 # 片側にだけ空振り検出が無いと、tsc が動かなかっただけの状況で「プログラムに含まれていません
@@ -225,10 +265,8 @@ check_root_files() {
   crf_program="$4"
 
   # 拡張子ベースの列挙。ディレクトリ名を列挙する方式と違い、新設ファイルで穴が空かない。
-  crf_files="$(find "$crf_dir" -maxdepth 1 -type f \
-    \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \
-       -o -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.jsx' \) \
-    -exec basename {} \; | sort)"
+  # 情報源は git 管理下（Issue #82）。`/` を含まない行＝直下のファイルだけを採る。
+  crf_files="$(tracked_code_files "$crf_dir" | grep -v '/' | sort || true)"
   [ -n "$crf_files" ] || return 0
 
   # (A) eslint の ignores に消されていないこと。
@@ -417,23 +455,27 @@ check_subdir_files() {
       ;;
   esac
 
-  # **`-mindepth` を併用してはならない（実測で確認済み）。** prune 対象（.next / dist /
-  # dist-scripts）は workspace から見て深さ 1 にあり、`-mindepth 2` は深さ 1 の**述語評価
-  # そのものを飛ばす**ため -prune が発火しない。実測では survey-web だけで .next 配下の
-  # 生成物が数百件流れ込んだ。直下ファイル（check_root_files の担当）の除外は、下のループの
-  # シェル側で「相対パスに / を含むか」で行う。
+  # 情報源は git 管理下（Issue #82）。以前は find + prune 一覧だったが、
+  #   - 未追跡の生成物・一時ファイルを拾い、従ってはいけない指示を出していた
+  #   - prune 一覧はディレクトリ名の列挙であり、本スクリプトが避けたい形そのものだった
+  #   - `-mindepth` を足すと prune が発火しなくなるという罠を、注記で避け続ける必要があった
+  # の 3 つが同時に消える。生成物ディレクトリは .gitignore 済みで追跡されないため、
+  # 除外の指定なしに最初から現れない（実測: 該当 8 ディレクトリの追跡ファイルは 0 件）。
   #
-  # なお prune 一覧はディレクトリ名の列挙であり、本スクリプトが避けたい形ではある。走査対象が
-  # git ではなく作業ツリーであるため、未追跡の生成物にも晒される（Issue #82 と同型の弱さ）。
-  # #82 の提案どおり列挙を `git ls-files` 由来へ寄せれば、この prune 一覧ごと不要になる。
   # 拡張子は常に JS 系＋TS 系で拾い、範囲の絞り込みは subdir_ext_in_scope でシェル側に置く。
-  # find 式を $6 で分岐させると prune 一覧が 2 箇所に増え、片方だけ直す事故が起きる。
-  csf_found="$(find "$csf_dir" \
-    \( -name node_modules -o -name dist -o -name dist-scripts -o -name .next \
-       -o -name public -o -name coverage -o -name playwright-report -o -name test-results \) -prune -o \
-    -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.jsx' \
-       -o -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \) -print 2>/dev/null | sort)"
-  [ -n "$csf_found" ] || return 0
+  # ここで担当域を絞ると、下の found_deep_paths が定数化して判別子として機能しなくなる。
+  #
+  # 下流は絶対パスを前提にしている（subdir_owned_elsewhere の接頭辞判定・${csf_path#"$csf_dir"}）
+  # ため、git が返す相対パスへ起点を戻して絶対パスにする。
+  csf_found=''
+  while IFS= read -r csf_rel_entry; do
+    [ -n "$csf_rel_entry" ] || continue
+    csf_found="${csf_found}${csf_dir}${csf_rel_entry}
+"
+  done <<EOF
+$(tracked_code_files "$csf_dir" | sort)
+EOF
+  [ -n "$(printf '%s' "$csf_found" | tr -d '[:space:]')" ] || return 0
 
   # 絞り込みは**ここ 1 箇所だけ**で行い、下の本ループは絞り込み済みの一覧を回す。
   # 同じ述語を 2 つのループへ書くと、片方だけ直る日が来る。それは本スクリプトが防ごうと
@@ -679,7 +721,8 @@ ${listed}"
       # `grep -q` を使わない理由は上（crf_* の照合）と同じ。ここは `if !` の内側にあるため、
       # SIGPIPE × pipefail による失敗が「.ts を含まないディレクトリ」と同じ扱い、すなわち
       # **ディレクトリを黙ってスキップする**方向へ化ける。件数判定へ揃える。
-      dir_ts_hits="$(find "${pkg_dir}${dir}" \( -name '*.ts' -o -name '*.tsx' \) -print 2>/dev/null | grep -c . || true)"
+      # 情報源は git 管理下（Issue #82）。未追跡の一時 .ts でディレクトリを対象化しない。
+      dir_ts_hits="$(tracked_code_files "${pkg_dir}${dir}/" | grep -cE '\.(ts|tsx)$' || true)"
       [ "${dir_ts_hits:-0}" -ne 0 ] || continue
       checked_dirs=$((checked_dirs + 1))
 
@@ -715,7 +758,8 @@ ${listed}"
       case " $CODE_DIR_CANDIDATES node_modules dist dist-scripts .next public db " in
         *" $name "*) continue ;;
       esac
-      entry_ts_hits="$(find "$entry" \( -name '*.ts' -o -name '*.tsx' \) -print 2>/dev/null | grep -c . || true)"
+      # 情報源は git 管理下（Issue #82）。未追跡の一時 .ts で「候補外」を誤報しない。
+      entry_ts_hits="$(tracked_code_files "$entry" | grep -cE '\.(ts|tsx)$' || true)"
       if [ "${entry_ts_hits:-0}" -ne 0 ]; then
         echo "ERROR: ${rel_pkg}${name}/ は TypeScript を含みますが本ガードの走査候補にありません。" >&2
         echo "       → CODE_DIR_CANDIDATES へ追加してください（候補の列挙が実態に追いついていません）。" >&2
@@ -858,6 +902,24 @@ if [ "$checked_subdir_files" -eq 0 ]; then
   fi
   echo "       いずれの場合も本ガードは fail-closed のため赤にします。" >&2
   exit 1
+fi
+
+# 未追跡のコードファイルを警告する（Issue #82）。列挙を git 管理下へ寄せたことで
+# 誤爆は消えたが、代わりに「新規作成してまだ add していないファイルを見逃す」fail-open が
+# 生じる。**この警告は git 列挙と対で運用すること。** 片方だけでは、
+#   - find だけ → 未追跡の生成物で誤爆する（#82 の症状）
+#   - git だけ → 未 add のファイルを黙って見逃す（本スクリプトの思想に反する）
+# のいずれかへ倒れる。
+#
+# fail は立てない。未 add は作業途中の正常な状態であり、赤にすると「とりあえず add する」
+# という誤った習慣を強いる。CI ではクリーン checkout のため 0 件になり、この警告は出ない。
+# 件数と先頭数件だけを出す（生成物が大量に残っている作業ツリーで壁のような出力にしないため）。
+untracked_code="$(tracked_code_files_untracked "${TS_DIR}/")"
+untracked_count="$(printf '%s' "$untracked_code" | grep -c . || true)"
+if [ "${untracked_count:-0}" -ne 0 ]; then
+  echo "WARNING: ts/ 配下に未追跡のコードファイルが ${untracked_count} 件あります（本ガードは走査していません）。" >&2
+  printf '%s\n' "$untracked_code" | head -n 3 | sed 's|^|         ts/|' >&2
+  echo "         → 検査対象に含めるなら git add してください。生成物なら .gitignore へ足してください。" >&2
 fi
 
 if [ "$fail" -ne 0 ]; then

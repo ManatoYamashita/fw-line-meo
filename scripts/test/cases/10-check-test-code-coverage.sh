@@ -200,3 +200,59 @@ else
   expect_red 'で tsc のプログラム構成を取得できませんでした'
 fi
 t_end
+
+# ---------------------------------------------------------------------------
+# Issue #82: 走査対象を作業ツリーから git 管理下へ寄せたことの検証。
+#
+# 再現条件は vitest / vite が設定ファイルと同じディレクトリへ生成する
+# `<config>.timestamp-<ms>-<rand>.mjs`。通常は finally で消えるが強制終了時に残り、
+# .gitignore にも該当パターンが無い。修正前はこれを「配線すべきコードファイル」として扱い、
+# **一時ファイル名を lint 引数へ恒久的に追加せよ**という従ってはいけない指示を出していた。
+
+t_begin 'check-test-code-coverage: 未追跡の一時ファイルで誤爆しない（#82）'
+if ! fx_has_real_toolchain; then
+  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
+else
+  tcc_fixture
+  fx_track_now   # ここまでを追跡させる
+  # 以降は未追跡。vitest がクラッシュ時に残す一時ファイルを模す。
+  fx_write ts/packages/w1/vitest.config.ts.timestamp-1754600000000-abcdef.mjs <<'EOF'
+export default {};
+EOF
+  fx_run check-test-code-coverage
+  expect_green
+  # **従ってはいけない指示**（一時ファイル名を lint 引数へ恒久的に追加せよ）が出ないこと。
+  # ファイル名そのものは下の WARNING に現れるため、名前の不在では検証にならない。
+  expect_absent 'lint スクリプトの引数にありません'
+  expect_absent 'ERROR:'
+  # 見逃しを可視化する対の仕組みが働いていること。git 列挙は「未 add を見逃す」側へ倒れるため、
+  # この警告が無いと fail-open が沈黙する。
+  expect_output_matches 'WARNING: .*未追跡のコードファイルが 1 件'
+fi
+t_end
+
+t_begin 'check-test-code-coverage: 対照 — 同じファイルが追跡されていれば検出する（見逃しでない）'
+if ! fx_has_real_toolchain; then
+  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
+else
+  tcc_fixture
+  # fx_track_now を呼ばない。fx_run が全ファイルを追跡させるため、この .mjs も対象になる。
+  # 上のケースの緑が「未追跡だから」であって「拡張子や場所で落としたから」ではないことを示す。
+  fx_write ts/packages/w1/tracked-extra.mjs <<'EOF'
+export default {};
+EOF
+  fx_run check-test-code-coverage
+  expect_red 'tracked-extra.mjs'
+fi
+t_end
+
+t_begin 'check-test-code-coverage: git work tree でなければ緑を返さない'
+if ! fx_has_real_toolchain; then
+  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
+else
+  tcc_fixture
+  # .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
+  OUT="$(cd "$FX" && bash scripts/check-test-code-coverage.sh 2>&1)" && RC=0 || RC=$?
+  expect_red 'git work tree ではありません'
+fi
+t_end

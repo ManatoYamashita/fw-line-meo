@@ -178,3 +178,48 @@ EOF
   expect_red '1 件も検査できませんでした'
 fi
 t_end
+
+# ---------------------------------------------------------------------------
+# Issue #82: Markdown ガードも作業ツリー列挙では未追跡の第三者文書で誤爆した。
+# 実測: main worktree の未追跡 .md 246 件のうち 2 件が違反として報告された（.agents/ 配下の
+# 外部製スキル文書）。我々が書いたものでも直せるものでもなく、CI では緑のままだった。
+
+t_begin 'check-markdown-emphasis: 未追跡の .md で誤爆しない（#82）'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_track_now   # ここまでを追跡させる
+  # 以降は未追跡。開発者が置いた外部由来の文書を模す。
+  fx_write .agents/skills/vendored/SKILL.md <<'EOF'
+これは外部由来の文書であり**我々の管理外（vendor）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — 同じ文書が追跡されていれば検出する（見逃しでない）'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # fx_track_now を呼ばない。fx_run が全ファイルを追跡させるため、この .md も対象になる。
+  fx_write docs/tracked-vendor.md <<'EOF'
+これは追跡された文書であり**我々の管理下（tracked）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red 'tracked-vendor.md'
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: git work tree でなければ緑を返さない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
+  OUT="$(cd "$FX" && bash scripts/check-markdown-emphasis.sh 2>&1)" && RC=0 || RC=$?
+  expect_red 'git work tree ではありません'
+fi
+t_end

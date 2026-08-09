@@ -171,10 +171,32 @@ fx_cleanup() {
   FX=''
 }
 
+# --- git 化 -----------------------------------------------------------------
+#
+# ガードは走査対象を git 管理下から列挙する（Issue #82）。したがって fixture も git work tree で
+# なければならない。`git init` + `git add` だけで済み、commit しないので user.name / user.email の
+# 設定は要らない（ネットワークも不要）。
+#
+# node_modules は除外する。実 node_modules への symlink を追跡させても実害は無いが、
+# 実リポジトリでは .gitignore 済みで追跡されない。fixture を実態から乖離させない。
+fx_track_now() {
+  # ここまでに書いたファイルを追跡させる。**これ以降に書いたファイルは未追跡のまま残る。**
+  # 「未追跡は走査されない」ことを検証するケースは、先に本関数を呼んでから壊す。
+  [ -n "$FX" ] || return 0
+  if [ ! -d "${FX}/.git" ]; then
+    (cd "$FX" && git init -q && printf 'node_modules\n' > .git/info/exclude) >/dev/null 2>&1
+  fi
+  (cd "$FX" && git add -A) >/dev/null 2>&1 || true
+}
+
 # --- 実行とアサーション -----------------------------------------------------
 
 fx_run() {
   # $1 = ガード名。$2 が 'stub' なら合成ツリーの stub/ を PATH の先頭へ置く。
+  # fixture がまだ git 化されていなければ、ここで全ファイルを追跡させる。
+  # 明示的に fx_track_now を呼んだケースでは .git が既に在るため、その後に書いた
+  # ファイルは未追跡のまま保たれる。
+  [ -d "${FX}/.git" ] || fx_track_now
   OUT=''
   RC=0
   if [ "${2:-}" = 'stub' ]; then
