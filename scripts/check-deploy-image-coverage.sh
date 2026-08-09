@@ -38,8 +38,13 @@ for f in "$TF_FILE" "$PUSH_SCRIPT" "$DEPLOY_YML" "$TS_CI_YML"; do
 done
 
 # main.tf の run-services サービスキー（`"name" = {` 形式のマップキーは services マップのみ）。
+# **末尾の `|| true` は必須である（Issue #90）。** grep は無一致で exit 1 を返し、
+# `set -o pipefail` によりパイプライン全体が失敗扱いになる。`set -e` と組み合わさると、
+# 直下の「1件も抽出できませんでした」という空振り検出へ到達する前にスクリプトが死に、
+# **出力ゼロのまま exit 1** になる。fail-closed ではあるが、原因を一切告げない赤は
+# 誤診断より始末が悪い。抽出結果の空判定は必ず下の分岐で行う。
 tf_services="$(grep -E '^[[:space:]]*"[a-z0-9-]+"[[:space:]]*=[[:space:]]*\{' "$TF_FILE" \
-  | sed -E 's/^[[:space:]]*"([a-z0-9-]+)".*/\1/' | sort -u)"
+  | sed -E 's/^[[:space:]]*"([a-z0-9-]+)".*/\1/' | sort -u || true)"
 
 if [ -z "$tf_services" ]; then
   echo "ERROR: ${TF_FILE#$ROOT/} から run-services のサービスキーを1件も抽出できませんでした（抽出パターンの前提が崩れています）。" >&2

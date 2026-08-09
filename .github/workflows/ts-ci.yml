@@ -68,6 +68,15 @@ jobs:
       # build の後に置く（設定ファイルの文字列を読むだけでは実効範囲を判定できない）。
       - name: コードカバレッジガード（Issue #70 / #78 / #83）
         run: bash scripts/check-test-code-coverage.sh
+      # 上のガード群が「壊れたときに壊れたと言える」かを機械検証する（Issue #90）。
+      # ガードは実装コードではなく "緑が信用できるか" を守る装置であり、装置自身の回帰を
+      # 検出する手段が無かった。実際 check-test-code-coverage.sh だけで #70 / #78 / #83 / #81 と
+      # 4 回、事後に穴が見つかっている（#81 は 653 行を読むだけでは出ず、実走して初めて出た偽緑）。
+      # 合成ツリーへガードを複製して走らせるため、リポジトリの実体には書き込まない。
+      # check-test-code-coverage のケースは実物の tsc / eslint を借用するので install の後に置く。
+      # --require-full は skip を失敗として扱う（CI で黙って 0 件成功にしないため）。
+      - name: ガード自己テスト（Issue #90）
+        run: bash scripts/test/run.sh --require-full
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
       - name: unit + integration tests (DB 込み)
