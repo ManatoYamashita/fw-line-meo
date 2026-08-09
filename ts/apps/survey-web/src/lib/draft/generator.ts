@@ -5,10 +5,11 @@ import { buildPrompt, type VariationSeed } from './prompt';
 // 下書き生成（Gemini）。Gemini 呼出の全パラメータ（モデル・スキーマ・安全設定・再試行・出力検証）を単一所有。
 // @google/genai の ai.models.generateContent を GenAiClient 面で抽象化し、テストでモック可能にする。
 
-export type DraftErrorKind = 'SAFETY_BLOCKED' | 'API_ERROR' | 'INVALID_OUTPUT';
-export interface DraftError {
-  kind: DraftErrorKind;
-}
+export type DraftError =
+  | { kind: 'SAFETY_BLOCKED' }
+  | { kind: 'API_ERROR'; status?: number }
+  | { kind: 'INVALID_OUTPUT' };
+export type DraftErrorKind = DraftError['kind'];
 
 export interface DraftGenerator {
   generate(material: DraftMaterial, variation: VariationSeed): Promise<Result<string, DraftError>>;
@@ -91,12 +92,12 @@ export function createDraftGenerator(
       try {
         res = await client.models.generateContent(req);
       } catch (firstError) {
-        if (!isRetryable(firstError)) return err({ kind: 'API_ERROR' });
+        if (!isRetryable(firstError)) return err(toApiError(firstError));
         await backoff(0);
         try {
           res = await client.models.generateContent(req);
-        } catch {
-          return err({ kind: 'API_ERROR' });
+        } catch (retryError) {
+          return err(toApiError(retryError));
         }
       }
 
@@ -150,10 +151,28 @@ function extractDraft(text: string | undefined, maxChars: number): string | null
 }
 
 function isRetryable(error: unknown): boolean {
-  const e = error as { status?: number; code?: number } | null;
-  const status = e?.status ?? e?.code;
+  const e = asErrorShape(error);
+  const status = getHttpStatus(error) ?? (typeof e?.code === 'number' ? e.code : undefined);
   if (status === undefined) return true; // ネットワーク断等は 1 回だけ再試行
   return status === 429 || (status >= 500 && status < 600);
+}
+
+function toApiError(error: unknown): DraftError {
+  const status = getHttpStatus(error);
+  return status === undefined ? { kind: 'API_ERROR' } : { kind: 'API_ERROR', status };
+}
+
+function getHttpStatus(error: unknown): number | undefined {
+  const status = asErrorShape(error)?.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : undefined;
+}
+
+function asErrorShape(error: unknown): { status?: unknown; code?: unknown } | undefined {
+  return typeof error === 'object' && error !== null
+    ? (error as { status?: unknown; code?: unknown })
+    : undefined;
 }
 
 function delay(ms: number): Promise<void> {
