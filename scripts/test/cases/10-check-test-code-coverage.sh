@@ -5,7 +5,7 @@
 # 合成ツリーを組み、そのときの再現条件をケースとして固定する。
 
 # 緑になる最小の合成 ts ツリーを組む。
-# 対象ガードの空振り防止（workspace / ディレクトリ / 直下ファイル / サブディレクトリ JS が
+# 対象ガードの空振り防止（workspace / ディレクトリ / 直下ファイル / サブディレクトリファイル が
 # それぞれ 1 件以上）をすべて満たす必要があるため、この 4 種を最低 1 件ずつ含める。
 tcc_fixture() {
   fx_guard check-test-code-coverage
@@ -112,7 +112,10 @@ else
   fx_run check-test-code-coverage
   expect_green
   # 「OK」だけでなく件数を照合する。0 件のまま緑になる経路と区別するため。
-  expect_output_matches '1 workspace / 2 ディレクトリ / 2 直下ファイル / 1 サブディレクトリ JS'
+  # 末尾の語は対象ガードの OK 行と一致させること。#92 が check_js_files を check_subdir_files へ
+  # 改名した際に「サブディレクトリ JS」→「サブディレクトリファイル」へ変わったが、本ケースは
+  # #92 と独立に書かれていたため、両者が merge された時点で main が赤くなった（実測: e0f6d5c）。
+  expect_output_matches '1 workspace / 2 ディレクトリ / 2 直下ファイル / 1 サブディレクトリファイル'
 fi
 t_end
 
