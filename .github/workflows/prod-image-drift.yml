@@ -102,7 +102,13 @@ jobs:
           fi
           # 署名は稼働側の状態だけを表す。main HEAD を含めるとマージのたびに変わり、
           # 停止中に毎回コメントが増えてしまう。
+          # 検証スクリプトは早期異常でも DRIFT-SIGNATURE を出す契約だが、それ以前に落ちた場合
+          # （プロセスが殺された等）に備えて空を許さない。空のまま渡すと状態変化の判定ができず、
+          # 赤が続く限り 6 時間ごとにコメントが増える。
           sig="$(grep '^DRIFT-SIGNATURE: ' "$report" | tail -n 1 | sed 's/^DRIFT-SIGNATURE: //' || true)"
+          if [ -z "$sig" ]; then
+            sig="no-signature"
+          fi
           state=red
           if [ "${DRIFT_STATUS:-}" = "0" ]; then
             state=green

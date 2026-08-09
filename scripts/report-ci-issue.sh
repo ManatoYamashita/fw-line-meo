@@ -104,14 +104,17 @@ if [ -n "$dry_run" ] && [ -n "${REPORT_CI_ISSUE_FAKE_TRACKER:-}" ]; then
   tracker="${REPORT_CI_ISSUE_FAKE_TRACKER}"
   [ -n "$tracker" ] && tracker_count=1
 else
-  if ! tracker_json="$(gh issue list --label "$label" --state open --limit 5 --json number 2>&1)"; then
+  # 番号の取り出しは gh の --jq に任せる。JSON を自前で切ると、整形やフィールド追加で静かに壊れる。
+  if ! tracker_list="$(gh issue list --label "$label" --state open --limit 5 --json number --jq '.[].number' 2>&1)"; then
     echo "ERROR: 追跡 Issue の検索に失敗しました（label=${label}）。" >&2
-    printf '%s\n' "$tracker_json" | sed 's/^/       | /' >&2
+    printf '%s\n' "$tracker_list" | sed 's/^/       | /' >&2
     echo "       → ここで起票すると、検索が失敗するたびに Issue が増殖します。起票せずに fail します。" >&2
     exit 1
   fi
-  tracker_count="$(printf '%s' "$tracker_json" | tr ',' '\n' | grep -c '"number"' || true)"
-  tracker="$(printf '%s' "$tracker_json" | tr ',' '\n' | grep '"number"' | sed -E 's/[^0-9]*([0-9]+).*/\1/' | sed -n '1p' || true)"
+  # 数字だけの行を数える。--jq が想定外の形を返したら 0 件として扱われ、下流で起票へ進むが、
+  # その経路は上の hard fail を通っていないので「検索は成功したが該当なし」と同義である。
+  tracker_count="$(printf '%s\n' "$tracker_list" | grep -cE '^[0-9]+$' || true)"
+  tracker="$(printf '%s\n' "$tracker_list" | grep -E '^[0-9]+$' | sed -n '1p' || true)"
 fi
 
 if [ "$tracker_count" -gt 1 ]; then

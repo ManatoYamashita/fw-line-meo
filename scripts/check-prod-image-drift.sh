@@ -60,7 +60,7 @@
 #   DRIFT_MAIN_REF        既定 origin/main。解決できなければ hard fail（HEAD へ暗黙に落ちない）
 #   DRIFT_GRACE_MINUTES   既定 90（実測 ts-ci 約 3 分 + deploy-prod 約 7 分の 9 倍マージン）
 #   DRIFT_TARGETS_FILE    正典の注入。未設定なら check-deploy-image-coverage.sh --print-targets
-#   PROD_IMAGE_SNAPSHOT   クラウド実測の注入。未設定なら gcloud を 3 回叩く
+#   PROD_IMAGE_SNAPSHOT   クラウド実測の注入。未設定なら gcloud を 2 回叩く（services / jobs）
 #   DRIFT_REPO_DIR        git 参照先。既定はこのリポジトリ
 #   DRIFT_NOW_EPOCH       現在時刻（epoch 秒）。猶予の決定的テスト用
 #
@@ -86,10 +86,24 @@ PROD_IMAGE_SNAPSHOT="${PROD_IMAGE_SNAPSHOT:-}"
 DRIFT_REPO_DIR="${DRIFT_REPO_DIR:-$ROOT}"
 DRIFT_NOW_EPOCH="${DRIFT_NOW_EPOCH:-}"
 
-if [ -z "$PROJECT_ID" ]; then
-  echo "ERROR: PROJECT_ID が未設定です。" >&2
-  echo "       → 既定値を置くと誤ったレジストリのイメージと比較して緑になり得るため、明示を必須にしています。" >&2
+# 早期異常でも必ず DRIFT-SIGNATURE を出してから落ちる。**署名は本スクリプトの契約**であり、
+# 空のまま通知側（report-ci-issue.sh）へ渡ると「状態が変わっていない」判定ができず、赤が続く限り
+# 実行のたびに追跡 Issue へコメントが増えてしまう。
+# $1 = 署名に使う理由キー、$2 以降 = stderr へ出す行。
+fail_early() {
+  reason="$1"
+  shift
+  for line in "$@"; do
+    echo "$line" >&2
+  done
+  echo "DRIFT-SIGNATURE: early-exit=${reason};"
   exit 1
+}
+
+if [ -z "$PROJECT_ID" ]; then
+  fail_early config-error \
+    "ERROR: PROJECT_ID が未設定です。" \
+    "       → 既定値を置くと誤ったレジストリのイメージと比較して緑になり得るため、明示を必須にしています。"
 fi
 IMAGE_BASE="${IMAGE_BASE:-${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}}"
 
@@ -97,8 +111,7 @@ IMAGE_BASE="${IMAGE_BASE:-${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}}"
 # 本スクリプトでは判定にパイプを使わない（case か grep -c で行う）。
 case "$DRIFT_GRACE_MINUTES" in
   ''|*[!0-9]*)
-    echo "ERROR: DRIFT_GRACE_MINUTES が数値ではありません: ${DRIFT_GRACE_MINUTES}" >&2
-    exit 1
+    fail_early config-error "ERROR: DRIFT_GRACE_MINUTES が数値ではありません: ${DRIFT_GRACE_MINUTES}"
     ;;
 esac
 grace_seconds=$((DRIFT_GRACE_MINUTES * 60))
@@ -125,25 +138,24 @@ fi
 # ---------------------------------------------------------------------------
 if [ -n "$DRIFT_TARGETS_FILE" ]; then
   if [ ! -f "$DRIFT_TARGETS_FILE" ]; then
-    echo "ERROR: DRIFT_TARGETS_FILE が見つかりません: ${DRIFT_TARGETS_FILE}" >&2
-    exit 1
+    fail_early config-error "ERROR: DRIFT_TARGETS_FILE が見つかりません: ${DRIFT_TARGETS_FILE}"
   fi
   targets="$(cat "$DRIFT_TARGETS_FILE")"
 else
   # --print-targets は検証を完走させた上で TSV を出す。検証が赤なら 1 行も出さず exit 1 するので、
   # 「壊れた正典で緑」にはならない。
   if ! targets="$(bash "${ROOT}/scripts/check-deploy-image-coverage.sh" --print-targets)"; then
-    echo "ERROR: 対象集合の正典（check-deploy-image-coverage.sh）が赤のため、ドリフト検証を打ち切りました。" >&2
-    echo "       → 先にデプロイパイプラインのカバレッジを是正してください（上記のエラー参照）。" >&2
-    exit 1
+    fail_early canon-red \
+      "ERROR: 対象集合の正典（check-deploy-image-coverage.sh）が赤のため、ドリフト検証を打ち切りました。" \
+      "       → 先にデプロイパイプラインのカバレッジを是正してください（上記のエラー参照）。"
   fi
 fi
 
 target_count="$(printf '%s\n' "$targets" | grep -cE '^(service|job)	[a-z0-9-]+$' || true)"
 if [ "$target_count" -eq 0 ]; then
-  echo "ERROR: 対象集合を1件も取得できませんでした（正典の供給が壊れています）。" >&2
-  echo "       → 対象 0 件のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。" >&2
-  exit 1
+  fail_early canon-empty \
+    "ERROR: 対象集合を1件も取得できませんでした（正典の供給が壊れています）。" \
+    "       → 対象 0 件のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。"
 fi
 
 # ---------------------------------------------------------------------------
@@ -196,36 +208,35 @@ collect_live_snapshot() {
 
 if [ -n "$PROD_IMAGE_SNAPSHOT" ]; then
   if [ ! -f "$PROD_IMAGE_SNAPSHOT" ]; then
-    echo "ERROR: PROD_IMAGE_SNAPSHOT が見つかりません: ${PROD_IMAGE_SNAPSHOT}" >&2
-    exit 1
+    fail_early config-error "ERROR: PROD_IMAGE_SNAPSHOT が見つかりません: ${PROD_IMAGE_SNAPSHOT}"
   fi
   snapshot="$(grep -vE '^[[:space:]]*(#|$)' "$PROD_IMAGE_SNAPSHOT" || true)"
 else
   if ! snapshot="$(collect_live_snapshot)"; then
-    exit 1
+    # collect_live_snapshot 側が原因を stderr へ出している。
+    fail_early collection-failed
   fi
 fi
 
 snapshot_count="$(printf '%s\n' "$snapshot" | grep -cE '^(service|job)	' || true)"
 if [ "$snapshot_count" -eq 0 ]; then
-  echo "ERROR: Cloud Run の稼働イメージを1件も取得できませんでした（snapshot が空です）。" >&2
-  echo "       → 実測 0 件のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。" >&2
-  exit 1
+  fail_early snapshot-empty \
+    "ERROR: Cloud Run の稼働イメージを1件も取得できませんでした（snapshot が空です）。" \
+    "       → 実測 0 件のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。"
 fi
 
 # ---------------------------------------------------------------------------
 # 3. main の HEAD
 # ---------------------------------------------------------------------------
 if ! git -C "$DRIFT_REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  echo "ERROR: git リポジトリではありません: ${DRIFT_REPO_DIR}" >&2
-  exit 1
+  fail_early config-error "ERROR: git リポジトリではありません: ${DRIFT_REPO_DIR}"
 fi
 main_sha="$(git -C "$DRIFT_REPO_DIR" rev-parse --verify --quiet "${DRIFT_MAIN_REF}^{commit}" || true)"
 if [ -z "$main_sha" ]; then
-  echo "ERROR: 比較先 '${DRIFT_MAIN_REF}' を解決できませんでした。" >&2
-  echo "       → actions/checkout の fetch-depth: 0 が要ります（既定の 1 では稼働タグの commit も解決できず全件が赤になります）。" >&2
-  echo "         HEAD へ暗黙にフォールバックすると、別物と比較して緑になる空振り経路になるため、ここで fail します。" >&2
-  exit 1
+  fail_early main-ref-unresolvable \
+    "ERROR: 比較先 '${DRIFT_MAIN_REF}' を解決できませんでした。" \
+    "       → actions/checkout の fetch-depth: 0 が要ります（既定の 1 では稼働タグの commit も解決できず全件が赤になります）。" \
+    "         HEAD へ暗黙にフォールバックすると、別物と比較して緑になる空振り経路になるため、ここで fail します。"
 fi
 main_subject="$(git -C "$DRIFT_REPO_DIR" show -s --format=%s "$main_sha")"
 main_short="$(git -C "$DRIFT_REPO_DIR" rev-parse --short "$main_sha")"
@@ -266,7 +277,7 @@ c_status=""
 c_tag=""
 c_detail=""
 classify_image() {
-  local name="$1" ref="$2" deployed_sha oldest_sha oldest_ct age behind_count
+  local name="$1" ref="$2" deployed_sha oldest_sha oldest_ct age behind_count tag_bad
   c_status=""
   c_tag=""
   c_detail=""
@@ -503,8 +514,7 @@ $(printf '%s\n' "$snapshot" | grep -E '^(service|job)	')
 EOF
 
 if [ "$checked" -eq 0 ]; then
-  echo "ERROR: 1 件も検証できませんでした（対象集合の読み取りが壊れています）。" >&2
-  exit 1
+  fail_early no-targets-checked "ERROR: 1 件も検証できませんでした（対象集合の読み取りが壊れています）。"
 fi
 
 echo ""

@@ -160,6 +160,9 @@ pid_fixture
 printf '' | fx_write snapshot.tsv
 pid_run
 expect_red '1件も取得できませんでした'
+# 早期異常でも署名を出すのが本スクリプトの契約。空のまま通知側へ渡ると「状態が変わっていない」
+# 判定ができず、赤が続く限り実行のたびに追跡 Issue へコメントが増える。
+expect_output_matches 'DRIFT-SIGNATURE: early-exit=snapshot-empty'
 t_end
 
 # 比較先を解決できないとき HEAD へ暗黙にフォールバックすると、別物と比較して緑になる。
@@ -170,4 +173,15 @@ PID_MAIN_REF=origin/nonexistent
 pid_run
 PID_MAIN_REF=''
 expect_red 'fetch-depth: 0'
+expect_output_matches 'DRIFT-SIGNATURE: early-exit=main-ref-unresolvable'
+t_end
+
+# 正典の供給が壊れたときも同様に署名を出す（通知のスパム防止は早期異常の経路でこそ効く）。
+t_begin 'check-prod-image-drift: 正典が空でも署名を出してから落ちる'
+pid_fixture
+pid_snapshot "$(pid_short "$PID_C4" 7)"
+printf '' | fx_write targets.tsv
+pid_run
+expect_red '対象集合を1件も取得できませんでした'
+expect_output_matches 'DRIFT-SIGNATURE: early-exit=canon-empty'
 t_end
