@@ -110,7 +110,7 @@ jobs:
             --image="${IMAGE_BASE}/line-webhook:${TAG}" \
             --region=asia-northeast1 --project="${PROJECT_ID}"
 
-      - name: Placeholder 稼働検出（Issue #33 再発防止・デプロイ漏れサービスを fail させる）
+      - name: 'Placeholder 稼働検出（Issue #33 再発防止・デプロイ漏れサービスを fail させる）'
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
         # Cloud Run 初期作成イメージ（cloudrun/container/hello）のまま稼働しているサービスは
