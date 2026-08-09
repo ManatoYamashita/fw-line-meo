@@ -148,6 +148,30 @@ fx_write() {
   cat > "${FX}/$1"
 }
 
+fx_flood() {
+  # 一覧としてだけ嵩むファイルを大量に置く。
+  #   $1 = 件数 / $2 = 合成ツリー相対の基点ディレクトリ / $3 = 拡張子（ドット込み） / $4 = 内容
+  #
+  # 効くのは件数ではなく **一覧のバイト数** である。一覧を「先頭数件だけ出す」ために
+  # パイプで consumer を挟むと、上流は buffer 一杯まで書いて止まり、consumer が読み切って
+  # 抜けた瞬間に EPIPE を受ける。件数だけ増やしても行が短ければ閾値へ届かない。
+  #
+  # **余裕は 2 buffer 分では足りない（実測）。** consumer は自身の入力 buffer（64KB）を
+  # 一度満たしてから抜けるため、上流は「初回の 64KB」＋「読み出しで空いた 64KB」まで
+  # 書き込める。合計が入力量を上回ると上流が先に完走してしまい、同じケースが赤にも緑にも
+  # 転ぶ。実測では 87KB で 5 回中 1 回緑になった。1 行 250 バイト前後 × 十分な件数とし、
+  # 総量が 128KB を大きく超えるようにしてある。
+  fx_flood_dir="${2}/padding-directory-name-to-make-each-listed-path-long-enough"
+  fx_flood_dir="${fx_flood_dir}/second-level-padding-segment-that-also-pads-the-path"
+  fx_flood_dir="${fx_flood_dir}/third-level-padding-segment-that-also-pads-the-path"
+  mkdir -p "${FX}/${fx_flood_dir}"
+  fx_flood_i=0
+  while [ "$fx_flood_i" -lt "$1" ]; do
+    printf '%s\n' "$4" > "${FX}/${fx_flood_dir}/flooded-${fx_flood_i}${3}"
+    fx_flood_i=$((fx_flood_i + 1))
+  done
+}
+
 fx_link_node_modules() {
   # $1 = 合成ツリー相対のリンク先ディレクトリ（例: ts）
   mkdir -p "${FX}/$1"
@@ -193,10 +217,32 @@ fx_cleanup() {
   FX=''
 }
 
+# --- git 化 -----------------------------------------------------------------
+#
+# ガードは走査対象を git 管理下から列挙する（Issue #82）。したがって fixture も git work tree で
+# なければならない。`git init` + `git add` だけで済み、commit しないので user.name / user.email の
+# 設定は要らない（ネットワークも不要）。
+#
+# node_modules は除外する。実 node_modules への symlink を追跡させても実害は無いが、
+# 実リポジトリでは .gitignore 済みで追跡されない。fixture を実態から乖離させない。
+fx_track_now() {
+  # ここまでに書いたファイルを追跡させる。**これ以降に書いたファイルは未追跡のまま残る。**
+  # 「未追跡は走査されない」ことを検証するケースは、先に本関数を呼んでから壊す。
+  [ -n "$FX" ] || return 0
+  if [ ! -d "${FX}/.git" ]; then
+    (cd "$FX" && git init -q && printf 'node_modules\n' > .git/info/exclude) >/dev/null 2>&1
+  fi
+  (cd "$FX" && git add -A) >/dev/null 2>&1 || true
+}
+
 # --- 実行とアサーション -----------------------------------------------------
 
 fx_run() {
   # $1 = ガード名。$2 が 'stub' なら合成ツリーの stub/ を PATH の先頭へ置く。
+  # fixture がまだ git 化されていなければ、ここで全ファイルを追跡させる。
+  # 明示的に fx_track_now を呼んだケースでは .git が既に在るため、その後に書いた
+  # ファイルは未追跡のまま保たれる。
+  [ -d "${FX}/.git" ] || fx_track_now
   OUT=''
   RC=0
   if [ "${2:-}" = 'stub' ]; then
