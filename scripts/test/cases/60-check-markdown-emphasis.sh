@@ -84,8 +84,42 @@ EOF
 fi
 t_end
 
+# 約物の定義を cmark-gfm（CommonMark 0.29）へ固定する。この 2 ケースは対（ペア）である。
+# `\p{P}\p{S}` を使うと S カテゴリを約物と誤認し、下の「見逃し」が緑・「誤検出」が赤へ同時に反転する。
+# 判定を CommonMark 0.31 の定義へ寄せる変更は、必ずこの 2 件を同時に壊す。
+t_begin 'check-markdown-emphasis: 全角記号（S カテゴリ）は約物ではない — 開始側の見逃しを検出する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 直前の ＋（U+FF0B・Sm）は cmark-gfm では約物ではないため、直後が約物 `/` の開始 `**` は
+  # 開けない。GitHub 上では生の ** が表示される（/markdown API で実測・research.md:33 の実例）。
+  fx_write docs/broken.md <<'EOF'
+- 2.2 UI 判定＋**/me に `id` が無い**（MeUser への追加が前提）。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red "の開始 '**' が強調を開いていません"
+fi
+t_end
+
 # ---------------------------------------------------------------------------
 # 対照。これらが赤くなると、正当な文書を直せと迫るガードになる。
+
+t_begin 'check-markdown-emphasis: 対照 — 全角記号が隣接する正当な強調は緑（誤検出しない）'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # → （U+2192）や ● （U+25CF）は S カテゴリ。cmark-gfm は約物と扱わないため、
+  # 終端 `**` の直前に来ても right-flanking は成立し、GitHub は正しく強調を描画する。
+  fx_write docs/symbols.md <<'EOF'
+- 設定は**反映→**する。
+- 状態は**確定●**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
 
 t_begin 'check-markdown-emphasis: 対照 — prune 対象の配下は走査しない'
 if ! fx_has_node; then

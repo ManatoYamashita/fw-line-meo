@@ -28,9 +28,16 @@
 #     （.kiro/specs/ui-token-collision/design.md の該当段で実際に踏んだ）
 #   - リスト項目をブロック境界にしないと、隣接項目の奇数個 `**` が打ち消し合って A を取りこぼす
 #
-# 判定本体を node へ委譲する理由: flanking 規則は Unicode の約物分類（\p{P} / \p{S}）を要求し、
+# 判定本体を node へ委譲する理由: flanking 規則は Unicode の一般カテゴリ照会を要求し、
 # BSD awk（macOS 既定）では多バイト文字を安定して扱えない。check-test-code-coverage.sh が
 # 同じ理由で node -e に JSON 解釈を委譲している前例に従う。npm パッケージには依存しない。
+#
+# **約物の定義は GitHub の renderer（cmark-gfm）へ合わせる。** GFM が基づく CommonMark 0.29 の
+# 「約物 = ASCII 約物 + Pc/Pd/Pe/Pf/Pi/Po/Ps」であり、S カテゴリ（Sm/Sc/Sk/So）は含まない。
+# 後年の CommonMark 0.31 は S を約物へ加えたが、GitHub はその定義では描画しない。`\p{P}\p{S}`
+# を使うと両方向へずれる（いずれも GitHub の /markdown API で実測）:
+#   - 見逃し: `＋**/me …**`（全角プラス U+FF0B は Sm）は GitHub で開かないのにガードは緑
+#   - 誤検出: `**設定→**反映` `**状態●**である` は GitHub で正しく描画されるのにガードが赤
 #
 # `***` 以上の連続アスタリスク（bold + italic）は対象外とする。導入時のコーパスに 0 箇所であり、
 # 対にする規則が別（内側と外側で開閉が入れ子になる）ため、確実に判定できる範囲へ絞る。
@@ -84,7 +91,11 @@ report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
   const FENCE = /^\s*(\`\`\`|~~~)/;
   const HEAD = /^\s{0,3}#{1,6}\s/;
   const LIST = /^\s*(?:[-*+]\s|\d+[.)]\s)/;
-  const PUNCT = /[\p{P}\p{S}]/u;
+  // cmark-gfm（CommonMark 0.29）の約物: ASCII 約物 + Pc/Pd/Pe/Pf/Pi/Po/Ps。S は含めない。
+  // ASCII 約物は U+0021-002F / U+003A-0040 / U+005B-0060 / U+007B-007E の 4 レンジ。
+  // 文字そのままではなく \u で書くのは、3 番目のレンジ末尾がバッククォートであり、
+  // node -e を囲む二重引用符の内側でコマンド置換として解釈されてしまうためである。
+  const PUNCT = /[\u0021-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E\p{Pc}\p{Pd}\p{Pe}\p{Pf}\p{Pi}\p{Po}\p{Ps}]/u;
   const isPunct = (c) => c !== \"\" && PUNCT.test(c);
   const isSpace = (c) => c === \"\" || /\s/u.test(c);
 

@@ -30,7 +30,7 @@
 | 1.3 保留行のリンク再開 | `linkAuthSubjectByEmail:71` | なし（**無変更が正解**・条件を緩めないこと） |
 | 1.6 UI 表示制御 | users/page.tsx のボタン出し分け | **Missing**: 無効行にのみ「有効化」ボタン |
 | 2.1 自己無効化拒否 | handler の guard.user.id | **Missing**: `req.id === guard.user.id` の事前拒否（DAL 到達前） |
-| 2.2 自分行のボタン非表示 | — | **Missing×2**: UI 判定＋**/me に `id` が無い**（MeUser への追加が前提。加算的変更・既存消費者は dashboard-web のみ） |
+| 2.2 自分行のボタン非表示 | — | **Missing×2**: UI 判定＋/**me に `id` が無い**（MeUser への追加が前提。加算的変更・既存消費者は dashboard-web のみ） |
 | 2.3/2.5 最終運営保護＋並行安全 | TX 前例（store-identification） | **Missing＋Research**: 単純な「判定→UPDATE」や単文 UPDATE+EXISTS は **write-skew**（最後の2人を同時に無効化→0人）を防げない。方式選定が必要（下記） |
 | 2.4/3.1/3.3 既存挙動維持 | 既存実装 | なし（回帰テストで固定） |
 | 2.6 拒否理由の明確表示 | 封筒コード体系 | **Missing**: ガード用エラーコード新設（例: 自己無効化/最終運営で別コード）＋UI 文言 |
