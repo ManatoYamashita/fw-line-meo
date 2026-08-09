@@ -106,6 +106,16 @@ checked_dirs=0
 checked_root_files=0
 checked_js_files=0
 
+# tsc の `--listFiles` 出力が実質空か（= tsc が走らなかった／プログラムを構成できなかった）
+# を判定する（Issue #81）。**workspace 側と ts/ 直下側で同じ器を共有する。**
+# 片側にだけ空振り検出が無いと、tsc が動かなかっただけの状況で「プログラムに含まれていません
+# → exclude から外すか include へ追加してください」という**原因と逆向きの診断**が出る。
+# 本ガードは「緑が信用できるか」を守る装置であり、装置が壊れたときに壊れたと言えないのは
+# 設計上の欠落である。判定を関数へ括り出しておけば、呼び出し漏れが目視で分かる。
+program_is_blank() {
+  [ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]
+}
+
 # ファイル先頭のコメント trivia（1 行目から最初の非コメント・非空行の手前まで）を出力する。
 # TypeScript が `@ts-nocheck` / `@ts-check` を honor するのはこの範囲であるため、走査窓を
 # ここへ合わせる（`head -n 3` では 4 行目以降に置かれた有効なプラグマを見逃す）。
@@ -479,7 +489,7 @@ while IFS= read -r glob; do
 ${listed}"
     done
 
-    if [ -z "$(printf '%s' "$program_files" | tr -d '[:space:]')" ]; then
+    if program_is_blank "$program_files"; then
       echo "ERROR: ${rel_pkg} で tsc のプログラム構成を取得できませんでした。" >&2
       echo "       → tsconfig が読めないか tsc を実行できていません。本ガードが空振りします。" >&2
       fail=1
@@ -569,12 +579,18 @@ root_typecheck_script="$(node -e "
 # `pnpm -r typecheck` だけでは ts/ 直下のファイルはどの workspace にも属さず永久に検査されない。
 root_tsconfig_names="$(printf '%s' "$root_typecheck_script" | sed -nE 's/.*(-p|--project)[[:space:]]+([^[:space:]]+).*/\2/p')"
 root_program_files=''
+# プログラム構成を取得できたか。取れていないまま check_root_files へ渡すと、tsc が動かな
+# かっただけの状況で「プログラムに含まれていません」という**別原因の診断**が出る（Issue #81）。
+root_program_ok=1
 if [ -z "$root_tsconfig_names" ]; then
   echo "ERROR: ts/package.json の typecheck が ts/ 直下用の tsconfig を走らせていません（現在: '${root_typecheck_script}'）。" >&2
   echo "       → ts/ 直下のファイル（eslint.config.js 等）はどの workspace にも属さないため、" >&2
   echo "         'pnpm -r typecheck' では永久に型検査されません。" >&2
   echo "         \"typecheck\": \"pnpm -r typecheck && tsc -p tsconfig.tools.json\" のように追加してください。" >&2
   fail=1
+  # プログラムは空のままである。この先へ進めると上の指摘に「include へ追加してください」が
+  # 積み重なり、同じ 1 つの原因が 2 種類の指示になる。ここで打ち切る。
+  root_program_ok=0
 else
   for root_tsconfig_name in $root_tsconfig_names; do
     if [ ! -f "${TS_DIR}/${root_tsconfig_name}" ]; then
@@ -586,9 +602,24 @@ else
     root_program_files="${root_program_files}
 ${root_listed}"
   done
+
+  # workspace 側（上の `program_is_blank "$program_files"`）と対称の空振り検出（Issue #81）。
+  # ts/ 直下は `pnpm -r typecheck` の外にあり配線が壊れやすいため、ここでこそ要る。
+  if program_is_blank "$root_program_files"; then
+    echo "ERROR: ts/ 直下で tsc のプログラム構成を取得できませんでした。" >&2
+    echo "       → tsconfig が読めないか ts/ で tsc を実行できていません。本ガードの ts/ 直下判定が空振りします。" >&2
+    fail=1
+    root_program_ok=0
+  fi
 fi
 
-check_root_files "${TS_DIR}/" "ts/" "$root_lint_script" "$root_program_files"
+# 空振りが確定した経路では検査自体を行わない（workspace 側が `continue` で丸ごと飛ばすのと対称）。
+# **この判定は check_root_files の外側かつ呼出前に置くこと。** 関数の内側へ入れると、ts/ 直下の
+# コードファイルが 0 件になったときの早期 return より後ろになり、tsc の空振りが何も出さずに
+# 素通りする（現在は eslint.config.js があるため顕在化しないが、構造としての穴は残る）。
+if [ "$root_program_ok" -eq 1 ]; then
+  check_root_files "${TS_DIR}/" "ts/" "$root_lint_script" "$root_program_files"
+fi
 
 # ここで check_js_files は呼ばない。ts/ 直下から再帰すると apps/ と packages/ へ降り、
 # 上の workspace ループが既に検査したファイルを二重に報告することになる（prune 一覧に
