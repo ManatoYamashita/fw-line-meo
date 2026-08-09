@@ -66,7 +66,7 @@ pid_run() {
     DRIFT_TARGETS_FILE="${FX}/targets.tsv" \
     PROD_IMAGE_SNAPSHOT="${FX}/snapshot.tsv" \
     DRIFT_NOW_EPOCH="${1:-$PID_NOW}" \
-    DRIFT_GRACE_MINUTES=90 \
+    DRIFT_GRACE_MINUTES="${PID_GRACE:-90}" \
     DRIFT_MAIN_REF="${PID_MAIN_REF:-origin/main}" \
     bash scripts/check-prod-image-drift.sh 2>&1)" || RC=$?
 }
@@ -93,6 +93,10 @@ pid_fixture
 pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
 pid_run $((PID_NOW + 7200))
 expect_red 'behind'
+# 時間帯の表示。3600 秒側の閾値が動くと（例: 分の範囲を広げる）ここが分表示になって赤くなる。
+# なお base の $((age / 3600)) でも同じ文字列が出るため、これは humanize_age 導入の negative
+# control ではない。逆行を捕まえるのは下の「5 分前」「7 日前」「2 日前」の 3 ケースである。
+expect_output_matches '最古 2 時間前'
 t_end
 
 # **本命 1**: 7 日停止の最中に新規マージが入った状態。main HEAD の経過時間で判定していると
@@ -102,6 +106,8 @@ pid_fixture
 pid_snapshot "$(pid_short "$PID_C1" 7)"
 pid_run
 expect_red 'behind'
+# 7 日分は「168 時間」ではなく「7 日」と出す。
+expect_output_matches '最古 7 日前'
 t_end
 
 # **本命 2**: feature ブランチの古い committer date で誤報しないこと。
@@ -184,4 +190,51 @@ printf '' | fx_write targets.tsv
 pid_run
 expect_red '対象集合を1件も取得できませんでした'
 expect_output_matches 'DRIFT-SIGNATURE: early-exit=canon-empty'
+t_end
+
+# 猶予超過が 1 時間未満のときに「0 時間前」と出さないこと（Issue #102 の実測で発覚）。
+t_begin 'check-prod-image-drift: 猶予超過が 1 時間未満でも分で表示する'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+PID_GRACE=1
+pid_run
+PID_GRACE=''
+expect_red 'behind'
+expect_output_matches '最古 5 分前'
+expect_absent '0 時間前'
+t_end
+
+# in-flight の粒度。猶予は**分**で示されるため、経過も分で出す。時間へ丸めると既定の猶予 90 分の
+# 境界にいる 60〜89 分がすべて「最古 1 時間前（猶予 90 分以内）」になり、赤まであと何分かが読めない。
+t_begin 'check-prod-image-drift: in-flight は 1 時間を超えても分で表示する'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+PID_GRACE=180
+pid_run $((PID_NOW + 4500))
+PID_GRACE=''
+expect_green
+expect_output_matches 'in-flight'
+expect_output_matches '最古 80 分前'
+expect_absent '1 時間前'
+t_end
+
+# 表示粒度の境界（172800 秒）。ここを跨ぐと「時間」から「日」へ切り替わる。humanize_age を
+# 素の $((age / 3600)) へ逆行させると「48 時間前」が出てこのケースだけが赤になる（negative control）。
+t_begin 'check-prod-image-drift: 48 時間を跨ぐと日で表示する'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+pid_run $((PID_NOW + 172800))
+expect_red 'behind'
+expect_output_matches '最古 2 日前'
+expect_absent '時間前'
+t_end
+
+# 対照: 境界の手前は時間のまま。閾値を下げる方向の変更をこちらが捕まえる。
+t_begin 'check-prod-image-drift: 48 時間の直前は時間で表示する（対照）'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+pid_run $((PID_NOW + 172200))
+expect_red 'behind'
+expect_output_matches '最古 47 時間前'
+expect_absent '日前'
 t_end
