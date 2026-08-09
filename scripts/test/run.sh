@@ -56,9 +56,16 @@ case_count=0
 # ケースファイル単位のカバレッジ。Issue #90 の受入条件「各ガードへ緑ケース 1 件 + 赤ケース
 # 1 件以上」を機械強制するために使う（散文の約束のままだと、ファイル内でケースが痩せても
 # 総アサーション数が 0 にならない限り緑で通る）。source ループの各反復で 0 へ戻す。
+#
+# `file_cases`（t_begin の回数）と `file_ran`（skip せず完了した回数）を分けて数えるのが要点。
+# 緑赤の照合は「実際に走ったケースがある」ファイルにしか課せない（依存が無く全 skip になる
+# ファイルへ課すと skip 許容の設計と矛盾する）が、`file_ran` だけを見ると **ケースが 1 件も
+# 定義されていないファイル**まで照合の外へ出てしまう。PR #101 のレビューで実測したとおり、
+# 中身を消したファイルや source に失敗したファイルは 0 ケースのまま exit 0 で緑になっていた。
 file_green=0
 file_red=0
 file_ran=0
+file_cases=0
 
 CURRENT_CASE=''
 CURRENT_FAILED=0
@@ -74,6 +81,8 @@ t_begin() {
   CURRENT_FAILED=0
   CURRENT_SKIPPED=0
   case_count=$((case_count + 1))
+  # skip されたかどうかに関わらず「そのファイルがケースを定義したか」を数える。
+  file_cases=$((file_cases + 1))
   FX="$(mktemp -d "${TMPDIR:-/tmp}/guard-selftest.XXXXXX")"
   mkdir -p "${FX}/scripts"
 }
@@ -271,10 +280,22 @@ expect_output_matches() {
   # **`grep -q` を使ってはならない。** `grep -q` は最初の一致で即終了するため、`$OUT` が
   # pipe buffer を超えると上流の `printf` が SIGPIPE で 141 を返し、`set -o pipefail` により
   # **マッチしているのにパイプライン全体が失敗**する（偽 FAIL）。`grep -c` は入力を最後まで
-  # 読むので SIGPIPE が起きない。無一致時の exit 1 は `|| true` で受け、件数で判定する。
+  # 読むので SIGPIPE が起きない。
+  #
+  # **ただし `|| true` で握り潰してもいけない。** `grep` は評価できない ERE に対し exit 2 を
+  # 返し、そのとき標準出力は空になる。`|| true` だと `matched` が空文字のまま
+  # `[ "$matched" -eq 0 ]` へ渡り、test 自身が「整数ではない」で status 2 を返す。`if` は偽に
+  # なるため `_t_fail` へ到達せず、**壊れたパターンのアサーションが PASS として素通りする**
+  # （PR #101 のレビューで実測。健全な実行と件数まで一致し、痕跡は stderr の 1 行だけだった）。
+  # したがって終了コードを捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分けて扱う。
   assert_count=$((assert_count + 1))
-  matched="$(printf '%s\n' "$OUT" | grep -cE "$1" || true)"
-  if [ "$matched" -eq 0 ]; then
+  grep_rc=0
+  matched="$(printf '%s\n' "$OUT" | grep -cE "$1")" || grep_rc=$?
+  if [ "$grep_rc" -gt 1 ]; then
+    _t_fail "パターンを評価できません（grep exit=${grep_rc}）: $1"
+    return
+  fi
+  if [ "${matched:-0}" -eq 0 ]; then
     _t_fail "出力が期待パターンに一致しません: $1"
   fi
 }
@@ -294,6 +315,21 @@ if [ ! -f "$COVERAGE_GUARD" ]; then
 fi
 bash "$COVERAGE_GUARD" || exit 1
 
+# ハーネス自身の自己テスト（PR #101 レビュー追補）。ケースを 1 件も走らせる前に、
+# 「壊れたケースファイルを緑にしない」ことを合成ツリー上で確認する。ガードの自己テストを
+# 集計している装置が黙って緑を返しては、下の全ケースの結果が信用できない。
+# `GUARD_HARNESS_INNER=1` は合成ツリー側の run.sh へ自己テストを再帰起動させないための印で、
+# harness-selftest.sh からのみ設定する（CI では設定しない）。
+if [ "${GUARD_HARNESS_INNER:-0}" != '1' ]; then
+  HARNESS_SELFTEST="${SCRIPT_DIR}/harness-selftest.sh"
+  if [ ! -f "$HARNESS_SELFTEST" ]; then
+    # 自己テストごと消えたときに、検証が黙って飛ぶことを防ぐ。
+    echo "ERROR: ハーネス自己テストがありません: scripts/test/harness-selftest.sh" >&2
+    exit 1
+  fi
+  bash "$HARNESS_SELFTEST" || exit 1
+fi
+
 if [ ! -d "$CASES_DIR" ]; then
   echo "ERROR: ケースディレクトリがありません: ${CASES_DIR#$ROOT/}" >&2
   exit 1
@@ -312,14 +348,34 @@ while IFS= read -r case_file; do
   file_green=0
   file_red=0
   file_ran=0
+  file_cases=0
+  source_rc=0
   # shellcheck source=/dev/null
-  . "$case_file"
-  # Issue #90 の受入条件「各ガードへ緑ケース 1 件 + 赤ケース 1 件以上」を機械強制する。
-  # 片方だけのファイルは「検出できること」か「誤検知しないこと」のどちらかを検証していない。
-  if [ "$file_ran" -gt 0 ] && { [ "$file_green" -eq 0 ] || [ "$file_red" -eq 0 ]; }; then
+  . "$case_file" || source_rc=$?
+  # ファイル単位の健全性を、原因の近い順に 1 つだけ報告する（同じ 1 つの原因で 2 行出さない）。
+  # 上 3 つは「そのファイルの検証が丸ごと消えていないか」、最後が Issue #90 の受入条件
+  # 「各ガードへ緑ケース 1 件 + 赤ケース 1 件以上」の機械強制。
+  file_problem=''
+  if [ -n "$CURRENT_CASE" ]; then
+    # t_end へ到達しないままファイルが終わった。構文エラーでの打ち切りはここへ落ちる
+    # （`t_begin` は実行済みなのでケース数は 1 以上になり、件数だけでは検出できない）。
+    file_problem="ケース「${CURRENT_CASE}」が閉じていません（t_end へ到達する前にファイルが終わりました）。"
+    fx_cleanup
+    CURRENT_CASE=''
+  elif [ "$source_rc" -ne 0 ]; then
+    # 全ケースが閉じた後で打ち切られた場合。以降に書かれていた検証は黙って消えている。
+    file_problem="ケースファイルの読み込みが exit=${source_rc} で終わりました（末尾が失われています）。"
+  elif [ "$file_cases" -eq 0 ]; then
+    # ファイル名は残るためガード側の 1:1 照合では検出できない（PR #101 レビュー指摘 2）。
+    file_problem='ケースを 1 件も定義していません（中身が消えています）。'
+  elif [ "$file_ran" -gt 0 ] && { [ "$file_green" -eq 0 ] || [ "$file_red" -eq 0 ]; }; then
+    # 片方だけのファイルは「検出できること」か「誤検知しないこと」のどちらかを検証していない。
+    file_problem="緑ケースと赤ケースが両方必要です（expect_green=${file_green} / expect_red=${file_red}）。"
+  fi
+  if [ -n "$file_problem" ]; then
     fail_count=$((fail_count + 1))
     echo "  FAIL  ${case_file#$CASES_DIR/}" >&2
-    echo "        緑ケースと赤ケースが両方必要です（expect_green=${file_green} / expect_red=${file_red}）。" >&2
+    echo "        ${file_problem}" >&2
   fi
 done <<EOF
 $case_files
