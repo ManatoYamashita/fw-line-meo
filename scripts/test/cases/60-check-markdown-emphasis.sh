@@ -122,6 +122,133 @@ EOF
 fi
 t_end
 
+t_begin 'check-markdown-emphasis: 対照 — インデントコードブロックは本文ではない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 4 スペースインデントは fenced でなくてもコードブロックである（CommonMark）。
+  # 中の JSDoc `/** ... */` は強調ではない。除外しないと 1 個の `**` が対にならず誤検出する。
+  fx_write docs/indented.md <<'EOF'
+インデントされたコード例:
+
+    /** JSDoc のアスタリスクは強調ではない。 */
+    const y = 2;
+
+段落へ戻る。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — リスト内のインデント段落は本文として検査する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # リスト項目の 2 段落目もインデントされる。これをコードとして飛ばすと、
+  # 本文中の破綻を見逃す（インデントコード除外が広がりすぎた状態の検出）。
+  fx_write docs/listpara.md <<'EOF'
+- 項目:
+
+    本文が続く。**強調（かっこ）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red "の終端 '**' が強調を閉じていません"
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — 入れ子 fence（4 バックティック）の中は本文ではない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 4 バックティックで開いた fence は 3 バックティックでは閉じない（CommonMark）。
+  # 開始 fence より短い fence 行で閉じたと誤認すると、以降の中身が本文として解析される。
+  fx_write docs/nested.md <<'EOF'
+Markdown の書き方を Markdown で示す例:
+
+````md
+```js
+/** 入れ子 fence の中のアスタリスクは強調ではない。 */
+```
+````
+
+段落へ戻る。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — fence を挟んでもリスト内のインデント段落は本文として検査する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 上の listpara.md が固定した不変量は、リスト項目が fenced code block を含んだ瞬間に
+  # 消えてはならない。fence 開始行でリスト文脈を落とすと、直後のインデント継続段落が
+  # インデントコードと誤認されて飛ばされ、GitHub が本文として描画する破綻を見逃す
+  # （/markdown API で <p>本文が続く。**強調（かっこ）**である。</p> と描画されることを実測）。
+  fx_write docs/listfence.md <<'EOF'
+- 項目:
+
+  ```js
+  const x = 1;
+  ```
+
+    本文が続く。**強調（かっこ）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red "の終端 '**' が強調を閉じていません"
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — リスト内の 4 スペース fence はコードとして除外する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 上のケースの裏。インデントコード除外を「字下げ 3 以下だけ fence と見なす」形で実装すると、
+  # リスト項目内の 4 スペース fence が本文へ落ちて JSDoc を誤検出する。除外の判定は
+  # 字下げ量ではなくリスト文脈で切り分けること。
+  fx_write docs/listfence-ok.md <<'EOF'
+- 項目:
+
+    ```js
+    /** JSDoc のアスタリスクは強調ではない。 */
+    ```
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: インデントコード内の fence 行は fence 状態を変えない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # fence 判定をインデントコード判定より先に走らせると、インデントコードの中身が
+  # fence の開閉として解釈される。長さが揃わない（4 個で開き 3 個で閉じようとする）形では
+  # 閉じられないまま fence 状態がファイル末尾まで残り、以降が丸ごと解析対象外になる。
+  # 単純トグルだった旧実装は次の fence 行で自己回復していたため、これは長さ判定の導入で
+  # 新たに開いた穴である。
+  fx_write docs/indented-fence.md <<'EOF'
+インデントされたコード例:
+
+    ````
+    text
+    ```
+
+後続。**強調（かっこ）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red "の終端 '**' が強調を閉じていません"
+fi
+t_end
+
 t_begin 'check-markdown-emphasis: 対照 — prune 対象の配下は走査しない'
 if ! fx_has_node; then
   t_skip 'node コマンドが無い'
