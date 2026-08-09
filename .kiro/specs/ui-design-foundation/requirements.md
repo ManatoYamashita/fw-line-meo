@@ -18,7 +18,7 @@
 - 良い土台: 各画面ともセマンティック HTML + ARIA 属性（`aria-label` / `aria-pressed` / `role="alert"` / `scope="col"` / `lang="ja"`）は丁寧に付与済み。スタイルを載せる下地は健全。
 
 ### 何を変えるべきか（本 spec のスコープ = 基盤の確立）
-本 spec は親 Issue #41 の**基盤（デザインシステムの新設）**に対応する。面ごとの実装（#42〜#45）は本基盤の上で各 spec/PR として行う。
+本 spec は親 Issue #41 の**基盤**（デザインシステムの新設）に対応する。面ごとの実装（#42〜#45）は本基盤の上で各 spec/PR として行う。
 - **コンポーネント基盤 = Base UI（`@base-ui/react`）** を採用。Radix / Floating UI / MUI チームによる unstyled・アクセシブルな React プリミティブ。CSS を同梱せず `className` に Tailwind を当て `data-*` 状態属性でスタイル分岐する。既存 ARIA を置換ではなく強化する。
 - **スタイリング = Tailwind CSS**（build-time・`next build` 統合・トークンを config で一元管理）。
 - **適用範囲の区別**: Base UI + Tailwind は React 3アプリ（store-detail / survey-web / dashboard-web）に適用。**LINE Flex は React ではない**ため Base UI 対象外で、色トークンの抽出・パレット統一のみ。

@@ -136,6 +136,12 @@ fx_has_real_toolchain() {
   [ -x "${REAL_NODE_MODULES}/.bin/tsc" ] && [ -x "${REAL_NODE_MODULES}/.bin/eslint" ]
 }
 
+fx_has_node() {
+  # node コマンド単体（npm パッケージ不要）。check-markdown-emphasis.sh は Unicode の約物分類を
+  # node へ委譲しているため、これが無いと走らない。
+  command -v node >/dev/null 2>&1
+}
+
 fx_stub_npx_failing_tsc_in() {
   # $1 = cwd のグロブ（例: '*/ts'）。その cwd での tsc 呼び出しだけを失敗させ、
   # それ以外の呼び出し（別ディレクトリの tsc・あらゆる eslint）は実物へ委譲する npx スタブ。

@@ -47,6 +47,14 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
+      # 日本語 Markdown で強調が閉じない形を機械検出する（Issue #89）。
+      # `**強調（かっこ）**である` は GFM の right-flanking 規則を満たさず、生の ** が表示される。
+      # 壊れても CI は落ちず見た目だけが黙って壊れるため、#55 と同型の「緑のまま素通り」になる。
+      # 上の grep ガード群（checkout 直後）へ入れられないのは、flanking 判定が Unicode の
+      # 約物分類を要するため node へ委譲しているからである。npm パッケージには依存しないので
+      # setup-node の直後・install の前に置ける。
+      - name: Markdown 強調ガード（Issue #89）
+        run: bash scripts/check-markdown-emphasis.sh
       - run: pnpm -C ts install --frozen-lockfile
       - run: pnpm -C ts run lint
       - run: pnpm -C ts run build

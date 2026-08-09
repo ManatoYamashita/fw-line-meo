@@ -81,7 +81,7 @@
 - SERIALIZABLE 隔離は不採用（リトライ実装が必要・前例なし）。**当初 design は `FOR UPDATE` を採ったが、validate-design（2026-07-19・ユーザー決裁）で advisory lock へ切替**——テナント単位の直列化により count 判定が自明に正しく、EvalPlanQual 再評価の機微に依存せず、並行テストが容易。管理操作は低頻度ゆえ過剰直列化は無害。
 
 ### Simplification
-- **自己無効化ガードは DB 前（ハンドラ）**で弾く（往復不要・並行性問題ではない）。TX が要るのは最後の運営ガードのみ。
+- **自己無効化ガードは DB 前**（ハンドラ）で弾く（往復不要・並行性問題ではない）。TX が要るのは最後の運営ガードのみ。
 - **再有効化は無ガードのプレーン UPDATE**（`disabled_at`=NULL・冪等・TX 不要）。
 - **migration ゼロ**（再有効化一本化により一意制約・リンク条件は無変更）。
 - ガードなしの単純 `disableDashboardUser` は撤去（dead-export 化を避ける・validate-impl 教訓）。

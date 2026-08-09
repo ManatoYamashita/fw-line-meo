@@ -6,7 +6,7 @@
 
 **Users**: 来店客（回答・投稿）、代理店・運営（QR 取得・印刷・設置）、オーナー（間接受益者・操作なし）。
 
-**Impact**: 実装コード未着手のリポジトリに**初のアプリ層（TS モノレポ）**を確立する。既存の four-tier-data-model スキーマ・gcp-infra-foundation 基盤の上に載り、**スキーマ変更なし**。Cloud Run の `survey-web`・`dashboard-api`（現在 hello イメージ）を実アプリに置換する。
+**Impact**: 実装コード未着手のリポジトリに**初のアプリ層**（TS モノレポ）を確立する。既存の four-tier-data-model スキーマ・gcp-infra-foundation 基盤の上に載り、**スキーマ変更なし**。Cloud Run の `survey-web`・`dashboard-api`（現在 hello イメージ）を実アプリに置換する。
 
 ### Goals
 - QR → 回答 → 下書き生成 → コピー → Google 投稿画面遷移の一連動作（Issue #3 完了条件）
