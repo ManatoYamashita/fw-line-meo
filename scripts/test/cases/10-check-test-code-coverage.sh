@@ -112,7 +112,7 @@ else
   fx_run check-test-code-coverage
   expect_green
   # 「OK」だけでなく件数を照合する。0 件のまま緑になる経路と区別するため。
-  expect_output_matches '1 workspace / 2 ディレクトリ / 2 直下ファイル / 1 サブディレクトリ JS'
+  expect_output_matches '1 workspace / 2 ディレクトリ / 2 直下ファイル / 1 サブディレクトリファイル'
 fi
 t_end
 
