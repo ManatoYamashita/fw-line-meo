@@ -134,9 +134,10 @@ if [ "$state" = "green" ]; then
   {
     echo "復旧を確認しました。追跡 Issue を閉じます。"
     echo ""
-    echo '```'
+    # **body-file をここでフェンスで包まない。** 呼び出し側が渡す本文は既に Markdown として
+    # 組まれており、コマンド出力は呼び出し側がフェンス内へ入れている。二重に包むと内側の ```
+    # が外側を閉じてしまい、復旧コメントの描画が崩れる（2026-08-09、Issue #102 で実測）。
     cat "$body_file"
-    echo '```'
   } > "$recover_body"
   run_gh gh issue comment "$tracker" --body-file "$recover_body"
   run_gh gh issue close "$tracker" --reason completed

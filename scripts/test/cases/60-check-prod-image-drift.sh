@@ -66,7 +66,7 @@ pid_run() {
     DRIFT_TARGETS_FILE="${FX}/targets.tsv" \
     PROD_IMAGE_SNAPSHOT="${FX}/snapshot.tsv" \
     DRIFT_NOW_EPOCH="${1:-$PID_NOW}" \
-    DRIFT_GRACE_MINUTES=90 \
+    DRIFT_GRACE_MINUTES="${PID_GRACE:-90}" \
     DRIFT_MAIN_REF="${PID_MAIN_REF:-origin/main}" \
     bash scripts/check-prod-image-drift.sh 2>&1)" || RC=$?
 }
@@ -93,6 +93,8 @@ pid_fixture
 pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
 pid_run $((PID_NOW + 7200))
 expect_red 'behind'
+# 経過の粒度。障害対応中に読む文面なので「0 時間前」のような表示を許さない。
+expect_output_matches '最古 2 時間前'
 t_end
 
 # **本命 1**: 7 日停止の最中に新規マージが入った状態。main HEAD の経過時間で判定していると
@@ -102,6 +104,8 @@ pid_fixture
 pid_snapshot "$(pid_short "$PID_C1" 7)"
 pid_run
 expect_red 'behind'
+# 7 日分は「168 時間」ではなく「7 日」と出す。
+expect_output_matches '最古 7 日前'
 t_end
 
 # **本命 2**: feature ブランチの古い committer date で誤報しないこと。
@@ -184,4 +188,16 @@ printf '' | fx_write targets.tsv
 pid_run
 expect_red '対象集合を1件も取得できませんでした'
 expect_output_matches 'DRIFT-SIGNATURE: early-exit=canon-empty'
+t_end
+
+# 猶予超過が 1 時間未満のときに「0 時間前」と出さないこと（Issue #102 の実測で発覚）。
+t_begin 'check-prod-image-drift: 猶予超過が 1 時間未満でも分で表示する'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+PID_GRACE=1
+pid_run
+PID_GRACE=''
+expect_red 'behind'
+expect_output_matches '最古 5 分前'
+expect_absent '0 時間前'
 t_end
