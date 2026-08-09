@@ -36,7 +36,9 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "*.mjs"
+    "*.mjs",
+    "perf/*.mjs",
+    "e2e/*.mjs"
   ],
   "exclude": [
     "node_modules"
