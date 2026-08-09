@@ -93,7 +93,9 @@ pid_fixture
 pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
 pid_run $((PID_NOW + 7200))
 expect_red 'behind'
-# 経過の粒度。障害対応中に読む文面なので「0 時間前」のような表示を許さない。
+# 時間帯の表示。3600 秒側の閾値が動くと（例: 分の範囲を広げる）ここが分表示になって赤くなる。
+# なお base の $((age / 3600)) でも同じ文字列が出るため、これは humanize_age 導入の negative
+# control ではない。逆行を捕まえるのは下の「5 分前」「7 日前」「2 日前」の 3 ケースである。
 expect_output_matches '最古 2 時間前'
 t_end
 
@@ -200,4 +202,39 @@ PID_GRACE=''
 expect_red 'behind'
 expect_output_matches '最古 5 分前'
 expect_absent '0 時間前'
+t_end
+
+# in-flight の粒度。猶予は**分**で示されるため、経過も分で出す。時間へ丸めると既定の猶予 90 分の
+# 境界にいる 60〜89 分がすべて「最古 1 時間前（猶予 90 分以内）」になり、赤まであと何分かが読めない。
+t_begin 'check-prod-image-drift: in-flight は 1 時間を超えても分で表示する'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+PID_GRACE=180
+pid_run $((PID_NOW + 4500))
+PID_GRACE=''
+expect_green
+expect_output_matches 'in-flight'
+expect_output_matches '最古 80 分前'
+expect_absent '1 時間前'
+t_end
+
+# 表示粒度の境界（172800 秒）。ここを跨ぐと「時間」から「日」へ切り替わる。humanize_age を
+# 素の $((age / 3600)) へ逆行させると「48 時間前」が出てこのケースだけが赤になる（negative control）。
+t_begin 'check-prod-image-drift: 48 時間を跨ぐと日で表示する'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+pid_run $((PID_NOW + 172800))
+expect_red 'behind'
+expect_output_matches '最古 2 日前'
+expect_absent '時間前'
+t_end
+
+# 対照: 境界の手前は時間のまま。閾値を下げる方向の変更をこちらが捕まえる。
+t_begin 'check-prod-image-drift: 48 時間の直前は時間で表示する（対照）'
+pid_fixture
+pid_snapshot "$(pid_short "${PID_C4}~1" 7)"
+pid_run $((PID_NOW + 172200))
+expect_red 'behind'
+expect_output_matches '最古 47 時間前'
+expect_absent '日前'
 t_end

@@ -275,6 +275,8 @@ parse_image() {
 # humanize_age: 経過秒を人が読める粒度の文字列にする。障害対応中に読まれる文面なので、
 # 1 時間未満を「0 時間前」と出さない（2026-08-09、Issue #102 の実測で発覚）。
 # 7 日停止のようなケースも「168 時間」ではなく「7 日」と出す。
+# **使うのは behind 側だけ。** in-flight は定義上つねに猶予の内側にあり、猶予が分で示される以上、
+# 経過も分で出さないと「赤まであと何分か」が読めなくなる（60〜89 分がすべて「1 時間前」になる）。
 humanize_age() {
   if [ "$1" -lt 3600 ]; then
     echo "$(($1 / 60)) 分"
@@ -365,7 +367,8 @@ classify_image() {
   age=$((now_epoch - oldest_ct))
   if [ "$age" -lt "$grace_seconds" ]; then
     c_status="in-flight"
-    c_detail="未デプロイ ${behind_count} 件・最古 $(humanize_age "$age")前（猶予 ${DRIFT_GRACE_MINUTES} 分以内）"
+    # 猶予との距離を読ませるため、ここだけは分で揃える（humanize_age の冒頭コメント参照）。
+    c_detail="未デプロイ ${behind_count} 件・最古 $((age / 60)) 分前（猶予 ${DRIFT_GRACE_MINUTES} 分以内）"
   else
     c_status="behind"
     c_detail="未デプロイ ${behind_count} 件・最古 $(humanize_age "$age")前（猶予 ${DRIFT_GRACE_MINUTES} 分を超過）"

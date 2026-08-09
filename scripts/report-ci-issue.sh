@@ -86,9 +86,21 @@ dry_run="${REPORT_CI_ISSUE_DRY_RUN:-}"
 
 run_gh() {
   if [ -n "$dry_run" ]; then
+    local prev='' arg=''
     printf 'DRY-RUN:'
     printf ' %s' "$@"
     printf '\n'
+    # **送る本文そのものを出す。** `--body-file` の中身は一時ファイルにしか無く、呼び出し直後に
+    # rm されるため、これが無いと自己テストから本文を観測できない。観測できないものは守れず、
+    # フェンスの二重化（Issue #102 の描画崩れ）のような文面の欠陥を誰も検出できない。
+    for arg in "$@"; do
+      if [ "$prev" = "--body-file" ] && [ -f "$arg" ]; then
+        echo "DRY-RUN-BODY-BEGIN"
+        cat "$arg"
+        echo "DRY-RUN-BODY-END"
+      fi
+      prev="$arg"
+    done
     return 0
   fi
   "$@"
