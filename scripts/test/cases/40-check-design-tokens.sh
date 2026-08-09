@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-design-tokens.sh の自己テスト（Issue #90）。
 #
 # 本ガードは「色はデザイントークンを単一情報源とする」を守る。直書き hex と生パレット色クラスは

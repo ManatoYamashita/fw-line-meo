@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-deploy-image-coverage.sh の自己テスト（Issue #90）。
 #
 # 本ガードは Issue #33（tf は成功・サービスも存在するのに中身が placeholder のまま）という

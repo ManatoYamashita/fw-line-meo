@@ -523,7 +523,14 @@ EOF
 echo
 # ハーネス自身の空振り防止。ガードの空振りを検出する装置が空振りしては元の木阿弥である。
 if [ "$assert_count" -eq 0 ]; then
-  echo "ERROR: アサーションを 1 件も実行できませんでした。ハーネスが空振りしています。" >&2
+  if [ "$skip_count" -ne 0 ]; then
+    # 「依存が無いので飛ばした」と「1 件も検証していない」は別のことである。前者を理由に
+    # 後者を緑で返してはならない。CI では --require-full が skip 自体を失敗にする。
+    echo "ERROR: ${skip_count} ケースすべてが skip され、1 件も検証できていません（tier=${TIER_SELECT}）。" >&2
+    echo "       → 依存が足りていません。Tier B は 'pnpm -C ts install' が要ります。" >&2
+  else
+    echo "ERROR: アサーションを 1 件も実行できませんでした。ハーネスが空振りしています。" >&2
+  fi
   exit 1
 fi
 if [ "$case_count" -eq 0 ]; then

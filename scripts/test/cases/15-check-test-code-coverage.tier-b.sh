@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-test-code-coverage.sh の自己テスト — Tier B（Issue #90）。
 #
 # このガードは #70 / #78 / #83 / #81 と 4 回、事後に穴が見つかっている。中でも #81 の偽緑は
