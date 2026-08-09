@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src test e2e perf next.config.ts postcss.config.mjs vitest.config.ts playwright.config.ts",
+    "lint": "eslint src test e2e",
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "perf:budget": "node perf/bundle-budget.mjs"

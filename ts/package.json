@@ -10,7 +10,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:packages": "pnpm --filter \"./packages/**\" run build",
-    "lint": "eslint eslint.config.js && pnpm -r lint",
+    "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm run build:packages && pnpm -r typecheck"
   },
