@@ -53,6 +53,13 @@ skip_count=0
 assert_count=0
 case_count=0
 
+# ケースファイル単位のカバレッジ。Issue #90 の受入条件「各ガードへ緑ケース 1 件 + 赤ケース
+# 1 件以上」を機械強制するために使う（散文の約束のままだと、ファイル内でケースが痩せても
+# 総アサーション数が 0 にならない限り緑で通る）。source ループの各反復で 0 へ戻す。
+file_green=0
+file_red=0
+file_ran=0
+
 CURRENT_CASE=''
 CURRENT_FAILED=0
 CURRENT_SKIPPED=0
@@ -74,11 +81,17 @@ t_begin() {
 t_end() {
   if [ "$CURRENT_SKIPPED" -eq 1 ]; then
     skip_count=$((skip_count + 1))
-  elif [ "$CURRENT_FAILED" -eq 0 ]; then
-    pass_count=$((pass_count + 1))
-    echo "  PASS  ${CURRENT_CASE}"
   else
-    fail_count=$((fail_count + 1))
+    # 非 skip で完了したケースだけをファイル単位カバレッジの母数にする。
+    # 依存が無く全ケースが skip されたファイルへ「緑と赤が両方要る」を課すと、
+    # skip を許容する設計（--require-full なしの実行）と矛盾するため。
+    file_ran=$((file_ran + 1))
+    if [ "$CURRENT_FAILED" -eq 0 ]; then
+      pass_count=$((pass_count + 1))
+      echo "  PASS  ${CURRENT_CASE}"
+    else
+      fail_count=$((fail_count + 1))
+    fi
   fi
   fx_cleanup
   CURRENT_CASE=''
@@ -207,6 +220,8 @@ fx_run_stdout() {
 
 expect_green() {
   assert_count=$((assert_count + 1))
+  # 成否ではなく「そのファイルが緑期待を 1 件でも持つか」を数える（カバレッジの形の話）。
+  file_green=$((file_green + 1))
   if [ "$RC" -ne 0 ]; then
     _t_fail "緑を期待しましたが exit=${RC} でした。"
     return
@@ -221,6 +236,7 @@ expect_green() {
 expect_red() {
   # $1 = 期待するエラー文字列（原因まで照合する。exit code だけでは別原因の赤と区別できない）
   assert_count=$((assert_count + 1))
+  file_red=$((file_red + 1))
   if [ "$RC" -eq 0 ]; then
     _t_fail "赤を期待しましたが exit=0 でした。期待した検出: $1"
     return
@@ -251,13 +267,32 @@ expect_output_empty() {
 
 expect_output_matches() {
   # $1 = 期待する ERE。件数表示など「緑の中身」を照合するために使う。
+  #
+  # **`grep -q` を使ってはならない。** `grep -q` は最初の一致で即終了するため、`$OUT` が
+  # pipe buffer を超えると上流の `printf` が SIGPIPE で 141 を返し、`set -o pipefail` により
+  # **マッチしているのにパイプライン全体が失敗**する（偽 FAIL）。`grep -c` は入力を最後まで
+  # 読むので SIGPIPE が起きない。無一致時の exit 1 は `|| true` で受け、件数で判定する。
   assert_count=$((assert_count + 1))
-  if ! printf '%s\n' "$OUT" | grep -qE "$1"; then
+  matched="$(printf '%s\n' "$OUT" | grep -cE "$1" || true)"
+  if [ "$matched" -eq 0 ]; then
     _t_fail "出力が期待パターンに一致しません: $1"
   fi
 }
 
 # --- 実行 -------------------------------------------------------------------
+
+# ガードとケースファイルの 1:1 対応を、ケースを 1 件も走らせる前に強制する（Issue #90 追補）。
+# 下の空振り防止は「アサーション 0 件」でしか発火せず、ケースファイルが 1 つ消えても残りが
+# 緑なら OK を返してしまう（PR #93 のレビューで実測: 50-*.sh を外すと 20 ケース緑 exit 0）。
+# 照合ロジックは独立したガードへ切り出してある。そうすることで、この harness 自身が
+# その照合ガードを（合成ツリー上で）自己テストできる。
+COVERAGE_GUARD="${ROOT}/scripts/check-guard-selftest-coverage.sh"
+if [ ! -f "$COVERAGE_GUARD" ]; then
+  # 照合ガードごと消えたときに、検証が黙って飛ぶことを防ぐ。
+  echo "ERROR: 対応検証ガードがありません: scripts/check-guard-selftest-coverage.sh" >&2
+  exit 1
+fi
+bash "$COVERAGE_GUARD" || exit 1
 
 if [ ! -d "$CASES_DIR" ]; then
   echo "ERROR: ケースディレクトリがありません: ${CASES_DIR#$ROOT/}" >&2
@@ -274,8 +309,18 @@ echo "ガード自己テスト（Issue #90）"
 while IFS= read -r case_file; do
   [ -n "$case_file" ] || continue
   echo "--- ${case_file#$CASES_DIR/} ---"
+  file_green=0
+  file_red=0
+  file_ran=0
   # shellcheck source=/dev/null
   . "$case_file"
+  # Issue #90 の受入条件「各ガードへ緑ケース 1 件 + 赤ケース 1 件以上」を機械強制する。
+  # 片方だけのファイルは「検出できること」か「誤検知しないこと」のどちらかを検証していない。
+  if [ "$file_ran" -gt 0 ] && { [ "$file_green" -eq 0 ] || [ "$file_red" -eq 0 ]; }; then
+    fail_count=$((fail_count + 1))
+    echo "  FAIL  ${case_file#$CASES_DIR/}" >&2
+    echo "        緑ケースと赤ケースが両方必要です（expect_green=${file_green} / expect_red=${file_red}）。" >&2
+  fi
 done <<EOF
 $case_files
 EOF
