@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push db-dev-setup db-dev-reset ts-dev-survey help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-typecheck ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push db-dev-setup db-dev-reset ts-dev-survey help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -53,6 +53,9 @@ ts-install: ## TS: pnpm workspace の依存を導入
 
 ts-build: ## TS: 全ワークスペースパッケージを tsc ビルド
 	pnpm -C $(TS_DIR) run build
+
+ts-typecheck: ## TS: 全ワークスペースを型検査（packages の dist 型が要るため先にビルドする）
+	pnpm -C $(TS_DIR) run typecheck
 
 ts-lint: ## TS: 全ワークスペースパッケージを ESLint 検査
 	pnpm -C $(TS_DIR) run lint
