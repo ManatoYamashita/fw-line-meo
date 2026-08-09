@@ -159,6 +159,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          # deploy ジョブが checkout するのと同じ commit（workflow_run 時は ts-ci が緑になった
+          # commit であり、main の HEAD とは限らない）。
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           # skipped（ts-ci が緑でないため deploy 自体を実行しなかった）と cancelled は
@@ -181,7 +184,7 @@ jobs:
             fi
             echo ""
             echo "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "- 反映対象 commit: \`${GITHUB_SHA}\`"
+            echo "- 反映対象 commit: \`${DEPLOYED_SHA}\`"
             echo ""
             echo "deploy-prod は workflow_run 起動のため PR のチェック欄には現れません。"
             echo "失敗の範囲は「最後に成功した run」まで遡って確定してください（当日分だけ見ると過小報告になります）。"
