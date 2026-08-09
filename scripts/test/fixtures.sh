@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # ケース間で共有する合成ツリーの組み立て（Issue #90）。
 #
 # run.sh が tier に関わらず必ず読み込む。tier ごとのケースファイルへ同じツリーを二重に
