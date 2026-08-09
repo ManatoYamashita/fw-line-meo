@@ -31,6 +31,19 @@
 #   - 入れ子 fence（```` で開き ``` を内側に持つ形）→ fence を単純トグルすると内側の短い fence で
 #     閉じたことになり、以降の中身が本文として解析される
 #
+# **見逃し源（除外が広がりすぎる方向。誤検出と違い CI が緑のままなので気づけない）:**
+#   - fence 開始行でリスト文脈を落とすと、リスト項目内の fenced code block を通過しただけで
+#     直後のインデント継続段落がコード扱いになる。GitHub はそこを本文として描画するため、
+#     破綻した強調を黙って見逃す（/markdown API で描画を実測して確認した）
+#   - インデントコード判定より先に fence 判定を走らせると、インデントコードの中に書かれた
+#     fence 行が fence の開閉として解釈される。長さが揃わない形では閉じないまま fence 状態が
+#     ファイル末尾まで残り、以降が丸ごと解析対象外になる
+#
+# **除外規則を足すときは、その規則が実コーパスで何行に発火したかを先に測ること。** 発火 0 行なら
+# 「検査した強調対の数が不変」は自明に成立し、広げすぎていない証拠にならない。実際、この 2 つの
+# 是正の時点で追跡対象 83 ファイルのインデント除外発火数は 0 行・長さ 4 以上の fence は 0 本であり、
+# 防御は scripts/test/cases/60-check-markdown-emphasis.sh の対照ケースだけが担っている。
+#
 # 判定本体を node へ委譲する理由: flanking 規則は Unicode の一般カテゴリ照会を要求し、
 # BSD awk（macOS 既定）では多バイト文字を安定して扱えない。check-test-code-coverage.sh が
 # 同じ理由で node -e に JSON 解釈を委譲している前例に従う。npm パッケージには依存しない。
@@ -131,36 +144,41 @@ report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
     const lines = text.split(\"\n\");
     for (let i = 0; i < lines.length; i++) {
       const raw = lines[i];
-      // fence は「同じ文字・開始以上の長さ・info string 無し」でしか閉じない（CommonMark）。
-      // 単純なトグルにすると 4 バックティックで開いた fence を内側の 3 バックティックが
-      // 閉じたことにしてしまい、以降の中身が本文として解析される（誤検出源）。
       const fm = raw.match(FENCE);
-      if (fm) {
-        const ch = fm[1].charAt(0);
-        const len = fm[1].length;
-        const info = fm[2];
-        if (!fence) {
-          // バッククォート fence の info string に \` は置けない。その形は fence ではない。
-          if (!(ch === \"\`\" && info.indexOf(\"\`\") >= 0)) {
-            fence = true; fenceChar = ch; fenceLen = len;
-            if (cur.length) { out.push(cur); cur = []; }
-            prevQuote = null; inList = false;
-            continue;
-          }
-        } else {
-          if (ch === fenceChar && len >= fenceLen && info.trim() === \"\") { fence = false; }
-          continue;
-        }
+      // fence 中は閉じ判定だけを行う。fence は「同じ文字・開始以上の長さ・info string 無し」
+      // でしか閉じない（CommonMark）。単純なトグルにすると 4 バックティックで開いた fence を
+      // 内側の 3 バックティックが閉じたことにしてしまい、以降の中身が本文として解析される。
+      if (fence) {
+        if (fm && fm[1].charAt(0) === fenceChar && fm[1].length >= fenceLen &&
+            fm[2].trim() === \"\") { fence = false; }
+        continue;
       }
-      if (fence) continue;
       const quote = /^\s*>/.test(raw);
       const content = quote ? raw.replace(/^\s*>\s?/, \"\") : raw;
       // インデントコードブロック（4 スペース / タブ）は本文ではない。段落の継続行と
       // 区別するため、段落が開いていないときだけコードとして扱う。リスト項目の 2 段落目も
       // インデントされるため、リスト文脈では適用しない（その代わりリスト内のインデント
       // コードは誤検出しうる。導入時のコーパスに 0 箇所であり、fenced を使えば避けられる）。
+      //
+      // **この判定は fence 開始判定より前に置くこと。** 逆順にすると、インデントコードの中に
+      // 書かれた fence 行が fence の開閉として解釈される。長さが揃わない形（4 個で開き 3 個で
+      // 閉じようとする形）では閉じないまま fence 状態がファイル末尾まで残り、以降が丸ごと
+      // 解析対象外になる。字下げ量で fence を弾く実装にしてはならない。リスト項目内の
+      // 4 スペース fence が本文へ落ちて JSDoc を誤検出する。切り分けはリスト文脈で行う。
       if (!quote && !inList && cur.length === 0 &&
           content.trim() !== \"\" && INDENTED.test(content)) {
+        continue;
+      }
+      // fence 開始。バッククォート fence の info string に \` は置けないため、その形は
+      // fence ではない（コードスパンを含む段落として解析する）。
+      //
+      // **ここで inList を落としてはならない。** リスト項目内の fenced code block を通過した
+      // だけでリスト文脈が消えると、直後のインデント継続段落を本文でなくコードとして飛ばす。
+      // GitHub はそれを本文として描画するため、破綻した強調を黙って見逃すことになる。
+      if (fm && !(fm[1].charAt(0) === \"\`\" && fm[2].indexOf(\"\`\") >= 0)) {
+        fence = true; fenceChar = fm[1].charAt(0); fenceLen = fm[1].length;
+        if (cur.length) { out.push(cur); cur = []; }
+        prevQuote = null;
         continue;
       }
       const boundary =
