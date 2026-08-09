@@ -100,6 +100,11 @@ t_begin() {
   CURRENT_FAILED=0
   CURRENT_SKIPPED=0
   case_count=$((case_count + 1))
+  # 前ケースの出力を持ち越さない。_t_fail は $OUT を「ガードの出力」として添えるため、
+  # fx_run より前に失敗したケース（変異の空振り等）へ**無関係な前ケースの出力**が付き、
+  # 原因を取り違える材料になる。
+  OUT=''
+  RC=0
   FX="$(mktemp -d "${TMPDIR:-/tmp}/guard-selftest.XXXXXX")"
   mkdir -p "${FX}/scripts"
   # Tier A は hermetic にする。ケース側の呼び忘れで実物の npx へ落ちる余地を残さないため、
@@ -350,6 +355,14 @@ fx_stub_npx_failing_tsc_in() {
   # それ以外の呼び出し（別ディレクトリの tsc・あらゆる eslint）は実物へ委譲する npx スタブ。
   # 「tsc が動かない」状態を決定論的に再現するために使う（Issue #81 の再現条件と同じ手法）。
   # eslint まで殺すと別の ERROR が混ざり、赤の原因を特定できなくなる。
+  #
+  # **Tier B 専用。** これは実物の npx へ委譲するスタブであり、Tier A で使うと t_begin が
+  # 置いた hermetic なスタブを上書きして実 node_modules へ手が伸びる。Tier A の空振り再現には
+  # fx_stub_tsc_blank を使う。
+  if [ "$CURRENT_TIER" = 'a' ]; then
+    _t_fail "Tier A で実 npx への委譲スタブが使われました。空振りの再現は fx_stub_tsc_blank を使ってください。"
+    return 1
+  fi
   real_npx="$(command -v npx)"
   mkdir -p "${FX}/stub"
   {
