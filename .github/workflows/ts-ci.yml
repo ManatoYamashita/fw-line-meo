@@ -55,9 +55,15 @@ jobs:
       # クリーン checkout では build 前に typecheck を走らせると TS2307 で解決不能になる
       # （run 30473500416 で実証済み。アプリ側は next build が型検査済みのため損失はない）。
       - run: pnpm -C ts run typecheck
-      # テストコードが型検査と lint の走査範囲から抜け落ちていないかを機械検証する（Issue #70）。
-      # tsc --listFiles でプログラム構成を問い合わせるため、install と build の後に置く。
-      - name: テストコードのカバレッジガード（Issue #70）
+      # コードが型検査と lint の走査範囲から抜け落ちていないかを機械検証する（Issue #70 / #78）。
+      # 守備範囲は 2 つ:
+      #   - テストコードのディレクトリ（test/ e2e/ 等）が双方に掛かっていること（#70）
+      #   - workspace 直下と ts/ 直下の設定ファイル（next/vitest/playwright/postcss/eslint）が
+      #     双方に掛かっていること（#78）。設定ファイルは「未知のキーが黙って無視される」形状の
+      #     ため、検査の外にある限り "テストが走らなくなる/別のものを測る" 形で静かに失敗する。
+      # tsc --listFiles と eslint --format json で実効範囲を問い合わせるため、install と
+      # build の後に置く（設定ファイルの文字列を読むだけでは実効範囲を判定できない）。
+      - name: コードカバレッジガード（Issue #70 / #78）
         run: bash scripts/check-test-code-coverage.sh
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
