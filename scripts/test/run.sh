@@ -78,11 +78,16 @@ done
 # 合成ツリーから symlink で借用する（pnpm install も worktree 汚染も不要）。
 REAL_NODE_MODULES="${ROOT}/ts/node_modules"
 
+# ハーネス起動時の PATH。Tier A ではケース実行中だけスタブを先頭へ差し込み、t_end で必ずここへ戻す。
+FX_BASE_PATH="$PATH"
+
 pass_count=0
 fail_count=0
 skip_count=0
 assert_count=0
 case_count=0
+# 依存不足で飛ばしたケース数。skip_count とは別に持つ理由は t_skip の注記を参照。
+dep_skip_count=0
 
 CURRENT_CASE=''
 CURRENT_FAILED=0
@@ -109,7 +114,25 @@ t_begin() {
   mkdir -p "${FX}/scripts"
   # Tier A は hermetic にする。ケース側の呼び忘れで実物の npx へ落ちる余地を残さないため、
   # スタブの設置は**ケースの意思に依存させず**ここで必ず行う。
-  [ "$CURRENT_TIER" = 'a' ] && fx_stub_toolchain
+  if [ "$CURRENT_TIER" = 'a' ]; then
+    fx_stub_toolchain
+    # **PATH の差し込みは runner ではなくここで行う。** runner 側（fx_run）だけに置くと、
+    # 引数を取るガード用の fx_run_args / fx_run_stdout や、ケースが自前で持つ runner
+    # （60-check-prod-image-drift.sh の pid_run のように環境変数を注入するもの）が、そのまま
+    # 実物の npx を掴む。install 済みの開発機でだけ緑になる — fx_run へ hermetic 化を寄せた
+    # ときに潰したはずの形が、runner を増やすたびに戻ってくる。プロセスの PATH を替えれば
+    # どの runner から起動しても子プロセスへ継承され、書き忘れの余地が構造的に無くなる。
+    PATH="${FX}/stub:${FX_BASE_PATH}"
+    STUB_DIR="${FX}/stub"
+    export STUB_DIR
+    # 分界の自己検査。「Tier A は実 node_modules を構造的に使えない」という主張は、
+    # **どの runner から起動しても** npx がスタブへ解決されて初めて成立する。ここが崩れた
+    # 瞬間に全 Tier A ケースが落ちる形にしておく（assert_count は増やさない。ケースの
+    # 検証項目ではなく、ハーネスが満たすべき前提条件であるため）。
+    if [ "$(command -v npx || true)" != "${FX}/stub/npx" ]; then
+      _t_fail "Tier A なのに npx が合成ツリーのスタブへ解決されていません。PATH の差し込みが壊れています。"
+    fi
+  fi
   return 0
 }
 
@@ -122,12 +145,20 @@ t_end() {
   else
     fail_count=$((fail_count + 1))
   fi
+  # 差し込んだ PATH は必ず戻す。撤去済みの合成ツリーを次のケースの mktemp / cp が引かないため。
+  PATH="$FX_BASE_PATH"
+  unset STUB_DIR
   fx_cleanup
   CURRENT_CASE=''
 }
 
 t_skip() {
   # skip は必ず理由を出す。黙って飛ばすと「実行したつもりの 0 件」になる。
+  #
+  # **依存不足の件数は --require-full の有無に関わらず数える。** --require-full は skip を
+  # 失敗へ変えるため skip_count が 0 のままになり、末尾の診断が「依存が足りない」と
+  # 「ハーネスが空振りしている」を取り違える。しかも取り違えるのは CI と同じ経路の側である。
+  dep_skip_count=$((dep_skip_count + 1))
   CURRENT_SKIPPED=1
   if [ "$REQUIRE_FULL" -eq 1 ]; then
     CURRENT_SKIPPED=0
@@ -390,12 +421,13 @@ fx_cleanup() {
 # --- 実行とアサーション -----------------------------------------------------
 
 fx_run() {
-  # $1 = ガード名。$2 が 'stub' なら合成ツリーの stub/ を PATH の先頭へ置く。
-  # **Tier A では $2 に関わらず常にスタブ経由で走らせる。** ケース側の指定に委ねると、
-  # 書き忘れた 1 件だけが実物の npx を掴み、install 済みの開発機でだけ緑になる。
+  # $1 = ガード名。$2 が 'stub' なら合成ツリーの stub/ を PATH の先頭へ置く（**Tier B 専用**。
+  # fx_stub_npx_failing_tsc_in が置く委譲スタブを掴ませるために使う）。
+  # **Tier A では指定は要らない。** t_begin がプロセスの PATH を差し替えており、この runner に
+  # 限らずどの経路から起動してもスタブへ解決される。runner ごとの書き忘れが起き得ない形にした。
   OUT=''
   RC=0
-  if [ "$CURRENT_TIER" = 'a' ] || [ "${2:-}" = 'stub' ]; then
+  if [ "${2:-}" = 'stub' ]; then
     OUT="$(cd "$FX" && PATH="${FX}/stub:$PATH" STUB_DIR="${FX}/stub" bash "scripts/$1.sh" 2>&1)" || RC=$?
   else
     OUT="$(cd "$FX" && bash "scripts/$1.sh" 2>&1)" || RC=$?
@@ -405,6 +437,7 @@ fx_run() {
 fx_run_args() {
   # $1 = ガード名、以降 = ガードへ渡す引数。出力は fx_run と同じく stdout/stderr を混ぜて OUT へ。
   # 引数を取るガード（check-deploy-image-coverage --print-targets 等）のために用意する。
+  # Tier A のスタブは t_begin が差し込んだプロセスの PATH から継承する（ここには書かない）。
   OUT=''
   RC=0
   fx_guard_name="$1"
@@ -415,7 +448,7 @@ fx_run_args() {
 fx_run_stdout() {
   # $1 = ガード名、以降 = 引数。**stdout だけ**を OUT へ入れる（stderr は捨てる）。
   # 「機械可読な出力に人間向けの行が混ざっていないこと」「赤のとき 1 行も出さないこと」を
-  # 照合するために使う。
+  # 照合するために使う。PATH の扱いは fx_run_args と同じ（t_begin から継承する）。
   OUT=''
   RC=0
   fx_guard_name="$1"
@@ -522,6 +555,57 @@ if [ -z "$(printf '%s' "$case_files" | tr -d '[:space:]')" ]; then
   exit 1
 fi
 
+# **CI 配線の空振り防止。** tier を引数で選ぶ設計にしたことで、「全 tier が走る」という保証が
+# 装置の外側（ワークフローの引数 2 つ）へ移った。片方のステップの `--tier=b` が `--tier=a` へ
+# 書き換われば Tier B は 1 件も走らないが、残った Tier A が緑を返すため CI は通る。ステップを
+# 消した場合も同じである。#33（tf のサービスが push 対象に無い）・#51（typecheck が定義されて
+# いるのに CI から呼ばれない）と同型で、しかも一段上（ガードを守る装置）で起きる。
+# 照合するのは run.sh を実行している行だけで、ステップ名や順序には依存させない。
+check_ci_tier_wiring() {
+  ctw_yaml="$1"
+  if [ ! -f "$ctw_yaml" ]; then
+    echo "ERROR: CI ワークフローがありません: ${ctw_yaml#$ROOT/}。" >&2
+    echo "       → ガード自己テストの配線を検証できません。" >&2
+    return 1
+  fi
+  # 説明文中の `--tier=b` を配線として数えないよう、コメント行は落とす。
+  ctw_lines="$(grep -F 'scripts/test/run.sh' "$ctw_yaml" | grep -vE '^[[:space:]]*#' || true)"
+  if [ -z "$ctw_lines" ]; then
+    echo "ERROR: ${ctw_yaml#$ROOT/} が scripts/test/run.sh を一度も実行していません。" >&2
+    echo "       → ガード自己テストが CI から外れています。" >&2
+    return 1
+  fi
+  ctw_a=0
+  ctw_b=0
+  while IFS= read -r ctw_line; do
+    [ -n "$ctw_line" ] || continue
+    # **`--tier=all` は `--tier=a` を部分文字列として含む。all を先に判定すること。**
+    # 逆順にすると `--tier=all` の 1 行が「Tier A だけの配線」に化け、Tier B の欠落を見逃す。
+    case "$ctw_line" in
+      *--tier=all*) ctw_a=1; ctw_b=1 ;;
+      *--tier=a*) ctw_a=1 ;;
+      *--tier=b*) ctw_b=1 ;;
+      *) ctw_a=1; ctw_b=1 ;;
+    esac
+  done <<EOF
+$ctw_lines
+EOF
+  if [ "$ctw_a" -eq 1 ] && [ "$ctw_b" -eq 1 ]; then
+    return 0
+  fi
+  if [ "$ctw_a" -eq 0 ]; then
+    ctw_missing='A'
+  else
+    ctw_missing='B'
+  fi
+  echo "ERROR: ${ctw_yaml#$ROOT/} が Tier ${ctw_missing} を実行していません。" >&2
+  echo "       → その層が CI から消えても、残った層の緑だけで通ってしまいます。" >&2
+  echo "         run.sh の実行行へ --tier=a と --tier=b の両方（または tier 指定なし）を置いてください。" >&2
+  return 1
+}
+
+check_ci_tier_wiring "${ROOT}/.github/workflows/ts-ci.yml" || exit 1
+
 echo "ガード自己テスト（Issue #90）  tier=${TIER_SELECT}"
 while IFS=' ' read -r file_tier case_file; do
   [ -n "$case_file" ] || continue
@@ -536,10 +620,12 @@ EOF
 echo
 # ハーネス自身の空振り防止。ガードの空振りを検出する装置が空振りしては元の木阿弥である。
 if [ "$assert_count" -eq 0 ]; then
-  if [ "$skip_count" -ne 0 ]; then
+  if [ "$dep_skip_count" -ne 0 ]; then
     # 「依存が無いので飛ばした」と「1 件も検証していない」は別のことである。前者を理由に
     # 後者を緑で返してはならない。CI では --require-full が skip 自体を失敗にする。
-    echo "ERROR: ${skip_count} ケースすべてが skip され、1 件も検証できていません（tier=${TIER_SELECT}）。" >&2
+    # 判定に使うのは skip_count ではなく dep_skip_count である（--require-full では skip が
+    # 失敗へ変わり skip_count が 0 になるため。理由は t_skip の注記を参照）。
+    echo "ERROR: ${dep_skip_count} ケースが依存不足で飛ばされ、1 件も検証できていません（tier=${TIER_SELECT}）。" >&2
     echo "       → 依存が足りていません。Tier B は 'pnpm -C ts install' が要ります。" >&2
   else
     echo "ERROR: アサーションを 1 件も実行できませんでした。ハーネスが空振りしています。" >&2

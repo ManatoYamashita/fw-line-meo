@@ -405,10 +405,12 @@ check_root_files() {
 # 消すため、`ts/scripts/apps/` のような無関係なディレクトリまで巻き込む。find 式そのものは
 # 触らない（下の -mindepth の経緯どおり、この式は壊れやすいうえ CI=GNU / 開発機=BSD 系で挙動が違う）。
 #
-# $6 で拡張子の範囲を切り替える。workspace 呼び出しは JS 系のみに留める。workspace 配下の
-# `.ts` は CODE_DIR_CANDIDATES のディレクトリ走査が既に担当しており、広げると同じ穴を
-# 二重に報告することになる。`ts/` 直下呼び出しだけが TS 系まで見る（そちらには
-# CODE_DIR_CANDIDATES のディレクトリ走査が回らず、TS 系の担当者が誰も居ないため）。
+# $6 で拡張子の範囲を切り替える。workspace 呼び出しは `ts-extra`（JS 系＋`.mts` / `.cts`）に
+# 留める。workspace 配下の `.ts` / `.tsx` は CODE_DIR_CANDIDATES のディレクトリ走査が既に
+# 担当しており、そこまで広げると同じ穴を二重に報告することになる。**`.mts` / `.cts` はその
+# 「担当済み」に入らない**（dir_ts_hits も entry_ts_hits も `*.ts` / `*.tsx` しか数えないため。
+# Issue #95）。`ts/` 直下呼び出しだけが `js+ts` で TS 系すべてを見る（そちらには
+# CODE_DIR_CANDIDATES のディレクトリ走査が回らず、`.ts` / `.tsx` にも担当者が居ないため）。
 # ---------------------------------------------------------------------------
 #
 # 呼出元の fail / checked_subdir_files / found_deep_paths を更新する
@@ -418,7 +420,8 @@ check_root_files() {
 #   $3 その単位の lint スクリプト文字列
 #   $4 その単位の tsc プログラム構成（--listFiles の出力）
 #   $5 別の呼出が担当済みのディレクトリの絶対パス一覧（改行区切り・末尾 / 付き・空可）
-#   $6 拡張子の範囲: js（JS 系のみ）/ js+ts（TS 系も含む）
+#   $6 拡張子の範囲: js（JS 系のみ）/ ts-extra（JS 系＋`.mts` / `.cts`・workspace 呼出）/
+#      js+ts（JS 系＋TS 系すべて・`ts/` 直下呼出）。定義は subdir_ext_in_scope に集約してある
 check_subdir_files() {
   csf_dir="$1"
   csf_rel="$2"
