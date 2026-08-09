@@ -24,18 +24,18 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v5
-      - name: NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）
+      - name: 'NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）'
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
-      - name: デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）
+      - name: 'デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）'
         # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
         # theme.css がトークンと同値であることを照合する（read-only grep 検証）。
         run: bash scripts/check-design-tokens.sh
-      - name: run-services デプロイカバレッジガード（Issue #33）
+      - name: 'run-services デプロイカバレッジガード（Issue #33）'
         # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
         # 放置される事故の再発防止（同じく read-only grep 検証）。
         run: bash scripts/check-deploy-image-coverage.sh
-      - name: typecheck カバレッジガード（Issue #51）
+      - name: 'typecheck カバレッジガード（Issue #51）'
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
         run: bash scripts/check-typecheck-coverage.sh
@@ -53,7 +53,7 @@ jobs:
       # 上の grep ガード群（checkout 直後）へ入れられないのは、flanking 判定が Unicode の
       # 約物分類を要するため node へ委譲しているからである。npm パッケージには依存しないので
       # setup-node の直後・install の前に置ける。
-      - name: Markdown 強調ガード（Issue #89）
+      - name: 'Markdown 強調ガード（Issue #89）'
         run: bash scripts/check-markdown-emphasis.sh
       - run: pnpm -C ts install --frozen-lockfile
       - run: pnpm -C ts run lint
@@ -91,7 +91,7 @@ jobs:
       # 合成ツリーへガードを複製して走らせるため、リポジトリの実体には書き込まない。
       # check-test-code-coverage のケースは実物の tsc / eslint を借用するので install の後に置く。
       # --require-full は skip を失敗として扱う（CI で黙って 0 件成功にしないため）。
-      - name: ガード自己テスト（Issue #90）
+      - name: 'ガード自己テスト（Issue #90）'
         run: bash scripts/test/run.sh --require-full
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done

@@ -27,6 +27,9 @@
 #   - **引用ブロック内の複数行 bold** → `>` 行ごとにブロックを切ると分断されて誤検出する
 #     （.kiro/specs/ui-token-collision/design.md の該当段で実際に踏んだ）
 #   - リスト項目をブロック境界にしないと、隣接項目の奇数個 `**` が打ち消し合って A を取りこぼす
+#   - インデントコードブロック（4 スペース / タブ）内の JSDoc → fenced だけを除外すると誤ヒットする
+#   - 入れ子 fence（```` で開き ``` を内側に持つ形）→ fence を単純トグルすると内側の短い fence で
+#     閉じたことになり、以降の中身が本文として解析される
 #
 # 判定本体を node へ委譲する理由: flanking 規則は Unicode の一般カテゴリ照会を要求し、
 # BSD awk（macOS 既定）では多バイト文字を安定して扱えない。check-test-code-coverage.sh が
@@ -88,7 +91,8 @@ EOF
 report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
   const fs = require(\"fs\");
   const ROOT = process.env.MD_ROOT;
-  const FENCE = /^\s*(\`\`\`|~~~)/;
+  const FENCE = /^\s*(\`{3,}|~{3,})(.*)$/;
+  const INDENTED = /^(?: {4}|\t)/;
   const HEAD = /^\s{0,3}#{1,6}\s/;
   const LIST = /^\s*(?:[-*+]\s|\d+[.)]\s)/;
   // cmark-gfm（CommonMark 0.29）の約物: ASCII 約物 + Pc/Pd/Pe/Pf/Pi/Po/Ps。S は含めない。
@@ -120,25 +124,53 @@ report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
     const out = [];
     let cur = [];
     let fence = false;
+    let fenceChar = \"\";
+    let fenceLen = 0;
+    let inList = false;
     let prevQuote = null;
     const lines = text.split(\"\n\");
     for (let i = 0; i < lines.length; i++) {
       const raw = lines[i];
-      if (FENCE.test(raw)) {
-        fence = !fence;
-        if (cur.length) { out.push(cur); cur = []; }
-        prevQuote = null;
-        continue;
+      // fence は「同じ文字・開始以上の長さ・info string 無し」でしか閉じない（CommonMark）。
+      // 単純なトグルにすると 4 バックティックで開いた fence を内側の 3 バックティックが
+      // 閉じたことにしてしまい、以降の中身が本文として解析される（誤検出源）。
+      const fm = raw.match(FENCE);
+      if (fm) {
+        const ch = fm[1].charAt(0);
+        const len = fm[1].length;
+        const info = fm[2];
+        if (!fence) {
+          // バッククォート fence の info string に \` は置けない。その形は fence ではない。
+          if (!(ch === \"\`\" && info.indexOf(\"\`\") >= 0)) {
+            fence = true; fenceChar = ch; fenceLen = len;
+            if (cur.length) { out.push(cur); cur = []; }
+            prevQuote = null; inList = false;
+            continue;
+          }
+        } else {
+          if (ch === fenceChar && len >= fenceLen && info.trim() === \"\") { fence = false; }
+          continue;
+        }
       }
       if (fence) continue;
       const quote = /^\s*>/.test(raw);
       const content = quote ? raw.replace(/^\s*>\s?/, \"\") : raw;
+      // インデントコードブロック（4 スペース / タブ）は本文ではない。段落の継続行と
+      // 区別するため、段落が開いていないときだけコードとして扱う。リスト項目の 2 段落目も
+      // インデントされるため、リスト文脈では適用しない（その代わりリスト内のインデント
+      // コードは誤検出しうる。導入時のコーパスに 0 箇所であり、fenced を使えば避けられる）。
+      if (!quote && !inList && cur.length === 0 &&
+          content.trim() !== \"\" && INDENTED.test(content)) {
+        continue;
+      }
       const boundary =
         content.trim() === \"\" || HEAD.test(content) || LIST.test(content) ||
         (prevQuote !== null && quote !== prevQuote);
       if (boundary && cur.length) { out.push(cur); cur = []; }
       prevQuote = quote;
       if (content.trim() === \"\") { prevQuote = null; continue; }
+      if (LIST.test(content)) inList = true;
+      else if (HEAD.test(content) || !/^\s/.test(content)) inList = false;
       cur.push({ line: i + 1, text: content });
     }
     if (cur.length) out.push(cur);

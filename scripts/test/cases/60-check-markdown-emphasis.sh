@@ -121,6 +121,66 @@ EOF
 fi
 t_end
 
+t_begin 'check-markdown-emphasis: 対照 — インデントコードブロックは本文ではない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 4 スペースインデントは fenced でなくてもコードブロックである（CommonMark）。
+  # 中の JSDoc `/** ... */` は強調ではない。除外しないと 1 個の `**` が対にならず誤検出する。
+  fx_write docs/indented.md <<'EOF'
+インデントされたコード例:
+
+    /** JSDoc のアスタリスクは強調ではない。 */
+    const y = 2;
+
+段落へ戻る。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — リスト内のインデント段落は本文として検査する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # リスト項目の 2 段落目もインデントされる。これをコードとして飛ばすと、
+  # 本文中の破綻を見逃す（インデントコード除外が広がりすぎた状態の検出）。
+  fx_write docs/listpara.md <<'EOF'
+- 項目:
+
+    本文が続く。**強調（かっこ）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red "の終端 '**' が強調を閉じていません"
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 対照 — 入れ子 fence（4 バックティック）の中は本文ではない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # 4 バックティックで開いた fence は 3 バックティックでは閉じない（CommonMark）。
+  # 開始 fence より短い fence 行で閉じたと誤認すると、以降の中身が本文として解析される。
+  fx_write docs/nested.md <<'EOF'
+Markdown の書き方を Markdown で示す例:
+
+````md
+```js
+/** 入れ子 fence の中のアスタリスクは強調ではない。 */
+```
+````
+
+段落へ戻る。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
 t_begin 'check-markdown-emphasis: 対照 — prune 対象の配下は走査しない'
 if ! fx_has_node; then
   t_skip 'node コマンドが無い'
