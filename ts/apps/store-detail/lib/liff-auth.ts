@@ -38,8 +38,11 @@
 //     scripts/check-test-code-coverage.sh が tsc --listFiles で「実際にプログラムへ含まれて
 //     いるか」を機械検証しているため、再び除外されれば CI が赤くなる。
 //   実効ガードは 4 つ:
-//     (a) test/liff-auth.test.ts の型ブロック — 引数タプル形状、LiffAuthOptions の鍵集合
-//         （Exclude<keyof …> による表明）、および許可鍵の型
+//     (a) test/liff-auth.test.ts の型ブロック — 引数タプル形状、options の鍵集合
+//         （Exclude<keyof …> による表明。左辺は LiffAuthOptions だけでなく
+//         authorizeStoreDetailRequest / verifyLiffIdToken の**実引数位置の型**も含む。
+//         名前付き型だけに固定すると、引数位置の型を派生型・交差型へ差し替える経路が
+//         素通りすることを PR #79 のレビューで実測した）、および許可鍵の型
 //     (b) 同ファイルの arity チェック（実行時。既定値付き引数は .length に数えられないため
 //         (a) の二重化にとどまり、単独では options への密輸を検出できない）
 //     (c) selectAuthorizedStore の振る舞いテスト（戻り値が必ず入力配列の要素であること）
@@ -222,11 +225,14 @@ export type StoreDetailAuthorizationError = LiffTokenVerificationError | StoreRe
  *
  * 表示対象の絞り込み（クライアント由来のヒントの適用）は意図的に本関数の外に置き、
  * `selectAuthorizedStore` に分離している。「認可（集合の決定）」と「選択（集合内の絞り込み）」を
- * 混ぜないことが不変条件の担保そのものであり、`options`（LiffAuthOptions）にクライアント
- * 制御可能な識別子を追加することは禁止する。arity チェックは既定値付き引数を数えないため
- * この経路を検出できないが、test/liff-auth.test.ts の型ブロックが鍵集合を
- * `Exclude<keyof LiffAuthOptions, keyof ExpectedLiffAuthOptions>` で表明しており、許可外の鍵が
- * 生えれば違反鍵名つきでコンパイルが失敗する（Issue #66）。
+ * 混ぜないことが不変条件の担保そのものであり、`options` にクライアント制御可能な識別子を
+ * 追加することは禁止する。arity チェックは既定値付き引数を数えないためこの経路を検出できないが、
+ * test/liff-auth.test.ts の型ブロックが鍵集合を `Exclude<keyof LiffAuthOptions | keyof
+ * ActualAuthorizeOptions | keyof ActualVerifyOptions, keyof ExpectedLiffAuthOptions>` で表明して
+ * おり、許可外の鍵が生えれば違反鍵名つきでコンパイルが失敗する（Issue #66・PR #79）。
+ * `ActualAuthorizeOptions` / `ActualVerifyOptions` は本関数と verifyLiffIdToken の実引数位置から
+ * 導いてある。`LiffAuthOptions` を変えずに引数位置の型だけを派生型・交差型へ差し替える迂回を
+ * 塞ぐためであり、この 2 つを外すとその経路が素通りする（実測済み）。
  *
  * 検証が失敗した場合は DB へ問い合わせない（無効トークンで owner 解決に進まないことを保証する
  * ショートサーキット）。

@@ -241,7 +241,24 @@ type ExpectedLiffAuthOptions = {
 //     出す。「期待する形を素朴に書き下して双方向代入する」だけでは検出できない: 全プロパティが
 //     省略可能な 2 つのオブジェクト型は構造的部分型により鍵が増えても相互代入可能であり、
 //     密輸される鍵は既存の呼出を壊さないため必ず省略可能になるからである。
-type UnexpectedLiffAuthOptionKeys = Exclude<keyof LiffAuthOptions, keyof ExpectedLiffAuthOptions>;
+//
+//     左辺は名前付き型 `LiffAuthOptions` だけに固定してはならない。実装が `LiffAuthOptions` を
+//     一切変えずに引数位置の型だけを差し替えると（交差型 `LiffAuthOptions & { requestedStoreId?:
+//     string }`、または `AuthorizeOptions extends LiffAuthOptions` のような派生型）、鍵集合表明が
+//     その型を見ていないため素通りする。PR #79 のレビューで実測した（3 経路とも
+//     `pnpm --filter @fwlm/store-detail run typecheck` が exit=0）。(3) の引数タプル表明も救済に
+//     ならない — 上と同じ「全プロパティ省略可能な 2 型は相互代入可能」により通ってしまう。
+//     したがって**実引数位置の型そのものから鍵集合を導く**。
+//
+//     なおここで `Parameters<typeof …>` を使うのは自己参照ではない。有害なのは**期待側**
+//     （ExpectedLiffAuthOptions）が実装へ追随する場合であり、**実際側**を実装の引数位置から
+//     導くのは正しい向きである。期待側は上の独立記述のまま変えないこと。
+type ActualAuthorizeOptions = NonNullable<Parameters<typeof authorizeStoreDetailRequest>[3]>;
+type ActualVerifyOptions = NonNullable<Parameters<typeof verifyLiffIdToken>[2]>;
+type UnexpectedLiffAuthOptionKeys = Exclude<
+  keyof LiffAuthOptions | keyof ActualAuthorizeOptions | keyof ActualVerifyOptions,
+  keyof ExpectedLiffAuthOptions
+>;
 const _noUnexpectedOptionKeys: never = null as unknown as UnexpectedLiffAuthOptionKeys;
 void _noUnexpectedOptionKeys;
 
@@ -291,8 +308,12 @@ describe('listOwnerConfirmedStores / selectAuthorizedStore / authorizeStoreDetai
     //
     // この arity チェック自体は options への密輸（例: `options.requestedStoreId`）を検出できない
     // — デフォルト値付き引数は .length に数えられないためである。その抜け道は上の型ブロック (1)
-    // （ExpectedLiffAuthOptions による鍵集合の表明）が機械検出するので、レビュー時の目視確認に
-    // 依存しない（Issue #66 で是正。それ以前は「レビュー時の必須確認項目」と書かれていた）。
+    // （鍵集合の表明）が機械検出する。(1) の左辺は LiffAuthOptions と両関数の実引数位置の型の
+    // 和集合なので、名前付き型を避けて派生型・交差型で足す迂回も赤くなる（Issue #66 で是正、
+    // PR #79 のレビューで迂回経路を塞いだ。それ以前は「レビュー時の必須確認項目」だった）。
+    //
+    // 機械検出の射程外は 1 つだけである: このファイルの ExpectedLiffAuthOptions 自体へ鍵を足す
+    // 操作。これは意図した唯一の逃げ道であり、テスト差分としてレビュアーの目に必ず入る。
     expect(authorizeStoreDetailRequest.length).toBe(3);
   });
 });
