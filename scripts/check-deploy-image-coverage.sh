@@ -12,14 +12,55 @@
 #      （ホワイトリスト項目が実はカバー済みになったら警告し、削除を促す）
 #   4. IMAGE_NAMES の各イメージが ts-ci.yml の docker-build matrix（`image: [...]` 1行定義）に
 #      含まれること（PR 段階の実ビルド検証から漏れたイメージを作らせない）
+#   5. ジョブ（= IMAGE_NAMES − run-services。現状 daily-batch / summary-delivery）が deploy.yml の
+#      `gcloud run jobs update` 対象に含まれること（Issue #91。検証2はサービスしか見ておらず、
+#      ジョブが deploy.yml から消えても誰も気づかない穴が開いていた）
 #
-# 使い方: bash scripts/check-deploy-image-coverage.sh
-#   漏れがあれば該当を stderr に出して exit 1、無ければ exit 0。
+# 対象集合の正典（Issue #91）: サービスは main.tf の run-services マップキー、ジョブはその差集合
+# （IMAGE_NAMES − run-services）で導出する。ジョブは main.tf 上 module "batch_job" /
+# module "delivery_job" の別モジュール定義で、job 名はモジュール variables.tf の default にしか
+# 無いため、run-services の抽出には構造上乗らない。差集合で導出すれば列挙の二重管理を作らずに
+# service / job の分類まで得られる。この分類は --print-targets で外部（ドリフト検証）へ供給する。
+#
+# 使い方:
+#   bash scripts/check-deploy-image-coverage.sh
+#     漏れがあれば該当を stderr に出して exit 1、無ければ exit 0。
+#   bash scripts/check-deploy-image-coverage.sh --print-targets
+#     上記の検証を完走させた上で、デプロイ対象を `<kind>\t<name>` の TSV で stdout へ出す
+#     （kind = service | job）。検証が赤なら stdout へ 1 行も出さず exit 1 する。壊れた正典から
+#     導出した対象集合で下流を緑にするのが最悪の空振りであるため、print だけの近道は用意しない。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+print_targets=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --print-targets)
+      print_targets=1
+      shift
+      ;;
+    -h|--help)
+      sed -n '2,30p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: 未知の引数です: $1" >&2
+      echo "       → 使い方は bash scripts/check-deploy-image-coverage.sh --help を参照してください。" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# 人間向けの進捗出力（OK / SKIP）の出し先。--print-targets 時は stdout を TSV 専用にするため
+# stderr へ退避する。ERROR / WARNING は従来どおり常に stderr。引数なし実行の出力は不変。
+if [ "$print_targets" -eq 1 ]; then
+  exec 3>&2
+else
+  exec 3>&1
+fi
 
 TF_FILE="${ROOT}/infra/envs/prod/main.tf"
 PUSH_SCRIPT="${ROOT}/scripts/push-images.sh"
@@ -71,6 +112,9 @@ in_list() {
 
 fail=0
 checked=0
+# --print-targets で出す対象集合。WHITELIST で意図的に除外したサービスは含めない
+# （CI がデプロイしない以上、ドリフト検証の対象にもならない）。
+target_services=""
 for svc in $tf_services; do
   # ${arr[@]+...} は空配列でも set -u（bash 3.2 含む）で unbound エラーにしない安全な展開。
   if in_list "$svc" ${WHITELIST[@]+"${WHITELIST[@]}"}; then
@@ -79,11 +123,12 @@ for svc in $tf_services; do
     if in_list "$svc" $image_names; then
       echo "WARNING: ${svc} は WHITELIST に載っていますが既に IMAGE_NAMES にあります。WHITELIST から削除してください。" >&2
     else
-      echo "SKIP: ${svc}（WHITELIST・理由はスクリプト内コメント参照）"
+      echo "SKIP: ${svc}（WHITELIST・理由はスクリプト内コメント参照）" >&3
     fi
     continue
   fi
   checked=$((checked + 1))
+  target_services="${target_services}${svc}"$'\n'
 
   # shellcheck disable=SC2086 # image_names は意図的に単語分割する
   if ! in_list "$svc" $image_names; then
@@ -117,10 +162,49 @@ else
   done
 fi
 
+# 検証5（Issue #91）: ジョブ（= IMAGE_NAMES − run-services）が deploy.yml の
+# `gcloud run jobs update` 対象に含まれること。検証2は `gcloud run services update` しか見ておらず、
+# ジョブ2件は無検証だった（deploy.yml から消しても緑のままになる穴を実測で確認済み）。
+target_jobs=""
+job_checked=0
+# shellcheck disable=SC2086 # image_names は意図的に単語分割する
+for name in $image_names; do
+  # shellcheck disable=SC2086 # tf_services は意図的に単語分割する
+  if in_list "$name" $tf_services; then
+    continue
+  fi
+  job_checked=$((job_checked + 1))
+  target_jobs="${target_jobs}${name}"$'\n'
+
+  if ! grep -qE "gcloud run jobs update[[:space:]]+${name}([[:space:]]|\\\\|\$)" "$DEPLOY_YML"; then
+    echo "ERROR: ${DEPLOY_YML#$ROOT/} に 'gcloud run jobs update ${name}' がありません（push しても Cloud Run へ反映されません）。" >&2
+    echo "       → '${name}' は IMAGE_NAMES にあり ${TF_FILE#$ROOT/} の run-services に無いため、ジョブとみなしています。" >&2
+    echo "         サービスのつもりなら run-services の services マップへ追加してください。" >&2
+    fail=1
+  fi
+done
+
+if [ "$job_checked" -eq 0 ]; then
+  echo "ERROR: IMAGE_NAMES と run-services の差集合からジョブを1件も導出できませんでした（対象集合の導出前提が崩れています）。" >&2
+  echo "       → 現状は daily-batch / summary-delivery の2件が導出される想定です。両者が run-services へ移されたか、IMAGE_NAMES の抽出が壊れています。" >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "NG: デプロイパイプラインのカバレッジに漏れがあります（上記参照）。" >&2
   exit 1
 fi
 
-echo "OK: run-services デプロイカバレッジ緑（${checked} サービス検証・WHITELIST ${#WHITELIST[@]} 件・matrix ${matrix_checked} イメージ照合）。"
+echo "OK: run-services デプロイカバレッジ緑（${checked} サービス・${job_checked} ジョブ検証・WHITELIST ${#WHITELIST[@]} 件・matrix ${matrix_checked} イメージ照合）。" >&3
+
+if [ "$print_targets" -eq 1 ]; then
+  # shellcheck disable=SC2086 # target_services / target_jobs は改行区切りで意図的に単語分割する
+  for svc in $target_services; do
+    printf 'service\t%s\n' "$svc"
+  done
+  # shellcheck disable=SC2086 # 同上
+  for job in $target_jobs; do
+    printf 'job\t%s\n' "$job"
+  done
+fi
 exit 0

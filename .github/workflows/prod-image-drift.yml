@@ -1,0 +1,147 @@
+# 本番稼働イメージのドリフト定期検証（Issue #91）
+#
+# deploy-prod は workflow_run 起動のため PR のチェック欄に現れず、かつ**マージ契機でしか動かない**。
+# 2026-08-02〜08-09 の課金失効では、失効期間中に main へのマージが 1 件も無かったため run 自体が
+# 生成されず、「失敗」という兆候すら出ないまま本番が 7 日間旧イメージで放置された。
+# 本ワークフローはマージではなく**時間**で回し、稼働実態と main を突き合わせてこの穴を埋める。
+#
+# CI デプロイ契約（deploy.yml / gcp-auth-smoke.yml と同一・厳守）:
+#   - 本ワークフローは read-only の照会のみ（gcloud run services/jobs list）。イメージ更新も
+#     構成変更も行わない。terraform state にも触れない。
+#
+# 必要な GitHub リポジトリ変数（vars.*・deploy.yml と共通）:
+#   vars.WIF_PROVIDER   = terraform output wif_provider_name
+#   vars.GCP_PROJECT_ID = gen-fw-line-meo
+name: prod-image-drift
+
+on:
+  # 6 時間ごと。毎時 00 分は GitHub 側が混雑して遅延しやすいため 17 分にずらす。
+  # なお scheduled workflow は default branch の定義しか読まれず、リポジトリが 60 日無操作だと
+  # 自動停止する点に注意（cron の数十分の遅延は commit 時刻基準の猶予設計なので影響しない）。
+  schedule:
+    - cron: '17 */6 * * *'
+  # 障害時の即時確認と、通知経路の end-to-end 実証（snapshot に fixture を渡して赤を作る）用。
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: 稼働イメージを注入する TSV のパス。通常は空（空なら gcloud で実測する）
+        required: false
+        default: ''
+      grace_minutes:
+        description: 猶予（分）。通常は空（空なら既定の 90 分）
+        required: false
+        default: ''
+
+concurrency:
+  group: prod-image-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # WIF の OIDC トークン発行に必須
+  issues: write # 追跡 Issue の起票・コメント・クローズ
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout（全履歴・稼働タグを commit へ解決するため）
+        uses: actions/checkout@v5
+        with:
+          # 既定の fetch-depth: 1 では稼働タグの commit オブジェクトが存在せず、7 件すべてが
+          # unresolvable の恒常赤になる。merge-base と rev-list も全履歴を要求する。
+          fetch-depth: 0
+
+      - name: main の remote-tracking ref を確実にする
+        # 比較先 origin/main が解決できないと検証は hard fail する（HEAD へ暗黙に落とすと
+        # 別物と比較して緑になる空振り経路になるため、意図的にフォールバックさせていない）。
+        run: git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Authenticate to Google Cloud (Direct WIF, no SA key)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+
+      - name: Set up gcloud
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: 稼働イメージと main の乖離を検証
+        id: drift
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          DRIFT_MAIN_REF: origin/main
+          # 未入力なら空文字が入り、スクリプト側の ${VAR:-default} が既定値へ落とす。
+          PROD_IMAGE_SNAPSHOT: ${{ github.event.inputs.snapshot }}
+          DRIFT_GRACE_MINUTES: ${{ github.event.inputs.grace_minutes }}
+        # 検証の赤はこのステップでは落とさず、通知まで通してから最終ステップで落とす。
+        # continue-on-error はジョブの結論を曖昧にするので使わない。
+        run: |
+          set -uo pipefail
+          bash scripts/check-prod-image-drift.sh > "$RUNNER_TEMP/drift-report.txt" 2>&1 && status=0 || status=$?
+          cat "$RUNNER_TEMP/drift-report.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/drift-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: 追跡 Issue へ通知
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRIFT_STATUS: ${{ steps.drift.outputs.status }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/drift-report.txt"
+          if [ ! -f "$report" ]; then
+            printf '%s\n' "検証ステップが report を残さずに終了しました（スクリプトの起動自体に失敗した可能性があります）。" > "$report"
+          fi
+          # 署名は稼働側の状態だけを表す。main HEAD を含めるとマージのたびに変わり、
+          # 停止中に毎回コメントが増えてしまう。
+          sig="$(grep '^DRIFT-SIGNATURE: ' "$report" | tail -n 1 | sed 's/^DRIFT-SIGNATURE: //' || true)"
+          state=red
+          if [ "${DRIFT_STATUS:-}" = "0" ]; then
+            state=green
+          fi
+
+          body="$RUNNER_TEMP/issue-body.md"
+          {
+            echo "本番 Cloud Run の稼働イメージが main と乖離しています（prod-image-drift が自動検出）。"
+            echo ""
+            echo "- 検出 run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- main: \`$(git rev-parse --short origin/main)\`"
+            echo ""
+            echo "## 検証結果"
+            echo ""
+            # コマンド出力は必ずフェンス内に置く（裸だと出力中の # や @ が
+            # 他 Issue への参照通知・誤メンションを飛ばす）。
+            echo '```'
+            cat "$report"
+            echo '```'
+            echo ""
+            echo "## 対処"
+            echo ""
+            echo "1. main で ts-ci が緑か確認する（赤いと deploy-prod が起動せず、乖離が解消しない）"
+            echo "2. 直近の deploy-prod を確認する: \`gh run list --workflow deploy.yml\`"
+            echo "3. GCP の課金と WIF を確認する（gcp-auth-smoke を workflow_dispatch で起動）"
+            echo "4. 復旧したら deploy-prod を再実行する: \`gh workflow run deploy.yml --ref main\`"
+            echo ""
+            echo "状態が変わらない間はコメントを増やしません。復旧を検出するとこの Issue は自動で閉じます。"
+          } > "$body"
+
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label prod-image-drift \
+            --title "chore(ci): 本番稼働イメージが main と乖離しています（自動検出）" \
+            --body-file "$body" \
+            --signature "$sig"
+
+      - name: 検証結果でジョブの成否を決める
+        if: always()
+        env:
+          DRIFT_STATUS: ${{ steps.drift.outputs.status }}
+        run: exit "${DRIFT_STATUS:-1}"
