@@ -86,7 +86,11 @@ fi
 
 # 走査候補。ここに無いディレクトリ名を新設した場合は追加すること
 # （網羅性はディレクトリ名の列挙に依存する。増えたら気づけるよう下の「候補外」検出を置く）。
-CODE_DIR_CANDIDATES="src app lib test e2e scripts"
+# `perf` を含めるのは Issue #83 の後始末である。以前は候補にも無く、下の「候補外」検出の
+# スキップ一覧へ明示的に列挙されていたため、**perf/ に .ts が入っても永久に不可視**だった。
+# 現在 perf/ は .mjs しか持たないため下の `.ts` 判定で skip されるが（JS 側は
+# check_js_files が担当する）、.ts が入った時点で本ループの判定が効くようになる。
+CODE_DIR_CANDIDATES="src app lib test e2e scripts perf"
 
 # lint の検査（A/B）のみ免除してよい直下ファイル（Issue #78）。
 # next-env.d.ts は Next が生成し、自ら「This file should not be edited」と書いているファイルで、
@@ -100,6 +104,7 @@ fail=0
 checked_workspaces=0
 checked_dirs=0
 checked_root_files=0
+checked_js_files=0
 
 # ファイル先頭のコメント trivia（1 行目から最初の非コメント・非空行の手前まで）を出力する。
 # TypeScript が `@ts-nocheck` / `@ts-check` を honor するのはこの範囲であるため、走査窓を
@@ -251,6 +256,174 @@ check_root_files() {
   done
 }
 
+# ---------------------------------------------------------------------------
+# Issue #83: サブディレクトリに置かれた JS 系ファイルは、上の 2 つの器のどちらにも入らない。
+# ディレクトリ列挙は `.ts`/`.tsx` を含む dir しか対象にせず（`perf/` は `.mjs` のみ）、
+# check_root_files は -maxdepth 1 で降りない。しかも `perf` は候補外検出のスキップ一覧へ
+# 明示的に列挙されていたため、「片側だけカバーされた状態」がどのガードにも見えなかった。
+#
+# 実害: survey-web/perf/bundle-budget.mjs は CI の性能ゲートで**実行される**。実行される
+# ことは検査の代わりにならない。`readdirSync(dir, { recursive: true })` のキー名が壊れても
+# 実行時エラーにはならず、サブディレクトリを辿らなくなるだけである。結果として
+# **チャンクの部分集合だけを gzip 合計し、予算内に収まって緑になる**。壊れると落ちるのでは
+# なく、別のものを測って緑になる。e2e/mock-gemini.mjs（NODE_OPTIONS で読み込まれる）も同型。
+#
+# 役割分担: ディレクトリ列挙 = TS のカバレッジ担当 / 本関数 = JS のカバレッジ担当。
+# 拡張子ベースの列挙にするのは、上の check_root_files と同じ理由（列挙が陳腐化しない）。
+#
+# 呼出元の fail / checked_js_files を更新する（サブシェルを挟まないこと）。
+#   $1 対象 workspace ディレクトリ（末尾 / 付きの絶対パス）
+#   $2 表示用の相対パス（末尾 / 付き）
+#   $3 その単位の lint スクリプト文字列
+#   $4 その単位の tsc プログラム構成（--listFiles の出力）
+check_js_files() {
+  cjf_dir="$1"
+  cjf_rel="$2"
+  cjf_lint="$3"
+  cjf_program="$4"
+
+  # **`-mindepth` を併用してはならない（実測で確認済み）。** prune 対象（.next / dist /
+  # dist-scripts）は workspace から見て深さ 1 にあり、`-mindepth 2` は深さ 1 の**述語評価
+  # そのものを飛ばす**ため -prune が発火しない。実測では survey-web だけで .next 配下の
+  # 生成物が数百件流れ込んだ。直下ファイル（check_root_files の担当）の除外は、下のループの
+  # シェル側で「相対パスに / を含むか」で行う。
+  #
+  # なお prune 一覧はディレクトリ名の列挙であり、本スクリプトが避けたい形ではある。走査対象が
+  # git ではなく作業ツリーであるため、未追跡の生成物にも晒される（Issue #82 と同型の弱さ）。
+  # #82 の提案どおり列挙を `git ls-files` 由来へ寄せれば、この prune 一覧ごと不要になる。
+  cjf_found="$(find "$cjf_dir" \
+    \( -name node_modules -o -name dist -o -name dist-scripts -o -name .next \
+       -o -name public -o -name coverage -o -name playwright-report -o -name test-results \) -prune -o \
+    -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.jsx' \) -print 2>/dev/null | sort)"
+  [ -n "$cjf_found" ] || return 0
+
+  # 対象（サブディレクトリ配下のみ）の相対パスを集める。eslint はファイル毎に起動すると
+  # 遅いため 1 回でまとめて尋ねる。
+  cjf_rels=''
+  while IFS= read -r cjf_path; do
+    [ -n "$cjf_path" ] || continue
+    cjf_relfile="${cjf_path#$cjf_dir}"
+    case "$cjf_relfile" in
+      */*) cjf_rels="${cjf_rels} ${cjf_relfile}" ;;
+    esac
+  done <<EOF
+$cjf_found
+EOF
+  [ -n "$(printf '%s' "$cjf_rels" | tr -d '[:space:]')" ] || return 0
+
+  # (A) eslint の ignores に消されていないこと。設定文字列ではなく eslint 自身に尋ねる。
+  cjf_json="$(cd "$cjf_dir" && npx --no-install eslint \
+    --no-error-on-unmatched-pattern --format json $cjf_rels 2>/dev/null || true)"
+
+  cjf_ignored=''
+  if [ -z "$(printf '%s' "$cjf_json" | tr -d '[:space:]')" ]; then
+    echo "ERROR: ${cjf_rel} でサブディレクトリの JS 系について eslint の判定結果を取得できませんでした。" >&2
+    echo "       → eslint を実行できていません。本ガードの lint 判定が空振りします。" >&2
+    fail=1
+  else
+    # basename ではなく workspace 相対パスで返させる（サブディレクトリ間で basename が
+    # 衝突しうるため）。node の cwd は workspace ではないので基準を環境変数で渡す。
+    cjf_ignored="$(printf '%s' "$cjf_json" | CJF_BASE="$cjf_dir" node -e "
+      const path = require('node:path');
+      let s = '';
+      process.stdin.on('data', (d) => (s += d)).on('end', () => {
+        const results = JSON.parse(s);
+        const ignored = results
+          .filter((r) => r.messages.some((m) => m.ruleId === null && /ignore/i.test(m.message)))
+          .map((r) => path.relative(process.env.CJF_BASE, r.filePath));
+        process.stdout.write(ignored.join('\n'));
+      });
+    " 2>/dev/null || printf '__PARSE_FAILED__')"
+    if [ "$cjf_ignored" = '__PARSE_FAILED__' ]; then
+      echo "ERROR: ${cjf_rel} でサブディレクトリの JS 系について eslint の JSON 出力を解釈できませんでした。" >&2
+      echo "       → 出力形式が変わっています。本ガードの lint 判定が空振りします。" >&2
+      fail=1
+      cjf_ignored=''
+    fi
+  fi
+
+  # 照合はすべて `grep -c`（件数）で行う。`grep -q` を使わない理由は check_root_files と同じ。
+  while IFS= read -r cjf_path; do
+    [ -n "$cjf_path" ] || continue
+    cjf_relfile="${cjf_path#$cjf_dir}"
+    # 直下のファイルは check_root_files が担当する（二重報告しない）。
+    case "$cjf_relfile" in
+      */*) ;;
+      *) continue ;;
+    esac
+    checked_js_files=$((checked_js_files + 1))
+
+    cjf_hits="$(printf '%s\n' "$cjf_ignored" | grep -Fxc "$cjf_relfile" || true)"
+    if [ "${cjf_hits:-0}" -ne 0 ]; then
+      echo "ERROR: ${cjf_rel}${cjf_relfile} は eslint の ignores に除外されています。" >&2
+      echo "       → lint スクリプトの引数が届いても走査そのものが行われません。" >&2
+      echo "         ts/eslint.config.js の ignores は生成物のみへ絞ってください。" >&2
+      fail=1
+    fi
+
+    # (B) lint の走査対象に含まれているか。lint の引数はディレクトリ指定が普通なので、
+    #     ファイル自身から祖先ディレクトリへ順に遡って、どれかが引数に現れることを要求する。
+    cjf_reach=0
+    cjf_cand="$cjf_relfile"
+    while [ -n "$cjf_cand" ]; do
+      # パスはドットを含む。正規表現で使う箇所はエスケープする。
+      cjf_re="$(printf '%s' "$cjf_cand" | sed 's/[.]/\\./g')"
+      cjf_hits="$(printf '%s' "$cjf_lint" | grep -Ec "(^|[[:space:]])${cjf_re}([[:space:]]|/|\$)" || true)"
+      if [ "${cjf_hits:-0}" -ne 0 ]; then
+        cjf_reach=1
+        break
+      fi
+      case "$cjf_cand" in
+        */*) cjf_cand="${cjf_cand%/*}" ;;
+        *) cjf_cand='' ;;
+      esac
+    done
+    if [ "$cjf_reach" -eq 0 ]; then
+      echo "ERROR: ${cjf_rel}${cjf_relfile} が lint スクリプトの走査対象にありません（現在: '${cjf_lint}'）。" >&2
+      echo "       → any や未使用が混入しても CI は緑のまま通ります。" >&2
+      echo "         lint スクリプトの引数へ ${cjf_relfile%%/*} を追加してください。" >&2
+      fail=1
+    fi
+
+    # (C) tsc のプログラムに含まれているか。
+    cjf_hits="$(printf '%s' "$cjf_program" | grep -Fc "$cjf_path" || true)"
+    if [ "${cjf_hits:-0}" -eq 0 ]; then
+      echo "ERROR: ${cjf_rel}${cjf_relfile} が tsc のプログラムに含まれていません。" >&2
+      echo "       → CI で実行されるスクリプトであっても、未知のキーが黙って無視される形状の" >&2
+      echo "         誤りは実行時エラーにならず「別のものを測って緑」になります。" >&2
+      echo "         tsconfig の include へ '${cjf_relfile%/*}/*.mjs' 等を追加してください。" >&2
+      fail=1
+      continue
+    fi
+
+    # (D) 型検査が実際に効いているか。判定は check_root_files と**同じ器を共有する**
+    #     （別実装にすると、#78 のレビューで塞いだ @ts-nocheck の穴がここで再発する）。
+    cjf_hits="$(leading_comment_block "$cjf_path" \
+      | grep -Ec '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-nocheck([[:space:]*]|$)' || true)"
+    if [ "${cjf_hits:-0}" -ne 0 ]; then
+      echo "ERROR: ${cjf_rel}${cjf_relfile} は @ts-nocheck でファイル全体の型検査を無効化しています。" >&2
+      echo "       → tsc のプログラムには載るため本ガードは緑になりますが、型エラーは" >&2
+      echo "         1 件も報告されません（@ts-check と併記しても @ts-nocheck が優先されます）。" >&2
+      echo "         プラグマを除去し、個別の抑止が要る箇所へ @ts-expect-error を使ってください。" >&2
+      fail=1
+      continue
+    fi
+
+    cjf_hits="$(head -n 3 "$cjf_path" \
+      | grep -Ec '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-check([[:space:]*]|$)' || true)"
+    if [ "${cjf_hits:-0}" -eq 0 ]; then
+      echo "ERROR: ${cjf_rel}${cjf_relfile} は tsc のプログラムに載っていますが型検査されていません。" >&2
+      echo "       → allowJs は「プログラムに含める」だけで、checkJs も @ts-check も無ければ" >&2
+      echo "         型エラーは 1 件も報告されません（本ガードが緑のまま素通りします）。" >&2
+      echo "         ファイル先頭 3 行以内へ、コメント行の先頭が '@ts-check' となる形" >&2
+      echo "         （'// @ts-check'）で追加してください。散文中の言及は証拠になりません。" >&2
+      fail=1
+    fi
+  done <<EOF
+$cjf_found
+EOF
+}
+
 globs="$(sed -nE "s/^[[:space:]]*-[[:space:]]*'([^']+)'.*/\1/p" "$WORKSPACE_YAML")"
 if [ -z "$globs" ]; then
   echo "ERROR: ${WORKSPACE_YAML#$ROOT/} から workspace glob を1件も抽出できません。抽出前提が崩れています。" >&2
@@ -315,10 +488,12 @@ ${listed}"
 
     for dir in $CODE_DIR_CANDIDATES; do
       [ -d "${pkg_dir}${dir}" ] || continue
-      # TypeScript ファイルを含まないディレクトリは対象外（perf/*.mjs 等）。
-      if ! find "${pkg_dir}${dir}" -name '*.ts' -o -name '*.tsx' 2>/dev/null | grep -q .; then
-        continue
-      fi
+      # TypeScript ファイルを含まないディレクトリは対象外（JS 系は check_js_files が担当する）。
+      # `grep -q` を使わない理由は上（crf_* の照合）と同じ。ここは `if !` の内側にあるため、
+      # SIGPIPE × pipefail による失敗が「.ts を含まないディレクトリ」と同じ扱い、すなわち
+      # **ディレクトリを黙ってスキップする**方向へ化ける。件数判定へ揃える。
+      dir_ts_hits="$(find "${pkg_dir}${dir}" \( -name '*.ts' -o -name '*.tsx' \) -print 2>/dev/null | grep -c . || true)"
+      [ "${dir_ts_hits:-0}" -ne 0 ] || continue
       checked_dirs=$((checked_dirs + 1))
 
       # (2) lint の走査対象に含まれているか。スクリプトの引数として現れることを要求する。
@@ -348,10 +523,13 @@ ${listed}"
     for entry in "${pkg_dir}"*/; do
       [ -d "$entry" ] || continue
       name="$(basename "$entry")"
-      case " $CODE_DIR_CANDIDATES node_modules dist dist-scripts .next perf public db " in
+      # `perf` は CODE_DIR_CANDIDATES へ移した（Issue #83）。ここへ明示列挙しておくと、
+      # perf/ に .ts が入っても候補外検出に掛からず、永久に不可視のままになる。
+      case " $CODE_DIR_CANDIDATES node_modules dist dist-scripts .next public db " in
         *" $name "*) continue ;;
       esac
-      if find "$entry" -name '*.ts' -o -name '*.tsx' 2>/dev/null | grep -q .; then
+      entry_ts_hits="$(find "$entry" \( -name '*.ts' -o -name '*.tsx' \) -print 2>/dev/null | grep -c . || true)"
+      if [ "${entry_ts_hits:-0}" -ne 0 ]; then
         echo "ERROR: ${rel_pkg}${name}/ は TypeScript を含みますが本ガードの走査候補にありません。" >&2
         echo "       → CODE_DIR_CANDIDATES へ追加してください（候補の列挙が実態に追いついていません）。" >&2
         fail=1
@@ -360,6 +538,10 @@ ${listed}"
 
     # (4) workspace 直下のコードファイル（Issue #78）。上のディレクトリ走査では構造的に拾えない。
     check_root_files "$pkg_dir" "$rel_pkg" "$lint_script" "$program_files"
+
+    # (5) サブディレクトリの JS 系ファイル（Issue #83）。(3) は `.ts`/`.tsx` を含む
+    #     ディレクトリしか見ず、(4) は -maxdepth 1 で降りないため、どちらにも入らない。
+    check_js_files "$pkg_dir" "$rel_pkg" "$lint_script" "$program_files"
   done
 done <<EOF
 $globs
@@ -408,6 +590,10 @@ fi
 
 check_root_files "${TS_DIR}/" "ts/" "$root_lint_script" "$root_program_files"
 
+# ここで check_js_files は呼ばない。ts/ 直下から再帰すると apps/ と packages/ へ降り、
+# 上の workspace ループが既に検査したファイルを二重に報告することになる（prune 一覧に
+# workspace ディレクトリは入っていない）。ts/ 直下の JS 系は check_root_files が担当する。
+
 # 空振り防止: workspace もディレクトリも 1 件も検証できていなければ、この検証自体が壊れている。
 if [ "$checked_workspaces" -eq 0 ]; then
   echo "ERROR: workspace を1件も検証できませんでした。抽出前提が崩れています。" >&2
@@ -421,11 +607,16 @@ if [ "$checked_root_files" -eq 0 ]; then
   echo "ERROR: 直下のコードファイルを1件も検証できませんでした。ガードが空振りしています。" >&2
   exit 1
 fi
+if [ "$checked_js_files" -eq 0 ]; then
+  echo "ERROR: サブディレクトリの JS 系ファイルを1件も検証できませんでした。ガードが空振りしています。" >&2
+  echo "       → prune 一覧が広すぎるか find の式が壊れています（Issue #83 の走査）。" >&2
+  exit 1
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "NG: テストコードのカバレッジガードに違反があります（上記参照）。" >&2
   exit 1
 fi
 
-echo "OK: テストコードのカバレッジガード緑（${checked_workspaces} workspace / ${checked_dirs} ディレクトリ / ${checked_root_files} 直下ファイルが lint と型検査の双方に掛かっている）。"
+echo "OK: テストコードのカバレッジガード緑（${checked_workspaces} workspace / ${checked_dirs} ディレクトリ / ${checked_root_files} 直下ファイル / ${checked_js_files} サブディレクトリ JS が lint と型検査の双方に掛かっている）。"
 exit 0
