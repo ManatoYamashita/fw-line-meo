@@ -68,13 +68,22 @@ if ! (cd "$ROOT" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
   exit 1
 fi
 
+# **`core.quotePath=false` を外してはならない。** 既定（true）の git ls-files は非 ASCII を
+# 含むパスを `"docs/\346\227\245..."` の形（引用符 + 8 進エスケープ）で返す。find は生バイトを
+# 返していたため、これは情報源を git へ替えたことで生じる**表現の差**である。引用形式のまま
+# 渡すと readFileSync が投げ、判定本体の catch で**黙って読み飛ばされる**一方 checked_files
+# には計上されるため、下の空振り防止ごと欺かれて緑になる。日本語ファイル名の文書を検査対象
+# から静かに落とすことになり、本ガードの目的（日本語固有の強調崩れの検出）と正面から衝突する。
+#
+# 改行を含むファイル名までは扱えない（`-z` と NUL 区切りが要るが、bash 3.2 互換のまま
+# ヒアドキュメントで受け渡す本実装では NUL を運べない）。find 由来の頃と同じ制約である。
 found=''
 while IFS= read -r md_rel; do
   [ -n "$md_rel" ] || continue
   found="${found}${ROOT}/${md_rel}
 "
 done <<EOF
-$( (cd "$ROOT" && git ls-files --cached -- '*.md') 2>/dev/null | sort )
+$( (cd "$ROOT" && git -c core.quotePath=false ls-files --cached -- '*.md') 2>/dev/null | sort )
 EOF
 
 # .claude/skills/ 配下は vendored（ATTRIBUTION.md に Apache-2.0・"Modifications: None. Files
@@ -256,29 +265,43 @@ done <<EOF
 $report
 EOF
 
+# 未追跡の .md を警告する（Issue #82）。列挙を git 管理下へ寄せた副作用として
+# 「新規作成してまだ add していない .md を見逃す」fail-open が生じるため、対で置く。
+# fail は立てない（未 add は作業途中の正常な状態であり、赤にすると誤った習慣を強いる）。
+# CI ではクリーン checkout のため 0 件になり、この警告は出ない。
+#
+# **下の空振り防止より前に置くこと。** 追跡漏れは「走査対象 0 件」の第一の原因であり、
+# この警告こそがその唯一の手掛かりである。後ろに置くと、原因を説明できる材料を持ったまま
+# 何も言わずに exit 1 する経路ができる。
+#
+# 一覧の絞り込みに `head` のような**入力を読み切らない consumer** をパイプで挟まないこと。
+# 一覧が buffer を超えると上流の printf が EPIPE を受け、`set -e` × `pipefail` により
+# **ガードごと exit 141 で中断する**（OK も NG も出ないまま赤になる）。しかも上流が
+# 書き込める上限は consumer の buffer 2 杯分あるため、同じ条件で赤にも緑にも転ぶ。
+# 入力サイズ依存で判定が変わるという点で、下の `grep -q` を避ける理由とまったく同型である。
+# `sed -n '1,3s///p'` は `q` を持たないため入力を最後まで読み、この経路を作らない。
+untracked_md="$( (cd "$ROOT" && git -c core.quotePath=false ls-files --others --exclude-standard -- '*.md') 2>/dev/null || true)"
+untracked_md_count="$(printf '%s' "$untracked_md" | grep -c . || true)"
+if [ "${untracked_md_count:-0}" -ne 0 ]; then
+  echo "WARNING: 未追跡の Markdown が ${untracked_md_count} 件あります（本ガードは走査していません）。" >&2
+  printf '%s\n' "$untracked_md" | sed -n '1,3s|^|         |p' >&2
+  echo "         → 検査対象に含めるなら git add してください。" >&2
+fi
+
 # 空振り防止: 1 件も走査できていなければ、この検証自体が壊れている。
-# find の prune 一覧や .claude/skills 除外が広がりすぎた場合、対象ゼロのまま緑になる。
+# 走査対象は git 管理下から列挙するため（Issue #82）、原因は次のいずれかである。
+# **撤去済みの find / prune 一覧を案内しないこと。** 存在しない機構の調査へ誘導することになり、
+# それは #81 で塞いだ「原因と逆方向へ誘導する」欠落の再演である。
 if [ "${checked_files:-0}" -eq 0 ]; then
   echo "ERROR: 走査対象の Markdown を 1 件も検出できませんでした。ガードが空振りしています。" >&2
-  echo "       → find の prune 一覧か除外条件が広すぎます。" >&2
+  echo "       → git 管理下に .md が 1 件も無いか、.claude/skills 除外が広がりすぎています。" >&2
+  echo "         上に未追跡の件数が出ていれば、原因は追跡漏れです（git add してください）。" >&2
   exit 1
 fi
 if [ "${checked_pairs:-0}" -eq 0 ]; then
   echo "ERROR: 強調（**）を 1 件も検査できませんでした。ガードが空振りしています。" >&2
   echo "       → fence 除外かインラインコード masking が全文を飲み込んでいます。" >&2
   exit 1
-fi
-
-# 未追跡の .md を警告する（Issue #82）。列挙を git 管理下へ寄せた副作用として
-# 「新規作成してまだ add していない .md を見逃す」fail-open が生じるため、対で置く。
-# fail は立てない（未 add は作業途中の正常な状態であり、赤にすると誤った習慣を強いる）。
-# CI ではクリーン checkout のため 0 件になり、この警告は出ない。
-untracked_md="$( (cd "$ROOT" && git ls-files --others --exclude-standard -- '*.md') 2>/dev/null || true)"
-untracked_md_count="$(printf '%s' "$untracked_md" | grep -c . || true)"
-if [ "${untracked_md_count:-0}" -ne 0 ]; then
-  echo "WARNING: 未追跡の Markdown が ${untracked_md_count} 件あります（本ガードは走査していません）。" >&2
-  printf '%s\n' "$untracked_md" | head -n 3 | sed 's|^|         |' >&2
-  echo "         → 検査対象に含めるなら git add してください。" >&2
 fi
 
 if [ "$fail" -ne 0 ]; then

@@ -256,3 +256,62 @@ else
   expect_red 'git work tree ではありません'
 fi
 t_end
+
+# ---------------------------------------------------------------------------
+# 列挙を git へ寄せたことの残差。情報源を替えると「対象の集合」だけでなく
+# **対象の表現**まで替わる。以下 3 件はいずれもその表現差・出力経路の差で生じる。
+
+t_begin 'check-test-code-coverage: 非 ASCII ファイル名のコードファイルも列挙する'
+if ! fx_has_real_toolchain; then
+  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
+else
+  tcc_fixture
+  # git ls-files は core.quotePath 既定 true のもとで非 ASCII パスを引用符で括って返すため、
+  # 行末が `"` になり CODE_EXT_RE の `$` アンカーに一致しない。結果としてこのファイルは
+  # **すべての列挙から丸ごと消え**、lint にも型検査にも配線されていないのにガードは緑になる。
+  # 上の tracked-extra.mjs と配置も未配線ぶりも同一で、違いはファイル名だけである
+  # （つまりこのケースが赤で tracked-extra.mjs が赤なら、差は名前の表現に閉じている）。
+  fx_write 'ts/packages/w1/日本語設定.mjs' <<'EOF'
+export default {};
+EOF
+  fx_run check-test-code-coverage
+  expect_red '日本語設定.mjs'
+fi
+t_end
+
+t_begin 'check-test-code-coverage: 未追跡が大量でも中断しない'
+if ! fx_has_real_toolchain; then
+  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
+else
+  tcc_fixture
+  fx_track_now   # ここまでを追跡させる
+  # 未追跡一覧の**バイト数**が pipe buffer（64KB）を超えると、先頭数件へ絞る consumer が
+  # 先にパイプを閉じ、上流が SIGPIPE で落ちる。set -e × pipefail によりガード自体が
+  # exit 141 で中断し、OK も NG も出ないまま赤になる。入力サイズ依存で赤にも緑にも
+  # 転ぶという点で、本スクリプトが grep -q を避けているのと同じ罠である。
+  # 件数は「1 行 185 バイト前後 × 1200 件 ≒ 216KB」を狙って選んである。上流が書き込める
+  # 上限（consumer の入力 buffer 2 杯分 ＝ 128KB 前後）に対し 1.7 倍の余裕を取り、
+  # BSD / GNU の buffer 幅の差でケースが緑へ転ばないようにする。
+  fx_flood 1200 ts .mjs 'export default {};'
+  fx_run check-test-code-coverage
+  expect_green
+  # 警告そのものが出ていることまで見る（出力を丸ごと落として緑にしても通らないように）。
+  expect_output_matches 'WARNING: .*未追跡のコードファイルが 1200 件'
+fi
+t_end
+
+t_begin 'check-test-code-coverage: サブディレクトリ 0 件の診断が撤去済みの find / prune を指さない'
+if ! fx_has_real_toolchain; then
+  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
+else
+  tcc_fixture
+  # 唯一のサブディレクトリ占有者を外して checked_subdir_files を 0 にし、両論併記の診断を出させる。
+  # 走査系は find でも prune でもなくなったため、その語で調査先を案内すると存在しない機構へ
+  # 誘導することになる（原因と逆方向へ誘導するのは #81 で塞いだはずの欠落である）。
+  rm -f "${FX}/ts/packages/w1/perf/x.mjs"
+  fx_run check-test-code-coverage
+  expect_red 'サブディレクトリのコードファイルを1件も検証できませんでした'
+  expect_absent 'prune'
+  expect_absent 'find の'
+fi
+t_end

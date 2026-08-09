@@ -126,6 +126,30 @@ fx_write() {
   cat > "${FX}/$1"
 }
 
+fx_flood() {
+  # 一覧としてだけ嵩むファイルを大量に置く。
+  #   $1 = 件数 / $2 = 合成ツリー相対の基点ディレクトリ / $3 = 拡張子（ドット込み） / $4 = 内容
+  #
+  # 効くのは件数ではなく **一覧のバイト数** である。一覧を「先頭数件だけ出す」ために
+  # パイプで consumer を挟むと、上流は buffer 一杯まで書いて止まり、consumer が読み切って
+  # 抜けた瞬間に EPIPE を受ける。件数だけ増やしても行が短ければ閾値へ届かない。
+  #
+  # **余裕は 2 buffer 分では足りない（実測）。** consumer は自身の入力 buffer（64KB）を
+  # 一度満たしてから抜けるため、上流は「初回の 64KB」＋「読み出しで空いた 64KB」まで
+  # 書き込める。合計が入力量を上回ると上流が先に完走してしまい、同じケースが赤にも緑にも
+  # 転ぶ。実測では 87KB で 5 回中 1 回緑になった。1 行 250 バイト前後 × 十分な件数とし、
+  # 総量が 128KB を大きく超えるようにしてある。
+  fx_flood_dir="${2}/padding-directory-name-to-make-each-listed-path-long-enough"
+  fx_flood_dir="${fx_flood_dir}/second-level-padding-segment-that-also-pads-the-path"
+  fx_flood_dir="${fx_flood_dir}/third-level-padding-segment-that-also-pads-the-path"
+  mkdir -p "${FX}/${fx_flood_dir}"
+  fx_flood_i=0
+  while [ "$fx_flood_i" -lt "$1" ]; do
+    printf '%s\n' "$4" > "${FX}/${fx_flood_dir}/flooded-${fx_flood_i}${3}"
+    fx_flood_i=$((fx_flood_i + 1))
+  done
+}
+
 fx_link_node_modules() {
   # $1 = 合成ツリー相対のリンク先ディレクトリ（例: ts）
   mkdir -p "${FX}/$1"

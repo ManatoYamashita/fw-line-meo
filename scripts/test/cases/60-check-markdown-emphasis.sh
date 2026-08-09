@@ -121,7 +121,10 @@ EOF
 fi
 t_end
 
-t_begin 'check-markdown-emphasis: 対照 — prune 対象の配下は走査しない'
+# 名前を「prune 対象」から改めてある。列挙は git 管理下由来になり prune 一覧は無い（Issue #82）。
+# ここが緑になる理由は「除外リストに載っているから」ではなく「.gitignore 済みで追跡されないから」
+# であり、根拠が変わっている。ケース名を旧機構のまま残すと、次に読む者が存在しない一覧を探す。
+t_begin 'check-markdown-emphasis: 対照 — 追跡されない生成物ディレクトリ配下は走査しない'
 if ! fx_has_node; then
   t_skip 'node コマンドが無い'
 else
@@ -221,5 +224,74 @@ else
   # .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
   OUT="$(cd "$FX" && bash scripts/check-markdown-emphasis.sh 2>&1)" && RC=0 || RC=$?
   expect_red 'git work tree ではありません'
+fi
+t_end
+
+# ---------------------------------------------------------------------------
+# 列挙を git へ寄せたことの残差。情報源を替えると「対象の集合」だけでなく
+# **対象の表現**まで替わる。以下 3 件はいずれもその表現差・出力経路の差で生じる。
+
+t_begin 'check-markdown-emphasis: 非 ASCII ファイル名の .md も走査する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  # git ls-files は core.quotePath 既定 true のもとで非 ASCII パスを
+  # `"docs/\346\227\245..."` の形（引用符 + 8 進エスケープ）で返す。find は生バイトを
+  # 返していたため、これは列挙を git へ寄せた時点で生じる退行である。
+  # 引用形式のまま node へ渡すと readFileSync が投げ、判定本体の catch で**黙って
+  # 読み飛ばされる**。にもかかわらず checked_files には計上されるため、空振り防止の
+  # カウンタごと欺かれて緑になる（本ガードが最も嫌う形である）。
+  # 対照は同じ fixture の docs/normal.md（ASCII 名）で、そちらは常に走査される。
+  fx_write 'docs/日本語ファイル名.md' <<'EOF'
+本仕様が定めるのは**構造・整合性・境界の制約（WHAT）**であり、物理設計は design で扱う。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red "の終端 '**' が強調を閉じていません"
+  # 8 進エスケープのまま報告されると、指摘された側がファイルへ辿り着けない。
+  expect_output_matches '日本語ファイル名\.md'
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 未追跡が大量でも中断しない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_track_now   # ここまでを追跡させる
+  # 未追跡一覧の**バイト数**が pipe buffer（64KB）を超えると、先頭数件へ絞る consumer が
+  # 先にパイプを閉じ、上流が SIGPIPE で落ちる。set -e × pipefail によりガード自体が
+  # exit 141 で中断し、OK も NG も出ないまま赤になる。入力サイズ依存で赤にも緑にも
+  # 転ぶという点で、本スクリプトが grep -q を避けているのと同じ罠である。
+  # 件数は「1 行 185 バイト前後 × 1200 件 ≒ 216KB」を狙って選んである。上流が書き込める
+  # 上限（consumer の入力 buffer 2 杯分 ＝ 128KB 前後）に対し 1.7 倍の余裕を取り、
+  # BSD / GNU の buffer 幅の差でケースが緑へ転ばないようにする。
+  fx_flood 1200 docs .md '**強調**である。'
+  fx_run check-markdown-emphasis
+  expect_green
+  # 警告そのものが出ていることまで見る（出力を丸ごと落として緑にしても通らないように）。
+  expect_output_matches 'WARNING: 未追跡の Markdown が 1200 件'
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 追跡漏れによる空振りでは未追跡件数を示す'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  fx_guard check-markdown-emphasis
+  fx_write docs/placeholder.txt <<'EOF'
+markdown ではないファイル
+EOF
+  fx_track_now   # .md が 1 件も無い状態で追跡させる
+  fx_write docs/untracked.md <<'EOF'
+**強調**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red '1 件も検出できませんでした'
+  # 真因（追跡漏れ）を示す唯一の材料が、空振りで打ち切る**前に**出ていること。
+  # 後ろに置くと、この経路でだけ原因が見えないまま終わる。
+  expect_output_matches 'WARNING: 未追跡の Markdown が 1 件'
+  # 撤去済みの機構（find の prune 一覧）の調査へ誘導しないこと。
+  expect_absent 'prune'
 fi
 t_end
