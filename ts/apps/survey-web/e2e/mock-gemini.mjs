@@ -1,3 +1,4 @@
+// @ts-check
 // E2E 用 Gemini モック。@google/genai の generateContent 呼出（generativelanguage）を MSW で傍受し、
 // 固定の口コミ下書き JSON を返す。next プロセスへ NODE_OPTIONS='--import ./e2e/mock-gemini.mjs' で読み込む。
 // 本番コードは一切変更しない（プロセスレベルの HTTP 傍受）。
