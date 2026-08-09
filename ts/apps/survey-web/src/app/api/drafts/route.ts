@@ -1,6 +1,7 @@
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
+import { writeStructuredLog } from '../../../lib/structured-log';
 import { handleDrafts, type DraftsDeps } from './handler';
 
 export const runtime = 'nodejs';
@@ -16,9 +17,7 @@ async function buildDeps(): Promise<DraftsDeps> {
     generator: await createDefaultDraftGenerator(),
     rateLimiter: createRateLimiter({ limit: 20, windowMs: 60_000 }),
     clientKey: (req) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown',
-    log: (level, event) => {
-      console[level](JSON.stringify({ level, event }));
-    },
+    log: writeStructuredLog,
   };
 }
 

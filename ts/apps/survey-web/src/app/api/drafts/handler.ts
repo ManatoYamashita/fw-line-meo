@@ -4,6 +4,7 @@ import type { RateLimiter } from '../../../lib/rate-limit';
 import type { SessionTokenService } from '../../../lib/session-token';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
+import { logGenerationFailure, type SurveyLogger } from '../../../lib/structured-log';
 
 // 再生成 API の中核ロジック（依存注入でテスト可能）。
 // 集計には一切触れず、attempt は生成成功時のみ +1、上限到達で 409。
@@ -13,7 +14,7 @@ export interface DraftsDeps {
   generator: DraftGenerator;
   rateLimiter: RateLimiter;
   clientKey: (req: Request) => string;
-  log: (level: 'warn' | 'error' | 'info', event: string) => void;
+  log: SurveyLogger;
 }
 
 export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Response> {
@@ -47,11 +48,7 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
 
   if (!gen.ok) {
     // 失敗した試行は再生成回数を消費しない（attempt 据え置き）。
-    if (gen.error.kind === 'SAFETY_BLOCKED') {
-      deps.log('info', 'generation_safety_blocked');
-    } else {
-      deps.log('error', 'generation_failed');
-    }
+    logGenerationFailure(deps.log, gen.error);
     const token = deps.tokens.sign({ storeId, material, attempt });
     return jsonOk({ generation: 'failed', draft: null, sessionToken: token, regenerationsLeft: REGEN_MAX - attempt });
   }

@@ -121,7 +121,10 @@ describe('createDraftGenerator', () => {
       const e = Object.assign(new Error('429'), { status: 429 });
       const { client, calls } = fakeClient([e, e]);
       const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
-      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR', status: 429 },
+      });
       expect(calls).toHaveLength(2);
     });
 
@@ -129,8 +132,60 @@ describe('createDraftGenerator', () => {
       const e = Object.assign(new Error('bad'), { status: 400 });
       const { client, calls } = fakeClient([e, draftResponse('よい')]);
       const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
-      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR', status: 400 },
+      });
       expect(calls).toHaveLength(1);
+    });
+
+    it('HTTP status を持たない例外は status なしの API_ERROR', async () => {
+      const { client } = fakeClient([new Error('network')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR' },
+      });
+    });
+
+    // status の範囲・整数ガードを固定する。ガードが外れると gRPC の status code や
+    // 不正値が HTTP status として構造化ログへ出て、運用の原因切り分けを誤らせる
+    // （Issue #62 のログは「400 ならキー無効」と読むためのものであり、8 や 700 が
+    // status として載ると読みが成立しない）。
+    it('gRPC 相当の小さい status code は HTTP status として採用しない', async () => {
+      // 8 = RESOURCE_EXHAUSTED。HTTP の 100-599 の外にあるため status には載せない。
+      const e = Object.assign(new Error('resource exhausted'), { status: 8 });
+      const { client } = fakeClient([e, e]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR' },
+      });
+    });
+
+    it('HTTP の範囲外・非整数の status は採用しない', async () => {
+      for (const bad of [700, 429.5]) {
+        const e = Object.assign(new Error('bad status'), { status: bad });
+        const { client } = fakeClient([e, e]);
+        const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+        expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+          ok: false,
+          error: { kind: 'API_ERROR' },
+        });
+      }
+    });
+
+    it('数値でない status は採用せず、数値の code を再試行判定へ使う', async () => {
+      // @google/genai 以外の層が status に文字列を載せる形。status は採用しないが、
+      // code が数値なら再試行判定にはそちらを使う（429 なので 1 回だけ再試行する）。
+      const e = Object.assign(new Error('rate limited'), { status: 'RESOURCE_EXHAUSTED', code: 429 });
+      const { client, calls } = fakeClient([e, e]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      expect(await gen.generate(MATERIAL, VARIATION)).toEqual({
+        ok: false,
+        error: { kind: 'API_ERROR' },
+      });
+      expect(calls).toHaveLength(2);
     });
   });
 });

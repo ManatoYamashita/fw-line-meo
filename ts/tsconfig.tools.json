@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // ts/ 直下のツール設定ファイル用（Issue #78）。
+  // ここに置かれるファイルは pnpm-workspace.yaml のどの glob にも入らないため、
+  // `pnpm -r typecheck` では永久に型検査されない。root の typecheck から本設定を呼ぶ。
+  // checkJs を有効にする（allowJs だけではプログラムに含まれるだけで検査されない）。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["eslint.config.js"]
+}

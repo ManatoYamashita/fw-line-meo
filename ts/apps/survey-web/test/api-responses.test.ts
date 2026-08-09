@@ -12,7 +12,7 @@ function okGenerator(draft = '良いお店でした'): DraftGenerator {
   return { generate: () => Promise.resolve(ok(draft)) };
 }
 function failGenerator(): DraftGenerator {
-  return { generate: () => Promise.resolve(err({ kind: 'API_ERROR' as const })) };
+  return { generate: () => Promise.resolve(err({ kind: 'API_ERROR' as const, status: 429 })) };
 }
 
 function baseDeps(over: Partial<ResponsesDeps> = {}): ResponsesDeps {
@@ -115,12 +115,17 @@ describe('handleResponses', () => {
   });
 
   it('生成失敗でも 200 generation:failed＋sessionToken（draft は null）', async () => {
-    const res = await handleResponses(req(validBody()), baseDeps({ generator: failGenerator() }));
+    const log = vi.fn();
+    const res = await handleResponses(req(validBody()), baseDeps({ generator: failGenerator(), log }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.generation).toBe('failed');
     expect(json.draft).toBeNull();
     expect(json.sessionToken).toBeTypeOf('string');
+    expect(log).toHaveBeenCalledWith('error', 'generation_failed', {
+      errorKind: 'API_ERROR',
+      status: 429,
+    });
   });
 
   it('安全ブロックは 200 failed かつ INFO ログ（件数把握）', async () => {
@@ -131,7 +136,9 @@ describe('handleResponses', () => {
     const res = await handleResponses(req(validBody()), baseDeps({ generator, log }));
     expect(res.status).toBe(200);
     expect((await res.json()).generation).toBe('failed');
-    expect(log).toHaveBeenCalledWith('info', 'generation_safety_blocked');
+    expect(log).toHaveBeenCalledWith('info', 'generation_safety_blocked', {
+      errorKind: 'SAFETY_BLOCKED',
+    });
   });
 
   it('集計失敗でも 200 で下書きを返し WARN ログのみ', async () => {

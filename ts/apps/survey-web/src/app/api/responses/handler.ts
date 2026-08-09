@@ -7,6 +7,7 @@ import type { SessionTokenService } from '../../../lib/session-token';
 import { validateSurveyAnswer } from '../../../lib/validate';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
+import { logGenerationFailure, type SurveyLogger } from '../../../lib/structured-log';
 
 // 回答受付 API の中核ロジック（依存を注入してテスト可能にする）。route.ts が実依存を配線する。
 
@@ -30,7 +31,7 @@ export interface ResponsesDeps {
   listAspects: () => Promise<AspectView[]>;
   incrementTallies: (input: { storeId: string; star: number; aspectCodes: string[] }) => Promise<void>;
   clientKey: (req: Request) => string;
-  log: (level: 'warn' | 'error' | 'info', event: string) => void;
+  log: SurveyLogger;
 }
 
 export async function handleResponses(req: Request, deps: ResponsesDeps): Promise<Response> {
@@ -90,11 +91,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
 
   if (!gen.ok) {
     // 安全ブロックは件数把握のため INFO、その他の生成失敗は ERROR（design: Monitoring）。
-    if (gen.error.kind === 'SAFETY_BLOCKED') {
-      deps.log('info', 'generation_safety_blocked');
-    } else {
-      deps.log('error', 'generation_failed');
-    }
+    logGenerationFailure(deps.log, gen.error);
     return jsonOk({ generation: 'failed', draft: null, sessionToken, regenerationsLeft: REGEN_MAX });
   }
   return jsonOk({ generation: 'ok', draft: gen.value, sessionToken, regenerationsLeft: REGEN_MAX });
