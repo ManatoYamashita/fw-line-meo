@@ -55,6 +55,14 @@ jobs:
       # setup-node の直後・install の前に置ける。
       - name: Markdown 強調ガード（Issue #89）
         run: bash scripts/check-markdown-emphasis.sh
+      # ガード自己テストの Tier A（Issue #90）。実 node_modules を使わず、npx スタブで
+      # eslint / tsc の応答だけを模擬して走る。走査範囲・担当分界・fail-closed 分岐の到達性を
+      # 検証する層であり、ガードが「壊れたときに壊れたと言える」ことをここで確かめる。
+      # **install の前に置くこと自体が、この層が node_modules 非依存であることの機械証明**である。
+      # 後ろへ動かすと依存が紛れ込んでも気づけない（Tier B との分界が宣言だけになる）。
+      # setup-node の後に置くのは node 単体を要するため（node_modules は要らない）。
+      - name: 'ガード自己テスト Tier A（Issue #90・install 前・node_modules 非依存）'
+        run: bash scripts/test/run.sh --tier=a --require-full
       - run: pnpm -C ts install --frozen-lockfile
       - run: pnpm -C ts run lint
       - run: pnpm -C ts run build
@@ -84,15 +92,15 @@ jobs:
       # 本 PR の対象外なので触っていない。
       - name: 'コードカバレッジガード（Issue #70 / #78 / #81 / #83）'
         run: bash scripts/check-test-code-coverage.sh
-      # 上のガード群が「壊れたときに壊れたと言える」かを機械検証する（Issue #90）。
-      # ガードは実装コードではなく "緑が信用できるか" を守る装置であり、装置自身の回帰を
-      # 検出する手段が無かった。実際 check-test-code-coverage.sh だけで #70 / #78 / #83 / #81 と
-      # 4 回、事後に穴が見つかっている（#81 は 653 行を読むだけでは出ず、実走して初めて出た偽緑）。
+      # ガード自己テストの Tier B（Issue #90）。実 node_modules を symlink で借用し、本物の
+      # tsc / eslint へ問い合わせる。tsconfig の include の実効範囲、flat config の ignores の
+      # 合成結果、@ts-check / @ts-nocheck、#81 の偽緑 — スタブで模擬すると「模擬した通りに
+      # 動いた」だけの緑になる層をここで検証する。よって install の後に置く必要がある。
       # 合成ツリーへガードを複製して走らせるため、リポジトリの実体には書き込まない。
-      # check-test-code-coverage のケースは実物の tsc / eslint を借用するので install の後に置く。
       # --require-full は skip を失敗として扱う（CI で黙って 0 件成功にしないため）。
-      - name: ガード自己テスト（Issue #90）
-        run: bash scripts/test/run.sh --require-full
+      # name は引用する（上のカバレッジガードと同じ理由。plain scalar は " #" 以降が切れる）。
+      - name: 'ガード自己テスト Tier B（Issue #90・実 tsc / eslint）'
+        run: bash scripts/test/run.sh --tier=b --require-full
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
       - name: unit + integration tests (DB 込み)
