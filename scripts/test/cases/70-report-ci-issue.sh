@@ -149,3 +149,25 @@ expect_output_matches '追跡 Issue はありません'
 expect_absent 'DRY-RUN: gh issue'
 expect_absent 'STUB-GH-INVOKED'
 t_end
+
+# ---------------------------------------------------------------------------
+# 赤ケース（Issue #109）。
+#
+# 本ファイルは導入以来すべて緑ケースで、**「検出できること」を一度も検証していなかった**
+# （expect_green=5 / expect_red=0）。run.sh のファイル単位規則はこれを赤にするが、
+# その手前で check-guard-selftest-coverage.sh が孤児ケースにより先に落ちていたため、
+# run.sh がケースを 1 件も走らせず、この穴は **main が赤い間ずっと隠れていた**。
+# 空振り防止が別の空振り防止に隠される形であり、直す順序を誤ると片方しか見えない。
+t_begin 'report-ci-issue: 未知の state を受理しない'
+fx_guard report-ci-issue
+rci_stub_gh
+rci_body_file
+RCI_TRACKER=102
+rci_run --state gren --label prod-image-drift --title t --body-file "${FX}/body.md"
+RCI_TRACKER=''
+expect_red '--state は red または green を指定してください'
+# 受理してしまうと、綴りを間違えただけで「red 以外＝緑」の経路へ落ち、乖離が続いている最中に
+# 追跡 Issue を閉じうる。引数の検証は gh の存在確認より前にあるため、書き込みは一切起きないこと。
+expect_absent 'DRY-RUN: gh issue'
+expect_absent 'STUB-GH-INVOKED'
+t_end
