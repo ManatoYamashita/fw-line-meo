@@ -66,6 +66,11 @@ file_green=0
 file_red=0
 file_ran=0
 file_cases=0
+# 終了コードを持たない照合型ケース（本文そのものを検証するファイル）用。肯定＝出るべきものが
+# 出る照合、否定＝出てはいけないものが出ない照合。exit code 型と同じ「検出できること／
+# 誤検知しないこと」の両方向を、別の語彙で数える。
+file_match=0
+file_absent=0
 
 CURRENT_CASE=''
 CURRENT_FAILED=0
@@ -305,6 +310,7 @@ expect_red() {
 expect_absent() {
   # $1 = 出てはいけない文字列（同じ 1 つの原因が 2 種類の指示になる二重報告の検出に使う）
   assert_count=$((assert_count + 1))
+  file_absent=$((file_absent + 1))
   case "$OUT" in
     *"$1"*) _t_fail "出てはいけないメッセージが出ています: $1" ;;
     *) ;;
@@ -315,6 +321,7 @@ expect_output_empty() {
   # 出力が完全に空であること。「検証が赤なら機械可読な stdout へ 1 行も出さない」のように、
   # *出さないこと* が契約になっている経路を照合するために使う。
   assert_count=$((assert_count + 1))
+  file_absent=$((file_absent + 1))
   if [ -n "$OUT" ]; then
     _t_fail "出力が空であることを期待しましたが、内容があります。"
   fi
@@ -335,6 +342,7 @@ expect_output_matches() {
   # （PR #101 のレビューで実測。健全な実行と件数まで一致し、痕跡は stderr の 1 行だけだった）。
   # したがって終了コードを捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分けて扱う。
   assert_count=$((assert_count + 1))
+  file_match=$((file_match + 1))
   grep_rc=0
   matched="$(printf '%s\n' "$OUT" | grep -cE "$1")" || grep_rc=$?
   if [ "$grep_rc" -gt 1 ]; then
@@ -395,6 +403,8 @@ while IFS= read -r case_file; do
   file_red=0
   file_ran=0
   file_cases=0
+  file_match=0
+  file_absent=0
   source_rc=0
   # shellcheck source=/dev/null
   . "$case_file" || source_rc=$?
@@ -414,9 +424,17 @@ while IFS= read -r case_file; do
   elif [ "$file_cases" -eq 0 ]; then
     # ファイル名は残るためガード側の 1:1 照合では検出できない（PR #101 レビュー指摘 2）。
     file_problem='ケースを 1 件も定義していません（中身が消えています）。'
-  elif [ "$file_ran" -gt 0 ] && { [ "$file_green" -eq 0 ] || [ "$file_red" -eq 0 ]; }; then
-    # 片方だけのファイルは「検出できること」か「誤検知しないこと」のどちらかを検証していない。
+  elif [ "$file_ran" -gt 0 ] && [ "$((file_green + file_red))" -gt 0 ] \
+    && { [ "$file_green" -eq 0 ] || [ "$file_red" -eq 0 ]; }; then
+    # 終了コード型（ガードを実走して緑/赤を見るファイル）。片方だけのファイルは
+    # 「検出できること」か「誤検知しないこと」のどちらかを検証していない。
     file_problem="緑ケースと赤ケースが両方必要です（expect_green=${file_green} / expect_red=${file_red}）。"
+  elif [ "$file_ran" -gt 0 ] && [ "$((file_green + file_red))" -eq 0 ] \
+    && { [ "$file_match" -eq 0 ] || [ "$file_absent" -eq 0 ]; }; then
+    # 照合型（終了コードを持たず、生成物の中身そのものを見るファイル。例: ワークフローの通知本文）。
+    # 緑/赤という語彙は無いが、要求は同じで「出るべきものが出る」と「出てはいけないものが出ない」の
+    # 両方が要る。片方だけなら、誤検知しないことか検出できることのどちらかを検証していない。
+    file_problem="肯定と否定の両方の照合が必要です（expect_output_matches=${file_match} / expect_absent 系=${file_absent}）。"
   fi
   if [ -n "$file_problem" ]; then
     fail_count=$((fail_count + 1))

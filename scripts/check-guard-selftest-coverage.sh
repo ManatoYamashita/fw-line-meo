@@ -34,6 +34,14 @@ CASES_DIR="${ROOT}/scripts/test/cases"
 # 現在は空。追加時は `WHITELIST=(check-foo)` 形式で、直上に理由と Issue 番号を書く。
 WHITELIST=()
 
+# 逆方向の免除。検証対象が `scripts/<名前>.sh` **ではない**ケースファイルをここへ登録する。
+# 逆方向照合は「ケースは必ず scripts 配下のスクリプトを検証する」という前提を置いていたが、
+# ワークフロー本体を検証するケースが入った時点でその前提は崩れた（2026-08-09 に main が赤化）。
+# 孤児ケース（ガード改名の取り残し）の検出は残したいので、対象を明記したものだけを免除する。
+# 追加時は必ず直上へ「何を検証しているか」と Issue / PR 番号を書くこと。
+#   prod-image-drift-notify: 対象は .github/workflows/prod-image-drift.yml の通知本文（PR #104）
+CASE_WHITELIST=(prod-image-drift-notify)
+
 if [ ! -d "$CASES_DIR" ]; then
   echo "ERROR: ケースディレクトリがありません: ${CASES_DIR#$ROOT/}（ガードの自己テストが丸ごと消えています）。" >&2
   exit 1
@@ -109,6 +117,14 @@ for case_path in "$CASES_DIR"/*.sh; do
       ;;
   esac
 
+  if in_list "$target" ${CASE_WHITELIST[@]+"${CASE_WHITELIST[@]}"}; then
+    # 免除対象。対応スクリプトが実在するようになったら免除は不要なので、削除を促す。
+    if [ -f "${GUARD_DIR}/${target}.sh" ]; then
+      echo "WARNING: ${target} は CASE_WHITELIST に載っていますが scripts/${target}.sh が実在します。CASE_WHITELIST から削除してください。" >&2
+    fi
+    continue
+  fi
+
   if [ ! -f "${GUARD_DIR}/${target}.sh" ]; then
     echo "ERROR: ${base}.sh に対応するガード scripts/${target}.sh がありません（ガード改名の取り残しです）。" >&2
     fail=1
@@ -126,5 +142,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "OK: ガード自己テストカバレッジ緑（${covered}/${guard_count} ガードにケース・${case_count} ケースファイル・WHITELIST ${#WHITELIST[@]} 件）。"
+echo "OK: ガード自己テストカバレッジ緑（${covered}/${guard_count} ガードにケース・${case_count} ケースファイル・WHITELIST ${#WHITELIST[@]} 件・CASE_WHITELIST ${#CASE_WHITELIST[@]} 件）。"
 exit 0

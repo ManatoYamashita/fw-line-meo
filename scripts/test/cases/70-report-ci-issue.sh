@@ -33,6 +33,23 @@ rci_stub_gh() {
   chmod +x "${FX}/stub/gh"
 }
 
+rci_stub_gh_failing_list() {
+  # `issue list` 自体が失敗する状態。追跡 Issue を同定できないまま起票へ進むと、検索が失敗する
+  # たびに Issue が増殖するため、スクリプトは fail-closed で落ちる契約になっている。
+  mkdir -p "${FX}/stub"
+  {
+    echo '#!/usr/bin/env bash'
+    # shellcheck disable=SC2016 # スタブの中身をそのまま書き出すので展開させない
+    echo 'case "${1:-} ${2:-}" in'
+    echo "  'issue list') echo 'gh: API rate limit exceeded' >&2; exit 1 ;;"
+    echo 'esac'
+    # shellcheck disable=SC2016 # 同上
+    echo 'echo "STUB-GH-INVOKED: $*" >&2'
+    echo 'exit 97'
+  } > "${FX}/stub/gh"
+  chmod +x "${FX}/stub/gh"
+}
+
 rci_body_file() {
   # 呼び出し側が組む本文を模す。**既にフェンスを 1 組持っている**のが要点で、
   # スクリプトがもう 1 組足すと 4 本になり、内側が外側を閉じて描画が崩れる。
@@ -148,4 +165,19 @@ expect_green
 expect_output_matches '追跡 Issue はありません'
 expect_absent 'DRY-RUN: gh issue'
 expect_absent 'STUB-GH-INVOKED'
+t_end
+
+# ---------------------------------------------------------------------------
+# 赤ケース。追跡 Issue を同定できないときに起票へ進むと、検索が失敗するたびに Issue が
+# 増殖する。fail-closed であること（落ちること）と、落ちる前に書き込みへ触れていないことを
+# 両方見る。exit code だけでは「別の理由で落ちた」実行と区別できない。
+t_begin 'report-ci-issue: 追跡 Issue の検索に失敗したら起票せず落ちる'
+fx_guard report-ci-issue
+rci_stub_gh_failing_list
+rci_body_file
+rci_run --state red --label prod-image-drift --title t --body-file "${FX}/body.md"
+expect_red '追跡 Issue の検索に失敗しました'
+# 起票・コメントへ一切進んでいないこと（進んでいればスタブが STUB-GH-INVOKED を出す）。
+expect_absent 'STUB-GH-INVOKED'
+expect_absent 'DRY-RUN: gh issue create'
 t_end

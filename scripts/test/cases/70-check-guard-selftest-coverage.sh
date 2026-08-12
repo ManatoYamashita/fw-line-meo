@@ -64,6 +64,48 @@ fx_run check-guard-selftest-coverage
 expect_red '99-check-bar.sh に対応するガード scripts/check-bar.sh がありません'
 t_end
 
+# ---------------------------------------------------------------------------
+# CASE_WHITELIST: 検証対象が scripts/ 配下のスクリプトでないケースファイルの逃げ道。
+# 逆方向照合は「ケースは必ず scripts/<名前>.sh を検証する」という前提を置いていたが、
+# ワークフロー本体を検証するケース（71-prod-image-drift-notify.sh・対象は
+# .github/workflows/prod-image-drift.yml）が入った瞬間に main が赤くなった。
+# 孤児検出そのものは残したいので、明示登録した対象だけを免除する。
+
+t_begin 'check-guard-selftest-coverage: CASE_WHITELIST のケースは孤児にしない'
+gsc_fixture
+fx_write scripts/test/cases/71-prod-image-drift-notify.sh <<'EOF'
+# dummy
+EOF
+fx_run check-guard-selftest-coverage
+expect_green
+# 免除したケースはガード数の母数へ混ぜない（ケースファイル数だけが増える）。
+expect_output_matches '2/2 ガードにケース・3 ケースファイル'
+t_end
+
+t_begin 'check-guard-selftest-coverage: CASE_WHITELIST は登録した名前だけを免除する（対照）'
+gsc_fixture
+fx_write scripts/test/cases/71-prod-image-drift-notify-typo.sh <<'EOF'
+# dummy
+EOF
+fx_run check-guard-selftest-coverage
+expect_red '71-prod-image-drift-notify-typo.sh に対応するガード scripts/prod-image-drift-notify-typo.sh がありません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: CASE_WHITELIST が不要になったら警告する'
+gsc_fixture
+fx_write scripts/test/cases/71-prod-image-drift-notify.sh <<'EOF'
+# dummy
+EOF
+# 対応スクリプトが実在するようになった状態。免除が要らなくなったので削除を促す。
+fx_write scripts/prod-image-drift-notify.sh <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+fx_run check-guard-selftest-coverage
+expect_green
+expect_output_matches 'WARNING: prod-image-drift-notify は CASE_WHITELIST に載っていますが'
+t_end
+
 t_begin 'check-guard-selftest-coverage: NN- 接頭を持たないケースファイルを検出する'
 gsc_fixture
 fx_write scripts/test/cases/helpers.sh <<'EOF'

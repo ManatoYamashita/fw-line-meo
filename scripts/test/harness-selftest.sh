@@ -43,7 +43,7 @@ for required in "$HARNESS" "$COVERAGE_GUARD"; do
 done
 
 # シナリオを足したら必ずこの数も更新する。取りこぼしを件数で機械検出するための固定値。
-EXPECTED_SCENARIOS=7
+EXPECTED_SCENARIOS=10
 
 pass_count=0
 fail_count=0
@@ -217,6 +217,48 @@ if [ 1 -eq 1 ; then
 EOF
 tree_run --require-full
 expect_harness_red 'ハーネス: 末尾が失われたケースファイルを緑にしない' '読み込みが exit='
+tree_cleanup
+
+# 終了コード型（ガードを実走して緑/赤を見るファイル）で片方しか無い状態。Issue #90 の受入条件。
+# 照合型を許容する二層化で、この従来の強制が弱まっていないことの対照でもある。
+tree_new
+tree_add_case_file <<'EOF'
+t_begin 'dummy: 緑のみ'
+OUT='OK: dummy'
+RC=0
+expect_green
+t_end
+EOF
+tree_run --require-full
+expect_harness_red 'ハーネス: 終了コード型で緑だけのファイルを緑にしない' '緑ケースと赤ケースが両方必要です'
+tree_cleanup
+
+# 照合型（終了コードを持たず生成物の中身を見るファイル。例: ワークフローの通知本文）。
+# 緑/赤の語彙は無いが「出るべきものが出る」「出てはいけないものが出ない」の両方が要る。
+tree_new
+tree_add_case_file <<'EOF'
+t_begin 'dummy: 肯定の照合だけ'
+OUT='OK: dummy'
+RC=0
+expect_output_matches 'OK: dummy'
+t_end
+EOF
+tree_run --require-full
+expect_harness_red 'ハーネス: 照合型で肯定だけのファイルを緑にしない' '肯定と否定の両方の照合が必要です'
+tree_cleanup
+
+# 対照: 照合型でも両方向あれば緑。終了コードを持たないケースファイルを一律に赤へ落としていない。
+tree_new
+tree_add_case_file <<'EOF'
+t_begin 'dummy: 肯定と否定の両方'
+OUT='OK: dummy'
+RC=0
+expect_output_matches 'OK: dummy'
+expect_absent 'NG:'
+t_end
+EOF
+tree_run --require-full
+expect_harness_green 'ハーネス: 対照 — 照合型で両方向あれば緑'
 tree_cleanup
 
 # 対照: 全 skip のケースファイルは緑のまま。依存が無い環境で skip を許容する設計
