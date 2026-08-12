@@ -116,43 +116,20 @@ jobs:
 
           main_short="$(git rev-parse --short origin/main)"
           body="$RUNNER_TEMP/issue-body.md"
-          # >>> compose-issue-body >>>
-          # この区間は scripts/test/cases/71-prod-image-drift-notify.sh が**そのまま抽出して実走**する。
-          # 依存してよいのは state / report / body / main_short / GITHUB_* だけに限る。ここへ git や
-          # gcloud の呼び出しを足すと自己テストから実走できなくなり、緑と赤の文面が再び未検証になる。
-          {
-            # 本文は**必ず state で組み分ける**。report-ci-issue.sh は本文を加工せずそのまま送るため、
-            # 赤用の断定と「## 対処」を緑でも出すと、復旧コメントが見出し付きの障害指示として描画され、
-            # 不要な障害対応を誘発する（Issue #102 のコメントで実測）。
-            if [ "$state" = "red" ]; then
-              echo "本番 Cloud Run の稼働イメージが main と乖離しています（prod-image-drift が自動検出）。"
-            else
-              echo "本番 Cloud Run の稼働イメージは main と一致しています（乖離は解消済みです）。"
-            fi
-            echo ""
-            echo "- 実行 run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "- main: \`${main_short}\`"
-            echo ""
-            echo "## 検証結果"
-            echo ""
-            # コマンド出力は必ずフェンス内に置く（裸だと出力中の # や @ が
-            # 他 Issue への参照通知・誤メンションを飛ばす）。フェンスはこの呼び出し側にしか無い。
-            echo '```'
-            cat "$report"
-            echo '```'
-            if [ "$state" = "red" ]; then
-              echo ""
-              echo "## 対処"
-              echo ""
-              echo "1. main で ts-ci が緑か確認する（赤いと deploy-prod が起動せず、乖離が解消しない）"
-              echo "2. 直近の deploy-prod を確認する: \`gh run list --workflow deploy.yml\`"
-              echo "3. GCP の課金と WIF を確認する（gcp-auth-smoke を workflow_dispatch で起動）"
-              echo "4. 復旧したら deploy-prod を再実行する: \`gh workflow run deploy.yml --ref main\`"
-              echo ""
-              echo "状態が変わらない間はコメントを増やしません。復旧を検出するとこの Issue は自動で閉じます。"
-            fi
-          } > "$body"
-          # <<< compose-issue-body <<<
+          # 本文の組み立ては scripts/prod-image-drift-notify.sh が持つ（Issue #109）。
+          # 以前はここへ直接書いており、自己テストは区間の見出しコメントを目印に **sed で抽出して
+          # 実走**していた。検証対象がスクリプトでないため scripts/prod-image-drift-notify.sh が
+          # 存在せず、check-guard-selftest-coverage.sh の孤児ケース検出に掛かって main の ts-ci が
+          # 3 日間赤いままになった（ts-ci が赤いと deploy-prod が起動せず、乖離も解消しない）。
+          #
+          # **本文の組み立てをこの run ブロックへ戻さないこと。** 戻した瞬間に、
+          # 「緑と赤で文面を出し分けているか」を検証する器が再び yml の抽出へ逆戻りする。
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/prod-image-drift-notify.sh \
+            --state "$state" \
+            --report "$report" \
+            --main-short "$main_short" \
+            --run-url "$run_url" > "$body"
 
           bash scripts/report-ci-issue.sh \
             --state "$state" \
