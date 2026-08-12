@@ -39,6 +39,10 @@ jobs:
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
         run: bash scripts/check-typecheck-coverage.sh
+      - name: 'ワークフロー表示名ガード（Issue #105）'
+        # 引用符なしの name: に ' #' が入ると YAML がそこをコメントとして捨て、Actions の
+        # 表示名が切れる（本リポジトリで 3 度再発）。失敗ステップを名前で特定できなくなる。
+        run: bash scripts/check-workflow-step-names.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
