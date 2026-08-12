@@ -123,3 +123,37 @@ rm -rf "${FX}/scripts/test/cases"
 fx_run check-guard-selftest-coverage
 expect_red 'ケースディレクトリがありません'
 t_end
+
+# ---------------------------------------------------------------------------
+# 変種ケース: NN-<ガード名>.<変種>.sh。1 つのガードの自己テストを層で分けたいときに使う
+# （PR #103 の Tier A / Tier B）。基本ケースは従来どおりちょうど 1 件必須で、変種は 0 件以上。
+
+t_begin 'check-guard-selftest-coverage: 変種ケース NN-<ガード>.<変種>.sh を孤児にしない'
+gsc_fixture
+fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF2'
+# dummy
+EOF2
+fx_run check-guard-selftest-coverage
+expect_green
+# 変種はガード数の母数を増やさない（ケースファイル数だけが増える）。
+expect_output_matches '2/2 ガードにケース・3 ケースファイル'
+t_end
+
+t_begin 'check-guard-selftest-coverage: 変種でも対応ガードが無ければ孤児として検出する（対照）'
+gsc_fixture
+fx_write scripts/test/cases/15-check-nosuch.tier-b.sh <<'EOF2'
+# dummy
+EOF2
+fx_run check-guard-selftest-coverage
+expect_red '15-check-nosuch.tier-b.sh に対応するガード scripts/check-nosuch.sh がありません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: 基本ケースが変種だけに置き換わったら検出する（対照）'
+gsc_fixture
+rm -f "${FX}/scripts/test/cases/10-check-foo.sh"
+fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF2'
+# dummy
+EOF2
+fx_run check-guard-selftest-coverage
+expect_red 'check-foo に対応するケースファイルがありません'
+t_end
