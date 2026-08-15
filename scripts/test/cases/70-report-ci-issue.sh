@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/report-ci-issue.sh の自己テスト（PR #104 のレビュー指摘）。
 #
 # 背景: 緑（復旧）経路が `--body-file` の内容をもう一度 ``` で包んでいたため、呼び出し側が既に

@@ -63,6 +63,22 @@ tree_new() {
   mkdir -p "${TREE}/scripts/test/cases"
   cp "$HARNESS" "${TREE}/scripts/test/run.sh"
   cp "$COVERAGE_GUARD" "${TREE}/scripts/check-guard-selftest-coverage.sh"
+  # run.sh が起動時に要求するもの（存在しないとケースへ入る前に打ち切られ、ハーネスの
+  # 挙動そのものを観測できなくなる）。**中身ではなく存在が要件**なので最小形で置く。
+  #   共有 fixture   … 二層化（Issue #90）で tier を跨いでツリー定義を共有するため必須になった
+  #   CI の tier 配線 … 全 tier が CI から走ることの検証（片方の tier が消えても残りの緑で通る形の防止）
+  cat > "${TREE}/scripts/test/fixtures.sh" <<'EOF'
+# shellcheck shell=bash  # 合成ツリー用の空 fixture（run.sh は存在だけを要求する）
+EOF
+  mkdir -p "${TREE}/.github/workflows"
+  cat > "${TREE}/.github/workflows/ts-ci.yml" <<'EOF'
+# 合成ツリー用の最小 CI 配線（run.sh の tier 配線検査を満たすためだけのもの）。
+jobs:
+  lint-build-test:
+    steps:
+      - run: bash scripts/test/run.sh --tier=a --require-full
+      - run: bash scripts/test/run.sh --tier=b --require-full
+EOF
   tree_write_primary_case 'OK: synthetic'
 }
 

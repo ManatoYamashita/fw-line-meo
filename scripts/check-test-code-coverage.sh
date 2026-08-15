@@ -157,24 +157,43 @@ found_deep_paths=0
 # **pnpm-workspace.yaml の glob 文字列からは作らない**（理由は subdir_owned_elsewhere を参照）。
 scanned_pkg_dirs=''
 
-# サブディレクトリ走査で見るべき拡張子か（Issue #81）。
-#   $1 パス / $2 範囲（js / js+ts）
-# JS 系は常に対象。TS 系は `ts/` 直下呼び出し（js+ts）でだけ対象にする。workspace 配下の
-# `.ts` / `.tsx` は CODE_DIR_CANDIDATES のディレクトリ走査（候補外検出を含む）が担当済みで、
-# 広げると二重報告になる。
+# サブディレクトリ走査で見るべき拡張子か（Issue #81 / #95）。
+#   $1 パス / $2 範囲（js / ts-extra / js+ts）
 #
-# **`.mts` / `.cts` はこの「担当済み」に含まれない（Issue #95）。** ディレクトリ走査の
-# dir_ts_hits も候補外検出の entry_ts_hits も `*.ts` / `*.tsx` しか数えないため、
-# workspace 配下の深さ 2 以上に置かれた `.mts` / `.cts` はどの器も見ていない（base・head とも
-# 緑になることを実測済み）。本 PR より前から開いている穴であり、是正は #95 で扱う。
-# ここを js+ts へ広げるだけでは `.ts` / `.tsx` が二重報告になるため、範囲指定の分割が要る。
+# JS 系は常に対象。TS 系の扱いは呼出元で変える。
+#
+#   js        JS 系のみ。現在この値で呼ぶ箇所は無いが、範囲指定の意味を 1 箇所へ集めるために残す。
+#   ts-extra  JS 系 ＋ `.mts` / `.cts`。workspace 呼出はこれ。
+#   js+ts     JS 系 ＋ TS 系すべて。`ts/` 直下呼出はこれ。
+#
+# workspace 配下の `.ts` / `.tsx` を含めないのは、CODE_DIR_CANDIDATES のディレクトリ走査
+# （候補外検出を含む）が担当済みで、広げると同じ 1 つの原因が 2 種類の指示になるためである。
+#
+# **`.mts` / `.cts` はその「担当済み」に入らない（Issue #95）。** ディレクトリ走査の
+# dir_ts_hits も候補外検出の entry_ts_hits も `*.ts` / `*.tsx` しか数えないため、workspace 配下の
+# 深さ 2 以上に置かれた `.mts` / `.cts` は以前どの器も見ていなかった。`ts-extra` はその穴だけを
+# 塞ぐための値である。**`js+ts` へ広げて済ませてはならない**（`.ts` / `.tsx` が二重報告になる）。
+#
+# find 式へ `.mts` / `.cts` を足してディレクトリ単位の担当へ寄せる案は採らなかった。あれは
+# ディレクトリ粒度であり、`src/` に `.ts` と `.mts` が混在すると dir_hits が非ゼロで緑になり、
+# `.mts` 個別の include 漏れを見逃す（tsconfig の `src/**/*.ts` は `.mts` に一致しない）。
 subdir_ext_in_scope() {
   case "$1" in
     *.mjs | *.cjs | *.js | *.jsx) return 0 ;;
   esac
-  [ "$2" = 'js+ts' ] || return 1
-  case "$1" in
-    *.ts | *.tsx | *.mts | *.cts) return 0 ;;
+  case "$2" in
+    ts-extra)
+      case "$1" in
+        *.mts | *.cts) return 0 ;;
+      esac
+      return 1
+      ;;
+    js+ts)
+      case "$1" in
+        *.ts | *.tsx | *.mts | *.cts) return 0 ;;
+      esac
+      return 1
+      ;;
   esac
   return 1
 }
@@ -413,7 +432,10 @@ check_root_files() {
 # **チャンクの部分集合だけを gzip 合計し、予算内に収まって緑になる**。壊れると落ちるのでは
 # なく、別のものを測って緑になる。e2e/mock-gemini.mjs（NODE_OPTIONS で読み込まれる）も同型。
 #
-# 役割分担（workspace の中）: ディレクトリ列挙 = TS のカバレッジ担当 / 本関数 = JS の担当。
+# 役割分担（workspace の中）: ディレクトリ列挙 = `.ts` / `.tsx` の担当 / 本関数 = JS 系と
+# `.mts` / `.cts` の担当（Issue #95）。「TS 系はディレクトリ列挙の担当」と括ると、`*.ts` /
+# `*.tsx` しか数えない dir_ts_hits / entry_ts_hits の実態から外れ、担当者不在の場所に
+# 「担当済み」と読める注記が付く。それが #95 の発見を遅らせた形である。
 # 拡張子ベースの列挙にするのは、上の check_root_files と同じ理由（列挙が陳腐化しない）。
 #
 # ---------------------------------------------------------------------------
@@ -435,10 +457,12 @@ check_root_files() {
 # `-name apps -prune` がこれに当たった）。列挙は git 管理下由来へ移ったが（Issue #82）、
 # 落とし方を絶対パス接頭辞に置く理由は変わらない。
 #
-# $6 で拡張子の範囲を切り替える。workspace 呼び出しは JS 系のみに留める。workspace 配下の
-# `.ts` は CODE_DIR_CANDIDATES のディレクトリ走査が既に担当しており、広げると同じ穴を
-# 二重に報告することになる。`ts/` 直下呼び出しだけが TS 系まで見る（そちらには
-# CODE_DIR_CANDIDATES のディレクトリ走査が回らず、TS 系の担当者が誰も居ないため）。
+# $6 で拡張子の範囲を切り替える。workspace 呼び出しは `ts-extra`（JS 系＋`.mts` / `.cts`）に
+# 留める。workspace 配下の `.ts` / `.tsx` は CODE_DIR_CANDIDATES のディレクトリ走査が既に
+# 担当しており、そこまで広げると同じ穴を二重に報告することになる。**`.mts` / `.cts` はその
+# 「担当済み」に入らない**（dir_ts_hits も entry_ts_hits も `*.ts` / `*.tsx` しか数えないため。
+# Issue #95）。`ts/` 直下呼び出しだけが `js+ts` で TS 系すべてを見る（そちらには
+# CODE_DIR_CANDIDATES のディレクトリ走査が回らず、`.ts` / `.tsx` にも担当者が居ないため）。
 # ---------------------------------------------------------------------------
 #
 # 呼出元の fail / checked_subdir_files / found_deep_paths を更新する
@@ -448,7 +472,8 @@ check_root_files() {
 #   $3 その単位の lint スクリプト文字列
 #   $4 その単位の tsc プログラム構成（--listFiles の出力）
 #   $5 別の呼出が担当済みのディレクトリの絶対パス一覧（改行区切り・末尾 / 付き・空可）
-#   $6 拡張子の範囲: js（JS 系のみ）/ js+ts（TS 系も含む）
+#   $6 拡張子の範囲: js（JS 系のみ）/ ts-extra（JS 系＋`.mts` / `.cts`・workspace 呼出）/
+#      js+ts（JS 系＋TS 系すべて・`ts/` 直下呼出）。定義は subdir_ext_in_scope に集約してある
 check_subdir_files() {
   csf_dir="$1"
   csf_rel="$2"
@@ -460,7 +485,7 @@ check_subdir_files() {
   # 未知の範囲指定は fail-closed にする。既定値へ倒すと、呼出側の引数がずれたときに
   # 「走査したつもりで何も見ていない」状態が緑のまま通る。
   case "$csf_exts" in
-    js | js+ts) ;;
+    js | ts-extra | js+ts) ;;
     *)
       echo "ERROR: check_subdir_files の呼出で未知の拡張子指定です: '${csf_exts}'。" >&2
       echo "       → 呼出側の引数が壊れています。${csf_rel} のサブディレクトリ走査は行われませんでした。" >&2
@@ -784,11 +809,14 @@ ${listed}"
     # (4) workspace 直下のコードファイル（Issue #78）。上のディレクトリ走査では構造的に拾えない。
     check_root_files "$pkg_dir" "$rel_pkg" "$lint_script" "$program_files"
 
-    # (5) サブディレクトリの JS 系ファイル（Issue #83）。(3) は `.ts`/`.tsx` を含む
-    #     ディレクトリしか見ず、(4) は -maxdepth 1 で降りないため、どちらにも入らない。
-    #     ここは JS 系に限る（TS 系は (3) の担当。広げると同じ穴を二重に報告する）。
+    # (5) サブディレクトリの JS 系ファイル（Issue #83）と `.mts` / `.cts`（Issue #95）。
+    #     (3) は `.ts`/`.tsx` を含むディレクトリしか見ず、(4) は -maxdepth 1 で降りないため、
+    #     どちらにも入らない。
+    #     範囲を `ts-extra` にするのは、`.ts` / `.tsx` **だけ**が (3) の担当だからである。
+    #     (3) の dir_ts_hits も候補外検出の entry_ts_hits も `*.ts` / `*.tsx` しか数えないため、
+    #     `.mts` / `.cts` は担当者不在だった（#95）。`js+ts` へ広げると `.ts` が二重報告になる。
     #     workspace の内側なので、降りてはいけないトップディレクトリは無い。
-    check_subdir_files "$pkg_dir" "$rel_pkg" "$lint_script" "$program_files" '' 'js'
+    check_subdir_files "$pkg_dir" "$rel_pkg" "$lint_script" "$program_files" '' 'ts-extra'
   done
 done <<EOF
 $globs

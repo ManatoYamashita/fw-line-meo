@@ -1,204 +1,160 @@
-# scripts/check-test-code-coverage.sh の自己テスト（Issue #90）。
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
+# scripts/check-test-code-coverage.sh の自己テスト — Tier A（Issue #90）。
 #
-# このガードは #70 / #78 / #83 / #81 と 4 回、事後に穴が見つかっている。中でも #81 の偽緑は
-# 653 行を読むだけでは見つからず、実走して初めて出た。ここでは実物の tsc / eslint に問い合わせる
-# 合成ツリーを組み、そのときの再現条件をケースとして固定する。
+# 実 node_modules を使わず、npx スタブで eslint / tsc の応答だけを模擬して走らせる。
+# ここで検証するのは **走査範囲・担当分界・fail-closed 分岐の到達性** である。
+# tsconfig の include の実効範囲や flat config の ignores の合成は模擬しない（Tier B の担当）。
+#
+# なぜ層を分けるか: 赤ケースを期待エラー文字列まで照合しても、**判別子が定数化して片側の分岐が
+# 実質デッドコードになった**状態は緑のまま残る。PR #92 のレビューで found_subdir_candidates が
+# 実際にその劣化をしており、653 行を読むだけでも赤ケースを増やすだけでも出なかった。分岐へ
+# 到達する最小改変が存在すること自体を assert する型（fx_guard_mutate）はここにしか置けない。
 
-# 緑になる最小の合成 ts ツリーを組む。
-# 対象ガードの空振り防止（workspace / ディレクトリ / 直下ファイル / サブディレクトリファイル が
-# それぞれ 1 件以上）をすべて満たす必要があるため、この 4 種を最低 1 件ずつ含める。
-tcc_fixture() {
+tcc_stub_fixture() {
   fx_guard check-test-code-coverage
-
-  fx_write ts/pnpm-workspace.yaml <<'EOF'
-packages:
-  - 'packages/*'
-EOF
-
-  fx_write ts/package.json <<'EOF'
-{
-  "name": "selftest-root",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "lint": "eslint eslint.config.js && pnpm -r lint",
-    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.tools.json"
-  }
-}
-EOF
-
-  fx_write ts/tsconfig.tools.json <<'EOF'
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "types": [],
-    "allowJs": true,
-    "checkJs": true,
-    "noEmit": true,
-    "strict": true,
-    "skipLibCheck": true
-  },
-  "include": ["eslint.config.js"]
-}
-EOF
-
-  # flat config。files を明示しないと eslint が「no matching configuration」で全ファイルを
-  # ignored 扱いにし、ガードの (A) 判定が意図と無関係に赤くなる。
-  fx_write ts/eslint.config.js <<'EOF'
-// @ts-check
-export default [
-  { files: ['**/*.js', '**/*.mjs', '**/*.cjs', '**/*.jsx', '**/*.ts', '**/*.tsx'], rules: {} },
-];
-EOF
-
-  fx_write ts/packages/w1/package.json <<'EOF'
-{
-  "name": "w1",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "lint": "eslint src test perf vitest.config.ts",
-    "typecheck": "tsc -p tsconfig.json"
-  }
-}
-EOF
-
-  fx_write ts/packages/w1/tsconfig.json <<'EOF'
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "types": [],
-    "allowJs": true,
-    "checkJs": true,
-    "noEmit": true,
-    "strict": true,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts", "perf/*.mjs"]
-}
-EOF
-
-  fx_write ts/packages/w1/src/a.ts <<'EOF'
-export const a = 1;
-EOF
-  fx_write ts/packages/w1/test/b.test.ts <<'EOF'
-export const b = 2;
-EOF
-  fx_write ts/packages/w1/vitest.config.ts <<'EOF'
-// @ts-check
-export default {};
-EOF
-  fx_write ts/packages/w1/perf/x.mjs <<'EOF'
-// @ts-check
-export const x = 1;
-EOF
-
-  # 実物の tsc / eslint を借用する（pnpm install も worktree 汚染も不要）。
-  fx_link_node_modules ts
-  fx_link_node_modules ts/packages/w1
+  tcc_tree
 }
 
 # ---------------------------------------------------------------------------
 
-t_begin 'check-test-code-coverage: 正常な合成ツリーは緑（件数まで照合）'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  fx_run check-test-code-coverage
-  expect_green
-  # 「OK」だけでなく件数を照合する。0 件のまま緑になる経路と区別するため。
-  # 末尾の語は対象ガードの OK 行と一致させること。#92 が check_js_files を check_subdir_files へ
-  # 改名した際に「サブディレクトリ JS」→「サブディレクトリファイル」へ変わったが、本ケースは
-  # #92 と独立に書かれていたため、両者が merge された時点で main が赤くなった（実測: e0f6d5c）。
-  expect_output_matches '1 workspace / 2 ディレクトリ / 2 直下ファイル / 1 サブディレクトリファイル'
-fi
+t_begin 'check-test-code-coverage[A]: スタブだけで正常な合成ツリーが緑（件数まで照合）'
+tcc_stub_fixture
+fx_run check-test-code-coverage
+expect_green
+# 件数まで照合する。0 件のまま緑になる経路と区別するため。
+# Tier B と同じ件数が出ることが、スタブが実物と同じ担当分界を再現できている証拠でもある。
+expect_output_matches '1 workspace / 2 ディレクトリ / 2 直下ファイル / 1 サブディレクトリファイル'
 t_end
 
 # ---------------------------------------------------------------------------
-# Issue #81 の中核。この条件は base（PR #88 以前）では exit 0（偽緑）だった。
-# check_root_files は ts/ 直下のコードファイルが 0 件だと早期 return するため、tsc が一度も
-# 走っていないことを誰も報告しなかった。判定を関数の外側へ出したことでここが赤になる。
-# 誰かが判定を check_root_files の内側へ戻すと、このケースが再び緑になり失敗する。
+# Issue #95: workspace 配下の深さ 2 以上に置かれた `.mts` / `.cts` はどの器も見ていなかった。
+# ディレクトリ走査の dir_ts_hits も候補外検出の entry_ts_hits も `*.ts` / `*.tsx` しか数えず、
+# check_subdir_files の workspace 呼出は TS 系を範囲外にしていたためである。
+# 素の穴より質が悪いのは、「TS 系は担当済み」と読める注記がそこに付いていたことである。
 
-t_begin 'check-test-code-coverage: ts/ 直下 0 件かつ tsc 空振りで緑を返さない（#81 の偽緑）'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  # ts/ 直下のコードファイルを 0 件にする。eslint の flat config は合成ツリーのルートへ退避し、
-  # workspace 側からは上位探索で届く状態を保つ（lint 判定を巻き込まないため）。
-  mv "${FX}/ts/eslint.config.js" "${FX}/eslint.config.js"
-  fx_stub_npx_failing_tsc_in '*/ts'
-  fx_run check-test-code-coverage stub
-  expect_red 'ts/ 直下で tsc のプログラム構成を取得できませんでした'
-fi
-t_end
-
-t_begin 'check-test-code-coverage: 対照 — 同じ 0 件ツリーでも tsc が動けば緑（偽陽性でない）'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  mv "${FX}/ts/eslint.config.js" "${FX}/eslint.config.js"
-  # スタブを置かない。上のケースの赤が「0 件だから」ではなく「tsc が空振りしたから」で
-  # あることを示す対照。ts/ 直下に検査すべきファイルが無い以上、緑が正しい。
-  fx_run check-test-code-coverage
-  expect_green
-fi
-t_end
-
-# ---------------------------------------------------------------------------
-
-t_begin 'check-test-code-coverage: ts/ の typecheck が -p を持たないとき二重報告しない（#81 タスク2）'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  fx_write ts/package.json <<'EOF'
-{
-  "name": "selftest-root",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "lint": "eslint eslint.config.js && pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
-  }
-}
+t_begin 'check-test-code-coverage[A]: 候補ディレクトリ内の深さ 2 の .mts が型検査外なら赤（#95）'
+tcc_stub_fixture
+# tsconfig の include は `src/**/*.ts` であり `.mts` に一致しない。実物の tsc と同じ状態を
+# 「プログラムから落とす」ことで再現する。
+fx_write ts/packages/w1/src/tool.mts <<'EOF'
+export const tool = 1;
 EOF
-  fx_run check-test-code-coverage
-  expect_red 'typecheck が ts/ 直下用の tsconfig を走らせていません'
-  # 同じ 1 つの原因に対し「include へ追加してください」を重ねない。
-  # 修正前は 2 件出て互いに矛盾する指示になっていた。
-  expect_absent 'が tsc のプログラムに含まれていません'
-fi
+fx_stub_tsc_exclude 'src/tool.mts'
+fx_run check-test-code-coverage
+expect_red 'src/tool.mts が tsc のプログラムに含まれていません'
 t_end
 
-t_begin 'check-test-code-coverage: tsconfig.tools.json 欠落は空振りとして報告する'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  rm -f "${FX}/ts/tsconfig.tools.json"
-  fx_run check-test-code-coverage
-  expect_red 'typecheck が指す tsconfig.tools.json が存在しません'
-  expect_red 'ts/ 直下で tsc のプログラム構成を取得できませんでした'
-fi
+t_begin 'check-test-code-coverage[A]: 候補外ディレクトリの .cts が lint 走査外なら赤（#95）'
+tcc_stub_fixture
+# `tools` は CODE_DIR_CANDIDATES にも lint の引数（src test perf vitest.config.ts）にも無い。
+fx_write ts/packages/w1/tools/other.cts <<'EOF'
+export const other = 1;
+EOF
+fx_run check-test-code-coverage
+expect_red 'tools/other.cts が lint スクリプトの走査対象にありません'
 t_end
 
-t_begin 'check-test-code-coverage: workspace 側の tsc 空振りも検出する'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  fx_stub_npx_failing_tsc_in '*/packages/w1'
-  fx_run check-test-code-coverage stub
-  expect_red 'で tsc のプログラム構成を取得できませんでした'
-fi
+t_begin 'check-test-code-coverage[A]: 対照 — workspace 直下の .mts は元から担当がある（深さの境界）'
+tcc_stub_fixture
+# check_root_files の find 式は元から `.mts` / `.cts` を含む。#95 の穴は拡張子ではなく
+# **深さ 2 以上**で開いていた。ここが赤のままであることが、その境界の実測になる。
+fx_write ts/packages/w1/tool.mts <<'EOF'
+export const tool = 1;
+EOF
+fx_stub_tsc_exclude 'w1/tool.mts'
+fx_run check-test-code-coverage
+expect_red 'tool.mts が tsc のプログラムに含まれていません'
+t_end
+
+t_begin 'check-test-code-coverage[A]: 対照 — 候補外の .ts は候補外検出だけが報告する（二重報告しない）'
+tcc_stub_fixture
+fx_write ts/packages/w1/tools/dup.ts <<'EOF'
+export const dup = 1;
+EOF
+fx_run check-test-code-coverage
+expect_red 'tools/ は TypeScript を含みますが本ガードの走査候補にありません'
+# `.ts` / `.tsx` はディレクトリ走査と候補外検出が担当済みである。サブディレクトリ走査まで
+# 広げると、同じ 1 つの原因が 2 種類の指示になる（#81 タスク 2 で潰した形状）。
+expect_absent 'tools/dup.ts が lint スクリプトの走査対象にありません'
+t_end
+
+# ---------------------------------------------------------------------------
+# fail-closed 分岐。実物の eslint では「判定結果が返らない」「JSON が壊れる」状態を安定して
+# 作れないため、この層でしか到達を確認できない。ガードが空振りしたときに空振りだと言えることは、
+# ガード本体の検査項目より重要である（本ガードは「緑が信用できるか」を守る装置であるため）。
+
+t_begin 'check-test-code-coverage[A]: eslint の判定結果が返らないとき空振りとして赤になる'
+tcc_stub_fixture
+fx_stub_eslint_blank
+fx_run check-test-code-coverage
+expect_red 'eslint の判定結果を取得できませんでした'
+expect_red '本ガードの lint 判定が空振りします'
+t_end
+
+t_begin 'check-test-code-coverage[A]: eslint の出力形式が変わったとき空振りとして赤になる'
+tcc_stub_fixture
+fx_stub_eslint_garbage
+fx_run check-test-code-coverage
+expect_red 'eslint の JSON 出力を解釈できませんでした'
+t_end
+
+t_begin 'check-test-code-coverage[A]: eslint の ignores に消されたサブディレクトリのファイルを検出する'
+tcc_stub_fixture
+# lint スクリプトの引数に perf があっても、ignores に入っていれば走査そのものが行われない。
+# 設定文字列を読むだけでは判定できない形状であり、ガードが eslint 自身に尋ねる理由でもある。
+fx_stub_eslint_ignored 'perf/x.mjs'
+fx_run check-test-code-coverage
+expect_red 'perf/x.mjs は eslint の ignores に除外されています'
+t_end
+
+# ---------------------------------------------------------------------------
+# 分岐到達性（Issue #90 コメントの主眼）。
+#
+# 赤ケースを期待エラー文字列まで照合しても、**判別子が定数化して片側の分岐が実質デッドコードに
+# なった**状態は緑のまま残る。PR #92 のレビューで found_subdir_candidates が実際にその劣化を
+# しており、深さフィルタの前で数えるよう直したのが found_deep_paths である。分岐ごとに
+# 「そこへ到達する最小改変が存在すること」自体を assert しておかないと、同じ劣化が再発する。
+
+t_begin 'check-test-code-coverage[A]: 占有者ゼロは両論併記で赤にする（断定へ戻ったら落ちる）'
+tcc_stub_fixture
+# サブディレクトリの占有者を消す。列挙自体は生きているため「対象の消失」と「列挙の破損」の
+# どちらとも決められない。列挙の返却だけでは両者は同じ 0 件を生む。
+rm -f "${FX}/ts/packages/w1/perf/x.mjs"
+fx_run check-test-code-coverage
+expect_red 'サブディレクトリのコードファイルを1件も検証できませんでした'
+expect_red '(1) 対象の消失'
+expect_red '(2) 列挙の破損'
+# 片側へ断定する実装へ戻ると、この不在アサーションが落ちる。
+expect_absent '列挙が深さ 2 以上へ一度も到達していません'
+t_end
+
+t_begin 'check-test-code-coverage[A]: 【変異】列挙が深さ方向へ死ぬと破損側の分岐へ到達する'
+# **この分岐は無変異では到達不能である。** 先に置かれた checked_dirs の空振り防止が
+# 「.ts を含むディレクトリが 1 件以上ある」ことを要求し、それは構造的に深さ 2 以上のファイルの
+# 存在を意味するため、found_deep_paths は必ず非ゼロになる。到達するのは列挙が実際に壊れた
+# ときだけであり、それを再現するには変異が要る。変異が当たらなければ fx_guard_mutate が落とす。
+#
+# 変異は `tracked_code_files` の **--cached 側だけ**へ当てて深さ 2 以上を落とす（Issue #82 で
+# 走査が find/prune から `git ls-files` へ替わったため、以前の prune 一覧を広げる変異は
+# 当たらなくなった）。深さ 1 は残るので checked_dirs / checked_root_files の空振り防止は
+# 通過し、狙った分岐だけへ到達する。未追跡側（--others）は対の警告に使うため巻き込まない。
+fx_guard_mutate check-test-code-coverage \
+  -e 's@--cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE"@--cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" | grep -v /@'
+tcc_tree
+fx_run check-test-code-coverage
+expect_red '列挙が深さ 2 以上へ一度も到達していません'
+expect_red 'tracked_code_files が壊れている可能性が高いです'
+# 両論併記側と取り違えていないこと。
+expect_absent '(1) 対象の消失'
+t_end
+
+t_begin 'check-test-code-coverage[A]: 【変異】範囲指定が壊れたら未知の指定として赤になる'
+# 呼出側の引数がずれたときに既定値へ倒すと、「走査したつもりで何も見ていない」状態が緑のまま
+# 通る。fail-closed 側へ倒す分岐が生きていることを確認する。
+fx_guard_mutate check-test-code-coverage -e "s/'' 'ts-extra'/'' 'bogus'/"
+tcc_tree
+fx_run check-test-code-coverage
+expect_red "check_subdir_files の呼出で未知の拡張子指定です: 'bogus'"
 t_end
 
 # ---------------------------------------------------------------------------
@@ -210,51 +166,40 @@ t_end
 # **一時ファイル名を lint 引数へ恒久的に追加せよ**という従ってはいけない指示を出していた。
 
 t_begin 'check-test-code-coverage: 未追跡の一時ファイルで誤爆しない（#82）'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  fx_track_now   # ここまでを追跡させる
-  # 以降は未追跡。vitest がクラッシュ時に残す一時ファイルを模す。
-  fx_write ts/packages/w1/vitest.config.ts.timestamp-1754600000000-abcdef.mjs <<'EOF'
+tcc_stub_fixture
+fx_track_now   # ここまでを追跡させる
+# 以降は未追跡。vitest がクラッシュ時に残す一時ファイルを模す。
+fx_write ts/packages/w1/vitest.config.ts.timestamp-1754600000000-abcdef.mjs <<'EOF'
 export default {};
 EOF
-  fx_run check-test-code-coverage
-  expect_green
-  # **従ってはいけない指示**（一時ファイル名を lint 引数へ恒久的に追加せよ）が出ないこと。
-  # ファイル名そのものは下の WARNING に現れるため、名前の不在では検証にならない。
-  expect_absent 'lint スクリプトの引数にありません'
-  expect_absent 'ERROR:'
-  # 見逃しを可視化する対の仕組みが働いていること。git 列挙は「未 add を見逃す」側へ倒れるため、
-  # この警告が無いと fail-open が沈黙する。
-  expect_output_matches 'WARNING: .*未追跡のコードファイルが 1 件'
-fi
+fx_run check-test-code-coverage
+expect_green
+# **従ってはいけない指示**（一時ファイル名を lint 引数へ恒久的に追加せよ）が出ないこと。
+# ファイル名そのものは下の WARNING に現れるため、名前の不在では検証にならない。
+expect_absent 'lint スクリプトの引数にありません'
+expect_absent 'ERROR:'
+# 見逃しを可視化する対の仕組みが働いていること。git 列挙は「未 add を見逃す」側へ倒れるため、
+# この警告が無いと fail-open が沈黙する。
+expect_output_matches 'WARNING: .*未追跡のコードファイルが 1 件'
 t_end
 
 t_begin 'check-test-code-coverage: 対照 — 同じファイルが追跡されていれば検出する（見逃しでない）'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  # fx_track_now を呼ばない。fx_run が全ファイルを追跡させるため、この .mjs も対象になる。
-  # 上のケースの緑が「未追跡だから」であって「拡張子や場所で落としたから」ではないことを示す。
-  fx_write ts/packages/w1/tracked-extra.mjs <<'EOF'
+tcc_stub_fixture
+# fx_track_now を呼ばない。fx_run が全ファイルを追跡させるため、この .mjs も対象になる。
+# 上のケースの緑が「未追跡だから」であって「拡張子や場所で落としたから」ではないことを示す。
+fx_write ts/packages/w1/tracked-extra.mjs <<'EOF'
 export default {};
 EOF
-  fx_run check-test-code-coverage
-  expect_red 'tracked-extra.mjs'
-fi
+fx_run check-test-code-coverage
+expect_red 'tracked-extra.mjs'
 t_end
 
 t_begin 'check-test-code-coverage: git work tree でなければ緑を返さない'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  # .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
-  OUT="$(cd "$FX" && bash scripts/check-test-code-coverage.sh 2>&1)" && RC=0 || RC=$?
-  expect_red 'git work tree ではありません'
-fi
+tcc_stub_fixture
+# .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="$(cd "$FX" && bash scripts/check-test-code-coverage.sh 2>&1)" && RC=0 || RC=$?
+expect_red 'git work tree ではありません'
 t_end
 
 # ---------------------------------------------------------------------------
@@ -262,56 +207,44 @@ t_end
 # **対象の表現**まで替わる。以下 3 件はいずれもその表現差・出力経路の差で生じる。
 
 t_begin 'check-test-code-coverage: 非 ASCII ファイル名のコードファイルも列挙する'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  # git ls-files は core.quotePath 既定 true のもとで非 ASCII パスを引用符で括って返すため、
-  # 行末が `"` になり CODE_EXT_RE の `$` アンカーに一致しない。結果としてこのファイルは
-  # **すべての列挙から丸ごと消え**、lint にも型検査にも配線されていないのにガードは緑になる。
-  # 上の tracked-extra.mjs と配置も未配線ぶりも同一で、違いはファイル名だけである
-  # （つまりこのケースが赤で tracked-extra.mjs が赤なら、差は名前の表現に閉じている）。
-  fx_write 'ts/packages/w1/日本語設定.mjs' <<'EOF'
+tcc_stub_fixture
+# git ls-files は core.quotePath 既定 true のもとで非 ASCII パスを引用符で括って返すため、
+# 行末が `"` になり CODE_EXT_RE の `$` アンカーに一致しない。結果としてこのファイルは
+# **すべての列挙から丸ごと消え**、lint にも型検査にも配線されていないのにガードは緑になる。
+# 上の tracked-extra.mjs と配置も未配線ぶりも同一で、違いはファイル名だけである
+# （つまりこのケースが赤で tracked-extra.mjs が赤なら、差は名前の表現に閉じている）。
+fx_write 'ts/packages/w1/日本語設定.mjs' <<'EOF'
 export default {};
 EOF
-  fx_run check-test-code-coverage
-  expect_red '日本語設定.mjs'
-fi
+fx_run check-test-code-coverage
+expect_red '日本語設定.mjs'
 t_end
 
 t_begin 'check-test-code-coverage: 未追跡が大量でも中断しない'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  fx_track_now   # ここまでを追跡させる
-  # 未追跡一覧の**バイト数**が pipe buffer（64KB）を超えると、先頭数件へ絞る consumer が
-  # 先にパイプを閉じ、上流が SIGPIPE で落ちる。set -e × pipefail によりガード自体が
-  # exit 141 で中断し、OK も NG も出ないまま赤になる。入力サイズ依存で赤にも緑にも
-  # 転ぶという点で、本スクリプトが grep -q を避けているのと同じ罠である。
-  # 件数は「1 行 185 バイト前後 × 1200 件 ≒ 216KB」を狙って選んである。上流が書き込める
-  # 上限（consumer の入力 buffer 2 杯分 ＝ 128KB 前後）に対し 1.7 倍の余裕を取り、
-  # BSD / GNU の buffer 幅の差でケースが緑へ転ばないようにする。
-  fx_flood 1200 ts .mjs 'export default {};'
-  fx_run check-test-code-coverage
-  expect_green
-  # 警告そのものが出ていることまで見る（出力を丸ごと落として緑にしても通らないように）。
-  expect_output_matches 'WARNING: .*未追跡のコードファイルが 1200 件'
-fi
+tcc_stub_fixture
+fx_track_now   # ここまでを追跡させる
+# 未追跡一覧の**バイト数**が pipe buffer（64KB）を超えると、先頭数件へ絞る consumer が
+# 先にパイプを閉じ、上流が SIGPIPE で落ちる。set -e × pipefail によりガード自体が
+# exit 141 で中断し、OK も NG も出ないまま赤になる。入力サイズ依存で赤にも緑にも
+# 転ぶという点で、本スクリプトが grep -q を避けているのと同じ罠である。
+# 件数は「1 行 185 バイト前後 × 1200 件 ≒ 216KB」を狙って選んである。上流が書き込める
+# 上限（consumer の入力 buffer 2 杯分 ＝ 128KB 前後）に対し 1.7 倍の余裕を取り、
+# BSD / GNU の buffer 幅の差でケースが緑へ転ばないようにする。
+fx_flood 1200 ts .mjs 'export default {};'
+fx_run check-test-code-coverage
+expect_green
+# 警告そのものが出ていることまで見る（出力を丸ごと落として緑にしても通らないように）。
+expect_output_matches 'WARNING: .*未追跡のコードファイルが 1200 件'
 t_end
 
 t_begin 'check-test-code-coverage: サブディレクトリ 0 件の診断が撤去済みの find / prune を指さない'
-if ! fx_has_real_toolchain; then
-  t_skip 'ts/node_modules の tsc / eslint が無い（pnpm install 前）'
-else
-  tcc_fixture
-  # 唯一のサブディレクトリ占有者を外して checked_subdir_files を 0 にし、両論併記の診断を出させる。
-  # 走査系は find でも prune でもなくなったため、その語で調査先を案内すると存在しない機構へ
-  # 誘導することになる（原因と逆方向へ誘導するのは #81 で塞いだはずの欠落である）。
-  rm -f "${FX}/ts/packages/w1/perf/x.mjs"
-  fx_run check-test-code-coverage
-  expect_red 'サブディレクトリのコードファイルを1件も検証できませんでした'
-  expect_absent 'prune'
-  expect_absent 'find の'
-fi
+tcc_stub_fixture
+# 唯一のサブディレクトリ占有者を外して checked_subdir_files を 0 にし、両論併記の診断を出させる。
+# 走査系は find でも prune でもなくなったため、その語で調査先を案内すると存在しない機構へ
+# 誘導することになる（原因と逆方向へ誘導するのは #81 で塞いだはずの欠落である）。
+rm -f "${FX}/ts/packages/w1/perf/x.mjs"
+fx_run check-test-code-coverage
+expect_red 'サブディレクトリのコードファイルを1件も検証できませんでした'
+expect_absent 'prune'
+expect_absent 'find の'
 t_end

@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-typecheck-coverage.sh の自己テスト（Issue #90）。
 #
 # 本ガードは Issue #51 の「定義されているのに CI から呼ばれない」を機械検出する。

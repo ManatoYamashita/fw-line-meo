@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-next-public-buildargs.sh の自己テスト（Issue #90）。
 #
 # 対象は grep 検証のみで実行環境に依存しないため、skip 条件を持たない。

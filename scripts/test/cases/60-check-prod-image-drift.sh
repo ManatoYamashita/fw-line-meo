@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-prod-image-drift.sh の自己テスト（Issue #91）。
 #
 # 本ガードは「main は正しいのに本番へ届いていない」を、マージ契機ではなく時間で検出する。

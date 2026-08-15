@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/check-markdown-emphasis.sh の自己テスト（Issue #89 / #90）。
 #
 # 本ガードは「壊れても CI は落ちず、見た目だけが黙って壊れる」形を検出する。誤検出は逆に CI を
@@ -349,6 +350,7 @@ if ! fx_has_node; then
 else
   mde_fixture
   # .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
   OUT="$(cd "$FX" && bash scripts/check-markdown-emphasis.sh 2>&1)" && RC=0 || RC=$?
   expect_red 'git work tree ではありません'
 fi

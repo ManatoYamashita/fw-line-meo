@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
 # scripts/prod-image-drift-notify.sh の自己テスト（PR #104 のレビュー指摘 / Issue #109）。
 #
 # 背景: report-ci-issue.sh が緑経路で本文を ``` で包むのをやめた結果、呼び出し側の本文が
