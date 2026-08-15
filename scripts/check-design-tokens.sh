@@ -103,7 +103,18 @@ theme_count=0
 while IFS= read -r hex; do
   [ -n "$hex" ] || continue
   theme_count=$((theme_count + 1))
-  if ! printf '%s\n' "$token_hexes" | grep -qx "$hex"; then
+  # 件数で判定する（Issue #117）。`$token_hexes` は **多行**であり、quiet 判定にすると
+  # トークンが増えた時点で最初の一致で打ち切られ、上流の printf が EPIPE で 141 を返す。
+  # ここは `if !` の内側なので中断はせず、141 が「無一致」と読まれて **定義済みの色を
+  # 未定義として報告する偽の赤**に化ける。実測の発火点は約 20,000 行（規律 2）。
+  # 無一致（exit 1）と評価不能（exit 2 以上）は分ける。後置 true で潰すと、壊れた
+  # パターンが「無一致」に化けて未定義色を素通りさせる。
+  hex_rc=0
+  hex_hits="$(printf '%s\n' "$token_hexes" | grep -cx "$hex")" || hex_rc=$?
+  if [ "$hex_rc" -gt 1 ]; then
+    echo "ERROR: ${THEME_CSS#$ROOT/} の ${hex} を照合できません（grep exit=${hex_rc}）。" >&2
+    fail=1
+  elif [ "${hex_hits:-0}" -eq 0 ]; then
     echo "ERROR: ${THEME_CSS#$ROOT/} の ${hex} は design-tokens に定義がありません。" >&2
     echo "       → theme.css の値は design-tokens と同値でなければなりません（単一情報源の維持）。" >&2
     fail=1

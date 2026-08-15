@@ -43,6 +43,11 @@ jobs:
         # 引用符なしの name: に ' #' が入ると YAML がそこをコメントとして捨て、Actions の
         # 表示名が切れる（本リポジトリで 3 度再発）。失敗ステップを名前で特定できなくなる。
         run: bash scripts/check-workflow-step-names.sh
+      - name: 'シェルパイプ consumer ガード（Issue #117・steering 規律 2 の機械強制）'
+        # 入力を読み切らない consumer をパイプの下流へ置くと、上流が EPIPE で 141 になり
+        # pipefail がそれを伝播する。入力サイズ依存なので閾値の下では何度走らせても緑になり、
+        # コードを読んでも出ない。構文そのものを禁じる（read-only grep 検証・node 不要）。
+        run: bash scripts/check-shell-pipe-consumers.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
