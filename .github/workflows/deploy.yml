@@ -176,24 +176,19 @@ jobs:
           esac
 
           body="$RUNNER_TEMP/issue-body.md"
-          {
-            if [ "$state" = "red" ]; then
-              echo "deploy-prod が失敗しました。**本番は旧イメージのままです。**"
-            else
-              echo "deploy-prod が成功しました。"
-            fi
-            echo ""
-            echo "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "- 反映対象 commit: \`${DEPLOYED_SHA}\`"
-            echo ""
-            echo "deploy-prod は workflow_run 起動のため PR のチェック欄には現れません。"
-            echo "失敗の範囲は「最後に成功した run」まで遡って確定してください（当日分だけ見ると過小報告になります）。"
-            echo ""
-            echo "\`\`\`"
-            echo "gh run list --workflow deploy.yml"
-            echo "gh workflow run deploy.yml --ref main   # 復旧後の再実行"
-            echo "\`\`\`"
-          } > "$body"
+          # 本文の組み立ては scripts/deploy-notify.sh が持つ（PR #104 のレビュー指摘）。
+          # report-ci-issue.sh は緑（復旧）経路で本文を加工せずそのまま送るため、緑と赤で文面を
+          # 出し分ける責務は呼び出し側にある。以前はここへ直接書いており、1 行目だけを組み分けて
+          # 後半（失敗の範囲を遡れという指示と復旧後の再実行コマンド）を緑でも出していたため、
+          # デプロイ成功で追跡 Issue を閉じるコメントが失敗調査の指示を掲げていた。
+          #
+          # **本文の組み立てをこの run ブロックへ戻さないこと。** 戻すと、緑と赤の文面を検証する
+          # 器が yml からの sed 抽出へ逆戻りし、孤児ケースとして ts-ci を止める（Issue #109 の実績）。
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/deploy-notify.sh \
+            --state "$state" \
+            --run-url "$run_url" \
+            --deployed-sha "$DEPLOYED_SHA" > "$body"
 
           # 署名に run ID を渡すため、連続失敗は 1 つの Issue にコメントとして積み上がる
           # （失敗のたびに新しい Issue を立てない）。
