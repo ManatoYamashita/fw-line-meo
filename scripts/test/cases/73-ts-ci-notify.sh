@@ -93,10 +93,10 @@ t_end
 t_begin 'ts-ci 通知: 赤のコマンド例はフェンス内に置き、緑にはフェンスを出さない'
 fx_guard ts-ci-notify
 tcn_compose red
-OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+OUT="FENCES: $(count_output_matches '^```$')"
 expect_output_matches '^FENCES: 2$'
 tcn_compose green
-OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+OUT="FENCES: $(count_output_matches '^```$')"
 expect_output_matches '^FENCES: 0$'
 t_end
 
