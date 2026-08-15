@@ -117,28 +117,33 @@ t_end
 
 t_begin 'check-test-code-coverage[A]: 占有者ゼロは両論併記で赤にする（断定へ戻ったら落ちる）'
 tcc_stub_fixture
-# サブディレクトリの占有者を消す。走査自体は生きているため「対象の消失」と「走査系の破損」の
-# どちらとも決められない。find の出力だけでは両者は同じ 0 件を生む。
+# サブディレクトリの占有者を消す。列挙自体は生きているため「対象の消失」と「列挙の破損」の
+# どちらとも決められない。列挙の返却だけでは両者は同じ 0 件を生む。
 rm -f "${FX}/ts/packages/w1/perf/x.mjs"
 fx_run check-test-code-coverage
 expect_red 'サブディレクトリのコードファイルを1件も検証できませんでした'
 expect_red '(1) 対象の消失'
-expect_red '(2) 走査系の破損'
+expect_red '(2) 列挙の破損'
 # 片側へ断定する実装へ戻ると、この不在アサーションが落ちる。
-expect_absent '走査が深さ 2 以上へ一度も到達していません'
+expect_absent '列挙が深さ 2 以上へ一度も到達していません'
 t_end
 
-t_begin 'check-test-code-coverage[A]: 【変異】prune を広げると走査破損側の分岐へ到達する'
+t_begin 'check-test-code-coverage[A]: 【変異】列挙が深さ方向へ死ぬと破損側の分岐へ到達する'
 # **この分岐は無変異では到達不能である。** 先に置かれた checked_dirs の空振り防止が
 # 「.ts を含むディレクトリが 1 件以上ある」ことを要求し、それは構造的に深さ 2 以上のファイルの
-# 存在を意味するため、found_deep_paths は必ず非ゼロになる。到達するのは走査系が実際に壊れた
+# 存在を意味するため、found_deep_paths は必ず非ゼロになる。到達するのは列挙が実際に壊れた
 # ときだけであり、それを再現するには変異が要る。変異が当たらなければ fx_guard_mutate が落とす。
+#
+# 変異は `tracked_code_files` の **--cached 側だけ**へ当てて深さ 2 以上を落とす（Issue #82 で
+# 走査が find/prune から `git ls-files` へ替わったため、以前の prune 一覧を広げる変異は
+# 当たらなくなった）。深さ 1 は残るので checked_dirs / checked_root_files の空振り防止は
+# 通過し、狙った分岐だけへ到達する。未追跡側（--others）は対の警告に使うため巻き込まない。
 fx_guard_mutate check-test-code-coverage \
-  -e "s/-name node_modules -o/-name node_modules -o -name src -o -name test -o -name perf -o -name packages -o/"
+  -e 's@--cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE"@--cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" | grep -v /@'
 tcc_tree
 fx_run check-test-code-coverage
-expect_red '走査が深さ 2 以上へ一度も到達していません'
-expect_red 'prune 一覧が広すぎるか find の式が壊れている'
+expect_red '列挙が深さ 2 以上へ一度も到達していません'
+expect_red 'tracked_code_files が壊れている可能性が高いです'
 # 両論併記側と取り違えていないこと。
 expect_absent '(1) 対象の消失'
 t_end
@@ -150,4 +155,96 @@ fx_guard_mutate check-test-code-coverage -e "s/'' 'ts-extra'/'' 'bogus'/"
 tcc_tree
 fx_run check-test-code-coverage
 expect_red "check_subdir_files の呼出で未知の拡張子指定です: 'bogus'"
+t_end
+
+# ---------------------------------------------------------------------------
+# Issue #82: 走査対象を作業ツリーから git 管理下へ寄せたことの検証。
+#
+# 再現条件は vitest / vite が設定ファイルと同じディレクトリへ生成する
+# `<config>.timestamp-<ms>-<rand>.mjs`。通常は finally で消えるが強制終了時に残り、
+# .gitignore にも該当パターンが無い。修正前はこれを「配線すべきコードファイル」として扱い、
+# **一時ファイル名を lint 引数へ恒久的に追加せよ**という従ってはいけない指示を出していた。
+
+t_begin 'check-test-code-coverage: 未追跡の一時ファイルで誤爆しない（#82）'
+tcc_stub_fixture
+fx_track_now   # ここまでを追跡させる
+# 以降は未追跡。vitest がクラッシュ時に残す一時ファイルを模す。
+fx_write ts/packages/w1/vitest.config.ts.timestamp-1754600000000-abcdef.mjs <<'EOF'
+export default {};
+EOF
+fx_run check-test-code-coverage
+expect_green
+# **従ってはいけない指示**（一時ファイル名を lint 引数へ恒久的に追加せよ）が出ないこと。
+# ファイル名そのものは下の WARNING に現れるため、名前の不在では検証にならない。
+expect_absent 'lint スクリプトの引数にありません'
+expect_absent 'ERROR:'
+# 見逃しを可視化する対の仕組みが働いていること。git 列挙は「未 add を見逃す」側へ倒れるため、
+# この警告が無いと fail-open が沈黙する。
+expect_output_matches 'WARNING: .*未追跡のコードファイルが 1 件'
+t_end
+
+t_begin 'check-test-code-coverage: 対照 — 同じファイルが追跡されていれば検出する（見逃しでない）'
+tcc_stub_fixture
+# fx_track_now を呼ばない。fx_run が全ファイルを追跡させるため、この .mjs も対象になる。
+# 上のケースの緑が「未追跡だから」であって「拡張子や場所で落としたから」ではないことを示す。
+fx_write ts/packages/w1/tracked-extra.mjs <<'EOF'
+export default {};
+EOF
+fx_run check-test-code-coverage
+expect_red 'tracked-extra.mjs'
+t_end
+
+t_begin 'check-test-code-coverage: git work tree でなければ緑を返さない'
+tcc_stub_fixture
+# .git を作らずに直接起動する（fx_run の自動 git 化を迂回する）。
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="$(cd "$FX" && bash scripts/check-test-code-coverage.sh 2>&1)" && RC=0 || RC=$?
+expect_red 'git work tree ではありません'
+t_end
+
+# ---------------------------------------------------------------------------
+# 列挙を git へ寄せたことの残差。情報源を替えると「対象の集合」だけでなく
+# **対象の表現**まで替わる。以下 3 件はいずれもその表現差・出力経路の差で生じる。
+
+t_begin 'check-test-code-coverage: 非 ASCII ファイル名のコードファイルも列挙する'
+tcc_stub_fixture
+# git ls-files は core.quotePath 既定 true のもとで非 ASCII パスを引用符で括って返すため、
+# 行末が `"` になり CODE_EXT_RE の `$` アンカーに一致しない。結果としてこのファイルは
+# **すべての列挙から丸ごと消え**、lint にも型検査にも配線されていないのにガードは緑になる。
+# 上の tracked-extra.mjs と配置も未配線ぶりも同一で、違いはファイル名だけである
+# （つまりこのケースが赤で tracked-extra.mjs が赤なら、差は名前の表現に閉じている）。
+fx_write 'ts/packages/w1/日本語設定.mjs' <<'EOF'
+export default {};
+EOF
+fx_run check-test-code-coverage
+expect_red '日本語設定.mjs'
+t_end
+
+t_begin 'check-test-code-coverage: 未追跡が大量でも中断しない'
+tcc_stub_fixture
+fx_track_now   # ここまでを追跡させる
+# 未追跡一覧の**バイト数**が pipe buffer（64KB）を超えると、先頭数件へ絞る consumer が
+# 先にパイプを閉じ、上流が SIGPIPE で落ちる。set -e × pipefail によりガード自体が
+# exit 141 で中断し、OK も NG も出ないまま赤になる。入力サイズ依存で赤にも緑にも
+# 転ぶという点で、本スクリプトが grep -q を避けているのと同じ罠である。
+# 件数は「1 行 185 バイト前後 × 1200 件 ≒ 216KB」を狙って選んである。上流が書き込める
+# 上限（consumer の入力 buffer 2 杯分 ＝ 128KB 前後）に対し 1.7 倍の余裕を取り、
+# BSD / GNU の buffer 幅の差でケースが緑へ転ばないようにする。
+fx_flood 1200 ts .mjs 'export default {};'
+fx_run check-test-code-coverage
+expect_green
+# 警告そのものが出ていることまで見る（出力を丸ごと落として緑にしても通らないように）。
+expect_output_matches 'WARNING: .*未追跡のコードファイルが 1200 件'
+t_end
+
+t_begin 'check-test-code-coverage: サブディレクトリ 0 件の診断が撤去済みの find / prune を指さない'
+tcc_stub_fixture
+# 唯一のサブディレクトリ占有者を外して checked_subdir_files を 0 にし、両論併記の診断を出させる。
+# 走査系は find でも prune でもなくなったため、その語で調査先を案内すると存在しない機構へ
+# 誘導することになる（原因と逆方向へ誘導するのは #81 で塞いだはずの欠落である）。
+rm -f "${FX}/ts/packages/w1/perf/x.mjs"
+fx_run check-test-code-coverage
+expect_red 'サブディレクトリのコードファイルを1件も検証できませんでした'
+expect_absent 'prune'
+expect_absent 'find の'
 t_end
