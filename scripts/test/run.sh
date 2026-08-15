@@ -353,7 +353,14 @@ case "$tool" in
     for f in $files; do
       msgs='[]'
       if [ -f "${stub_dir}/eslint-ignored" ]; then
-        hits="$(grep -Fxc "$f" "${stub_dir}/eslint-ignored" || true)"
+        # 終了コードを捕捉する（Issue #120）。潰すと、制御ファイルを読めない状態が
+        # 「ignore されていない」と同義になり、スタブが黙って別の挙動を模擬する。
+        hits_rc=0
+        hits="$(grep -Fxc "$f" "${stub_dir}/eslint-ignored")" || hits_rc=$?
+        if [ "$hits_rc" -gt 1 ]; then
+          echo "npx スタブ: eslint-ignored を読めません（grep exit=${hits_rc}）。" >&2
+          exit 1
+        fi
         if [ "${hits:-0}" -ne 0 ]; then
           msgs='[{"ruleId":null,"severity":1,"message":"File ignored because of a matching ignore pattern."}]'
         fi
@@ -380,7 +387,16 @@ case "$tool" in
       -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \
          -o -name '*.js' -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs' \) -print 2>/dev/null | sort)"
     if [ -f "${stub_dir}/tsc-exclude" ] && [ -s "${stub_dir}/tsc-exclude" ]; then
-      printf '%s\n' "$listing" | grep -vFf "${stub_dir}/tsc-exclude" || true
+      # 終了コードを捕捉する（Issue #120）。無一致（全件除外＝exit 1）と読めない・評価不能
+      # （exit 2 以上）を分ける。潰すと後者が「全件除外」と同義になり、プログラム構成が
+      # 空になった原因が制御ファイル側なのかスタブ側なのか区別できなくなる。
+      tsc_filtered_rc=0
+      tsc_filtered="$(printf '%s\n' "$listing" | grep -vFf "${stub_dir}/tsc-exclude")" || tsc_filtered_rc=$?
+      if [ "$tsc_filtered_rc" -gt 1 ]; then
+        echo "npx スタブ: tsc-exclude を適用できません（grep exit=${tsc_filtered_rc}）。" >&2
+        exit 1
+      fi
+      [ -z "$tsc_filtered" ] || printf '%s\n' "$tsc_filtered"
     else
       printf '%s\n' "$listing"
     fi
@@ -598,6 +614,24 @@ expect_output_matches() {
   fi
 }
 
+count_output_matches() {
+  # $1 = ERE。`$OUT` の一致行数を stdout へ返す。出力そのものではなく件数だけを見たい
+  # アサーション（フェンスの数など）で使う。
+  #
+  # **後置 true で潰してはならない**（Issue #120）。潰すと評価できない ERE の exit 2 まで
+  # 飲み込み、標準出力が空のまま `${n:-0}` が 0 と読むため、壊れたパターンが「0 件」として
+  # 素通りする。ここは `$( )` の中で呼ばれる想定であり、subshell の `_t_fail` は親の
+  # 集計へ届かないため、**数値の代わりに EVAL-ERROR を返して呼び出し側のアサーションを
+  # 落とす**（沈黙ではなく赤にするのが目的である）。
+  cnt_rc=0
+  cnt_n="$(printf '%s\n' "$OUT" | grep -cE "$1")" || cnt_rc=$?
+  if [ "$cnt_rc" -gt 1 ]; then
+    printf 'EVAL-ERROR(grep exit=%s)\n' "$cnt_rc"
+    return 0
+  fi
+  printf '%s\n' "${cnt_n:-0}"
+}
+
 # --- 実行 -------------------------------------------------------------------
 
 # ガードとケースファイルの 1:1 対応を、ケースを 1 件も走らせる前に強制する（Issue #90 追補）。
@@ -687,7 +721,13 @@ check_ci_tier_wiring() {
     return 1
   fi
   # 説明文中の `--tier=b` を配線として数えないよう、コメント行は落とす。
-  ctw_lines="$(grep -F 'scripts/test/run.sh' "$ctw_yaml" | grep -vE '^[[:space:]]*#' || true)"
+  # 終了コードを捕捉し、無一致（exit 1）と評価不能・読めない（exit 2 以上）を分ける（Issue #120）。
+  ctw_rc=0
+  ctw_lines="$(grep -F 'scripts/test/run.sh' "$ctw_yaml" | grep -vE '^[[:space:]]*#')" || ctw_rc=$?
+  if [ "$ctw_rc" -gt 1 ]; then
+    echo "ERROR: ${ctw_yaml#$ROOT/} を走査できません（grep exit=${ctw_rc}）。" >&2
+    return 1
+  fi
   if [ -z "$ctw_lines" ]; then
     echo "ERROR: ${ctw_yaml#$ROOT/} が scripts/test/run.sh を一度も実行していません。" >&2
     echo "       → ガード自己テストが CI から外れています。" >&2

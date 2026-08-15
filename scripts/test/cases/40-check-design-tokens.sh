@@ -105,3 +105,22 @@ fx_run check-design-tokens
 expect_green
 expect_output_matches 'theme.css 1 色'
 t_end
+
+# ---------------------------------------------------------------------------
+# Issue #120: 検出パターンが評価不能になったとき、緑ではなく赤にすること。
+#
+# 起票時の実測では、82 行目の照合が `2>/dev/null` と後置 `true` を併用していたため、
+# `bg-red-500` の違反をツリーに置いたままガードが「生パレット色クラスゼロ」と申告して
+# exit 0 を返した。しかも `2>/dev/null` が grep のエラーごと捨てるため、stderr を全部
+# 拾っても痕跡が 1 行も残らなかった。違反があるのに緑、かつ痕跡ゼロという最悪形である。
+t_begin 'check-design-tokens: 検出パターンが評価不能なら緑ではなく赤にする（Issue #120）'
+dt_fixture
+fx_write ts/apps/demo/page.tsx <<'EOF'
+export const cls = 'bg-red-500 p-4';
+EOF
+awk '/^PALETTE_PATTERN=/ { print "PALETTE_PATTERN='"'"'['"'"'"; next } { print }' \
+  "${FX}/scripts/check-design-tokens.sh" > "${FX}/scripts/dt-broken.tmp"
+mv "${FX}/scripts/dt-broken.tmp" "${FX}/scripts/check-design-tokens.sh"
+fx_run check-design-tokens
+expect_red '生パレット色クラスの検出パターンを評価できません'
+t_end

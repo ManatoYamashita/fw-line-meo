@@ -151,7 +151,13 @@ else
   fi
 fi
 
-target_count="$(printf '%s\n' "$targets" | grep -cE '^(service|job)	[a-z0-9-]+$' || true)"
+# 終了コードを捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分ける（Issue #120）。
+# 潰すと、集計が壊れた状態が「対象 0 件」と同義になり、下の空振り防止が本来と違う原因で発火する。
+target_count_rc=0
+target_count="$(printf '%s\n' "$targets" | grep -cE '^(service|job)	[a-z0-9-]+$')" || target_count_rc=$?
+if [ "$target_count_rc" -gt 1 ]; then
+  fail_early canon-empty "ERROR: 対象集合を数えられません（grep exit=${target_count_rc}）。"
+fi
 if [ "$target_count" -eq 0 ]; then
   fail_early canon-empty \
     "ERROR: 対象集合を1件も取得できませんでした（正典の供給が壊れています）。" \
@@ -210,7 +216,13 @@ if [ -n "$PROD_IMAGE_SNAPSHOT" ]; then
   if [ ! -f "$PROD_IMAGE_SNAPSHOT" ]; then
     fail_early config-error "ERROR: PROD_IMAGE_SNAPSHOT が見つかりません: ${PROD_IMAGE_SNAPSHOT}"
   fi
-  snapshot="$(grep -vE '^[[:space:]]*(#|$)' "$PROD_IMAGE_SNAPSHOT" || true)"
+  # 終了コードを捕捉する（Issue #120）。潰すと、ファイルを読めない状態が
+  # 「snapshot が空」と同義になり、原因の異なる 2 つが同じ診断に化ける。
+  snapshot_rc=0
+  snapshot="$(grep -vE '^[[:space:]]*(#|$)' "$PROD_IMAGE_SNAPSHOT")" || snapshot_rc=$?
+  if [ "$snapshot_rc" -gt 1 ]; then
+    fail_early config-error "ERROR: PROD_IMAGE_SNAPSHOT を読めません（grep exit=${snapshot_rc}）: ${PROD_IMAGE_SNAPSHOT}"
+  fi
 else
   if ! snapshot="$(collect_live_snapshot)"; then
     # collect_live_snapshot 側が原因を stderr へ出している。
@@ -218,7 +230,11 @@ else
   fi
 fi
 
-snapshot_count="$(printf '%s\n' "$snapshot" | grep -cE '^(service|job)	' || true)"
+snapshot_count_rc=0
+snapshot_count="$(printf '%s\n' "$snapshot" | grep -cE '^(service|job)	')" || snapshot_count_rc=$?
+if [ "$snapshot_count_rc" -gt 1 ]; then
+  fail_early snapshot-empty "ERROR: 稼働イメージを数えられません（grep exit=${snapshot_count_rc}）。"
+fi
 if [ "$snapshot_count" -eq 0 ]; then
   fail_early snapshot-empty \
     "ERROR: Cloud Run の稼働イメージを1件も取得できませんでした（snapshot が空です）。" \
@@ -394,7 +410,16 @@ severity_rank() {
 
 snapshot_lookup() {
   # $1=kind $2=name → 一致行（無ければ空）
-  printf '%s\n' "$snapshot" | grep -E "^$1	$2	" | sed -n '1p' || true
+  # `$1` / `$2` を ERE へ埋めているため、名前に正規表現メタ文字が入れば exit 2 になりうる。
+  # 後置 true で潰すと、それが「snapshot に無い」と同義になり、稼働中のリソースを
+  # **未デプロイとして報告する**方向へ倒れる（Issue #120）。
+  lookup_rc=0
+  lookup_line="$(printf '%s\n' "$snapshot" | grep -E "^$1	$2	" | sed -n '1p')" || lookup_rc=$?
+  if [ "$lookup_rc" -gt 1 ]; then
+    echo "ERROR: snapshot の照合パターンを評価できません（grep exit=${lookup_rc}）: $1/$2" >&2
+    exit 1
+  fi
+  [ -z "$lookup_line" ] || printf '%s\n' "$lookup_line"
 }
 
 fail=0
@@ -423,7 +448,12 @@ while IFS=$'\t' read -r kind name; do
     else
       other="service"
     fi
-    if [ -n "$(snapshot_lookup "$other" "$name")" ]; then
+    # **`if [ -n "$(snapshot_lookup ...)" ]` と直接書いてはならない**（Issue #120）。
+    # 関数内の `exit` はコマンド置換の subshell を終わらせるだけで、`if` の条件文脈では
+    # `set -e` も働かない。照合が壊れた状態が「見つからない」と同義になり、
+    # kind-mismatch と missing を取り違えたまま緑の側の分岐へ進む。いったん代入して受ける。
+    other_row="$(snapshot_lookup "$other" "$name")"
+    if [ -n "$other_row" ]; then
       echo "ERROR: ${kind}/${name} が Cloud Run では ${other} として存在します（kind-mismatch）。" >&2
       echo "       → 正典（infra/envs/prod/main.tf と scripts/push-images.sh）と本番の実体がずれています。" >&2
       signature="${signature}${kind}/${name}=kind-mismatch;"
@@ -514,9 +544,21 @@ EOF
 while IFS=$'\t' read -r kind name rest; do
   [ -n "${kind:-}" ] || continue
   # grep -q は使わない（SIGPIPE × pipefail の偽陽性回避。件数で判定する）。
-  same_kind="$(printf '%s\n' "$targets" | grep -cE "^${kind}	${name}\$" || true)"
+  same_kind_rc=0
+  same_kind="$(printf '%s\n' "$targets" | grep -cE "^${kind}	${name}\$")" || same_kind_rc=$?
+  if [ "$same_kind_rc" -gt 1 ]; then
+    echo "ERROR: ${kind}/${name} の照合パターンを評価できません（grep exit=${same_kind_rc}）。" >&2
+    fail=1
+    continue
+  fi
   if [ "$same_kind" -eq 0 ]; then
-    any_kind="$(printf '%s\n' "$targets" | grep -cE "^(service|job)	${name}\$" || true)"
+    any_kind_rc=0
+    any_kind="$(printf '%s\n' "$targets" | grep -cE "^(service|job)	${name}\$")" || any_kind_rc=$?
+    if [ "$any_kind_rc" -gt 1 ]; then
+      echo "ERROR: ${name} の kind 照合パターンを評価できません（grep exit=${any_kind_rc}）。" >&2
+      fail=1
+      continue
+    fi
     if [ "$any_kind" -gt 0 ]; then
       continue # kind-mismatch として正典側のループが報告済み
     fi

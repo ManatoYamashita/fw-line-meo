@@ -93,7 +93,13 @@ if [ -z "$tf_services" ]; then
 fi
 
 # push-images.sh の IMAGE_NAMES 配列（1行定義が前提。崩れたら fail して前提を守らせる）。
-image_names_line="$(grep -E '^IMAGE_NAMES=\(' "$PUSH_SCRIPT" || true)"
+# 終了コードを捕捉し、無一致（exit 1）と評価不能・読めない（exit 2 以上）を分ける（Issue #120）。
+image_names_rc=0
+image_names_line="$(grep -E '^IMAGE_NAMES=\(' "$PUSH_SCRIPT")" || image_names_rc=$?
+if [ "$image_names_rc" -gt 1 ]; then
+  echo "ERROR: ${PUSH_SCRIPT#$ROOT/} を走査できません（grep exit=${image_names_rc}）。" >&2
+  exit 1
+fi
 if [ -z "$image_names_line" ]; then
   echo "ERROR: ${PUSH_SCRIPT#$ROOT/} に 'IMAGE_NAMES=(...)' の1行定義が見つかりません。" >&2
   exit 1
@@ -144,7 +150,13 @@ done
 
 # 検証4: push-images.sh の全イメージが ts-ci の docker-build matrix に含まれること。
 # matrix は「image: [a, b, c]」の1行定義が前提（崩れたら fail して前提を守らせる）。
-matrix_line="$(grep -E '^[[:space:]]*image: \[' "$TS_CI_YML" || true)"
+# 終了コードを捕捉し、無一致（exit 1）と評価不能・読めない（exit 2 以上）を分ける（Issue #120）。
+matrix_line_rc=0
+matrix_line="$(grep -E '^[[:space:]]*image: \[' "$TS_CI_YML")" || matrix_line_rc=$?
+if [ "$matrix_line_rc" -gt 1 ]; then
+  echo "ERROR: ${TS_CI_YML#$ROOT/} を走査できません（grep exit=${matrix_line_rc}）。" >&2
+  exit 1
+fi
 matrix_checked=0
 if [ -z "$matrix_line" ]; then
   echo "ERROR: ${TS_CI_YML#$ROOT/} に docker-build の 'image: [...]' 1行 matrix 定義が見つかりません。" >&2

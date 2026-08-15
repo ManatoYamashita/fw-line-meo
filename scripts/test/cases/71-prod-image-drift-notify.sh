@@ -64,7 +64,7 @@ fx_guard prod-image-drift-notify
 pin_report
 for pin_state in green red; do
   pin_compose "$pin_state"
-  OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+  OUT="FENCES: $(count_output_matches '^```$')"
   expect_output_matches '^FENCES: 2$'
 done
 t_end

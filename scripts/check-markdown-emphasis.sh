@@ -331,7 +331,14 @@ EOF
 # 入力サイズ依存で判定が変わるという点で、下の `grep -q` を避ける理由とまったく同型である。
 # `sed -n '1,3s///p'` は `q` を持たないため入力を最後まで読み、この経路を作らない。
 untracked_md="$( (cd "$ROOT" && git -c core.quotePath=false ls-files --others --exclude-standard -- '*.md') 2>/dev/null || true)"
-untracked_md_count="$(printf '%s' "$untracked_md" | grep -c . || true)"
+# 終了コードを捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分ける（Issue #120）。
+# 後置 true で潰すと、走査が壊れた状態が「未追跡 0 件」と同じ結果に化けて警告が消える。
+untracked_md_rc=0
+untracked_md_count="$(printf '%s' "$untracked_md" | grep -c .)" || untracked_md_rc=$?
+if [ "$untracked_md_rc" -gt 1 ]; then
+  echo "ERROR: 未追跡 Markdown の件数を数えられません（grep exit=${untracked_md_rc}）。" >&2
+  exit 1
+fi
 if [ "${untracked_md_count:-0}" -ne 0 ]; then
   echo "WARNING: 未追跡の Markdown が ${untracked_md_count} 件あります（本ガードは走査していません）。" >&2
   printf '%s\n' "$untracked_md" | sed -n '1,3s|^|         |p' >&2

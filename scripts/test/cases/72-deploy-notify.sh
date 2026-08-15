@@ -51,10 +51,10 @@ t_end
 t_begin 'deploy 通知: 赤のコマンド例はフェンス内に置き、緑にはフェンスを出さない'
 fx_guard deploy-notify
 pdn_compose red
-OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+OUT="FENCES: $(count_output_matches '^```$')"
 expect_output_matches '^FENCES: 2$'
 pdn_compose green
-OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+OUT="FENCES: $(count_output_matches '^```$')"
 expect_output_matches '^FENCES: 0$'
 t_end
 

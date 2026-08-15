@@ -85,8 +85,22 @@ scan() {
   scan_wf="$1"
   scan_path="$2"
 
-  # 違反行を行番号つきで取り出す。無一致の exit 1 は後置 true で受ける。
-  scan_bad="$(grep -nE "$3" "$scan_path" || true)"
+  # 違反行を行番号つきで取り出す。終了コードを捕捉し、無一致（exit 1）と評価不能
+  # （exit 2 以上）を分ける（Issue #120）。
+  #
+  # **後置 true で潰してはならない。** grep は評価できない ERE に exit 2 を返し、そのとき
+  # 標準出力は空になる。潰すと `[ -n "$scan_bad" ]` が偽になって「違反なし」と同義になり、
+  # 下の空振り防止は別パターン（NAME_LINE_RE）を母数にしているため件数表示まで健全な実行と
+  # 一致したまま緑を返す。実測: TRUNC_LINE_RE を壊すと、引用符なし + ' #' の違反を置いた
+  # ままで「5 ファイル / 42 件の name: を検証」と出して exit 0 になった。痕跡は stderr の
+  # 1 行だけで、CI ログでは他の出力に埋もれる。
+  scan_rc=0
+  scan_bad="$(grep -nE "$3" "$scan_path")" || scan_rc=$?
+  if [ "$scan_rc" -gt 1 ]; then
+    echo "ERROR: ${scan_wf} の検出パターンを評価できません（grep exit=${scan_rc}）: $3" >&2
+    fail=1
+    return 0
+  fi
   [ -n "$scan_bad" ] || return 0
 
   while IFS= read -r line; do
@@ -123,8 +137,16 @@ for wf_path in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
 
   # 件数で数える。`grep -q` は最初の一致で終了するため、上流が SIGPIPE で死んで
   # pipefail が入力サイズ依存の偽陽性を生む（#78 で実際に踏んだ）。
-  hits="$(grep -cE "$NAME_LINE_RE" "$wf_path" || true)"
-  name_line_count=$((name_line_count + hits))
+  # 終了コードを捕捉する（Issue #120）。この母数が壊れたまま 0 を足し込むと、
+  # 空振り防止が他ファイルの件数で埋め合わされて発火しない。
+  hits_rc=0
+  hits="$(grep -cE "$NAME_LINE_RE" "$wf_path")" || hits_rc=$?
+  if [ "$hits_rc" -gt 1 ]; then
+    echo "ERROR: ${wf} の name: 行を数えられません（grep exit=${hits_rc}）。" >&2
+    fail=1
+    continue
+  fi
+  name_line_count=$((name_line_count + ${hits:-0}))
 
   scan "$wf" "$wf_path" "$TRUNC_LINE_RE" "$TRUNC_MSG"
   scan "$wf" "$wf_path" "$NULL_LINE_RE" "$NULL_MSG"
