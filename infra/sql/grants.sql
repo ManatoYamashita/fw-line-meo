@@ -14,7 +14,7 @@
 --     operators, agencies, dashboard_users, owners, stores,
 --     survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
 --     agency_invite_codes, onboarding_sessions, line_webhook_events,
---     gbp_locations, gbp_sessions（gbp-post-review-reply 0005・GBP 連携の身元と会話セッション）
+--     gbp_locations, gbp_sessions（gbp-post-review-reply 0006・GBP 連携の身元と会話セッション）
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots, daily_summaries
 --     （daily_summaries は competitive-daily-summary 0004・INSERT/UPDATE は同日再実行の
 --     ON CONFLICT DO UPDATE、DELETE は 30日超パージ。go/internal/repo/summaries.go 参照）

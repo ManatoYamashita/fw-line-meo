@@ -205,12 +205,12 @@ export interface WebhookEventRow {
   received_at: Date;
 }
 
-// --- gbp-post-review-reply（0001 oauth_tokens 実運用化 + 0005 新設 2 表）---
+// --- gbp-post-review-reply（0001 oauth_tokens 実運用化 + 0006 新設 2 表）---
 
 // 0001 冒頭の CREATE TYPE oauth_provider と 1:1。
 export type OauthProvider = 'google';
 
-// 0005 の CREATE TYPE gbp_flow / gbp_stage と 1:1。
+// 0006 の CREATE TYPE gbp_flow / gbp_stage と 1:1。
 export type GbpFlow = 'connect' | 'post' | 'reply';
 export type GbpStage =
   | 'await_store'
@@ -234,7 +234,7 @@ export interface OauthTokenRow {
   created_at: Date;
 }
 
-// GBP 上の身元（0005・store 1:1・TS 書込）。
+// GBP 上の身元（0006・store 1:1・TS 書込）。
 export interface GbpLocationRow {
   id: string;
   store_id: string;
@@ -245,7 +245,7 @@ export interface GbpLocationRow {
   linked_at: Date;
 }
 
-// GBP 会話セッション（0005・owner 1:1・期限付き・TS 書込）。
+// GBP 会話セッション（0006・owner 1:1・期限付き・TS 書込）。
 // payload（jsonb）の flow 別の具体形状（connect の state nonce / post の material /
 // reply の reviews スナップショット）は gbp ドメイン（line-webhook）の型で規律する。
 // packages/db は apps へ依存できないため、ここでは JSON オブジェクトとしてのみ扱う。

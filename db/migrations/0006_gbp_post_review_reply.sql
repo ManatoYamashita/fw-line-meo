@@ -1,4 +1,4 @@
--- 0005_gbp_post_review_reply.sql
+-- 0006_gbp_post_review_reply.sql
 -- gbp-post-review-reply spec: GBP 連携の身元（gbp_locations）と会話セッション（gbp_sessions）の 2 表を追加。
 -- PostgreSQL 15+ 互換。すべて追加のみ（既存テーブル・enum の変更なし。oauth_tokens は 0001 定義のまま実運用化）。
 -- 書き込み境界は db/write-boundary.md（両テーブルとも TS リアルタイム応答層）を参照。0001-0004 適用後に実行する。

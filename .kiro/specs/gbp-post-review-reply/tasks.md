@@ -2,7 +2,7 @@
 
 - [ ] 1. 基盤: DB スキーマ・共有パッケージ・シークレット配線
 - [x] 1.1 GBP 連携用の DB スキーマを確立する
-  - migration 0005 として gbp_locations（store 一意・account/location リソース名・placeId・投稿可否）と gbp_sessions（owner 一意・flow/stage enum・payload・draft・期限）を追加する
+  - migration 0006 として gbp_locations（store 一意・account/location リソース名・placeId・投稿可否）と gbp_sessions（owner 一意・flow/stage enum・payload・draft・期限）を追加する
   - ERD と書込境界ドキュメントに 2 テーブル（書込責任 = TypeScript）を追記する
   - make db-migrate / db-smoke / db-test / db-verify-docs がすべて成功する
   - _Requirements: 1.7_

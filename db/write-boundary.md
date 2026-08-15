@@ -20,8 +20,8 @@
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
 | `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
 | `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
-| `gbp_locations` | TS リアルタイム応答層 | `gbp-post-review-reply`: OAuth 連携成立時の GBP 身元（account/location・placeId 突合結果）保存・解除時削除（`0005`） |
-| `gbp_sessions` | TS リアルタイム応答層 | `gbp-post-review-reply`: GBP 会話フロー（connect/post/reply）の期限付きセッション状態（Webhook・`0005`） |
+| `gbp_locations` | TS リアルタイム応答層 | `gbp-post-review-reply`: OAuth 連携成立時の GBP 身元（account/location・placeId 突合結果）保存・解除時削除（`0006`） |
+| `gbp_sessions` | TS リアルタイム応答層 | `gbp-post-review-reply`: GBP 会話フロー（connect/post/reply）の期限付きセッション状態（Webhook・`0006`） |
 | `competitors` | Go 日次バッチ層 | Places API による競合探索・churn 更新 |
 | `rating_snapshots` | Go 日次バッチ層 | Places API による毎朝の評価/順位スナップショット |
 | `daily_summaries` | Go 日次バッチ層 | `competitive-daily-summary`: Go 日次バッチによる順位/前日比算出・確定「配信素材」生成（`0004`） |

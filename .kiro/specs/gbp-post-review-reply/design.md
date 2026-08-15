@@ -137,7 +137,7 @@ packages/db, packages/gemini → gbp/client.ts, gbp/token-store.ts, gbp/oauth.ts
 | 認可 | google-auth-library（新規依存） | authorize URL・code 交換・refresh grant | OAuth2Client のみ使用。googleapis 本体は不採用 |
 | 外部 API | GBP v4（localPosts, reviews）+ v1（Account Mgmt, Business Info） | 投稿・返信・location 列挙 | 自前の薄い REST クライアント。name 形式変換を単一所有 |
 | 生成 AI | Gemini API via `packages/gemini`（`@google/genai`） | 投稿文・返信文の下書き生成 | survey-web から実行核を抽出 |
-| Data | Cloud SQL PostgreSQL（既存） | `oauth_tokens` 実運用 + `gbp_locations`・`gbp_sessions` 新設 | migration `0005`。全テーブル TS 書込 |
+| Data | Cloud SQL PostgreSQL（既存） | `oauth_tokens` 実運用 + `gbp_locations`・`gbp_sessions` 新設 | migration `0006`。全テーブル TS 書込 |
 | 暗号 | Node `crypto`（AES-256-GCM） | refresh token の暗号化 | 鍵は Secret Manager → env 注入（既存パターン） |
 | Infrastructure | Terraform（既存 modules） | secret 枠 2 件追加 + line-webhook への env/secret 配線 | 値は out-of-band 投入の既存規律 |
 
@@ -169,7 +169,7 @@ ts/packages/db/src/
 ├── gbp-locations.ts                   # 新設: upsert/get/delete（store_id 一意）
 └── gbp-sessions.ts                    # 新設: getActive/upsert/clear（owner_id 一意・期限付き）
 
-db/migrations/0005_gbp_post_review_reply.sql  # gbp_locations・gbp_sessions 新設（COMMENT 込み）
+db/migrations/0006_gbp_post_review_reply.sql  # gbp_locations・gbp_sessions 新設（COMMENT 込み）
 ```
 
 ### Modified Files
@@ -635,7 +635,7 @@ function createDefaultGenAiClient(): GenAiClient;  // @google/genai 動的 impor
 - **集約: GBP 会話セッション**（root = owner）: owner 単位に高々 1 つ。フロー横断の一時状態のみを持ち、永続ドメインデータを含まない（期限切れ削除が常に安全）
 - 不変条件: (a) `gbp_locations` の行は対応する `oauth_tokens` 行なしに存在しない（連携成立時に同時作成・解除時に同時削除）、(b) 4 階層モデル（store→owner→agency）は変更しない
 
-### Physical Data Model（migration `0005_gbp_post_review_reply.sql`）
+### Physical Data Model（migration `0006_gbp_post_review_reply.sql`）
 
 ```sql
 -- 書込責任: TypeScript（line-webhook）。db/write-boundary.md へ追記必須
@@ -736,7 +736,7 @@ CREATE TABLE gbp_sessions (
 
 ## Migration Strategy
 
-1. **DB**: `0005_gbp_post_review_reply.sql` 適用（`make db-migrate` / `db-test` / `db-verify-docs` を通す。ERD・write-boundary 同時更新）
+1. **DB**: `0006_gbp_post_review_reply.sql` 適用（`make db-migrate` / `db-test` / `db-verify-docs` を通す。ERD・write-boundary 同時更新）
 2. **packages/gemini 抽出**: パッケージ新設 → survey-web を差し替え → survey-web テスト全通過を確認してから gbp 実装に着手（依存順）
 3. **infra**: secret 枠追加（値は out-of-band 投入）→ line-webhook の env/secret 配線 → デプロイ
 4. **導線は最後**: リッチメニュー更新・delivery-job のボタン追加は、webhook 側の全フロー実装・検証後に反映（ボタンだけ先行すると誘導先が存在しない）
