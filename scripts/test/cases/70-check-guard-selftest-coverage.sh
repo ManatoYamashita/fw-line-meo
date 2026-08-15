@@ -89,7 +89,7 @@ fx_run check-guard-selftest-coverage
 expect_green
 t_end
 
-t_begin 'check-guard-selftest-coverage: 宣言済みガードの Tier A 消失を検出する（#103 レビュー指摘）'
+t_begin 'check-guard-selftest-coverage: 基本ケース（Tier A）の消失を検出する（#103 レビュー指摘）'
 gsc_fixture_declared
 fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF'
 # dummy
@@ -98,10 +98,23 @@ EOF
 # 実リポジトリではこれが 10-check-test-code-coverage.sh（Tier A・17 ケース）の消失に当たる。
 rm -f "${FX}/scripts/test/cases/10-check-foo.sh"
 fx_run check-guard-selftest-coverage
-expect_red 'check-foo は TIER_SPLIT の宣言に反して Tier A のケースファイルがありません'
+expect_red 'check-foo に Tier A の基本ケース（NN-check-foo.sh）がありません'
 # 件数不足として報告してはいけない。n=1 で素通りしていたことが本件の欠陥であり、
 # この不在アサーションが「件数の分岐で偶然赤くなった」との取り違えを防ぐ。
 expect_absent 'check-foo に対応するケースファイルがありません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: 基本ケースの消失は宣言の有無に依らず赤（PR #116 との衝突分析）'
+gsc_fixture
+# 基本ケースを **1 手で** 変種へ置き換える。この経路は「未宣言のまま 2 tier」という赤の状態を
+# 一度も通らないため、宣言の要求だけを課しても捕まらない（TIER_SPLIT 導入直後は緑で素通り
+# することを実測した）。基本ケースの実在は宣言から独立した**構造的要件**として課す。
+mv "${FX}/scripts/test/cases/10-check-foo.sh" "${FX}/scripts/test/cases/15-check-foo.tier-b.sh"
+fx_run check-guard-selftest-coverage
+expect_red 'check-foo に Tier A の基本ケース（NN-check-foo.sh）がありません'
+# 宣言漏れとして報告してはいけない。tier-a が無いのだから「2 tier ある」ではないうえ、
+# 同じ 1 つの原因に「TIER_SPLIT へ追加せよ」と「基本ケースを戻せ」の 2 種類の指示が並ぶ。
+expect_absent 'TIER_SPLIT に宣言されていません'
 t_end
 
 t_begin 'check-guard-selftest-coverage: 宣言済みガードの Tier B 消失を検出する（#103 レビュー指摘）'
