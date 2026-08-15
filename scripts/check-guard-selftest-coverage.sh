@@ -12,8 +12,9 @@
 #
 # 本スクリプトは以下を機械検証する（read-only の走査・副作用なし・連想配列を使わず bash 3.2 でも走る）:
 #   1. `scripts/check-*.sh` の各ガードに対応するケースファイルが **tier ごとに 1 件** ある
-#      （`NN-<ガード名>.sh` = Tier A / `NN-<ガード名>.tier-b.sh` = Tier B）。さらに TIER_SPLIT へ
-#      宣言したガードは両 tier の実在を要求する（片側が消えても残る層の緑で通るのを防ぐ）
+#      （`NN-<ガード名>.sh` = Tier A / `NN-<ガード名>.tier-b.sh` = Tier B）。基本ケース（Tier A）は
+#      全ガード必須、TIER_SPLIT へ宣言したガードは Tier B も必須
+#      （片側が消えても残る層の緑で通るのを防ぐ）
 #   2. 逆に、各ケースファイルが実在するガードを指している（改名の取り残し＝孤児ケースの検出）
 #   3. 意図的除外はこのファイル内の WHITELIST に Issue 番号付きで明記されている
 #      （ホワイトリスト項目が実はカバー済みになったら警告し、削除を促す）
@@ -37,8 +38,8 @@ CASES_DIR="${ROOT}/scripts/test/cases"
 WHITELIST=()
 
 # tier 分割済みガードの宣言（Issue #90 の二層化・PR #103 レビュー指摘）。
-# ここに載せたガードは Tier A（接尾辞なし）と Tier B（`.tier-b`）の **両方** のケースファイルが
-# 実在することを要求する。
+# ここに載せたガードは Tier B（`.tier-b`）のケースファイルの実在も要求する。
+# Tier A（接尾辞なし）の基本ケースは宣言に依らず全ガード必須である（check_tier_set の (1)）。
 #
 # 「tier ごとに 1 件」だけでは **片側の消失** を検出できない。2 tier へ割れたガードは片方の
 # ファイルを削除しても残り 1 件で「カバー済み」と数えられ、その層の検証が丸ごと消えても
@@ -102,24 +103,35 @@ check_tier_set() {
   cts_name="$1"
   cts_seen="$2"
 
+  # (1) 基本ケース（Tier A）は **宣言に依らず** 必須。
+  #
+  # 宣言の要求だけでは足りない。基本ケースを変種へ置き換える改変は「未宣言のまま 2 tier」と
+  # いう赤の状態を **一度も通らない** ため、宣言を課しても緑で素通りする（PR #116 との衝突分析で
+  # 実測）。Tier A は install 前に走る唯一の層であり、消えたまま気づけない層でもある。
+  # 宣言から独立した構造的要件として課すことで、経路に依らず必ず捕まる。
+  if ! in_list 'tier-a' $cts_seen; then
+    echo "ERROR: ${cts_name} に Tier A の基本ケース（NN-${cts_name}.sh）がありません。" >&2
+    echo "       → tier 変種だけが残っています。install 前に走る層の検証が丸ごと消えており、" >&2
+    echo "         残る層の緑だけで CI が通ってしまいます（件数は 1 件のままです）。" >&2
+    fail=1
+  fi
+
+  # (2) TIER_SPLIT に載せたガードは Tier B も必須。こちらは構造から導けない（Tier B を持たない
+  #     ガードのほうが普通である）ため、宣言でしか要求できない。
   if in_list "$cts_name" ${TIER_SPLIT[@]+"${TIER_SPLIT[@]}"}; then
-    for cts_want in tier-a tier-b; do
-      if in_list "$cts_want" $cts_seen; then
-        continue
-      fi
-      cts_label="$(printf '%s' "${cts_want#tier-}" | tr 'a-z' 'A-Z')"
-      echo "ERROR: ${cts_name} は TIER_SPLIT の宣言に反して Tier ${cts_label} のケースファイルがありません。" >&2
-      echo "       → その層の検証が丸ごと消えても、残る層の緑だけで CI が通ってしまいます。" >&2
+    if ! in_list 'tier-b' $cts_seen; then
+      echo "ERROR: ${cts_name} は TIER_SPLIT の宣言に反して Tier B のケースファイルがありません。" >&2
+      echo "       → 実物の tsc / eslint にしか答えられない層の検証が消えても、Tier A の緑だけで通ります。" >&2
       echo "         復旧するか、その層を持たない構成にしたのなら TIER_SPLIT から外してください。" >&2
       fail=1
-    done
+    fi
     return 0
   fi
 
-  # 未宣言のまま 2 tier へ割れている状態。放置すると、以後どちらが消えても検出できない。
+  # (3) 未宣言のまま 2 tier へ割れている状態。放置すると、以後 Tier B が消えても検出できない。
   if in_list 'tier-a' $cts_seen && in_list 'tier-b' $cts_seen; then
     echo "ERROR: ${cts_name} は Tier A / Tier B の両方にケースファイルがありますが TIER_SPLIT に宣言されていません。" >&2
-    echo "       → 宣言が無いと、片方が消えても残る層の緑だけで通ります（件数は 1 件のままです）。" >&2
+    echo "       → 宣言が無いと、Tier B が消えても Tier A の緑だけで通ります（件数は 1 件のままです）。" >&2
     echo "         TIER_SPLIT へ ${cts_name} を追加してください。" >&2
     fail=1
   fi
