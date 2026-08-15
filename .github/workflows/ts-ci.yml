@@ -221,3 +221,78 @@ jobs:
       # pnpm install は行わない（クリーン checkout のままビルドコンテキストへ渡す。
       # deploy-prod の push-images.sh 実行時と同一条件）。
       - run: scripts/push-images.sh --build-only --image ${{ matrix.image }}
+
+  notify:
+    # Issue #118: main の ts-ci が赤になっても誰にも通知されなかった。deploy-prod には失敗通知
+    # ジョブがあるが、main の ts-ci が赤いときは deploy ジョブ自体が skip されるため発火しない
+    # （skip を失敗として扱わないのは正しい判断である）。結果として「main が赤い」という最も
+    # 直接的で最も早い信号だけが通知経路を持たず、2026-08-09 の赤化は症状側の prod-image-drift
+    # （6 時間ごと）が拾うまで気づかれず、本番が約 2 日 16 時間停滞した。ここで原因側を塞ぐ。
+    #
+    # **docker-build を needs に入れない。** PR イベント限定のジョブで main push では常に
+    # skipped になる。入れると判定が none（通知しない）へ倒れ、通知が永久に飛ばなくなる。
+    # needs と下の --job 引数の食い違いは scripts/test/cases/73-ts-ci-notify.sh が機械照合する。
+    needs: [lint-build-test, e2e, lighthouse]
+    # main への push だけを見る。PR のレビュー中の赤で追跡 Issue を立てない。
+    # always() が無いと needs の失敗でこのジョブごと skip され、赤のときに限って黙る。
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # ジョブ単位の permissions はワークフロー単位を置き換えるため、他のジョブへ issues: write を
+    # 持たせずに済む（最小権限）。
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # name は引用する。YAML の plain scalar は " #" 以降をコメントとして捨てるため、
+      # 引用しないと表示名が「main の ts-ci 失敗を追跡 Issue へ通知（Issue」で切れる
+      # （scripts/check-workflow-step-names.sh が機械強制する）。
+      - name: 'main の ts-ci 失敗を追跡 Issue へ通知（Issue #118）'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # needs.*.result は run へ直接展開せず env 経由で渡す（deploy.yml の notify と同じ）。
+          R_LINT_BUILD_TEST: ${{ needs.lint-build-test.result }}
+          R_E2E: ${{ needs.e2e.result }}
+          R_LIGHTHOUSE: ${{ needs.lighthouse.result }}
+        run: |
+          set -euo pipefail
+          # 引数列は 1 度だけ組んで判定と本文の両方で使い回す。2 箇所へ書くと片方だけが腐り、
+          # 判定は red なのに本文は緑という組み合わせが成立する（スクリプト側でも照合するが、
+          # そもそも 2 度書かないのが先である）。
+          set -- \
+            --job "lint-build-test=${R_LINT_BUILD_TEST}" \
+            --job "e2e=${R_E2E}" \
+            --job "lighthouse=${R_LIGHTHOUSE}"
+
+          # 判定も本文の組み立ても scripts/ts-ci-notify.sh が持つ（Issue #109 の決定）。
+          # yml の run ブロックへ書くと、検証の器が yml からの sed 抽出へ逆戻りし、
+          # 孤児ケースとして ts-ci を止める。**この run ブロックへ組み立てを戻さないこと。**
+          state="$(bash scripts/ts-ci-notify.sh --print-state "$@")"
+
+          # cancelled / skipped が混じり failure が無い状態。赤へ倒すと偽の障害通知が飛び、
+          # 緑へ倒すと赤いままの障害を復旧したと偽る。どちらでもないので通知しない。
+          if [ "$state" = 'none' ]; then
+            echo "OK: ジョブ結果が success で揃っておらず失敗も無いため通知しません。"
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/issue-body.md"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/ts-ci-notify.sh \
+            --state "$state" \
+            --run-url "$run_url" \
+            --commit "$GITHUB_SHA" \
+            "$@" > "$body"
+
+          # 署名は commit SHA。同じコミットへの再実行ではコメントを積み上げず、新しいコミットで
+          # 赤が続いたときだけ積み上がる（追跡 Issue は 1 本のまま維持される）。
+          # ラベルは report-ci-issue.sh が冪等に作成するので事前作成は不要。
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label ts-ci-main-failure \
+            --title "chore(ci): main の ts-ci が失敗しています（自動検出）" \
+            --body-file "$body" \
+            --signature "commit-${GITHUB_SHA}"
