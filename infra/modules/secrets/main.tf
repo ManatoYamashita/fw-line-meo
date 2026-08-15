@@ -5,6 +5,10 @@
 # - accessor IAM も持たない → SA を作る consumer 側（run-services / batch-job）が
 #   secret 単位で co-locate（循環回避・Req 5.4）
 locals {
+  # 実値の投入宣言は infra/secrets-provisioned.tsv が持つ（Issue #63）。枠をここへ足したら、
+  # 同じ PR で宣言へも行を足すこと（未投入なら PENDING）。
+  # **複数行リスト定義を維持すること**: scripts/check-secret-declaration-coverage.sh が
+  # `secret_ids = [` 〜 `]` の範囲抽出で正典を読む。1 行定義へ変えると赤になる。
   secret_ids = [
     "line-channel-secret",       # Webhook 署名検証用
     "line-channel-access-token", # Push/Reply 送信用（機能1 配信・機能3 応答）

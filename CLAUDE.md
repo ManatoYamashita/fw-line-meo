@@ -28,6 +28,8 @@ Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で
 CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
 - `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
 - `scripts/check-prod-image-drift.sh` — 本番稼働イメージと `origin/main` の乖離検証（Issue #91）。`PROJECT_ID` 必須。`PROD_IMAGE_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
+- `scripts/check-secret-declaration-coverage.sh` — シークレット実値投入の宣言カバレッジ（Issue #63）。tf の `locals.secret_ids` ／ `infra/secrets-provisioned.tsv` ／ `infra/README.md` の投入手順 ／ 消費側配線を両方向で照合する。`--print-secrets` で **宣言 6 件の正典**を `<secret_id>\t<version>` の TSV で出す
+- `scripts/check-secret-version-drift.sh` — 本番シークレットの version 構成と宣言の乖離検証（Issue #63・`secret-version-drift` ワークフローが 6 時間ごとに実行）。`PROJECT_ID` 必須。**値（payload）は読まない**（CI に付くのは secret 単位の `roles/secretmanager.viewer` のみで、このロールは `versions.access` を含まない）。`PROD_SECRET_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
 - `scripts/report-ci-issue.sh` — 追跡 Issue の起票／コメント／自動クローズ。`REPORT_CI_ISSUE_DRY_RUN=1` で書き込みを伴わず検証できる
 
 アプリ層のビルド・lint・テストは各層導入時に確立し追記すること。**未確立のコマンドを推測で書かない。**
