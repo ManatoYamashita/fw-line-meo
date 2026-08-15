@@ -88,7 +88,7 @@ WHITELIST=()
 
 for f in "$TF_FILE" "$DECL_FILE" "$README_FILE" "$CONSUMER_TF"; do
   if [ ! -f "$f" ]; then
-    echo "ERROR: 検証対象ファイルが見つかりません: ${f#$ROOT/}" >&2
+    echo "ERROR: 検証対象ファイルが見つかりません: ${f#"$ROOT"/}" >&2
     exit 1
   fi
 done
@@ -125,7 +125,7 @@ fail=0
 tf_block="$(sed -n '/^[[:space:]]*secret_ids[[:space:]]*=[[:space:]]*\[[[:space:]]*$/,/^[[:space:]]*\][[:space:]]*$/p' "$TF_FILE" || true)"
 
 if [ -z "$tf_block" ]; then
-  echo "ERROR: ${TF_FILE#$ROOT/} に 'secret_ids = [' で始まる複数行リスト定義が見つかりません。" >&2
+  echo "ERROR: ${TF_FILE#"$ROOT"/} に 'secret_ids = [' で始まる複数行リスト定義が見つかりません。" >&2
   echo "       → 1 行定義（secret_ids = [\"a\", \"b\"]）へ変えると範囲抽出が成立しません。" >&2
   echo "         複数行リスト定義を維持してください（terraform fmt の既定形です）。" >&2
   exit 1
@@ -136,7 +136,7 @@ tf_block_last="$(printf '%s\n' "$tf_block" | tail -n 1)"
 case "$tf_block_last" in
   *']'*) ;;
   *)
-    echo "ERROR: ${TF_FILE#$ROOT/} の secret_ids リストが ']' で閉じていません（範囲抽出が EOF まで走っています）。" >&2
+    echo "ERROR: ${TF_FILE#"$ROOT"/} の secret_ids リストが ']' で閉じていません（範囲抽出が EOF まで走っています）。" >&2
     echo "       → リストの閉じ括弧を行頭（インデントのみ）に置いてください。" >&2
     exit 1
     ;;
@@ -148,7 +148,7 @@ tf_secrets="$(printf '%s\n' "$tf_block" \
   | sed -E 's/^[[:space:]]*"([a-z0-9-]+)"$/\1/' | sort -u || true)"
 
 if [ -z "$tf_secrets" ]; then
-  echo "ERROR: ${TF_FILE#$ROOT/} の secret_ids から secret を1件も抽出できませんでした（抽出パターンの前提が崩れています）。" >&2
+  echo "ERROR: ${TF_FILE#"$ROOT"/} の secret_ids から secret を1件も抽出できませんでした（抽出パターンの前提が崩れています）。" >&2
   echo "       → 対象 0 件のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。" >&2
   exit 1
 fi
@@ -157,7 +157,7 @@ tf_count="$(count_lines "$tf_secrets")"
 # --- 検証4: 宣言ファイルの読み込みと形式検査 -------------------------------------------------
 decl_rows="$(grep -vE '^[[:space:]]*(#|$)' "$DECL_FILE" || true)"
 if [ -z "$decl_rows" ]; then
-  echo "ERROR: ${DECL_FILE#$ROOT/} からデータ行を1行も読めませんでした（コメントと空行しかありません）。" >&2
+  echo "ERROR: ${DECL_FILE#"$ROOT"/} からデータ行を1行も読めませんでした（コメントと空行しかありません）。" >&2
   echo "       → 宣言 0 行のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。" >&2
   exit 1
 fi
@@ -186,12 +186,12 @@ TSVROW
 
   row_ok=1
   if [ -n "$d_extra" ]; then
-    echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} の列が 4 列を超えています（列区切りはタブ 1 個です）。" >&2
+    echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} の列が 4 列を超えています（列区切りはタブ 1 個です）。" >&2
     fail=1
     row_ok=0
   fi
   if [ -z "$d_id" ] || [ -z "$d_ver" ] || [ -z "$d_date" ] || [ -z "$d_ref" ]; then
-    echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} は 4 列（secret_id / version / 投入日 / Issue-PR）が揃っていません。" >&2
+    echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} は 4 列（secret_id / version / 投入日 / Issue-PR）が揃っていません。" >&2
     fail=1
     row_ok=0
   fi
@@ -199,7 +199,7 @@ TSVROW
   id_ok=1
   case "$d_id" in
     ''|*[!a-z0-9-]*)
-      echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} の secret_id '${d_id}' が [a-z0-9-]+ の形ではありません。" >&2
+      echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} の secret_id '${d_id}' が [a-z0-9-]+ の形ではありません。" >&2
       fail=1
       row_ok=0
       id_ok=0
@@ -210,7 +210,7 @@ TSVROW
   case "$d_ver" in
     PENDING) ver_kind='pending' ;;
     ''|*[!0-9]*)
-      echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} の version 列は 10 進数か PENDING でなければなりません（現在: '${d_ver}'）。" >&2
+      echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} の version 列は 10 進数か PENDING でなければなりません（現在: '${d_ver}'）。" >&2
       echo "       → 枠を作っただけで実値が未投入なら PENDING（投入日は '-'）を使ってください。" >&2
       fail=1
       row_ok=0
@@ -221,7 +221,7 @@ TSVROW
   if [ "$ver_kind" = 'pending' ]; then
     pending_count=$((pending_count + 1))
     if [ "$d_date" != '-' ]; then
-      echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} は PENDING なので投入日は '-' にしてください（現在: '${d_date}'）。" >&2
+      echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} は PENDING なので投入日は '-' にしてください（現在: '${d_date}'）。" >&2
       fail=1
       row_ok=0
     fi
@@ -229,7 +229,7 @@ TSVROW
     case "$d_date" in
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
       *)
-        echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} の投入日は YYYY-MM-DD で書いてください（現在: '${d_date}'）。" >&2
+        echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} の投入日は YYYY-MM-DD で書いてください（現在: '${d_date}'）。" >&2
         fail=1
         row_ok=0
         ;;
@@ -239,7 +239,7 @@ TSVROW
   if [ "$id_ok" -eq 1 ]; then
     # shellcheck disable=SC2086 # decl_ids は改行区切りで意図的に単語分割する
     if in_list "$d_id" $decl_ids; then
-      echo "ERROR: ${DECL_FILE#$ROOT/}:${lineno} の secret_id '${d_id}' が宣言ファイルに重複しています（どちらが正か決まりません）。" >&2
+      echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} の secret_id '${d_id}' が宣言ファイルに重複しています（どちらが正か決まりません）。" >&2
       fail=1
       row_ok=0
     else
@@ -257,7 +257,7 @@ done < "$DECL_FILE"
 for s in $tf_secrets; do
   # shellcheck disable=SC2086 # decl_ids は改行区切りで意図的に単語分割する
   if ! in_list "$s" $decl_ids; then
-    echo "ERROR: ${TF_FILE#$ROOT/} の secret '${s}' が ${DECL_FILE#$ROOT/} にありません。" >&2
+    echo "ERROR: ${TF_FILE#"$ROOT"/} の secret '${s}' が ${DECL_FILE#"$ROOT"/} にありません。" >&2
     echo "       → 実値を投入済みなら version と投入日を書いた行を、まだ投入していない枠なら" >&2
     echo "         '${s}' / PENDING / '-' / '#<Issue>' の行を足してください（PENDING は version 検証が赤にします）。" >&2
     fail=1
@@ -271,7 +271,7 @@ orphan_decl=""
 for s in $decl_ids; do
   # shellcheck disable=SC2086 # tf_secrets は改行区切りで意図的に単語分割する
   if ! in_list "$s" $tf_secrets; then
-    echo "ERROR: ${DECL_FILE#$ROOT/} の '${s}' が正典（${TF_FILE#$ROOT/} の secret_ids）にありません。" >&2
+    echo "ERROR: ${DECL_FILE#"$ROOT"/} の '${s}' が正典（${TF_FILE#"$ROOT"/} の secret_ids）にありません。" >&2
     echo "       → tf から枠を消したなら宣言の行も消してください（残すと version 検証が存在しない secret を照会し続けます）。" >&2
     orphan_decl="${orphan_decl}${s}"$'\n'
     fail=1
@@ -286,7 +286,7 @@ readme_secrets="$(grep -oE 'gcloud secrets versions add[[:space:]]+[a-z0-9-]+' "
   | sed -E 's/.*[[:space:]]//' | sort -u || true)"
 
 if [ -z "$readme_secrets" ]; then
-  echo "ERROR: ${README_FILE#$ROOT/} から 'gcloud secrets versions add <id>' を1件も抽出できませんでした。" >&2
+  echo "ERROR: ${README_FILE#"$ROOT"/} から 'gcloud secrets versions add <id>' を1件も抽出できませんでした。" >&2
   echo "       → §1 項目 5（Secret Manager の値投入）の書式が変わっています。抽出 0 件のまま" >&2
   echo "         「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。" >&2
   exit 1
@@ -308,7 +308,7 @@ for s in $tf_secrets; do
   fi
   # shellcheck disable=SC2086 # readme_secrets は改行区切りで意図的に単語分割する
   if ! in_list "$s" $readme_secrets; then
-    echo "ERROR: ${README_FILE#$ROOT/} の投入手順に '${s}' がありません（§1 項目 5）。" >&2
+    echo "ERROR: ${README_FILE#"$ROOT"/} の投入手順に '${s}' がありません（§1 項目 5）。" >&2
     echo "       → 手順書に無い枠は誰も値を入れず、tf 成功・CI 全緑のまま本番で死にます（Issue #63 と同型）。" >&2
     echo "         printf %s \"<VALUE>\" | gcloud secrets versions add ${s} --data-file=- --project=gen-fw-line-meo" >&2
     fail=1
@@ -321,7 +321,7 @@ for s in $readme_secrets; do
   in_list "$s" $tf_secrets && continue
   # shellcheck disable=SC2086 # orphan_decl は改行区切りで意図的に単語分割する
   in_list "$s" $orphan_decl && continue
-  echo "ERROR: ${README_FILE#$ROOT/} の投入手順にある '${s}' が正典にありません。" >&2
+  echo "ERROR: ${README_FILE#"$ROOT"/} の投入手順にある '${s}' が正典にありません。" >&2
   echo "       → 存在しない secret へ値を投入させる手順が残っています。手順から削除してください。" >&2
   fail=1
 done
@@ -332,7 +332,7 @@ consumer_refs="$(grep -oE 'module\.secrets\.secret_ids\["[a-z0-9-]+"\]' "$CONSUM
 consumer_count="$(count_lines "$consumer_refs")"
 
 if [ "$consumer_count" -eq 0 ]; then
-  echo "ERROR: ${CONSUMER_TF#$ROOT/} から module.secrets.secret_ids[\"…\"] の参照を1件も抽出できませんでした。" >&2
+  echo "ERROR: ${CONSUMER_TF#"$ROOT"/} から module.secrets.secret_ids[\"…\"] の参照を1件も抽出できませんでした。" >&2
   echo "       → 配線の書き方が変わり、この照合が空振りしています。ts-ci は terraform を走らせないため、" >&2
   echo "         参照キーの誤りは人間が apply するまで発覚しません。抽出パターンを更新してください。" >&2
   exit 1
@@ -343,7 +343,7 @@ consumer_uniq="$(printf '%s\n' "$consumer_refs" | sort -u)"
 for s in $consumer_uniq; do
   # shellcheck disable=SC2086 # tf_secrets は改行区切りで意図的に単語分割する
   if ! in_list "$s" $tf_secrets; then
-    echo "ERROR: ${CONSUMER_TF#$ROOT/} が参照する '${s}' が正典（secret_ids）にありません。" >&2
+    echo "ERROR: ${CONSUMER_TF#"$ROOT"/} が参照する '${s}' が正典（secret_ids）にありません。" >&2
     echo "       → terraform plan は落ちますが、ts-ci は terraform を走らせないため人間の apply まで発覚しません。" >&2
     fail=1
   fi
