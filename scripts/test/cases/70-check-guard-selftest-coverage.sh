@@ -8,9 +8,7 @@
 # fixture には 70-check-guard-selftest-coverage.sh のダミーが必要になる。この自己参照が
 # 成立していること自体が「自己強制になっている」ことの確認でもある。
 
-gsc_fixture() {
-  fx_guard check-guard-selftest-coverage
-
+gsc_tree() {
   fx_write scripts/check-foo.sh <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -23,6 +21,23 @@ EOF
   fx_write scripts/test/cases/70-check-guard-selftest-coverage.sh <<'EOF'
 # dummy
 EOF
+}
+
+gsc_fixture() {
+  fx_guard check-guard-selftest-coverage
+  gsc_tree
+}
+
+# TIER_SPLIT へ `check-foo` を宣言した状態のガードを置く。
+#
+# 実在するガード名（`check-test-code-coverage`）を合成ツリーへ持ち込む案は採らない。宣言の
+# 中身を fixture が写経することになり、ガードを改名しただけで「宣言と食い違う」以外の理由で
+# ケースが赤くなる。宣言そのものを変異で与えれば、合成ツリーは実リポジトリの構成から独立する。
+# 変異が当たらなければ fx_guard_mutate が落とすため、宣言の書式が変われば黙って空振りしない。
+gsc_fixture_declared() {
+  fx_guard_mutate check-guard-selftest-coverage \
+    -e 's/^TIER_SPLIT=(.*)$/TIER_SPLIT=(check-foo)/'
+  gsc_tree
 }
 
 t_begin 'check-guard-selftest-coverage: ガードとケースが 1:1 なら緑（件数まで照合）'
@@ -60,9 +75,13 @@ t_end
 # 割れるため、「ガード 1 本にケース 1 件」を素朴に課すと正しい構成が赤になる。逆に tier の
 # 区別を捨てて何件でも許すと、同じ層のケースが 2 つに散る事故を見逃す。**同じ層に 2 件を
 # 許さない**という形で両立させる。
+#
+# ただしそれだけでは**片側の消失**が残る。件数は tier ごとに 1 件のままなので、削除しても
+# 「カバー済み」と数えられてしまう（PR #103 のレビューで実測）。期待する tier 集合を
+# TIER_SPLIT で宣言し、その実在を要求することで塞ぐ — 以下 4 件がその検証である。
 
-t_begin 'check-guard-selftest-coverage: tier 分割（Tier A + Tier B）は 1 件扱いで緑'
-gsc_fixture
+t_begin 'check-guard-selftest-coverage: 宣言済みガードが Tier A / Tier B を揃えていれば緑'
+gsc_fixture_declared
 fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF'
 # dummy
 EOF
@@ -70,8 +89,44 @@ fx_run check-guard-selftest-coverage
 expect_green
 t_end
 
-t_begin 'check-guard-selftest-coverage: 同じ層のケースが 2 件に散っていれば赤（tier 分割でも緩めない）'
+t_begin 'check-guard-selftest-coverage: 宣言済みガードの Tier A 消失を検出する（#103 レビュー指摘）'
+gsc_fixture_declared
+fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF'
+# dummy
+EOF
+# Tier B だけが残る。**件数は 1 件のまま**なので、件数を見る既存の検証では捕まらない。
+# 実リポジトリではこれが 10-check-test-code-coverage.sh（Tier A・17 ケース）の消失に当たる。
+rm -f "${FX}/scripts/test/cases/10-check-foo.sh"
+fx_run check-guard-selftest-coverage
+expect_red 'check-foo は TIER_SPLIT の宣言に反して Tier A のケースファイルがありません'
+# 件数不足として報告してはいけない。n=1 で素通りしていたことが本件の欠陥であり、
+# この不在アサーションが「件数の分岐で偶然赤くなった」との取り違えを防ぐ。
+expect_absent 'check-foo に対応するケースファイルがありません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: 宣言済みガードの Tier B 消失を検出する（#103 レビュー指摘）'
+gsc_fixture_declared
+# tier-b ファイルを置かない。Tier B は「実物の tsc / eslint にしか答えられない層」であり、
+# 消えても Tier A の緑だけで CI は通る。宣言があって初めて欠落として検出できる。
+fx_run check-guard-selftest-coverage
+expect_red 'check-foo は TIER_SPLIT の宣言に反して Tier B のケースファイルがありません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: 2 tier あるのに宣言が無ければ赤（宣言の陳腐化を防ぐ）'
 gsc_fixture
+fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF'
+# dummy
+EOF
+# 宣言のずれを片方向だけ見ると、宣言そのものが実態から乖離していく。tier を分けた本人へ
+# その場で宣言を要求することで、TIER_SPLIT が「後から誰も更新しない一覧」になるのを防ぐ。
+fx_run check-guard-selftest-coverage
+expect_red 'check-foo は Tier A / Tier B の両方にケースファイルがありますが TIER_SPLIT に宣言されていません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: 同じ層のケースが 2 件に散っていれば赤（tier 分割でも緩めない）'
+# 宣言済みの fixture を使う。未宣言のままだと上の「宣言されていません」も同時に出て、
+# 赤の原因が 2 つ混ざる（このハーネスが避けようとしている取り違えそのものである）。
+gsc_fixture_declared
 fx_write scripts/test/cases/15-check-foo.tier-b.sh <<'EOF'
 # dummy
 EOF
@@ -80,6 +135,7 @@ fx_write scripts/test/cases/16-check-foo.tier-b.sh <<'EOF'
 EOF
 fx_run check-guard-selftest-coverage
 expect_red 'check-foo の Tier B のケースファイルが 2 件あります'
+expect_absent 'TIER_SPLIT に宣言されていません'
 t_end
 
 t_begin 'check-guard-selftest-coverage: run.sh が知らない tier 接尾辞を検出する'
