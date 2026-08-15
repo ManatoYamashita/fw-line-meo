@@ -52,3 +52,27 @@ resource "google_service_account_iam_member" "act_as" {
   role               = "roles/iam.serviceAccountUser"
   member             = local.principal_set
 }
+
+# シークレット実値の投入漏れを CI が定期検証するためのメタデータ読み取り（Issue #63）
+#
+# 付与するのは roles/secretmanager.viewer のみ。この事前定義ロールは secretmanager.secrets.get /
+# secretmanager.versions.list / secretmanager.versions.get を含むが、**secretmanager.versions.access
+# （payload の読み取り）を含まない**（gcloud iam roles describe で実測確認済み）。したがって CI は
+# 「何番の version がいつ作られ、いま ENABLED か」までしか観測できず、値は一切読めない。
+#
+# **project 単位では付与しない**（Req 5.4。secrets モジュールが accessor を持たず consumer 側で
+# co-locate するのと同じ規律）。副作用として CI は project 全体の `gcloud secrets list` を実行
+# できない（secretmanager.secrets.list は project スコープで評価されるため）。
+# scripts/check-secret-version-drift.sh はこれを前提に、宣言された secret を 1 件ずつ
+# describe / versions list する設計になっている。
+#
+# 本モジュールが所有するのは、CI の principalSet が consumer だからである（secrets モジュール側へ
+# 置くと secrets が WIF プールを知る必要が生じ、root の依存が逆流する）。
+resource "google_secret_manager_secret_iam_member" "ci_metadata_viewer" {
+  for_each = toset(var.metadata_viewer_secret_ids)
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.viewer"
+  member    = local.principal_set
+}

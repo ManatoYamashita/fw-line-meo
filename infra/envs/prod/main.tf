@@ -163,6 +163,10 @@ module "cicd_wif" {
     [module.delivery_job.job_service_account_email],
   )
 
+  # Issue #63: CI がシークレットの **メタデータのみ** を定期検証するための viewer binding。
+  # 正典は secrets モジュールの output（列挙を二重管理しない）。値は読ませない。
+  metadata_viewer_secret_ids = values(module.secrets.secret_ids)
+
   depends_on = [module.project_services]
 }
 
