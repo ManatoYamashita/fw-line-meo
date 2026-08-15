@@ -118,6 +118,27 @@ fx_run check-shell-pipe-consumers
 expect_red 'scripts/bad.sh:2 は head をパイプの下流へ置いています'
 t_end
 
+t_begin 'check-shell-pipe-consumers: 行頭が引用符の行に置かれた違反も検出する（PR #119 指摘）'
+# 複数行の `awk` / `sed` はコマンドの残りが**閉じ引用符の行**へ続く。本リポジトリに実在する形で
+# ある（`scripts/test/cases/80-check-workflow-step-names.sh:36` ほか 2 箇所）。この行を WHITELIST の
+# データ行と同一視して読み飛ばすと、置かれた違反が ERROR も SKIP も出さないまま消える。
+# 除外の広さは「入れた理由」ではなく「外したら赤くなるか」で測る。この対照が無い間、
+# 当該除外を削除しても実リポジトリ緑・Tier A 全 PASS のままだった（PR #119 レビューで実測）。
+sp_fixture
+q='-q'
+fx_write scripts/quoted.sh <<EOF
+#!/usr/bin/env bash
+awk '
+  { print }
+' "\$1" | grep $q 'needle'
+EOF
+fx_track_now
+fx_run check-shell-pipe-consumers
+expect_red 'scripts/quoted.sh:4 は grep の quiet / max-count 系をパイプの下流へ置いています'
+# WHITELIST へ載せて黙らせる形での「是正」と区別する。SKIP は痕跡が残るが、除外は残らない。
+expect_absent 'SKIP: scripts/quoted.sh'
+t_end
+
 # ---------------------------------------------------------------------------
 # 対照: 誤検出しないこと。落とすとガードが永久に赤い、または正しいコードを壊す。
 
