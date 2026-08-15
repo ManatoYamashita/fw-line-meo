@@ -58,7 +58,15 @@ svn_report
 for svn_state in green red; do
   svn_compose "$svn_state"
   # 裸で置くと出力中の #123 が他 Issue への参照通知を、@name が誤メンションを飛ばす。
-  OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+  # **件数取得を後置 true で潰さない。** 潰すと評価不能（exit 2 以上）まで「0 件」へ化け、
+  # フェンスが無いのに `FENCES: 0` として素通りする（Issue #120）。無一致（1）と評価不能（2 以上）
+  # を分ける。`grep -c` は入力を読み切るので上流へ SIGPIPE を送らない（Issue #78）。
+  svn_fences_rc=0
+  svn_fences="$(printf '%s\n' "$OUT" | grep -cE '^```$')" || svn_fences_rc=$?
+  if [ "$svn_fences_rc" -gt 1 ]; then
+    _t_fail "フェンス数の抽出パターンを評価できません（grep exit=${svn_fences_rc}）"
+  fi
+  OUT="FENCES: ${svn_fences:-0}"
   expect_output_matches '^FENCES: 2$'
 done
 t_end
