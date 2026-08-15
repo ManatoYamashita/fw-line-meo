@@ -722,7 +722,17 @@ ${pkg_dir}"
     # `-p <path>` 指定が無い場合は tsc の既定である tsconfig.json を対象とする。
     tsconfig_names="$(printf '%s' "$typecheck_script" | sed -nE 's/.*(-p|--project)[[:space:]]+([^[:space:]]+).*/\2/p')"
     if [ -z "$tsconfig_names" ]; then
-      if printf '%s' "$typecheck_script" | grep -q 'tsc'; then
+      # 件数で判定する（Issue #117）。ここは `if`（否定なし）で **else 側が ERROR** なので、
+      # SIGPIPE × pipefail の非ゼロは「tsc を呼んでいない」と同義に読まれ、tsc を呼んでいる
+      # workspace を偽の赤で落とす。現状 `$typecheck_script` は 1 行で早期終了は起きないが、
+      # それは入力の形に依存した安全であってコードの性質ではない。
+      tsc_rc=0
+      tsc_hits="$(printf '%s' "$typecheck_script" | grep -c 'tsc')" || tsc_rc=$?
+      if [ "$tsc_rc" -gt 1 ]; then
+        echo "ERROR: ${rel_pkg} の typecheck スクリプトを照合できません（grep exit=${tsc_rc}）。" >&2
+        fail=1
+        continue
+      elif [ "${tsc_hits:-0}" -ne 0 ]; then
         tsconfig_names='tsconfig.json'
       else
         echo "ERROR: ${rel_pkg} の typecheck スクリプトが tsc を呼んでいません（現在: '${typecheck_script}'）。" >&2
@@ -766,7 +776,17 @@ ${listed}"
       checked_dirs=$((checked_dirs + 1))
 
       # (2) lint の走査対象に含まれているか。スクリプトの引数として現れることを要求する。
-      if ! printf '%s' "$lint_script" | grep -qE "(^|[[:space:]])${dir}([[:space:]]|/|$)"; then
+      # 件数で判定する（Issue #117）。上の dir_ts_hits と同じ理由で quiet 判定を使わない。
+      # `${dir}` を ERE へ埋めているため、候補名に正規表現メタ文字が入れば exit 2 になりうる。
+      # 後置 true で潰すと、それが「lint が走査していない」と同じ扱いになり、原因と逆向きの
+      # 「lint スクリプトの引数へ追加してください」という**従ってはいけない指示**が出る。
+      lint_rc=0
+      lint_hits="$(printf '%s' "$lint_script" | grep -cE "(^|[[:space:]])${dir}([[:space:]]|/|$)")" || lint_rc=$?
+      if [ "$lint_rc" -gt 1 ]; then
+        echo "ERROR: ${rel_pkg} の lint スクリプトの照合パターンを評価できません（grep exit=${lint_rc}）。" >&2
+        echo "       → ディレクトリ候補名に正規表現メタ文字が含まれていないか確認してください。" >&2
+        fail=1
+      elif [ "${lint_hits:-0}" -eq 0 ]; then
         echo "ERROR: ${rel_pkg} の lint スクリプトが ${dir}/ を走査していません（現在: '${lint_script}'）。" >&2
         echo "       → ${dir}/ に any や未使用が混入しても CI は緑のまま通ります。" >&2
         echo "         lint スクリプトの引数へ ${dir} を追加してください。" >&2

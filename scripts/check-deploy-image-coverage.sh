@@ -154,7 +154,18 @@ else
   for name in $image_names; do
     matrix_checked=$((matrix_checked + 1))
     # [ ] , のいずれかを境界として名前の完全一致を検証（部分一致の誤検出を防ぐ）。
-    if ! printf '%s\n' "$matrix_line" | grep -qE "[][, ]${name}[],]"; then
+    # 件数で判定する（Issue #117）。`$matrix_line` は現状 1 行なので早期終了は起きないが、
+    # 「今は転ばない」は入力の形という外部条件に依存しており、コードの性質ではない。
+    # 無一致（exit 1）と評価不能（exit 2 以上）を分ける。`${name}` を ERE へ埋めているため、
+    # 名前に正規表現メタ文字が混じると exit 2 になりうる。後置 true で潰すと、それが
+    # 「matrix に無い」と同じ扱いになり **原因と逆向きの診断**を出す。
+    matrix_rc=0
+    matrix_hits="$(printf '%s\n' "$matrix_line" | grep -cE "[][, ]${name}[],]")" || matrix_rc=$?
+    if [ "$matrix_rc" -gt 1 ]; then
+      echo "ERROR: '${name}' の matrix 照合パターンを評価できません（grep exit=${matrix_rc}）。" >&2
+      echo "       → イメージ名に正規表現メタ文字が含まれていないか確認してください。" >&2
+      fail=1
+    elif [ "${matrix_hits:-0}" -eq 0 ]; then
       echo "ERROR: ${PUSH_SCRIPT#$ROOT/} の '${name}' が ${TS_CI_YML#$ROOT/} の docker-build matrix にありません。" >&2
       echo "       → PR 段階の実ビルド検証（Issue #33/#35 型の Dockerfile 腐敗の検出）から漏れます。" >&2
       fail=1
