@@ -35,6 +35,12 @@ jobs:
         # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
         # 放置される事故の再発防止（同じく read-only grep 検証）。
         run: bash scripts/check-deploy-image-coverage.sh
+      - name: 'シークレット宣言カバレッジガード（Issue #63）'
+        # Secret Manager の値（version）は tf が作らず、人間が out-of-band 投入する。枠だけ作って
+        # 実値を入れ忘れた gemini-api-key は go-live 以降 4 週間 400 を返し続け、機能A は一度も
+        # 成功していなかった。tf 正典 / infra/secrets-provisioned.tsv / README の投入手順 /
+        # 消費側配線を両方向で照合する（同じく read-only grep 検証・gcloud には問い合わせない）。
+        run: bash scripts/check-secret-declaration-coverage.sh
       - name: 'typecheck カバレッジガード（Issue #51）'
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
