@@ -165,7 +165,14 @@ module "cicd_wif" {
 
   # Issue #63: CI がシークレットの **メタデータのみ** を定期検証するための viewer binding。
   # 正典は secrets モジュールの output（列挙を二重管理しない）。値は読ませない。
-  metadata_viewer_secret_ids = values(module.secrets.secret_ids)
+  #
+  # **values() ではなく keys() を渡すこと。** output の値は google_secret_manager_secret.id
+  # （computed）であり、枠を 1 件でも新規に足した PR では apply 前に確定しない。確定しない値を
+  # for_each の set 要素にすると `Invalid for_each argument` で **prod env の plan ごと落ちる**。
+  # 既存の枠だけなら state から確定するため気づけず、次に枠を足した PR で初めて出る（terraform
+  # validate も ts-ci も terraform を走らせないので、人間が apply するまで発覚しない）。
+  # 鍵は locals.secret_ids そのもので plan 時点に確定する。
+  metadata_viewer_secret_ids = keys(module.secrets.secret_ids)
 
   depends_on = [module.project_services]
 }

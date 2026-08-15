@@ -68,6 +68,11 @@ resource "google_service_account_iam_member" "act_as" {
 #
 # 本モジュールが所有するのは、CI の principalSet が consumer だからである（secrets モジュール側へ
 # 置くと secrets が WIF プールを知る必要が生じ、root の依存が逆流する）。
+#
+# **for_each の要素には plan 時点で確定する値（枠名）しか渡してはならない。** computed な
+# google_secret_manager_secret.id を渡すと、枠を 1 件でも新規に足した時点で set が確定せず
+# `Invalid for_each argument` になり、prod env の plan ごと落ちる。secret_id は project を
+# 併記すれば短い枠名で解決される（フルパスの .id も API 上は通るが、それは確定しない値である）。
 resource "google_secret_manager_secret_iam_member" "ci_metadata_viewer" {
   for_each = toset(var.metadata_viewer_secret_ids)
 
