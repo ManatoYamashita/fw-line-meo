@@ -93,6 +93,26 @@ fx_run check-grep-exit-codes
 expect_red 'scripts/bad.sh:2 は grep の失敗を後置 true で潰しています'
 t_end
 
+t_begin 'check-grep-exit-codes: 行頭が引用符の行に置かれた握り潰しも検出する（PR #119 と同型）'
+# 複数行の `awk` / `sed` はコマンドの残りが**閉じ引用符の行**へ続く。本リポジトリに実在する形で
+# ある。この行を WHITELIST のデータ行と同一視して読み飛ばすと、置かれた違反が ERROR も SKIP も
+# 出さないまま消える。check-shell-pipe-consumers.sh が PR #119 で踏んだ穴と同型であり、
+# 本ガードはその是正前のひな型から複製されたため同じ穴を持っていた（実測で 2 行が母数から
+# 落ちていた）。除外の広さは「入れた理由」ではなく「外したら赤くなるか」で測る。
+gec_fixture
+fx_write scripts/quoted.sh <<EOF
+#!/usr/bin/env bash
+n="\$(awk '
+  { print }
+' "\$1" | grep -c 'x' ${SWALLOW})"
+EOF
+fx_track_now
+fx_run check-grep-exit-codes
+expect_red 'scripts/quoted.sh:4 は grep の失敗を後置 true で潰しています'
+# WHITELIST へ載せて黙らせる形での「是正」と区別する。SKIP は痕跡が残るが、除外は残らない。
+expect_absent 'SKIP: scripts/quoted.sh'
+t_end
+
 # ---------------------------------------------------------------------------
 # 対照: 誤検出しないこと。
 

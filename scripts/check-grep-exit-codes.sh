@@ -56,6 +56,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# WHITELIST を宣言しているファイル（= 本スクリプト）のリポジトリ相対パス。
+# データ行の除外をこのファイルへ限定するために使う（下の scan 内 case を参照）。
+# check-shell-pipe-consumers.sh と同形である（PR #119 で同じ穴を塞いだ）。
+SELF_REL="${SCRIPT_DIR}/$(basename "$0")"
+SELF_REL="${SELF_REL#$ROOT/}"
+
 # 意図的に許容する行（必ず理由と Issue を明記すること）。
 # 形式: `WHITELIST=('scripts/foo.sh|cmd  # 理由')`。値は前後の空白を除いた行そのもの。
 # 現在は空。
@@ -119,13 +125,24 @@ scan() {
     trimmed="${content#"${content%%[![:space:]]*}"}"
     trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
 
+    # 行頭が `#` のコメント行は全ファイルで対象外。規律を説明する注記がこの構文を引用するため。
     case "$trimmed" in
       '#'*) continue ;;
-      # WHITELIST 宣言の行はコマンドではなくデータである。違反行を除外へ載せると
-      # その内容がガード本体のソースへ現れるため、除外しないと永久に赤くなる。
-      'WHITELIST=('*) continue ;;
-      "'"*) continue ;;
     esac
+
+    # WHITELIST 宣言の行と配列要素の引用符行はコマンドではなくデータである。違反行を除外へ
+    # 載せるとその内容がガード本体のソースへ現れるため、除外しないと永久に赤くなる。
+    #
+    # **この除外は WHITELIST を宣言する本ファイルへ限定すること。** 全ファイルへ広げると、
+    # 複数行の `awk` / `sed` で残りのコマンドが続く閉じ引用符行に置かれた握り潰しが、
+    # ERROR も SKIP も出さずに消える（check-shell-pipe-consumers.sh が PR #119 で踏んだ穴と
+    # 同型。本ガードはその是正前のひな型から複製されていた）。対照は 86 番にある。
+    if [ "$scan_rel" = "$SELF_REL" ]; then
+      case "$trimmed" in
+        'WHITELIST=('*) continue ;;
+        "'"*) continue ;;
+      esac
+    fi
 
     grep_line_count=$((grep_line_count + 1))
 
