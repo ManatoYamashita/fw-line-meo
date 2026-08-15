@@ -119,10 +119,14 @@ fail=0
 #
 # `secret_ids = [` 〜 `]` の範囲を先に確定してから、行頭の引用符で id を取る。範囲を先に切らないと
 # module 引数など範囲外の引用符まで拾ってしまう。
-# **末尾の `|| true` は必須である（Issue #90）。** sed/grep は無一致で exit 1 を返し、`pipefail` と
-# `set -e` の組み合わせで、直下の空振り検出へ到達する前にスクリプトが死ぬ。**出力ゼロのまま exit 1**
-# は fail-closed ではあるが、原因を一切告げない赤は誤診断より始末が悪い。空判定は必ず下の分岐で行う。
-tf_block="$(sed -n '/^[[:space:]]*secret_ids[[:space:]]*=[[:space:]]*\[[[:space:]]*$/,/^[[:space:]]*\][[:space:]]*$/p' "$TF_FILE" || true)"
+# **抽出の失敗を握り潰さない。** grep は無一致で exit 1 を返し、`pipefail` と `set -e` の
+# 組み合わせで、直下の空振り検出へ到達する前にスクリプトが死ぬ。**出力ゼロのまま exit 1** は
+# fail-closed ではあるが、原因を一切告げない赤は誤診断より始末が悪い（Issue #90）。かといって
+# `|| true` で潰すと、評価不能（exit 2 以上）まで「一致 0 件」へ化ける（Issue #120）。
+# したがって **終了コードを捕捉し、無一致（1）と評価不能（2 以上）を分ける**。
+#
+# 下の sed は範囲指定のみでスクリプトが固定されているため失敗し得ず、無一致でも exit 0 を返す。
+tf_block="$(sed -n '/^[[:space:]]*secret_ids[[:space:]]*=[[:space:]]*\[[[:space:]]*$/,/^[[:space:]]*\][[:space:]]*$/p' "$TF_FILE")"
 
 if [ -z "$tf_block" ]; then
   echo "ERROR: ${TF_FILE#"$ROOT"/} に 'secret_ids = [' で始まる複数行リスト定義が見つかりません。" >&2
@@ -143,9 +147,14 @@ case "$tf_block_last" in
 esac
 
 # 行頭が引用符の行だけを id とみなす（`secret_ids = [` の行や `]` の行、行末コメントは当たらない）。
+tf_secrets_rc=0
 tf_secrets="$(printf '%s\n' "$tf_block" \
   | grep -oE '^[[:space:]]*"[a-z0-9-]+"' \
-  | sed -E 's/^[[:space:]]*"([a-z0-9-]+)"$/\1/' | sort -u || true)"
+  | sed -E 's/^[[:space:]]*"([a-z0-9-]+)"$/\1/' | sort -u)" || tf_secrets_rc=$?
+if [ "$tf_secrets_rc" -gt 1 ]; then
+  echo "ERROR: 正典の抽出パターンを評価できません（grep exit=${tf_secrets_rc}）: ${TF_FILE#"$ROOT"/}" >&2
+  exit 1
+fi
 
 if [ -z "$tf_secrets" ]; then
   echo "ERROR: ${TF_FILE#"$ROOT"/} の secret_ids から secret を1件も抽出できませんでした（抽出パターンの前提が崩れています）。" >&2
@@ -155,7 +164,14 @@ fi
 tf_count="$(count_lines "$tf_secrets")"
 
 # --- 検証4: 宣言ファイルの読み込みと形式検査 -------------------------------------------------
-decl_rows="$(grep -vE '^[[:space:]]*(#|$)' "$DECL_FILE" || true)"
+decl_rows_rc=0
+decl_rows="$(grep -vE '^[[:space:]]*(#|$)' "$DECL_FILE")" || decl_rows_rc=$?
+if [ "$decl_rows_rc" -gt 1 ]; then
+  # 潰すと「ファイルを読めない」が「データ行が 0 行」と同義に化け、原因の異なる 2 つが
+  # 同じ診断へ落ちる（Issue #120）。
+  echo "ERROR: ${DECL_FILE#"$ROOT"/} を読めません（grep exit=${decl_rows_rc}）。" >&2
+  exit 1
+fi
 if [ -z "$decl_rows" ]; then
   echo "ERROR: ${DECL_FILE#"$ROOT"/} からデータ行を1行も読めませんでした（コメントと空行しかありません）。" >&2
   echo "       → 宣言 0 行のまま「乖離なし」で緑にするのが最悪の空振りであるため、ここで fail します。" >&2
@@ -282,8 +298,13 @@ done
 #
 # 抽出をコマンド行に限定する。README には `gcloud sql users set-password` の説明で
 # db-admin-password に言及する箇所があり、素朴な出現数カウントは二重計上する。
+readme_secrets_rc=0
 readme_secrets="$(grep -oE 'gcloud secrets versions add[[:space:]]+[a-z0-9-]+' "$README_FILE" \
-  | sed -E 's/.*[[:space:]]//' | sort -u || true)"
+  | sed -E 's/.*[[:space:]]//' | sort -u)" || readme_secrets_rc=$?
+if [ "$readme_secrets_rc" -gt 1 ]; then
+  echo "ERROR: 投入手順の抽出パターンを評価できません（grep exit=${readme_secrets_rc}）: ${README_FILE#"$ROOT"/}" >&2
+  exit 1
+fi
 
 if [ -z "$readme_secrets" ]; then
   echo "ERROR: ${README_FILE#"$ROOT"/} から 'gcloud secrets versions add <id>' を1件も抽出できませんでした。" >&2
@@ -327,8 +348,13 @@ for s in $readme_secrets; do
 done
 
 # --- 検証5: 消費側配線 → 正典（一方向） ------------------------------------------------------
+consumer_refs_rc=0
 consumer_refs="$(grep -oE 'module\.secrets\.secret_ids\["[a-z0-9-]+"\]' "$CONSUMER_TF" \
-  | sed -E 's/.*\["([a-z0-9-]+)"\].*/\1/' || true)"
+  | sed -E 's/.*\["([a-z0-9-]+)"\].*/\1/')" || consumer_refs_rc=$?
+if [ "$consumer_refs_rc" -gt 1 ]; then
+  echo "ERROR: 消費側配線の抽出パターンを評価できません（grep exit=${consumer_refs_rc}）: ${CONSUMER_TF#"$ROOT"/}" >&2
+  exit 1
+fi
 consumer_count="$(count_lines "$consumer_refs")"
 
 if [ "$consumer_count" -eq 0 ]; then

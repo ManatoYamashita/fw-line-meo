@@ -229,7 +229,13 @@ if [ -n "$PROD_SECRET_SNAPSHOT" ]; then
   if [ ! -f "$PROD_SECRET_SNAPSHOT" ]; then
     fail_early config-error "ERROR: PROD_SECRET_SNAPSHOT が見つかりません: ${PROD_SECRET_SNAPSHOT}"
   fi
-  snapshot="$(grep -vE '^[[:space:]]*(#|$)' "$PROD_SECRET_SNAPSHOT" || true)"
+  # 終了コードを捕捉する（Issue #120）。潰すと「ファイルを読めない」が「snapshot が空」と
+  # 同義に化け、原因の異なる 2 つが同じ診断へ落ちる。
+  snapshot_rc=0
+  snapshot="$(grep -vE '^[[:space:]]*(#|$)' "$PROD_SECRET_SNAPSHOT")" || snapshot_rc=$?
+  if [ "$snapshot_rc" -gt 1 ]; then
+    fail_early config-error "ERROR: PROD_SECRET_SNAPSHOT を読めません（grep exit=${snapshot_rc}）: ${PROD_SECRET_SNAPSHOT}"
+  fi
 else
   collect_rc=0
   snapshot="$(collect_live_snapshot)" || collect_rc=$?
@@ -251,9 +257,16 @@ fi
 # snapshot の形式検査。壊れた行を黙って読み飛ばすと、その secret だけ検証されないまま緑になる。
 snapshot_valid="$(printf '%s\n' "$snapshot" | count_re '^secret	[a-z0-9-]+	-	(-|MISSING)	-$|^version	[a-z0-9-]+	[0-9]+	(ENABLED|DISABLED|DESTROYED)	[^	]+$')"
 if [ "$snapshot_valid" -ne "$snapshot_rows" ]; then
+  # ここは必ず 1 件以上一致する（valid < rows が成立しているため）。それでも終了コードを捕捉
+  # するのは、パターンを書き換えたときに無言で空の診断を出す経路を残さないためである。
+  # `sed -n '1,3p'` は `q` を持たず入力を読み切るので、上流へ SIGPIPE を送らない。
+  bad_line_rc=0
   bad_line="$(printf '%s\n' "$snapshot" \
     | grep -vE '^secret	[a-z0-9-]+	-	(-|MISSING)	-$|^version	[a-z0-9-]+	[0-9]+	(ENABLED|DISABLED|DESTROYED)	[^	]+$' \
-    | sed -n '1,3p' || true)"
+    | sed -n '1,3p')" || bad_line_rc=$?
+  if [ "$bad_line_rc" -gt 1 ]; then
+    fail_early snapshot-malformed "ERROR: snapshot の検査パターンを評価できません（grep exit=${bad_line_rc}）。"
+  fi
   fail_early snapshot-malformed \
     "ERROR: snapshot に形式の合わない行が $((snapshot_rows - snapshot_valid)) 件あります（先頭 3 件）:" \
     "$(printf '%s\n' "$bad_line" | sed 's/^/       | /')" \
@@ -261,11 +274,28 @@ if [ "$snapshot_valid" -ne "$snapshot_rows" ]; then
     "         壊れた行を読み飛ばすと、その secret だけ検証されないまま緑になるため、ここで fail します。"
 fi
 
+# `$1` を ERE へ埋めるため、正典の供給が壊れて id にメタ文字が入れば exit 2 になり得る。
+# **後置 true で潰してはならない**（Issue #120）。潰すと「照合できない」が「snapshot に無い」と
+# 同義になり、稼働中の secret を **missing-frame / no-version として報告する**方向へ倒れる。
+# 呼び出し側は `|| fail_early` で受けること（署名を出さずに死ぬ経路を作らないため、ここでは
+# exit せず return 2 を返す）。
 snapshot_lookup_frame() {
-  printf '%s\n' "$snapshot" | grep -E "^secret	$1	" || true
+  slf_rc=0
+  slf_out="$(printf '%s\n' "$snapshot" | grep -E "^secret	$1	")" || slf_rc=$?
+  if [ "$slf_rc" -gt 1 ]; then
+    echo "ERROR: snapshot の照合パターンを評価できません（grep exit=${slf_rc}）: secret/$1" >&2
+    return 2
+  fi
+  printf '%s\n' "$slf_out"
 }
 snapshot_versions() {
-  printf '%s\n' "$snapshot" | grep -E "^version	$1	" || true
+  sv_rc=0
+  sv_out="$(printf '%s\n' "$snapshot" | grep -E "^version	$1	")" || sv_rc=$?
+  if [ "$sv_rc" -gt 1 ]; then
+    echo "ERROR: snapshot の照合パターンを評価できません（grep exit=${sv_rc}）: version/$1" >&2
+    return 2
+  fi
+  printf '%s\n' "$sv_out"
 }
 
 # ---------------------------------------------------------------------------
@@ -289,10 +319,10 @@ while IFS="$(printf '\t')" read -r sid dver; do
   [ -n "${sid:-}" ] || continue
   checked=$((checked + 1))
 
-  frame_row="$(snapshot_lookup_frame "$sid")"
+  frame_row="$(snapshot_lookup_frame "$sid")" || fail_early snapshot-lookup-failed
   frame_state="$(printf '%s' "$frame_row" | cut -f4)"
 
-  v_rows="$(snapshot_versions "$sid")"
+  v_rows="$(snapshot_versions "$sid")" || fail_early snapshot-lookup-failed
   ver_count=0
   enabled_count=0
   enabled_other=""
