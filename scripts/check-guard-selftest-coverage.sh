@@ -11,7 +11,9 @@
 # 起きている。ガードの本数が増えるほど、ケースの取りこぼしは差分上に痕跡を残さなくなる。
 #
 # 本スクリプトは以下を機械検証する（read-only の走査・副作用なし・連想配列を使わず bash 3.2 でも走る）:
-#   1. `scripts/check-*.sh` の各ガードに `scripts/test/cases/NN-<ガード名>.sh` がちょうど 1 件ある
+#   1. `scripts/check-*.sh` の各ガードに対応するケースファイルが **tier ごとに 1 件** ある
+#      （`NN-<ガード名>.sh` = Tier A / `NN-<ガード名>.tier-b.sh` = Tier B）。さらに TIER_SPLIT へ
+#      宣言したガードは両 tier の実在を要求する（片側が消えても残る層の緑で通るのを防ぐ）
 #   2. 逆に、各ケースファイルが実在するガードを指している（改名の取り残し＝孤児ケースの検出）
 #   3. 意図的除外はこのファイル内の WHITELIST に Issue 番号付きで明記されている
 #      （ホワイトリスト項目が実はカバー済みになったら警告し、削除を促す）
@@ -33,6 +35,22 @@ CASES_DIR="${ROOT}/scripts/test/cases"
 # 意図的に自己テストを持たないガード（必ず理由と Issue を明記すること）。
 # 現在は空。追加時は `WHITELIST=(check-foo)` 形式で、直上に理由と Issue 番号を書く。
 WHITELIST=()
+
+# tier 分割済みガードの宣言（Issue #90 の二層化・PR #103 レビュー指摘）。
+# ここに載せたガードは Tier A（接尾辞なし）と Tier B（`.tier-b`）の **両方** のケースファイルが
+# 実在することを要求する。
+#
+# 「tier ごとに 1 件」だけでは **片側の消失** を検出できない。2 tier へ割れたガードは片方の
+# ファイルを削除しても残り 1 件で「カバー済み」と数えられ、その層の検証が丸ごと消えても
+# 本ガードは `8/8 ガードにケース` と申告し、run.sh --tier=a も緑を返した（PR #103 のレビューで
+# base 赤 / head 緑を実測）。これは本スクリプトが PR #93 で塞いだ「ケースファイルが 1 件消えても
+# 残りの緑で通る」形状が、tier 粒度へ移っただけである。
+#
+# 宣言のずれは **両方向** で赤にする。載っているのに片側が無ければ欠落、載っていないのに
+# 2 tier あれば宣言漏れ。片方向だけだと、この一覧そのものが実態から乖離していく。
+# ガードを改名した場合は新しい名前が「2 tier あるのに未宣言」で赤になるため、取り残された
+# 旧名の項目は不活性になるだけで見逃しにはならない。
+TIER_SPLIT=(check-test-code-coverage)
 
 if [ ! -d "$CASES_DIR" ]; then
   echo "ERROR: ケースディレクトリがありません: ${CASES_DIR#$ROOT/}（ガードの自己テストが丸ごと消えています）。" >&2
@@ -72,6 +90,40 @@ case_guard_of() {
     *.tier-*) echo "${1%.tier-*}" ;;
     *) echo "$1" ;;
   esac
+}
+
+check_tier_set() {
+  # 期待する tier 集合が実在することを要求する（PR #103 レビュー指摘）。
+  #   $1 = ガード名 / $2 = そのガードで実在した tier トークンの一覧（空白区切り・Tier A は tier-a）
+  #
+  # 件数を見る上のループとは検出する欠陥が違う。あちらは「同じ層が 2 ファイルへ散る」、
+  # 本関数は「あるべき層が丸ごと消える」。後者は件数が tier ごとに 1 件のままなので、
+  # 件数をいくら厳しくしても捕まらない。
+  cts_name="$1"
+  cts_seen="$2"
+
+  if in_list "$cts_name" ${TIER_SPLIT[@]+"${TIER_SPLIT[@]}"}; then
+    for cts_want in tier-a tier-b; do
+      if in_list "$cts_want" $cts_seen; then
+        continue
+      fi
+      cts_label="$(printf '%s' "${cts_want#tier-}" | tr 'a-z' 'A-Z')"
+      echo "ERROR: ${cts_name} は TIER_SPLIT の宣言に反して Tier ${cts_label} のケースファイルがありません。" >&2
+      echo "       → その層の検証が丸ごと消えても、残る層の緑だけで CI が通ってしまいます。" >&2
+      echo "         復旧するか、その層を持たない構成にしたのなら TIER_SPLIT から外してください。" >&2
+      fail=1
+    done
+    return 0
+  fi
+
+  # 未宣言のまま 2 tier へ割れている状態。放置すると、以後どちらが消えても検出できない。
+  if in_list 'tier-a' $cts_seen && in_list 'tier-b' $cts_seen; then
+    echo "ERROR: ${cts_name} は Tier A / Tier B の両方にケースファイルがありますが TIER_SPLIT に宣言されていません。" >&2
+    echo "       → 宣言が無いと、片方が消えても残る層の緑だけで通ります（件数は 1 件のままです）。" >&2
+    echo "         TIER_SPLIT へ ${cts_name} を追加してください。" >&2
+    fail=1
+  fi
+  return 0
 }
 
 # 検証1/3: 各ガードに対応するケースファイルがあること。
@@ -117,6 +169,9 @@ for guard_path in "$GUARD_DIR"/check-*.sh; do
     fail=1
   else
     # 件数そのものは制約にしない（tier ごとに 1 件を上のループで見ている）。
+    # ただし **期待する tier がすべて実在すること** は別に要求する。件数だけを見ていると、
+    # 2 tier へ割れたガードの片方が消えても n=1 のまま「カバー済み」になる（PR #103）。
+    check_tier_set "$name" "$seen_tiers"
     covered=$((covered + 1))
   fi
 done
