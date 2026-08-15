@@ -253,13 +253,43 @@ CODE_EXT_RE='\.(ts|tsx|mts|cts|mjs|cjs|js|jsx)$'
 #
 # 改行を含むファイル名までは扱えない（`-z` と NUL 区切りが要るが、bash 3.2 互換のまま
 # ヒアドキュメントで受け渡す本実装では NUL を運べない）。find 由来の頃と同じ制約である。
+# 件数を数える共通器（Issue #120）。標準入力を読み、`-c` 以外の grep 引数を受ける。
+# 無一致（exit 1）は 0 を返す。**評価不能（exit 2 以上）は即座に停止する。**
+#
+# 後置 `true` で潰すと、標準出力が空のまま `${n:-0}` が 0 と読まれ、呼び出し側の極性しだいで
+# 偽の赤にも偽の緑にもなる。ここで止めれば、どちらにも化けない。本関数はコマンド置換の中から
+# 呼ばれる想定であり、`exit` は subshell を終わらせるだけだが、呼び出し側は単純代入なので
+# 非ゼロが `set -e` に拾われてスクリプトごと止まる（`if` の条件へ直接埋めないこと）。
+count_matches() {
+  cm_rc=0
+  cm_out="$(grep -c "$@")" || cm_rc=$?
+  if [ "$cm_rc" -gt 1 ]; then
+    echo "ERROR: 照合パターンを評価できません（grep exit=${cm_rc}）: $*" >&2
+    exit 1
+  fi
+  printf '%s\n' "${cm_out:-0}"
+}
+
 tracked_code_files() {
-  (cd "$1" && git -c core.quotePath=false ls-files --cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" || true
+  # 列挙側も同様に扱う。無一致は空、評価不能は停止（Issue #120）。
+  tcf_rc=0
+  tcf_out="$( (cd "$1" && git -c core.quotePath=false ls-files --cached -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" )" || tcf_rc=$?
+  if [ "$tcf_rc" -gt 1 ]; then
+    echo "ERROR: コードファイルの列挙パターンを評価できません（grep exit=${tcf_rc}）: ${CODE_EXT_RE}" >&2
+    exit 1
+  fi
+  [ -z "$tcf_out" ] || printf '%s\n' "$tcf_out"
 }
 
 # 追跡されていない（= 上の列挙から漏れた）コードファイル。.gitignore 済みは除く。
 tracked_code_files_untracked() {
-  (cd "$1" && git -c core.quotePath=false ls-files --others --exclude-standard -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" || true
+  tcfu_rc=0
+  tcfu_out="$( (cd "$1" && git -c core.quotePath=false ls-files --others --exclude-standard -- .) 2>/dev/null | grep -E "$CODE_EXT_RE" )" || tcfu_rc=$?
+  if [ "$tcfu_rc" -gt 1 ]; then
+    echo "ERROR: 未追跡コードファイルの列挙パターンを評価できません（grep exit=${tcfu_rc}）: ${CODE_EXT_RE}" >&2
+    exit 1
+  fi
+  [ -z "$tcfu_out" ] || printf '%s\n' "$tcfu_out"
 }
 
 # tsc の `--listFiles` 出力が実質空か（= tsc が走らなかった／プログラムを構成できなかった）
@@ -298,7 +328,12 @@ check_root_files() {
 
   # 拡張子ベースの列挙。ディレクトリ名を列挙する方式と違い、新設ファイルで穴が空かない。
   # 情報源は git 管理下（Issue #82）。`/` を含まない行＝直下のファイルだけを採る。
-  crf_files="$(tracked_code_files "$crf_dir" | grep -v '/' | sort || true)"
+  crf_files_rc=0
+  crf_files="$(tracked_code_files "$crf_dir" | grep -v '/' | sort)" || crf_files_rc=$?
+  if [ "$crf_files_rc" -gt 1 ]; then
+    echo "ERROR: ${crf_rel} 直下のファイル一覧を絞り込めません（grep exit=${crf_files_rc}）。" >&2
+    exit 1
+  fi
   [ -n "$crf_files" ] || return 0
 
   # (A) eslint の ignores に消されていないこと。
@@ -351,7 +386,7 @@ check_root_files() {
     esac
 
     if [ "$crf_lint_exempt" -eq 0 ]; then
-      crf_hits="$(printf '%s\n' "$crf_ignored" | grep -Fxc "$crf_base" || true)"
+      crf_hits="$(printf '%s\n' "$crf_ignored" | count_matches -Fx "$crf_base")"
       if [ "${crf_hits:-0}" -ne 0 ]; then
         echo "ERROR: ${crf_rel}${crf_base} は eslint の ignores に除外されています。" >&2
         echo "       → lint スクリプトの引数へ足しても走査そのものが行われません。" >&2
@@ -359,7 +394,7 @@ check_root_files() {
         fail=1
       fi
 
-      crf_hits="$(printf '%s' "$crf_lint" | grep -Ec "(^|[[:space:]])${crf_re}([[:space:]]|\$)" || true)"
+      crf_hits="$(printf '%s' "$crf_lint" | count_matches -E "(^|[[:space:]])${crf_re}([[:space:]]|\$)")"
       if [ "${crf_hits:-0}" -eq 0 ]; then
         echo "ERROR: ${crf_rel}${crf_base} が lint スクリプトの引数にありません（現在: '${crf_lint}'）。" >&2
         echo "       → lint 引数がディレクトリ限定のため直下のファイルへ到達しません。" >&2
@@ -368,7 +403,7 @@ check_root_files() {
       fi
     fi
 
-    crf_hits="$(printf '%s' "$crf_program" | grep -Fc "${crf_dir}${crf_base}" || true)"
+    crf_hits="$(printf '%s' "$crf_program" | count_matches -F "${crf_dir}${crf_base}")"
     if [ "${crf_hits:-0}" -eq 0 ]; then
       echo "ERROR: ${crf_rel}${crf_base} が tsc のプログラムに含まれていません。" >&2
       echo "       → 未知のキーが黙って無視される形状の設定でも誰も気づけません。" >&2
@@ -381,7 +416,7 @@ check_root_files() {
     # **拡張子を問わず全コードファイルへ適用する**（`.ts` 系を下の JS 系分岐に任せると、
     # `.ts` はプラグマを一度も見られないまま「型検査に掛かっている」と報告される）。
     crf_hits="$(leading_comment_block "${crf_dir}${crf_base}" \
-      | grep -Ec '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-nocheck([[:space:]*]|$)' || true)"
+      | count_matches -E '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-nocheck([[:space:]*]|$)')"
     if [ "${crf_hits:-0}" -ne 0 ]; then
       echo "ERROR: ${crf_rel}${crf_base} は @ts-nocheck でファイル全体の型検査を無効化しています。" >&2
       echo "       → tsc のプログラムには載るため本ガードは緑になりますが、型エラーは" >&2
@@ -406,7 +441,7 @@ check_root_files() {
     case "$crf_base" in
       *.js | *.jsx | *.mjs | *.cjs)
         crf_hits="$(head -n 3 "${crf_dir}${crf_base}" \
-          | grep -Ec '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-check([[:space:]*]|$)' || true)"
+          | count_matches -E '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-check([[:space:]*]|$)')"
         if [ "${crf_hits:-0}" -eq 0 ]; then
           echo "ERROR: ${crf_rel}${crf_base} は tsc のプログラムに載っていますが型検査されていません。" >&2
           echo "       → allowJs は「プログラムに含める」だけで、checkJs も @ts-check も無ければ" >&2
@@ -593,7 +628,7 @@ EOF
     csf_path="${csf_dir}${csf_relfile}"
     checked_subdir_files=$((checked_subdir_files + 1))
 
-    csf_hits="$(printf '%s\n' "$csf_ignored" | grep -Fxc "$csf_relfile" || true)"
+    csf_hits="$(printf '%s\n' "$csf_ignored" | count_matches -Fx "$csf_relfile")"
     if [ "${csf_hits:-0}" -ne 0 ]; then
       echo "ERROR: ${csf_rel}${csf_relfile} は eslint の ignores に除外されています。" >&2
       echo "       → lint スクリプトの引数が届いても走査そのものが行われません。" >&2
@@ -617,7 +652,7 @@ EOF
     while [ -n "$csf_cand" ]; do
       # パスはドットを含む。正規表現で使う箇所はエスケープする。
       csf_re="$(printf '%s' "$csf_cand" | sed 's/[.]/\\./g')"
-      csf_hits="$(printf '%s' "$csf_lint" | grep -Ec "(^|[[:space:]])${csf_re}([[:space:]]|/|\$)" || true)"
+      csf_hits="$(printf '%s' "$csf_lint" | count_matches -E "(^|[[:space:]])${csf_re}([[:space:]]|/|\$)")"
       if [ "${csf_hits:-0}" -ne 0 ]; then
         csf_reach=1
         break
@@ -642,7 +677,7 @@ EOF
     fi
 
     # (C) tsc のプログラムに含まれているか。
-    csf_hits="$(printf '%s' "$csf_program" | grep -Fc "$csf_path" || true)"
+    csf_hits="$(printf '%s' "$csf_program" | count_matches -F "$csf_path")"
     if [ "${csf_hits:-0}" -eq 0 ]; then
       echo "ERROR: ${csf_rel}${csf_relfile} が tsc のプログラムに含まれていません。" >&2
       echo "       → CI で実行されるスクリプトであっても、未知のキーが黙って無視される形状の" >&2
@@ -656,7 +691,7 @@ EOF
     # (D) 型検査が実際に効いているか。判定は check_root_files と**同じ器を共有する**
     #     （別実装にすると、#78 のレビューで塞いだ @ts-nocheck の穴がここで再発する）。
     csf_hits="$(leading_comment_block "$csf_path" \
-      | grep -Ec '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-nocheck([[:space:]*]|$)' || true)"
+      | count_matches -E '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-nocheck([[:space:]*]|$)')"
     if [ "${csf_hits:-0}" -ne 0 ]; then
       echo "ERROR: ${csf_rel}${csf_relfile} は @ts-nocheck でファイル全体の型検査を無効化しています。" >&2
       echo "       → tsc のプログラムには載るため本ガードは緑になりますが、型エラーは" >&2
@@ -672,7 +707,7 @@ EOF
     case "$csf_relfile" in
       *.js | *.jsx | *.mjs | *.cjs)
         csf_hits="$(head -n 3 "$csf_path" \
-          | grep -Ec '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-check([[:space:]*]|$)' || true)"
+          | count_matches -E '^[[:space:]]*(//|/\*)[*[:space:]]*@ts-check([[:space:]*]|$)')"
         if [ "${csf_hits:-0}" -eq 0 ]; then
           echo "ERROR: ${csf_rel}${csf_relfile} は tsc のプログラムに載っていますが型検査されていません。" >&2
           echo "       → allowJs は「プログラムに含める」だけで、checkJs も @ts-check も無ければ" >&2
@@ -771,7 +806,7 @@ ${listed}"
       # SIGPIPE × pipefail による失敗が「.ts を含まないディレクトリ」と同じ扱い、すなわち
       # **ディレクトリを黙ってスキップする**方向へ化ける。件数判定へ揃える。
       # 情報源は git 管理下（Issue #82）。未追跡の一時 .ts でディレクトリを対象化しない。
-      dir_ts_hits="$(tracked_code_files "${pkg_dir}${dir}/" | grep -cE '\.(ts|tsx)$' || true)"
+      dir_ts_hits="$(tracked_code_files "${pkg_dir}${dir}/" | count_matches -E '\.(ts|tsx)$')"
       [ "${dir_ts_hits:-0}" -ne 0 ] || continue
       checked_dirs=$((checked_dirs + 1))
 
@@ -799,7 +834,7 @@ ${listed}"
       # `/test/` のような部分一致にすると node_modules 配下の同名ディレクトリに当たり、
       # 未カバーでも件数が立って**常に緑**になる（実際にこの誤りを踏んだ）。
       # `grep -q` は最初の一致で打ち切るため件数が取れず判定が不透明になるので使わない。
-      dir_hits="$(printf '%s' "$program_files" | grep -Fc "${pkg_dir}${dir}/" || true)"
+      dir_hits="$(printf '%s' "$program_files" | count_matches -F "${pkg_dir}${dir}/")"
       if [ "${dir_hits:-0}" -eq 0 ]; then
         echo "ERROR: ${rel_pkg}${dir}/ が tsc のプログラムに含まれていません。" >&2
         echo "       → このディレクトリの型エラーは CI を素通りします（テストは実行して緑なら通るため気づけません）。" >&2
@@ -818,7 +853,7 @@ ${listed}"
         *" $name "*) continue ;;
       esac
       # 情報源は git 管理下（Issue #82）。未追跡の一時 .ts で「候補外」を誤報しない。
-      entry_ts_hits="$(tracked_code_files "$entry" | grep -cE '\.(ts|tsx)$' || true)"
+      entry_ts_hits="$(tracked_code_files "$entry" | count_matches -E '\.(ts|tsx)$')"
       if [ "${entry_ts_hits:-0}" -ne 0 ]; then
         echo "ERROR: ${rel_pkg}${name}/ は TypeScript を含みますが本ガードの走査候補にありません。" >&2
         echo "       → CODE_DIR_CANDIDATES へ追加してください（候補の列挙が実態に追いついていません）。" >&2
@@ -942,7 +977,7 @@ fi
 # 入力サイズ依存で判定が変わるという点で、下の `grep -q` を避ける理由とまったく同型である。
 # `sed -n '1,3s///p'` は `q` を持たないため入力を最後まで読み、この経路を作らない。
 untracked_code="$(tracked_code_files_untracked "${TS_DIR}/")"
-untracked_count="$(printf '%s' "$untracked_code" | grep -c . || true)"
+untracked_count="$(printf '%s' "$untracked_code" | count_matches .)"
 if [ "${untracked_count:-0}" -ne 0 ]; then
   echo "WARNING: ts/ 配下に未追跡のコードファイルが ${untracked_count} 件あります（本ガードは走査していません）。" >&2
   printf '%s\n' "$untracked_code" | sed -n '1,3s|^|         ts/|p' >&2

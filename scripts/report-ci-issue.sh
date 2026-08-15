@@ -125,8 +125,15 @@ else
   fi
   # 数字だけの行を数える。--jq が想定外の形を返したら 0 件として扱われ、下流で起票へ進むが、
   # その経路は上の hard fail を通っていないので「検索は成功したが該当なし」と同義である。
-  tracker_count="$(printf '%s\n' "$tracker_list" | grep -cE '^[0-9]+$' || true)"
-  tracker="$(printf '%s\n' "$tracker_list" | grep -E '^[0-9]+$' | sed -n '1p' || true)"
+  # 終了コードを捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分ける（Issue #120）。
+  tracker_count_rc=0
+  tracker_count="$(printf '%s\n' "$tracker_list" | grep -cE '^[0-9]+$')" || tracker_count_rc=$?
+  tracker_rc=0
+  tracker="$(printf '%s\n' "$tracker_list" | grep -E '^[0-9]+$' | sed -n '1p')" || tracker_rc=$?
+  if [ "$tracker_count_rc" -gt 1 ] || [ "$tracker_rc" -gt 1 ]; then
+    echo "ERROR: 追跡 Issue 一覧を解釈できません（grep exit=${tracker_count_rc}/${tracker_rc}）。" >&2
+    exit 1
+  fi
 fi
 
 if [ "$tracker_count" -gt 1 ]; then
@@ -195,7 +202,14 @@ if [ -n "$signature" ]; then
       printf '%s\n' "$seen" | sed 's/^/       | /' >&2
       exit 1
     fi
-    prev="$(printf '%s\n' "$seen" | grep '^CI-REPORT-SIGNATURE: ' | tail -n 1 | sed 's/^CI-REPORT-SIGNATURE: //' || true)"
+    # 終了コードを捕捉する（Issue #120）。潰すと、読み取りが壊れた状態が「署名なし」と
+    # 同義になり、状態が変わっていないのに重複コメントを投げる方向へ倒れる。
+    prev_rc=0
+    prev="$(printf '%s\n' "$seen" | grep '^CI-REPORT-SIGNATURE: ' | tail -n 1 | sed 's/^CI-REPORT-SIGNATURE: //')" || prev_rc=$?
+    if [ "$prev_rc" -gt 1 ]; then
+      echo "ERROR: 追跡 Issue #${tracker} の署名行を抽出できません（grep exit=${prev_rc}）。" >&2
+      exit 1
+    fi
   fi
   if [ "$prev" = "$signature" ]; then
     rm -f "$payload"

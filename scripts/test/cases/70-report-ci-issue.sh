@@ -69,7 +69,7 @@ rci_sent_body() {
 
 rci_fences() {
   # 本文中のフェンス行数を数え、OUT を 1 行へ畳む。件数まで見ないと「崩れていない」と言えない。
-  OUT="FENCES: $(printf '%s\n' "$OUT" | grep -cE '^```$' || true)"
+  OUT="FENCES: $(count_output_matches '^```$')"
 }
 
 # **本命**: 復旧コメントが本文を二重のフェンスで包まないこと（Issue #102 の再発検出）。

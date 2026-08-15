@@ -95,7 +95,15 @@ if ! grep -qE '"build:packages"[[:space:]]*:' "$ROOT_PKG"; then
 fi
 
 # typecheck の値そのものに build:packages が現れること（定義したのに呼ばれない、を防ぐ）。
-typecheck_line="$(grep -E '"typecheck"[[:space:]]*:' "$ROOT_PKG" || true)"
+# 終了コードを捕捉し、無一致（exit 1）と評価不能・読めない（exit 2 以上）を分ける（Issue #120）。
+# 後置 true で潰すと、ファイルを読めない状態が「typecheck が未定義」と同じ結果に化け、
+# 原因と逆向きの「build:packages を呼んでください」という指示が出る。
+typecheck_line_rc=0
+typecheck_line="$(grep -E '"typecheck"[[:space:]]*:' "$ROOT_PKG")" || typecheck_line_rc=$?
+if [ "$typecheck_line_rc" -gt 1 ]; then
+  echo "ERROR: ${ROOT_PKG#$ROOT/} を走査できません（grep exit=${typecheck_line_rc}）。" >&2
+  exit 1
+fi
 case "$typecheck_line" in
   *build:packages*) ;;
   *)

@@ -213,3 +213,27 @@ fx_run check-workflow-step-names
 expect_green
 expect_output_matches 'WARNING: .*既に是正済みの行.* は WHITELIST に載っていますが'
 t_end
+
+# ---------------------------------------------------------------------------
+# Issue #120: 検出パターンが評価不能になったとき、緑ではなく赤にすること。
+#
+# 起票時の実測では、scan() の照合が後置 `true` で失敗を潰していたため、引用符なし + ' #' の
+# 違反を置いたままガードが exit 0 を返した。空振り防止の母数は別パターン（NAME_LINE_RE）
+# なので生き残り、「5 ファイル / 42 件の name: を検証」と **件数まで健全な実行と一致**した。
+# 痕跡は stderr の 1 行だけで、CI ログでは他の出力に埋もれる。
+t_begin 'check-workflow-step-names: 検出パターンが評価不能なら緑ではなく赤にする（Issue #120）'
+wsn_fixture
+fx_write .github/workflows/deploy.yml <<'EOF'
+name: deploy
+jobs:
+  deploy:
+    steps:
+      - name: Placeholder 稼働検出（Issue #33 再発防止）
+        run: echo hi
+EOF
+awk '/^TRUNC_LINE_RE=/ { print "TRUNC_LINE_RE='"'"'['"'"'"; next } { print }' \
+  "${FX}/scripts/check-workflow-step-names.sh" > "${FX}/scripts/wsn-broken.tmp"
+mv "${FX}/scripts/wsn-broken.tmp" "${FX}/scripts/check-workflow-step-names.sh"
+fx_run check-workflow-step-names
+expect_red '検出パターンを評価できません'
+t_end

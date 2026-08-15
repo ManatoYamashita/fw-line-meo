@@ -59,10 +59,26 @@ fail=0
 
 # --- 検証1a: アプリ層・UI コンポーネント層への直書き hex の混入検出 ---
 # theme.css は hex の許可箇所（design-tokens と同値であることは検証2 が保証する）のため対象外。
-scan_targets=("$APPS_DIR")
+scan_targets=()
+[ -d "$APPS_DIR" ] && scan_targets+=("$APPS_DIR")
 [ -d "$UI_COMPONENTS_DIR" ] && scan_targets+=("$UI_COMPONENTS_DIR")
 
-hits="$(grep -rnE "$HEX_PATTERN" "${scan_targets[@]}" "${GREP_FILTERS[@]}" 2>/dev/null || true)"
+# 空振り防止: 走査対象が 1 つも無ければ「違反 0 件」は「検証していない」と同義である。
+if [ "${#scan_targets[@]}" -eq 0 ]; then
+  echo "ERROR: 直書き hex の走査対象がありません（ts/apps も ts/packages/ui/src/components も不在）。" >&2
+  exit 1
+fi
+
+# **`2>/dev/null` を付けてはならない（Issue #120）。** 付けると評価できない ERE に対する
+# grep のエラーごと捨てるため、痕跡が 1 行も残らないまま「違反 0 件」で緑になる。
+# 実測: PALETTE_PATTERN を壊すと bg-red-500 の違反を置いたままガードが exit 0 を返した。
+# 対象ディレクトリの不在は上で弾いてあるので、ここで出る stderr は本物の異常である。
+hits_rc=0
+hits="$(grep -rnE "$HEX_PATTERN" "${scan_targets[@]}" "${GREP_FILTERS[@]}")" || hits_rc=$?
+if [ "$hits_rc" -gt 1 ]; then
+  echo "ERROR: 直書き hex の検出パターンを評価できません（grep exit=${hits_rc}）: ${HEX_PATTERN}" >&2
+  exit 1
+fi
 
 if [ -n "$hits" ]; then
   echo "ERROR: デザイントークンを経由しない直書きの色指定が検出されました:" >&2
@@ -76,10 +92,23 @@ fi
 # hex を含まないため検証1a では捕まらないが、Tailwind が実色へコンパイルするため
 # トークンを迂回した色指定になる。theme.css を含む UI パッケージの src 全体を走査対象にする
 # （パレット色クラスはトークン定義側にも現れてはならないため hex のような許可箇所を持たない）。
-palette_targets=("$APPS_DIR")
+palette_targets=()
+[ -d "$APPS_DIR" ] && palette_targets+=("$APPS_DIR")
 [ -d "$UI_SRC_DIR" ] && palette_targets+=("$UI_SRC_DIR")
 
-palette_hits="$(grep -rnE "$PALETTE_PATTERN" "${palette_targets[@]}" "${GREP_FILTERS[@]}" 2>/dev/null || true)"
+if [ "${#palette_targets[@]}" -eq 0 ]; then
+  echo "ERROR: 生パレット色クラスの走査対象がありません（ts/apps も ts/packages/ui/src も不在）。" >&2
+  exit 1
+fi
+
+# ここが実測で偽 PASS を出した箇所である（Issue #120）。`2>/dev/null` と後置 true の併用で、
+# 壊れたパターンが痕跡ゼロのまま「生パレット色クラスゼロ」に化けていた。
+palette_rc=0
+palette_hits="$(grep -rnE "$PALETTE_PATTERN" "${palette_targets[@]}" "${GREP_FILTERS[@]}")" || palette_rc=$?
+if [ "$palette_rc" -gt 1 ]; then
+  echo "ERROR: 生パレット色クラスの検出パターンを評価できません（grep exit=${palette_rc}）: ${PALETTE_PATTERN}" >&2
+  exit 1
+fi
 
 if [ -n "$palette_hits" ]; then
   echo "ERROR: Tailwind 既定パレットの生色クラス（bg-red-500 等）が検出されました:" >&2
@@ -91,8 +120,17 @@ if [ -n "$palette_hits" ]; then
 fi
 
 # --- 検証2: theme.css の hex が design-tokens の値集合に含まれること ---
-theme_hexes="$(grep -oE "$HEX_PATTERN" "$THEME_CSS" | tr '[:lower:]' '[:upper:]' | sort -u || true)"
-token_hexes="$(grep -rhoE "$HEX_PATTERN" "$TOKENS_DIR" | tr '[:lower:]' '[:upper:]' | sort -u || true)"
+# 終了コードを捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分ける（Issue #120）。
+# 潰すと、抽出が壊れた状態が「色が 1 件も無い」と同義になる。theme 側は下の theme_count で、
+# token 側は直後の空振り防止で赤へ倒れるが、それは偶然の後ろ盾であって設計ではない。
+theme_hexes_rc=0
+theme_hexes="$(grep -oE "$HEX_PATTERN" "$THEME_CSS" | tr '[:lower:]' '[:upper:]' | sort -u)" || theme_hexes_rc=$?
+token_hexes_rc=0
+token_hexes="$(grep -rhoE "$HEX_PATTERN" "$TOKENS_DIR" | tr '[:lower:]' '[:upper:]' | sort -u)" || token_hexes_rc=$?
+if [ "$theme_hexes_rc" -gt 1 ] || [ "$token_hexes_rc" -gt 1 ]; then
+  echo "ERROR: hex の抽出パターンを評価できません（grep exit=${theme_hexes_rc}/${token_hexes_rc}）: ${HEX_PATTERN}" >&2
+  exit 1
+fi
 
 if [ -z "$token_hexes" ]; then
   echo "ERROR: ${TOKENS_DIR#$ROOT/} から色定義を 1 件も抽出できませんでした（抽出前提が崩れています）。" >&2
