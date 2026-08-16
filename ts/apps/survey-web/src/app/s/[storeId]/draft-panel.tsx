@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@fwlm/ui/components/button';
 import type { DraftPanelProps } from './types';
 
 // 下書きパネル（葉コンポーネント）。生成中表示・編集・再生成トリガー・コピー・投稿導線を担う。
@@ -107,13 +108,9 @@ export function DraftPanel({
         }}
       />
       <div className="flex flex-col gap-3">
-        <button
-          className="min-h-11 w-full rounded-lg bg-primary px-6 py-3 text-lg font-semibold text-primary-foreground"
-          type="button"
-          onClick={handleCopy}
-        >
+        <Button className="min-h-11 w-full px-6 py-3 text-lg font-semibold" type="button" onClick={handleCopy}>
           コピーして投稿する
-        </button>
+        </Button>
         <button
           className="min-h-11 w-full rounded-lg border border-input px-6 py-3 text-base font-medium disabled:opacity-60"
           type="button"

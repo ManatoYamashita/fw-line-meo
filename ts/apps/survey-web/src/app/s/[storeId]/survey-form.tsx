@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@fwlm/ui/components/button';
 import type { SurveyAnswer, SurveyFormProps } from './types';
 
 // 回答フォーム（葉コンポーネント）。星評価（必須）・良かった点（複数選択）・一言（任意 200 字）を
@@ -101,13 +102,9 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         />
       </label>
 
-      <button
-        className="min-h-11 w-full rounded-lg bg-primary px-6 py-3 text-lg font-semibold text-primary-foreground disabled:opacity-60"
-        type="submit"
-        disabled={submitting}
-      >
+      <Button className="min-h-11 w-full px-6 py-3 text-lg font-semibold" type="submit" disabled={submitting}>
         送信する
-      </button>
+      </Button>
     </form>
   );
 }
