@@ -48,7 +48,21 @@ jobs:
         # 棚卸しの網羅（secret 正典との両方向）と記録の形だけを見る。**日付は見ない**（鮮度は
         # external-api-smoke-freshness ワークフローの責務。ts-ci が時間依存になると、何も触って
         # いない PR が突然赤くなり、規律が「日付だけ更新する」空洞化へ倒れる）。
+        #
+        # このガードは直上の check-secret-declaration-coverage.sh を --print-secrets で呼び、
+        # secret 正典をそこから導出する（列挙を二重管理しない）。上流が赤なら救済せず落ちるので、
+        # 順序は直後を保つこと。
         run: bash scripts/check-external-api-smoke.sh
+      - name: 'main を取得（連番一意性ガードが合成集合で判定するため）'
+        # checkout の既定 fetch-depth は 1 で origin/main が無い。ガードは ls-tree しか
+        # 使わないので depth 1 で足りる（履歴は要らない）。
+        run: git fetch --no-tags --depth=1 origin main
+      - name: '連番一意性ガード（Issue #128）'
+        # 番号が重複しても**ファイル名が違えば git は衝突として報告しない**。main 単体でも
+        # ブランチ単体でも重複は見えず、並べたときだけ現れる（PR #121 で実発生）。適用は
+        # shell glob の辞書順なので「たまたま」正しく流れ、db-migrate も db-test も緑になる。
+        # HEAD と origin/main の合成集合で判定する（同じく read-only・git 以外は叩かない）。
+        run: bash scripts/check-db-ordinals.sh
       - name: 'typecheck カバレッジガード（Issue #51）'
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。

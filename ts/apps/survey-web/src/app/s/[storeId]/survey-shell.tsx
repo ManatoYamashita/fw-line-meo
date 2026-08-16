@@ -100,9 +100,14 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
 
   if (phase === 'answered') {
     return (
-      <section>
+      <section className="space-y-4">
         <p>{storeName}へのご回答ありがとうございました。</p>
-        <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer">
+        <a
+          className="block min-h-11 rounded-lg border border-primary px-6 py-3 text-center text-base font-semibold text-primary"
+          href={googleReviewUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           Google のクチコミを書く
         </a>
       </section>
@@ -124,7 +129,11 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
 
   return (
     <>
-      {error !== null && <p role="alert">{error}</p>}
+      {error !== null && (
+        <p className="mb-4 font-medium text-destructive" role="alert">
+          {error}
+        </p>
+      )}
       <SurveyForm aspects={aspects} onSubmit={handleSubmit} submitting={submitting} />
     </>
   );

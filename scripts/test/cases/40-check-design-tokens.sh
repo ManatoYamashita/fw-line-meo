@@ -124,3 +124,55 @@ mv "${FX}/scripts/dt-broken.tmp" "${FX}/scripts/check-design-tokens.sh"
 fx_run check-design-tokens
 expect_red '生パレット色クラスの検出パターンを評価できません'
 t_end
+
+# ---------------------------------------------------------------------------
+# Issue 132: Issue 番号が 3 桁に達し、hex の 3 桁短縮形（#RGB）と表記が衝突するようになった。
+# `（Issue #132）` というコメントが「直書き色」として検出され CI が赤になったのが発端である。
+#
+# 除外を入れる以上、それが広がりすぎていないことを同時に固定しなければならない。
+# 「Issue 参照が緑になる」だけを置くと、除外が全 hex を飲み込んでも緑のままになる。
+t_begin 'check-design-tokens: 種別を前置した Issue / PR 参照は色として検出しない（Issue 132）'
+dt_fixture
+fx_write ts/apps/demo/page.tsx <<'EOF'
+// Issue #132 の対応。関連: PR #133、過去の経緯は Issue #120 を参照。
+export const Page = () => null;
+EOF
+fx_run check-design-tokens
+expect_green
+t_end
+
+t_begin 'check-design-tokens: 種別を前置しない裸の #132 は依然として検出する（除外の広がり過ぎ防止）'
+dt_fixture
+fx_write ts/apps/demo/page.tsx <<'EOF'
+export const style = { color: '#132' };
+EOF
+fx_run check-design-tokens
+expect_red '直書きの色指定が検出されました'
+t_end
+
+t_begin 'check-design-tokens: 同一行に Issue 参照と直書き色があれば色を検出する（行ごと捨てない）'
+dt_fixture
+fx_write ts/apps/demo/page.tsx <<'EOF'
+// Issue #132 の暫定対応
+export const style = { color: '#FF0000' }; // Issue #132 で恒久対応する
+EOF
+fx_run check-design-tokens
+expect_red '直書きの色指定が検出されました'
+t_end
+
+# Issue 参照の打ち消しは sed、その後の判定は grep と、別のコマンドが担う。両者を 1 本のパイプへ
+# 繋ぐと grep の exit 1（無一致＝違反なし）と sed の失敗が pipefail 下で同じ 1 に潰れ、
+# **壊れた ISSUE_REF_PATTERN が「違反 0 件」に化ける**。Issue 120 と同型の偽緑であり、
+# 実装では段を分けて防いでいる。その分離が外れたらここが赤で気づけるようにする。
+t_begin 'check-design-tokens: Issue 参照の打ち消しが評価不能なら緑ではなく赤にする（Issue 132）'
+dt_fixture
+fx_write ts/apps/demo/page.tsx <<'EOF'
+// Issue #132 の対応
+export const Page = () => null;
+EOF
+awk '/^ISSUE_REF_PATTERN=/ { print "ISSUE_REF_PATTERN='"'"'['"'"'"; next } { print }' \
+  "${FX}/scripts/check-design-tokens.sh" > "${FX}/scripts/dt-broken-ref.tmp"
+mv "${FX}/scripts/dt-broken-ref.tmp" "${FX}/scripts/check-design-tokens.sh"
+fx_run check-design-tokens
+expect_red 'Issue 参照の打ち消しを評価できません'
+t_end

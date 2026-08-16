@@ -1,0 +1,112 @@
+{
+  "_comment": [
+    "事実性評価の素材データセット（Issue #132）。",
+    "各素材は本番の /api/responses が組み立てる DraftMaterial と同じ形で prompt.ts へ渡される。",
+    "",
+    "設計方針:",
+    "  - 選択軸を絞った素材ほど『選ばなかった軸』が多く、逸脱の機会が増える。少選択と全選択を両端に置く。",
+    "  - all-selected は対照群。選ばれなかった軸が無いので検出は必ず 0 件になる。ここで 0 にならなければ",
+    "    検出器か実行系が壊れている（空振り検証を兼ねる）。",
+    "  - none-selected は最小素材。星だけを与えたとき、モデルがどれだけ軸を創作するかを測る。",
+    "  - storeNameKind: 実在の著名店はモデルの事前知識が混入し得るため、架空店名との対比を取れるようにする。",
+    "  - 低評価（星 1-2）は prompt.ts が節度分岐を足す経路。この分岐でも事実性が保たれるかを見る。"
+  ],
+  "materials": [
+    {
+      "id": "none-selected-star5",
+      "storeName": "カフェ みなも",
+      "storeNameKind": "fictional",
+      "star": 5,
+      "aspectCodes": [],
+      "comment": null
+    },
+    {
+      "id": "taste-only-star5",
+      "storeName": "カフェ みなも",
+      "storeNameKind": "fictional",
+      "star": 5,
+      "aspectCodes": ["taste"],
+      "comment": null
+    },
+    {
+      "id": "taste-only-star5-with-comment",
+      "storeName": "カフェ みなも",
+      "storeNameKind": "fictional",
+      "star": 5,
+      "aspectCodes": ["taste"],
+      "comment": "コーヒーが香り高くて good でした"
+    },
+    {
+      "id": "taste-atmosphere-star5",
+      "storeName": "カフェ みなも",
+      "storeNameKind": "fictional",
+      "star": 5,
+      "aspectCodes": ["taste", "atmosphere"],
+      "comment": "落ち着いた雰囲気でゆっくり過ごせました"
+    },
+    {
+      "id": "service-only-star4",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 4,
+      "aspectCodes": ["service"],
+      "comment": null
+    },
+    {
+      "id": "price-only-star3",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 3,
+      "aspectCodes": ["price"],
+      "comment": "値段のわりに満足できました"
+    },
+    {
+      "id": "none-selected-star2",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 2,
+      "aspectCodes": [],
+      "comment": "期待していたほどではありませんでした"
+    },
+    {
+      "id": "none-selected-star1",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 1,
+      "aspectCodes": [],
+      "comment": "残念ながら合いませんでした"
+    },
+    {
+      "id": "all-selected-star5",
+      "storeName": "カフェ みなも",
+      "storeNameKind": "fictional",
+      "star": 5,
+      "aspectCodes": ["taste", "volume", "service", "atmosphere", "price", "cleanliness"],
+      "comment": "全部よかったです"
+    },
+    {
+      "id": "real-store-taste-only-star5",
+      "storeName": "ONIBUS COFFEE 中目黒駅前店",
+      "storeNameKind": "real",
+      "star": 5,
+      "aspectCodes": ["taste"],
+      "comment": null
+    },
+    {
+      "id": "real-store-taste-atmosphere-star5",
+      "storeName": "ONIBUS COFFEE 自由が丘店",
+      "storeNameKind": "real",
+      "star": 5,
+      "aspectCodes": ["taste", "atmosphere"],
+      "comment": "コーヒーが香り高く、落ち着いた雰囲気でゆっくり過ごせました"
+    },
+    {
+      "id": "real-store-none-selected-star5",
+      "storeName": "一蘭 渋谷店",
+      "storeNameKind": "real",
+      "star": 5,
+      "aspectCodes": [],
+      "comment": null
+    }
+  ]
+}

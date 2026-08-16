@@ -58,6 +58,46 @@ describe('handleResponses', () => {
     expect(incrementTallies).toHaveBeenCalledWith({ storeId: STORE, star: 5, aspectCodes: ['taste'] });
   });
 
+  // Issue #132（案 A）の配線。prompt.ts 側だけ直しても、handler が未選択の観点を渡さなければ
+  // 本番では禁止句が出ない。「手法は正しいが対象が違う」形の空振りを防ぐため、実際に
+  // generator へ何が渡るかをここで固定する。
+  describe('未選択の観点を素材へ載せる（Issue #132）', () => {
+    it('選ばれなかった観点のラベルを generator へ渡す', async () => {
+      // 型引数で実シグネチャを与える。省くと引数なしと推論され mock.calls から素材を取り出せない。
+      const generate = vi.fn<DraftGenerator['generate']>(() => Promise.resolve(ok('下書き')));
+      await handleResponses(
+        req(validBody()),
+        baseDeps({ generator: { generate } as unknown as DraftGenerator }),
+      );
+      const material = generate.mock.calls[0]![0] as { aspectLabels: string[]; unselectedAspectLabels?: string[] };
+      expect(material.aspectLabels).toEqual(['味']);
+      expect(material.unselectedAspectLabels).toEqual(['接客']);
+    });
+
+    it('全選択なら空配列を渡す（禁止句を出させない）', async () => {
+      // 型引数で実シグネチャを与える。省くと引数なしと推論され mock.calls から素材を取り出せない。
+      const generate = vi.fn<DraftGenerator['generate']>(() => Promise.resolve(ok('下書き')));
+      await handleResponses(
+        req(validBody({ aspectCodes: ['taste', 'service'] })),
+        baseDeps({ generator: { generate } as unknown as DraftGenerator }),
+      );
+      const material = generate.mock.calls[0]![0] as { unselectedAspectLabels?: string[] };
+      expect(material.unselectedAspectLabels).toEqual([]);
+    });
+
+    it('sessionToken に載り、再生成（/api/drafts）でも同じ禁止が効く', async () => {
+      // 再生成は署名済みトークンから素材を復元するため、ここで欠落すると
+      // 「初回は守るが再生成では守らない」という気づきにくい穴になる。
+      const res = await handleResponses(req(validBody()), baseDeps());
+      const { sessionToken } = (await res.json()) as { sessionToken: string };
+      const verified = tokens.verify(sessionToken);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) {
+        expect(verified.value.material.unselectedAspectLabels).toEqual(['接客']);
+      }
+    });
+  });
+
   it('pageToken 不正は 400 PAGE_TOKEN_INVALID（store 取得も生成もしない）', async () => {
     const findStore = vi.fn();
     const generator = { generate: vi.fn() };

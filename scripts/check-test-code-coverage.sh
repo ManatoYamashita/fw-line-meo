@@ -125,7 +125,10 @@ fi
 # スキップ一覧へ明示的に列挙されていたため、**perf/ に .ts が入っても永久に不可視**だった。
 # 現在 perf/ は .mjs しか持たないため下の `.ts` 判定で skip されるが（JS 側は
 # check_subdir_files が担当する）、.ts が入った時点で本ループの判定が効くようになる。
-CODE_DIR_CANDIDATES="src app lib test e2e scripts perf"
+# `eval` は事実性評価（Issue 132・survey-web）。実 Gemini を叩くため通常の test 実行からは
+# 除外されるが、**検査（lint / 型）から外す理由は無い**。むしろ実行頻度が低い分だけ
+# 壊れても気づきにくいので、検査の網には必ず載せる。
+CODE_DIR_CANDIDATES="src app lib test e2e scripts perf eval"
 
 # lint の検査（A/B）のみ免除してよい直下ファイル（Issue #78）。
 # next-env.d.ts は Next が生成し、自ら「This file should not be edited」と書いているファイルで、
