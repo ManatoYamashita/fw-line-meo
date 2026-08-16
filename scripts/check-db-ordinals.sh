@@ -45,6 +45,15 @@
 
 set -euo pipefail
 
+# **照合順序を LC_ALL=C へ固定する。** 実行環境で判定が変わってはならない。実測（macOS）:
+#   LC_ALL=C          … 500_new_feature.sql → 50_agency_dashboard.sql
+#   LC_ALL=en_US.UTF-8 … 50_agency_dashboard.sql → 500_new_feature.sql
+# **シェル glob 自体も同じように反転する**ため、適用順もロケール次第で変わる。C（バイト順）は
+# 最も厳しい順序なので、ここで「辞書順=数値順」が成立していれば、どのロケールでも番号から
+# 適用順が一意に読める。桁を揃えたゼロ埋めはロケールに依らず同順になるため、この固定によって
+# 正しい命名が赤くなることはない。
+export LC_ALL=C
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -92,31 +101,39 @@ else
   echo "INFO: main 側は ${DB_ORDINAL_MAIN_REF} から読みます。" >&2
 fi
 
+# $1 = ディレクトリ。標準入力のパス一覧から、そのディレクトリ**直下**のものだけを出す。
+#
+# **HEAD 側と main 側で列挙範囲を必ず揃えるために、両側ともこの 1 箇所を通す。** 片側だけ
+# `*.sql` で絞ると、ブランチが `0003_c.SQL` を足しても HEAD 側の列挙から漏れて緑になり、
+# 同じファイルが main 側に在るときだけ赤くなる（判定がファイルの居場所に依存する）。
+# 拡張子での絞り込みはここでは行わず、命名検査へ一本化する。
+select_direct_children() {
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      "$1"/*)
+        case "${line#"$1"/}" in
+          */*) ;;                      # サブディレクトリ配下は対象外
+          *) printf '%s\n' "$line" ;;
+        esac
+        ;;
+    esac
+  done
+}
+
 # $1 = ディレクトリ。main 側のパスを 1 行 1 件で出す。
 main_paths_in() {
   if [ "$snapshot_declared" -eq 1 ]; then
-    # snapshot はリポジトリ全体のパス一覧。対象ディレクトリ直下だけを取り出す。
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      case "$line" in
-        "$1"/*)
-          # サブディレクトリを含むパスは対象外（直下のみ）。
-          case "${line#"$1"/}" in
-            */*) ;;
-            *) printf '%s\n' "$line" ;;
-          esac
-          ;;
-      esac
-    done < "$snapshot_path"
+    select_direct_children "$1" < "$snapshot_path"
   else
     git -C "$ROOT" -c core.quotePath=false ls-tree -r --name-only \
-      "${DB_ORDINAL_MAIN_REF}" -- "$1/"
+      "${DB_ORDINAL_MAIN_REF}" -- "$1/" | select_direct_children "$1"
   fi
 }
 
 # $1 = ディレクトリ。HEAD 側（作業ツリーの追跡ファイル）のパスを出す。
 head_paths_in() {
-  git -C "$ROOT" -c core.quotePath=false ls-files --cached -- "$1/*.sql"
+  git -C "$ROOT" -c core.quotePath=false ls-files --cached -- "$1/" | select_direct_children "$1"
 }
 
 # 先頭の連続数字を 10 進として正規化する（0005 と 5 を同一視する）。
@@ -139,9 +156,14 @@ count_lines() {
 
 # --- 対象ごとの検査 -------------------------------------------------------------
 # 形式: <dir>|<命名の数字部の正規表現>|<欠番検査を行うか>
+#
+# **`db/test/run.sh` が無検査の glob で流すディレクトリはすべて挙げること。** smoke は
+# assertions と同じ `$(RUN) db/test/smoke` 経由で `*.sql` を辞書順に流すため、番号衝突の
+# 危険は完全に同型である（12/13/21/…/34 と飛び番が正常なので欠番検査は課さない）。
 for spec in \
   'db/migrations|[0-9]{4}|yes' \
-  'db/test/assertions|[0-9]+|no'
+  'db/test/assertions|[0-9]+|no' \
+  'db/test/smoke|[0-9]+|no'
 do
   dir="${spec%%|*}"
   rest="${spec#*|}"
@@ -150,26 +172,26 @@ do
 
   union="$( { head_paths_in "$dir"; main_paths_in "$dir"; } | sort -u )"
 
-  # 空振り防止: 対象が 1 件も無ければ、この検査自体が成立していない。
-  count="$(count_lines "$union")"
-  if [ "${count:-0}" -eq 0 ]; then
-    echo "ERROR: ${dir} に .sql が 1 件もありません（走査前提が崩れています）。" >&2
-    echo "       → ディレクトリの移動・改名か、ls-files の pathspec の破損を疑ってください。" >&2
-    fail=1
-    continue
-  fi
-  checked_dirs=$((checked_dirs + 1))
-
   name_re="^${digit_re}_[a-z0-9]+(_[a-z0-9]+)*\.sql$"
   ordinals=''
   bad_name=0
+  numbered=0
 
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     base="${path##*/}"
+    # **数字で始まる名前だけを「番号付き成果物」とみなす。** README 等は適用順に関与しない
+    # ので対象外にする。逆に数字で始まるものは、拡張子違い（`.SQL`）で glob から漏れても
+    # 作者の意図は migration なので、黙って見逃さず命名違反として赤にする。
+    case "$base" in
+      [0-9]*) ;;
+      *) continue ;;
+    esac
+    numbered=$((numbered + 1))
     if ! [[ $base =~ $name_re ]]; then
       echo "ERROR: ${dir}/${base} が命名規約 <番号>_<snake_case>.sql に合いません。" >&2
       echo "       → 番号で適用順を決めているため、番号を機械抽出できない名前は置けません。" >&2
+      echo "         大文字の .SQL は run.sh の *.sql glob から外れ、適用されないまま緑になります。" >&2
       fail=1
       bad_name=1
       continue
@@ -179,6 +201,17 @@ do
   done <<EOF
 $union
 EOF
+
+  # 空振り防止: 番号付きファイルが 1 件も無ければ、この検査自体が成立していない。
+  # （union の総数ではなく **検査対象になった件数** で見る。README だけのディレクトリを
+  #   「走査できた」と誤認しないため。）
+  if [ "$numbered" -eq 0 ]; then
+    echo "ERROR: ${dir} に番号付きの .sql が 1 件もありません（走査前提が崩れています）。" >&2
+    echo "       → ディレクトリの移動・改名か、ls-files の pathspec の破損を疑ってください。" >&2
+    fail=1
+    continue
+  fi
+  checked_dirs=$((checked_dirs + 1))
 
   # 命名が壊れている状態で以降の番号検査を続けると、原因を取り違えた二次エラーが出る。
   if [ "$bad_name" -ne 0 ]; then
