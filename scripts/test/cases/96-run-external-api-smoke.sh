@@ -199,6 +199,36 @@ expect_output_matches 'PASS  places'
 expect_absent 'PASS  gemini'
 t_end
 
+# ---------------------------------------------------------------------------
+# 空振り防止。**対象 0 件を「すべて成功しました」と報告してはならない。** これは本スクリプトが
+# 塞ごうとしている無音障害（成功しているように見えるが一度も実際には動いていない）そのものを
+# 実疎通の器の側で再生産する形である（[[zero-count-escapes-coverage-gate]]）。
+# `--api ''` は selected を空白 1 文字にするため「空だから既定の 3 件」へも落ちず、
+# 語彙チェックの for も 1 度も回らず、wants が全て偽になって 0 件のまま末尾の OK へ到達した。
+
+t_begin 'run-external-api-smoke: 対象 0 件を「すべて成功」と報告しない（--api の値が空）'
+reas_fixture 200
+reas_run --api '' --place-id ChIJTEST
+expect_red '実疎通の対象が 1 件もありません'
+# 0 件で緑を返すのが最悪の形。成功の断定も、貼り付け用の行も出してはならない。
+# **成功断定の行そのものへアンカーする。** 部分文字列で見ると、診断文がその語を引用しただけで
+# 落ちる（実際に一度これで赤くなった）。曖昧な一致は誤検出と見逃しの両方を生む。
+expect_absent 'OK: 対象の実疎通はすべて成功しました'
+expect_absent '最終確認日と証拠を差し替えて更新してください'
+t_end
+
+t_begin 'run-external-api-smoke: 値を伴うオプションで値が無ければ無言終了しない'
+reas_fixture 200
+reas_run --model
+expect_red '--model には値が必要です'
+t_end
+
+t_begin 'run-external-api-smoke: 値の無い --api でも無言終了しない（shift 2 が set -e に殺される形）'
+reas_fixture 200
+reas_run --api
+expect_red '--api には値が必要です'
+t_end
+
 t_begin 'run-external-api-smoke: 必須引数が無ければ既定値へ落とさず落とす'
 reas_fixture 200
 reas_run --api gemini

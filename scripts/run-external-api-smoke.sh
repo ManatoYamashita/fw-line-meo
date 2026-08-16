@@ -49,13 +49,25 @@ model=''
 channel_id=''
 selected=''
 
+# 値を伴うオプションで値が無いまま `shift 2` すると、`set -e` の下で **何も出さずに rc=1 で
+# 終了する**（`--model` を末尾に置いた実行が無言で死ぬ）。無言の失敗は、実行し忘れたのか
+# 失敗したのかを運用者が区別できず、このスクリプトが守ろうとしている記録の信頼を直接壊す。
+need_value() {
+  # $1 = オプション名、$2 = 残りの引数個数
+  if [ "$2" -lt 2 ]; then
+    echo "ERROR: ${1} には値が必要です。" >&2
+    echo "       → 使い方は bash scripts/run-external-api-smoke.sh --help を参照してください。" >&2
+    exit 2
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --project) project="${2:-}"; shift 2 ;;
-    --place-id) place_id="${2:-}"; shift 2 ;;
-    --model) model="${2:-}"; shift 2 ;;
-    --channel-id) channel_id="${2:-}"; shift 2 ;;
-    --api) selected="${selected}${2:-} "; shift 2 ;;
+    --project) need_value "$1" "$#"; project="$2"; shift 2 ;;
+    --place-id) need_value "$1" "$#"; place_id="$2"; shift 2 ;;
+    --model) need_value "$1" "$#"; model="$2"; shift 2 ;;
+    --channel-id) need_value "$1" "$#"; channel_id="$2"; shift 2 ;;
+    --api) need_value "$1" "$#"; selected="${selected}${2} "; shift 2 ;;
     -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
     *)
       echo "ERROR: 未知の引数です: $1" >&2
@@ -69,6 +81,7 @@ if [ -z "$selected" ]; then
   selected='gemini places line-messaging '
 fi
 
+selected_count=0
 # shellcheck disable=SC2086 # selected は空白区切りで意図的に単語分割する
 for a in $selected; do
   case "$a" in
@@ -78,7 +91,19 @@ for a in $selected; do
       exit 2
       ;;
   esac
+  selected_count=$((selected_count + 1))
 done
+
+# **対象 0 件のまま先へ進まない。** `--api ''` は selected を空白 1 文字にするため
+# 「空だから既定の 3 件」へも落ちず、上の語彙チェックも 1 度も回らず、wants が全て偽になって
+# **1 件も叩かずに末尾の「すべて成功しました」へ到達する**（実測）。0 件実行を成功と数えるのは、
+# このスクリプトが塞ごうとしている無音障害そのものを実疎通の器の側で再生産する形である。
+if [ "$selected_count" -eq 0 ]; then
+  echo "ERROR: 実疎通の対象が 1 件もありません（--api に空の値が渡っています）。" >&2
+  echo "       → 対象 0 件のまま「すべて成功しました」と報告するのが最悪の空振りであるため、ここで落とします。" >&2
+  echo "       → 全 API を叩くなら --api を付けずに実行してください。" >&2
+  exit 2
+fi
 
 wants() {
   case " ${selected}" in
@@ -252,6 +277,15 @@ if wants line-messaging; then
 fi
 
 echo ""
+
+# 成功を断定する直前の空振り防止。上流の引数検証をすり抜ける経路が将来できても、
+# **1 件も record していないなら成功と言わせない。** 判定の直前に置くことに意味がある
+# （引数検証は入口の 1 経路しか守らないが、ここは成功断定の唯一の門である）。
+if [ -z "$results" ]; then
+  echo "NG: 実疎通を 1 件も実行していません（対象の選択が空です）。" >&2
+  echo "    → 対象 0 件のまま「すべて成功しました」と報告するのが最悪の空振りであるため、ここで落とします。" >&2
+  exit 1
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "NG: 実疎通に失敗した API があります。" >&2

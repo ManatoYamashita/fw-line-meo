@@ -251,11 +251,16 @@ KEY="$(gcloud secrets versions access latest --secret=gemini-api-key --project=g
 MODEL='<本番の GEMINI_MODEL・§8-0 の方法で確認する>'
 curl -sS -o /dev/null -w '%{http_code}\n' \
   -X POST "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent" \
-  -H "x-goog-api-key: ${KEY}" -H 'Content-Type: application/json' \
-  -d '{"contents":[{"parts":[{"text":"ping"}]}],"generationConfig":{"maxOutputTokens":1}}'
+  -H 'Content-Type: application/json' \
+  -d '{"contents":[{"parts":[{"text":"ping"}]}],"generationConfig":{"maxOutputTokens":1}}' \
+  -K - <<CFG
+header = "x-goog-api-key: ${KEY}"
+CFG
 ```
 
 - 成功の観察可能な証拠: HTTP `200`。キーが不正なら `400`（`API_KEY_INVALID`）、課金・API 無効なら `403`。
+- **鍵を `-H` でコマンドラインへ置かない。** argv は同一ホストの他ユーザーが `ps` で読める。`-K -` で標準入力の設定として渡す（`run-external-api-smoke.sh` が 600 の一時ファイルを使うのと同じ理由）。本文（`-d`）は鍵を含まないのでそのままでよい。
+- 応答本文を出さない（`-o /dev/null`）のは、Google の 400 応答がリクエスト URL を含むことがあり、素朴に出すとターミナル履歴や貼り付け先へ残るためである。
 - 課金と副作用: 出力 1 トークン上限の呼び出し 1 回。外部に何も残らない。
 - モデル名は本番の env `GEMINI_MODEL`（tfvars `gemini_model`）と揃えること。アプリ側コードの既定値を写経すると、本番が別モデルへ移った瞬間に「動くはずのない構成が緑」になる。
 
@@ -265,10 +270,14 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 KEY="$(gcloud secrets versions access latest --secret=places-api-key --project=gen-fw-line-meo)"
 curl -sS -o /dev/null -w '%{http_code}\n' \
   "https://places.googleapis.com/v1/places/<PLACE_ID>" \
-  -H "X-Goog-Api-Key: ${KEY}" -H 'X-Goog-FieldMask: id'
+  -H 'X-Goog-FieldMask: id' \
+  -K - <<CFG
+header = "X-Goog-Api-Key: ${KEY}"
+CFG
 ```
 
 - 成功の観察可能な証拠: HTTP `200`。キーが不正なら `400`、クォータ超過なら `429`。
+- **鍵は `-K -` で渡す**（§8-1 と同じ理由。argv に置くと `ps` で読める）。
 - 課金と副作用: read-only の Place Details 1 回。`X-Goog-FieldMask` を `id` だけに絞ると最安の Essentials SKU に収まる（`go/internal/places/client.go` の 2 種のマスクは使わない）。
 - `<PLACE_ID>` は本番 `stores.place_id` の実値を使う（§3 の Auth Proxy 経由 `psql` で取得）。
 
@@ -277,14 +286,18 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 ```bash
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
 CHANNEL_ID='<本番の LINE_CHANNEL_ID・§8-0 の方法で確認する>'
-TOKEN="$(curl -sS -X POST 'https://api.line.me/oauth2/v3/token' \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d "grant_type=client_credentials&client_id=${CHANNEL_ID}&client_secret=${SECRET}" \
+# printf はシェル組み込みなので、チャネルシークレットがどのプロセスの argv にも現れない。
+TOKEN="$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' "$CHANNEL_ID" "$SECRET" \
+  | curl -sS -X POST 'https://api.line.me/oauth2/v3/token' \
+      -H 'Content-Type: application/x-www-form-urlencoded' --data @- \
   | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
-curl -sS -o /dev/null -w '%{http_code}\n' 'https://api.line.me/v2/bot/info' -H "Authorization: Bearer ${TOKEN}"
+curl -sS -o /dev/null -w '%{http_code}\n' 'https://api.line.me/v2/bot/info' -K - <<CFG
+header = "Authorization: Bearer ${TOKEN}"
+CFG
 ```
 
 - 成功の観察可能な証拠: 2 本目が HTTP `200`。トークン発行に失敗していれば `TOKEN` が空になり `401` が返る。
+- **チャネルシークレットもトークンも argv へ置かない**（§8-1 と同じ理由）。本文は `--data @-` で標準入力から、トークンは `-K -` で設定として渡す。
 - 課金と副作用: **なし。`/v2/bot/info` は read-only であり、メッセージを一切送信しない。**
 - **push / multicast / broadcast を実疎通に使ってはならない。** 実送信は受信者への迷惑であり、無料メッセージ通数枠を消費する。トークンが発行できて `/v2/bot/info` が 200 を返せば、チャネル資格情報の正当性は証明できる。
 - `line-channel-access-token` は実疎通の対象ではない。2 つの消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts`）はどちらもチャネル ID とシークレットから stateless token を都度発行しており、この枠はコードから読まれていない。
