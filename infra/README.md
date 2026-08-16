@@ -293,7 +293,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' 'https://api.line.me/v2/bot/info' -H "
 
 実疎通が全て PASS したら、同じ PR で `infra/external-api-smoke.tsv` の該当行を更新する。
 
-- `<最終確認日>`: 実施日（JST・`YYYY-MM-DD`）。`PENDING` を置き換える。
+- `<最終確認日>`: 実施日（JST・`YYYY-MM-DD`）。`PENDING` を置き換える。`run-external-api-smoke.sh` が出す行は実行環境の TZ に依らず JST で押してあるので、そのまま貼ってよい（鮮度検証の基準日も JST 固定で、両者は必ず同じ暦の上で比較される）。
 - `<証拠>`: 後から辿れる短い識別子（実行日時・run URL・execution id 等）。空欄や `-` は層1 ガードが赤にする。
 
 `scripts/check-external-api-smoke.sh`（ts-ci）が構造を、`scripts/check-external-api-smoke-freshness.sh`（`external-api-smoke-freshness` ワークフロー・日次）が鮮度を検証する。後者は `PENDING` と期限切れを赤にし、`scripts/report-ci-issue.sh` がラベル `external-api-smoke` の追跡 Issue を 1 本だけ維持する。記録を更新すると次の実行で自動的に閉じる。

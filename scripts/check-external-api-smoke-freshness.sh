@@ -21,8 +21,9 @@
 #   ok       上記以外。
 #
 # 環境変数:
-#   EXTERNAL_API_SMOKE_NOW  「今日」を YYYY-MM-DD で注入する（既定は date +%Y-%m-%d）。
+#   EXTERNAL_API_SMOKE_NOW  「今日」を YYYY-MM-DD で注入する（既定は JST の今日）。
 #                           自己テストと、赤の実証（workflow_dispatch の now 入力）で使う。
+#                           注入値も JST として解釈する（記録側が JST であるため）。
 #
 # 使い方: bash scripts/check-external-api-smoke-freshness.sh
 #   期限切れ・未実施があれば該当を stderr に出して exit 1、無ければ exit 0。
@@ -35,7 +36,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ $# -gt 0 ]; then
   case "$1" in
     -h|--help)
-      sed -n '2,28p' "$0"
+      sed -n '2,29p' "$0"
       exit 0
       ;;
     *)
@@ -114,12 +115,31 @@ fi
 echo ""
 
 # --- 「今日」の決定 ---------------------------------------------------------------------------
+#
+# **基準日は必ず JST で取る（TZ を実行環境へ委ねない）。** 記録側の最終確認日は JST と定めて
+# あり（infra/external-api-smoke.tsv の列定義・infra/README.md §8-4）、一方 GitHub の runner は
+# UTC である。素の `date` を使うと両者が最大 1 日ずれ、本ワークフローの cron は 21:07 UTC ＝
+# **JST 翌 06:07** に当たるため、JST 00:00〜06:07 に実疎通して記録を更新した当日、正当な記録が
+# 未来日（＝叩かずに日付だけ埋めた捏造）と誤判定される。手順どおり叩いた運用者を追跡 Issue で
+# 名指しする形になり、偽の障害通知は通知そのものの信頼を壊す（steering #118 の規律）。
+# 逆向きにも 1 日ぶんの甘さが出て、有効期間 14 日が実効 15 日になる。
 now="${EXTERNAL_API_SMOKE_NOW:-}"
 injected_note=""
 if [ -n "$now" ]; then
   injected_note="（EXTERNAL_API_SMOKE_NOW=${now} を注入）"
 else
-  now="$(date +%Y-%m-%d)"
+  # tzdata が無い環境では `TZ=Asia/Tokyo` が **黙って UTC へ落ちる**（エラーにならない）。
+  # そのとき基準日は実行環境のローカル日付へ戻り、上に書いた分界が音もなく消える。
+  # 落ちたことを観測できるのはここだけなので、緑を返す前に解決を確かめる。
+  tz_offset="$(TZ=Asia/Tokyo date +%z)"
+  if [ "$tz_offset" != '+0900' ]; then
+    fail_early tzdata-unavailable \
+      "ERROR: TZ=Asia/Tokyo を解決できません（オフセットが '${tz_offset}' で +0900 になりません）。" \
+      "       → tzdata が無い環境の可能性があります。" \
+      "       → 基準日が実行環境のローカル日付へ落ち、JST で書かれた記録と最大 1 日ずれます。" \
+      "         ずれたまま緑を返すより、解決できないことを赤で告げるほうが安全です。"
+  fi
+  now="$(TZ=Asia/Tokyo date +%Y-%m-%d)"
 fi
 case "$now" in
   [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;

@@ -261,8 +261,13 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-today="$(date +%Y-%m-%d)"
-stamp="local-$(date +%Y%m%dT%H%M%S%z)"
+# **記録へ押す日時は必ず JST で取る（TZ を実行者の環境へ委ねない）。** 宣言の最終確認日は JST と
+# 定めてあり（infra/external-api-smoke.tsv の列定義・infra/README.md §8-4）、鮮度検証（層2）も
+# JST を基準日に判定する。ここが実行者のローカル日付だと、JST 圏外から叩いた記録が層2 の未来日
+# 判定に掛かり、正当な実施が「日付だけ埋めた捏造」として追跡 Issue へ立つ。証拠欄の刻も同じ理由で
+# JST に揃える（オフセットが実行環境ごとに変わると、後から読む人が実施時刻を復元できない）。
+today="$(TZ=Asia/Tokyo date +%Y-%m-%d)"
+stamp="local-$(TZ=Asia/Tokyo date +%Y%m%dT%H%M%S%z)"
 
 echo "OK: 対象の実疎通はすべて成功しました。"
 echo ""

@@ -72,6 +72,22 @@ easf_run() {
     bash scripts/check-external-api-smoke-freshness.sh 2>&1)" || RC=$?
 }
 
+easf_run_tz() {
+  # $1 = 実行環境の TZ。**EXTERNAL_API_SMOKE_NOW を注入しない**（実際の date 経路を通す）。
+  OUT=''
+  RC=0
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+  OUT="$(cd "$FX" && TZ="$1" bash scripts/check-external-api-smoke-freshness.sh 2>&1)" || RC=$?
+}
+
+easf_base_date() {
+  # 直前の実行の基準日を `--- 層2（鮮度）の検証・基準日 YYYY-MM-DD・…` の行から抜く。
+  # **多バイト文字をパターンへ持ち込まない**（BSD / GNU で挙動を揃えるため）。`--- ` 行を
+  # 選んでから日付だけを抜く。`head` ではなく `sed -n 1p` を使うのは、入力を最後まで読ませて
+  # 上流の grep へ SIGPIPE を起こさないためである（pipefail の下で偽の失敗になる）。
+  printf '%s\n' "$OUT" | grep '^--- ' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sed -n '1p'
+}
+
 # ---------------------------------------------------------------------------
 # 本命 1: 未実施（PENDING）。go-live の完了条件そのものであり、必ず赤で鳴り続けなければ
 # ならない。層1 が PENDING を通す（枠を足す PR をマージ可能にする）代償をここで払う。
@@ -149,6 +165,90 @@ expect_red '基準日 2026-08-16 より未来です'
 expect_output_matches 'EXTERNAL-API-SMOKE-SIGNATURE: alpha=future-date;'
 # 未来日を stale と同じ診断に混ぜると、原因（記録の捏造 / 単なる放置）を取り違える。
 expect_absent '有効期間 14 日を超えています'
+t_end
+
+# ---------------------------------------------------------------------------
+# 基準日の TZ（PR #130 レビュー指摘）。**記録は JST で書く**（infra/external-api-smoke.tsv の
+# 列定義と infra/README.md §8-4）。判定側が実行環境のローカル日付を使うと両者が最大 1 日ずれ、
+# GitHub runner は UTC・本ワークフローの cron は 21:07 UTC ＝ **JST 翌 06:07** に当たるため、
+# **JST 00:00〜06:07 に実疎通して記録を更新した当日**、正当な記録が future-date（＝日付だけ
+# 埋めた捏造）と誤判定される。追跡 Issue へ「実施していない日付が入っています」というコメントが
+# 立ち、最も守りたい相手（手順どおり叩いた運用者）を最初に殴る。偽の障害通知は通知そのものの
+# 信頼を壊す — steering の #118 で確立した規律に真正面から反する。
+#
+# **これは時刻を注入せず実際の date 経路を通す唯一のケースである。** 時間依存にしないため
+# 「ある TZ で緑」ではなく **「基準日が実行環境の TZ に依らず一定」** を照合する。東西の両端
+# （UTC-12 / UTC+14）を含めるのは、JST から見てどの瞬間でもこの 3 つのうち少なくとも 1 つは
+# 日付が食い違うためで、ambient TZ を拾っていれば必ずどれかが赤くなる（単一 TZ で固定すると、
+# 時刻帯によって赤にも緑にも転ぶ時間依存テストになる）。
+
+t_begin 'check-external-api-smoke-freshness: 基準日は実行環境の TZ に依らず JST で一定（runner は UTC）'
+easf_fixture
+easf_jst_today="$(TZ=Asia/Tokyo date +%Y-%m-%d)"
+easf_decl \
+  "alpha-key|alpha|${easf_jst_today}|run-12345|#125|外部 API を叩く鍵" \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_offs=''
+easf_bases=''
+for easf_tz in Etc/GMT+12 UTC Pacific/Kiritimati; do
+  easf_offs="${easf_offs}$(TZ="$easf_tz" date +%z),"
+  easf_run_tz "$easf_tz"
+  easf_bases="${easf_bases}$(easf_base_date),"
+done
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="OFFSETS: ${easf_offs} BASES: ${easf_bases}"
+# shellcheck disable=SC2034 # 同上
+RC=0
+# 空振り防止: tzdata が無く date が黙って UTC へ落ちた環境では 3 本とも同じ日付になり、
+# 「TZ を振ったつもりの 1 通り」を検証して緑を返す。オフセットが実際に散っていることを先に見る
+# （[[invariance-evidence-needs-firing-count]]: 不変の主張は発火数を先に測る）。
+expect_output_matches '^OFFSETS: -1200,\+0000,\+1400,'
+expect_output_matches "BASES: ${easf_jst_today},${easf_jst_today},${easf_jst_today},$"
+t_end
+
+# TZ 固定は **tzdata が解決できること** を前提にする。無い環境では `TZ=Asia/Tokyo` は
+# エラーにならず **黙って UTC へ落ち**、上の分界が音もなく消える。落ちたまま緑を返すより
+# 解決できないことを赤で告げるほうが安全であり、その分岐が実在することを変異で確かめる
+# （期待オフセットを潰すと必ず到達する ＝ 判別子が定数化したデッドコードではない）。
+t_begin 'check-external-api-smoke-freshness: TZ を解決できないまま緑を返さない（分岐到達性）'
+easf_fixture
+easf_decl \
+  "alpha-key|alpha|$(TZ=Asia/Tokyo date +%Y-%m-%d)|run-12345|#125|外部 API を叩く鍵" \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+if fx_guard_mutate check-external-api-smoke-freshness -e "s/!= '+0900'/!= '+9999'/"; then
+  # 注入すると date 経路を通らないため、**基準日を注入せずに**走らせる。
+  easf_run_tz UTC
+  expect_red 'EXTERNAL-API-SMOKE-SIGNATURE: early-exit=tzdata-unavailable;'
+  expect_output_matches 'TZ=Asia/Tokyo を解決できません'
+  # ずれた基準日で判定を続けない。
+  expect_absent 'すべて有効期間内'
+fi
+t_end
+
+# 上のケースは `now` を通る経路しか見ない。後から別の場所へ TZ 無しの date を足しても
+# 気づけないため、**コード行の date が 1 件残らず TZ 固定であること** も併せて機械検証する
+# （層1 の「date が 1 件も無い」と対になる構造保証。[[stale-safety-notes-are-misdirection]]）。
+#
+# なお本検査は grep であり **呼び出しと文字列を区別できない**。したがってガード側の規約として
+# 「診断文の中で `date` の語を裸で使わない」を課す（実際に一度これで赤くなった）。緩めて
+# 「文字列っぽい行を除く」方向へ倒すと、除外規則の隙間から本物の呼び出しが逃げる。
+t_begin 'check-external-api-smoke-freshness: コード行の date 呼び出しはすべて TZ 固定（JST）'
+easf_fixture
+easf_tz_rc=0
+# 解説文へ date の語が出るため、全行コメントを除いてからコード行だけを見る。
+easf_code="$(grep -vE '^[[:space:]]*#' "${FX}/scripts/check-external-api-smoke-freshness.sh")"
+easf_dt="$(printf '%s\n' "$easf_code" | grep -cE '(^|[^[:alnum:]_-])date[[:space:]]')" || easf_tz_rc=$?
+easf_dp="$(printf '%s\n' "$easf_code" | grep -cE 'TZ=Asia/Tokyo[[:space:]]+date[[:space:]]')" || easf_tz_rc=$?
+if [ "$easf_tz_rc" -gt 1 ]; then
+  _t_fail "date 呼び出しの抽出パターンを評価できません（grep exit=${easf_tz_rc}）"
+fi
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="DATE_PINNED: ${easf_dp:-0} DATE_UNPINNED: $(( ${easf_dt:-0} - ${easf_dp:-0} ))"
+# shellcheck disable=SC2034 # 同上
+RC=0
+# 発火数が 0 なら「date が 1 件も無いから未固定も 0」という空振りと区別できない。
+expect_output_matches 'DATE_PINNED: [1-9]'
+expect_output_matches 'DATE_UNPINNED: 0$'
 t_end
 
 # ---------------------------------------------------------------------------

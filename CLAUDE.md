@@ -31,7 +31,7 @@ CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可
 - `scripts/check-secret-declaration-coverage.sh` — シークレット実値投入の宣言カバレッジ（Issue #63）。tf の `locals.secret_ids` ／ `infra/secrets-provisioned.tsv` ／ `infra/README.md` の投入手順 ／ 消費側配線を両方向で照合する。`--print-secrets` で **宣言 6 件の正典**を `<secret_id>\t<version>` の TSV で出す
 - `scripts/check-secret-version-drift.sh` — 本番シークレットの version 構成と宣言の乖離検証（Issue #63・`secret-version-drift` ワークフローが 6 時間ごとに実行）。`PROJECT_ID` 必須。**値（payload）は読まない**（CI に付くのは secret 単位の `roles/secretmanager.viewer` のみで、このロールは `versions.access` を含まない）。`PROD_SECRET_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
 - `scripts/check-external-api-smoke.sh` — 外部 API 実疎通の棚卸しと記録の構造検証（Issue #125・層1・ts-ci）。`infra/external-api-smoke.tsv` を secret 正典（`check-secret-declaration-coverage.sh --print-secrets`）と `infra/README.md` §8 の手順見出しの両方に対して両方向照合する。**`date` を 1 箇所も持たない**（時間依存の判定は層2 の責務）
-- `scripts/check-external-api-smoke-freshness.sh` — 実疎通記録の鮮度検証（Issue #125・層2・`external-api-smoke-freshness` ワークフローが日次実行）。`PENDING` と有効期間 14 日超を赤にする。**GCP へ一切アクセスしない**（鍵も読まない）。`EXTERNAL_API_SMOKE_NOW` に `YYYY-MM-DD` を渡せば基準日を注入できる
+- `scripts/check-external-api-smoke-freshness.sh` — 実疎通記録の鮮度検証（Issue #125・層2・`external-api-smoke-freshness` ワークフローが日次実行）。`PENDING` と有効期間 14 日超を赤にする。**GCP へ一切アクセスしない**（鍵も読まない）。基準日は記録側と揃えて `TZ=Asia/Tokyo` に固定する（runner は UTC なので素の `date` だと最大 1 日ずれ、正当な記録が未来日と誤判定される）。`EXTERNAL_API_SMOKE_NOW` に `YYYY-MM-DD` を渡せば基準日を注入できる
 - `scripts/run-external-api-smoke.sh` — 外部 API への実疎通そのもの（Issue #125・**運用者用・CI からは呼ばない**）。鍵を CI へ渡さないのは Req 5.4 のため。出力は PASS/FAIL・HTTP ステータス・`status` フィールドだけの allowlist（応答本文も鍵も出さない）。LINE は送信系を使わず `/v2/bot/info` で確認する
 - `scripts/report-ci-issue.sh` — 追跡 Issue の起票／コメント／自動クローズ。`REPORT_CI_ISSUE_DRY_RUN=1` で書き込みを伴わず検証できる
 

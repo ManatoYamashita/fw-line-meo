@@ -79,6 +79,16 @@ reas_run() {
   OUT="$(cd "$FX" && bash scripts/run-external-api-smoke.sh "$@" 2>&1)" || RC=$?
 }
 
+reas_run_tz() {
+  # $1 = 実行環境の TZ、$2 以降 = スクリプト引数。
+  reas_tz="$1"
+  shift
+  OUT=''
+  RC=0
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+  OUT="$(cd "$FX" && TZ="$reas_tz" bash scripts/run-external-api-smoke.sh "$@" 2>&1)" || RC=$?
+}
+
 reas_expect_no_leak() {
   # 鍵と応答本文の番兵が出力へ 1 度も現れないこと。**この 2 つが本スクリプトの存在理由である。**
   expect_absent "$REAS_KEY_SENTINEL"
@@ -134,6 +144,47 @@ OUT="SENDS: ${reas_sends:-0} / INFO: ${reas_info:-0}"
 # shellcheck disable=SC2034 # 同上
 RC=0
 expect_output_matches '^SENDS: 0 / INFO: [1-9]'
+t_end
+
+# ---------------------------------------------------------------------------
+# 本命 3: 記録へ押す日付の TZ（PR #130 レビュー指摘）。宣言（infra/external-api-smoke.tsv）の
+# 最終確認日は **JST** と定めてあり、鮮度検証（層2）も JST を基準日に判定する。ここが実行者の
+# ローカル日付だと、JST 圏外から叩いた記録が層2 の未来日判定に掛かり、正当な実施が「日付だけ
+# 埋めた捏造」として追跡 Issue へ立つ。基準日側だけを直しても、記録側がずれていれば同じ穴が残る。
+#
+# 時間依存にしないため「ある TZ で緑」ではなく **「実行環境の TZ に依らず一定」** を照合する
+# （理由は 94-check-external-api-smoke-freshness.sh の同名ケースに詳しい）。
+
+t_begin 'run-external-api-smoke: 記録へ押す日付は実行環境の TZ に依らず JST で一定'
+reas_fixture 200
+# 貼り付け用の行は選んだ api の行しか出ない。既定 fixture の api は 'alpha' でどの --api にも
+# 一致せず 1 行も出ないため、このケースでは実在の api 名を持つ宣言へ差し替える。
+{
+  printf '# 自己テストの宣言 fixture（Issue #125）\n'
+  printf 'places-api-key\tplaces\tPENDING\t-\t#125\t説明\n'
+} > "${FX}/infra/external-api-smoke.tsv"
+reas_jst_today="$(TZ=Asia/Tokyo date +%Y-%m-%d)"
+reas_offs=''
+reas_dates=''
+reas_stamps=''
+for reas_tz in Etc/GMT+12 UTC Pacific/Kiritimati; do
+  reas_offs="${reas_offs}$(TZ="$reas_tz" date +%z),"
+  reas_run_tz "$reas_tz" --api places --place-id ChIJTEST
+  # 貼り付け行は `  places-api-key<TAB>places<TAB><日付><TAB>local-<刻>…` の形。
+  reas_row="$(printf '%s\n' "$OUT" | grep 'places-api-key' | sed -n '1p')"
+  reas_dates="${reas_dates}$(printf '%s\n' "$reas_row" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sed -n '1p'),"
+  reas_stamps="${reas_stamps}$(printf '%s\n' "$reas_row" | grep -oE 'local-[0-9]{8}T[0-9]{6}[+-][0-9]{4}' | sed -n '1p'),"
+done
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="OFFSETS: ${reas_offs} DATES: ${reas_dates} STAMPS: ${reas_stamps}"
+# shellcheck disable=SC2034 # 同上
+RC=0
+# 空振り防止: tzdata が無く date が黙って UTC へ落ちた環境では 3 本とも同じになり、
+# 「TZ を振ったつもりの 1 通り」を緑にする。オフセットが実際に散っていることを先に見る。
+expect_output_matches '^OFFSETS: -1200,\+0000,\+1400,'
+expect_output_matches "DATES: ${reas_jst_today},${reas_jst_today},${reas_jst_today},"
+# 証拠欄の刻も JST。オフセットが実行環境ごとに変わると、後から読む人が実施時刻を復元できない。
+expect_output_matches 'STAMPS: local-[0-9]{8}T[0-9]{6}\+0900,local-[0-9]{8}T[0-9]{6}\+0900,local-[0-9]{8}T[0-9]{6}\+0900,$'
 t_end
 
 # ---------------------------------------------------------------------------
