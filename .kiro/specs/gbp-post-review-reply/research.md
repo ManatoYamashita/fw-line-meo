@@ -87,7 +87,7 @@
 | 返信モデレーション | 2026 年追加の `ReviewReplyState`（PENDING/REJECTED/APPROVED）＋`PolicyViolation` | AI 生成返信の却下検知フローを設計可能（スコープ判断は design で） |
 | OAuth | スコープは `business.manage` 単一（sensitive 相当→アプリ検証が必要）。**Testing ステータスは refresh token 7 日失効**。Published は無期限（6ヶ月未使用・取消等で失効） | 早期 Published 化必須。失効時挙動は Req 2.3 で要件化済み |
 | 利用審査 | contact form 申請。**60 日以上 verified/active な GBP 管理が前提**・所要期間非公開。承認で 300 QPM | 運用側で前提充足を確認し**着手前に前倒し申請**（スケジュール上の最大外部リスク） |
-| location 列挙 | v1 Account Management `accounts.list` ＋ v1 Business Information `accounts.locations.list`（readMask 必須）。`Location.metadata.placeId`（output only）で Places の place_id と突合 | placeId 逆引き API は無し → 全列挙→突合→**`gbp_locations` 対応表（place_id ↔ location ↔ account）の永続化**が定石 |
+| location 列挙 | v1 Account Management `accounts.list` ＋ v1 Business Information `accounts.locations.list`（readMask 必須）。`Location.metadata.placeId`（output only）で Places の place_id と突合 | placeId 逆引き API は無し → 全列挙→突合→`gbp_locations` **対応表（place_id ↔ location ↔ account）の永続化**が定石 |
 | name 形式差 | v4 は `accounts/{a}/locations/{l}`、v1 は `locations/{l}` | 変換関数を単一箇所に置く |
 | capability | `metadata.canOperateLocalPost` 等で投稿可否を事前判定可 | 連携時の権限不足検知（Req 1.6）に利用可 |
 
