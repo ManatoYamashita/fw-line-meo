@@ -1,0 +1,169 @@
+# shellcheck shell=bash  # run.sh から source される断片（shebang は持たない）
+# scripts/run-external-api-smoke.sh の自己テスト（Issue #125）。
+#
+# 本スクリプトは **CI では走らない**（鍵を CI へ渡さない設計）。それでも自己テストを持つのは、
+# 最も守りたい性質が「出力の allowlist」だからである。応答本文をそのまま出すと、Google の 400
+# 応答に含まれるリクエスト URL 経由で鍵がターミナル履歴や貼り付け先へ漏れる。この性質は
+# 読むだけでは確かめられず、**実走して出力を検査して初めて**固定できる。
+#
+# もう 1 つの本命は「LINE の送信系エンドポイントを叩かないこと」。実疎通で push を使うと
+# 受信者への実送信になり、無料メッセージ通数枠を消費する。スタブが叩かれた URL を記録し、
+# 送信系が 1 度も現れないことを照合する。
+#
+# gcloud / curl はスタブへ差し替える。実 API も実 gcloud も呼ばない（hermetic）。
+
+# 出力へ現れてはならない番兵。スタブは鍵としてこれを返し、応答本文にも埋め込む。
+REAS_KEY_SENTINEL='SUPER-SECRET-KEY-abc123'
+REAS_BODY_SENTINEL='LEAKY-BODY-MARKER-xyz789'
+
+reas_stubs() {
+  # $1 = スタブ curl が返す HTTP ステータス。
+  # スタブは t_begin が PATH の先頭へ置く ${FX}/stub へ設置する（npx スタブと同居）。
+  mkdir -p "${FX}/stub"
+
+  cat > "${FX}/stub/gcloud" <<STUB
+#!/usr/bin/env bash
+# secrets versions access だけを模擬する。値は番兵をそのまま返す。
+printf '%s' '${REAS_KEY_SENTINEL}'
+STUB
+
+  cat > "${FX}/stub/curl" <<STUB
+#!/usr/bin/env bash
+# -o <file> だけ解釈し、叩かれた URL を \${STUB_DIR}/urls.txt へ記録する。
+# 応答本文には必ず番兵を埋める（allowlist が効いていなければ出力へ漏れる）。
+set -u
+out=''
+prev=''
+for a in "\$@"; do
+  if [ "\$prev" = '-o' ]; then out="\$a"; fi
+  prev="\$a"
+done
+# curl の設定ファイル（-K）に url = "..." の形で入るため、そこから拾う。
+for a in "\$@"; do
+  if [ -f "\$a" ]; then
+    sed -n 's/^url = "\(.*\)"\$/\1/p' "\$a" >> "\${STUB_DIR}/urls.txt"
+  fi
+done
+code='${1}'
+if [ -n "\$out" ]; then
+  if [ "\$code" = '200' ]; then
+    printf '{"access_token":"TOK-${REAS_BODY_SENTINEL}","note":"${REAS_BODY_SENTINEL}"}' > "\$out"
+  else
+    printf '{"error":{"code":%s,"message":"${REAS_BODY_SENTINEL} key=${REAS_KEY_SENTINEL}","status":"INVALID_ARGUMENT"}}' "\$code" > "\$out"
+  fi
+fi
+printf '%s' "\$code"
+STUB
+
+  chmod +x "${FX}/stub/gcloud" "${FX}/stub/curl"
+  : > "${FX}/stub/urls.txt"
+}
+
+reas_fixture() {
+  # $1 = スタブ curl が返す HTTP ステータス。
+  fx_guard run-external-api-smoke
+  reas_stubs "$1"
+  # 末尾で貼り付け用の行を組むため、宣言ファイルも要る。
+  mkdir -p "${FX}/infra"
+  {
+    printf '# 自己テストの宣言 fixture（Issue #125）\n'
+    printf 'alpha-key\talpha\tPENDING\t-\t#125\t説明\n'
+    printf 'ops-only\t-\t-\t-\t#125\t対象外\n'
+  } > "${FX}/infra/external-api-smoke.tsv"
+}
+
+reas_run() {
+  OUT=''
+  RC=0
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+  OUT="$(cd "$FX" && bash scripts/run-external-api-smoke.sh "$@" 2>&1)" || RC=$?
+}
+
+reas_expect_no_leak() {
+  # 鍵と応答本文の番兵が出力へ 1 度も現れないこと。**この 2 つが本スクリプトの存在理由である。**
+  expect_absent "$REAS_KEY_SENTINEL"
+  expect_absent "$REAS_BODY_SENTINEL"
+}
+
+# ---------------------------------------------------------------------------
+# 本命 1: 出力 allowlist。成功・失敗のどちらの経路でも鍵と応答本文を出さない。
+
+t_begin 'run-external-api-smoke: 成功経路で鍵も応答本文も出力しない'
+reas_fixture 200
+reas_run --place-id ChIJTEST --model test-model --channel-id 1234567890
+expect_green
+reas_expect_no_leak
+# 出すのは PASS / HTTP ステータスだけ。
+expect_output_matches 'PASS  gemini'
+expect_output_matches 'PASS  places'
+expect_output_matches 'PASS  line-messaging'
+t_end
+
+t_begin 'run-external-api-smoke: 失敗経路でも鍵も応答本文も出力しない（status だけ出す）'
+reas_fixture 400
+reas_run --place-id ChIJTEST --model test-model --channel-id 1234567890
+expect_red '実疎通に失敗した API があります'
+reas_expect_no_leak
+# 応答本文のうち allowlist された status フィールドだけは出る（切り分けに要るため）。
+expect_output_matches 'FAIL  gemini +http=400 status=INVALID_ARGUMENT'
+# 失敗したまま記録を更新させない。
+expect_output_matches '日付を更新しないこと'
+t_end
+
+# ---------------------------------------------------------------------------
+# 本命 2: LINE の送信系を叩かない。実疎通で push を使うと実送信になり通数枠を消費する。
+
+t_begin 'run-external-api-smoke: LINE は送信系エンドポイントを 1 度も叩かない'
+reas_fixture 200
+reas_run --api line-messaging --channel-id 1234567890
+expect_green
+reas_urls_rc=0
+reas_sends="$(grep -cE 'message/(push|multicast|broadcast|reply)' "${FX}/stub/urls.txt")" || reas_urls_rc=$?
+if [ "$reas_urls_rc" -gt 1 ]; then
+  _t_fail "送信系 URL の抽出パターンを評価できません（grep exit=${reas_urls_rc}）"
+fi
+reas_info_rc=0
+reas_info="$(grep -cE 'api\.line\.me/v2/bot/info' "${FX}/stub/urls.txt")" || reas_info_rc=$?
+if [ "$reas_info_rc" -gt 1 ]; then
+  _t_fail "/v2/bot/info の抽出パターンを評価できません（grep exit=${reas_info_rc}）"
+fi
+# 送信系は 0 件、かつ /v2/bot/info は 1 件以上。前者だけでは「そもそも何も叩いていない」空振りと
+# 区別できない（[[invariance-evidence-needs-firing-count]]）。
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="SENDS: ${reas_sends:-0} / INFO: ${reas_info:-0}"
+# shellcheck disable=SC2034 # 同上
+RC=0
+expect_output_matches '^SENDS: 0 / INFO: [1-9]'
+t_end
+
+# ---------------------------------------------------------------------------
+# 引数の扱い。`wants X && require_arg …` の形は set -e の下で無言終了する（実測で踏んだ）。
+
+t_begin 'run-external-api-smoke: --api で 1 つだけ選んでも無言終了しない'
+reas_fixture 200
+reas_run --api places --place-id ChIJTEST
+expect_green
+expect_output_matches 'PASS  places'
+# 選ばなかった API は叩かない。
+expect_absent 'PASS  gemini'
+t_end
+
+t_begin 'run-external-api-smoke: 必須引数が無ければ既定値へ落とさず落とす'
+reas_fixture 200
+reas_run --api gemini
+expect_red '--model は必須です'
+# 既定値を持たせると、本番が別モデルへ移った瞬間に「動くはずのない構成が緑」になる。
+expect_absent 'PASS  gemini'
+t_end
+
+t_begin 'run-external-api-smoke: 未知の --api は落とす'
+reas_fixture 200
+reas_run --api bogus
+expect_red '--api は gemini / places / line-messaging のいずれかです'
+t_end
+
+t_begin 'run-external-api-smoke: 未知の引数は使い方の誤りとして落とす'
+reas_fixture 200
+reas_run --nope
+expect_red '未知の引数です'
+t_end

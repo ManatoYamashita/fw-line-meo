@@ -132,7 +132,9 @@ easf_run 2026-09-30
 easf_sig_b="$(printf '%s\n' "$OUT" | sed -n 's/^EXTERNAL-API-SMOKE-SIGNATURE: //p')"
 # 経過日数（15 日 / 60 日）は診断文には出るが署名には出ない。
 expect_output_matches '60 日前'
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
 OUT="SIG_A: ${easf_sig_a} / SIG_B: ${easf_sig_b}"
+# shellcheck disable=SC2034 # 同上
 RC=0
 expect_output_matches '^SIG_A: alpha=stale; / SIG_B: alpha=stale;$'
 t_end

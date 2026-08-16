@@ -295,7 +295,9 @@ eas_date_hits="$(grep -vE '^[[:space:]]*#' "${FX}/scripts/check-external-api-smo
 if [ "$eas_date_rc" -gt 1 ]; then
   _t_fail "date 呼び出しの抽出パターンを評価できません（grep exit=${eas_date_rc}）"
 fi
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
 OUT="DATE_CALLS: ${eas_date_hits:-0}"
+# shellcheck disable=SC2034 # 同上
 RC=0
 expect_output_matches '^DATE_CALLS: 0$'
 t_end
