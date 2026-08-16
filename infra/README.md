@@ -223,9 +223,35 @@ Google ビジネスプロフィール（GBP）への投稿作成・クチコミ�
 
 GCP コンソールで GBP API を有効化しただけでは使えない。**別途の利用申請が承認されるまでクォータは 0**（承認で 300 QPM）。
 
-- **前提条件**（満たさないと申請が通らない）: 申請アカウントが **60 日以上 verified かつ active な GBP を管理**・その GBP に Web サイト登録済み・オーナー/マネージャー権限・GCP の **Project Number**（`gen-fw-line-meo`）。
+**申請フォームへ入れる値（実測・2026-08-17）**
+
+| 欄 | 値 |
+|---|---|
+| Google Cloud Project Number | **`903142718720`**（`gcloud projects describe gen-fw-line-meo --format="value(projectNumber)"`） |
+| 連絡先メール | 対象 GBP の**オーナー/マネージャーに登録済み**のアドレスであること（別アドレスだと弾かれる） |
+| ドロップダウン | **Application for Basic API Access** |
+
+- **前提条件**（満たさないと申請が通らない）: 申請アカウントが **60 日以上 verified かつ active な GBP を管理**・その GBP に **Web サイトが登録済み**・オーナー/マネージャー権限。GBP のプロフィールは最新かつ記入漏れが無い状態にしておくこと（審査の所要を左右する）。
 - **手順**: GBP API のコンタクトフォームから申請 → メールで可否連絡 + クォータ反映。
-- **承認の観察可能な証拠**: `gcloud services quota list --service=mybusiness.googleapis.com --project=gen-fw-line-meo` 等でクォータが 0 → 300 QPM になること（未承認は 0）。
+- **承認の観察可能な証拠**: 正典は Cloud Console のクォータ画面（未承認 0 QPM → 承認 300 QPM）。
+  CLI からの簡易判定は次で足りる。**未承認の間、v4 の `mybusiness.googleapis.com` はこのプロジェクトの
+  API ライブラリに現れない**（2026-08-17 実測: 0 件。同時に新 API 群 7 本は列挙される）。
+
+  ```bash
+  gcloud services list --available --project=gen-fw-line-meo \
+    --filter="config.name=mybusiness.googleapis.com" --format="value(config.name)"
+  # 空 = 未承認 / 1 行返る = 承認済み（有効化できる状態）
+  ```
+
+  **`gcloud services quota list` というコマンドは存在しない**（gcloud 575.0.0 で `Invalid choice: 'quota'`）。
+  以前ここに書いていたが誤りだったので使わないこと。
+
+- **承認後に有効化する API**: 公式手順は Business Profile 関連の **8 本すべて**の有効化を要求する
+  （Google My Business API / My Business Account Management / Business Information / Lodging /
+  Place Actions / Notifications / Verifications / Q&A）。本実装が実際に叩くのは次の 3 ホストだが、
+  審査側の前提に合わせて 8 本を有効化しておくのが安全:
+  `mybusiness.googleapis.com`（v4・投稿と返信）/ `mybusinessaccountmanagement.googleapis.com`（v1）/
+  `mybusinessbusinessinformation.googleapis.com`（v1）。
 - **スケジュール上の最大リスク**: 「60 日以上稼働の verified GBP」は運営が事前に用意する必要がある。今日申請しても審査に時間がかかるため、**本番ローンチの律速はここ**。
 
 ### 8-2. OAuth クライアント作成 + 同意画面検証 + Published 化（人手）
@@ -233,15 +259,38 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 店舗オーナーが LINE から連携する際の Google 認可画面。§1.4 の Identity Platform 用同意画面とは**別の OAuth クライアント**を作る（用途が異なる）。
 
 1. **OAuth 同意画面を構成**（External）: `https://www.googleapis.com/auth/business.manage` スコープを追加（コードの `GBP_SCOPE` と一致・単一）。プライバシーポリシー URL・承認済みドメインを設定。
-2. **OAuth クライアント（Web アプリケーション）を作成**し、**承認済みリダイレクト URI** に line-webhook の公開 URL + **`/gbp/oauth/callback`** を設定する（コードの callback ルート `app.get('/gbp/oauth/callback')` と 1 文字も違わせないこと。OAuth 失敗の第 1 位はここの不一致）。得られる client_id / client_secret を 8-3 で投入。
-3. **検証を申請**: `business.manage` は sensitive スコープのため Google の OAuth 検証（スコープ正当性説明・デモ動画・ドメイン検証）が必要。
-4. **Published へ切り替え**: これを怠り Testing のままだと「未確認アプリ」警告＋**refresh token 7 日失効**で、IT に不慣れなオーナーに毎週再連携を強いることになる（本サービスの存在意義に反する）。
+2. **OAuth クライアント（Web アプリケーション）を作成**し、**承認済みリダイレクト URI** に次を**そのまま**設定する（コードの callback ルート `app.get('/gbp/oauth/callback')`（`ts/apps/line-webhook/src/app.ts`）と 1 文字も違わせないこと。OAuth 失敗の第 1 位はここの不一致）。得られる client_id / client_secret を 8-3 で投入。
 
-コードの認可要求は `access_type=offline` + `prompt=consent`（refresh token を確実に取得）で固定済み（`ts/apps/line-webhook/src/gbp/oauth.ts`）。
+   ```
+   https://line-webhook-vdqjgfvkma-an.a.run.app/gbp/oauth/callback
+   ```
+
+   （2026-08-17 実測。`gcloud run services describe line-webhook --project=gen-fw-line-meo --region=asia-northeast1 --format="value(status.url)"`。この値をそのまま tfvars の `gbp_oauth_redirect_url` にも入れる）
+3. **検証を申請**: `business.manage` は sensitive スコープのため Google の OAuth 検証が必要。**審査は最大 10 日**。提出前に次を全部揃える:
+   - **ドメイン所有権の検証**: 承認済みドメインを **Google Search Console** で検証しておく（Owner/Editor 権限のアカウントで）
+   - **ホームページ**: ログイン不要で公開されており、審査対象アプリとの関係が明確で、アプリ説明とプライバシーポリシーへのリンクを含むこと
+   - **プライバシーポリシー**: **ホームページと同一ドメイン**に置き、Google ユーザーデータの取得・利用・保存・共有をどう行うか明記すること
+   - **スコープ正当性**: `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可
+   - **デモ動画**: YouTube へ **Unlisted** で上げる。**英語**で OAuth 同意フローを流し、同意画面にアプリ名が正しく出ること・**ブラウザのアドレスバーに OAuth クライアント ID が見えること**を映し、要求スコープが実際に何を可能にするかを実演する
+   - **ブランディング**: アプリ名・ロゴ・デベロッパー連絡先が実体と一致していること
+4. **Published へ切り替え**: これを怠り Testing のままだと「未確認アプリ」警告＋**refresh token 7 日失効**（テストユーザーの承認自体が 7 日で切れる）で、IT に不慣れなオーナーに毎週再連携を強いることになる（本サービスの存在意義に反する）。**検証結果の有効期間も 7 日**で、その間に Published へ切り替えないと再検証がいる。承認が出たら速やかに公開すること。
+
+コードの認可要求は `access_type=offline` + `prompt=consent` + `include_granted_scopes=false`（refresh token を確実に取得）で固定済み（`ts/apps/line-webhook/src/gbp/oauth.ts`）。
+
+**§1.4 の Identity Platform 用クライアント（`903142718720-o43fa5ch35aefmdrcaqqjuf2fjs6ekhk...`）を流用しないこと。** 用途もリダイレクト URI も別で、混ぜるとダッシュボードのログインごと巻き込んで壊れる。
 
 ### 8-3. 認証情報の投入（§1.5 と同じ out-of-band 規律）
 
-secret 枠は Terraform 済み（`infra/modules/secrets/main.tf` の `gbp-oauth-client-secret`・`gbp-token-cipher-key`）。値のみ手動投入する。
+secret 枠は Terraform の**宣言**済み（`infra/modules/secrets/main.tf` の `gbp-oauth-client-secret`・`gbp-token-cipher-key`）だが、**本番にはまだ枠自体が無い**（2026-08-17 実測。`gcloud secrets list --project=gen-fw-line-meo` は既存 6 本のみ）。順序は必ず次:
+
+1. `make tf-apply` で**枠を作る**
+2. 下の `gcloud secrets versions add` で**値を入れる**
+3. `infra/secrets-provisioned.tsv` の 2 行を `PENDING` から実 version 番号・投入日へ更新する（同じ PR で）
+4. **その後で** PR #121 を main へマージする
+
+順序を逆にすると `deploy-prod` が env 未設定の新イメージを出荷し、`loadConfig()` の fail-fast で line-webhook の新リビジョンが起動失敗する。
+
+値のみ手動投入する。
 
 ```bash
 # 8-2 で作成した OAuth クライアントシークレット
