@@ -1,0 +1,121 @@
+# 外部 API 実疎通の鮮度検証（Issue #125）
+#
+# Issue #63 の二層検証は「宣言どおりの version が入っている」までしか言えない。値そのものの
+# 正当性（プレースホルダー文字列・失効キー・別プロジェクトのキー・課金無効）は原理的に検出
+# できず、実際に外部 API を叩いて成功を観測するしかない。2026-07-05〜08-02 の gemini-api-key は
+# まさにこの穴に落ち、機能A（口コミ下書き生成）は go-live 以降一度も成功していなかった。
+#
+# **実疎通そのものは CI では行わない。** 実疎通には値が要るが、CI の責務はイメージ更新であり
+# 外部 API 呼出ではない。CI へ roles/secretmanager.secretAccessor を付けることは Req 5.4
+# （各実行環境は自身の責務に必要なシークレットのみ読み取り可能）に反し、#63 の再発防止のために
+# #63 より広いブラストラディウスを開くことになる。実疎通は運用者が自分の資格情報で行い
+# （infra/README.md §8・scripts/run-external-api-smoke.sh）、結果を
+# infra/external-api-smoke.tsv へ記録する。本ワークフローはその記録の鮮度だけを見る。
+#
+# デプロイ契機ではなく時間で回すのは、この欠陥がマージと無関係に恒常的に成り立つためである
+# （#91 で学んだのと同じ理由。main が動かない期間は run 自体が生成されず、失敗という兆候すら
+#  出ない）。
+#
+# CI デプロイ契約（deploy.yml / prod-image-drift.yml / secret-version-drift.yml と同一・厳守）:
+#   - 本ワークフローは **GCP へ一切アクセスしない**。読むのはリポジトリ内の宣言ファイルだけで、
+#     gcloud も鍵も使わない。したがって WIF 認証のステップも `id-token: write` も持たない
+#     （他ワークフローからのコピーで付いてくるのを避けること。要らない権限は付けない）。
+name: external-api-smoke-freshness
+
+on:
+  # 日次。prod-image-drift（17 分）・secret-version-drift（43 分）と分を分ける。
+  # 21:07 UTC = 06:07 JST。判定が日単位で動くため 6 時間ごとに回す意味がない。
+  # なお scheduled workflow は default branch の定義しか読まれず、リポジトリが 60 日無操作だと
+  # 自動停止する。
+  schedule:
+    - cron: '7 21 * * *'
+  # 障害時の即時確認と、通知経路の end-to-end 実証（基準日を未来へ送って赤を作る）用。
+  workflow_dispatch:
+    inputs:
+      now:
+        description: 基準日を YYYY-MM-DD で上書きする。通常は空（空なら実際の今日を使う）
+        required: false
+        default: ''
+
+concurrency:
+  group: external-api-smoke-freshness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write # 追跡 Issue の起票・コメント・クローズ
+
+jobs:
+  smoke-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout（正典は作業ツリーのファイル・git 履歴は不要）'
+        uses: actions/checkout@v5
+        # **fetch-depth: 0 を置かないこと。** 本検証は infra/external-api-smoke.tsv と
+        # infra/README.md と infra/*.tf を読むだけで、git の履歴を一切参照しない。
+
+      - name: '外部 API 実疎通の鮮度を検証（Issue #125）'
+        id: smoke
+        env:
+          # 未入力なら空文字が入り、スクリプト側の ${VAR:-default} が既定値（実際の今日）へ落とす。
+          EXTERNAL_API_SMOKE_NOW: ${{ github.event.inputs.now }}
+        # 検証の赤はこのステップでは落とさず、通知まで通してから最終ステップで落とす。
+        # continue-on-error はジョブの結論を曖昧にするので使わない。
+        run: |
+          set -uo pipefail
+          bash scripts/check-external-api-smoke-freshness.sh > "$RUNNER_TEMP/smoke-report.txt" 2>&1 && status=0 || status=$?
+          cat "$RUNNER_TEMP/smoke-report.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/smoke-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: '追跡 Issue へ通知'
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SMOKE_STATUS: ${{ steps.smoke.outputs.status }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/smoke-report.txt"
+          if [ ! -f "$report" ]; then
+            printf '%s\n' "検証ステップが report を残さずに終了しました（スクリプトの起動自体に失敗した可能性があります）。" > "$report"
+          fi
+          # 検証スクリプトは早期異常でも EXTERNAL-API-SMOKE-SIGNATURE を出す契約だが、それ以前に
+          # 落ちた場合（プロセスが殺された等）に備えて空を許さない。空のまま渡すと状態変化の判定が
+          # できず、赤が続く限り毎日コメントが増える。
+          sig="$(grep '^EXTERNAL-API-SMOKE-SIGNATURE: ' "$report" | tail -n 1 | sed 's/^EXTERNAL-API-SMOKE-SIGNATURE: //' || true)"
+          if [ -z "$sig" ]; then
+            sig="no-signature"
+          fi
+          state=red
+          if [ "${SMOKE_STATUS:-}" = "0" ]; then
+            state=green
+          fi
+
+          body="$RUNNER_TEMP/issue-body.md"
+          # 本文の組み立ては scripts/external-api-smoke-notify.sh が持つ。
+          # **この run ブロックへ戻さないこと。** 戻した瞬間に「緑と赤で文面を出し分けているか」を
+          # 検証する器が yml からの sed 抽出へ逆戻りし、Issue #109 と同じ形（孤児ケース検出で
+          # main の ts-ci が 3 日赤）を再生産する。
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/external-api-smoke-notify.sh \
+            --state "$state" \
+            --report "$report" \
+            --run-url "$run_url" > "$body"
+
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label external-api-smoke \
+            --title "chore(ci): 外部 API への実疎通が未実施または期限切れです（自動検出）" \
+            --body-file "$body" \
+            --signature "$sig"
+
+      - name: '検証結果でジョブの成否を決める'
+        if: always()
+        env:
+          SMOKE_STATUS: ${{ steps.smoke.outputs.status }}
+        run: exit "${SMOKE_STATUS:-1}"

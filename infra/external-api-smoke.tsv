@@ -1,0 +1,34 @@
+# 外部 API 実疎通の棚卸しと実施記録（Issue #125）— 「本番で一度実際に叩いて成功した」ことの正典。
+#
+# このファイルは値（payload）も応答本文も一切含まない。含むのは secret id・API 名・最終確認日・
+# 証拠の識別子・参照 Issue/PR・説明だけである（Req 5.2）。
+#
+# なぜ必要か: infra/secrets-provisioned.tsv とその二層検証は「宣言どおりの version が入っている」
+# までしか言えない。**値そのものの正当性（プレースホルダー文字列・失効キー・別プロジェクトのキー・
+# 課金無効）は原理的に検出できない** — CI に付くのは secret 単位の roles/secretmanager.viewer だけで、
+# このロールは secretmanager.versions.access を含まず、project 単位の付与は Req 5.4 で禁止だからである。
+# 2026-07-05〜08-02 の gemini-api-key はまさにこの穴に落ち、機能A は go-live 以降一度も成功して
+# いなかった。到達手段は実際に外部 API を叩いて成功を観測することしかない。
+#
+# **鍵は CI へ渡さない。** 実疎通は運用者が自分の資格情報で out-of-band 実行し（infra/README.md §8）、
+# 結果をこのファイルへ記録する。CI が検証するのは宣言の構造と鮮度だけで、新しい IAM 付与はゼロである。
+#
+# 列: <secret_id>	<api>	<最終確認日 YYYY-MM-DD>	<証拠>	<Issue/PR>	<説明>
+#   secret_id  infra/modules/secrets/main.tf の locals.secret_ids と 1:1。過不足はどちらも赤。
+#   api        gemini / places / line-messaging / -（'-' は実疎通の対象外）。
+#              **新しい枠を足した PR は必ずどちらかを選ばされる。** 棚卸しの漏れが「行が無い」という
+#              不可視の形にならないよう、分類そのものを宣言させる。
+#   最終確認日 JST。api が '-' なら '-'。未実施なら PENDING（層1 では緑・層2 では必ず赤）。
+#   証拠       後から辿れる短い識別子（実行日時・run URL・execution id 等）。api が '-' なら '-'。
+#
+# 照合するガード:
+#   scripts/check-external-api-smoke.sh            構造照合（ts-ci・gcloud 不要・日付を一切見ない）
+#   scripts/check-external-api-smoke-freshness.sh  鮮度照合（定期ワークフロー・PENDING と期限切れを赤）
+#
+# 実疎通の実行: bash scripts/run-external-api-smoke.sh（運用者の gcloud 資格情報で走る。CI では呼ばない）
+db-admin-password	-	-	-	#125	Cloud SQL の postgres 管理ユーザー。外部 API ではない。
+gemini-api-key	gemini	PENDING	-	#125	survey-web が口コミ下書き生成で消費。Issue #63 が落ちた穴そのもの。
+line-channel-access-token	-	-	-	#125	accessor binding のみでコードから未消費（2 消費者とも channel id + secret の stateless token 方式）。撤去は別 Issue。
+line-channel-secret	line-messaging	PENDING	-	#125	line-webhook / delivery-job が stateless token 発行に消費。実疎通は送信を伴わない /v2/bot/info で行う。
+places-api-key	places	PENDING	-	#125	daily-batch / line-webhook / dashboard-api が競合データ取得に消費。
+survey-session-key	-	-	-	#125	機能3 再生成上限の HMAC 署名鍵。自前の署名にのみ使い、外部 API を叩かない。
