@@ -63,6 +63,47 @@ describe('buildPrompt', () => {
     expect(userContent).toContain('良かった点: なし');
     expect(userContent).toContain('一言: なし');
   });
+
+  // Issue #132（案 A）: 「素材に含まれる事実のみを書く」という抽象的な禁止だけでは守られず、
+  // 実測で未選択軸への言及が 63.9% 発生していた。禁止対象を名指しする。
+  describe('未選択の観点を名指しで禁止する（Issue #132）', () => {
+    it('未選択の観点が systemInstruction で禁止される', () => {
+      const m = material({ aspectLabels: ['味'], unselectedAspectLabels: ['雰囲気', '接客'] });
+      const { systemInstruction } = buildPrompt(m, VARIATION);
+      expect(systemInstruction).toContain('雰囲気、接客');
+      expect(systemInstruction).toContain('一切言及しない');
+    });
+
+    it('選択済みの観点は禁止句に現れない（選んだものを禁じては本末転倒）', () => {
+      const m = material({ aspectLabels: ['味'], unselectedAspectLabels: ['雰囲気'] });
+      const { systemInstruction } = buildPrompt(m, VARIATION);
+      const forbiddenLine = systemInstruction
+        .split('\n')
+        .find((l) => l.includes('一切言及しない'));
+      expect(forbiddenLine).toBeDefined();
+      expect(forbiddenLine).not.toContain('味');
+    });
+
+    it('未選択が空（全選択）なら禁止句自体を出さない', () => {
+      const m = material({ unselectedAspectLabels: [] });
+      expect(buildPrompt(m, VARIATION).systemInstruction).not.toContain('一切言及しない');
+    });
+
+    it('項目が無い旧 sessionToken 由来の素材でも壊れず、禁止句を出さない', () => {
+      // /api/drafts の再生成は署名済みトークンから素材を復元する。デプロイ直後は
+      // unselectedAspectLabels を持たない素材が届きうるので、従来の挙動へ安全に劣化させる。
+      const m: DraftMaterial = { storeName: '店', star: 5, aspectLabels: ['味'] };
+      const { systemInstruction } = buildPrompt(m, VARIATION);
+      expect(systemInstruction).not.toContain('一切言及しない');
+      expect(systemInstruction).toContain('素材に含まれる事実のみ');
+    });
+
+    it('禁止句は素材ブロックではなく systemInstruction 側に置く（データと指示を混ぜない）', () => {
+      const m = material({ aspectLabels: ['味'], unselectedAspectLabels: ['雰囲気'] });
+      const { userContent } = buildPrompt(m, VARIATION);
+      expect(userContent).not.toContain('一切言及しない');
+    });
+  });
 });
 
 describe('pickVariation', () => {
