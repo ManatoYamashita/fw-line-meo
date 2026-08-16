@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@fwlm/ui/components/button';
 import type { SurveyAnswer, SurveyFormProps } from './types';
 
 // 回答フォーム（葉コンポーネント）。星評価（必須）・良かった点（複数選択）・一言（任意 200 字）を
@@ -38,15 +39,19 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
 
   return (
     <form
+      className="space-y-8"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
     >
-      <fieldset>
-        <legend>満足度（必須）</legend>
+      <fieldset className="space-y-2">
+        <legend className="mb-2 text-lg font-semibold">満足度（必須）</legend>
         {STARS.map((n) => (
           <button
+            className={`min-h-11 min-w-11 px-1 text-4xl leading-none ${
+              star !== null && n <= star ? 'text-primary' : 'text-muted-foreground'
+            }`}
             type="button"
             key={n}
             aria-label={`星${n}`}
@@ -59,13 +64,23 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
             {star !== null && n <= star ? '★' : '☆'}
           </button>
         ))}
-        {showStarError && <p role="alert">満足度を選択してください</p>}
+        {showStarError && (
+          <p className="text-sm font-medium text-destructive" role="alert">
+            満足度を選択してください
+          </p>
+        )}
       </fieldset>
 
-      <fieldset>
-        <legend>良かった点</legend>
+      <fieldset className="space-y-2">
+        <legend className="mb-2 text-lg font-semibold">良かった点</legend>
         {aspects.map((a) => (
-          <label key={a.code}>
+          // 折り返しは inline-flex + 余白で行い、包む要素を足さない（DOM 構造は据え置き）。
+          <label
+            className={`mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 py-2 ${
+              selected.has(a.code) ? 'border-primary bg-secondary' : 'border-input'
+            }`}
+            key={a.code}
+          >
             <input
               type="checkbox"
               checked={selected.has(a.code)}
@@ -76,18 +91,20 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         ))}
       </fieldset>
 
-      <label>
+      <label className="block text-lg font-semibold">
         一言（任意）
         <textarea
+          className="mt-2 block w-full rounded-lg border border-input p-3 text-base font-normal"
+          rows={3}
           value={comment}
           maxLength={COMMENT_MAX}
           onChange={(e) => setComment(e.target.value)}
         />
       </label>
 
-      <button type="submit" disabled={submitting}>
+      <Button className="min-h-11 w-full px-6 py-3 text-lg font-semibold" type="submit" disabled={submitting}>
         送信する
-      </button>
+      </Button>
     </form>
   );
 }
