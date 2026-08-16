@@ -31,8 +31,19 @@ interface Sample {
 }
 
 function toDraftMaterial(m: (typeof datasetRaw.materials)[number]): DraftMaterial {
+  const selected = new Set<string>(m.aspectCodes);
   const aspectLabels = m.aspectCodes.map((c: string) => labels[c] ?? c);
-  const base = { storeName: m.storeName, star: m.star as Star, aspectLabels };
+  // 本番の /api/responses と同じく、選ばれなかった観点も渡す（Issue #132・案 A）。
+  // ここを渡さないと「本番とは違うプロンプト」を測ることになり、比較が成立しない。
+  const unselectedAspectLabels = Object.entries(labels)
+    .filter(([code]) => !selected.has(code))
+    .map(([, label]) => label);
+  const base = {
+    storeName: m.storeName,
+    star: m.star as Star,
+    aspectLabels,
+    unselectedAspectLabels,
+  };
   return m.comment === null ? base : { ...base, comment: m.comment };
 }
 

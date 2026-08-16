@@ -74,10 +74,16 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
 
   const labelByCode = new Map(aspects.map((a) => [a.code, a.label]));
   const aspectLabels = aspectCodes.map((c) => labelByCode.get(c) ?? c);
+  // 選ばれなかった観点も渡す（Issue #132）。プロンプト側が名指しで言及を禁止するのに使う。
+  // 全選択のときは空配列になり、禁止句自体が出ない。
+  const selectedCodes = new Set(aspectCodes);
+  const unselectedAspectLabels = aspects
+    .filter((a) => !selectedCodes.has(a.code))
+    .map((a) => a.label);
   const material: DraftMaterial =
     comment !== undefined
-      ? { storeName: store.name, star, aspectLabels, comment }
-      : { storeName: store.name, star, aspectLabels };
+      ? { storeName: store.name, star, aspectLabels, comment, unselectedAspectLabels }
+      : { storeName: store.name, star, aspectLabels, unselectedAspectLabels };
 
   // 集計（非致命・失敗しても応答継続）と生成を並行実行
   const tally = deps
