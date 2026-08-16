@@ -41,6 +41,16 @@ jobs:
         # 成功していなかった。tf 正典 / infra/secrets-provisioned.tsv / README の投入手順 /
         # 消費側配線を両方向で照合する（同じく read-only grep 検証・gcloud には問い合わせない）。
         run: bash scripts/check-secret-declaration-coverage.sh
+      - name: 'main を取得（連番一意性ガードが合成集合で判定するため）'
+        # checkout の既定 fetch-depth は 1 で origin/main が無い。ガードは ls-tree しか
+        # 使わないので depth 1 で足りる（履歴は要らない）。
+        run: git fetch --no-tags --depth=1 origin main
+      - name: '連番一意性ガード（Issue #128）'
+        # 番号が重複しても**ファイル名が違えば git は衝突として報告しない**。main 単体でも
+        # ブランチ単体でも重複は見えず、並べたときだけ現れる（PR #121 で実発生）。適用は
+        # shell glob の辞書順なので「たまたま」正しく流れ、db-migrate も db-test も緑になる。
+        # HEAD と origin/main の合成集合で判定する（同じく read-only・git 以外は叩かない）。
+        run: bash scripts/check-db-ordinals.sh
       - name: 'typecheck カバレッジガード（Issue #51）'
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
