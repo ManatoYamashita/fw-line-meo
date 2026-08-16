@@ -144,7 +144,9 @@ describe('buildV4ReviewReplyPath', () => {
 // =====================================================================
 describe('listAccountsAndLocations', () => {
   it('v1 の accounts / locations を列挙し placeId 付きで返す', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    // 第 2 引数（RequestInit）まで受ける。省略すると呼び出し記録が 1 要素タプルになり、
+    // 下の Authorization ヘッダ検証が `calls[n][1]` へ到達できない。
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith('https://mybusinessaccountmanagement.googleapis.com/v1/accounts')) {
         return jsonResponse(200, { accounts: [{ name: ACCOUNT_NAME }] });

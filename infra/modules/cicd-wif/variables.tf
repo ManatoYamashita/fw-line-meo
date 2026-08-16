@@ -30,3 +30,9 @@ variable "runtime_service_account_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "metadata_viewer_secret_ids" {
+  description = "CI（principalSet）へ secret 単位で roles/secretmanager.viewer を付与する Secret Manager シークレットの secret_id 群（Issue #63）。for_each の鍵になるため **plan 時点で確定する値**（枠名）を渡すこと。computed な .id を渡すと枠追加時に plan が落ちる。値（payload）は読ませない（accessor は付与しない）。Req 5.4 により project 単位の付与は行わない。"
+  type        = list(string)
+  default     = []
+}

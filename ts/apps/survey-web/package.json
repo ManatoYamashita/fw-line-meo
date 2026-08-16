@@ -7,24 +7,30 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src",
+    "lint": "eslint src test e2e perf eval next.config.ts postcss.config.mjs vitest.config.ts vitest.eval.config.ts playwright.config.ts",
+    "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
+    "eval:factuality": "vitest run --config vitest.eval.config.ts",
     "perf:budget": "node perf/bundle-budget.mjs"
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
     "@fwlm/gemini": "workspace:*",
+    "@fwlm/ui": "workspace:*",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@fwlm/design-tokens": "workspace:*",
     "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",
     "@testing-library/user-event": "^14",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "jsdom": "^25",
-    "msw": "^2.15.0"
+    "msw": "^2.15.0",
+    "tailwindcss": "^4"
   }
 }

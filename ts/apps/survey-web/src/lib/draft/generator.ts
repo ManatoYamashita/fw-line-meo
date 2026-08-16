@@ -14,10 +14,11 @@ import { buildPrompt, type VariationSeed } from './prompt';
 // 既存の公開面を維持するための re-export（テスト・消費者の import 元は本モジュールのまま）。
 export type { GenAiClient, GenAiRequest, GenAiResponse } from '@fwlm/gemini';
 
-export type DraftErrorKind = 'SAFETY_BLOCKED' | 'API_ERROR' | 'INVALID_OUTPUT';
-export interface DraftError {
-  kind: DraftErrorKind;
-}
+export type DraftError =
+  | { kind: 'SAFETY_BLOCKED' }
+  | { kind: 'API_ERROR'; status?: number }
+  | { kind: 'INVALID_OUTPUT' };
+export type DraftErrorKind = DraftError['kind'];
 
 export interface DraftGenerator {
   generate(material: DraftMaterial, variation: VariationSeed): Promise<Result<string, DraftError>>;

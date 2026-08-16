@@ -15,10 +15,7 @@ import {
 } from '../../src/onboarding/conversation.js';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessage, LineMessenger } from '../../src/line/client.js';
-import type {
-  ConnectablePool,
-  StoreIdentificationService,
-} from '../../src/onboarding/store-identification.js';
+import type { ConnectablePool, StoreIdentificationService } from '@fwlm/store-identification';
 import { createGbpFlowHandlers, type GbpFlowDeps } from '../../src/gbp/flows.js';
 import { decodeGbpPostback, encodeGbpPostback, isGbpPostbackData } from '../../src/gbp/postback.js';
 import type { GbpApiError, GbpReview } from '../../src/gbp/client.js';
@@ -176,8 +173,12 @@ function createHarness(options: HarnessOptions = {}): Harness {
   };
 
   const pool: ConnectablePool = {
+    // pg の query は多重定義のため、フェイクは戻り値を never へ落として構造的に適合させる
+    // （onboarding/conversation.test.ts の createFakePool と同一の規律）。
     connect: async () => ({
-      query: async () => ({ rows: [], rowCount: 0 }),
+      async query() {
+        return { rows: [], rowCount: 0 } as never;
+      },
       release: () => undefined,
     }),
   };

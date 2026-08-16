@@ -30,14 +30,16 @@ export default async function SurveyPage({
 
   if (data.kind === 'unavailable') {
     return (
-      <main>
-        <p>このアンケートは現在ご利用いただけません。</p>
+      <main className="mx-auto w-full max-w-xl px-5 py-10">
+        <p className="text-muted-foreground">このアンケートは現在ご利用いただけません。</p>
       </main>
     );
   }
 
   return (
-    <main>
+    <main className="mx-auto w-full max-w-xl px-5 py-8">
+      {/* 店名の見出し。どの店舗へのアンケートかを回答前に示す（従来は完了画面にしか出ていなかった）。 */}
+      <h1 className="mb-8 text-2xl font-bold tracking-tight">{data.store.name}</h1>
       <SurveyShell
         storeId={data.store.id}
         storeName={data.store.name}

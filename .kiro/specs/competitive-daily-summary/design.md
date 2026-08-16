@@ -344,7 +344,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Requirements | 4.1–4.4 |
 
 **Responsibilities & Constraints**
-- 認可: `liff.getIDToken()` → サーバーで `POST /oauth2/v2.1/verify` → `sub`（=userId）→ `owners.line_user_id` 突合 → 自店のみ返却。**getProfile の userId を認可に使わない**
+- 認可: `liff.getIDToken()` → サーバーで `POST /oauth2/v2.1/verify` → `sub`（=userId）→ `owners.line_user_id` 突合 → **その sub が所有する confirmed 店舗の集合（認可済み集合）のみ返却**。**getProfile の userId を認可に使わない**
 - 表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示
 - 書込 API を一切持たない（4.2 の構造的担保）
 - **設定値の注入経路（2種を混同しないこと）**: サーバー側の `LIFF_CHANNEL_ID`（`/api/detail` の IDトークン検証 client_id）は Cloud Run のランタイム env で注入する。一方 **クライアント側の `NEXT_PUBLIC_LIFF_ID`（`liff.init` の liffId）は Next.js が `next build` 時にクライアントバンドルへインライン化する値であり、ランタイム env では一切反映されない — 必ず Dockerfile の build-arg（`ARG NEXT_PUBLIC_LIFF_ID`）でビルド時に渡す**。terraform の `liff_id` 変数はランタイム env として設定しても LIFF 起動には効かず、イメージビルド時に同値を build-arg として渡して初めて機能する（2026-07-14 に本番で発覚・修正。tasks.md Implementation Notes 参照）。
@@ -352,10 +352,13 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
-| GET | /api/detail | Authorization: Bearer {LIFF ID token} | 自店＋競合の詳細 JSON（30日推移含む） | 401（検証失敗）, 404（店舗未特定・**または sub に紐づく confirmed 店舗が複数で一意に解決不能＝AMBIGUOUS_STORE**）, 500 |
+| GET | /api/detail | Authorization: Bearer {LIFF ID token}<br>`?storeId={storeId}`（任意・**認可済み集合内でのみ有効なヒント**） | 200: 詳細 JSON（30日推移含む）＋ `storeName`（表示中の店舗名）＋ `stores[]`（認可済み集合の `{storeId, name}` 一覧） | 401（検証失敗）, **409（認可済み集合が2件以上で表示対象を決められない＝`STORE_SELECTION_REQUIRED`。本文に `stores[]` を含む）**, 404（owner 不在・confirmed 店舗0件）, 500 |
 
-- LIFF URL 契約: Flex ボタン → `https://liff.line.me/{liffId}`（storeId をパスに含めない — 認可主体は ID トークンの sub であり、URL パラメータを信頼しない）
-- **既知の制約（MVP・task 5.1 実装時に発見）**: `four-tier-data-model` は オーナー:店舗 = 1:N を確定仕様とする。しかし本コンポーネントの認可は sub のみを信頼し LIFF URL に storeId を含めないため、1 オーナーが confirmed 店舗を複数持つ場合、`sub` だけでは「詳細を見る」がどの店舗を指すか一意に解決できない。安全側に倒し、複数該当時は店舗を推測せず 404（AMBIGUOUS_STORE）を返す（誤店舗の情報を見せるリスクを避ける）。MVP は個人店（1オーナー:1店舗）を主要ユーザー像と想定しこの制約を許容する。複数店舗オーナーへの対応（例: delivery-job が店舗ごとに署名付きトークンを LIFF URL へ付与する方式）は第2フェーズで再検討する。
+- LIFF URL 契約: Flex ボタン → `https://liff.line.me/{liffId}`（storeId をパスに含めない — 認可主体は ID トークンの sub であり、URL パラメータを信頼しない）。アプリ内遷移の `/store?storeId=` は**認可済み集合の内部での絞り込みヒント**であり、認可主体を変えない（下記「クライアント入力の不変条件」参照）
+- **クライアント入力の不変条件（Security-critical・Issue #61 で再定義）**: 認可主体（誰か）は ID トークンの `sub` のみが決める。クライアント由来の識別子は、`sub` から導いた**認可済み集合の内部での絞り込み**にのみ使用でき、集合の境界を広げる入力としては使えない。**集合外の値（他オーナーの実在 storeId・不正 UUID・空文字を含む）は無視し、未指定時と完全に同一の応答を返す**（404 等で区別しない ＝ 非オラクル）。この性質は「応答が `sub` のみの関数である」ことと同値であり、テストで deep-equal として直接証明する。
+  - 構造的担保: 集合の生成（`listOwnerConfirmedStores(pool, sub)`）と集合内の選択（`selectAuthorizedStore(stores, hint)`）を分離する。後者は `Queryable` を受け取らない純関数であり、**型シグネチャ上、入力配列の要素しか返せない**。ヒントが SQL に一切到達しないため、不正 UUID による pg `22P02`（→500）も構造的に起きない。
+- **多店舗オーナーの解決（Issue #61 で解消済み）**: `four-tier-data-model` は オーナー:店舗 = 1:N を確定仕様とする。`sub` だけでは「詳細を見る」がどの店舗を指すか一意に決まらないため、認可済み集合が2件以上のときはサーバーが**店舗を推測せず候補一覧（`stores[]`）を 409 で返し**、画面がリンクによる選択を提示する。候補の生成元は常にサーバー側の `sub` であり、クライアントが候補を持ち込むことはできない。
+  - 第2フェーズの拡張余地: 多店舗オーナーは「詳細を見る」から選択画面を1枚挟むため、要件 4 の「1タップ」が1回分後退する。delivery-job が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば1タップへ復帰できる（Open Questions 参照）。ただしトークンの無い入口（リッチメニュー・古い配信・再訪問）が残るため、選択画面は将来も必須である。
 
 ### TS / packages/db 拡張（配信時刻設定の契約）
 
@@ -444,7 +447,8 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - **LINE 500/タイムアウト**: 同一 Retry-Key で再送（バックオフ・上限あり）— 3.8, 3.9
 - **LINE 400（無効 userId）**: failed 記録・継続。**ブロック済みは 200 で不達**（検知は unfollow webhook＝境界外。設計上の既知制約として明記）
 - **LINE 429（月次クォータ超過）**: 残対象を quota_exceeded 記録し即終了（無駄な連打をしない）
-- **LIFF 検証失敗**: 401 を返し再ログイン誘導。URL パラメータ由来の店舗指定は受け付けない（IDOR 防止）
+- **LIFF 検証失敗**: 401 を返し再ログイン誘導。URL の `storeId` は**認可済み集合内のフィルタとしてのみ**解釈し、集合外の値は無視して未指定と同一の応答を返す（IDOR 防止・非オラクル。詳細は TS / store-detail の「クライアント入力の不変条件」）
+- **表示対象が一意に決まらない**: 認可済み集合が2件以上かつヒント未指定/集合外のとき 409 `STORE_SELECTION_REQUIRED` と候補一覧を返し、画面が選択を提示する。ヒントを無視した事実は**識別子を含まない**構造化ログ1行で残す（silent drop を作らない）
 
 ### Monitoring
 - 両ジョブとも終了時に固定フィールドの構造化ログ1行（stores_total / fetch_ok / fetch_failed / summaries_written / delivered / failed / skipped / purged）を出力 — 5.2
@@ -463,7 +467,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 1. migration 0004 適用＋`db/test/assertions` 追加分（一意制約・CHECK・delivery_hour 範囲）＋ `make db-verify-docs` 通過 — 2.6, 3.2
 2. Go バッチをフェイク Places サーバー（httptest）＋実 postgres で実行: 抽出→snapshots→summaries→パージ→再実行の冪等性 — 2.1–2.7
 3. delivery-job を LINE モックで実行: 正常配信・409・500再送・quota・summary 欠損 skip の各記録 — 3.8, 3.9
-4. store-detail の /api/detail: verify モックで sub→自店解決・他店アクセス不可・店舗未特定 404 — 4.1, 4.2
+4. store-detail の /api/detail: verify モックで sub→自店解決・他店アクセス不可・店舗未特定 404・**多店舗の 409 候補一覧・集合外 storeId が未指定時と deep-equal（非オラクル）** — 4.1, 4.2, 4.5, 4.6
 
 ### E2E（スモーク・実 GCP 検証時）
 1. シード店舗1件で daily-batch 実行 → daily_summaries 生成 → delivery-job 実行 → summary_deliveries=delivered と実 LINE 受信を確認（Issue #4 完了条件）
@@ -472,7 +476,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 ## Security Considerations
 - 客の個人情報は一切扱わない（Google クチコミの公開情報のみ。投稿者名は帰属表示義務のため表示するが、30日で消滅する new_reviews 内にのみ保持）
 - API キー・チャネルトークンは Secret Manager 経由（env 直書き禁止・既存パターン準拠）
-- LIFF 認可は ID トークンのサーバーサイド検証のみを信頼。storeId を URL・リクエストボディから受けない
+- LIFF 認可は ID トークンのサーバーサイド検証のみを信頼する。**認可主体（誰か）は検証済み `sub` のみが決め、クライアント由来の識別子は `sub` から導いた認可済み集合の内部での絞り込みにしか使えない**（集合の境界を広げる入力としては使えない）。集合外の値は無視し、未指定時と完全に同一の応答を返す（非オラクル）。集合の生成と集合内の選択を別関数に分離し、後者を `Queryable` を受け取らない純関数とすることで構造的に担保する（Issue #61 で 1オーナー:N店舗 対応のため再定義。旧文言「storeId を URL・リクエストボディから受けない」の意図を保存しつつ 1:N へ拡張したもの）
 - store-detail・delivery-job の SA は最小権限（DB read + 必要 secret accessor のみ。delivery-job のみ LINE token accessor）
 - **既知の乖離（task 6.1 で発見・非ブロッキング follow-up）**: `line-channel-access-token` の accessor は本節の指示通り delivery-job SA へ付与済みだが、現行実装（Stateless token 発行方式・line.ts）はこの secret を env としては消費しない未使用 grant。害はないが実装と本節の記述に乖離がある（対応は任意・infra/modules/delivery-job/variables.tf にも同旨のコメントあり）。
 
@@ -490,4 +494,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - Places Service Specific Terms の「30日キャッシュ」条文の原文確認（実装前 Follow-up。確認までは30日保持を上限として実装）
 - LIFF 用 LINE Login チャネルの作成タイミング（**Messaging API チャネルと同一プロバイダー必須**）— #6 と共同の runbook 手順として調整
 - 配信時刻設定 UI の webhook 配線は #6 完了後の統合タスク（本 spec は契約と関数のみ提供）
-- **複数店舗オーナーの LIFF 詳細画面が一意に解決できない**（task 5.1 実装時に発見。詳細は Components and Interfaces / TS store-detail の「既知の制約」参照）。MVP は個人店（1オーナー:1店舗）想定で許容するが、`four-tier-data-model` が確定する 1オーナー:N店舗 の仕様と本 spec の LIFF URL 契約（storeId 非包含）が根本的に緊張関係にある。複数店舗運用が実際に始まる前に、per-store 署名付きトークンの LIFF URL 付与などの対応を第2フェーズで設計すること。
+- ~~**複数店舗オーナーの LIFF 詳細画面が一意に解決できない**~~ → **解決済み（Issue #61・task 5.4）**。サーバーが認可済み集合を候補一覧として 409 で返し、画面がリンク選択を提示する方式で解消した。詳細は Components and Interfaces / TS store-detail の「クライアント入力の不変条件」「多店舗オーナーの解決」を参照。残る派生課題は以下2件。
+- **多店舗オーナーの「1タップ」が1回分後退している**（要件 4 Objective の但し書き参照）。delivery-job が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば復帰できるが、HMAC 鍵を delivery-job と store-detail の両方へ配布する必要があり（Secret Manager + terraform 2箇所）、かつトークンの無い入口が残るため選択画面は将来も必須。第2フェーズで費用対効果を再評価すること。
+- **Flex カードに店舗名が無く、多店舗オーナーは同時刻に届く N 通を見た目で区別できない**（`delivery-job/src/flex.ts` の `buildDailySummaryFlex` の入力 `DailySummaryRow` に店舗名が無い）。Issue #61 の選択画面では店舗名が出るため実用性は回復しているが、配信カード側は未対応。**Issue #73** として起票済み。
+- **store-detail の型レベルセキュリティガードが実際には検査されていない**（`tsconfig.json` の `exclude` に `"test"` があるため、`test/liff-auth.test.ts` の型代入は typecheck でも `next build` でも走らない）。実効ガードは arity チェックと振る舞いテスト。**Issue #72** として起票済み。

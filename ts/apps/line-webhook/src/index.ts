@@ -12,9 +12,9 @@ import {
 import { createApp, type AppDeps } from './app.js';
 import { loadConfig } from './config.js';
 import { createSignatureVerifier } from './webhook/signature.js';
-import { createPlacesSearchAdapter } from './places/search.js';
+import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
-import { createStoreIdentificationService } from './onboarding/store-identification.js';
+import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
 import { createGbpClient } from './gbp/client.js';
 import { createGoogleRefreshGrantClient, createTokenStore } from './gbp/token-store.js';

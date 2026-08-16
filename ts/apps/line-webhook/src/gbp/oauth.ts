@@ -36,7 +36,7 @@ import {
   type UpsertGbpSessionInput,
 } from '@fwlm/db';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { ConnectablePool, TransactionClient } from '../onboarding/store-identification.js';
+import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type { StoreKey, TokenStoreService } from './token-store.js';
 import { findLocationForPlace, type LocationLookupClient } from './locations.js';
 

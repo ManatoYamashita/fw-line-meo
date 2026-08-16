@@ -3,6 +3,19 @@ import { Pool } from 'pg';
 // アクセサが受け取る最小の問い合わせ面（Pool / PoolClient / テスト用モックが適合）。
 export type Queryable = Pick<Pool, 'query'>;
 
+// トランザクションクライアント（query に加え release を持つ）。BEGIN/COMMIT を張る保護付き操作が使う。
+// pg の PoolClient が構造的に適合する（release の任意引数は () => void へ代入可能）。
+export interface TransactionClient extends Queryable {
+  release(): void;
+}
+
+// connect() でトランザクションクライアントを得られるプール面（design: Component Contracts / DAL）。
+// pg の Pool が構造的に適合し、実配線では getPool() の戻り値をそのまま渡せる
+// （@fwlm/store-identification の ConnectablePool と同型のパターン）。
+export interface TransactionCapable {
+  connect(): Promise<TransactionClient>;
+}
+
 // 接続 2 系統（design: Components/pool）:
 //   - test/local: DATABASE_URL（標準 pg・native postgres の unix socket も可）
 //   - 本番:      @google-cloud/cloud-sql-connector（IAM 認証・パスワードレス）

@@ -6,7 +6,7 @@
 
 **Users**: 来店客（回答・投稿）、代理店・運営（QR 取得・印刷・設置）、オーナー（間接受益者・操作なし）。
 
-**Impact**: 実装コード未着手のリポジトリに**初のアプリ層（TS モノレポ）**を確立する。既存の four-tier-data-model スキーマ・gcp-infra-foundation 基盤の上に載り、**スキーマ変更なし**。Cloud Run の `survey-web`・`dashboard-api`（現在 hello イメージ）を実アプリに置換する。
+**Impact**: 実装コード未着手のリポジトリに**初のアプリ層**（TS モノレポ）を確立する。既存の four-tier-data-model スキーマ・gcp-infra-foundation 基盤の上に載り、**スキーマ変更なし**。Cloud Run の `survey-web`・`dashboard-api`（現在 hello イメージ）を実アプリに置換する。
 
 ### Goals
 - QR → 回答 → 下書き生成 → コピー → Google 投稿画面遷移の一連動作（Issue #3 完了条件）
@@ -304,7 +304,10 @@ interface DraftMaterial {
   aspectLabels: string[];   // 選択済み観点の label（seed 由来）
   comment?: string;         // ≤200 字・デリミタ内でのみ使用
 }
-type DraftError = { kind: 'SAFETY_BLOCKED' | 'API_ERROR' | 'INVALID_OUTPUT' };
+type DraftError =
+  | { kind: 'SAFETY_BLOCKED' }
+  | { kind: 'API_ERROR'; status?: number }
+  | { kind: 'INVALID_OUTPUT' };
 interface DraftGenerator {
   generate(material: DraftMaterial, variation: VariationSeed): Promise<Result<string, DraftError>>;
 }
@@ -409,7 +412,7 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 - **Business Logic**: レビューゲーティングに相当する分岐は**存在しないことが正**（テストで star による導線分岐がないことを検証）
 
 ### Monitoring
-- 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。**自由記述・下書き本文はログ出力禁止**（5.3）
+- 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
 - 既存 guardrails（予算・アラート）は変更なし。Gemini コストは AI Studio のレート/使用量ページで運用確認（runbook 記載）
 
 ## Testing Strategy

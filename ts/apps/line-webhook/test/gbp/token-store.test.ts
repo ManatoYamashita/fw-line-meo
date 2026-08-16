@@ -119,10 +119,13 @@ describe('encryptToken / decryptToken', () => {
     const ref = encryptToken(REFRESH_TOKEN, KEY);
     const parts = ref.split(':');
     expect(parts).toHaveLength(4);
-    expect(parts[0]).toBe('v1');
-    expect(Buffer.from(parts[1], 'base64').length).toBe(12);
-    expect(Buffer.from(parts[2], 'base64').length).toBe(16);
-    expect(Buffer.from(parts[3], 'base64').length).toBeGreaterThan(0);
+    // 添字アクセスは string | undefined（noUncheckedIndexedAccess）。要素数は直前で表明済みなので
+    // 非 null 表明で受ける（?? '' で握ると欠損が空文字として通り、長さ検証が空振りする）。
+    const [version, iv, tag, ciphertext] = parts as [string, string, string, string];
+    expect(version).toBe('v1');
+    expect(Buffer.from(iv, 'base64').length).toBe(12);
+    expect(Buffer.from(tag, 'base64').length).toBe(16);
+    expect(Buffer.from(ciphertext, 'base64').length).toBeGreaterThan(0);
     // 暗号化ペイロードに平文が現れない
     expect(ref).not.toContain(REFRESH_TOKEN);
   });
@@ -148,7 +151,7 @@ describe('encryptToken / decryptToken', () => {
 
   it('authTag 検証: 暗号文・タグの改竄や鍵違いは null（復号失敗）', () => {
     const ref = encryptToken(REFRESH_TOKEN, KEY);
-    const [, iv, tag, ct] = ref.split(':');
+    const [, iv, tag, ct] = ref.split(':') as [string, string, string, string];
     const flipped = Buffer.from(ct, 'base64');
     flipped[0] = flipped[0]! ^ 0xff;
     expect(decryptToken(`v1:${iv}:${tag}:${flipped.toString('base64')}`, KEY)).toBeNull();

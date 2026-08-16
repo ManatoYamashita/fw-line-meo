@@ -1,4 +1,5 @@
 import type { StoreCandidate } from '@fwlm/db';
+import { lineColors } from '@fwlm/design-tokens';
 import { encodePostback } from '../onboarding/stages.js';
 import type { LineMessage } from './client.js';
 
@@ -114,7 +115,7 @@ function buildCandidateBubble(candidate: StoreCandidate, index: number): FlexBub
       spacing: 'sm',
       contents: [
         { type: 'text', text: candidate.name, weight: 'bold', size: 'md', wrap: true },
-        { type: 'text', text: candidate.address, size: 'sm', color: '#888888', wrap: true },
+        { type: 'text', text: candidate.address, size: 'sm', color: lineColors.caption, wrap: true },
       ],
     },
     footer: {
@@ -228,7 +229,7 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
       contents: [
         { type: 'text', text: 'この店舗でよろしいですか？', weight: 'bold', size: 'md', wrap: true },
         { type: 'text', text: candidate.name, size: 'md', wrap: true },
-        { type: 'text', text: candidate.address, size: 'sm', color: '#888888', wrap: true },
+        { type: 'text', text: candidate.address, size: 'sm', color: lineColors.caption, wrap: true },
       ],
     },
     footer: {
@@ -278,7 +279,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
     type: 'bubble',
     size: 'kilo',
     styles: {
-      body: { backgroundColor: '#F0FBF4' },
+      body: { backgroundColor: lineColors.successBackground },
     },
     body: {
       type: 'box',
@@ -292,14 +293,14 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           weight: 'bold',
           size: 'lg',
           align: 'center',
-          color: '#1DB446',
+          color: lineColors.headline,
           wrap: true,
         },
         {
           type: 'text',
           text: 'お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。',
           size: 'sm',
-          color: '#333333',
+          color: lineColors.body,
           align: 'center',
           wrap: true,
           margin: 'md',
@@ -308,7 +309,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           type: 'text',
           text: '毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。',
           size: 'xs',
-          color: '#888888',
+          color: lineColors.caption,
           align: 'center',
           wrap: true,
         },
@@ -322,7 +323,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
         {
           type: 'button',
           style: 'primary',
-          color: '#1DB446',
+          color: lineColors.action,
           action: {
             type: 'uri',
             label: '店舗の詳細を見る',
@@ -380,7 +381,7 @@ export function buildPlaceAlreadyRegisteredMessage(): LineMessage {
             'この店舗はすでに別のオーナー様の店舗として登録されているため、確定できませんでした。' +
             '心当たりがない場合は、お手数ですが運営までお問い合わせください。',
           size: 'sm',
-          color: '#666666',
+          color: lineColors.description,
           wrap: true,
         },
       ],

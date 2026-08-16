@@ -7,20 +7,24 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint app test",
+    "lint": "eslint app lib test next.config.ts postcss.config.mjs vitest.config.ts",
+    "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@fwlm/ui": "workspace:*",
     "@line/liff": "^2.29.1",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "jsdom": "^25"
+    "jsdom": "^25",
+    "tailwindcss": "^4"
   }
 }

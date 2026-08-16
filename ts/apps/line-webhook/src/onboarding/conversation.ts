@@ -5,7 +5,7 @@ import type {
   ConnectablePool,
   StoreIdentificationService,
   TransactionClient,
-} from './store-identification.js';
+} from '@fwlm/store-identification';
 import { decodePostback } from './stages.js';
 import type { GbpFlowHandlers } from '../gbp/flows.js';
 import { isGbpPostbackData } from '../gbp/postback.js';

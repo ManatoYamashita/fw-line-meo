@@ -14,9 +14,9 @@ import type { StoreCandidate } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
 import { createSignatureVerifier } from '../src/webhook/signature.js';
 import { createConversationHandlers } from '../src/onboarding/conversation.js';
-import { createStoreIdentificationService } from '../src/onboarding/store-identification.js';
+import { createStoreIdentificationService } from '@fwlm/store-identification';
 import type { LineMessenger } from '../src/line/client.js';
-import type { PlacesSearchAdapter, SearchOutcome } from '../src/places/search.js';
+import type { PlacesSearchAdapter, SearchOutcome } from '@fwlm/store-identification';
 import {
   buildGreetingMessage,
   buildStoreNameInputGuidanceMessage,
@@ -45,6 +45,7 @@ const AG = 'f2222222-2222-2222-2222-222222222221';
 
 const CHANNEL_SECRET = 'f2-test-channel-secret';
 const RICHMENU_COMPLETED_ID = 'f2-richmenu-completed';
+const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 const INVITE_CODE = 'F2ACTIVE01';
 
 function sign(body: string, secret: string): string {
@@ -167,6 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook 重複防止と継続�
       messenger: deps.messenger,
       now: () => new Date(),
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
     });
 
     const appDeps: AppDeps = {

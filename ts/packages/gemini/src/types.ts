@@ -24,8 +24,13 @@ export interface SafetySetting {
   threshold: string;
 }
 
-/** 生成失敗の分類（安全性ブロック / API 障害 / 出力検証不合格）。 */
-export type GenerationErrorKind = 'SAFETY_BLOCKED' | 'API_ERROR' | 'INVALID_OUTPUT';
-export interface GenerationError {
-  kind: GenerationErrorKind;
-}
+/**
+ * 生成失敗の分類（安全性ブロック / API 障害 / 出力検証不合格）。
+ * API_ERROR のみ HTTP status を任意で伴う。呼出元は status で「再試行しても無駄な 4xx」と
+ * 「上流の一時障害」を区別してログ・監視へ出せる（未取得なら undefined のまま省略する）。
+ */
+export type GenerationError =
+  | { kind: 'SAFETY_BLOCKED' }
+  | { kind: 'API_ERROR'; status?: number }
+  | { kind: 'INVALID_OUTPUT' };
+export type GenerationErrorKind = GenerationError['kind'];

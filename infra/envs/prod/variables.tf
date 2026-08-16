@@ -58,6 +58,17 @@ variable "survey_base_url" {
   default     = ""
 }
 
+# --- agency-dashboard（代理店ダッシュボード）が追加する env（gcp-infra への additive 拡張） ---
+
+variable "dashboard_web_origin" {
+  description = <<-EOT
+    dashboard-web の Cloud Run オリジン（CORS 許可元・dashboard-api の DASHBOARD_WEB_ORIGIN 用）。
+    dashboard-web の初回デプロイ後にその Cloud Run URL（またはカスタムドメイン）を設定する。
+  EOT
+  type        = string
+  default     = ""
+}
+
 # --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---
 
 variable "line_channel_id" {

@@ -24,9 +24,51 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v5
-      - name: NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）
+      - name: 'NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）'
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
+      - name: 'デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）'
+        # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
+        # theme.css がトークンと同値であることを照合する（read-only grep 検証）。
+        run: bash scripts/check-design-tokens.sh
+      - name: 'run-services デプロイカバレッジガード（Issue #33）'
+        # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
+        # 放置される事故の再発防止（同じく read-only grep 検証）。
+        run: bash scripts/check-deploy-image-coverage.sh
+      - name: 'シークレット宣言カバレッジガード（Issue #63）'
+        # Secret Manager の値（version）は tf が作らず、人間が out-of-band 投入する。枠だけ作って
+        # 実値を入れ忘れた gemini-api-key は go-live 以降 4 週間 400 を返し続け、機能A は一度も
+        # 成功していなかった。tf 正典 / infra/secrets-provisioned.tsv / README の投入手順 /
+        # 消費側配線を両方向で照合する（同じく read-only grep 検証・gcloud には問い合わせない）。
+        run: bash scripts/check-secret-declaration-coverage.sh
+      - name: 'main を取得（連番一意性ガードが合成集合で判定するため）'
+        # checkout の既定 fetch-depth は 1 で origin/main が無い。ガードは ls-tree しか
+        # 使わないので depth 1 で足りる（履歴は要らない）。
+        run: git fetch --no-tags --depth=1 origin main
+      - name: '連番一意性ガード（Issue #128）'
+        # 番号が重複しても**ファイル名が違えば git は衝突として報告しない**。main 単体でも
+        # ブランチ単体でも重複は見えず、並べたときだけ現れる（PR #121 で実発生）。適用は
+        # shell glob の辞書順なので「たまたま」正しく流れ、db-migrate も db-test も緑になる。
+        # HEAD と origin/main の合成集合で判定する（同じく read-only・git 以外は叩かない）。
+        run: bash scripts/check-db-ordinals.sh
+      - name: 'typecheck カバレッジガード（Issue #51）'
+        # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
+        # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
+        run: bash scripts/check-typecheck-coverage.sh
+      - name: 'ワークフロー表示名ガード（Issue #105）'
+        # 引用符なしの name: に ' #' が入ると YAML がそこをコメントとして捨て、Actions の
+        # 表示名が切れる（本リポジトリで 3 度再発）。失敗ステップを名前で特定できなくなる。
+        run: bash scripts/check-workflow-step-names.sh
+      - name: 'grep 終了コードガード（Issue #120・steering 規律 2 後半の機械強制）'
+        # grep の失敗を後置 true で潰すと、無一致（exit 1）と評価不能（exit 2 以上）が
+        # 同じ結果に化ける。実測では違反を置いたままガードが緑を返し、件数表示まで
+        # 健全な実行と一致した（read-only grep 検証・node 不要）。
+        run: bash scripts/check-grep-exit-codes.sh
+      - name: 'シェルパイプ consumer ガード（Issue #117・steering 規律 2 の機械強制）'
+        # 入力を読み切らない consumer をパイプの下流へ置くと、上流が EPIPE で 141 になり
+        # pipefail がそれを伝播する。入力サイズ依存なので閾値の下では何度走らせても緑になり、
+        # コードを読んでも出ない。構文そのものを禁じる（read-only grep 検証・node 不要）。
+        run: bash scripts/check-shell-pipe-consumers.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
@@ -35,9 +77,60 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
+      # 日本語 Markdown で強調が閉じない形を機械検出する（Issue #89）。
+      # `**強調（かっこ）**である` は GFM の right-flanking 規則を満たさず、生の ** が表示される。
+      # 壊れても CI は落ちず見た目だけが黙って壊れるため、#55 と同型の「緑のまま素通り」になる。
+      # 上の grep ガード群（checkout 直後）へ入れられないのは、flanking 判定が Unicode の
+      # 約物分類を要するため node へ委譲しているからである。npm パッケージには依存しないので
+      # setup-node の直後・install の前に置ける。
+      - name: 'Markdown 強調ガード（Issue #89）'
+        run: bash scripts/check-markdown-emphasis.sh
+      # ガード自己テストの Tier A（Issue #90）。実 node_modules を使わず、npx スタブで
+      # eslint / tsc の応答だけを模擬して走る。走査範囲・担当分界・fail-closed 分岐の到達性を
+      # 検証する層であり、ガードが「壊れたときに壊れたと言える」ことをここで確かめる。
+      # **install の前に置くこと自体が、この層が node_modules 非依存であることの機械証明**である。
+      # 後ろへ動かすと依存が紛れ込んでも気づけない（Tier B との分界が宣言だけになる）。
+      # setup-node の後に置くのは node 単体を要するため（node_modules は要らない）。
+      - name: 'ガード自己テスト Tier A（Issue #90・install 前・node_modules 非依存）'
+        run: bash scripts/test/run.sh --tier=a --require-full
       - run: pnpm -C ts install --frozen-lockfile
       - run: pnpm -C ts run lint
       - run: pnpm -C ts run build
+      # typecheck は build の後に置く必要がある: @fwlm/db 等の workspace 依存は
+      # dist/ から型を export しており（package.json の types が dist を指す）、
+      # クリーン checkout では build 前に typecheck を走らせると TS2307 で解決不能になる
+      # （run 30473500416 で実証済み。アプリ側は next build が型検査済みのため損失はない）。
+      - run: pnpm -C ts run typecheck
+      # コードが型検査と lint の走査範囲から抜け落ちていないかを機械検証する（Issue #70 / #78 / #81 / #83）。
+      # 守備範囲は 4 つ:
+      #   - テストコードのディレクトリ（test/ e2e/ 等）が双方に掛かっていること（#70）
+      #   - workspace 直下と ts/ 直下の設定ファイル（next/vitest/playwright/postcss/eslint）が
+      #     双方に掛かっていること（#78）。設定ファイルは「未知のキーが黙って無視される」形状の
+      #     ため、検査の外にある限り "テストが走らなくなる/別のものを測る" 形で静かに失敗する。
+      #   - workspace のサブディレクトリの JS 系ファイル（perf/*.mjs・e2e/*.mjs）が双方に
+      #     掛かっていること（#83）。下の「JS バンドル予算」ステップが実行する
+      #     perf/bundle-budget.mjs がこれに当たる。
+      #     **実行されることは検査の代わりにならない。** 壊れても落ちず、別のものを測って緑になる。
+      #   - ts/<非 workspace ディレクトリ>/**（ts/scripts/ 等）の JS 系と TS 系（#81）。
+      #     pnpm-workspace.yaml のどの glob にも入らないため pnpm -r lint / pnpm -r typecheck の
+      #     外にあり、置いた瞬間から lint も型検査も届かない（実測で三方とも exit 0 を確認済み）。
+      #     workspace として走査されなかった ts/apps/<package.json 無し>/** もここが担当する。
+      # tsc --listFiles と eslint --format json で実効範囲を問い合わせるため、install と
+      # build の後に置く（設定ファイルの文字列を読むだけでは実効範囲を判定できない）。
+      # name は引用する。YAML の plain scalar は " #" で終わるため、引用しないと表示名が
+      # 「コードカバレッジガード（Issue」で切れる（実測）。他のガードステップも同じ形だが、
+      # 本 PR の対象外なので触っていない。
+      - name: 'コードカバレッジガード（Issue #70 / #78 / #81 / #83）'
+        run: bash scripts/check-test-code-coverage.sh
+      # ガード自己テストの Tier B（Issue #90）。実 node_modules を symlink で借用し、本物の
+      # tsc / eslint へ問い合わせる。tsconfig の include の実効範囲、flat config の ignores の
+      # 合成結果、@ts-check / @ts-nocheck、#81 の偽緑 — スタブで模擬すると「模擬した通りに
+      # 動いた」だけの緑になる層をここで検証する。よって install の後に置く必要がある。
+      # 合成ツリーへガードを複製して走らせるため、リポジトリの実体には書き込まない。
+      # --require-full は skip を失敗として扱う（CI で黙って 0 件成功にしないため）。
+      # name は引用する（上のカバレッジガードと同じ理由。plain scalar は " #" 以降が切れる）。
+      - name: 'ガード自己テスト Tier B（Issue #90・実 tsc / eslint）'
+        run: bash scripts/test/run.sh --tier=b --require-full
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
       - name: unit + integration tests (DB 込み)
@@ -128,3 +221,99 @@ jobs:
         # （生成は /api/responses のクライアント操作のみ）ため Gemini モックは不要。
         # npx --yes は実行時に lhci をレジストリ取得するため、ここに --import mock を被せると npm が壊れる。
         run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
+
+  docker-build:
+    # Issue #33/#35 再発防止: Dockerfile の腐敗（pnpm workspace 追従漏れ等）が deploy-prod で
+    # 初めて発覚する穴を塞ぎ、PR 段階で 7 イメージの実ビルドを検証する。
+    # --build-only は push せず GCP 認証も不要（NEXT_PUBLIC_* 未設定は warning 続行）。
+    # main push では deploy-prod 自身が実ビルドするため PR イベント時のみ実行する
+    # （skipped ジョブは workflow_run の conclusion=success を妨げない＝デプロイを遅延させない）。
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1行定義を維持すること（scripts/check-deploy-image-coverage.sh が IMAGE_NAMES との
+        # ドリフトを grep で機械検証する）。
+        image: [daily-batch, summary-delivery, store-detail, dashboard-api, dashboard-web, survey-web, line-webhook]
+    steps:
+      - uses: actions/checkout@v5
+      # pnpm install は行わない（クリーン checkout のままビルドコンテキストへ渡す。
+      # deploy-prod の push-images.sh 実行時と同一条件）。
+      - run: scripts/push-images.sh --build-only --image ${{ matrix.image }}
+
+  notify:
+    # Issue #118: main の ts-ci が赤になっても誰にも通知されなかった。deploy-prod には失敗通知
+    # ジョブがあるが、main の ts-ci が赤いときは deploy ジョブ自体が skip されるため発火しない
+    # （skip を失敗として扱わないのは正しい判断である）。結果として「main が赤い」という最も
+    # 直接的で最も早い信号だけが通知経路を持たず、2026-08-09 の赤化は症状側の prod-image-drift
+    # （6 時間ごと）が拾うまで気づかれず、本番が約 2 日 16 時間停滞した。ここで原因側を塞ぐ。
+    #
+    # **docker-build を needs に入れない。** PR イベント限定のジョブで main push では常に
+    # skipped になる。入れると判定が none（通知しない）へ倒れ、通知が永久に飛ばなくなる。
+    # needs と下の --job 引数の食い違いは scripts/test/cases/73-ts-ci-notify.sh が機械照合する。
+    needs: [lint-build-test, e2e, lighthouse]
+    # main への push だけを見る。PR のレビュー中の赤で追跡 Issue を立てない。
+    # always() が無いと needs の失敗でこのジョブごと skip され、赤のときに限って黙る。
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # ジョブ単位の permissions はワークフロー単位を置き換えるため、他のジョブへ issues: write を
+    # 持たせずに済む（最小権限）。
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # name は引用する。YAML の plain scalar は " #" 以降をコメントとして捨てるため、
+      # 引用しないと表示名が「main の ts-ci 失敗を追跡 Issue へ通知（Issue」で切れる
+      # （scripts/check-workflow-step-names.sh が機械強制する）。
+      - name: 'main の ts-ci 失敗を追跡 Issue へ通知（Issue #118）'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # needs.*.result は run へ直接展開せず env 経由で渡す（deploy.yml の notify と同じ）。
+          R_LINT_BUILD_TEST: ${{ needs.lint-build-test.result }}
+          R_E2E: ${{ needs.e2e.result }}
+          R_LIGHTHOUSE: ${{ needs.lighthouse.result }}
+        run: |
+          set -euo pipefail
+          # 引数列は 1 度だけ組んで判定と本文の両方で使い回す。2 箇所へ書くと片方だけが腐り、
+          # 判定は red なのに本文は緑という組み合わせが成立する（スクリプト側でも照合するが、
+          # そもそも 2 度書かないのが先である）。
+          set -- \
+            --job "lint-build-test=${R_LINT_BUILD_TEST}" \
+            --job "e2e=${R_E2E}" \
+            --job "lighthouse=${R_LIGHTHOUSE}"
+
+          # 判定も本文の組み立ても scripts/ts-ci-notify.sh が持つ（Issue #109 の決定）。
+          # yml の run ブロックへ書くと、検証の器が yml からの sed 抽出へ逆戻りし、
+          # 孤児ケースとして ts-ci を止める。**この run ブロックへ組み立てを戻さないこと。**
+          state="$(bash scripts/ts-ci-notify.sh --print-state "$@")"
+
+          # cancelled / skipped が混じり failure が無い状態。赤へ倒すと偽の障害通知が飛び、
+          # 緑へ倒すと赤いままの障害を復旧したと偽る。どちらでもないので通知しない。
+          if [ "$state" = 'none' ]; then
+            echo "OK: ジョブ結果が success で揃っておらず失敗も無いため通知しません。"
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/issue-body.md"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/ts-ci-notify.sh \
+            --state "$state" \
+            --run-url "$run_url" \
+            --commit "$GITHUB_SHA" \
+            "$@" > "$body"
+
+          # 署名は commit SHA。同じコミットへの再実行ではコメントを積み上げず、新しいコミットで
+          # 赤が続いたときだけ積み上がる（追跡 Issue は 1 本のまま維持される）。
+          # ラベルは report-ci-issue.sh が冪等に作成するので事前作成は不要。
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label ts-ci-main-failure \
+            --title "chore(ci): main の ts-ci が失敗しています（自動検出）" \
+            --body-file "$body" \
+            --signature "commit-${GITHUB_SHA}"

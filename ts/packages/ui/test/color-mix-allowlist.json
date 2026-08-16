@@ -1,0 +1,13 @@
+{
+  "note": "部品が使う color-mix() の許可リスト。ui の contrast-usage.test.ts（静的な数値検証）と survey-web の e2e/ui-foundation.spec.ts（実ブラウザでの実測）が同じ 1 つの値を読むため、TS ではなく JSON で置いている。measuredHex は実ブラウザで測った合成後の実効色であり、推測値を書いてはならない（誰も検証していない自由記述を許すと、このガード自体が空振りになる）。E2E が実測値との一致を検証するので、トークンや式を変えれば必ず赤化する。",
+  "entries": [
+    {
+      "file": "button.tsx",
+      "expression": "color-mix(in_oklab,var(--secondary),var(--foreground)_5%)",
+      "measuredHex": "#E6F0E9",
+      "foreground": "secondary-foreground",
+      "kind": "text",
+      "reason": "variant=secondary の hover。--secondary(#F0FBF4) に --foreground(#333333) を 5% 混色して面を暗くする。文字は --secondary-foreground(#333333) のままで、合成方向が「暗くする」ため hover していない状態（11.92:1）より悪化しない。混色空間が oklch だと無彩色である --foreground の色相が powerless となり結果の hue が none（描画時 0 = 赤）になるため、実描画が赤寄り #F5E9EC になっていた。色相成分を持たない oklab で混ぜることで意図どおりの #E6F0E9 になる。この値は e2e/ui-foundation.spec.ts が実ブラウザで実測して一致を検証する。"
+    }
+  ]
+}

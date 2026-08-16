@@ -117,8 +117,8 @@
 - [x] 5.2 詳細データの読取 API を実装する
   - 認可ライブラリを組み込んだ読取専用 API として、当日サマリー・自店/競合の指標・直近 30 日の推移を返し、競合 0 店では自店のみ返す
   - 無効トークン→401・店舗未特定→404 のルート挙動を含めて実装する（ルートの所有は本タスク）
-  - **task 5.1 で発見**: `resolveOwnerStore`（liff-auth）は confirmed 店舗が複数（1オーナー:N店舗）の場合 `AMBIGUOUS_STORE` を返す。design.md の API Contract 更新に従い、これも 404 として扱う（店舗未特定と同じ扱い・詳細は design.md「既知の制約」参照。誤った店舗の情報を返さないことを優先する）
-  - 観察可能な完了: テスト DB で 30 日窓・競合なし分岐・401/404（店舗未特定・AMBIGUOUS_STORE 双方）のレスポンスが検証される
+  - ~~**task 5.1 で発見**: `resolveOwnerStore`（liff-auth）は confirmed 店舗が複数（1オーナー:N店舗）の場合 `AMBIGUOUS_STORE` を返す。これも 404 として扱う~~ → **Issue #61（task 5.4）で解消**。多店舗は 404 ではなく 409 で候補一覧を返す方式に変更した。`AMBIGUOUS_STORE` は廃止
+  - 観察可能な完了: テスト DB で 30 日窓・競合なし分岐・401/404（店舗未特定）のレスポンスが検証される
   - _Requirements: 4.1, 4.2, 4.3_
   - _Boundary: store-detail/data_
   - _Depends: 5.1_
@@ -128,6 +128,15 @@
   - 観察可能な完了: モックデータでの画面表示が確認でき、書込系のフォーム・API 呼出が存在しない
   - _Depends: 5.1, 5.2_
   - _Requirements: 4.1, 4.2, 4.4_
+
+- [x] 5.4 多店舗オーナーの店舗選択を実装する（Issue #61）
+  - 自店解決を「認可済み集合の生成（`listOwnerConfirmedStores(pool, sub)`）」と「集合内の選択（`selectAuthorizedStore(stores, hint)`・`Queryable` を受け取らない純関数）」に分離し、`AMBIGUOUS_STORE` を廃止する
+  - `/api/detail` は集合が2件以上でヒント未解決なら 409 `STORE_SELECTION_REQUIRED` と候補一覧を返し、集合内ヒントならその店舗の詳細を返す。**集合外のヒント（他オーナーの実在 storeId・不正 UUID・空文字）は無視し未指定時と完全同一の応答を返す**（非オラクル）
+  - 画面は候補をリンクで提示し（`<button>` を導入せず 4.2 の構造的 no-write 保証を維持）、表示中の店舗名を見出しに出し、複数店舗時は切替リンクを出す
+  - 観察可能な完了: テスト DB で 409＋候補一覧、集合内ヒントでの 200、**集合外ヒントが未指定時の応答と deep-equal**、不正 UUID が 500 にならないこと、他オーナー店舗が本文に現れないことが検証される。純関数側は DB 不要テストで「戻り値が必ず入力配列の要素である」ことが検証される
+  - _Requirements: 4.5, 4.6, 4.7_
+  - _Boundary: store-detail/liff-auth, store-detail/route, store-detail/ui_
+  - _Depends: 5.1, 5.2, 5.3_
 
 - [ ] 6. Integration: インフラ配線と実体化
 - [x] 6.1 配信ジョブのインフラモジュールを新設する
@@ -183,6 +192,15 @@
 - task 3.6 の初回レビューは REJECTED（テストが旧stub文字列の不在のみを確認しfalse green リスクあり）。cloudsqlconn由来の型エラー（errtype.RefreshError等）をerrors.Asで積極確認するよう修復し2回目レビューでAPPROVED。実装（db.go/main.go）自体は初回から正しく、テストのみの問題だった。
 - task 3.6 レビューでさらに発見: `infra/modules/batch-job/main.tf` に `DB_IAM_USER`・`DB_NAME` env が未配線（`CLOUDSQL_CONNECTION_NAME`・`PLACES_API_KEY` のみ）。task 6.3 のスコープに追記済み。
 - **task 5.1 で発見（設計レベルの既知の制約）**: `four-tier-data-model` の1オーナー:N店舗仕様と、本 spec の LIFF URL 契約（storeId 非包含・IDOR対策）が緊張関係にある。複数店舗オーナーは `AMBIGUOUS_STORE` により詳細画面を解決できない（安全側フェイル）。design.md の Open Questions / Risks・API Contract に既知の制約として明記し、task 5.2 は AMBIGUOUS_STORE を 404 として扱う。第2フェーズで per-store 署名付きトークン方式の再設計が必要。
+  - → **task 5.4（Issue #61）で解消**。「storeId を受けない」という**手段**を守るのではなく、「認可主体は sub のみが決め、クライアント入力は認可済み集合の内部でしか使えない」という**不変条件**へ再定義した。集合の生成と集合内の選択を別関数に分け、後者を `Queryable` を受け取らない純関数にすることで、集合外を返すコードが型の上で書けないようにしている。この分離は「ヒントが SQL に到達しない」＝不正 UUID で 500 にならないという副次的な堅牢性も生む。
+- **task 5.4（Issue #61）で発見・実測した3件**:
+  1. **型レベルのセキュリティガードが実際には一度も検査されていなかった**（→ **Issue #72**）。`ts/apps/store-detail/tsconfig.json` の `exclude` に `"test"` が含まれるため、`test/liff-auth.test.ts` の `Parameters<typeof …>` 双方向代入は `typecheck`（`tsc -p tsconfig.json --noEmit`）でも `next build` でも走らない。lint も非型認識 recommended のみで型を見ない。`lib/liff-auth.ts` の「抜け道を追加すればコンパイルが失敗する」というコメントは虚偽だった。実効ガードは vitest 実行時の arity チェックと振る舞いテストのみ。当該コメントは限界を明記する形へ訂正済み。**「型で守っている」と書かれた保証は、その型が実際に検査される経路に載っているかを必ず実測すること。**
+  2. **`created_at` は行ごとの時刻ではなくトランザクション開始時刻**である。複数店舗を単一 INSERT／単一 Tx で登録すると `created_at` が同値になり、`ORDER BY created_at ASC` だけでは返却順が呼出ごとに揺れる（＝選択リストの並びが変わる）。`id ASC` を tiebreaker に追加し、単一 INSERT で 2 行を作る回帰テストで固定した。
+  3. **Flex カードに店舗名が無く、多店舗オーナーは同時刻に届く N 通を区別できない**（→ **Issue #73**）。配信は店舗単位なので 2 店舗なら 2 通届くが、`buildDailySummaryFlex` の入力 `DailySummaryRow` に店舗名が無い。本 task の選択画面では店舗名が出るため実用性は回復しているが、配信カード側は別途対応が必要。
+- **task 5.4 の検証（`kiro-verify-completion` 流の新証拠ゲート）**: 緑を確認しただけでは「テストが穴を検出できる」ことの証拠にならないため、意図的な欠陥注入を 2 種行い、狙ったテストだけが赤化することを実測した。
+  1. `selectAuthorizedStore` をヒント無視・常に先頭返却へ差し替え → 9 本赤化（うち route の「先頭固定ではない」「409 と候補一覧」「非オラクル deep-equal」の 3 本が中核）
+  2. ヒントを SQL の検索キーとして渡す実装へ差し替え → 「不正 UUID で 500 にならない」1 本だけが `invalid input syntax for type uuid` で赤化
+  注入は撤去済み（`git status` クリーンを確認）。
 - **task 6.3: 実 GCP デプロイで発見・修正した実ビルド不良4件**（ローカル検証・native postgresテストでは検出できず、Cloud Build での実ビルドで初めて顕在化）:
   1. `go/Dockerfile` の `golang:1.24-alpine` が `go.mod`（1.25.8・task 3.3/3.6 の pgx/cloudsqlconn 依存で自動昇格）と不整合 → `golang:1.25-alpine` に修正。
   2. `ts/package.json` に `packageManager` 固定・`pnpm.onlyBuiltDependencies` 未設定 → Docker の `corepack enable` が最新pnpm（11.x）を取得し `[ERR_PNPM_IGNORED_BUILDS]` で `pnpm install --frozen-lockfile` が失敗。`packageManager: "pnpm@10.33.2"`（CI が既に固定していたバージョンと同一）と `onlyBuiltDependencies: ["esbuild","msw"]` を追加。

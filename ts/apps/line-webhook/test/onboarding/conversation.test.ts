@@ -9,12 +9,12 @@ import {
 } from '../../src/onboarding/conversation.js';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessenger, LineMessage } from '../../src/line/client.js';
-import type { ConnectablePool, TransactionClient } from '../../src/onboarding/store-identification.js';
+import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type {
   ConfirmOutcome,
   StoreIdentificationService,
-} from '../../src/onboarding/store-identification.js';
-import type { SearchOutcome } from '../../src/places/search.js';
+} from '@fwlm/store-identification';
+import type { SearchOutcome } from '@fwlm/store-identification';
 import { encodePostback } from '../../src/onboarding/stages.js';
 import {
   buildAlreadyCompletedMessage,
@@ -76,6 +76,8 @@ function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     display_name: null,
     onboarding_status: 'pending',
     created_at: FIXED_NOW,
+    // スキーマ既定（0004 マイグレーション）。OwnerRow で必須のためヘルパで満たす。
+    delivery_hour: 7,
     ...overrides,
   };
 }
@@ -143,8 +145,10 @@ function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: st
 // confirmStore に渡された引数（ownerId・candidate）を記録して「セッションに保存された
 // 実際に提示済みの候補」がそのまま渡されたことを検証できるようにする。
 function createFakeIdentificationService(config: {
-  searchOutcome?: SearchOutcome;
-  confirmOutcome?: ConfirmOutcome;
+  // 呼び出し側が undefined を素通しするため、キーの省略と明示的な undefined の双方を許す
+  // （exactOptionalPropertyTypes 下では両者が別物になる）。
+  searchOutcome?: SearchOutcome | undefined;
+  confirmOutcome?: ConfirmOutcome | undefined;
 }): {
   service: StoreIdentificationService;
   searchCalls: string[];
@@ -171,6 +175,10 @@ function createFakeMessenger(): LineMessenger & { replies: { replyToken: string;
     replies,
     async reply(replyToken, messages) {
       replies.push({ replyToken, messages });
+    },
+    async push() {
+      // 未使用（本テストは reply 経路のみを検証する）。push は OAuth callback 等の
+      // webhook 外の契機で使われる（gbp/callback.ts）。
     },
     async getProfile() {
       return { displayName: 'テストオーナー' };

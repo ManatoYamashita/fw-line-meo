@@ -16,7 +16,9 @@ WORKDIR /repo
 # ダングリングになり、その依存（gemini なら @google/genai）が一切 install されない。
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
+COPY packages/design-tokens/package.json packages/design-tokens/
 COPY packages/gemini/package.json packages/gemini/
+COPY packages/ui/package.json packages/ui/
 COPY apps/survey-web/package.json apps/survey-web/
 RUN pnpm install --frozen-lockfile
 
@@ -24,8 +26,9 @@ RUN pnpm install --frozen-lockfile
 FROM base AS build
 WORKDIR /repo
 # deps ステージ全体をコピー（pnpm はパッケージ単位で node_modules を持つため、
-# ルートの node_modules だけでは next などの実行ファイルが解決できない。
-# delivery-job/store-detail/line-webhook と同一パターン）。
+# ルートの node_modules だけでなく packages/*・apps/survey-web 配下の
+# node_modules シンボリックリンクも必要。ルートだけでは next などの実行ファイルも
+# 解決できない。delivery-job/store-detail/line-webhook と同一パターン）。
 COPY --from=deps /repo ./
 COPY . .
 # packages/* は types/main が dist/ を指すため、消費側より先にビルドする。
@@ -38,9 +41,10 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # standalone は依存を内包した server.js を出力（node_modules 不要）。
+# survey-web は public/ ディレクトリを持たないため static のみコピーする（存在しない
+# パスの COPY はビルドエラーになる）。
 COPY --from=build /repo/apps/survey-web/.next/standalone ./
 COPY --from=build /repo/apps/survey-web/.next/static ./apps/survey-web/.next/static
-COPY --from=build /repo/apps/survey-web/public ./apps/survey-web/public
 EXPOSE 8080
 ENV PORT=8080
 ENV HOSTNAME=0.0.0.0

@@ -32,6 +32,12 @@
 - **MINI App 不採用**: 審査が重く初期不要。客向けは通常 Web、LINE 内入力は LIFF に限定。
 - **GBP OAuth は第2フェーズ**: MVP に OAuth 連携を持ち込まない（審査リスク回避）。
 - **Next.js `NEXT_PUBLIC_*` はビルド時 build-arg 必須**: `NEXT_PUBLIC_*` は `next build` 時にクライアントバンドルへインライン化される値。Cloud Run のランタイム env 注入はサーバー側にしか効かず、クライアントバンドルには一切反映されない。standalone アプリで使う `NEXT_PUBLIC_*` は必ず Dockerfile の `ARG`+`ENV`（`next build` 前）でビルド時に渡し、`scripts/push-images.sh` の `BUILD_ARGS` にも対応エントリを足すこと。CI の `scripts/check-next-public-buildargs.sh` が「ソースで参照する `NEXT_PUBLIC_X` に対応する `ARG` が Dockerfile に在るか」を機械強制する。CI 自動デプロイ（`.github/workflows/deploy.yml`・`ts-ci` 緑後に image-only 反映・Direct WIF）は `vars.NEXT_PUBLIC_LIFF_ID`（= tfvars `liff_id`）を build-arg として渡す。出典: 2026-07-14 の本番 LIFF 起動障害（`.kiro/specs/competitive-daily-summary/tasks.md` Implementation Notes 参照）。
+- **デプロイの成否は「稼働実態」で判定する（Issue #91）**: `deploy-prod` は `workflow_run` 起動のため PR のチェック欄に現れず、かつ**マージ契機でしか動かない**。2026-08-02〜09 の課金失効では、失効期間中に main へのマージが無かったため run 自体が生成されず、本番が 7 日間旧イメージで放置された（同型の見落としは #33 / #35 に続き 3 度目で、原因は毎回違うが気づけない構造は同じ）。対策は 2 つ。(1) `prod-image-drift` が 6 時間ごとに稼働イメージのタグを git オブジェクトへ解決して `origin/main` と照合する（read-only・`scripts/check-prod-image-drift.sh`）。猶予は「**未デプロイコミットのうち最も古いものの経過時間**」で判定する（main HEAD の経過時間で見ると、停止中に新規マージが入った瞬間に緑へ戻る穴がある）。(2) `deploy-prod` に失敗通知ジョブを持たせる。通知はいずれも `scripts/report-ci-issue.sh` がラベル単位の追跡 Issue を 1 本だけ維持し、復旧で自動クローズする。**対象集合の正典は `scripts/check-deploy-image-coverage.sh --print-targets`**（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）。
+- **通知は症状側と原因側の両方に置く（Issue #118）**: #91 で入れた `prod-image-drift` は「本番が古い」という症状を見る遅行指標であり、原因（main の ts-ci が赤い）を指さない。しかも `deploy-prod` の失敗通知は、main が赤いと `deploy` ジョブごと skip されるため発火しない（skip を失敗として扱わないのは正しい判断である）。結果として**最も直接的で最も早い信号だけが通知経路を持っていなかった**。2026-08-09 の赤化は 3 時間 53 分後に症状側が拾い、そこから 2 日放置され、本番が約 2 日 16 時間停滞した。よって `ts-ci.yml` に `notify` ジョブを置き、main への push に限って `scripts/ts-ci-notify.sh` が状態を判定し、同じ追跡 Issue 基盤へ流す。規律は 3 点。(1) **判定は `cancelled` / `skipped` を red へ倒さない**（偽の障害通知は通知そのものの信頼を壊す）。PR イベント限定の `docker-build` を `needs` に入れないのも同じ理由である。(2) 通知ジョブ自身の失敗は ts-ci を赤にする（結果として deploy-prod も止まる）。通知装置が壊れているのに緑を返すのは、この Issue が塞いだ構造をそのまま一段上へ移すだけである。(3) 監視対象が job 一覧から漏れる事故は `scripts/test/cases/73-ts-ci-notify.sh` が `ts-ci.yml` と機械照合する。
+
+- **シークレットの「実値が入っている」ことはリポジトリ内の宣言で正典化する（Issue #63）**: Secret Manager の枠は Terraform が作るが、**値（version）は tf が一切作らない**（`google_secret_manager_secret_version` は git 史上ゼロ件）。値は `infra/README.md` §1 項目 5 の `gcloud secrets versions add` で人間が out-of-band 投入するため、「tf 成功・デプロイ成功・CI 全緑、しかし値がプレースホルダーのまま」という無音障害が構造的に起き得る（gemini-api-key が 2026-07-05〜08-02 の 4 週間この状態で、機能A は go-live 以降一度も成功していなかった）。正典は `infra/secrets-provisioned.tsv`（`<secret_id>` / `<version>` / `<投入日>` / `<Issue-PR>`）。GCP の annotation ではなくリポジトリ内に置くのは、**tf へ新しい枠を足した PR の時点で「宣言に無い」を ts-ci が即座に赤にできる**ためで、投入漏れを本番へ出す前に捕まえられる。検証は二層。層1 `scripts/check-secret-declaration-coverage.sh`（ts-ci・gcloud 不要・tf ↔ 宣言 ↔ README ↔ 消費側配線を両方向照合）、層2 `scripts/check-secret-version-drift.sh`（`secret-version-drift` ワークフロー・6 時間ごと・**メタデータのみ**）。**「versions が 1 件だけなら未投入」という heuristic は採用しない** — `survey-session-key` は version 1 件のみで実値であり誤検出になる（本番実測）。層2 は「宣言 version が DESTROYED でない最大番号であり、かつ唯一の ENABLED である」ことを要求する。Cloud Run は `version = "latest"` でマウントし pin を持たないため、この条件なら `latest` の解決規則がどちらの解釈でも宣言 version へ解決し、規則の解釈に依存しない。CI へ付与するのは **secret 単位の `roles/secretmanager.viewer`** のみで、このロールは `secretmanager.versions.access` を含まない（実測確認済み）＝ CI は値を読めない。project 単位の付与は Req 5.4 で禁止であり、その帰結として CI は `gcloud secrets list` を打てない（検証は宣言された secret を 1 件ずつ describe / versions list する）。**値そのものの正当性（失効キー・別プロジェクトのキー）はこの二層では原理的に検出できない。** 外部 API に依存する機能は「本番で一度実際に叩いて成功を確認する」ことを go-live の完了条件に含めること（残件は Issue #125 が引き継ぐ）。
+
+- **Terraform の `for_each` には plan 時点で確定する値しか渡さない（Issue #63・PR #124 レビュー）**: module output が `{ name => resource.id }` の形をしていても、**`values()` を `for_each` の集合へ渡してはならない**。`.id` は computed であり、リソースが 1 件でも新規なら apply 前に確定しない。確定しない要素を含む set は `Invalid for_each argument` になり、**その env の plan ごと落ちる**。厄介なのは既存分が state にある限り緑で通ることで、**次に 1 件足した PR で初めて出る遅延型**である点。`terraform validate` は素通りし、ts-ci は terraform を走らせないため、人間が apply するまで発覚しない。渡すのは `keys()`（＝ `locals` の静的なリスト）か、鍵を静的に固定した map にする。IAM binding の `secret_id` / `service_account_id` などは短い名前と `project` の併記で解決できるので、フルパスの `.id` を運ぶ必要はない。実測（terraform 1.15.7）: 既存の枠だけなら plan 成功、枠を 1 件足すと `Invalid for_each argument`、`keys()` へ変えると同じ追加が通る。
 
 ## Development Standards
 
@@ -44,6 +50,77 @@
 
 ### Type Safety / Code Quality / Testing
 - 実装着手時に確立する（現状ルール未策定）。確立後に本ファイルへ追記すること。
+
+### シェルガードの実装規律（`scripts/`）
+
+ガードは実装コードではなく **「緑が信用できるか」を守る装置** である。装置が静かに壊れると、
+壊れたこと自体を誰も検出できない。以下はいずれも実測で踏んだ形なので、再発時の症状まで残す。
+
+- **`git ls-files` には `-c core.quotePath=false` を必ず併用する。** 既定（true）は非 ASCII を
+  含むパスを `"docs/\346\227\245..."` の形（引用符 ＋ 8 進エスケープ）で返す。行末が引用符に
+  なるため拡張子の `$` アンカーに一致せず**列挙から丸ごと消え**、パスとして開けないので
+  **黙って走査対象から落ちる**。実測（PR #99）: 日本語ファイル名の違反を base は exit 1 で
+  検出し、head は exit 0 で緑になった。しかも空振り防止の件数表示は増えたままだった。
+  `find` からの移行で生じる、対象の集合ではなく**対象の表現**が変わる型の退行である。
+- **`set -euo pipefail` の下で、入力を読み切らない consumer をパイプ終端へ置かない。**
+  `head -n N` や `grep -q` は途中で抜けるため上流が EPIPE を受け、`pipefail` により
+  **スクリプトごと exit 141 で中断する**（OK も NG も出ないまま赤になる）。さらに上流が
+  書き込める量は consumer の buffer 2 杯分あるので、**入力サイズ依存で赤にも緑にも転ぶ**。
+  `if` 条件下では `set -e` が働かず中断しない。その場合 141 は「無一致」と**同義に読まれる**ので、
+  転ぶ向きは条件の極性で決まる。無一致が ERROR 側なら偽の赤、スキップ側なら**黙って緑へ倒れる**。
+  後者は「ガードが対象を静かに飛ばす」形であり、壊れたことを誰も検出できない。
+  **入力が単一行なら発火しない。** grep は行単位で判定するため、1 行しか来ない入力では行末まで
+  読まざるを得ず早期終了できない（実測: 200KB の 1 行で 3/3 が 0、多行 20,000 行では 3/3 が 141、
+  多行 2,000 行では 3/3 が 0）。したがって「今は転ばない」は**入力の形という外部条件**に依存した
+  安全であって、コードの性質ではない。振る舞いテストで守れるのは多行入力の箇所だけなので、
+  構文そのものは `scripts/check-shell-pipe-consumers.sh` が静的に禁じている。
+  - 件数は `grep -c`（入力を最後まで読むので SIGPIPE が起きない）、先頭数件の抽出は `q` を
+    持たない `sed -n '1,Np'` を使う。
+  - **`grep -c` を素で代入してはならない。** 無一致では exit 1 を返すため、
+    `n="$(... | grep -c ...)"` は**違反ゼロという正常系でスクリプトごと中断する**。
+  - **`|| true` で潰すのも誤りである。** 評価できない ERE に対する exit 2 まで飲み込み、標準
+    出力が空のまま `${n:-0}` が 0 と読むため、**壊れたパターンのアサーションが PASS へ化ける**
+    （PR #101 実測。健全な実行と件数まで一致し、痕跡は stderr の 1 行だけだった）。終了コードを
+    捕捉し、無一致（exit 1）と評価不能（exit 2 以上）を分けること。正典は
+    `scripts/test/run.sh` の `expect_output_matches` である。
+  - **検出結果を文字列で受ける形のほうが危険である**（Issue #120 実測）。`hits="$(grep ...)"` を
+    潰すと空文字になり、`[ -n "$hits" ]` が「違反なし」と**同義になる**。件数受けは極性しだいで
+    偽の赤にも倒れるが、文字列受けは一方向に偽 PASS へ倒れる。実測 2 件:
+    `check-design-tokens.sh` は違反を置いたまま「生パレット色クラスゼロ」で exit 0 を返し、
+    `2>/dev/null` の併用により**痕跡が 1 行も残らなかった**。`check-workflow-step-names.sh` は
+    「5 ファイル / 42 件の name: を検証」と**件数まで健全な実行と一致**させて exit 0 を返した。
+    空振り防止の後ろ盾があるかで結果が割れるため、同じファイル内でも守られている行と
+    守られていない行が混在する。行ごとに見るしかない。
+  - **`2>/dev/null` は評価不能の診断ごと捨てる。** 走査対象の不在を抑止したいなら、対象の
+    存在を先に確かめて `2>/dev/null` を外すこと。抑止と握り潰しを同じ手段で兼ねない。
+  - **コマンド置換の中の `exit` は `if` の条件文脈では効かない。** 関数内で `exit` しても
+    subshell が終わるだけで、`if [ -n "$(f ...)" ]` の形では `set -e` も働かない。いったん
+    変数へ代入して受けること（`check-prod-image-drift.sh` の `snapshot_lookup` で実測）。
+  - 機械強制は `scripts/check-shell-pipe-consumers.sh`（Issue #117）。追跡下の `scripts/**/*.sh`
+    を走査し、`head` / `grep` の quiet・max-count 系 / `q` を持つ `sed` がパイプの下流に
+    現れる行を弾く。除外は 3 つある。行頭 `#` のコメント行は**全ファイル**、`WHITELIST=(` の
+    宣言行と配列要素の引用符行は**ガード自身のファイルに限定**して除外する。規律を説明する注記や、
+    除外した違反行の内容そのものがガード本体へ現れるため、除外しないと永久に赤くなる。
+  - **データ行の除外を全ファイルへ広げてはならない。** 引用符で始まる行を一律で飛ばすと、
+    複数行の `awk` / `sed` で残りのコマンドが続く閉じ引用符行 — 本リポジトリに 3 箇所実在する
+    形である — に置かれた違反が、ERROR も SKIP も出さずに消えた（PR #119 レビュー実測）。
+    **除外の広さは「入れた理由」ではなく「外したら赤くなるか」で測る。** 当該除外は削除しても
+    実リポジトリ緑・Tier A 全 PASS のままで、1 件のケースにも守られていなかった。除外を足す
+    PR は、その除外を外すと赤くなる対照ケースを必ず同時に置くこと。
+  - 後半（後置 `true` の禁止）の機械強制は `scripts/check-grep-exit-codes.sh`（Issue #120）。
+    同じく `scripts/**/*.sh` を走査し、`grep` を含む行が後置 `true` で失敗を潰していないかを見る。
+    導入時に 43 箇所を変換済み。**`grep` と後置 `true` が別の行に分かれた複数行パイプラインは
+    検出できない**ため、そこは人手の規律のまま残る。
+- **出力サイズに依存する自己テストは、閾値へ十分な倍率を取り、複数回実行で決定性を確かめる。**
+  buffer 1 杯（64KB）で組んだケースは 5 回中 1 回緑になった（PR #99 実測）。上限は 2 杯分ある
+  ため、総量が 128KB を大きく超える設計にする。フレークな赤ケースは、無いより悪い。
+- **走査・列挙の機構を差し替える PR は、機構名を含む stderr 文字列まで棚卸しする。**
+  `find` と prune 一覧を撤去したのに空振り時の診断が「prune 一覧か find の式を疑え」と案内し
+  続け、**存在しない機構の調査へ誘導していた**（PR #99 のレビューで検出）。コメントだけでなく、
+  利用者が読む出力を `grep` で全件確認すること。
+- **同一ガードを対象とする改修 PR は直列化する。** ガードは「消えても誰も気づけない」からこそ
+  価値がある。並走した #99 と #100 は追記位置の衝突だけで済んだが、同じ関数を書き換えていれば
+  競合解決の過程で片方の防御が黙って消えていた。着手前に他ブランチの差分を確認すること。
 
 ## Development Environment
 

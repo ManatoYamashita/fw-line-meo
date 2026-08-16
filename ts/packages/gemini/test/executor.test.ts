@@ -153,19 +153,19 @@ describe('generateText', () => {
       expect(attempts).toEqual([0]);
     });
 
-    it('429 の再試行後も失敗すれば API_ERROR（呼出は 2 回で打ち止め）', async () => {
+    it('429 の再試行後も失敗すれば API_ERROR（status 付き・呼出は 2 回で打ち止め）', async () => {
       const e = Object.assign(new Error('429'), { status: 429 });
       const { client, calls } = fakeClient([e, e, e]);
       const res = await generateText(client, baseOptions());
-      expect(res).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(res).toEqual({ ok: false, error: { kind: 'API_ERROR', status: 429 } });
       expect(calls).toHaveLength(2);
     });
 
-    it('非再試行エラー(4xx)は再試行せず API_ERROR', async () => {
+    it('非再試行エラー(4xx)は再試行せず API_ERROR（status 付き）', async () => {
       const e = Object.assign(new Error('bad'), { status: 400 });
       const { client, calls } = fakeClient([e, { text: 'よい' }]);
       const res = await generateText(client, baseOptions());
-      expect(res).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(res).toEqual({ ok: false, error: { kind: 'API_ERROR', status: 400 } });
       expect(calls).toHaveLength(1);
     });
 
@@ -174,6 +174,26 @@ describe('generateText', () => {
       const res = await generateText(client, baseOptions());
       expect(res).toEqual({ ok: true, value: 'よい' });
       expect(calls).toHaveLength(2);
+    });
+
+    it('status を持たない例外が再試行後も失敗すれば status なしの API_ERROR', async () => {
+      const e = new Error('network');
+      const { client, calls } = fakeClient([e, e, e]);
+      const res = await generateText(client, baseOptions());
+      expect(res).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('HTTP status として意味を成さない値（文字列・範囲外）は status に採用しない', async () => {
+      const stringStatus = Object.assign(new Error('bad'), { status: '400' });
+      const outOfRange = Object.assign(new Error('bad'), { status: 700 });
+      // どちらも getHttpStatus が undefined を返すため、再試行判定は「status 不明」＝ 1 回再試行。
+      for (const e of [stringStatus, outOfRange]) {
+        const { client, calls } = fakeClient([e, e, e]);
+        const res = await generateText(client, baseOptions());
+        expect(res).toEqual({ ok: false, error: { kind: 'API_ERROR' } });
+        expect(calls).toHaveLength(2);
+      }
     });
 
     it('code プロパティ（5xx）でも再試行判定される', async () => {

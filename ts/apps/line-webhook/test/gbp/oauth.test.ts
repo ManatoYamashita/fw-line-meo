@@ -4,6 +4,7 @@ import type {
   GbpSessionRow,
   Queryable,
   Result,
+  TransactionClient,
   UpsertGbpLocationInput,
   UpsertGbpSessionInput,
 } from '@fwlm/db';
@@ -115,10 +116,14 @@ function createHarness(options: HarnessOptions = {}): Harness {
   const listCalls: string[] = [];
 
   const rootDb = { query: async () => ({ rows: [], rowCount: 0 }) } as unknown as Queryable;
-  const txClient = {
-    query: async (text: string) => {
-      journal.push(text);
-      return { rows: [], rowCount: 0 };
+  // pg の query は多重定義のため、フェイクは戻り値を never へ落として構造的に適合させる
+  // （onboarding/conversation.test.ts の createFakePool と同一の規律）。
+  const txClient: TransactionClient = {
+    async query(text: unknown) {
+      if (typeof text === 'string') {
+        journal.push(text);
+      }
+      return { rows: [], rowCount: 0 } as never;
     },
     release() {
       journal.push('RELEASE');

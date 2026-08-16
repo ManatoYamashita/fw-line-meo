@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "評価軸の code → ラベルの対応（Issue #132）。",
+    "正典は db/migrations/0002_reference_seed.sql の survey_aspects であり、このファイルはその写しである。",
+    "写しを置く理由は、評価が DB へ接続せずオフラインで完結する必要があるため。",
+    "二重管理は test/factuality-detect.test.ts が seed SQL と機械照合して守る（ずれたら赤になる）。"
+  ],
+  "labels": {
+    "taste": "味",
+    "volume": "量",
+    "service": "接客",
+    "atmosphere": "雰囲気",
+    "price": "コスパ",
+    "cleanliness": "清潔さ"
+  }
+}

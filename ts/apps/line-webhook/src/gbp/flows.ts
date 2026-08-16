@@ -54,7 +54,7 @@ import {
   type Result,
   type UpsertGbpSessionInput,
 } from '@fwlm/db';
-import type { ConnectablePool, TransactionClient } from '../onboarding/store-identification.js';
+import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type { LineMessage, LineMessenger } from '../line/client.js';
 import { CONNECT_SESSION_TTL_MS, type GbpOauthService } from './oauth.js';
 import { decodeGbpPostback, type GbpPostbackAction } from './postback.js';

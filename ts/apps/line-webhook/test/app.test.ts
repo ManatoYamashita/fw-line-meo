@@ -35,7 +35,10 @@ function fakeRecordWebhookEventOnce(): (webhookEventId: string) => Promise<boole
 function fakeGbpOauthCallback(
   impl?: AppDeps['gbpOauthCallback'],
 ): AppDeps['gbpOauthCallback'] {
-  return vi.fn(impl ?? (async () => ({ status: 200, html: '<p>ok</p>' })));
+  // 既定実装にも注釈を付ける。付けないと vi.fn の型引数が
+  // `GbpOauthCallbackRoute | (() => Promise<...>)` の合併に推論され、AppDeps へ代入できない。
+  const fallback: AppDeps['gbpOauthCallback'] = async () => ({ status: 200, html: '<p>ok</p>' });
+  return vi.fn(impl ?? fallback);
 }
 
 function baseDeps(overrides: Partial<AppDeps> = {}): AppDeps {

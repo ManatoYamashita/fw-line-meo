@@ -6,8 +6,8 @@ import {
 } from '../../src/onboarding/conversation.js';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessage, LineMessenger } from '../../src/line/client.js';
-import type { ConnectablePool } from '../../src/onboarding/store-identification.js';
-import type { StoreIdentificationService } from '../../src/onboarding/store-identification.js';
+import type { ConnectablePool } from '@fwlm/store-identification';
+import type { StoreIdentificationService } from '@fwlm/store-identification';
 import type { GbpFlowHandlers } from '../../src/gbp/flows.js';
 import { encodeGbpPostback } from '../../src/gbp/postback.js';
 import { encodePostback } from '../../src/onboarding/stages.js';

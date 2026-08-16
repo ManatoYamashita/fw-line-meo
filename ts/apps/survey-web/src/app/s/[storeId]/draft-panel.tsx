@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@fwlm/ui/components/button';
 import type { DraftPanelProps } from './types';
 
 // 下書きパネル（葉コンポーネント）。生成中表示・編集・再生成トリガー・コピー・投稿導線を担う。
@@ -51,7 +52,12 @@ export function DraftPanel({
 
   // 投稿導線（全状態・全評価で同一。ゲーティングをしない）。
   const reviewLink = (
-    <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer">
+    <a
+      className="block min-h-11 rounded-lg border border-primary px-6 py-3 text-center text-base font-semibold text-primary"
+      href={googleReviewUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
       Google のクチコミを書く
     </a>
   );
@@ -60,10 +66,21 @@ export function DraftPanel({
 
   if (generationFailed) {
     return (
-      <section>
-        {regenerating && <p aria-live="polite">生成中…</p>}
-        <p role="alert">下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。</p>
-        <button type="button" onClick={() => onRegenerate()} disabled={!canRegenerate}>
+      <section className="space-y-4">
+        {regenerating && (
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            生成中…
+          </p>
+        )}
+        <p className="font-medium text-destructive" role="alert">
+          下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。
+        </p>
+        <button
+          className="min-h-11 w-full rounded-lg border border-input px-6 py-3 text-base font-medium disabled:opacity-60"
+          type="button"
+          onClick={() => onRegenerate()}
+          disabled={!canRegenerate}
+        >
           もう一度生成する
         </button>
         {reviewLink}
@@ -72,9 +89,16 @@ export function DraftPanel({
   }
 
   return (
-    <section>
-      {regenerating && <p aria-live="polite">生成中…</p>}
+    <section className="space-y-4">
+      {regenerating && (
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          生成中…
+        </p>
+      )}
+      {/* 生成された下書きは全文が一目で読める高さを確保する（rows と最小高さの二重指定）。 */}
       <textarea
+        className="block min-h-64 w-full rounded-lg border border-input p-4 text-base leading-relaxed"
+        rows={10}
         ref={textareaRef}
         aria-label="口コミ下書き"
         value={text}
@@ -83,17 +107,28 @@ export function DraftPanel({
           setCopyState('idle');
         }}
       />
-      <div>
-        <button type="button" onClick={handleCopy}>
+      <div className="flex flex-col gap-3">
+        <Button className="min-h-11 w-full px-6 py-3 text-lg font-semibold" type="button" onClick={handleCopy}>
           コピーして投稿する
-        </button>
-        <button type="button" onClick={() => onRegenerate()} disabled={!canRegenerate}>
+        </Button>
+        <button
+          className="min-h-11 w-full rounded-lg border border-input px-6 py-3 text-base font-medium disabled:opacity-60"
+          type="button"
+          onClick={() => onRegenerate()}
+          disabled={!canRegenerate}
+        >
           別の文章を生成（残り{regenerationsLeft}回）
         </button>
       </div>
-      {copyState === 'copied' && <p role="status">コピーしました。投稿画面に貼り付けてください。</p>}
+      {copyState === 'copied' && (
+        <p className="text-sm text-muted-foreground" role="status">
+          コピーしました。投稿画面に貼り付けてください。
+        </p>
+      )}
       {copyState === 'manual' && (
-        <p role="status">自動コピーできませんでした。上の文章を選択して手動でコピーしてください。</p>
+        <p className="text-sm text-muted-foreground" role="status">
+          自動コピーできませんでした。上の文章を選択して手動でコピーしてください。
+        </p>
       )}
       {reviewLink}
     </section>

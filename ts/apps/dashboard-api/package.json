@@ -6,12 +6,13 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@fwlm/store-identification": "workspace:*",
     "@hono/node-server": "^1",
     "firebase-admin": "^13",
     "hono": "^4",

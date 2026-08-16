@@ -1,6 +1,8 @@
-# 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 の CI 化フォロー）
+# 本番自動デプロイ（Issue #23 / competitive-daily-summary task 6.3 / agency-dashboard task 5.1 の CI 化フォロー）
 #
-# main への push で ts-ci が緑になった後、3イメージ（daily-batch / summary-delivery / store-detail）を
+# main への push で ts-ci が緑になった後、7イメージ
+# （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web / survey-web /
+# line-webhook）を
 # build → Artifact Registry へ push → Cloud Run へ image-only 反映する。gcp-auth-smoke.yml の
 # Direct WIF 雛形を踏襲（service_account 入力なし・SA JSON キー不使用）。
 #
@@ -15,6 +17,11 @@
 #   vars.NEXT_PUBLIC_LIFF_ID = tfvars の liff_id と同値（store-detail の build-arg。Next.js は
 #                              next build 時にクライアントバンドルへインライン化するため、
 #                              Cloud Run のランタイム env では反映されない＝ビルド時に渡す必要がある）
+#   vars.NEXT_PUBLIC_API_BASE_URL         = dashboard-web が叩く dashboard-api の URL（build-arg）
+#   vars.NEXT_PUBLIC_FIREBASE_API_KEY     = dashboard-web の Firebase Web SDK 設定（build-arg）
+#   vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN = 同上（build-arg）
+#   vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID  = 同上（build-arg。いずれも store-detail の LIFF ID と同理由で
+#                                           next build 時にクライアントバンドルへインライン化される）
 name: deploy-prod
 
 on:
@@ -58,15 +65,20 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Build & push 3 images（store-detail は NEXT_PUBLIC_LIFF_ID を build-arg で焼き込み）
+      - name: Build & push 7 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: asia-northeast1
           REPOSITORY: fwlm
           TAG: ${{ steps.meta.outputs.tag }}
           NEXT_PUBLIC_LIFF_ID: ${{ vars.NEXT_PUBLIC_LIFF_ID }}
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
         # push-images.sh 内で gcloud auth configure-docker → docker build（build-arg）→ push。
-        # NEXT_PUBLIC_LIFF_ID 未設定なら store-detail の push を hard-fail（空焼き込みを構造的に防止）。
+        # NEXT_PUBLIC_LIFF_ID 未設定なら store-detail の push を、dashboard-web の NEXT_PUBLIC_* が
+        # 1つでも未設定なら dashboard-web の push を hard-fail（空焼き込みを構造的に防止）。
         run: scripts/push-images.sh
 
       - name: Reflect images to Cloud Run（image-only update・契約遵守）
@@ -85,3 +97,104 @@ jobs:
           gcloud run services update store-detail \
             --image="${IMAGE_BASE}/store-detail:${TAG}" \
             --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update dashboard-api \
+            --image="${IMAGE_BASE}/dashboard-api:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update dashboard-web \
+            --image="${IMAGE_BASE}/dashboard-web:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update survey-web \
+            --image="${IMAGE_BASE}/survey-web:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+          gcloud run services update line-webhook \
+            --image="${IMAGE_BASE}/line-webhook:${TAG}" \
+            --region=asia-northeast1 --project="${PROJECT_ID}"
+
+      - name: 'Placeholder 稼働検出（Issue #33 再発防止・デプロイ漏れサービスを fail させる）'
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        # Cloud Run 初期作成イメージ（cloudrun/container/hello）のまま稼働しているサービスは
+        # 「tf で作成されたのに CI のデプロイ対象から漏れている」サイン。QR 飛び先が
+        # placeholder のまま放置される事故（Issue #33）を再発させないため、検出したら fail する。
+        run: |
+          set -euo pipefail
+          bad=0
+          for svc in $(gcloud run services list --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(metadata.name)'); do
+            rev="$(gcloud run services describe "$svc" --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(status.latestReadyRevisionName)')"
+            if [ -z "$rev" ]; then
+              echo "ERROR: ${svc} に Ready なリビジョンがありません。" >&2
+              bad=1
+              continue
+            fi
+            img="$(gcloud run revisions describe "$rev" --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(spec.containers[0].image)')"
+            case "$img" in
+              us-docker.pkg.dev/cloudrun/container/hello*)
+                echo "ERROR: ${svc} が Cloud Run 初期 placeholder（${img}）のまま稼働しています。scripts/push-images.sh と deploy.yml への追加漏れを疑ってください。" >&2
+                bad=1
+                ;;
+              *)
+                echo "OK: ${svc} → ${img}"
+                ;;
+            esac
+          done
+          exit "$bad"
+
+  # 失敗通知（Issue #91）。deploy-prod は workflow_run 起動のため PR のチェック欄に現れず、
+  # 2026-08-08〜09 に 6 回連続で失敗しても誰にも通知されなかった。追跡 Issue を 1 本だけ維持し、
+  # 復旧したら自動で閉じる。
+  notify:
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    # ジョブ単位の permissions はワークフロー単位を置き換えるため、deploy ジョブへ
+    # issues: write を持たせずに済む（最小権限）。
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 追跡 Issue へ通知
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          # deploy ジョブが checkout するのと同じ commit（workflow_run 時は ts-ci が緑になった
+          # commit であり、main の HEAD とは限らない）。
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # skipped（ts-ci が緑でないため deploy 自体を実行しなかった）と cancelled は
+          # デプロイの失敗ではないので通知しない。
+          case "$DEPLOY_RESULT" in
+            success) state=green ;;
+            failure) state=red ;;
+            *)
+              echo "OK: deploy の結果は ${DEPLOY_RESULT} のため通知しません。"
+              exit 0
+              ;;
+          esac
+
+          body="$RUNNER_TEMP/issue-body.md"
+          # 本文の組み立ては scripts/deploy-notify.sh が持つ（PR #104 のレビュー指摘）。
+          # report-ci-issue.sh は緑（復旧）経路で本文を加工せずそのまま送るため、緑と赤で文面を
+          # 出し分ける責務は呼び出し側にある。以前はここへ直接書いており、1 行目だけを組み分けて
+          # 後半（失敗の範囲を遡れという指示と復旧後の再実行コマンド）を緑でも出していたため、
+          # デプロイ成功で追跡 Issue を閉じるコメントが失敗調査の指示を掲げていた。
+          #
+          # **本文の組み立てをこの run ブロックへ戻さないこと。** 戻すと、緑と赤の文面を検証する
+          # 器が yml からの sed 抽出へ逆戻りし、孤児ケースとして ts-ci を止める（Issue #109 の実績）。
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/deploy-notify.sh \
+            --state "$state" \
+            --run-url "$run_url" \
+            --deployed-sha "$DEPLOYED_SHA" > "$body"
+
+          # 署名に run ID を渡すため、連続失敗は 1 つの Issue にコメントとして積み上がる
+          # （失敗のたびに新しい Issue を立てない）。
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label deploy-prod-failure \
+            --title "chore(ci): deploy-prod が失敗しています（自動検出）" \
+            --body-file "$body" \
+            --signature "run-${GITHUB_RUN_ID}"

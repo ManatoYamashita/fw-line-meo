@@ -55,12 +55,12 @@ export async function generateText(
   try {
     res = await client.models.generateContent(req);
   } catch (firstError) {
-    if (!isRetryable(firstError)) return err({ kind: 'API_ERROR' });
+    if (!isRetryable(firstError)) return err(toApiError(firstError));
     await backoff(0);
     try {
       res = await client.models.generateContent(req);
-    } catch {
-      return err({ kind: 'API_ERROR' });
+    } catch (retryError) {
+      return err(toApiError(retryError));
     }
   }
 
@@ -79,10 +79,30 @@ export async function generateText(
 }
 
 function isRetryable(error: unknown): boolean {
-  const e = error as { status?: number; code?: number } | null;
-  const status = e?.status ?? e?.code;
+  const e = asErrorShape(error);
+  const status = getHttpStatus(error) ?? (typeof e?.code === 'number' ? e.code : undefined);
   if (status === undefined) return true; // ネットワーク断等は 1 回だけ再試行
   return status === 429 || (status >= 500 && status < 600);
+}
+
+function toApiError(error: unknown): GenerationError {
+  const status = getHttpStatus(error);
+  return status === undefined ? { kind: 'API_ERROR' } : { kind: 'API_ERROR', status };
+}
+
+// status は「HTTP ステータスとして意味を成す整数」だけを採用する。SDK の層によっては
+// 文字列や独自コードが同名で載るため、型と範囲の両方を確かめないと観測値が汚れる。
+function getHttpStatus(error: unknown): number | undefined {
+  const status = asErrorShape(error)?.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : undefined;
+}
+
+function asErrorShape(error: unknown): { status?: unknown; code?: unknown } | undefined {
+  return typeof error === 'object' && error !== null
+    ? (error as { status?: unknown; code?: unknown })
+    : undefined;
 }
 
 function delay(ms: number): Promise<void> {

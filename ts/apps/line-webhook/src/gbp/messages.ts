@@ -13,6 +13,7 @@
 //   （tasks.md Implementation Notes 2.2 の申し送り）。
 
 import type { GbpSessionRow } from '@fwlm/db';
+import { lineColors } from '@fwlm/design-tokens';
 import type { LineMessage } from '../line/client.js';
 import type {
   FlexBoxContent,
@@ -40,8 +41,10 @@ export interface GbpStatusEntry {
  */
 export const MAX_SELECTABLE_STORES = 10;
 
-const LINKED_COLOR = '#1DB446';
-const MUTED_COLOR = '#888888';
+// 色は @fwlm/design-tokens の lineColors のみを使う（直書き hex は
+// scripts/check-design-tokens.sh が禁じる。line/messages.ts と同一の規律）。
+const LINKED_COLOR = lineColors.action;
+const MUTED_COLOR = lineColors.caption;
 
 function assertWithinCarouselContract(count: number, fnName: string): void {
   if (count === 0) {
@@ -71,7 +74,7 @@ function bubbleMessage(input: {
         type: 'text',
         text: line,
         size: 'sm',
-        color: '#666666',
+        color: lineColors.description,
         wrap: true,
       }),
     ),
@@ -147,7 +150,7 @@ export function buildGbpAuthorizeMessage(input: {
             '下のボタンから Google にログインし、お店のビジネスプロフィールへのアクセスを許可してください。' +
             '連携が完了すると、LINE から Google 投稿の作成とクチコミ返信ができるようになります。',
           size: 'sm',
-          color: '#666666',
+          color: lineColors.description,
           wrap: true,
         },
         {
@@ -206,7 +209,7 @@ export function buildGbpStorePickerMessage(
               type: 'text',
               text: 'このお店を Google と連携します。',
               size: 'sm',
-              color: '#666666',
+              color: lineColors.description,
               wrap: true,
             },
           ],
@@ -292,7 +295,7 @@ export function buildGbpStatusMessage(entries: readonly GbpStatusEntry[]): LineM
                 ? 'このお店では Google 投稿の作成とクチコミ返信をご利用いただけます。'
                 : '連携すると、Google 投稿の作成とクチコミ返信が LINE から使えるようになります。',
               size: 'sm',
-              color: '#666666',
+              color: lineColors.description,
               wrap: true,
             },
           ],
@@ -523,7 +526,7 @@ export function buildGbpPostStorePickerMessage(
               type: 'text',
               text: 'このお店の Google 投稿を作成します。',
               size: 'sm',
-              color: '#666666',
+              color: lineColors.description,
               wrap: true,
             },
           ],
@@ -789,7 +792,7 @@ export function buildGbpReplyStorePickerMessage(
               type: 'text',
               text: 'このお店のクチコミに返信します。',
               size: 'sm',
-              color: '#666666',
+              color: lineColors.description,
               wrap: true,
             },
           ],

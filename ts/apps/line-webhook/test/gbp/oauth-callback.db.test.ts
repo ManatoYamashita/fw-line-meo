@@ -71,7 +71,8 @@ function jsonResponse(body: unknown): Response {
 
 /** GBP の accounts / locations 列挙だけに応答する偽 fetch（他 URL は明示的に失敗させる）。 */
 function createGbpListingFetch(placeIdOnLocation: string): typeof fetch {
-  return (async (input: RequestInfo | URL): Promise<Response> => {
+  // RequestInfo は DOM lib の型で、このパッケージの lib 構成には無い。fetch の引数型から導く。
+  return (async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     if (url.includes('mybusinessaccountmanagement.googleapis.com/v1/accounts')) {
       return jsonResponse({ accounts: [{ name: ACCOUNT_NAME }] });

@@ -14,6 +14,7 @@
 // - 応答ステータスは design「API Contract」に従う: 200（結果の提示）/ 400（state 不正）/ 500（内部失敗）。
 
 import type { Queryable } from '@fwlm/db';
+import { colors } from '@fwlm/design-tokens';
 import type { LineMessage } from '../line/client.js';
 import type { FlexBubbleContents } from '../line/messages.js';
 import { encodeGbpPostback } from './postback.js';
@@ -88,11 +89,11 @@ function page(input: { title: string; heading: string; lines: readonly string[] 
     <meta name="robots" content="noindex, nofollow" />
     <title>${escapeHtml(input.title)}</title>
     <style>
-      body { font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 24px; line-height: 1.7; color: #222; background: #fff; }
+      body { font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 24px; line-height: 1.7; color: ${colors.text}; background: ${colors.background}; }
       main { max-width: 480px; margin: 0 auto; }
       h1 { font-size: 1.25rem; margin: 0 0 16px; }
       p { margin: 0 0 12px; font-size: 0.95rem; }
-      .note { color: #666; font-size: 0.85rem; }
+      .note { color: ${colors.textMuted}; font-size: 0.85rem; }
     </style>
   </head>
   <body>
