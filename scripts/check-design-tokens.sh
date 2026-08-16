@@ -32,6 +32,16 @@ UI_COMPONENTS_DIR="${UI_SRC_DIR}/components"
 # hex 色リテラル（3〜8 桁。8 桁は shadow のアルファ付き #0000000D 等）。
 HEX_PATTERN='#[0-9a-fA-F]{3,8}'
 
+# Issue / PR 参照は色ではない。Issue 番号が 3 桁に達した時点で hex の 3 桁短縮形（#RGB）と
+# 表記が完全に衝突する（`#132` は #112233 と同形）。実際、Issue 132 の作業で追加した
+# `（Issue 132）` 形式のコメントが「直書き色」として検出され CI が赤になった。
+#
+# 除外するのは **種別を前置した参照だけ** に限る。裸の `#132` まで除外すると `#000` のような
+# 数字のみのグレー階調と原理的に区別がつかず、本物の直書き色を見逃す側に倒れるため。
+# つまりこの除外は「Issue 参照は Issue / PR を前置して書く」という規約とセットで成立している。
+# 前置なしで書きたい場合は色と紛れない表記（`Issue 132` など）を使うこと。
+ISSUE_REF_PATTERN='(Issue|PR|issue|pr) #[0-9]+'
+
 # Tailwind 既定パレットの色クラス（bg-red-500 / text-blue-700 / border-gray-200 等）。
 # @theme でトークンを定義しても Tailwind の既定パレットは無効化されないため、これらのクラスは
 # そのまま実色へコンパイルされる（＝トークンを迂回した色指定になる）。
@@ -74,10 +84,34 @@ fi
 # 実測: PALETTE_PATTERN を壊すと bg-red-500 の違反を置いたままガードが exit 0 を返した。
 # 対象ディレクトリの不在は上で弾いてあるので、ここで出る stderr は本物の異常である。
 hits_rc=0
-hits="$(grep -rnE "$HEX_PATTERN" "${scan_targets[@]}" "${GREP_FILTERS[@]}")" || hits_rc=$?
+raw_hits="$(grep -rnE "$HEX_PATTERN" "${scan_targets[@]}" "${GREP_FILTERS[@]}")" || hits_rc=$?
 if [ "$hits_rc" -gt 1 ]; then
   echo "ERROR: 直書き hex の検出パターンを評価できません（grep exit=${hits_rc}）: ${HEX_PATTERN}" >&2
   exit 1
+fi
+
+# Issue / PR 参照を打ち消したうえで、なお hex が残る行だけを違反とする。
+# 打ち消しは行内の該当箇所だけを潰すので、同じ行に本物の直書き色があればそれは残る。
+#
+# sed と grep を 1 本のパイプに繋いではならない。grep の exit 1（無一致＝違反なし）と
+# sed の失敗（パターン評価不能）が pipefail 下で同じ 1 に潰れ、**壊れた ISSUE_REF_PATTERN が
+# 「違反 0 件」に化ける**（Issue 120 と同型の偽緑）。段を分けてそれぞれの失敗を別に扱う。
+hits=""
+if [ -n "$raw_hits" ]; then
+  strip_rc=0
+  stripped="$(printf '%s\n' "$raw_hits" | sed -E "s/${ISSUE_REF_PATTERN}/\1 ref/g")" || strip_rc=$?
+  if [ "$strip_rc" -ne 0 ]; then
+    echo "ERROR: Issue 参照の打ち消しを評価できません（sed exit=${strip_rc}）: ${ISSUE_REF_PATTERN}" >&2
+    exit 1
+  fi
+
+  filter_rc=0
+  hits="$(printf '%s\n' "$stripped" | grep -E "$HEX_PATTERN")" || filter_rc=$?
+  # exit 1 は「Issue 参照だけだった＝違反なし」で正常。2 以上はパターン評価の失敗である。
+  if [ "$filter_rc" -gt 1 ]; then
+    echo "ERROR: Issue 参照を除いた後の hex 判定を評価できません（grep exit=${filter_rc}）: ${HEX_PATTERN}" >&2
+    exit 1
+  fi
 fi
 
 if [ -n "$hits" ]; then
