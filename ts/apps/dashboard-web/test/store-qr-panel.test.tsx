@@ -289,3 +289,47 @@ describe('StoreQrPanel: 失敗表現と再試行', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('StoreQrPanel: 失敗経路の堅牢性', () => {
+  it.each([['constructor'], ['toString'], ['hasOwnProperty']])(
+    'Object.prototype 由来の名前を持つ code（%s）でも空の文言を描画しない',
+    async (code) => {
+      const fetchQr = vi.fn().mockResolvedValue(errorResult(code, 'サーバ側の文言'));
+      render(
+        <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+      );
+
+      await screen.findByRole('alert');
+      // 未知の code と同じ「再試行できる一般障害」として扱われること。
+      expect(alertText()).toContain('再試行');
+      expect(alertText().length).toBeGreaterThan(0);
+    },
+  );
+
+  it('取得手続きが例外を投げても loading のまま固着せず再試行できる（4.3）', async () => {
+    const fetchQr = vi.fn().mockRejectedValue(new Error('boom'));
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: /再試行/ })).toBeTruthy();
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('取得後に表示資源の生成が失敗しても loading のまま固着しない（4.3）', async () => {
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: () => {
+        throw new Error('object URL unavailable');
+      },
+      configurable: true,
+    });
+    const fetchQr = vi.fn().mockResolvedValue(okPayload());
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: /再試行/ })).toBeTruthy();
+  });
+});

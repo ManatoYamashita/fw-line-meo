@@ -29,8 +29,10 @@ export interface StoreQrPanelProps {
 
 type QrState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly imageUrl: string; readonly fileName: string }
-  | { readonly kind: 'error'; readonly code: string; readonly message: string };
+  | { readonly kind: 'ready'; readonly imageUrl: string }
+  // サーバの message は保持しない。保持すると「描画してはならない値」を手の届く場所へ置くことに
+  // なり、Requirement 4.1 の違反が「たまたま起きていないだけ」の状態になる。code だけを持つ。
+  | { readonly kind: 'error'; readonly code: string };
 
 // 取得する QR の一辺（px）。api client が size=1024 を要求するため実体もこの寸法になる。
 // width/height に実寸を与えることで、読み込み完了時のレイアウトのずれを防ぐ。
@@ -51,18 +53,27 @@ const ACCESS_DENIED_TEXT: QrErrorText = {
 
 // サーバが返す code を利用者向けの文言へ写す対応表。api client は code を保つだけで
 // 文言を決めない（責務をここに一本化する）。既知でない code は再試行可能な一般障害として扱う。
-const ERROR_TEXT_BY_CODE: Record<string, QrErrorText> = {
-  UNAUTHENTICATED: {
-    title: 'ログインの有効期限が切れています',
-    description: '再度ログインしてから QR を発行してください。',
-  },
-  FORBIDDEN: ACCESS_DENIED_TEXT,
-  NOT_FOUND: ACCESS_DENIED_TEXT,
-  PLACE_NOT_CONFIRMED: {
-    title: '店舗の場所が未確定です',
-    description: 'QR の発行には店舗の場所の確定が先に必要です。',
-  },
-};
+// オブジェクトリテラルではなく Map を使う。リテラルの添字参照は Object.prototype を辿るため、
+// code が 'constructor' や 'toString' だと ?? が発火せず空の文言で描画されうる。
+// code は封筒から取る任意の文字列なので、鎖を持たない入れ物で受ける。
+const ERROR_TEXT_BY_CODE = new Map<string, QrErrorText>([
+  [
+    'UNAUTHENTICATED',
+    {
+      title: 'ログインの有効期限が切れています',
+      description: '再度ログインしてから QR を発行してください。',
+    },
+  ],
+  ['FORBIDDEN', ACCESS_DENIED_TEXT],
+  ['NOT_FOUND', ACCESS_DENIED_TEXT],
+  [
+    'PLACE_NOT_CONFIRMED',
+    {
+      title: '店舗の場所が未確定です',
+      description: 'QR の発行には店舗の場所の確定が先に必要です。',
+    },
+  ],
+]);
 
 // 通信障害・内部障害・空応答・未知の code。成功したかのような表示は行わない。
 const GENERIC_ERROR_TEXT: QrErrorText = {
@@ -71,7 +82,7 @@ const GENERIC_ERROR_TEXT: QrErrorText = {
 };
 
 function errorTextFor(code: string): QrErrorText {
-  return ERROR_TEXT_BY_CODE[code] ?? GENERIC_ERROR_TEXT;
+  return ERROR_TEXT_BY_CODE.get(code) ?? GENERIC_ERROR_TEXT;
 }
 
 export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPanelProps) {
@@ -91,19 +102,25 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
       // 取得完了前にアンマウントされた場合は状態へ反映せず、資源も作らない。
       if (cancelled) return;
       if (!result.ok) {
-        setState({ kind: 'error', code: result.code, message: result.message });
+        setState({ kind: 'error', code: result.code });
         return;
       }
       const blob = new Blob([result.value.bytes], { type: result.value.contentType });
       createdUrl = URL.createObjectURL(blob);
-      setState({ kind: 'ready', imageUrl: createdUrl, fileName: qrFileName(storeName, storeId) });
+      setState({ kind: 'ready', imageUrl: createdUrl });
+    }).catch(() => {
+      // 取得そのものは api client が try/catch するため通常は到達しない。到達するのは
+      // Blob 生成や object URL 生成が失敗した場合で、握り潰すと loading のまま固着し、
+      // 再試行の操作も出せなくなる（脱出不能になる）。失敗として扱い再試行可能にする。
+      if (cancelled) return;
+      setState({ kind: 'error', code: 'unexpected' });
     });
 
     return () => {
       cancelled = true;
       if (createdUrl !== null) URL.revokeObjectURL(createdUrl);
     };
-  }, [storeId, storeName, fetchQr, attempt]);
+  }, [storeId, fetchQr, attempt]);
 
   // 状態の変化を支援技術へ通知する単一のライブリージョン（Requirement 6.2）。
   // 失敗時は Alert（role="alert"）が担うため、ここは空にして二重読み上げを避ける。
@@ -160,7 +177,7 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
             // buttonVariants から借り、要素と役割は素の <a> のまま保つ。
             <a
               href={state.imageUrl}
-              download={state.fileName}
+              download={qrFileName(storeName, storeId)}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
               aria-label={`${storeName} の QR 画像を保存`}
             >
