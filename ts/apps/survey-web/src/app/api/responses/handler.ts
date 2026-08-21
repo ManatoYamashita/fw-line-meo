@@ -77,13 +77,28 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   // 選ばれなかった観点も渡す（Issue #132）。プロンプト側が名指しで言及を禁止するのに使う。
   // 全選択のときは空配列になり、禁止句自体が出ない。
   const selectedCodes = new Set(aspectCodes);
-  const unselectedAspectLabels = aspects
-    .filter((a) => !selectedCodes.has(a.code))
-    .map((a) => a.label);
+  const unselected = aspects.filter((a) => !selectedCodes.has(a.code));
+  // label はプロンプトの禁止文言に、code は生成後の事後検証に使う（Issue #132）。
+  // 同じ差集合から両方を導くことで、「禁止した観点」と「検証する観点」がずれない。
+  const unselectedAspectLabels = unselected.map((a) => a.label);
+  const unselectedAspectCodes = unselected.map((a) => a.code);
   const material: DraftMaterial =
     comment !== undefined
-      ? { storeName: store.name, star, aspectLabels, comment, unselectedAspectLabels }
-      : { storeName: store.name, star, aspectLabels, unselectedAspectLabels };
+      ? {
+          storeName: store.name,
+          star,
+          aspectLabels,
+          comment,
+          unselectedAspectLabels,
+          unselectedAspectCodes,
+        }
+      : {
+          storeName: store.name,
+          star,
+          aspectLabels,
+          unselectedAspectLabels,
+          unselectedAspectCodes,
+        };
 
   // 集計（非致命・失敗しても応答継続）と生成を並行実行
   const tally = deps
