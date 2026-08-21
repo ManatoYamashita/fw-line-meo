@@ -104,6 +104,31 @@ describe('buildPrompt', () => {
       expect(userContent).not.toContain('一切言及しない');
     });
   });
+
+  // Issue #132・案C: 素材が乏しいとき、字数の指示が事実性と競合する。
+  // 実測で「観点も一言も無い素材の方が下書きが長い」＝字数を満たすために創作していた。
+  describe('素材が乏しいときは字数より事実性を優先する（Issue #132・案C）', () => {
+    it('観点が 1 つも選ばれていなければ短い字数帯を指示する', () => {
+      const m: DraftMaterial = { storeName: '店', star: 5, aspectLabels: [] };
+      const { systemInstruction } = buildPrompt(m, VARIATION);
+      expect(systemInstruction).toContain('40〜80 字');
+      // 通常の字数指示とは同時に課さない（両方あると結局 100 字まで創作で埋める）
+      expect(systemInstruction).not.toContain('100〜200 字');
+    });
+
+    it('観点が 1 つでもあれば従来どおり 100〜200 字を指示する', () => {
+      const m = material({ aspectLabels: ['味'] });
+      const { systemInstruction } = buildPrompt(m, VARIATION);
+      expect(systemInstruction).toContain('100〜200 字');
+      expect(systemInstruction).not.toContain('40〜80 字');
+    });
+
+    it('一言があっても観点ゼロなら短縮を許す（抽象的な一言は書く材料にならない）', () => {
+      // 実測では「観点ゼロ・一言あり（抽象的）」でも逸脱が残っていた。
+      const m: DraftMaterial = { storeName: '店', star: 1, aspectLabels: [], comment: '合いませんでした' };
+      expect(buildPrompt(m, VARIATION).systemInstruction).toContain('40〜80 字');
+    });
+  });
 });
 
 describe('pickVariation', () => {

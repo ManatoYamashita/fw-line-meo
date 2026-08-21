@@ -116,6 +116,31 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
         console.log(`  ${kind.padEnd(12)} ${bad.length}/${mine.length} (${pct(bad.length, mine.length)})`);
       }
 
+      // 案C（素材が乏しいときは字数より事実性を優先）の副作用を見る。逸脱率だけを追うと
+      // 「短く書けば逸脱しない」方向へ寄せた結果、口コミとして使えない下書きになっても気づけない。
+      console.log('\n--- 下書きの字数 ---');
+      const lengths = samples.map((s) => [...s.draft].length).sort((a, b) => a - b);
+      const at = (q: number) => lengths[Math.min(lengths.length - 1, Math.floor(lengths.length * q))];
+      const inRange = lengths.filter((l) => l >= 100 && l <= 200).length;
+      console.log(
+        `  min=${lengths[0]} p10=${at(0.1)} 中央=${at(0.5)} p90=${at(0.9)} max=${lengths[lengths.length - 1]}`,
+      );
+      console.log(
+        `  100〜200 字: ${inRange}/${lengths.length} (${pct(inRange, lengths.length)})` +
+          `  100 字未満: ${lengths.filter((l) => l < 100).length} 件` +
+          `  200 字超: ${lengths.filter((l) => l > 200).length} 件`,
+      );
+      for (const [label, thin] of [['観点ゼロ（案C の対象）', true], ['観点あり', false]] as const) {
+        const mine = samples
+          .filter((s) => (s.selected.length === 0) === thin)
+          .map((s) => [...s.draft].length)
+          .sort((a, b) => a - b);
+        if (mine.length === 0) continue;
+        console.log(
+          `  ${label.padEnd(22)} n=${String(mine.length).padStart(3)}  中央=${mine[Math.floor(mine.length / 2)]}  min=${mine[0]}  max=${mine[mine.length - 1]}`,
+        );
+      }
+
       if (violating.length > 0) {
         console.log('\n--- 逸脱サンプルの実例（先頭 3 件）---');
         for (const s of violating.slice(0, 3)) {
