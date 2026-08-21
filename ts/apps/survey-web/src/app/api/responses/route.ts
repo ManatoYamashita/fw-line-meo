@@ -2,7 +2,7 @@ import { getPool, findStoreForSurvey, listSurveyAspects, incrementTallies } from
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
-import { writeStructuredLog } from '../../../lib/structured-log';
+import { logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
 import { handleResponses, type ResponsesDeps } from './handler';
 
 // pg / @google/genai を使うため Node ランタイム・動的（POST）。
@@ -15,7 +15,11 @@ async function buildDeps(): Promise<ResponsesDeps> {
   const signingKey = process.env.SESSION_SIGNING_KEY;
   if (!signingKey) throw new Error('SESSION_SIGNING_KEY is required');
   const tokens = createSessionTokenService(signingKey);
-  const generator = await createDefaultDraftGenerator();
+  // 事後検証（Issue #132・案B）で作り直してもなお残った観点を記録する。下書き自体は客へ返すため
+  // 生成失敗ではない。生成器はロガーを持たないので、記録の仕方はここで決める。
+  const generator = await createDefaultDraftGenerator({
+    onResidual: (aspectCodes) => logFactualityResidual(writeStructuredLog, aspectCodes),
+  });
   const rateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 
   return {

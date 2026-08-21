@@ -188,4 +188,83 @@ describe('createDraftGenerator', () => {
       expect(calls).toHaveLength(2);
     });
   });
+
+  // Issue #132・案B: 生成後に「客が選ばなかった観点へ言及していないか」を検証し、していれば
+  // 1 回だけ作り直す。案A（プロンプトでの禁止）で 63.9%→11.1% まで下がった残差を刈るための層。
+  describe('事実性の事後検証（Issue #132・案B）', () => {
+    // 検証対象を 1 軸に絞った素材と、それに対応する最小の語彙。
+    const WITH_CODES: DraftMaterial = {
+      storeName: '店',
+      star: 5,
+      aspectLabels: ['味'],
+      unselectedAspectLabels: ['雰囲気'],
+      unselectedAspectCodes: ['atmosphere'],
+    };
+    const LEXICON = { atmosphere: ['雰囲気'] };
+
+    it('未選択観点への言及を検出したら作り直し、解消した方を返す', async () => {
+      const { client, calls } = fakeClient([draftResponse('雰囲気が良い店'), draftResponse('味が良い店')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF, lexicon: LEXICON });
+      const res = await gen.generate(WITH_CODES, VARIATION);
+      expect(res).toEqual({ ok: true, value: '味が良い店' });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('作り直しは 1 回だけ。なお残るなら下書きを返しつつ残差を通知する', async () => {
+      // fakeClient は steps を使い切ると最後の応答を繰り返すので、常に言及が残る状況になる。
+      const seen: string[][] = [];
+      const { client, calls } = fakeClient([draftResponse('雰囲気が良い店')]);
+      const gen = createDraftGenerator(client, {
+        backoff: NOOP_BACKOFF,
+        lexicon: LEXICON,
+        onResidual: (codes) => seen.push(codes),
+      });
+      const res = await gen.generate(WITH_CODES, VARIATION);
+      // 客には下書きを返す（何も出さない方が実害が大きい）。合意水準 11.1% を受け入れた形。
+      expect(res).toEqual({ ok: true, value: '雰囲気が良い店' });
+      expect(calls).toHaveLength(2);
+      expect(seen).toEqual([['atmosphere']]);
+    });
+
+    it('言及が無ければ作り直さない（無駄な課金とレイテンシを生まない）', async () => {
+      const seen: string[][] = [];
+      const { client, calls } = fakeClient([draftResponse('味が良い店')]);
+      const gen = createDraftGenerator(client, {
+        backoff: NOOP_BACKOFF,
+        lexicon: LEXICON,
+        onResidual: (codes) => seen.push(codes),
+      });
+      const res = await gen.generate(WITH_CODES, VARIATION);
+      expect(res).toEqual({ ok: true, value: '味が良い店' });
+      expect(calls).toHaveLength(1);
+      expect(seen).toEqual([]);
+    });
+
+    it('作り直しが失敗したら初回の下書きを返す', async () => {
+      const { client } = fakeClient([draftResponse('雰囲気が良い店'), { text: 'not json' }]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF, lexicon: LEXICON });
+      const res = await gen.generate(WITH_CODES, VARIATION);
+      expect(res).toEqual({ ok: true, value: '雰囲気が良い店' });
+    });
+
+    it('factualityCheck: false なら検証せず初回をそのまま返す（測定の独立性）', async () => {
+      const { client, calls } = fakeClient([draftResponse('雰囲気が良い店')]);
+      const gen = createDraftGenerator(client, {
+        backoff: NOOP_BACKOFF,
+        lexicon: LEXICON,
+        factualityCheck: false,
+      });
+      const res = await gen.generate(WITH_CODES, VARIATION);
+      expect(res).toEqual({ ok: true, value: '雰囲気が良い店' });
+      expect(calls).toHaveLength(1);
+    });
+
+    it('unselectedAspectCodes を持たない素材では検証しない（旧 sessionToken からの復元）', async () => {
+      const { client, calls } = fakeClient([draftResponse('雰囲気が良い店')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF, lexicon: LEXICON });
+      const res = await gen.generate(MATERIAL, VARIATION);
+      expect(res).toEqual({ ok: true, value: '雰囲気が良い店' });
+      expect(calls).toHaveLength(1);
+    });
+  });
 });
