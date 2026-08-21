@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Button } from '@fwlm/ui/components/button';
 import { AuthGuard } from '../../components/auth-guard';
+import { StoreQrPanel } from '../../components/store-qr-panel';
 import { TopNav } from '../../components/top-nav';
 import { useAuth } from '../../lib/auth-context';
 import { getStores } from '../../lib/api';
@@ -14,11 +16,19 @@ type LoadState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; stores: StoreListItem[] };
 
+// 全ロール共通の列数（店名・店舗特定・競合設定・QR）。operator のみ担当代理店列が加わる。
+// パネル行の colSpan をここから算出し、列数を定数で二重管理しない
+// （store-qr-issuance-ui task 3.2）。
+const BASE_COLUMN_COUNT = 4;
+
 // 店舗一覧本体。AuthGuard 配下でのみ描画されるため me は非 null 前提だが、防御的に optional 参照する。
 function StoresView() {
   const { me } = useAuth();
   const isOperator = me?.role === 'operator';
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // QR パネルを開いている店舗。開閉状態は一覧が所有し、パネル自身は持たない。
+  const [openStoreId, setOpenStoreId] = useState<string | null>(null);
+  const columnCount = BASE_COLUMN_COUNT + (isOperator ? 1 : 0);
 
   useEffect(() => {
     let active = true;
@@ -57,18 +67,53 @@ function StoresView() {
               <th>競合設定</th>
               {/* operator は全店舗を担当代理店が識別できる形で見る（Req 4.2） */}
               {isOperator && <th>担当代理店</th>}
+              {/* 店頭設置用 QR の発行導線（store-qr-issuance-ui Req 1.1） */}
+              <th>QR</th>
             </tr>
           </thead>
           <tbody>
             {state.stores.map((store) => (
-              <tr key={store.id}>
-                <td>{store.name}</td>
-                {/* 店舗特定バッジ（Req 4.3） */}
-                <td>{store.placeStatus === 'confirmed' ? '確定済み' : '未確定'}</td>
-                {/* 競合設定バッジ（Req 4.3・変更手段は提供しない = 表示のみ Req 4.5） */}
-                <td>{store.competitorConfigured ? '競合設定済み' : '競合未設定'}</td>
-                {isOperator && <td>{store.agencyName}</td>}
-              </tr>
+              <Fragment key={store.id}>
+                <tr>
+                  <td>{store.name}</td>
+                  {/* 店舗特定バッジ（Req 4.3） */}
+                  <td>{store.placeStatus === 'confirmed' ? '確定済み' : '未確定'}</td>
+                  {/* 競合設定バッジ（Req 4.3・変更手段は提供しない = 表示のみ Req 4.5） */}
+                  <td>{store.competitorConfigured ? '競合設定済み' : '競合未設定'}</td>
+                  {isOperator && <td>{store.agencyName}</td>}
+                  <td>
+                    {/* 分岐条件は場所の状態のみ。競合設定の状態を条件に含めない（Req 1.5）。 */}
+                    {store.placeStatus === 'confirmed' ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setOpenStoreId(store.id)}
+                        aria-label={`${store.name} の QR を発行`}
+                      >
+                        QR 発行
+                      </Button>
+                    ) : (
+                      // 発行操作に代えて理由を同じ位置に置く（Req 3.1, 3.2）。
+                      <span className="text-muted-foreground">場所の確定が必要です</span>
+                    )}
+                  </td>
+                </tr>
+                {openStoreId === store.id && (
+                  // 対象行の直下へ挿入し、対応関係を視覚的にも DOM 順でも読み取れるようにする。
+                  <tr>
+                    <td colSpan={columnCount}>
+                      {/* fetchQr は渡さない。インライン関数を渡すと参照が毎描画で変わり、
+                        * パネル側の副作用が再走して取得が繰り返される（Req 2.2, 2.3 が同時に壊れる）。 */}
+                      <StoreQrPanel
+                        key={store.id}
+                        storeId={store.id}
+                        storeName={store.name}
+                        onClose={() => setOpenStoreId(null)}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
