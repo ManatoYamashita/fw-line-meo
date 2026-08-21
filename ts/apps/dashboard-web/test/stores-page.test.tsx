@@ -301,3 +301,142 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
   });
 });
+
+describe('店舗一覧ページ: 行と取得対象の対応', () => {
+  it('押した行の店舗 ID で取得する（1.3・取り違えの防止）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({
+      ok: true,
+      value: [storeConfirmed, storeConfirmedNoCompetitor],
+    });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('競合未設定の確定店');
+
+    // 一覧の 2 行目を押す。1 行目の ID を渡す実装ではここが赤になる。
+    fireEvent.click(
+      within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店/ }),
+    );
+    await screen.findByRole('heading', { name: /競合未設定の確定店/ });
+
+    expect(api.getStoreQr).toHaveBeenCalledWith('s3');
+    expect(api.getStoreQr).not.toHaveBeenCalledWith('s1');
+  });
+
+  it('別店舗へ切り替えると切り替え先の店舗 ID で取得し直す（2.8）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({
+      ok: true,
+      value: [storeConfirmed, storeConfirmedNoCompetitor],
+    });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ }));
+    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    fireEvent.click(
+      within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店/ }),
+    );
+    await screen.findByRole('heading', { name: /競合未設定の確定店/ });
+
+    expect(api.getStoreQr.mock.calls.map(([id]) => id)).toEqual(['s1', 's3']);
+  });
+
+  it('保存名にも押した行の店舗が反映される（2.4, 2.6）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({
+      ok: true,
+      value: [storeConfirmed, storeConfirmedNoCompetitor],
+    });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('競合未設定の確定店');
+
+    fireEvent.click(
+      within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店/ }),
+    );
+    const link = await screen.findByRole('link', { name: /競合未設定の確定店/ });
+    expect(link.getAttribute('download')).toBe('qr-競合未設定の確定店-s3.png');
+  });
+});
+
+describe('店舗一覧ページ: 発行導線の操作性', () => {
+  it('見える文言が読み上げ名に含まれる（WCAG 2.5.3 Label in Name）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ });
+    const visible = button.textContent ?? '';
+    expect(visible.length).toBeGreaterThan(0);
+    expect(button.getAttribute('aria-label')).toContain(visible);
+  });
+
+  it('発行導線が開閉状態を支援技術へ伝える（6.1）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(button);
+    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('パネルを閉じたとき焦点を発行操作へ戻す（6.1）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ });
+    fireEvent.click(button);
+    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+
+    fireEvent.click(screen.getByRole('button', { name: /閉じる/ }));
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('agency でもパネル行が全列にまたがる（1.4）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    const targetRow = rowOf('鳥貴族 渋谷店');
+    fireEvent.click(within(targetRow).getByRole('button', { name: /鳥貴族 渋谷店/ }));
+    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+
+    expect(targetRow.nextElementSibling?.querySelector('td')?.getAttribute('colspan')).toBe('4');
+  });
+
+  it('発行に失敗しても他店舗の発行を妨げない（4.4）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({
+      ok: true,
+      value: [storeConfirmed, storeConfirmedNoCompetitor],
+    });
+    api.getStoreQr.mockResolvedValueOnce({ ok: false, code: 'network', message: 'x' });
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ }));
+    await screen.findByRole('alert');
+
+    api.getStoreQr.mockResolvedValue(qrOk());
+    fireEvent.click(
+      within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店/ }),
+    );
+
+    await screen.findByRole('img');
+    expect(api.getStoreQr.mock.calls.map(([id]) => id)).toEqual(['s1', 's3']);
+  });
+});

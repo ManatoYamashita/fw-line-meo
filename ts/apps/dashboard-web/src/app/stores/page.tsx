@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { Button } from '@fwlm/ui/components/button';
 import { AuthGuard } from '../../components/auth-guard';
@@ -17,9 +17,15 @@ type LoadState =
   | { kind: 'ready'; stores: StoreListItem[] };
 
 // 全ロール共通の列数（店名・店舗特定・競合設定・QR）。operator のみ担当代理店列が加わる。
-// パネル行の colSpan をここから算出し、列数を定数で二重管理しない
-// （store-qr-issuance-ui task 3.2）。
+// パネル行の colSpan はここからロールに応じて算出する。ロール差分を各所へ散らさないための
+// 単一の起点であり、下の <th> の並びとは別に列数を持つ点は残っている
+// （operator / agency 双方の colSpan をテストで固定してドリフトを検出する）。
 const BASE_COLUMN_COUNT = 4;
+
+// 発行操作から開閉先のパネルを指すための id（aria-controls 用）。
+function panelId(storeId: string): string {
+  return `qr-panel-${storeId}`;
+}
 
 // 店舗一覧本体。AuthGuard 配下でのみ描画されるため me は非 null 前提だが、防御的に optional 参照する。
 function StoresView() {
@@ -29,6 +35,20 @@ function StoresView() {
   // QR パネルを開いている店舗。開閉状態は一覧が所有し、パネル自身は持たない。
   const [openStoreId, setOpenStoreId] = useState<string | null>(null);
   const columnCount = BASE_COLUMN_COUNT + (isOperator ? 1 : 0);
+  // 直近に押された発行操作。パネルを閉じると焦点の載っていた要素ごと消えるため、
+  // 焦点を呼び出し元へ戻す（戻さないと body へ落ち、焦点位置が視覚的に判別できなくなる）。
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  function openPanel(event: MouseEvent<HTMLButtonElement>, storeId: string) {
+    triggerRef.current = event.currentTarget;
+    setOpenStoreId(storeId);
+  }
+
+  function closePanel() {
+    // 対象は消えないので先に焦点を移してよい（この後の再描画でパネルだけが外れる）。
+    triggerRef.current?.focus();
+    setOpenStoreId(null);
+  }
 
   useEffect(() => {
     let active = true;
@@ -87,8 +107,13 @@ function StoresView() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setOpenStoreId(store.id)}
-                        aria-label={`${store.name} の QR を発行`}
+                        onClick={(event) => openPanel(event, store.id)}
+                        aria-expanded={openStoreId === store.id}
+                        aria-controls={openStoreId === store.id ? panelId(store.id) : undefined}
+                        // 見えている文言（QR 発行）を読み上げ名へそのまま含める。含めないと
+                        // 音声入力の利用者が見えているとおりに発話しても操作できない
+                        // （WCAG 2.5.3 Label in Name）。
+                        aria-label={`${store.name} の QR 発行`}
                       >
                         QR 発行
                       </Button>
@@ -101,14 +126,14 @@ function StoresView() {
                 {openStoreId === store.id && (
                   // 対象行の直下へ挿入し、対応関係を視覚的にも DOM 順でも読み取れるようにする。
                   <tr>
-                    <td colSpan={columnCount}>
+                    <td colSpan={columnCount} id={panelId(store.id)}>
                       {/* fetchQr は渡さない。インライン関数を渡すと参照が毎描画で変わり、
                         * パネル側の副作用が再走して取得が繰り返される（Req 2.2, 2.3 が同時に壊れる）。 */}
                       <StoreQrPanel
                         key={store.id}
                         storeId={store.id}
                         storeName={store.name}
-                        onClose={() => setOpenStoreId(null)}
+                        onClose={closePanel}
                       />
                     </td>
                   </tr>
