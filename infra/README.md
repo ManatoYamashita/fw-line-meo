@@ -35,11 +35,15 @@
    ```bash
    gcloud sql users set-password postgres --instance=fwlm-pg --project=gen-fw-line-meo --prompt-for-password
    ```
-7. **Places API クォータ ID の確認と設定**（Req 7.2）:
+7. **Places API クォータ ID の確認と設定**（Req 7.2）。実名は Cloud Quotas API の `quotaInfos` が正典:
    ```bash
-   gcloud services quota list --service=places.googleapis.com --project=gen-fw-line-meo
+   curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+     -H "x-goog-user-project: gen-fw-line-meo" \
+     "https://cloudquotas.googleapis.com/v1/projects/gen-fw-line-meo/locations/global/services/places.googleapis.com/quotaInfos?pageSize=200"
    ```
-   確認した quota_id と上限値を `terraform.tfvars` の `places_quota_id` / `places_quota_limit` に設定してから apply（未設定だと上限が作られず Req 7.2 未達）。
+   返る `quotaInfos[].quotaId` が実名である。バッチが使う日次エンドポイント（`SearchTextRequestPerDayPerProject` / `SearchNearbyRequestPerDayPerProject` / `GetPlaceRequestPerDayPerProject`）を `terraform.tfvars` の `places_quota_caps`（`quota_id => 上限値` の map）へ設定してから apply する（空 `{}` だと上限が作られず Req 7.2 未達）。
+
+   **gcloud に quota 用のコマンド群は無い。** 575.0.0 で `gcloud services quota` は `Invalid choice: 'quota'`、`gcloud quotas` も `Invalid choice: 'quotas'` を返す（`gcloud alpha quotas` はコンポーネント追加を要求するため既定では使えない）。ここで REST を直接叩いているのはそのためである。
 8. **GitHub リポジトリ変数の設定**（WIF 検証ワークフロー用）: `vars.WIF_PROVIDER = terraform output wif_provider_name`、`vars.GCP_PROJECT_ID = gen-fw-line-meo`
 9. **LIFF チャネル作成**（competitive-daily-summary / store-detail 用。LINE Developers コンソールでの手動作業・Terraform 管理外。LINE は LIFF/LINE Login チャネルの Terraform provider を持たないため恒久的に手動）:
    - Messaging API チャネルと **同一プロバイダー配下**に LINE Login チャネルを新規作成する（`ts/apps/store-detail/lib/liff-auth.ts` の userId 突合はプロバイダー一致が前提）
@@ -352,11 +356,11 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 
   実測: 2026-08-17 と 2026-08-21 のいずれも **0 件（未承認）**。同じ時点で新 API 群 8 本（`mybusinessaccountmanagement` ほか）は列挙されるので、フィルタが空振りしているわけではない。有効化済み API（`--enabled`）にも GBP 系は 1 本も無い。
 
-  **`gcloud services quota list` というコマンドは存在しない**（gcloud 575.0.0 で `Invalid choice: 'quota'`）。以前この節に書いていたが誤りだったので使わないこと。
+  **`gcloud services quota list` というコマンドは存在しない**（gcloud 575.0.0 で `Invalid choice: 'quota'`）。以前この節と §1 項目 7 の両方に書いていた誤りで、いずれも是正済み（Places のクォータ実名確認は §1 項目 7 の Cloud Quotas REST を使う）。
 
 - **承認後に有効化する API**: 公式手順は Business Profile 関連の **8 本すべて**の有効化を要求する（Google My Business API / My Business Account Management / Business Information / Lodging / Place Actions / Notifications / Verifications / Q&A）。実装が実際に叩くのは次の 3 ホストだが、審査側の前提に合わせて 8 本を有効化しておくのが安全: `mybusiness.googleapis.com`（v4・投稿と返信）/ `mybusinessaccountmanagement.googleapis.com`（v1）/ `mybusinessbusinessinformation.googleapis.com`（v1）。
 
-#### 9-1-a. 前提 GBP の確保（2026-08-21 時点で未確保・Phase2 の真のゲート）
+#### 9-1-a. 前提 GBP の確保
 
 **この関門は工学の問題ではなく事業の問題である。** 60 日要件は文言上**プロフィール自体の年齢**に掛かっており、「自社のものでもクライアントのものでもよい」と明記されている。取り得る経路は 3 本で、優劣が明確に違う。
 
@@ -376,10 +380,10 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 
 `business.manage` は sensitive スコープのため Google の OAuth 検証が必要で、**審査は最大 10 日**。ここで揃える提出物は**デモ動画を除いて GBP に依存しない**。関門 A が事業側で詰まっている間に、ここを空にしておくと承認後の待ち時間が最小になる。
 
-| 提出物 | 要件 | 2026-08-21 時点 |
+| 提出物 | 要件 | 2026-08-21 時点（状態の正典は Issue #7） |
 |---|---|---|
 | 独自ドメイン | 自己所有・Search Console で所有権検証済み | **未取得**（9-2-a） |
-| ドメイン所有権の検証 | **Project Owner** の Google アカウントで **Domain property**（DNS レベル）を検証する | 未（ドメイン待ち） |
+| ドメイン所有権の検証 | API Console プロジェクトに **Owner または Editor** として紐づく Google アカウントで Search Console の所有権検証を通す | 未（ドメイン待ち） |
 | 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 未（ドメイン待ち） |
 | プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 未（ドメイン待ち） |
 | スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 未着手（ドメイン非依存・**今日から書ける**） |
@@ -388,7 +392,7 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 
 **Testing のまま放置しないこと。** 「未確認アプリ」警告に加え、テストユーザーの承認自体が **7 日で失効**する。IT に不慣れなオーナーへ毎週の再連携を強いることになり、本サービスの存在意義に反する。**検証結果の有効期間も 7 日**で、その間に Published へ切り替えないと再検証がいる。承認が出たら速やかに公開すること。
 
-#### 9-2-a. 独自ドメインの確保（未着手・関門 B の律速）
+#### 9-2-a. 独自ドメインの確保
 
 **現状の公開面は Cloud Run の `*.run.app` だけで、独自ドメインを保有していない**（2026-08-21 実測。`gcloud run services list` が返す 5 サービスはすべて `https://<name>-vdqjgfvkma-an.a.run.app`）。
 
@@ -397,11 +401,13 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 この順序で詰まる:
 
 1. ドメインを取得する（運営が所有する top private domain）
-2. **Project Owner** の Google アカウントで Search Console の **Domain property**（DNS レコードによる検証）を通す。Editor 権限では不十分
+2. API Console プロジェクトに **Owner または Editor** として紐づく Google アカウントで Search Console の所有権検証を通す（公式は検証方式を指定していない）
 3. そのドメインでホームページとプライバシーポリシーを公開する（同一ドメイン）
 4. OAuth 同意画面の承認済みドメインへ登録し、プライバシーポリシー URL をホームページ側のリンクと一致させる
 
 1〜3 は GBP と無関係に進む。**関門 A の事業ゲートを待つ理由にはならない。**
+
+**権限要件を上乗せしないこと。** 出典は Google の sensitive scope 検証ページ（2026-08-22 確認）。所有権検証の要件は逐語で `Use a Google Account that's associated with your API Console project as an Owner or an Editor.` であり、Search Console の検証方式（Domain property / URL-prefix property）は指定されていない。「Project Owner でなければ通せない」「DNS レベルの検証でなければならない」はいずれも公式要件ではなく、本 PR のレビューで差し戻した誤りである（過去に一度この誤りを持ち込んでいる）。
 
 ### 9-3. 進捗の追跡
 
