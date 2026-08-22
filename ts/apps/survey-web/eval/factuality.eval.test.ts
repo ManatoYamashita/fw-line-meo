@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { createDefaultDraftGenerator } from '../src/lib/draft/generator';
-import { pickVariation } from '../src/lib/draft/prompt';
+import { pickVariation, materialThickness, type MaterialThickness } from '../src/lib/draft/prompt';
 import type { DraftMaterial, Star } from '../src/lib/domain';
 import { detectAspectMentions, readLexicon } from '../src/lib/draft/factuality';
 import lexiconRaw from '../src/lib/draft/aspect-lexicon.json';
@@ -29,6 +29,8 @@ interface Sample {
   readonly materialId: string;
   readonly storeNameKind: string;
   readonly selected: readonly string[];
+  /** 字数の指示を切り替える素材の厚み。**本番と同じ関数で判定する**（Issue #137 段階2）。 */
+  readonly thickness: MaterialThickness;
   readonly draft: string;
   readonly violations: readonly { aspectCode: string; matchedTerm: string }[];
 }
@@ -75,6 +77,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             materialId: material.id,
             storeNameKind: material.storeNameKind,
             selected: material.aspectCodes,
+            thickness: materialThickness(dm),
             draft: result.value,
             // 検証対象は本番と同じく「素材が持つ未選択 code」。プロンプトで禁止した集合と一致する。
             violations: detectAspectMentions(result.value, dm.unselectedAspectCodes ?? [], lexicon),
@@ -130,14 +133,34 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
           `  100 字未満: ${lengths.filter((l) => l < 100).length} 件` +
           `  200 字超: ${lengths.filter((l) => l > 200).length} 件`,
       );
-      for (const [label, thin] of [['観点ゼロ（案C の対象）', true], ['観点あり', false]] as const) {
+      // 分割は本番の materialThickness で行う。ここを自前の条件（旧: selected.length === 0）で
+      // 書くと、字数規則の分岐が変わったときに見出しと中身が静かにずれ、前後比較が読めなくなる。
+      for (const [label, kind] of [
+        ['観点あり（100〜200 字）', 'aspects'],
+        ['観点ゼロ＋一言あり（上限のみ）', 'comment-only'],
+        ['観点ゼロ＋一言なし（40〜80 字）', 'bare'],
+      ] as const) {
         const mine = samples
-          .filter((s) => (s.selected.length === 0) === thin)
+          .filter((s) => s.thickness === kind)
           .map((s) => [...s.draft].length)
           .sort((a, b) => a - b);
         if (mine.length === 0) continue;
         console.log(
           `  ${label.padEnd(22)} n=${String(mine.length).padStart(3)}  中央=${mine[Math.floor(mine.length / 2)]}  min=${mine[0]}  max=${mine[mine.length - 1]}`,
+        );
+      }
+
+      // 素材別の字数（段階2 の狙いは「中間層だけが伸びる」こと。全体の中央値では見えない）。
+      console.log('\n--- 素材別の字数 ---');
+      for (const material of datasetRaw.materials) {
+        const mine = samples
+          .filter((s) => s.materialId === material.id)
+          .map((s) => [...s.draft].length)
+          .sort((a, b) => a - b);
+        if (mine.length === 0) continue;
+        const kind = materialThickness(toDraftMaterial(material));
+        console.log(
+          `  ${material.id.padEnd(36)} ${kind.padEnd(12)} n=${String(mine.length).padStart(3)}  中央=${mine[Math.floor(mine.length / 2)]}  min=${mine[0]}  max=${mine[mine.length - 1]}`,
         );
       }
 

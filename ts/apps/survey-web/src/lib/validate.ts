@@ -68,10 +68,15 @@ export function validateSurveyAnswer(
   if (rawComment !== undefined && rawComment !== null && rawComment !== '') {
     if (typeof rawComment !== 'string') {
       errors.push({ field: 'comment', code: 'INVALID' });
-    } else if ([...rawComment].length > COMMENT_MAX) {
-      errors.push({ field: 'comment', code: 'TOO_LONG' });
-    } else {
-      comment = rawComment;
+    } else if (rawComment.trim() !== '') {
+      // 空白のみは空文字と同じく「未回答」。フォームは trim 済みで送るが、直接 POST では
+      // 届きうる。ここで潰しておかないと「一言あり」として素材の厚みに数えられ、
+      // プロンプト側の判定（書く材料が無い）とずれる（Issue #137 段階2/3）。
+      if ([...rawComment].length > COMMENT_MAX) {
+        errors.push({ field: 'comment', code: 'TOO_LONG' });
+      } else {
+        comment = rawComment;
+      }
     }
   }
 
