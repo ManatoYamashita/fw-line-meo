@@ -655,7 +655,7 @@ describe('createGbpFlowHandlers（投稿フロー・task 4.1）', () => {
         stage: 'await_decision',
         draft_text: '本日から新メニューを始めました。',
       });
-      expect(h.replies).toEqual([[buildGbpPostFailedMessage('reauth')]]);
+      expect(h.replies).toEqual([[buildGbpPostFailedMessage('reauth', STORE_A)]]);
     });
 
     it('未連携エラーも再連携誘導へ倒す', async () => {
@@ -663,7 +663,7 @@ describe('createGbpFlowHandlers（投稿フロー・task 4.1）', () => {
 
       await h.handlers.handleGbpPostback(postback(G_APPROVE));
 
-      expect(h.replies).toEqual([[buildGbpPostFailedMessage('reauth')]]);
+      expect(h.replies).toEqual([[buildGbpPostFailedMessage('reauth', STORE_A)]]);
     });
 
     it('crypto_error は再連携を促さず一過性障害として案内する', async () => {

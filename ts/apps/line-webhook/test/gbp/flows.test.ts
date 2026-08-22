@@ -150,6 +150,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
       },
       async deleteToken(_db, key) {
         deletedTokens.push({ ownerId: key.ownerId, storeId: key.storeId });
+        // 実アクセサは oauth_tokens の行を消すので、以降の isLinked は false になる。
+        // フェイクがこれを反映しないと、削除後に再認可へ進む経路（g_relink）を検証できない。
+        linked.delete(key.storeId);
         return true;
       },
     },
@@ -297,6 +300,10 @@ describe('createGbpFlowHandlers（連携系フロー・task 3.3）', () => {
 
       expect(h.startConnectCalls).toEqual([]);
       expect(h.replies).toEqual([[buildGbpAlreadyLinkedMessage(STORE_A, 'テスト食堂A')]]);
+      // **セッションを破棄しない**（PR #121 レビュー指摘）。この分岐は startConnect を伴わない
+      // ＝何も置き換えないので、破棄は純粋な副作用になる。失効時の失敗文面は「下書きは保存して
+      // います」と案内するため、ここで clear すると温存したはずの draft_text が消える。
+      expect(h.clearCalls).toEqual([]);
     });
 
     it('startConnect が所有検証で失敗したら案内のみ返す', async () => {
@@ -421,6 +428,54 @@ describe('createGbpFlowHandlers（連携系フロー・task 3.3）', () => {
       await h.handlers.handleGbpPostback(postback(encodeGbpPostback({ action: 'g_status' })));
 
       expect(h.replies).toEqual([[buildGbpNoEligibleStoreMessage()]]);
+    });
+  });
+
+  // PR #121 レビュー指摘の是正。g_connect は isLinked（oauth_tokens 行の存在のみ）で短絡する
+  // ため、refresh token が失効していても「すでに連携済み」しか返せず行き止まりだった。
+  // g_relink は古い認可情報を消してから認可 URL の発行へ進む。
+  describe('g_relink（失効した連携の張り直し・Req 2.3）', () => {
+    it('連携済み店舗なら revoke → 行削除 → 認可 URL 発行まで進む', async () => {
+      const h = createHarness({ linkedStoreIds: [STORE_A] });
+
+      await h.handlers.handleGbpPostback(
+        postback(encodeGbpPostback({ action: 'g_relink', storeId: STORE_A })),
+      );
+
+      expect(h.revoked).toEqual([`access-token-for-${STORE_A}`]);
+      expect(h.deletedTokens).toEqual([{ ownerId: OWNER, storeId: STORE_A }]);
+      expect(h.deletedLocations).toEqual([{ ownerId: OWNER, storeId: STORE_A }]);
+      expect(h.txLog).toEqual(['BEGIN', 'COMMIT', 'RELEASE']);
+      // 削除後は isLinked が false になるため startConnect が走る（＝行き止まりでない）。
+      expect(h.startConnectCalls).toEqual([{ ownerId: OWNER, storeId: STORE_A }]);
+    });
+
+    it('未連携・他オーナーの storeId は同一文面へ倒し、何も削除しない', async () => {
+      const h = createHarness({ linkedStoreIds: [] });
+
+      await h.handlers.handleGbpPostback(
+        postback(encodeGbpPostback({ action: 'g_relink', storeId: STORE_A })),
+      );
+
+      expect(h.deletedTokens).toEqual([]);
+      expect(h.deletedLocations).toEqual([]);
+      expect(h.startConnectCalls).toEqual([]);
+      expect(h.replies).toEqual([[buildGbpNotLinkedMessage()]]);
+    });
+
+    it('復号不能でも revoke を諦めてローカルの認可情報は必ず消す', async () => {
+      const h = createHarness({
+        linkedStoreIds: [STORE_A],
+        accessToken: { ok: false, error: { kind: 'crypto_error' } },
+      });
+
+      await h.handlers.handleGbpPostback(
+        postback(encodeGbpPostback({ action: 'g_relink', storeId: STORE_A })),
+      );
+
+      expect(h.revoked).toEqual([]);
+      expect(h.deletedTokens).toEqual([{ ownerId: OWNER, storeId: STORE_A }]);
+      expect(h.startConnectCalls).toEqual([{ ownerId: OWNER, storeId: STORE_A }]);
     });
   });
 

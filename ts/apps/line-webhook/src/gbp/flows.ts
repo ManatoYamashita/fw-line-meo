@@ -274,8 +274,12 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
 
     if (await deps.tokenStore.isLinked(deps.db, key)) {
       // 連携済みの店舗を再認可しても得るものがないため、状態と解除導線のみを案内する。
-      // 選択中のセッションが残っていても意味を持たないので破棄する（owner キーで冪等）。
-      await deps.sessions.clearGbpSession(deps.db, event.ownerId);
+      //
+      // **ここでセッションを破棄してはならない**（PR #121 レビュー指摘）。この分岐は
+      // startConnect を伴わない＝何も置き換えないので、破棄は純粋な副作用になる。
+      // 失効時の失敗文面は「下書きは保存しています」と案内したうえで再連携導線を出すため、
+      // ここで clear すると、その導線を踏んだ瞬間に温存したはずの draft_text が消える
+      // （Req 3.7 / 4.7 に反する）。失効した連携の張り直しは g_relink が担う。
       await reply(event.replyToken, buildGbpAlreadyLinkedMessage(store.id, store.name));
       return;
     }
@@ -422,6 +426,41 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     }
 
     await reply(event.replyToken, buildGbpDisconnectedMessage(storeName));
+  }
+
+  /**
+   * Req 2.3: 失効した連携の張り直し（PR #121 レビュー指摘の是正）。
+   *
+   * `g_connect` は `isLinked`（oauth_tokens 行の存在のみ）で短絡するため、refresh token が
+   * 失効していても「すでに連携済み」しか返せず、案内どおり操作しても復旧できない行き止まりに
+   * なっていた。本ハンドラは解除と同じ所有検証を通したうえで古い認可情報を消し、そのまま
+   * 認可 URL の発行（beginConnect）へ進む。この時点で isLinked は false なので startConnect が走る。
+   *
+   * 下書きは残らない（gbp_sessions は owner 単位で 1 行しか持てず、startConnect の upsert と
+   * callback の消費で必ず置換される）。失敗文面側でその旨を明示している。
+   */
+  async function handleRelink(event: GbpPostbackEvent, storeId: string): Promise<void> {
+    const key: StoreKey = { ownerId: event.ownerId, storeId };
+
+    // 所有と連携の両方を同時に検証する（g_disconnect と同一の規律）。満たさない場合は
+    // 他オーナーの店舗の存在を推測させない同一文面へ倒す。
+    if (!(await deps.tokenStore.isLinked(deps.db, key))) {
+      await reply(event.replyToken, buildGbpNotLinkedMessage());
+      return;
+    }
+
+    const stores = await resolveEligibleStores(event.ownerId);
+    const store = stores.find((candidate) => candidate.id === storeId);
+    if (store === undefined) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
+
+    // Google 側の認可を手放してからローカルを消す（解除と同じ順序・同じヘルパー）。
+    await revokeBestEffort(key);
+    await deleteLinkRows(key);
+
+    await beginConnect(event, store);
   }
 
   async function revokeBestEffort(key: StoreKey): Promise<void> {
@@ -740,7 +779,10 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
       'post',
       sessionExpiry(),
     );
-    await reply(event.replyToken, buildGbpPostFailedMessage(toGbpFailureReason(result.error)));
+    await reply(
+      event.replyToken,
+      buildGbpPostFailedMessage(toGbpFailureReason(result.error), storeId),
+    );
   }
 
   /**
@@ -849,7 +891,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
       // セッションは作らない（状態機械に入る前の失敗のため、やり直しは開始から）。
       await reply(
         event.replyToken,
-        buildGbpReviewListFailedMessage(toGbpFailureReason(listed.error)),
+        buildGbpReviewListFailedMessage(toGbpFailureReason(listed.error), store.id),
       );
       return;
     }
@@ -1130,7 +1172,10 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
       'reply',
       sessionExpiry(),
     );
-    await reply(event.replyToken, buildGbpReplyFailedMessage(toGbpFailureReason(result.error)));
+    await reply(
+      event.replyToken,
+      buildGbpReplyFailedMessage(toGbpFailureReason(result.error), storeId),
+    );
   }
 
   /** 返信の実行。例外は一過性障害として Result へ畳む（executing に取り残さない）。 */
@@ -1200,6 +1245,8 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         return handleStatus(event);
       case 'g_disconnect':
         return handleDisconnect(event, session, action.storeId);
+      case 'g_relink':
+        return handleRelink(event, action.storeId);
       case 'g_cancel': {
         if (session !== null) await deps.sessions.clearGbpSession(deps.db, event.ownerId);
         return reply(event.replyToken, buildGbpCancelledMessage());

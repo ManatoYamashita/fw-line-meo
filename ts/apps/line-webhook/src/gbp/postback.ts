@@ -22,6 +22,13 @@ export type GbpPostbackAction =
   | { action: 'g_pick_store'; index: number }
   | { action: 'g_status' }
   | { action: 'g_disconnect'; storeId: string }
+  /**
+   * 失効した連携の張り直し（PR #121 レビュー指摘）。`g_connect` は `isLinked`（oauth_tokens
+   * 行の存在のみ）で短絡するため、失効中は「すでに連携済み」しか返せず行き止まりになる。
+   * 本 action は古い認可情報を消してから認可 URL を発行する経路を指す。
+   * storeId の所有検証は GbpFlows の責務（`g_disconnect` と同じ）。
+   */
+  | { action: 'g_relink'; storeId: string }
   | { action: 'g_post' }
   | { action: 'g_reply' }
   | { action: 'g_pick_review'; index: number }
@@ -53,6 +60,8 @@ export function encodeGbpPostback(action: GbpPostbackAction): string {
         return `a=g_pick_review&i=${action.index}`;
       case 'g_disconnect':
         return `a=g_disconnect&s=${encodeURIComponent(action.storeId)}`;
+      case 'g_relink':
+        return `a=g_relink&s=${encodeURIComponent(action.storeId)}`;
       case 'g_connect':
       case 'g_status':
       case 'g_post':
@@ -107,6 +116,14 @@ export function decodeGbpPostback(data: string): GbpPostbackAction | null {
         return null;
       }
       return { action: 'g_disconnect', storeId };
+    }
+    case 'g_relink': {
+      // g_disconnect と同じ規律（形式検証のみ・所有検証は GbpFlows）。
+      const storeId = params.get('s');
+      if (storeId === null || !UUID_PATTERN.test(storeId)) {
+        return null;
+      }
+      return { action: 'g_relink', storeId };
     }
     case 'g_post':
       return { action: 'g_post' };

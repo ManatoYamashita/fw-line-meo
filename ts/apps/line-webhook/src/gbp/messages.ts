@@ -113,6 +113,25 @@ const STATUS_BUTTON: FlexBoxContent = {
   },
 };
 
+/**
+ * 失効した連携を張り直すボタン（PR #121 レビュー指摘）。CONNECT_BUTTON（`g_connect`）は
+ * `isLinked` が oauth_tokens 行の存在だけを見るため失効中は「すでに連携済み」で止まる。
+ * こちらは古い認可情報を消してから認可 URL を発行する経路へ入る。
+ */
+function relinkButton(storeId: string): FlexBoxContent {
+  return {
+    type: 'button',
+    style: 'primary',
+    color: LINKED_COLOR,
+    action: {
+      type: 'postback',
+      label: '連携をやり直す',
+      data: encodeGbpPostback({ action: 'g_relink', storeId }),
+      displayText: '連携をやり直す',
+    },
+  };
+}
+
 function disconnectButton(storeId: string): FlexBoxContent {
   return {
     type: 'button',
@@ -636,7 +655,10 @@ export type GbpPostFailureReason = 'reauth' | 'transient' | 'permission';
  * Req 3.7: 投稿の失敗通知。いずれの分類でも **下書きは保持されている**ことを明示し、
  * 再試行の導線を必ず添える（下書きの作り直しをオーナーに強いない）。
  */
-export function buildGbpPostFailedMessage(reason: GbpPostFailureReason): LineMessage {
+export function buildGbpPostFailedMessage(
+  reason: GbpPostFailureReason,
+  storeId: string | null = null,
+): LineMessage {
   const detail: { lines: readonly string[]; buttons: readonly FlexBoxContent[] } = ((): {
     lines: readonly string[];
     buttons: readonly FlexBoxContent[];
@@ -646,9 +668,11 @@ export function buildGbpPostFailedMessage(reason: GbpPostFailureReason): LineMes
         return {
           lines: [
             'Google との連携が切れているため投稿できませんでした。',
-            'もう一度連携すると、この下書きから投稿をやり直せます。',
+            // 連携をやり直すと gbp_sessions が置換されるため下書きは残らない。
+            // 文面で断っておく（残ると案内して消すのが最悪）。
+            '連携をやり直すと、この下書きは取り消されます。',
           ],
-          buttons: [CONNECT_BUTTON, CANCEL_BUTTON],
+          buttons: storeId === null ? [STATUS_BUTTON, CANCEL_BUTTON] : [relinkButton(storeId), CANCEL_BUTTON],
         };
       case 'permission':
         return {
@@ -911,7 +935,10 @@ export function buildGbpNoReviewsMessage(storeName: string | null): LineMessage 
  * クチコミ一覧の取得に失敗したときの案内。分類は投稿の失敗通知と同一の規律に従う
  * （`crypto_error` を再連携へ倒さない）。
  */
-export function buildGbpReviewListFailedMessage(reason: GbpPostFailureReason): LineMessage {
+export function buildGbpReviewListFailedMessage(
+  reason: GbpPostFailureReason,
+  storeId: string | null = null,
+): LineMessage {
   const detail: { lines: readonly string[]; buttons: readonly FlexBoxContent[] } = ((): {
     lines: readonly string[];
     buttons: readonly FlexBoxContent[];
@@ -921,9 +948,9 @@ export function buildGbpReviewListFailedMessage(reason: GbpPostFailureReason): L
         return {
           lines: [
             'Google との連携が切れているため、クチコミを取得できませんでした。',
-            'もう一度連携すると、クチコミへの返信をご利用いただけます。',
+            '連携をやり直すと、クチコミへの返信をご利用いただけます。',
           ],
-          buttons: [CONNECT_BUTTON, STATUS_BUTTON],
+          buttons: storeId === null ? [STATUS_BUTTON] : [relinkButton(storeId), STATUS_BUTTON],
         };
       case 'permission':
         return {
@@ -1021,7 +1048,10 @@ export function buildGbpReplySucceededMessage(storeName: string | null): LineMes
  * Req 4.7: 返信の失敗通知。投稿フローと同一の規律で、**下書きが保持されている**ことを
  * 明示し再試行導線を必ず添える。
  */
-export function buildGbpReplyFailedMessage(reason: GbpPostFailureReason): LineMessage {
+export function buildGbpReplyFailedMessage(
+  reason: GbpPostFailureReason,
+  storeId: string | null = null,
+): LineMessage {
   const detail: { lines: readonly string[]; buttons: readonly FlexBoxContent[] } = ((): {
     lines: readonly string[];
     buttons: readonly FlexBoxContent[];
@@ -1031,9 +1061,9 @@ export function buildGbpReplyFailedMessage(reason: GbpPostFailureReason): LineMe
         return {
           lines: [
             'Google との連携が切れているため返信できませんでした。',
-            'もう一度連携すると、この下書きから返信をやり直せます。',
+            '連携をやり直すと、この下書きは取り消されます。',
           ],
-          buttons: [CONNECT_BUTTON, CANCEL_BUTTON],
+          buttons: storeId === null ? [STATUS_BUTTON, CANCEL_BUTTON] : [relinkButton(storeId), CANCEL_BUTTON],
         };
       case 'permission':
         return {

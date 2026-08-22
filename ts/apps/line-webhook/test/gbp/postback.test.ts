@@ -16,13 +16,14 @@ import { encodePostback, decodePostback } from '../../src/onboarding/stages.js';
 const MAX_POSTBACK_DATA_LENGTH = 300;
 const STORE_ID = 'fcd00000-0000-0000-0000-0000000000a1';
 
-// design.md が列挙する 12 action すべて（漏れがあれば往復テストが検出する）。
+// design.md が列挙する 12 action ＋ g_relink（PR #121 レビュー是正）。漏れがあれば往復テストが検出する。
 const ALL_ACTIONS: GbpPostbackAction[] = [
   { action: 'g_connect' },
   { action: 'g_pick_store', index: 0 },
   { action: 'g_pick_store', index: 9 },
   { action: 'g_status' },
   { action: 'g_disconnect', storeId: STORE_ID },
+  { action: 'g_relink', storeId: STORE_ID },
   { action: 'g_post' },
   { action: 'g_reply' },
   { action: 'g_pick_review', index: 0 },
@@ -44,7 +45,7 @@ describe('encodeGbpPostback / decodeGbpPostback 往復', () => {
     expect(encodeGbpPostback(action).length).toBeLessThanOrEqual(MAX_POSTBACK_DATA_LENGTH);
   });
 
-  it('design.md が定める 12 種の action 名をすべて符号化できる', () => {
+  it('design.md が定める 12 種 ＋ g_relink の action 名をすべて符号化できる', () => {
     const names = new Set(ALL_ACTIONS.map((a) => encodeGbpPostback(a).split('&')[0]));
     expect(names).toEqual(
       new Set([
@@ -52,6 +53,7 @@ describe('encodeGbpPostback / decodeGbpPostback 往復', () => {
         'a=g_pick_store',
         'a=g_status',
         'a=g_disconnect',
+        'a=g_relink',
         'a=g_post',
         'a=g_reply',
         'a=g_pick_review',
@@ -108,6 +110,13 @@ describe('decodeGbpPostback の安全側フォールバック', () => {
       expect(decodeGbpPostback(`a=${name}&i=NaN`)).toBeNull();
       expect(decodeGbpPostback(`a=${name}&i=999999999999999999999`)).toBeNull();
     }
+  });
+
+  it('g_relink の s は UUID 形式でなければ null（形式検証のみ・所有検証は GbpFlows）', () => {
+    expect(decodeGbpPostback('a=g_relink')).toBeNull();
+    expect(decodeGbpPostback('a=g_relink&s=')).toBeNull();
+    expect(decodeGbpPostback('a=g_relink&s=not-a-uuid')).toBeNull();
+    expect(decodeGbpPostback(`a=g_relink&s=${STORE_ID}x`)).toBeNull();
   });
 
   it('g_disconnect の s は UUID 形式でなければ null（形式検証のみ）', () => {

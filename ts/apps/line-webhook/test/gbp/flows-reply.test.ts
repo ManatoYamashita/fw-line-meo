@@ -770,7 +770,7 @@ describe('createGbpFlowHandlers（クチコミ返信フロー・task 4.2）', ()
 
       await h.handlers.handleGbpPostback(postback(G_APPROVE));
 
-      expect(h.replies).toEqual([[buildGbpReplyFailedMessage('reauth')]]);
+      expect(h.replies).toEqual([[buildGbpReplyFailedMessage('reauth', STORE_A)]]);
     });
   });
 
