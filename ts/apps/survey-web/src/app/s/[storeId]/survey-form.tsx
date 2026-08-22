@@ -11,6 +11,18 @@ import type { SurveyAnswer, SurveyFormProps } from './types';
 const COMMENT_MAX = 200;
 const STARS = [1, 2, 3, 4, 5] as const;
 
+// 一言欄の記入例（Issue #137 段階1）。素材が薄い回答ほど AI 下書きの事実性が崩れることを
+// Issue #132 で実測しており（具体的な一言がある素材は逸脱 0/20）、材料を増やす方が是正を層として
+// 積むより構造的に効く。ただし摩擦は増やさない。任意のままとし、選択肢も必須条件も変えない
+// （Requirement 2.3: 星評価のみ必須）。
+//
+// 例の選び方には 2 つの制約がある。
+//   - 観点を 2 つに分散させる（味系と提供/接客系）。片方だけを挙げると、その観点に寄った
+//     一言ばかりが集まり、下書きの材料としても集計の分布としても偏る。
+//   - 肯定と否定を 1 つずつにする。良かったことの例しか出さないと、低評価の客が書きにくく
+//     なる。これは導線を分岐させていなくても実質的にレビューゲーティングへ近づく作用を持つ。
+const COMMENT_PLACEHOLDER = '例）料理が熱々だった／提供まで少し待った';
+
 export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
   const [star, setStar] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -94,10 +106,11 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
       <label className="block text-lg font-semibold">
         一言（任意）
         <textarea
-          className="mt-2 block w-full rounded-lg border border-input p-3 text-base font-normal"
+          className="mt-2 block w-full rounded-lg border border-input p-3 text-base font-normal placeholder:text-muted-foreground"
           rows={3}
           value={comment}
           maxLength={COMMENT_MAX}
+          placeholder={COMMENT_PLACEHOLDER}
           onChange={(e) => setComment(e.target.value)}
         />
       </label>
