@@ -27,19 +27,19 @@
 - **下書き生成パイプライン**: プロンプト（素材限定・変動注入）・安全設定・構造化出力・再試行・出力検証
 - **セッショントークン契約**（HMAC 署名・attempt/exp 封入）: 再生成上限のステートレス強制
 - **Google 投稿 URL 組立**（writereview 形式）: 単一モジュールに隔離
-- **tallies 2 表への書込実装**（TS 層の書込責任として。書込境界自体は four-tier が定義済み）
+- **tallies 3 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で追加）
 - **QR 生成エンドポイント**（`ts/apps/dashboard-api` の種アプリ・Firebase ID トークン検証・RBAC）
 - **TS モノレポ基盤**（`ts/` pnpm workspace・`packages/db`・lint/test 規約）
 
 ### Out of Boundary
 - ダッシュボード UI・ログインフロー・セッション管理（Issue #5。本 spec の QR API は Bearer ID トークンを受けるだけ）
 - `stores.place_id` の充足・鮮度（オンボーディング／バッチ側。本 spec は毎回 DB から読むのみ）
-- DB スキーマ・seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）
+- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）のみで、既存表は変更しない
 - インフラ本体の構成変更（下記の最小追加を除き gcp-infra-foundation の所有。追加も同 spec の規約に従う）
 - 集計データの読み出し・可視化
 
 ### Allowed Dependencies
-- **four-tier-data-model**: `stores`/`owners`/`dashboard_users`/`survey_aspects` の読取、`survey_rating_tallies`/`survey_aspect_tallies` への DML（grants.sql 付与済み・write-boundary.md 準拠）
+- **four-tier-data-model**: `stores`/`owners`/`dashboard_users`/`survey_aspects` の読取、`survey_rating_tallies`/`survey_aspect_tallies`/`survey_material_tallies` への DML（grants.sql 付与済み・write-boundary.md 準拠）
 - **gcp-infra-foundation**: Cloud Run `survey-web`/`dashboard-api`、IAM DB 認証、Secret Manager（`GEMINI_API_KEY` 既存）
 - **外部**: Gemini API（@google/genai・API キー）、Google writereview URL、Identity Platform（ID トークン検証）
 - **依存方向の制約**: `packages/db → apps/*`（apps が db を import。逆流禁止）。app 内は `lib → app/api → app/(pages)`。UI コンポーネントは DB・Gemini へ直接依存しない
@@ -53,7 +53,7 @@
 ## Architecture
 
 ### Existing Architecture Analysis
-- 書き込み境界: tallies 2 表は「TS リアルタイム応答層」書込（`db/write-boundary.md`）— 本設計はこの境界の**内側**で完結
+- 書き込み境界: tallies 3 表は「TS リアルタイム応答層」書込（`db/write-boundary.md`）— 本設計はこの境界の**内側**で完結
 - `stores.ck_place_confirmed`（confirmed ⇔ place_id 非 NULL）が QR 発行可否と投稿導線の前提条件を構造化済み
 - Cloud Run 3 サービス・IAM DB 認証（パスワードレス）・Secret 供給は稼働済み。本 spec はイメージの中身を提供する
 
@@ -225,6 +225,8 @@ sequenceDiagram
 | 4.6 | コピー不可時フォールバック | DraftPanel | 選択可能表示＋再試行 | — |
 | 5.1 | 個人情報非取得 | 全コンポーネント | 入力項目自体に PII なし | セキュリティ節 |
 | 5.2 | 月次集計のみ加算 | tallies.ts, ResponsesAPI, SessionToken（pageToken） | UPSERT 契約・pageToken 検証 | 回答フロー |
+| 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006` の列 allowlist | DDL に本文列を持たない・`30_compliance.sql` | 回答フロー |
+| 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log | sink の allowlist（storeId のみ） | Monitoring |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
 | 5.5 | 既存モデルに記録・階層不変 | tallies.ts | 既存 2 表のみ | — |
@@ -354,10 +356,12 @@ interface SessionTokenService {
 | Requirements | 5.2, 5.4, 5.5 |
 
 ```typescript
-interface TallyInput { storeId: string; star: 1|2|3|4|5; aspectCodes: string[] }
+interface TallyInput { storeId: string; star: 1|2|3|4|5; aspectCodes: string[]; hasComment: boolean }
 incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び手がログのみ）
 ```
-- 単一 TX: `survey_rating_tallies` 1 行 + `survey_aspect_tallies` N 行を `ON CONFLICT ... DO UPDATE SET count = count + 1`
+- 単一 TX: `survey_rating_tallies` 1 行 + `survey_aspect_tallies` N 行 + `survey_material_tallies` 1 行を `ON CONFLICT ... DO UPDATE SET count = count + 1`
+- **厚みを別 TX にしない**: 部分成功すると `sum(material.count)` と `sum(rating.count)` が恒久的にずれ、「観点ゼロの回答が何割か」の母数が信用できなくなる（5.6）
+- `aspect_count` は重複除去後の件数（aspect 行の加算数と必ず一致）、`hasComment` は素材へ渡す `comment` と**同じ値**から導く
 - `period_month = date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo')::date`（JST 月境界を SQL 側で確定）
 - 既存 UNIQUE 制約（store_id, period_month, star/aspect_code）に整合。aspect code は seed 由来のみ（FK が構造強制）
 
@@ -387,13 +391,14 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 
 ## Data Models
 
-**スキーマ変更なし。** 使用する既存構造と本 spec が加える意味論のみ記す。
+**スキーマ追加は 1 表のみ**（`survey_material_tallies`・`0006`・Issue #137 段階3）。既存表は変更しない。
 
 - **読取**: `stores`（存在・place 確定・名前）、`owners`（agency 連鎖）、`dashboard_users`（RBAC）、`survey_aspects`（選択肢 SoT）
-- **書込**: `survey_rating_tallies` / `survey_aspect_tallies` のみ（TS 層書込境界の内側）
+- **書込**: `survey_rating_tallies` / `survey_aspect_tallies` / `survey_material_tallies` のみ（TS 層書込境界の内側）
 - **不変条件（本 spec が追加する運用semantics）**:
   - period_month は **JST** 月初日（four-tier の UNIQUE/CHECK 制約に整合）
-  - 1 回答 = rating 1 加算 + 選択 aspect ごとに 1 加算。再生成・コピー・遷移は集計に影響しない
+  - 1 回答 = rating 1 加算 + 選択 aspect ごとに 1 加算 + 厚み 1 加算。再生成・コピー・遷移は集計に影響しない
+  - 厚みが持つのは「選択数（0 以上・上限なし）」と「一言の有無」だけ。本文を持つ列は存在しない（5.6）
   - 自由記述・個別回答はいかなるテーブル・ログにも書かない
 
 ### Data Contracts & Integration
@@ -413,6 +418,7 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 
 ### Monitoring
 - 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
+- ファネル（Issue #137 段階3・5.7）: `survey_page_viewed`（INFO・回答可能な状態で表示できたときのみ）と `survey_response_submitted`（INFO・生成と集計の成否に依らず送信時）。フィールドは `storeId` だけで、来店客に紐づく値は載せない。**数え方の癖**: ページは `force-dynamic` なので bot・プリフェッチ・回答済みの再訪（24 時間判定は localStorage 側で SSR は走る）も表示に数える。したがって「送信 / 表示」は転換率の**下限**であり、絶対値ではなく施策前後の変化を見る指標である。送信は tallies にも入るが、**集計失敗時はログにだけ残るため両者の乖離が集計障害の検知になる**
 - 既存 guardrails（予算・アラート）は変更なし。Gemini コストは AI Studio のレート/使用量ページで運用確認（runbook 記載）
 
 ## Testing Strategy

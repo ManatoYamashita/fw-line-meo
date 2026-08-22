@@ -55,7 +55,60 @@ describe('handleResponses', () => {
     expect(json.draft).toBe('良いお店でした');
     expect(json.sessionToken).toBeTypeOf('string');
     expect(json.regenerationsLeft).toBe(3);
-    expect(incrementTallies).toHaveBeenCalledWith({ storeId: STORE, star: 5, aspectCodes: ['taste'] });
+    expect(incrementTallies).toHaveBeenCalledWith({
+      storeId: STORE,
+      star: 5,
+      aspectCodes: ['taste'],
+      hasComment: false,
+    });
+  });
+
+  // Issue #137 段階3: 素材の厚みは「プロンプトへ渡す comment の有無」と同じ値でなければ
+  // ならない。ずれると、入力導線を変えた効果をこのデータで検証できなくなる。
+  it('一言があれば hasComment=true で加算する', async () => {
+    const incrementTallies = vi.fn(() => Promise.resolve());
+    await handleResponses(
+      req(validBody({ comment: '3分で出てきました' })),
+      baseDeps({ incrementTallies }),
+    );
+    expect(incrementTallies).toHaveBeenCalledWith({
+      storeId: STORE,
+      star: 5,
+      aspectCodes: ['taste'],
+      hasComment: true,
+    });
+  });
+
+  it('空文字の一言は hasComment=false（validate が未回答へ潰す）', async () => {
+    const incrementTallies = vi.fn(() => Promise.resolve());
+    await handleResponses(req(validBody({ comment: '' })), baseDeps({ incrementTallies }));
+    expect(incrementTallies).toHaveBeenCalledWith(
+      expect.objectContaining({ hasComment: false }),
+    );
+  });
+
+  // Issue #137 段階3: ファネルの分子。生成の成否と独立に「客が送信した」を数える。
+  it('送信は survey_response_submitted を storeId つきで出す（生成失敗でも出る）', async () => {
+    const log = vi.fn();
+    await handleResponses(req(validBody()), baseDeps({ log }));
+    expect(log).toHaveBeenCalledWith('info', 'survey_response_submitted', { storeId: STORE });
+
+    const logFailed = vi.fn();
+    await handleResponses(
+      req(validBody()),
+      baseDeps({ generator: failGenerator(), log: logFailed }),
+    );
+    expect(logFailed).toHaveBeenCalledWith('info', 'survey_response_submitted', { storeId: STORE });
+  });
+
+  it('集計が失敗しても送信は数える（tallies との乖離が集計障害の検知になる）', async () => {
+    const log = vi.fn();
+    await handleResponses(
+      req(validBody()),
+      baseDeps({ incrementTallies: () => Promise.reject(new Error('db down')), log }),
+    );
+    expect(log).toHaveBeenCalledWith('warn', 'tally_failed');
+    expect(log).toHaveBeenCalledWith('info', 'survey_response_submitted', { storeId: STORE });
   });
 
   // Issue #132（案 A）の配線。prompt.ts 側だけ直しても、handler が未選択の観点を渡さなければ

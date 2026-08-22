@@ -12,7 +12,7 @@
 -- 書込境界（db/write-boundary.md・"整合する GRANT のみ"）:
 --   TS 層（line_webhook / survey_web / dashboard_api）→ DML on
 --     operators, agencies, dashboard_users, owners, stores,
---     survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
+--     survey_rating_tallies, survey_aspect_tallies, survey_material_tallies, oauth_tokens,
 --     agency_invite_codes, onboarding_sessions, line_webhook_events
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots, daily_summaries
 --     （daily_summaries は competitive-daily-summary 0004・INSERT/UPDATE は同日再実行の
@@ -54,7 +54,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public
 -- oauth_tokens（第2フェーズまで休眠）と同じ扱いで DML を付与する。
 GRANT INSERT, UPDATE, DELETE ON
   operators, agencies, dashboard_users, owners, stores,
-  survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
+  survey_rating_tallies, survey_aspect_tallies, survey_material_tallies, oauth_tokens,
   agency_invite_codes, onboarding_sessions, line_webhook_events
   TO :"line_webhook", :"survey", :"dashboard";
 

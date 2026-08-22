@@ -7,7 +7,11 @@ import type { SessionTokenService } from '../../../lib/session-token';
 import { validateSurveyAnswer } from '../../../lib/validate';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
-import { logGenerationFailure, type SurveyLogger } from '../../../lib/structured-log';
+import {
+  logGenerationFailure,
+  logSurveyResponseSubmitted,
+  type SurveyLogger,
+} from '../../../lib/structured-log';
 
 // 回答受付 API の中核ロジック（依存を注入してテスト可能にする）。route.ts が実依存を配線する。
 
@@ -29,7 +33,12 @@ export interface ResponsesDeps {
   rateLimiter: RateLimiter;
   findStore: (id: string) => Promise<SurveyStoreView | null>;
   listAspects: () => Promise<AspectView[]>;
-  incrementTallies: (input: { storeId: string; star: number; aspectCodes: string[] }) => Promise<void>;
+  incrementTallies: (input: {
+    storeId: string;
+    star: number;
+    aspectCodes: string[];
+    hasComment: boolean;
+  }) => Promise<void>;
   clientKey: (req: Request) => string;
   log: SurveyLogger;
 }
@@ -100,12 +109,19 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
           unselectedAspectCodes,
         };
 
-  // 集計（非致命・失敗しても応答継続）と生成を並行実行
+  // 集計（非致命・失敗しても応答継続）と生成を並行実行。
+  // hasComment は素材へ渡すのと **同じ値** から導く（`material` の分岐条件と同一）。別々に
+  // 導くと「プロンプトが見た厚み」と「記録した厚み」がずれ、入力導線を変えた効果をこの
+  // データで検証できなくなる（Issue #137 段階3）。
   const tally = deps
-    .incrementTallies({ storeId, star, aspectCodes })
+    .incrementTallies({ storeId, star, aspectCodes, hasComment: comment !== undefined })
     .catch(() => deps.log('warn', 'tally_failed'));
   const generation = deps.generator.generate(material, pickVariation());
   const [, gen] = await Promise.all([tally, generation]);
+
+  // ファネルの分子（Issue #137 段階3）。生成の成否や集計の成否とは独立に、「客が送信した」
+  // という事実を記録する。生成失敗でも回答は届いており、表示に対する送信率の分子である。
+  logSurveyResponseSubmitted(deps.log, storeId);
 
   // sessionToken は生成成否に関わらず必ず発行（再試行は集計非接触の /api/drafts へ）
   const sessionToken = deps.tokens.sign({ storeId, material, attempt: 0 });
