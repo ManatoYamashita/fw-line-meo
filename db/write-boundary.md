@@ -1,4 +1,4 @@
-# 書き込み境界（Write Boundary）: four-tier-data-model / competitive-daily-summary
+# 書き込み境界（Write Boundary）: four-tier-data-model / competitive-daily-summary / review-acquisition
 
 同一 Cloud SQL を 2 言語（TypeScript リアルタイム応答層 / Go 日次バッチ層）から触るため、**各テーブルの書き込み責任を厳密に 1 つの層へ割り当てる**。読み取りは原則両層に許容。共有定数はマイグレーション seed を単一情報源（SoT）とし、実行時はどちらの層も書き込まない。
 
@@ -15,6 +15,7 @@
 | `stores` | TS リアルタイム応答層 | 店舗特定オンボーディング（Webhook/LIFF） |
 | `survey_rating_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
+| `survey_material_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（素材の厚み＝観点の選択数と一言の有無の匿名集計加算・`0006`） |
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
 | `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`: TS 配信ジョブによる LINE Push 配信記録・`retry_key` で冪等再送（`0004`） |
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
