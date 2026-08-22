@@ -47,9 +47,11 @@
   - 場所の未確定・認証切れ・通信障害・未知の失敗をそれぞれ区別して示す
   - 失敗時に再試行の操作を提示する。再試行は一覧の再取得を伴わずパネル内で完結する
   - 処理中・成功・失敗の変化を支援技術へ通知する
+  - 再試行の押下で焦点を失わせない。押下元を再取得の間も描画し続け、押下元が消える遷移
+    （再取得の成功）でだけ焦点をパネル内の次の操作へ引き取る。パネルが壊していない焦点は触らない
   - 2.1 と同一ファイルを編集するため `(P)` にできない
-  - Observable: jsdom テストで `code` ごとに文言が切り替わり、権限不足と不在が同一文言になり、再試行で取得が 1 回だけ追加で走ることが緑
-  - _Requirements: 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 6.2_
+  - Observable: jsdom テストで `code` ごとに文言が切り替わり、権限不足と不在が同一文言になり、再試行で取得が 1 回だけ追加で走り、再試行の押下前後で焦点が `body` へ落ちないことが緑
+  - _Requirements: 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 6.1, 6.2_
   - _Boundary: StoreQrPanel_
 
 - [x] 3. Integration: 店舗一覧への結線
@@ -110,9 +112,28 @@
 
 **経路 B（ローカル一式）**: `make db-dev-setup` で `fwlm_dev` を用意し
 （`ts/apps/survey-web/e2e/seed.sql` が `place_status` 付きの店舗を投入する）、`dashboard-api` を
-ビルドして起動し（**`dev` スクリプトは無い**。`build` の出力を直接起動する）、`CORS_ORIGIN` を
-ローカルの origin にして、`pnpm -C ts --filter @fwlm/dashboard-web dev` を叩く。Firebase は実
-プロジェクトの資格情報を使う。
+ビルドして起動する（**`dev` スクリプトは無い**。`build` の出力を直接起動する）。そのうえで
+`pnpm -C ts --filter @fwlm/dashboard-web dev` を叩く。Firebase は実プロジェクトの資格情報を使う。
+
+`dashboard-api` は起動時に必須 env を検証して落ちる（`config.ts` の `loadConfig`）。CORS の許可元は
+`DASHBOARD_WEB_ORIGIN` であり、**`CORS_ORIGIN` という名前は存在しない**。
+
+| env | 出典 | ローカルでの値 |
+|---|---|---|
+| `SURVEY_BASE_URL` | `ts/apps/dashboard-api/src/config.ts` | QR が符号化する客向け URL の基点 |
+| `DASHBOARD_WEB_ORIGIN` | 同上 | `next dev` の origin（既定 `http://localhost:3000`） |
+| `PLACES_API_KEY` | 同上 | Places API (New) の実キー |
+| `DATABASE_URL` | `ts/packages/db/src/pool.ts` | `postgres:///fwlm_dev`。未設定だと Cloud SQL IAM 接続へ倒れる |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `ts/apps/dashboard-api/src/index.ts` の `initializeApp()`（ADC） | firebase-admin の ID トークン検証に要る |
+| `PORT` | `config.ts` | 省略時 8080 |
+
+`dashboard-web` 側は `next dev` が `.env.local` を実行時に読むため、`NEXT_PUBLIC_API_BASE_URL` と
+`NEXT_PUBLIC_FIREBASE_API_KEY` / `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` / `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+の 4 件をそこへ置く（`src/lib/firebase.ts` と `src/lib/api.ts` が参照する）。
+
+> **この経路 B は実行して確かめていない。** 上の env 一覧は `loadConfig` と `index.ts` の起動経路から
+> 機械的に導出したものであり、実測記録ではない。実行していない手順を実測のように書いたことが、
+> `CORS_ORIGIN` という実在しない env 名を残した原因だった（PR #142 のレビュー指摘）。
 
 **確認項目**:
 
@@ -172,3 +193,14 @@
 - `dashboard-web` には `react-hooks/exhaustive-deps` が無い。effect の依存配列は誰も検査しない
 - TypeScript 5.7 以降、既定の `Uint8Array<ArrayBufferLike>` は `BlobPart` にも `BodyInit` にも
   載らない。`res.arrayBuffer()` 由来の実体は非共有なので `Uint8Array<ArrayBuffer>` へ狭める
+- 条件描画で消える対話的要素は、**消える側に焦点があった場合の受け皿を先に決める**。要素が DOM
+  から外れるとブラウザは焦点を `body` へ移し、焦点指標が消える。「閉じる」だけを直して「再試行」に
+  同じ穴を残したのが PR #142 のレビュー指摘だった
+- Base UI の `Button` は `disabled` と `focusableWhenDisabled` を併せて渡すと、native の `disabled`
+  属性を付けずに `aria-disabled` と `data-disabled` だけを与え、`tabIndex` を保つ。押下は primitive
+  側の `onClick` が `preventDefault` で止めるため、再入抑止のガードを呼び出し側へ書かなくてよい。
+  ただし `buttonVariants` の減光は native の `:disabled` 擬似クラスに掛かっており**発火しない**ので、
+  `data-[disabled]:` 側で与える必要がある
+- **jsdom は「`disabled` になった要素から焦点が外れる」挙動を再現しない。** そのため
+  `focusableWhenDisabled` の欠落は焦点のテストでは捕まらず、`aria-disabled` / `data-disabled` の
+  存在を直接固定するテストだけが検出できる（ミューテーションで実測済み）

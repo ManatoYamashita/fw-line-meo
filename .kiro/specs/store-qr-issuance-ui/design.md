@@ -162,7 +162,7 @@ stateDiagram-v2
     loading --> ready: 取得成功かつ非空
     loading --> error: 拒否 または 通信失敗 または 空応答
     ready --> [*]: アンマウントで解放
-    error --> loading: 再試行
+    error --> loading: 再試行（押下元を残したまま）
     error --> [*]: アンマウント
 ```
 
@@ -171,6 +171,7 @@ stateDiagram-v2
 - パネルは `key={storeId}` でマウントされるため、別店舗の発行は再マウントとして扱われる。前の資源は React のクリーンアップで必ず解放される（2.8・5.3）
 - `ready` から `loading` へ戻る遷移を持たない。取得済みの画像がある間は再取得の契機を UI に置かない（2.3）
 - クライアント側の `placeStatus` 判定は表示の最適化であり、真正の判定はサーバのみが持つ。UI の分岐が古くても安全側（サーバが拒否する）へ倒れる（3.3）
+- `error → loading` の遷移で再試行の操作を描画対象から外さない。押下元が DOM から消えると焦点が `body` へ落ち、焦点指標が失われる（6.1）。再取得の間は押下不能な状態で描画し続け、押下元が消える `loading → ready` でだけ焦点をパネル内の保存操作へ引き取る。パネルが壊していない焦点（初回取得・利用者自身が移した焦点）は触らない
 
 ## Requirements Traceability
 
@@ -202,7 +203,7 @@ stateDiagram-v2
 | 5.3 | ログアウト後に残さない | StoreQrPanel | 永続化せず解放する | 状態遷移 |
 | 5.4 | 単一導線のみ | StoreQrPanel | 店舗あたり 1 つの画像のみを扱う | — |
 | 5.5 | 日本語 | StoresPage / StoreQrPanel | 全文言を日本語で定義 | — |
-| 6.1 | キーボード操作と焦点可視 | StoresPage / StoreQrPanel | Button と実リンクを用いる | — |
+| 6.1 | キーボード操作と焦点可視 | StoresPage / StoreQrPanel | Button と実リンクを用いる。焦点を担っていた要素の除去を伴う遷移（パネルを閉じる／再試行の完了）では、焦点を呼び出し元またはパネル内へ引き取る | 状態遷移 |
 | 6.2 | 状態変化の通知 | StoreQrPanel | `role="status"` と `role="alert"` | 状態遷移 |
 | 6.3 | 操作要素の名前 | StoresPage | `aria-label` に店名を含める | — |
 | 6.4 | 画像の代替テキスト | StoreQrPanel | `alt` に店名を含める | — |
@@ -214,7 +215,7 @@ stateDiagram-v2
 |---|---|---|---|---|---|
 | api client（拡張） | lib | 認証付きで binary を取得しエラー封筒を解釈する | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1 | firebase auth (P0), dashboard-api (P0) | Service, API |
 | qr-filename | lib | 保存ファイル名を決定する純粋関数 | 2.4, 2.5, 2.6 | なし | Service |
-| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.2, 6.4 | api client (P0), qr-filename (P0), @fwlm/ui (P1) | Service, State |
+| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4 | api client (P0), qr-filename (P0), @fwlm/ui (P1) | Service, State |
 | StoresPage（拡張） | app | 行への発行導線・未確定の理由・パネルの開閉 | 1.1–1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5 | StoreQrPanel (P0), auth-context (P1) | State |
 
 ### lib
@@ -319,7 +320,7 @@ export function qrFileName(storeName: string, storeId: string): string;
 | Field | Detail |
 |---|---|
 | Intent | 1 店舗ぶんの QR を取得・表示・保存させ、表示資源を確実に解放する |
-| Requirements | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 5.2, 5.3, 5.4, 6.2, 6.4 |
+| Requirements | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4 |
 
 **Responsibilities & Constraints**
 
@@ -327,6 +328,7 @@ export function qrFileName(storeName: string, storeId: string): string;
 - object URL の生成と解放を単独で所有する。他のどのモジュールも解放責務を持たない
 - 取得結果を永続化しない（`localStorage` 等へ書かない）。生存期間はコンポーネントの生存期間に一致する（5.3）
 - 失敗時に一覧を再取得しない。影響をパネル内に閉じる（4.4）
+- **このパネルが焦点を壊した場合にだけ、このパネルが引き取る**（6.1）。押下元が生き残るなら何もしない。押下元が消える遷移でだけ、パネル内の次の操作へ移す。パネル外に焦点があるときは触らない（横取りになる）
 
 **Dependencies**
 
@@ -369,7 +371,7 @@ type QrState =
 **Implementation Notes**
 
 - Integration: 取得・URL 生成・解放を単一の副作用として構成し、解放をそのクリーンアップに置く。生成と解放が別の場所に分かれると、解放漏れが「動くが残る」形の欠陥になり検出できない
-- Validation: 状態の変化は `role="status"` と `role="alert"` で通知する（6.2）。画像の `alt` と保存リンクの名前に店名を含める（6.4）。保存は実際のリンク要素（`href` に object URL・`download` にファイル名）とし、プログラムによる click 合成を行わない（6.1・2.3）。失敗状態では再試行の操作を提示し、一覧の再取得を伴わずにパネル内で再要求する（4.3・4.4）
+- Validation: 状態の変化は `role="status"` と `role="alert"` で通知する（6.2）。画像の `alt` と保存リンクの名前に店名を含める（6.4）。保存は実際のリンク要素（`href` に object URL・`download` にファイル名）とし、プログラムによる click 合成を行わない（6.1・2.3）。失敗状態では再試行の操作を提示し、一覧の再取得を伴わずにパネル内で再要求する（4.3・4.4）。再試行の操作は再取得の間も描画し続け、`disabled` を焦点可能な形（`aria-disabled` / `data-disabled` のみ・native の `disabled` 属性を付けない）で与える。押下の抑止は部品側が担うため呼び出し側にガードを置かない（2.2・6.1）
 - Styling: 新しい色ユーティリティを導入しない。部品の既定 variant と、`@fwlm/ui` の部品が既に使用している `text-muted-foreground`（実 hex `#666666`・`contrast-usage.test.ts` の検証表に登録済み）のみを用いる（6.5）
 - Risks: `URL.createObjectURL` は jsdom に存在しない。テストでは差し込みが必要になる（research.md §3.3）
 
@@ -431,6 +433,10 @@ type QrState =
 3. 保存操作が追加の取得を発生させないこと（`fetchQr` の呼び出し回数が 1 のまま）（2.3）
 4. アンマウントで object URL の解放が呼ばれること（2.8・5.3）
 5. `code` ごとに提示文言が切り替わり、403 と 404 が同一文言になること（4.1・4.2・4.3・3.3）
+6. 再取得の間も押下元が生きており、焦点がそこに残ること。再び失敗しても残ること（6.1）
+7. 再試行が成功したとき焦点がパネル内の保存操作へ移ること（6.1）
+8. 再取得の間の再試行操作が `aria-disabled` と `data-disabled` を持ち、押しても取得が増えないこと（2.2・6.1）
+9. 初回取得のとき、および利用者が自分で焦点を移していたときに、成功しても焦点を奪わないこと（6.1）
 
 ### UI Tests（jsdom・StoresPage）
 
