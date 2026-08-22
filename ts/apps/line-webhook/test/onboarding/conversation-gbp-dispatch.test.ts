@@ -46,6 +46,7 @@ interface Harness {
 function createHarness(options: {
   current?: OnboardingSessionRow;
   textResult?: 'handled' | 'not_handled';
+  postbackResult?: 'handled' | 'not_handled';
   withGbp?: boolean;
 }): Harness {
   const replies: LineMessage[][] = [];
@@ -55,6 +56,7 @@ function createHarness(options: {
   const gbp: GbpFlowHandlers = {
     async handleGbpPostback(event) {
       postbackCalls.push({ ownerId: event.ownerId, data: event.data });
+      return options.postbackResult ?? 'handled';
     },
     async handleGbpText(event) {
       textCalls.push({ ownerId: event.ownerId, text: event.text });
@@ -198,6 +200,21 @@ describe('completed 段階からの GBP 委譲（task 3.3）', () => {
     );
 
     expect(h.postbackCalls).toEqual([]);
+    expect(h.replies).toEqual([[buildAlreadyCompletedMessage()]]);
+  });
+
+  // PR #121 レビュー指摘: GBP サブシステムの障害（0006 未適用・grants.sql 未再実行など）で
+  // 委譲先が引き受けられなかったとき、既存の完了案内へ落ちること。**例外を握る責務は
+  // GbpFlows 側**にあり（flows.test.ts の「委譲は例外を外へ出さず not_handled を返す」）、
+  // ここで固定するのは委譲元が `not_handled` を正しく尊重することである。
+  it('委譲先の postback 処理が not_handled を返しても従来の完了案内へ落ちる', async () => {
+    const h = createHarness({ postbackResult: 'not_handled' });
+
+    await createConversationHandlers(h.deps).handleEvent(
+      postbackEvent(encodeGbpPostback({ action: 'g_status' })),
+    );
+
+    expect(h.postbackCalls).toHaveLength(1);
     expect(h.replies).toEqual([[buildAlreadyCompletedMessage()]]);
   });
 });

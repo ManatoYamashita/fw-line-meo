@@ -60,6 +60,7 @@ import { CONNECT_SESSION_TTL_MS, type GbpOauthService } from './oauth.js';
 import { decodeGbpPostback, type GbpPostbackAction } from './postback.js';
 import type { StoreKey, TokenStoreService } from './token-store.js';
 import type { GbpApiError, GbpClientService, GbpReview } from './client.js';
+import { errorNameOf, type GbpLogger } from './logger.js';
 import {
   pickPostVariation,
   pickReplyVariation,
@@ -187,11 +188,22 @@ export interface GbpFlowDeps {
    */
   gbpClient: Pick<GbpClientService, 'createLocalPost' | 'listReviews' | 'upsertReviewReply'>;
   messenger: Pick<LineMessenger, 'reply'>;
+  /**
+   * 失敗の記録先（design.md「Monitoring」）。**本文・下書き・トークンは載せられない**
+   * （GbpLogMeta が allowlist）。これが無いと、利用審査未承認によるクォータ 0 のような
+   * 最有力の本番障害が、オーナーからの問い合わせ以外に観測できない。
+   */
+  logger: GbpLogger;
   now(): Date;
 }
 
 export interface GbpFlowHandlers {
-  handleGbpPostback(event: GbpPostbackEvent): Promise<void>;
+  /**
+   * `not_handled` は「GBP 側で引き受けられなかった」を意味し、委譲元（onboarding）の
+   * 既存案内へ戻す。GBP サブシステムの障害（例: gbp_sessions が未作成・権限不足）で
+   * 例外が出た場合もこれを返す（Req 4.6 の既存挙動を巻き込まないため）。
+   */
+  handleGbpPostback(event: GbpPostbackEvent): Promise<HandledResult>;
   handleGbpText(event: GbpTextEvent): Promise<HandledResult>;
 }
 
@@ -222,6 +234,26 @@ export function createDefaultGbpFlowAccessors(): {
 export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
   const reply = (replyToken: string, message: LineMessage): Promise<void> =>
     deps.messenger.reply(replyToken, [message]);
+
+  /**
+   * GBP 呼び出しの失敗を 1 行だけ記録する。`toGbpFailureReason` は 7 種の kind を
+   * 3 つの文面へ畳むため、**畳む前にここで kind と status を残す**。これが無いと
+   * 「利用審査未承認（permission_denied）」と「一過性障害」が本番で区別できない。
+   */
+  const logFailure = (
+    flow: GbpFlow,
+    ownerId: string,
+    storeId: string | null,
+    error: GbpApiError,
+  ): void => {
+    deps.logger.warn('gbp: operation failed', {
+      flow,
+      ownerId,
+      ...(storeId !== null ? { storeId } : {}),
+      errorKind: error.kind,
+      ...(error.kind === 'upstream_error' ? { status: error.status } : {}),
+    });
+  };
 
   /**
    * Req 1.1: 連携誘導・状態確認の対象は Place 確定済み店舗のみ。
@@ -701,6 +733,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     }
 
     // Req 3.7: 下書き（draft_text）を温存したまま承認待ちへ戻し、再試行導線を返す。
+    logFailure('post', event.ownerId, storeId, result.error);
     await deps.sessions.revertGbpSessionExecution(
       deps.db,
       event.ownerId,
@@ -722,8 +755,14 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
   ): Promise<Result<{ postName: string }, GbpApiError>> {
     try {
       return await deps.gbpClient.createLocalPost(deps.db, { ownerId, storeId, summary });
-    } catch {
-      // 例外にはトークン・本文が含まれうるため保持しない（Req 2.1）。
+    } catch (err) {
+      // 例外にはトークン・本文が含まれうるため保持しない（Req 2.1）。記録するのは名前だけ。
+      deps.logger.error('gbp: createLocalPost threw', {
+        flow: 'post',
+        ownerId,
+        storeId,
+        errorName: errorNameOf(err),
+      });
       return { ok: false, error: { kind: 'upstream_error', status: 0 } };
     }
   }
@@ -806,6 +845,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
 
     const listed = await listReviewsSafely(event.ownerId, store.id);
     if (!listed.ok) {
+      logFailure('reply', event.ownerId, store.id, listed.error);
       // セッションは作らない（状態機械に入る前の失敗のため、やり直しは開始から）。
       await reply(
         event.replyToken,
@@ -856,7 +896,13 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         storeId,
         limit: REVIEW_FETCH_LIMIT,
       });
-    } catch {
+    } catch (err) {
+      deps.logger.error('gbp: listReviews threw', {
+        flow: 'reply',
+        ownerId,
+        storeId,
+        errorName: errorNameOf(err),
+      });
       return { ok: false, error: { kind: 'upstream_error', status: 0 } };
     }
   }
@@ -1077,6 +1123,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     }
 
     // Req 4.7: 下書きを温存したまま承認待ちへ戻し、再試行導線を返す。
+    logFailure('reply', event.ownerId, storeId, result.error);
     await deps.sessions.revertGbpSessionExecution(
       deps.db,
       event.ownerId,
@@ -1100,7 +1147,13 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         reviewName,
         comment,
       });
-    } catch {
+    } catch (err) {
+      deps.logger.error('gbp: upsertReviewReply threw', {
+        flow: 'reply',
+        ownerId,
+        storeId,
+        errorName: errorNameOf(err),
+      });
       return { ok: false, error: { kind: 'upstream_error', status: 0 } };
     }
   }
@@ -1212,21 +1265,51 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     }
   }
 
+  /**
+   * GBP 側の想定外の例外を委譲元へ伝播させない（PR #121 レビュー指摘）。
+   *
+   * `handleGbpText` / `handleGbpPostback` はどちらも分岐前に `gbp_sessions` を無条件で
+   * SELECT する。0006 未適用や grants.sql 未再実行だと、**GBP を使っていない completed
+   * オーナーの通常テキストまで** Req 4.6 の固定案内でなく内部エラー案内に化ける。
+   * ここで握って `not_handled` へ倒せば、GBP サブシステムの不調が onboarding の既存応答を
+   * 巻き込まない。
+   *
+   * 既知の縁: GBP 側が reply を送った後に例外が出た場合、委譲元のフォールバックは使用済みの
+   * replyToken で 2 度目の reply を試みる。`LineMessenger.reply` は非 2xx をログのみに留めて
+   * throw しないため会話は壊れない（重複案内が 1 通出る可能性だけが残る）。
+   */
+  async function guard(
+    what: string,
+    ownerId: string,
+    run: () => Promise<HandledResult>,
+  ): Promise<HandledResult> {
+    try {
+      return await run();
+    } catch (err) {
+      deps.logger.error(`gbp: ${what} failed`, { ownerId, errorName: errorNameOf(err) });
+      return 'not_handled';
+    }
+  }
+
   return {
-    async handleGbpPostback(event: GbpPostbackEvent): Promise<void> {
-      const { session, expired } = await loadSession(event.ownerId);
-      const action = decodeGbpPostback(event.data);
+    async handleGbpPostback(event: GbpPostbackEvent): Promise<HandledResult> {
+      return guard('handleGbpPostback', event.ownerId, async () => {
+        const { session, expired } = await loadSession(event.ownerId);
+        const action = decodeGbpPostback(event.data);
 
-      if (action === null) {
-        // 未知・破損した `g_*` data（自前ボタンからは到達しない）。何も実行せず案内のみ。
-        await replyStaleOrCurrentState(event, session, expired);
-        return;
-      }
+        if (action === null) {
+          // 未知・破損した `g_*` data（自前ボタンからは到達しない）。何も実行せず案内のみ。
+          await replyStaleOrCurrentState(event, session, expired);
+          return 'handled';
+        }
 
-      await dispatchPostback(event, action, session, expired);
+        await dispatchPostback(event, action, session, expired);
+        return 'handled';
+      });
     },
 
     async handleGbpText(event: GbpTextEvent): Promise<HandledResult> {
+      return guard('handleGbpText', event.ownerId, async () => {
       const lookup = await deps.sessions.getActiveGbpSession(
         deps.db,
         event.ownerId,
@@ -1263,6 +1346,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
 
       await reply(event.replyToken, buildGbpCurrentStateMessage(session));
       return 'handled';
+      });
     },
   };
 }

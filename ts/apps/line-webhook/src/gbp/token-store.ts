@@ -13,6 +13,7 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
+import { safeErrorCode, safeStatus } from './logger.js';
 import {
   deleteOauthToken,
   getOauthToken,
@@ -155,16 +156,6 @@ export function isInvalidGrantError(error: unknown): boolean {
   const oauthError = readProperty(data, 'error');
   if (typeof oauthError === 'string') return oauthError === 'invalid_grant';
   return /\binvalid_grant\b/.test(error.message);
-}
-
-/** ログ・例外メッセージに載せてよい短い識別子だけを通す（トークン混入の構造的防止）。 */
-function safeErrorCode(value: unknown): string {
-  if (typeof value !== 'string') return 'unknown';
-  return /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : 'unredactable';
-}
-
-function safeStatus(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : 'unknown';
 }
 
 /**

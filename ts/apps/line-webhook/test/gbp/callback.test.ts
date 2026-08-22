@@ -10,6 +10,7 @@ import {
   createGbpOauthCallbackRoute,
   type GbpOauthCallbackDeps,
 } from '../../src/gbp/callback.js';
+import type { GbpLogMeta } from '../../src/gbp/logger.js';
 
 // gbp-post-review-reply spec task 3.2（CallbackRoute）の unit テスト。
 // Requirements: 1.4（認可完了の通知）, 1.5（拒否・中断の案内）, 1.6（管理権限なしの案内）。
@@ -30,8 +31,8 @@ interface Harness {
   pushes: { lineUserId: string; messages: readonly LineMessage[] }[];
   ownerLookups: string[];
   callbackParams: { code?: string | undefined; state?: string | undefined; error?: string | undefined }[];
-  errorLogs: { message: string; meta?: Record<string, unknown> }[];
-  warnLogs: { message: string; meta?: Record<string, unknown> }[];
+  errorLogs: { message: string; meta?: GbpLogMeta }[];
+  warnLogs: { message: string; meta?: GbpLogMeta }[];
 }
 
 interface HarnessOptions {

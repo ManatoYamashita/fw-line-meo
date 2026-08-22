@@ -26,6 +26,7 @@ import {
 import { createGbpOauthCallbackRoute } from './gbp/callback.js';
 import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flows.js';
 import { createDefaultGbpPrompts } from './gbp/prompts.js';
+import { createDefaultGbpLogger } from './gbp/logger.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -91,6 +92,9 @@ const gbpOauthService = createGbpOauthService({
 // （conversationHandlers と同じ前提）。
 const gbpPrompts = await createDefaultGbpPrompts();
 
+// GBP ドメイン共通のロガー。meta は allowlist なので本文・トークンは型として渡せない。
+const gbpLogger = createDefaultGbpLogger();
+
 const gbpFlowHandlers = createGbpFlowHandlers({
   db: pool,
   pool,
@@ -100,6 +104,7 @@ const gbpFlowHandlers = createGbpFlowHandlers({
   prompts: gbpPrompts,
   gbpClient,
   messenger: lineMessenger,
+  logger: gbpLogger,
   now: () => new Date(),
 });
 
@@ -122,14 +127,7 @@ const gbpOauthCallback = createGbpOauthCallbackRoute({
   oauth: gbpOauthService,
   messenger: lineMessenger,
   owners: { findOwnerById },
-  logger: {
-    error: (message, meta) => {
-      console.error(message, meta ?? {});
-    },
-    warn: (message, meta) => {
-      console.warn(message, meta ?? {});
-    },
-  },
+  logger: gbpLogger,
 });
 
 const deps: AppDeps = {

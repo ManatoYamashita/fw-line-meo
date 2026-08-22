@@ -39,6 +39,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type { StoreKey, TokenStoreService } from './token-store.js';
 import { findLocationForPlace, type LocationLookupClient } from './locations.js';
+import { safeErrorCode, safeStatus } from './logger.js';
 
 /** Req 1.8: GBP の投稿作成・クチコミ返信に必要な唯一のスコープ。ここを増やしてはならない。 */
 export const GBP_SCOPE = 'https://www.googleapis.com/auth/business.manage';
@@ -167,16 +168,6 @@ export interface GoogleOauthCodeClientOptions {
 function readProperty(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null) return undefined;
   return (value as Record<string, unknown>)[key];
-}
-
-/** ログ・例外メッセージに載せてよい短い識別子だけを通す（機微情報の混入を構造的に防ぐ）。 */
-function safeErrorCode(value: unknown): string {
-  if (typeof value !== 'string') return 'unknown';
-  return /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : 'unredactable';
-}
-
-function safeStatus(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : 'unknown';
 }
 
 /**

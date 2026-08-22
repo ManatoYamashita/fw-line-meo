@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import type {
   ConfirmedStoreSummary,
   GbpSessionLookup,
@@ -70,6 +70,8 @@ interface HarnessOptions {
   accessToken?: Result<string, TokenStoreError>;
   /** getAccessTokenForStore が一過性障害で throw する経路の再現。 */
   accessTokenThrows?: boolean;
+  /** getActiveGbpSession が throw する経路（0006 未適用・GRANT 不足）の再現。 */
+  sessionLookupThrows?: boolean;
   startConnectFails?: boolean;
 }
 
@@ -83,12 +85,14 @@ interface Harness {
   deletedTokens: { ownerId: string; storeId: string }[];
   deletedLocations: { ownerId: string; storeId: string }[];
   txLog: string[];
+  logger: { error: Mock; warn: Mock };
 }
 
 function createHarness(options: HarnessOptions = {}): Harness {
   const stores = options.stores ?? [confirmedStore(STORE_A, 'テスト食堂A')];
   const linked = new Set(options.linkedStoreIds ?? []);
 
+  const logger = { error: vi.fn(), warn: vi.fn() };
   const replies: LineMessage[][] = [];
   const startConnectCalls: { ownerId: string; storeId: string }[] = [];
   const upsertCalls: UpsertGbpSessionInput[] = [];
@@ -151,6 +155,10 @@ function createHarness(options: HarnessOptions = {}): Harness {
     },
     sessions: {
       async getActiveGbpSession() {
+        // GBP サブシステムの障害（gbp_sessions 未作成・GRANT 不足など）の再現。
+        if (options.sessionLookupThrows === true) {
+          throw new Error('relation "gbp_sessions" does not exist');
+        }
         return options.session ?? { kind: 'none' };
       },
       async upsertGbpSession(_db, input) {
@@ -210,6 +218,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
         replies.push([...messages]);
       },
     },
+    logger,
     now: () => NOW,
   };
 
@@ -223,6 +232,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
     deletedTokens,
     deletedLocations,
     txLog,
+    logger,
   };
 }
 
@@ -541,6 +551,46 @@ describe('createGbpFlowHandlers（連携系フロー・task 3.3）', () => {
 
       expect(result).toBe('handled');
       expect(h.replies).toEqual([[buildGbpCurrentStateMessage(session)]]);
+    });
+  });
+
+  // PR #121 レビュー指摘の是正。handleGbpText / handleGbpPostback はどちらも分岐前に
+  // gbp_sessions を無条件 SELECT する。0006 未適用や grants.sql 未再実行だと、**GBP を
+  // 使っていない completed オーナーの通常テキストまで** Req 4.6 の固定案内でなく内部エラー
+  // 案内へ退行していた（app.ts のイベント境界が捕まえて buildInternalErrorRetryMessage を返す）。
+  describe('GBP サブシステムの障害を委譲元へ伝播させない', () => {
+    it('テキスト委譲は例外を外へ出さず not_handled を返す（返信もしない）', async () => {
+      const h = createHarness({ sessionLookupThrows: true });
+
+      const result = await h.handlers.handleGbpText(text('こんにちは'));
+
+      expect(result).toBe('not_handled');
+      // 委譲元（onboarding）が固定案内を返すので、ここでは 1 通も送らない。
+      expect(h.replies).toEqual([]);
+    });
+
+    it('postback 委譲も例外を外へ出さず not_handled を返す', async () => {
+      const h = createHarness({ sessionLookupThrows: true });
+
+      const result = await h.handlers.handleGbpPostback(
+        postback(encodeGbpPostback({ action: 'g_status' })),
+      );
+
+      expect(result).toBe('not_handled');
+      expect(h.replies).toEqual([]);
+    });
+
+    it('握った例外は errorName だけを記録する（message は載せない）', async () => {
+      const h = createHarness({ sessionLookupThrows: true });
+
+      await h.handlers.handleGbpText(text('こんにちは'));
+
+      expect(h.logger.error).toHaveBeenCalledWith('gbp: handleGbpText failed', {
+        ownerId: OWNER,
+        errorName: 'Error',
+      });
+      // pg のエラー文には接続情報が載りうる。message は 1 度も現れてはならない。
+      expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('gbp_sessions');
     });
   });
 });

@@ -19,6 +19,7 @@ import type { LineMessage } from '../line/client.js';
 import type { FlexBubbleContents } from '../line/messages.js';
 import { encodeGbpPostback } from './postback.js';
 import type { GbpOauthService, OauthCallbackResult } from './oauth.js';
+import { errorNameOf, type GbpLogger } from './logger.js';
 
 /** LINE Push の最小面（LineMessenger の `push` のみを要求する）。 */
 export interface GbpCallbackNotifier {
@@ -33,10 +34,11 @@ export interface GbpCallbackOwnerLookup {
   findOwnerById(db: Queryable, ownerId: string): Promise<{ line_user_id: string } | null>;
 }
 
-export interface GbpCallbackLogger {
-  error(message: string, meta?: Record<string, unknown>): void;
-  warn(message: string, meta?: Record<string, unknown>): void;
-}
+/**
+ * GBP ドメイン共通のロガー（`./logger.js`）を再輸出する。meta は allowlist であり、
+ * 本文・トークン・例外メッセージは型として渡せない。
+ */
+export type GbpCallbackLogger = GbpLogger;
 
 export interface GbpOauthCallbackDeps {
   db: Queryable;
@@ -329,10 +331,11 @@ export function createGbpOauthCallbackRoute(deps: GbpOauthCallbackDeps): GbpOaut
       await deps.messenger.push(owner.line_user_id, [input.message]);
     } catch (err) {
       // Push・owner 参照の失敗で callback を落とさない（HTML は必ず返す）。
+      // 例外の message は載せない（LINE / pg の原文が入力のエコーや接続情報を含みうる）。
       deps.logger.warn('gbp oauth callback: push notification failed', {
         kind: input.kind,
         ownerId: input.ownerId,
-        error: err instanceof Error ? err.message : String(err),
+        errorName: errorNameOf(err),
       });
     }
   }
@@ -345,7 +348,7 @@ export function createGbpOauthCallbackRoute(deps: GbpOauthCallbackDeps): GbpOaut
       // handleOauthCallback は結果型で失敗を表す契約だが、想定外の例外でも 500 HTML を返す。
       // 原因文字列は認可コードを含みうる（google-auth-library の GaxiosError 由来）ため記録しない。
       deps.logger.error('gbp oauth callback: unexpected failure while handling callback', {
-        errorType: err instanceof Error ? err.name : typeof err,
+        errorName: errorNameOf(err),
       });
       return { status: 500, html: errorPage() };
     }

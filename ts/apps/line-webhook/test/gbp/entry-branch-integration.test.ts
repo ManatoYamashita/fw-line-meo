@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type {
   ConfirmedStoreSummary,
   GbpFlow,
@@ -297,6 +297,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
       },
     },
     messenger,
+    logger: { error: vi.fn(), warn: vi.fn() },
     now: () => NOW,
   };
 

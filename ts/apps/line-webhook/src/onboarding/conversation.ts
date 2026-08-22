@@ -378,15 +378,17 @@ async function handlePostback(
     // （design.md ディスパッチ規則）。判定は data の形式のみで行い、action の妥当性は見ない
     // ＝未知の `g_*` も GbpFlows が引き受ける。これにより GBP のボタンが
     // onboarding の固定案内へ誤って吸われることがなくなる。
+    // `handled` のときだけ委譲で完結する。`not_handled` は GBP 側が引き受けられなかった
+    // （＝サブシステムの障害を握った）ことを意味し、下の既存の固定案内へそのまま落ちる。
     const delegation = resolveGbpDelegation(deps, session);
     if (delegation !== null && isGbpPostbackData(event.data)) {
-      await delegation.gbp.handleGbpPostback({
+      const handled = await delegation.gbp.handleGbpPostback({
         ownerId: delegation.ownerId,
         lineUserId: event.lineUserId,
         replyToken: event.replyToken,
         data: event.data,
       });
-      return;
+      if (handled === 'handled') return;
     }
 
     // Req 4.6: completed 段階では postback の種類（resume 導線含む）を問わず固定案内のみ返す。
