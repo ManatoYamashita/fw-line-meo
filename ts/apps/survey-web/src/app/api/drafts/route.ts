@@ -1,7 +1,7 @@
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
-import { writeStructuredLog } from '../../../lib/structured-log';
+import { logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
 import { handleDrafts, type DraftsDeps } from './handler';
 
 export const runtime = 'nodejs';
@@ -14,7 +14,10 @@ async function buildDeps(): Promise<DraftsDeps> {
   if (!signingKey) throw new Error('SESSION_SIGNING_KEY is required');
   return {
     tokens: createSessionTokenService(signingKey),
-    generator: await createDefaultDraftGenerator(),
+    // 再生成 API も同じ生成器を通るので、事後検証は配線を足さずに効く（Issue #132・案B）。
+    generator: await createDefaultDraftGenerator({
+      onResidual: (aspectCodes) => logFactualityResidual(writeStructuredLog, aspectCodes),
+    }),
     rateLimiter: createRateLimiter({ limit: 20, windowMs: 60_000 }),
     clientKey: (req) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown',
     log: writeStructuredLog,

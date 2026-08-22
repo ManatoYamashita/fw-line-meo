@@ -16,4 +16,8 @@ export interface DraftMaterial {
   // optional なのは、この項目を持たない旧 sessionToken が /api/drafts の再生成で復元され
   // うるため。その場合は禁止句が出ない＝従来の挙動へ安全に劣化する（生成が壊れることはない）。
   unselectedAspectLabels?: string[];
+  // 同じ観点を **code** で持つ（Issue #132・案B）。プロンプトは表示名（label）で禁止し、
+  // 生成後の事後検証は識別子（code）で照合する。表示名が変わっても検証がずれないようにするため。
+  // 禁止と検証が同一の差集合から導かれることが、両者のずれを構造的に防ぐ。
+  unselectedAspectCodes?: string[];
 }

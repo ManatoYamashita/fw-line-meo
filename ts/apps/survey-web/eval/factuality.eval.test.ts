@@ -3,8 +3,8 @@ import { writeFileSync } from 'node:fs';
 import { createDefaultDraftGenerator } from '../src/lib/draft/generator';
 import { pickVariation } from '../src/lib/draft/prompt';
 import type { DraftMaterial, Star } from '../src/lib/domain';
-import { detectUnselectedAspectMentions, readLexicon } from './detect';
-import lexiconRaw from './aspect-lexicon.json';
+import { detectAspectMentions, readLexicon } from '../src/lib/draft/factuality';
+import lexiconRaw from '../src/lib/draft/aspect-lexicon.json';
 import aspectsRaw from './aspects.json';
 import datasetRaw from './dataset.json';
 
@@ -19,6 +19,9 @@ import datasetRaw from './dataset.json';
 const lexicon = readLexicon(lexiconRaw);
 const labels = aspectsRaw.labels as Record<string, string>;
 const RUNS = Number.parseInt(process.env.EVAL_RUNS ?? '3', 10);
+// 既定は本番と同じ構成（案A + 案B）。EVAL_POSTCHECK=0 で事後検証だけを外し、
+// 案A（プロンプトでの禁止）単体の効果を測れるようにする。前後比較の意味を保つために要る。
+const POST_CHECK = (process.env.EVAL_POSTCHECK ?? '1') !== '0';
 const OUT = process.env.EVAL_OUT ?? '';
 const hasKey = (process.env.GEMINI_API_KEY ?? '').length > 0;
 
@@ -35,14 +38,13 @@ function toDraftMaterial(m: (typeof datasetRaw.materials)[number]): DraftMateria
   const aspectLabels = m.aspectCodes.map((c: string) => labels[c] ?? c);
   // 本番の /api/responses と同じく、選ばれなかった観点も渡す（Issue #132・案 A）。
   // ここを渡さないと「本番とは違うプロンプト」を測ることになり、比較が成立しない。
-  const unselectedAspectLabels = Object.entries(labels)
-    .filter(([code]) => !selected.has(code))
-    .map(([, label]) => label);
+  const unselectedEntries = Object.entries(labels).filter(([code]) => !selected.has(code));
   const base = {
     storeName: m.storeName,
     star: m.star as Star,
     aspectLabels,
-    unselectedAspectLabels,
+    unselectedAspectLabels: unselectedEntries.map(([, label]) => label),
+    unselectedAspectCodes: unselectedEntries.map(([code]) => code),
   };
   return m.comment === null ? base : { ...base, comment: m.comment };
 }
@@ -58,11 +60,12 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
   it(
     `データセット ${datasetRaw.materials.length} 件 × ${RUNS} 回を生成して逸脱を測る`,
     async () => {
-      const generator = await createDefaultDraftGenerator();
+      const generator = await createDefaultDraftGenerator({ factualityCheck: POST_CHECK });
 
       for (const material of datasetRaw.materials) {
+        const dm = toDraftMaterial(material);
         for (let run = 0; run < RUNS; run++) {
-          const result = await generator.generate(toDraftMaterial(material), pickVariation());
+          const result = await generator.generate(dm, pickVariation());
           if (!result.ok) {
             // 生成失敗はサンプルとして数えない。多発する場合は測定自体が成立していない。
             failures.push(`${material.id}#${run}: ${result.error.kind}`);
@@ -73,7 +76,8 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             storeNameKind: material.storeNameKind,
             selected: material.aspectCodes,
             draft: result.value,
-            violations: detectUnselectedAspectMentions(result.value, material.aspectCodes, lexicon),
+            // 検証対象は本番と同じく「素材が持つ未選択 code」。プロンプトで禁止した集合と一致する。
+            violations: detectAspectMentions(result.value, dm.unselectedAspectCodes ?? [], lexicon),
           });
         }
       }
@@ -81,6 +85,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       // ---- レポート ----
       const violating = samples.filter((s) => s.violations.length > 0);
       console.log('\n===== 事実性評価レポート（Issue #132） =====');
+      console.log(`構成: 案A（プロンプト禁止）+ 案B（事後検証）= ${POST_CHECK ? '有効' : '案A のみ'}`);
       console.log(`生成成功 ${samples.length} / 試行 ${datasetRaw.materials.length * RUNS}（失敗 ${failures.length}）`);
       console.log(`未選択軸への言及を含むサンプル: ${violating.length} / ${samples.length}（${pct(violating.length, samples.length)}）\n`);
 
@@ -109,6 +114,31 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
         const mine = samples.filter((s) => s.storeNameKind === kind);
         const bad = mine.filter((s) => s.violations.length > 0);
         console.log(`  ${kind.padEnd(12)} ${bad.length}/${mine.length} (${pct(bad.length, mine.length)})`);
+      }
+
+      // 案C（素材が乏しいときは字数より事実性を優先）の副作用を見る。逸脱率だけを追うと
+      // 「短く書けば逸脱しない」方向へ寄せた結果、口コミとして使えない下書きになっても気づけない。
+      console.log('\n--- 下書きの字数 ---');
+      const lengths = samples.map((s) => [...s.draft].length).sort((a, b) => a - b);
+      const at = (q: number) => lengths[Math.min(lengths.length - 1, Math.floor(lengths.length * q))];
+      const inRange = lengths.filter((l) => l >= 100 && l <= 200).length;
+      console.log(
+        `  min=${lengths[0]} p10=${at(0.1)} 中央=${at(0.5)} p90=${at(0.9)} max=${lengths[lengths.length - 1]}`,
+      );
+      console.log(
+        `  100〜200 字: ${inRange}/${lengths.length} (${pct(inRange, lengths.length)})` +
+          `  100 字未満: ${lengths.filter((l) => l < 100).length} 件` +
+          `  200 字超: ${lengths.filter((l) => l > 200).length} 件`,
+      );
+      for (const [label, thin] of [['観点ゼロ（案C の対象）', true], ['観点あり', false]] as const) {
+        const mine = samples
+          .filter((s) => (s.selected.length === 0) === thin)
+          .map((s) => [...s.draft].length)
+          .sort((a, b) => a - b);
+        if (mine.length === 0) continue;
+        console.log(
+          `  ${label.padEnd(22)} n=${String(mine.length).padStart(3)}  中央=${mine[Math.floor(mine.length / 2)]}  min=${mine[0]}  max=${mine[mine.length - 1]}`,
+        );
       }
 
       if (violating.length > 0) {

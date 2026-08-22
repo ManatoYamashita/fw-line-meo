@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { writeStructuredLog, type SurveyLogFields } from '../src/lib/structured-log';
+import {
+  logFactualityResidual,
+  writeStructuredLog,
+  type SurveyLogFields,
+} from '../src/lib/structured-log';
 
 describe('writeStructuredLog', () => {
   it('event・errorKind・status だけを 1 行 JSON で出力する', () => {
@@ -56,5 +60,35 @@ describe('writeStructuredLog', () => {
 
     expect(output).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'tally_failed' }));
     output.mockRestore();
+  });
+});
+
+// Issue #132・案B: 事後検証で作り直してもなお残った未選択観点の記録。
+// 下書き自体は客へ返すため「失敗」ではない（level は warn）。合意した残差が実運用で
+// どう推移するかを後から集計できるようにするために残す。
+describe('logFactualityResidual', () => {
+  it('観点の code だけを warn で出力する（本文・一言・プロンプトは載せない）', () => {
+    const output = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    logFactualityResidual(writeStructuredLog, ['atmosphere', 'service']);
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        level: 'warn',
+        event: 'factuality_residual',
+        violatedAspects: 'atmosphere,service',
+      }),
+    );
+    output.mockRestore();
+  });
+
+  it('順序が違っても同じ文字列になる（集計時に同じ組み合わせが散らばらない）', () => {
+    const seen: string[] = [];
+    const log = (_l: unknown, _e: unknown, fields?: SurveyLogFields) => {
+      if (fields?.violatedAspects !== undefined) seen.push(fields.violatedAspects);
+    };
+    logFactualityResidual(log as Parameters<typeof logFactualityResidual>[0], ['service', 'atmosphere']);
+    logFactualityResidual(log as Parameters<typeof logFactualityResidual>[0], ['atmosphere', 'service']);
+    expect(seen[0]).toBe(seen[1]);
   });
 });

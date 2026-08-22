@@ -114,6 +114,7 @@ gcloud sql databases create fwlm_staging --instance=fwlm-pg --project=gen-fw-lin
 - 検証: `.github/workflows/gcp-auth-smoke.yml` を `workflow_dispatch` で起動 → SA キーなしで認証し `gcloud run services list` が成功すること（Req 6.1/6.2）。
 - **稼働実態の定期検証（Issue #91）**: `.github/workflows/prod-image-drift.yml`（`prod-image-drift`）が 6 時間ごとに、稼働イメージのタグと `origin/main` を突き合わせる。**read-only の照会のみ**（`gcloud run services/jobs list`）であり、イメージ更新も構成変更も行わないため本契約に抵触しない。`deploy-prod` はマージ契機でしか動かず、main が動かない期間は run 自体が生成されない（＝失敗という兆候すら出ない）ため、時間で回す検証がこの穴を埋める。
 - **シークレット実値の定期検証（Issue #63）**: `.github/workflows/secret-version-drift.yml`（`secret-version-drift`）が 6 時間ごとに、`infra/secrets-provisioned.tsv` の宣言と本番の version 構成を突き合わせる。**read-only のメタデータ照会のみ**（`gcloud secrets describe` / `versions list`）であり、値（payload）は読まないため本契約に抵触しない。CI に付く IAM は secret 単位の `roles/secretmanager.viewer` だけで、このロールは `secretmanager.versions.access` を含まない。project 単位の付与は行わない（Req 5.4）。
+- **外部 API への実疎通は CI では行わない（Issue #125）**: 実疎通には値そのものが要るが、CI の責務はイメージ更新であり外部 API 呼出ではない。CI へ `roles/secretmanager.secretAccessor` を付けることは Req 5.4（各実行環境は自身の責務に必要なシークレットのみ読み取り可能）に反するため行わない。実疎通は §8 の手順で運用者が自分の資格情報で実行し、CI は `infra/external-api-smoke.tsv` の宣言の構造と鮮度だけを検証する。
 - per-app のビルド/デプロイワークフローは各アプリ spec がこの雛形を基に追加する。
 
 ---
@@ -208,13 +209,117 @@ summary-delivery（毎時 Job）も同様に `gcloud run jobs execute summary-de
 
 ---
 
+## 8. 外部 API 実疎通の手順（Issue #125）
+
+`infra/secrets-provisioned.tsv` の二層検証（§5）は「宣言どおりの version が入っている」までしか言えず、**値そのものの正当性は原理的に検出できない**。プレースホルダー文字列・失効キー・別プロジェクトのキー・課金無効はいずれもメタデータからは見えない。到達手段は実際に外部 API を叩いて成功を観測することだけである。
+
+**この手順は CI では走らない。** 実疎通には値そのものが要るが、CI へ `roles/secretmanager.secretAccessor` を付けることは Req 5.4 に反する（§5 の契約）。実行するのは運用者であり、使うのは運用者自身の `gcloud` 資格情報である。
+
+実施記録の正典は `infra/external-api-smoke.tsv`。**外部 API に依存する機能は、この記録が `PENDING` でなくなるまで go-live を完了扱いにしない。**
+
+### 8-0. 一括実行
+
+```bash
+# 3 API をまとめて叩き、TSV へ貼る行を生成する（要 roles/secretmanager.secretAccessor 相当・人間の資格情報）
+bash scripts/run-external-api-smoke.sh \
+  --place-id <本番 stores.place_id のいずれか> \
+  --model <本番の GEMINI_MODEL> \
+  --channel-id <本番の LINE_CHANNEL_ID>
+```
+
+出力は PASS/FAIL・HTTP ステータス・API が返した `status` フィールドだけに絞ってある。応答本文をそのまま出さないのは、キーや URL がエコーされた本文をターミナル履歴や貼り付け先へ残さないためである。個別に確認したい場合は以下の 8-1〜8-3 を手で叩く。`--api gemini` のように対象を絞って再実行することもできる。
+
+**引数に既定値を持たせていないのは意図的である。** アプリ側コードの既定値を写経すると、本番が別モデル・別チャネルへ移った瞬間に「動くはずのない構成が緑」になる。値は次の 3 つから取る。
+
+- `--place-id`: 本番 `stores.place_id` の実値（§3 の Auth Proxy 経由 `psql` で取得）
+- `--model`: 本番 `survey-web` の env `GEMINI_MODEL`（`terraform.tfvars` の `gemini_model` と同値）
+- `--channel-id`: 本番 `line-webhook` の env `LINE_CHANNEL_ID`（`terraform.tfvars` の `line_channel_id` と同値）
+
+稼働中の実値を確認する場合は Cloud Run のリビジョンを読む（`gemini_model` / `line_channel_id` は Terraform の input variable であり `terraform output` には出ない）:
+
+```bash
+gcloud run services describe survey-web   --region=asia-northeast1 --project=gen-fw-line-meo --format=json
+gcloud run services describe line-webhook --region=asia-northeast1 --project=gen-fw-line-meo --format=json
+```
+
+出力の `spec.template.spec.containers[].env` から `GEMINI_MODEL` / `LINE_CHANNEL_ID` を読む。
+
+### 8-1. gemini: 口コミ下書き生成（survey-web / 機能3）
+
+```bash
+KEY="$(gcloud secrets versions access latest --secret=gemini-api-key --project=gen-fw-line-meo)"
+MODEL='<本番の GEMINI_MODEL・§8-0 の方法で確認する>'
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -X POST "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent" \
+  -H 'Content-Type: application/json' \
+  -d '{"contents":[{"parts":[{"text":"ping"}]}],"generationConfig":{"maxOutputTokens":1}}' \
+  -K - <<CFG
+header = "x-goog-api-key: ${KEY}"
+CFG
+```
+
+- 成功の観察可能な証拠: HTTP `200`。キーが不正なら `400`（`API_KEY_INVALID`）、課金・API 無効なら `403`。
+- **鍵を `-H` でコマンドラインへ置かない。** argv は同一ホストの他ユーザーが `ps` で読める。`-K -` で標準入力の設定として渡す（`run-external-api-smoke.sh` が 600 の一時ファイルを使うのと同じ理由）。本文（`-d`）は鍵を含まないのでそのままでよい。
+- 応答本文を出さない（`-o /dev/null`）のは、Google の 400 応答がリクエスト URL を含むことがあり、素朴に出すとターミナル履歴や貼り付け先へ残るためである。
+- 課金と副作用: 出力 1 トークン上限の呼び出し 1 回。外部に何も残らない。
+- モデル名は本番の env `GEMINI_MODEL`（tfvars `gemini_model`）と揃えること。アプリ側コードの既定値を写経すると、本番が別モデルへ移った瞬間に「動くはずのない構成が緑」になる。
+
+### 8-2. places: 競合データ取得（daily-batch / line-webhook / dashboard-api / 機能1）
+
+```bash
+KEY="$(gcloud secrets versions access latest --secret=places-api-key --project=gen-fw-line-meo)"
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  "https://places.googleapis.com/v1/places/<PLACE_ID>" \
+  -H 'X-Goog-FieldMask: id' \
+  -K - <<CFG
+header = "X-Goog-Api-Key: ${KEY}"
+CFG
+```
+
+- 成功の観察可能な証拠: HTTP `200`。キーが不正なら `400`、クォータ超過なら `429`。
+- **鍵は `-K -` で渡す**（§8-1 と同じ理由。argv に置くと `ps` で読める）。
+- 課金と副作用: read-only の Place Details 1 回。`X-Goog-FieldMask` を `id` だけに絞ると最安の Essentials SKU に収まる（`go/internal/places/client.go` の 2 種のマスクは使わない）。
+- `<PLACE_ID>` は本番 `stores.place_id` の実値を使う（§3 の Auth Proxy 経由 `psql` で取得）。
+
+### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / 機能1 配信）
+
+```bash
+SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
+CHANNEL_ID='<本番の LINE_CHANNEL_ID・§8-0 の方法で確認する>'
+# printf はシェル組み込みなので、チャネルシークレットがどのプロセスの argv にも現れない。
+TOKEN="$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' "$CHANNEL_ID" "$SECRET" \
+  | curl -sS -X POST 'https://api.line.me/oauth2/v3/token' \
+      -H 'Content-Type: application/x-www-form-urlencoded' --data @- \
+  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+curl -sS -o /dev/null -w '%{http_code}\n' 'https://api.line.me/v2/bot/info' -K - <<CFG
+header = "Authorization: Bearer ${TOKEN}"
+CFG
+```
+
+- 成功の観察可能な証拠: 2 本目が HTTP `200`。トークン発行に失敗していれば `TOKEN` が空になり `401` が返る。
+- **チャネルシークレットもトークンも argv へ置かない**（§8-1 と同じ理由）。本文は `--data @-` で標準入力から、トークンは `-K -` で設定として渡す。
+- 課金と副作用: **なし。`/v2/bot/info` は read-only であり、メッセージを一切送信しない。**
+- **push / multicast / broadcast を実疎通に使ってはならない。** 実送信は受信者への迷惑であり、無料メッセージ通数枠を消費する。トークンが発行できて `/v2/bot/info` が 200 を返せば、チャネル資格情報の正当性は証明できる。
+- `line-channel-access-token` は実疎通の対象ではない。2 つの消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts`）はどちらもチャネル ID とシークレットから stateless token を都度発行しており、この枠はコードから読まれていない。
+
+### 8-4. 記録の更新
+
+実疎通が全て PASS したら、同じ PR で `infra/external-api-smoke.tsv` の該当行を更新する。
+
+- `<最終確認日>`: 実施日（JST・`YYYY-MM-DD`）。`PENDING` を置き換える。`run-external-api-smoke.sh` が出す行は実行環境の TZ に依らず JST で押してあるので、そのまま貼ってよい（鮮度検証の基準日も JST 固定で、両者は必ず同じ暦の上で比較される）。
+- `<証拠>`: 後から辿れる短い識別子（実行日時・run URL・execution id 等）。空欄や `-` は層1 ガードが赤にする。
+
+`scripts/check-external-api-smoke.sh`（ts-ci）が構造を、`scripts/check-external-api-smoke-freshness.sh`（`external-api-smoke-freshness` ワークフロー・日次）が鮮度を検証する。後者は `PENDING` と期限切れを赤にし、`scripts/report-ci-issue.sh` がラベル `external-api-smoke` の追跡 Issue を 1 本だけ維持する。記録を更新すると次の実行で自動的に閉じる。
+
+**日付だけを更新して実疎通を省略しないこと。** このガードは人間の実施を強制できず、記録の鮮度しか見ていない。`<証拠>` 欄は、後から「本当に叩いたのか」を第三者が辿るための唯一の手掛かりである。
+
 ## 10. GBP 連携の実装側セットアップ（gbp-post-review-reply / 機能2・機能1-b）
 
 Google ビジネスプロフィール（GBP）への投稿作成・クチコミ返信を本番で動かすための**実装側**手順。コード（`ts/apps/line-webhook/src/gbp/`）は実装・検証済みだが、認証情報を投入するまで本番では動かない。
 
 **Google の審査 2 関門（A: GBP API 利用審査 / B: OAuth アプリ検証）の手順は §9 が正典**であり、Issue #7 として実装とは独立に進む。この節はその承認が出た後に実施する手順だけを持つ。両審査が通るまで、本 PR は Draft から出せない。
 
-**節番号について**: §8 は #125 の外部 API 実疎通、§9 は #7 の GBP 審査手順が main 側で占有している。本 PR は main 統合前のため手元のファイルでは §8・§9 が欠番に見えるが、統合後に連番へ収まる。§8 を GBP に使うと統合時に `8-1` が 2 つ存在する文書になり、`scripts/check-external-api-smoke.sh` の抽出パターンは大文字始まりの GBP 見出しに当たらないため**CI は緑のまま壊れる**。この節を §8 へ戻さないこと。
+**節番号について**: §8 は #125 の外部 API 実疎通が占有済み（main 統合で本ファイルにも入った）。**§9 は #7 の GBP 審査手順（PR #140）が入るまで欠番**であり、本節が参照する §9 / §9-2 / §9-2-a は #140 が main へマージされた時点で解決する。§8 を GBP に使うと `8-1` が 2 つ存在する文書になり、`scripts/check-external-api-smoke.sh` の見出し抽出は `^### 8-[0-9]+\. [a-z][a-z-]+:`（小文字始まり + コロン）なので大文字始まりの GBP 見出しには当たらず**CI は緑のまま壊れる**。この節を §8 へ戻さないこと。
 
 ### 10-1. OAuth クライアントの作成（人手・§9-2 の検証申請と対で行う）
 
