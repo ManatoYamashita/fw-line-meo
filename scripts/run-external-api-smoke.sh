@@ -24,13 +24,20 @@
 #   line-messaging トークン発行 → GET /v2/bot/info。**メッセージを一切送信しない。**
 #                  push / multicast / broadcast は実疎通に使ってはならない（実送信は受信者への
 #                  迷惑であり、無料メッセージ通数枠を消費する）。
+#   gbp            意図的に無効な refresh token で token endpoint を 1 回叩くだけ。ユーザー認可を
+#                  要さず、トークンも発行されず、GBP 側に何も残らない。
 #
 # 使い方:
 #   bash scripts/run-external-api-smoke.sh \
 #     --place-id <本番 stores.place_id> \
 #     --model <本番の GEMINI_MODEL> \
 #     --channel-id <本番の LINE_CHANNEL_ID> \
-#     [--project gen-fw-line-meo] [--api gemini|places|line-messaging]...
+#     --gbp-client-id <本番の GBP_OAUTH_CLIENT_ID> \
+#     [--project gen-fw-line-meo] [--api <api>]...
+#
+#   `--api` の語彙をこのスクリプトへ列挙しない。正典は infra/external-api-smoke.tsv の api 列で
+#   あり、そこから導出する。ハードコードすると TSV へ api を足しても既定の一括実行が追従せず、
+#   **照合するガードが無いまま静かに乖離する**（PR #121 レビュー指摘）。
 #
 #   --model / --channel-id に既定値を持たせないのは意図的である。アプリ側コードの既定値を
 #   写経すると、本番が別モデル・別チャネルへ移った瞬間に「動くはずのない構成が緑」になる。
@@ -47,7 +54,21 @@ project='gen-fw-line-meo'
 place_id=''
 model=''
 channel_id=''
+gbp_client_id=''
 selected=''
+
+# 実疎通対象の語彙は infra/external-api-smoke.tsv の api 列（'-' 以外）が正典。列挙を二重管理しない。
+DECL_FILE="${ROOT}/infra/external-api-smoke.tsv"
+if [ ! -f "$DECL_FILE" ]; then
+  echo "ERROR: ${DECL_FILE#"$ROOT"/} が見つかりません（実疎通対象の正典）。" >&2
+  exit 1
+fi
+known_apis="$(grep -vE '^[[:space:]]*(#|$)' "$DECL_FILE" | cut -f2 | grep -v '^-$' | sort -u | tr '\n' ' ')"
+if [ -z "${known_apis// /}" ]; then
+  echo "ERROR: ${DECL_FILE#"$ROOT"/} に実疎通対象（api が '-' 以外）の行が 1 件もありません。" >&2
+  echo "       → 対象 0 件のまま成功と報告するのが最悪の空振りであるため、ここで落とします。" >&2
+  exit 1
+fi
 
 # 値を伴うオプションで値が無いまま `shift 2` すると、`set -e` の下で **何も出さずに rc=1 で
 # 終了する**（`--model` を末尾に置いた実行が無言で死ぬ）。無言の失敗は、実行し忘れたのか
@@ -67,6 +88,7 @@ while [ "$#" -gt 0 ]; do
     --place-id) need_value "$1" "$#"; place_id="$2"; shift 2 ;;
     --model) need_value "$1" "$#"; model="$2"; shift 2 ;;
     --channel-id) need_value "$1" "$#"; channel_id="$2"; shift 2 ;;
+    --gbp-client-id) need_value "$1" "$#"; gbp_client_id="$2"; shift 2 ;;
     --api) need_value "$1" "$#"; selected="${selected}${2} "; shift 2 ;;
     -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
     *)
@@ -78,16 +100,16 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$selected" ]; then
-  selected='gemini places line-messaging '
+  selected="$known_apis"
 fi
 
 selected_count=0
 # shellcheck disable=SC2086 # selected は空白区切りで意図的に単語分割する
 for a in $selected; do
-  case "$a" in
-    gemini|places|line-messaging) ;;
+  case " ${known_apis}" in
+    *" ${a} "*) ;;
     *)
-      echo "ERROR: --api は gemini / places / line-messaging のいずれかです（現在: '${a}'）。" >&2
+      echo "ERROR: --api は infra/external-api-smoke.tsv が宣言する ${known_apis% } のいずれかです（現在: '${a}'）。" >&2
       exit 2
       ;;
   esac
@@ -133,6 +155,9 @@ fi
 if wants line-messaging; then
   require_arg "$channel_id" '--channel-id' '本番 line-webhook の env LINE_CHANNEL_ID と同じ値を渡してください（infra/README.md §8-0）。'
 fi
+if wants gbp; then
+  require_arg "$gbp_client_id" '--gbp-client-id' '本番 line-webhook の env GBP_OAUTH_CLIENT_ID と同じ値を渡してください（infra/README.md §8-0）。GBP の認証情報がまだ未投入（§10-2）なら、`--api gemini --api places --api line-messaging` で対象を絞って実行してください。'
+fi
 
 for cmd in gcloud curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -154,6 +179,14 @@ results=''
 extract_status() {
   _s="$(sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([A-Z_]\{1,64\}\)".*/\1/p' "$1")"
   printf '%s' "${_s%%$'\n'*}"
+}
+
+# OAuth 2.0 の `"error": "xxx"` だけを取り出す（RFC 6749 のエラーコードは小文字とアンダースコア）。
+# `error_description` は入力のエコーを含みうるので絶対に読まない。**受理するのは [a-z_] のみ。**
+# 繰り返し回数を書かないのは line-messaging 側と同じ理由（BSD sed の RE_DUP_MAX 255）。
+extract_oauth_error() {
+  _e="$(sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([a-z_][a-z_]*\)".*/\1/p' "$1")"
+  printf '%s' "${_e%%$'\n'*}"
 }
 
 # curl を 600 の設定ファイル経由で叩き、HTTP ステータスだけを stdout へ返す。
@@ -276,6 +309,40 @@ if wants line-messaging; then
   fi
 fi
 
+# --- gbp -----------------------------------------------------------------------------------------
+# **HTTP ステータスでは判定しない。** Google はこの 2 ケース（invalid_grant / invalid_client）の
+# HTTP コードを公開文書に明記していないため、判定は `error` フィールドで行う。アプリ側の
+# ts/apps/line-webhook/src/gbp/token-store.ts の isInvalidGrantError も同じく error を一次情報にする。
+if wants gbp; then
+  if ! secret="$(read_secret gbp-oauth-client-secret)"; then
+    record gbp FAIL "gbp-oauth-client-secret を読めません（未投入なら infra/README.md §10-2 を先に）"
+  else
+    body="${TMPDIR_SMOKE}/gbp-token.json"
+    data="${TMPDIR_SMOKE}/gbp-req.txt"
+    # 意図的に無効な refresh token を送る。クライアント資格情報が正当なら Google は
+    # 「grant が無効」とだけ答えるので、invalid_grant が返ること自体が client の正当性を証明する。
+    # ユーザー認可を要さず、トークンも発行されず、GBP 側に何も残らない。
+    printf 'grant_type=refresh_token&refresh_token=smoke-invalid&client_id=%s&client_secret=%s' \
+      "$gbp_client_id" "$secret" > "$data"
+    unset secret
+    code="$(CURL_DATA_FILE="$data" curl_status "$body" \
+      'https://oauth2.googleapis.com/token' \
+      'Content-Type: application/x-www-form-urlencoded')"
+    rm -f "$data"
+    oerr="$(extract_oauth_error "$body")"
+    case "$oerr" in
+      invalid_grant)
+        record gbp PASS "http=${code} error=${oerr}（クライアント資格情報は正当・トークン発行なし）" ;;
+      invalid_client)
+        record gbp FAIL "http=${code} error=${oerr}（client_id と client_secret の組が誤りです）" ;;
+      '')
+        record gbp FAIL "http=${code}（応答に error フィールドがありません）" ;;
+      *)
+        record gbp FAIL "http=${code} error=${oerr}" ;;
+    esac
+  fi
+fi
+
 echo ""
 
 # 成功を断定する直前の空振り防止。上流の引数検証をすり抜ける経路が将来できても、
@@ -296,7 +363,7 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 # **記録へ押す日時は必ず JST で取る（TZ を実行者の環境へ委ねない）。** 宣言の最終確認日は JST と
-# 定めてあり（infra/external-api-smoke.tsv の列定義・infra/README.md §8-4）、鮮度検証（層2）も
+# 定めてあり（infra/external-api-smoke.tsv の列定義・infra/README.md §8-5）、鮮度検証（層2）も
 # JST を基準日に判定する。ここが実行者のローカル日付だと、JST 圏外から叩いた記録が層2 の未来日
 # 判定に掛かり、正当な実施が「日付だけ埋めた捏造」として追跡 Issue へ立つ。証拠欄の刻も同じ理由で
 # JST に揃える（オフセットが実行環境ごとに変わると、後から読む人が実施時刻を復元できない）。
@@ -309,11 +376,7 @@ echo "infra/external-api-smoke.tsv の該当行を、最終確認日と証拠を
 echo ""
 # 現在の宣言から該当 api の行を引き、日付と証拠だけを差し替えた行を提示する。
 # 宣言を直接書き換えないのは、レビューされる差分として人間の手で入れるべきだからである。
-DECL_FILE="${ROOT}/infra/external-api-smoke.tsv"
-if [ ! -f "$DECL_FILE" ]; then
-  echo "WARNING: ${DECL_FILE#"$ROOT"/} が見つからないため、貼り付け用の行を出せません。" >&2
-  exit 0
-fi
+# DECL_FILE は冒頭で解決・存在確認済み（実疎通対象の語彙もそこから導出している）。
 while IFS= read -r line; do
   api="$(printf '%s' "$line" | cut -f2)"
   case " ${selected}" in

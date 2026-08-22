@@ -233,7 +233,7 @@ TSVROW
   if [ "$d_evid" = '-' ]; then
     echo "ERROR: ${DECL_FILE#"$ROOT"/}:${lineno} は実施日が入っているのに証拠が '-' です。" >&2
     echo "       → 証拠列は「本当に叩いたのか」を第三者が後から辿るための唯一の手掛かりです。" >&2
-    echo "         実行日時・run URL・execution id など、辿れる識別子を書いてください（infra/README.md §8-4）。" >&2
+    echo "         実行日時・run URL・execution id など、辿れる識別子を書いてください（infra/README.md §8-5）。" >&2
     fail=1
   fi
 done < "$DECL_FILE"
@@ -273,7 +273,7 @@ done
 # --- 検証4: api ↔ README §8 の手順セクション（両方向） ---------------------------------------
 #
 # 見出しの形は `### 8-<番号>. <api>: <説明>` に固定する。api を含まない節（8-0 一括実行・
-# 8-4 記録の更新）は日本語で始まるためこのパターンに当たらない。
+# 8-5 記録の更新）は日本語で始まるためこのパターンに当たらない。
 readme_rc=0
 readme_apis="$(grep -oE '^### 8-[0-9]+\. [a-z][a-z-]+:' "$README_FILE" \
   | sed -E 's/^### 8-[0-9]+\. ([a-z][a-z-]+):$/\1/' | sort -u)" || readme_rc=$?

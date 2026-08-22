@@ -83,11 +83,16 @@ cloud-sql-proxy gen-fw-line-meo:asia-northeast1:fwlm-pg --port 5432
 # migration を番号順に適用 → その後 GRANT を適用
 psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0001_four_tier_baseline.sql
 psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0002_reference_seed.sql
+psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0003_line_onboarding.sql
 psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0004_competitive_daily_summary.sql
+psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0005_agency_dashboard.sql
+psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0006_gbp_post_review_reply.sql
 psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f infra/sql/grants.sql
 ```
 
 - migration は `db/migrations/` に存在する番号を実際に確認してから番号順に適用すること（本書の例を鵜呑みにしない）。`infra/sql/grants.sql` は `daily_summaries`/`summary_deliveries`（0004）を含む全テーブルへの GRANT を前提とするため、0004 未適用のまま grants.sql を実行すると失敗する（task 6.1 レビューで発見）。
+
+- **新しい migration を適用したら `infra/sql/grants.sql` を必ず再実行する。** `GRANT SELECT ON ALL TABLES IN SCHEMA public` は**実行時点に存在するテーブルにしか効かず**、`ALTER DEFAULT PRIVILEGES` も置いていないため、後から作られた表には SELECT すら付かない。再実行を怠ると、アプリは起動できるのにその表へ触った瞬間だけ `permission denied` で落ちる（PR #121 レビュー指摘）。
 
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。
 
@@ -302,7 +307,28 @@ CFG
 - **push / multicast / broadcast を実疎通に使ってはならない。** 実送信は受信者への迷惑であり、無料メッセージ通数枠を消費する。トークンが発行できて `/v2/bot/info` が 200 を返せば、チャネル資格情報の正当性は証明できる。
 - `line-channel-access-token` は実疎通の対象ではない。2 つの消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts`）はどちらもチャネル ID とシークレットから stateless token を都度発行しており、この枠はコードから読まれていない。
 
-### 8-4. 記録の更新
+### 8-4. gbp: Google 連携の OAuth クライアント（line-webhook / 機能2・機能1-b）
+
+**この節は §10 の認証情報投入が済むまで実行できない**（`gbp-oauth-client-secret` が未投入のため）。宣言は `PENDING` のまま、層2 の `external-api-smoke-freshness` は意図どおり赤で残る（`infra/secrets-provisioned.tsv` の 2 行と同じ「未完の可視化」）。
+
+```bash
+CLIENT_SECRET="$(gcloud secrets versions access latest --secret=gbp-oauth-client-secret --project=gen-fw-line-meo)"
+CLIENT_ID='<本番の GBP_OAUTH_CLIENT_ID・§8-0 の方法で確認する>'
+# printf はシェル組み込みなので、クライアントシークレットがどのプロセスの argv にも現れない。
+printf 'grant_type=refresh_token&refresh_token=smoke-invalid&client_id=%s&client_secret=%s' \
+    "$CLIENT_ID" "$CLIENT_SECRET" \
+  | curl -sS -X POST 'https://oauth2.googleapis.com/token' \
+      -H 'Content-Type: application/x-www-form-urlencoded' --data @- \
+  | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([a-z_]*\)".*/\1/p'
+```
+
+- **成功の観察可能な証拠: `invalid_grant`。** 意図的に無効な refresh token を送っているので、クライアント資格情報が正当なら Google は「grant が無効」とだけ答える。つまり `invalid_grant` が返ること自体が client_id / client_secret の組の正当性を証明する。
+- **失敗: `invalid_client`。** client_id と client_secret の組が誤っている（出典: Google Identity「OAuth 2.0 for Web Server Applications」のエラー一覧。`invalid_client` は "The OAuth client secret is incorrect"）。
+- **HTTP ステータスで判定しないこと。** Google はこの 2 ケースの HTTP コードを公開文書に明記していない。判定は `error` フィールドで行う（アプリ側 `ts/apps/line-webhook/src/gbp/token-store.ts` の `isInvalidGrantError` も同じく `error` を一次情報にしている）。
+- 課金と副作用: **なし。** ユーザー認可を要さず、トークンも発行されず、GBP 側に何も残らない。
+- **`business.manage` のクォータは検証できない。** これはクライアント資格情報の疎通確認であって、GBP API 利用審査（§9 関門 A）の承認状態は別物である。審査の確認方法は §9-1 を参照。
+
+### 8-5. 記録の更新
 
 実疎通が全て PASS したら、同じ PR で `infra/external-api-smoke.tsv` の該当行を更新する。
 
@@ -343,12 +369,15 @@ Google ビジネスプロフィール（GBP）への投稿作成・クチコミ�
 
 secret 枠は Terraform の**宣言**済み（`infra/modules/secrets/main.tf` の `gbp-oauth-client-secret`・`gbp-token-cipher-key`）だが、**本番にはまだ枠自体が無い**（2026-08-17 実測。`gcloud secrets list --project=gen-fw-line-meo` は既存 6 本のみ）。順序は必ず次:
 
+0. **DB を先に整える。** §3 の Auth Proxy 経由で `db/migrations/0006_gbp_post_review_reply.sql` を適用し、**続けて `infra/sql/grants.sql` を再実行する**
 1. `make tf-apply` で**枠を作る**
 2. 下の `gcloud secrets versions add` で**値を入れる**
 3. `infra/secrets-provisioned.tsv` の 2 行を `PENDING` から実 version 番号・投入日へ更新する（同じ PR で）
 4. **その後で** PR #121 を main へマージする
 
 順序を逆にすると `deploy-prod` が env 未設定の新イメージを出荷し、`loadConfig()` の fail-fast で line-webhook の新リビジョンが起動失敗する。
+
+**手順 0 を飛ばすと fail-fast は助けにならない。** env は揃っているのでリビジョンは正常に起動し、`gbp_locations` / `gbp_sessions` が無い（または `grants.sql` 未再実行で権限が無い）状態のまま本番へ出る。`line-webhook` は店舗特定済みオーナーのテキストを受けるたびに `gbp_sessions` を引くため、**GBP を使っていないオーナーの通常メッセージまで内部エラー案内に化ける**（PR #121 レビュー指摘）。`GRANT SELECT ON ALL TABLES` が実行時点のテーブルにしか効かないことは §3 の注記を参照。
 
 値のみ手動投入する。
 

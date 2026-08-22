@@ -63,12 +63,49 @@ reas_fixture() {
   # $1 = スタブ curl が返す HTTP ステータス。
   fx_guard run-external-api-smoke
   reas_stubs "$1"
-  # 末尾で貼り付け用の行を組むため、宣言ファイルも要る。
+  # 宣言ファイルは末尾の貼り付け行を組むためだけでなく、**`--api` の語彙と既定の対象集合の正典**
+  # でもある（スクリプト側は語彙をハードコードしない）。ここに書いた api がそのまま実行対象になる。
   mkdir -p "${FX}/infra"
   {
     printf '# 自己テストの宣言 fixture（Issue #125）\n'
-    printf 'alpha-key\talpha\tPENDING\t-\t#125\t説明\n'
+    printf 'gemini-api-key\tgemini\tPENDING\t-\t#125\t説明\n'
+    printf 'places-api-key\tplaces\tPENDING\t-\t#125\t説明\n'
+    printf 'line-channel-secret\tline-messaging\tPENDING\t-\t#125\t説明\n'
     printf 'ops-only\t-\t-\t-\t#125\t対象外\n'
+  } > "${FX}/infra/external-api-smoke.tsv"
+}
+
+reas_gbp_fixture() {
+  # $1 = スタブ curl が返す HTTP ステータス、$2 = OAuth の error コード。
+  # gbp の判定は HTTP ステータスではなく `error` フィールドで行う（Google は invalid_grant /
+  # invalid_client の HTTP コードを公開文書に明記していない）。error_description には番兵を
+  # 埋め、**説明文が出力へ漏れないこと**もあわせて固定する。
+  fx_guard run-external-api-smoke
+  reas_stubs "$1"
+  cat > "${FX}/stub/curl" <<STUB
+#!/usr/bin/env bash
+set -u
+out=''
+prev=''
+for a in "\$@"; do
+  if [ "\$prev" = '-o' ]; then out="\$a"; fi
+  prev="\$a"
+done
+for a in "\$@"; do
+  if [ -f "\$a" ]; then
+    sed -n 's/^url = "\(.*\)"\$/\1/p' "\$a" >> "\${STUB_DIR}/urls.txt"
+  fi
+done
+if [ -n "\$out" ]; then
+  printf '{"error":"${2}","error_description":"${REAS_BODY_SENTINEL} key=${REAS_KEY_SENTINEL}"}' > "\$out"
+fi
+printf '%s' '${1}'
+STUB
+  chmod +x "${FX}/stub/curl"
+  mkdir -p "${FX}/infra"
+  {
+    printf '# 自己テストの宣言 fixture（Issue #125）\n'
+    printf 'gbp-oauth-client-secret\tgbp\tPENDING\t-\t#8\t説明\n'
   } > "${FX}/infra/external-api-smoke.tsv"
 }
 
@@ -157,8 +194,7 @@ t_end
 
 t_begin 'run-external-api-smoke: 記録へ押す日付は実行環境の TZ に依らず JST で一定'
 reas_fixture 200
-# 貼り付け用の行は選んだ api の行しか出ない。既定 fixture の api は 'alpha' でどの --api にも
-# 一致せず 1 行も出ないため、このケースでは実在の api 名を持つ宣言へ差し替える。
+# 貼り付け用の行は選んだ api の行しか出ない。日付の比較を 1 行に絞るため places だけの宣言へ差し替える。
 {
   printf '# 自己テストの宣言 fixture（Issue #125）\n'
   printf 'places-api-key\tplaces\tPENDING\t-\t#125\t説明\n'
@@ -240,7 +276,51 @@ t_end
 t_begin 'run-external-api-smoke: 未知の --api は落とす'
 reas_fixture 200
 reas_run --api bogus
-expect_red '--api は gemini / places / line-messaging のいずれかです'
+# 語彙は宣言ファイル（fixture）から導出される。メッセージにも導出元と実際の候補が出る。
+expect_red '--api は infra/external-api-smoke.tsv が宣言する'
+expect_output_matches 'gemini line-messaging places'
+t_end
+
+t_begin 'run-external-api-smoke: 宣言に無い api は既定の対象にもならない'
+reas_fixture 200
+# 既定の対象集合も宣言から導出する。ハードコードした列挙だと、TSV へ api を足しても
+# 一括実行が追従せず、照合するガードが無いまま静かに乖離する（PR #121 レビュー指摘）。
+reas_run --place-id ChIJTEST --model test-model --channel-id 1234567890
+expect_green
+expect_output_matches '対象: gemini line-messaging places'
+t_end
+
+# ---------------------------------------------------------------------------
+# gbp（PR #121 レビュー指摘の是正）。クライアント資格情報の正当性だけを、ユーザー認可も
+# トークン発行も伴わずに確かめる。判定は HTTP ステータスではなく OAuth の `error` フィールド。
+
+t_begin 'run-external-api-smoke: gbp は invalid_grant を成功と判定する（クライアントは正当）'
+reas_gbp_fixture 400 invalid_grant
+reas_run --api gbp --gbp-client-id 000000000000-x.apps.googleusercontent.com
+expect_green
+expect_output_matches 'PASS  gbp .*error=invalid_grant'
+# error_description は入力のエコーを含みうるので絶対に出さない。
+reas_expect_no_leak
+# 意図的に無効な grant を送るだけで、トークン発行にも GBP の書込系にも到達しない。
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="URLS: $(tr '\n' ' ' < "${FX}/stub/urls.txt")"
+# shellcheck disable=SC2034 # 同上
+RC=0
+expect_output_matches '^URLS: https://oauth2\.googleapis\.com/token *$'
+t_end
+
+t_begin 'run-external-api-smoke: gbp は invalid_client を失敗と判定する（資格情報が誤り）'
+reas_gbp_fixture 401 invalid_client
+reas_run --api gbp --gbp-client-id 000000000000-x.apps.googleusercontent.com
+expect_red '実疎通に失敗した API があります'
+expect_output_matches 'FAIL  gbp .*error=invalid_client'
+reas_expect_no_leak
+t_end
+
+t_begin 'run-external-api-smoke: gbp は --gbp-client-id が無ければ落とす'
+reas_gbp_fixture 400 invalid_grant
+reas_run --api gbp
+expect_red '--gbp-client-id は必須です'
 t_end
 
 t_begin 'run-external-api-smoke: 未知の引数は使い方の誤りとして落とす'

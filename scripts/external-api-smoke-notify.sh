@@ -83,7 +83,7 @@ if [ "$state" = "red" ]; then
   echo ""
   echo "## 対処"
   echo ""
-  echo "1. \`infra/README.md\` §8 の手順で該当 API を**本番に対して実際に叩く**（\`bash scripts/run-external-api-smoke.sh --place-id <place_id> --model <GEMINI_MODEL> --channel-id <LINE_CHANNEL_ID>\` で 3 API まとめて実行できます。値の調べ方は §8-0）"
+  echo "1. \`infra/README.md\` §8 の手順で該当 API を**本番に対して実際に叩く**（\`bash scripts/run-external-api-smoke.sh --place-id <place_id> --model <GEMINI_MODEL> --channel-id <LINE_CHANNEL_ID> --gbp-client-id <GBP_OAUTH_CLIENT_ID>\` で宣言済みの API をまとめて実行できます。対象は \`infra/external-api-smoke.tsv\` の api 列から導出されるので、絞るなら \`--api\` を使ってください。値の調べ方は §8-0）"
   echo "2. 全て成功したら、同じ PR で \`infra/external-api-smoke.tsv\` の該当行の最終確認日と証拠を更新する"
   echo "3. 失敗した場合は**キーそのものが死んでいます**。\`infra/README.md\` §1 項目 5 で実値を投入し直し、\`infra/secrets-provisioned.tsv\` も同じ PR で更新する"
   echo ""
