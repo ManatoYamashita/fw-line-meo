@@ -408,12 +408,50 @@ describe('エラー分類とリトライ', () => {
     expect(backoffCalls).toEqual([]);
   });
 
+  // リトライの検証には **冪等なメソッド**（GET / PUT）を使う。createLocalPost は POST で
+  // 非冪等なため再送しない（下の専用ケースで固定している）。
   it('429 は 1 回だけリトライし、なお 429 なら rate_limited', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(429, {}));
     const { client, db, backoffCalls } = makeClient({ fetch: fetchMock as unknown as typeof fetch });
 
-    const res = await client.createLocalPost(db, { ...KEY, summary: 'x' });
+    const res = await client.listReviews(db, { ...KEY, limit: 5 });
     expect(res).toEqual({ ok: false, error: { kind: 'rate_limited' } satisfies GbpApiError });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(backoffCalls).toEqual([0]);
+  });
+
+  // 非冪等な POST を再送してはならない（PR #121 レビュー指摘）。
+  // 429/5xx は「リクエストが処理されなかった」ことを意味しない。Google が投稿を作成した後に
+  // ゲートウェイが 5xx を返せば、再送は同一本文の投稿を 2 件公開する。オーナーには失敗と
+  // 表示されるため重複に気づけず、Google のスパム判定リスクにも直結する。
+  it.each([
+    [429, { kind: 'rate_limited' } as GbpApiError],
+    [503, { kind: 'upstream_error', status: 503 } as GbpApiError],
+  ])('createLocalPost は HTTP %i でも再送しない（重複公開を作らない）', async (status, expected) => {
+    const fetchMock = vi.fn(async () => jsonResponse(status, {}));
+    const { client, db, backoffCalls } = makeClient({ fetch: fetchMock as unknown as typeof fetch });
+
+    const res = await client.createLocalPost(db, { ...KEY, summary: 'x' });
+    expect(res).toEqual({ ok: false, error: expected });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(backoffCalls).toEqual([]);
+  });
+
+  // 返信は PUT（upsert）で冪等なので再送してよい。投稿側だけを止めたのであって、
+  // 再試行そのものを殺したわけではないことを対照として固定する。
+  it('upsertReviewReply は PUT なので 5xx で 1 回リトライする', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(503, {}));
+    const { client, db, backoffCalls } = makeClient({ fetch: fetchMock as unknown as typeof fetch });
+
+    const res = await client.upsertReviewReply(db, {
+      ...KEY,
+      reviewName: `${V4_PATH}/reviews/rev-1`,
+      comment: 'ありがとうございます。',
+    });
+    expect(res).toEqual({
+      ok: false,
+      error: { kind: 'upstream_error', status: 503 } satisfies GbpApiError,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(backoffCalls).toEqual([0]);
   });

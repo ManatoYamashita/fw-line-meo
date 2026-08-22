@@ -12,6 +12,9 @@
 //   本モジュールが原エラーへ触れる経路自体を作らない・Req 2.1）。
 // - 429/5xx は指数バックオフで 1 回だけ再試行し、それでも失敗した場合は型付きエラーで返す
 //   （上位の GbpFlows が LINE 向けメッセージへ一元変換する・Req 3.7, 4.7）。
+//   **再試行してよいのは冪等な要求だけ**（`RequestOptions.idempotent`）。localPosts の作成は
+//   POST で非冪等なので再送しない。429/5xx は「処理されなかった」ことを意味せず、Google が
+//   投稿を作成した後の 5xx を再送すると同一本文が 2 件公開される（PR #121 レビュー指摘）。
 // - HTTP には Node 標準 fetch のみを使用し、新規 HTTP ライブラリを導入しない。
 //   テストで実ネットワークを叩かないよう fetch と backoff を注入可能にする。
 
@@ -272,6 +275,17 @@ interface RequestOptions {
   body?: unknown;
   /** false のときレスポンスボディを解釈しない（更新系で本文を必要としない場合）。 */
   expectJson: boolean;
+  /**
+   * 自動再送してよいか。**false なら 429/5xx でも 1 度しか叩かない**（PR #121 レビュー指摘）。
+   *
+   * 429/5xx は「リクエストが処理されなかった」ことを意味しない。Google が投稿を作成した後に
+   * ゲートウェイが 5xx を返せば、再送は同一本文の投稿を 2 件公開する。オーナーには失敗と
+   * 表示されるため重複に気づけず、Google のスパム判定リスクにも直結する。
+   *
+   * GET（listReviews）と PUT（upsertReviewReply）は冪等なので true。
+   * POST（createLocalPost）は作成そのものなので false。
+   */
+  idempotent: boolean;
 }
 
 function defaultBackoff(attempt: number): Promise<void> {
@@ -305,7 +319,7 @@ function createRequester(deps: GbpClientDeps) {
 
       if (!response.ok) {
         const isLastAttempt = attempt === MAX_ATTEMPTS - 1;
-        if (!isLastAttempt && isRetryableStatus(response.status)) continue;
+        if (!isLastAttempt && options.idempotent && isRetryableStatus(response.status)) continue;
         return { ok: false, error: classifyStatus(response.status) };
       }
 
@@ -399,6 +413,7 @@ export function createGbpClient(deps: GbpClientDeps): GbpClientService {
         url: query === '' ? baseUrl : `${baseUrl}?${query}`,
         accessToken,
         expectJson: true,
+        idempotent: true,
       });
       if (!res.ok) return res;
 
@@ -459,6 +474,8 @@ export function createGbpClient(deps: GbpClientDeps): GbpClientService {
           topicType: LOCAL_POST_TOPIC_TYPE,
         },
         expectJson: true,
+        // 投稿の作成は非冪等。429/5xx でも再送しない（重複公開を作らない）。
+        idempotent: false,
       });
       if (!res.ok) return res;
 
@@ -483,6 +500,7 @@ export function createGbpClient(deps: GbpClientDeps): GbpClientService {
         url: `${V4_BASE}/${pathRes.value}/reviews?${query.toString()}`,
         accessToken: tokenRes.value,
         expectJson: true,
+        idempotent: true,
       });
       if (!res.ok) return res;
 
@@ -511,6 +529,8 @@ export function createGbpClient(deps: GbpClientDeps): GbpClientService {
         accessToken: tokenRes.value,
         body: { comment: input.comment },
         expectJson: false,
+        // 返信は PUT（upsert）なので冪等。再送しても結果は同じ。
+        idempotent: true,
       });
       if (!res.ok) return res;
       return { ok: true, value: undefined };
