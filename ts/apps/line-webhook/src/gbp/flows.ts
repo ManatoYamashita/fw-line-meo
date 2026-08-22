@@ -45,15 +45,18 @@ import {
   revertGbpSessionExecution,
   upsertGbpSession,
   deleteGbpLocation,
+  getGbpLocation,
   type ConfirmedStoreSummary,
   type GbpFlow,
   type GbpLocationKey,
+  type GbpLocationRow,
   type GbpSessionLookup,
   type GbpSessionRow,
   type Queryable,
   type Result,
   type UpsertGbpSessionInput,
 } from '@fwlm/db';
+import { randomBytes } from 'node:crypto';
 import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type { LineMessage, LineMessenger } from '../line/client.js';
 import { CONNECT_SESSION_TTL_MS, type GbpOauthService } from './oauth.js';
@@ -86,6 +89,7 @@ import {
   buildGbpPostFailedMessage,
   buildGbpPostInputPromptMessage,
   buildGbpPostStorePickerMessage,
+  buildGbpPostUnavailableMessage,
   buildGbpPostSucceededMessage,
   buildGbpReplyDraftMessages,
   buildGbpReplyFailedMessage,
@@ -160,6 +164,11 @@ export interface GbpSessionsAccessor {
 
 export interface GbpLocationsAccessor {
   deleteGbpLocation(db: Queryable, key: GbpLocationKey): Promise<boolean>;
+  /**
+   * 連携済み店舗の GBP 上の身元。投稿開始時に `can_operate_local_post` を確認するために使う
+   * （PR #121 レビュー指摘）。所有外・未連携は null（アクセサ側が fail-closed）。
+   */
+  getGbpLocation(db: Queryable, key: GbpLocationKey): Promise<GbpLocationRow | null>;
 }
 
 /** 連携対象になり得る店舗（Place 確定済み）の列挙。所有検証はアクセサ側のクエリ形状が担う。 */
@@ -188,6 +197,8 @@ export interface GbpFlowDeps {
    */
   gbpClient: Pick<GbpClientService, 'createLocalPost' | 'listReviews' | 'upsertReviewReply'>;
   messenger: Pick<LineMessenger, 'reply'>;
+  /** カルーセル世代の生成（テストで固定するための注入点。oauth.ts の generateStateNonce と同型）。 */
+  generateNonce?(): string;
   /**
    * 失敗の記録先（design.md「Monitoring」）。**本文・下書き・トークンは載せられない**
    * （GbpLogMeta が allowlist）。これが無いと、利用審査未承認によるクォータ 0 のような
@@ -222,7 +233,7 @@ export function createDefaultGbpFlowAccessors(): {
       completeGbpSessionExecution,
       revertGbpSessionExecution,
     },
-    locations: { deleteGbpLocation },
+    locations: { deleteGbpLocation, getGbpLocation },
     stores: { listConfirmedStoresByOwner },
   };
 }
@@ -234,6 +245,8 @@ export function createDefaultGbpFlowAccessors(): {
 export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
   const reply = (replyToken: string, message: LineMessage): Promise<void> =>
     deps.messenger.reply(replyToken, [message]);
+
+  const generateNonce = deps.generateNonce ?? (() => randomBytes(4).toString('base64url'));
 
   /**
    * GBP 呼び出しの失敗を 1 行だけ記録する。`toGbpFailureReason` は 7 種の kind を
@@ -563,6 +576,21 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     });
     if (!linked) {
       await reply(event.replyToken, buildGbpConnectRequiredMessage(store.name));
+      return;
+    }
+
+    // Req 1.6 の趣旨: 連携は成立していても、そのロケーションで投稿を作れないことがある
+    // （metadata.canOperateLocalPost=false）。突合時に永続化した値をここで確認する。
+    // 確認しないと状態機械に入ってから毎回 permission_denied になり、連携済み扱いのため
+    // 再連携導線も出ない袋小路になる（PR #121 レビュー指摘）。クチコミ返信は使えるので
+    // 連携自体は成立させたままにし、**投稿だけ**を専用文面で断る。
+    const location = await deps.locations.getGbpLocation(deps.db, {
+      ownerId: event.ownerId,
+      storeId: store.id,
+    });
+    if (location !== null && !location.can_operate_local_post) {
+      // セッションは作らない（状態機械に入る前に断る）。
+      await reply(event.replyToken, buildGbpPostUnavailableMessage(store.name));
       return;
     }
 
@@ -904,12 +932,15 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
 
     // 提示した並び順を payload に固定し、g_pick_review の index と対応づける
     // （postback の index はスナップショット経由でのみ意味を持つ）。
+    // **世代を併せて持つ**（PR #121 レビュー指摘）。index だけだと、返信フローを開始し直して
+    // 候補が入れ替わった後に古いカルーセルを押したとき、表示と別のクチコミが対象になる。
+    const gen = generateNonce();
     const upserted = await deps.sessions.upsertGbpSession(deps.db, {
       ownerId: event.ownerId,
       storeId: store.id,
       flow: 'reply',
       stage: 'await_review_pick',
-      payload: { reviews: candidates },
+      payload: { reviews: candidates, gen },
       draftText: null,
       expiresAt: sessionExpiry(),
     });
@@ -920,7 +951,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
 
     await reply(
       event.replyToken,
-      buildGbpReviewPickerMessage({ storeName: store.name, reviews: candidates }),
+      buildGbpReviewPickerMessage({ storeName: store.name, reviews: candidates, gen }),
     );
   }
 
@@ -968,8 +999,15 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     event: GbpPostbackEvent,
     session: GbpSessionRow,
     index: number,
+    gen: string,
   ): Promise<void> {
     const store = await resolveSessionStore(event.ownerId, session);
+    // 世代が一致しない = 別の提示に属するボタン。index の範囲内であっても受理してはならない
+    // （表示と別のクチコミへ公開返信が付く）。
+    if (readReviewGen(session.payload) !== gen) {
+      await reply(event.replyToken, buildGbpStaleSelectionMessage());
+      return;
+    }
     const snapshot = readReviewSnapshot(session.payload);
     const picked = snapshot[index];
     if (store === null || picked === undefined) {
@@ -1273,7 +1311,7 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
         if (!isReplyStage(session, 'await_review_pick')) {
           return replyStaleOrCurrentState(event, session, expired);
         }
-        return handlePickReview(event, session, action.index);
+        return handlePickReview(event, session, action.index, action.gen);
       }
 
       case 'g_overwrite': {
@@ -1482,6 +1520,12 @@ function readReviewSnapshot(payload: Record<string, unknown>): GbpReviewSummary[
   return value
     .map((item) => toReviewSummary(item))
     .filter((item): item is GbpReviewSummary => item !== null);
+}
+
+/** payload に保存したカルーセル世代。欠落・非文字列は null（＝どの gen とも一致しない）。 */
+function readReviewGen(payload: Record<string, unknown>): string | null {
+  const value = payload['gen'];
+  return typeof value === 'string' && value !== '' ? value : null;
 }
 
 /** payload に保存した選択済みクチコミ（await_overwrite_ok 以降）。不正・欠落は null。 */

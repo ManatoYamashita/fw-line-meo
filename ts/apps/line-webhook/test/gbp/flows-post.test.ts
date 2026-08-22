@@ -15,6 +15,7 @@ import {
 } from '../../src/gbp/flows.js';
 import {
   buildGbpConnectRequiredMessage,
+  buildGbpPostUnavailableMessage,
   buildGbpCancelledMessage,
   buildGbpCurrentStateMessage,
   buildGbpGenerationFailedMessage,
@@ -85,6 +86,8 @@ interface HarnessOptions {
   /** generatePostDraft の応答（呼び出し順に消費。尽きたら最後の値を再利用）。 */
   drafts?: readonly Result<string, GenerationError>[];
   /** createLocalPost の応答。 */
+  /** gbp_locations.can_operate_local_post（既定 true）。false で投稿可否ゲートを再現する。 */
+  canOperateLocalPost?: boolean;
   postResult?: Result<{ postName: string }, GbpApiError>;
   /** createLocalPost が例外を投げる経路の再現。 */
   postThrows?: boolean;
@@ -211,6 +214,18 @@ function createHarness(options: HarnessOptions = {}): Harness {
       async deleteGbpLocation() {
         return true;
       },
+      // 投稿可否ゲート（PR #121 レビュー是正）。既定は投稿可。
+      async getGbpLocation(_db, key) {
+        return {
+          id: 'dddddddd-0000-0000-0000-0000000000e1',
+          store_id: key.storeId,
+          account_name: 'accounts/111',
+          location_name: 'locations/222',
+          place_id: 'ChIJtest',
+          can_operate_local_post: options.canOperateLocalPost ?? true,
+          linked_at: NOW,
+        };
+      },
     },
     stores: {
       async listConfirmedStoresByOwner() {
@@ -309,6 +324,20 @@ describe('createGbpFlowHandlers（投稿フロー・task 4.1）', () => {
       expect(h.generateCalls).toEqual([]);
       expect(h.postCalls).toEqual([]);
       expect(h.replies).toEqual([[buildGbpConnectRequiredMessage('テスト食堂A')]]);
+    });
+
+    // PR #121 レビュー指摘: 連携は成立していてもロケーションが投稿不可のことがある。
+    // 確認せず状態機械へ入れると、承認のたびに permission_denied になり、連携済み扱いの
+    // ため再連携導線も出ない袋小路になる。**セッションを作らずに**専用文面で断る。
+    it('投稿不可ロケーションではセッションを作らず専用文面を返す', async () => {
+      const h = createHarness({ linkedStoreIds: [STORE_A], canOperateLocalPost: false });
+
+      await h.handlers.handleGbpPostback(postback(G_POST));
+
+      expect(h.upsertCalls).toEqual([]);
+      expect(h.generateCalls).toEqual([]);
+      expect(h.postCalls).toEqual([]);
+      expect(h.replies).toEqual([[buildGbpPostUnavailableMessage('テスト食堂A')]]);
     });
 
     it('Place 確定済み店舗が 0 件なら投稿フローに入らない（Req 1.1）', async () => {
@@ -732,7 +761,7 @@ describe('createGbpFlowHandlers（投稿フロー・task 4.1）', () => {
         encodeGbpPostback({ action: 'g_connect' }),
         encodeGbpPostback({ action: 'g_status' }),
         encodeGbpPostback({ action: 'g_reply' }),
-        encodeGbpPostback({ action: 'g_pick_review', index: 0 }),
+        encodeGbpPostback({ action: 'g_pick_review', index: 0, gen: 'gen1' }),
         encodeGbpPostback({ action: 'g_pick_store', index: 0 }),
         encodeGbpPostback({ action: 'g_overwrite' }),
         'a=g_unknown',

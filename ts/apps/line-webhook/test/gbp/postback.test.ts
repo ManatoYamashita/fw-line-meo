@@ -26,8 +26,8 @@ const ALL_ACTIONS: GbpPostbackAction[] = [
   { action: 'g_relink', storeId: STORE_ID },
   { action: 'g_post' },
   { action: 'g_reply' },
-  { action: 'g_pick_review', index: 0 },
-  { action: 'g_pick_review', index: 4 },
+  { action: 'g_pick_review', index: 0, gen: 'gen1' },
+  { action: 'g_pick_review', index: 4, gen: 'gen1' },
   { action: 'g_approve' },
   { action: 'g_regen' },
   { action: 'g_revise' },
@@ -71,9 +71,12 @@ describe('encodeGbpPostback / decodeGbpPostback 往復', () => {
       action: 'g_pick_store',
       index: 0,
     });
-    expect(decodeGbpPostback(encodeGbpPostback({ action: 'g_pick_review', index: 0 }))).toEqual({
+    expect(
+      decodeGbpPostback(encodeGbpPostback({ action: 'g_pick_review', index: 0, gen: 'gen1' })),
+    ).toEqual({
       action: 'g_pick_review',
       index: 0,
+      gen: 'gen1',
     });
   });
 

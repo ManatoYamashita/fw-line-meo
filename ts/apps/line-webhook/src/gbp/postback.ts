@@ -31,7 +31,17 @@ export type GbpPostbackAction =
   | { action: 'g_relink'; storeId: string }
   | { action: 'g_post' }
   | { action: 'g_reply' }
-  | { action: 'g_pick_review'; index: number }
+  /**
+   * 返信対象の選択。`gen` は候補提示時のスナップショット世代（PR #121 レビュー指摘）。
+   * index だけだと、返信フローを開始し直して候補が入れ替わった後に古いカルーセルを押した
+   * とき、**表示と別のクチコミ**が対象になる。並び順は「未返信優先 → 新着順」なので
+   * 1 件返信するだけで全体が繰り上がり、index の意味は容易に変わる。
+   *
+   * 店舗選択（g_pick_store）に同じ手当てをしないのは、`listConfirmedStoresByOwner` が
+   * `created_at ASC, id ASC` の全順序で安定しており、再提示しても index の意味が
+   * 変わらないためである。
+   */
+  | { action: 'g_pick_review'; index: number; gen: string }
   | { action: 'g_approve' }
   | { action: 'g_regen' }
   | { action: 'g_revise' }
@@ -48,6 +58,9 @@ const GBP_ACTION_PREFIX = 'g_';
 /** 非負整数のみを許容する十進数文字列判定（符号・小数・指数・空文字は不可）。 */
 const NON_NEGATIVE_INTEGER_PATTERN = /^\d+$/;
 
+/** カルーセル世代（base64url の短い乱数）。長さ上限は postback data 全体の 300 字が担う。 */
+const GENERATION_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+
 /** storeId の形式検証（packages/db の UUID_RE と同一形式）。所有検証は含まない。 */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,7 +70,7 @@ export function encodeGbpPostback(action: GbpPostbackAction): string {
       case 'g_pick_store':
         return `a=g_pick_store&i=${action.index}`;
       case 'g_pick_review':
-        return `a=g_pick_review&i=${action.index}`;
+        return `a=g_pick_review&i=${action.index}&g=${action.gen}`;
       case 'g_disconnect':
         return `a=g_disconnect&s=${encodeURIComponent(action.storeId)}`;
       case 'g_relink':
@@ -131,7 +144,13 @@ export function decodeGbpPostback(data: string): GbpPostbackAction | null {
       return { action: 'g_reply' };
     case 'g_pick_review': {
       const index = parseIndex(params.get('i'));
-      return index === null ? null : { action: 'g_pick_review', index };
+      const gen = params.get('g');
+      // `g` を欠く data は世代を持たない旧カルーセル。null を返して stale として扱う
+      // （呼び出し側は現在状態の案内だけを返し、いかなる遷移も起こさない）。
+      if (index === null || gen === null || !GENERATION_PATTERN.test(gen)) {
+        return null;
+      }
+      return { action: 'g_pick_review', index, gen };
     }
     case 'g_approve':
       return { action: 'g_approve' };

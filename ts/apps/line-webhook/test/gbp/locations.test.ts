@@ -77,6 +77,18 @@ describe('matchLocationByPlaceId', () => {
     );
     expect(matched?.locationName).toBe('locations/postable');
   });
+
+  // 全件が投稿不可でも「一致は一致」として連携は成立させる（クチコミ返信は使えるため）。
+  // 投稿だけを断る判定は GbpFlows の beginPostForStore が gbp_locations の
+  // can_operate_local_post を読んで行う（PR #121 レビュー指摘）。
+  it('全件 canOperateLocalPost が false でも先頭を返す（連携自体は成立させる）', () => {
+    const first = location({ locationName: 'locations/a', canOperateLocalPost: false });
+    const matched = matchLocationByPlaceId(
+      [first, location({ locationName: 'locations/b', canOperateLocalPost: false })],
+      PLACE_ID,
+    );
+    expect(matched).toEqual(first);
+  });
 });
 
 describe('findLocationForPlace', () => {

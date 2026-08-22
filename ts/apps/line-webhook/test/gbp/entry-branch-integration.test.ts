@@ -264,6 +264,18 @@ function createHarness(options: HarnessOptions = {}): Harness {
       async deleteGbpLocation() {
         return true;
       },
+      // 投稿可否は既定で可（導線分岐の検証が目的）。
+      async getGbpLocation(_db, key) {
+        return {
+          id: 'fcd00000-0000-0000-0000-0000000000e1',
+          store_id: key.storeId,
+          account_name: 'accounts/111',
+          location_name: 'locations/222',
+          place_id: 'ChIJtest',
+          can_operate_local_post: true,
+          linked_at: NOW,
+        };
+      },
     },
     stores: {
       async listConfirmedStoresByOwner() {

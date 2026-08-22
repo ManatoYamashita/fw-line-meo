@@ -510,6 +510,23 @@ export function buildGbpConnectRequiredMessage(storeName: string | null): LineMe
 }
 
 /** Req 3.1: 投稿したい内容（要点）の入力受付。 */
+/**
+ * 連携は成立しているが、そのロケーションでは Google 投稿を作成できない場合の案内
+ * （PR #121 レビュー指摘）。`gbp_locations.can_operate_local_post = false`。
+ * クチコミ返信は使えるため、連携解除を促さず返信導線へ寄せる。
+ */
+export function buildGbpPostUnavailableMessage(storeName: string): LineMessage {
+  return bubbleMessage({
+    altText: `「${storeName}」では Google 投稿の作成をご利用いただけません。`,
+    title: '投稿の作成はご利用いただけません',
+    lines: [
+      `「${storeName}」の Google ビジネスプロフィールでは、投稿の作成が許可されていません。`,
+      'クチコミへの返信はこれまでどおりご利用いただけます。',
+    ],
+    buttons: [REPLY_BUTTON, STATUS_BUTTON],
+  });
+}
+
 export function buildGbpPostInputPromptMessage(storeName: string): LineMessage {
   return bubbleMessage({
     altText: `「${storeName}」の Google 投稿の内容を送ってください。`,
@@ -856,6 +873,8 @@ export function buildGbpReplyStorePickerMessage(
 export function buildGbpReviewPickerMessage(input: {
   storeName: string;
   reviews: readonly GbpReviewSummary[];
+  /** 候補スナップショットの世代。押されたボタンがこの提示に属することを照合するために載せる。 */
+  gen: string;
 }): LineMessage {
   if (input.reviews.length === 0) {
     throw new Error('buildGbpReviewPickerMessage: reviews must not be empty');
@@ -900,7 +919,7 @@ export function buildGbpReviewPickerMessage(input: {
               action: {
                 type: 'postback',
                 label: 'このクチコミに返信',
-                data: encodeGbpPostback({ action: 'g_pick_review', index }),
+                data: encodeGbpPostback({ action: 'g_pick_review', index, gen: input.gen }),
                 displayText: 'このクチコミに返信',
               },
             },

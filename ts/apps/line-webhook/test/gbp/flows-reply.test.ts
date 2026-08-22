@@ -248,6 +248,18 @@ function createHarness(options: HarnessOptions = {}): Harness {
       async deleteGbpLocation() {
         return true;
       },
+      // 返信フローからは投稿可否ゲートへ到達しない。
+      async getGbpLocation(_db, key) {
+        return {
+          id: 'fcd00000-0000-0000-0000-0000000000e1',
+          store_id: key.storeId,
+          account_name: 'accounts/111',
+          location_name: 'locations/222',
+          place_id: 'ChIJtest',
+          can_operate_local_post: true,
+          linked_at: NOW,
+        };
+      },
     },
     stores: {
       async listConfirmedStoresByOwner() {
@@ -300,6 +312,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
       },
     },
     logger: { error: vi.fn(), warn: vi.fn() },
+    generateNonce: () => GEN,
     now: () => NOW,
   };
 
@@ -343,8 +356,9 @@ const G_APPROVE = encodeGbpPostback({ action: 'g_approve' });
 const G_REGEN = encodeGbpPostback({ action: 'g_regen' });
 const G_REVISE = encodeGbpPostback({ action: 'g_revise' });
 const G_CANCEL = encodeGbpPostback({ action: 'g_cancel' });
-const pickReview = (index: number): string =>
-  encodeGbpPostback({ action: 'g_pick_review', index });
+const GEN = 'gen1';
+const pickReview = (index: number, gen: string = GEN): string =>
+  encodeGbpPostback({ action: 'g_pick_review', index, gen });
 
 describe('createGbpFlowHandlers（クチコミ返信フロー・task 4.2）', () => {
   describe('g_reply の開始（Req 4.1, 4.8）', () => {
@@ -385,7 +399,7 @@ describe('createGbpFlowHandlers（クチコミ返信フロー・task 4.2）', ()
         expiresAt: new Date(NOW.getTime() + TTL_MS),
       });
       expect(h.replies).toEqual([
-        [buildGbpReviewPickerMessage({ storeName: 'テスト食堂A', reviews })],
+        [buildGbpReviewPickerMessage({ storeName: 'テスト食堂A', reviews, gen: GEN })],
       ]);
     });
 
@@ -542,12 +556,38 @@ describe('createGbpFlowHandlers（クチコミ返信フロー・task 4.2）', ()
       return createHarness({
         session: replySession({
           stage: 'await_review_pick',
-          payload: { reviews: snapshot },
+          payload: { reviews: snapshot, gen: GEN },
           draft_text: null,
         }),
         ...options,
       });
     }
+
+    // PR #121 レビュー指摘: index だけでは古いカルーセルを無効化できない。並び順は
+    // 「未返信優先 → 新着順」なので、返信フローを開始し直すと候補が繰り上がり、範囲内の
+    // index が **表示と別のクチコミ** へ解決する。下書き提示は店名と本文しか出さないため
+    // オーナーが取り違えに気づく手掛かりが無く、承認すると公開返信が別のクチコミへ付く。
+    it('世代が一致しない古いカルーセルの選択は下書きを生成せず stale として断る', async () => {
+      const h = pickHarness();
+
+      // 現在のセッションの gen は GEN。古い提示のボタンは別の世代を載せている。
+      await h.handlers.handleGbpPostback(postback(pickReview(0, 'oldgen')));
+
+      expect(h.generateCalls).toEqual([]);
+      expect(h.upsertCalls).toEqual([]);
+      expect(h.replies).toEqual([[buildGbpStaleSelectionMessage()]]);
+    });
+
+    it('世代を持たない旧 postback（g 欠落）も stale として断る', async () => {
+      const h = pickHarness();
+
+      // 旧カルーセルの data は `a=g_pick_review&i=0` の形（g が無い）。decode で null になり、
+      // 未知 action と同じ扱い＝現在状態の案内だけを返す。
+      await h.handlers.handleGbpPostback(postback('a=g_pick_review&i=0'));
+
+      expect(h.generateCalls).toEqual([]);
+      expect(h.upsertCalls).toEqual([]);
+    });
 
     it('未返信のクチコミを選ぶと下書きを生成して await_decision へ進む', async () => {
       const h = pickHarness();
@@ -632,7 +672,7 @@ describe('createGbpFlowHandlers（クチコミ返信フロー・task 4.2）', ()
       const h = createHarness({
         session: replySession({
           stage: 'await_review_pick',
-          payload: { reviews: [review({ rating: 7 })] },
+          payload: { reviews: [review({ rating: 7 })], gen: GEN },
           draft_text: null,
         }),
       });
@@ -647,7 +687,7 @@ describe('createGbpFlowHandlers（クチコミ返信フロー・task 4.2）', ()
         const h = createHarness({
           session: replySession({
             stage: 'await_review_pick',
-            payload: { reviews: [review({ rating: bad })] },
+            payload: { reviews: [review({ rating: bad })], gen: GEN },
             draft_text: null,
           }),
         });

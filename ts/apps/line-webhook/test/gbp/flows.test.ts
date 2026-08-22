@@ -189,6 +189,11 @@ function createHarness(options: HarnessOptions = {}): Harness {
         deletedLocations.push({ ownerId: key.ownerId, storeId: key.storeId });
         return true;
       },
+      // 連携系フローからは投稿可否ゲートへ到達しない。到達したら経路混入なので落とす
+      // （このハーネスの既存の規律: 到達してはならない依存は throw する）。
+      getGbpLocation() {
+        throw new Error('getGbpLocation must not be called from connect flows');
+      },
     },
     stores: {
       async listConfirmedStoresByOwner() {
