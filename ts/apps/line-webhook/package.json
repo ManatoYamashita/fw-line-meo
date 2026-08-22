@@ -15,9 +15,11 @@
   "dependencies": {
     "@fwlm/db": "workspace:*",
     "@fwlm/design-tokens": "workspace:*",
+    "@fwlm/gemini": "workspace:*",
     "@fwlm/store-identification": "workspace:*",
     "@hono/node-server": "^1",
     "@line/bot-sdk": "^11",
+    "google-auth-library": "^10",
     "hono": "^4"
   }
 }

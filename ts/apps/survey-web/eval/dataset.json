@@ -9,7 +9,10 @@
     "    検出器か実行系が壊れている（空振り検証を兼ねる）。",
     "  - none-selected は最小素材。星だけを与えたとき、モデルがどれだけ軸を創作するかを測る。",
     "  - storeNameKind: 実在の著名店はモデルの事前知識が混入し得るため、架空店名との対比を取れるようにする。",
-    "  - 低評価（星 1-2）は prompt.ts が節度分岐を足す経路。この分岐でも事実性が保たれるかを見る。"
+    "  - 低評価（星 1-2）は prompt.ts が節度分岐を足す経路。この分岐でも事実性が保たれるかを見る。",
+    "  - 低評価は『理由あり／理由なし』の対で持つ。案A 適用後の残差が星1へ寄ったため、",
+    "    「素材に *何が悪かったか* の材料が無いとモデルが観点を補う」という仮説を切り分ける。",
+    "    理由ありの一言は検出語彙と重ならない表現にする（素材由来の言及まで逸脱と数えないため）。"
   ],
   "materials": [
     {
@@ -25,7 +28,9 @@
       "storeName": "カフェ みなも",
       "storeNameKind": "fictional",
       "star": 5,
-      "aspectCodes": ["taste"],
+      "aspectCodes": [
+        "taste"
+      ],
       "comment": null
     },
     {
@@ -33,7 +38,9 @@
       "storeName": "カフェ みなも",
       "storeNameKind": "fictional",
       "star": 5,
-      "aspectCodes": ["taste"],
+      "aspectCodes": [
+        "taste"
+      ],
       "comment": "コーヒーが香り高くて good でした"
     },
     {
@@ -41,7 +48,10 @@
       "storeName": "カフェ みなも",
       "storeNameKind": "fictional",
       "star": 5,
-      "aspectCodes": ["taste", "atmosphere"],
+      "aspectCodes": [
+        "taste",
+        "atmosphere"
+      ],
       "comment": "落ち着いた雰囲気でゆっくり過ごせました"
     },
     {
@@ -49,7 +59,9 @@
       "storeName": "定食屋 あおば",
       "storeNameKind": "fictional",
       "star": 4,
-      "aspectCodes": ["service"],
+      "aspectCodes": [
+        "service"
+      ],
       "comment": null
     },
     {
@@ -57,7 +69,9 @@
       "storeName": "定食屋 あおば",
       "storeNameKind": "fictional",
       "star": 3,
-      "aspectCodes": ["price"],
+      "aspectCodes": [
+        "price"
+      ],
       "comment": "値段のわりに満足できました"
     },
     {
@@ -81,7 +95,14 @@
       "storeName": "カフェ みなも",
       "storeNameKind": "fictional",
       "star": 5,
-      "aspectCodes": ["taste", "volume", "service", "atmosphere", "price", "cleanliness"],
+      "aspectCodes": [
+        "taste",
+        "volume",
+        "service",
+        "atmosphere",
+        "price",
+        "cleanliness"
+      ],
       "comment": "全部よかったです"
     },
     {
@@ -89,7 +110,9 @@
       "storeName": "ONIBUS COFFEE 中目黒駅前店",
       "storeNameKind": "real",
       "star": 5,
-      "aspectCodes": ["taste"],
+      "aspectCodes": [
+        "taste"
+      ],
       "comment": null
     },
     {
@@ -97,7 +120,10 @@
       "storeName": "ONIBUS COFFEE 自由が丘店",
       "storeNameKind": "real",
       "star": 5,
-      "aspectCodes": ["taste", "atmosphere"],
+      "aspectCodes": [
+        "taste",
+        "atmosphere"
+      ],
       "comment": "コーヒーが香り高く、落ち着いた雰囲気でゆっくり過ごせました"
     },
     {
@@ -107,6 +133,22 @@
       "star": 5,
       "aspectCodes": [],
       "comment": null
+    },
+    {
+      "id": "none-selected-star1-with-reason",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 1,
+      "aspectCodes": [],
+      "comment": "注文してから提供まで40分ほど待ちました"
+    },
+    {
+      "id": "none-selected-star2-with-reason",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 2,
+      "aspectCodes": [],
+      "comment": "料理が冷めていました"
     }
   ]
 }

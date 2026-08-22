@@ -119,3 +119,26 @@ variable "liff_id" {
   type        = string
   default     = ""
 }
+
+# --- gbp-post-review-reply（機能2・機能1-b）が追加する env（gcp-infra への additive 拡張） ---
+
+variable "gbp_oauth_client_id" {
+  description = <<-EOT
+    line-webhook の GBP_OAUTH_CLIENT_ID env（Google OAuth クライアント ID・非秘匿）。
+    GCP コンソールで OAuth クライアント（Web アプリケーション）を作成後に設定する。
+    既定は空文字列＝未設定（line-webhook は起動時に必須 env 欠落を検知し fail-fast する）。
+    クライアントシークレットは secret `gbp-oauth-client-secret` へ out-of-band 投入する。
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "gbp_oauth_redirect_url" {
+  description = <<-EOT
+    line-webhook の GBP_OAUTH_REDIRECT_URL env（OAuth リダイレクト URL・非秘匿）。
+    line-webhook の公開 URL + `/gbp/oauth/callback` を、OAuth クライアントの
+    承認済みリダイレクト URI と同一値で設定する。既定は空文字列＝未設定。
+  EOT
+  type        = string
+  default     = ""
+}

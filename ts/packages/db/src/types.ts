@@ -265,3 +265,59 @@ export interface DashboardUserItem {
   disabled: boolean;
   createdAt: Date;
 }
+
+// --- gbp-post-review-reply（0001 oauth_tokens 実運用化 + 0006 新設 2 表）---
+
+// 0001 冒頭の CREATE TYPE oauth_provider と 1:1。
+export type OauthProvider = 'google';
+
+// 0006 の CREATE TYPE gbp_flow / gbp_stage と 1:1。
+export type GbpFlow = 'connect' | 'post' | 'reply';
+export type GbpStage =
+  | 'await_store'
+  | 'await_callback'
+  | 'await_input'
+  | 'await_review_pick'
+  | 'await_overwrite_ok'
+  | 'await_decision'
+  | 'await_revision'
+  | 'executing';
+
+// 認可トークン参照（0001。token_ref は暗号化ペイロード `v1:<iv>:<tag>:<ciphertext>` のみを格納。
+// 平文トークンを保存してはならない — 暗号化は line-webhook 側 TokenStore の責務・Req 2.1）。
+export interface OauthTokenRow {
+  id: string;
+  store_id: string;
+  provider: OauthProvider;
+  token_ref: string;
+  scopes: string | null;
+  expires_at: Date | null;
+  created_at: Date;
+}
+
+// GBP 上の身元（0006・store 1:1・TS 書込）。
+export interface GbpLocationRow {
+  id: string;
+  store_id: string;
+  account_name: string; // accounts/{accountId}
+  location_name: string; // locations/{locationId}
+  place_id: string; // 突合時点の stores.place_id
+  can_operate_local_post: boolean;
+  linked_at: Date;
+}
+
+// GBP 会話セッション（0006・owner 1:1・期限付き・TS 書込）。
+// payload（jsonb）の flow 別の具体形状（connect の state nonce / post の material /
+// reply の reviews スナップショット）は gbp ドメイン（line-webhook）の型で規律する。
+// packages/db は apps へ依存できないため、ここでは JSON オブジェクトとしてのみ扱う。
+export interface GbpSessionRow {
+  id: string;
+  owner_id: string;
+  store_id: string | null; // await_store 中は NULL
+  flow: GbpFlow;
+  stage: GbpStage;
+  payload: Record<string, unknown>;
+  draft_text: string | null;
+  expires_at: Date;
+  updated_at: Date;
+}

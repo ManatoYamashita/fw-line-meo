@@ -111,6 +111,42 @@ export async function createConfirmedStore(
   return row;
 }
 
+/** Place 確定済み店舗の最小情報（GBP 連携の対象候補・gbp-post-review-reply Req 1.1）。 */
+export interface ConfirmedStoreSummary {
+  id: string;
+  name: string;
+  /** place_status='confirmed' の店舗のみを返すため常に非 null。 */
+  placeId: string;
+}
+
+/**
+ * オーナーの Place 確定済み店舗を列挙する（gbp-post-review-reply Req 1.1, 1.3, 2.6）。
+ * 連携誘導・店舗選択・連携状態確認の対象を「日次サマリーが稼働している店舗」に限るため、
+ * place_status='confirmed' かつ place_id を持つ行のみを返す。
+ *
+ * owner_id を WHERE に置く所有検証込みのクエリ形状であり、この結果集合が
+ * 「そのオーナーが GBP 操作を行える店舗の全体」の唯一の定義になる
+ * （postback 由来の storeId は必ずこの集合との突合で検証する）。
+ *
+ * 並び順は postback の index 選択が安定するよう created_at → id の全順序で固定する。
+ */
+export async function listConfirmedStoresByOwner(
+  db: Queryable,
+  ownerId: string,
+): Promise<ConfirmedStoreSummary[]> {
+  if (!UUID_RE.test(ownerId)) return [];
+  const res = await db.query<{ id: string; name: string; place_id: string }>(
+    `SELECT id, name, place_id
+       FROM stores
+      WHERE owner_id = $1
+        AND place_status = 'confirmed'
+        AND place_id IS NOT NULL
+      ORDER BY created_at ASC, id ASC`,
+    [ownerId],
+  );
+  return res.rows.map((row) => ({ id: row.id, name: row.name, placeId: row.place_id }));
+}
+
 /**
  * place_id で既存店舗を検索する。既に他オーナーの店舗として登録済みかどうかの判定に使う
  * （Req 4.4: 登録済み Place は確定拒否）。未登録は null。

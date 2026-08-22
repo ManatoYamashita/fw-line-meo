@@ -2,8 +2,13 @@ import type { DraftError, DraftErrorKind } from './draft/generator';
 
 export type LogLevel = 'warn' | 'error' | 'info';
 export interface SurveyLogFields {
-  errorKind: DraftErrorKind;
+  errorKind?: DraftErrorKind;
   status?: number;
+  /**
+   * 事後検証（Issue #132・案B）をもってしても下書きに残った未選択観点の **code**（カンマ区切り）。
+   * 記録するのは観点の識別子だけで、下書き本文・一言・プロンプトは決して載せない。
+   */
+  violatedAspects?: string;
 }
 export type SurveyLogger = (level: LogLevel, event: string, fields?: SurveyLogFields) => void;
 
@@ -19,6 +24,20 @@ export function logGenerationFailure(log: SurveyLogger, error: DraftError): void
   } else {
     log('error', 'generation_failed', fields);
   }
+}
+
+/**
+ * 事後検証（Issue #132・案B）をもってしても下書きに残った未選択観点を記録する。
+ *
+ * 下書き自体は客へ返すため「失敗」ではない。生成は成功しており Google 投稿導線も生きている。
+ * それでも記録するのは、受け入れた残差（合意水準 11.1%）が実運用でどう推移するかを
+ * 後から集計できるようにするため。level が warn なのはこの理由による（error ではない）。
+ *
+ * 載せるのは観点の code だけで、下書き本文・一言・プロンプトは決して含めない。
+ */
+export function logFactualityResidual(log: SurveyLogger, aspectCodes: readonly string[]): void {
+  // 並び順を固定して集計しやすくする（同じ組み合わせが別文字列に散らばらないように）。
+  log('warn', 'factuality_residual', { violatedAspects: [...aspectCodes].sort().join(',') });
 }
 
 /**
@@ -38,6 +57,7 @@ export const writeStructuredLog: SurveyLogger = (level, event, fields) => {
       event,
       ...(fields?.errorKind !== undefined ? { errorKind: fields.errorKind } : {}),
       ...(fields?.status !== undefined ? { status: fields.status } : {}),
+      ...(fields?.violatedAspects !== undefined ? { violatedAspects: fields.violatedAspects } : {}),
     }),
   );
 };
@@ -47,7 +67,7 @@ export const writeStructuredLog: SurveyLogger = (level, event, fields) => {
 // ログに出ない」という Issue #62 と同じ状態を再生産する。鍵集合を表明して型で強制する。
 // 左辺は名前付き型ではなく **sink の実引数位置** から導く（名前付き型へ固定すると、引数の型を
 // 派生型・交差型へ差し替えた瞬間に無言で無効化する）。
-type EmittedLogField = 'errorKind' | 'status';
+type EmittedLogField = 'errorKind' | 'status' | 'violatedAspects';
 type UnemittedLogField = Exclude<keyof NonNullable<Parameters<SurveyLogger>[2]>, EmittedLogField>;
 const _allLogFieldsEmitted: never = null as unknown as UnemittedLogField;
 void _allLogFieldsEmitted;

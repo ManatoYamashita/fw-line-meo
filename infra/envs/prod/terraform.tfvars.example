@@ -36,3 +36,13 @@ places_quota_caps = {
 # liff_url        = "https://liff.line.me/1234567890-abcdefgh"
 # liff_channel_id = "1234567891"
 # liff_id         = "1234567890-abcdefgh"
+
+# gbp-post-review-reply（機能2・機能1-b）の env。line-webhook が要求する（非秘匿の 2 値のみ）。
+# gbp_oauth_client_id は GCP コンソールで作成した OAuth クライアント（Web アプリケーション）の ID。
+# gbp_oauth_redirect_url は line-webhook の公開 URL + /gbp/oauth/callback
+# （OAuth クライアントの承認済みリダイレクト URI と同一値）。
+# クライアントシークレットと暗号化鍵は tfvars ではなく Secret Manager へ out-of-band 投入:
+#   gcloud secrets versions add gbp-oauth-client-secret --data-file=-
+#   openssl rand -base64 32 | gcloud secrets versions add gbp-token-cipher-key --data-file=-
+# gbp_oauth_client_id    = "000000000000-xxxxxxxx.apps.googleusercontent.com"
+# gbp_oauth_redirect_url = "https://line-webhook-xxxxxxxxxx-an.a.run.app/gbp/oauth/callback"

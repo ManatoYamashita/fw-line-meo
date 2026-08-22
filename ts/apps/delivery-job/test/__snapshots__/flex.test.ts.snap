@@ -185,6 +185,26 @@ exports[`buildDailySummaryFlex > 前日データなし（rank_prev=null, R3.7）
           "type": "button",
         },
         {
+          "action": {
+            "data": "a=g_reply",
+            "label": "クチコミに返信",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=g_post",
+            "label": "Google 投稿作成",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
+          "type": "button",
+        },
+        {
           "align": "center",
           "color": "#AAAAAA",
           "size": "xxs",
@@ -374,6 +394,26 @@ exports[`buildDailySummaryFlex > 新着クチコミなし（new_review_count=0, 
           },
           "height": "sm",
           "style": "primary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=g_reply",
+            "label": "クチコミに返信",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=g_post",
+            "label": "Google 投稿作成",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
           "type": "button",
         },
         {
@@ -597,6 +637,26 @@ exports[`buildDailySummaryFlex > 正常系（前日比あり・新着あり・�
           "type": "button",
         },
         {
+          "action": {
+            "data": "a=g_reply",
+            "label": "クチコミに返信",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=g_post",
+            "label": "Google 投稿作成",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
+          "type": "button",
+        },
+        {
           "align": "center",
           "color": "#AAAAAA",
           "size": "xxs",
@@ -736,6 +796,26 @@ exports[`buildDailySummaryFlex > 競合なし（competitors=[], status=no_compet
           },
           "height": "sm",
           "style": "primary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=g_reply",
+            "label": "クチコミに返信",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=g_post",
+            "label": "Google 投稿作成",
+            "type": "postback",
+          },
+          "height": "sm",
+          "style": "secondary",
           "type": "button",
         },
         {

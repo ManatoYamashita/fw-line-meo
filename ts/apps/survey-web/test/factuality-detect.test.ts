@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { detectUnselectedAspectMentions, readLexicon } from '../eval/detect';
-import lexiconRaw from '../eval/aspect-lexicon.json';
+import { detectAspectMentions, readLexicon } from '../src/lib/draft/factuality';
+import lexiconRaw from '../src/lib/draft/aspect-lexicon.json';
 import aspectsRaw from '../eval/aspects.json';
 import datasetRaw from '../eval/dataset.json';
 
@@ -15,6 +15,12 @@ import datasetRaw from '../eval/dataset.json';
 
 const lexicon = readLexicon(lexiconRaw);
 const labels = aspectsRaw.labels as Record<string, string>;
+const ALL_CODES = Object.keys(lexicon);
+
+/** 客が選んだ観点から「検証対象（＝選ばなかった観点）」を作る。本番も同じ差集合を渡す。 */
+function unselected(selected: readonly string[]): string[] {
+  return ALL_CODES.filter((c) => !selected.includes(c));
+}
 
 describe('未選択の評価軸への言及を検出する', () => {
   // 実際に本番・本番同等パラメータで観測した出力を回帰ケースとして固定する。
@@ -44,38 +50,43 @@ describe('未選択の評価軸への言及を検出する', () => {
   ] as const;
 
   it.each(OBSERVED)('観測済みの逸脱を検出する: $name', ({ draft, selected, expectedAspects }) => {
-    const violations = detectUnselectedAspectMentions(draft, selected, lexicon);
+    const violations = detectAspectMentions(draft, unselected(selected), lexicon);
     expect(violations.map((v) => v.aspectCode).sort()).toEqual([...expectedAspects].sort());
   });
 
-  it('選択済みの評価軸への言及は逸脱としない', () => {
+  it('検証対象に含めなかった観点は検出しない（＝選択済みの観点への言及は逸脱ではない）', () => {
     const draft = '接客がとても丁寧で、店内の雰囲気も落ち着いていました。';
-    const violations = detectUnselectedAspectMentions(draft, ['service', 'atmosphere'], lexicon);
-    expect(violations).toEqual([]);
+    expect(detectAspectMentions(draft, unselected(['service', 'atmosphere']), lexicon)).toEqual([]);
   });
 
-  it('全軸を選択した素材では構造的に検出が 0 件になる（対照群が対照として機能する）', () => {
+  it('全軸を選択した素材では検証対象が空になり構造的に 0 件（対照群が対照として機能する）', () => {
     const draft = '味わいも接客も雰囲気も清潔さもコスパもボリュームも文句なしでした。';
-    const allCodes = Object.keys(lexicon);
-    expect(detectUnselectedAspectMentions(draft, allCodes, lexicon)).toEqual([]);
+    expect(unselected(ALL_CODES)).toEqual([]);
+    expect(detectAspectMentions(draft, unselected(ALL_CODES), lexicon)).toEqual([]);
   });
 
   it('同一軸で複数の語が当たっても 1 件に畳む（件数は逸脱した軸の数で数える）', () => {
     const draft = '雰囲気が良く、内装も素敵で、居心地の良い空間でした。';
-    const violations = detectUnselectedAspectMentions(draft, [], lexicon);
+    const violations = detectAspectMentions(draft, unselected([]), lexicon);
     expect(violations.filter((v) => v.aspectCode === 'atmosphere')).toHaveLength(1);
+  });
+
+  it('語彙を持たない観点を渡されても落ちない（未知の軸は判定できないので黙って飛ばす）', () => {
+    // 実行時にここへ到達する経路は「lexicon が全ての評価軸を持つ」検査で塞いでいるが、
+    // 例外を投げると客に下書きが出なくなるため、関数自体は落ちない設計にしている。
+    expect(detectAspectMentions('雰囲気が良い', ['unknown_aspect'], lexicon)).toEqual([]);
   });
 
   describe('部分一致による誤検出を出さない（語彙設計の要）', () => {
     it('「美味しい」は taste の言及として検出しない', () => {
       // 「美味しい」には『味』が部分文字列として含まれる。1 文字の語を語彙へ入れると
       // taste 未選択のほぼ全サンプルが誤検出になるため、語彙は 2 文字以上に限っている。
-      const violations = detectUnselectedAspectMentions('とても美味しいお店でした。', [], lexicon);
+      const violations = detectAspectMentions('とても美味しいお店でした。', unselected([]), lexicon);
       expect(violations.map((v) => v.aspectCode)).not.toContain('taste');
     });
 
     it('「気持ちよく過ごせた」は atmosphere の言及として検出しない', () => {
-      const violations = detectUnselectedAspectMentions('気持ちよく過ごせました。', [], lexicon);
+      const violations = detectAspectMentions('気持ちよく過ごせました。', unselected([]), lexicon);
       expect(violations.map((v) => v.aspectCode)).not.toContain('atmosphere');
     });
   });
@@ -85,9 +96,9 @@ describe('未選択の評価軸への言及を検出する', () => {
       // 「丁寧に淹れられた」は素材に無い創作だが、6 軸のいずれでもないため語彙では捕まらない。
       // 将来この種を検出できるようにしたらこのテストが赤くなる。それは意図した変更の通知であり、
       // 「限界が変わった」ことをレビューへ強制的に上げるためにここへ書いている。
-      const violations = detectUnselectedAspectMentions(
+      const violations = detectAspectMentions(
         '丁寧に淹れられた一杯で、静かな時間を過ごせました。',
-        ['taste'],
+        unselected(['taste']),
         lexicon,
       );
       expect(violations).toEqual([]);

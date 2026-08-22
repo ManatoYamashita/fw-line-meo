@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@fwlm/gemini": "workspace:*",
     "@fwlm/ui": "workspace:*",
-    "@google/genai": "^1",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
