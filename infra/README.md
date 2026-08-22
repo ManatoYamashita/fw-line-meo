@@ -398,7 +398,31 @@ gbp_oauth_redirect_url = "https://<line-webhook の Cloud Run URL>/gbp/oauth/cal
 
 コード側の env は `GBP_OAUTH_CLIENT_ID`・`GBP_OAUTH_CLIENT_SECRET`・`GBP_OAUTH_REDIRECT_URL`・`GBP_TOKEN_CIPHER_KEY`・`GEMINI_API_KEY` を必須とし、欠落時は `config.Load()` 相当で起動時 fail-fast する（`ts/apps/line-webhook/src/config.ts`）。`gemini-api-key` は既存枠を line-webhook へも配線済み（機能2/1-b の下書き生成で使用）。
 
-### 10-3. 稼働確認
+### 10-3. リッチメニューの入れ替えと既存オーナーの移行
+
+完了後リッチメニューは 4 領域化した（ステータス確認 / Google 投稿作成 / クチコミ返信 / Google 連携・設定）。**コードを変えただけでは誰にも届かない。** メニューは LINE 側に作成済みの実体で、`linkRichMenu` は店舗特定の完了時にしか呼ばれないため、既に completed のオーナーは旧メニューに紐づいたままになる。GBP 機能の主対象がまさにこの層なので、次を順に行う。
+
+1. **新しいメニューを作る**（`ts/apps/line-webhook` をカレントディレクトリとして）。出力される「完了用 richMenuId」を控える。
+
+   ```bash
+   pnpm run build:scripts
+   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... pnpm run setup-rich-menus
+   ```
+
+2. **tfvars `line_richmenu_completed_id` を新 ID へ更新して `make tf-apply`。** これを飛ばすと、以後の新規完了オーナーまで旧メニューにリンクされ続ける。
+
+3. **既存オーナーを一括で移す。**
+
+   ```bash
+   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... \
+     pnpm run setup-rich-menus -- --relink-existing <旧richMenuId> <新richMenuId>
+   ```
+
+   `POST /v2/bot/richmenu/batch` の link 操作（旧メニューにリンク済みの全ユーザーを新メニューへ）を使う。userId の一覧が要らないので DB を参照しない。**レート制限は 3 req/hr。batch は非同期**で、受理（`x-line-request-id`）と反映は別である。`ongoing` が返ったら `GET /v2/bot/richmenu/progress/batch?requestId=...` で追跡し、失敗しても安易に叩き直さないこと。
+
+4. **旧メニューを撤去する。** 順序は固定: (a) デフォルトリッチメニューをクリア → (b) エイリアスを削除 → (c) リッチメニューを削除（`DELETE /v2/bot/richmenu/{richMenuId}`・100 req/hr）。**削除だけでは利用者の画面から消えない**（チャットを開き直すまで残る）。即時反映が要るなら unlink を使う。
+
+### 10-4. 稼働確認
 
 1. **設定の健全性**: secret 投入 + tfvars apply 後にデプロイ。env 欠落があれば line-webhook が起動時に落ちる（fail-fast が防波堤）。
 2. **鍵の注意**: `openssl rand -base64 32` の出力は末尾改行を含むが、コードの base64 デコードは空白を無視するため 32 byte が正しく得られる（実装確認済み）。

@@ -38,6 +38,8 @@ const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const CREATE_RICHMENU_URL = 'https://api.line.me/v2/bot/richmenu';
 const UPLOAD_IMAGE_URL_BASE = 'https://api-data.line.me/v2/bot/richmenu';
 const SET_DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
+const BATCH_URL = 'https://api.line.me/v2/bot/richmenu/batch';
+const BATCH_PROGRESS_URL = 'https://api.line.me/v2/bot/richmenu/progress/batch';
 
 // Full (Compact) 800x540（ratio 1.481 >= 1.45 要件）。最小の標準サイズを採用しファイルサイズを抑える。
 const RICH_MENU_WIDTH = 800;
@@ -80,6 +82,79 @@ export interface SetupRichMenusDeps {
 export interface SetupRichMenusResult {
   onboardingRichMenuId: string;
   completedRichMenuId: string;
+}
+
+/** `POST /v2/bot/richmenu/progress/batch` の phase（LINE SDK の RichMenuBatchProgressPhase と同値）。 */
+export type RichMenuBatchPhase = 'ongoing' | 'succeeded' | 'failed';
+
+export interface RelinkResult {
+  /** `x-line-request-id` ヘッダ。進捗照会のキー。 */
+  requestId: string | null;
+  phase: RichMenuBatchPhase | 'unknown';
+}
+
+/**
+ * 既存の連携済みオーナーを新しい完了後メニューへ移す（PR #121 レビュー指摘の是正）。
+ *
+ * `linkRichMenu` は confirmStore 完了時の 1 箇所でしか呼ばれないため、完了後メニューを
+ * 作り直しても **既に completed のオーナーは旧メニューに紐づいたまま**で、Req 5.4 の常設導線が
+ * 届かない。GBP 機能の主対象がまさにこの層である。
+ *
+ * `POST /v2/bot/richmenu/batch` の link 操作（旧メニュー → 新メニュー）を使う。
+ * `bulk/link`（500 件上限・userId の一覧が要る）ではなくこちらを選ぶのは、
+ * **userId のリストが不要**でスクリプトに DB 依存を持ち込まずに済み、かつ「旧メニューに
+ * リンクされている全ユーザー」を対象にできて取りこぼしが構造的に起きないため。
+ *
+ * batch は**非同期**（受理と反映は別）。レート制限は **3 req/hr** なので、失敗しても
+ * 安易に叩き直さないこと。進捗は requestId で照会する。
+ */
+export async function relinkExistingUsers(
+  deps: Pick<SetupRichMenusDeps, 'channelId' | 'channelSecret' | 'fetch'>,
+  fromRichMenuId: string,
+  toRichMenuId: string,
+): Promise<RelinkResult> {
+  const accessToken = await issueAccessToken(deps);
+
+  const response = await deps.fetch(BATCH_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    // 形は @line/bot-sdk の RichMenuBatchRequest / RichMenuBatchLinkOperation に一致させている
+    // （同 SDK は LINE 公開の OpenAPI から生成されたもの）。
+    body: JSON.stringify({
+      operations: [{ type: 'link', from: fromRichMenuId, to: toRichMenuId }],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`relinkExistingUsers: batch failed with status ${response.status}`);
+  }
+
+  // batch の応答本文は空。進捗照会のキーは `x-line-request-id` ヘッダで返る。
+  const requestId = response.headers.get('x-line-request-id');
+  if (requestId === null) {
+    return { requestId: null, phase: 'unknown' };
+  }
+
+  const progress = await deps.fetch(
+    `${BATCH_PROGRESS_URL}?requestId=${encodeURIComponent(requestId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!progress.ok) {
+    return { requestId, phase: 'unknown' };
+  }
+
+  const parsed: unknown = await progress.json();
+  const phase =
+    typeof parsed === 'object' && parsed !== null
+      ? (parsed as { phase?: unknown }).phase
+      : undefined;
+  return {
+    requestId,
+    phase: phase === 'ongoing' || phase === 'succeeded' || phase === 'failed' ? phase : 'unknown',
+  };
 }
 
 interface RawTokenResponse {
@@ -231,14 +306,22 @@ export function buildCompletedRichMenu(): RichMenuObject {
     chatBarText: 'メニュー',
     areas: [
       {
-        // 左上: ステータス確認。既存の message アクションを踏襲する。タップ時はテキストとして
-        // 送信されるだけで、completed 段階の既存 fallback（handleText の buildAlreadyCompletedMessage）が
-        // そのまま応答でき、新規サーバロジックを増やさない。
+        // 左上: ステータス確認。**message アクションにしてはならない**（PR #121 レビュー指摘）。
+        //
+        // message はタップ時にテキストを送信する。同 PR が completed 段階のテキストを GBP の
+        // 入力チャネルにしたため、投稿フローの await_input 中にこれを押すと文字列
+        // 「ステータス確認」が **投稿の要点として取り込まれ**、承認ボタン付きの下書きが提示される
+        // （handlePostInput の除外は trim().length === 0 のみ）。await_revision 中は修正指示として
+        // 解釈され、connect/await_callback 中（最大 30 分）は GBP の状態案内に吸われる。
+        //
+        // `a=resume` は `g_` プレフィックスを持たないので isGbpPostbackData が false になり、
+        // conversation.ts の completed 分岐が buildAlreadyCompletedMessage() を返す。
+        // これは message アクション時代の最終的な応答と同一で、テキスト注入経路だけが消える。
         bounds: { x: 0, y: 0, width: COMPLETED_MENU_COL_WIDTH, height: COMPLETED_MENU_ROW_HEIGHT },
         action: {
-          type: 'message',
+          type: 'postback',
           label: 'ステータス確認',
-          text: 'ステータス確認',
+          data: encodePostback({ kind: 'resume' }),
         },
       },
       {
@@ -307,6 +390,9 @@ export async function setupRichMenus(deps: SetupRichMenusDeps): Promise<SetupRic
 // CLI エントリポイント（運用者がデプロイ時に手動実行する）。
 // 実行方法（ts/apps/line-webhook をカレントディレクトリとして）:
 //   pnpm run build:scripts && LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... pnpm run setup-rich-menus
+//
+// 既存オーナーを新しい完了後メニューへ移す（メニュー作成とは別に 1 回だけ実行する）:
+//   ... pnpm run setup-rich-menus -- --relink-existing <旧richMenuId> <新richMenuId>
 const isMainModule = process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
@@ -318,6 +404,24 @@ if (isMainModule) {
     }
     if (!channelSecret) {
       throw new Error('LINE_CHANNEL_SECRET is required');
+    }
+
+    const relinkAt = process.argv.indexOf('--relink-existing');
+    if (relinkAt !== -1) {
+      const fromId = process.argv[relinkAt + 1];
+      const toId = process.argv[relinkAt + 2];
+      if (fromId === undefined || toId === undefined) {
+        throw new Error('--relink-existing には <旧richMenuId> <新richMenuId> の 2 つが必要です');
+      }
+      const result = await relinkExistingUsers({ channelId, channelSecret, fetch }, fromId, toId);
+      console.log('一括再リンクを受理しました。requestId:', result.requestId ?? '(不明)');
+      console.log('進捗:', result.phase);
+      console.log(
+        'batch は非同期です。ongoing の場合は ' +
+          'GET /v2/bot/richmenu/progress/batch?requestId=... で追跡してください' +
+          '（レート制限 3 req/hr のため、失敗しても安易に叩き直さないこと）。',
+      );
+      return;
     }
 
     // assets/ はカレントディレクトリ（ts/apps/line-webhook）基準で解決する
