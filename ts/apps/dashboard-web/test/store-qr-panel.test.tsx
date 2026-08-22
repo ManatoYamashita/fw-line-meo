@@ -333,3 +333,152 @@ describe('StoreQrPanel: 失敗経路の堅牢性', () => {
     expect(screen.getByRole('button', { name: /再試行/ })).toBeTruthy();
   });
 });
+
+// 再試行の押下で焦点が失われないことの固定（Requirement 6.1 後段）。
+//
+// 押下元が DOM から外れると、ブラウザは焦点を body へ移す。body には焦点指標が無いため
+// 「現在の焦点がどこにあるかを視覚的に判別できる状態」が壊れ、キーボード利用者は一覧の
+// 先頭からたどり直すことになる。閉じる操作については一覧側（StoresPage）が焦点を戻して
+// いるが、再試行は同じ形の欠陥を残していた。
+describe('StoreQrPanel: 焦点の引き取り', () => {
+  /** 1 回失敗させたあと、2 回目の応答を呼び出し側から制御できる取得手続きを作る。 */
+  function failThenControlled(): {
+    fetchQr: ReturnType<typeof vi.fn>;
+    resolveSecond: (value: ApiResult<BinaryPayload>) => void;
+  } {
+    const pending = deferred<ApiResult<BinaryPayload>>();
+    const fetchQr = vi
+      .fn()
+      .mockResolvedValueOnce(errorResult('network', 'ネットワークエラー'))
+      .mockReturnValueOnce(pending.promise);
+    return { fetchQr, resolveSecond: pending.resolve };
+  }
+
+  it('再取得の間も焦点が再試行操作に残る（6.1）', async () => {
+    const { fetchQr, resolveSecond } = failThenControlled();
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    screen.getByRole('button', { name: /再試行/ }).focus();
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+
+    // 失敗表示が消える＝取得中へ移った時点で、押下元は生きていなければならない。
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /再試行/ }));
+
+    resolveSecond(okPayload());
+    await screen.findByRole('img');
+  });
+
+  it('再試行が再び失敗しても焦点が再試行操作に残る（6.1）', async () => {
+    const fetchQr = vi
+      .fn()
+      .mockResolvedValueOnce(errorResult('network', '1 回目'))
+      .mockResolvedValueOnce(errorResult('network', '2 回目'));
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    screen.getByRole('button', { name: /再試行/ }).focus();
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+
+    await waitFor(() => expect(fetchQr).toHaveBeenCalledTimes(2));
+    await screen.findByRole('alert');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /再試行/ }));
+  });
+
+  it('再試行が成功したとき焦点をパネル内の保存操作へ引き取る（6.1）', async () => {
+    const fetchQr = vi
+      .fn()
+      .mockResolvedValueOnce(errorResult('network', 'ネットワークエラー'))
+      .mockResolvedValueOnce(okPayload());
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    screen.getByRole('button', { name: /再試行/ }).focus();
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+
+    const link = await screen.findByRole('link', { name: new RegExp(STORE_NAME) });
+    expect(document.activeElement).toBe(link);
+  });
+
+  it('再取得の間の再試行操作は押下を受け付けない状態として提示される（2.2, 6.1）', async () => {
+    const { fetchQr, resolveSecond } = failThenControlled();
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+
+    const retry = screen.getByRole('button', { name: /再試行/ }) as HTMLButtonElement;
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    // 焦点を残すため native disabled 属性は付かない。したがって減光は data-disabled 側でしか
+    // 届かない（この属性が消えると、押下不能なのに通常の見た目のまま残る）。
+    expect(retry.hasAttribute('data-disabled')).toBe(true);
+    expect(retry.disabled).toBe(false);
+
+    resolveSecond(okPayload());
+    await screen.findByRole('img');
+  });
+
+  it('再取得の間に再試行をもう一度押しても取得は増えない（2.2）', async () => {
+    const { fetchQr, resolveSecond } = failThenControlled();
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+    await waitFor(() => expect(fetchQr).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+    expect(fetchQr).toHaveBeenCalledTimes(2);
+
+    resolveSecond(okPayload());
+    await screen.findByRole('img');
+  });
+
+  it('初回取得の間に焦点がどこにも無くなっても、成功時に焦点を奪わない（6.1）', async () => {
+    const pending = deferred<ApiResult<BinaryPayload>>();
+    const fetchQr = vi.fn().mockReturnValue(pending.promise);
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    // マウスで発行操作を押したあと余白を押すと、焦点は body へ落ちる。この焦点を壊したのは
+    // 利用者であってパネルではないため、初回取得の成功で引き取ってはならない。
+    // attempt === 0 の早期 return だけが担当する領域で、これを外すとここが赤くなる。
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    pending.resolve(okPayload());
+    await screen.findByRole('img');
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('再取得の間に焦点を他の操作へ移していれば、成功時に焦点を奪わない（6.1）', async () => {
+    const { fetchQr, resolveSecond } = failThenControlled();
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+
+    const close = screen.getByRole('button', { name: /閉じる/ });
+    close.focus();
+
+    resolveSecond(okPayload());
+    await screen.findByRole('img');
+    expect(document.activeElement).toBe(close);
+  });
+});

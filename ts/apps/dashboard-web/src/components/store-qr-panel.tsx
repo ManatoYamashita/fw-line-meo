@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
@@ -90,6 +90,8 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
   // 再試行の回数。副作用の依存に含めることで、再試行を「取得をやり直す」という
   // 一つの意味に閉じる（取得・生成・解放が常に同じ経路を通る）。
   const [attempt, setAttempt] = useState(0);
+  // 再試行が成功したときの焦点の受け皿。押下元（再試行）はその遷移で描画対象から外れる。
+  const saveLinkRef = useRef<HTMLAnchorElement | null>(null);
 
   // 取得・object URL の生成・解放を単一の副作用に閉じる。生成と解放が別の場所に分かれると、
   // 解放漏れが「動くが残る」形の欠陥になり検出できない。
@@ -121,6 +123,23 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
       if (createdUrl !== null) URL.revokeObjectURL(createdUrl);
     };
   }, [storeId, fetchQr, attempt]);
+
+  // 焦点の引き取り（Requirement 6.1 後段）。このパネルが焦点を壊した場合にだけ引き取る。
+  //
+  // 再試行を押した要素は、取得成功時に描画対象から外れる。要素が DOM から消えるとブラウザは
+  // 焦点を body へ移すが、body には焦点指標が無く「現在の焦点がどこにあるかを視覚的に判別
+  // できる状態」が壊れる。行き場を失った場合にだけ、パネル内の次の操作（保存）へ移す。
+  //
+  // 初回取得（attempt === 0）では焦点は一覧の発行操作にあり、このパネルは何も壊していない。
+  // 取得中に利用者が自分で別の要素へ焦点を移した場合も同じで、いずれも触ると横取りになる。
+  // 押下元への ref は持たない。この副作用が走る時点で押下元は既にアンマウント済みであり、
+  // ref は null になっていて比較対象にならない。「焦点が行き場を失ったか」を直接見る。
+  useEffect(() => {
+    if (state.kind !== 'ready' || attempt === 0) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    saveLinkRef.current?.focus();
+  }, [state.kind, attempt]);
 
   // 状態の変化を支援技術へ通知する単一のライブリージョン（Requirement 6.2）。
   // 失敗時は Alert（role="alert"）が担うため、ここは空にして二重読み上げを避ける。
@@ -176,6 +195,7 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
             // 提示され、download 属性を持つ実リンクという実体と食い違う。見た目だけを
             // buttonVariants から借り、要素と役割は素の <a> のまま保つ。
             <a
+              ref={saveLinkRef}
               href={state.imageUrl}
               download={qrFileName(storeName, storeId)}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -184,11 +204,27 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
               画像を保存
             </a>
           ) : null}
-          {state.kind === 'error' ? (
+          {state.kind === 'error' || (state.kind === 'loading' && attempt > 0) ? (
             // 再試行はパネル内で完結させ、店舗一覧の再取得は伴わせない（Requirement 4.4）。
+            //
+            // 再取得の間もこの要素を描画し続ける。押下元が DOM から外れると焦点が body へ落ち、
+            // Requirement 6.1 後段が禁じる状態になる（閉じる操作で一覧側が焦点を戻しているのと
+            // 同じ形の欠陥が、再試行にだけ残っていた）。
+            //
+            // disabled は focusableWhenDisabled と併せて渡す。Base UI は native button に対して
+            // この組み合わせのとき **native の disabled 属性を付けず** aria-disabled と
+            // data-disabled だけを与え、tabIndex を保つ。押下は primitive 側の onClick が
+            // preventDefault で止めるため、重複した発行要求の抑止（Requirement 2.2）は
+            // ここに手書きのガードを足さなくても成立する。
+            //
+            // 減光は data-disabled 経由で与える。buttonVariants の減光は native の :disabled
+            // 擬似クラスに掛かっており、上記のとおり属性が付かないため発火しない。
             <Button
               variant="outline"
               size="sm"
+              disabled={state.kind === 'loading'}
+              focusableWhenDisabled
+              className="data-[disabled]:opacity-50"
               onClick={() => setAttempt((count) => count + 1)}
               aria-label={`${storeName} の QR の発行を再試行`}
             >

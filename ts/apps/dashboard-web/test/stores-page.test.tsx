@@ -440,3 +440,44 @@ describe('店舗一覧ページ: 発行導線の操作性', () => {
     expect(api.getStoreQr.mock.calls.map(([id]) => id)).toEqual(['s1', 's3']);
   });
 });
+
+describe('店舗一覧ページ: 発行導線の焦点', () => {
+  it('初回取得が成功しても焦点を発行操作から奪わない（6.1）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ });
+    button.focus();
+    fireEvent.click(button);
+    await screen.findByRole('img');
+
+    // 初回はパネルが焦点を壊していないため、引き取ってはならない（横取りになる）。
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('失敗から再試行して成功するまで焦点が body へ落ちない（6.1）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    api.getStoreQr
+      .mockResolvedValueOnce({ ok: false, code: 'network', message: 'x' })
+      .mockResolvedValueOnce(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店/ });
+    button.focus();
+    fireEvent.click(button);
+    await screen.findByRole('alert');
+
+    const retry = screen.getByRole('button', { name: /再試行/ });
+    retry.focus();
+    fireEvent.click(retry);
+    expect(document.activeElement).not.toBe(document.body);
+
+    const link = await screen.findByRole('link', { name: /鳥貴族 渋谷店/ });
+    expect(document.activeElement).toBe(link);
+  });
+});
