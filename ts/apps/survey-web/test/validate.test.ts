@@ -68,4 +68,18 @@ describe('validateSurveyAnswer', () => {
     const res = validateSurveyAnswer(null, ALLOWED);
     expect(res).toEqual({ ok: false, error: [{ field: 'star', code: 'REQUIRED' }] });
   });
+
+  // Issue #137: 空白のみの一言は「未回答」。素材の厚み（観点ゼロ・一言あり）へ
+  // 誤って数えると、プロンプト側の判定とずれ、記入率の指標も水増しされる。
+  it('空白のみの一言は未回答として扱う（comment を含めない）', () => {
+    const r = validateSurveyAnswer({ star: 5, comment: '   ' }, ALLOWED);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.comment).toBeUndefined();
+  });
+
+  it('空白のみが 200 字を超えても TOO_LONG にしない（未回答なので長さを問わない）', () => {
+    const r = validateSurveyAnswer({ star: 5, comment: ' '.repeat(300) }, ALLOWED);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.comment).toBeUndefined();
+  });
 });

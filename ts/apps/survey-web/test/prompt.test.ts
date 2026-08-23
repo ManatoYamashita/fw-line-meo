@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildPrompt, pickVariation } from '../src/lib/draft/prompt';
+import { buildPrompt, pickVariation, materialThickness } from '../src/lib/draft/prompt';
 import type { DraftMaterial } from '../src/lib/domain';
 
 const VARIATION = { tone: '丁寧な敬体', opening: '料理の感想から始める', angle: '味の具体性を重視' };
@@ -123,10 +123,46 @@ describe('buildPrompt', () => {
       expect(systemInstruction).not.toContain('40〜80 字');
     });
 
-    it('一言があっても観点ゼロなら短縮を許す（抽象的な一言は書く材料にならない）', () => {
-      // 実測では「観点ゼロ・一言あり（抽象的）」でも逸脱が残っていた。
-      const m: DraftMaterial = { storeName: '店', star: 1, aspectLabels: [], comment: '合いませんでした' };
-      expect(buildPrompt(m, VARIATION).systemInstruction).toContain('40〜80 字');
+    // Issue #137 段階2: 中間層（観点ゼロ・一言あり）に別の規則を与える案を 4 つ実測したが、
+    // どれも現行を上回らなかった（prompt.ts の表を参照）。字数を押し上げられるのは無条件の
+    // 下限だけで、それは抽象的な一言に対して創作を呼び戻す。よって現行の規則を共有する。
+    // **この一致は測ったうえでの選択であり、一言を見落としているのではない**（判定は 3 段階）。
+    it('観点ゼロなら一言の有無にかかわらず短い字数帯を指示する（実測にもとづく現行維持）', () => {
+      const withComment: DraftMaterial = {
+        storeName: '店',
+        star: 1,
+        aspectLabels: [],
+        comment: '提供まで40分待ちました',
+      };
+      const withoutComment: DraftMaterial = { storeName: '店', star: 1, aspectLabels: [] };
+      expect(buildPrompt(withComment, VARIATION).systemInstruction).toContain('40〜80 字');
+      expect(buildPrompt(withoutComment, VARIATION).systemInstruction).toContain('40〜80 字');
+      expect(buildPrompt(withComment, VARIATION).systemInstruction).not.toContain('100〜200 字');
+    });
+
+    it('空白のみの一言は「一言なし」として扱う（書く材料が無いため）', () => {
+      const m: DraftMaterial = { storeName: '店', star: 5, aspectLabels: [], comment: '   ' };
+      const { systemInstruction, userContent } = buildPrompt(m, VARIATION);
+      expect(systemInstruction).toContain('40〜80 字');
+      expect(userContent).toContain('一言: なし');
+    });
+  });
+
+  describe('materialThickness（本番と eval で共用する厚みの判定）', () => {
+    it('観点が 1 つでもあれば aspects', () => {
+      expect(materialThickness({ storeName: '店', star: 5, aspectLabels: ['味'] })).toBe('aspects');
+      // 観点があれば一言の有無で変わらない
+      expect(
+        materialThickness({ storeName: '店', star: 5, aspectLabels: ['味'], comment: 'おいしい' }),
+      ).toBe('aspects');
+    });
+
+    it('観点ゼロで一言があれば comment-only、無ければ bare', () => {
+      expect(materialThickness({ storeName: '店', star: 5, aspectLabels: [], comment: '3分で出てきた' })).toBe(
+        'comment-only',
+      );
+      expect(materialThickness({ storeName: '店', star: 5, aspectLabels: [] })).toBe('bare');
+      expect(materialThickness({ storeName: '店', star: 5, aspectLabels: [], comment: '  ' })).toBe('bare');
     });
   });
 });
