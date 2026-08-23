@@ -99,7 +99,10 @@ export function materialThickness(material: DraftMaterial): MaterialThickness {
 const THIN_LENGTH_RULE =
   '- 日本語で自然な口コミ本文を 1 つだけ書く。素材が乏しいので、事実に忠実であることを最優先し、40〜80 字程度で簡潔にまとめる';
 
-const LENGTH_RULE: Record<MaterialThickness, string> = {
+// eval のレポートは見出しの字数帯をこの表から導く（export しているのはそのため）。
+// 見出しを別に書くと、規則を変えたときに見出しだけが古い規則を名乗る。実際このレポートは
+// 中間層の見出しへ、上の表で実測して **棄却した**「上限のみ」を書いたまま入りかけた（PR #143）。
+export const LENGTH_RULE: Record<MaterialThickness, string> = {
   aspects: '- 日本語で 100〜200 字程度の自然な口コミ本文を 1 つだけ書く',
   'comment-only': THIN_LENGTH_RULE,
   bare: THIN_LENGTH_RULE,

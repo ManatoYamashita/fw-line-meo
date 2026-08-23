@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { createDefaultDraftGenerator } from '../src/lib/draft/generator';
-import { pickVariation, materialThickness, type MaterialThickness } from '../src/lib/draft/prompt';
+import { pickVariation, materialThickness, LENGTH_RULE, type MaterialThickness } from '../src/lib/draft/prompt';
 import type { DraftMaterial, Star } from '../src/lib/domain';
 import { detectAspectMentions, readLexicon } from '../src/lib/draft/factuality';
 import lexiconRaw from '../src/lib/draft/aspect-lexicon.json';
@@ -53,6 +53,18 @@ function toDraftMaterial(m: (typeof datasetRaw.materials)[number]): DraftMateria
 
 function pct(numerator: number, denominator: number): string {
   return denominator === 0 ? 'n/a' : `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
+/**
+ * 見出しに出す字数帯を **LENGTH_RULE から導く**（PR #143 レビュー指摘）。
+ *
+ * ここを手書きすると、規則を変えたときに見出しだけが古い規則を名乗る。分割条件を
+ * materialThickness へ寄せても、見出しの文字列が別の出所を持てば同じずれが再発する。
+ * 字数帯を書かない規則へ変えたときは規則本文をそのまま出す（要約できないものを要約しない）。
+ */
+function lengthLabel(kind: MaterialThickness): string {
+  const rule = LENGTH_RULE[kind];
+  return /[0-9]+〜[0-9]+ 字/.exec(rule)?.[0] ?? rule.replace(/^- /, '');
 }
 
 describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.2）', () => {
@@ -133,12 +145,13 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
           `  100 字未満: ${lengths.filter((l) => l < 100).length} 件` +
           `  200 字超: ${lengths.filter((l) => l > 200).length} 件`,
       );
-      // 分割は本番の materialThickness で行う。ここを自前の条件（旧: selected.length === 0）で
-      // 書くと、字数規則の分岐が変わったときに見出しと中身が静かにずれ、前後比較が読めなくなる。
+      // 分割は本番の materialThickness で、字数帯は本番の LENGTH_RULE で書く。どちらも自前で
+      // 持つと、規則を変えたときに見出しと中身が静かにずれ、前後比較が読めなくなる。
+      // 中間層と一言なしが同じ字数帯を出すなら、それは規則を共有しているという事実そのものである。
       for (const [label, kind] of [
-        ['観点あり（100〜200 字）', 'aspects'],
-        ['観点ゼロ＋一言あり（上限のみ）', 'comment-only'],
-        ['観点ゼロ＋一言なし（40〜80 字）', 'bare'],
+        ['観点あり', 'aspects'],
+        ['観点ゼロ＋一言あり', 'comment-only'],
+        ['観点ゼロ＋一言なし', 'bare'],
       ] as const) {
         const mine = samples
           .filter((s) => s.thickness === kind)
@@ -146,7 +159,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
           .sort((a, b) => a - b);
         if (mine.length === 0) continue;
         console.log(
-          `  ${label.padEnd(22)} n=${String(mine.length).padStart(3)}  中央=${mine[Math.floor(mine.length / 2)]}  min=${mine[0]}  max=${mine[mine.length - 1]}`,
+          `  ${`${label}（${lengthLabel(kind)}）`.padEnd(24)} n=${String(mine.length).padStart(3)}  中央=${mine[Math.floor(mine.length / 2)]}  min=${mine[0]}  max=${mine[mine.length - 1]}`,
         );
       }
 
