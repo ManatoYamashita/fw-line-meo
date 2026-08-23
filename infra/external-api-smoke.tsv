@@ -38,7 +38,7 @@
 #
 # 実疎通の実行: bash scripts/run-external-api-smoke.sh（運用者の gcloud 資格情報で走る。CI では呼ばない）
 db-admin-password	-	-	-	#125	Cloud SQL の postgres 管理ユーザー。外部 API ではない。
-gbp-oauth-client-secret	gbp	PENDING	-	#8	line-webhook が GBP 連携の code 交換と refresh grant で消費。実疎通は副作用の無い client 検証で行う（§8-5）。
+gbp-oauth-client-secret	gbp	PENDING	-	#8	line-webhook が GBP 連携の code 交換と refresh grant で消費。実疎通は副作用の無い client 検証で行う（§8-4）。
 gbp-token-cipher-key	-	-	-	#8	refresh token を AES-256-GCM で暗号化する自前の鍵。外部 API を叩かない。
 gemini-api-key	gemini	2026-08-21	local-20260821T155000+0900	#125	survey-web が口コミ下書き生成で消費。Issue #63 が落ちた穴そのもの。
 line-channel-secret	line-messaging	2026-08-21	local-20260821T155000+0900	#125	line-webhook / delivery-job が stateless token 発行に消費。実疎通は送信を伴わない /v2/bot/info で行う。
