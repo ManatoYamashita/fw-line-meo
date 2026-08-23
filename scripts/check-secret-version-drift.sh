@@ -40,7 +40,7 @@
 # 環境変数（既定はすべて本番挙動）:
 #   PROJECT_ID            GCP プロジェクト ID。**必須**（既定値を置かない）
 #   SECRET_TARGETS_FILE   正典の注入。未設定なら check-secret-declaration-coverage.sh --print-secrets
-#   PROD_SECRET_SNAPSHOT  クラウド実測の注入。未設定なら gcloud を 2×N 回叩く（宣言 6 件なら 12 回）
+#   PROD_SECRET_SNAPSHOT  クラウド実測の注入。未設定なら gcloud を 2×N 回叩く（宣言 5 件なら 10 回）
 #
 # **時刻の注入は持たない。** 判定はすべて version の番号と state だけで決まり、猶予や経過時間の
 # 閾値を一切持たないため、決定的テストに時刻の固定が要らない。作成時刻は診断文へ添えるためだけに

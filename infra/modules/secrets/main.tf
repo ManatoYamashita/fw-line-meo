@@ -10,14 +10,13 @@ locals {
   # **複数行リスト定義を維持すること**: scripts/check-secret-declaration-coverage.sh が
   # `secret_ids = [` 〜 `]` の範囲抽出で正典を読む。1 行定義へ変えると赤になる。
   secret_ids = [
-    "line-channel-secret",       # Webhook 署名検証用
-    "line-channel-access-token", # Push/Reply 送信用（機能1 配信・機能3 応答）
-    "gemini-api-key",            # 口コミ下書き生成
-    "places-api-key",            # 競合データ取得
-    "db-admin-password",         # postgres 管理ユーザー（ランタイム SA には非付与）
-    "survey-session-key",        # 機能3 再生成上限の HMAC 署名鍵（review-acquisition・値は out-of-band 投入）
-    "gbp-oauth-client-secret",   # GBP OAuth クライアントシークレット（gbp-post-review-reply / Req 2.1・値は out-of-band 投入）
-    "gbp-token-cipher-key",      # refresh token 暗号化鍵（AES-256-GCM・32 byte base64・値は out-of-band 投入）
+    "line-channel-secret",     # Webhook 署名検証用
+    "gemini-api-key",          # 口コミ下書き生成
+    "places-api-key",          # 競合データ取得
+    "db-admin-password",       # postgres 管理ユーザー（ランタイム SA には非付与）
+    "survey-session-key",      # 機能3 再生成上限の HMAC 署名鍵（review-acquisition・値は out-of-band 投入）
+    "gbp-oauth-client-secret", # GBP OAuth クライアントシークレット（gbp-post-review-reply / Req 2.1・値は out-of-band 投入）
+    "gbp-token-cipher-key",    # refresh token 暗号化鍵（AES-256-GCM・32 byte base64・値は out-of-band 投入）
   ]
 }
 
