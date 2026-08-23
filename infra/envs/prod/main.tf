@@ -136,16 +136,15 @@ module "batch_job" {
 
 # competitive-daily-summary: TS 配信ジョブ（毎時 HH:00 JST・design.md「infra/delivery-job」）
 module "delivery_job" {
-  source                              = "../../modules/delivery-job"
-  project_id                          = var.project_id
-  region                              = var.region
-  db_instance_name                    = module.database.instance_name
-  db_connection_name                  = module.database.connection_name
-  db_name                             = module.database.database_name
-  line_channel_secret_id              = module.secrets.secret_ids["line-channel-secret"]
-  line_channel_access_token_secret_id = module.secrets.secret_ids["line-channel-access-token"]
-  line_channel_id                     = var.line_channel_id
-  liff_url                            = var.liff_url
+  source                 = "../../modules/delivery-job"
+  project_id             = var.project_id
+  region                 = var.region
+  db_instance_name       = module.database.instance_name
+  db_connection_name     = module.database.connection_name
+  db_name                = module.database.database_name
+  line_channel_secret_id = module.secrets.secret_ids["line-channel-secret"]
+  line_channel_id        = var.line_channel_id
+  liff_url               = var.liff_url
 
   depends_on = [module.project_services]
 }
