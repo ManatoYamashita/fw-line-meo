@@ -39,7 +39,6 @@
 # 実疎通の実行: bash scripts/run-external-api-smoke.sh（運用者の gcloud 資格情報で走る。CI では呼ばない）
 db-admin-password	-	-	-	#125	Cloud SQL の postgres 管理ユーザー。外部 API ではない。
 gemini-api-key	gemini	2026-08-21	local-20260821T155000+0900	#125	survey-web が口コミ下書き生成で消費。Issue #63 が落ちた穴そのもの。
-line-channel-access-token	-	-	-	#125	accessor binding のみでコードから未消費（2 消費者とも channel id + secret の stateless token 方式）。撤去は別 Issue。
 line-channel-secret	line-messaging	2026-08-21	local-20260821T155000+0900	#125	line-webhook / delivery-job が stateless token 発行に消費。実疎通は送信を伴わない /v2/bot/info で行う。
 places-api-key	places	2026-08-21	local-20260821T155000+0900	#125	daily-batch / line-webhook / dashboard-api が競合データ取得に消費。
 survey-session-key	-	-	-	#125	機能3 再生成上限の HMAC 署名鍵。自前の署名にのみ使い、外部 API を叩かない。
