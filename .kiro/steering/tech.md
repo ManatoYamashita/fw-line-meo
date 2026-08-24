@@ -174,6 +174,12 @@ make db-migrate   # BUILD: 一時postgresへ db/migrations/*.sql をクリーン
 make db-smoke     # SMOKE: 適用後 db/test/smoke/*.sql を実行
 make db-test      # TEST:  適用後 db/test/assertions/*.sql を実行（網羅スイート）
 make db-verify-docs # DOCS: ERD/write-boundary と実スキーマの整合・書込境界単一所有を機械検証
+
+# 上の smoke / assertions / docs 整合を 1 本で流す実行装置（Issue #156）。DATABASE_URL へ既存の
+# postgres を受けるのでコンテナランタイムが要らず、CI と同じ入口になる。
+# **ts-ci の lint-build-test が apply migrations の直後にこれを呼ぶ。**
+ts/scripts/with-test-db.sh bash scripts/run-db-test-suites.sh   # ローカル（native postgres を起動）
+DATABASE_URL=... bash scripts/run-db-test-suites.sh             # CI / 既存 DB
 # アプリ層（TS/Go）のビルド・lint・テストは各層導入時に確立し追記する。推測で書かない。
 ```
 
