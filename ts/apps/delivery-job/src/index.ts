@@ -419,9 +419,25 @@ export async function main(): Promise<void> {
 
 const isDirectRun = import.meta.url === `file://${process.argv[1]}`;
 if (isDirectRun) {
-  main().catch((err: unknown) => {
-    // main() 内部で全て捕捉している想定の安全網（防御的多重化）。
-    defaultLogger.fatal('main() rejected unexpectedly', err);
-    process.exitCode = 1;
-  });
+  main()
+    .catch((err: unknown) => {
+      // main() 内部で全て捕捉している想定の安全網（防御的多重化）。
+      defaultLogger.fatal('main() rejected unexpectedly', err);
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      // closePool() 後に残っているハンドルを 1 行だけ記録する（Issue #151）。
+      // 挙動は変えない（process.exit() は使わず自然終了を待つ）。ここが空でなければ、
+      // 次にプロセスが終われなくなったとき 600 秒の無言タイムアウトではなく、
+      // 残存ハンドルの種類がログに出て原因の起点になる。
+      // main() の中ではなくここに置くのは、テストが呼ぶ main() へテストプロセス自身の
+      // ハンドルを混ぜないため（テストは main() を直接 await する）。
+      console.log(
+        JSON.stringify({
+          event: 'delivery-job.exit',
+          exitCode: process.exitCode ?? 0,
+          activeResources: process.getActiveResourcesInfo(),
+        }),
+      );
+    });
 }
