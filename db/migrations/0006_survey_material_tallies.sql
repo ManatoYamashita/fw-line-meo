@@ -40,3 +40,8 @@ CREATE TABLE survey_material_tallies (
 );
 
 COMMIT;
+
+-- RED 対照 1（**マージ禁止**・Issue #156 の完了条件のための一時コミット）:
+-- 「一言の本文を保存する列」を注入する。30_compliance.sql の列 allowlist と
+-- smoke/35 の文字列列チェックの**両方**が発火することを CI 上で確かめる。
+ALTER TABLE survey_material_tallies ADD COLUMN comment_body text;
