@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   logFactualityResidual,
+  logSurveyPageViewed,
+  logSurveyResponseSubmitted,
   writeStructuredLog,
   type SurveyLogFields,
 } from '../src/lib/structured-log';
@@ -90,5 +92,47 @@ describe('logFactualityResidual', () => {
     logFactualityResidual(log as Parameters<typeof logFactualityResidual>[0], ['service', 'atmosphere']);
     logFactualityResidual(log as Parameters<typeof logFactualityResidual>[0], ['atmosphere', 'service']);
     expect(seen[0]).toBe(seen[1]);
+  });
+});
+
+// Issue #137 段階3: 表示 → 送信のファネル。載せるのは storeId だけで、来店客に紐づく値は
+// 一切出さない。storeId は事業者側の識別子である。
+describe('ファネルの構造化ログ', () => {
+  it('survey_page_viewed は storeId だけを info で出力する', () => {
+    const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    logSurveyPageViewed(writeStructuredLog, 'store-1');
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ level: 'info', event: 'survey_page_viewed', storeId: 'store-1' }),
+    );
+    output.mockRestore();
+  });
+
+  it('survey_response_submitted は storeId だけを info で出力する', () => {
+    const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    logSurveyResponseSubmitted(writeStructuredLog, 'store-1');
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ level: 'info', event: 'survey_response_submitted', storeId: 'store-1' }),
+    );
+    output.mockRestore();
+  });
+
+  it('storeId と一緒に渡された余剰プロパティは出力しない', () => {
+    const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const smuggled = {
+      storeId: 'store-1',
+      comment: '客の自由記述',
+      userAgent: 'Mozilla/5.0',
+    } as unknown as SurveyLogFields;
+
+    writeStructuredLog('info', 'survey_page_viewed', smuggled);
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ level: 'info', event: 'survey_page_viewed', storeId: 'store-1' }),
+    );
+    output.mockRestore();
   });
 });

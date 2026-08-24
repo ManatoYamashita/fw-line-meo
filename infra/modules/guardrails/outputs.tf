@@ -7,3 +7,8 @@ output "budget_name" {
   description = "月次予算リソース名。"
   value       = google_billing_budget.monthly.name
 }
+
+output "survey_funnel_metric_names" {
+  description = "アンケートのファネル指標名（Issue #137 段階3・logging.googleapis.com/user/<name> として読む）。"
+  value       = { for k, m in google_logging_metric.survey_funnel : k => m.name }
+}

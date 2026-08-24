@@ -5,14 +5,14 @@
 DO $$
 DECLARE bad text;
 BEGIN
-    -- テーブル allowlist: public の BASE TABLE は既知 15 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
+    -- テーブル allowlist: public の BASE TABLE は既知 18 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
     SELECT string_agg(table_name, ', ') INTO bad
     FROM information_schema.tables
     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
       AND table_name NOT IN (
         'operators','agencies','owners','stores','dashboard_users','categories',
         'competitors','rating_snapshots','survey_aspects','survey_rating_tallies',
-        'survey_aspect_tallies','oauth_tokens',
+        'survey_aspect_tallies','survey_material_tallies','oauth_tokens',
         'daily_summaries','summary_deliveries',
         'agency_invite_codes','onboarding_sessions','line_webhook_events'
       );
@@ -35,6 +35,15 @@ BEGIN
       AND table_name = 'survey_aspect_tallies'
       AND column_name NOT IN ('id','store_id','period_month','aspect_code','count');
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: survey_aspect_tallies に想定外の列: %', bad; END IF;
+
+    -- 素材の厚み（Issue #137 段階3）。保持するのは選択の **個数** と一言の **有無** だけで、
+    -- 一言の本文を保存する列が生えたらここで落ちる。Issue の「やってはいけないこと」を構造で担保する。
+    SELECT string_agg(table_name || '.' || column_name, ', ') INTO bad
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'survey_material_tallies'
+      AND column_name NOT IN ('id','store_id','period_month','aspect_count','has_comment','count');
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: survey_material_tallies に想定外の列: %', bad; END IF;
     RAISE NOTICE 'PASS 5.3b: survey tallies are fixed anonymous counters (allowlist)';
 
     -- 二次ガード: 来店客 PII を匂わす列名の denylist（owners.line_user_id はオーナー識別子で対象外）。

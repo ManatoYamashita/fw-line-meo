@@ -184,6 +184,8 @@ module "guardrails" {
   budget_amount_jpy  = var.budget_amount_jpy
   alert_email        = var.alert_email
   places_quota_caps  = var.places_quota_caps
+  # review-acquisition のファネル指標（Issue #137 段階3）の対象サービス。
+  survey_service_name = module.run_services.service_names["survey-web"]
 
   depends_on = [module.project_services]
 }

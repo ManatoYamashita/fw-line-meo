@@ -69,6 +69,16 @@ async function ratingCount(star: number): Promise<number> {
   return res.rows[0]?.count ?? 0;
 }
 
+/** 素材の厚み（Issue #137 段階3）のカウンタを読む。 */
+async function materialCount(aspects: number, hasComment: boolean): Promise<number> {
+  const pool = await getPool();
+  const res = await pool.query<{ count: number }>(
+    'SELECT count FROM survey_material_tallies WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3',
+    [STORE, aspects, hasComment],
+  );
+  return res.rows[0]?.count ?? 0;
+}
+
 describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => {
   beforeAll(async () => {
     const pool = await getPool();
@@ -106,7 +116,10 @@ describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => 
       [STORE],
     );
     expect(taste.rows[0]?.count).toBe(1);
+    // 素材の厚み: 観点 1・一言なし（Issue #137 段階3）
+    expect(await materialCount(1, false)).toBe(1);
   });
+
 
   it('再回答で count が加算される（実 UNIQUE 制約上の UPSERT）', async () => {
     const pageToken = tokens.signPage(STORE);
@@ -115,6 +128,26 @@ describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => 
       responsesDeps(okGen()),
     );
     expect(await ratingCount(5)).toBe(2);
+    expect(await materialCount(1, false)).toBe(2);
+  });
+
+  // hasComment はプロンプトへ渡す comment と同じ値から導かれる。実経路で確かめる。
+  it('一言つきの回答は has_comment=true の行へ加算される', async () => {
+    const pageToken = tokens.signPage(STORE);
+    const res = await handleResponses(
+      post('http://x/api/responses', {
+        pageToken,
+        storeId: STORE,
+        star: 5,
+        aspectCodes: ['taste'],
+        comment: '3分で出てきました',
+      }),
+      responsesDeps(okGen()),
+    );
+    expect(res.status).toBe(200);
+    expect(await materialCount(1, true)).toBe(1);
+    // 同じ観点数でも一言の有無で行が分かれる（分かれていないと記入率が取り出せない）
+    expect(await materialCount(1, false)).toBe(2);
   });
 
   it('pageToken 不正は 400 で集計を加算しない', async () => {
@@ -125,6 +158,7 @@ describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => 
     );
     expect(res.status).toBe(400);
     expect(await ratingCount(4)).toBe(before);
+    expect(await materialCount(0, false)).toBe(0);
   });
 
   it('生成失敗→/api/drafts 再試行で tallies が二重加算されない（3.9×5.2）', async () => {
@@ -145,5 +179,6 @@ describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => 
     );
     expect((await res2.json()).generation).toBe('ok');
     expect(await ratingCount(3)).toBe(1); // 二重加算なし
+    expect(await materialCount(0, false)).toBe(1); // 厚みも二重加算されない
   });
 });

@@ -5,14 +5,20 @@
 --   psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f infra/sql/grants.sql
 --
 -- IAM DB ユーザー名は Cloud SQL が SA email から .gserviceaccount.com を除いた形
--- （例: sa-line-webhook@fwlm.iam）。project 名は既定 fwlm。別プロジェクトは -v で上書き:
---   psql ... -v ON_ERROR_STOP=1 -v project=gen-fw-line-meo -f infra/sql/grants.sql
+-- （本番実測: sa-line-webhook@gen-fw-line-meo.iam）。**`project` は GCP プロジェクト ID であって
+-- DB 名ではない。** 既定を 'fwlm'（＝DB 名／インスタンス名の接頭辞）にしていたため、runbook
+-- どおりに `-v project=` 無しで実行すると 1 文目で
+-- `role "sa-line-webhook@fwlm.iam" does not exist` になり、BEGIN 済みの GRANT が全て
+-- ロールバックしていた（2026-08-24・PR #144 の 0006 本番適用で実測）。README §3 の
+-- 「IAM DB ユーザー（sa-*@gen-fw-line-meo.iam）」という記述とも食い違っていた。
+-- 別プロジェクトへ流すときだけ -v で上書きする:
+--   psql ... -v ON_ERROR_STOP=1 -v project=<gcp-project-id> -f infra/sql/grants.sql
 -- SA 命名は各モジュール内で決定的に導出/直書き（run-services: sa-${each.key}・batch-job/delivery-job: 個別ハードコード）。
 --
 -- 書込境界（db/write-boundary.md・"整合する GRANT のみ"）:
 --   TS 層（line_webhook / survey_web / dashboard_api）→ DML on
 --     operators, agencies, dashboard_users, owners, stores,
---     survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
+--     survey_rating_tallies, survey_aspect_tallies, survey_material_tallies, oauth_tokens,
 --     agency_invite_codes, onboarding_sessions, line_webhook_events
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots, daily_summaries
 --     （daily_summaries は competitive-daily-summary 0004・INSERT/UPDATE は同日再実行の
@@ -28,7 +34,7 @@
 
 \if :{?project}
 \else
-  \set project 'fwlm'
+  \set project 'gen-fw-line-meo'
 \endif
 \set line_webhook 'sa-line-webhook@' :project '.iam'
 \set survey    'sa-survey-web@' :project '.iam'
@@ -54,7 +60,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public
 -- oauth_tokens（第2フェーズまで休眠）と同じ扱いで DML を付与する。
 GRANT INSERT, UPDATE, DELETE ON
   operators, agencies, dashboard_users, owners, stores,
-  survey_rating_tallies, survey_aspect_tallies, oauth_tokens,
+  survey_rating_tallies, survey_aspect_tallies, survey_material_tallies, oauth_tokens,
   agency_invite_codes, onboarding_sessions, line_webhook_events
   TO :"line_webhook", :"survey", :"dashboard";
 

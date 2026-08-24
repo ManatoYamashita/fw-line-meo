@@ -1,6 +1,6 @@
-# ER 図: four-tier-data-model / competitive-daily-summary
+# ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -18,6 +18,7 @@ erDiagram
     competitors ||--o{ rating_snapshots : "measured by"
     stores ||--o{ survey_rating_tallies : aggregates
     stores ||--o{ survey_aspect_tallies : aggregates
+    stores ||--o{ survey_material_tallies : aggregates
     survey_aspects ||--o{ survey_aspect_tallies : classifies
     stores ||--o{ oauth_tokens : "future authorizes"
     stores ||--o{ daily_summaries : "summarized as"
@@ -41,6 +42,7 @@ erDiagram
 | survey_aspects | code (text) | — | — | アンケート観点（共有定数・seed SoT） |
 | survey_rating_tallies | id (uuid) | (store_id, period_month, star) unique | store_id → stores | 星評価の匿名集計カウンタ |
 | survey_aspect_tallies | id (uuid) | (store_id, period_month, aspect_code) unique | store_id → stores, aspect_code → survey_aspects | 観点別の匿名集計カウンタ |
+| survey_material_tallies | id (uuid) | (store_id, period_month, aspect_count, has_comment) unique | store_id → stores | 素材の厚み（観点の選択数×一言の有無）の匿名集計カウンタ |
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
 | daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
 | summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 配信記録（店舗×日付で一意の「配信事実」・`retry_key` で冪等再送・TS 書込） |
@@ -53,6 +55,7 @@ erDiagram
 - 全階層 FK（agencies.operator_id / owners.agency_id / stores.owner_id）は **NOT NULL・ON DELETE RESTRICT**。親欠落の子は作成不可、誤削除は拒否。
 - リネージ（テナント分離の根拠）: `stores → owners.agency_id → agencies → operators`。RBAC は運営=全体 / 代理店=担当 agency 配下のみ。
 - **来店客(Customer)・個別回答を表現するエンティティは存在しない**（匿名性の構造保証）。集計は `survey_*_tallies` のカウンタのみ。
+- `survey_material_tallies`（`review-acquisition`・`0006`）は回答 1 件の「素材の厚み」を観点の **選択数** と一言の **有無** だけで数える。一言の本文は列として存在しない（Req 5.1/5.3）。既存 tallies と同じく `created_at` を持たず、時刻も残さない。
 - `rating_snapshots` は追記専用（更新/削除しない）。`subject_kind` で自店/競合を区別し、`place_id` を非正規化保持して競合 churn 後も歴史を自立保持。
 - 共有定数 `categories`・`survey_aspects` は seed（`0002`）が唯一の定義（SoT）。
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。

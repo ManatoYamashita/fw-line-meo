@@ -1,6 +1,7 @@
 import { getPool, findStoreForSurvey, listSurveyAspects } from '@fwlm/db';
 import { buildGoogleReviewUrl } from '../../../lib/google-review-url';
 import { createSessionTokenService } from '../../../lib/session-token';
+import { writeStructuredLog } from '../../../lib/structured-log';
 import { loadSurveyPageData, type SurveyPageDeps } from './page-data';
 import { SurveyShell } from './survey-shell';
 
@@ -17,6 +18,7 @@ async function buildDeps(): Promise<SurveyPageDeps> {
     listAspects: async () => listSurveyAspects(await getPool()),
     signPage: (storeId) => tokens.signPage(storeId),
     buildReviewUrl: (placeId) => buildGoogleReviewUrl(placeId),
+    log: writeStructuredLog,
   };
 }
 

@@ -102,3 +102,52 @@ resource "google_cloud_quotas_quota_preference" "places" {
 
   ignore_safety_checks = "QUOTA_DECREASE_PERCENTAGE_TOO_HIGH"
 }
+
+# ------------------------------------------------------------------------------
+# アンケートのファネル指標（review-acquisition / Issue #137 段階3・Req 5.7）
+#
+# 表示件数（survey_page_viewed）は DB のどの表にも存在しない。survey_material_tallies が
+# 数えるのは **送信された回答** だけで、「開いたが送らなかった」は原理的に出せないため、
+# 唯一の記録がアプリの構造化ログになる。ところが Cloud Run の stdout は _Default バケットへ
+# 入り、既定の保持は 30 日である（本番実測: buckets list → _Default 30 日・_Required 400 日は
+# 監査ログ専用。ログベース指標もシンクも未設定）。段階4（導線変更）の判断は「施策前後の比較」
+# なので、施策前の窓が消えた時点で本 spec の計測基盤そのものが目的を果たさなくなる。
+#
+# ログベース指標へ写すと時系列は 24 か月残る（6 週までは 1 分粒度、以降は 10 分粒度へ集約）。
+# _Default バケットの保持延長を採らないのは、survey 以外の全ログまで課金対象になるため。
+#
+# **severity では絞らないこと。** アプリは `level` フィールドを出しており、Cloud Run はこれを
+# LogEntry.severity へ写さない（本番実測: {"event":"generation_failed","level":"error"} の
+# severity は null）。`severity = "INFO"` を条件に足すと 1 件も一致せず、「指標は存在するのに
+# 常に 0」という静かな失敗になる。event 名だけで絞る。
+#
+# **指標は作成時点から数え始める。** 段階4 の直前に作ってもベースラインは取れないので、
+# 本 spec のデプロイと同じタイミングで apply すること。
+# ------------------------------------------------------------------------------
+resource "google_logging_metric" "survey_funnel" {
+  for_each = toset(["survey_page_viewed", "survey_response_submitted"])
+
+  project     = var.project_id
+  name        = each.key
+  description = "review-acquisition のファネル（Issue #137 段階3・Req 5.7）: ${each.key} を店舗単位で数える。"
+  filter      = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${var.survey_service_name}\" AND jsonPayload.event = \"${each.key}\""
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+
+    # 店舗単位で読めることが Req 5.7 の要求。**来店客に紐づく値は載せない**（storeId は
+    # 事業者側の識別子であって来店客の識別子ではない）。ログ側の sink が storeId 以外を
+    # 出さない allowlist なので、ここで抽出しうる値も構造的に storeId に限られる。
+    labels {
+      key         = "store_id"
+      value_type  = "STRING"
+      description = "店舗 ID（jsonPayload.storeId）。"
+    }
+  }
+
+  label_extractors = {
+    store_id = "EXTRACT(jsonPayload.storeId)"
+  }
+}
