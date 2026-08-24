@@ -167,8 +167,10 @@ jobs:
       # 実体を scripts/ 側へ置くのは、ワークフローの run: ブロックが
       # check-grep-exit-codes.sh / check-shell-pipe-consumers.sh の走査対象外だからである
       # （db/test/run.sh を使わない理由も含め、詳細はスクリプト冒頭のコメント）。
-      - name: 'db/test スイート（assertions / smoke / docs 整合・Issue #156）'
-        run: bash scripts/run-db-test-suites.sh
+      # RED 対照4（**マージ禁止**）: 実行ステップをコメント化する。
+      # 期待: check-db-test-ci-coverage.sh が赤になる（コメントは配線と数えない）。
+      # - name: 'db/test スイート（assertions / smoke / docs 整合・Issue #156）'
+      #   run: bash scripts/run-db-test-suites.sh
       - name: unit + integration tests (DB 込み)
         run: pnpm -C ts -r test
       - name: JS バンドル予算（性能プロキシ・Req 2.8）
