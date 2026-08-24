@@ -1,8 +1,13 @@
 # コストガードレール・失敗検知（gcp-infra-foundation / Req 2.5,7.1,7.2,7.3）
 #
 # 通知系（channel + alert policy）と課金系（budget + quota）を集約。
-# 循環回避のため batch 失敗アラートポリシーはここが所有し、BatchJob の Job を
-# 名前で参照する（run-services/batch-job → guardrails の一方向）。
+# 失敗アラートポリシーはここが所有する（run-services/batch-job → guardrails の一方向）。
+#
+# ジョブ名で対象を絞らない（Issue #151）。以前は job_name 変数で daily-batch だけを
+# 見ていたため、後から追加された summary-delivery の失敗を見る監視が 1 つも無く、
+# 60 execution 以上（毎時 2 回 × 600 秒のタイムアウト）が誰にも通知されないまま続いた。
+# ジョブを足すたびに配線を思い出す設計は、思い出さなかったときに無音になる。
+# 述語そのものを持たなければ、その忘れ方は起き得ない。
 
 # 通知チャネル（budget 通知とバッチ失敗アラートで共用）
 resource "google_monitoring_notification_channel" "email" {
@@ -47,17 +52,17 @@ resource "google_billing_budget" "monthly" {
   }
 }
 
-# daily-batch 失敗アラート（Req 2.5 後半・検知）。Job 実行履歴の失敗数を監視。
-resource "google_monitoring_alert_policy" "batch_failure" {
+# Cloud Run Job 失敗アラート（Req 2.5 後半・検知）。プロジェクト内の全 Job の実行失敗を監視。
+resource "google_monitoring_alert_policy" "job_failure" {
   project      = var.project_id
-  display_name = "daily-batch job failure"
+  display_name = "cloud run job failure"
   combiner     = "OR"
 
   conditions {
-    display_name = "daily-batch failed executions"
+    display_name = "failed job executions"
 
     condition_threshold {
-      filter          = "resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"${var.job_name}\" AND metric.type = \"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result = \"failed\""
+      filter          = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result = \"failed\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
@@ -67,6 +72,14 @@ resource "google_monitoring_alert_policy" "batch_failure" {
         per_series_aligner = "ALIGN_COUNT"
       }
     }
+  }
+
+  # 既定の自動クローズは 7 日で、復旧を短時間で観測できない（直したのに閉じないので、
+  # 開いているインシデントが「今も壊れている」ことを意味しなくなる）。
+  # daily-batch は日次・summary-delivery は毎時なので、1 時間なら失敗が続く間は
+  # インシデントが 1 本に畳まれ、直ってから 1 時間強で閉じる。
+  alert_strategy {
+    auto_close = "3600s"
   }
 
   notification_channels = [google_monitoring_notification_channel.email.id]
