@@ -215,3 +215,80 @@
 - **[PR #144 レビュー知見] ログだけの指標は 30 日で消える**: 表示件数（`survey_page_viewed`）は tallies に持てない（tallies は送信された回答しか数えない）ため唯一の記録がログになるが、Cloud Run の stdout が入る `_Default` バケットの保持は既定 30 日で、本番にはログベース指標もシンクも無かった（`gcloud logging buckets|metrics|sinks list` で実測。`_Required` の 400 日は監査ログ専用で app ログは入らない）。段階4 の判断は施策前後の比較なので、施策前の窓が消えれば計測基盤そのものが目的を失う。`infra/modules/guardrails` へログベース指標 2 本（時系列 24 か月）を足して写す。`_Default` の保持延長を採らないのは survey 以外の全ログまで課金対象になるため。**指標は作成時点から数え始めるので、段階4 の直前に作ってもベースラインは取れない**（本 spec のデプロイと同時に apply する）。
 - **[PR #144 レビュー知見] ログベース指標のフィルタで `severity` を条件にしない**: アプリの構造化ログは `level` フィールドを出しており、Cloud Run はこれを `LogEntry.severity` へ写さない。本番の実物は `{"event":"generation_failed","level":"error"}` で **`severity` は null** だった（`jsonPayload` への解析自体は行われる）。`severity = "INFO"` を条件へ足すと 1 件も一致せず、「指標は存在するのに常に 0」という静かな失敗になる。event 名だけで絞る。
 - **[PR #144 レビュー知見] 制約を変える PR の注記棚卸しは表の行まで届かせる**: `design.md` の要件トレーサビリティ表 5.5 行が「既存 2 表のみ」のまま残り、同じファイルの Boundary 節「tallies 3 表」・Data Models 節と矛盾していた。散文の注記 2 件は掃討できていたが、**表のセルは見落とした**。要件本文を書き換えたら、その要件を指すトレーサビリティ行の検証手段列まで必ず読み直す。
+
+## Issue #137 段階3 の本番実施記録（2026-08-24）
+
+**対象**: 本番 `survey-web` リビジョン `survey-web-00053-nq6`（2026-08-24T07:10:07Z 作成）。
+`deploy-prod` run 32699841748（07:03:26–07:11:28Z）の実行区間内に作られ、トラフィック 100%、
+`metadata.generation` と `status.observedGeneration` がともに 56、`latestReady` と `latestCreated` が一致、
+Ready / ConfigurationsReady / RoutesReady がいずれも True。リビジョンが保持するのは digest だけなので
+タグから引き直して照合した — `survey-web:46d1b5b` は `sha256:f92ba3c8…` で、リビジョンのイメージと
+一致する。これが「動いているのはマージコミット `46d1b5b`（PR #144）である」ことの根拠である。
+
+### 事前に out-of-band で行ったこと
+
+| 作業 | 結果 |
+|---|---|
+| `db/migrations/0006_survey_material_tallies.sql` の適用 | public の BASE TABLE が 17 → 18。列は `id` / `store_id` / `period_month` / `aspect_count` / `has_comment` / `count` の 6 つで、文字列型の列は 1 つも無い |
+| `infra/sql/grants.sql` の適用 | `sa-survey-web@…` へ SELECT / INSERT / UPDATE / DELETE。TS 層の他 2 SA も同じ、Go 層と store-detail は SELECT のみ |
+| terraform（plan をファイルへ固定してから apply） | `2 added / 8 changed / 0 destroyed`。added はログベース指標 2 本 |
+
+`grants.sql` は runbook どおり `-v project=` 無しで実行すると
+`role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックした。既定だった
+`\set project 'fwlm'` は DB 名であって GCP プロジェクト ID ではなく、実在するロールは
+`sa-*@gen-fw-line-meo.iam` である。PR #144 の `61fd358` で既定を是正済み。
+
+**Auth Proxy のポートに 5432 を使わないこと。** 開発機は Homebrew postgres が 5432 を掴んでおり、
+runbook の `--port 5432` をそのまま打つと proxy の bind 失敗に気づかないまま psql がローカル DB へ
+繋がる。本作業は 15432 を使い、流す前に店舗名で接続先を確かめた。
+
+### 観測したこと
+
+客と同じ経路で 1 件だけ送信した（`GET /s/<storeId>` の SSR HTML から `pageToken` を取り
+`POST /api/responses`）。星 5・観点 2 個（`taste` と `atmosphere`）・一言あり。
+
+1. `survey_material_tallies` に行が立った。`ONIBUS COFFEE 中目黒駅前店` / `2026-08-01` /
+   `aspect_count=2` / `has_comment=t` / `count=1`。選択数と一致し、一言の有無を反映している
+2. ファネルの構造化ログが 2 本出た。`survey_page_viewed`（07:12:26）→
+   `survey_response_submitted`（07:12:40）。どちらも `jsonPayload` は `event` / `level` / `storeId` の
+   3 鍵だけで、来店客に紐づく値は 1 つも載っていない（Req 5.7）
+3. ログベース指標が計上した。生の点で両指標とも 07:12 のバケットが 1、前後は 0。ラベルは
+   `store_id` と `log` のみ。集約付き（`aggregation.alignmentPeriod=300s` と `ALIGN_SUM`）で引くと
+   DELTA 点を境界で二重に拾い値が 2 に見えるので、実数を見るときは集約を付けずに生の点を読む
+
+**フィルタで `severity` を条件にしなかった判断が本番で裏取りできた。** 実物のログは `severity` が
+null である（アプリは `level` を出しており、Cloud Run はこれを `LogEntry.severity` へ写さない）。
+`severity = "INFO"` を条件に足していれば 1 件も一致せず、「指標は存在するのに常に 0」という
+静かな失敗になっていた。
+
+### 確認していないこと
+
+以下は実施していない。テストで満たしていることと本番で確認したことを混ぜない。
+
+- **`has_comment = false` の行が本番で別行に分かれること** — 本番へ送ったのは一言ありの 1 件だけ。
+  有無で行が分かれることは `db/test/assertions/70_survey_material_tallies.sql` の 70c と
+  `ts/packages/db/test/tallies.db.test.ts` でのみ確認しており、本番では観測していない
+- **実トラフィックでの分母の性質** — 表示 1 件はこちらの `curl` である。bot・プリフェッチ・
+  回答済みの再訪が分母へどの割合で混ざるかは、design に「数え方の癖」として書いてあるだけで未観測
+- **集計失敗時にログだけが残る形（乖離による集計障害の検知）** — 本番では発生させていない
+- **JST 月境界** — 8 月の行が 1 つできただけで、境界を跨いでいない
+- **ログベース指標の 24 か月保持** — 仕様上の値であって観測していない。確認できたのは
+  「いま計上されている」ことまでである
+
+### 匿名性の機械強制について（代理で確認した範囲と、埋まらない差）
+
+`0006` の DDL コメントは「この構造は `db/test/assertions/30_compliance.sql` の列 allowlist が
+機械強制する」と書いている。allowlist が実際に働くことは、一時 postgres へ
+`ALTER TABLE survey_material_tallies ADD COLUMN comment_body text` を注入して `30_compliance.sql` と
+smoke 3.5c が赤くなることで確認した。**ただしこの実行主体が CI に存在しない。** `db/test/` を回す
+ワークフローは 1 つも無く、強制が効くのは誰かが手元で走らせたときだけである。したがって
+`comment_body text` を足す migration は ts-ci を緑のまま通る。**Issue #156 が唯一の追跡面**であり、
+CI へ載せて対照で赤化を示すまで「機械強制する」は成立していない。
+
+### 識別子について
+
+本記録に書いた店舗 ID は先頭 8 文字の `865d1c0e` だけである。このリポジトリは公開されており、
+`place_status = 'confirmed'` の店舗 ID は客向けアンケート経路（`/s/<storeId>` の SSR から
+`pageToken` を取り `POST /api/responses`）へ到達する唯一の関門で、知られれば第三者が実店舗の
+匿名集計と Gemini の生成コストへ加算できる（steering `tech.md`「spec の実施記録の規律」）。
+DB の行と照合する用途には先頭 8 文字で足りるため、完全値は書かない。
