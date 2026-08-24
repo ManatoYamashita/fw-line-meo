@@ -46,7 +46,7 @@
 
 ### Revalidation Triggers
 - アンケート URL スキーム変更 → 発行済み QR が無効化（実質不可変更。変更時は全 QR 再発行の運用判断）
-- インフラへの追加（Secret `survey-session-key`・env `SESSION_SIGNING_KEY`/`GEMINI_MODEL`/`SURVEY_BASE_URL`・run-services モジュールの plain env 対応）→ gcp-infra-foundation の `tf-plan` 差分確認を必須とする
+- インフラへの追加（Secret `survey-session-key`・env `SESSION_SIGNING_KEY`/`GEMINI_MODEL`/`SURVEY_BASE_URL`・run-services モジュールの plain env 対応・guardrails モジュールの `google_logging_metric` 2 本＝ファネル指標）→ gcp-infra-foundation の `tf-plan` 差分確認を必須とする
 - セッショントークン契約・QR API 契約の変更 → Issue #5（ダッシュボード）の再検証
 - tallies 書込セマンティクス（月次粒度・JST）変更 → four-tier-data-model ドキュメント整合の再検証
 
@@ -226,7 +226,7 @@ sequenceDiagram
 | 5.1 | 個人情報非取得 | 全コンポーネント | 入力項目自体に PII なし | セキュリティ節 |
 | 5.2 | 月次集計のみ加算 | tallies.ts, ResponsesAPI, SessionToken（pageToken） | UPSERT 契約・pageToken 検証 | 回答フロー |
 | 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006` の列 allowlist | DDL に本文列を持たない・`30_compliance.sql` | 回答フロー |
-| 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log | sink の allowlist（storeId のみ） | Monitoring |
+| 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log, guardrails のログベース指標 | sink の allowlist（storeId のみ）・指標の label は `store_id` のみ | Monitoring |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
 | 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 3 表のみ（`0006` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
@@ -419,7 +419,8 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 ### Monitoring
 - 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
 - ファネル（Issue #137 段階3・5.7）: `survey_page_viewed`（INFO・回答可能な状態で表示できたときのみ）と `survey_response_submitted`（INFO・生成と集計の成否に依らず送信時）。フィールドは `storeId` だけで、来店客に紐づく値は載せない。**数え方の癖**: ページは `force-dynamic` なので bot・プリフェッチ・回答済みの再訪（24 時間判定は localStorage 側で SSR は走る）も表示に数える。したがって「送信 / 表示」は転換率の**下限**であり、絶対値ではなく施策前後の変化を見る指標である。送信は tallies にも入るが、**集計失敗時はログにだけ残るため両者の乖離が集計障害の検知になる**
-- 既存 guardrails（予算・アラート）は変更なし。Gemini コストは AI Studio のレート/使用量ページで運用確認（runbook 記載）
+- ファネルの保持（Issue #137 段階3・5.7）: 表示件数は **ログにしか存在しない**（tallies は送信された回答しか数えない）。Cloud Run の stdout が入る `_Default` バケットの保持は既定 30 日で、本番にログベース指標もシンクも無かった（実測）。段階4 の判断は施策前後の比較なので、`survey_page_viewed` / `survey_response_submitted` をログベース指標（`infra/modules/guardrails`・時系列 24 か月・label は `store_id` のみ）へ写して残す。**指標は作成時点から数え始める**ため、本 spec のデプロイと同じタイミングで `make tf-apply` すること。フィルタで `severity` を条件にしてはいけない（アプリは `level` を出しており Cloud Run は `severity` へ写さない。本番実測で `severity` は null。条件に入れると常に 0 件の指標になる）
+- guardrails の既存分（予算・アラート・クォータ）は変更なし。Gemini コストは AI Studio のレート/使用量ページで運用確認（runbook 記載）
 
 ## Testing Strategy
 

@@ -38,3 +38,8 @@ variable "places_quota_caps" {
   type        = map(number)
   default     = {}
 }
+
+variable "survey_service_name" {
+  description = "ファネル指標（Issue #137 段階3）の対象となる survey-web の Cloud Run サービス名（run-services output）。"
+  type        = string
+}
