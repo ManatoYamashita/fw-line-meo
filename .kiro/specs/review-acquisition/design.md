@@ -229,7 +229,7 @@ sequenceDiagram
 | 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log | sink の allowlist（storeId のみ） | Monitoring |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
-| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | 既存 2 表のみ | — |
+| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 3 表のみ（`0006` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
 
 ## Components and Interfaces
 
