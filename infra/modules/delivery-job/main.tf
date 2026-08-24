@@ -116,18 +116,6 @@ resource "google_secret_manager_secret_iam_member" "line_channel_secret_accessor
   member    = "serviceAccount:${google_service_account.job.email}"
 }
 
-# LINE チャネルアクセストークンの accessor（job SA・secret 単位）。
-# design.md「Modified Files」「Security Considerations」の明示指示に基づき accessor のみ付与する
-# （research.md で発見された既存ギャップ: 従来 webhook SA のみに付与されていた）。
-# 現行実装（Stateless token 発行方式）は本 secret を env としては消費しないため、
-# Job のコンテナ env へは意図的にマウントしない（CONCERNS 参照）。
-resource "google_secret_manager_secret_iam_member" "line_channel_access_token_accessor" {
-  project   = var.project_id
-  secret_id = var.line_channel_access_token_secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.job.email}"
-}
-
 # IAM DB ユーザー（password なし・batch-job パターン踏襲）
 resource "google_sql_user" "job_iam" {
   project  = var.project_id

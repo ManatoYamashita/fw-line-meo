@@ -136,16 +136,15 @@ module "batch_job" {
 
 # competitive-daily-summary: TS 配信ジョブ（毎時 HH:00 JST・design.md「infra/delivery-job」）
 module "delivery_job" {
-  source                              = "../../modules/delivery-job"
-  project_id                          = var.project_id
-  region                              = var.region
-  db_instance_name                    = module.database.instance_name
-  db_connection_name                  = module.database.connection_name
-  db_name                             = module.database.database_name
-  line_channel_secret_id              = module.secrets.secret_ids["line-channel-secret"]
-  line_channel_access_token_secret_id = module.secrets.secret_ids["line-channel-access-token"]
-  line_channel_id                     = var.line_channel_id
-  liff_url                            = var.liff_url
+  source                 = "../../modules/delivery-job"
+  project_id             = var.project_id
+  region                 = var.region
+  db_instance_name       = module.database.instance_name
+  db_connection_name     = module.database.connection_name
+  db_name                = module.database.database_name
+  line_channel_secret_id = module.secrets.secret_ids["line-channel-secret"]
+  line_channel_id        = var.line_channel_id
+  liff_url               = var.liff_url
 
   depends_on = [module.project_services]
 }
@@ -184,7 +183,6 @@ module "guardrails" {
   billing_account_id = var.billing_account_id
   budget_amount_jpy  = var.budget_amount_jpy
   alert_email        = var.alert_email
-  job_name           = module.batch_job.job_name
   places_quota_caps  = var.places_quota_caps
   # review-acquisition のファネル指標（Issue #137 段階3）の対象サービス。
   survey_service_name = module.run_services.service_names["survey-web"]

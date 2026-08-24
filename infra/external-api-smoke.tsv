@@ -13,6 +13,17 @@
 # **鍵は CI へ渡さない。** 実疎通は運用者が自分の資格情報で out-of-band 実行し（infra/README.md §8）、
 # 結果をこのファイルへ記録する。CI が検証するのは宣言の構造と鮮度だけで、新しい IAM 付与はゼロである。
 #
+# **キーの設定は 1 回でよい。確認は 14 日ごとに要る。** この 2 つを混同しないこと。API キーに寿命は
+# なく、定期的な再発行も更新も不要である。にもかかわらず確認が要るのは、**値が正しいまま使えなく
+# なる経路**が実在するからである — 課金失効・コンソールでの失効や再生成・プロジェクトでの API 無効化・
+# クォータやプランの変更。いずれも Secret Manager の値を 1 バイトも変えないため、メタデータ検証では
+# 見えない。本プロジェクトは 2026-08-02〜09 に実際に課金失効を踏んでおり（7 日間気づかなかった）、
+# その手前では #63 の「設定したつもりでプレースホルダーのまま 4 週間」も踏んでいる。
+#
+# したがって **有効期間 14 日はキーの寿命ではない**。「壊れていることに気づかないまま過ごしてよい
+# 上限」である。叩き直しの作業はキーに一切触らない（再発行も値の書き換えもしない）。見るのは
+# 「今も生きているか」だけである。
+#
 # 列: <secret_id>	<api>	<最終確認日 YYYY-MM-DD>	<証拠>	<Issue/PR>	<説明>
 #   secret_id  infra/modules/secrets/main.tf の locals.secret_ids と 1:1。過不足はどちらも赤。
 #   api        gemini / places / line-messaging / -（'-' は実疎通の対象外）。
@@ -28,7 +39,6 @@
 # 実疎通の実行: bash scripts/run-external-api-smoke.sh（運用者の gcloud 資格情報で走る。CI では呼ばない）
 db-admin-password	-	-	-	#125	Cloud SQL の postgres 管理ユーザー。外部 API ではない。
 gemini-api-key	gemini	2026-08-21	local-20260821T155000+0900	#125	survey-web が口コミ下書き生成で消費。Issue #63 が落ちた穴そのもの。
-line-channel-access-token	-	-	-	#125	accessor binding のみでコードから未消費（2 消費者とも channel id + secret の stateless token 方式）。撤去は別 Issue。
 line-channel-secret	line-messaging	2026-08-21	local-20260821T155000+0900	#125	line-webhook / delivery-job が stateless token 発行に消費。実疎通は送信を伴わない /v2/bot/info で行う。
 places-api-key	places	2026-08-21	local-20260821T155000+0900	#125	daily-batch / line-webhook / dashboard-api が競合データ取得に消費。
 survey-session-key	-	-	-	#125	機能3 再生成上限の HMAC 署名鍵。自前の署名にのみ使い、外部 API を叩かない。

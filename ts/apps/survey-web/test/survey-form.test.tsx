@@ -56,6 +56,16 @@ describe('SurveyForm', () => {
     expect(textarea.getAttribute('maxLength')).toBe('200');
   });
 
+  it('一言欄に記入例のプレースホルダーが出る（Issue #137 段階1）', () => {
+    setup();
+    const textarea = screen.getByRole('textbox');
+    // 文言まで固定する。記入例は「観点を 2 つに分散させる」「肯定と否定を 1 つずつ持つ」
+    // という 2 つの意図で選んであり、片方へ寄せる変更や黙った削除を落としたい。
+    expect(textarea.getAttribute('placeholder')).toBe('例）料理が熱々だった／提供まで少し待った');
+    // 記入例を出しても入力必須にはしない（Requirement 2.3・摩擦を増やさない）。
+    expect(textarea.hasAttribute('required')).toBe(false);
+  });
+
   it('送信中は送信ボタンが無効', () => {
     setup(true);
     expect((screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement).disabled).toBe(true);

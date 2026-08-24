@@ -24,11 +24,6 @@ variable "alert_email" {
   type        = string
 }
 
-variable "job_name" {
-  description = "失敗アラートの対象となる daily-batch ジョブ名（batch-job output）。"
-  type        = string
-}
-
 variable "places_quota_caps" {
   description = <<-EOT
     Places API のクォータ上限マップ（Req 7.2）: quota_id => preferred_value。

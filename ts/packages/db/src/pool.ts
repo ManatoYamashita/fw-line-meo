@@ -29,19 +29,36 @@ export function resolvePoolMode(env: NodeJS.ProcessEnv = process.env): PoolMode 
   return env.DATABASE_URL ? 'database-url' : 'cloud-sql-iam';
 }
 
-let pool: Pool | null = null;
+/**
+ * Pool と、それを生成するために確保した資源をまとめて解放する手続きの対（Issue #151）。
+ *
+ * cloud-sql-iam 経路の Connector はインスタンス証明書のリフレッシュを ref 付きタイマーで
+ * 予約するため、`pool.end()` だけではイベントループが空にならない。閉じ忘れは業務ログ上は
+ * 完全に正常に見え（サマリー行まで出る）、短命な Cloud Run Job のタイムアウトでしか露見
+ * しない。したがって「Pool を返す」ではなく「Pool と閉じ方の対を返す」形にして、解放を
+ * 呼び出し側の記憶に委ねない。
+ */
+export interface PoolHandle {
+  pool: Pool;
+  /** Pool と（cloud-sql-iam 経路では）Connector を閉じる。 */
+  close(): Promise<void>;
+}
+
+let handle: PoolHandle | null = null;
 
 /** プロセス共有の単一 Pool を返す（初回に接続を確立）。 */
 export async function getPool(): Promise<Pool> {
-  if (pool) return pool;
-  pool = await createPool(process.env);
-  return pool;
+  if (handle) return handle.pool;
+  handle = await createPool(process.env);
+  return handle.pool;
 }
 
 /** env からモードを解決して Pool を生成する（getPool の実体・テストで env 注入可能）。 */
-export async function createPool(env: NodeJS.ProcessEnv): Promise<Pool> {
+export async function createPool(env: NodeJS.ProcessEnv): Promise<PoolHandle> {
   if (resolvePoolMode(env) === 'database-url') {
-    return new Pool({ connectionString: env.DATABASE_URL, max: 5 });
+    // Connector を作らない経路。閉じる対象は Pool だけである。
+    const pool = new Pool({ connectionString: env.DATABASE_URL, max: 5 });
+    return { pool, close: () => pool.end() };
   }
   const instanceConnectionName = requireEnv(env, 'CLOUDSQL_CONNECTION_NAME');
   const user = requireEnv(env, 'DB_IAM_USER');
@@ -50,20 +67,39 @@ export async function createPool(env: NodeJS.ProcessEnv): Promise<Pool> {
     '@google-cloud/cloud-sql-connector'
   );
   const connector = new Connector();
-  const clientOpts = await connector.getOptions({
-    instanceConnectionName,
-    ipType: IpAddressTypes.PUBLIC,
-    authType: AuthTypes.IAM,
-  });
-  return new Pool({ ...clientOpts, user, database, max: 5 });
+  try {
+    const clientOpts = await connector.getOptions({
+      instanceConnectionName,
+      ipType: IpAddressTypes.PUBLIC,
+      authType: AuthTypes.IAM,
+    });
+    const pool = new Pool({ ...clientOpts, user, database, max: 5 });
+    return {
+      pool,
+      close: async () => {
+        // pool.end() が失敗しても Connector は必ず閉じる（閉じ忘れがプロセスを終われなくする）。
+        try {
+          await pool.end();
+        } finally {
+          connector.close();
+        }
+      },
+    };
+  } catch (err) {
+    // 構築途中で失敗した場合の取り残しを防ぐ。ここで閉じないと、呼び出し側は
+    // 参照を受け取れないまま Connector のタイマーだけが残る。
+    connector.close();
+    throw err;
+  }
 }
 
-/** テストやシャットダウンで Pool を閉じる。 */
+/** テストやシャットダウンで Pool（と Connector）を閉じる。 */
 export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
-  }
+  const current = handle;
+  if (!current) return;
+  // 二重 close を防ぐため、実際に閉じる前に singleton から外す。
+  handle = null;
+  await current.close();
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, key: string): string {
