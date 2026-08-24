@@ -199,7 +199,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       const control = samples.filter((s) => s.materialId === 'all-selected-star5');
       expect(control.flatMap((s) => s.violations), '対照群で逸脱が検出されました').toEqual([]);
     },
-    // 12 素材 × 3 回 × 約 2 秒 + 再試行の余裕。
+    // 16 素材 × 3 回 × 約 2 秒 + 再試行の余裕。
     10 * 60 * 1000,
   );
 });
