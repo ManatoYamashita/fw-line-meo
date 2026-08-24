@@ -7,6 +7,6 @@
 DO $$
 BEGIN
     -- RED 確認用（普段はコメントアウト）:
-    -- RAISE EXCEPTION 'harness-red-check: 機構が失敗を非ゼロ終了として伝播することの確認';
+    RAISE EXCEPTION 'harness-red-check: 機構が失敗を非ゼロ終了として伝播することの確認';
     RAISE NOTICE 'harness selfcheck: OK';
 END $$;
