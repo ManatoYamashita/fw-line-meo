@@ -50,7 +50,7 @@ rm -f /tmp/gk   # 使い終わったら必ず消す
 
 | ファイル | 役割 |
 |---|---|
-| `dataset.json` | 素材セット。少選択・全選択・低評価（理由あり/なし）・架空店名/実店名の対比を含む |
+| `dataset.json` | 素材セット。少選択・全選択・低評価（理由あり/なし）・高評価（理由あり/なし/抽象的な一言）・架空店名/実店名の対比を含む |
 | `aspects.json` | 評価軸 code → ラベル。正典は `db/migrations/0002_reference_seed.sql`（写しのずれは自己検証テストが検出する） |
 | `factuality.eval.test.ts` | 実測。本番と同一の生成経路（`createDefaultDraftGenerator` + `pickVariation`）を通す |
 | `../src/lib/draft/factuality.ts` | 検出の純関数。**案B で本番経路へ移した**（生成器と評価の両方が使う） |
