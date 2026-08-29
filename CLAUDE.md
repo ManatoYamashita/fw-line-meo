@@ -19,6 +19,8 @@ ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジショ�
 - `make db-smoke` — 適用後 `db/test/smoke/*.sql` を実行（観察可能完了の証明）
 - `make db-test` — 適用後 `db/test/assertions/*.sql` を実行（網羅スイート）
 - `make db-verify-docs` — ERD/write-boundary と実スキーマの整合・書込境界単一所有を機械検証
+- `bash scripts/run-db-test-suites.sh` — 上の smoke / assertions / docs 整合を **1 本で流す実行装置**（Issue #156）。`DATABASE_URL` へ既存の postgres を受けるので、コンテナランタイムが要らない。**ts-ci の `lint-build-test` が `apply migrations` の直後にこれを呼ぶ**。ローカルは `ts/scripts/with-test-db.sh bash scripts/run-db-test-suites.sh`（native postgres を起動して接続情報を渡す）。最初の失敗で止めず全件流してから非ゼロ終了する（集約実行）
+  - **#156 まで、これら 3 つはどのワークフローからも実行されていなかった。** 匿名性の構造保証（Req 5）と書込境界の単一所有（Req 9.1/9.4）が「手元で `make db-test` を打った人にだけ効く規律」だった。配線が消えていないことは `scripts/check-db-test-ci-coverage.sh` が機械強制する
 
 Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で新設。`go.mod` はリポジトリ初導入・モジュールパス `github.com/ManatoYamashita/fw-line-meo/go`）:
 - `make go-build` — `go/` 配下の全パッケージをビルド（`cd go && go build ./...`）
@@ -33,6 +35,7 @@ CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可
 - `scripts/check-external-api-smoke.sh` — 外部 API 実疎通の棚卸しと記録の構造検証（Issue #125・層1・ts-ci）。`infra/external-api-smoke.tsv` を secret 正典（`check-secret-declaration-coverage.sh --print-secrets`）と `infra/README.md` §8 の手順見出しの両方に対して両方向照合する。**`date` を 1 箇所も持たない**（時間依存の判定は層2 の責務）
 - `scripts/check-external-api-smoke-freshness.sh` — 実疎通記録の鮮度検証（Issue #125・層2・`external-api-smoke-freshness` ワークフローが日次実行）。`PENDING` と有効期間 14 日超を赤にする。**GCP へ一切アクセスしない**（鍵も読まない）。基準日は記録側と揃えて `TZ=Asia/Tokyo` に固定する（runner は UTC なので素の `date` だと最大 1 日ずれ、正当な記録が未来日と誤判定される）。`EXTERNAL_API_SMOKE_NOW` に `YYYY-MM-DD` を渡せば基準日を注入できる
 - `scripts/run-external-api-smoke.sh` — 外部 API への実疎通そのもの（Issue #125・**運用者用・CI からは呼ばない**）。鍵を CI へ渡さないのは Req 5.4 のため。出力は PASS/FAIL・HTTP ステータス・`status` フィールドだけの allowlist（応答本文も鍵も出さない）。LINE は送信系を使わず `/v2/bot/info` で確認する
+- `scripts/check-db-test-ci-coverage.sh` — `db/test` の検査資産が CI から実行されていることの機械強制（Issue #156）。実行装置 `scripts/run-db-test-suites.sh` が **`push` / `pull_request` で発火するワークフローの非コメント行から**参照されていること、`db/test/*.sh` がすべて実行装置の RUN 表か SKIP 表に宣言されていること（SKIP は Issue 番号必須・実体の存在も照合）を検証する。**DB へ一切接続しない**ので checkout 直後の grep ガード群に並べてある
 - `scripts/report-ci-issue.sh` — 追跡 Issue の起票／コメント／自動クローズ。`REPORT_CI_ISSUE_DRY_RUN=1` で書き込みを伴わず検証できる
 
 アプリ層のビルド・lint・テストは各層導入時に確立し追記すること。**未確立のコマンドを推測で書かない。**

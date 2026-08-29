@@ -3,9 +3,14 @@
 #  - 実テーブルが db/write-boundary.md のマッピング表行にちょうど 1 回出現＝書込責任層が単一（Req 9.1, 9.4）
 #  - 実テーブルが db/ERD.md に出現（Req 11.1, 11.2）
 #  - write-boundary.md の書込所有テーブルに infra/sql/grants.sql で該当層 SA への DML GRANT があること
+#  - 走査したテーブルが 1 件以上あること（空振り防止・Issue #156）
 #
 # 既定: apple/container で一時 postgres を起動し migrations を適用して実テーブル一覧を取得。
 # 既存 DB を使う場合: MANAGE_CONTAINER=0 かつ PSQL_EXEC を設定（例: MANAGE_CONTAINER=0 PSQL_EXEC=psql、PG* 環境変数で接続）。
+#
+# CI からは `scripts/run-db-test-suites.sh` が MANAGE_CONTAINER=0 / PSQL_EXEC="psql $DATABASE_URL" で
+# 呼ぶ（Issue #156）。それ以前は本スクリプトを実行するワークフローが存在せず、
+# 書込境界の単一所有は `make db-verify-docs` を手元で打った人にだけ効く規律だった。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -61,6 +66,16 @@ while IFS= read -r t; do
         *Go*) printf '%s\n' "$go_dml" | grep -qw "$t" || { echo "FAIL: Go 書込所有 '$t' への DML GRANT が grants.sql に無い"; fail=1; } ;;
     esac
 done <<< "$tables"
+
+# **空振り防止（Issue #156）。** テーブルが 0 件なら上の while は一度も回らず、`fail` は 0 のまま
+# `n` も 0 のままになる。素朴に書くと `OK: … 0 テーブル …` を出して **exit 0** するので、
+# 「接続先に migrations が当たっていない」「別の DB を指した」という**検査の前提が崩れた状態**を、
+# CI の緑がお墨付きにしてしまう。違反 0 件と対象 0 件は別物である。
+# 実測（Issue #156 の作業時）: 空の DB を指すと `OK: … 0 テーブル …` / exit 0 を返した。
+if [ "$n" -eq 0 ]; then
+    echo "FAIL: public に BASE TABLE が 1 件もありません（接続先に migrations が当たっていない可能性。検査の前提が崩れています）"
+    fail=1
+fi
 
 if [ "$fail" -eq 0 ]; then echo "OK: docs と schema と grants.sql が整合（${n} テーブル・書込境界は各 1 所有・所有層へ DML GRANT あり）"; fi
 exit $fail

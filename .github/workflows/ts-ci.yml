@@ -63,6 +63,13 @@ jobs:
         # shell glob の辞書順なので「たまたま」正しく流れ、db-migrate も db-test も緑になる。
         # HEAD と origin/main の合成集合で判定する（同じく read-only・git 以外は叩かない）。
         run: bash scripts/check-db-ordinals.sh
+      - name: 'db/test CI カバレッジガード（Issue #156）'
+        # db/test の検査資産（匿名性の構造保証 = Req 5・書込境界の単一所有 = Req 9.1/9.4）は
+        # #156 まで**一度も CI に載ったことがなかった**。実行装置を足しただけでは、下の
+        # 「db/test スイート」ステップの 1 行を消せば同じ状態へ戻り、残りの CI は全緑を返す。
+        # 実行装置がワークフローから参照されていること・db/test の shell が RUN/SKIP へ
+        # 宣言されていることを機械検証する（read-only・DB へ一切接続しないので install 前に置ける）。
+        run: bash scripts/check-db-test-ci-coverage.sh
       - name: 'typecheck カバレッジガード（Issue #51）'
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。
@@ -145,6 +152,23 @@ jobs:
         run: bash scripts/test/run.sh --tier=b --require-full
       - name: apply migrations
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+      # db/test の 3 スイート（assertions / smoke / docs 整合）。**#156 まで一度も CI に無かった。**
+      # 担っているのは Requirement 5（客の個人情報を一切取得しない・Place 単位の匿名集計のみ）の
+      # 構造的担保と Req 9.1/9.4（書込境界の単一所有）で、CI に無い間は「一言の本文を保存する列を
+      # 足す migration」も「書込責任層を宣言しない新テーブル」も PR を全緑にしたまま main へ入りえた。
+      #
+      # **位置は apply migrations の直後でなければならない。** assertions は「migrations だけが
+      # 当たった状態」を前提に書かれている。下の unit + integration tests の後ろへ動かすと、
+      # TS 統合テストが残した行の上で走ることになる（現在の assertions は自トランザクション内しか
+      # 数えないので当面は通るが、前提が崩れたまま緑を返すのは #156 が塞いだ穴と同じ形である）。
+      # 逆に前へ置くのは安全で、スイートは書き込みを伴う全ファイルが BEGIN … ROLLBACK で閉じており、
+      # 閉じていない 4 件は information_schema / pg_type / count(*) の参照のみである。
+      #
+      # 実体を scripts/ 側へ置くのは、ワークフローの run: ブロックが
+      # check-grep-exit-codes.sh / check-shell-pipe-consumers.sh の走査対象外だからである
+      # （db/test/run.sh を使わない理由も含め、詳細はスクリプト冒頭のコメント）。
+      - name: 'db/test スイート（assertions / smoke / docs 整合・Issue #156）'
+        run: bash scripts/run-db-test-suites.sh
       - name: unit + integration tests (DB 込み)
         run: pnpm -C ts -r test
       - name: JS バンドル予算（性能プロキシ・Req 2.8）

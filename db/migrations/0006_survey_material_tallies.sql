@@ -17,7 +17,11 @@ BEGIN;
 --
 -- 匿名性: 保持するのは選択の **個数** と一言の **有無** だけで、本文は列として存在しない
 -- （Requirement 5.1/5.3）。既存 tallies と同じく created_at も持たない（時刻を残さない）。
--- この構造は db/test/assertions/30_compliance.sql の列 allowlist が機械強制する。
+-- この構造は db/test/assertions/30_compliance.sql の列 allowlist と
+-- db/test/smoke/35_survey_material.sql の文字列列チェックが機械強制する。実行主体は
+-- ts-ci の `db/test スイート` ステップ（scripts/run-db-test-suites.sh・Issue #156）である。
+-- **#156 以前はその実行主体が存在せず、この行は書かれた時点から偽だった**（どのワークフローも
+-- db/test を呼んでおらず、comment_body 列を足す migration は CI を全緑のまま通過しえた）。
 -- ============================================================
 -- 書込責任: TypeScript（write-boundary.md へ追記必須）
 CREATE TABLE survey_material_tallies (
