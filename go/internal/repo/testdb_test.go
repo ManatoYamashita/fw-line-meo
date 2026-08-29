@@ -2,27 +2,18 @@ package repo
 
 import (
 	"context"
-	"os"
 	"testing"
 
+	"github.com/ManatoYamashita/fw-line-meo/go/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool は DATABASE_URL 相手の pgx プールを返す。DATABASE_URL 未設定時はテストを
-// スキップする — ts/scripts/with-test-db.sh・ts の describe.skipIf(!process.env.DATABASE_URL)
-// と同じ「DB が無ければ自動スキップ、渡されたら実 DB で検証する」思想を Go 側でも踏襲する。
+// testPool は**このテスト専用**のデータベース（migrations 適用済み）を返す（Issue #163）。
+// 従来は共有 DB へ直結し、seedStore が挿入した operator/agency/owner/store を片付けないまま
+// 残していたため、同時に（あるいは後から）走る internal/batch の全件クエリを汚していた。
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping repo integration test (see ts/scripts/with-test-db.sh)")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return testdb.Isolated(t)
 }
 
 // seedStore は operator/agency/owner/confirmed store の最小チェーンを挿入し store id を返す。

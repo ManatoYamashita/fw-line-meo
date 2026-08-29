@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/repo"
+	"github.com/ManatoYamashita/fw-line-meo/go/internal/testdb"
 )
 
 // TestCrossRuntimeContract_GoWritesReadableSummaries is the Go half of the cross-runtime
@@ -37,7 +38,9 @@ import (
 //     unexpected shape.
 func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	ctx := context.Background()
-	pool := testPool(t)
+	// **ここだけは共有 DB（DATABASE_URL）である。** 直後に TS の配信ジョブが別プロセスとして
+	// 同じデータベースからこの行を読む契約なので、隔離してはならない（Issue #163）。
+	pool := testdb.Shared(t)
 
 	// Fixed UUIDs reserved for the cross-runtime contract test (task 7.1). Distinct "c7…" prefix
 	// to avoid collision with other test files that share the same throwaway postgres instance

@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/places"
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/repo"
+	"github.com/ManatoYamashita/fw-line-meo/go/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -59,18 +59,11 @@ func newFakePlacesClient(t *testing.T, resultPlaces []fakeNearbyPlace) places.Pl
 // --- DB テストヘルパー（go/internal/repo/testdb_test.go・seedStore と同じ思想。
 // competitor パッケージは repo の非公開テストヘルパーを参照できないためローカルに複製する）---
 
+// testPool は**このテスト専用**のデータベース（migrations 適用済み）を返す（Issue #163）。
+// 従来は共有 DB へ直結し、挿入した店舗を片付けないまま他パッケージの全件クエリを汚していた。
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping competitor integration test (see ts/scripts/with-test-db.sh)")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return testdb.Isolated(t)
 }
 
 // seedConfirmedStore は operator/agency/owner/confirmed store の最小チェーンを挿入し、

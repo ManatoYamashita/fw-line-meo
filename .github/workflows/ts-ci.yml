@@ -220,6 +220,48 @@ jobs:
           name: playwright-report
           path: ts/apps/survey-web/playwright-report/
 
+  go-test:
+    # Issue #163: `go/` はこのジョブが入るまで **CI で一度もテストされていなかった**。
+    # `setup-go` / `go test` / `go vet` はワークフロー 6 本のいずれにも存在せず、Go が CI で
+    # 触れられる唯一の経路は docker-build (daily-batch) のコンパイル（しかも PR 限定）だった。
+    # その結果 `make go-test` が main で赤いまま誰も気づいていなかった（#163 の再現手順を参照）。
+    #
+    # lint-build-test へ相乗りさせない理由は速度ではなく、あちらが「db/test スイートは
+    # **migrations だけが当たった状態**で走ること」を必須条件として文書化しているためである。
+    # Go の統合テストは自分専用のデータベースを作って捨てるが、cross-runtime 契約テストだけは
+    # 共有 DB（DATABASE_URL）へ書く。同一ジョブに置くと配置制約が絡み合う。
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fwlm
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          # 版は go.mod を単一の情報源にする（ワークフロー側へ数字を書くと二重管理になる）。
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: 'migrations を適用（共有 DB・cross-runtime 用の土台）'
+        # 隔離 DB を作るテストは自分で migrations を流すが、testdb.Shared を使う
+        # cross-runtime 契約テストは**この共有 DB のスキーマ**に依存する。
+        run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+      - name: 'go build'
+        run: cd go && go build ./...
+      - name: 'go vet'
+        run: cd go && go vet ./...
+      - name: 'go test（DB 込み・パッケージ並列のまま）'
+        # **`-p 1` を付けない。** 付けると Issue #163 の根治（テストごとの隔離データベース）が
+        # 効いているかを検証できなくなる。並列のまま緑であることがこの修正の観察可能な完了条件。
+        run: cd go && go test ./...
+
   lighthouse:
     runs-on: ubuntu-latest
     services:
@@ -289,7 +331,7 @@ jobs:
     # **docker-build を needs に入れない。** PR イベント限定のジョブで main push では常に
     # skipped になる。入れると判定が none（通知しない）へ倒れ、通知が永久に飛ばなくなる。
     # needs と下の --job 引数の食い違いは scripts/test/cases/73-ts-ci-notify.sh が機械照合する。
-    needs: [lint-build-test, e2e, lighthouse]
+    needs: [lint-build-test, e2e, lighthouse, go-test]
     # main への push だけを見る。PR のレビュー中の赤で追跡 Issue を立てない。
     # always() が無いと needs の失敗でこのジョブごと skip され、赤のときに限って黙る。
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -314,6 +356,7 @@ jobs:
           R_LINT_BUILD_TEST: ${{ needs.lint-build-test.result }}
           R_E2E: ${{ needs.e2e.result }}
           R_LIGHTHOUSE: ${{ needs.lighthouse.result }}
+          R_GO_TEST: ${{ needs.go-test.result }}
         run: |
           set -euo pipefail
           # 引数列は 1 度だけ組んで判定と本文の両方で使い回す。2 箇所へ書くと片方だけが腐り、
@@ -322,7 +365,8 @@ jobs:
           set -- \
             --job "lint-build-test=${R_LINT_BUILD_TEST}" \
             --job "e2e=${R_E2E}" \
-            --job "lighthouse=${R_LIGHTHOUSE}"
+            --job "lighthouse=${R_LIGHTHOUSE}" \
+            --job "go-test=${R_GO_TEST}"
 
           # 判定も本文の組み立ても scripts/ts-ci-notify.sh が持つ（Issue #109 の決定）。
           # yml の run ブロックへ書くと、検証の器が yml からの sed 抽出へ逆戻りし、
