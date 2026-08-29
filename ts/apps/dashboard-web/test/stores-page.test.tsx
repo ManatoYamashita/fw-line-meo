@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, within, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 // 認証コンテキストはモックし、ready な operator/agency を注入する（login-page.test と同規約）。
@@ -27,6 +27,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../src/lib/api', () => api);
 
 import StoresPage from '../src/app/stores/page';
+import { settleEffects } from './focus-observation';
 
 function ready(role: 'operator' | 'agency') {
   useAuthMock.mockReturnValue({
@@ -455,6 +456,8 @@ describe('店舗一覧ページ: 発行導線の焦点', () => {
     await screen.findByRole('img');
 
     // 初回はパネルが焦点を壊していないため、引き取ってはならない（横取りになる）。
+    // 否定の比較なので待たずに観測点を確定させる（Issue #166）。
+    await settleEffects();
     expect(document.activeElement).toBe(button);
   });
 
@@ -478,6 +481,7 @@ describe('店舗一覧ページ: 発行導線の焦点', () => {
     expect(document.activeElement).not.toBe(document.body);
 
     const link = await screen.findByRole('link', { name: /鳥貴族 渋谷店/ });
-    expect(document.activeElement).toBe(link);
+    // 収束を待つ（Issue #166。store-qr-panel.test.tsx と同じ理由で、ここも偽の赤になりうる）。
+    await waitFor(() => expect(document.activeElement).toBe(link));
   });
 });
