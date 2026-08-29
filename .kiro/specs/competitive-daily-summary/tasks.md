@@ -239,3 +239,24 @@
   - **自己テストの追随**: `97-check-db-test-ci-coverage.sh` へ 7 件、`98-run-db-test-suites.sh` へ 3 件の赤ケースを新設し、ガードの分岐に 1 対 1 で対応させた。とくに「ELSEWHERE 宣言のスクリプトは実行しない」は**非ゼロ終了するスタブを置いても緑**であることを見る（RUN 表の行は非ゼロが伝播する。この対照が無いと第 3 の状態がただの RUN と区別できない）。表が 3 つになったことで既存ケース「表の書式が変わって抽出が空になると赤」の変異が合計 0 件へ到達しなくなっていたのも是正した（1 表だけ残すと網羅側が赤にするので、両方の経路をそれぞれのケースで固定した）。sed 変異は**当たったことを先に assert する**（#158 (a) で、当たっていない変異の緑を「検出できなかった」と読み違えかけた）。
   - **副産物として見つけたフレーク（本 PR とは無関係・Issue #166 として起票）**: `ts/apps/dashboard-web/test/store-qr-panel.test.tsx` の焦点アサーションが CI で断続的に落ちる。本 PR は `ts/` に 1 行も触れておらず（`git diff origin/main...HEAD -- ts/` が 0 件）、**同一コミット `08a8c030` の同一ジョブを再実行したら緑になった**（1 回目 failure / 再実行 success）。原因は実装ではなくテスト側で、焦点の引き取りが passive effect（`useEffect`）なのに対し、テストは DOM 変化で解決する `findByRole` の直後に `document.activeElement` を 1 回だけ比較している。同ファイルには `document.activeElement` の比較が 7 箇所あり、`waitFor` で包まれているものは 0 件である。**再試行で握り潰さないこと** — フレークを隠すと PR #142 が実際に踏んだ焦点回帰まで一緒に隠れる。
   - **残り**: `check-grep-exit-codes.sh` / `check-shell-pipe-consumers.sh` の走査対象が `scripts/` のみで `db/test/*.sh` が機械強制の外にある件は **Issue #162** のまま。`check_no_optional_capabilities.sh` の B2 走査面が `dashboard-web` / `dashboard-api` / `survey-web` / `packages` 配下へ届いていない件も未解消（誤検出の除外設計とセットで行う）。
+- **2026-08-30: `db/test/*.sh` を grep 終了コード / パイプ consumer ガードの走査対象へ入れた（Issue #162・PR は別）**: 
+`scripts/check-grep-exit-codes.sh` と `scripts/check-shell-pipe-consumers.sh` は走査対象を **`scripts/` のみ**に限っており、
+#156 / #158 (a) 以降 **CI から毎 PR 実行されている** `db/test/*.sh` が機械強制の外にあった。pathspec へ `db/test/*.sh` を足すと
+走査ファイルは **56 → 61 件**（grep 行 237 → 271・パイプ行 618 → 654）に増え、`db/test/check_docs.sh` の 5 箇所
+（`|| true` 3 件・`printf | grep -qw` 2 件）が赤くなった。
+  - **「壊れたパターンが素通りする」を実測した。** `check_docs.sh` の write-boundary 走査 ERE を壊す変異を新旧へ当てて同一 DB で比較:
+    **旧は `exit=0` かつ `OK: docs と schema と grants.sql が整合（18 テーブル・…）` を返した**（件数まで健全な実行と一致する緑）。
+    新は `FAIL: write-boundary.md を走査できません（grep exit=2・…）` を 18 件出して `exit=1`。Issue #120 が記録した形が、
+    CI が毎 PR 回している検査資産にそのまま残っていた。
+  - **`set -e` による打ち切りも直った。** 旧版は `layer=$(grep … | awk …)` が pipefail 下で grep の無一致（exit 1）を拾い、
+    **書込境界表に無いテーブルが 1 件見つかった時点でスクリプトごと終了**していた。書込境界表から 2 行消す変異で
+    旧 FAIL 1 件 / 新 FAIL 2 件。集約実行という本ファイルの前提が静かに壊れていた。
+  - **検出力は 1 件も失っていない**（同一 DB での新旧比較・変異はすべて適用を assert 済み）: 変異なし 緑/緑、書込境界表から 2 行削除 1 件/**2 件**、
+    ERD から 1 テーブル削除 1 件/1 件、TS 所有テーブルの GRANT を外す 1 件/1 件、`GRANT INSERT` を全廃 16 件/**17 件**（上位 1 行が増えた）。
+  - **空振り検査は断定しない文言にし、早期 exit をやめた。** 「`GRANT INSERT` が 1 件も無い」は「全書込所有テーブルが未付与」でも
+    「抽出の前提が崩れた」でも起こる。前者なら下のテーブルごとの FAIL が実体を列挙するので、打ち切ると集約実行の利点を失う。
+  - **自己テストは「広げたのに件数が変わらない」を検出できる形にした。** 違反を `db/test/` へ置く赤ケースだけでは、pathspec を
+    外す変異を検出できない（違反が消えれば緑になるので、走査していないのか違反が無いのかを区別できない）。**母数の照合**を別ケースで足した。
+    `db/test/*.sh` の pathspec を外す変異で新設 4 ケースすべてが赤になり、他は 1 件も動かないことを実測（Tier A 353 ケース / 638 アサーション）。
+  - 自己テストの fixture では **ガード本体を未追跡のまま残す**こと。`gec_fixture` / `sp_fixture` の後に `fx_track_now` を呼ぶと
+    ガード自身が走査対象へ入り、母数がガード本体の増減で動く（新設の件数ケースで実際に踏んだ）。

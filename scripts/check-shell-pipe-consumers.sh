@@ -17,7 +17,8 @@
 # 多行入力の箇所だけなので、**構文そのものを静的に禁じる**のが本ガードの役割である。
 #
 # 本スクリプトは以下を機械検証する（read-only の grep 検証・副作用なし・bash 3.2 でも走る）:
-#   1. 追跡下の `scripts/**/*.sh` で、パイプの下流に早期終了 consumer を置く行を検出
+#   1. 追跡下の `scripts/**/*.sh` と `db/test/**/*.sh` で、パイプの下流に早期終了 consumer を
+#      置く行を検出
 #      （`head` / `grep` の quiet・max-count 系 / `q` コマンドを持つ `sed`）
 #   2. 行頭が `#` の行は全ファイルで対象外。規律そのものを説明する注記がこの構文を含むため、
 #      除外しないと本ガードは永久に緑にならない（素朴な走査は 4 件ではなく 5 件を返す）
@@ -33,7 +34,8 @@
 # 一致せず、そのファイルが列挙から丸ごと消える（規律 1・PR #99 実測）。
 #
 # 既知の限界:
-#   - 対象は `scripts/` のみである（規律 2 のスコープに合わせている）。`Makefile` 等は見ない。
+#   - 対象は `scripts/` と `db/test/` である（#162 で後者を追加。`db/test/` の検査資産は
+#     #156 / #158 (a) 以降 CI から毎 PR 実行されている）。`Makefile` や `ts/` は見ない。
 #   - `sed` の検出は `Nq` と `;q` の 2 形に絞ってある。`q` の混入を網羅しようとすると
 #     置換文字列の中の `q` まで拾って誤検出が増え、ガードへの信頼が先に壊れるためである。
 #   - 変数越しの間接呼び出し（`$CMD | $CONSUMER`）は検出できない。
@@ -168,9 +170,11 @@ EOF
   return 0
 }
 
-# 走査対象の列挙。追跡下の `scripts/` 配下の .sh をすべて見る（pathspec の `*` は `/` も跨ぐ）。
-# 自己テスト（scripts/test/）も対象に含める。ガードを検証する側が同じ罠を踏んでよい理由は無い。
-targets="$( (cd "$ROOT" && git -c core.quotePath=false ls-files --cached -- 'scripts/*.sh') 2>/dev/null || true)"
+# 走査対象の列挙。追跡下の `scripts/` と `db/test/` 配下の .sh をすべて見る
+# （pathspec の `*` は `/` も跨ぐ）。自己テスト（scripts/test/）も対象に含める。
+# ガードを検証する側が同じ罠を踏んでよい理由は無い。db/test/ を加えたのは #162 で、
+# あちらは #156 / #158 (a) 以降 **CI から毎 PR 実行されている**検査資産だからである。
+targets="$( (cd "$ROOT" && git -c core.quotePath=false ls-files --cached -- 'scripts/*.sh' 'db/test/*.sh') 2>/dev/null || true)"
 
 while IFS= read -r rel; do
   [ -n "$rel" ] || continue
@@ -199,7 +203,7 @@ EOF
 
 # 空振り防止: 対象が 0 件なら「違反 0 件」は「検証していない」と同義である。
 if [ "$file_count" -eq 0 ]; then
-  echo "ERROR: 追跡下の scripts/**/*.sh が 1 件もありません（列挙の前提が崩れています）。" >&2
+  echo "ERROR: 追跡下の scripts/**/*.sh と db/test/**/*.sh が 1 件もありません（列挙の前提が崩れています）。" >&2
   exit 1
 fi
 if [ "$pipe_line_count" -eq 0 ]; then
