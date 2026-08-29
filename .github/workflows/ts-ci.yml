@@ -262,6 +262,63 @@ jobs:
         # 効いているかを検証できなくなる。並列のまま緑であることがこの修正の観察可能な完了条件。
         run: cd go && go test ./...
 
+  cross-runtime:
+    # Issue #158 (b): 「言語間の結合は SQL スキーマのみ」（design.md）をモックではなく
+    # **実 DB 越しの 2 プロセス実行**で証明する唯一の装置が、#158 までどのワークフローからも
+    # 実行されていなかった。入口は `make cross-runtime-test`（手動）だけで、
+    # scripts/run-db-test-suites.sh には #158 を添えた SKIP として宣言されていた。
+    #
+    # **別ジョブにする理由は速度ではない。**
+    #   - lint-build-test は「db/test スイートは *migrations だけが当たった状態* で走ること」を
+    #     必須条件として文書化している。cross-runtime は CROSS_RUNTIME_SKIP_CLEANUP=1 で
+    #     固定 UUID の行を意図的に残すので、同居させると配置制約が 2 つ絡む。
+    #   - go-test へ相乗りさせないのは、あちらの `go test ./...` が**同じ固定 UUID**の
+    #     シードを cleanup 込みで再実行するためである。同一 DB へ同居させると実行順が
+    #     暗黙の前提になり、順序が入れ替わった瞬間に PK 違反で落ちる。
+    #
+    # このジョブを消すと scripts/check-db-test-ci-coverage.sh が赤になる（実行装置の
+    # ELSEWHERE 表が `ts-ci.yml:cross-runtime` を名指しで宣言しているため）。
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fwlm
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          # 版は go.mod を単一の情報源にする（go-test ジョブと同じ理由）。
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      # `pnpm -C ts run build`（全 7 アプリ）は置かない。cross_runtime_steps.sh が
+      # delivery-job の依存（@fwlm/db・@fwlm/design-tokens）だけを自分でビルドする。
+      # ここへ全体ビルドを足すと、数分を無駄にしたうえ「全体ビルドが要る」という誤った前提が
+      # ワークフローに固定される。
+      - run: pnpm -C ts install --frozen-lockfile
+      - name: apply migrations
+        # 既存 DB モードは migrations 適用済みを前提にする（with-test-db.sh は
+        # initdb / pg_ctl を要求するが ubuntu-latest ではこれらが PATH に無い）。
+        run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+      # name は引用する。YAML の plain scalar は " #" 以降をコメントとして捨てる
+      # （scripts/check-workflow-step-names.sh が機械強制する）。
+      - name: 'クロスランタイム契約検証（Go バッチ → TS 配信・task 7.1・Issue #158）'
+        run: CROSS_RUNTIME_USE_EXISTING_DB=1 bash db/test/cross_runtime_integration.sh
+
   lighthouse:
     runs-on: ubuntu-latest
     services:
@@ -331,7 +388,7 @@ jobs:
     # **docker-build を needs に入れない。** PR イベント限定のジョブで main push では常に
     # skipped になる。入れると判定が none（通知しない）へ倒れ、通知が永久に飛ばなくなる。
     # needs と下の --job 引数の食い違いは scripts/test/cases/73-ts-ci-notify.sh が機械照合する。
-    needs: [lint-build-test, e2e, lighthouse, go-test]
+    needs: [lint-build-test, e2e, lighthouse, go-test, cross-runtime]
     # main への push だけを見る。PR のレビュー中の赤で追跡 Issue を立てない。
     # always() が無いと needs の失敗でこのジョブごと skip され、赤のときに限って黙る。
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -357,6 +414,7 @@ jobs:
           R_E2E: ${{ needs.e2e.result }}
           R_LIGHTHOUSE: ${{ needs.lighthouse.result }}
           R_GO_TEST: ${{ needs.go-test.result }}
+          R_CROSS_RUNTIME: ${{ needs.cross-runtime.result }}
         run: |
           set -euo pipefail
           # 引数列は 1 度だけ組んで判定と本文の両方で使い回す。2 箇所へ書くと片方だけが腐り、
@@ -366,7 +424,8 @@ jobs:
             --job "lint-build-test=${R_LINT_BUILD_TEST}" \
             --job "e2e=${R_E2E}" \
             --job "lighthouse=${R_LIGHTHOUSE}" \
-            --job "go-test=${R_GO_TEST}"
+            --job "go-test=${R_GO_TEST}" \
+            --job "cross-runtime=${R_CROSS_RUNTIME}"
 
           # 判定も本文の組み立ても scripts/ts-ci-notify.sh が持つ（Issue #109 の決定）。
           # yml の run ブロックへ書くと、検証の器が yml からの sed 抽出へ逆戻りし、

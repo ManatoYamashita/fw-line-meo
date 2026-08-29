@@ -48,12 +48,18 @@ EOF
 echo "no-optional-capabilities-stub: OK"
 EOF
   # SKIP 表が指す実体（存在照合のためだけに置く）。
-  for f in run.sh cross_runtime_integration.sh cross_runtime_steps.sh; do
+  for f in run.sh cross_runtime_steps.sh; do
     fx_write "db/test/${f}" <<'EOF'
 #!/usr/bin/env bash
 : # SKIP 宣言済み。実行されない
 EOF
   done
+  # ELSEWHERE 表が指す実体（#158 (b)）。**実行されたら出力で分かる形にする。**
+  # 空の `:` にすると「実行されていない」と「実行されたが何も起きない」が区別できない。
+  fx_write db/test/cross_runtime_integration.sh <<'EOF'
+#!/usr/bin/env bash
+echo "cross-runtime-stub: 実行された"
+EOF
 
   DATABASE_URL='postgres://stub@127.0.0.1:5432/stub'
   export DATABASE_URL
@@ -67,7 +73,7 @@ t_begin 'run-db-test-suites: 全スイートが通れば緑（件数を出す）
 rdt_fixture
 fx_run run-db-test-suites
 expect_green
-expect_output_matches 'OK: db/test スイート緑（2 ディレクトリ / 2 SQL / 2 スクリプト）'
+expect_output_matches 'OK: db/test スイート緑（2 ディレクトリ / 2 SQL / 2 スクリプト・別ジョブ 1 件）'
 t_end
 
 t_begin 'run-db-test-suites: 最初の失敗で止めず、別スイートの失敗も同じ実行で出す'
@@ -112,6 +118,50 @@ expect_red 'db/test/check_no_optional_capabilities.sh が非ゼロ終了しま�
 t_end
 
 # ---------------------------------------------------------------------------
+# 第 3 の状態（ELSEWHERE・Issue #158 (b)）
+#
+# 「CI では実行されるが、この実行装置からは呼ばない」。RUN との違いは実行の有無であり、
+# SKIP との違いは CI に載っているかどうかである。どちらとも取り違えられると、
+# 実行されていないのに宣言だけが健全に見える状態が作れてしまう。
+# ---------------------------------------------------------------------------
+
+t_begin 'run-db-test-suites: ELSEWHERE 宣言のスクリプトは実行しない（RUN との対照）'
+# **RUN 表の行は非ゼロ終了が伝播する**（上の check_docs / 能力の不在のケース）。
+# ELSEWHERE 表の行は実行そのものをしないので、非ゼロで終わるスタブを置いても緑でなければ
+# ならない。ここが赤くなるなら第 3 の状態として機能していない（＝ただの RUN である）。
+rdt_fixture
+fx_write db/test/cross_runtime_integration.sh <<'EOF'
+#!/usr/bin/env bash
+echo "cross-runtime-stub: 実行された" >&2
+exit 1
+EOF
+fx_run run-db-test-suites
+expect_green
+expect_absent 'cross-runtime-stub'
+t_end
+
+t_begin 'run-db-test-suites: ELSEWHERE 宣言の実体が消えると赤（指す対象が消えた宣言は虚偽）'
+rdt_fixture
+rm -f "${FX}/db/test/cross_runtime_integration.sh"
+fx_run run-db-test-suites
+expect_red 'ELSEWHERE 宣言の db/test/cross_runtime_integration.sh が存在しません'
+t_end
+
+t_begin 'run-db-test-suites: 同じファイルが 2 つの表に載ると赤（後勝ちで静かに実行されなくなる）'
+# 宣言をフラグで持つと、RUN で立てた should_run を後続の SKIP / ELSEWHERE が 0 へ倒す。
+# 「RUN に書いたのに実行されない」が緑のまま成立するので、件数で数えて鳴らす。
+rdt_fixture
+sed -i.bak "s/^    'cross_runtime_integration.sh|/    'check_docs.sh|/" "${FX}/scripts/run-db-test-suites.sh"
+rm -f "${FX}/scripts/run-db-test-suites.sh.bak"
+# **変異が当たったことを先に確かめる。** 当たっていない変異の緑を「検出できなかった」と
+# 読み違えると、無効な実験を成功と誤読する（#158 (a) で実際に踏んだ）。
+OUT="MUTATED: $(grep -c "^    'check_docs.sh|" "${FX}/scripts/run-db-test-suites.sh")"
+expect_output_matches '^MUTATED: 1$'
+fx_run run-db-test-suites
+expect_red 'db/test/check_docs.sh が複数の表に宣言されています'
+t_end
+
+# ---------------------------------------------------------------------------
 # 空振り防止（消しても実リポジトリでは何も起きない分岐）
 # ---------------------------------------------------------------------------
 
@@ -149,7 +199,7 @@ fx_write db/test/new_suite.sh <<'EOF'
 : # RUN にも SKIP にも宣言されていない
 EOF
 fx_run run-db-test-suites
-expect_red 'db/test/new_suite.sh が RUN にも SKIP にも宣言されていません'
+expect_red 'db/test/new_suite.sh が RUN にも SKIP にも ELSEWHERE にも宣言されていません'
 t_end
 
 t_begin 'run-db-test-suites: SKIP 宣言の実体が消えると赤'
@@ -165,7 +215,7 @@ rdt_fixture
 sed -i.bak "/^    'check_docs.sh'\$/d" "${FX}/scripts/run-db-test-suites.sh"
 rm -f "${FX}/scripts/run-db-test-suites.sh.bak"
 fx_run run-db-test-suites
-expect_red 'db/test/check_docs.sh が RUN にも SKIP にも宣言されていません'
+expect_red 'db/test/check_docs.sh が RUN にも SKIP にも ELSEWHERE にも宣言されていません'
 t_end
 
 t_begin 'run-db-test-suites: 宣言表が空でも unbound variable で死なない（bash 3.2 の空配列）'
@@ -177,6 +227,6 @@ sed -i.bak "/^    'check_docs.sh'\$/d; /^    'run.sh|/d; /^    'check_no_optiona
   "${FX}/scripts/run-db-test-suites.sh"
 rm -f "${FX}/scripts/run-db-test-suites.sh.bak"
 fx_run run-db-test-suites
-expect_red 'RUN にも SKIP にも宣言されていません'
+expect_red 'RUN にも SKIP にも ELSEWHERE にも宣言されていません'
 expect_absent 'unbound variable'
 t_end

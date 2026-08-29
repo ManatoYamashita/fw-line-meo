@@ -19,12 +19,20 @@
 #   2. それが `.github/workflows/*.yml` / `*.yaml` の **非コメント行**から参照されている
 #   3. 参照しているワークフローが `push` または `pull_request` で発火する
 #      （`workflow_dispatch` だけのワークフローへ移されると「器に入っているが蓋が閉じている」形になる）
-#   4. 追跡下の `db/test/*.sh` がすべて実行装置の RUN 表か SKIP 表に宣言されている
+#   4. 追跡下の `db/test/*.sh` がすべて実行装置の RUN 表 / SKIP 表 / ELSEWHERE 表に宣言されている
 #      （「置いたのに誰も呼ばない」＝ 本 Issue そのものを二度と無言で起こさない）
 #   5. SKIP 宣言に Issue 番号がある（理由と追跡先の無い除外を作らない）
 #   6. SKIP 宣言の指すファイルが実在する（指す対象が消えた宣言は虚偽である）
 #   7. 空振り防止: ワークフロー 0 件・`db/test/*.sh` 0 件・スイートディレクトリ 0 件はいずれも赤
 #      （走査の前提が崩れたまま「違反 0 件だから緑」を返さない）
+#   8. ELSEWHERE 宣言（`<file>|<workflow>:<job>|<理由>`・Issue #158 (b)）の実行先が実在する:
+#      ファイルがある / ワークフローがある / **そのワークフローに当該 job がある** /
+#      **その job のブロック内の非コメント行が当該スクリプトを参照している** /
+#      そのワークフローが push / pull_request で発火する
+#
+# 8 が要るのは、ELSEWHERE が「CI では実行されるが実行装置からは呼ばない」を表す第 3 の状態
+# だからである。実行装置は呼ばないので何も報告せず、宣言だけが残る。job を消しても、ステップを
+# 別 job へ移しても、**差分に痕跡が出ないまま CI は全緑を返す** — #156 が潰した当の形である。
 #
 # 実行装置側にも 4〜6 と同等の検査がある（あちらは実行時）。二重に見えるが役割が違う。
 # **ステップが消されたときに鳴るのはこちらだけである**（実行されない装置は何も報告しない）。
@@ -33,8 +41,8 @@
 # 既知の限界:
 #   - 3 の発火判定は `on:` 直下の `push` / `pull_request` を行頭インデント付きで探す近似である。
 #     YAML を解釈しないので、極端な書き方（フロースタイルの `on: {push: ...}`）は拾えない。
-#   - 参照が「実際に走るジョブの中」にあるかまでは見ない。ジョブ単位の `if:` で無効化された場合は
-#     検出できない。
+#   - 2 の参照は「ワークフローのどこかにある」までしか見ない（ELSEWHERE の 8 だけは job ブロック
+#     内であることまで見る）。いずれもジョブ単位の `if:` による無効化は検出できない。
 #
 # 使い方: bash scripts/check-db-test-ci-coverage.sh
 #   違反があれば該当を stderr に出して exit 1、無ければ exit 0。
@@ -52,6 +60,17 @@ fail=0
 note_fail() {
     fail=1
     echo "ERROR: $1" >&2
+}
+
+# ワークフローが push / pull_request で発火するか。0=する / 1=しない / 2=走査できない。
+# **無一致（1）と評価不能（2 以上）を分ける**（Issue #120）。2-3 と 8 の両方から使う。
+wf_fires() {
+    wf_rc=0
+    wf_hits="$(grep -cE '^[[:space:]]+(push|pull_request):?[[:space:]]*$' "$1")" || wf_rc=$?
+    if [ "$wf_rc" -gt 1 ]; then
+        return 2
+    fi
+    [ "${wf_hits:-0}" -gt 0 ]
 }
 
 # --- 1. 実行装置の存在 ----------------------------------------------------------
@@ -86,12 +105,12 @@ for wf in "${WORKFLOW_DIR}"/*.yml "${WORKFLOW_DIR}"/*.yaml; do
     ref_total=$((ref_total + 1))
 
     trc=0
-    triggers="$(grep -cE '^[[:space:]]+(push|pull_request):?[[:space:]]*$' "$wf")" || trc=$?
+    wf_fires "$wf" || trc=$?
     if [ "$trc" -gt 1 ]; then
         note_fail "${wf#${ROOT}/} のトリガを走査できません（grep exit=${trc}）。"
         continue
     fi
-    if [ "${triggers:-0}" -gt 0 ]; then
+    if [ "$trc" -eq 0 ]; then
         ref_triggered=$((ref_triggered + 1))
     else
         note_fail "${wf#${ROOT}/} は ${RUNNER_REL} を参照していますが、push / pull_request で発火しません（器に入っていても蓋が閉じています）。"
@@ -119,13 +138,14 @@ table_names() {   # $1 = 配列変数名
 }
 run_names="$(table_names RUN_SCRIPTS)"
 skip_names="$(table_names SKIP_SCRIPTS)"
+elsewhere_names="$(table_names ELSEWHERE_SCRIPTS)"
 
 declared_count=0
-for nm in $run_names $skip_names; do
+for nm in $run_names $skip_names $elsewhere_names; do
     declared_count=$((declared_count + 1))
 done
 if [ "$declared_count" -eq 0 ]; then
-    note_fail "${RUNNER_REL} の RUN 表 / SKIP 表から宣言を 1 件も抽出できません（表の書式が変わった可能性。走査の前提が崩れています）。"
+    note_fail "${RUNNER_REL} の RUN 表 / SKIP 表 / ELSEWHERE 表から宣言を 1 件も抽出できません（表の書式が変わった可能性。走査の前提が崩れています）。"
 fi
 
 # **非 ASCII パスの取りこぼしを防ぐため `-c core.quotePath=false` を必ず併用する**（steering 規律 1）。
@@ -136,11 +156,11 @@ while IFS= read -r p; do
     sh_total=$((sh_total + 1))
     base="${p##*/}"
     found=0
-    for nm in $run_names $skip_names; do
+    for nm in $run_names $skip_names $elsewhere_names; do
         [ "$nm" = "$base" ] && found=1
     done
     if [ "$found" -eq 0 ]; then
-        note_fail "${p} が ${RUNNER_REL} の RUN 表にも SKIP 表にも宣言されていません（置いたのに誰も呼ばない状態です）。"
+        note_fail "${p} が ${RUNNER_REL} の RUN 表にも SKIP 表にも ELSEWHERE 表にも宣言されていません（置いたのに誰も呼ばない状態です）。"
     fi
 done <<EOF
 $sh_paths
@@ -193,9 +213,94 @@ if [ "$dir_total" -eq 0 ]; then
     note_fail "db/test/ に *.sql を持つスイートディレクトリが 1 件もありません（走査の前提が崩れています）。"
 fi
 
+
+# --- 8. ELSEWHERE 宣言の実行先の実在 ---------------------------------------
+# 「CI では実行されるが実行装置からは呼ばない」を表す第 3 の状態（Issue #158 (b)）。
+# 実行装置は呼ばないので何も報告しない。**ここが唯一の後ろ盾である。**
+elsewhere_lines="$(sed -n '/^ELSEWHERE_SCRIPTS=(/,/^)/p' "$RUNNER" | sed -n "s/^[[:space:]]*'\(.*\)'.*/\1/p")"
+elsewhere_total=0
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    elsewhere_total=$((elsewhere_total + 1))
+    nm="${line%%|*}"
+    rest="${line#*|}"
+    target="${rest%%|*}"
+
+    # 8-1. 実体が実在すること（SKIP と同じ理由: 指す対象が消えた宣言は虚偽である）。
+    if [ ! -f "${ROOT}/db/test/${nm}" ]; then
+        note_fail "ELSEWHERE 宣言の db/test/${nm} が存在しません（指す対象が消えた宣言は虚偽です）。"
+        continue
+    fi
+
+    # 8-2. 実行先が `<workflow>:<job>` の形であること。**書式が崩れたら以降は判定不能である。**
+    # `:` を含まないときは `${target#*:}` が target 自身を返すので、それを崩れの判定に使う。
+    wf_name="${target%%:*}"
+    job_name="${target#*:}"
+    if [ -z "$wf_name" ] || [ -z "$job_name" ] || [ "$job_name" = "$target" ]; then
+        note_fail "ELSEWHERE 宣言 '${nm}' の実行先が <workflow>:<job> の形ではありません: '${target}'。"
+        continue
+    fi
+
+    # 8-3. ワークフローが実在すること。
+    ew_path="${WORKFLOW_DIR}/${wf_name}"
+    if [ ! -f "$ew_path" ]; then
+        note_fail "ELSEWHERE 宣言 '${nm}' の実行先ワークフローがありません: .github/workflows/${wf_name}。"
+        continue
+    fi
+
+    # 8-4/8-5. 当該 job が実在し、**その job のブロック内**の非コメント行が当該スクリプトを
+    # 参照していること。1 回の awk で両方を数える（パイプを作らないので下流 consumer も
+    # grep の終了コードの取り違えも起きない）。`index()` はリテラル照合なので、
+    # ファイル名に正規表現メタ文字が入っても壊れない。
+    #
+    # **job ブロック内であることまで見るのが要点である。** ワークフロー全体を見るだけだと、
+    # ステップを別の job（PR 限定ジョブなど）へ移されても緑を返す。
+    arc=0
+    ew_probe="$(awk -v job="$job_name" -v needle="db/test/${nm}" '
+        /^jobs:[[:space:]]*$/ { injobs = 1; next }
+        /^[^[:space:]#]/      { injobs = 0; injob = 0 }
+        injobs && /^  [A-Za-z][A-Za-z0-9_-]*:[[:space:]]*$/ {
+            name = $0
+            sub(/:[[:space:]]*$/, "", name)
+            sub(/^  /, "", name)
+            injob = (name == job) ? 1 : 0
+            if (injob) found = 1
+            next
+        }
+        injob && $0 !~ /^[[:space:]]*#/ && index($0, needle) > 0 { hits++ }
+        END { printf "%d %d\n", (found ? 1 : 0), hits + 0 }
+    ' "$ew_path")" || arc=$?
+    if [ "$arc" -ne 0 ]; then
+        note_fail "ELSEWHERE 宣言 '${nm}' の実行先 .github/workflows/${wf_name} を走査できません（awk exit=${arc}）。"
+        continue
+    fi
+    ew_found="${ew_probe%% *}"
+    ew_hits="${ew_probe##* }"
+
+    if [ "$ew_found" -ne 1 ]; then
+        note_fail "ELSEWHERE 宣言 '${nm}' の実行先ジョブがありません: ${wf_name} の '${job_name}'（ジョブごと消えても実行装置は何も報告しません）。"
+        continue
+    fi
+    if [ "$ew_hits" -eq 0 ]; then
+        note_fail "${wf_name} の '${job_name}' は db/test/${nm} を実行していません（宣言だけが残り、CI からは外れています）。"
+        continue
+    fi
+
+    # 8-6. そのワークフローが push / pull_request で発火すること。
+    etrc=0
+    wf_fires "$ew_path" || etrc=$?
+    if [ "$etrc" -gt 1 ]; then
+        note_fail "ELSEWHERE 宣言 '${nm}' の実行先 .github/workflows/${wf_name} のトリガを走査できません。"
+    elif [ "$etrc" -ne 0 ]; then
+        note_fail ".github/workflows/${wf_name} は db/test/${nm} を実行していますが、push / pull_request で発火しません（器に入っていても蓋が閉じています）。"
+    fi
+done <<EOF
+$elsewhere_lines
+EOF
+
 # --- 結果 -----------------------------------------------------------------------
 if [ "$fail" -ne 0 ]; then
     echo "NG: db/test の CI カバレッジに違反があります。" >&2
     exit 1
 fi
-echo "OK: db/test は CI から実行されている（ワークフロー ${wf_total} 件中 ${ref_total} 件が参照 / スイート ${dir_total} ディレクトリ / db/test の shell ${sh_total} 件を宣言済み・うち SKIP ${skip_total} 件）"
+echo "OK: db/test は CI から実行されている（ワークフロー ${wf_total} 件中 ${ref_total} 件が参照 / スイート ${dir_total} ディレクトリ / db/test の shell ${sh_total} 件を宣言済み・うち SKIP ${skip_total} 件・別ジョブ ${elsewhere_total} 件）"

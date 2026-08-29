@@ -35,9 +35,19 @@ echo "=================================================================="
 echo ">> [cross-runtime 2/3] TS: 実配信オーケストレーション（runDeliveryJob）を"
 echo "   フェイク LINE + 同一 postgres に対して実行し、Go が書いた行を読み配信する"
 echo "=================================================================="
-# @fwlm/db は dist（ビルド済み JS）を経由して解決される（package.json exports）。他パッケージが
-# 未ビルドのまま参照した場合に古い dist を掴まないよう明示的にビルドしてから実行する。
-(cd "$ROOT/ts" && pnpm --filter @fwlm/db run build)
+# delivery-job が依存する workspace パッケージは dist（ビルド済み JS）を経由して解決される
+# （package.json の main / exports）。未ビルドのまま参照した場合に古い dist を掴まないよう、
+# 明示的にビルドしてから実行する。`<pkg>^...` は「そのパッケージの依存だけ（自分自身は含まない）」を
+# 選ぶ pnpm のフィルタで、現在は @fwlm/db と @fwlm/design-tokens が該当する。
+#
+# **`@fwlm/db` だけを名指ししていた版はクリーン checkout で落ちる**（Issue #158 (b) で実測）。
+# delivery-job の src/flex.ts は @fwlm/design-tokens も import しており、そちらは
+# main: ./dist/index.js を持つのに dist が無い。しかも vitest はこれを
+# `Test Files 1 failed (1)` / `Tests  no tests` と報告するため、**「テストが 0 件で終わった」と
+# 読み違えやすい**（実体は import 解決の失敗である）。ローカルで長く通っていたのは、作業ツリーに
+# 過去のビルド成果物が残っていたからにすぎない。依存が増えるたびの追記を避けるため、名指しでは
+# なくフィルタで再帰的に解決する。
+(cd "$ROOT/ts" && pnpm --filter '@fwlm/delivery-job^...' run build)
 (cd "$ROOT/ts" && CROSS_RUNTIME_GO_SEEDED=1 pnpm --filter @fwlm/delivery-job exec vitest run test/cross-runtime.e2e.test.ts)
 
 echo "=================================================================="
