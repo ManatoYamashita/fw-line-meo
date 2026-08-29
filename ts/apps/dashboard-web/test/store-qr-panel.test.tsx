@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 import type { ApiResult, BinaryPayload } from '../src/lib/api';
+import { settleEffects } from './focus-observation';
 
 // api.ts は './firebase' を取り込むため、モジュールごと差し替えて実 SDK を発火させない
 // （stores-page.test.tsx と同規約）。取得手続きは props で注入する。
@@ -404,7 +405,9 @@ describe('StoreQrPanel: 焦点の引き取り', () => {
     fireEvent.click(screen.getByRole('button', { name: /再試行/ }));
 
     const link = await screen.findByRole('link', { name: new RegExp(STORE_NAME) });
-    expect(document.activeElement).toBe(link);
+    // **収束を待つ。** 焦点の引き取りは passive effect なので、リンクが DOM に現れた時点では
+    // まだ移っていないことがある（Issue #166・CI で偽の赤として実発生）。
+    await waitFor(() => expect(document.activeElement).toBe(link));
   });
 
   it('再取得の間の再試行操作は押下を受け付けない状態として提示される（2.2, 6.1）', async () => {
@@ -461,6 +464,9 @@ describe('StoreQrPanel: 焦点の引き取り', () => {
 
     pending.resolve(okPayload());
     await screen.findByRole('img');
+    // **待つのではなく観測点を確定させる。** waitFor は条件が最初から成立しているため即座に
+    // 通ってしまい、effect が後から横取りしても緑を返す（Issue #166）。
+    await settleEffects();
     expect(document.activeElement).toBe(document.body);
   });
 
@@ -479,6 +485,7 @@ describe('StoreQrPanel: 焦点の引き取り', () => {
 
     resolveSecond(okPayload());
     await screen.findByRole('img');
+    await settleEffects();
     expect(document.activeElement).toBe(close);
   });
 });
