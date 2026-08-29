@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -16,24 +15,25 @@ import (
 
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/places"
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/repo"
+	"github.com/ManatoYamashita/fw-line-meo/go/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // --- DB テストヘルパー（go/internal/repo/testdb_test.go・go/internal/competitor/extract_test.go と
 // 同じ思想。batch パッケージは他パッケージの非公開テストヘルパーを参照できないためローカルに複製する）---
 
+// testPool は**このテスト専用**のデータベース（migrations 適用済み）を返す（Issue #163）。
+//
+// **共有 DB を使ってはならない。** batch.Run は「全 confirmed 店舗を無制限にクエリする」という
+// 本番どおりの設計であり、下の Test はその件数を厳密比較する。共有 DB では、並列に走る
+// internal/repo や internal/competitor が挿入した店舗まで数えて落ちる（`StoresTotal = 10, want 3`）。
+// `-p 1` は回避策にならない — 緑になるのは batch が repo よりアルファベット順で先に走る偶然に
+// 依存しているだけで、順序を入れ替えると落ちる。
+//
+// 言語をまたいで同じ行を見る必要がある cross-runtime 契約テストだけは testdb.Shared を使う。
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping batch integration test (see ts/scripts/with-test-db.sh)")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return testdb.Isolated(t)
 }
 
 func seedConfirmedStore(t *testing.T, ctx context.Context, pool *pgxpool.Pool, lineUserID, placeID string, lat, lng float64) string {

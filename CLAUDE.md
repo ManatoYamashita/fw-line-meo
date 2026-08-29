@@ -26,6 +26,7 @@ Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で
 - `make go-build` — `go/` 配下の全パッケージをビルド（`cd go && go build ./...`）
 - `make go-test` — `go/` 配下の全パッケージのテストを実行（`cd go && go test ./...`）
 - コンテナイメージは `go/Dockerfile`（multi-stage・distroless/static-debian12:nonroot 実行時）。このマシンには docker/apple-container が無いため実ビルド検証は CI/デプロイ時に行う
+- **CI では `ts-ci` の `go-test` ジョブが `go build ./...` / `go vet ./...` / `go test ./...` を実行する**（Issue #163 で新設。それ以前は Go が CI に一切載っておらず `make go-test` は main で赤いまま気づかれていなかった）。DB を使うテストは `go/internal/testdb` の `Isolated` が**テストごとに専用データベース**を作って migrations を適用する。共有 DB（`DATABASE_URL`）へ直接つないでよいのは、言語をまたいで同じ行を見る cross-runtime 契約テスト（`testdb.Shared`）だけである
 
 CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
 - `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
