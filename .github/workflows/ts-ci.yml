@@ -306,8 +306,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       # `pnpm -C ts run build`（全 7 アプリ）は置かない。cross_runtime_steps.sh が
-      # delivery-job の依存（@fwlm/db・@fwlm/design-tokens）だけを自分でビルドする。
-      # ここへ全体ビルドを足すと、数分を無駄にしたうえ「全体ビルドが要る」という誤った前提が
+      # `--filter '@fwlm/delivery-job^...'` で delivery-job の依存だけを自分でビルドする。
+      # **ここに依存パッケージ名を列挙しないこと。** 列挙した時点で二重管理になり、依存が
+      # 増えたときに黙って偽になる（フィルタで再帰解決させているのはそれを避けるためである）。
+      # 全体ビルドを足すと、数分を無駄にしたうえ「全体ビルドが要る」という誤った前提が
       # ワークフローに固定される。
       - run: pnpm -C ts install --frozen-lockfile
       - name: apply migrations
