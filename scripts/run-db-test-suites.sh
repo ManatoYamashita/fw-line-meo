@@ -58,9 +58,12 @@ TEST_DIR="${ROOT}/db/test"
 # 起動する。よって 1 本ずつ RUN か SKIP かを宣言し、どちらにも載っていないファイルは赤にする。
 # 「db/test へ置いたのに誰も呼ばない」（＝ Issue #156 そのもの）が二度と無言で起きないようにする。
 #
-# RUN 形式: `<ファイル名>|<このスクリプトが呼ぶときのコマンド>`
+# RUN 形式: `<ファイル名>` のみ。**env を表の 1 フィールドとして持たせてはならない。**
+# `PSQL_EXEC` の値は空白を含むため語分割で壊れ、「表に書いたが実際には使わない」形になる。
+# 宣言と挙動の乖離はこのスクリプト自身が禁じている当のものなので、env は下の case が唯一の
+# 情報源とし、表は「呼ぶか呼ばないか」だけを宣言する（PR #159 レビュー指摘 1）。
 RUN_SCRIPTS=(
-    'check_docs.sh|MANAGE_CONTAINER=0'
+    'check_docs.sh'
 )
 
 # SKIP 形式: `<ファイル名>|<Issue>|<理由>`。**理由と追跡先の無い SKIP を作らない。**
@@ -124,18 +127,21 @@ for sh_path in "${TEST_DIR}"/*.sh; do
     sh_total=$((sh_total + 1))
     sh_name="$(basename "$sh_path")"
 
+    # **空配列を素で展開しない。** bash 3.2（macOS 既定）は `set -u` 下の `"${a[@]}"` を
+    # unbound variable として落とす。宣言表が空になるのはこのリポジトリでは常態で、
+    # 既存ガード 7 本はいずれも `${a[@]+"${a[@]}"}` の防御形を使っている（PR #159 レビュー指摘 3）。
     declared=0
-    run_cmd=''
-    for entry in "${RUN_SCRIPTS[@]}"; do
-        if [ "${entry%%|*}" = "$sh_name" ]; then
+    should_run=0
+    for entry in ${RUN_SCRIPTS[@]+"${RUN_SCRIPTS[@]}"}; do
+        if [ "$entry" = "$sh_name" ]; then
             declared=1
-            run_cmd="${entry#*|}"
+            should_run=1
         fi
     done
-    for entry in "${SKIP_SCRIPTS[@]}"; do
+    for entry in ${SKIP_SCRIPTS[@]+"${SKIP_SCRIPTS[@]}"}; do
         if [ "${entry%%|*}" = "$sh_name" ]; then
             declared=1
-            run_cmd=''
+            should_run=0
         fi
     done
 
@@ -143,10 +149,19 @@ for sh_path in "${TEST_DIR}"/*.sh; do
         note_fail "db/test/${sh_name} が RUN にも SKIP にも宣言されていません（scripts/run-db-test-suites.sh の表へ追記してください）"
         continue
     fi
-    [ -n "$run_cmd" ] || continue
+    [ "$should_run" -eq 1 ] || continue
+
+    # RUN するスクリプトごとの env はここが唯一の情報源である。追加時はここへ 1 節足すこと。
+    run_env=()
+    case "$sh_name" in
+        check_docs.sh)
+            # 既定のコンテナ起動を止め、CI / with-test-db.sh が用意済みの postgres へ繋がせる。
+            run_env=(MANAGE_CONTAINER=0 "PSQL_EXEC=psql ${DATABASE_URL}")
+            ;;
+    esac
 
     echo ">> [docs] db/test/${sh_name}"
-    if ! env MANAGE_CONTAINER=0 PSQL_EXEC="psql ${DATABASE_URL}" bash "$sh_path"; then
+    if ! env ${run_env[@]+"${run_env[@]}"} bash "$sh_path"; then
         note_fail "db/test/${sh_name} が非ゼロ終了しました"
     fi
 done
@@ -157,7 +172,7 @@ fi
 
 # 宣言だけが残って実体が消えた場合も赤にする。指す対象が消えた宣言は虚偽であり、
 # 「SKIP に載っているから安心」という読み手の判断を静かに裏切る。
-for entry in "${SKIP_SCRIPTS[@]}"; do
+for entry in ${SKIP_SCRIPTS[@]+"${SKIP_SCRIPTS[@]}"}; do
     skip_name="${entry%%|*}"
     if [ ! -f "${TEST_DIR}/${skip_name}" ]; then
         note_fail "SKIP 宣言の db/test/${skip_name} が存在しません（宣言を消してください）"

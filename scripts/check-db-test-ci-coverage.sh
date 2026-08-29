@@ -112,7 +112,10 @@ fi
 # 実行装置の RUN 表 / SKIP 表から宣言済みのファイル名を取り出す。
 # `sed` は範囲抽出と置換のみで `q` を持たない（早期終了 consumer を作らない・steering 規律 2）。
 table_names() {   # $1 = 配列変数名
-    sed -n "/^${1}=(/,/^)/p" "$RUNNER" | sed -n "s/^[[:space:]]*'\([^|']*\)|.*/\1/p"
+    # RUN 行は `'name'`、SKIP 行は `'name|#Issue|理由'`。**`|` を必須にしない。**
+    # 必須にすると RUN 表から第 2 列を外した瞬間に抽出が 0 件へ落ち、check_docs.sh が
+    # 「未宣言」として誤検出される（PR #159 レビュー指摘 1 の是正で実際に踏んだ）。
+    sed -n "/^${1}=(/,/^)/p" "$RUNNER" | sed -n "s/^[[:space:]]*'\([^|']*\).*/\1/p"
 }
 run_names="$(table_names RUN_SCRIPTS)"
 skip_names="$(table_names SKIP_SCRIPTS)"
