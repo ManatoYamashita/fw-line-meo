@@ -223,9 +223,14 @@ for case_path in "$CASES_DIR"/*.sh; do
       ;;
   esac
 
+  # 対応先は `scripts/<stem>.sh` を第一候補とし、`db/test/<stem>.sh` も受け付ける。
+  # `db/test/*.sh` は #156 / #158 で **CI から毎 PR 実行される検査資産**になったので、
+  # ケースを書く先として正当である（それを禁じると、CI が回すガードだけ自己テストを
+  # 持てないという逆転が起きる）。**逆方向（このガードがケースを要求する側）は依然
+  # `scripts/check-*.sh` のみである**。db/test の検査資産へ要求を広げるのは Issue #162。
   target="$(case_guard_of "$stem")"
-  if [ ! -f "${GUARD_DIR}/${target}.sh" ]; then
-    echo "ERROR: ${base}.sh に対応するガード scripts/${target}.sh がありません（ガード改名の取り残しです）。" >&2
+  if [ ! -f "${GUARD_DIR}/${target}.sh" ] && [ ! -f "${ROOT}/db/test/${target}.sh" ]; then
+    echo "ERROR: ${base}.sh に対応するガードが scripts/${target}.sh にも db/test/${target}.sh にもありません（ガード改名の取り残しです）。" >&2
     fail=1
   fi
 done
