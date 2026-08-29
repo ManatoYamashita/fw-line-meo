@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Issue #156 実行装置: db/test のスイート（assertions / smoke / docs 整合）を CI から回す。
+# Issue #156 / #158 実行装置: db/test のスイート（assertions / smoke / docs 整合 / 能力の不在）を
+# CI から回す。
 #
 # **これは静的ガードではなく実行装置である。** DB へ接続して SQL を流すので、`scripts/check-*.sh`
 # の「すべて read-only」という契約には属さない。名前を `run-*` にしているのはそのためで、
@@ -64,13 +65,13 @@ TEST_DIR="${ROOT}/db/test"
 # 情報源とし、表は「呼ぶか呼ばないか」だけを宣言する（PR #159 レビュー指摘 1）。
 RUN_SCRIPTS=(
     'check_docs.sh'
+    'check_no_optional_capabilities.sh'
 )
 
 # SKIP 形式: `<ファイル名>|<Issue>|<理由>`。**理由と追跡先の無い SKIP を作らない。**
 # 「調べたうえで外した」と「気づかず落とした」を、リポジトリ上で区別できる形にしておく。
 SKIP_SCRIPTS=(
     'run.sh|#156|コンテナランタイムを自前で起動するローカルハーネス。CI は service postgres へ DATABASE_URL で繋ぐので入口が違う'
-    'check_no_optional_capabilities.sh|#158|DATABASE_URL だけで走るので CI 化は安いが、Req 1.4/3.10 は本 Issue が扱う Req 5 / Req 9 とは別契約で、独立した対照実験が要る'
     'cross_runtime_integration.sh|#158|actions/setup-go とビルド済み TS を要し、service container ではなく自前の native postgres を起動する。別ジョブとしての設計が要る'
     'cross_runtime_steps.sh|#158|上の内部ステップであり単体の入口ではない'
 )
@@ -158,9 +159,15 @@ for sh_path in "${TEST_DIR}"/*.sh; do
             # 既定のコンテナ起動を止め、CI / with-test-db.sh が用意済みの postgres へ繋がせる。
             run_env=(MANAGE_CONTAINER=0 "PSQL_EXEC=psql ${DATABASE_URL}")
             ;;
+        check_no_optional_capabilities.sh)
+            # 追加の env は要らない。DATABASE_URL は本スクリプトが環境から受け取った時点で
+            # export 済みであり、env 無指定の `env bash` がそのまま子へ渡す（#158 (a)）。
+            # **節そのものは省かない。** 上のコメントどおりここが env の唯一の情報源なので、
+            # 「env が要らないことを確認した」と「書き忘れた」を読み手が区別できる形にしておく。
+            ;;
     esac
 
-    echo ">> [docs] db/test/${sh_name}"
+    echo ">> [script] db/test/${sh_name}"
     if ! env ${run_env[@]+"${run_env[@]}"} bash "$sh_path"; then
         note_fail "db/test/${sh_name} が非ゼロ終了しました"
     fi

@@ -171,7 +171,23 @@ fx_write scripts/test/cases/99-check-bar.sh <<'EOF'
 # dummy
 EOF
 fx_run check-guard-selftest-coverage
-expect_red '99-check-bar.sh に対応するガード scripts/check-bar.sh がありません'
+expect_red '99-check-bar.sh に対応するガードが scripts/check-bar.sh にも db/test/check-bar.sh にもありません'
+t_end
+
+t_begin 'check-guard-selftest-coverage: db/test 配下のガードを指すケースは孤児にしない（#158 (a)）'
+# `db/test/*.sh` は #156 / #158 で CI から毎 PR 実行される検査資産になった。ケースの対応先として
+# 受け付けないと、**CI が回すガードだけ自己テストを持てない**という逆転が起きる。
+# 上の孤児ケースと違うのは「対応先の実体が db/test にあるかどうか」の 1 点だけである。
+gsc_fixture
+fx_write db/test/check_baz.sh <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+fx_write scripts/test/cases/99-check_baz.sh <<'EOF'
+# dummy
+EOF
+fx_run check-guard-selftest-coverage
+expect_green
 t_end
 
 t_begin 'check-guard-selftest-coverage: NN- 接頭を持たないケースファイルを検出する'

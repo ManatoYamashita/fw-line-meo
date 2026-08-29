@@ -42,9 +42,13 @@ EOF
 #!/usr/bin/env bash
 echo "check_docs-stub: OK"
 EOF
+  # RUN 表が指す実体その 2（#158 (a) で SKIP から昇格）。既定では成功する。
+  fx_write db/test/check_no_optional_capabilities.sh <<'EOF'
+#!/usr/bin/env bash
+echo "no-optional-capabilities-stub: OK"
+EOF
   # SKIP 表が指す実体（存在照合のためだけに置く）。
-  for f in run.sh check_no_optional_capabilities.sh \
-           cross_runtime_integration.sh cross_runtime_steps.sh; do
+  for f in run.sh cross_runtime_integration.sh cross_runtime_steps.sh; do
     fx_write "db/test/${f}" <<'EOF'
 #!/usr/bin/env bash
 : # SKIP 宣言済み。実行されない
@@ -63,7 +67,7 @@ t_begin 'run-db-test-suites: 全スイートが通れば緑（件数を出す）
 rdt_fixture
 fx_run run-db-test-suites
 expect_green
-expect_output_matches 'OK: db/test スイート緑（2 ディレクトリ / 2 SQL / 1 スクリプト）'
+expect_output_matches 'OK: db/test スイート緑（2 ディレクトリ / 2 SQL / 2 スクリプト）'
 t_end
 
 t_begin 'run-db-test-suites: 最初の失敗で止めず、別スイートの失敗も同じ実行で出す'
@@ -91,6 +95,20 @@ exit 1
 EOF
 fx_run run-db-test-suites
 expect_red 'db/test/check_docs.sh が非ゼロ終了しました'
+t_end
+
+t_begin 'run-db-test-suites: 能力の不在チェックの失敗も伝播する（#158 (a) で RUN へ昇格した行が実際に実行されている証拠）'
+# **RUN 表へ 1 行足しただけでは「宣言した」までしか言えない。** ループが実際にこのファイルを
+# 起動していなければ、宣言は虚偽のまま緑を返す（それは #156 / #158 が潰した当の形である）。
+# スタブを非ゼロ終了させ、実行装置がそれを拾うことをここで固定する。
+rdt_fixture
+fx_write db/test/check_no_optional_capabilities.sh <<'EOF'
+#!/usr/bin/env bash
+echo "no-optional-capabilities-stub: FAIL" >&2
+exit 1
+EOF
+fx_run run-db-test-suites
+expect_red 'db/test/check_no_optional_capabilities.sh が非ゼロ終了しました'
 t_end
 
 # ---------------------------------------------------------------------------
@@ -155,7 +173,7 @@ t_begin 'run-db-test-suites: 宣言表が空でも unbound variable で死なな
 # 宣言表が空になるのはこのリポジトリでは常態（既存ガード 7 本の WHITELIST は全て空）なので、
 # 防御形 `${a[@]+"${a[@]}"}` が外れたらここで気づけるようにする。
 rdt_fixture
-sed -i.bak "/^    'check_docs.sh'\$/d; /^    'run.sh|/d; /^    'check_no_optional_capabilities.sh|/d; /^    'cross_runtime_integration.sh|/d; /^    'cross_runtime_steps.sh|/d" \
+sed -i.bak "/^    'check_docs.sh'\$/d; /^    'run.sh|/d; /^    'check_no_optional_capabilities.sh'\$/d; /^    'cross_runtime_integration.sh|/d; /^    'cross_runtime_steps.sh|/d" \
   "${FX}/scripts/run-db-test-suites.sh"
 rm -f "${FX}/scripts/run-db-test-suites.sh.bak"
 fx_run run-db-test-suites
