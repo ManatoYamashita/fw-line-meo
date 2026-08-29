@@ -31,7 +31,8 @@
 #   if [ "$rc" -gt 1 ]; then ... 評価不能として報告 ... fi
 #
 # 本スクリプトは以下を機械検証する（read-only の走査・副作用なし・bash 3.2 でも走る）:
-#   1. 追跡下の `scripts/**/*.sh` で、`grep` を含む行が後置 `true` で失敗を潰していないこと
+#   1. 追跡下の `scripts/**/*.sh` と `db/test/**/*.sh` で、`grep` を含む行が後置 `true` で
+#      失敗を潰していないこと
 #   2. 行頭 `#` のコメント行は全ファイルで対象外
 #      （規律を説明する注記がこの構文を引用するため）
 #   3. `WHITELIST=(` の宣言行と配列要素の引用符行は対象外。ただし **本ファイルに限定**する
@@ -43,7 +44,10 @@
 # **`core.quotePath=false` を外してはならない**（規律 1・PR #99 実測）。
 #
 # 既知の限界:
-#   - 対象は `scripts/` のみ（規律 2 のスコープに合わせている）。
+#   - 対象は `scripts/` と `db/test/` である。後者を #162 で加えたのは、`db/test/` の検査資産が
+#     #156 / #158 (a) 以降 **CI から毎 PR 実行されている**のに機械強制の外にあったためで、
+#     実測では `check_docs.sh` の走査パターンを壊すと `OK: … 18 テーブル …` / exit 0 という
+#     **件数まで健全な実行と一致する緑**を返していた。`Makefile` や `ts/` は依然として見ない。
 #   - `grep` と後置 `true` が**別の行**に分かれた複数行パイプラインは検出できない。
 #     現状の 43 箇所はすべて同一行である。
 #   - `2>/dev/null` を併用して診断ごと捨てているかまでは見ない。これは棚卸しの対象であり、
@@ -173,7 +177,11 @@ EOF
   return 0
 }
 
-targets="$( (cd "$ROOT" && git -c core.quotePath=false ls-files --cached -- 'scripts/*.sh') 2>/dev/null )"
+# 走査対象の列挙。`scripts/` に加えて `db/test/` 配下の .sh も見る（#162）。
+# db/test の検査資産は #156 / #158 (a) 以降 **CI から毎 PR 実行されている**のに、
+# 本ガードの外にあった。「ガードを検証する側が同じ罠を踏んでよい理由は無い」という
+# check-shell-pipe-consumers.sh の論理は、そのまま実行される検査資産にも当てはまる。
+targets="$( (cd "$ROOT" && git -c core.quotePath=false ls-files --cached -- 'scripts/*.sh' 'db/test/*.sh') 2>/dev/null )"
 
 while IFS= read -r rel; do
   [ -n "$rel" ] || continue
@@ -187,7 +195,7 @@ EOF
 
 # 空振り防止: 対象が 0 件なら「違反 0 件」は「検証していない」と同義である。
 if [ "$file_count" -eq 0 ]; then
-  echo "ERROR: 追跡下の scripts/**/*.sh が 1 件もありません（列挙の前提が崩れています）。" >&2
+  echo "ERROR: 追跡下の scripts/**/*.sh と db/test/**/*.sh が 1 件もありません（列挙の前提が崩れています）。" >&2
   exit 1
 fi
 if [ "$grep_line_count" -eq 0 ]; then

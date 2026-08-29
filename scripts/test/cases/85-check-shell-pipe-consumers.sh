@@ -187,6 +187,44 @@ t_end
 # ---------------------------------------------------------------------------
 # WHITELIST と空振り防止。
 
+# ---------------------------------------------------------------------------
+# 走査面（Issue #162）。`db/test/` の検査資産は #156 / #158 (a) 以降 CI から毎 PR 実行されて
+# いるのに、#162 まで本ガードの外にあった（`check_docs.sh` に `printf | grep -q` が 2 件残存）。
+
+t_begin 'check-shell-pipe-consumers: db/test/ 配下の違反も検出する（#162）'
+sp_fixture
+q='-q'
+fx_write db/test/bad.sh <<EOF
+#!/usr/bin/env bash
+printf 'a\n' | grep $q 'a'
+EOF
+fx_track_now
+fx_run check-shell-pipe-consumers
+expect_red 'db/test/bad.sh:2 は grep の quiet / max-count 系をパイプの下流へ置いています'
+t_end
+
+t_begin 'check-shell-pipe-consumers: 走査面に db/test/ が入っていることを件数で固定する（#162）'
+# **pathspec を広げても件数が変わらなければ、広げていないのと同じである。** 上の赤ケースだけ
+# では「db/test/ を pathspec から外す」変異を検出できない（違反が消えれば緑になるため）。
+# **fixture を使わず順序を自分で組む。** sp_fixture は track の後にガードを置いて未追跡へ
+# 残すが、その後に fx_track_now を呼ぶとガード本体まで追跡され、母数がガードの増減で動く。
+fx_write scripts/clean.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'a\nb\n' | grep -c 'a'
+printf 'a\nb\n' | sort | wc -l
+EOF
+fx_write db/test/clean.sh <<'EOF'
+#!/usr/bin/env bash
+printf 'a\nb\n' | grep -c 'a'
+EOF
+fx_track_now
+fx_guard check-shell-pipe-consumers
+fx_run check-shell-pipe-consumers
+expect_green
+expect_output_matches '2 ファイル / 3 パイプ行を検証'
+t_end
+
 t_begin 'check-shell-pipe-consumers: WHITELIST の行は SKIP になる'
 # **fixture の違反行に引用符とバックスラッシュを入れないこと。** WHITELIST のキーは行そのもの
 # なので、そのまま awk -v へ渡ることになる。awk -v は値のエスケープ列を解釈するため、
@@ -226,7 +264,7 @@ fx_track_now
 fx_guard check-shell-pipe-consumers
 fx_run check-shell-pipe-consumers
 # 列挙が壊れたまま「違反 0 件だから緑」を返さないこと。
-expect_red '追跡下の scripts/**/*.sh が 1 件もありません'
+expect_red '追跡下の scripts/**/*.sh と db/test/**/*.sh が 1 件もありません'
 t_end
 
 t_begin 'check-shell-pipe-consumers: 空振り防止 — パイプを含む行が 0 件なら赤'

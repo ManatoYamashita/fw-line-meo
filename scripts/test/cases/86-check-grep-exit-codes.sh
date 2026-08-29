@@ -157,6 +157,49 @@ expect_absent 'check-grep-exit-codes.sh:'
 t_end
 
 # ---------------------------------------------------------------------------
+# 走査面（Issue #162）。
+#
+# `db/test/` の検査資産は #156 / #158 (a) 以降 **CI から毎 PR 実行されている**のに、
+# #162 まで本ガードの外にあった。実測では `db/test/check_docs.sh` の走査パターンを壊すと
+# `OK: … 18 テーブル …` / exit 0 という**件数まで健全な実行と一致する緑**を返していた。
+
+t_begin 'check-grep-exit-codes: db/test/ 配下の握り潰しも検出する（#162）'
+gec_fixture
+fx_write db/test/bad.sh <<EOF
+#!/usr/bin/env bash
+n="\$(printf 'a\n' | grep -c 'a' ${SWALLOW})"
+EOF
+fx_track_now
+fx_run check-grep-exit-codes
+expect_red 'db/test/bad.sh:2 は grep の失敗を後置 true で潰しています'
+t_end
+
+t_begin 'check-grep-exit-codes: 走査面に db/test/ が入っていることを件数で固定する（#162）'
+# **pathspec を広げても件数が変わらなければ、広げていないのと同じである。** 上の赤ケースだけ
+# だと「db/test/ を pathspec から外す」変異を検出できない（違反が消えれば緑になるため、
+# 走査していないのか違反が無いのかを区別できない）。母数を照合して両者を分ける。
+# **fixture を使わず順序を自分で組む。** gec_fixture は track の後にガードを置いて未追跡へ
+# 残すが、その後に fx_track_now を呼ぶとガード本体まで追跡され、母数がガードの増減で動く。
+fx_write scripts/clean.sh <<'EOF'
+#!/usr/bin/env bash
+rc=0
+n="$(printf 'a\n' | grep -c 'a')" || rc=$?
+printf '%s\n' "$n"
+EOF
+fx_write db/test/clean.sh <<'EOF'
+#!/usr/bin/env bash
+rc=0
+n="$(printf 'x\n' | grep -c 'x')" || rc=$?
+printf '%s\n' "$n"
+EOF
+fx_track_now
+fx_guard check-grep-exit-codes
+fx_run check-grep-exit-codes
+expect_green
+expect_output_matches '2 ファイル / 2 件の grep 行を検証'
+t_end
+
+# ---------------------------------------------------------------------------
 # WHITELIST と空振り防止。
 
 t_begin 'check-grep-exit-codes: WHITELIST の行は SKIP になる'
@@ -188,7 +231,7 @@ EOF
 fx_track_now
 fx_guard check-grep-exit-codes
 fx_run check-grep-exit-codes
-expect_red '追跡下の scripts/**/*.sh が 1 件もありません'
+expect_red '追跡下の scripts/**/*.sh と db/test/**/*.sh が 1 件もありません'
 t_end
 
 t_begin 'check-grep-exit-codes: 空振り防止 — grep を含む行が 0 件なら赤'
