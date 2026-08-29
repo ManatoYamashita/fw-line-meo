@@ -33,6 +33,12 @@
 # 閉じており、閉じていない 4 件（assertions/0000・assertions/30・smoke/12・smoke/13）は
 # information_schema / pg_type / count(*) の参照のみで、後続の DB を汚さない。
 #
+# **宣言は 3 値である（#158 (b)）。** RUN / SKIP の二値では「CI では実行されるが、この実行装置
+# からは呼ばない」を表せない。cross_runtime_integration.sh は Go と TS の両ツールチェーンを要し、
+# 固定 UUID の行を意図的に共有 DB へ残すため ts-ci の専用ジョブで回す。これを SKIP に置いたままに
+# すると理由文（「CI から実行されていない」）が虚偽になり、しかも**そのジョブを消しても何も鳴らない**。
+# よって ELSEWHERE 表を持ち、実行先の workflow:job まで宣言させる。
+#
 # **最初の失敗で止めない（集約実行）。** 全ファイルを流し切ってから非ゼロ終了する。1 回の違反注入が
 # 複数のスイートを同時に赤にすることを 1 つの run で観察できるようにするためで、これは Issue #156 の
 # 完了条件「空振りでないことを対照で示す」の証拠の取りやすさに直結する。
@@ -72,8 +78,17 @@ RUN_SCRIPTS=(
 # 「調べたうえで外した」と「気づかず落とした」を、リポジトリ上で区別できる形にしておく。
 SKIP_SCRIPTS=(
     'run.sh|#156|コンテナランタイムを自前で起動するローカルハーネス。CI は service postgres へ DATABASE_URL で繋ぐので入口が違う'
-    'cross_runtime_integration.sh|#158|actions/setup-go とビルド済み TS を要し、service container ではなく自前の native postgres を起動する。別ジョブとしての設計が要る'
-    'cross_runtime_steps.sh|#158|上の内部ステップであり単体の入口ではない'
+    'cross_runtime_steps.sh|#158|cross_runtime_integration.sh の内部ステップであり単体の入口ではない。入口の側は ELSEWHERE 表で CI 実行先を宣言している'
+)
+
+# ELSEWHERE 形式: `<ファイル名>|<workflow>:<job>|<理由>`。**CI では実行されるが本装置からは呼ばない。**
+# SKIP との違いは「CI に載っているかどうか」であって「呼ぶかどうか」ではない。両者を混ぜると、
+# 別ジョブが消えたときに SKIP の理由文だけが残り、誰も実行していないのに宣言は健全に見える。
+# 宣言先の実在（workflow がある・その job がある・その job の中で当該スクリプトを参照している・
+# その workflow が push / pull_request で発火する）は scripts/check-db-test-ci-coverage.sh が
+# 機械検証する。**ここへ 1 行足したら、あちらが赤くなくなることまで確かめること。**
+ELSEWHERE_SCRIPTS=(
+    'cross_runtime_integration.sh|ts-ci.yml:cross-runtime|Go と TS の両ツールチェーンを要し、CROSS_RUNTIME_SKIP_CLEANUP=1 で固定 UUID の行を意図的に共有 DB へ残す。本装置が前提とする「migrations だけが当たった状態」と実行順の制約が衝突するため別ジョブで回す（#158 (b)）'
 )
 
 fail=0
@@ -131,23 +146,35 @@ for sh_path in "${TEST_DIR}"/*.sh; do
     # **空配列を素で展開しない。** bash 3.2（macOS 既定）は `set -u` 下の `"${a[@]}"` を
     # unbound variable として落とす。宣言表が空になるのはこのリポジトリでは常態で、
     # 既存ガード 7 本はいずれも `${a[@]+"${a[@]}"}` の防御形を使っている（PR #159 レビュー指摘 3）。
+    # **フラグではなく件数で数える。** 同じ名前が 2 つの表に載ると、後勝ちで should_run が
+    # 静かに 0 へ倒れる（RUN に書いたのに実行されない、が緑のまま成立する）。件数で見れば鳴る。
     declared=0
     should_run=0
     for entry in ${RUN_SCRIPTS[@]+"${RUN_SCRIPTS[@]}"}; do
         if [ "$entry" = "$sh_name" ]; then
-            declared=1
+            declared=$((declared + 1))
             should_run=1
         fi
     done
     for entry in ${SKIP_SCRIPTS[@]+"${SKIP_SCRIPTS[@]}"}; do
         if [ "${entry%%|*}" = "$sh_name" ]; then
-            declared=1
+            declared=$((declared + 1))
+            should_run=0
+        fi
+    done
+    for entry in ${ELSEWHERE_SCRIPTS[@]+"${ELSEWHERE_SCRIPTS[@]}"}; do
+        if [ "${entry%%|*}" = "$sh_name" ]; then
+            declared=$((declared + 1))
             should_run=0
         fi
     done
 
     if [ "$declared" -eq 0 ]; then
-        note_fail "db/test/${sh_name} が RUN にも SKIP にも宣言されていません（scripts/run-db-test-suites.sh の表へ追記してください）"
+        note_fail "db/test/${sh_name} が RUN にも SKIP にも ELSEWHERE にも宣言されていません（scripts/run-db-test-suites.sh の表へ追記してください）"
+        continue
+    fi
+    if [ "$declared" -gt 1 ]; then
+        note_fail "db/test/${sh_name} が複数の表に宣言されています（${declared} 件）。どの表が効くかは並び順次第になります"
         continue
     fi
     [ "$should_run" -eq 1 ] || continue
@@ -185,11 +212,20 @@ for entry in ${SKIP_SCRIPTS[@]+"${SKIP_SCRIPTS[@]}"}; do
         note_fail "SKIP 宣言の db/test/${skip_name} が存在しません（宣言を消してください）"
     fi
 done
+for entry in ${ELSEWHERE_SCRIPTS[@]+"${ELSEWHERE_SCRIPTS[@]}"}; do
+    elsewhere_name="${entry%%|*}"
+    if [ ! -f "${TEST_DIR}/${elsewhere_name}" ]; then
+        note_fail "ELSEWHERE 宣言の db/test/${elsewhere_name} が存在しません（宣言を消してください）"
+    fi
+done
 
 # --- 3. 結果 --------------------------------------------------------------------
+# 別ジョブ件数も出す。**表が空になったことは件数でしか観測できない**（ELSEWHERE が空でも
+# 本装置は何も実行しないので、出力だけを見ていると健全な緑と区別が付かない）。
 run_count="${#RUN_SCRIPTS[@]}"
+elsewhere_count="${#ELSEWHERE_SCRIPTS[@]}"
 if [ "$fail" -ne 0 ]; then
-    echo "NG: db/test スイートに失敗があります（${dir_total} ディレクトリ / ${sql_total} SQL / ${run_count} スクリプト）" >&2
+    echo "NG: db/test スイートに失敗があります（${dir_total} ディレクトリ / ${sql_total} SQL / ${run_count} スクリプト・別ジョブ ${elsewhere_count} 件）" >&2
     exit 1
 fi
-echo "OK: db/test スイート緑（${dir_total} ディレクトリ / ${sql_total} SQL / ${run_count} スクリプト）"
+echo "OK: db/test スイート緑（${dir_total} ディレクトリ / ${sql_total} SQL / ${run_count} スクリプト・別ジョブ ${elsewhere_count} 件）"
