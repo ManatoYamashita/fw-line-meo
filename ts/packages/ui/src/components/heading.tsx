@@ -23,8 +23,11 @@ const headingVariants = cva("text-balance", {
     // サイズは typography トークン（theme.css の --text-*）由来のユーティリティのみを使う。
     // 色は指定しない（周囲の文脈から継承させる。Alert 内の見出し等で文脈色を壊さないため）。
     size: {
+      // 太さが最も強いのは 2xl（= 既定のレベル 1）だけにしてある。意匠の出典は display の
+      // ウェイトを控えめに保ち、階層はサイズと余白で表す。theme.css の @layer base と
+      // 一致していることは test/app-integration.test.ts が実コンパイル結果で機械検証する。
       "2xl": "text-2xl leading-tight font-bold",
-      xl: "text-xl leading-tight font-bold",
+      xl: "text-xl leading-tight font-semibold",
       lg: "text-lg leading-snug font-semibold",
       base: "text-base leading-snug font-semibold",
       sm: "text-sm leading-normal font-semibold",
@@ -36,7 +39,13 @@ const headingVariants = cva("text-balance", {
 /** 見出しの階層（1 = ページ見出し 〜 6）。描画される要素と支援技術の見出しレベルに一致する。 */
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
 
-/** 各レベルの既定サイズ。theme.css の `@layer base` が生 <h1>〜<h6> に与える階層と対応する。 */
+/**
+ * 各レベルの既定サイズ。theme.css の `@layer base` が生 <h1>〜<h6> に与える階層と対応する。
+ *
+ * この対応は長らくコメントで主張されていただけで、検証するものが何も無かった（結果として
+ * 実際に食い違っていた）。test/app-integration.test.ts が実コンパイル結果を使って
+ * レベルごとの寸法・太さ・行間の一致を要求するため、本表は export する。
+ */
 const DEFAULT_SIZE_BY_LEVEL = {
   1: "2xl",
   2: "xl",
@@ -71,5 +80,5 @@ function Heading({ level, size, className, ...props }: HeadingProps) {
   )
 }
 
-export { Heading, headingVariants }
+export { Heading, headingVariants, DEFAULT_SIZE_BY_LEVEL }
 export type { HeadingLevel, HeadingProps }

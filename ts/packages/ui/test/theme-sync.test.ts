@@ -89,6 +89,30 @@ function extractThemeBlock(css: string): string {
   throw new Error('theme.css の @theme ブロックが閉じられていません');
 }
 
+/**
+ * `@theme inline { … }` のブロック本文を取り出す。
+ *
+ * `@theme` と `@theme inline` は役割が異なる。前者は実値の宣言、後者は既存の意味論変数を
+ * Tailwind の色名前空間へ**公開するだけ**の層である。同じ名前を両方に置くと循環参照になるため、
+ * 「どちらに居るか」を区別できる抽出器が要る（`extractThemeBlock` は inline を意図的に除外する）。
+ */
+function extractThemeInlineBlock(css: string): string {
+  const header = /@theme[ \t]+inline[ \t]*\{/.exec(css);
+  if (header === null) {
+    throw new Error('theme.css に @theme inline ブロックが見つかりません');
+  }
+  const start = css.indexOf('{', header.index);
+  let depth = 0;
+  for (let i = start; i < css.length; i += 1) {
+    if (css[i] === '{') depth += 1;
+    else if (css[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return css.slice(start + 1, i);
+    }
+  }
+  throw new Error('theme.css の @theme inline ブロックが閉じられていません');
+}
+
 /** ブロック本文から `--name: <値>;` の値部分を取り出す（最初の宣言のみ）。 */
 function declarationIn(block: string, cssVariable: string): string | undefined {
   // 変数名の直後に `:` を要求するため、`--color-text` が `--color-text-muted` に誤一致しない。
@@ -203,13 +227,18 @@ describe('抽出器の自己検証（Issue #60）', () => {
  */
 const COLOR_ROLE_TO_CSS_VARIABLE: Readonly<Record<keyof ColorTokens, string>> = {
   brand: '--color-brand',
-  brandSubtle: '--color-brand-subtle',
   primary: '--color-primary',
   primaryHover: '--color-primary-hover',
   primaryForeground: '--color-primary-foreground',
   text: '--color-text',
+  textBody: '--color-text-body',
   textMuted: '--color-text-muted',
   background: '--color-background',
+  surfaceSoft: '--color-surface-soft',
+  surfaceStrong: '--color-surface-strong',
+  // 成功色。:root の --success はこの変数だけを参照し、アクション色を参照してはならない
+  // （下の「success 意味論変数」の検証が向きを固定する）。
+  success: '--color-success',
   destructive: '--color-destructive',
   destructiveForeground: '--color-destructive-foreground',
   border: '--color-border',
@@ -272,18 +301,34 @@ describe('success 意味論変数の AA 準拠参照（Requirements 2.1, 5.2）'
     return match?.[1]?.trim();
   }
 
-  it('--success が定義され、AA 準拠の primary を参照する（brand は参照しない）', () => {
+  it('--success は専用の成功色だけを参照する（アクション色・ブランド色・危険色は参照しない）', () => {
+    // かつて --success は --color-primary を参照していた。その状態でアクション色を暖色系へ
+    // 差し替えると、成功通知が危険通知と同系色になる。**色相の変化は輝度を変えないため、
+    // コントラスト比を見るどのガードにも掛からず CI 全緑で通る。**
+    // 参照先そのものを固定してこの経路を塞ぐ（Requirements 2.1）。
     const value = declarationValue('success');
     expect(value, '--success が theme.css に定義されていません').toBeDefined();
-    expect(value).toContain('var(--color-primary)');
-    expect(value).not.toContain('var(--color-brand)');
+    expect(value).toContain('var(--color-success)');
+    for (const forbidden of ['var(--color-primary)', 'var(--color-brand)', 'var(--color-destructive)']) {
+      expect(
+        value,
+        `--success が ${forbidden} を参照しています。参照元の色を差し替えると成功通知が巻き込まれます。`,
+      ).not.toContain(forbidden);
+    }
   });
 
-  it('--color-success が公開され、text-success ユーティリティが生成される', () => {
-    // @theme inline へ公開しないと Tailwind は text-success を「静かに生成しない」
-    // （design.md Error Handling の既知の落とし穴）。
-    const value = declarationValue('color-success');
-    expect(value, '--color-success が @theme inline に公開されていません').toBeDefined();
-    expect(value).toContain('var(--success)');
+  it('--color-success は @theme の実値として宣言される（@theme inline では公開しない）', () => {
+    // 成功色は意味役割として独立した実値を持つため、他の色役割と同じく @theme 側に置く。
+    // @theme と @theme inline の両方に同名を置くと循環参照になるため、inline からは外す。
+    const themeBlockValue = declarationIn(extractThemeBlock(themeCss), '--color-success');
+    expect(
+      themeBlockValue,
+      '--color-success が theme.css の @theme ブロックに定義されていません',
+    ).toBeDefined();
+    expect(themeBlockValue?.toUpperCase()).toBe(colors.success.toUpperCase());
+    expect(
+      declarationIn(extractThemeInlineBlock(themeCss), '--color-success'),
+      '--color-success が @theme inline にも宣言されています（@theme と二重定義になり循環参照になります）',
+    ).toBeUndefined();
   });
 });

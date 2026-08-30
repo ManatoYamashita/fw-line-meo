@@ -26,6 +26,11 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // （ui-token-collision タスク 1.1 で切り出し。base をアプリディレクトリへ固定する条件を
 // 二重管理にしないため。同モジュール冒頭のコメント参照）。
 import { APPS, compileWithAppToolchain, componentsDir, uiSrcDir } from './support/compile-app-css';
+// 見出しの階層は「theme.css の @layer base が生 <h1>〜<h6> に与える既定」と「共通部品 Heading が
+// レベルごとに与えるユーティリティ」の 2 箇所が別々に持っている。両者の一致は長らくコメントで
+// 主張されていただけで検証が無く、実際に食い違っていた（ui-airbnb-foundation N2）。
+// 実装そのものを import して照合するため、この表をテスト側に書き写さない。
+import { DEFAULT_SIZE_BY_LEVEL, headingVariants } from '../src/components/heading';
 
 /**
  * 代表部品と、その部品にしか現れないユーティリティクラス。
@@ -159,6 +164,119 @@ function declarationsOf(rule: Rule): Readonly<Record<string, string>> {
     declarations[decl.prop] = decl.value;
   });
   return declarations;
+}
+
+/**
+ * 生成 CSS に現れるカスタムプロパティの宣言表（`--name -> 値`）。
+ *
+ * 同名が複数回宣言された場合は後勝ちで畳む（カスケードと同じ向き）。
+ * Tailwind の `@property` は `syntax` / `inherits` を宣言するだけで `--name: 値` を持たないため、
+ * ここには入らない。
+ */
+function cssVariableMap(css: string): ReadonlyMap<string, string> {
+  const variables = new Map<string, string>();
+  postcss.parse(css).walkDecls((decl) => {
+    if (decl.prop.startsWith('--')) variables.set(decl.prop, decl.value.trim());
+  });
+  return variables;
+}
+
+/**
+ * `var(--x)` / `var(--x, フォールバック)` を宣言表で展開し、実値へ解決する。
+ *
+ * 括弧の深さを数えて対応する閉じ括弧を探す。単純な正規表現だと
+ * `var(--tw-leading, var(--text-2xl--line-height))` のような入れ子で末尾まで飲み込み、
+ * 内側の変数名を取り違える。未定義の変数はフォールバック側へ倒す。
+ * 循環参照で止まらなくならないよう展開回数に上限を置く。
+ */
+function resolveCssValue(value: string, variables: ReadonlyMap<string, string>): string {
+  let current = value.trim();
+  for (let step = 0; step < 16; step += 1) {
+    const start = current.indexOf('var(');
+    if (start < 0) return current.trim();
+    let depth = 0;
+    let end = -1;
+    for (let i = start + 3; i < current.length; i += 1) {
+      if (current[i] === '(') depth += 1;
+      else if (current[i] === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return current.trim();
+    const inner = current.slice(start + 4, end);
+    const comma = inner.indexOf(',');
+    const name = (comma < 0 ? inner : inner.slice(0, comma)).trim();
+    const fallback = comma < 0 ? '' : inner.slice(comma + 1).trim();
+    current = current.slice(0, start) + (variables.get(name) ?? fallback) + current.slice(end + 1);
+  }
+  return current.trim();
+}
+
+/** 生成 CSS から、セレクタが `.{utility}` と完全一致する規則の宣言を集める。 */
+function utilityDeclarations(css: string, utility: string): Readonly<Record<string, string>> {
+  const declarations: Record<string, string> = {};
+  postcss.parse(css).walkRules((rule) => {
+    if (rule.selector.trim() !== `.${utility}`) return;
+    Object.assign(declarations, declarationsOf(rule));
+  });
+  return declarations;
+}
+
+/**
+ * 見出しの見え方を決める 3 プロパティ。
+ *
+ * `font-size` だけでは足りない。Preflight は `font-size` と `font-weight` の両方を潰すし、
+ * 行間は既存のどのガードも見ていなかった（実際に base 側 1.3 と部品側 1.25 が食い違っていた）。
+ */
+const HEADING_VISUAL_PROPERTIES = ['font-size', 'font-weight', 'line-height'] as const;
+
+/** 生成 CSS の `h{level}` 単独規則から、見え方 3 プロパティを実値で取り出す。 */
+function headingBaseVisual(
+  css: string,
+  level: number,
+  variables: ReadonlyMap<string, string>,
+): Readonly<Record<string, string>> {
+  const declarations: Record<string, string> = {};
+  postcss.parse(css).walkRules((rule) => {
+    if (rule.selector.trim() !== `h${level}`) return;
+    Object.assign(declarations, declarationsOf(rule));
+  });
+  const visual: Record<string, string> = {};
+  for (const property of HEADING_VISUAL_PROPERTIES) {
+    const raw = declarations[property];
+    if (raw !== undefined) visual[property] = resolveCssValue(raw, variables);
+  }
+  return visual;
+}
+
+/**
+ * 共通部品 Heading がレベル n へ与えるユーティリティ群から、見え方 3 プロパティを実値で組み立てる。
+ *
+ * ユーティリティの実値は**実コンパイル結果から引く**。Tailwind 既定の行間や太さの数値を
+ * このファイルへ書き写すと、Tailwind 側が値を変えたときに気づけない写しになる。
+ * クラスは記述順に後勝ちで畳む（`text-2xl` の行間を `leading-tight` が上書きする関係を再現する）。
+ */
+function headingComponentVisual(
+  css: string,
+  level: 1 | 2 | 3 | 4 | 5 | 6,
+  variables: ReadonlyMap<string, string>,
+): Readonly<Record<string, string>> {
+  const utilities = headingVariants({ size: DEFAULT_SIZE_BY_LEVEL[level] })
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+  const visual: Record<string, string> = {};
+  for (const utility of utilities) {
+    const declarations = utilityDeclarations(css, utility);
+    for (const property of HEADING_VISUAL_PROPERTIES) {
+      const raw = declarations[property];
+      if (raw !== undefined) visual[property] = resolveCssValue(raw, variables);
+    }
+  }
+  return visual;
 }
 
 /**
@@ -534,6 +652,43 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
         ).toBeLessThan(sizes[i - 1]!);
       }
     });
+
+    // 見出しの階層は 2 箇所が別々に持っている。theme.css の `@layer base` が生 <h1>〜<h6> へ与える
+    // 既定と、共通部品 Heading がレベルごとに与えるユーティリティである。**この 2 つの一致を
+    // 検証するものが 1 本も無かった**ため、実際に食い違ったまま両方が緑で通っていた
+    // （base 側 h1 の行間 1.3 に対し部品側は leading-tight = 1.25 等）。
+    //
+    // 食い違いの実害は「同じ見出しレベルなのに、素のタグで書いたか部品で書いたかで見え方が変わる」
+    // ことである。#48 が是正した「見出しが本文と同じ大きさで描かれる」と同じく、
+    // **画面を目視するまで誰も気づけない**種類の劣化にあたる。
+    it.each(HEADING_LEVELS)(
+      'h%i の既定と共通部品 Heading の描画が寸法・太さ・行間で一致する',
+      (level) => {
+        const variables = cssVariableMap(compiled);
+        const base = headingBaseVisual(compiled, level, variables);
+        const component = headingComponentVisual(compiled, level, variables);
+
+        // 解決に失敗した値（var( が残る・空）を「一致」と読み違えないための前提確認。
+        for (const [source, visual] of [
+          ['@layer base', base],
+          ['Heading 部品', component],
+        ] as const) {
+          for (const property of HEADING_VISUAL_PROPERTIES) {
+            const value = visual[property];
+            expect(value, `${source} の h${level} に ${property} がありません`).toBeDefined();
+            expect(value, `${source} の h${level} の ${property} を実値へ解決できていません`).not.toMatch(
+              /var\(|^$/,
+            );
+          }
+        }
+
+        expect(
+          component,
+          `h${level} の見え方が @layer base と Heading 部品で食い違っています。` +
+            'どちらか一方だけを変えると、同じ見出しレベルが書き方によって別の大きさで描かれます',
+        ).toEqual(base);
+      },
+    );
 
     it('@source を外すと部品のユーティリティが消える（ガードが空振りしていないことの証明）', () => {
       // ここが落ちる場合、@source 無しでも部品が拾えている＝本テストの 4 層目が意味を失っている。

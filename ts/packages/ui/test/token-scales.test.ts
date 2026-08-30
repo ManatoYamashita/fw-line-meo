@@ -319,9 +319,23 @@ const PROBED_NAMESPACES: Readonly<Record<string, readonly string[]>> = {
 
 /**
  * 余白トークンと Tailwind の数値スケールの対応表（正典）。
- * 余白基数 0.25rem に対し xs=×1 / sm=×2 / md=×4 / lg=×6 / xl=×8。
+ *
+ * 余白基数 0.25rem に対し xxs=×0.5 / xs=×1 / sm=×2 / md=×3 / base=×4 / lg=×6 / xl=×8 /
+ * xxl=×12 / section=×16。これは意匠の出典（docs/design/upstream/airbnb-DESIGN.md）の
+ * 9 段（2/4/8/12/16/24/32/48/64 px）と余りなく対応する。**余りが出ないことが、余白の
+ * 名前付きキーを @theme へ宣言せずに出典の余白律を採れる根拠である**（Issue #54）。
  */
-const SPACING_STEPS: Readonly<Record<string, number>> = { xs: 1, sm: 2, md: 4, lg: 6, xl: 8 };
+const SPACING_STEPS: Readonly<Record<string, number>> = {
+  xxs: 0.5,
+  xs: 1,
+  sm: 2,
+  md: 3,
+  base: 4,
+  lg: 6,
+  xl: 8,
+  xxl: 12,
+  section: 16,
+};
 
 /** ベンダリングした部品のソース（角丸の使用側の網羅に用いる）。 */
 function readComponentSources(): readonly string[] {

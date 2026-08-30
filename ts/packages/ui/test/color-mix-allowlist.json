@@ -4,10 +4,10 @@
     {
       "file": "button.tsx",
       "expression": "color-mix(in_oklab,var(--secondary),var(--foreground)_5%)",
-      "measuredHex": "#E6F0E9",
+      "measuredHex": "#E6E6E6",
       "foreground": "secondary-foreground",
       "kind": "text",
-      "reason": "variant=secondary の hover。--secondary(#F0FBF4) に --foreground(#333333) を 5% 混色して面を暗くする。文字は --secondary-foreground(#333333) のままで、合成方向が「暗くする」ため hover していない状態（11.92:1）より悪化しない。混色空間が oklch だと無彩色である --foreground の色相が powerless となり結果の hue が none（描画時 0 = 赤）になるため、実描画が赤寄り #F5E9EC になっていた。色相成分を持たない oklab で混ぜることで意図どおりの #E6F0E9 になる。この値は e2e/ui-foundation.spec.ts が実ブラウザで実測して一致を検証する。"
+      "reason": "variant=secondary の hover。--secondary（中立のやや濃い面）に --foreground（本文色）を 5% 混色して 面を暗くする。文字は --secondary-foreground のままで、合成方向が「暗くする」ため hover していない 状態（14.21:1）より悪化しない（合成後 12.75:1）。混色空間が oklch だと無彩色である --foreground の 色相が powerless となり結果の hue が none（描画時 0 = 赤）になるため、実描画が赤寄りになっていた。色相成分を持たない oklab で混ぜることで意図どおりの中立灰になる。この値は e2e/ui-foundation.spec.ts が 実ブラウザで実測して一致を検証する。意匠を Airbnb 系へ差し替えた際、--secondary と --foreground が 同時に動いたため再実測した（Chromium・2026-08-30）。"
     }
   ]
 }

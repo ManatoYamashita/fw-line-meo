@@ -116,16 +116,16 @@ function resolveSemanticColor(name: string, seen: readonly string[] = []): strin
 
 describe('意味論名の hex 解決（theme.css からの導出・自己検証）', () => {
   it('@theme に直接ある色をそのまま返す', () => {
-    expect(resolveSemanticColor('primary')).toBe('#15803D');
+    expect(resolveSemanticColor('primary')).toBe('#E00B41');
   });
 
   it('@theme inline → :root → @theme の参照鎖をたどる', () => {
     // --color-card -> var(--card) -> var(--color-background) -> #FFFFFF
     expect(resolveSemanticColor('card')).toBe('#FFFFFF');
-    // --color-success -> var(--success) -> var(--color-primary) -> #15803D
+    // --color-success -> @theme の実値（アクション色を経由しなくなった）
     expect(resolveSemanticColor('success')).toBe('#15803D');
-    // --color-muted-foreground -> var(--muted-foreground) -> var(--color-text-muted) -> #666666
-    expect(resolveSemanticColor('muted-foreground')).toBe('#666666');
+    // --color-muted-foreground -> var(--muted-foreground) -> var(--color-text-muted)
+    expect(resolveSemanticColor('muted-foreground')).toBe('#6A6A6A');
   });
 
   it('未定義の意味論名は例外にする（静かな空振りを防ぐ）', () => {
@@ -972,4 +972,51 @@ describe('color-mix ガード: 静的検証できない色指定を野放しに�
       ).toBeGreaterThanOrEqual(threshold);
     });
   }
+});
+
+
+// フォーカス指標の色の隣接コントラスト（Requirements 2.3, 2.4 / SC 1.4.11）。
+//
+// **この検証が無かった。** `:focus-visible { outline: 2px solid var(--ring) }` は
+// ユーティリティではなく `@layer base` のグローバル既定なので、上の網羅ガード（部品ソースから
+// 色ユーティリティを抽出する）の走査対象に一度も入っていない。結果として `--ring` の値が
+// 何であるかを誰も検証していなかった。
+//
+// 判定の相手は**要素の面色ではなく親の背景**である。輪郭は `outline-offset` により要素の
+// 2px 外側へ描かれ、その隙間には親の背景が見えるためである。したがってアクション色で塗った
+// ボタンの面色に対する比は問わない（輪郭がそこへ接しない）。
+// **この推論は offset が 0 でないことに依存する。** offset を 0 にする変更を入れるときは、
+// 判定の相手を面色側へ変えること。
+describe('フォーカス指標の色の隣接コントラスト（Requirements 2.3, 2.4）', () => {
+  /** 輪郭の外側に見えうる面（ページ・カード・ミュート面・副次面・ポップオーバー）。 */
+  const ADJACENT_SURFACES = ['background', 'card', 'muted', 'secondary', 'popover'] as const;
+
+  it('outline-offset が 0 ではない（隣接色を親の背景と見なす前提の確認）', () => {
+    // 前提そのものが崩れたら、下の判定は「測ってはいるが違うものを測っている」状態になる。
+    const offset = /:focus-visible\s*\{[^}]*outline-offset:\s*([^;]+);/.exec(themeCss)?.[1]?.trim();
+    expect(offset, ':focus-visible に outline-offset がありません').toBeDefined();
+    expect(offset, `outline-offset が ${offset} です。0 だと輪郭が要素の面色に接します`).not.toMatch(
+      /^0(px|rem|em)?$/,
+    );
+  });
+
+  it.each(ADJACENT_SURFACES)('輪郭の色は %s に対して 3:1 以上', (surface) => {
+    const ring = resolveSemanticColor('ring');
+    const background = resolveSemanticColor(surface);
+    const ratio = contrastRatio(ring, background);
+    expect(
+      ratio,
+      `輪郭(${ring}) と ${surface}(${background}) のコントラストが ${ratio.toFixed(2)}:1 で ` +
+        `${AA_NON_TEXT_RATIO}:1 を下回ります。キーボード操作時に現在位置が見えません。`,
+    ).toBeGreaterThanOrEqual(AA_NON_TEXT_RATIO);
+  });
+
+  it('輪郭の色はアクション色と同値ではない', () => {
+    // 同値だと、アクション色で塗った面の周囲で輪郭が消える（offset の隙間が親背景でも、
+    // 面の縁と輪郭が同色である状態は指標として弱い）。
+    expect(
+      resolveSemanticColor('ring'),
+      '輪郭の色がアクション色と同値です',
+    ).not.toBe(resolveSemanticColor('primary'));
+  });
 });
