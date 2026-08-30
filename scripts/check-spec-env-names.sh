@@ -32,8 +32,18 @@
 #   2. 各行の第 1 列がバッククォートで囲んだ env 名の形である（`` `FOO` ``）
 #   3. 第 2 列の出典が解決する（バッククォート囲みのリポジトリ相対パス、または直前行を継ぐ `同上`）。
 #      解決したパスが実在しなければ赤（パスの腐りを検出する）
-#   4. **方向 1（文書 → 実装）**: 表の env 名が出典ファイルに文字列として実在する
-#      （`CORS_ORIGIN` を表へ書くと `config.ts` に無いので赤）
+#   4. **方向 1（文書 → 実装）**: 表の env 名が出典ファイルに **語として** 実在する
+#      （`CORS_ORIGIN` を表へ書くと `config.ts` に無いので赤）。
+#      **部分一致で見てはならない**（Issue #176）。旧名はより長い新名の部分文字列として当たり
+#      続けるため、`grep -F` だけだと **実装側の改名が丸ごと素通りする**。実測: `pool.ts` の
+#      `DATABASE_URL` を `DATABASE_URL_PRIMARY` へ改名しても `-cF` は 4 件当たって緑、`-cwF` は
+#      0 件で赤。改名は「実在しない env 名が手順に残る」最も普通の経路であり、#148 が塞ごうと
+#      した形そのものがそこだけ開いていた。露出するのは方向 2 が守らない行だけで
+#      （必須 env は「新名が表に無い」と方向 2 が赤にする）、現状は `DATABASE_URL`（条件付き
+#      必須）と `PORT`（任意 env）の 2 行である。とくに前者は、名前がずれると手順どおりに値を
+#      置いても**黙って無視され Cloud SQL IAM 接続へ倒れる**。起動は成功するので失敗として現れない。
+#      `-w` の語構成文字は英数字と `_` で、上記 2 が強制する env 名の文法と一致する。先行例は
+#      `db/test/check_docs.sh` の `count_matches -wF`（テーブル名の実在確認）。
 #   5. **方向 2（実装 → 文書）**: 出典ファイルの `throw new Error('<NAME> is required')` が
 #      すべてその表に載っている（`SURVEY_BASE_URL` / `PLACES_API_KEY` の欠落で赤）
 #   6. 空振り防止: 走査対象 0 件・表 0 件・本文行 0 件・方向 2 の対象出典が全体で 0 件はいずれも赤
@@ -249,13 +259,26 @@ while IFS=$'\t' read -r _kind spec _tbl lineno name src; do
     continue
   fi
   hit_rc=0
-  hits="$(grep -cF -- "$name" "${ROOT}/${src}")" || hit_rc=$?
+  # **語として照合する（`-w`）。部分一致では改名の取り残しが素通りする。** 旧名はより長い新名の
+  # 部分文字列として当たり続けるため、`-F` だけだと `PORT` が `SERVER_PORT` に、`DATABASE_URL` が
+  # `DATABASE_URL_PRIMARY` に当たって緑を返す（Issue #176）。`-w` の語構成文字は英数字と `_` で、
+  # 上の BADENV 判定が強制する env 名の文法（`[A-Z][A-Z0-9_]*`）と一致する。
+  hits="$(grep -cwF -- "$name" "${ROOT}/${src}")" || hit_rc=$?
   if [ "$hit_rc" -gt 1 ]; then
     note_fail "${spec}:${lineno} の出典 '${src}' を走査できません（grep exit=${hit_rc}）。"
     continue
   fi
   if [ "${hits:-0}" -eq 0 ]; then
     note_fail "${spec}:${lineno} の \`${name}\` は出典 '${src}' に存在しません（実在しない env 名です）。"
+    # 語としては 0 件でも部分一致で当たるなら、原因はほぼ確実に「より長い名前への改名の取り残し」
+    # である。ここを黙っていると、読み手はソースを素朴に grep して新名に当たり、**ガードのほうが
+    # 誤っていると読む**。件数を添えて両者を区別できるようにする。
+    sub_rc=0
+    sub="$(grep -cF -- "$name" "${ROOT}/${src}")" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ] && [ "${sub:-0}" -gt 0 ]; then
+      echo "       → ただし部分一致では ${sub} 件当たります。より長い env 名へ改名され、表が" >&2
+      echo "         取り残された可能性があります（例 PORT → SERVER_PORT）。" >&2
+    fi
     echo "       → 実装が読んでいる名前へ直してください。手順どおりに起動しても env が効かず、" >&2
     echo "         必須 env なら起動時に '<NAME> is required' で落ちます（Issue #148 の CORS_ORIGIN と同型）。" >&2
   fi

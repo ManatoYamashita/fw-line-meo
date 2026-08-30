@@ -74,6 +74,33 @@ export function loadConfig(env) {
 EOF
 }
 
+spen_rename_env() {
+  # 合成ツリーの config.ts の env 名を改名する（$1 = 旧名 / $2 = 新名）。
+  #
+  # **改名は「実在しない env 名が手順に残る」最も普通の経路である**（Issue #176）。旧名は新名の
+  # 部分文字列として当たり続けるため、実在確認を部分一致で行っているとガードは緑のまま通る。
+  #
+  # fixture の定義は spen_src の 1 箇所に置いたまま**派生させる**。別途リテラルで書き直すと、
+  # 片方だけが更新される日が来る — fixtures.sh 冒頭が禁じている二重定義そのものである。
+  # sed -i はプラットフォームで引数が異なるため、spen_whitelist と同じく sed と mv で行う。
+  spen_from="$1"
+  spen_to="$2"
+  spen_cfg="${FX}/ts/apps/demo/src/config.ts"
+  sed "s/${spen_from}/${spen_to}/g" "$spen_cfg" > "${spen_cfg}.tmp"
+  mv "${spen_cfg}.tmp" "$spen_cfg"
+
+  # **着弾を先に確かめる**（fx_guard_mutate と同じ規律）。空振りしたまま走らせると、無改変の
+  # ツリーを検査した結果を「改名を検出できた／できなかった」と読み違える。旧名の残存も見るのは、
+  # 部分置換で `DEMO_PORT` と `DEMO_PORT_V2` が同居した木を「改名済み」と誤認しないため。
+  assert_count=$((assert_count + 1))
+  if [ "$(grep -cwF -- "$spen_to" "$spen_cfg")" -eq 0 ]; then
+    _t_fail "改名の注入が空振りしました: ${spen_from} -> ${spen_to}"
+  fi
+  if [ "$(grep -cwF -- "$spen_from" "$spen_cfg")" -ne 0 ]; then
+    _t_fail "改名したのに旧名が語として残っています: ${spen_from}"
+  fi
+}
+
 spen_base() {
   spen_src
   fx_guard check-spec-env-names
@@ -119,6 +146,9 @@ EOF
 fx_run check-spec-env-names
 expect_red '`DEMO_CORS_ORIGIN` は出典 '"'"'ts/apps/demo/src/config.ts'"'"' に存在しません'
 expect_output_matches 'NG: spec の env 宣言表と実装の必須 env に乖離があります'
+# 部分一致すらしない名前なので、改名ヒント（#176）は出してはならない。誤射すると
+# 「実在しない名前」と「改名の取り残し」を読み手が区別できなくなる。
+expect_absent '部分一致では'
 t_end
 
 t_begin 'check-spec-env-names: 出典の必須 env が表に無ければ赤（方向 2・SURVEY_BASE_URL と同型）'
@@ -336,4 +366,50 @@ fx_write .kiro/specs/demo/tasks.md <<'EOF'
 EOF
 fx_run check-spec-env-names
 expect_red '必須 env を抽出できた出典が 1 件もありません'
+t_end
+
+# ---------------------------------------------------------------------------
+# 17-18. 改名の取り残し（Issue #176）。
+#
+# 方向 1 の実在確認が部分一致（`grep -cF`）だと、実装側が **より長い env 名へ改名された**とき
+# 旧名が新名の部分文字列として当たり続け、ガードは緑のまま通る。#148 が塞ごうとした形
+# （手順が実在しない env 名を指示している）そのものが、そこだけ素通りしていた。
+
+t_begin 'check-spec-env-names: より長い env 名への改名を表が取り残していれば赤（方向 1・部分一致では素通りしない）'
+spen_base
+# **改名するのは任意 env（DEMO_PORT）である。** 穴が露出するのは方向 2（実装 → 文書）が守らない
+# 行だけで、必須 env を改名すると「新名が表に無い」と方向 2 が先に赤にする。それでは方向 2 の
+# 守りを方向 1 の検出と読み違えるうえ、exit code が現行実装でも 1 になり穴を示せない。
+# 実リポジトリで露出しているのも DATABASE_URL（条件付き必須）と PORT（任意）の 2 行だけである。
+spen_rename_env DEMO_PORT DEMO_PORT_V2
+fx_write .kiro/specs/demo/tasks.md <<'EOF'
+| env | 出典 | ローカルでの値 |
+|---|---|---|
+| `DEMO_BASE_URL` | `ts/apps/demo/src/config.ts` | 基点 URL |
+| `DEMO_API_KEY` | 同上 | 実キー |
+| `DEMO_PORT` | 同上 | 省略時 8080 |
+EOF
+fx_run check-spec-env-names
+expect_red '`DEMO_PORT` は出典 '"'"'ts/apps/demo/src/config.ts'"'"' に存在しません'
+# 素朴に grep すると DEMO_PORT_V2 に当たるため、読み手は「ガードのほうが誤っている」と読む。
+# 部分一致の件数を添えて、改名の取り残しであることを名指しする。
+expect_output_matches 'ただし部分一致では 1 件当たります'
+# 方向 2 は無関係である（必須 env は表に載ったまま）。赤の原因を取り違えないことを固定する。
+expect_absent '必須 env `DEMO_BASE_URL` がありません'
+expect_absent '必須 env `DEMO_API_KEY` がありません'
+t_end
+
+t_begin 'check-spec-env-names: 対照 — 改名へ表を追随させれば緑（赤の原因は取り残しの一点）'
+spen_base
+spen_rename_env DEMO_PORT DEMO_PORT_V2
+fx_write .kiro/specs/demo/tasks.md <<'EOF'
+| env | 出典 | ローカルでの値 |
+|---|---|---|
+| `DEMO_BASE_URL` | `ts/apps/demo/src/config.ts` | 基点 URL |
+| `DEMO_API_KEY` | 同上 | 実キー |
+| `DEMO_PORT_V2` | 同上 | 省略時 8080 |
+EOF
+fx_run check-spec-env-names
+expect_green
+expect_absent 'DEMO_PORT_V2` は出典'
 t_end
