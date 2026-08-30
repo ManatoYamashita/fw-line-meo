@@ -16,15 +16,21 @@
 /* --- Tailwind v4 デザイントークン（@fwlm/design-tokens と同値） --- */
 @theme {
   /* Colors（design-tokens colors） */
-  --color-brand: #1DB446;
-  --color-brand-subtle: #F0FBF4;
-  --color-primary: #15803D;
-  --color-primary-hover: #166534;
+  --color-brand: #FF385C;
+  --color-primary: #E00B41;
+  --color-primary-hover: #B30934;
   --color-primary-foreground: #FFFFFF;
-  --color-text: #333333;
-  --color-text-muted: #666666;
+  --color-text: #222222;
+  --color-text-body: #3F3F3F;
+  --color-text-muted: #6A6A6A;
   --color-background: #FFFFFF;
-  --color-destructive: #B91C1C;
+  --color-surface-soft: #F7F7F7;
+  --color-surface-strong: #F2F2F2;
+  /* 成功色はアクション色と共有しない。共有していると、アクション色を暖色系へ変えた瞬間に
+   * 成功通知が危険通知と同系色になる。色相の変化は輝度を変えないため、コントラスト比を見る
+   * どのガードにも掛からず CI 全緑で通る（design-tokens の test/colors.test.ts が塞ぐ）。 */
+  --color-success: #15803D;
+  --color-destructive: #B32505;
   --color-destructive-foreground: #FFFFFF;
   /* 枠色は「部品の識別に必要な枠」と「情報を持たない純装飾の罫線」で意味役割が分かれる。
    * --color-border は後者（区切り線・カード罫線・情報コンテナ外枠）で、SC 1.4.11 の対象外。
@@ -51,7 +57,8 @@
    * ビルドが通る状態になる（Issue #54）。test/token-scales.test.ts が機械検証する。
    *
    * design-tokens の余白トークンと数値スケールの対応（余白基数 0.25rem に対する倍率）:
-   *   xs = ×1 / sm = ×2 / md = ×4 / lg = ×6 / xl = ×8
+   *   xxs = ×0.5 / xs = ×1 / sm = ×2 / md = ×3 / base = ×4 / lg = ×6 / xl = ×8 / xxl = ×12 / section = ×16
+   * これは意匠の出典の 9 段（2/4/8/12/16/24/32/48/64 px）と余りなく対応する。
    * design-tokens 側の定義は LINE Flex Message など CSS 以外の消費先のために維持する。 */
 
   /* 角丸は Tailwind の既定スケールをそのまま用いる。本ファイルは段の上書きを行わない。
@@ -65,10 +72,10 @@
    * 宣言を外すと「描画される角丸に対応するトークンが存在しない」状態になるため。 */
   --radius-full: 9999px;
 
-  /* Shadow（design-tokens shadow・影色は 8 桁アルファ hex） */
-  --shadow-sm: 0 1px 2px 0 #0000000D;
-  --shadow-md: 0 4px 6px -1px #0000001A, 0 2px 4px -2px #0000001A;
-  --shadow-lg: 0 10px 15px -3px #0000001A, 0 4px 6px -4px #0000001A;
+  /* Shadow（design-tokens shadow・影色は 8 桁アルファ hex）
+   * 意匠の出典は影を 1 段しか持たない。面の分離は影ではなく 1px の輪郭と余白が担う。
+   * 無印の --shadow は上書きしない（Tailwind 既定クラスの意味が静かに変わるため）。 */
+  --shadow-raised: 0 0 0 1px #00000005, 0 2px 6px 0 #0000000A, 0 4px 8px 0 #0000001A;
 }
 
 /* --- dark バリアントの無効化（ダークモードは本 spec の Non-Goals） ---
@@ -91,20 +98,23 @@
   --popover-foreground: var(--color-text);
   --primary: var(--color-primary);
   --primary-foreground: var(--color-primary-foreground);
-  --secondary: var(--color-brand-subtle);
+  /* 副次面・ミュート面は意匠の出典の中立色から供給する。以前はブランドの淡色を割り当てていたが、
+   * 出典は「白 90% とインク、そこへアクセントを 1〜2 箇所」という構成であり、副次面に色を持たせない。 */
+  --secondary: var(--color-surface-strong);
   --secondary-foreground: var(--color-text);
-  --muted: var(--color-brand-subtle);
+  --muted: var(--color-surface-soft);
   --muted-foreground: var(--color-text-muted);
-  --accent: var(--color-brand-subtle);
+  --accent: var(--color-surface-soft);
   --accent-foreground: var(--color-text);
   --destructive: var(--color-destructive);
   --destructive-foreground: var(--color-destructive-foreground);
-  /* 成功通知（Alert の success 変種）の色。ブランド緑（--color-brand）は白背景の通常文字で
-   * 約 2.74:1 と WCAG AA（4.5:1）に届かないため、成功の「文字色」には AA 準拠の primary
-   * （白文字比で約 5.02:1・design-tokens の colors.test.ts が保証）を割り当てる。
-   * ブランド緑は装飾・面塗り用途に留める
-   * （Requirements 2.1, 5.2 / test/theme-sync.test.ts が対応付けを機械固定する）。 */
-  --success: var(--color-primary);
+  /* 成功通知（Alert の success 変種）の色。
+   * **アクション色を参照してはならない。** 以前は --color-primary を参照していたが、
+   * その状態でアクション色を暖色系へ差し替えると成功通知が危険通知と同系色になる。
+   * 色相の変化は輝度を変えないため、コントラスト比を見るどのガードにも掛からず CI 全緑で通る。
+   * ブランド色は白背景の通常文字で AA に届かないため成功の文字色にも使えない
+   * （Requirements 2.1, 2.5 / test/theme-sync.test.ts が対応付けを機械固定する）。 */
+  --success: var(--color-success);
   --border: var(--color-border);
   /* フォーム入力部品と対話的部品の輪郭の色（識別用・SC 1.4.11 の 3:1 対象）。
    * 上の --border（純装飾の罫線）とは別の意味役割であり、値も別の役割トークンから供給される。
@@ -116,14 +126,23 @@
    * 記録済み（WCAG は無効化部品を対象外とし、無効化がより明確に見えることは改善である）。
    * ダークモードを導入する際は、この二重用途を必ず再設計すること。 */
   --input: var(--color-border-interactive);
-  --ring: var(--color-primary);
+  /* キーボード操作時の輪郭の色。**アクション色を参照してはならない。**
+   * アクション色を参照していると、アクション色で塗った面の周囲に同色の輪郭が出て指標が消える。
+   * 本文色（インク）は白面に対して約 15.9:1 で、意匠の出典自身のフォーカス表現
+   *（枠が 2px インクへ太る）とも一致する。
+   * 輪郭は outline-offset により要素の 2px 外側へ描かれるため、隣接色は要素の面色ではなく
+   * 親の背景である。判定はその面（background / card / muted / secondary / popover）に対して
+   * 行う（test/contrast-usage.test.ts）。**offset を 0 にする変更は、この推論を無効にする。** */
+  --ring: var(--color-text);
   --radius: var(--radius-md);
 }
 
 /* shadcn 意味論名を Tailwind の色ユーティリティ名前空間へ公開する
  * （bg-card / text-muted-foreground / bg-secondary / border-input 等の生成に必要）。
  * design-tokens に既存の名前（background / primary / primary-foreground / destructive /
- * destructive-foreground / border）は @theme で定義済みのため再定義しない（循環参照防止）。 */
+ * destructive-foreground / border / success）は @theme で定義済みのため再定義しない（循環参照防止）。
+ * success はかつてここで公開していたが、意味役割として独立した実値を持つようになったため
+ * @theme 側へ移した。両方に置くと循環参照になる。 */
 @theme inline {
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -138,7 +157,6 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-success: var(--success);
 }
 
 /* --- Base UI 必須ベーススタイル + グローバル focus-visible 既定 ---
@@ -163,29 +181,36 @@
    * CSS は無言でカスケードするため画面を目視するまで気づけない種類の劣化であり、
    * test/app-integration.test.ts が実 Tailwind コンパイル結果でこの規則の生成と
    * preflight より後段であることを機械検証する。
-   * 値は @theme のタイポグラフィトークン（--text-*）参照のみで、新規の実寸を持ち込まない。 */
+   * 値は @theme のタイポグラフィトークン（--text-*）参照のみで、新規の実寸を持ち込まない。
+   *
+   * **行間と太さは共通部品 Heading の既定と一致していなければならない。** 同じ見出しレベルが
+   * 素のタグで書いたか部品で書いたかによって別の大きさで描かれるのを防ぐためであり、
+   * 一致は test/app-integration.test.ts が実コンパイル結果で機械検証する（かつて食い違っていた）。
+   * 行間の値は Tailwind の leading-tight / leading-snug / leading-normal と厳密に一致させてある。
+   * 意匠の出典の行間（1.18〜1.20）まで詰めないのは、日本語の全角字形が上下の余りを持たず
+   * 折り返し時に窮屈になるためである。 */
   h1 {
     font-size: var(--text-2xl);
     font-weight: 700;
-    line-height: 1.3;
+    line-height: 1.25;
   }
 
   h2 {
     font-size: var(--text-xl);
-    font-weight: 700;
-    line-height: 1.35;
+    font-weight: 600;
+    line-height: 1.25;
   }
 
   h3 {
     font-size: var(--text-lg);
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 1.375;
   }
 
   h4 {
     font-size: var(--text-base);
     font-weight: 600;
-    line-height: 1.5;
+    line-height: 1.375;
   }
 
   h5 {
