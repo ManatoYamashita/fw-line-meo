@@ -11,6 +11,9 @@ import { colors, compositeOver, contrastRatio, hexToRgb, relativeLuminance } fro
 /** 通常文字の WCAG 2.1 AA 基準（Requirements 5.2）。 */
 const AA_NORMAL_TEXT_RATIO = 4.5;
 
+/** 非テキスト（部品の境界・状態の指標）の WCAG 2.1 AA 基準（SC 1.4.11）。 */
+const AA_NON_TEXT_RATIO = 3;
+
 /** Web 面でテキスト描画に使う前景/背景の全ペア（意味役割名で列挙）。 */
 const AA_TEXT_PAIRS: ReadonlyArray<{
   foreground: keyof typeof colors;
@@ -184,6 +187,30 @@ describe('成功と危険の識別（Requirements 2.1, 2.2）', () => {
       side(colors.success),
       '成功色と危険色が同じ側にあります。色で区別できない状態です。',
     ).not.toBe(side(colors.destructive));
+  });
+
+  // アクション色と危険色は、この意匠では**色では区別できない**。
+  //
+  // 出典のパレットは暖色一色（brand / primary / destructive がすべて赤系）であり、
+  // アクション色 #E00B41 と危険色 #B32505 は色相が約 14 度、相互コントラストが 1.35:1 しかない。
+  // 差し替え前の緑と赤の組も相互比は 1.29:1 だったので、**両者を分けていたのは輝度ではなく色相**
+  // であり、その色相差が失われた。成功色に入れた分離の不変条件はここへは適用できない
+  // （危険色を暖色から外すと「危険」に読まれなくなる）。
+  //
+  // したがってこの組は「色では区別できない」ことを受け入れ、区別は色以外の手掛かりが担う。
+  // 手掛かりの実効性は @fwlm/ui の test/contrast-usage.test.ts
+  //「選択済みの面をアクション色で塗る部品のエラー指標」が数値で検証する。
+  // 本テストはその判定が前提にしている状態を固定する。**前提が変われば向こうも見直しが要る。**
+  it('アクション色は暖色側にあり、危険色と色では区別できない（受容した前提の固定）', () => {
+    // tasks.md 2.3 が要求していた「アクション色・危険色は成功色の逆側」の固定でもある。
+    expect(side(colors.primary), `primary(${colors.primary}) が寒色側にあります`).toBe('warm');
+    const ratio = contrastRatio(colors.primary, colors.destructive);
+    expect(
+      ratio,
+      `primary(${colors.primary}) と destructive(${colors.destructive}) の相互比が ` +
+        `${ratio.toFixed(2)}:1 になり、色だけで区別できるようになりました。` +
+        '@fwlm/ui 側で「色以外の手掛かり」を要求している判定が過剰になっていないか見直すこと。',
+    ).toBeLessThan(AA_NON_TEXT_RATIO);
   });
 
   it('成功色はアクション色・ブランド色・危険色のいずれとも値を共有しない', () => {

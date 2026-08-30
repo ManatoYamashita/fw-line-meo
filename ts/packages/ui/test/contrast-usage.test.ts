@@ -5,7 +5,7 @@
 // `text-success/90` や `bg-destructive/10` のような不透明度付きユーティリティは、ブラウザ上では
 // 「その色を下地に合成した色」として描画されるため、コントラスト比は合成後の実効色で決まる。
 // 実際に PR #46/#47 では 5 箇所が AA を割ったまま CI 全緑で main に入った。
-// theme.css:87-91 が「ブランド緑は 2.74:1 だから文字色に使わない」と明記しているにもかかわらず、
+// design-tokens が「ブランド色は対白 3.52:1 だから文字色に使わない」と明記しているにもかかわらず、
 // `/90` や `/80` の合成が同じ失敗を再導入していた、という構図である。
 //
 // 本テストは 4 層で構成する:
@@ -196,6 +196,20 @@ const USAGE_PAIRS: readonly UsagePair[] = [
     surface: 'secondary',
     surfaceAlpha: 0.8,
     kind: 'text',
+  },
+  {
+    // 選択済みの面をアクション色で塗る部品では、**エラーの枠が信号を運べない**。
+    // アクション色と危険色は色相が約 14 度しか離れておらず（差し替え前は約 123 度）、
+    // 相互コントラストは 1.35:1 しかないためである。これは色相の変化であって輝度の変化ではなく、
+    // 面と枠それぞれの対背景比を見るどのガードにも掛からない（両方とも単体では AA を満たす）。
+    // したがって残る手掛かりはリングだけになり、リング自身が SC 1.4.11 の 3:1 を満たす必要がある。
+    // 隣接色は要素の面色ではなく頁背景である（リングは枠の外側に描かれる）。
+    utility: 'ring-destructive/60',
+    source: 'checkbox.tsx / radio-group.tsx（aria-invalid・選択済みの面がアクション色で塗られる部品）',
+    foreground: 'destructive',
+    foregroundAlpha: 0.6,
+    surface: 'background',
+    kind: 'non-text',
   },
   {
     utility: 'bg-muted/50',
@@ -406,16 +420,17 @@ const USAGE_PAIRS: readonly UsagePair[] = [
  */
 const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reason: string }> = [
   {
-    // 根拠文の再確認（design.md「コントラスト検証ガード」の Implementation Notes / リスク）:
-    // 本仕様はエラー枠の適用範囲を広げる（チェック済みの部品でも枠がエラー色のまま維持される・
-    // design.md D4）。すなわち「エラー伝達は枠と文言が担う」という前提は、是正前に唯一
-    // 成り立っていなかった状態（エラーかつチェック済み）を含めて成り立つようになる。
-    // 根拠は弱まるどころか強まるため、除外はこのまま維持する。
+    // **この除外は「枠が信号を運べる部品」に限って成立する。**
+    // 面が透明な部品（input / textarea / button / badge）では、エラー時に枠色が
+    // border-input（中立の灰）から destructive（赤）へ変わるため、枠だけで状態が読める。
+    // 面をアクション色で塗る部品（checkbox / radio-group の選択済み）はこの前提を満たさない。
+    // 意匠を Airbnb 系へ差し替えてアクション色と危険色の色相が約 14 度まで近づいた結果、
+    // 「選択済み」の面（primary）と「エラー」の枠（destructive）の比が 1.35:1 になり、
+    // 枠は信号を運べなくなった。そちらはリング自身に 3:1 を要求する（下の USAGE_PAIRS）。
     utility: 'ring-destructive/20',
     reason:
-      'aria-invalid のリングは装飾。エラーであることの伝達は同時に付くエラー枠' +
-      '（destructive・本仕様の是正後はチェック済みの状態でも維持される）と ' +
-      'role="alert" の可視文言が担う。',
+      '面が透明な部品（input / textarea / button / badge）の aria-invalid のリングは装飾。' +
+      'エラーであることの伝達は中立の枠色から赤へ変わるエラー枠と role="alert" の可視文言が担う。',
   },
   {
     utility: 'ring-foreground/10',
@@ -1018,5 +1033,83 @@ describe('フォーカス指標の色の隣接コントラスト（Requirements 
       resolveSemanticColor('ring'),
       '輪郭の色がアクション色と同値です',
     ).not.toBe(resolveSemanticColor('primary'));
+  });
+});
+
+
+// 選択済みの面をアクション色で塗る部品のエラー指標（Requirements 2.2, 5.2 / SC 1.4.11）。
+//
+// shadcn の aria-invalid 表現は「枠がエラー色へ変わる」ことを主たる信号とし、リングは装飾として
+// 淡い段（/20）に置く。この分担は **面が透明な部品でしか成立しない**。面が透明なら枠色は
+// 中立の灰（border-input）から赤（destructive）へ変わり、色相の変化そのものが信号になる。
+//
+// 選択済みの面をアクション色で塗る部品（checkbox / radio-group）はこの前提を満たさない。
+// 意匠を Airbnb 系へ差し替えてアクション色が寒色から暖色へ移った結果、アクション色と危険色は
+// 色相が約 14 度しか離れず（差し替え前は約 123 度）、相互コントラストは 1.35:1 になった。
+// つまり「選択済み」の面の上に「エラー」の枠を置いても、両者は同じ赤に見える。
+//
+// **この事故は色相の変化であって輝度の変化ではない。** 面も枠も単体では頁背景に対して基準を
+// 満たすため、対背景比を見るガードはすべて緑のまま通る（差し替え前の緑と赤の組も相互比は
+// 1.29:1 で、両者を分けていたのは輝度ではなく色相だった）。したがって残る手掛かりはリングだけで、
+// リング自身が SC 1.4.11 の 3:1 を満たしていなければ、エラー状態は選択済み状態と区別できない。
+//
+// 判定の相手は要素の面色ではなく頁背景である（リングは枠の外側へ描かれるため）。
+// 段は表へ書き写さず **部品ソースから実値を引く**。書き写すと部品を戻しても表が緑のままになる
+// （実測: 検証表へ /60 を足しただけの状態では、部品を /20 へ戻しても 393 件すべて緑だった）。
+const CHECKED_FILL_IS_ACTION_COLOR = ['checkbox.tsx', 'radio-group.tsx'] as const;
+
+/** `dark:` 修飾の付かない `aria-invalid:ring-destructive/<段>` の段を取り出す。 */
+function invalidRingAlpha(source: string): number | undefined {
+  const match = /(?<!dark:)aria-invalid:ring-destructive\/(\d{1,3})\b/.exec(source);
+  return match === null ? undefined : Number(match[1]) / 100;
+}
+
+describe('選択済みの面をアクション色で塗る部品のエラー指標（Requirements 2.2, 5.2）', () => {
+  const sources = new Map(readComponentSources().map((entry) => [entry.file, entry.source]));
+
+  describe('invalidRingAlpha の自己検証（Issue #60）', () => {
+    it('dark: 修飾の段を拾わない（ダークは本 spec の Non-Goals であり判定に混ぜない）', () => {
+      expect(invalidRingAlpha('dark:aria-invalid:ring-destructive/40')).toBeUndefined();
+    });
+
+    it('dark: が先に現れても非 dark の段を拾う（順序に頼っていないことの証明）', () => {
+      expect(
+        invalidRingAlpha('dark:aria-invalid:ring-destructive/40 aria-invalid:ring-destructive/60'),
+      ).toBe(0.6);
+    });
+
+    it('リングが無ければ undefined を返す（0 と取り違えない）', () => {
+      expect(invalidRingAlpha('aria-invalid:border-destructive')).toBeUndefined();
+    });
+  });
+
+  it.each(CHECKED_FILL_IS_ACTION_COLOR)(
+    '%s は選択済みの面をアクション色で塗る（判定の前提の確認）',
+    (file) => {
+      // 前提が崩れたら、下の判定は「測ってはいるが違うものを測っている」状態へ静かに移る。
+      const source = sources.get(file);
+      expect(source, `${file} を読み込めていません`).toBeDefined();
+      expect(
+        source,
+        `${file} が data-checked:bg-primary を持ちません。選択済みの面がアクション色でなくなったなら、` +
+          'エラーの枠が信号を運べるようになるので判定ごと見直すこと',
+      ).toContain('data-checked:bg-primary');
+    },
+  );
+
+  it.each(CHECKED_FILL_IS_ACTION_COLOR)('%s のエラーリングは頁背景に対して 3:1 以上', (file) => {
+    const alpha = invalidRingAlpha(sources.get(file) ?? '');
+    expect(alpha, `${file} に aria-invalid のエラーリングがありません`).toBeDefined();
+
+    const background = resolveSemanticColor('background');
+    const ring = compositeOver(resolveSemanticColor('destructive'), background, alpha ?? 0);
+    const ratio = contrastRatio(ring, background);
+    expect(
+      ratio,
+      `${file}: エラーリング(destructive/${((alpha ?? 0) * 100).toFixed(0)} → ${ring}) と ` +
+        `背景(${background}) が ${ratio.toFixed(2)}:1 で ${AA_NON_TEXT_RATIO}:1 を下回ります。` +
+        '選択済みの面はアクション色で塗られ、エラーの枠はその面と 1.35:1 しかないため、' +
+        'リングが見えないとエラー状態を選択済み状態と区別できません。',
+    ).toBeGreaterThanOrEqual(AA_NON_TEXT_RATIO);
   });
 });
