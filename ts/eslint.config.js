@@ -18,13 +18,27 @@ export default tseslint.config(
   {
     // typescript-eslint の eslint-recommended は no-undef を off にするが、その files は
     // **/*.ts|tsx|mts|cts に限られる。したがって .mjs/.cjs/.js では js.configs.recommended の
-    // no-undef が生きており、Node のグローバルが未定義扱いになる。Issue #78 で
-    // survey-web/perf/bundle-budget.mjs（CI で実行される）が lint 対象に入り露見した。
-    // globals パッケージは直接依存に無いため、実際に使う識別子だけを列挙する。
+    // no-undef が生きている（Issue #78 で設定ファイル群が lint 対象に入り露見した）。
+    //
+    // 以前はここで globals を手書き列挙していた（console / process / URL の 3 つ）。その列挙は
+    // 実測で「対象 6 ファイルにちょうど適合しているだけ」で余裕がなく、Buffer / setTimeout /
+    // TextEncoder / fetch を 1 つ足すか .cjs を 1 本追加するだけで、require / module / exports /
+    // __dirname が一斉に未定義扱いになった。失敗は 'Buffer' is not defined という形で出るため
+    // **コードの誤りに見え**、原因が globals の列挙漏れであることは診断から読み取れない
+    // （Issue #85）。列挙の陳腐化は本リポジトリが #33 / #51 / #78 で繰り返し踏んだ形である。
+    //
+    // no-undef は off にする。JS 系の未定義識別子は tsc が捕捉するため、この規則は二重化でしか
+    // ない。実測: perf/bundle-budget.mjs から型の供給を外して tsc を走らせると、no-undef が
+    // 挙げるのと同一の 7 箇所・3 識別子を TS2304 / TS2580 / TS2584 で報告する。逆に Buffer や
+    // setTimeout のように @types/node が供給する識別子は tsc が緑を返す（= no-undef 側だけが
+    // 誤って赤くしていた）。
+    //
+    // この前提は宣言ではなく機械強制されている。scripts/check-test-code-coverage.sh が
+    // git 管理下の JS 系ファイルすべてに対し、先頭 3 行の @ts-check を要求し、@ts-nocheck を
+    // 禁じ、tsc のプログラムに載っていることまで確認する。プラグマが失われた場合に赤くなるのは
+    // 型検査ではなくそのガードであり、ここで no-undef を落としても検査の穴にはならない。
     files: ['**/*.mjs', '**/*.cjs', '**/*.js'],
-    languageOptions: {
-      globals: { console: 'readonly', process: 'readonly', URL: 'readonly' },
-    },
+    rules: { 'no-undef': 'off' },
   },
   {
     rules: {
