@@ -127,7 +127,7 @@
 | `PLACES_API_KEY` | 同上 | Places API (New) の実キー |
 | `DATABASE_URL` | `ts/packages/db/src/pool.ts` | `postgres:///fwlm_dev`。未設定だと Cloud SQL IAM 接続へ倒れる |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `ts/apps/dashboard-api/src/index.ts` の `initializeApp()`（ADC） | firebase-admin の ID トークン検証に要る |
-| `PORT` | `config.ts` | 省略時 8080 |
+| `PORT` | `ts/apps/dashboard-api/src/config.ts` | 省略時 8080 |
 
 `dashboard-web` 側は `next dev` が `.env.local` を実行時に読むため、`NEXT_PUBLIC_API_BASE_URL` と
 `NEXT_PUBLIC_FIREBASE_API_KEY` / `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` / `NEXT_PUBLIC_FIREBASE_PROJECT_ID`

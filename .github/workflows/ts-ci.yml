@@ -88,6 +88,14 @@ jobs:
         # pipefail がそれを伝播する。入力サイズ依存なので閾値の下では何度走らせても緑になり、
         # コードを読んでも出ない。構文そのものを禁じる（read-only grep 検証・node 不要）。
         run: bash scripts/check-shell-pipe-consumers.sh
+      - name: 'spec env 名ガード（Issue #148・文書の env 宣言表と実装の必須 env の両方向照合）'
+        # spec 文書は誰の検査対象でもない。実装の loadConfig を変えても文書は追随せず、
+        # 存在しない env 名を書いても CI は緑のまま通る。実際 4.2 の実施手順は、どこにも
+        # 存在しない CORS_ORIGIN の設定を指示していた（#142 のレビューで検出）。抽出は
+        # 「| env | 出典 |」の宣言表へアンカーする — 素の大文字トークンは実測で 93% が
+        # env ではなく、散文の CORS_ORIGIN（存在しないと教えるための記述）まで叩くため
+        # （read-only grep 検証・node 不要）。
+        run: bash scripts/check-spec-env-names.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
