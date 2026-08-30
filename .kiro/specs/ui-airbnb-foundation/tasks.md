@@ -77,9 +77,16 @@
   - _Requirements: 3.4, 3.5_
 - [x] 4.2 `shadow.ts` と `@theme` の影を 1 段へ寄せる
   - `raised` 1 キーへ。値は設計 D5 の 8 桁アルファ hex
-  - 影の名前空間プローブを新しい名前へ差し替える
   - `--shadow`（無印）は上書きしない
-  - 観察可能な完了条件: 名前空間の網羅ガードが緑。生成 CSS に新しい影が出ている
+  - **影の名前空間プローブは差し替えない。** `shadow-*` は Tailwind が実値を `--tw-shadow` へ
+    展開するため、解決先の照合（`findShadowing`）は base でも current でもテーマ変数を返さず、
+    プローブを `shadow-raised` へ替えても検出は 1 件も増えない（同ファイルの単体ケースが
+    `.shadow-md { box-shadow: var(--tw-shadow-color) }` → literal であることを明示している）。
+    残るのは `SAME_NAME_OVERRIDE_PROBES` の注記が `shadow-md` について事実でなくなる点だけで、
+    これは #174 で `shadow-raised` を使う部品が入る時点で対照ごと立て直す
+  - 観察可能な完了条件: 名前空間の網羅ガードが緑。**生成 CSS には新しい影は出ない**
+    （`shadow-raised` を参照する部品がまだ無く、Tailwind は未参照のテーマ変数を出力しないため。
+    出力を伴う検証は #174 で部品が入ってから行う）
   - _Requirements: 3.3_
 - [x] 4.3 `@layer base` の見出しと共通見出し部品を一致させる
   - 設計 D7 の新しい共通値へ。h1〜h4 の行間と h2 の太さを変更する

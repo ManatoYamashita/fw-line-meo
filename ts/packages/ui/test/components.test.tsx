@@ -544,8 +544,8 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
     expect(success).toBeDefined();
     expect(destructive).toBeDefined();
 
-    // 成功はブランド緑をそのまま文字色にしない（#1DB446 は白背景で 2.74:1 = AA 非準拠）。
-    // 意味論トークン --success（= AA 準拠の primary）経由の text-success を使う。
+    // 成功はブランド色をそのまま文字色にしない（#FF385C は白背景で 3.52:1 = AA 非準拠）。
+    // アクション色からも独立した成功専用トークン（--color-success）経由の text-success を使う。
     expect(classesOf(success!)).toContain('text-success');
     expect(classesOf(success!)).not.toContain('text-brand');
     expect(classesOf(destructive!)).toContain('text-destructive');

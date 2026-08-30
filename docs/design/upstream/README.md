@@ -9,8 +9,9 @@
 | ここにあるもの | 上流の**無改変**コピー。上流が更新されたときに差分を取るための基準点 |
 | ここに**無い**もの | **このプロジェクトの設計**。原典と我々の設計は 10 点以上で意図的に乖離している（後述） |
 
-**このプロジェクトのデザイン言語は `docs/design/design-language.md` が正典である。**
+**このプロジェクトのデザイン言語の正典は `.kiro/specs/ui-airbnb-foundation/design.md` の D1〜D8 である。**
 本ディレクトリの内容を「我々の設計」として読んではならない。
+（写像版の `docs/design/design-language.md` は #175 で整備予定であり、**現時点では存在しない**。）
 
 > ディレクトリ名が `vendor` ではなく `upstream` なのは、`.gitignore:30` の `vendor/`（Go の依存ベンダリング用）が
 > パス位置を問わず一致し、このディレクトリを追跡対象から外してしまうためである。
@@ -33,7 +34,7 @@
 
 ```
 gh api "repos/VoltAgent/awesome-design-md/contents/design-md/airbnb/DESIGN.md" --jq '.content' \
-  | base64 -d | diff -u docs/design/vendor/airbnb-DESIGN.md -
+  | base64 -d | diff -u docs/design/upstream/airbnb-DESIGN.md -
 ```
 
 ## 上流の免責（原文）
@@ -45,12 +46,12 @@ gh api "repos/VoltAgent/awesome-design-md/contents/design-md/airbnb/DESIGN.md" -
 
 MIT License が及ぶのは VoltAgent が作成した**文書**であって、そこに記述された第三者のブランド資産ではない。
 参照した色や形をこのプロダクトのブランドとして採用する判断は、ライセンスとは別の事業判断であり、
-その判断そのものは #173 と `docs/design/design-language.md` に記録する。
+その判断そのものは #173 と、#175 で整備する `docs/design/design-language.md` に記録する。
 
 ## 原典から採らなかったもの（要約）
 
-詳細と根拠は `docs/design/design-language.md` にある。ここでは「無改変コピーをそのまま実装だと
-読まないための最小限の注意」として列挙する。
+詳細と根拠は `.kiro/specs/ui-airbnb-foundation/design.md` の D1〜D8 にある。ここでは
+「無改変コピーをそのまま実装だと読まないための最小限の注意」として列挙する。
 
 - **アクセント色をそのまま CTA に使っていない。** 原典の primary は白文字と 3.52:1 で WCAG AA（4.5:1）に届かない。装飾専用の役割へ降格し、CTA には原典の押下時の色を採った
 - **原典の muted-soft・legal-link・border-strong・disabled tint は採用していない**（いずれも AA または SC 1.4.11 の閾値に届かない）
