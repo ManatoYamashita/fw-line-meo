@@ -34,6 +34,32 @@ rci_stub_gh() {
   chmod +x "${FX}/stub/gh"
 }
 
+rci_notation_count() {   # $1 = ERE。実スクリプト内の注入判定の記法を数え、$RCN_N へ入れる。
+  rcn_rc=0
+  RCN_N="$(grep -cE "$1" "${ROOT}/scripts/report-ci-issue.sh")" || rcn_rc=$?
+  # 後置 true で潰さない。評価不能（2 以上）を無一致（1）と同一視すると、記法照合そのものが
+  # 空振りしたまま「0 件だから揃っている」と読めてしまう。
+  if [ "$rcn_rc" -gt 1 ]; then
+    _t_fail "注入記法を走査できません（grep exit=${rcn_rc}）"
+  fi
+  RCN_N="${RCN_N:-0}"
+}
+
+rci_stub_gh_strict() {
+  # **`issue list` すら通さない**スタブ（Issue #108）。rci_stub_gh は追跡 Issue の探索経路を
+  # 本物のまま通すため、dry-run の注入が効かずに実 gh へ落ちても「該当なし」という
+  # **意図どおりの表示**になり、症状が出力に出ない（コマンド置換が stderr ごと吸うため）。
+  # 呼び出しの有無そのものを見るには、探索も含めて全ての起動を赤にする必要がある。
+  mkdir -p "${FX}/stub"
+  {
+    echo '#!/usr/bin/env bash'
+    # shellcheck disable=SC2016 # スタブの中身をそのまま書き出すので展開させない
+    echo 'echo "STUB-GH-INVOKED: $*" >&2'
+    echo 'exit 97'
+  } > "${FX}/stub/gh"
+  chmod +x "${FX}/stub/gh"
+}
+
 rci_body_file() {
   # 呼び出し側が組む本文を模す。**既にフェンスを 1 組持っている**のが要点で、
   # スクリプトがもう 1 組足すと 4 本になり、内側が外側を閉じて描画が崩れる。
@@ -171,4 +197,47 @@ expect_red '--state は red または green を指定してください'
 # 追跡 Issue を閉じうる。引数の検証は gh の存在確認より前にあるため、書き込みは一切起きないこと。
 expect_absent 'DRY-RUN: gh issue'
 expect_absent 'STUB-GH-INVOKED'
+t_end
+
+# ---------------------------------------------------------------------------
+# dry-run 注入の到達性（Issue #108）
+#
+# 注入変数を `${VAR:-}` で判定すると **空文字が「未設定」と同義**になり、注入分岐へ入らずに
+# 実 `gh` が走る。同ファイルの FAKE_PREV_SIGNATURE 側は `${VAR+x}` で正しく書かれており、
+# 記法の食い違いがそのまま挙動の食い違いになっていた。
+#
+# **症状は出力に出ない。** 探索は `tracker_list="$(gh issue list … 2>&1)"` で呼ばれるため、
+# スタブのエラー出力まで変数へ吸われ、数字行が 0 件になって「追跡 Issue はありません」という
+# 意図どおりの表示になる。よって**起動の有無そのもの**を照合するしかない。
+# 実害は 2 つ: (1) 「追跡 Issue 有り」を意図したテストが create 経路を通って偽 PASS する、
+# (2) dry-run が実 API を叩き、ネットワークやトークンの状態でテストが落ちうる。
+t_begin 'report-ci-issue: dry-run の注入は空文字でも効き、gh を 1 度も起動しない（#108）'
+fx_guard report-ci-issue
+rci_stub_gh_strict
+rci_body_file
+# (1) 空文字 = 「追跡 Issue 無し」。`:-` だと注入分岐へ入らず実 gh の探索が走る。
+RCI_TRACKER=''
+rci_run --state green --label prod-image-drift --title t --body-file "${FX}/body.md"
+expect_green
+expect_output_matches '追跡 Issue はありません'
+expect_absent 'STUB-GH-INVOKED'
+# (2) 対照: 非空の注入でも同じく gh を起動せず、コメント経路へ入ること。
+#     片側だけだと「厳格なスタブでも通る」ことしか言えず、注入が効いた証拠にならない。
+RCI_TRACKER=102
+rci_run --state green --label prod-image-drift --title t --body-file "${FX}/body.md"
+RCI_TRACKER=''
+expect_green
+expect_output_matches '^DRY-RUN: gh issue comment 102 '
+expect_absent 'STUB-GH-INVOKED'
+t_end
+
+t_begin 'report-ci-issue: dry-run の注入判定は全箇所が +x で揃っている（#108）'
+# **上のケースは FAKE_TRACKER の経路しか通らない。** 注入点が増えたとき、新しい方だけ `:-` で
+# 書かれても誰も気づけない（その分岐を通るケースが無ければ緑のまま）。記法そのものを数える。
+rci_notation_count '\[ -n "\$\{REPORT_CI_ISSUE_FAKE_[A-Z_]+\+x\}" \]'
+rci_plus_x="$RCN_N"
+rci_notation_count '\[ -n "\$\{REPORT_CI_ISSUE_FAKE_[A-Z_]+:-\}" \]'
+OUT="PLUS_X: ${rci_plus_x} COLON: ${RCN_N}"
+# 空振り防止として `+x` の件数まで見る。0 件なら注入点ごと消えたか記法が変わっている。
+expect_output_matches '^PLUS_X: 2 COLON: 0$'
 t_end

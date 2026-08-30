@@ -111,8 +111,13 @@ run_gh() {
 # ---------------------------------------------------------------------------
 tracker=""
 tracker_count=0
-if [ -n "$dry_run" ] && [ -n "${REPORT_CI_ISSUE_FAKE_TRACKER:-}" ]; then
-  # dry-run 時の注入（分岐の実証用）。空文字なら「追跡 Issue 無し」を意味する。
+# dry-run 時の注入（分岐の実証用）。**判定は `+x`（設定されていれば空文字でも真）で行う。**
+# `:-` にすると空文字が「未設定」と同義になり、「追跡 Issue 無し」を意図した注入が
+# 注入分岐へ入らず実 `gh issue list` へ落ちる（Issue #108）。しかも探索はコマンド置換で
+# `2>&1` ごと変数へ吸われるため、結果は「追跡 Issue はありません」という**意図どおりの表示**に
+# なり、症状が出力に出ない。下の FAKE_PREV_SIGNATURE 側は最初から `+x` で、記法の食い違いが
+# そのまま挙動の食い違いになっていた。**両者を揃えたまま保つこと。**
+if [ -n "$dry_run" ] && [ -n "${REPORT_CI_ISSUE_FAKE_TRACKER+x}" ]; then
   tracker="${REPORT_CI_ISSUE_FAKE_TRACKER}"
   [ -n "$tracker" ] && tracker_count=1
 else
