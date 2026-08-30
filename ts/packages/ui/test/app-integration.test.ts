@@ -47,16 +47,28 @@ const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
 
 /**
  * 生成 CSS から「単独セレクタの h{level} 規則」を全て取り出す。
- * Preflight のリセットは `h1, h2, h3, h4, h5, h6 { … }` というセレクタリストのため、
- * `h1` の直後に `{` を要求する本パターンには一致しない（後段の上書き規則だけを取れる）。
+ *
+ * Preflight のリセットは `h1, h2, h3, h4, h5, h6 { … }` というセレクタリストなので除外する。
+ *
+ * **旧実装は正規表現で `h{level}` の直後に `{` を要求していたが、これは末尾レベルで破れる**
+ * （Issue #60 の自己検証で検出）。`h1, …, h6 {` の `h6` は直後が ` {` で、直前が空白なので
+ * 境界条件も満たしてしまい、Preflight のリセットを単独規則として拾っていた。先頭レベル（h1）は
+ * 直後が `,` なので偶然通り、実利用側も `rules[rules.length - 1]` を採っていたため
+ * 順序の偶然に守られて表面化していなかった。
+ *
+ * 「セレクタが `h{level}` そのものであること」は文字列の見た目では判定できないので、
+ * 本ファイルの `rulesInLayer` / `mediaRulesInLayer` と同じく postcss の構文木で判定する。
  */
 function standaloneHeadingRules(css: string, level: number): readonly { index: number; body: string }[] {
-  const pattern = new RegExp(`(?:^|[\\s,}])(h${level}\\s*\\{([^}]*)\\})`, 'g');
   const rules: { index: number; body: string }[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(css)) !== null) {
-    rules.push({ index: match.index, body: match[2] ?? '' });
-  }
+  postcss.parse(css).walkRules((rule) => {
+    if (rule.selector.trim() !== `h${level}`) return;
+    rules.push({
+      // 実利用側が Preflight のリセットとの前後関係を見るため、元 CSS 上の位置を保つ。
+      index: rule.source?.start?.offset ?? -1,
+      body: rule.nodes.map((node) => node.toString()).join(';'),
+    });
+  });
   return rules;
 }
 
@@ -148,6 +160,90 @@ function declarationsOf(rule: Rule): Readonly<Record<string, string>> {
   });
   return declarations;
 }
+
+/**
+ * 抽出器の自己検証（Issue #60）。
+ *
+ * 本ファイルには「対照実験」（`@source` を外すと消える／`@source inline` で強制すると生成される）は
+ * あるが、**抽出器そのものの入出力を固定する fixture が無い**ものが残っていた。対照実験は
+ * 「ガード全体が空振りしていない」ことしか言えず、抽出器が位置や形状に依存して取りこぼしても、
+ * たまたま別の経路で赤くなれば緑に見えてしまう。
+ */
+describe('抽出器の自己検証（Issue #60）', () => {
+  describe('standaloneHeadingRules', () => {
+    it('Preflight のセレクタリストを拾わず、単独規則だけを返す', () => {
+      // 実装コメントが主張している中核の性質。**末尾レベル（h6）で確かめる**のが要点で、
+      // 先頭レベル（h1）は直後が `,` なので、境界が壊れていても偶然通る。
+      const css = 'h1, h2, h3, h4, h5, h6 {\n  font-size: inherit;\n}\nh6 {\n  font-size: 1rem;\n}\n';
+      const rules = standaloneHeadingRules(css, 6);
+      expect(rules).toHaveLength(1);
+      expect(rules[0]?.body).toContain('1rem');
+    });
+
+    it('先頭位置の規則も拾う（位置依存で漏らさない）', () => {
+      expect(standaloneHeadingRules('h3{color:red}', 3)).toHaveLength(1);
+    });
+
+    it('クラス名や別レベルを拾わない', () => {
+      expect(standaloneHeadingRules('.h3 { color: red }', 3)).toEqual([]);
+      expect(standaloneHeadingRules('h33 { color: red }', 3)).toEqual([]);
+      expect(standaloneHeadingRules('h4 { color: red }', 3)).toEqual([]);
+    });
+
+    it('複数の規則をすべて出現順に返す', () => {
+      const rules = standaloneHeadingRules('h2 { a: 1 }\nh2 { b: 2 }\n', 2);
+      expect(rules.map((r) => r.body.trim())).toEqual(['a: 1', 'b: 2']);
+    });
+  });
+
+  describe('hasUtilityRule', () => {
+    it('単独のユーティリティ規則を検出する（先頭位置を含む）', () => {
+      expect(hasUtilityRule('.bg-primary { color: red }', 'bg-primary')).toBe(true);
+      expect(hasUtilityRule('a{}\n.bg-primary{color:red}', 'bg-primary')).toBe(true);
+    });
+
+    it('接頭辞が一致する別ユーティリティを拾わない', () => {
+      // `.bg-primary-hover` があるだけで `.bg-primary` が生成されたと誤報しない。
+      expect(hasUtilityRule('.bg-primary-hover { color: red }', 'bg-primary')).toBe(false);
+    });
+
+    it('複合セレクタの一部としての出現を拾わない', () => {
+      // `.hover\:bg-primary:hover` のような形は「単独のユーティリティ規則」ではない。
+      expect(hasUtilityRule('.foo.bg-primary { color: red }', 'bg-primary')).toBe(false);
+    });
+
+    it('セレクタに含まれる特殊文字をエスケープして扱う', () => {
+      // Tailwind の生成 CSS は `.focus-visible\:ring-3` のようにコロンを含む。
+      expect(hasUtilityRule('.focus-visible\\:ring-3 { outline: none }', 'focus-visible\\:ring-3')).toBe(
+        true,
+      );
+    });
+  });
+
+  describe('rulesInLayer', () => {
+    it('指定レイヤ内の完全一致セレクタだけを返す', () => {
+      const css = '@layer base { :focus-visible { outline: 1px } }';
+      expect(rulesInLayer(css, 'base', ':focus-visible')).toHaveLength(1);
+    });
+
+    it('レイヤ外の同一セレクタは拾わない（mediaRulesInLayer と同水準の性質）', () => {
+      // **本ファイルで自己検証を持っていたのは mediaRulesInLayer だけだった。**
+      // レイヤ所属を見る点は同型なのに、こちらは固定されていなかった。
+      const css = ':focus-visible { outline: 1px }\n@layer utilities { :focus-visible { outline: 2px } }';
+      expect(rulesInLayer(css, 'base', ':focus-visible')).toEqual([]);
+    });
+
+    it('セレクタの部分一致では拾わない（完全一致を要求する）', () => {
+      const css = '@layer base { .a:focus-visible { outline: 1px } }';
+      expect(rulesInLayer(css, 'base', ':focus-visible')).toEqual([]);
+    });
+
+    it('入れ子の at-rule 内にある規則も拾う', () => {
+      const css = '@layer base { @media (min-width: 1px) { :focus-visible { outline: 1px } } }';
+      expect(rulesInLayer(css, 'base', ':focus-visible')).toHaveLength(1);
+    });
+  });
+});
 
 /** node_modules / ビルド成果物を除いたアプリ自身のソースを列挙する。 */
 function collectAppSourceFiles(dir: string): readonly string[] {

@@ -54,6 +54,41 @@ function collectDeclarations(css: string): ReadonlyMap<string, string> {
   return declarations;
 }
 
+describe('collectDeclarations の自己検証（Issue #60）', () => {
+  it('先頭と末尾の宣言を漏らさず、値の空白を落とす', () => {
+    const map = collectDeclarations('--a: #111;\n  --b:   #222  ;\n--c:#333;');
+    expect([...map.entries()]).toEqual([
+      ['--a', '#111'],
+      ['--b', '#222'],
+      ['--c', '#333'],
+    ]);
+  });
+
+  it('同名の再宣言は最初の宣言を採る（実装コメントの主張の固定）', () => {
+    // theme.css は再定義を禁じている（循環参照防止）。その前提が崩れたときにどう振る舞うかを
+    // 固定しておかないと、後勝ちへ変わっても誰も気づけない。
+    expect(collectDeclarations('--a: #111;\n--a: #222;').get('--a')).toBe('#111');
+  });
+
+  it('カスタムプロパティでない宣言は拾わない', () => {
+    const map = collectDeclarations('color: red;\n--a: #111;');
+    expect([...map.keys()]).toEqual(['--a']);
+  });
+
+  it('値の中の var() 参照を宣言として拾わない', () => {
+    // `--x: var(--a);` の `--a` は値の一部であって宣言ではない。ここを拾うと、
+    // 参照鎖の解決（resolveSemanticColor）が存在しない宣言を見つけて静かに別の色を返す。
+    const map = collectDeclarations('--x: color-mix(in oklab, var(--a) 50%, transparent);');
+    expect([...map.keys()]).toEqual(['--x']);
+  });
+
+  it('メディア条件を宣言と取り違えない', () => {
+    // `(prefers-reduced-motion: reduce)` は「プロパティ: 値」の形をしている（PR #59 で踏んだ型）。
+    const map = collectDeclarations('@media (prefers-reduced-motion: reduce) { --a: #111; }');
+    expect([...map.keys()]).toEqual(['--a']);
+  });
+});
+
 const declarations = collectDeclarations(themeCss);
 
 /**
@@ -729,6 +764,33 @@ const DESCENDANT_TEXT_PATTERN = /\*:data-\[slot=[a-z0-9-]+\]:text-[a-z0-9-]+(?:\
 function extractDescendantTextUtilities(source: string): readonly string[] {
   return [...source.matchAll(DESCENDANT_TEXT_PATTERN)].map((match) => match[0]);
 }
+
+describe('extractDescendantTextUtilities の自己検証（Issue #60）', () => {
+  it('不透明度あり・なしの双方を、先頭と末尾の位置で漏らさず拾う', () => {
+    expect(
+      extractDescendantTextUtilities(
+        '*:data-[slot=card-title]:text-foreground mid *:data-[slot=alert-description]:text-muted/70',
+      ),
+    ).toEqual([
+      '*:data-[slot=card-title]:text-foreground',
+      '*:data-[slot=alert-description]:text-muted/70',
+    ]);
+  });
+
+  it('前置きの variant 連鎖があっても子孫指定の本体を取り出す', () => {
+    expect(extractDescendantTextUtilities('hover:*:data-[slot=x]:text-primary')).toEqual([
+      '*:data-[slot=x]:text-primary',
+    ]);
+  });
+
+  it('子孫指定でない色ユーティリティを拾わない', () => {
+    expect(extractDescendantTextUtilities('text-foreground bg-primary/50')).toEqual([]);
+  });
+
+  it('text- 以外の子孫指定を拾わない（本ガードの対象は文字色である）', () => {
+    expect(extractDescendantTextUtilities('*:data-[slot=x]:bg-primary')).toEqual([]);
+  });
+});
 
 describe('子孫指定の色ガード: 親 variant が子へ渡す色（PR #56 レビュー指摘1）', () => {
   const sources = readComponentSources();

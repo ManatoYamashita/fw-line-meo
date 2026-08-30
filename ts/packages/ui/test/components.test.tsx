@@ -1072,9 +1072,12 @@ const ALERT_ROLE_BY_VARIANT: Readonly<Record<AlertVariant, string>> = {
  * この success を取りこぼした（実際に踏んだ）。
  */
 function variantKeysOf(source: string, group: string): readonly string[] {
-  const start = source.indexOf(`${group}: {`);
-  if (start < 0) return [];
-  const open = source.indexOf('{', start);
+  // **前方境界を要求する。** 素の `indexOf(`${group}: {`)` だと `subvariant: {` のように
+  // 接尾辞が一致する別グループの中身を掴む（Issue #60 の自己検証で固定）。
+  // 同ファイルの他の抽出器（theme-sync の `declarationIn` 等）と同じ作法へ揃える。
+  const header = new RegExp(`(?:^|[\\s{,])${group}\\s*:\\s*\\{`).exec(source);
+  if (header === null) return [];
+  const open = header.index + header[0].length - 1;
 
   let depth = 0;
   let end = -1;
@@ -1102,6 +1105,74 @@ function variantKeysOf(source: string, group: string): readonly string[] {
   }
   return keys;
 }
+
+describe('variantKeysOf の自己検証（Issue #60）', () => {
+  // 実部品に近い形の fixture。**説明コメントを鍵の直前に挟む**のが要点で、
+  // doc に記録された past miss（「カンマ直後を起点にする実装ではこの success を取りこぼした
+  // （実際に踏んだ）」）を再現する形である。現在の行単位実装は正しいが、その正しさが
+  // 固定されていなかった。
+  const source = [
+    "const x = cva('base', {",
+    '  variants: {',
+    '    variant: {',
+    "      default: 'a',",
+    '      // 成功通知。読み上げ強度は status。',
+    "      success: 'b',",
+    '      /* ブロックコメントでも同じ */',
+    "      destructive: 'c',",
+    '      nestedGroup: {',
+    "        inner: 'should-not-appear',",
+    '      },',
+    '    },',
+    '    size: {',
+    "      sm: 'd',",
+    '    },',
+    '  },',
+    '});',
+  ].join('\n');
+
+  it('コメントを挟んだ鍵も漏らさない（過去に踏んだ取りこぼしの再現）', () => {
+    expect(variantKeysOf(source, 'variant')).toEqual([
+      'default',
+      'success',
+      'destructive',
+      'nestedGroup',
+    ]);
+  });
+
+  it('入れ子オブジェクトの内側の鍵は拾わない', () => {
+    expect(variantKeysOf(source, 'variant')).not.toContain('inner');
+  });
+
+  it('指定したグループの範囲だけを見る（隣のグループへ漏れない）', () => {
+    expect(variantKeysOf(source, 'size')).toEqual(['sm']);
+    expect(variantKeysOf(source, 'variant')).not.toContain('sm');
+  });
+
+  it('接尾辞が一致する別グループを掴まない（subvariant に対する variant）', () => {
+    const shadowed = [
+      '  subvariant: {',
+      "    wrong: 'x',",
+      '  },',
+      '  variant: {',
+      "    right: 'y',",
+      '  },',
+    ].join('\n');
+    expect(variantKeysOf(shadowed, 'variant')).toEqual(['right']);
+  });
+
+  it('引用符付きの鍵も拾う', () => {
+    expect(variantKeysOf('a: {\n  "quoted": 1,\n}', 'a')).toEqual(['quoted']);
+  });
+
+  it('グループが無ければ空を返す（例外にせず、呼び出し側の双方向照合で赤にする）', () => {
+    expect(variantKeysOf(source, 'missing')).toEqual([]);
+  });
+
+  it('閉じ括弧が無ければ空を返す', () => {
+    expect(variantKeysOf("a: {\n  b: 'c',\n", 'a')).toEqual([]);
+  });
+});
 
 const alertSource = readFileSync(join(motionComponentsDir, 'alert.tsx'), 'utf8');
 

@@ -97,6 +97,102 @@ function declarationIn(block: string, cssVariable: string): string | undefined {
 }
 
 /**
+ * 抽出器の自己検証（Issue #60）。
+ *
+ * 「空振り防止」（`themeHexes.length > 0` のような非空 assert）は **対象ゼロで緑にならないこと**しか
+ * 保証せず、**拾ったものが正しいか**は一切見ない。位置依存の取りこぼしと、宣言でないものの誤検出は
+ * 素通りする。PR #59 では実際に、抑制ブロックの**先頭**に置いた宣言だけが判定から漏れていた
+ * （非空 assert は 3 件返るので緑のままだった）。
+ *
+ * 固定する性質は 2 方向ある。片方だけでは足りない。
+ *   - 拾ってはならないものを拾わない（誤検出）
+ *   - 拾うべきものを漏らさない（取りこぼし。とくに**先頭・末尾・入れ子**の位置）
+ */
+describe('抽出器の自己検証（Issue #60）', () => {
+  describe('extractHexes', () => {
+    it('3 桁・6 桁・8 桁を拾い、先頭と末尾の位置でも漏らさない', () => {
+      // 先頭と末尾に置くのが要点。`match` の逐次走査が位置に依存しないことを固定する。
+      expect(extractHexes('#abc mid #112233 tail #aabbcc80')).toEqual([
+        '#ABC',
+        '#112233',
+        '#AABBCC80',
+      ]);
+    });
+
+    it('大文字へ揃える（照合は大文字同士で行うため）', () => {
+      expect(extractHexes('#aAbBcC')).toEqual(['#AABBCC']);
+    });
+
+    it('hex に見えない語は拾わない', () => {
+      // `#` に続く 3 文字以上が hex でなければ色ではない（`url(#gradient)` の類）。
+      expect(extractHexes('url(#gradient) and #zz calc(100% - 2px)')).toEqual([]);
+    });
+  });
+
+  describe('extractThemeBlock', () => {
+    it('@theme inline を拾わず、@theme の本文だけを返す', () => {
+      // **`@theme inline` が先に現れる並び**にするのが要点。先頭一致で拾う実装だと、
+      // ここで inline 側の本文を返してしまう。
+      const css = '@theme inline {\n  --a: 1;\n}\n@theme {\n  --b: 2;\n}\n';
+      expect(extractThemeBlock(css)).toContain('--b: 2;');
+      expect(extractThemeBlock(css)).not.toContain('--a: 1;');
+    });
+
+    it('入れ子の波括弧を跨いで対応する閉じ括弧まで取り出す', () => {
+      const css = '@theme {\n  --a: 1;\n  @media (min-width: 1px) { --b: 2; }\n  --c: 3;\n}\ntail {}';
+      const block = extractThemeBlock(css);
+      expect(block).toContain('--b: 2;');
+      expect(block).toContain('--c: 3;');
+      expect(block).not.toContain('tail');
+    });
+
+    it('@theme が無ければ例外にする（静かに空文字を返さない）', () => {
+      expect(() => extractThemeBlock(':root { --a: 1; }')).toThrow(/@theme ブロックが見つかりません/);
+    });
+
+    it('閉じられていなければ例外にする', () => {
+      expect(() => extractThemeBlock('@theme {\n  --a: 1;\n')).toThrow(/閉じられていません/);
+    });
+  });
+
+  describe('declarationIn', () => {
+    it('接頭辞が一致する別変数へ誤一致しない（--color-text vs --color-text-muted）', () => {
+      // **本 Issue が名指しした性質。** 実装コメントは「変数名の直後に `:` を要求するため誤一致しない」と
+      // 主張していたが、その主張を固定する fixture が無かった。宣言の順序を入れ替えた 2 通りで見る。
+      const muted_first = '  --color-text-muted: #111;\n  --color-text: #222;\n';
+      const text_first = '  --color-text: #222;\n  --color-text-muted: #111;\n';
+      expect(declarationIn(muted_first, '--color-text')).toBe('#222');
+      expect(declarationIn(text_first, '--color-text')).toBe('#222');
+      expect(declarationIn(muted_first, '--color-text-muted')).toBe('#111');
+      expect(declarationIn(text_first, '--color-text-muted')).toBe('#111');
+    });
+
+    it('別変数の接尾辞として一致しない（--brand--color-a に対する --color-a）', () => {
+      // 前方の `(?:^|[;{\\s])` が守っている性質。接頭辞の衝突（上）と対になる。
+      // **`--brand-color-a` ではなく `--brand--color-a` にすること。** 前者はハイフンが 1 本なので
+      // `--color-a` を部分文字列として含まず、前方境界を外す変異でも赤にならない
+      // （最初にそう書いて変異で見逃し、fixture の側が的を外していることに気づいた）。
+      expect(declarationIn('  --brand--color-a: #999;\\n', '--color-a')).toBeUndefined();
+      expect(declarationIn('  --brand--color-a: #999;\\n  --color-a: #123;\\n', '--color-a')).toBe(
+        '#123',
+      );
+    });
+
+    it('ブロック先頭の宣言も拾う（位置依存で漏らさない）', () => {
+      expect(declarationIn('--color-a: #123;', '--color-a')).toBe('#123');
+    });
+
+    it('値の前後の空白を落とす', () => {
+      expect(declarationIn('  --color-a:   #123  ;\n', '--color-a')).toBe('#123');
+    });
+
+    it('無ければ undefined を返す（空文字と取り違えない）', () => {
+      expect(declarationIn('  --color-b: #123;\n', '--color-a')).toBeUndefined();
+    });
+  });
+});
+
+/**
  * 意味役割 ↔ `@theme` の CSS 変数の対応表（Requirements 1.1, 1.3）。
  *
  * ここが本テストの中核。集合包含では「役割の取り違え」を検出できないため、
