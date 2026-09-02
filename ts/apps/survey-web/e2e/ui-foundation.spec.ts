@@ -428,9 +428,13 @@ const OPERABLE_SELECTOR =
  * 44px の保証範囲外である（要件の Boundary Context「ラベルを伴わない裸の入力」）。
  * 条件を `input を含む Field` とだけ書くと、Issue #57 が検証面へ追加したエラー状態の行
  * （ラベルを持たない・実測 40px）まで巻き込んで、満たしようのない要求を課すことになる。
+ *
+ * 選択部品（Issue #174）も同じ扱いにする。高さは一行入力と揃えてあり、単体では要求寸法に
+ * 届かないため、ラベルを含む行で満たす。ここへ足さないと、**指で操作する部品が 1 つだけ
+ * 操作領域の検証の外に置かれる**（部品を足すたびに検査対象が静かに減る型の事故）。
  */
 const LABELLED_ROW_SELECTOR =
-  '[data-slot="field-label"]:has([data-slot="checkbox"], [data-slot="radio-group-item"]), [data-slot="field"]:has([data-slot="field-label"]):has([data-slot="input"])';
+  '[data-slot="field-label"]:has([data-slot="checkbox"], [data-slot="radio-group-item"]), [data-slot="field"]:has([data-slot="field-label"]):has([data-slot="input"], [data-slot="select"])';
 
 interface TextCue {
   /** テキストを持つ子孫が存在するか。 */
@@ -1314,6 +1318,10 @@ test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以
     ['チェックボックス（Checkbox）', page.getByRole('checkbox', { name: 'チェックボックス' })],
     // ラジオ1 は defaultValue で選択済みのため、既定状態の枠を測る的にはならない。
     ['ラジオ2（RadioGroupItem・未選択）', page.getByRole('radio', { name: 'ラジオ2' })],
+    // 選択部品は一行入力と同じ枠色を使う（Issue #174 / spec ui-airbnb-foundation 6.3）。
+    // 同じ変数を読んでいるという理由で検証を省くと、包む要素の追加や上書きで枠色が
+    // 変わったときに誰も気づけない。実描画で測る対象として並べる。
+    ['表示順の指定（Select）', page.getByRole('combobox', { name: '表示順の指定' })],
   ];
 
   for (const [where, locator] of targets) {
@@ -1417,6 +1425,99 @@ test('エラーかつチェック済みの枠がエラー色で描画され選�
 });
 
 // Requirements 4.2: 装飾用の罫線が識別用へ巻き込まれず現在の値のまま描画される。
+// Issue #174 / spec ui-airbnb-foundation タスク 8.1: 追加した共通部品の意匠を実描画で固定する。
+//
+// クラス名の照合で代替しない。余白も罫線も「そう書いてあるのに効いていない」が起こりうる
+// （余白は名前付きスケールが別スケールに覆われれば静かに潰れ、罫線は色だけが装飾用から
+// 識別用へ振り替わっても集合は無傷である）。
+test('表のセル余白と行の区切りが意匠のとおりに実描画される', async ({ page }) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('table')).toBeVisible();
+
+  const cell = page.locator('[data-slot="table-cell"]').first();
+  const padding = await cell.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      top: style.paddingTop,
+      right: style.paddingRight,
+      bottom: style.paddingBottom,
+      left: style.paddingLeft,
+    };
+  });
+  expect(
+    padding,
+    `セル余白が意匠の 16px と食い違う（実測 ${JSON.stringify(padding)}）`,
+  ).toEqual({ top: '16px', right: '16px', bottom: '16px', left: '16px' });
+
+  // 区切りは 1px の罫線のみ。最終行は罫線を持たないので、本体の先頭行で測る。
+  const row = page.locator('[data-slot="table-body"] > [data-slot="table-row"]').first();
+  const stroke = await row.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { width: Number.parseFloat(style.borderBottomWidth), style: style.borderBottomStyle };
+  });
+  expect(stroke.style, '行の区切りが実線で描かれていない').toBe('solid');
+  expect(stroke.width, '行の区切りが描画されていない（幅 0）').toBeGreaterThan(0);
+  expect(stroke.width, '行の区切りが 1px の罫線より太い').toBeLessThanOrEqual(1);
+
+  const rendered = await readRenderedColors(row);
+  expect(
+    rendered.borderColor,
+    `行の区切りが装飾用の値で描画されていない（実測 ${rendered.borderColor ?? '不明'}）`,
+  ).toBe(colors.border);
+  expect(
+    rendered.borderColor,
+    '行の区切りが識別用の枠色へ巻き込まれている（区切りは情報を持たない装飾である）',
+  ).not.toBe(colors.borderInteractive);
+
+  // 交互の背景も行の面塗りも使わない。面が塗られていればここで不透明な色が返る。
+  expect(rendered.backgroundColor, '行に面塗りが入っている（縞模様・可動感の誤提示）').toBeNull();
+});
+
+test('ページ枠の版面が名前付きスケールで解決され、実効内容幅が狭く潰れていない', async ({
+  page,
+}) => {
+  await page.goto('/ui-check');
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await expectVerificationSurfaceSane(page);
+
+  const shell = page.locator('[data-slot="page-shell"]');
+  await expect(shell).toHaveCount(1);
+  expect(
+    await shell.evaluate((element) => element.tagName),
+    '検証面のルートがページ枠の部品になっていない（主要領域が二重になっている疑い）',
+  ).toBe('MAIN');
+
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
+  }
+  const metrics = await shell.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      maxWidth: style.maxWidth,
+      paddingLeft: Number.parseFloat(style.paddingLeft),
+      paddingRight: Number.parseFloat(style.paddingRight),
+      width: element.getBoundingClientRect().width,
+    };
+  });
+
+  // 狭い側の版面の記録値（Tailwind の名前付きコンテナ寸法スケール）。
+  // ここを実測で固定する理由は Issue #54 にある。余白の名前付きキーを宣言すると
+  // 寸法系ユーティリティの解決先が余白スケールへ覆われ、**版面が数 px へ潰れたまま
+  // クラス名は無傷**になる。クラス名の照合ではこの経路を検出できない。
+  expect(
+    metrics.maxWidth,
+    `版面が名前付きスケールへ解決されていない（実測 ${metrics.maxWidth}）。` +
+      '寸法系の解決先が別スケールに覆われている疑いがある',
+  ).toBe('576px');
+
+  const content = metrics.width - metrics.paddingLeft - metrics.paddingRight;
+  expect(
+    content,
+    `ページ枠の実効内容幅が ${content}px しかない（端末幅 ${viewport.width}px）`,
+  ).toBeGreaterThanOrEqual(viewport.width * 0.8);
+});
+
 test('区切り線が装飾用の値のまま描画される', async ({ page }) => {
   await page.goto('/ui-check');
   const separator = page.locator('[data-slot="separator"]');

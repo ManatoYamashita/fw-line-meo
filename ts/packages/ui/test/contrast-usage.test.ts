@@ -451,6 +451,13 @@ const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reaso
       'separator.tsx の区切り線の面塗り。内容の区切りを示すだけで部品の存在・境界・状態を' +
       '伝えないため、情報を持たない純装飾として SC 1.4.11 の対象外（要件 4.2）。',
   },
+  {
+    utility: 'border-border',
+    reason:
+      'table.tsx の行区切りと page-header.tsx の見出し下の罫線。いずれも内容の区切りを示すだけで' +
+      '部品の存在・境界・状態を伝えないため、bg-border と同じく純装飾として SC 1.4.11 の対象外' +
+      '（要件 4.2）。行の識別は罫線ではなくセルの内容が担う。',
+  },
 ];
 
 // --- 数値検証 -----------------------------------------------------------------------
@@ -599,6 +606,7 @@ const NON_COLOR_TOKENS: readonly string[] = [
   'bg-clip-padding',
   'bg-transparent',
   'border-0',
+  'border-b',
   'border-t',
   'border-transparent',
   'ring-1',
@@ -606,10 +614,12 @@ const NON_COLOR_TOKENS: readonly string[] = [
   'text-2xl',
   'text-balance',
   'text-base',
+  'text-center',
   'text-current',
   'text-left',
   'text-lg',
   'text-pretty',
+  'text-right',
   'text-sm',
   'text-xl',
   'text-xs',
