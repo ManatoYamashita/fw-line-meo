@@ -261,8 +261,8 @@ export default function UiCheckPage() {
         以下は共通の枠組みの部品（Issue #174）。PageShell と PageHeader は上で既に
         描かれているため、ここでは残りの 3 つを置く。
 
-        配置の規律はこれまでと同じで、追加は必ず末尾に置く。巡回の停止数は 2 つ増える
-        （Select と、横溢れの捲りを担う表の容器。容器は焦点を取れないと隠れた列へ
+        配置の規律はこれまでと同じで、追加は必ず末尾に置く。巡回の停止数は 3 つ増える
+        （Select と、横溢れの捲りを担う表の容器 2 つ。容器は焦点を取れないと隠れた列へ
         キーボードで到達できないため焦点可能である）。上限には十分な余裕がある。
 
         命名の規律も同じ。ここで付ける名前が既存 locator（「〜のボタン」「〜の通知」
@@ -272,7 +272,8 @@ export default function UiCheckPage() {
 
       {/*
         表。セル余白・行区切り線の実描画色を測る的にする。
-        列を増やさないのは、横スクロールを起こすと横溢れの検証と干渉するため。
+        この表の列を増やさないのは、意匠の実測を溢れの有無に依存させないため。
+        溢れそのものを発火させる的は、この直後に別の容器として置いてある。
         名前を与えるのは、焦点を得たときに支援技術へ「何の領域か」が伝わるようにするため。
       */}
       <TableContainer label="区分ごとの個数">
@@ -291,6 +292,49 @@ export default function UiCheckPage() {
             <TableRow>
               <TableCell>乙の行</TableCell>
               <TableCell numeric>345</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/*
+        横に捲る領域の見本（Issue #53）。**意図的に端末幅を超える**表を置く。
+
+        これは意匠を測る的ではない。横スクロール検証が持つ「捲れる領域の内側で起きている溢れは
+        面が横に動いていることを意味しない」という除外規則を、実際に発火させるための的である。
+        除外規則は発火しなければ空振りしており、規則が存在すること自体を証明できない
+        （この面が唯一の発火場所であり、実面へ表が入るのは後続 spec の作業）。
+
+        セルの折り返しを止めているのは、溢れの有無を内容の長さや字幅の実測に依存させないため。
+      */}
+      <TableContainer label="横に捲る領域の見本">
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableHeaderCell className="whitespace-nowrap">計測した日付</TableHeaderCell>
+              <TableHeaderCell className="whitespace-nowrap">掲載の順位</TableHeaderCell>
+              <TableHeaderCell className="whitespace-nowrap">平均の評価</TableHeaderCell>
+              <TableHeaderCell className="whitespace-nowrap">クチコミの件数</TableHeaderCell>
+              <TableHeaderCell className="whitespace-nowrap">前日からの増減</TableHeaderCell>
+              <TableHeaderCell className="whitespace-nowrap">取得できた時刻</TableHeaderCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            <TableRow>
+              <TableCell className="whitespace-nowrap">2026年9月1日</TableCell>
+              <TableCell className="whitespace-nowrap" numeric>
+                3
+              </TableCell>
+              <TableCell className="whitespace-nowrap" numeric>
+                4.2
+              </TableCell>
+              <TableCell className="whitespace-nowrap" numeric>
+                128
+              </TableCell>
+              <TableCell className="whitespace-nowrap" numeric>
+                2
+              </TableCell>
+              <TableCell className="whitespace-nowrap">午前6時30分</TableCell>
             </TableRow>
           </TableBody>
         </Table>
