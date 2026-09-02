@@ -146,12 +146,15 @@ CSS では数値スケールで指定し、上の表は LINE Flex Message など
 |---|---|---|---|---|
 | `sm` | `0.25rem` | `rounded-sm` | （なし） | xs（4px・一致） |
 | `md` | `0.375rem` | `rounded-md` | `button.tsx` | 対応段なし |
-| `lg` | `0.5rem` | `rounded-lg` | `alert.tsx`, `button.tsx`, `field.tsx`, `input.tsx`, `textarea.tsx` | sm（8px・一致） |
-| `xl` | `0.75rem` | `rounded-xl` | `card.tsx` | md（14px・2px の差を受容） |
+| `lg` | `0.5rem` | `rounded-lg` | `alert.tsx`, `button.tsx`, `field.tsx`, `input.tsx`, `select.tsx`, `textarea.tsx` | sm（8px・一致） |
+| `xl` | `0.75rem` | `rounded-xl` | （なし） | 対応段なし |
+| `2xl` | `1rem` | `rounded-2xl` | `card.tsx`, `table.tsx` | md（14px・2px の差を受容） |
 | `4xl` | `2rem` | `rounded-4xl` | `badge.tsx` | xl（32px・一致） |
 | `full` | `9999px` | `rounded-full` | `radio-group.tsx` | full（一致） |
 
 原典の lg（20px）に対応する段は置いていない。消費する部品が 1 つも無いためである。
+`xl`（12px）も現在は消費先を持たない。カードが原典の md へ寄って `2xl` へ移ったためで、
+段そのものは Tailwind 既定として残る（段を消すと既定クラスの意味が変わる）。
 
 ---
 
@@ -298,13 +301,18 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 | `button.tsx` | `Button`, `buttonVariants` | 押しボタン |
 | `card.tsx` | `Card`, `CardAction`, `CardContent`, `CardDescription`, `CardFooter`, `CardHeader`, `CardTitle` | 情報の容器 |
 | `checkbox.tsx` | `Checkbox` | 複数選択 |
+| `empty-state.tsx` | `EmptyState` | 一覧が空のときの案内。押しボタンを内包しない |
 | `field.tsx` | `Field`, `FieldContent`, `FieldDescription`, `FieldError`, `FieldGroup`, `FieldLabel`, `FieldLegend`, `FieldSeparator`, `FieldSet`, `FieldTitle` | フォームの構造と検証状態 |
 | `heading.tsx` | `DEFAULT_SIZE_BY_LEVEL`, `Heading`, `headingVariants` | 見出し階層 |
 | `input.tsx` | `Input` | 単一行入力 |
 | `label.tsx` | `Label` | 記入欄の見出し |
+| `page-header.tsx` | `PageHeader` | ページ主見出しの周囲（説明文・右側の操作・下罫線） |
+| `page-shell.tsx` | `PageShell`, `pageShellVariants` | ページ外枠。版面は 2 段だけ |
 | `radio-group.tsx` | `RadioGroup`, `RadioGroupItem` | 単一選択 |
+| `select.tsx` | `Select` | 選択。ブラウザ標準の選択要素のラッパ |
 | `separator.tsx` | `Separator` | 区切り線 |
 | `spinner.tsx` | `Spinner` | 処理中の表示 |
+| `table.tsx` | `Table`, `TableBody`, `TableCell`, `TableContainer`, `TableHead`, `TableHeaderCell`, `TableRow` | 一覧表。容器がカード化を担う |
 | `textarea.tsx` | `Textarea` | 複数行入力 |
 
 ---
