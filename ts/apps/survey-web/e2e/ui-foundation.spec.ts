@@ -412,9 +412,44 @@ const BUTTON_TOUCH_REQUIREMENT: Readonly<Record<string, number>> = {
   'icon-sm': TOUCH_TARGET_COMPACT_PX,
 };
 
+/**
+ * 指で操作する部品の `data-slot`。**判定の射程はこの 1 箇所から導く。**
+ *
+ * 要件 4.5（隣接時の被覆）と要件 4.7（ラベルを伴う行）の対象条件を 2 箇所に書くと、
+ * 部品を足したときに片方だけ追随して、判定の射程が静かに縮む。実際 PR #180 では
+ * 選択部品を 4.7 側だけへ足し、4.5 側は元のままだった（レビュー指摘 1）。
+ * 縮んだことはどの検査にも現れない（覆う側が居なければ 4.5 は自明に成立するため）。
+ *
+ * 下の 2 つの部分集合を `satisfies` でこの集合へ束縛することで、**ラベルを伴う構成として
+ * 数えた部品が 4.5 の対象から漏れると型検査が落ちる**。追随を人間の注意力に委ねない。
+ */
+const OPERABLE_SLOTS = [
+  'button',
+  'checkbox',
+  'radio-group-item',
+  'input',
+  'textarea',
+  'select',
+] as const;
+
+type OperableSlot = (typeof OPERABLE_SLOTS)[number];
+
+/** `data-slot` の並びを CSS のセレクタリストへ変換する。 */
+function slotSelector(slots: readonly string[]): string {
+  return slots.map((slot) => `[data-slot="${slot}"]`).join(', ');
+}
+
 /** 指で操作する部品。隣接時の被覆判定（要件 4.5）はこの集合の全組み合わせで見る。 */
-const OPERABLE_SELECTOR =
-  '[data-slot="button"], [data-slot="checkbox"], [data-slot="radio-group-item"], [data-slot="input"], [data-slot="textarea"]';
+const OPERABLE_SELECTOR = slotSelector(OPERABLE_SLOTS);
+
+/** ラベルが制御を包む構成をとる部品（要件 4.7 の前者）。 */
+const LABEL_WRAPPING_SLOTS = [
+  'checkbox',
+  'radio-group-item',
+] as const satisfies readonly OperableSlot[];
+
+/** ラベルが制御の上へ積まれる構成をとる部品（要件 4.7 の後者）。 */
+const LABEL_STACKED_SLOTS = ['input', 'select'] as const satisfies readonly OperableSlot[];
 
 /**
  * ラベルを伴う構成の「行」。要件 4.7 の 44px はこの行全体で満たす。
@@ -430,11 +465,11 @@ const OPERABLE_SELECTOR =
  * （ラベルを持たない・実測 40px）まで巻き込んで、満たしようのない要求を課すことになる。
  *
  * 選択部品（Issue #174）も同じ扱いにする。高さは一行入力と揃えてあり、単体では要求寸法に
- * 届かないため、ラベルを含む行で満たす。ここへ足さないと、**指で操作する部品が 1 つだけ
- * 操作領域の検証の外に置かれる**（部品を足すたびに検査対象が静かに減る型の事故）。
+ * 届かないため、ラベルを含む行で満たす。
  */
 const LABELLED_ROW_SELECTOR =
-  '[data-slot="field-label"]:has([data-slot="checkbox"], [data-slot="radio-group-item"]), [data-slot="field"]:has([data-slot="field-label"]):has([data-slot="input"], [data-slot="select"])';
+  `[data-slot="field-label"]:has(${slotSelector(LABEL_WRAPPING_SLOTS)}), ` +
+  `[data-slot="field"]:has([data-slot="field-label"]):has(${slotSelector(LABEL_STACKED_SLOTS)})`;
 
 interface TextCue {
   /** テキストを持つ子孫が存在するか。 */
@@ -1173,7 +1208,17 @@ test('拡張した操作領域が隣接部品の視覚領域を覆わない', as
 
   const operables = await readTouchGeometries(page, OPERABLE_SELECTOR);
   const expanded = operables.filter((item) => item.hasExpansion);
-  // 空振り防止: 拡張を持つ部品がゼロなら「覆っていない」は自明に成立する。
+  // 空振り防止 1: 宣言した種別がすべて検証面に実在すること。選択子へ足しても検証面へ
+  // 置き忘れると、その部品は一度も測られないまま緑になる（PR #180 レビュー指摘 1）。
+  // 型検査は「宣言から漏れた部品」を捕まえるが、「宣言はあるが実在しない部品」は捕まえない。
+  const measuredSlots = new Set(operables.map((item) => item.slot));
+  const absentSlots = OPERABLE_SLOTS.filter((slot) => !measuredSlots.has(slot));
+  expect(
+    absentSlots,
+    `指で操作する部品が検証面に無い（${absentSlots.join(', ')}）。この判定の射程が宣言より狭い`,
+  ).toEqual([]);
+
+  // 空振り防止 2: 拡張を持つ部品がゼロなら「覆っていない」は自明に成立する。
   expect(
     expanded.length,
     '操作領域を拡張している部品が 1 つも無い。この判定は拡張が存在して初めて意味を持つ',
@@ -1469,8 +1514,29 @@ test('表のセル余白と行の区切りが意匠のとおりに実描画さ�
     '行の区切りが識別用の枠色へ巻き込まれている（区切りは情報を持たない装飾である）',
   ).not.toBe(colors.borderInteractive);
 
-  // 交互の背景も行の面塗りも使わない。面が塗られていればここで不透明な色が返る。
-  expect(rendered.backgroundColor, '行に面塗りが入っている（縞模様・可動感の誤提示）').toBeNull();
+  // 交互の背景も行の面塗りも使わない。
+  //
+  // **`readRenderedColors` の null を「塗られていない」の証明に使わない**（PR #180 レビュー指摘 2）。
+  // あの関数は alpha < 1 を一律 null で返す契約であり（「その要素では色が決まらない」の意）、
+  // `odd:bg-muted/50` のような半透明の縞模様まで null になって緑で通る（実測で対照を取った）。
+  // しかも `bg-muted/50` は CardFooter 由来で USAGE_PAIRS に登録済みのため、色ユーティリティの
+  // 網羅ガード（ユーティリティ単位）にも掛からない。不在を主張する側は、合成前の alpha を直接見る。
+  const rowFill = (await readRenderedLayers(row)).backgroundColor;
+  expect(
+    rowFill.alpha,
+    `行に面塗りが入っている（縞模様・可動感の誤提示・実測 ${rowFill.hex} / alpha ${rowFill.alpha}）`,
+  ).toBe(0);
+
+  // 横溢れの捲りを担う容器がキーボードで焦点を得られること（WCAG 2.1.1・レビュー指摘 3）。
+  // 焦点を取れないスクロール領域は、走査領域を自動で焦点可能にしないブラウザで
+  // キーボードのみの利用者から隠れた列を奪う。セルに焦点可能な要素があるとは限らないため、
+  // 容器そのものが到達点でなければならない。宣言（tabindex）ではなく実際に焦点が載ることを見る。
+  const container = page.locator('[data-slot="table-container"]');
+  await container.focus();
+  expect(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-slot') ?? null),
+    '横溢れの捲りを担う容器へ焦点が載らない（キーボードのみの利用者が隠れた列へ到達できない）',
+  ).toBe('table-container');
 });
 
 test('ページ枠の版面が名前付きスケールで解決され、実効内容幅が狭く潰れていない', async ({

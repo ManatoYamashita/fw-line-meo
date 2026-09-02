@@ -312,7 +312,7 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 | `select.tsx` | `Select` | 選択。ブラウザ標準の選択要素のラッパ |
 | `separator.tsx` | `Separator` | 区切り線 |
 | `spinner.tsx` | `Spinner` | 処理中の表示 |
-| `table.tsx` | `Table`, `TableBody`, `TableCell`, `TableContainer`, `TableHead`, `TableHeaderCell`, `TableRow` | 一覧表。容器がカード化を担う |
+| `table.tsx` | `Table`, `TableBody`, `TableCell`, `TableContainer`, `TableHead`, `TableHeaderCell`, `TableRow` | 一覧表。容器がカード化と、キーボードで焦点を得られる横溢れの捲りを担う |
 | `textarea.tsx` | `Textarea` | 複数行入力 |
 
 ---

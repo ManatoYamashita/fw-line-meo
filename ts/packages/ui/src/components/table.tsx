@@ -21,21 +21,44 @@
 //  - TableRow は tr を 1 段だけ描く（間に要素を挟まない）
 //  - TableBody は子をそのまま tbody へ流す
 //  - 横溢れの捲りは table の **外側**（TableContainer）が持つ。tbody の内側には置けない
+//  - その容器はキーボードで焦点を得られる（捲りを担う領域が到達不能だと隠れた列が失われる）
 
 import * as React from "react"
 
 import { cn } from "../lib/utils"
+
+type TableContainerProps = React.ComponentProps<"div"> & {
+  /**
+   * スクロール領域としてのアクセシブル名（任意）。
+   *
+   * 名前を持たない `region` を支援技術へランドマークとして公開しない実装があるため、
+   * 名前が与えられたときだけ役割を宣言する。**焦点可能であること自体は名前に依存しない**
+   * （到達性は名前の有無で変わってはならない）。
+   */
+  label?: string
+}
 
 /**
  * 表を包む容器。カード化（面・角丸・輪郭）と横溢れの捲りを担う。
  *
  * 捲りを table の外側に置くのは、tbody の内側に要素を挟めないためだけではなく、
  * 挟むと行の隣接関係が壊れて呼び出し側の詳細行の挿入が成立しなくなるためでもある。
+ *
+ * **捲りを担う以上、容器そのものがキーボードで焦点を得られなければならない**（WCAG 2.1.1）。
+ * スクロール領域を自動で焦点可能にしないブラウザでは、溢れて隠れた列へ到達する手段が
+ * 他に無い。セルの中に焦点可能な要素があるとは限らず（数値や日時だけの列が普通にある）、
+ * 「行のどれかを辿れば横にも動く」は成り立たない。
+ *
+ * 溢れていない表でも巡回の停止が 1 つ増えるが、溢れの有無は描画してからでないと決まらず、
+ * 判定を持ち込むと部品が状態と副作用を持つことになる。常に焦点可能とし、費用は一定に保つ。
  */
-function TableContainer({ className, ...props }: React.ComponentProps<"div">) {
+function TableContainer({ className, label, ...props }: TableContainerProps) {
   return (
     <div
       data-slot="table-container"
+      tabIndex={0}
+      role={label === undefined ? undefined : "region"}
+      aria-label={label}
       className={cn(
         "w-full overflow-x-auto rounded-2xl bg-card ring-1 ring-foreground/10",
         className
@@ -135,6 +158,7 @@ function TableCell({
   )
 }
 
+export type { TableContainerProps }
 export {
   Table,
   TableContainer,

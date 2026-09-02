@@ -763,19 +763,6 @@ describe('Spinner — 読み込み中の状態通知（Requirements 2.1, 5.1）'
   });
 });
 
-// フォーカス指標の一本化（Issue #49 / Requirements 5.3）。
-//
-// theme.css は `@layer base` にグローバルな `:focus-visible { outline: 2px solid var(--ring) }` を
-// アクセシビリティ既定として宣言している。ところがベンダリング元の shadcn 部品は base class に
-// `outline-none` を持ち、これは `@layer utilities` に生成されるため **詳細度に関係なくレイヤ順で
-// base に勝ち**、既定は「それが守るべき対話的部品の上でだけ」無効化されていた。
-// 残る指標も `ring-ring/50`（白背景 2.08:1）や destructive の `border-destructive/40`（1.93:1）と
-// SC 1.4.11 の 3:1 を満たしておらず、default Button では `border-ring` が自身の塗り（bg-primary）と
-// 同色になって完全に不可視だった。
-//
-// 是正方針は「部品は focus を自前定義せず、theme.css の base outline に一本化する」。
-// 本テストはその契約をクラス宣言レベルで固定する（実コンパイル結果は app-integration.test.ts、
-// 実描画は survey-web の E2E が担う）。
 // --- 共通の枠組みの部品（Issue #174 / Requirements 5.1〜5.6） ---------------------------
 
 /** 表の最小構成。役割と構造の検証で使い回す。 */
@@ -857,6 +844,28 @@ describe('Table — 支援技術上の役割と構造契約（Requirements 5.1, 
     expect(classesOf(numeric!)).toContain('tabular-nums');
     expect(plain?.hasAttribute('data-numeric')).toBe(false);
     expect(classesOf(plain!)).not.toContain('tabular-nums');
+  });
+
+  it('横溢れの捲りを担う容器がキーボードで焦点を得られる（WCAG 2.1.1）', () => {
+    // スクロール領域を自動で焦点可能にしないブラウザでは、溢れて隠れた列へ到達する手段が
+    // 容器自身しか無い。セルに焦点可能な要素があるとは限らない（数値や日時だけの列がある）。
+    // 実描画で焦点が実際に載ることは survey-web の E2E が測る（PR #180 レビュー指摘 3）。
+    renderTable();
+    expect(screen.getByTestId('table-container').getAttribute('tabindex')).toBe('0');
+  });
+
+  it('名前を与えたときだけ領域としての役割を宣言する', () => {
+    // 名前を持たない region をランドマークとして公開しない実装があるため、名前の無い容器へ
+    // 役割だけを付けない。**到達性は名前の有無で変わらない**ことを同時に固定する。
+    const { container, rerender } = render(<TableContainer data-testid="tc" />);
+    const unnamed = container.querySelector('[data-slot="table-container"]')!;
+    expect(unnamed.hasAttribute('role')).toBe(false);
+    expect(unnamed.getAttribute('tabindex')).toBe('0');
+
+    rerender(<TableContainer data-testid="tc" label="担当店舗の一覧" />);
+    const named = screen.getByRole('region', { name: '担当店舗の一覧' });
+    expect(named.getAttribute('data-slot')).toBe('table-container');
+    expect(named.getAttribute('tabindex')).toBe('0');
   });
 
   it('全要素が意味論トークンのみを使い、生の色（hex / パレット色クラス）を持たない', () => {
@@ -1031,6 +1040,16 @@ describe('Select — 標準の選択要素としての振る舞い（Requirement
     expect(classesOf(control)).toContain('aria-invalid:border-destructive');
   });
 
+  it('外から与える指定は部品の箱（包む要素）へ載る', () => {
+    // 開閉の記号は包む要素を基準に絶対配置される。選択要素の側だけを狭めると、記号は
+    // 箱の右端に取り残されて選択要素から離れて描かれる（PR #180 レビュー指摘）。
+    // 寸法系の指定は箱＝包む要素に効かなければならない。
+    const { container } = render(<Select aria-label="選択" className="w-40" />);
+    const wrapper = container.querySelector('[data-slot="select-wrapper"]')!;
+    expect(classesOf(wrapper)).toContain('w-40');
+    expect(classesOf(screen.getByLabelText('選択'))).not.toContain('w-40');
+  });
+
   it('意味論トークンのみを使い、生の色を持たない', () => {
     const { container } = renderSelect();
     for (const node of container.querySelectorAll('*')) {
@@ -1040,6 +1059,19 @@ describe('Select — 標準の選択要素としての振る舞い（Requirement
   });
 });
 
+// フォーカス指標の一本化（Issue #49 / Requirements 5.3）。
+//
+// theme.css は `@layer base` にグローバルな `:focus-visible { outline: 2px solid var(--ring) }` を
+// アクセシビリティ既定として宣言している。ところがベンダリング元の shadcn 部品は base class に
+// `outline-none` を持ち、これは `@layer utilities` に生成されるため **詳細度に関係なくレイヤ順で
+// base に勝ち**、既定は「それが守るべき対話的部品の上でだけ」無効化されていた。
+// 残る指標も `ring-ring/50`（白背景 2.08:1）や destructive の `border-destructive/40`（1.93:1）と
+// SC 1.4.11 の 3:1 を満たしておらず、default Button では `border-ring` が自身の塗り（bg-primary）と
+// 同色になって完全に不可視だった。
+//
+// 是正方針は「部品は focus を自前定義せず、theme.css の base outline に一本化する」。
+// 本テストはその契約をクラス宣言レベルで固定する（実コンパイル結果は app-integration.test.ts、
+// 実描画は survey-web の E2E が担う）。
 describe('フォーカス指標は部品が自前定義しない（Issue #49 / Requirements 5.3）', () => {
   /** `outline-none` は base レイヤの既定を打ち消すため、部品では一切許さない。 */
   const OUTLINE_SUPPRESSION = /\boutline-none\b/;
