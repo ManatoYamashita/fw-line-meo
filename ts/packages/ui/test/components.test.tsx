@@ -763,19 +763,6 @@ describe('Spinner — 読み込み中の状態通知（Requirements 2.1, 5.1）'
   });
 });
 
-// フォーカス指標の一本化（Issue #49 / Requirements 5.3）。
-//
-// theme.css は `@layer base` にグローバルな `:focus-visible { outline: 2px solid var(--ring) }` を
-// アクセシビリティ既定として宣言している。ところがベンダリング元の shadcn 部品は base class に
-// `outline-none` を持ち、これは `@layer utilities` に生成されるため **詳細度に関係なくレイヤ順で
-// base に勝ち**、既定は「それが守るべき対話的部品の上でだけ」無効化されていた。
-// 残る指標も `ring-ring/50`（白背景 2.08:1）や destructive の `border-destructive/40`（1.93:1）と
-// SC 1.4.11 の 3:1 を満たしておらず、default Button では `border-ring` が自身の塗り（bg-primary）と
-// 同色になって完全に不可視だった。
-//
-// 是正方針は「部品は focus を自前定義せず、theme.css の base outline に一本化する」。
-// 本テストはその契約をクラス宣言レベルで固定する（実コンパイル結果は app-integration.test.ts、
-// 実描画は survey-web の E2E が担う）。
 // --- 共通の枠組みの部品（Issue #174 / Requirements 5.1〜5.6） ---------------------------
 
 /** 表の最小構成。役割と構造の検証で使い回す。 */
@@ -1053,6 +1040,16 @@ describe('Select — 標準の選択要素としての振る舞い（Requirement
     expect(classesOf(control)).toContain('aria-invalid:border-destructive');
   });
 
+  it('外から与える指定は部品の箱（包む要素）へ載る', () => {
+    // 開閉の記号は包む要素を基準に絶対配置される。選択要素の側だけを狭めると、記号は
+    // 箱の右端に取り残されて選択要素から離れて描かれる（PR #180 レビュー指摘）。
+    // 寸法系の指定は箱＝包む要素に効かなければならない。
+    const { container } = render(<Select aria-label="選択" className="w-40" />);
+    const wrapper = container.querySelector('[data-slot="select-wrapper"]')!;
+    expect(classesOf(wrapper)).toContain('w-40');
+    expect(classesOf(screen.getByLabelText('選択'))).not.toContain('w-40');
+  });
+
   it('意味論トークンのみを使い、生の色を持たない', () => {
     const { container } = renderSelect();
     for (const node of container.querySelectorAll('*')) {
@@ -1062,6 +1059,19 @@ describe('Select — 標準の選択要素としての振る舞い（Requirement
   });
 });
 
+// フォーカス指標の一本化（Issue #49 / Requirements 5.3）。
+//
+// theme.css は `@layer base` にグローバルな `:focus-visible { outline: 2px solid var(--ring) }` を
+// アクセシビリティ既定として宣言している。ところがベンダリング元の shadcn 部品は base class に
+// `outline-none` を持ち、これは `@layer utilities` に生成されるため **詳細度に関係なくレイヤ順で
+// base に勝ち**、既定は「それが守るべき対話的部品の上でだけ」無効化されていた。
+// 残る指標も `ring-ring/50`（白背景 2.08:1）や destructive の `border-destructive/40`（1.93:1）と
+// SC 1.4.11 の 3:1 を満たしておらず、default Button では `border-ring` が自身の塗り（bg-primary）と
+// 同色になって完全に不可視だった。
+//
+// 是正方針は「部品は focus を自前定義せず、theme.css の base outline に一本化する」。
+// 本テストはその契約をクラス宣言レベルで固定する（実コンパイル結果は app-integration.test.ts、
+// 実描画は survey-web の E2E が担う）。
 describe('フォーカス指標は部品が自前定義しない（Issue #49 / Requirements 5.3）', () => {
   /** `outline-none` は base レイヤの既定を打ち消すため、部品では一切許さない。 */
   const OUTLINE_SUPPRESSION = /\boutline-none\b/;

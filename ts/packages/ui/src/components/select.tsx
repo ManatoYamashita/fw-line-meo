@@ -29,16 +29,22 @@ import { cn } from "../lib/utils"
  * 包む要素を 1 枚挟むのは、開閉の記号を重ねるためだけである。`id` や必須属性を含む
  * すべての属性は選択要素そのものへ渡すので、ラベルとの関連付け（`htmlFor`）も
  * アクセシブル名の解決も標準要素のまま変わらない。
+ *
+ * **外から与える `className` は包む要素へ載せる**（PR #180 レビュー指摘）。開閉の記号は
+ * 包む要素を基準に絶対配置されるため、選択要素の側だけを狭めると、記号は箱の右端に
+ * 取り残されて選択要素から離れて描かれる。呼び出し側が「この部品」と見なして幅や余白を
+ * 指定する箱は包む要素であり、寸法系の指定はそちらへ効くのが正しい。
+ *
+ * 選択要素自身の枠・高さ・角丸は一行入力と揃える約束なので、**面ごとに上書きする口は
+ * 用意しない**（意匠のドリフト防止が本部品の存在理由である）。そのため選択要素側の
+ * クラスは合成せず、この 1 箇所に固定する。
  */
 function Select({ className, children, ...props }: React.ComponentProps<"select">) {
   return (
-    <div data-slot="select-wrapper" className="relative w-full">
+    <div data-slot="select-wrapper" className={cn("relative w-full", className)}>
       <select
         data-slot="select"
-        className={cn(
-          "h-8 w-full min-w-0 appearance-none rounded-lg border border-input bg-transparent py-1 pr-8 pl-2.5 text-base transition-colors disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm",
-          className
-        )}
+        className="h-8 w-full min-w-0 appearance-none rounded-lg border border-input bg-transparent py-1 pr-8 pl-2.5 text-base transition-colors disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm"
         {...props}
       >
         {children}
