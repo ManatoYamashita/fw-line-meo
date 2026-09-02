@@ -64,7 +64,11 @@
 - 外部ライブラリは必要性を吟味して最小限に。LINE/GCP/Gemini の公式 SDK を基軸とする。
 
 ### Type Safety / Code Quality / Testing
-- 実装着手時に確立する（現状ルール未策定）。確立後に本ファイルへ追記すること。
+- **型検査は CI で必ず走る。** 配線が消えていないことは `scripts/check-typecheck-coverage.sh` が機械強制する
+  （Issue #51 は共通部品の型が一度も検査されないまま main に入り得た形である）。
+- **構造を固定するテストは、固定している性質を壊す変異で赤くなることを実証してから入れる。**
+  実証していないガードは、空振りしていても誰も気づけない。
+- **UI・デザイントークンの規律は `.kiro/steering/design-tokens.md` にある。** 本ファイルへ書き写さない。
 
 #### 抽出器の自己検証（Issue #60）
 
@@ -226,8 +230,10 @@
 ## Development Environment
 
 ### 現状
-**実装コード・`package.json`・`go.mod` はまだ存在しない**（要件定義・提案フェーズ完了直後）。
-`.gitignore` は Node/TS + Go + GCP/Terraform を想定済み。
+TypeScript は `ts/` の pnpm workspace（`ts/package.json` / `ts/pnpm-workspace.yaml`。`apps/` がデプロイ単位、
+`packages/` が共有ライブラリ）、Go は `go/go.mod`（モジュールパス `github.com/ManatoYamashita/fw-line-meo/go`）。
+スキーマは `db/`、インフラは `infra/`、CI ガードは `scripts/`。
+リポジトリ直下に `package.json` / `go.mod` は置かない（言語ごとにトップレベルを分離するため）。
 
 ### Common Commands
 ```bash
@@ -242,10 +248,15 @@ make db-verify-docs # DOCS: ERD/write-boundary と実スキーマの整合・書
 # **ts-ci の lint-build-test が apply migrations の直後にこれを呼ぶ。**
 ts/scripts/with-test-db.sh bash scripts/run-db-test-suites.sh   # ローカル（native postgres を起動）
 DATABASE_URL=... bash scripts/run-db-test-suites.sh             # CI / 既存 DB
-# アプリ層（TS/Go）のビルド・lint・テストは各層導入時に確立し追記する。推測で書かない。
+# アプリ層（Makefile がラップする。実体は ts/ の pnpm scripts と Go 標準ツール）
+make ts-install ts-build ts-typecheck ts-lint ts-test  # TS: 導入・ビルド・型検査・lint・テスト
+make ts-test-db                                        # TS: DB 依存テスト（native postgres を起動）
+make ts-test-e2e ts-test-perf                          # TS: 実ブラウザ検証・JS バンドル予算
+make go-build go-test                                  # Go: ビルド・テスト
 ```
 
 ---
 _Document standards and patterns, not every dependency_
 _一次情報源: `requirements.md` 2章／`README.md`／`CLAUDE.md`_
 _created_at: 2026-06-28_
+_updated_at: 2026-09-02（#175: 「実装コード未着手」「アプリ層のコマンドは各層導入時に確立」の虚偽記述を是正。UI 規律は `.kiro/steering/design-tokens.md` へ分離した）_
