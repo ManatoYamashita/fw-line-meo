@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { radius, spacing } from '@fwlm/design-tokens';
+import { radius, shadow, spacing } from '@fwlm/design-tokens';
 import {
   APPS,
   compileStockBaseline,
@@ -26,6 +26,7 @@ import {
   declaredThemeKeys,
   findDuplicateRadiusSteps,
   findRadiusMismatches,
+  findShadowMismatches,
   findShadowing,
   findSpacingMismatches,
   namespaceOf,
@@ -188,6 +189,46 @@ describe('findSpacingMismatches は数値スケールの実寸と突き合わせ
   });
 });
 
+describe('findShadowMismatches は影の段を突き合わせる', () => {
+  // 実測した生成 CSS の形を写した fixture。影はテーマ変数として現れず、内部変数へ値ごと
+  // 展開され、各色は var() の既定値として包まれる。この形を再現していない fixture で
+  // 緑になっても、実物に対して何も証明しない。
+  const css =
+    '.shadow-raised { --tw-shadow: 0 2px 6px 0 var(--tw-shadow-color, #0000000A); }';
+
+  it('包みを外した値がトークンと一致すれば違反を返さない', () => {
+    expect(findShadowMismatches(css, { raised: '0 2px 6px 0 #0000000A' })).toEqual([]);
+  });
+
+  it('包みが外れていることを fixture 側から確かめる（抽出器の自己検証）', () => {
+    // 包んだままの文字列をトークン値として渡すと一致しない。これが緑になるようなら
+    // 上の一致は「両方とも包まれたまま比べている」ことになり、実物と条件が違う。
+    const mismatches = findShadowMismatches(css, {
+      raised: '0 2px 6px 0 var(--tw-shadow-color, #0000000A)',
+    });
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0]?.resolvedValue).toBe('0 2px 6px 0 #0000000A');
+  });
+
+  it('寸法の並びが変わった段を報告する（色の集合では捕まらない食い違い）', () => {
+    // 色は同じまま距離だけを変えた例。theme.css の色集合を見る検査は緑のまま通る。
+    expect(findShadowMismatches(css, { raised: '0 3px 6px 0 #0000000A' })).toEqual([
+      {
+        scale: 'shadow',
+        key: 'raised',
+        tokenValue: '0 3px 6px 0 #0000000A',
+        resolvedValue: '0 2px 6px 0 #0000000A',
+      },
+    ]);
+  });
+
+  it('生成されていない段は違反として扱う（欠測を握り潰さない）', () => {
+    expect(findShadowMismatches(css, { floating: '0 1px 2px 0 #0000000A' })).toEqual([
+      { scale: 'shadow', key: 'floating', tokenValue: '0 1px 2px 0 #0000000A', resolvedValue: null },
+    ]);
+  });
+});
+
 describe('collectRadiusVariables は生成 CSS が出力した段を列挙する', () => {
   it('接尾辞を持つ --radius-* のみを拾う', () => {
     const css = ':root { --radius: var(--radius-md); --radius-md: 0.375rem; --radius-xl: 0.75rem; }';
@@ -278,22 +319,40 @@ const RADIUS_PROBES = [
   'rounded-md',
   'rounded-lg',
   'rounded-xl',
+  'rounded-2xl',
   'rounded-4xl',
   'rounded-full',
 ] as const;
+
+/**
+ * 影の段。**越境衝突の対照ではない。**
+ *
+ * 影のユーティリティは実値を Tailwind の内部変数へ展開するため、解決先の判定は基準線でも
+ * 現行でもテーマ変数を返さない（本ファイル冒頭の単体ケースがその形を固定している）。
+ * したがって `findShadowing` は影について構造的に何も検出できず、どのクラスを置いても
+ * 検出数は変わらない。ここに置く目的は 2 つだけである:
+ *
+ *  1. `@theme` が宣言する名前空間を網羅する（下の対応表が要求する）
+ *  2. 生成を強制して、トークン値との突き合わせ（`findShadowMismatches`）を成立させる
+ *
+ * 差し替え前は同名上書きの対照として撤去済みの段が置かれていたが、その名前は
+ * `@theme` から消えており、注記が事実でなくなっていた（Issue #173 のレビューで判明）。
+ */
+const SHADOW_PROBES = ['shadow-raised'] as const;
 
 /**
  * 同名上書きの対照。theme.css がこれらの名前空間を意図的に上書きしているが、
  * ユーティリティが読む**変数名は変わらない**ため越境衝突にはならない。
  * 誤検出が起きればここが真っ先に落ちる。
  */
-const SAME_NAME_OVERRIDE_PROBES = ['text-xs', 'text-2xl', 'font-sans', 'shadow-md', 'bg-primary'] as const;
+const SAME_NAME_OVERRIDE_PROBES = ['text-xs', 'text-2xl', 'font-sans', 'bg-primary'] as const;
 
 const PROBES: readonly string[] = [
   ...SIZE_PROBES,
   ...NUMERIC_SPACING_PROBES,
   ...NAMED_SPACING_PROBES,
   ...RADIUS_PROBES,
+  ...SHADOW_PROBES,
   ...SAME_NAME_OVERRIDE_PROBES,
 ];
 
@@ -312,7 +371,7 @@ const PROBED_NAMESPACES: Readonly<Record<string, readonly string[]>> = {
   '--color': ['bg-primary'],
   '--font': ['font-sans'],
   '--radius': [...RADIUS_PROBES],
-  '--shadow': ['shadow-md'],
+  '--shadow': [...SHADOW_PROBES],
   '--spacing': [...NUMERIC_SPACING_PROBES, ...NAMED_SPACING_PROBES, ...SIZE_PROBES],
   '--text': ['text-xs', 'text-2xl'],
 };
@@ -461,6 +520,25 @@ describe.each(APPS)('$packageName のトークンスケール', (app) => {
     });
   });
 
+  describe('影トークンと生成 CSS の対応（Requirements 3.3）', () => {
+    it('影の段がトークン値どおりに出力される', () => {
+      // 影の値は色ではなく寸法の並びを含む。theme.css の hex 集合を見る検査（theme-sync）は
+      // 色が同じままなら距離やぼかしの変化を検出できないため、ここが唯一の照合点になる。
+      const mismatches = findShadowMismatches(current, shadow);
+      const detail = mismatches
+        .map(
+          (mismatch) =>
+            `  ${mismatch.key}: トークンは ${mismatch.tokenValue} だが生成 CSS は ` +
+            `${mismatch.resolvedValue ?? '未出力'}`,
+        )
+        .join('\n');
+      expect(
+        mismatches,
+        `${app.packageName}: 影トークンと生成 CSS が食い違っています。\n${detail}`,
+      ).toEqual([]);
+    });
+  });
+
   describe('余白トークンと数値スケールの対応（Requirements 2.2, 2.3, 5.4, 5.5）', () => {
     it('数値スケールの実寸がトークン値と一致する', () => {
       const mismatches = findSpacingMismatches(current, spacing, SPACING_STEPS);
@@ -512,6 +590,17 @@ describe.each(APPS)('$packageName のトークンスケール', (app) => {
 describe('余白トークンと対応表は両方向で一致する（Requirements 5.6）', () => {
   it('トークンのキー集合と対応表のキー集合が一致する', () => {
     expect(Object.keys(spacing).sort()).toEqual(Object.keys(SPACING_STEPS).sort());
+  });
+});
+
+describe('角丸トークンとプローブ集合は両方向で一致する（Requirements 3.7）', () => {
+  it('プローブのキー集合とトークンのキー集合が一致する', () => {
+    // **段を足したときにプローブを足し忘れても、必ずしも赤くならない**（実測）。
+    // その段を使う部品があれば `@source` 経由で生成 CSS に現れるため、値の照合は通る。
+    // しかし RADIUS_KEYS はプローブから導出されているので、足し忘れた段は
+    // 「段の重複」検査と「生成側の網羅」検査の対象から**静かに外れる**。
+    // 検出力が落ちたことは他のどの検査にも現れない。ここで機械的に追随を強制する。
+    expect([...RADIUS_KEYS].sort()).toEqual(Object.keys(radius).sort());
   });
 });
 

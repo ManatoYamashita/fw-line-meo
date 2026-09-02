@@ -28,7 +28,7 @@ export interface ShadowingViolation {
 }
 
 export interface ScaleMismatch {
-  readonly scale: 'spacing' | 'radius';
+  readonly scale: 'spacing' | 'radius' | 'shadow';
   readonly key: string;
   readonly tokenValue: string;
   /** 生成 CSS から得た実寸。解決できない場合は null（**違反として扱う**）。 */
@@ -152,6 +152,48 @@ export function findRadiusMismatches(
     const resolvedValue = customPropertyValue(css, `--radius-${key}`);
     if (resolvedValue === null || resolvedValue !== normalize(tokenValue)) {
       mismatches.push({ scale: 'radius', key, tokenValue, resolvedValue });
+    }
+  }
+  return mismatches;
+}
+
+/**
+ * 影のユーティリティが宣言する影の値を取り出す（未生成なら null）。
+ *
+ * **影は角丸と違い、テーマ変数として生成 CSS に現れない**（実測）。角丸は
+ * `border-radius: var(--radius-2xl)` のように変数を読むが、影は Tailwind の内部変数へ
+ * 値ごと展開され、しかも各色が `var(--tw-shadow-color, <色>)` の既定値として包まれる:
+ *
+ *   .shadow-raised { --tw-shadow: 0 0 0 1px var(--tw-shadow-color, #00000005), ... }
+ *
+ * したがって `--shadow-{key}` を引く方法では常に未出力になり、照合が成立しない。
+ * 包みを外して素の値へ戻したうえで突き合わせる。
+ */
+function shadowUtilityValue(css: string, utility: string): string | null {
+  const declarations = declarationsOfUtility(css, utility).filter(
+    (declaration) => declaration.prop === '--tw-shadow',
+  );
+  const declaration = declarations[declarations.length - 1];
+  if (declaration === undefined) return null;
+  return normalize(declaration.value.replace(/var\(--tw-shadow-color,\s*([^)]*)\)/g, '$1'));
+}
+
+/**
+ * 影トークンと生成 CSS を役割ごとに突き合わせる。
+ *
+ * 解決できなかった段は角丸と同じく違反として扱う。**影の値は色ではなく寸法の並びを含む**ため、
+ * theme.css の色集合を見る検査（theme-sync）では距離やぼかしの変化を検出できない。
+ * ここが唯一その食い違いを捕まえる。
+ */
+export function findShadowMismatches(
+  css: string,
+  tokens: Readonly<Record<string, string>>,
+): readonly ScaleMismatch[] {
+  const mismatches: ScaleMismatch[] = [];
+  for (const [key, tokenValue] of Object.entries(tokens)) {
+    const resolvedValue = shadowUtilityValue(css, `shadow-${key}`);
+    if (resolvedValue === null || resolvedValue !== normalize(tokenValue)) {
+      mismatches.push({ scale: 'shadow', key, tokenValue, resolvedValue });
     }
   }
   return mismatches;

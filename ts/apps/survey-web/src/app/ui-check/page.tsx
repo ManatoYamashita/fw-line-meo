@@ -25,6 +25,7 @@ import {
   CardTitle,
 } from '@fwlm/ui/components/card';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
+import { EmptyState } from '@fwlm/ui/components/empty-state';
 import {
   Field,
   FieldDescription,
@@ -35,9 +36,21 @@ import {
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { Label } from '@fwlm/ui/components/label';
+import { PageHeader } from '@fwlm/ui/components/page-header';
+import { PageShell } from '@fwlm/ui/components/page-shell';
 import { RadioGroup, RadioGroupItem } from '@fwlm/ui/components/radio-group';
+import { Select } from '@fwlm/ui/components/select';
 import { Separator } from '@fwlm/ui/components/separator';
 import { Spinner } from '@fwlm/ui/components/spinner';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '@fwlm/ui/components/table';
 import { Textarea } from '@fwlm/ui/components/textarea';
 
 export const metadata: Metadata = {
@@ -47,15 +60,19 @@ export const metadata: Metadata = {
 
 export default function UiCheckPage() {
   return (
-    // コンテナ幅は名前付きスケールで指定する（本番の各面と同じ書き方にする）。
+    // コンテナ幅は PageShell が名前付きスケールで与える（本番の各面と同じ書き方にする）。
     // 検証面のコンテナ幅が端末幅に対して不当に狭いと、タッチ操作領域の実測が実態と乖離し、
     // 部品の欠陥と検証面の欠陥を切り分けられなくなる（ui-a11y-gaps design「失敗モードと観測性」）。
     // その状態は e2e の expectVerificationSurfaceSane が検出する。
-    <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
-      <h1>UI 基盤の検証面</h1>
-      <p>
-        自動検証（E2E）専用のページです。利用者向けの機能はありません。
-      </p>
+    //
+    // PageShell を入れ子にせずルートそのものとして使うのは、主要領域を 2 つ作らないため。
+    // 2 つになると main を 1 つに解決している e2e の複数の検証が同時に壊れる。
+    // 見出しと説明文は PageHeader が描く（この面の h1 は 1 つだけである）。
+    <PageShell width="sm" className="flex flex-col gap-4">
+      <PageHeader
+        title="UI 基盤の検証面"
+        description="自動検証（E2E）専用のページです。利用者向けの機能はありません。"
+      />
 
       <Button>既定のボタン</Button>
       <Button variant="destructive">破壊的なボタン</Button>
@@ -239,6 +256,54 @@ export default function UiCheckPage() {
           <FieldTitle>囲み枠の未選択</FieldTitle>
         </Field>
       </FieldLabel>
-    </main>
+
+      {/*
+        以下は共通の枠組みの部品（Issue #174）。PageShell と PageHeader は上で既に
+        描かれているため、ここでは残りの 3 つを置く。
+
+        配置の規律はこれまでと同じで、追加は必ず末尾に置く。Select は操作可能要素を
+        1 つ増やすので巡回の停止数が 1 つ増える（上限には十分な余裕がある）。
+
+        命名の規律も同じ。ここで付ける名前が既存 locator（「〜のボタン」「〜の通知」
+        「一行入力」「複数行入力」「チェックボックス」）の部分文字列にならないようにしてある。
+      */}
+      <Heading level={2}>共通の枠組みの検証</Heading>
+
+      {/*
+        表。セル余白・行区切り線の実描画色を測る的にする。
+        列を増やさないのは、横スクロールを起こすと横溢れの検証と干渉するため。
+      */}
+      <TableContainer>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableHeaderCell>区分</TableHeaderCell>
+              <TableHeaderCell className="text-right">個数</TableHeaderCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            <TableRow>
+              <TableCell>甲の行</TableCell>
+              <TableCell numeric>12</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>乙の行</TableCell>
+              <TableCell numeric>345</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <EmptyState>表示できる項目はありません</EmptyState>
+
+      {/* 選択部品。非フォーカス時の枠の実描画色を測る的にする。 */}
+      <Field>
+        <FieldLabel htmlFor="ui-check-select">表示順の指定</FieldLabel>
+        <Select id="ui-check-select" defaultValue="newest">
+          <option value="newest">新しい順</option>
+          <option value="oldest">古い順</option>
+        </Select>
+      </Field>
+    </PageShell>
   );
 }

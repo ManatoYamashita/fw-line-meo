@@ -21,12 +21,13 @@ import { fileURLToPath } from 'node:url';
 import postcss from 'postcss';
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { Alert, AlertDescription, AlertTitle } from '../src/components/alert';
 import { Button } from '../src/components/button';
 import { Checkbox } from '../src/components/checkbox';
+import { EmptyState } from '../src/components/empty-state';
 import {
   Field,
   FieldDescription,
@@ -35,8 +36,20 @@ import {
 } from '../src/components/field';
 import { Heading } from '../src/components/heading';
 import { Input } from '../src/components/input';
+import { PageHeader } from '../src/components/page-header';
+import { PageShell } from '../src/components/page-shell';
 import { RadioGroup, RadioGroupItem } from '../src/components/radio-group';
+import { Select } from '../src/components/select';
 import { Spinner } from '../src/components/spinner';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '../src/components/table';
 import { Textarea } from '../src/components/textarea';
 
 // jsdom 25 は PointerEvent を実装していない。一方 Base UI の Checkbox は、キーボード/クリックの
@@ -763,6 +776,270 @@ describe('Spinner — 読み込み中の状態通知（Requirements 2.1, 5.1）'
 // 是正方針は「部品は focus を自前定義せず、theme.css の base outline に一本化する」。
 // 本テストはその契約をクラス宣言レベルで固定する（実コンパイル結果は app-integration.test.ts、
 // 実描画は survey-web の E2E が担う）。
+// --- 共通の枠組みの部品（Issue #174 / Requirements 5.1〜5.6） ---------------------------
+
+/** 表の最小構成。役割と構造の検証で使い回す。 */
+function renderTable(): ReturnType<typeof render> {
+  return render(
+    <TableContainer data-testid="table-container">
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableHeaderCell>区分</TableHeaderCell>
+            <TableHeaderCell>個数</TableHeaderCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          <TableRow>
+            <TableCell>甲</TableCell>
+            <TableCell numeric>12</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </TableContainer>,
+  );
+}
+
+describe('Table — 支援技術上の役割と構造契約（Requirements 5.1, 5.2）', () => {
+  it('行・列・セルの役割が支援技術へ公開される', () => {
+    renderTable();
+    expect(screen.getByRole('table')).toBeTruthy();
+    // thead / tbody がそれぞれ行グループとして公開される。
+    expect(screen.getAllByRole('rowgroup')).toHaveLength(2);
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      '区分',
+      '個数',
+    ]);
+    expect(screen.getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['甲', '12']);
+  });
+
+  it('見出しセルは列の見出しであることを既定で宣言する', () => {
+    // 既存の一覧のうち片方だけが宣言を持っていた。部品化で持っている側へ揃える。
+    renderTable();
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(header.getAttribute('scope')).toBe('col');
+    }
+  });
+
+  it('呼び出し側は見出しセルの向きを上書きできる', () => {
+    render(
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell scope="row">甲</TableHeaderCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    expect(screen.getByRole('rowheader').getAttribute('scope')).toBe('row');
+  });
+
+  it('行とセルを 1 段で描く（呼び出し側が行の隣接関係へ依存できる）', () => {
+    // 呼び出し側の一覧は「ある行の直後に詳細行を挿す」構成を取り、行の隣接と
+    // セルから行への遡りに依存している。間に要素が 1 枚でも挟まると同時に壊れる。
+    renderTable();
+    const cell = screen.getAllByRole('cell')[0]!;
+    const row = cell.parentElement;
+    expect(row?.tagName).toBe('TR');
+    expect(row?.parentElement?.tagName).toBe('TBODY');
+    expect(cell.closest('tr')).toBe(row);
+    // 横溢れの捲りは表の外側にある（tbody の内側に容器を挟んでいない）。
+    const container = screen.getByTestId('table-container');
+    expect(container.firstElementChild?.tagName).toBe('TABLE');
+  });
+
+  it('数値の体裁は明示したセルにだけ付く（既定では付かない）', () => {
+    // 既定で付けると、日時や状態のような「数字を含むだけの列」まで右へ寄る。
+    renderTable();
+    const [plain, numeric] = screen.getAllByRole('cell');
+    expect(numeric?.getAttribute('data-numeric')).toBe('true');
+    expect(classesOf(numeric!)).toContain('tabular-nums');
+    expect(plain?.hasAttribute('data-numeric')).toBe(false);
+    expect(classesOf(plain!)).not.toContain('tabular-nums');
+  });
+
+  it('全要素が意味論トークンのみを使い、生の色（hex / パレット色クラス）を持たない', () => {
+    const { container } = renderTable();
+    for (const node of container.querySelectorAll('*')) {
+      expect(classesOf(node)).not.toMatch(RAW_HEX);
+      expect(classesOf(node)).not.toMatch(RAW_PALETTE_COLOR);
+    }
+  });
+});
+
+describe('PageShell — 主要領域と版面の幅（Requirements 5.1）', () => {
+  it('既定では主要領域として描かれる', () => {
+    render(<PageShell>本文</PageShell>);
+    expect(screen.getByRole('main').textContent).toBe('本文');
+  });
+
+  it('主要領域の重複を避けるために描画先を切り替えられる', () => {
+    // 既に主要領域を持つ構造の内側で使う場合の逃げ道。2 つ目の主要領域を作らせない。
+    const { container } = render(<PageShell as="div">本文</PageShell>);
+    expect(screen.queryByRole('main')).toBeNull();
+    expect(container.querySelector('[data-slot="page-shell"]')?.tagName).toBe('DIV');
+  });
+
+  it('幅は 2 段だけで、既定は狭い側になる', () => {
+    const { container } = render(
+      <>
+        <PageShell data-testid="shell-default">既定</PageShell>
+        <PageShell as="div" width="lg" data-testid="shell-lg">
+          広い
+        </PageShell>
+      </>,
+    );
+    const shells = [...container.querySelectorAll('[data-slot="page-shell"]')];
+    expect(shells.map((shell) => shell.getAttribute('data-width'))).toEqual(['sm', 'lg']);
+    // 2 段が同じ幅へ解決されると、段を分けた意味が失われる。
+    const widths = shells.map(
+      (shell) => classesOf(shell).split(/\s+/).find((name) => name.startsWith('max-w-')) ?? '',
+    );
+    expect(widths[0]).not.toBe('');
+    expect(widths[0]).not.toBe(widths[1]);
+  });
+
+  it('意味論トークンのみを使い、生の色を持たない', () => {
+    const { container } = render(<PageShell>本文</PageShell>);
+    expect(classesOf(container.querySelector('[data-slot="page-shell"]')!)).not.toMatch(RAW_HEX);
+    expect(classesOf(container.querySelector('[data-slot="page-shell"]')!)).not.toMatch(
+      RAW_PALETTE_COLOR,
+    );
+  });
+});
+
+describe('PageHeader — ページの主見出し（Requirements 5.1）', () => {
+  it('主見出しとして公開される（階層は固定）', () => {
+    render(<PageHeader title="店舗一覧" />);
+    const heading = screen.getByRole('heading', { name: '店舗一覧' });
+    expect(heading.tagName).toBe('H1');
+  });
+
+  it('説明文と操作は渡したときだけ描かれる', () => {
+    const { container, rerender } = render(<PageHeader title="店舗一覧" />);
+    expect(container.querySelector('[data-slot="page-header-description"]')).toBeNull();
+    expect(container.querySelector('[data-slot="page-header-actions"]')).toBeNull();
+
+    rerender(
+      <PageHeader
+        title="店舗一覧"
+        description="担当する店舗の一覧です"
+        actions={<Button>登録</Button>}
+      />,
+    );
+    expect(
+      container.querySelector('[data-slot="page-header-description"]')?.textContent,
+    ).toBe('担当する店舗の一覧です');
+    const actions = container.querySelector('[data-slot="page-header-actions"]');
+    expect(within(actions as HTMLElement).getByRole('button', { name: '登録' })).toBeTruthy();
+  });
+
+  it('押しボタンを自前で持たない（操作要素ゼロを契約とする面で使えること）', () => {
+    // 店舗詳細の面は「書込操作の要素を 1 つも含まない」ことを構造契約として固定している。
+    const { container } = render(<PageHeader title="店舗詳細" description="説明" />);
+    expect(container.querySelectorAll('form, button, input, textarea, select')).toHaveLength(0);
+  });
+
+  it('意味論トークンのみを使い、生の色を持たない', () => {
+    const { container } = render(<PageHeader title="店舗一覧" description="説明" />);
+    for (const node of container.querySelectorAll('*')) {
+      expect(classesOf(node)).not.toMatch(RAW_HEX);
+      expect(classesOf(node)).not.toMatch(RAW_PALETTE_COLOR);
+    }
+  });
+});
+
+describe('EmptyState — 一覧が空であることの案内（Requirements 5.1）', () => {
+  it('既定では通知として読み上げられない', () => {
+    // 一覧が空であること自体は通常「操作の結果の通知」ではない。
+    const { container } = render(<EmptyState>担当する店舗はまだありません</EmptyState>);
+    expect(container.querySelector('[data-slot="empty-state"]')?.hasAttribute('role')).toBe(false);
+  });
+
+  it('操作の結果として現れる場合は呼び出し側が通知にできる', () => {
+    render(<EmptyState role="alert">見つかりませんでした</EmptyState>);
+    expect(screen.getByRole('alert').textContent).toBe('見つかりませんでした');
+  });
+
+  it('押しボタンを自前で持たない（導線の有無は呼び出し側が決める）', () => {
+    const { container } = render(<EmptyState>推移データがありません</EmptyState>);
+    expect(container.querySelectorAll('form, button, input, textarea, select')).toHaveLength(0);
+  });
+
+  it('意味論トークンのみを使い、生の色を持たない', () => {
+    const { container } = render(<EmptyState>空です</EmptyState>);
+    const node = container.querySelector('[data-slot="empty-state"]')!;
+    expect(classesOf(node)).not.toMatch(RAW_HEX);
+    expect(classesOf(node)).not.toMatch(RAW_PALETTE_COLOR);
+  });
+});
+
+describe('Select — 標準の選択要素としての振る舞い（Requirements 5.1, 5.3）', () => {
+  function renderSelect(props: Record<string, unknown> = {}): ReturnType<typeof render> {
+    return render(
+      <>
+        <label htmlFor="role">ロール</label>
+        <Select id="role" defaultValue="viewer" {...props}>
+          <option value="viewer">閲覧</option>
+          <option value="operator">運営</option>
+        </Select>
+      </>,
+    );
+  }
+
+  it('選択要素として公開され、ラベルが名前になる', () => {
+    renderSelect();
+    const control = screen.getByLabelText('ロール');
+    expect(control.tagName).toBe('SELECT');
+    expect(screen.getByRole('combobox', { name: 'ロール' })).toBe(control);
+  });
+
+  it('プログラムによる値の変更がそのまま届く', () => {
+    // 呼び出し側の既存テストはこの形で選択を操作している。包む要素を挟んでも
+    // 値の変更が標準要素へ届くことを固定する。
+    renderSelect();
+    const control = screen.getByLabelText('ロール') as HTMLSelectElement;
+    expect(control.value).toBe('viewer');
+    fireEvent.change(control, { target: { value: 'operator' } });
+    expect(control.value).toBe('operator');
+  });
+
+  it('キーボードで到達でき、標準の属性が素通しされる', async () => {
+    const user = userEvent.setup();
+    renderSelect({ required: true });
+    const control = screen.getByLabelText('ロール');
+    // 必須であることを要素から直接読めること（呼び出し側の既存テストがそう検証している）。
+    expect(control.hasAttribute('required')).toBe(true);
+    await user.tab();
+    expect(document.activeElement).toBe(control);
+  });
+
+  it('無効化は標準の属性で表現され、キーボードで到達できない', async () => {
+    const user = userEvent.setup();
+    renderSelect({ disabled: true });
+    const control = screen.getByLabelText('ロール');
+    expect((control as HTMLSelectElement).disabled).toBe(true);
+    await user.tab();
+    expect(document.activeElement).not.toBe(control);
+  });
+
+  it('エラー状態は aria-invalid で通知され、同じ属性が視覚状態も分岐させる', () => {
+    renderSelect({ 'aria-invalid': true });
+    const control = screen.getByLabelText('ロール');
+    expect(control.getAttribute('aria-invalid')).toBe('true');
+    expect(classesOf(control)).toContain('aria-invalid:border-destructive');
+  });
+
+  it('意味論トークンのみを使い、生の色を持たない', () => {
+    const { container } = renderSelect();
+    for (const node of container.querySelectorAll('*')) {
+      expect(classesOf(node)).not.toMatch(RAW_HEX);
+      expect(classesOf(node)).not.toMatch(RAW_PALETTE_COLOR);
+    }
+  });
+});
+
 describe('フォーカス指標は部品が自前定義しない（Issue #49 / Requirements 5.3）', () => {
   /** `outline-none` は base レイヤの既定を打ち消すため、部品では一切許さない。 */
   const OUTLINE_SUPPRESSION = /\boutline-none\b/;
@@ -776,6 +1053,7 @@ describe('フォーカス指標は部品が自前定義しない（Issue #49 / R
     { name: 'Input', element: <Input aria-label="入力" /> },
     { name: 'Textarea', element: <Textarea aria-label="複数行入力" /> },
     { name: 'Checkbox', element: <Checkbox aria-label="同意する" /> },
+    { name: 'Select', element: <Select aria-label="選択" /> },
   ];
 
   for (const { name, element } of cases) {

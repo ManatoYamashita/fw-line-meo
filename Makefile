@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-typecheck ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push db-dev-setup db-dev-reset ts-dev-survey help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-typecheck ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push db-dev-setup db-dev-reset ts-dev-survey ts-dev-dashboard ts-dev-store-detail help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -117,3 +117,11 @@ db-dev-reset: ## DEV: 常駐DB(fwlm_dev)を破棄して db-dev-setup をやり�
 ts-dev-survey: ## DEV: 常駐DB(fwlm_dev)で survey-web を起動（要 db-dev-setup 済み・env は .env.local）
 	brew services start postgresql@16 >/dev/null
 	pnpm -C $(TS_DIR) --filter @fwlm/survey-web dev
+
+ts-dev-dashboard: ## DEV: 常駐DB(fwlm_dev)で dashboard-web を起動（要 db-dev-setup 済み・env は .env.local）
+	brew services start postgresql@16 >/dev/null
+	pnpm -C $(TS_DIR) --filter @fwlm/dashboard-web dev
+
+ts-dev-store-detail: ## DEV: 常駐DB(fwlm_dev)で store-detail を起動（要 db-dev-setup 済み・env は .env.local）
+	brew services start postgresql@16 >/dev/null
+	pnpm -C $(TS_DIR) --filter @fwlm/store-detail dev
