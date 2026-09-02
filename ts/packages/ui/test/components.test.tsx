@@ -859,6 +859,28 @@ describe('Table — 支援技術上の役割と構造契約（Requirements 5.1, 
     expect(classesOf(plain!)).not.toContain('tabular-nums');
   });
 
+  it('横溢れの捲りを担う容器がキーボードで焦点を得られる（WCAG 2.1.1）', () => {
+    // スクロール領域を自動で焦点可能にしないブラウザでは、溢れて隠れた列へ到達する手段が
+    // 容器自身しか無い。セルに焦点可能な要素があるとは限らない（数値や日時だけの列がある）。
+    // 実描画で焦点が実際に載ることは survey-web の E2E が測る（PR #180 レビュー指摘 3）。
+    renderTable();
+    expect(screen.getByTestId('table-container').getAttribute('tabindex')).toBe('0');
+  });
+
+  it('名前を与えたときだけ領域としての役割を宣言する', () => {
+    // 名前を持たない region をランドマークとして公開しない実装があるため、名前の無い容器へ
+    // 役割だけを付けない。**到達性は名前の有無で変わらない**ことを同時に固定する。
+    const { container, rerender } = render(<TableContainer data-testid="tc" />);
+    const unnamed = container.querySelector('[data-slot="table-container"]')!;
+    expect(unnamed.hasAttribute('role')).toBe(false);
+    expect(unnamed.getAttribute('tabindex')).toBe('0');
+
+    rerender(<TableContainer data-testid="tc" label="担当店舗の一覧" />);
+    const named = screen.getByRole('region', { name: '担当店舗の一覧' });
+    expect(named.getAttribute('data-slot')).toBe('table-container');
+    expect(named.getAttribute('tabindex')).toBe('0');
+  });
+
   it('全要素が意味論トークンのみを使い、生の色（hex / パレット色クラス）を持たない', () => {
     const { container } = renderTable();
     for (const node of container.querySelectorAll('*')) {
