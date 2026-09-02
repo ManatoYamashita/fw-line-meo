@@ -146,6 +146,7 @@ function createFakePlaces(outcome: SearchOutcome): PlacesSearchAdapter {
 function createFakeMessenger(profiles: Record<string, string | undefined> = {}): LineMessenger {
   return {
     reply: vi.fn(async (): Promise<void> => {}),
+    push: vi.fn(async (): Promise<void> => {}),
     getProfile: vi.fn(async (lineUserId: string) => {
       const displayName = profiles[lineUserId];
       return displayName ? { displayName } : null;
@@ -199,6 +200,8 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       conversationHandlers,
       messenger: deps.messenger,
       logger: { error: vi.fn() },
+      // 本テストは webhook 経路のみを検証するため、GBP callback は呼ばれない前提のスタブ。
+      gbpOauthCallback: vi.fn(async () => ({ status: 200 as const, html: '<p>ok</p>' })),
     };
 
     return createApp(appDeps);

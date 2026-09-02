@@ -7,6 +7,11 @@ const validEnv = {
   PLACES_API_KEY: 'places-key',
   LINE_RICHMENU_COMPLETED_ID: 'richmenu-completed',
   LIFF_STORE_DETAIL_URL: 'https://liff.line.me/test-liff-id',
+  GBP_OAUTH_CLIENT_ID: 'gbp-client-id',
+  GBP_OAUTH_CLIENT_SECRET: 'gbp-client-secret',
+  GBP_OAUTH_REDIRECT_URL: 'https://line-webhook.example.com/gbp/oauth/callback',
+  GBP_TOKEN_CIPHER_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  GEMINI_API_KEY: 'gemini-key',
 };
 
 function withoutKey(key: keyof typeof validEnv): Record<string, string> {
@@ -24,6 +29,11 @@ describe('loadConfig', () => {
       placesApiKey: 'places-key',
       lineRichMenuCompletedId: 'richmenu-completed',
       liffStoreDetailUrl: 'https://liff.line.me/test-liff-id',
+      gbpOauthClientId: 'gbp-client-id',
+      gbpOauthClientSecret: 'gbp-client-secret',
+      gbpOauthRedirectUrl: 'https://line-webhook.example.com/gbp/oauth/callback',
+      gbpTokenCipherKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      geminiApiKey: 'gemini-key',
       port: 8080,
     });
   });
@@ -53,6 +63,30 @@ describe('loadConfig', () => {
 
   it('LIFF_STORE_DETAIL_URL 欠落は明示エラー', () => {
     expect(() => loadConfig(withoutKey('LIFF_STORE_DETAIL_URL'))).toThrow(/LIFF_STORE_DETAIL_URL/);
+  });
+
+  it('GBP_OAUTH_CLIENT_ID 欠落は明示エラー', () => {
+    expect(() => loadConfig(withoutKey('GBP_OAUTH_CLIENT_ID'))).toThrow(/GBP_OAUTH_CLIENT_ID/);
+  });
+
+  it('GBP_OAUTH_CLIENT_SECRET 欠落は明示エラー', () => {
+    expect(() => loadConfig(withoutKey('GBP_OAUTH_CLIENT_SECRET'))).toThrow(
+      /GBP_OAUTH_CLIENT_SECRET/,
+    );
+  });
+
+  it('GBP_OAUTH_REDIRECT_URL 欠落は明示エラー', () => {
+    expect(() => loadConfig(withoutKey('GBP_OAUTH_REDIRECT_URL'))).toThrow(
+      /GBP_OAUTH_REDIRECT_URL/,
+    );
+  });
+
+  it('GBP_TOKEN_CIPHER_KEY 欠落は明示エラー', () => {
+    expect(() => loadConfig(withoutKey('GBP_TOKEN_CIPHER_KEY'))).toThrow(/GBP_TOKEN_CIPHER_KEY/);
+  });
+
+  it('GEMINI_API_KEY 欠落は明示エラー', () => {
+    expect(() => loadConfig(withoutKey('GEMINI_API_KEY'))).toThrow(/GEMINI_API_KEY/);
   });
 
   it('全 env 欠落は最初に検証した必須項目のエラーを投げる', () => {

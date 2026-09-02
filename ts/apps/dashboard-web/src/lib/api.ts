@@ -316,3 +316,80 @@ export async function disableInviteCode(
   if (!result.ok) return result;
   return { ok: true, value: result.value.inviteCode };
 }
+
+// --- binary 応答の窓口（store-qr-issuance-ui / Requirements 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1）---
+//
+// 上の apiFetch は readJson を通す JSON 専用のため、画像応答の経路が無い。ここでは
+// トークン付与とエラー封筒の解釈という本ファイルの不変条件を保ったまま、成功値だけを
+// バイト列へ差し替える。表示・保存の関心はこの層に持ち込まない。
+
+// 認証付き binary 取得の成功値。表示・保存の関心は持たない。
+//
+// 型引数を ArrayBuffer に固定するのは意図的。TypeScript 5.7 で TypedArray が背後のバッファで
+// 総称化され、既定の Uint8Array<ArrayBufferLike> は SharedArrayBuffer を含みうるため BlobPart
+// にも BodyInit にも載らない。res.arrayBuffer() 由来の実体は常に非共有なので、ここで狭めておく
+// ことで表示層が Blob を組み立てるときに型アサーションを必要としなくなる。
+export interface BinaryPayload {
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly contentType: string;
+}
+
+// 2xx でありながら本文が空だった場合の文言。欠けた画像を QR として提示しないための失敗扱い。
+const EMPTY_RESPONSE_MESSAGE = '画像を取得できませんでした。時間をおいて再試行してください。';
+
+// content type が読めなかった場合の既定値（RFC 2046 の汎用バイナリ型）。
+const FALLBACK_CONTENT_TYPE = 'application/octet-stream';
+
+/**
+ * JSON 用 apiFetch の binary 版。method は GET 固定で body は取らない。
+ * 非 2xx は parseErrorEnvelope へ委譲し、サーバの code を書き換えたり既定値へ丸めたりしない。
+ */
+export async function apiFetchBinary(
+  path: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<BinaryPayload>> {
+  const { getToken = defaultGetToken, fetchImpl = fetch, baseUrl = DEFAULT_BASE_URL } = options;
+
+  try {
+    const token = await getToken();
+    // body を送らないため Content-Type は付けない。トークンは Authorization にのみ載せる。
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const res = await fetchImpl(`${baseUrl}${path}`, { method: 'GET', headers });
+
+    if (!res.ok) {
+      const { code, message } = await parseErrorEnvelope(res);
+      return { ok: false, code, message };
+    }
+
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // 応答本文は例外メッセージにもログにも載せない（QR は店舗のアンケート URL を含む）。
+    if (bytes.length === 0) {
+      return { ok: false, code: 'empty_response', message: EMPTY_RESPONSE_MESSAGE };
+    }
+    return {
+      ok: true,
+      value: { bytes, contentType: res.headers.get('Content-Type') ?? FALLBACK_CONTENT_TYPE },
+    };
+  } catch {
+    return { ok: false, code: 'network', message: NETWORK_MESSAGE };
+  }
+}
+
+// QR の解像度は利用者に選ばせず印刷用途に固定する（Requirement 2.7）。
+// dashboard-api の clampSize は 128–1024 で、1024 はその上限（app.ts の SIZE_MAX）。
+const QR_SIZE = 1024;
+
+/**
+ * GET /stores/:storeId/qr.png: 店舗のアンケート QR を PNG バイト列として取得する。
+ * 401 UNAUTHENTICATED / 403 FORBIDDEN / 404 NOT_FOUND / 409 PLACE_NOT_CONFIRMED は
+ * code をそのまま返す。利用者向けの文言への写像は呼び出し側（表示層）が持つ。
+ */
+export async function getStoreQr(
+  storeId: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<BinaryPayload>> {
+  const query = buildQuery({ size: String(QR_SIZE) });
+  return await apiFetchBinary(`/stores/${encodeURIComponent(storeId)}/qr.png${query}`, options);
+}

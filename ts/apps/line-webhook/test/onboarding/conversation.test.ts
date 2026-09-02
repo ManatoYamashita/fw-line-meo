@@ -176,6 +176,10 @@ function createFakeMessenger(): LineMessenger & { replies: { replyToken: string;
     async reply(replyToken, messages) {
       replies.push({ replyToken, messages });
     },
+    async push() {
+      // 未使用（本テストは reply 経路のみを検証する）。push は OAuth callback 等の
+      // webhook 外の契機で使われる（gbp/callback.ts）。
+    },
     async getProfile() {
       return { displayName: 'テストオーナー' };
     },

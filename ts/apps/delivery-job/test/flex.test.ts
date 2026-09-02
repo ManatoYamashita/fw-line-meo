@@ -280,4 +280,89 @@ describe('buildDailySummaryFlex', () => {
       ).toThrow(FlexBubbleTooLargeError);
     });
   });
+
+  // Task 5.1: 連携済み店舗のサマリーに投稿・返信のアクション導線を追加する（R5.1）。
+  // ボタンは「無条件」で付与し、未連携時のタップ→連携誘導の分岐は webhook 側に集約する
+  // （design.md「FlexBuilder 拡張」・連携状態分岐は delivery-job の責務ではない）。
+  // postback data は line-webhook の encodeGbpPostback と一致させる必要がある
+  //   （src/gbp/postback.ts: g_reply/g_post は単純 action → data は `a=g_reply`/`a=g_post`）。
+  describe('GBP アクションボタン（Task 5.1・R5.1）', () => {
+    // footer 配下の全 button の action オブジェクトを収集する（構造非依存アサーション用）。
+    function collectActions(node: unknown): Array<Record<string, unknown>> {
+      if (node === null || typeof node !== 'object') return [];
+      const obj = node as Record<string, unknown>;
+      const actions: Array<Record<string, unknown>> = [];
+      if (obj['type'] === 'button' && obj['action'] !== null && typeof obj['action'] === 'object') {
+        actions.push(obj['action'] as Record<string, unknown>);
+      }
+      if (Array.isArray(obj['contents'])) {
+        for (const child of obj['contents']) actions.push(...collectActions(child));
+      }
+      return actions;
+    }
+
+    function footerActions(summary: DailySummaryRow): Array<Record<string, unknown>> {
+      const result = buildDailySummaryFlex(summary, LIFF_URL);
+      return collectActions(findBlock(result.contents, 'footer'));
+    }
+
+    it('footer に「クチコミに返信」postback ボタン（data=a=g_reply）を含む', () => {
+      const reply = footerActions(baseSummary()).find((a) => a['data'] === 'a=g_reply');
+      expect(reply).toBeDefined();
+      expect(reply?.['type']).toBe('postback');
+      expect(reply?.['label']).toBe('クチコミに返信');
+    });
+
+    it('footer に「Google 投稿作成」postback ボタン（data=a=g_post）を含む', () => {
+      const post = footerActions(baseSummary()).find((a) => a['data'] === 'a=g_post');
+      expect(post).toBeDefined();
+      expect(post?.['type']).toBe('postback');
+      expect(post?.['label']).toBe('Google 投稿作成');
+    });
+
+    it('既存の「詳細を見る」uri ボタンを維持する', () => {
+      const detail = footerActions(baseSummary()).find((a) => a['type'] === 'uri');
+      expect(detail).toBeDefined();
+      expect(detail?.['label']).toBe('詳細を見る');
+      expect(detail?.['uri']).toBe(LIFF_URL);
+    });
+
+    it('連携状態で分岐せず、両 postback ボタンを無条件で付与する（failed 縮退表示でも付く）', () => {
+      const failed = baseSummary({
+        status: 'failed',
+        rank: null,
+        rank_total: null,
+        rank_prev: null,
+        rating: null,
+        review_count: null,
+        new_review_count: 0,
+        new_reviews: [],
+        competitors: [],
+      });
+      for (const summary of [baseSummary(), failed]) {
+        const datas = footerActions(summary).map((a) => a['data']);
+        expect(datas).toContain('a=g_reply');
+        expect(datas).toContain('a=g_post');
+      }
+    });
+
+    it('postback data が line-webhook decodeGbpPostback の受理形式（a=<action>・300字以内）である', () => {
+      const postbacks = footerActions(baseSummary()).filter((a) => a['type'] === 'postback');
+      expect(postbacks.length).toBe(2);
+      for (const action of postbacks) {
+        const data = action['data'];
+        expect(typeof data).toBe('string');
+        const s = data as string;
+        expect(s).toMatch(/^a=g_(reply|post)$/);
+        expect(s.length).toBeLessThanOrEqual(300);
+      }
+    });
+
+    it('ボタン追加後も 30KB サイズ検証を通過する', () => {
+      const result = buildDailySummaryFlex(baseSummary(), LIFF_URL);
+      const check = validateBubbleSize(result.contents);
+      expect(check.withinLimit).toBe(true);
+      expect(check.sizeBytes).toBeLessThanOrEqual(BUBBLE_SIZE_LIMIT_BYTES);
+    });
+  });
 });

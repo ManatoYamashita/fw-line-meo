@@ -69,9 +69,12 @@ describe('handleResponses', () => {
         req(validBody()),
         baseDeps({ generator: { generate } as unknown as DraftGenerator }),
       );
-      const material = generate.mock.calls[0]![0] as { aspectLabels: string[]; unselectedAspectLabels?: string[] };
+      const material = generate.mock.calls[0]![0];
       expect(material.aspectLabels).toEqual(['味']);
       expect(material.unselectedAspectLabels).toEqual(['接客']);
+      // label はプロンプトの禁止文言、code は生成後の事後検証（案B）に使う。
+      // 同じ差集合から導かれるので、両者がずれていたらここで落ちる。
+      expect(material.unselectedAspectCodes).toEqual(['service']);
     });
 
     it('全選択なら空配列を渡す（禁止句を出させない）', async () => {
@@ -81,8 +84,9 @@ describe('handleResponses', () => {
         req(validBody({ aspectCodes: ['taste', 'service'] })),
         baseDeps({ generator: { generate } as unknown as DraftGenerator }),
       );
-      const material = generate.mock.calls[0]![0] as { unselectedAspectLabels?: string[] };
+      const material = generate.mock.calls[0]![0];
       expect(material.unselectedAspectLabels).toEqual([]);
+      expect(material.unselectedAspectCodes).toEqual([]);
     });
 
     it('sessionToken に載り、再生成（/api/drafts）でも同じ禁止が効く', async () => {
@@ -94,6 +98,7 @@ describe('handleResponses', () => {
       expect(verified.ok).toBe(true);
       if (verified.ok) {
         expect(verified.value.material.unselectedAspectLabels).toEqual(['接客']);
+        expect(verified.value.material.unselectedAspectCodes).toEqual(['service']);
       }
     });
   });

@@ -5,6 +5,7 @@ import {
   getOrCreateSession,
   updateSession,
   findOwnerByLineUserId,
+  findOwnerById,
   createOwner,
   findActiveInviteCode,
 } from '@fwlm/db';
@@ -15,6 +16,17 @@ import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
+import { createGbpClient } from './gbp/client.js';
+import { createGoogleRefreshGrantClient, createTokenStore } from './gbp/token-store.js';
+import {
+  createDefaultGbpOauthAccessors,
+  createGbpOauthService,
+  createGoogleOauthCodeClient,
+} from './gbp/oauth.js';
+import { createGbpOauthCallbackRoute } from './gbp/callback.js';
+import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flows.js';
+import { createDefaultGbpPrompts } from './gbp/prompts.js';
+import { createDefaultGbpLogger } from './gbp/logger.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -47,6 +59,55 @@ const storeIdentificationService = createStoreIdentificationService({
   places: placesAdapter,
 });
 
+// GBP OAuth（gbp-post-review-reply spec task 3.1・3.2）。
+// task 3.3 で会話フロー（GbpFlows）も配線したため、conversationHandlers より先に構築する
+// （conversationHandlers が GbpFlows を委譲先として受け取るため）。
+const gbpTokenStore = createTokenStore({
+  cipherKeyBase64: config.gbpTokenCipherKey,
+  refreshClient: createGoogleRefreshGrantClient({
+    clientId: config.gbpOauthClientId,
+    clientSecret: config.gbpOauthClientSecret,
+  }),
+});
+
+const gbpClient = createGbpClient({ tokenStore: gbpTokenStore, fetch });
+
+const gbpOauthService = createGbpOauthService({
+  db: pool,
+  pool,
+  oauthClient: createGoogleOauthCodeClient({
+    clientId: config.gbpOauthClientId,
+    clientSecret: config.gbpOauthClientSecret,
+    redirectUrl: config.gbpOauthRedirectUrl,
+  }),
+  gbpClient,
+  tokenStore: gbpTokenStore,
+  ...createDefaultGbpOauthAccessors(),
+  now: () => new Date(),
+});
+
+// task 3.3: 連携系（connect / status / disconnect）の会話フロー。
+// task 4.1: 投稿フロー（下書き生成 → 承認 → 投稿）を同ハンドラへ追加配線する。
+// pool は Queryable（db）と ConnectablePool（pool）の両方に構造的に適合する
+// （conversationHandlers と同じ前提）。
+const gbpPrompts = await createDefaultGbpPrompts();
+
+// GBP ドメイン共通のロガー。meta は allowlist なので本文・トークンは型として渡せない。
+const gbpLogger = createDefaultGbpLogger();
+
+const gbpFlowHandlers = createGbpFlowHandlers({
+  db: pool,
+  pool,
+  oauth: gbpOauthService,
+  tokenStore: gbpTokenStore,
+  ...createDefaultGbpFlowAccessors(),
+  prompts: gbpPrompts,
+  gbpClient,
+  messenger: lineMessenger,
+  logger: gbpLogger,
+  now: () => new Date(),
+});
+
 const conversationHandlers = createConversationHandlers({
   db: pool,
   pool,
@@ -58,6 +119,15 @@ const conversationHandlers = createConversationHandlers({
   now: () => new Date(),
   lineRichMenuCompletedId: config.lineRichMenuCompletedId,
   liffStoreDetailUrl: config.liffStoreDetailUrl,
+  gbp: gbpFlowHandlers,
+});
+
+const gbpOauthCallback = createGbpOauthCallbackRoute({
+  db: pool,
+  oauth: gbpOauthService,
+  messenger: lineMessenger,
+  owners: { findOwnerById },
+  logger: gbpLogger,
 });
 
 const deps: AppDeps = {
@@ -68,6 +138,7 @@ const deps: AppDeps = {
   recordWebhookEventOnce: (webhookEventId) => dbRecordWebhookEventOnce(pool, webhookEventId),
   conversationHandlers,
   messenger: lineMessenger,
+  gbpOauthCallback,
   logger: {
     // LINE はログを提供しないため自前で標準出力へ記録する。
     error: (message, meta) => {

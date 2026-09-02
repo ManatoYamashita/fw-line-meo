@@ -11,9 +11,13 @@ RUN corepack enable
 
 FROM base AS deps
 WORKDIR /repo
+# 依存する workspace パッケージの package.json は漏れなく列挙する。欠けても
+# pnpm install --frozen-lockfile はエラーにならず、当該パッケージへのリンクが
+# ダングリングになり、その依存（gemini なら @google/genai）が一切 install されない。
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/design-tokens/package.json packages/design-tokens/
+COPY packages/gemini/package.json packages/gemini/
 COPY packages/store-identification/package.json packages/store-identification/
 COPY apps/line-webhook/package.json apps/line-webhook/
 RUN pnpm install --frozen-lockfile
@@ -25,8 +29,10 @@ WORKDIR /repo
 # node_modules シンボリックリンクも必要。delivery-job/dashboard-api と同一パターン）。
 COPY --from=deps /repo ./
 COPY . .
+# packages/* は types/main が dist/ を指すため、消費側より先にビルドする。
 RUN pnpm -C packages/db run build
 RUN pnpm -C packages/design-tokens run build
+RUN pnpm -C packages/gemini run build
 RUN pnpm -C packages/store-identification run build
 RUN pnpm -C apps/line-webhook run build
 
@@ -40,6 +46,9 @@ ENV NODE_ENV=production
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/db ./packages/db
 COPY --from=build /repo/packages/design-tokens ./packages/design-tokens
+# gemini は起動時に必要（index.ts が createDefaultGbpPrompts を await し、その先で
+# @google/genai を動的 import するため、dist と node_modules の両方が要る）。
+COPY --from=build /repo/packages/gemini ./packages/gemini
 COPY --from=build /repo/packages/store-identification ./packages/store-identification
 COPY --from=build /repo/apps/line-webhook/node_modules ./apps/line-webhook/node_modules
 COPY --from=build /repo/apps/line-webhook/dist ./apps/line-webhook/dist

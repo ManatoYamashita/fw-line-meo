@@ -11,3 +11,6 @@ export * from './agencies.js';
 export * from './categories.js';
 export * from './onboarding-sessions.js';
 export * from './webhook-events.js';
+export * from './oauth-tokens.js';
+export * from './gbp-locations.js';
+export * from './gbp-sessions.js';

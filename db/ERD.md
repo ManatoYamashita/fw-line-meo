@@ -1,6 +1,6 @@
-# ER 図: four-tier-data-model / competitive-daily-summary
+# ER 図: four-tier-data-model / competitive-daily-summary / gbp-post-review-reply
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`gbp-post-review-reply`（GBP 連携の身元・会話セッション）は `db/migrations/0006_gbp_post_review_reply.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -24,6 +24,9 @@ erDiagram
     stores ||--o{ summary_deliveries : "delivered to"
     agencies ||--o{ agency_invite_codes : issues
     owners ||--o{ onboarding_sessions : "progress of"
+    stores ||--o| gbp_locations : "GBP identity of"
+    owners ||--o| gbp_sessions : "gbp conversation of"
+    stores ||--o{ gbp_sessions : "target of"
 ```
 
 ## エンティティ一覧（PK / 自然キー / 主な FK）
@@ -47,6 +50,8 @@ erDiagram
 | agency_invite_codes | id (uuid) | code (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
 | onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
 | line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
+| gbp_locations | id (uuid) | store_id (unique) | store_id → stores | GBP 上の身元（account/location リソース名・突合時点の place_id・投稿可否。店舗 1:1・TS 書込） |
+| gbp_sessions | id (uuid) | owner_id (unique) | owner_id → owners, store_id → stores | GBP 会話セッション（flow×stage・payload・draft・期限付き。owner 単位に高々 1 つ・TS 書込） |
 
 ## 凡例・補足
 
@@ -61,3 +66,4 @@ erDiagram
 - `owners.delivery_hour`（`competitive-daily-summary`・`0004`）: 日次サマリー配信時刻（時単位・デフォルト 7・0-23）。`owners` は既存 TS 境界のため書込責任は変わらず TS。
 - `onboarding_sessions`: `stage='await_invite_code' ⇔ owner_id IS NULL`（`ck_session_owner_stage`）。owner 誕生前の LINE ユーザー状態も本表が唯一保持する。
 - `agency_invite_codes`: `code` は代理店ごとに共有・使い回し可能（`disabled_at` が無効化するまで複数オーナーが同一コードで登録できる。Req 2.5）。
+- `gbp_locations`・`gbp_sessions`（`gbp-post-review-reply`・`0006`・いずれも TS 書込）: 連携の単位は店舗（`gbp_locations.store_id` unique・1 店舗の連携/解除が他店舗へ非影響）。`gbp_locations` の行は対応する `oauth_tokens` 行なしに存在しない（連携成立時に同時作成・解除時に同時削除。アプリ規律で担保）。`gbp_sessions` は owner 単位に高々 1 つ（`owner_id` unique）の期限付き一時状態のみを保持し、`store_id` は店舗選択前（await_store）は NULL。両テーブルとも親削除で CASCADE（一時状態・従属身元のため RESTRICT にしない）。

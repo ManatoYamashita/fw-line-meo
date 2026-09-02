@@ -38,24 +38,31 @@ const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const CREATE_RICHMENU_URL = 'https://api.line.me/v2/bot/richmenu';
 const UPLOAD_IMAGE_URL_BASE = 'https://api-data.line.me/v2/bot/richmenu';
 const SET_DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
+const BATCH_URL = 'https://api.line.me/v2/bot/richmenu/batch';
+const BATCH_PROGRESS_URL = 'https://api.line.me/v2/bot/richmenu/progress/batch';
 
 // Full (Compact) 800x540（ratio 1.481 >= 1.45 要件）。最小の標準サイズを採用しファイルサイズを抑える。
 const RICH_MENU_WIDTH = 800;
 const RICH_MENU_HEIGHT = 540;
 
-interface RichMenuAction {
+// 完了後メニュー（gbp task 5.2）の 2×2 グリッド分割座標。800×540 を 4 等分（各セル 400×270）し、
+// 重複なく画像全面を被覆する（references/rich-menu.md: bounds は左上原点・px 指定）。
+const COMPLETED_MENU_COL_WIDTH = RICH_MENU_WIDTH / 2;
+const COMPLETED_MENU_ROW_HEIGHT = RICH_MENU_HEIGHT / 2;
+
+export interface RichMenuAction {
   type: 'postback' | 'message';
   label?: string;
   data?: string;
   text?: string;
 }
 
-interface RichMenuArea {
+export interface RichMenuArea {
   bounds: { x: number; y: number; width: number; height: number };
   action: RichMenuAction;
 }
 
-interface RichMenuObject {
+export interface RichMenuObject {
   size: { width: number; height: number };
   selected: boolean;
   name: string;
@@ -75,6 +82,79 @@ export interface SetupRichMenusDeps {
 export interface SetupRichMenusResult {
   onboardingRichMenuId: string;
   completedRichMenuId: string;
+}
+
+/** `POST /v2/bot/richmenu/progress/batch` の phase（LINE SDK の RichMenuBatchProgressPhase と同値）。 */
+export type RichMenuBatchPhase = 'ongoing' | 'succeeded' | 'failed';
+
+export interface RelinkResult {
+  /** `x-line-request-id` ヘッダ。進捗照会のキー。 */
+  requestId: string | null;
+  phase: RichMenuBatchPhase | 'unknown';
+}
+
+/**
+ * 既存の連携済みオーナーを新しい完了後メニューへ移す（PR #121 レビュー指摘の是正）。
+ *
+ * `linkRichMenu` は confirmStore 完了時の 1 箇所でしか呼ばれないため、完了後メニューを
+ * 作り直しても **既に completed のオーナーは旧メニューに紐づいたまま**で、Req 5.4 の常設導線が
+ * 届かない。GBP 機能の主対象がまさにこの層である。
+ *
+ * `POST /v2/bot/richmenu/batch` の link 操作（旧メニュー → 新メニュー）を使う。
+ * `bulk/link`（500 件上限・userId の一覧が要る）ではなくこちらを選ぶのは、
+ * **userId のリストが不要**でスクリプトに DB 依存を持ち込まずに済み、かつ「旧メニューに
+ * リンクされている全ユーザー」を対象にできて取りこぼしが構造的に起きないため。
+ *
+ * batch は**非同期**（受理と反映は別）。レート制限は **3 req/hr** なので、失敗しても
+ * 安易に叩き直さないこと。進捗は requestId で照会する。
+ */
+export async function relinkExistingUsers(
+  deps: Pick<SetupRichMenusDeps, 'channelId' | 'channelSecret' | 'fetch'>,
+  fromRichMenuId: string,
+  toRichMenuId: string,
+): Promise<RelinkResult> {
+  const accessToken = await issueAccessToken(deps);
+
+  const response = await deps.fetch(BATCH_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    // 形は @line/bot-sdk の RichMenuBatchRequest / RichMenuBatchLinkOperation に一致させている
+    // （同 SDK は LINE 公開の OpenAPI から生成されたもの）。
+    body: JSON.stringify({
+      operations: [{ type: 'link', from: fromRichMenuId, to: toRichMenuId }],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`relinkExistingUsers: batch failed with status ${response.status}`);
+  }
+
+  // batch の応答本文は空。進捗照会のキーは `x-line-request-id` ヘッダで返る。
+  const requestId = response.headers.get('x-line-request-id');
+  if (requestId === null) {
+    return { requestId: null, phase: 'unknown' };
+  }
+
+  const progress = await deps.fetch(
+    `${BATCH_PROGRESS_URL}?requestId=${encodeURIComponent(requestId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!progress.ok) {
+    return { requestId, phase: 'unknown' };
+  }
+
+  const parsed: unknown = await progress.json();
+  const phase =
+    typeof parsed === 'object' && parsed !== null
+      ? (parsed as { phase?: unknown }).phase
+      : undefined;
+  return {
+    requestId,
+    phase: phase === 'ongoing' || phase === 'succeeded' || phase === 'failed' ? phase : 'unknown',
+  };
 }
 
 interface RawTokenResponse {
@@ -175,7 +255,7 @@ async function setDefaultRichMenu(
   }
 }
 
-function buildOnboardingRichMenu(): RichMenuObject {
+export function buildOnboardingRichMenu(): RichMenuObject {
   return {
     size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
     selected: false,
@@ -194,7 +274,31 @@ function buildOnboardingRichMenu(): RichMenuObject {
   };
 }
 
-function buildCompletedRichMenu(): RichMenuObject {
+// 完了後（店舗特定済み）オーナー向けの常設メニュー。
+//
+// gbp-post-review-reply spec task 5.2 / Requirement 5.4（サマリー配信時刻に依存しない常設導線）に従い、
+// design.md「RichMenu 拡張（setup-rich-menus.ts）」の指定どおり 4 領域化する:
+//   ステータス確認（既存 message）/ Google 投稿作成（g_post）/ クチコミ返信（g_reply）/ Google 連携・設定（g_status）
+//
+// レイアウト（800×540 を 4 分割・重複なし・画像全面を被覆）:
+//   ┌───────────────┬────────────────┐
+//   │ ステータス確認 │ Google 投稿作成 │
+//   ├───────────────┼────────────────┤
+//   │ クチコミ返信   │ Google 連携・設定│
+//   └───────────────┴────────────────┘
+//
+// postback data の整合性（重要）: 各 postback 領域の data は src/gbp/postback.ts の
+//   `encodeGbpPostback` の出力と完全一致させる。g_post / g_reply / g_status は引数を持たない
+//   単純 action であり、encodeGbpPostback は該当 case で `a=${action.action}` を返すため、
+//     encodeGbpPostback({ action: 'g_post' })   === 'a=g_post'
+//     encodeGbpPostback({ action: 'g_reply' })  === 'a=g_reply'
+//     encodeGbpPostback({ action: 'g_status' }) === 'a=g_status'
+//   となる（postback.ts を確認済み）。よって下記リテラルは webhook 側 `decodeGbpPostback` /
+//   `isGbpPostbackData`（`g_` プレフィックス判定）で正しく受理される。
+//   postback.ts をここから import せずリテラルにするのは、ワンショット script のコンパイル対象
+//   （tsconfig.scripts.json）へ src/gbp を引き込まないため。整合は test/scripts の dry-run で
+//   `decodeGbpPostback` により機械検証している。
+export function buildCompletedRichMenu(): RichMenuObject {
   return {
     size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
     selected: false,
@@ -202,17 +306,64 @@ function buildCompletedRichMenu(): RichMenuObject {
     chatBarText: 'メニュー',
     areas: [
       {
-        bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
-        // Requirement 6.3 は「完了後の案内へ切替」を求めるのみで、完了後メニューのタップに
-        // 特定の挙動は要求していない（本 stateDiagram では linkRichMenu による切替のみが前提）。
-        // message アクションはタップ時にテキストメッセージとして送信されるだけなので、
-        // ConversationHandlers 側は completed 段階の既存 fallback（handleText の
-        // buildAlreadyCompletedMessage）がそのまま応答でき、新規サーバロジックが不要となる
-        // 最小の選択肢として採用する。
+        // 左上: ステータス確認。**message アクションにしてはならない**（PR #121 レビュー指摘）。
+        //
+        // message はタップ時にテキストを送信する。同 PR が completed 段階のテキストを GBP の
+        // 入力チャネルにしたため、投稿フローの await_input 中にこれを押すと文字列
+        // 「ステータス確認」が **投稿の要点として取り込まれ**、承認ボタン付きの下書きが提示される
+        // （handlePostInput の除外は trim().length === 0 のみ）。await_revision 中は修正指示として
+        // 解釈され、connect/await_callback 中（最大 30 分）は GBP の状態案内に吸われる。
+        //
+        // `a=resume` は `g_` プレフィックスを持たないので isGbpPostbackData が false になり、
+        // conversation.ts の completed 分岐が buildAlreadyCompletedMessage() を返す。
+        // これは message アクション時代の最終的な応答と同一で、テキスト注入経路だけが消える。
+        bounds: { x: 0, y: 0, width: COMPLETED_MENU_COL_WIDTH, height: COMPLETED_MENU_ROW_HEIGHT },
         action: {
-          type: 'message',
+          type: 'postback',
           label: 'ステータス確認',
-          text: 'ステータス確認',
+          data: encodePostback({ kind: 'resume' }),
+        },
+      },
+      {
+        // 右上: Google 投稿作成。data === encodeGbpPostback({ action: 'g_post' })。
+        bounds: {
+          x: COMPLETED_MENU_COL_WIDTH,
+          y: 0,
+          width: COMPLETED_MENU_COL_WIDTH,
+          height: COMPLETED_MENU_ROW_HEIGHT,
+        },
+        action: {
+          type: 'postback',
+          label: 'Google 投稿作成',
+          data: 'a=g_post',
+        },
+      },
+      {
+        // 左下: クチコミ返信。data === encodeGbpPostback({ action: 'g_reply' })。
+        bounds: {
+          x: 0,
+          y: COMPLETED_MENU_ROW_HEIGHT,
+          width: COMPLETED_MENU_COL_WIDTH,
+          height: COMPLETED_MENU_ROW_HEIGHT,
+        },
+        action: {
+          type: 'postback',
+          label: 'クチコミ返信',
+          data: 'a=g_reply',
+        },
+      },
+      {
+        // 右下: Google 連携・設定。data === encodeGbpPostback({ action: 'g_status' })。
+        bounds: {
+          x: COMPLETED_MENU_COL_WIDTH,
+          y: COMPLETED_MENU_ROW_HEIGHT,
+          width: COMPLETED_MENU_COL_WIDTH,
+          height: COMPLETED_MENU_ROW_HEIGHT,
+        },
+        action: {
+          type: 'postback',
+          label: 'Google 連携・設定',
+          data: 'a=g_status',
         },
       },
     ],
@@ -239,6 +390,9 @@ export async function setupRichMenus(deps: SetupRichMenusDeps): Promise<SetupRic
 // CLI エントリポイント（運用者がデプロイ時に手動実行する）。
 // 実行方法（ts/apps/line-webhook をカレントディレクトリとして）:
 //   pnpm run build:scripts && LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... pnpm run setup-rich-menus
+//
+// 既存オーナーを新しい完了後メニューへ移す（メニュー作成とは別に 1 回だけ実行する）:
+//   ... pnpm run setup-rich-menus -- --relink-existing <旧richMenuId> <新richMenuId>
 const isMainModule = process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
@@ -250,6 +404,24 @@ if (isMainModule) {
     }
     if (!channelSecret) {
       throw new Error('LINE_CHANNEL_SECRET is required');
+    }
+
+    const relinkAt = process.argv.indexOf('--relink-existing');
+    if (relinkAt !== -1) {
+      const fromId = process.argv[relinkAt + 1];
+      const toId = process.argv[relinkAt + 2];
+      if (fromId === undefined || toId === undefined) {
+        throw new Error('--relink-existing には <旧richMenuId> <新richMenuId> の 2 つが必要です');
+      }
+      const result = await relinkExistingUsers({ channelId, channelSecret, fetch }, fromId, toId);
+      console.log('一括再リンクを受理しました。requestId:', result.requestId ?? '(不明)');
+      console.log('進捗:', result.phase);
+      console.log(
+        'batch は非同期です。ongoing の場合は ' +
+          'GET /v2/bot/richmenu/progress/batch?requestId=... で追跡してください' +
+          '（レート制限 3 req/hr のため、失敗しても安易に叩き直さないこと）。',
+      );
+      return;
     }
 
     // assets/ はカレントディレクトリ（ts/apps/line-webhook）基準で解決する

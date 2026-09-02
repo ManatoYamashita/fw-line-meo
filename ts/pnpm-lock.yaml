@@ -106,6 +106,9 @@ importers:
       '@fwlm/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@fwlm/gemini':
+        specifier: workspace:*
+        version: link:../../packages/gemini
       '@fwlm/store-identification':
         specifier: workspace:*
         version: link:../../packages/store-identification
@@ -115,6 +118,9 @@ importers:
       '@line/bot-sdk':
         specifier: ^11
         version: 11.2.0
+      google-auth-library:
+        specifier: ^10
+        version: 10.9.0
       hono:
         specifier: ^4
         version: 4.12.28
@@ -164,12 +170,12 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/gemini':
+        specifier: workspace:*
+        version: link:../../packages/gemini
       '@fwlm/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@google/genai':
-        specifier: ^1
-        version: 1.52.0
       next:
         specifier: ^16
         version: 16.2.10(@opentelemetry/api@1.9.1)(@playwright/test@1.61.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -225,6 +231,12 @@ importers:
         version: 8.20.0
 
   packages/design-tokens: {}
+
+  packages/gemini:
+    dependencies:
+      '@google/genai':
+        specifier: ^1
+        version: 1.52.0
 
   packages/store-identification:
     dependencies:

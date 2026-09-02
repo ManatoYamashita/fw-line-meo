@@ -45,18 +45,6 @@ variable "line_channel_secret_id" {
   type        = string
 }
 
-variable "line_channel_access_token_secret_id" {
-  description = <<-EOT
-    LINE チャネルアクセストークンの Secret Manager secret id（secrets output の
-    `line-channel-access-token`）。design.md「Modified Files」「Security Considerations」
-    （`line-channel-access-token` の accessor を delivery-job SA へ追加付与・
-    「delivery-job のみ LINE token accessor」）に基づき accessor のみを付与する。
-    現行の delivery-job 実装（Stateless token 発行方式）は本 secret を env としては消費しないため、
-    Job のコンテナ env へはマウントしない（IAM accessor 権限の付与のみ・CONCERNS 参照）。
-  EOT
-  type        = string
-}
-
 variable "line_channel_id" {
   description = <<-EOT
     LINE チャネル ID（Stateless token 発行の client_id・env LINE_CHANNEL_ID）。

@@ -54,6 +54,7 @@ function createUnusedPlaces(): PlacesSearchAdapter {
 function createFakeMessenger(): LineMessenger {
   return {
     reply: vi.fn(async (): Promise<void> => {}),
+    push: vi.fn(async (): Promise<void> => {}),
     getProfile: vi.fn(async () => null),
     linkRichMenu: vi.fn(async (): Promise<void> => {}),
   };
