@@ -19,6 +19,15 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "../lib/utils"
 
+/**
+ * 版面の既定。
+ *
+ * cva の既定と描画結果へ出す印の両方がこの 1 箇所を読む。2 箇所に書くと、既定を変えたときに
+ * 「クラスは広い側なのに印は狭い側」という食い違いが静かに生まれ、印を頼りに測る検証が
+ * 別のものを測り始める。
+ */
+const DEFAULT_WIDTH = "sm" as const
+
 const pageShellVariants = cva("mx-auto w-full px-4 py-8", {
   variants: {
     width: {
@@ -29,7 +38,7 @@ const pageShellVariants = cva("mx-auto w-full px-4 py-8", {
     },
   },
   defaultVariants: {
-    width: "sm",
+    width: DEFAULT_WIDTH,
   },
 })
 
@@ -52,7 +61,7 @@ function PageShell({ as = "main", width, className, ...props }: PageShellProps) 
   return (
     <Tag
       data-slot="page-shell"
-      data-width={width ?? "sm"}
+      data-width={width ?? DEFAULT_WIDTH}
       className={cn(pageShellVariants({ width }), className)}
       {...props}
     />
