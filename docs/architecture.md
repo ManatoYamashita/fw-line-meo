@@ -6,7 +6,7 @@
 に置かれる。本書はそれらを繋ぐ地図であり、詳細は再掲せずリンクで辿れるようにしている。
 
 一次情報源: [要件定義書](../requirements.md) ／ [提案書](./proposal.md) ／
-`.kiro/steering/`（[product](../.kiro/steering/product.md)・[tech](../.kiro/steering/tech.md)・[structure](../.kiro/steering/structure.md)）。
+`.kiro/steering/`（[product](../.kiro/steering/product.md)・[tech](../.kiro/steering/tech.md)・[structure](../.kiro/steering/structure.md)・[design-tokens](../.kiro/steering/design-tokens.md)）。
 
 ---
 
@@ -184,5 +184,6 @@ Google クチコミ投稿画面へ自分で貼る。回答は Place 単位の匿
 - 提案書（クライアント合意用・非技術）: [docs/proposal.md](./proposal.md)
 - インフラ bootstrap runbook（GCP 手順の単一情報源）: [infra/README.md](../infra/README.md)
 - ER 図: [db/ERD.md](../db/ERD.md) ／ 書き込み境界: [db/write-boundary.md](../db/write-boundary.md)
+- デザイン言語（色・余白・角丸・影・見出しの写像版）: [docs/design/design-language.md](./design/design-language.md)
 - 各機能の詳細仕様: `.kiro/specs/{feature}/`（requirements / design / tasks）
-- プロジェクト永続メモリ: `.kiro/steering/`（product / tech / structure）
+- プロジェクト永続メモリ: `.kiro/steering/`（product / tech / structure / design-tokens）
