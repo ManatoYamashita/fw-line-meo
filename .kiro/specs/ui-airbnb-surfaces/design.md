@@ -328,21 +328,46 @@ flowchart TD
 
 ##### Service Interface
 
+本節は #184 が着地した後の実装を写している。設計を書いた時点の形は捲れる領域の免除を持たず、
+そのまま実装すると免除の件数と領域の幾何が失われて既存の検証が複数壊れる。
+**移設は形を設計へ合わせるのではなく、実装を正として設計を追随させた。**
+
 ```typescript
-interface ViewportMetrics {
-  readonly innerWidth: number;
-  readonly documentScrollWidth: number;
-  readonly documentClientWidth: number;
-  readonly bodyScrollWidth: number;
-  readonly maxRight: number;
-  readonly widestSelector: string;
+type ScrollRegionRule = 'scroll-container' | 'none' | 'data-slot' | 'any-non-visible';
+
+interface ScrollRegionGeometry {
+  slot: string;
+  label: string;
+  right: number;
+  clientWidth: number;
+  scrollWidth: number;
 }
 
-declare function readViewportMetrics(page: Page): Promise<ViewportMetrics>;
-declare function expectNoHorizontalScroll(page: Page, where: string): Promise<void>;
+interface OverflowMetrics {
+  innerWidth: number;
+  docScrollWidth: number;
+  docClientWidth: number;
+  bodyScrollWidth: number;
+  maxRight: number;
+  widest: string;
+  excludedCount: number;
+  widestExcluded: string;
+  scrollRegions: ScrollRegionGeometry[];
+}
+
+declare function deviceWidthOf(page: Page): number;
+declare function readOverflowMetrics(page: Page, rule: ScrollRegionRule): Promise<OverflowMetrics>;
+declare function expectNoHorizontalScroll(
+  page: Page,
+  where: string,
+  expectedScrollRegions: number,
+): Promise<void>;
 ```
 
-- Preconditions: 携帯端末相当の幅で実行されていること。`expectNoHorizontalScroll` はこれ自体を assert する
+- Preconditions: 携帯端末相当の幅で実行されていること。`deviceWidthOf` が実行環境の設定から取り、
+  取れなければ例外にする。呼び出し側は捲れる領域の件数を宣言する（既定値を持たせない。
+  宣言と実測の食い違いは、領域が捲りを失ったか面へ領域が増えたかのどちらかであり、
+  どちらも黙って通してはならない）
 - Postconditions: 溢れがあれば、原因要素の識別子を含む失敗メッセージを返す
 - Invariants: 端末幅は被測定物から取らない
 
