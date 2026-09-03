@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@fwlm/design-tokens": "workspace:*",
+    "@fwlm/e2e-support": "workspace:*",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",

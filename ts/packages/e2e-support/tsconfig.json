@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+
+    // 本パッケージはソース直配布（dist なし）で、消費者は Playwright のトランスパイラである。
+    // @fwlm/ui と同じ理由で bundler 解決を採る（拡張子なしの相対 import を許容する）。
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.ts"]
+}
