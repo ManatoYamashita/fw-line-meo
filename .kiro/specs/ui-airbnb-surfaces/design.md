@@ -447,7 +447,7 @@ declare function expectNoHorizontalScroll(page: Page, where: string): Promise<vo
 面へ意匠を当てる前に、`docs/design/design-language.md` へ次を追記する。要件 6.2 が定める手順であり、
 これを飛ばすと面の側が判断を新設することになって要件 6.1 に反する。
 
-| 追記する判断 | 現状 |
+| 追記する判断 | 着手前の現状（第 0 段階が解消する） |
 |---|---|
 | 管理ダッシュボードの帯の高さと現在地の示し方 | 文書に記述が無い |
 | ログイン画面の版面（中央寄せの容器と全幅の主操作） | 同上 |
