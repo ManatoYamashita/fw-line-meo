@@ -669,6 +669,58 @@ function readFocusIndicator(page: Page): Promise<FocusIndicator | null> {
   });
 }
 
+/**
+ * 端末幅を Playwright の project 設定（devices['Pixel 5']）から取る。
+ *
+ * ページ側の `window.innerWidth` を基準に使わない。はみ出したときに自動で広がるため、
+ * 「はみ出しているかどうか」の基準としては自己言及になる。
+ */
+function deviceWidthOf(page: Page): number {
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
+  }
+  expect(viewport.width, 'モバイル幅の project で実行されていない').toBeLessThanOrEqual(480);
+  return viewport.width;
+}
+
+/**
+ * `maxRight` の母数から外す「スクロール領域の内側」の判定規則。
+ *
+ * 本番の検証は `scroll-container` 固定である。残る 3 つは **対照専用** で、規則を広げる改変や
+ * 名前で判定する改変が静かに通らないことを固定するためだけに存在する（@fwlm/ui の
+ * token-scales が採る「注入対照」と同じ思想。製品コード側にはフックを作らない）。
+ *
+ * - `scroll-container`: 祖先の計算済み `overflow-x` が **捲れる値**（`auto` / `scroll`）のときだけ免除する
+ * - `none`: 免除しない（是正前の挙動）
+ * - `data-slot`: 名前で免除する（fail-open の対照）
+ * - `any-non-visible`: `visible` 以外をすべて免除する（除外が広すぎる場合の対照）
+ */
+type ScrollRegionRule = 'scroll-container' | 'none' | 'data-slot' | 'any-non-visible';
+
+// 免除してよいのは「利用者が捲れる領域の内側」だけである。
+//
+// **`hidden` と `clip` を入れてはならない。** どちらも捲れる領域を作らず、はみ出した中身は
+// 到達不能なまま失われる。面の側の `overflow-x: clip` を免除しないのとまったく同じ理由であり、
+// 実際 `card.tsx` と `badge.tsx` は `overflow-hidden` を持つため、`visible` 以外を一律に
+// 免除すると Card 配下の全要素が母数から消える（`overflow-x: clip` により scrollWidth 系の
+// assert は構造的に常に真なので、そのとき面の溢れを検出する網は 1 本も残らない）。
+//
+// 否定形（`!== 'visible'`）ではなく列挙で書くのは、将来 `overlay` のような値が増えたときに
+// 免除の範囲が黙って広がらないようにするため。
+const PANNABLE_OVERFLOW_X: readonly string[] = ['auto', 'scroll'];
+
+/** スクロール領域そのものの幾何（免除する側ではなく、外側の箱として測る対象）。 */
+interface ScrollRegionGeometry {
+  /** 識別子。`data-slot` が無ければタグ名。 */
+  slot: string;
+  /** アクセシブル名（`aria-label`）。どの領域かをメッセージで指すために持つ。 */
+  label: string;
+  right: number;
+  clientWidth: number;
+  scrollWidth: number;
+}
+
 interface OverflowMetrics {
   innerWidth: number;
   docScrollWidth: number;
@@ -676,48 +728,148 @@ interface OverflowMetrics {
   bodyScrollWidth: number;
   maxRight: number;
   widest: string;
+  /**
+   * 母数から外した要素数。
+   *
+   * **0 を一律に失敗させてはならない。** 捲れる領域を持たない面（`/s/` の 2 画面）では 0 が正当で、
+   * 大域の非空 assert にすると正しい面が赤くなる。「規則が空振りしているか」は
+   * 呼び出し側が宣言した `expectedScrollRegions` と `scrollRegions.length` の一致で測る。
+   */
+  excludedCount: number;
+  /** 免除した中の最右端。偽陰性を目視で追えるようにするために残す。 */
+  widestExcluded: string;
+  /** 免除の根拠になった領域そのもの（入れ子の内側にあるものは含まない）。 */
+  scrollRegions: ScrollRegionGeometry[];
 }
 
 // 横方向のはみ出しをドキュメント全体と個別要素の両面から実測する。
-function readOverflowMetrics(page: Page): Promise<OverflowMetrics> {
-  return page.evaluate(() => {
-    const doc = document.documentElement;
-    let maxRight = 0;
-    let widest = '(none)';
-    for (const el of Array.from(document.body.querySelectorAll('*'))) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) continue; // 非表示要素は対象外
-      if (rect.right > maxRight) {
-        maxRight = rect.right;
-        widest = `${el.tagName}[class="${el.getAttribute('class') ?? ''}"]`;
+//
+// 捲れる領域の内側で起きている溢れは、面が横に動いていることを意味しない（要件 3.3 が禁じるのは
+// **ページ全体の**横スクロールである）。そこで祖先に捲れる領域を持つ要素は `maxRight` の母数から
+// 外し、領域そのものは外側の箱として別に測る。
+function readOverflowMetrics(page: Page, rule: ScrollRegionRule): Promise<OverflowMetrics> {
+  return page.evaluate(
+    ({ rule, pannable }: { rule: ScrollRegionRule; pannable: readonly string[] }) => {
+      const doc = document.documentElement;
+
+      // 「この要素はスクロール領域そのものか」。規則ごとに定義が変わるのは対照のためである。
+      const isRegion = (element: Element): boolean => {
+        if (rule === 'none') return false;
+        if (rule === 'data-slot') return element.getAttribute('data-slot') === 'table-container';
+        const overflowX = getComputedStyle(element).overflowX;
+        if (rule === 'any-non-visible') return overflowX !== 'visible';
+        return pannable.includes(overflowX);
+      };
+
+      const describe = (element: Element): string =>
+        `${element.tagName}[class="${element.getAttribute('class') ?? ''}"]`;
+
+      let maxRight = 0;
+      let widest = '(none)';
+      let excludedCount = 0;
+      let maxExcludedRight = 0;
+      let widestExcluded = '(none)';
+      const scrollRegions: ScrollRegionGeometry[] = [];
+
+      for (const el of Array.from(document.body.querySelectorAll('*'))) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue; // 非表示要素は対象外
+
+        // 祖先に捲れる領域があるか。**領域そのものは免除しない**（外側の箱は必ず測る）。
+        let inside = false;
+        for (let ancestor = el.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+          if (isRegion(ancestor)) {
+            inside = true;
+            break;
+          }
+        }
+
+        if (inside) {
+          // 入れ子の領域も「内側」として扱う。外側の箱が端末幅に収まっている以上、
+          // 内側の領域の右端を端末幅と比べても意味を持たない。
+          excludedCount += 1;
+          if (rect.right > maxExcludedRight) {
+            maxExcludedRight = rect.right;
+            widestExcluded = describe(el);
+          }
+          continue;
+        }
+
+        if (isRegion(el)) {
+          scrollRegions.push({
+            slot: el.getAttribute('data-slot') ?? el.tagName,
+            label: el.getAttribute('aria-label') ?? '(名前なし)',
+            right: rect.right,
+            clientWidth: el.clientWidth,
+            scrollWidth: el.scrollWidth,
+          });
+        }
+
+        if (rect.right > maxRight) {
+          maxRight = rect.right;
+          widest = describe(el);
+        }
       }
-    }
-    return {
-      innerWidth: window.innerWidth,
-      docScrollWidth: doc.scrollWidth,
-      docClientWidth: doc.clientWidth,
-      bodyScrollWidth: document.body.scrollWidth,
-      maxRight,
-      widest,
-    };
-  });
+
+      return {
+        innerWidth: window.innerWidth,
+        docScrollWidth: doc.scrollWidth,
+        docClientWidth: doc.clientWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+        maxRight,
+        widest,
+        excludedCount,
+        widestExcluded,
+        scrollRegions,
+      };
+    },
+    { rule, pannable: PANNABLE_OVERFLOW_X },
+  );
 }
 
-async function expectNoHorizontalScroll(page: Page, where: string): Promise<void> {
-  // 端末幅は Playwright の project 設定（devices['Pixel 5']）を正とする。
-  // ページ側の window.innerWidth ははみ出し時に自動で広がるため基準に使わない。
-  const viewport = page.viewportSize();
-  if (viewport === null) {
-    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
-  }
-  const deviceWidth = viewport.width;
-  expect(deviceWidth, 'モバイル幅の project で実行されていない').toBeLessThanOrEqual(480);
+/**
+ * 面が横スクロールしないことを実測する。
+ *
+ * `expectedScrollRegions` に **既定値を持たせない**のは意図的である。既定値があると呼び出し側は
+ * 宣言を省略でき、面へ捲れる領域が増減しても誰も気づかない。面ごとに件数を書かせることで、
+ * 領域が `overflow-x-auto` を失った瞬間に `maxRight` と件数の 2 本が同時に赤くなる。
+ *
+ * 件数の網が本当に効くのは逆向きの事故に対してである。**溢れを「直す」つもりで外側の枠へ
+ * `overflow-x-auto` を足すと、その配下は丸ごと免除され `maxRight` は永久に緑になる。**
+ * 免除の広さを規則だけで守るのは無理で、件数の宣言がその改変を赤にする唯一の網である。
+ */
+async function expectNoHorizontalScroll(
+  page: Page,
+  where: string,
+  expectedScrollRegions: number,
+): Promise<void> {
+  const deviceWidth = deviceWidthOf(page);
+  const m = await readOverflowMetrics(page, 'scroll-container');
+  const regions = m.scrollRegions.map((r) => `${r.slot}(${r.label})`).join(', ') || '(なし)';
 
-  const m = await readOverflowMetrics(page);
+  // 免除の空振り検出。宣言と実測の食い違いは「領域が捲りを失った」か「面に領域が増えた」の
+  // どちらかであり、どちらも黙って通してはならない。
+  expect(
+    m.scrollRegions.length,
+    `${where}: 捲れる領域の実測件数 ${m.scrollRegions.length} が宣言 ${expectedScrollRegions} と` +
+      `食い違う（実測: ${regions}）。領域が overflow-x の捲りを失ったか、面へ領域が増えている`,
+  ).toBe(expectedScrollRegions);
+
+  // 内側を免除するなら、外側の箱は必ず測る。
+  for (const region of m.scrollRegions) {
+    expect(
+      region.right,
+      `${where}: 捲れる領域 ${region.slot}(${region.label}) 自身の右端 ${region.right}px が` +
+        `端末幅（${deviceWidth}px）を超えている（内側ではなく領域そのものが面を押し広げている）`,
+    ).toBeLessThanOrEqual(deviceWidth + 1);
+  }
+
   // overflow-x: clip の安全網に隠れた実レイアウトのはみ出しを検出する（サブピクセル分は許容）。
+  // 下の scrollWidth 2 本は clip により構造的に常に真であり、面の溢れを捕らえる網はここだけである。
   expect(
     m.maxRight,
-    `${where}: ${m.widest} が端末幅（${deviceWidth}px）を超えて右端 ${m.maxRight}px まで伸びている`,
+    `${where}: ${m.widest} が端末幅（${deviceWidth}px）を超えて右端 ${m.maxRight}px まで伸びている` +
+      `（捲れる領域の内側として免除したのは ${m.excludedCount} 件・最右端 ${m.widestExcluded}）`,
   ).toBeLessThanOrEqual(deviceWidth + 1);
   expect(
     m.docScrollWidth,
@@ -1477,9 +1629,12 @@ test('エラーかつチェック済みの枠がエラー色で描画され選�
 // 識別用へ振り替わっても集合は無傷である）。
 test('表のセル余白と行の区切りが意匠のとおりに実描画される', async ({ page }) => {
   await page.goto('/ui-check');
-  await expect(page.getByRole('table')).toBeVisible();
+  // 検証面には表が 2 つある（意匠を測る的と、横溢れを発火させる的）。**測る側を名前で選ぶ。**
+  // `.first()` に頼ると、面へ表を足した順序が変わっただけで測る対象が黙って入れ替わる。
+  const catalogue = page.getByRole('region', { name: '区分ごとの個数' });
+  await expect(catalogue.getByRole('table')).toBeVisible();
 
-  const cell = page.locator('[data-slot="table-cell"]').first();
+  const cell = catalogue.locator('[data-slot="table-cell"]').first();
   const padding = await cell.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
@@ -1495,7 +1650,7 @@ test('表のセル余白と行の区切りが意匠のとおりに実描画さ�
   ).toEqual({ top: '16px', right: '16px', bottom: '16px', left: '16px' });
 
   // 区切りは 1px の罫線のみ。最終行は罫線を持たないので、本体の先頭行で測る。
-  const row = page.locator('[data-slot="table-body"] > [data-slot="table-row"]').first();
+  const row = catalogue.locator('[data-slot="table-body"] > [data-slot="table-row"]').first();
   const stroke = await row.evaluate((element) => {
     const style = getComputedStyle(element);
     return { width: Number.parseFloat(style.borderBottomWidth), style: style.borderBottomStyle };
@@ -1531,8 +1686,7 @@ test('表のセル余白と行の区切りが意匠のとおりに実描画さ�
   // 焦点を取れないスクロール領域は、走査領域を自動で焦点可能にしないブラウザで
   // キーボードのみの利用者から隠れた列を奪う。セルに焦点可能な要素があるとは限らないため、
   // 容器そのものが到達点でなければならない。宣言（tabindex）ではなく実際に焦点が載ることを見る。
-  const container = page.locator('[data-slot="table-container"]');
-  await container.focus();
+  await catalogue.focus();
   expect(
     await page.evaluate(() => document.activeElement?.getAttribute('data-slot') ?? null),
     '横溢れの捲りを担う容器へ焦点が載らない（キーボードのみの利用者が隠れた列へ到達できない）',
@@ -1701,7 +1855,8 @@ test('無効化された記入欄の枠と面が D8 の記録値どおりの実�
 test('モバイルビューポートの回答画面で横スクロールが発生しない', async ({ page }) => {
   await page.goto(`/s/${STORE_ID}`);
   await expect(page.getByRole('button', { name: '星5' })).toBeVisible();
-  await expectNoHorizontalScroll(page, '回答画面');
+  // 捲れる領域は一言の `<textarea>` の 1 つ（textarea の既定の overflow は auto）。
+  await expectNoHorizontalScroll(page, '回答画面', 1);
 });
 
 // requirements 3.3: 下書き画面（生成テキスト・投稿導線を含む主要画面）でも同様。
@@ -1710,5 +1865,193 @@ test('モバイルビューポートの下書き画面で横スクロールが�
   await page.getByRole('button', { name: '星5' }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
-  await expectNoHorizontalScroll(page, '下書き画面');
+  // 捲れる領域は下書きの `<textarea>` の 1 つ。
+  await expectNoHorizontalScroll(page, '下書き画面', 1);
+});
+
+// Issue #53: 捲れる領域（overflow-x-auto）を持つ面で、要件 3.3 の検証が成立することを固定する。
+//
+// 面の側の `overflow-x: clip` により `docScrollWidth <= docClientWidth` は構造的に常に真であり、
+// **面の溢れを捕らえる網は `maxRight` 1 本だけ**である。そこへ除外を入れる以上、除外が広すぎれば
+// 網は消え、狭すぎれば偽陽性が出る。以下は「広さがちょうどよいこと」を両方向で固定する対照群で、
+// 全部が緑になることではなく、**表のとおりに緑と赤へ分かれること**が証拠である。
+test.describe('スクロール領域の除外', () => {
+  /** 意図的に端末幅を超える表を抱えた容器。検証面における唯一の発火場所。 */
+  const PANNING_REGION = '横に捲る領域の見本';
+  /** 意匠を測る側の容器。溢れない。 */
+  const CATALOGUE_REGION = '区分ごとの個数';
+
+  /**
+   * 検証面を開き、対照の前提（発火場所が実際に溢れていること）を確かめる。
+   *
+   * これを置かないと、fixture が何かの拍子に溢れなくなったとき、以下の対照は
+   * すべて「溢れが無いので緑」という無意味な緑を返す。
+   */
+  async function openSurfaceWithPanning(page: Page): Promise<OverflowMetrics> {
+    await page.goto('/ui-check');
+    await expect(page.getByRole('region', { name: PANNING_REGION })).toBeVisible();
+    const metrics = await readOverflowMetrics(page, 'scroll-container');
+    const region = metrics.scrollRegions.find((candidate) => candidate.label === PANNING_REGION);
+    expect(region, `検証面に「${PANNING_REGION}」が捲れる領域として現れていない`).toBeDefined();
+    expect(
+      region!.scrollWidth,
+      `対照の前提が崩れている: 「${PANNING_REGION}」の中身が溢れていない` +
+        `（scrollWidth=${region!.scrollWidth} <= clientWidth=${region!.clientWidth}）。` +
+        'この状態では以下の対照はすべて空振りの緑になる',
+    ).toBeGreaterThan(region!.clientWidth);
+    return metrics;
+  }
+
+  /** 容器から捲りを奪う（実行時の注入対照。製品コードは書き換えない）。 */
+  async function stripPanning(page: Page, label: string): Promise<void> {
+    const before = await page.evaluate((name) => {
+      const region = document.querySelector(`[data-slot="table-container"][aria-label="${name}"]`);
+      if (region === null) throw new Error(`容器「${name}」が見つからない`);
+      const previous = getComputedStyle(region).overflowX;
+      (region as HTMLElement).style.overflowX = 'visible';
+      return previous;
+    }, label);
+    // 変異が当たったことを確かめる。当たっていない変異は無改変のガードを検査することになる。
+    expect(before, `容器「${label}」はもともと捲れる領域ではなかった（変異が空振りしている）`).toBe(
+      'auto',
+    );
+  }
+
+  /** `overflow-hidden` を持つ Card の内側へ、端末幅を超える要素を注入する。 */
+  async function injectOverflowInsideCard(page: Page, position: 'first' | 'last'): Promise<void> {
+    const cardOverflowX = await page.evaluate((where) => {
+      const card = document.querySelector('[data-slot="card"]');
+      if (card === null) throw new Error('検証面に Card が無い（対照の前提が崩れている）');
+      const probe = document.createElement('div');
+      probe.setAttribute('data-testid', 'overflow-probe');
+      probe.style.width = '2000px';
+      probe.style.height = '8px';
+      if (where === 'first') card.prepend(probe);
+      else card.append(probe);
+      return getComputedStyle(card).overflowX;
+    }, position);
+    // 前提の確認: Card が `visible` 以外であることが、この対照の成立条件そのものである。
+    expect(
+      cardOverflowX,
+      'Card が overflow を持たなくなっている（「visible 以外を免除する」対照が空振りする）',
+    ).toBe('hidden');
+  }
+
+  // 本番の検証。
+  //
+  // 検証面が持つ捲れる領域は **3 つ**である。表の容器 2 つ（意匠を測る側と溢れを発火させる側）に
+  // 加えて `<textarea>` が入る。textarea の既定の `overflow` は `auto` であり、これは
+  // 「利用者が捲れる領域」の定義に素直に当てはまる（子要素を持たないので免除の効果は無いが、
+  // 領域そのものの右端は測る対象である）。**この 3 件目は実測で見つけた**。宣言を実測へ
+  // 合わせているのであって、逆ではない。
+  test('捲れる領域を 3 つ持つ検証面で、面そのものは横スクロールしない', async ({ page }) => {
+    const metrics = await openSurfaceWithPanning(page);
+    await expectVerificationSurfaceSane(page);
+
+    // 免除が実際に発火していること。0 件なら規則は空振りしており、以下は何も証明しない。
+    expect(
+      metrics.excludedCount,
+      `捲れる領域の内側として免除された要素が 1 件も無い（規則が空振りしている）`,
+    ).toBeGreaterThan(0);
+
+    await expectNoHorizontalScroll(page, '検証面', 3);
+  });
+
+  // 対照 1: 免除しなければ、この面は赤い。是正前の挙動が偽陽性であることの実証。
+  test('対照: 免除しない規則では、捲れる領域の内側の溢れで赤くなる', async ({ page }) => {
+    await openSurfaceWithPanning(page);
+    const deviceWidth = deviceWidthOf(page);
+    const metrics = await readOverflowMetrics(page, 'none');
+
+    expect(metrics.excludedCount, '免除しない規則なのに免除が発生している').toBe(0);
+    expect(
+      metrics.maxRight,
+      `免除しない規則で緑になっている（${metrics.widest} の右端 ${metrics.maxRight}px）。` +
+        'この対照が赤くならないなら、fixture が溢れていないか走査が届いていない',
+    ).toBeGreaterThan(deviceWidth + 1);
+  });
+
+  // 対照 3: 容器が捲りを失った瞬間、内側は除外から外れて赤くなる（fail-closed の中核）。
+  test('対照: 容器が捲りを失うと、除外から外れて赤くなる', async ({ page }) => {
+    await openSurfaceWithPanning(page);
+    const deviceWidth = deviceWidthOf(page);
+    await stripPanning(page, PANNING_REGION);
+
+    // 網 1: 面の溢れ。
+    const metrics = await readOverflowMetrics(page, 'scroll-container');
+    expect(
+      metrics.maxRight,
+      '捲りを失った容器の内側が依然として免除されている（fail-open）',
+    ).toBeGreaterThan(deviceWidth + 1);
+
+    // 網 2: 宣言した件数との一致。捲りを失った容器は領域として数えられなくなる。
+    const labels = metrics.scrollRegions.map((region) => region.label);
+    expect(labels, '捲りを失った容器が、まだ捲れる領域として数えられている').not.toContain(
+      PANNING_REGION,
+    );
+    // 意匠を測る側は捲りを保っているので、件数は 3 から 1 つだけ減る。
+    expect(labels, '捲りを失った容器以外まで数から消えている').toContain(CATALOGUE_REGION);
+    expect(metrics.scrollRegions).toHaveLength(2);
+
+    // 呼び出し側から見ても赤いこと。
+    const failure = await expectNoHorizontalScroll(page, '検証面', 3).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure, '捲りを失った面が緑のまま通っている').not.toBeNull();
+  });
+
+  // 対照 4: 名前で判定すると、上の赤が緑に化ける（fail-open の実証）。
+  test('対照: 名前で判定する規則では、捲りを失っても緑のまま通る', async ({ page }) => {
+    await openSurfaceWithPanning(page);
+    const deviceWidth = deviceWidthOf(page);
+    await stripPanning(page, PANNING_REGION);
+
+    const metrics = await readOverflowMetrics(page, 'data-slot');
+    expect(
+      metrics.maxRight,
+      '名前で判定する規則が赤くなっている。この対照は「名前で判定すると見逃す」ことを' +
+        '固定するためのもので、緑にならないなら対照そのものが的を外している',
+    ).toBeLessThanOrEqual(deviceWidth + 1);
+    // 名前は残っているので、件数の網も同時に無力化される（名前で数える規則は表の容器だけを数える）。
+    expect(metrics.scrollRegions.map((region) => region.label)).toContain(PANNING_REGION);
+  });
+
+  // 対照 5 と 6: 除外の広さ。`visible` 以外をすべて免除すると Card 配下が母数から消える。
+  //
+  // 注入位置を先頭と末尾の 2 通りで試す。1 箇所での検証は位置依存の穴を隠す。
+  for (const position of ['first', 'last'] as const) {
+    test(`対照: 除外の広さを Card 配下の溢れで測る（注入位置 ${position}）`, async ({ page }) => {
+      await openSurfaceWithPanning(page);
+      const deviceWidth = deviceWidthOf(page);
+      await injectOverflowInsideCard(page, position);
+
+      // 対照 5: 「visible 以外」で免除すると、網は弱まるのではなく **消滅する**。
+      //
+      // 面の側の `globals.css` が `html, body { overflow-x: clip }` を持つため、`body` 自身が
+      // 免除の根拠になる。走査は `body` 配下から始まるので、**全要素が「領域の内側」に落ちる**。
+      // 実測では 145 要素すべてが免除され、`maxRight` は 0 のまま、測られた要素は 1 つも無い。
+      // Card の `overflow-hidden` はその一段手前にある同じ型の穴である。
+      const broad = await readOverflowMetrics(page, 'any-non-visible');
+      expect(
+        broad.maxRight,
+        `「visible 以外を免除」で赤くなっている（${broad.widest}）。この対照は除外が広すぎると` +
+          '網が消えることを固定するためのもので、緑にならないなら対照が的を外している',
+      ).toBeLessThanOrEqual(deviceWidth + 1);
+      expect(
+        broad.widest,
+        '「visible 以外を免除」でも測られた要素が残っている。' +
+          'body の overflow-x: clip が免除の根拠にならなくなった可能性があり、' +
+          'この対照が示すはずの「網の消滅」を示せていない',
+      ).toBe('(none)');
+
+      // 対照 6: 捲れる値だけを免除すれば、同じ溢れを捕らえる。
+      const narrow = await readOverflowMetrics(page, 'scroll-container');
+      expect(
+        narrow.maxRight,
+        'Card 配下（overflow-hidden の内側）の溢れを見逃している。' +
+          '`hidden` は捲れる領域ではなく、中身は到達不能なまま失われる',
+      ).toBeGreaterThan(deviceWidth + 1);
+    });
+  }
 });
