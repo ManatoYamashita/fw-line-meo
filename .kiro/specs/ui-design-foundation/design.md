@@ -291,10 +291,34 @@ store-detail: 店舗詳細）。**9 経路すべてが `e2e/fixtures/` の open 
 持つことでその重複も消えている。`E2E_STORE_ID` の既定値も、以前は 2 つの spec がそれぞれ持っていたが
 `fixtures/surfaces.ts` の 1 箇所になった。
 
-なお `check-a11y-audit-preconditions.sh` が `page.goto` の直書きを禁じるのは**監査 spec に対してだけ**
-である。実測側の spec（ui-foundation / survey-flow / dashboard-surfaces / store-surface）が
-fixtures を経由しているのは現在の規律であって機械強制ではない。監査でない spec が一度きりの URL へ
-直接行く正当な場面はありうるため、禁止を全 spec へ広げるかは別途の判断とする。
+`page.goto` の直書き禁止は **`e2e/` 配下の全ファイル（fixtures を除く）** へ適用する
+（`scripts/check-e2e-goto-ownership.sh`）。`check-a11y-audit-preconditions.sh` は同じ禁止を監査 spec に
+対してだけ課しており、重なりは無駄ではなく保護である —— 片方が消えても監査 spec の側は守られる。
+一度きりの URL へ直接行く正当な場面のために WHITELIST を持つが、**理由と Issue 番号を必須**とし、
+違反が無くなった項目は警告して削除を促す。
+
+### E2E storeId の整合
+
+E2E の確定店舗 storeId は役割の違う 4 箇所に現れ、**ずれても CI は緑を返しうる**。
+
+| 役割 | 場所 |
+|---|---|
+| 種 | `ts/apps/survey-web/e2e/seed.sql`（この行が店舗を作る＝正典） |
+| 既定 | `ts/apps/survey-web/e2e/fixtures/surfaces.ts`（env が無いときの既定値） |
+| 注入 | `.github/workflows/ts-ci.yml` の `E2E_STORE_ID` |
+| 計測 | `ts/apps/survey-web/perf/lighthouserc.json` の URL |
+
+**計測のずれが最も静かである。** 種の UUID を変えて lighthouserc.json を直し忘れると、Lighthouse は
+存在しない店舗の URL を開く。そこに出るのは 404 ではなく `unavailable` 分岐の 1 段落だけの面で、
+LCP は当然速く accessibility も 1.0 を返す —— **別の面を測ったまま両方の assert が緑になる。**
+
+`scripts/check-e2e-store-id-consistency.sh` が 4 役割の一致と、既定値の宣言がちょうど 1 箇所である
+ことを検証する。後者が動機で、PR #191 の時点では `fixtures/surfaces.ts` と `survey-flow.spec.ts` が
+同じ UUID をそれぞれ持っていた。**env が渡っている限り値は一致するため、複写であること自体が
+観測できない。** 手順書（Markdown）に書かれた値も、あれば照合する（無くてもよい）。
+
+なお UUID の一致を無条件には要求しない。同じ UUID は単体テストにも多数現れるが、あちらは隔離された
+文脈で任意に選んだリテラルであり、種の値と一致する義務は無い。**役割で照合する。**
 
 空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。これは体裁ではなく成立条件で、
 実測で確かめてある: `/s/{storeId}` の unavailable 分岐（店舗不在・place 未確定）が返す 1 段落だけの
