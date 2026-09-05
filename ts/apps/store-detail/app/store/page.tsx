@@ -26,9 +26,22 @@
 // ——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを送信できないため、
 // <button> を導入するより厳格な保証を維持できる。書込系 fetch（POST/PUT/DELETE/PATCH）も
 // 一切呼び出さない — 発行するのは `/api/detail` への GET のみ（test/store-page.test.tsx で検証）。
+//
+// 意匠（ui-airbnb-surfaces task 3.1）:
+//   版面・主見出し・処理中・通知を共通部品から描く。判断の正典は docs/design/design-language.md
+//   （版面は §7.9、見出しの階層は §6、余白は §3）であり、ここでは結論も数値も転記せず参照する。
+//   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。
+//
+//   使える部品は上記の no-write 保証で決まる。`Button` / `Input` / `Select` / `Textarea` は
+//   この面では**使ってはならない**（他の面では正解でも、ここでは要件 3.1 に真正面から反する）。
+//   PageShell は <div>／Heading は <h1>-<h6>／Spinner は <span>／Alert は <div> しか描かない。
 
 import { useEffect, useState } from 'react';
 import liff from '@line/liff';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { Heading } from '@fwlm/ui/components/heading';
+import { PageShell } from '@fwlm/ui/components/page-shell';
+import { Spinner } from '@fwlm/ui/components/spinner';
 
 import type { DailySummaryCompetitor, DailySummaryNewReview } from '@fwlm/db';
 // lib/data.ts / lib/contract.ts が定義する実際のレスポンス形状を型としてのみ取り込む
@@ -369,39 +382,55 @@ export default function StorePage(): React.JSX.Element {
     };
   }, []);
 
+  // 4 つの分岐はいずれも自前の主要領域を持っていた。版面の部品は既定で main を描くため、
+  // 素の <main> を **置換** する（内側へ入れると主要領域が 2 つになる）。
   if (state.status === 'loading') {
     return (
-      <main>
-        <h1>店舗詳細</h1>
-        <p>読み込み中です…</p>
-      </main>
+      <PageShell width="sm" className="flex flex-col gap-6">
+        <Heading level={1}>店舗詳細</Heading>
+        {/* Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
+         * 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
+         * （Spinner の aria-label へ移すと sr-only の子要素へ落ち、動き低減設定でない実ブラウザ
+         * では進行状態の手掛かりが回転だけになる・要件 4.5）。文言は 1 文字も変えない。 */}
+        <p role="status" className="flex items-center gap-2">
+          <Spinner aria-hidden />
+          読み込み中です…
+        </p>
+      </PageShell>
     );
   }
 
   if (state.status === 'error') {
     return (
-      <main>
-        <h1>店舗詳細</h1>
-        <p role="alert">{state.message}</p>
-      </main>
+      <PageShell width="sm" className="flex flex-col gap-6">
+        <Heading level={1}>店舗詳細</Heading>
+        {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
+            領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}
+        <Alert variant="destructive">
+          <AlertDescription>{state.message}</AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
   if (state.status === 'select') {
     // 選択待ちは異常ではないため role="alert" は使わない（支援技術に警告として読ませない）。
+    // 通知の部品も置かない。既定の変種は role="status" のライブリージョンであり、
+    // 「候補から選ぶ」という通常の画面状態を読み上げの割り込みに乗せる理由がない。
     return (
-      <main>
-        <h1>店舗詳細</h1>
+      <PageShell width="sm" className="flex flex-col gap-6">
+        <Heading level={1}>店舗詳細</Heading>
         <StoreSelector stores={state.stores} />
-      </main>
+      </PageShell>
     );
   }
 
   const { data } = state;
   return (
-    <main>
-      {/* 多店舗オーナーにとって「今どの店を見ているか」は必須の文脈（要件 4.7）。 */}
-      <h1>{data.storeName}</h1>
+    <PageShell width="sm" className="flex flex-col gap-6">
+      {/* 多店舗オーナーにとって「今どの店を見ているか」は必須の文脈（要件 4.7）。
+       * 主見出しは店名そのものであり、装飾も日付も内包しない（日付は各節の h2 側にある）。 */}
+      <Heading level={1}>{data.storeName}</Heading>
       {data.stores.length >= 2 ? (
         // storeId を持たない /store へ戻る → サーバーが再び 409 を返し選択画面に着地する。
         <p>
@@ -412,6 +441,6 @@ export default function StorePage(): React.JSX.Element {
       <CompetitorsSection competitors={data.competitors} />
       <TrendSection trend={data.trend} />
       <p>{GOOGLE_ATTRIBUTION_TEXT}</p>
-    </main>
+    </PageShell>
   );
 }
