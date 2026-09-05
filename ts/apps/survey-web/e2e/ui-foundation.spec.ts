@@ -716,9 +716,15 @@ test('キーボードでたどった操作可能要素すべてに可視フォ�
 
 // requirements 5.3 / Issue #49: @fwlm/ui の部品そのものに可視フォーカス表示が出る。
 //
-// 上のテストが走査する回答画面は素の <button> / <textarea> / <input> で構成されており、
-// @fwlm/ui の部品を一度も通っていない。そのため「部品が base レイヤのフォーカス既定を
-// outline を打ち消すユーティリティで無効化していた」欠陥（Issue #49）を検出できなかった。
+// 上のテストが走査する回答画面は、Issue #49 の当時は素の <button> / <textarea> / <input> で
+// 構成されており、@fwlm/ui の部品を一度も通っていなかった。そのため「部品が base レイヤの
+// フォーカス既定を outline を打ち消すユーティリティで無効化していた」欠陥を検出できなかった。
+//
+// **現在の回答画面は部品を一部通っている**（ui-airbnb-surfaces task 4.1 の時点で
+// Alert / Button / Checkbox / Heading / PageShell / Textarea の 6 種）。それでも本テストは要る。
+// 全 18 種のうち残る 12 種（Badge / Card / EmptyState / Field / Input / Label / PageHeader /
+// RadioGroup / Select / Separator / Spinner / Table）は本番のどの画面からも到達せず、
+// 到達しない部品のフォーカス表示は本番の面を走査しても一度も測られないからである。
 // ここでは部品を実描画する検証面（/ui-check）を的にして、同じ実測ロジックを部品経路へ通す。
 test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出る', async ({ page }) => {
   await page.goto('/ui-check');

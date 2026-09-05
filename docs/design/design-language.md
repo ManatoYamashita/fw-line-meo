@@ -441,4 +441,7 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 名前付き余白キーの不在と角丸の段の重複 | `ts/packages/ui/test/token-scales.test.ts` | 角丸の段差とトークン対応 |
 | 見出しの実コンパイル結果の一致 | `ts/packages/ui/test/app-integration.test.ts` | 見出しのサイズ階層 |
 | 色の役割分離とコントラストの下限 | `ts/packages/design-tokens/test/colors.test.ts` | 成功と危険の識別 |
+| 7.1 星の色（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 星の色を分岐の両端 |
+| 7.10 主操作の寸法区分（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 主操作の寸法区分 |
+| 7.11 状態変化の遷移（客向けアンケートの星） | `ts/apps/survey-web/test/survey-form.test.tsx` | 状態変化の色遷移 |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
