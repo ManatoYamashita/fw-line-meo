@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint app lib test next.config.ts postcss.config.mjs vitest.config.ts",
+    "lint": "eslint app e2e lib test next.config.ts playwright.config.ts postcss.config.mjs vitest.config.ts",
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
@@ -20,6 +20,8 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@fwlm/e2e-support": "workspace:*",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16",
     "@types/react": "^19",

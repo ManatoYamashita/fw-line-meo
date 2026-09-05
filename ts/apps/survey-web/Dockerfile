@@ -14,6 +14,7 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/design-tokens/package.json packages/design-tokens/
+COPY packages/e2e-support/package.json packages/e2e-support/
 COPY packages/ui/package.json packages/ui/
 COPY apps/survey-web/package.json apps/survey-web/
 RUN pnpm install --frozen-lockfile

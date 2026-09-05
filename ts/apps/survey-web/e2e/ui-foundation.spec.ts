@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 import { test, expect, devices, type Locator, type Page } from '@playwright/test';
 import { colors, compositeOver, contrastRatio } from '@fwlm/design-tokens';
+import {
+  deviceWidthOf,
+  expectNoHorizontalScroll,
+  readOverflowMetrics,
+  type OverflowMetrics,
+} from '@fwlm/e2e-support/viewport';
 
 import {
   deviceWidthOf,

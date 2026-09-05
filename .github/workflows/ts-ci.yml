@@ -27,6 +27,12 @@ jobs:
       - name: 'NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）'
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
+      - name: 'E2E スタブ隔離ガード（Issue #53・IdP 差し替えが出荷経路へ漏れないこと）'
+        # 管理ダッシュボードと店舗詳細を実ブラウザで測るため、外部 IdP の SDK をビルド時に
+        # スタブへ差し替える口がある（E2E_STUB_IDP=1 のときだけ有効）。漏れたときの症状は
+        # エラーではなく「認証を求められない正常動作」であり、通常のテストでは検出できない。
+        # 出荷経路への混入・fail-open 化・本番ソースからの参照を read-only の grep で検出する。
+        run: bash scripts/check-e2e-idp-stub-isolation.sh
       - name: 'デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）'
         # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
         # theme.css がトークンと同値であることを照合する（read-only grep 検証）。
@@ -228,6 +234,55 @@ jobs:
           name: playwright-report
           path: ts/apps/survey-web/playwright-report/
 
+  # 管理ダッシュボードと店舗詳細の実描画検証（Issue #53）。
+  #
+  # 上の e2e ジョブと分けてあるのは **DB を必要としないから**である。この 2 面のデータは
+  # Playwright の page.route() が固定 fixture で供給するため、postgres も dashboard-api も
+  # 起こさない。同居させると、測りたい対象と無関係な DB の不調でこちらまで赤くなる。
+  #
+  # ビルドを 2 度行う。1 度目（上の e2e / lint-build-test と同じ通常ビルド）ではこの 2 面は
+  # 実ブラウザで開けない。E2E_STUB_IDP=1 を与えた 2 度目のビルドだけがスタブを束ねる。
+  # **この env を出荷経路へ渡してはならない**（scripts/check-e2e-idp-stub-isolation.sh が強制）。
+  e2e-surfaces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - run: pnpm -C ts install --frozen-lockfile
+      # 共有パッケージ（@fwlm/ui / @fwlm/e2e-support 等）を先に用意する。
+      - run: pnpm -C ts run build:packages
+      - name: 'E2E 用ビルド（IdP をスタブへ差し替える）'
+        # NEXT_PUBLIC_API_BASE_URL は面自身と別オリジンにする。同一オリジンにすると
+        # page.route() の横取りが `/stores` への文書要求まで掴み、ページ遷移そのものが壊れる
+        # （e2e/fixtures/api.ts の説明）。実在しないポートでよい（応答は fixture が返す）。
+        env:
+          E2E_STUB_IDP: '1'
+          NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:3199
+          NEXT_PUBLIC_LIFF_ID: e2e-stub-liff-id
+        run: |
+          pnpm -C ts --filter @fwlm/dashboard-web run build
+          pnpm -C ts --filter @fwlm/store-detail run build
+      - name: install Playwright browsers
+        run: pnpm -C ts --filter @fwlm/dashboard-web exec playwright install --with-deps chromium
+      - name: 'E2E（管理ダッシュボード 6 面の横スクロール実測）'
+        run: pnpm -C ts --filter @fwlm/dashboard-web exec playwright test
+      - name: 'E2E（店舗詳細の横スクロール実測）'
+        run: pnpm -C ts --filter @fwlm/store-detail exec playwright test
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: playwright-report-surfaces
+          path: |
+            ts/apps/dashboard-web/test-results/
+            ts/apps/store-detail/test-results/
+
   go-test:
     # Issue #163: `go/` はこのジョブが入るまで **CI で一度もテストされていなかった**。
     # `setup-go` / `go test` / `go vet` はワークフロー 6 本のいずれにも存在せず、Go が CI で
@@ -398,7 +453,7 @@ jobs:
     # **docker-build を needs に入れない。** PR イベント限定のジョブで main push では常に
     # skipped になる。入れると判定が none（通知しない）へ倒れ、通知が永久に飛ばなくなる。
     # needs と下の --job 引数の食い違いは scripts/test/cases/73-ts-ci-notify.sh が機械照合する。
-    needs: [lint-build-test, e2e, lighthouse, go-test, cross-runtime]
+    needs: [lint-build-test, e2e, e2e-surfaces, lighthouse, go-test, cross-runtime]
     # main への push だけを見る。PR のレビュー中の赤で追跡 Issue を立てない。
     # always() が無いと needs の失敗でこのジョブごと skip され、赤のときに限って黙る。
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -422,6 +477,7 @@ jobs:
           # needs.*.result は run へ直接展開せず env 経由で渡す（deploy.yml の notify と同じ）。
           R_LINT_BUILD_TEST: ${{ needs.lint-build-test.result }}
           R_E2E: ${{ needs.e2e.result }}
+          R_E2E_SURFACES: ${{ needs.e2e-surfaces.result }}
           R_LIGHTHOUSE: ${{ needs.lighthouse.result }}
           R_GO_TEST: ${{ needs.go-test.result }}
           R_CROSS_RUNTIME: ${{ needs.cross-runtime.result }}
@@ -433,6 +489,7 @@ jobs:
           set -- \
             --job "lint-build-test=${R_LINT_BUILD_TEST}" \
             --job "e2e=${R_E2E}" \
+            --job "e2e-surfaces=${R_E2E_SURFACES}" \
             --job "lighthouse=${R_LIGHTHOUSE}" \
             --job "go-test=${R_GO_TEST}" \
             --job "cross-runtime=${R_CROSS_RUNTIME}"
