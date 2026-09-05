@@ -444,4 +444,6 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.1 星の色（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 星の色を分岐の両端 |
 | 7.10 主操作の寸法区分（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 主操作の寸法区分 |
 | 7.11 状態変化の遷移（客向けアンケートの星） | `ts/apps/survey-web/test/survey-form.test.tsx` | 状態変化の色遷移 |
+| 7.10 寸法区分の面側上書き（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 押しボタンの寸法区分 |
+| 7.9 全幅の押しボタン風リンク（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 投稿導線の見た目 |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
