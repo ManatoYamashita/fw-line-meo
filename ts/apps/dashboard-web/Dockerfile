@@ -17,6 +17,7 @@ WORKDIR /repo
 # ルート workspace ファイルと自アプリの package.json のみで解決できる。
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/design-tokens/package.json packages/design-tokens/
+COPY packages/e2e-support/package.json packages/e2e-support/
 COPY packages/ui/package.json packages/ui/
 COPY apps/dashboard-web/package.json apps/dashboard-web/
 RUN pnpm install --frozen-lockfile

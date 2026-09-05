@@ -15,6 +15,7 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/design-tokens/package.json packages/design-tokens/
+COPY packages/e2e-support/package.json packages/e2e-support/
 COPY packages/ui/package.json packages/ui/
 COPY apps/store-detail/package.json apps/store-detail/
 RUN pnpm install --frozen-lockfile

@@ -70,6 +70,12 @@ importers:
         specifier: ^19
         version: 19.2.7(react@19.2.7)
     devDependencies:
+      '@fwlm/e2e-support':
+        specifier: workspace:*
+        version: link:../../packages/e2e-support
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.3.3
@@ -140,6 +146,12 @@ importers:
         specifier: ^19
         version: 19.2.7(react@19.2.7)
     devDependencies:
+      '@fwlm/e2e-support':
+        specifier: workspace:*
+        version: link:../../packages/e2e-support
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.3.3
