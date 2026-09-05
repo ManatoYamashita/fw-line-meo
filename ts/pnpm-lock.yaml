@@ -183,6 +183,9 @@ importers:
       '@fwlm/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@fwlm/e2e-support':
+        specifier: workspace:*
+        version: link:../../packages/e2e-support
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
@@ -225,6 +228,12 @@ importers:
         version: 8.20.0
 
   packages/design-tokens: {}
+
+  packages/e2e-support:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
 
   packages/store-identification:
     dependencies:
