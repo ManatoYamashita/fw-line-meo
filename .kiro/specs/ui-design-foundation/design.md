@@ -285,10 +285,45 @@ axe は 3 面 9 経路に当てる（survey-web: `/ui-check`・`/s/{storeId}` �
 store-detail: 店舗詳細）。**9 経路すべてが `e2e/fixtures/` の open 手順を経由し**、その手順が
 「本体が描けていること」を先に固定する。**3 アプリとも、実測側の spec と a11y 監査が同じ定義を使う**
 （dashboard-web: `fixtures/api.ts` ／ store-detail: `fixtures/detail.ts` ／ survey-web:
-`fixtures/surfaces.ts`）。survey-web は `ui-foundation.spec.ts` が持っていた `page.goto` 26 箇所を
-すべて fixtures へ移した。うち 9 箇所は直後に同じ前提 assert（`既定のボタン` の可視）を重複して
-書いており、fixtures が単一の定義を持つことでその重複も消えている。`STORE_ID` の定義も
-fixtures 側へ寄せた。
+`fixtures/surfaces.ts`）。**survey-web は `e2e/` 配下の `page.goto` を 1 つ残らず fixtures へ寄せた**
+（`ui-foundation.spec.ts` 26 箇所 ／ `survey-flow.spec.ts` 3 箇所）。ui-foundation の 26 箇所のうち
+10 箇所は開いた直後に同じ前提 assert（`既定のボタン` の可視）を重複して持っており、fixtures が単一の
+定義を持つことでその重複も消えている（うち 1 箇所はロケータ束縛と assert が 2 行に割れた形である）。
+`E2E_STORE_ID` の既定値も、以前は 2 つの spec がそれぞれ持っていたが `fixtures/surfaces.ts` の
+1 箇所になった。
+
+`page.goto` の直書き禁止は **`e2e/` 配下の Playwright が収集しうる拡張子すべて（fixtures を除く）** へ
+適用する（`scripts/check-e2e-goto-ownership.sh`）。`.ts` だけに絞ると `.spec.mts` や `.spec.tsx` へ 1 段
+隠した goto が **Playwright には収集されつつガードからは見えない**ため、抜け道が拡張子ひとつで開く。
+所有者が実在することの要求は**アプリ単位**である（合算だと、あるアプリの fixtures が goto を失っても
+別アプリの分で埋まり、そのアプリの空振りが見えない）。走査が評価不能だったファイルは fail-closed で
+赤にする。`check-a11y-audit-preconditions.sh` は同じ禁止を監査 spec に対してだけ課しており、
+重なりは無駄ではなく保護である —— 片方が消えても監査 spec の側は守られる。
+一度きりの URL へ直接行く正当な場面のために WHITELIST を持つが、**理由と Issue 番号を必須**とし、
+違反が無くなった項目は警告して削除を促す。
+
+### E2E storeId の整合
+
+E2E の確定店舗 storeId は役割の違う 4 箇所に現れ、**ずれても CI は緑を返しうる**。
+
+| 役割 | 場所 |
+|---|---|
+| 種 | `ts/apps/survey-web/e2e/seed.sql`（この行が店舗を作る＝正典） |
+| 既定 | `ts/apps/survey-web/e2e/fixtures/surfaces.ts`（env が無いときの既定値） |
+| 注入 | `.github/workflows/ts-ci.yml` の `E2E_STORE_ID` |
+| 計測 | `ts/apps/survey-web/perf/lighthouserc.json` の URL |
+
+**計測のずれが最も静かである。** 種の UUID を変えて lighthouserc.json を直し忘れると、Lighthouse は
+存在しない店舗の URL を開く。そこに出るのは 404 ではなく `unavailable` 分岐の 1 段落だけの面で、
+LCP は当然速く accessibility も 1.0 を返す —— **別の面を測ったまま両方の assert が緑になる。**
+
+`scripts/check-e2e-store-id-consistency.sh` が 4 役割の一致と、既定値の宣言がちょうど 1 箇所である
+ことを検証する。後者が動機で、PR #191 の時点では `fixtures/surfaces.ts` と `survey-flow.spec.ts` が
+同じ UUID をそれぞれ持っていた。**env が渡っている限り値は一致するため、複写であること自体が
+観測できない。** 手順書（Markdown）に書かれた値も、あれば照合する（無くてもよい）。
+
+なお UUID の一致を無条件には要求しない。同じ UUID は単体テストにも多数現れるが、あちらは隔離された
+文脈で任意に選んだリテラルであり、種の値と一致する義務は無い。**役割で照合する。**
 
 空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。これは体裁ではなく成立条件で、
 実測で確かめてある: `/s/{storeId}` の unavailable 分岐（店舗不在・place 未確定）が返す 1 段落だけの

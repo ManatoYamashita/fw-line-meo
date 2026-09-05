@@ -1,13 +1,17 @@
 import { test, expect } from '@playwright/test';
 
-// CI が seed した確定店舗の storeId を env で受け取る（既定はプレースホルダ）。
-const STORE_ID = process.env.E2E_STORE_ID ?? '44444444-4444-4444-4444-444444444444';
+import { openSurveySurface } from './fixtures/surfaces';
+
+// 面を開く手順（と「本体が描けていること」の前提 assert・storeId の受け取り）は
+// fixtures/surfaces.ts が単一の定義を持つ。ここで goto を書き直すと、同じ既定値と同じ前提が
+// 2 箇所に生まれ、片方だけが古びる日が来る（Issue #53・PR #191 のレビューで実際に踏んだ形）。
+
 const WRITEREVIEW = /search\.google\.com\/local\/writereview/;
 
 // Issue #3 完了条件の機械化: QR URL → 回答 → 下書き → 編集 → コピー → writereview 遷移リンク。
 test('客が回答し下書きをコピーして Google 投稿画面リンクへ到達する', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.goto(`/s/${STORE_ID}`);
+  await openSurveySurface(page);
 
   await page.getByRole('button', { name: '星5' }).click();
   await page.getByRole('button', { name: '送信する' }).click();
@@ -24,7 +28,7 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
 
 // 低評価でも同一の投稿導線（レビューゲーティング不在の証明）。
 test('低評価（星1）でも同一の投稿導線が表示される', async ({ page }) => {
-  await page.goto(`/s/${STORE_ID}`);
+  await openSurveySurface(page);
   await page.getByRole('button', { name: '星1' }).click();
   await page.getByRole('button', { name: '送信する' }).click();
 
@@ -34,7 +38,7 @@ test('低評価（星1）でも同一の投稿導線が表示される', async (
 
 // 回答完了後の再訪は回答済み画面＋投稿導線（localStorage・24h）。
 test('回答済みで再訪すると回答済み画面と投稿導線が出る', async ({ page }) => {
-  await page.goto(`/s/${STORE_ID}`);
+  await openSurveySurface(page);
   await page.getByRole('button', { name: '星4' }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
