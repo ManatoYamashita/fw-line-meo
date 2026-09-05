@@ -51,6 +51,7 @@ export interface FlexButtonComponent {
   readonly type: 'button';
   readonly style: 'primary' | 'secondary';
   readonly color?: string;
+  readonly height?: 'sm' | 'md';
   readonly action: FlexAction;
 }
 
@@ -332,6 +333,9 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           type: 'button',
           style: 'primary',
           color: lineColors.action,
+          // 高さも明示する。既定に委ねると、LINE 側の既定値が変わったとき
+          // 日次サマリーの同じ操作と片方だけ動く。
+          height: lineLayout.actionHeight,
           action: {
             type: 'uri',
             // 日次サマリーの同じ導線と語彙を揃える（同じ LIFF 画面へ飛ぶ）。

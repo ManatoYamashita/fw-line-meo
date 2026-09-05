@@ -380,6 +380,18 @@ describe('4 バブルの意匠の不変条件（スナップショット更新�
       expect(textColors, `${name} の本文`).not.toContain(lineColors.action);
     }
   });
+
+  it('主要操作は色と高さの両方をトークンから明示する', () => {
+    // 高さを既定に委ねると、LINE 側の既定値が変わったとき日次サマリーの同じ操作と
+    // 片方だけ動く。2 面で同じ役割の操作は同じ宣言を持たせる。
+    const completion = asFlexBubble(buildCompletionMessage(LIFF_URL));
+    const button = completion.footer.contents.find(
+      (content): content is FlexButtonComponent => content.type === 'button',
+    );
+    expect(button).toBeDefined();
+    expect(button?.color).toBe(lineColors.action);
+    expect(button?.height).toBe(lineLayout.actionHeight);
+  });
 });
 
 describe('Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料）', () => {

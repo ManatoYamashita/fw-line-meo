@@ -102,6 +102,7 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
             "uri": "https://liff.line.me/2010693573-NxEVPPoc",
           },
           "color": "#1DB446",
+          "height": "md",
           "style": "primary",
           "type": "button",
         },
