@@ -1,0 +1,243 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 候補カルーセル（1 件） 1`] = `
+{
+  "altText": "店舗候補が1件見つかりました。トークから該当する店舗を選択してください。",
+  "contents": {
+    "contents": [
+      {
+        "body": {
+          "contents": [
+            {
+              "size": "md",
+              "text": "テスト食堂",
+              "type": "text",
+              "weight": "bold",
+              "wrap": true,
+            },
+            {
+              "color": "#888888",
+              "size": "sm",
+              "text": "東京都渋谷区1-1-1",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "paddingAll": "lg",
+          "spacing": "sm",
+          "type": "box",
+        },
+        "footer": {
+          "contents": [
+            {
+              "action": {
+                "data": "a=select&i=0",
+                "displayText": "1番目の候補を選択",
+                "label": "この店舗を選ぶ",
+                "type": "postback",
+              },
+              "style": "primary",
+              "type": "button",
+            },
+          ],
+          "layout": "vertical",
+          "paddingAll": "lg",
+          "type": "box",
+        },
+        "size": "kilo",
+        "type": "bubble",
+      },
+    ],
+    "type": "carousel",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 完了 1`] = `
+{
+  "altText": "店舗の登録が完了しました。機能1（競合店舗の日次サマリー）がご利用いただけます。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#333333",
+          "size": "lg",
+          "text": "🎉 登録が完了しました",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "align": "center",
+          "color": "#333333",
+          "margin": "md",
+          "size": "sm",
+          "text": "お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。",
+          "type": "text",
+          "wrap": true,
+        },
+        {
+          "align": "center",
+          "color": "#888888",
+          "size": "xs",
+          "text": "毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "label": "詳細を見る",
+            "type": "uri",
+            "uri": "https://liff.line.me/2010693573-NxEVPPoc",
+          },
+          "color": "#1DB446",
+          "height": "md",
+          "style": "primary",
+          "type": "button",
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "body": {
+        "backgroundColor": "#F0FBF4",
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 既登録エラー 1`] = `
+{
+  "altText": "この店舗はすでに登録されているため確定できませんでした。別のお店でやり直せます。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "確定できませんでした",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "この店舗はすでに別のオーナー様の店舗として登録されているため、確定できませんでした。心当たりがない場合は、お手数ですが運営までお問い合わせください。",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "data": "a=restart",
+            "displayText": "やり直す",
+            "label": "別のお店でやり直す",
+            "type": "postback",
+          },
+          "style": "primary",
+          "type": "button",
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 確認 1`] = `
+{
+  "altText": "「テスト食堂」でよろしいですか？内容をご確認のうえ確定してください。",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "この店舗でよろしいですか？",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "size": "md",
+          "text": "テスト食堂",
+          "type": "text",
+          "wrap": true,
+        },
+        {
+          "color": "#888888",
+          "size": "sm",
+          "text": "東京都渋谷区1-1-1",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "action": {
+            "data": "a=confirm",
+            "displayText": "確定する",
+            "label": "確定する",
+            "type": "postback",
+          },
+          "style": "primary",
+          "type": "button",
+        },
+        {
+          "action": {
+            "data": "a=restart",
+            "displayText": "やり直す",
+            "label": "やり直す",
+            "type": "postback",
+          },
+          "style": "secondary",
+          "type": "button",
+        },
+      ],
+      "layout": "horizontal",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;

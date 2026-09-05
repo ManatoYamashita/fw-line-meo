@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DailySummaryCompetitor, DailySummaryNewReview, DailySummaryRow } from '@fwlm/db';
+import { lineColors, lineLayout } from '@fwlm/design-tokens';
 import {
   ALT_TEXT_MAX_LENGTH,
   BUBBLE_SIZE_LIMIT_BYTES,
@@ -7,6 +8,8 @@ import {
   buildDailySummaryFlex,
   validateBubbleSize,
   type FlexBubble,
+  type FlexButton,
+  type FlexSeparator,
 } from '../src/flex.js';
 
 const LIFF_URL = 'https://liff.line.me/1234567890-abcdefgh';
@@ -67,6 +70,25 @@ function collectTexts(node: unknown): string[] {
   return texts;
 }
 
+
+// Flex JSON 内から text の size 指定だけを再帰的に集める（唯一の大声の一意性を測るため）。
+function collectTextSizes(node: unknown): string[] {
+  if (node === null || typeof node !== 'object') return [];
+  const obj = node as Record<string, unknown>;
+  const sizes: string[] = [];
+  if (obj['type'] === 'text' && typeof obj['size'] === 'string') {
+    sizes.push(obj['size']);
+  }
+  if (Array.isArray(obj['contents'])) {
+    for (const child of obj['contents']) {
+      sizes.push(...collectTextSizes(child));
+    }
+  }
+  for (const key of ['header', 'body', 'footer'] as const) {
+    if (key in obj) sizes.push(...collectTextSizes(obj[key]));
+  }
+  return sizes;
+}
 describe('buildDailySummaryFlex', () => {
   describe('正常系（前日比あり・新着あり・競合あり）', () => {
     const result = buildDailySummaryFlex(baseSummary(), LIFF_URL);
@@ -156,6 +178,33 @@ describe('buildDailySummaryFlex', () => {
 
     it('スナップショット: 新着なしの Flex JSON', () => {
       expect(result).toMatchSnapshot();
+    });
+  });
+
+  describe('新着クチコミが表示上限を超える（見出しの件数と抜粋数の食い違い）', () => {
+    const overflowReviews: DailySummaryNewReview[] = Array.from({ length: 5 }, (_, i) => ({
+      authorName: `投稿者${i}`,
+      publishTime: '2026-07-11T08:00:00Z',
+      rating: 4,
+      textExcerpt: `抜粋${i}`,
+    }));
+    const result = buildDailySummaryFlex(
+      baseSummary({ new_review_count: 5, new_reviews: overflowReviews }),
+      LIFF_URL,
+    );
+
+    it('見出しが告げた件数と読める件数の差を手がかりとして示す', () => {
+      const texts = collectTexts(result.contents);
+      expect(texts).toContain('5件の新着クチコミ');
+      // 抜粋は表示上限で打ち切られるため、実際に読めるのは 3 件だけになる。
+      expect(texts.filter((text) => text.startsWith('投稿者'))).toHaveLength(3);
+      expect(texts).toContain('ほか2件');
+    });
+
+    it('上限以下のときは手がかりを出さない', () => {
+      // 条件つきの分岐は既定側も固定しないと、無条件に出す実装が素通りする。
+      const texts = collectTexts(buildDailySummaryFlex(baseSummary(), LIFF_URL).contents);
+      expect(texts.some((text) => text.startsWith('ほか'))).toBe(false);
     });
   });
 
@@ -278,6 +327,67 @@ describe('buildDailySummaryFlex', () => {
           LIFF_URL,
         ),
       ).toThrow(FlexBubbleTooLargeError);
+    });
+  });
+
+  describe('意匠の不変条件（スナップショット更新では直らない）', () => {
+    // スナップショットは -u 一発で「意匠を元に戻す変更」も静かに受理するため、
+    // 意匠の規律そのものはここで固定する。値がトークン由来であることと、
+    // 群として読める間隔になっていることを直接 assert する。
+    const bubble = buildDailySummaryFlex(baseSummary(), LIFF_URL).contents;
+
+    it('幅の段をトークンから明示する', () => {
+      // 既定に委ねると LINE 側の既定値が変わったとき、オンボーディングの 4 バブルと片方だけ動く。
+      // このカードは順位・3 セクション・3 列の競合行を詰めているので、幅の変化が直に破綻へつながる。
+      expect(bubble.size).toBe(lineLayout.bubbleSize);
+    });
+
+    it('header / body / footer が同じ内側余白をトークンから宣言する', () => {
+      for (const block of ['header', 'body', 'footer'] as const) {
+        expect(findBlock(bubble, block).paddingAll).toBe(lineLayout.blockPadding);
+      }
+    });
+
+    it('唯一の大声はカード全体でちょうど 1 件である', () => {
+      const sizes = collectTextSizes(bubble);
+      // 抽出器が空振りしていないこと（0 件しか返さない抽出器でも「1 件でない」は成立してしまう）。
+      expect(sizes.length).toBeGreaterThan(1);
+      expect(sizes.filter((size) => size === lineLayout.displaySize)).toHaveLength(1);
+    });
+
+    it('区切り線は節を閉じるため、セクション間の間隔より大きい段を取る', () => {
+      const body = findBlock(bubble, 'body');
+      const separators = body.contents.filter((c): c is FlexSeparator => c.type === 'separator');
+      expect(separators.length).toBeGreaterThan(0);
+      for (const separator of separators) {
+        expect(separator.margin).toBe(lineLayout.dividerMargin);
+      }
+      expect(body.spacing).toBe(lineLayout.sectionGap);
+      // 同じ段だと均等な区切りにしか見えず、線が節を閉じない。
+      expect(lineLayout.dividerMargin).not.toBe(lineLayout.sectionGap);
+    });
+
+    it('セクションの内側の間隔は外側より小さい', () => {
+      const body = findBlock(bubble, 'body');
+      const sections = body.contents.filter((c): c is typeof c & { type: 'box' } => c.type === 'box');
+      expect(sections.length).toBeGreaterThan(0);
+      for (const section of sections) {
+        expect(section.spacing).toBe(lineLayout.itemGap);
+      }
+      expect(lineLayout.itemGap).not.toBe(lineLayout.sectionGap);
+    });
+
+    it('footer は上に線を持ち、帰属表記と操作を本文から切り離す', () => {
+      expect(bubble.styles?.footer?.separator).toBe(true);
+    });
+
+    it('主要操作はアクション色と高さをトークンから明示する', () => {
+      const footer = findBlock(bubble, 'footer');
+      const button = footer.contents.find((c): c is FlexButton => c.type === 'button');
+      expect(button).toBeDefined();
+      // 色を明示しないと LINE 既定の緑になり、オンボーディング完了バブルの CTA と別の緑になりうる。
+      expect(button?.color).toBe(lineColors.action);
+      expect(button?.height).toBe(lineLayout.actionHeight);
     });
   });
 });

@@ -15,7 +15,7 @@
 // 厳密なローカル型として定義する（no `any`）。詳細は CONCERNS 参照。
 
 import type { DailySummaryCompetitor, DailySummaryNewReview, DailySummaryRow } from '@fwlm/db';
-import { lineColors } from '@fwlm/design-tokens';
+import { lineColors, lineLayout } from '@fwlm/design-tokens';
 
 // --- Flex JSON の最小・厳密な型（このモジュールが実際に使う形のみ） -----------------
 
@@ -34,6 +34,9 @@ export interface FlexText {
   readonly wrap?: boolean;
   readonly align?: 'start' | 'center' | 'end';
   readonly flex?: number;
+  // 容器幅を超える text を自動縮小する（LINE 10.13.0+）。wrap を持たない text は既定では
+  // 省略記号で切り詰められるため、大きな段を使う数値表示にはこれを添える。
+  readonly adjustMode?: 'shrink-to-fit';
 }
 
 export interface FlexSeparator {
@@ -45,6 +48,7 @@ export interface FlexButton {
   readonly type: 'button';
   readonly action: FlexUriAction;
   readonly style?: 'primary' | 'secondary' | 'link';
+  readonly color?: string;
   readonly height?: 'sm' | 'md';
 }
 
@@ -56,10 +60,24 @@ export interface FlexBox {
   readonly contents: readonly FlexBoxContent[];
   readonly spacing?: string;
   readonly margin?: string;
+  readonly paddingAll?: string;
+  readonly paddingBottom?: string;
+}
+
+// Bubble の各ブロックの装飾。references/flex-message.md「Bubble Styles」準拠で、
+// separator はそのブロックの**上**に線を引く。
+export interface FlexBlockStyle {
+  readonly separator?: boolean;
+}
+
+export interface FlexBubbleStyles {
+  readonly footer?: FlexBlockStyle;
 }
 
 export interface FlexBubble {
   readonly type: 'bubble';
+  readonly size?: string;
+  readonly styles?: FlexBubbleStyles;
   readonly header?: FlexBox;
   readonly body?: FlexBox;
   readonly footer?: FlexBox;
@@ -145,15 +163,19 @@ function buildHeader(summary: DailySummaryRow): FlexBox {
       type: 'text',
       text: '本日のポジションを取得できませんでした',
       weight: 'bold',
-      size: 'md',
+      size: lineLayout.bodySize,
       wrap: true,
     });
   } else {
+    // 順位はこのカードで唯一の大声（design-language.md「巨大表示はプロダクト全体で 1 箇所」の
+    // LINE 面への写像）。wrap を持たない text は容器幅を超えると省略記号で切り詰められるため、
+    // 大きな段を使う以上 adjustMode を対で添える（「近隣12店中 10位」のような 2 桁 × 2 が入る）。
     contents.push({
       type: 'text',
       text: `近隣${summary.rank_total}店中 ${summary.rank}位`,
       weight: 'bold',
-      size: 'xl',
+      size: lineLayout.displaySize,
+      adjustMode: 'shrink-to-fit',
     });
 
     const diffText = formatRankDiffArrow(summary.rank, summary.rank_prev);
@@ -161,13 +183,30 @@ function buildHeader(summary: DailySummaryRow): FlexBox {
       contents.push({
         type: 'text',
         text: `前日比: ${diffText}`,
-        size: 'sm',
+        size: lineLayout.descriptionSize,
         color: lineColors.description,
       });
     }
   }
 
-  return { type: 'box', layout: 'vertical', contents };
+  return {
+    type: 'box',
+    layout: 'vertical',
+    contents,
+    paddingAll: lineLayout.blockPadding,
+    paddingBottom: lineLayout.headerPaddingBottom,
+  };
+}
+
+/**
+ * セクション見出しを組み立てる。
+ *
+ * 色は description を使う。muted は「補助的な数値・ラベル」の役割であり、本文より薄いため
+ * 見出しに当てると階層が逆転する。見出しであることは size と、直下の本文が bold であることが
+ * 担っているので、色を一段上げても補足としての読まれ方は変わらない。
+ */
+function buildSectionHeading(text: string): FlexText {
+  return { type: 'text', text, size: lineLayout.descriptionSize, color: lineColors.description };
 }
 
 function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
@@ -176,18 +215,14 @@ function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
   return {
     type: 'box',
     layout: 'vertical',
+    spacing: lineLayout.itemGap,
     contents: [
-      {
-        type: 'text',
-        text: '自店の評価',
-        size: 'sm',
-        color: lineColors.muted,
-      },
+      buildSectionHeading('自店の評価'),
       {
         type: 'text',
         text: `★${ratingText}（クチコミ ${reviewCountText}）`,
         weight: 'bold',
-        size: 'md',
+        size: lineLayout.bodySize,
       },
     ],
   };
@@ -198,28 +233,21 @@ function formatNewReviewExcerpt(review: DailySummaryNewReview): FlexText {
   return {
     type: 'text',
     text: `${review.authorName}さん ${stars}「${review.textExcerpt}」`,
-    size: 'sm',
+    size: lineLayout.descriptionSize,
     color: lineColors.description,
     wrap: true,
   };
 }
 
 function buildNewReviewsSection(summary: DailySummaryRow): FlexBox {
-  const header: FlexText = {
-    type: 'text',
-    text: '新着クチコミ',
-    size: 'sm',
-    color: lineColors.muted,
-  };
+  const heading = buildSectionHeading('新着クチコミ');
 
   if (summary.new_review_count <= 0) {
     return {
       type: 'box',
       layout: 'vertical',
-      contents: [
-        header,
-        { type: 'text', text: NO_NEW_REVIEWS_TEXT, size: 'md' },
-      ],
+      spacing: lineLayout.itemGap,
+      contents: [heading, { type: 'text', text: NO_NEW_REVIEWS_TEXT, size: lineLayout.bodySize }],
     };
   }
 
@@ -227,13 +255,35 @@ function buildNewReviewsSection(summary: DailySummaryRow): FlexBox {
     .slice(0, MAX_DISPLAYED_NEW_REVIEWS)
     .map(formatNewReviewExcerpt);
 
+  // 抜粋は表示上限で打ち切るため、見出しが告げる件数と実際に読める件数が食い違う場合がある。
+  // 手がかりが無いと、読み手は「5件」と言われて 3 件しか見えない状態に置かれる。
+  const hiddenCount = summary.new_review_count - excerpts.length;
+  const overflowNotice: readonly FlexText[] =
+    hiddenCount > 0
+      ? [
+          {
+            type: 'text',
+            text: `ほか${hiddenCount}件`,
+            size: lineLayout.descriptionSize,
+            color: lineColors.description,
+          },
+        ]
+      : [];
+
   return {
     type: 'box',
     layout: 'vertical',
+    spacing: lineLayout.itemGap,
     contents: [
-      header,
-      { type: 'text', text: `${summary.new_review_count}件の新着クチコミ`, weight: 'bold', size: 'md' },
+      heading,
+      {
+        type: 'text',
+        text: `${summary.new_review_count}件の新着クチコミ`,
+        weight: 'bold',
+        size: lineLayout.bodySize,
+      },
       ...excerpts,
+      ...overflowNotice,
     ],
   };
 }
@@ -258,43 +308,62 @@ function formatCompetitorLine(competitor: DailySummaryCompetitor): FlexBox {
     type: 'box',
     layout: 'horizontal',
     contents: [
-      { type: 'text', text: competitor.name, size: 'sm', wrap: true, flex: 3 },
-      { type: 'text', text: `★${ratingText}`, size: 'sm', align: 'end', flex: 1 },
-      { type: 'text', text: diffText, size: 'sm', align: 'end', color: lineColors.muted, flex: 1 },
+      { type: 'text', text: competitor.name, size: lineLayout.descriptionSize, wrap: true, flex: 3 },
+      {
+        type: 'text',
+        text: `★${ratingText}`,
+        size: lineLayout.descriptionSize,
+        align: 'end',
+        flex: 1,
+      },
+      // 星差はこの行で最も情報量の多い数値（自店が勝っているか負けているか）であり、
+      // 行内で最も薄い色を当てると読めない。差分が補足であることは位置（右端）と符号が
+      // 運んでいるので、色は説明文と同じ段でよい。
+      {
+        type: 'text',
+        text: diffText,
+        size: lineLayout.descriptionSize,
+        align: 'end',
+        color: lineColors.description,
+        flex: 1,
+      },
     ],
   };
 }
 
 function buildCompetitorsSection(summary: DailySummaryRow): FlexBox {
-  const header: FlexText = {
-    type: 'text',
-    text: '競合との比較',
-    size: 'sm',
-    color: lineColors.muted,
-  };
+  const heading = buildSectionHeading('競合との比較');
 
   // R1.3: 競合が 1 店も見つからない場合は自店のみの旨を明示する。
   if (summary.competitors.length === 0) {
     return {
       type: 'box',
       layout: 'vertical',
-      contents: [header, { type: 'text', text: NO_COMPETITORS_TEXT, size: 'sm', wrap: true }],
+      spacing: lineLayout.itemGap,
+      contents: [
+        heading,
+        { type: 'text', text: NO_COMPETITORS_TEXT, size: lineLayout.descriptionSize, wrap: true },
+      ],
     };
   }
 
   return {
     type: 'box',
     layout: 'vertical',
-    contents: [header, ...summary.competitors.map(formatCompetitorLine)],
+    spacing: lineLayout.itemGap,
+    contents: [heading, ...summary.competitors.map(formatCompetitorLine)],
   };
 }
 
 function buildBody(summary: DailySummaryRow): FlexBox {
-  const separator: FlexSeparator = { type: 'separator', margin: 'md' };
+  // 区切り線の margin は親の spacing を、その子についてだけ上書きする。セクション間の間隔より
+  // 大きい段を取ることで「節を閉じる線」として読ませる（同じ段だと均等な区切りにしか見えない）。
+  const separator: FlexSeparator = { type: 'separator', margin: lineLayout.dividerMargin };
   return {
     type: 'box',
     layout: 'vertical',
-    spacing: 'md',
+    spacing: lineLayout.sectionGap,
+    paddingAll: lineLayout.blockPadding,
     contents: [
       buildSelfMetricsSection(summary),
       separator,
@@ -309,18 +378,22 @@ function buildFooter(liffUrl: string): FlexBox {
   return {
     type: 'box',
     layout: 'vertical',
-    spacing: 'sm',
+    spacing: lineLayout.itemGap,
+    paddingAll: lineLayout.blockPadding,
     contents: [
       {
         type: 'button',
         style: 'primary',
-        height: 'sm',
+        height: lineLayout.actionHeight,
+        // 色を明示しないと LINE 既定の緑で描かれ、オンボーディング完了バブルの CTA
+        // （lineColors.action を明示している）と別の緑になりうる。2 面の主要操作を揃える。
+        color: lineColors.action,
         action: { type: 'uri', label: DETAIL_BUTTON_LABEL, uri: liffUrl },
       },
       {
         type: 'text',
         text: GOOGLE_ATTRIBUTION_TEXT,
-        size: 'xxs',
+        size: lineLayout.captionSize,
         color: lineColors.muted,
         align: 'center',
       },
@@ -366,6 +439,10 @@ function buildAltText(summary: DailySummaryRow): string {
 export function buildDailySummaryFlex(summary: DailySummaryRow, liffUrl: string): FlexMessagePayload {
   const bubble: FlexBubble = {
     type: 'bubble',
+    // 幅の段を明示する。既定に委ねるとオンボーディングの 4 バブルと片方だけ動く。
+    size: lineLayout.bubbleSize,
+    // footer の上に線を引き、操作と帰属表記を本文から切り離す（法的表記の帯として読ませる）。
+    styles: { footer: { separator: true } },
     header: buildHeader(summary),
     body: buildBody(summary),
     footer: buildFooter(liffUrl),

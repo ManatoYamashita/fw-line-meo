@@ -2,6 +2,8 @@
 // 全トークン値の単一情報源。フレームワーク非依存・依存ゼロを不変条件とする。
 export type { ColorTokens, LineColorTokens } from './colors.js';
 export { colors, lineColors } from './colors.js';
+export type { LineLayoutTokens } from './line-layout.js';
+export { lineLayout } from './line-layout.js';
 export type { TypographyTokens } from './typography.js';
 export { typography } from './typography.js';
 export { spacing } from './spacing.js';

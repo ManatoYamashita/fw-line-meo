@@ -48,6 +48,18 @@
   `pnpm -C ts --filter @fwlm/design-tokens build` を挟まないとテストが古い値を見る。
   このとき出る失敗メッセージは実際の原因と食い違う。
 
+## LINE Flex
+
+- **`contents` 配列に要素を足さない・並べ替えない。** `line-webhook/test/line/messages.test.ts` が
+  本文要素とボタンを添字で掴んでいる。プロパティの追加なら既存の検査を壊さない。
+- **寸法のキーワードは CSS の数値スケールへ写像できない。** 値の所有者は LINE であり、
+  `lineLayout` が共有するのは値ではなく役割である。トークンを置くだけでは何も守られない。
+  消費側で「組み立てた Flex がその値を実際に使っている」を assert して初めて効く。
+- **意匠を変えたらスナップショットの更新前に赤を確認し、差分そのものをレビューする。**
+  `-u` は意匠を元に戻す変更も静かに受理するので、戻せない不変条件はテストで固定する。
+- **更新コマンドは `pnpm -C ts --filter <pkg> exec vitest run -u`。**
+  `pnpm ... test -- -u` では `-u` が vitest へ渡らず、更新されないまま赤が残る。
+
 ---
 _Rules that change behavior. Values live in the implementation and are machine-verified_
 _一次情報源: `docs/design/design-language.md`／`.kiro/specs/ui-airbnb-foundation/design.md`_
