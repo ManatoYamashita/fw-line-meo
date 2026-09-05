@@ -831,14 +831,15 @@ describe('管理ダッシュボードのフォーム部品の幅は面をまた�
   // 解決に失敗したら下の存在確認が赤くなるので、静かに読み飛ばされることはない。
   const SOURCE_ROOT = resolve(process.cwd(), 'src/app');
 
-  // task 5.2（店舗登録）が同じ段を採ったら、この配列へ自分を足すこと。
+  // task 5.2（店舗登録）が同じ段を採ったので、この配列へ自分を足した。
   const SURFACE_SOURCES = [
     'admin/users/page.tsx',
     'admin/agencies/page.tsx',
     'invite-codes/page.tsx',
+    'stores/new/page.tsx',
   ] as const;
 
-  it('3 面のフォーム容器が同一の幅の段を使う', () => {
+  it('4 面のフォーム容器が同一の幅の段を使う', () => {
     const found = new Set<string>();
     let scanned = 0;
     for (const relative of SURFACE_SOURCES) {

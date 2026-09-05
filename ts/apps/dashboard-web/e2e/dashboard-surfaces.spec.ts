@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { deviceWidthOf, expectNoHorizontalScroll, readOverflowMetrics } from '@fwlm/e2e-support/viewport';
+import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
 import { AGENCIES, stubDashboardApi } from './fixtures/api';
 
@@ -13,13 +13,11 @@ import { AGENCIES, stubDashboardApi } from './fixtures/api';
 // 前提: `E2E_STUB_IDP=1` と `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199` を与えて
 // ビルドしたものに対して走らせる（playwright.config.ts の説明）。
 //
-// 捲れる領域の宣言件数は面ごとに異なる。帯を描く 5 面は帯の案内リストで 1 件（task 2.1）、
+// 捲れる領域の宣言件数は面ごとに異なる。帯を描く 6 面は帯の案内リストで 1 件（task 2.1）、
 // 店舗一覧・招待コード・代理店管理・利用者管理はさらに表の容器で 1 件（task 2.3 / 2.4 / 2.5）、
-// 帯も表も持たないログイン画面は 0 件である。残る店舗登録の表はまだ素の `<table>` で
-// `TableContainer` を通っておらず、`<select>` の計算済み overflow-x は `visible` のため
-// 免除対象にならない（どちらも実測して確認した。推測ではない）。
-// `ui-airbnb-surfaces` の task 5.2 が表を容器へ移した時点でその面の件数は実測と
-// 食い違って赤くなり、宣言の更新が強制される。**それが件数宣言の本来の働きである。**
+// 帯も表も持たないログイン画面は 0 件である。**店舗登録は表を持たない**ので帯の 1 件だけである
+// （候補一覧は押しボタンの並びであって表ではない）。
+// 宣言と実測が食い違えば赤くなり、宣言の更新が強制される。**それが件数宣言の本来の働きである。**
 // （task 2.3 / 2.4 / 2.5 では実際にそう起きた: 宣言 1 に対して実測 2 で赤くなり、下の宣言を書き足した。）
 
 /** 未ログイン状態で開く（既定はログイン済み）。ログイン画面そのものを測るために使う。 */
@@ -85,8 +83,7 @@ const NAV_SCROLL_REGIONS = 1;
 // ページ全体を横に溢れさせない」と定めており、これは事故ではなく設計どおりの 1 件である。
 // 容器は表の外側にあり、内側を免除しても容器自身の右端は依然として端末幅と比べられる。
 //
-// **面ごとに足す。** 素の `<table>` のまま残っている面（店舗登録）は帯の 1 件だけであり、
-// task 5.2 が容器へ移した時点でその面の宣言が赤くなって更新を強制する。
+// **面ごとに足す。** 表を持たない面（ログイン・店舗登録）はこれを足さない。
 const TABLE_SCROLL_REGIONS = 1;
 
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
@@ -112,15 +109,34 @@ test('モバイルビューポートの招待コードで横スクロールが�
   await expectNoHorizontalScroll(page, '招待コード', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
-// 利用者管理は task 2.5 まで下の「既知の溢れ」に登録されていた。素の `<select>` 2 つを
+// 利用者管理は task 2.5 まで「既知の溢れ」（Issue #186）に登録されていた。素の `<select>` 2 つを
 // `@fwlm/ui` の `Select`（`w-full min-w-0` を持つ）へ移して溢れが解消したため、通常の面へ戻した。
-// **移動は自発ではなく強制である。** 是正した状態で走らせると 網 1 が
+// **移動は自発ではなく強制である。** 是正した状態で走らせると、溢れの理由を固定していた網が
 // 「利用者管理: 溢れが解消している（Expected: > 394 / Received: 393）」と赤を出し、宣言の更新を要求した。
-// **このとき網 2 は `✘` のまま緑だった**（下の偽緑の説明を参照。task 2.4 に続く 2 度目の再現）。
 test('モバイルビューポートの利用者管理で横スクロールが発生しない', async ({ page }) => {
   await openListSurface(page, '/admin/users', '利用者管理', 3);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '利用者管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+// 店舗登録は Issue #186 の**最後の 1 面**であり、task 5.2 が `@fwlm/ui` の `Select` へ移して
+// 是正した。是正前は素の `<select>` が最長の選択肢の幅まで伸びて 472px（端末幅 393px）だった。
+//
+// **この面には表が無い。** 候補一覧は押しボタンの並びであって `TableContainer` を通らないので、
+// 捲れる領域は帯の 1 件だけである。task 2.3 / 2.4 / 2.5 と件数が違うのはそのためであり、
+// 書き写しの誤りではない。
+//
+// 是正を検出したのは「既知の溢れ」の 2 枚の網の**両方**である（下の「畳んだ理由」を参照）。
+test('モバイルビューポートの店舗登録で横スクロールが発生しない', async ({ page }) => {
+  await stubDashboardApi(page);
+  await page.goto('/stores/new');
+  // 測る対象が消えたことを緑と読まないための前置き（`openListSurface` と同じ思想）。
+  // 選択要素が描かれているところまで進めてから測る。
+  await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
+  await expect(page.getByRole('combobox').first()).toBeVisible();
+  // 帯 1 件のみ（表を持たない）。
+  await expectNoHorizontalScroll(page, '店舗登録', NAV_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートのログイン画面で横スクロールが発生しない', async ({ page }) => {
@@ -132,90 +148,31 @@ test('モバイルビューポートのログイン画面で横スクロール�
   await expectNoHorizontalScroll(page, 'ログイン', 0);
 });
 
-// --- 既知の溢れ（Issue #186）------------------------------------------------------------
+// --- 「既知の溢れ」の節を畳んだ理由（Issue #186 の完了）--------------------------------
 //
-// 素の `<select>` が幅の制約を持たず、最長の選択肢の幅まで伸びる（実測 472px > 393px）。
-// 正しい是正は @fwlm/ui の `Select`（`w-full min-w-0` を持つ）へ移すことで、それは
-// ui-airbnb-surfaces の task 5.2 が指定済みの作業である。本 spec の守備範囲は
-// 「測れるようにすること」であり、意匠の適用ではない。
+// task 2.5 の時点で `KNOWN_OVERFLOW_SURFACES` に残っていたのは店舗登録 1 面だけだった。
+// task 5.2 がそれを是正したので、**節ごと削除した**（型・配列・2 枚の網の 4 つ）。
 //
-// **招待コードは task 2.4 で、利用者管理は task 2.5 で是正され、ここから外れて上の通常の面へ
-// 移った。** どちらも移動は自発ではなく、網 1 が「溢れが解消している」と赤を出して強制した
-// ものである（下の 2 枚の網が設計どおり働いた実例が 2 度）。残る 1 面は task 5.2 が同じ経路をたどる。
+// **配列だけを空にして節を残してはならない。** 網 1 の末尾は
+// `expect(observed.length).toBe(KNOWN_OVERFLOW_SURFACES.length)` であり、空配列では
+// `0 === 0` で緑になる。`for` ループは 1 度も回らず、**何も走査しないまま通る**。
+// これは要件 7.4 が塞ごうとしている「走査対象 0 件で緑」そのものであり、
+// 節を残すことは網を残すことではない。存在理由が消えた以上、節ごと畳むのが正しい。
 //
-// 記録の仕方には 2 枚の網を掛ける。`test.fail()` だけでは**偽緑になる**ためである。
-// `test.fail()` は「何らかの理由で落ちたこと」しか要求しないので、差し替えが壊れて面が
-// 描画できずに落ちた実行も、溢れが是正されて別の assert が落ちた実行も、等しく緑に見える。
-// （task 2.4 と 2.5 で 2 度とも現実に起きた。溢れは解消したのに、同じ作業で入れた表の容器が
-// 捲れる領域を 1 つ増やしたせいで `expectNoHorizontalScroll` は件数の食い違いで落ち続け、
-// 網 2 は `✘` のまま「想定内の失敗」に見えていた。**どちらも赤を出したのは網 1 だけである。**
-// 2 度続いたことで、これは偶然ではなく `test.fail()` の構造的な性質だと確定した。）
+// **是正時の実測（task 2.4 / 2.5 との差が意味を持つ）。** 宣言を更新しないまま走らせると:
 //
-//   網 1（下の緑のテスト）: 登録された面が管理データを実描画できており、**かつ溢れの主が
-//        SELECT であること**を固定する。是正されれば widest が変わってこのテストが赤くなる。
-//   網 2（test.fail のテスト）: 本番の判定 `expectNoHorizontalScroll` をそのまま当てる。
-//        是正されれば「期待に反して通った」として赤くなり、宣言の削除が強制される。
+//   網 1（溢れの主が SELECT であることの固定）  → 赤。
+//       「店舗登録: 溢れが解消している（Expected: > 394 / Received: 393）」
+//   網 2（`test.fail` で本番の判定を当てる）    → **赤。「Expected to fail, but passed.」**
+//
+// task 2.4 / 2.5 では網 2 が `✘` のまま偽緑だった。差の原因は
+// **同じ作業で `TableContainer` が捲れる領域を 1 件増やしていたこと**にある。件数の食い違いで
+// `expectNoHorizontalScroll` が別の理由で落ち続け、`test.fail` の「何らかの理由で落ちた」を
+// 満たしてしまっていた。店舗登録は表を持たず領域が増えないため、判定が素直に通って
+// `test.fail` が発火した。
+//
+// つまり `test.fail` の偽緑は `test.fail` 単独の性質ではなく、**別の失敗が同時に供給されたとき**に
+// 起きる。供給源が無ければ発火する。どちらにせよ「既知の失敗を宣言するときは、失敗の**理由**を
+// 固定する第 2 の網を対で置く」という規律は変わらない（理由を固定する網だけが、
+// 何が直ったのかを名指しできる）。
 
-interface KnownOverflowSurface {
-  readonly where: string;
-  readonly path: string;
-  readonly heading: string;
-  /** 表が現れるまでに必要な操作（無い面もある）。 */
-  readonly open: (page: Page) => Promise<void>;
-}
-
-const KNOWN_OVERFLOW_SURFACES: readonly KnownOverflowSurface[] = [
-  {
-    where: '店舗登録',
-    path: '/stores/new',
-    heading: '店舗登録',
-    open: async (page) => {
-      await stubDashboardApi(page);
-      await page.goto('/stores/new');
-      await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
-      await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
-      await expect(page.getByRole('combobox').first()).toBeVisible();
-    },
-  },
-];
-
-// 網 1。**この 1 件が緑であることが、下の test.fail 群を「既知の溢れ」と読んでよい根拠である。**
-// 題も失敗メッセージも件数を literal で持たない（宣言を 1 件減らしたときに題だけが古びる）。
-test('既知の溢れを持つ面が実描画できており、溢れの主が選択要素である（Issue #186）', async ({ page }) => {
-  const observed: string[] = [];
-
-  for (const surface of KNOWN_OVERFLOW_SURFACES) {
-    await surface.open(page);
-    const deviceWidth = deviceWidthOf(page);
-    const metrics = await readOverflowMetrics(page, 'scroll-container');
-    observed.push(`${surface.where}: ${metrics.widest} right=${metrics.maxRight}`);
-
-    expect(
-      metrics.maxRight,
-      `${surface.where}: 溢れが解消している。是正されたなら KNOWN_OVERFLOW_SURFACES から` +
-        `この面を外して通常の面へ移し、捲れる領域の宣言件数を実測へ合わせること（Issue #186 の完了条件）`,
-    ).toBeGreaterThan(deviceWidth + 1);
-    expect(
-      metrics.widest,
-      `${surface.where}: 溢れの主が選択要素でなくなった（実測 ${metrics.widest}）。` +
-        `別の原因の溢れを「既知の溢れ」として見逃さないための固定である`,
-    ).toMatch(/^SELECT\[/);
-  }
-
-  // 走査対象が 1 件も無い状態で緑にならないようにする。
-  expect(observed.length, `実測: ${observed.join(' / ')}`).toBe(KNOWN_OVERFLOW_SURFACES.length);
-});
-
-// 網 2。本番の判定をそのまま当てる。是正されれば「期待に反して通った」として赤くなる。
-for (const surface of KNOWN_OVERFLOW_SURFACES) {
-  test(`モバイルビューポートの${surface.where}で横スクロールが発生しない`, async ({ page }) => {
-    test.fail(
-      true,
-      `素の <select> が幅の制約を持たず端末幅を超える（Issue #186）。` +
-        `@fwlm/ui の Select へ移せば解消する。解消したらこの宣言を外すこと`,
-    );
-    await surface.open(page);
-    // 帯の捲れる領域は意図的な 1 件（上の NAV_SCROLL_REGIONS の説明）。この 3 面も帯を描く。
-    await expectNoHorizontalScroll(page, surface.where, NAV_SCROLL_REGIONS);
-  });
-}
