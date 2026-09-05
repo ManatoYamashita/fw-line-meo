@@ -285,10 +285,16 @@ axe は 3 面 9 経路に当てる（survey-web: `/ui-check`・`/s/{storeId}` �
 store-detail: 店舗詳細）。**9 経路すべてが `e2e/fixtures/` の open 手順を経由し**、その手順が
 「本体が描けていること」を先に固定する。**3 アプリとも、実測側の spec と a11y 監査が同じ定義を使う**
 （dashboard-web: `fixtures/api.ts` ／ store-detail: `fixtures/detail.ts` ／ survey-web:
-`fixtures/surfaces.ts`）。survey-web は `ui-foundation.spec.ts` が持っていた `page.goto` 26 箇所を
-すべて fixtures へ移した。うち 9 箇所は直後に同じ前提 assert（`既定のボタン` の可視）を重複して
-書いており、fixtures が単一の定義を持つことでその重複も消えている。`STORE_ID` の定義も
-fixtures 側へ寄せた。
+`fixtures/surfaces.ts`）。**survey-web は `e2e/` 配下の `page.goto` を 1 つ残らず fixtures へ寄せた**
+（`ui-foundation.spec.ts` 26 箇所 ／ `survey-flow.spec.ts` 3 箇所）。ui-foundation の 26 箇所のうち
+9 箇所は直後に同じ前提 assert（`既定のボタン` の可視）を重複して書いており、fixtures が単一の定義を
+持つことでその重複も消えている。`E2E_STORE_ID` の既定値も、以前は 2 つの spec がそれぞれ持っていたが
+`fixtures/surfaces.ts` の 1 箇所になった。
+
+なお `check-a11y-audit-preconditions.sh` が `page.goto` の直書きを禁じるのは**監査 spec に対してだけ**
+である。実測側の spec（ui-foundation / survey-flow / dashboard-surfaces / store-surface）が
+fixtures を経由しているのは現在の規律であって機械強制ではない。監査でない spec が一度きりの URL へ
+直接行く正当な場面はありうるため、禁止を全 spec へ広げるかは別途の判断とする。
 
 空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。これは体裁ではなく成立条件で、
 実測で確かめてある: `/s/{storeId}` の unavailable 分岐（店舗不在・place 未確定）が返す 1 段落だけの
