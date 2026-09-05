@@ -13,11 +13,13 @@ import { AGENCIES, stubDashboardApi } from './fixtures/api';
 // 前提: `E2E_STUB_IDP=1` と `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199` を与えて
 // ビルドしたものに対して走らせる（playwright.config.ts の説明）。
 //
-// 捲れる領域の宣言件数は 6 面すべて 0 である。実面の表はまだ素の `<table>` で `TableContainer`
-// を通っておらず、`<select>` の計算済み overflow-x は `visible` のため免除対象にならない
-// （どちらも実測して 0 と確認した。推測ではない）。`ui-airbnb-surfaces` の task 2.3 / 3.3 が
-// 表を容器へ移した時点でこの 0 は実測と食い違って赤くなり、宣言の更新が強制される。
-// **それが件数宣言の本来の働きである。**
+// 捲れる領域の宣言件数は面ごとに異なる。帯を描く 5 面は帯の案内リストで 1 件（task 2.1）、
+// 店舗一覧はさらに表の容器で 1 件（task 2.3）、帯も表も持たないログイン画面は 0 件である。
+// 残る面の表はまだ素の `<table>` で `TableContainer` を通っておらず、`<select>` の計算済み
+// overflow-x は `visible` のため免除対象にならない（どちらも実測して確認した。推測ではない）。
+// `ui-airbnb-surfaces` の task 2.4 / 2.5 / 3.3 が表を容器へ移した時点でその面の件数は実測と
+// 食い違って赤くなり、宣言の更新が強制される。**それが件数宣言の本来の働きである。**
+// （task 2.3 では実際にそう起きた: 宣言 1 に対して実測 2 で赤くなり、下の宣言を書き足した。）
 
 /** 未ログイン状態で開く（既定はログイン済み）。ログイン画面そのものを測るために使う。 */
 async function startSignedOut(page: Page): Promise<void> {
@@ -61,9 +63,19 @@ async function openListSurface(
 // 帯を描かない面（ログイン）は 0 のままであり、その差自体が「帯の有無」を測っている。
 const NAV_SCROLL_REGIONS = 1;
 
+// 一覧を `@fwlm/ui` の `TableContainer` へ移した面は、表 1 つにつき捲れる領域が 1 件増える
+// （ui-airbnb-surfaces task 2.3）。要件 2.5 が「一覧の内部だけを横にたどれる状態にし、
+// ページ全体を横に溢れさせない」と定めており、これは事故ではなく設計どおりの 1 件である。
+// 容器は表の外側にあり、内側を免除しても容器自身の右端は依然として端末幅と比べられる。
+//
+// **面ごとに足す。** 素の `<table>` のまま残っている面（招待コード・代理店管理・利用者管理）は
+// 帯の 1 件だけであり、task 2.4 / 2.5 が容器へ移した時点でその面の宣言が赤くなって更新を強制する。
+const TABLE_SCROLL_REGIONS = 1;
+
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
   await openListSurface(page, '/stores', '店舗一覧', 3);
-  await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS);
+  // 帯 1 件 + 表 1 件。
+  await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {
