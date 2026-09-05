@@ -11,13 +11,6 @@ import {
   type OverflowMetrics,
 } from '@fwlm/e2e-support/viewport';
 
-import {
-  deviceWidthOf,
-  expectNoHorizontalScroll,
-  readOverflowMetrics,
-  type OverflowMetrics,
-} from './support/viewport';
-
 // UI デザイン基盤（ui-design-foundation）の非後退 E2E。
 // requirements 5.3（キーボードフォーカス時に視認可能なフォーカス表示）と
 // requirements 3.3（モバイル端末で横スクロールを発生させない）を検証する。
