@@ -19,13 +19,18 @@ export const STORE_ID = process.env.E2E_STORE_ID ?? '44444444-4444-4444-4444-444
 /**
  * 部品カタログ面（/ui-check）を開く。
  *
- * 主見出しだけでなく操作領域の節見出しまで確かめる。PageHeader は部品の描画が落ちても
- * 描けてしまうため、h1 の可視だけでは「部品が 1 つも無い面」を監査対象として通してしまう。
+ * 主見出しに加えて **@fwlm/ui の部品が実際に 1 つ描けている**ことまで確かめる。PageHeader は
+ * 部品の描画が落ちても描けてしまうため、h1 の可視だけでは「部品が 1 つも無い面」を通してしまう。
+ * 的に `既定のボタン` を選ぶのは、この面の先頭の操作可能要素であり ui-foundation.spec.ts が
+ * 従来から前提 assert に使ってきた要素だからである（面の先頭であることはフォーカス巡回テストの
+ * 前提でもあり、/ui-check ページ冒頭の「追加は末尾に置くこと」がそれを保っている）。
+ *
+ * assert はフォーカスを動かさないため、直後に Tab の巡回を測るテストへ影響しない。
  */
 export async function openComponentCatalog(page: Page): Promise<void> {
   await page.goto('/ui-check');
   await expect(page.getByRole('heading', { level: 1, name: 'UI 基盤の検証面' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: '操作領域の検証' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
 }
 
 /**

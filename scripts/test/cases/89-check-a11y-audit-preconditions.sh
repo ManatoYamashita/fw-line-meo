@@ -46,6 +46,21 @@ EOF
   fx_write ts/apps/plain-face/next.config.ts <<'EOF'
 export default {};
 EOF
+
+  # 監査ヘルパ（検査 6・7 の対象）。**これを置かないと全ケースが検査 6 で赤くなり、
+  # 上の 1〜5 を検査する前に落ちる。** 赤の原因を取り違えないためにここへ置く。
+  fx_write ts/packages/e2e-support/src/a11y.ts <<'EOF'
+import AxeBuilder from '@axe-core/playwright';
+import { expect, type Page } from '@playwright/test';
+
+export async function expectNoAxeViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toHaveLength(0);
+  expect(
+    results.passes.length + results.incomplete.length + results.violations.length,
+  ).toBeGreaterThan(0);
+}
+EOF
 }
 
 t_begin 'check-a11y-audit-preconditions: 正常なツリーで緑（件数まで照合）'
@@ -53,7 +68,7 @@ aap_tree
 fx_run check-a11y-audit-preconditions
 expect_green
 # 「OK」だけでなく件数を照合する。走査が空振りしたまま緑になる経路と区別するため。
-expect_output_matches '監査 spec 1 件 / fixtures モジュール 1 件'
+expect_output_matches '監査 spec 1 件 / fixtures モジュール 1 件 / 監査ヘルパ 1 件'
 t_end
 
 # ---------------------------------------------------------------------------
@@ -183,5 +198,102 @@ EOF
 fx_run check-a11y-audit-preconditions
 expect_green
 # 緑であることだけでは、走査そのものが消えた状態と区別できない。件数まで照合する。
-expect_output_matches '監査 spec 1 件 / fixtures モジュール 1 件'
+expect_output_matches '監査 spec 1 件 / fixtures モジュール 1 件 / 監査ヘルパ 1 件'
+t_end
+
+# ---------------------------------------------------------------------------
+# 8〜12. 規律のもう半分 —— 「違反 0 件」と「規則 0 件」の区別。
+#
+# 1〜7 が守るのは「面が描けているか」で、こちらは「規則が実際に走ったか」である。axe は
+# include が外れる・注入が失敗する経路で例外ではなく空の結果を返すため、この区別を失うと
+# 「監査していないこと」が「監査に合格したこと」と同義になる。
+
+t_begin 'check-a11y-audit-preconditions: 監査ヘルパが消えると赤'
+aap_tree
+# axe の import を失った版へ差し替える（ヘルパの実体が無くなった状態）。
+fx_write ts/packages/e2e-support/src/a11y.ts <<'EOF'
+import { expect, type Page } from '@playwright/test';
+
+export async function expectNoAxeViolations(page: Page): Promise<void> {
+  expect(page).toBeDefined();
+}
+EOF
+fx_run check-a11y-audit-preconditions
+expect_red '監査ヘルパが ts/packages/*/src に 1 件もありません'
+t_end
+
+t_begin 'check-a11y-audit-preconditions: 規則件数の項が 1 つ欠けると赤'
+aap_tree
+# passes を数えるのをやめる。合計は incomplete + violations だけになり、違反 0 件で規則も
+# 0 件の状態を検出できなくなる。
+fx_write ts/packages/e2e-support/src/a11y.ts <<'EOF'
+import AxeBuilder from '@axe-core/playwright';
+import { expect, type Page } from '@playwright/test';
+
+export async function expectNoAxeViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toHaveLength(0);
+  expect(
+    results.incomplete.length + results.violations.length,
+  ).toBeGreaterThan(0);
+}
+EOF
+fx_run check-a11y-audit-preconditions
+expect_red 'ts/packages/e2e-support/src/a11y.ts に results.passes.length がありません'
+t_end
+
+t_begin 'check-a11y-audit-preconditions: 件数の assert 自体が消えると赤'
+aap_tree
+# 件数を数えてはいるが表明しない。**最も静かな壊れ方**で、diff 上は 1 行の削除にしか見えない。
+fx_write ts/packages/e2e-support/src/a11y.ts <<'EOF'
+import AxeBuilder from '@axe-core/playwright';
+import { expect, type Page } from '@playwright/test';
+
+export async function expectNoAxeViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page }).analyze();
+  const evaluated = results.passes.length + results.incomplete.length + results.violations.length;
+  void evaluated;
+  expect(results.violations).toHaveLength(0);
+}
+EOF
+fx_run check-a11y-audit-preconditions
+expect_red 'ts/packages/e2e-support/src/a11y.ts に toBeGreaterThan(0) がありません'
+t_end
+
+t_begin 'check-a11y-audit-preconditions: アプリ側が axe を直接掴むと赤（ヘルパの迂回）'
+aap_tree
+# **これが現実的な迂回路である。** ヘルパの中身をいくら守っても、spec が直に axe を回して
+# 違反だけを assert すれば、規則 0 件の区別は最初から存在しない。
+fx_write ts/apps/good-face/e2e/direct-axe.spec.ts <<'EOF'
+import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+
+import { openSurface } from './fixtures/surfaces';
+
+test('面に違反が無い', async ({ page }) => {
+  await openSurface(page);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toHaveLength(0);
+});
+EOF
+fx_run check-a11y-audit-preconditions
+expect_red 'ts/apps/good-face/e2e/direct-axe.spec.ts が axe を直接掴んでいます'
+t_end
+
+t_begin 'check-a11y-audit-preconditions: 監査ヘルパが 2 件あると赤（正典が割れる）'
+aap_tree
+fx_write ts/packages/other-support/src/a11y.ts <<'EOF'
+import AxeBuilder from '@axe-core/playwright';
+import { expect, type Page } from '@playwright/test';
+
+export async function expectNoAxeViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toHaveLength(0);
+  expect(
+    results.passes.length + results.incomplete.length + results.violations.length,
+  ).toBeGreaterThan(0);
+}
+EOF
+fx_run check-a11y-audit-preconditions
+expect_red '監査ヘルパが 2 件あります（正典が割れています）'
 t_end

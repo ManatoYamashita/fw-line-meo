@@ -283,10 +283,12 @@ Issue #50 でガードが素通りさせたのはまさにこの経路である�
 
 axe は 3 面 9 経路に当てる（survey-web: `/ui-check`・`/s/{storeId}` ／ dashboard-web: 6 面 ／
 store-detail: 店舗詳細）。**9 経路すべてが `e2e/fixtures/` の open 手順を経由し**、その手順が
-「本体が描けていること」を先に固定する。dashboard-web と store-detail は横スクロール実測と
-a11y 監査の双方が同じ定義を使う。survey-web は対応する実測が `ui-foundation.spec.ts`（26 箇所の
-`page.goto` を持つ）であり今回は移していないため、`e2e/fixtures/surfaces.ts` を使うのは a11y 監査側
-だけである。
+「本体が描けていること」を先に固定する。**3 アプリとも、実測側の spec と a11y 監査が同じ定義を使う**
+（dashboard-web: `fixtures/api.ts` ／ store-detail: `fixtures/detail.ts` ／ survey-web:
+`fixtures/surfaces.ts`）。survey-web は `ui-foundation.spec.ts` が持っていた `page.goto` 26 箇所を
+すべて fixtures へ移した。うち 9 箇所は直後に同じ前提 assert（`既定のボタン` の可視）を重複して
+書いており、fixtures が単一の定義を持つことでその重複も消えている。`STORE_ID` の定義も
+fixtures 側へ寄せた。
 
 空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。これは体裁ではなく成立条件で、
 実測で確かめてある: `/s/{storeId}` の unavailable 分岐（店舗不在・place 未確定）が返す 1 段落だけの
@@ -298,6 +300,17 @@ DOM へ axe を当てると **violations 0 / passes 5**（`aria-hidden-body`・`
 監査 spec の同定は**ファイル名ではなく `expectNoAxeViolations` の呼び出し**で行い、`page.goto` の直書き・
 `fixtures/` 非経由・fixtures 側に前提 assert が無い形（移設しただけの形）・監査 spec 0 件（空振り）を
 それぞれ赤にする。是正前の spec を当てて赤、是正後で緑になることを実測で確認している。
+
+**同じガードが「規則が実際に走ったか」の側も守る。** 前提は 2 つあり、面が描けていても規則が 1 件も
+走っていなければ監査結果は意味を持たない。監査ヘルパ（`@axe-core/playwright` を import する
+`ts/packages/*/src` の .ts）がちょうど 1 件あること、そこに規則件数の区別を成り立たせている 3 項
+（`results.passes.length` / `results.incomplete.length` / `toBeGreaterThan(0)`）が残っていること、
+そして**アプリ側が `new AxeBuilder(...)` を直に書いてヘルパを迂回していないこと**を検証する。
+最後の 1 つが現実的な迂回路である —— ヘルパの中身をいくら守っても、spec が直に axe を回して違反だけを
+assert すれば、規則 0 件の区別は最初から存在しない。
+
+照合は**素のパッケージ名ではなく import 形**（`from '@axe-core/playwright'`）でアンカーする。素の名前で
+数えると散文が混じる（`fixtures/surfaces.ts` が版をコメントで記録しており、実際に偽陽性になった）。
 
 さらに `expectNoAxeViolations` は、違反 0 件が「違反が無い」のか「規則が 1 件も走っていない」
 のかを区別する（`passes + incomplete + violations > 0` を要求）。Lighthouse 側は実測で
