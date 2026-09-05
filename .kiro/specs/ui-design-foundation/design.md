@@ -196,19 +196,111 @@ ts/packages/ui/
 | 2.4 | キーボード/支援技術 | Base UI プリミティブ | components.test（role/キーボード） |
 | 3.1 | トークンに基づく描画 | globals.css + layout | E2E + 目視確認 |
 | 3.2 | 機能挙動不変 | スタイルのみの変更方針 | 既存 unit/E2E 全緑 |
-| 3.3 | モバイル横スクロールなし | theme.css ベース + viewport | E2E ビューポート確認 |
+| 3.3 | モバイル横スクロールなし | theme.css ベース + viewport | E2E ビューポート確認（客向け / 管理 6 面 / 店舗詳細の 3 面すべて・Issue #53） |
 | 3.4 | 本格リデザイン非包含 | Out of Boundary | レビュー |
 | 4.1 | LINE 色トークンのみ使用 | messages.ts の import 置換 | ガード + 既存 messages テスト |
 | 4.2 | 単一定義箇所で更新 | design-tokens（dist）を LINE が import | 依存関係の実体 |
 | 4.3 | 文言・構造不変 | 色のみ置換の方針 | 既存 messages テスト（構造 snapshot） |
 | 4.4 | LINE 直書き色の機械検出 | check-design-tokens.sh（LINE 面も対象） | ガード否定系テスト |
-| 5.1 | ARIA/セマンティクス非後退 | Base UI + 既存 DOM 維持 | components.test + E2E |
-| 5.2 | コントラスト AA | colors.test（比率計算） | ユニットテスト（4.5:1 検証） |
-| 5.3 | フォーカス可視 | theme.css の focus-visible 既定 | components.test + E2E |
-| 6.1 | 性能予算維持 | 導入前後の perf:budget 実測 | perf:budget + Lighthouse |
+| 5.1 | ARIA/セマンティクス非後退 | Base UI + 既存 DOM 維持 | components.test + E2E + axe 自動監査（Issue #53） |
+| 5.2 | コントラスト AA | colors.test（比率計算） | ユニットテスト（4.5:1 検証）+ axe `color-contrast` + Lighthouse a11y（Issue #53） |
+| 5.3 | フォーカス可視 | theme.css の focus-visible 既定 | components.test + E2E 実測（**axe では検出できない**・下記「UI 検証基盤」参照） |
+| 6.1 | 性能予算維持 | 導入前後の perf:budget 実測 | perf:budget（JS **と CSS** の 2 予算・Issue #53）+ Lighthouse |
 | 6.2 | 自動検証全緑 | 既存 CI パイプライン | ts-ci |
 | 6.3 | 7 イメージ・出荷経路維持 | Dockerfile 5 面の整合変更 | PR docker-build ゲート |
 | 6.4 | 体感遅延の出荷前是正 | 6.1 の実測ゲート運用 | Lighthouse assert（LCP 3000ms） |
+
+## UI 検証基盤（Issue #53）
+
+手書きの assert は「書いた項目」しか守らない。Issue #49（フォーカス可視性の喪失）と Issue #50
+（アルファ合成色の AA 未達）は、**どちらも CI 全緑のまま main へ入った**。汎用の検証手段を
+足すのが本節の目的で、採否は外部依存の増加に見合うかで個別に判断した（steering `tech.md`
+「外部ライブラリは必要性を吟味して最小限に」）。
+
+### 採否
+
+| 手段 | 採否 | 依存 | 根拠 |
+|---|---|---|---|
+| Lighthouse の accessibility カテゴリ | **採用** | ゼロ | `lighthouserc.json` の 2 行。既存 lighthouse ジョブに相乗りし CI 時間は増えない |
+| `@axe-core/playwright` | **採用** | 1（`@fwlm/e2e-support` の devDependency 1 箇所のみ） | 既存 E2E に数行で実描画監査が乗る。**実測で Issue #50 を検出した** |
+| 生成 CSS の予算 | **採用** | ゼロ | 既存 `bundle-budget.mjs` へ計測を追加 |
+| `eslint-plugin-jsx-a11y` | 見送り | 1 | axe が実描画で見るのに対し静的解析は補完的。まず実描画側を入れて効果を測る |
+| `toHaveScreenshot()` による VRT | 見送り | ゼロ | スナップショットの保守コストとフレークが先に立つ。意匠が `ui-airbnb-surfaces` で動いている最中は特に不安定 |
+| Storybook / Chromatic | 不採用 | 重 + SaaS 課金 | 現段階では過剰 |
+
+依存は `@axe-core/playwright` **1 つだけ**である。`@fwlm/e2e-support` が唯一の宣言箇所で、
+3 面はそこ経由で使う（アプリ側へ個別に足すと版を 3 箇所で維持することになる。実際に一度
+足してから外し、1 箇所で解決することを実測で確かめた）。
+
+### axe の守備範囲 —— 実測した限界
+
+**axe はフォーカス可視性を検出できない。** これは推測ではなく、是正前のコードへ実際に当てて
+確かめた結果である（Issue #53 完了条件「導入した仕組みが実際に検出できることを実証する」）。
+
+`button.tsx` に Issue #49 の欠陥（`@layer utilities` の `outline-none` が base の
+`:focus-visible` をレイヤ順で無効化する）を戻し、**同一のビルド・同一のページ**へ 2 つの
+機構を当てた:
+
+| 機構 | 結果 | 備考 |
+|---|---|---|
+| axe（WCAG 2.1 A/AA 全規則） | **緑（違反 0 件）** | フォーカス指標の視認性は axe が「手動確認」に分類しており自動規則が無い |
+| `e2e/ui-foundation.spec.ts` の実測 | **赤** | `outlineStyle: "none"` を検出。欠陥がビルドに実在したことの対照 |
+
+axe の緑が意味を持つのは、**同じビルドで実測側が赤くなったから**である（欠陥が入っていない
+ビルドを測って「axe が緑」と言っても何も示さない）。
+
+再現手順（`ts/` で実行。いずれも一時的な改変なので確認後に戻すこと）:
+
+```bash
+# 1. Issue #49 の欠陥を戻す（base class へ outline 打ち消しと自前のリングを足す）
+#    packages/ui/src/components/button.tsx の base class に次を挿入:
+#      outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
+pnpm --filter @fwlm/survey-web run build
+
+# 2. 同一ビルドへ 2 つの機構を当てる
+pnpm --filter @fwlm/survey-web exec playwright test e2e/a11y-audit.spec.ts   # 緑（axe は見えない）
+pnpm --filter @fwlm/survey-web exec playwright test e2e/ui-foundation.spec.ts \
+  -g 'の対話的部品すべてに可視フォーカス表示が出る'                          # 赤（outlineStyle: "none"）
+
+# 3. 対照: Issue #50 の欠陥（packages/ui/src/theme.css の --color-destructive を #DC2626 へ）
+pnpm --filter @fwlm/survey-web run build
+pnpm --filter @fwlm/survey-web exec playwright test e2e/a11y-audit.spec.ts   # 赤（color-contrast 4.13:1）
+```
+
+対照として Issue #50 の欠陥（`--color-destructive` を AA 未達の `#DC2626` へ戻す）を当てると、
+axe は `color-contrast` で **赤くなった**（実測 4.13:1 / 要求 4.5:1・前景 `#dc2626` ／ 背景
+`#fce9e9`）。背景はトークン値そのものではなく `bg-destructive/10` の**合成後の実効色**であり、
+Issue #50 でガードが素通りさせたのはまさにこの経路である。axe はここを見る。
+
+したがって役割分担は次のとおりで、**axe を入れたことを理由に実測側を削ってはならない**:
+
+- **axe / Lighthouse** … 誰も書かなかった項目を汎用規則で拾う（aria・role・ラベル・
+  コントラスト）。Lighthouse は axe-core を内包するため、フォーカス可視性の限界も共通である。
+- **`ui-foundation.spec.ts` の実測** … フォーカス指標のように自動規則が存在しない項目を、
+  `getComputedStyle` の実測で名指しして守る。
+
+### 監査対象と空振り防止
+
+axe は 3 面 9 経路に当てる（survey-web: `/ui-check`・`/s/{storeId}` ／ dashboard-web: 6 面 ／
+store-detail: 店舗詳細）。各面は横スクロール実測と**同じ手順**で開き、その手順が
+「本体が描けていること」を先に固定する（`fixtures/` が単一の定義を持ち、両 spec が使う）。
+空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。
+
+さらに `expectNoAxeViolations` は、違反 0 件が「違反が無い」のか「規則が 1 件も走っていない」
+のかを区別する（`passes + incomplete + violations > 0` を要求）。Lighthouse 側は実測で
+**21 規則が実際に採点されている**ことを確認したうえで `minScore: 1` を課している（現状の実測は
+1.0）。しきい値を 1.0 に置けるのは、現に 1.0 だからである。
+
+### CSS 予算
+
+`bundle-budget.mjs` は `.js` だけを数えており、生成 CSS の増加を**構造的に一度も見ていなかった**。
+Tailwind の生成 CSS は使ったクラスに比例して単調増加し、実測でも 6,598 → 7,207 → 7,563 B gzip
+と誰にも観測されずに伸びていた。予算は 12 KB gzip（実測比 約 1.6 倍）。起票時の案は 15 KB
+だったが、それでは CSS が倍増するまで無警告で通るため、JS 予算の比率（実測 211 KB に対し
+300 KB ＝ 約 1.4 倍）に倣って詰めた。
+
+**0 件を「予算内」と読まない。** next build の出力先が変われば計測は黙って 0 B を報告し、
+CSS がどれだけ増えても永久に緑になる。CSS が 1 件も見つからないことは赤にしている。
 
 ## Components and Interfaces
 

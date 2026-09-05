@@ -7,7 +7,7 @@
 // ロールは operator を使う。agency には見えない「担当代理店」列が加わり、店舗一覧が
 // 最も列数の多い状態になるためである（BASE_COLUMN_COUNT + 1）。
 
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /**
  * API のベースオリジン。**面自身（127.0.0.1:3110）と必ず別にする。**
@@ -156,3 +156,113 @@ export async function stubDashboardApi(page: Page): Promise<void> {
     });
   });
 }
+
+// --- 面を開く手順 ----------------------------------------------------------------------
+//
+// 横スクロール実測（dashboard-surfaces.spec.ts）と自動 a11y 監査（a11y-audit.spec.ts）の
+// 双方が同じ定義を使う。複写にしないのは、前提 assert が片方だけ古びても誰も検出できない
+// ためで、これは @fwlm/e2e-support を切り出したのと同じ理由による（Issue #53）。
+
+/** 未ログイン状態で開く（既定はログイン済み）。ログイン画面そのものを測るために使う。 */
+export async function startSignedOut(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('e2e-auth-signed-out', '1');
+    } catch {
+      // 保存領域が使えない文脈（about:blank 等）では何もしない。
+    }
+  });
+}
+
+/**
+ * 一覧面を開き、**表が実際に描かれている**ことを先に固定する。
+ *
+ * これが無いと、認証の差し替えが効かず「読み込み中...」だけの画面になったときに、後続の
+ * assert は当然のように緑を返す。測る対象が消えたことを緑と読まないための前置きである。
+ * a11y 監査にとっても同じで、空の画面には違反が出ようがない。
+ */
+export async function openListSurface(
+  page: Page,
+  path: string,
+  heading: string,
+  expectedRows: number,
+): Promise<void> {
+  await stubDashboardApi(page);
+  await page.goto(path);
+  await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+  await expect(page.getByRole('table')).toBeVisible();
+  await expect(page.getByRole('row')).toHaveCount(expectedRows);
+}
+
+export interface DashboardSurface {
+  readonly where: string;
+  /** 表や主要部品が現れるまでの操作と、本体が描けていることの前提 assert。 */
+  readonly open: (page: Page) => Promise<void>;
+  /**
+   * 素の `<select>` 由来の既知の溢れを持つ面か（Issue #186）。
+   * 横スクロールの spec はこの印で `test.fail` 側と通常側を振り分ける。
+   */
+  readonly knownOverflow: boolean;
+}
+
+/**
+ * 管理ダッシュボードの検証対象 6 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
+ */
+export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
+  {
+    where: '店舗一覧',
+    knownOverflow: false,
+    open: async (page) => {
+      await openListSurface(page, '/stores', '店舗一覧', 3);
+    },
+  },
+  {
+    where: '代理店管理',
+    knownOverflow: false,
+    open: async (page) => {
+      await openListSurface(page, '/admin/agencies', '代理店管理', 2);
+    },
+  },
+  {
+    where: 'ログイン',
+    knownOverflow: false,
+    open: async (page) => {
+      await startSignedOut(page);
+      await stubDashboardApi(page);
+      await page.goto('/login');
+      await expect(page.getByRole('heading', { level: 1, name: 'ログイン' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Google でログイン' })).toBeEnabled();
+    },
+  },
+  {
+    where: '招待コード',
+    knownOverflow: true,
+    open: async (page) => {
+      await stubDashboardApi(page);
+      await page.goto('/invite-codes');
+      await expect(page.getByRole('heading', { level: 1, name: '招待コード' })).toBeVisible();
+      // operator は代理店を選ぶまで一覧を出さない（Req 5.4）。選択して初めて表が現れる。
+      await page.getByLabel('代理店').selectOption(AGENCIES[0].id);
+      await expect(page.getByRole('table')).toBeVisible();
+      await expect(page.getByRole('row')).toHaveCount(3);
+    },
+  },
+  {
+    where: '利用者管理',
+    knownOverflow: true,
+    open: async (page) => {
+      await openListSurface(page, '/admin/users', '利用者管理', 3);
+    },
+  },
+  {
+    where: '店舗登録',
+    knownOverflow: true,
+    open: async (page) => {
+      await stubDashboardApi(page);
+      await page.goto('/stores/new');
+      await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
+      await expect(page.getByRole('combobox').first()).toBeVisible();
+    },
+  },
+];

@@ -1,7 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { DETAIL_RESPONSE, STORE_NAME } from './fixtures/detail';
+import { openStoreSurface } from './fixtures/detail';
 
 // 店舗詳細（LIFF 面）の実描画検証（Issue #53 完了条件 3）。
 //
@@ -10,32 +10,10 @@ import { DETAIL_RESPONSE, STORE_NAME } from './fixtures/detail';
 // 「隠しているので見えない」状態だった。clip は scrollWidth 系の検査を構造的に無効化するため、
 // 面の溢れを捕らえる網は要素の実測右端（maxRight）1 本しかない。
 //
+// 面を開く手順（と「本体が描けていること」の前提 assert）は fixtures/detail.ts が持つ。
+// 自動 a11y 監査（a11y-audit.spec.ts）も同じ手順を使う。
+//
 // 前提: `E2E_STUB_IDP=1` を立ててビルドしたものに対して走らせる（playwright.config.ts の説明）。
-
-/** 詳細データを固定 fixture で供給する。DB も LINE の検証エンドポイントも起こさない。 */
-async function stubDetailApi(page: import('@playwright/test').Page): Promise<void> {
-  await page.route('**/api/detail*', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(DETAIL_RESPONSE),
-    });
-  });
-}
-
-/**
- * 面が「エラー画面ではなく本体」を描いていることを先に固定する。
- *
- * これが無いと、LIFF の差し替えが効かずエラー文言だけの画面になったときに、横スクロールの
- * assert は当然のように緑を返す。**測る対象が消えたことを緑と読まないための前置きである。**
- */
-async function openStoreSurface(page: import('@playwright/test').Page): Promise<void> {
-  await stubDetailApi(page);
-  await page.goto('/store');
-  await expect(page.getByRole('heading', { level: 1, name: STORE_NAME })).toBeVisible();
-  await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('row')).toHaveCount(DETAIL_RESPONSE.trend.length + 1);
-}
 
 test('モバイルビューポートの店舗詳細で横スクロールが発生しない', async ({ page }) => {
   await openStoreSurface(page);

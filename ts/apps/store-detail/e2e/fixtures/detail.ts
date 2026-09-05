@@ -1,3 +1,5 @@
+import { expect, type Page } from '@playwright/test';
+
 // 店舗詳細 E2E の固定データ（Issue #53）。
 //
 // DB を起こさず page.route() で供給する。実データに寄せるのではなく、**面を最も横へ広げる
@@ -73,3 +75,35 @@ export const DETAIL_RESPONSE = {
   // 保持窓の上限（直近 30 日）。行数が最大のときに測る。
   trend: trendPoints(30),
 } as const;
+
+// --- 面を開く手順 ----------------------------------------------------------------------
+//
+// 横スクロール実測（store-surface.spec.ts）と自動 a11y 監査（a11y-audit.spec.ts）の双方が
+// 同じ手順で開く。複写にしないのは、前提 assert が片方だけ古びても誰も検出できないためで、
+// これは @fwlm/e2e-support を切り出したのと同じ理由による（Issue #53）。
+
+/** 詳細データを固定 fixture で供給する。DB も LINE の検証エンドポイントも起こさない。 */
+export async function stubDetailApi(page: Page): Promise<void> {
+  await page.route('**/api/detail*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(DETAIL_RESPONSE),
+    });
+  });
+}
+
+/**
+ * 面が「エラー画面ではなく本体」を描いていることを先に固定する。
+ *
+ * これが無いと、LIFF の差し替えが効かずエラー文言だけの画面になったときに、後続の assert は
+ * 当然のように緑を返す。**測る対象が消えたことを緑と読まないための前置きである。**
+ * a11y 監査にとっても同じで、空の画面には違反が出ようがない。
+ */
+export async function openStoreSurface(page: Page): Promise<void> {
+  await stubDetailApi(page);
+  await page.goto('/store');
+  await expect(page.getByRole('heading', { level: 1, name: STORE_NAME })).toBeVisible();
+  await expect(page.getByRole('table')).toBeVisible();
+  await expect(page.getByRole('row')).toHaveCount(DETAIL_RESPONSE.trend.length + 1);
+}

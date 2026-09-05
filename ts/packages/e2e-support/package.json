@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./a11y": "./src/a11y.ts",
     "./viewport": "./src/viewport.ts"
   },
   "scripts": {
@@ -15,6 +16,7 @@
     "@playwright/test": "^1.61.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.61.1"
   }
 }

@@ -1,7 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { deviceWidthOf, expectNoHorizontalScroll, readOverflowMetrics } from '@fwlm/e2e-support/viewport';
 
-import { AGENCIES, stubDashboardApi } from './fixtures/api';
+import { DASHBOARD_SURFACES } from './fixtures/api';
 
 // 管理ダッシュボードの実描画検証（Issue #53）。
 //
@@ -9,6 +9,9 @@ import { AGENCIES, stubDashboardApi } from './fixtures/api';
 // 機械検証する。これまで担保は globals.css の `overflow-x: clip` だけ、すなわち
 // 「隠しているので見えない」状態だった。clip は scrollWidth 系の検査を構造的に無効化するため、
 // 面の溢れを捕らえる網は要素の実測右端（maxRight）1 本しかない。
+//
+// 6 面の定義（開く手順と「本体が描けていること」の前提 assert）は fixtures/api.ts が持つ。
+// 自動 a11y 監査（a11y-audit.spec.ts）も同じ定義を使うため、面を足せば双方が自動で拾う。
 //
 // 前提: `E2E_STUB_IDP=1` と `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199` を与えて
 // ビルドしたものに対して走らせる（playwright.config.ts の説明）。
@@ -19,56 +22,17 @@ import { AGENCIES, stubDashboardApi } from './fixtures/api';
 // 表を容器へ移した時点でこの 0 は実測と食い違って赤くなり、宣言の更新が強制される。
 // **それが件数宣言の本来の働きである。**
 
-/** 未ログイン状態で開く（既定はログイン済み）。ログイン画面そのものを測るために使う。 */
-async function startSignedOut(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('e2e-auth-signed-out', '1');
-    } catch {
-      // 保存領域が使えない文脈（about:blank 等）では何もしない。
-    }
-  });
-}
-
-/**
- * 一覧面を開き、**表が実際に描かれている**ことを先に固定する。
- *
- * これが無いと、認証の差し替えが効かず「読み込み中...」だけの画面になったときに、
- * 横スクロールの assert は当然のように緑を返す。測る対象が消えたことを緑と読まないための前置き。
- */
-async function openListSurface(
-  page: Page,
-  path: string,
-  heading: string,
-  expectedRows: number,
-): Promise<void> {
-  await stubDashboardApi(page);
-  await page.goto(path);
-  await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
-  await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('row')).toHaveCount(expectedRows);
-}
+const OVERFLOWING = DASHBOARD_SURFACES.filter((s) => s.knownOverflow);
+const CLEAN = DASHBOARD_SURFACES.filter((s) => !s.knownOverflow);
 
 // --- 溢れていない面 --------------------------------------------------------------------
 
-test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
-  await openListSurface(page, '/stores', '店舗一覧', 3);
-  await expectNoHorizontalScroll(page, '店舗一覧', 0);
-});
-
-test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {
-  await openListSurface(page, '/admin/agencies', '代理店管理', 2);
-  await expectNoHorizontalScroll(page, '代理店管理', 0);
-});
-
-test('モバイルビューポートのログイン画面で横スクロールが発生しない', async ({ page }) => {
-  await startSignedOut(page);
-  await stubDashboardApi(page);
-  await page.goto('/login');
-  await expect(page.getByRole('heading', { level: 1, name: 'ログイン' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Google でログイン' })).toBeEnabled();
-  await expectNoHorizontalScroll(page, 'ログイン', 0);
-});
+for (const surface of CLEAN) {
+  test(`モバイルビューポートの${surface.where}で横スクロールが発生しない`, async ({ page }) => {
+    await surface.open(page);
+    await expectNoHorizontalScroll(page, surface.where, 0);
+  });
+}
 
 // --- 既知の溢れ（Issue #186）------------------------------------------------------------
 //
@@ -86,56 +50,11 @@ test('モバイルビューポートのログイン画面で横スクロール�
 //   網 2（test.fail のテスト）: 本番の判定 `expectNoHorizontalScroll` をそのまま当てる。
 //        是正されれば「期待に反して通った」として赤くなり、宣言の削除が強制される。
 
-interface KnownOverflowSurface {
-  readonly where: string;
-  readonly path: string;
-  readonly heading: string;
-  /** 表が現れるまでに必要な操作（無い面もある）。 */
-  readonly open: (page: Page) => Promise<void>;
-}
-
-const KNOWN_OVERFLOW_SURFACES: readonly KnownOverflowSurface[] = [
-  {
-    where: '招待コード',
-    path: '/invite-codes',
-    heading: '招待コード',
-    open: async (page) => {
-      await stubDashboardApi(page);
-      await page.goto('/invite-codes');
-      await expect(page.getByRole('heading', { level: 1, name: '招待コード' })).toBeVisible();
-      // operator は代理店を選ぶまで一覧を出さない（Req 5.4）。選択して初めて表が現れる。
-      await page.getByLabel('代理店').selectOption(AGENCIES[0].id);
-      await expect(page.getByRole('table')).toBeVisible();
-      await expect(page.getByRole('row')).toHaveCount(3);
-    },
-  },
-  {
-    where: '利用者管理',
-    path: '/admin/users',
-    heading: '利用者管理',
-    open: async (page) => {
-      await openListSurface(page, '/admin/users', '利用者管理', 3);
-    },
-  },
-  {
-    where: '店舗登録',
-    path: '/stores/new',
-    heading: '店舗登録',
-    open: async (page) => {
-      await stubDashboardApi(page);
-      await page.goto('/stores/new');
-      await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
-      await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
-      await expect(page.getByRole('combobox').first()).toBeVisible();
-    },
-  },
-];
-
 // 網 1。**この 1 件が緑であることが、下の test.fail 3 件を「既知の溢れ」と読んでよい根拠である。**
 test('既知の溢れを持つ 3 面が実描画できており、溢れの主が選択要素である（Issue #186）', async ({ page }) => {
   const observed: string[] = [];
 
-  for (const surface of KNOWN_OVERFLOW_SURFACES) {
+  for (const surface of OVERFLOWING) {
     await surface.open(page);
     const deviceWidth = deviceWidthOf(page);
     const metrics = await readOverflowMetrics(page, 'scroll-container');
@@ -143,7 +62,7 @@ test('既知の溢れを持つ 3 面が実描画できており、溢れの主�
 
     expect(
       metrics.maxRight,
-      `${surface.where}: 溢れが解消している。是正されたなら test.fail の宣言 3 件を外し、` +
+      `${surface.where}: 溢れが解消している。是正されたなら knownOverflow の宣言を外し、` +
         `宣言件数を実測へ合わせること（Issue #186 の完了条件）`,
     ).toBeGreaterThan(deviceWidth + 1);
     expect(
@@ -154,11 +73,11 @@ test('既知の溢れを持つ 3 面が実描画できており、溢れの主�
   }
 
   // 走査対象が 1 件も無い状態で緑にならないようにする。
-  expect(observed.length, `実測: ${observed.join(' / ')}`).toBe(KNOWN_OVERFLOW_SURFACES.length);
+  expect(observed.length, `実測: ${observed.join(' / ')}`).toBe(OVERFLOWING.length);
 });
 
 // 網 2。本番の判定をそのまま当てる。是正されれば「期待に反して通った」として赤くなる。
-for (const surface of KNOWN_OVERFLOW_SURFACES) {
+for (const surface of OVERFLOWING) {
   test(`モバイルビューポートの${surface.where}で横スクロールが発生しない`, async ({ page }) => {
     test.fail(
       true,
