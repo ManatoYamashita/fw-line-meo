@@ -385,6 +385,49 @@ class 文字列の照合では捕まえきれない。視覚回帰は本 spec �
 当てても真にならない行になる。`design-language-doc.test.ts` は表の行ごとに実効コントラストを再計算して
 照合するため、意味を持たない行は検査を弱める。追記しない。レビュアも同意（異議なし）。
 
+#### 追記（同日）: 帯の `overflow-x-auto` が PR #190 の e2e を赤にした
+
+`<ul>` へ足した `overflow-x-auto` は、`ts/packages/e2e-support/src/viewport.ts` の doc コメントが
+名指しで警告している事故そのものに当たった。
+
+> 溢れを「直す」つもりで外側の枠へ `overflow-x-auto` を足すと、その配下は丸ごと免除され
+> `maxRight` は永久に緑になる。**件数の宣言がその改変を赤にする唯一の網である。**
+
+PR #190 が入れた `ts/apps/dashboard-web/e2e/dashboard-surfaces.spec.ts` は帯を持つ面について
+`expectNoHorizontalScroll(page, '店舗一覧', 0)` と宣言していた。**ローカルの実ブラウザで再現した**
+（推定ではない）。
+
+```
+代理店管理: 捲れる領域の実測件数 1 が宣言 0 と食い違う（実測: UL((名前なし))）
+Expected: 0  Received: 1
+2 failed | 5 passed
+```
+
+**是正は宣言の側を実態へ合わせる方向にした。** 帯は携帯端末幅にワードマーク・案内 5 件・ロール・
+ログアウトを収められず、要件 3.3 がリンクと押しボタンの個数を固定しているためハンバーガーへ
+畳むこともできない。溢れをリストの内部へ閉じる形（要件 2.5 と同型）が唯一の解であり、
+捲れる領域は**意図的な 1 件**である。`overflow-x-auto` を外すと今度は実レイアウトが端末幅を超え、
+同じ網が別の理由で赤くなる。
+
+**宣言を 1 にしても網は死んでいない。** `expectNoHorizontalScroll` は捲れる領域そのものの右端を
+端末幅と比べるため、帯が面を押し広げれば依然として赤くなる。免除されるのは領域の**内側**だけである。
+帯を描かないログイン画面は 0 のままで、その差自体が「帯の有無」を測っている。
+
+是正後に実ブラウザで **7 passed**（うち 3 件は Issue #186 の `test.fail` 想定内失敗）。
+
+**この e2e はローカルで実行できる。** DB も dashboard-api も要らない（`page.route()` の fixture と
+firebase スタブで閉じている）。手順:
+
+```
+rm -rf ts/apps/dashboard-web/.next
+E2E_STUB_IDP=1 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199 NEXT_PUBLIC_LIFF_ID=e2e-stub-liff-id \
+  pnpm -C ts --filter @fwlm/dashboard-web run build
+cd ts/apps/dashboard-web && npx playwright test
+```
+
+**以後の面（2.3〜2.5・5.2）も同じ手順で着手直後に回すこと。** 段階 1 の末尾の CI まで待つと、
+どの面が壊したのか切り分けられなくなる。
+
 観察可能な完了条件の確認: 帯を描画する 6 ファイルが個別に緑（top-nav 8 / stores-page 25 /
 stores-new-page 6 / invite-codes-page 6 / admin-agencies-page 4 / admin-users-page 11 = 60 件）。
 運営は `運営`、代理店は `代理店` を提示し、互いの語は出ない。

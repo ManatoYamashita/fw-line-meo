@@ -51,14 +51,24 @@ async function openListSurface(
 
 // --- 溢れていない面 --------------------------------------------------------------------
 
+// 帯（components/top-nav.tsx）の案内リストは捲れる領域である（ui-airbnb-surfaces task 2.1）。
+// 携帯端末幅にワードマーク・案内 5 件・ロール・ログアウトは収まらず、要件 3.3 がリンクと
+// 押しボタンの個数を固定しているためハンバーガーへ畳むこともできない。溢れをリストの内部へ
+// 閉じてページ全体を溢れさせない形（要件 2.5 と同型）が唯一の解であり、**意図的な 1 件**である。
+//
+// 宣言を 1 にしても網は生きている。`expectNoHorizontalScroll` は捲れる領域そのものの右端を
+// 端末幅と比べるため、帯が面を押し広げれば依然として赤くなる。免除されるのは領域の**内側**だけである。
+// 帯を描かない面（ログイン）は 0 のままであり、その差自体が「帯の有無」を測っている。
+const NAV_SCROLL_REGIONS = 1;
+
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
   await openListSurface(page, '/stores', '店舗一覧', 3);
-  await expectNoHorizontalScroll(page, '店舗一覧', 0);
+  await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {
   await openListSurface(page, '/admin/agencies', '代理店管理', 2);
-  await expectNoHorizontalScroll(page, '代理店管理', 0);
+  await expectNoHorizontalScroll(page, '代理店管理', NAV_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートのログイン画面で横スクロールが発生しない', async ({ page }) => {
@@ -166,6 +176,7 @@ for (const surface of KNOWN_OVERFLOW_SURFACES) {
         `@fwlm/ui の Select へ移せば解消する。解消したらこの宣言を外すこと`,
     );
     await surface.open(page);
-    await expectNoHorizontalScroll(page, surface.where, 0);
+    // 帯の捲れる領域は意図的な 1 件（上の NAV_SCROLL_REGIONS の説明）。この 3 面も帯を描く。
+    await expectNoHorizontalScroll(page, surface.where, NAV_SCROLL_REGIONS);
   });
 }
