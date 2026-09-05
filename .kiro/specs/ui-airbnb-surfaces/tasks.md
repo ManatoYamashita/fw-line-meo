@@ -884,6 +884,47 @@ task 2.5 が新設した照合（3 面のソースを読み `sm:max-w-*` の集�
 「要件 4.6 は 2 面で機械検証できない」の前提が変わっている。task 7.2 の目視 3 件の扱いは
 段階 6 で再評価する。
 
+### 段階 1〜4 の CI 実証（2026-09-05・run 33969587342）
+
+`3182da2` を使い捨ての `feat/ci-check-ui-airbnb-stage-1-4` へ push して発火させ、確認後に削除した
+（`spec/**` は `ts-ci` の発火条件 `push: [main, 'feat/**']` / `pull_request` に当たらない）。
+run はブランチ削除後も残る。
+
+| ジョブ | 結果 | 実行の証拠 |
+|---|---|---|
+| `lint-build-test` | success | vitest 10 パッケージ全緑。`@fwlm/ui` **580** / `dashboard-web` **266** / `survey-web` **159** |
+| `e2e` | success | **`Running 34 tests` → `34 passed`**（survey-web の `ui-foundation.spec.ts`） |
+| `e2e-surfaces` | success | **`Running 6 tests` → `6 passed`**（dashboard-web）＋ **`1 passed`**（store-detail） |
+| `lighthouse` | success | 客向けアンケートの 1 URL × 3 run で assertion 通過 |
+| `cross-runtime` | success | — |
+| `go-test` | success | — |
+| `docker-build` | skipped | **設計どおり**。`if: github.event_name == 'pull_request'` で push では走らない |
+| `notify` | skipped | — |
+
+**「0 件で緑」ではないことを件数で確認した。** 特に:
+
+- **`e2e` の 34 件は、段階 -1 で `@fwlm/e2e-support` へ付け替えて以来 CI で初めて実行された。**
+  ローカルでは DB と生成 API のモックが要るため回せず、収集件数（`--list`）でしか見ていなかった。
+  付け替えが実際に動くことがここで初めて実証された
+- **`e2e-surfaces` の 6 件に `✘` が 1 つも無い。** task 5.2 が `KNOWN_OVERFLOW_SURFACES` の節を
+  畳んだ結果、6 面すべてが通常の緑テストになった（Issue #186 の完了）。段階 0 の時点では
+  この職自体が存在しなかった（PR #190 が新設）
+- `survey-web` が 154（ローカル）→ **159**（CI）なのは、CI に postgres があり DB 依存の 5 件が
+  skip されずに走るためである
+
+**push は workflow scope の制約に当たる。** 段階 -1 のマージが `.github/workflows/ts-ci.yml` の
+変更（#190 由来）を取り込んでいるため、素の `git push` は
+`refusing to allow an OAuth App to create or update workflow` で拒否される。
+差分の出所がマージであるかは関係ない。次の形で通した:
+
+```
+git -c credential.helper= -c credential.helper='!gh auth git-credential' \
+  push origin HEAD:refs/heads/feat/ci-check-ui-airbnb-stage-1-4
+```
+
+**空値による一覧リセットが必須**（`-c` は helper を追記するだけなので、global の
+`credential.helper=osxkeychain` が先に評価されて失効資格を返す）。
+
 ### 段階 0 の CI 実証（2026-09-03・run 33757795701）
 
 段階 1 で 3 面を触る前に、段階 0 の土台が実際に緑であることを確かめた。`ts-ci` の発火条件は
