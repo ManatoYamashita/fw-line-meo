@@ -1,5 +1,5 @@
 import type { StoreCandidate } from '@fwlm/db';
-import { lineColors } from '@fwlm/design-tokens';
+import { lineColors, lineLayout } from '@fwlm/design-tokens';
 import { encodePostback } from '../onboarding/stages.js';
 import type { LineMessage } from './client.js';
 
@@ -108,19 +108,21 @@ function assertCandidatesWithinContract(candidates: readonly StoreCandidate[]): 
 function buildCandidateBubble(candidate: StoreCandidate, index: number): FlexBubbleContents {
   return {
     type: 'bubble',
-    size: 'kilo',
+    size: lineLayout.bubbleSize,
     body: {
       type: 'box',
       layout: 'vertical',
-      spacing: 'sm',
+      spacing: lineLayout.itemGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
-        { type: 'text', text: candidate.name, weight: 'bold', size: 'md', wrap: true },
-        { type: 'text', text: candidate.address, size: 'sm', color: lineColors.caption, wrap: true },
+        { type: 'text', text: candidate.name, weight: 'bold', size: lineLayout.bodySize, wrap: true },
+        { type: 'text', text: candidate.address, size: lineLayout.descriptionSize, color: lineColors.caption, wrap: true },
       ],
     },
     footer: {
       type: 'box',
       layout: 'vertical',
+      paddingAll: lineLayout.blockPadding,
       contents: [
         {
           type: 'button',
@@ -221,21 +223,23 @@ export function buildCandidateCarouselMessage(candidates: readonly StoreCandidat
 export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage {
   const contents: FlexBubbleContents = {
     type: 'bubble',
-    size: 'kilo',
+    size: lineLayout.bubbleSize,
     body: {
       type: 'box',
       layout: 'vertical',
-      spacing: 'sm',
+      spacing: lineLayout.itemGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
-        { type: 'text', text: 'この店舗でよろしいですか？', weight: 'bold', size: 'md', wrap: true },
-        { type: 'text', text: candidate.name, size: 'md', wrap: true },
-        { type: 'text', text: candidate.address, size: 'sm', color: lineColors.caption, wrap: true },
+        { type: 'text', text: 'この店舗でよろしいですか？', weight: 'bold', size: lineLayout.bodySize, wrap: true },
+        { type: 'text', text: candidate.name, size: lineLayout.bodySize, wrap: true },
+        { type: 'text', text: candidate.address, size: lineLayout.descriptionSize, color: lineColors.caption, wrap: true },
       ],
     },
     footer: {
       type: 'box',
       layout: 'horizontal',
-      spacing: 'sm',
+      spacing: lineLayout.itemGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
         {
           type: 'button',
@@ -277,38 +281,41 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
 export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
   const contents: FlexBubbleContents = {
     type: 'bubble',
-    size: 'kilo',
+    size: lineLayout.bubbleSize,
     styles: {
       body: { backgroundColor: lineColors.successBackground },
     },
     body: {
       type: 'box',
       layout: 'vertical',
-      spacing: 'md',
-      paddingAll: 'lg',
+      spacing: lineLayout.sectionGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
         {
           type: 'text',
           text: '🎉 登録が完了しました',
           weight: 'bold',
-          size: 'lg',
+          size: lineLayout.titleSize,
           align: 'center',
-          color: lineColors.headline,
+          // 見出しはアクション色と同値の緑を使わない。淡緑の面の上では読みづらいうえ、
+          // 同じバブルの CTA と同色になり、押せない見出しが押せるように読まれる。
+          // 緑はこのバブルでは CTA ただ 1 箇所が持つ。
+          color: lineColors.body,
           wrap: true,
         },
         {
           type: 'text',
           text: 'お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。',
-          size: 'sm',
+          size: lineLayout.descriptionSize,
           color: lineColors.body,
           align: 'center',
           wrap: true,
-          margin: 'md',
+          margin: lineLayout.sectionGap,
         },
         {
           type: 'text',
           text: '毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。',
-          size: 'xs',
+          size: lineLayout.noteSize,
           color: lineColors.caption,
           align: 'center',
           wrap: true,
@@ -318,7 +325,8 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
     footer: {
       type: 'box',
       layout: 'vertical',
-      spacing: 'sm',
+      spacing: lineLayout.itemGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
         {
           type: 'button',
@@ -326,7 +334,8 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           color: lineColors.action,
           action: {
             type: 'uri',
-            label: '店舗の詳細を見る',
+            // 日次サマリーの同じ導線と語彙を揃える（同じ LIFF 画面へ飛ぶ）。
+            label: '詳細を見る',
             uri: storeDetailUrl,
           },
         },
@@ -368,19 +377,20 @@ export function buildSearchFailedMessage(): LineMessage {
 export function buildPlaceAlreadyRegisteredMessage(): LineMessage {
   const contents: FlexBubbleContents = {
     type: 'bubble',
-    size: 'kilo',
+    size: lineLayout.bubbleSize,
     body: {
       type: 'box',
       layout: 'vertical',
-      spacing: 'sm',
+      spacing: lineLayout.itemGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
-        { type: 'text', text: '確定できませんでした', weight: 'bold', size: 'md', wrap: true },
+        { type: 'text', text: '確定できませんでした', weight: 'bold', size: lineLayout.bodySize, wrap: true },
         {
           type: 'text',
           text:
             'この店舗はすでに別のオーナー様の店舗として登録されているため、確定できませんでした。' +
             '心当たりがない場合は、お手数ですが運営までお問い合わせください。',
-          size: 'sm',
+          size: lineLayout.descriptionSize,
           color: lineColors.description,
           wrap: true,
         },
@@ -389,7 +399,8 @@ export function buildPlaceAlreadyRegisteredMessage(): LineMessage {
     footer: {
       type: 'box',
       layout: 'vertical',
-      spacing: 'sm',
+      spacing: lineLayout.itemGap,
+      paddingAll: lineLayout.blockPadding,
       contents: [
         {
           type: 'button',

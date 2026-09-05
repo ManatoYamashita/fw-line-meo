@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { StoreCandidate } from '@fwlm/db';
+import { lineColors, lineLayout } from '@fwlm/design-tokens';
+import type { LineMessage } from '../../src/line/client.js';
 import { decodePostback } from '../../src/onboarding/stages.js';
 import {
   buildGreetingMessage,
@@ -306,5 +308,96 @@ describe('buildPlaceAlreadyRegisteredMessage', () => {
     expect(decodePostback(asPostback(button).data)).toEqual({ kind: 'restart' });
     assertContainsJapanese(button.action.label);
     assertNoObviousEnglishPlaceholder(button.action.label);
+  });
+});
+
+// LineMessage は union なので、contents を取り出す前に型を絞る（既存テストと同じ規律）。
+function asFlexBubble(message: LineMessage): FlexBubbleContents {
+  if (message.type !== 'flex') throw new Error('flex メッセージではない');
+  return message.contents as FlexBubbleContents;
+}
+
+function asFlexCarousel(message: LineMessage): FlexCarouselContents {
+  if (message.type !== 'flex') throw new Error('flex メッセージではない');
+  return message.contents as FlexCarouselContents;
+}
+
+// Flex JSON 内から text の size / color だけを再帰的に集める（構造に依存しない意匠の観測用）。
+function collectTextProp(node: unknown, prop: 'size' | 'color'): string[] {
+  if (node === null || typeof node !== 'object') return [];
+  const obj = node as Record<string, unknown>;
+  const values: string[] = [];
+  if (obj['type'] === 'text' && typeof obj[prop] === 'string') {
+    values.push(obj[prop] as string);
+  }
+  if (Array.isArray(obj['contents'])) {
+    for (const child of obj['contents']) {
+      values.push(...collectTextProp(child, prop));
+    }
+  }
+  for (const key of ['body', 'footer'] as const) {
+    if (key in obj) values.push(...collectTextProp(obj[key], prop));
+  }
+  return values;
+}
+
+describe('4 バブルの意匠の不変条件（スナップショット更新では直らない）', () => {
+  // スナップショットは -u 一発で「意匠を元に戻す変更」も静かに受理するため、
+  // 意匠の規律そのものはここで固定する。
+  const LIFF_URL = 'https://liff.line.me/2010693573-NxEVPPoc';
+  const bubbles: readonly { readonly name: string; readonly bubble: FlexBubbleContents }[] = [
+    {
+      name: '候補カルーセル',
+      bubble: asFlexCarousel(buildCandidateCarouselMessage([candidate()])).contents[0] as FlexBubbleContents,
+    },
+    { name: '確認', bubble: asFlexBubble(buildConfirmationMessage(candidate())) },
+    { name: '完了', bubble: asFlexBubble(buildCompletionMessage(LIFF_URL)) },
+    {
+      name: '既登録エラー',
+      bubble: asFlexBubble(buildPlaceAlreadyRegisteredMessage()),
+    },
+  ];
+
+  it('body と footer が同じ内側余白をトークンから宣言する', () => {
+    expect(bubbles).toHaveLength(4);
+    for (const { name, bubble } of bubbles) {
+      expect(bubble.body.paddingAll, `${name} の body`).toBe(lineLayout.blockPadding);
+      expect(bubble.footer.paddingAll, `${name} の footer`).toBe(lineLayout.blockPadding);
+    }
+  });
+
+  it('祝祭の主見出しはオンボーディング全体でちょうど 1 件である', () => {
+    const sizes = bubbles.flatMap(({ bubble }) => collectTextProp(bubble, 'size'));
+    // 抽出器が空振りしていないこと（0 件しか返さない抽出器でも「1 件でない」は成立してしまう）。
+    expect(sizes.length).toBeGreaterThan(1);
+    expect(sizes.filter((size) => size === lineLayout.titleSize)).toHaveLength(1);
+  });
+
+  it('アクション色は押せるものだけが持ち、静的な文字は帯びない', () => {
+    for (const { name, bubble } of bubbles) {
+      const textColors = collectTextProp(bubble, 'color');
+      expect(textColors.length, `${name} の色付き本文`).toBeGreaterThan(0);
+      expect(textColors, `${name} の本文`).not.toContain(lineColors.action);
+    }
+  });
+});
+
+describe('Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料）', () => {
+  const LIFF_URL = 'https://liff.line.me/2010693573-NxEVPPoc';
+
+  it('候補カルーセル（1 件）', () => {
+    expect(buildCandidateCarouselMessage([candidate()])).toMatchSnapshot();
+  });
+
+  it('確認', () => {
+    expect(buildConfirmationMessage(candidate())).toMatchSnapshot();
+  });
+
+  it('完了', () => {
+    expect(buildCompletionMessage(LIFF_URL)).toMatchSnapshot();
+  });
+
+  it('既登録エラー', () => {
+    expect(buildPlaceAlreadyRegisteredMessage()).toMatchSnapshot();
   });
 });
