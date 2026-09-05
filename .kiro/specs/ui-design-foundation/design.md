@@ -287,13 +287,18 @@ store-detail: 店舗詳細）。**9 経路すべてが `e2e/fixtures/` の open 
 （dashboard-web: `fixtures/api.ts` ／ store-detail: `fixtures/detail.ts` ／ survey-web:
 `fixtures/surfaces.ts`）。**survey-web は `e2e/` 配下の `page.goto` を 1 つ残らず fixtures へ寄せた**
 （`ui-foundation.spec.ts` 26 箇所 ／ `survey-flow.spec.ts` 3 箇所）。ui-foundation の 26 箇所のうち
-9 箇所は直後に同じ前提 assert（`既定のボタン` の可視）を重複して書いており、fixtures が単一の定義を
-持つことでその重複も消えている。`E2E_STORE_ID` の既定値も、以前は 2 つの spec がそれぞれ持っていたが
-`fixtures/surfaces.ts` の 1 箇所になった。
+10 箇所は開いた直後に同じ前提 assert（`既定のボタン` の可視）を重複して持っており、fixtures が単一の
+定義を持つことでその重複も消えている（うち 1 箇所はロケータ束縛と assert が 2 行に割れた形である）。
+`E2E_STORE_ID` の既定値も、以前は 2 つの spec がそれぞれ持っていたが `fixtures/surfaces.ts` の
+1 箇所になった。
 
-`page.goto` の直書き禁止は **`e2e/` 配下の全ファイル（fixtures を除く）** へ適用する
-（`scripts/check-e2e-goto-ownership.sh`）。`check-a11y-audit-preconditions.sh` は同じ禁止を監査 spec に
-対してだけ課しており、重なりは無駄ではなく保護である —— 片方が消えても監査 spec の側は守られる。
+`page.goto` の直書き禁止は **`e2e/` 配下の Playwright が収集しうる拡張子すべて（fixtures を除く）** へ
+適用する（`scripts/check-e2e-goto-ownership.sh`）。`.ts` だけに絞ると `.spec.mts` や `.spec.tsx` へ 1 段
+隠した goto が **Playwright には収集されつつガードからは見えない**ため、抜け道が拡張子ひとつで開く。
+所有者が実在することの要求は**アプリ単位**である（合算だと、あるアプリの fixtures が goto を失っても
+別アプリの分で埋まり、そのアプリの空振りが見えない）。走査が評価不能だったファイルは fail-closed で
+赤にする。`check-a11y-audit-preconditions.sh` は同じ禁止を監査 spec に対してだけ課しており、
+重なりは無駄ではなく保護である —— 片方が消えても監査 spec の側は守られる。
 一度きりの URL へ直接行く正当な場面のために WHITELIST を持つが、**理由と Issue 番号を必須**とし、
 違反が無くなった項目は警告して削除を促す。
 

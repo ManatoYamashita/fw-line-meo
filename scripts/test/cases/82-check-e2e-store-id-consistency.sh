@@ -47,7 +47,7 @@ esi_tree
 fx_run check-e2e-store-id-consistency
 expect_green
 # 「OK」だけでなく照合できた件数まで見る。走査が空振りしたまま緑になる経路と区別するため。
-expect_output_matches '役割 4 件が一致 44444444-4444-4444-4444-444444444444 / 既定値の宣言 1 件 / 手順書 1 件照合'
+expect_output_matches '役割 4 件が一致 44444444-4444-4444-4444-444444444444 / 既定値の宣言 1 件 / ts 走査 1 ファイル / 手順書 1 件照合'
 t_end
 
 # ---------------------------------------------------------------------------
@@ -162,4 +162,26 @@ EOF
 fx_run check-e2e-store-id-consistency
 expect_green
 expect_output_matches '手順書 0 件照合'
+t_end
+
+# ---------------------------------------------------------------------------
+# 5. 既定値の宣言を数える走査面の**母数**。
+#
+# 「宣言がちょうど 1 件」は、走査面を fixtures の 1 ディレクトリまで狭めても成立する。
+# そのとき他所の複写は見えないまま緑を返す —— 「走査していない」と「違反が無い」を
+# 区別できない形である（steering tech.md の #162 の規律）。母数を出力へ載せて照合する。
+
+t_begin 'check-e2e-store-id-consistency: 既定値を数えた走査面の母数を出力する'
+esi_tree
+fx_run check-e2e-store-id-consistency
+expect_green
+expect_output_matches '既定値の宣言 1 件 / ts 走査 1 ファイル'
+t_end
+
+t_begin 'check-e2e-store-id-consistency: ts の走査面が消えると赤（母数 0 を違反 0 件と読まない）'
+esi_tree
+fx_guard_mutate check-e2e-store-id-consistency \
+  -e "s|-type f -name '\*\.ts' -print|-type f -name '*.NOPE' -print|"
+fx_run check-e2e-store-id-consistency
+expect_red 'ts/ 配下に走査対象の .ts が 1 件もありません'
 t_end

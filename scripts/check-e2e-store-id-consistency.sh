@@ -21,7 +21,9 @@
 #   1. 4 つの役割それぞれから値が**ちょうど 1 つ**取れる（0 件＝抽出の前提が崩れた・
 #      2 件以上＝どれが正典か決まらない、のどちらも赤）
 #   2. 4 つの値がすべて一致する（不一致は役割名つきで報告する）
-#   3. 既定値の宣言（`process.env.E2E_STORE_ID ??`）が ts/ 配下でちょうど 1 箇所
+#   3. 既定値の宣言（`process.env.E2E_STORE_ID ??`）が ts/ 配下でちょうど 1 箇所。
+#      **走査面の母数も出力へ載せる**（「ちょうど 1 件」は走査面を 1 ディレクトリまで狭めても
+#        成立するため、件数だけでは「走査していない」と「違反が無い」を区別できない・#162 の規律）
 #      （**これが本ガードを入れた直接の動機である。** PR #191 の時点では fixtures と
 #        survey-flow.spec.ts が同じ UUID をそれぞれ持っており、env が渡っている限り
 #        一致するため、複写であること自体が観測できなかった）
@@ -121,9 +123,11 @@ fi
 # --- 3. 既定値の宣言が 1 箇所 -------------------------------------------------------------
 
 decl_count=0
+decl_scanned=0
 decl_paths=''
 ts_files="$(find "${ROOT}/ts" -name node_modules -prune -o -name '.next' -prune -o -type f -name '*.ts' -print)"
 for f in $ts_files; do
+  decl_scanned=$((decl_scanned + 1))
   d_rc=0
   d_n="$(grep -cF 'process.env.E2E_STORE_ID ??' "$f")" || d_rc=$?
   if [ "$d_rc" -gt 1 ]; then
@@ -135,6 +139,13 @@ for f in $ts_files; do
   decl_count=$((decl_count + d_n))
   decl_paths="${decl_paths} ${f#$ROOT/}"
 done
+
+# 母数の空振り防止。走査面が消えていれば「宣言 0 件」は「違反が無い」ではなく「検証していない」。
+if [ "$decl_scanned" -eq 0 ]; then
+  echo "ERROR: ts/ 配下に走査対象の .ts が 1 件もありません（走査面の前提が崩れています）。" >&2
+  echo "       → 母数 0 の「宣言 0 件」は、複写が無いことの証拠になりません。" >&2
+  fail=1
+fi
 
 if [ "$decl_count" -ne 1 ]; then
   echo "ERROR: 既定値の宣言（process.env.E2E_STORE_ID ??）が ${decl_count} 件あります（1 件であるべきです）:" >&2
@@ -170,4 +181,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "OK: E2E の storeId を検証しました（役割 4 件が一致 ${seed_id} / 既定値の宣言 ${decl_count} 件 / 手順書 ${doc_checked} 件照合）。"
+echo "OK: E2E の storeId を検証しました（役割 4 件が一致 ${seed_id} / 既定値の宣言 ${decl_count} 件 / ts 走査 ${decl_scanned} ファイル / 手順書 ${doc_checked} 件照合）。"

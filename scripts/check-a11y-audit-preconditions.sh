@@ -83,15 +83,31 @@ helper_files=''
 
 # 指定ファイルに含まれる固定文字列の件数を返す。grep の「無一致（1）」と「評価不能（2 以上）」を
 # 分けて扱う（後置 true で潰すと、評価不能が「違反 0 件」に化ける・Issue #120）。
+# **この関数の中で fail を立ててはならない。** 呼び出しはコマンド置換（副シェル）なので、
+# 代入した値は親へ戻らず、stderr のエラーだけが出て exit 0 という**偽の緑**になる
+# （PR #192 レビュー指摘 1 の付帯。姉妹ガードで OK / exit 0 を実測した）。評価不能は
+# 負値で返し、判定は下の count_checked が**親シェルで**行う。
 count_fixed() {
   cf_rc=0
   cf_n="$(grep -cF "$1" "$2")" || cf_rc=$?
   if [ "$cf_rc" -gt 1 ]; then
     echo "ERROR: ${2#$ROOT/} の走査に失敗しました（grep exit ${cf_rc}）。判定不能を 0 件として扱いません。" >&2
-    fail=1
     cf_n=-1
   fi
   printf '%s' "$cf_n"
+}
+
+# count_fixed の結果を CF_N へ入れる。**この関数は subshell ではないので fail が親へ残る。**
+# 評価不能は fail-closed（赤）にしたうえで 0 として扱う。以降の判定は極性がまちまちだが、
+# fail が立っている以上どの経路を通っても緑にはならない。
+count_checked() {
+  CF_N="$(count_fixed "$1" "$2")"
+  if [ "$CF_N" -lt 0 ]; then
+    echo "ERROR: ${2#$ROOT/} を走査できなかったため判定できません。" >&2
+    echo "       → 判定不能を「違反なし」と読みません。" >&2
+    fail=1
+    CF_N=0
+  fi
 }
 
 for app_path in "$APPS_DIR"/*/; do
@@ -105,14 +121,16 @@ for app_path in "$APPS_DIR"/*/; do
   [ -n "$spec_files" ] || continue
 
   for spec in $spec_files; do
-    mark_n="$(count_fixed "$AUDIT_MARK" "$spec")"
+    count_checked "$AUDIT_MARK" "$spec"
+    mark_n="$CF_N"
     [ "$mark_n" -gt 0 ] || continue
     audit_spec_count=$((audit_spec_count + 1))
     spec_rel="${spec#$ROOT/}"
     spec_dir="$(dirname "$spec")"
 
     # --- 2. 面を開く手順を spec へ直書きしていない ---------------------------------------
-    goto_n="$(count_fixed "$GOTO_MARK" "$spec")"
+    count_checked "$GOTO_MARK" "$spec"
+    goto_n="$CF_N"
     if [ "$goto_n" -gt 0 ]; then
       echo "ERROR: ${spec_rel} が ${GOTO_MARK} を ${goto_n} 件直書きしています。" >&2
       echo "       → 監査 spec は面を自分で開いてはいけません。開く手順と「本体が描けている」" >&2
@@ -146,8 +164,11 @@ for app_path in "$APPS_DIR"/*/; do
       fi
       fixture_module_count=$((fixture_module_count + 1))
 
-      fg_n="$(count_fixed "$FIXTURE_GOTO" "$fixture_path")"
-      fa_n="$(count_fixed "$FIXTURE_ASSERT" "$fixture_path")"
+      count_checked "$FIXTURE_GOTO" "$fixture_path"
+
+      fg_n="$CF_N"
+      count_checked "$FIXTURE_ASSERT" "$fixture_path"
+      fa_n="$CF_N"
       if [ "$fg_n" -eq 0 ]; then
         echo "ERROR: ${fixture_rel} に ${FIXTURE_GOTO} がありません（面を開く手順を持っていません）。" >&2
         echo "       → 監査 spec が経由しているのに面を開かないのであれば、開く手順は" >&2
@@ -171,7 +192,8 @@ for pkg_path in "$ROOT"/ts/packages/*/; do
   pkg_files="$(find "${pkg_path}src" -type f -name '*.ts')"
   [ -n "$pkg_files" ] || continue
   for pkg_file in $pkg_files; do
-    imp_n="$(count_fixed "$AXE_IMPORT" "$pkg_file")"
+    count_checked "$AXE_IMPORT" "$pkg_file"
+    imp_n="$CF_N"
     [ "$imp_n" -gt 0 ] || continue
     helper_count=$((helper_count + 1))
     helper_files="${helper_files} ${pkg_file}"
@@ -194,7 +216,8 @@ else
   for helper_file in $helper_files; do
     helper_rel="${helper_file#$ROOT/}"
     for term in "$RULE_TERM_PASSES" "$RULE_TERM_INCOMPLETE" "$RULE_TERM_ASSERT"; do
-      term_n="$(count_fixed "$term" "$helper_file")"
+      count_checked "$term" "$helper_file"
+      term_n="$CF_N"
       if [ "$term_n" -eq 0 ]; then
         echo "ERROR: ${helper_rel} に ${term} がありません（違反 0 件と規則 0 件を区別できません）。" >&2
         echo "       → axe は include が外れる・注入が失敗する経路で例外ではなく空の結果を返します。" >&2
@@ -213,8 +236,10 @@ for app_path in "$APPS_DIR"/*/; do
   [ -n "$app_files" ] || continue
   for app_file in $app_files; do
     app_rel="${app_file#$ROOT/}"
-    di_n="$(count_fixed "$AXE_IMPORT" "$app_file")"
-    dc_n="$(count_fixed "$AXE_CTOR" "$app_file")"
+    count_checked "$AXE_IMPORT" "$app_file"
+    di_n="$CF_N"
+    count_checked "$AXE_CTOR" "$app_file"
+    dc_n="$CF_N"
     if [ "$di_n" -gt 0 ] || [ "$dc_n" -gt 0 ]; then
       echo "ERROR: ${app_rel} が axe を直接掴んでいます（監査ヘルパを迂回しています）。" >&2
       echo "       → ヘルパの中身をいくら守っても、spec が直に axe を回して違反だけを assert すれば" >&2

@@ -11,6 +11,23 @@
 aap_tree() {
   fx_guard check-a11y-audit-preconditions
 
+  # --- grep スタブ -------------------------------------------------------
+  # 既定は実物へ委譲し、AAP_GREP_FAIL の子プロセスでだけ exit 2 を返す。**どの grep を
+  # 落とすかを引数で指定する**（一律に落とすと最初の経路で必ず赤くなり、以降の分岐を
+  # 1 件も検査しないまま覆ったと誤認する・#161 で踏んだ形）。chmod は使えない
+  # （CI は --require-full で skip を失敗として扱うため uid 依存の再現を作れない）。
+  aap_real_grep="$(PATH="$FX_BASE_PATH" command -v grep)"
+  cat > "${STUB_DIR}/grep" <<STUB
+#!/usr/bin/env bash
+if [ -n "\${AAP_GREP_FAIL:-}" ]; then
+  case "\$*" in
+    *"\${AAP_GREP_FAIL}"*) echo "grep-stub: simulated read error" >&2; exit 2 ;;
+  esac
+fi
+exec "${aap_real_grep}" "\$@"
+STUB
+  chmod +x "${STUB_DIR}/grep"
+
   # 規律を満たす面（正常形）。
   fx_write ts/apps/good-face/e2e/a11y-audit.spec.ts <<'EOF'
 import { test } from '@playwright/test';
@@ -296,4 +313,20 @@ export async function expectNoAxeViolations(page: Page): Promise<void> {
 EOF
 fx_run check-a11y-audit-preconditions
 expect_red '監査ヘルパが 2 件あります（正典が割れています）'
+t_end
+
+# ---------------------------------------------------------------------------
+# 走査が評価不能（grep exit 2）だったときに、それを「違反 0 件」と読まないこと。
+#
+# 抽出関数はコマンド置換（副シェル）で呼ばれるため、**関数の中で fail=1 を立てても親へ
+# 戻らない**（steering tech.md「シェルガードの実装規律」）。姉妹ガードで実測した症状は
+# ERROR を stderr へ出しながら OK / exit 0 を返す偽の緑だった（PR #192 レビュー指摘 1）。
+
+t_begin 'check-a11y-audit-preconditions: 監査 spec の走査が評価不能（exit 2）なら赤'
+aap_tree
+[ -d "${FX}/.git" ] || fx_track_now
+OUT=''
+RC=0
+OUT="$(cd "$FX" && AAP_GREP_FAIL='a11y-audit.spec.ts' bash scripts/check-a11y-audit-preconditions.sh 2>&1)" || RC=$?
+expect_red 'ts/apps/good-face/e2e/a11y-audit.spec.ts を走査できなかったため判定できません。'
 t_end

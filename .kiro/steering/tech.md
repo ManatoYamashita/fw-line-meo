@@ -76,6 +76,9 @@
   開く手順と前提 assert は面ごとに `e2e/fixtures/` の 1 箇所へ置く。**`page.goto` は `e2e/fixtures/` の
   外に書かない**（監査 spec に限らず全 spec・helper・stub が対象。`scripts/check-e2e-goto-ownership.sh`
   が機械強制する。一度きりの URL の例外は理由と Issue 番号つきで WHITELIST へ）。
+  **走査面は Playwright が収集しうる拡張子すべてに及ぶ**（`.ts` だけに絞ると `.spec.mts` / `.spec.tsx` へ
+  1 段隠した goto が収集されつつガードからは見えない）。**所有者の実在はアプリ単位で要求する**
+  （合算だと、あるアプリの fixtures が goto を失っても別アプリの分で埋まり、空振りが見えない）。
   同じ面を測る他の spec があるなら、その定義を共有する。
   **この規律は `scripts/check-a11y-audit-preconditions.sh` が機械強制する。** 文章だけでは守れない
   ことが実証済みで、規律を書いた当の PR が 9 経路のうち 2 経路で破り、CI は全緑を返していた。
@@ -173,6 +176,13 @@
   - **コマンド置換の中の `exit` は `if` の条件文脈では効かない。** 関数内で `exit` しても
     subshell が終わるだけで、`if [ -n "$(f ...)" ]` の形では `set -e` も働かない。いったん
     変数へ代入して受けること（`check-prod-image-drift.sh` の `snapshot_lookup` で実測）。
+  - **判定フラグ（`fail=1`）も同じ理由でコマンド置換の中で立ててはならない。** `n="$(f ...)"` の
+    形で呼ばれる抽出関数の中で `fail=1` を代入しても親へ戻らず、**stderr の ERROR だけが出て
+    exit 0 という偽の緑**になる。実測（PR #192 レビュー指摘 1・`check-e2e-goto-ownership.sh`）:
+    grep が exit 2 を返したファイルを検査せずに `OK` を返し、しかも件数へ `-1` が混ざって
+    「所有者が 0 件」の空振り防止（`-eq 0`）まですり抜けた。**判定は必ず呼び出し側で行い**、
+    関数は「評価不能」を負値などの識別可能な値で返すこと。回帰は自己テストで固定する
+    （exit 2 の再現は uid 非依存にするため chmod ではなく grep スタブで作る）。
   - 機械強制は `scripts/check-shell-pipe-consumers.sh`（Issue #117）。追跡下の `scripts/**/*.sh`
     と `db/test/**/*.sh` を走査し（後者は #162 で追加。`db/test` の検査資産は #156 / #158 (a)
     以降 **CI から毎 PR 実行されている**）、`head` / `grep` の quiet・max-count 系 / `q` を持つ
