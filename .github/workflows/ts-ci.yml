@@ -33,6 +33,19 @@ jobs:
         # エラーではなく「認証を求められない正常動作」であり、通常のテストでは検出できない。
         # 出荷経路への混入・fail-open 化・本番ソースからの参照を read-only の grep で検出する。
         run: bash scripts/check-e2e-idp-stub-isolation.sh
+      # name は引用する。YAML の plain scalar は " #" 以降をコメントとして捨てるため、
+      # 引用しないと表示名が「a11y 監査の前提固定ガード（Issue」で切れる
+      # （scripts/check-workflow-step-names.sh が機械強制する）。
+      - name: 'a11y 監査の前提固定ガード（Issue #53・監査 spec が面を自分で開かないこと）'
+        # 自動 a11y 監査は「面が本体を描けている」ことを先に固定してから当てないと意味を持たない。
+        # 空の画面・エラー画面には違反が出ようがないため、**破れたときの症状は赤ではなく緑**である。
+        # 実測: `/s/{storeId}` の unavailable 分岐が返す 1 段落だけの DOM へ axe を当てると
+        # violations 0 / passes 5 となり、expectNoAxeViolations の「規則 0 件」検出まで満たす。
+        # steering tech.md は規律として明文化したが、それを書いた PR 自身が 9 経路のうち 2 経路で
+        # 破っていた（CI は全緑だった）。文章では守れないのでここで機械強制する。
+        # 直上の E2E スタブ隔離ガードと同じ Issue #53 の守備範囲であり、同じく read-only の
+        # grep 検証なので install の前に置ける。
+        run: bash scripts/check-a11y-audit-preconditions.sh
       - name: 'デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）'
         # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
         # theme.css がトークンと同値であることを照合する（read-only grep 検証）。

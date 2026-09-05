@@ -11,12 +11,12 @@ import {
   type OverflowMetrics,
 } from '@fwlm/e2e-support/viewport';
 
+import { openComponentCatalog, openSurveySurface } from './fixtures/surfaces';
+
 // UI デザイン基盤（ui-design-foundation）の非後退 E2E。
 // requirements 5.3（キーボードフォーカス時に視認可能なフォーカス表示）と
 // requirements 3.3（モバイル端末で横スクロールを発生させない）を検証する。
 // クラス名の有無ではなく getComputedStyle とレイアウト実測（実描画）で判定する。
-
-const STORE_ID = process.env.E2E_STORE_ID ?? '44444444-4444-4444-4444-444444444444';
 
 // alpha = 0 のアウトラインは描画されないため「見えている」とは扱わない。
 const TRANSPARENT = /^rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*0\s*\)$/;
@@ -677,7 +677,7 @@ function readFocusIndicator(page: Page): Promise<FocusIndicator | null> {
 
 // requirements 5.3: キーボードフォーカス時に視認可能なフォーカス表示を提示する。
 test('キーボードでたどった操作可能要素すべてに可視フォーカス表示が出る', async ({ page }) => {
-  await page.goto(`/s/${STORE_ID}`);
+  await openSurveySurface(page);
   const firstStar = page.getByRole('button', { name: '星1' });
   await expect(firstStar).toBeVisible();
 
@@ -721,7 +721,7 @@ test('キーボードでたどった操作可能要素すべてに可視フォ�
 // outline を打ち消すユーティリティで無効化していた」欠陥（Issue #49）を検出できなかった。
 // ここでは部品を実描画する検証面（/ui-check）を的にして、同じ実測ロジックを部品経路へ通す。
 test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出る', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   const firstButton = page.getByRole('button', { name: '既定のボタン' });
   await expect(firstButton).toBeVisible();
 
@@ -782,7 +782,7 @@ test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出�
 // 渡さない限り説明文は灰色で描画される。それでも親のクラス集合は壊れないので、jsdom での
 // クラス assert も含めた既存の静的検証は全て緑のまま通る。ここでは実際に描かれた色を測る。
 test('Alert の説明文に変種の状態色が実描画で届いている', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   // role で引かないこと。読み上げ強度は変種ごとに変わる（destructive のみ alert・それ以外は
   // status）ため、role で引くと variant によって取れたり取れなかったりする（ui-a11y-gaps 要件 3.1）。
   const alerts = page.locator('[data-slot="alert"]');
@@ -839,7 +839,7 @@ test.describe('color-mix の実効色（ポインタのある環境）', () => {
     const entry = colorMixAllowlist.find((candidate) => candidate.file === 'button.tsx');
     expect(entry, 'button.tsx の color-mix が許可リストにない').toBeDefined();
 
-    await page.goto('/ui-check');
+    await openComponentCatalog(page);
     const secondary = page.getByRole('button', { name: '副次のボタン' });
     await expect(secondary).toBeVisible();
     expect(
@@ -876,8 +876,7 @@ test.describe('color-mix の実効色（ポインタのある環境）', () => {
 // 「部品が要求を満たしていない」と報告すると原因の切り分けを誤らせるため、基盤の健全性を
 // 独立したテストとして固定する。
 test('実描画の計測基盤と検証面が実測の前提を満たしている', async ({ page }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
 
   // 前提 1: 検証面が端末幅どおりに描かれている。
   await expectVerificationSurfaceSane(page);
@@ -934,8 +933,7 @@ test.describe('動き低減設定が有効な環境', () => {
   test.use({ contextOptions: { reducedMotion: 'reduce' } });
 
   test('無限アニメーションが停止し、状態遷移が知覚できない水準まで抑制される', async ({ page }) => {
-    await page.goto('/ui-check');
-    await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+    await openComponentCatalog(page);
 
     // 空振り防止その1: 動き低減が実際に模擬されている文脈で測っていること。
     // これが偽なら抑制規則は最初から適用対象外であり、以降の assert は実装ではなく
@@ -981,7 +979,7 @@ test.describe('動き低減設定が有効な環境', () => {
   // 要件 2.1: 動きを止めたなら、動きに依存しない手段で処理中であることを伝える。
   // 止めただけでは「画面が固まったのか処理中なのか」が判断できなくなる。
   test('処理中表示が動きに依存しない可視の手掛かりを提示する', async ({ page }) => {
-    await page.goto('/ui-check');
+    await openComponentCatalog(page);
     await expect(page.locator('[data-slot="spinner"]').first()).toBeVisible();
     expect(
       await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
@@ -1006,8 +1004,7 @@ test.describe('動き低減設定が無効な環境', () => {
   test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
   test('従来どおりの動きが維持される', async ({ page }) => {
-    await page.goto('/ui-check');
-    await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+    await openComponentCatalog(page);
 
     // 対照側でも文脈を確かめる。両側が同じ文脈で走っていたら比較は無意味になる。
     expect(
@@ -1036,7 +1033,7 @@ test.describe('動き低減設定が無効な環境', () => {
   // 要件 1.3 / 2.1 の裏側: 代替表現は動き低減時にだけ現れること。
   // 常時露出すると、動きが十分な環境でも表示が変わってしまう（非後退の違反）。
   test('処理中表示の代替文言が露出しない', async ({ page }) => {
-    await page.goto('/ui-check');
+    await openComponentCatalog(page);
     await expect(page.locator('[data-slot="spinner"]').first()).toBeVisible();
 
     const cue = await readSpinnerTextCue(page);
@@ -1066,7 +1063,7 @@ test('押下時に到達する見た目が動き低減の有無で変わらな�
     });
     try {
       const page = await context.newPage();
-      await page.goto('/ui-check');
+      await openComponentCatalog(page);
       // 文脈が本当に切り替わっていることを確かめる（両側が同じ文脈なら比較は無意味）。
       expect(
         await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
@@ -1094,8 +1091,7 @@ test('押下時に到達する見た目が動き低減の有無で変わらな�
 // （steering product.md）。押し損ねは離脱に直結するが、押しにくさは誰も報告しないため、
 // 実測でしか守れない。
 test('押しボタンの操作領域が寸法区分ごとの要求値を満たす', async ({ page }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
   // 検証面が潰れていると寸法の検証は「部品の欠陥」に見える失敗をする。先に切り分ける。
   await expectVerificationSurfaceSane(page);
 
@@ -1143,8 +1139,7 @@ test('押しボタンの操作領域が寸法区分ごとの要求値を満た�
 // そこに利用者の意図が定義できない以上あってよい。**害があるのは、見えている部品を指したのに
 // 別の部品が反応する場合だけ**であり、それは「拡張が隣の視覚領域を覆う」ことと同値である。
 test('拡張した操作領域が隣接部品の視覚領域を覆わない', async ({ page }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
   await expectVerificationSurfaceSane(page);
 
   const operables = await readTouchGeometries(page, OPERABLE_SELECTOR);
@@ -1180,8 +1175,7 @@ test('拡張した操作領域が隣接部品の視覚領域を覆わない', as
 
 // 要件 4.2 / 4.6 / 4.8: 拡張を掛けない側が下限を割っていないこと（現状維持の非後退）。
 test('選択部品と複数行入力の操作領域が下限を維持している', async ({ page }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
   await expectVerificationSurfaceSane(page);
 
   const selectables = await readTouchGeometries(
@@ -1216,8 +1210,7 @@ test('選択部品と複数行入力の操作領域が下限を維持してい�
 
 // 要件 4.7: ラベルを伴う構成では、ラベルを含む行全体で 44px を満たす。
 test('ラベルを伴う行が要求寸法を満たす', async ({ page }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
   await expectVerificationSurfaceSane(page);
 
   const rows = await readTouchGeometries(page, LABELLED_ROW_SELECTOR);
@@ -1241,8 +1234,7 @@ test('ラベルを伴う行が要求寸法を満たす', async ({ page }) => {
 // 要件 4.7 の後半: 行を指した結果、対応する部品が実際に反応すること。
 // 高さだけを満たしても、押して何も起きなければ「操作領域」とは呼べない。
 test('ラベル領域の指定で対応する部品が反応する', async ({ page }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
 
   // テキスト入力: ラベル文字の指定でフォーカスが移る。
   await page.getByText('ラベル付き入力', { exact: true }).click();
@@ -1285,7 +1277,7 @@ test('ラベル領域の指定で対応する部品が反応する', async ({ pa
 
 // Requirements 1.1 / 1.2: 既定状態のフォーム部品の枠が、フォーカスを当てずに 3:1 以上で識別できる。
 test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以上で描画される', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   await expect(page.getByRole('textbox', { name: '一行入力' })).toBeVisible();
 
   const pageBackground = await readPageBackground(page);
@@ -1319,7 +1311,7 @@ test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以
 
 // Requirements 2.1 / 2.3: 選択状態の表示が 3:1 以上で、かつ未選択とは別色で描画される。
 test('選択状態の枠が 3:1 以上かつ未選択と別色で描画される', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   const selected = page.getByTestId('wrapped-choice-checked');
   const unselected = page.getByTestId('wrapped-choice-unchecked');
   await expect(selected).toBeAttached();
@@ -1345,7 +1337,7 @@ test('選択状態の枠が 3:1 以上かつ未選択と別色で描画される
 
 // Requirements 3.4: エラー状態の枠が隣接背景に対し 3:1 以上で描画される。
 test('エラー状態の枠が 3:1 以上で描画される', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   await expect(page.getByRole('textbox', { name: 'エラーの記入欄' })).toBeVisible();
 
   const pageBackground = await readPageBackground(page);
@@ -1373,7 +1365,7 @@ test('エラー状態の枠が 3:1 以上で描画される', async ({ page }) =
 // 実描画で実際に勝つことを示す。クラス集合の検証では「どちらのクラスも付いている」ことまでしか
 // 分からず、詳細度の破綻はここでしか捕捉できない（tasks.md「3.3 → 4.2 への申し送り」）。
 test('エラーかつチェック済みの枠がエラー色で描画され選択色でない', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
 
   // 対照: エラーでないチェック済みの枠は選択色である。これが選択色でなければ、
   // 下の「エラー色である」は詳細度の勝敗と無関係に成立してしまい実証にならない。
@@ -1417,7 +1409,7 @@ test('エラーかつチェック済みの枠がエラー色で描画され選�
 // （余白は名前付きスケールが別スケールに覆われれば静かに潰れ、罫線は色だけが装飾用から
 // 識別用へ振り替わっても集合は無傷である）。
 test('表のセル余白と行の区切りが意匠のとおりに実描画される', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   // 検証面には表が 2 つある（意匠を測る的と、横溢れを発火させる的）。**測る側を名前で選ぶ。**
   // `.first()` に頼ると、面へ表を足した順序が変わっただけで測る対象が黙って入れ替わる。
   const catalogue = page.getByRole('region', { name: '区分ごとの個数' });
@@ -1485,8 +1477,7 @@ test('表のセル余白と行の区切りが意匠のとおりに実描画さ�
 test('ページ枠の版面が名前付きスケールで解決され、実効内容幅が狭く潰れていない', async ({
   page,
 }) => {
-  await page.goto('/ui-check');
-  await expect(page.getByRole('button', { name: '既定のボタン' })).toBeVisible();
+  await openComponentCatalog(page);
   await expectVerificationSurfaceSane(page);
 
   const shell = page.locator('[data-slot="page-shell"]');
@@ -1528,7 +1519,7 @@ test('ページ枠の版面が名前付きスケールで解決され、実効�
 });
 
 test('区切り線が装飾用の値のまま描画される', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   const separator = page.locator('[data-slot="separator"]');
   await expect(separator).toHaveCount(1);
 
@@ -1561,7 +1552,7 @@ const DISABLED_EFFECTIVE_BORDER = '#BBBBBB';
 const DISABLED_EFFECTIVE_SURFACE = '#DDDDDD';
 
 test('無効化された記入欄の枠と面が D8 の記録値どおりの実効色で描画される', async ({ page }) => {
-  await page.goto('/ui-check');
+  await openComponentCatalog(page);
   const disabled = page.getByRole('textbox', { name: '無効化の記入欄' });
   await expect(disabled).toBeVisible();
   await expect(disabled).toBeDisabled();
@@ -1642,15 +1633,14 @@ test('無効化された記入欄の枠と面が D8 の記録値どおりの実�
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。
 test('モバイルビューポートの回答画面で横スクロールが発生しない', async ({ page }) => {
-  await page.goto(`/s/${STORE_ID}`);
-  await expect(page.getByRole('button', { name: '星5' })).toBeVisible();
+  await openSurveySurface(page);
   // 捲れる領域は一言の `<textarea>` の 1 つ（textarea の既定の overflow は auto）。
   await expectNoHorizontalScroll(page, '回答画面', 1);
 });
 
 // requirements 3.3: 下書き画面（生成テキスト・投稿導線を含む主要画面）でも同様。
 test('モバイルビューポートの下書き画面で横スクロールが発生しない', async ({ page }) => {
-  await page.goto(`/s/${STORE_ID}`);
+  await openSurveySurface(page);
   await page.getByRole('button', { name: '星5' }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
@@ -1677,7 +1667,7 @@ test.describe('スクロール領域の除外', () => {
    * すべて「溢れが無いので緑」という無意味な緑を返す。
    */
   async function openSurfaceWithPanning(page: Page): Promise<OverflowMetrics> {
-    await page.goto('/ui-check');
+    await openComponentCatalog(page);
     await expect(page.getByRole('region', { name: PANNING_REGION })).toBeVisible();
     const metrics = await readOverflowMetrics(page, 'scroll-container');
     const region = metrics.scrollRegions.find((candidate) => candidate.label === PANNING_REGION);
