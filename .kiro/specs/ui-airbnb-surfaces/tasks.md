@@ -281,5 +281,36 @@ make ts-test-perf
 - **残存課題（本 spec の範囲外）**: `maxRight` 自身に非ゼロの assert が無い。
   将来「捲れる領域は 0 件」と宣言する面が現れると、非空振りの根拠が件数の宣言だけになる
 - **E2E はローカルで実行できない**（ブラウザ・起動アプリ・DB・生成 API のモックが要る）。
-  収集のサニティは `playwright test --list` で取れる（移設前後とも 34 件）。本体は CI に委ねる
+  収集のサニティは `playwright test --list` で取れる（移設前後とも 34 件）。
+  本体は CI で確認した（次節）
 
+### 段階 0 の CI 実証（2026-09-03・run 33757795701）
+
+段階 1 で 3 面を触る前に、段階 0 の土台が実際に緑であることを確かめた。`ts-ci` の発火条件は
+`push: [main, 'feat/**']` と `pull_request` であり、作業ブランチ `spec/**` は**どちらにも当たらない**。
+PR を立てずに回すため、同じ HEAD（`96f0832`）を使い捨ての `feat/ci-check-ui-airbnb-surfaces-41` へ
+push して発火させ、結果を確認したのちブランチを削除した（run は削除後も残る）。
+
+| ジョブ | 結果 |
+|---|---|
+| `lint-build-test` | success |
+| `e2e` | success |
+| `lighthouse` | success |
+| `cross-runtime` | success |
+| `go-test` | success |
+| `docker-build` | skipped（対象の変更なし） |
+
+**`e2e` は 34 件を実際に走らせて 34 件通した**（`Running 34 tests using 2 workers` → `34 passed (13.3s)`）。
+0 件で緑になったのではない。task 1.4 の完了条件が要求する 2 件は、ログに名前で残っている。
+
+```
+✓ 27 ui-foundation.spec.ts:1645 › モバイルビューポートの回答画面で横スクロールが発生しない
+✓ 28 ui-foundation.spec.ts:1653 › モバイルビューポートの下書き画面で横スクロールが発生しない
+```
+
+免除の対照実験（`none` / `data-slot` / `any-non-visible` と注入位置 2 通り）も同じ run で通っている。
+これで task 1.4 の「既存の横スクロール検証 2 件が移設後も緑」が、収集件数の一致ではなく
+**実行の証拠**を持った。`lighthouse` の success は要件 5.2（最大要素の描画完了時間）も
+現行の閾値内であることを示す。
+
+**段階 1 以降も同じ手順で回す。** `spec/**` に push しただけでは CI は 1 度も走らない。
