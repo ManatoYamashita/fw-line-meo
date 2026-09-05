@@ -282,9 +282,17 @@ Issue #50 でガードが素通りさせたのはまさにこの経路である�
 ### 監査対象と空振り防止
 
 axe は 3 面 9 経路に当てる（survey-web: `/ui-check`・`/s/{storeId}` ／ dashboard-web: 6 面 ／
-store-detail: 店舗詳細）。各面は横スクロール実測と**同じ手順**で開き、その手順が
-「本体が描けていること」を先に固定する（`fixtures/` が単一の定義を持ち、両 spec が使う）。
-空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。
+store-detail: 店舗詳細）。**9 経路すべてが `e2e/fixtures/` の open 手順を経由し**、その手順が
+「本体が描けていること」を先に固定する。dashboard-web と store-detail は横スクロール実測と
+a11y 監査の双方が同じ定義を使う。survey-web は対応する実測が `ui-foundation.spec.ts`（26 箇所の
+`page.goto` を持つ）であり今回は移していないため、`e2e/fixtures/surfaces.ts` を使うのは a11y 監査側
+だけである。
+
+空の画面には違反が出ようがないため、a11y 監査こそ前提の固定が要る。これは体裁ではなく成立条件で、
+実測で確かめてある: `/s/{storeId}` の unavailable 分岐（店舗不在・place 未確定）が返す 1 段落だけの
+DOM へ axe を当てると **violations 0 / passes 5**（`aria-hidden-body`・`color-contrast`・
+`document-title`・`html-has-lang`・`html-lang-valid`）となり、下の「規則 0 件」検出まで満たす。
+前提 assert が無ければ、回答画面を一度も監査せずに緑を返していた（PR #191 のレビュー指摘 1）。
 
 さらに `expectNoAxeViolations` は、違反 0 件が「違反が無い」のか「規則が 1 件も走っていない」
 のかを区別する（`passes + incomplete + violations > 0` を要求）。Lighthouse 側は実測で
@@ -296,11 +304,12 @@ store-detail: 店舗詳細）。各面は横スクロール実測と**同じ手�
 `bundle-budget.mjs` は `.js` だけを数えており、生成 CSS の増加を**構造的に一度も見ていなかった**。
 Tailwind の生成 CSS は使ったクラスに比例して単調増加し、実測でも 6,598 → 7,207 → 7,563 B gzip
 と誰にも観測されずに伸びていた。予算は 12 KB gzip（実測比 約 1.6 倍）。起票時の案は 15 KB
-だったが、それでは CSS が倍増するまで無警告で通るため、JS 予算の比率（実測 211 KB に対し
-300 KB ＝ 約 1.4 倍）に倣って詰めた。
+だったが、それでは CSS が倍増するまで無警告で通るため、JS 予算の比率（CI 実測 228.9 KB に対し
+300 KB ＝ 約 1.3 倍）に倣って詰めた。
 
 **0 件を「予算内」と読まない。** next build の出力先が変われば計測は黙って 0 B を報告し、
-CSS がどれだけ増えても永久に緑になる。CSS が 1 件も見つからないことは赤にしている。
+その資産がどれだけ増えても永久に緑になる。JS・CSS のどちらも 0 件なら赤にする（判定は
+`violatesBudget` が両者へ共有する。片方だけに置くと、置かなかった側が同じ穴を残す）。
 
 ## Components and Interfaces
 

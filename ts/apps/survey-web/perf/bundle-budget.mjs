@@ -19,9 +19,9 @@ const JS_BUDGET_GZIP_BYTES = 300 * 1024;
 //
 // 予算値の根拠: 実測 7,563 B に対し 12 KB（約 1.6 倍の余裕）。Issue #53 の起票時の案は 15 KB
 // （約 2 倍）だったが、それでは CSS が倍増するまで無警告で通ってしまい、「歯止め」という
-// 本来の目的を満たさない。JS 予算が実測 211 KB に対し 300 KB ＝ 約 1.4 倍で運用できている
-// ことに倣い、同程度の比率まで詰めた。部品追加で正当に超えたときは、超過分が妥当かを
-// 判断したうえでこの値を更新すること（更新自体が「CSS が増えた」ことの記録になる）。
+// 本来の目的を満たさない。JS 予算が実測 228.9 KB（CI の本ステップ出力）に対し 300 KB ＝
+// 約 1.3 倍で運用できていることに倣い、同程度の比率まで詰めた。部品追加で正当に超えたときは、
+// 超過分が妥当かを判断したうえでこの値を更新すること（更新自体が「CSS が増えた」ことの記録になる）。
 const CSS_BUDGET_GZIP_BYTES = 12 * 1024;
 
 const chunksDir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '.next', 'static', 'chunks');
@@ -64,27 +64,37 @@ console.log(
   `client CSS (gzip, ${css.count} files):  ${kb(css.gzipBytes)} KB / budget ${kb(CSS_BUDGET_GZIP_BYTES)} KB`,
 );
 
-let exceeded = false;
-
-if (js.gzipBytes > JS_BUDGET_GZIP_BYTES) {
-  console.error('JS バンドル予算を超過しました。');
-  exceeded = true;
+/**
+ * 1 種類の資産について「測れていること」と「予算内であること」を順に判定する。
+ *
+ * **0 件は「予算内」ではなく「測れていない」。** next build の出力先が変われば計測は黙って
+ * 0 B を報告し、その資産がどれだけ増えても永久に緑になる（Issue #53 が問題にした
+ * 「歯止めが無い」状態へ、検出されずに戻る）。判定を JS と CSS で共有するのは、片方だけに
+ * 置くと置かなかった側が同じ穴を残すためである（PR #191 のレビュー指摘 3）。
+ *
+ * @param {string} label
+ * @param {{ count: number, gzipBytes: number }} result
+ * @param {number} budgetGzipBytes
+ * @returns {boolean} 赤にすべきなら true
+ */
+function violatesBudget(label, result, budgetGzipBytes) {
+  if (result.count === 0) {
+    console.error(
+      `${label} が 1 件も見つかりません。next build の出力先が変わった可能性があります（予算検査が空振りしています）。`,
+    );
+    return true;
+  }
+  if (result.gzipBytes > budgetGzipBytes) {
+    console.error(`${label} 予算を超過しました。`);
+    return true;
+  }
+  return false;
 }
 
-// 0 件は「予算内」ではなく「測れていない」。next build の出力先が変われば
-// このガードは黙って 0 B を報告し、CSS がどれだけ増えても永久に緑になる
-// （Issue #53 が問題にした「歯止めが無い」状態へ、検出されずに戻る）。
-if (css.count === 0) {
-  console.error(
-    'CSS が 1 件も見つかりません。next build の出力先が変わった可能性があります（予算検査が空振りしています）。',
-  );
-  exceeded = true;
-} else if (css.gzipBytes > CSS_BUDGET_GZIP_BYTES) {
-  console.error('CSS 予算を超過しました。');
-  exceeded = true;
-}
+const jsViolates = violatesBudget('JS', js, JS_BUDGET_GZIP_BYTES);
+const cssViolates = violatesBudget('CSS', css, CSS_BUDGET_GZIP_BYTES);
 
-if (exceeded) {
+if (jsViolates || cssViolates) {
   process.exit(1);
 }
 console.log('bundle budget OK');
