@@ -294,6 +294,11 @@ DOM へ axe を当てると **violations 0 / passes 5**（`aria-hidden-body`・`
 `document-title`・`html-has-lang`・`html-lang-valid`）となり、下の「規則 0 件」検出まで満たす。
 前提 assert が無ければ、回答画面を一度も監査せずに緑を返していた（PR #191 のレビュー指摘 1）。
 
+この規律は `scripts/check-a11y-audit-preconditions.sh` が機械強制する（ts-ci の install 前・read-only）。
+監査 spec の同定は**ファイル名ではなく `expectNoAxeViolations` の呼び出し**で行い、`page.goto` の直書き・
+`fixtures/` 非経由・fixtures 側に前提 assert が無い形（移設しただけの形）・監査 spec 0 件（空振り）を
+それぞれ赤にする。是正前の spec を当てて赤、是正後で緑になることを実測で確認している。
+
 さらに `expectNoAxeViolations` は、違反 0 件が「違反が無い」のか「規則が 1 件も走っていない」
 のかを区別する（`passes + incomplete + violations > 0` を要求）。Lighthouse 側は実測で
 **21 規則が実際に採点されている**ことを確認したうえで `minScore: 1` を課している（現状の実測は
