@@ -76,6 +76,7 @@ export interface FlexBubbleStyles {
 
 export interface FlexBubble {
   readonly type: 'bubble';
+  readonly size?: string;
   readonly styles?: FlexBubbleStyles;
   readonly header?: FlexBox;
   readonly body?: FlexBox;
@@ -438,6 +439,8 @@ function buildAltText(summary: DailySummaryRow): string {
 export function buildDailySummaryFlex(summary: DailySummaryRow, liffUrl: string): FlexMessagePayload {
   const bubble: FlexBubble = {
     type: 'bubble',
+    // 幅の段を明示する。既定に委ねるとオンボーディングの 4 バブルと片方だけ動く。
+    size: lineLayout.bubbleSize,
     // footer の上に線を引き、操作と帰属表記を本文から切り離す（法的表記の帯として読ませる）。
     styles: { footer: { separator: true } },
     header: buildHeader(summary),

@@ -19,7 +19,10 @@
 
 /** LINE Flex Message 用の寸法トークン（意味役割 → LINE のキーワード）。 */
 export interface LineLayoutTokens {
-  /** バブルの幅の段。日次サマリーは既定（mega）を使うため、本トークンの消費先はオンボーディングの 4 バブル。 */
+  /**
+   * バブルの幅の段。値は LINE の既定と同じだが、消費側は明示する。既定に委ねると
+   * LINE 側の既定値が変わったときに幅が静かに変わり、詰め込んだ内容が破綻する。
+   */
   readonly bubbleSize: string;
   /** header / body / footer の内部余白。バブルの大きさに依らず同じ段を使う。 */
   readonly blockPadding: string;

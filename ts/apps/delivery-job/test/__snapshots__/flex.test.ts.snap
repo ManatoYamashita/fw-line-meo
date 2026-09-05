@@ -217,6 +217,7 @@ exports[`buildDailySummaryFlex > 前日データなし（rank_prev=null, R3.7）
       "paddingBottom": "md",
       "type": "box",
     },
+    "size": "kilo",
     "styles": {
       "footer": {
         "separator": true,
@@ -429,6 +430,7 @@ exports[`buildDailySummaryFlex > 新着クチコミなし（new_review_count=0, 
       "paddingBottom": "md",
       "type": "box",
     },
+    "size": "kilo",
     "styles": {
       "footer": {
         "separator": true,
@@ -663,6 +665,7 @@ exports[`buildDailySummaryFlex > 正常系（前日比あり・新着あり・�
       "paddingBottom": "md",
       "type": "box",
     },
+    "size": "kilo",
     "styles": {
       "footer": {
         "separator": true,
@@ -813,6 +816,7 @@ exports[`buildDailySummaryFlex > 競合なし（competitors=[], status=no_compet
       "paddingBottom": "md",
       "type": "box",
     },
+    "size": "kilo",
     "styles": {
       "footer": {
         "separator": true,

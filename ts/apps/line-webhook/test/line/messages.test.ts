@@ -358,6 +358,12 @@ describe('4 バブルの意匠の不変条件（スナップショット更新�
     },
   ];
 
+  it('4 バブルが同じ幅の段をトークンから宣言する', () => {
+    for (const { name, bubble } of bubbles) {
+      expect(bubble.size, `${name} の幅`).toBe(lineLayout.bubbleSize);
+    }
+  });
+
   it('body と footer が同じ内側余白をトークンから宣言する', () => {
     expect(bubbles).toHaveLength(4);
     for (const { name, bubble } of bubbles) {

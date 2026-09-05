@@ -336,6 +336,12 @@ describe('buildDailySummaryFlex', () => {
     // 群として読める間隔になっていることを直接 assert する。
     const bubble = buildDailySummaryFlex(baseSummary(), LIFF_URL).contents;
 
+    it('幅の段をトークンから明示する', () => {
+      // 既定に委ねると LINE 側の既定値が変わったとき、オンボーディングの 4 バブルと片方だけ動く。
+      // このカードは順位・3 セクション・3 列の競合行を詰めているので、幅の変化が直に破綻へつながる。
+      expect(bubble.size).toBe(lineLayout.bubbleSize);
+    });
+
     it('header / body / footer が同じ内側余白をトークンから宣言する', () => {
       for (const block of ['header', 'body', 'footer'] as const) {
         expect(findBlock(bubble, block).paddingAll).toBe(lineLayout.blockPadding);
