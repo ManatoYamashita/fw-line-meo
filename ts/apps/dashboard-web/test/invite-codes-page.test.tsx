@@ -8,9 +8,23 @@ const useAuthMock = vi.fn();
 vi.mock('../src/lib/auth-context', () => ({ useAuth: () => useAuthMock() }));
 
 // next/navigation・next/link はブラウザランタイム依存のためモックする。
-vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  // 帯（TopNav）が現在地の判定に使う。このページの実経路を返し、偽装が嘘をつかないようにする。
+  usePathname: () => '/invite-codes',
+}));
 vi.mock('next/link', () => ({
-  default: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
+  // href / children 以外の props（TopNav が現在地へ付ける aria-current と className）も素の a へ透過する。
+  // 捨てると帯の現在地表現が DOM に現れず、検証が構造を掴めない。
+  default: ({
+    href,
+    children,
+    ...rest
+  }: { href: string; children: ReactNode } & import('react').ComponentProps<'a'>) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
 }));
 
 // api クライアントは招待コード系メソッドをモックし、ネットワーク・firebase を発火させない。

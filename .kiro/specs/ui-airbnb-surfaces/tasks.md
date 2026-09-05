@@ -37,7 +37,7 @@
 ## 段階 1 — 管理ダッシュボード（Core）
 
 - [ ] 2. 一覧・ナビゲーション・ログインへ意匠を当てる
-- [ ] 2.1 帯を意匠へ寄せ、巻き添えになるテストの前提を揃える
+- [x] 2.1 帯を意匠へ寄せ、巻き添えになるテストの前提を揃える
   - 高さ・下端の罫線・現在地の示し方・ロールの提示を与える
   - 案内領域は 1 つのまま、リンクの読み上げ名を 1 文字も変えない
   - ワードマークの色は段階 0 で正典へ追記した組だけを使う
@@ -283,6 +283,111 @@ make ts-test-perf
 - **E2E はローカルで実行できない**（ブラウザ・起動アプリ・DB・生成 API のモックが要る）。
   収集のサニティは `playwright test --list` で取れる（移設前後とも 34 件）。
   本体は CI で確認した（次節）
+
+### 2.1 帯（2026-09-05）
+
+`h-20`・下端罫線・現在地・ロール提示・ワードマークを与えた。dashboard-web は **143 → 149 件**。
+
+**ワードマークの文字列は正典に無かった。** §2.2 と §7.4 は色と配置（帯とログインの 2 箇所）だけを定め、
+文字列を持たない。steering の製品名 `LINE Restaurant Manager` は 24px 太字で 300px を超え、
+携帯端末幅の帯に 5 リンク＋ロール＋ログアウトと並ぶと確実に溢れる。利用者の判断で **`LINE MEO`** とした
+（task 2.2 のログイン画面も同じ文字列を使う）。
+
+**現在地は「下線を属性から引く」形にした。** 条件分岐を class 側に 1 つも持たない。
+
+```
+aria-current={pathname === item.href ? 'page' : undefined}
+className="… border-b-2 border-transparent … aria-[current=page]:border-current"
+```
+
+全リンクの class 文字列が同一になり、下線は DOM 上の属性を CSS セレクタが拾って初めて出る。
+§7.8 の「片方だけが付く状態を作らない」を、規律ではなく**構造**で満たす。`border-current` は
+`currentColor`（リンク自身の文字色）を借りるので、design.md の「面の側に置く色」の閉じた集合を
+1 件も広げない。§7.8 の「リンクの色は変えない」も文字通り満たす。
+
+**ロール提示に `Badge variant="secondary"` を使ったのは選択ではなく強制である。** design.md の
+Architecture Pattern が「面が色を持つときは必ず部品経由」と定め、閉じた集合（4 件）はロール表示を
+含まない。手書きの `<span className="bg-… text-…">` は集合を 5 件目へ広げ、§2.2 への行追加＝段階 0 の
+作業を今さら発生させて 2.1 の境界を超える。
+
+**巻き添えの順序**: 5 ページの偽装拡充を実装より**前**に置いた。逆順だと `usePathname` の import 時点で
+5 ファイルが全滅し、実装のどこが原因か切り分けられない。5 ページの差分は 90 行すべてが 2 つの
+`vi.mock` ブロック内で、`expect(` / `it(` / `describe(` / `render(` を 1 行も触っていない（機械確認）。
+`next/link` のモックは 6 ファイルとも `{...rest}` 透過形へ拡充した。**拡充しないと `aria-current` も
+`className` も DOM に現れず、完了条件を 1 行も固定できない。**
+
+#### 独立レビューは 1 巡目で REJECTED（実装ではなく検証の穴 2 件）
+
+**穴 1 — 包含の assert は置換を捕まえるが追加を捕まえない。** 当初の照合は
+`classes.size === 1` と `toContain('aria-[current=page]:')` の 2 つで「片方だけが付く状態を排除する」と
+主張していた。レビュアの実測: `border-transparent` を `border-current` へ変えるだけ（接尾辞は残す）で
+**全リンクが恒久的に下線を持つのに 7/7 緑のまま通る**。両方の assert が成立してしまう。
+コメントに書いた保証は成立していなかった。
+
+是正は既定側も固定すること。さらにレビュアが M2/M4/M7（`border-current` の追加・`hover:` 付き・
+擬似要素）も是正前は緑だったと実測した。最終形は border-color を与えるトークンの**集合の完全一致**:
+
+```ts
+const borderColorTokens = tokens.filter((t) => /(^|:)border-(?:b-|y-)?[a-z]+$/.test(t));
+expect(borderColorTokens).toEqual(['border-transparent', 'aria-[current=page]:border-current']);
+```
+
+`border-b-2` は末尾が数字なので網に入らない（太さの指定であり色ではない）。
+**残余は記録しておく**: `underline` など text-decoration 系と擬似要素で線を描く手口は
+class 文字列の照合では捕まえきれない。視覚回帰は本 spec の境界外（#53）。
+
+**穴 2 — ログアウトの押しボタンに照合が 1 件も無かった。** `grep -rn "ログアウト" test/` が 0 件。
+このタスクは素の `<button>` を `Button variant="ghost"` へ差し替えており、読み上げ名・役割・個数・
+`signOut` の配線のいずれも固定されていなかった。要件 3.3 は個数が「検証によって固定されている」ことを
+問題にしており、ここでは固定するものがゼロだった。**「壊れない」のではなく「壊れても誰も気づかない」。**
+
+#### 赤化の実証（要件 7.2）
+
+注入 **11 通り**を実測し、すべて復元した。要件が求める 2 通りを大きく超える。
+
+| 対象 | 注入 | 失敗メッセージ |
+|---|---|---|
+| 現在地の一意性 | `aria-current` を削除 | `expected [] to have a length of 1 but got +0` |
+| 同上 | 判定を `startsWith` へ | `/stores/new: … to have a length of 1 but got 2` |
+| 下線と属性の結合 | `border-transparent` → `border-current` | `to include 'border-transparent'` |
+| 同上 | 素の `border-current` を追加 | 集合の不一致 |
+| 同上 | `border-b-current` を追加 | `expected [ 'border-transparent', …(2) ] to deeply equal [ …(1) ]` |
+| 同上 | `border-b-border` を追加 | 同上 |
+| 同上 | `hover:border-current` / 擬似要素 | 集合の不一致 |
+| 同上 | 現在地にだけ class を追加 | `expected 2 to be 1` |
+| ロール | `roleLabel` が常に `'運営'` | `agency … Unable to find an element with the text: 代理店` |
+| ログアウト | `onClick` を削除 | `expected "spy" to be called 1 times, but got 0 times` |
+| 同上 | 押しボタンをもう 1 つ追加 | `to have a length of 1 but got 2` |
+
+**注入は「同じ軸の 2 箇所」ではなく異なる軸から選ぶこと。** 親が最初に指示した注入
+「判定を `startsWith` へ」は、テストが `/invite-codes` 単独を走査する限り**赤くならない**
+（前方一致でも印は 1 つのまま）。前方一致が壊すのは `/stores/new` の経路である。
+実装者がこれに気づいてテストを 2 経路へ拡張した。単一経路のままなら空振りの注入で
+「実証した」と記録するところだった。
+
+#### 意匠が画面へ届いたことの証拠
+
+生成 CSS（`ts/apps/dashboard-web/.next/static/chunks/*.css`）を実測した。Tailwind v4 はソースを
+テキスト走査するため、クラスを書いても生成されない経路が実在する。
+
+```
+.aria-\[current\=page\]\:border-current[aria-current=page]{border-color:currentColor}
+.text-brand{color:var(--color-brand)}     --color-brand:#ff385c   （§2.2 の brand 行）
+.h-20{height:calc(var(--spacing) * 20)}   --spacing:.25rem → 80px （§7.8）
+.border-transparent{border-color:#0000}
+--text-2xl:1.5rem                                                 （§6 の最大段）
+```
+
+#### 判断: 下端罫線を §2.2 へ追記しない
+
+`border-b border-border` は「面の側に置く色」の閉じた集合に literal では無い。だが §2.2 は**閾値を持つ組**の
+表であり、§2.1 が `border` を「純装飾であり SC 1.4.11 の対象外」と定義している以上、3 語彙のどれを
+当てても真にならない行になる。`design-language-doc.test.ts` は表の行ごとに実効コントラストを再計算して
+照合するため、意味を持たない行は検査を弱める。追記しない。レビュアも同意（異議なし）。
+
+観察可能な完了条件の確認: 帯を描画する 6 ファイルが個別に緑（top-nav 8 / stores-page 25 /
+stores-new-page 6 / invite-codes-page 6 / admin-agencies-page 4 / admin-users-page 11 = 60 件）。
+運営は `運営`、代理店は `代理店` を提示し、互いの語は出ない。
 
 ### 1.4 の移設先は #187 に確定した（2026-09-05・訂正）
 
