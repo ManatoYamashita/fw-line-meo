@@ -1,4 +1,6 @@
 import { getPool, findStoreForSurvey, listSurveyAspects } from '@fwlm/db';
+import { Heading } from '@fwlm/ui/components/heading';
+import { PageShell } from '@fwlm/ui/components/page-shell';
 import { buildGoogleReviewUrl } from '../../../lib/google-review-url';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { writeStructuredLog } from '../../../lib/structured-log';
@@ -30,18 +32,23 @@ export default async function SurveyPage({
   const { storeId } = await params;
   const data = await loadSurveyPageData(await buildDeps(), storeId);
 
+  // 版面は外枠の部品が持つ（幅・左右余白・上下余白）。この面は本文系なので狭い方の段を使う。
+  // 分岐ごとに余白を変えていたが、面の側で段を作る理由が無いため部品の値へ寄せる。
+  // 部品は主要領域（main）として描かれるため、入れ子にしないこと。
   if (data.kind === 'unavailable') {
     return (
-      <main className="mx-auto w-full max-w-xl px-5 py-10">
+      <PageShell width="sm">
         <p className="text-muted-foreground">このアンケートは現在ご利用いただけません。</p>
-      </main>
+      </PageShell>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-xl px-5 py-8">
+    <PageShell width="sm">
       {/* 店名の見出し。どの店舗へのアンケートかを回答前に示す（従来は完了画面にしか出ていなかった）。 */}
-      <h1 className="mb-8 text-2xl font-bold tracking-tight">{data.store.name}</h1>
+      <Heading className="mb-8" level={1}>
+        {data.store.name}
+      </Heading>
       <SurveyShell
         storeId={data.store.id}
         storeName={data.store.name}
@@ -49,6 +56,6 @@ export default async function SurveyPage({
         pageToken={data.pageToken}
         googleReviewUrl={data.googleReviewUrl}
       />
-    </main>
+    </PageShell>
   );
 }

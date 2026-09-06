@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { test, expect, devices, type Locator, type Page } from '@playwright/test';
-import { colors, compositeOver, contrastRatio } from '@fwlm/design-tokens';
+import { colors, compositeOver, contrastRatio, spacing } from '@fwlm/design-tokens';
 import {
   deviceWidthOf,
   expectNoHorizontalScroll,
@@ -41,6 +41,14 @@ const AA_NORMAL_TEXT_RATIO = 4.5;
 // 非テキスト（部品の輪郭・状態表示）の WCAG 2.1 SC 1.4.11 基準。
 // spec form-non-text-contrast の Requirements 1.1 / 2.1 / 3.4 が課すしきい値。
 const NON_TEXT_RATIO = 3;
+
+// ページ枠の狭い側（本文系）の版面が解決されるべき値。Tailwind の名前付きコンテナ寸法スケール。
+//
+// **この値は 1 箇所にしか置かない。** 検証面と本番の回答画面はどちらもこの段を使っており
+// （ui-airbnb-surfaces 要件 1.2「同一の役割は面をまたいで同一の寸法」）、両側へ手書きすると
+// 片方だけを直したときに面の間の食い違いが検出できなくなる。
+// 固定する理由そのものは、この値を使う検証面側のテストの本文に書いてある（Issue #54）。
+const PAGE_SHELL_SM_MAX_WIDTH = '576px';
 
 // color-mix() の合成後の実効色は @fwlm/ui の許可リストを正典にする（PR #56 レビュー指摘2）。
 // 同じファイルを ui の contrast-usage.test.ts が静的な数値検証に使う。実測値を両側へ手書きすると、
@@ -646,6 +654,181 @@ async function expectVerificationSurfaceSane(page: Page): Promise<void> {
   ).toBeGreaterThanOrEqual(viewport.width * 0.8);
 }
 
+/**
+ * 本番の面についても、意匠の実測より **先に** レイアウトが degenerate でないことを確かめる。
+ *
+ * 検証面向けの `expectVerificationSurfaceSane` と同じ役割・同じ閾値だが、失敗時に見るべき場所が
+ * まったく違う（検証面なら検証面の器、本番なら面そのものの版面）。同じ関数を使い回すと、本番の面が
+ * 潰れたときに「検証面を確認せよ」という誤った案内を出すので、案内の中身ごと分ける。
+ */
+async function expectProductionSurfaceSane(page: Page, where: string): Promise<void> {
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
+  }
+  const width = await page
+    .locator('main')
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(
+    width,
+    `${where}: 主要領域の実幅が ${width}px しかない（端末幅 ${viewport.width}px）。` +
+      'これは意匠の欠陥ではなく面のレイアウトが壊れている状態で、この幅で測った色も寸法も' +
+      '実態を表さない。ページ枠の部品の版面指定と、寸法系ユーティリティの解決先を確認すること',
+  ).toBeGreaterThanOrEqual(viewport.width * 0.8);
+}
+
+/** 根の文字寸法（px）。rem で宣言された名前付きスケールを実描画の px へ解決するために要る。 */
+async function readRootFontSizePx(page: Page): Promise<number> {
+  const size = await page.evaluate(
+    () => getComputedStyle(document.documentElement).fontSize,
+  );
+  const px = Number.parseFloat(size);
+  expect(px, `根の文字寸法を実測できない（実測 ${size}）`).toBeGreaterThan(0);
+  return px;
+}
+
+/**
+ * 余白の名前付きスケール（design-language §3 の 9 段）を px へ解決した集合。
+ *
+ * **段そのものを転記しない**（要件 6.1）。値は `@fwlm/design-tokens` の `spacing` が持ち、
+ * 段と Tailwind の数値スケールの対応は @fwlm/ui の token-scales が機械照合している。
+ * ここではその 9 段の **どれかへ解決されていること** だけを要求する。特定の段を名指しすると、
+ * 面の側が「どの段を使うか」を検証へ転記することになり、正典が 2 箇所へ増える。
+ */
+function namedSpacingPx(rootFontSizePx: number): readonly number[] {
+  return Object.values(spacing).map((rem) => Number.parseFloat(rem) * rootFontSizePx);
+}
+
+interface ShellMetrics {
+  maxWidth: string;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  width: number;
+}
+
+function readShellMetrics(shell: Locator): Promise<ShellMetrics> {
+  return shell.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      maxWidth: style.maxWidth,
+      paddingTop: Number.parseFloat(style.paddingTop),
+      paddingRight: Number.parseFloat(style.paddingRight),
+      paddingBottom: Number.parseFloat(style.paddingBottom),
+      paddingLeft: Number.parseFloat(style.paddingLeft),
+      width: element.getBoundingClientRect().width,
+    };
+  });
+}
+
+/**
+ * ページ枠の版面が意匠の律どおりに解決されていることを実測から要求する。
+ *
+ * 見るのは 3 つ。(1) 版面が名前付きコンテナ寸法スケールへ解決されていること（Issue #54 の
+ * 潰れ）、(2) 四辺の余白が名前付き余白スケールのいずれかへ解決され、かつ 0 でないこと
+ * （要件 1.5「要素が端に接した状態で描画しない」）、(3) 実効内容幅が潰れていないこと。
+ */
+function expectShellSane(
+  metrics: ShellMetrics,
+  where: string,
+  viewportWidth: number,
+  allowedPadding: readonly number[],
+): void {
+  expect(
+    metrics.maxWidth,
+    `${where}: 版面が名前付きスケールへ解決されていない（実測 ${metrics.maxWidth}）。` +
+      '寸法系の解決先が別スケールに覆われている疑いがある',
+  ).toBe(PAGE_SHELL_SM_MAX_WIDTH);
+
+  const sides = [
+    ['上', metrics.paddingTop],
+    ['右', metrics.paddingRight],
+    ['下', metrics.paddingBottom],
+    ['左', metrics.paddingLeft],
+  ] as const;
+  for (const [side, value] of sides) {
+    expect(
+      value,
+      `${where}: ${side}の余白が ${value}px。内容が面の端に接して描画されている`,
+    ).toBeGreaterThan(0);
+    expect(
+      allowedPadding.includes(value),
+      `${where}: ${side}の余白 ${value}px が名前付き余白スケール` +
+        `（${allowedPadding.join(' / ')}px）のどれにも解決されていない。` +
+        '面の側が独自の値を持っている疑いがある',
+    ).toBe(true);
+  }
+  expect(
+    metrics.paddingLeft,
+    `${where}: 左右の余白が非対称（左 ${metrics.paddingLeft}px / 右 ${metrics.paddingRight}px）`,
+  ).toBe(metrics.paddingRight);
+  expect(
+    metrics.paddingTop,
+    `${where}: 上下の余白が非対称（上 ${metrics.paddingTop}px / 下 ${metrics.paddingBottom}px）`,
+  ).toBe(metrics.paddingBottom);
+
+  const content = metrics.width - metrics.paddingLeft - metrics.paddingRight;
+  expect(
+    content,
+    `${where}: ページ枠の実効内容幅が ${content}px しかない（端末幅 ${viewportWidth}px）`,
+  ).toBeGreaterThanOrEqual(viewportWidth * 0.8);
+}
+
+interface AlertStateColor {
+  /** 説明文の実描画色。 */
+  readonly color: string;
+  /** 説明文の直下の面（通知の容器）の実描画色。 */
+  readonly background: string;
+}
+
+/**
+ * 通知の説明文の実描画色と、その背面の色を実測する。**ここでは値を表明しない。**
+ *
+ * 説明文を見る理由は検証面向けの同種のテストと同じで、`AlertDescription` が自身に補足色を
+ * 持つため、親の変種が子孫指定で色を渡さない限り説明文だけが灰色のまま残るからである。
+ * この経路はクラス集合を壊さないので、静的な検証はすべて緑のまま通る。
+ *
+ * 表明を呼び出し側へ残すのは、2 つの通知を測り終えてからでなければ「成功と危険が同系色へ
+ * 寄っていない」を表明できないためである。測る場所で値を表明すると、その表明が先に落ちて、
+ * 面をまたいだ比較が一度も発火しない。
+ */
+async function readAlertStateColor(alert: Locator, where: string): Promise<AlertStateColor> {
+  const description = alert.locator('[data-slot="alert-description"]');
+  await expect(description, `${where}: 通知の説明文が 1 つに定まらない`).toHaveCount(1);
+
+  const rendered = await readRenderedColors(description);
+  const container = await readRenderedColors(alert);
+  expect(rendered.color, `${where}: 説明文の色を実測できない`).not.toBeNull();
+  expect(container.backgroundColor, `${where}: 通知の下地の色を実測できない`).not.toBeNull();
+
+  return {
+    color: rendered.color as string,
+    background: container.backgroundColor as string,
+  };
+}
+
+/** 実測した通知の色が、その変種の状態色であり、かつ背面に対して AA を満たすことを要求する。 */
+function expectAlertStateColor(
+  measured: AlertStateColor,
+  expected: string,
+  where: string,
+): void {
+  expect(
+    measured.color,
+    `${where}: 説明文が ${measured.color} で描画されている（要求 ${expected}）。` +
+      `補足色（${colors.textMuted}）なら変種そのものが届いておらず、` +
+      `アクション色（${colors.primary}）なら状態色が汎用のアクション色へ退行している`,
+  ).toBe(expected);
+
+  const ratio = contrastRatio(measured.color, measured.background);
+  expect(
+    ratio,
+    `${where}: 説明文 ${measured.color} on ${measured.background} → ` +
+      `${ratio.toFixed(3)}:1（要求 ${AA_NORMAL_TEXT_RATIO}:1）`,
+  ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
+}
+
 interface FocusIndicator {
   tag: string;
   name: string;
@@ -716,9 +899,15 @@ test('キーボードでたどった操作可能要素すべてに可視フォ�
 
 // requirements 5.3 / Issue #49: @fwlm/ui の部品そのものに可視フォーカス表示が出る。
 //
-// 上のテストが走査する回答画面は素の <button> / <textarea> / <input> で構成されており、
-// @fwlm/ui の部品を一度も通っていない。そのため「部品が base レイヤのフォーカス既定を
-// outline を打ち消すユーティリティで無効化していた」欠陥（Issue #49）を検出できなかった。
+// 上のテストが走査する回答画面は、Issue #49 の当時は素の <button> / <textarea> / <input> で
+// 構成されており、@fwlm/ui の部品を一度も通っていなかった。そのため「部品が base レイヤの
+// フォーカス既定を outline を打ち消すユーティリティで無効化していた」欠陥を検出できなかった。
+//
+// **現在の回答画面は部品を一部通っている**（ui-airbnb-surfaces task 4.1 の時点で
+// Alert / Button / Checkbox / Heading / PageShell / Textarea の 6 種）。それでも本テストは要る。
+// 全 18 種のうち残る 12 種（Badge / Card / EmptyState / Field / Input / Label / PageHeader /
+// RadioGroup / Select / Separator / Spinner / Table）は本番のどの画面からも到達せず、
+// 到達しない部品のフォーカス表示は本番の面を走査しても一度も測られないからである。
 // ここでは部品を実描画する検証面（/ui-check）を的にして、同じ実測ロジックを部品経路へ通す。
 test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出る', async ({ page }) => {
   await openComponentCatalog(page);
@@ -996,6 +1185,83 @@ test.describe('動き低減設定が有効な環境', () => {
       cue.width,
       `処理中の文言「${cue.text}」が実描画で ${cue.width}px しかない（読み上げ専用のまま可視化されていない）`,
     ).toBeGreaterThan(8);
+  });
+
+  // 上の 1 件は検証面（/ui-check）しか見ておらず、**本番画面の処理中表示は誰も測っていなかった**。
+  // 本 spec の task 4.2 が本番の下書き画面へ処理中の図形を入れたため、射程の外に穴が空いていた。
+  //
+  // 本番と検証面では文言の出所が違う。検証面の文言は部品が持つ読み上げ専用の要素で、
+  // 動きの低減が要求されたときだけ可視化される。本番は面の側が直下のテキストノードとして
+  // 常時可視で置き、図形は読み上げから隠した装飾として添える（task 4.2）。
+  // **どちらの形でも「動きを止めた環境で処理中が文言で伝わる」ことが成立する必要がある。**
+  test('本番の下書き画面の処理中表示が動きに依存しない可視の手掛かりを提示する', async ({
+    page,
+  }) => {
+    await openSurveySurface(page);
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬されていない文脈で実行されている（抑制規則が適用対象外になり空振りする）',
+    ).toBe(true);
+
+    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('button', { name: '送信する' }).click();
+    await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+    await page.getByRole('button', { name: /別の文章を生成/ }).click();
+
+    const measured = await page.evaluate(() => {
+      const region = document.querySelector('[role="status"]');
+      if (region === null) return null;
+      const spinner = region.querySelector('[data-slot="spinner"]');
+      const icon = spinner === null ? null : spinner.querySelector('svg');
+      // 文言は「直下のテキストノード」であることが要る。図形の読み上げ名へ畳むと
+      // 部品内部の読み上げ専用要素へ落ち、動きの低減が要求されていない環境で見えなくなる。
+      const range = document.createRange();
+      const own: string[] = [];
+      let width = 0;
+      for (const paragraph of Array.from(region.querySelectorAll('p'))) {
+        for (const node of Array.from(paragraph.childNodes)) {
+          const text = (node.textContent ?? '').trim();
+          if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
+            own.push(text);
+            range.selectNodeContents(node);
+            width = Math.max(width, range.getBoundingClientRect().width);
+          }
+        }
+      }
+      return {
+        ownText: own.join(''),
+        width,
+        spinnerPresent: spinner !== null,
+        spinnerHidden: spinner === null ? null : spinner.getAttribute('aria-hidden'),
+        animationDuration: icon === null ? null : getComputedStyle(icon).animationDuration,
+      };
+    });
+
+    // 空振り防止: 領域と図形を実際に掴めていること。掴めていないと以下はすべて空の比較になる。
+    expect(measured, '本番の下書き画面に読み上げ領域が無い').not.toBeNull();
+    const cue = measured as NonNullable<typeof measured>;
+    expect(cue.spinnerPresent, '処理中の図形を掴めていない（再生成が始まっていない疑い）').toBe(
+      true,
+    );
+
+    expect(
+      cue.ownText,
+      `処理中の文言が直下のテキストノードとして置かれていない（実測「${cue.ownText}」）。` +
+        '図形の読み上げ名へ畳むと、動きの低減が要求されていない環境で文言が見えなくなる',
+    ).toBe('生成中…');
+    expect(
+      cue.width,
+      `処理中の文言が実描画で ${cue.width}px しかない（可視化されていない）`,
+    ).toBeGreaterThan(8);
+    expect(
+      cue.spinnerHidden,
+      '処理中の図形が読み上げから隠されていない（読み上げ領域が二重になる）',
+    ).toBe('true');
+    // 図形の回転そのものは止まっていること（止めた代わりが上の文言である）。
+    expect(
+      Number.parseFloat(cue.animationDuration ?? '1'),
+      `処理中の図形の動きが抑制されていない（実測 ${cue.animationDuration ?? '不明'}）`,
+    ).toBeLessThanOrEqual(0.001);
   });
 });
 
@@ -1509,7 +1775,7 @@ test('ページ枠の版面が名前付きスケールで解決され、実効�
     metrics.maxWidth,
     `版面が名前付きスケールへ解決されていない（実測 ${metrics.maxWidth}）。` +
       '寸法系の解決先が別スケールに覆われている疑いがある',
-  ).toBe('576px');
+  ).toBe(PAGE_SHELL_SM_MAX_WIDTH);
 
   const content = metrics.width - metrics.paddingLeft - metrics.paddingRight;
   expect(
@@ -1629,6 +1895,385 @@ test('無効化された記入欄の枠と面が D8 の記録値どおりの実�
     `枠の実効色が計算値（${rendered.borderColor ?? '不明'}）と同じ。` +
       '要素の不透明度が実効色に効いておらず、利用者が見る色を測れていない',
   ).not.toBe(rendered.borderColor);
+});
+
+// --- 本番画面への意匠の実測（ui-airbnb-surfaces タスク 6.1 / 6.2） -----------------------
+//
+// ここまでの意匠の実測は 1 件残らず検証専用ページ（/ui-check）にしか当たっていなかった。
+// 検証面が緑でも、本番の面がその成果を受け取っているとは限らない（設計 design.md「実描画検証の
+// 射程」）。段階 3 で回答画面・下書き画面・回答済み画面へ意匠を当てたので、実ブラウザで測る
+// 足場のあるこの面に限り、射程を本番へ広げる。残る 2 面（管理・店舗詳細）は足場が無いため
+// 目視確認の記録で補う（要件 4.6 の扱いとして確定した判断）。
+//
+// **どの検証も、走査対象を掴めた件数を先に固定する**（要件 7.4）。差が無いことや覆っていない
+// ことの表明は、対象が 0 件なら自明に成立して緑になる。
+
+// 要件 1.2 / 1.5 / 4.6: 本番の面でも版面が名前付きスケールへ解決され、内容が端に接しない。
+test('本番の回答画面と下書き画面の版面が名前付きスケールで解決され、実効内容幅が潰れていない', async ({
+  page,
+}) => {
+  await openSurveySurface(page);
+  await expectProductionSurfaceSane(page, '回答画面');
+
+  const viewport = page.viewportSize();
+  if (viewport === null) {
+    throw new Error('Playwright の viewport が未設定（モバイル幅の project で実行すること）');
+  }
+  const allowedPadding = namedSpacingPx(await readRootFontSizePx(page));
+
+  const shell = page.locator('[data-slot="page-shell"]');
+  // 走査対象を先に固定する（要件 7.4）。この表明が無いと、0 件のときは下の実測が
+  // 「要素が見つからない」という原因の読めない例外になり、2 件のときはページ枠が入れ子に
+  // なって主要領域が二重になっているのに、どちらを測っているかが決まらないまま進む。
+  await expect(shell, '回答画面にページ枠の部品が 1 つに解決されていない').toHaveCount(1);
+  expect(
+    await shell.evaluate((element) => element.tagName),
+    '回答画面のルートがページ枠の部品になっていない（面の側が素の器を持っている疑い）',
+  ).toBe('MAIN');
+  expect(
+    await shell.getAttribute('data-width'),
+    '回答画面が本文系の版面で描かれていない。客向けの面は一覧系の段を使わない',
+  ).toBe('sm');
+
+  const answering = await readShellMetrics(shell);
+  expectShellSane(answering, '回答画面', viewport.width, allowedPadding);
+
+  // 下書き画面は同じページの状態遷移で描かれる。版面を作り直していないこと（＝下書き側に
+  // 面固有の器が生えていないこと）まで見る。生えていれば data-slot は 2 件になるか、
+  // 版面の段が食い違う。
+  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('button', { name: '送信する' }).click();
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+
+  await expect(shell, '下書き画面でページ枠の部品が 1 つに解決されていない').toHaveCount(1);
+  expect(
+    await shell.getAttribute('data-width'),
+    '下書き画面が回答画面と別の版面で描かれている',
+  ).toBe('sm');
+  const drafting = await readShellMetrics(shell);
+  expectShellSane(drafting, '下書き画面', viewport.width, allowedPadding);
+});
+
+// 要件 1.2 / 4.1 / 4.4 / 正典 7.1: 星は選択済みを本文色、未選択を補足色で描く。
+//
+// jsdom 側（survey-form.test.tsx）はクラス集合を固定しているが、クラスが付いていることと
+// その色が描かれることは別問題である。意味論変数の付け替えや @theme の割当を誤れば、
+// クラス名は無傷のまま色だけが別の役割へ移る。ここは実際に描かれた色を測る。
+test('本番の回答画面の星が選択済みと未選択で異なる実描画色を持つ', async ({ page }) => {
+  await openSurveySurface(page);
+  const third = page.getByRole('button', { name: '星3' });
+  await expect(third).toBeVisible();
+  const background = await readPageBackground(page);
+
+  await third.click();
+
+  // **落ち着くまで待つ。** 状態を示す色は遷移して変わるため（正典 7.11）、押した直後に読むと
+  // 選択済みも未選択もほぼ遷移前の色のままで、「2 色が異なる」の対偶が偽で成立する
+  // （実測で踏んだ: 押した直後の 5 個は #6A6A6A / #6A6A6A / #686868 / #6A6A6A / #6A6A6A）。
+  //
+  // **待ちの条件へ期待する色を書かない。** 期待値で待つと、色の表明がこの待ちに吸収されて、
+  // 下に並べた個別の表明（アクション色でないこと・罫線色でないこと）が一度も発火しなくなる。
+  // 遷移の長さも書かない（正典 7.11 の数値をここへ転記することになる）。
+  // 2 回続けて同じ色が読めた時点で遷移は終わっている、という条件だけで待つ。
+  let previous: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const current = (await readRenderedColors(third)).color;
+        const settled = current !== null && current === previous;
+        previous = current;
+        return settled;
+      },
+      {
+        message: '押した星の色が落ち着かない（状態の色遷移が終わらない）',
+        timeout: 5_000,
+      },
+    )
+    .toBe(true);
+
+  // **走査対象も 2 群の分け方も DOM から導く**（要件 7.4）。星の番号を並べた固定長の配列から
+  // 群を作ると、要素が 1 つも描かれていなくても配列の長さは定数のままで、非空の確認が
+  // 「長さ 3 は 0 より大きい」という常に真の表明に退化する。
+  //
+  // 分ける鍵に **字形** を使うのは、それが状態の区別を色だけに委ねていないことの確認を兼ねる
+  // ためである（要件 4.7）。字形が状態で変わらなくなれば、どちらかの群が空になって赤くなる。
+  const starButtons = page.getByRole('button', { name: /^星\d+$/ });
+  const total = await starButtons.count();
+  expect(total, '回答画面の星を 1 つも掴めていない（面が星を描いていない）').toBeGreaterThan(0);
+
+  const measured: { name: string; glyph: string; color: string }[] = [];
+  for (let index = 0; index < total; index += 1) {
+    const button = starButtons.nth(index);
+    const name = (await button.getAttribute('aria-label')) ?? `星（${index}番目）`;
+    const rendered = await readRenderedColors(button);
+    expect(rendered.color, `${name} の色を実測できない`).not.toBeNull();
+    measured.push({
+      name,
+      glyph: ((await button.textContent()) ?? '').trim(),
+      color: rendered.color as string,
+    });
+  }
+
+  const selected = measured.filter((star) => star.glyph === '★');
+  const unselected = measured.filter((star) => star.glyph === '☆');
+  expect(
+    selected.length,
+    `選択済みの星を 1 つも掴めていない（実測した字形: ${measured.map((s) => s.glyph).join('')}）。` +
+      '状態の区別が字形に現れていない',
+  ).toBeGreaterThan(0);
+  expect(
+    unselected.length,
+    `未選択の星を 1 つも掴めていない（実測した字形: ${measured.map((s) => s.glyph).join('')}）。` +
+      '状態の区別が字形に現れていない',
+  ).toBeGreaterThan(0);
+
+  const selectedColors = new Set(selected.map((star) => star.color));
+  const unselectedColors = new Set(unselected.map((star) => star.color));
+  expect(
+    selectedColors.size,
+    `選択済みの星が 1 色に解決されていない（${[...selectedColors].join(' / ')}）`,
+  ).toBe(1);
+  expect(
+    unselectedColors.size,
+    `未選択の星が 1 色に解決されていない（${[...unselectedColors].join(' / ')}）`,
+  ).toBe(1);
+
+  const [selectedColor] = [...selectedColors] as [string];
+  const [unselectedColor] = [...unselectedColors] as [string];
+
+  expect(
+    selectedColor,
+    `選択済み（${selectedColor}）と未選択（${unselectedColor}）が同じ色で描かれている。` +
+      '評価の状態が見た目から読み取れない',
+  ).not.toBe(unselectedColor);
+
+  // 正典 7.1 が名指しで禁じた退行を、下の等値の表明より **先に** 置く。等値を先に置くと
+  // これらは等値から論理的に導かれるだけの死んだ表明になり、どの改変でも発火しない。
+  for (const [role, value] of [
+    ['選択済み', selectedColor],
+    ['未選択', unselectedColor],
+  ] as const) {
+    expect(
+      value,
+      `${role}の星がアクション色（${colors.primary}）で描かれている。` +
+        '満足度評価が赤い星になる退行で、正典 7.1 が名指しで禁じている',
+    ).not.toBe(colors.primary);
+  }
+  expect(
+    unselectedColor,
+    `未選択の星が装飾用の罫線色（${colors.border}）で描かれている。` +
+      '罫線色は情報を持たない装飾であり、状態を伝える字形の色には足りない（正典 7.1）',
+  ).not.toBe(colors.border);
+  expect(
+    unselectedColor,
+    `未選択の星が識別用の枠色（${colors.borderInteractive}）で描かれている。` +
+      'この色は変数参照専用であり、文字色のユーティリティとしては使わない（正典 7.1）',
+  ).not.toBe(colors.borderInteractive);
+
+  expect(selectedColor, '選択済みの星が本文色で描かれていない（正典 7.1）').toBe(colors.text);
+  expect(unselectedColor, '未選択の星が補足色で描かれていない（正典 7.1）').toBe(colors.textMuted);
+
+  // 2 色とも本文として読めること。未選択が薄すぎれば「☆ が見えない」になる。
+  for (const [role, value] of [
+    ['選択済み', selectedColor],
+    ['未選択', unselectedColor],
+  ] as const) {
+    const ratio = contrastRatio(value, background);
+    expect(
+      ratio,
+      `${role}の星 ${value} on ${background} → ${ratio.toFixed(3)}:1（要求 ${AA_NORMAL_TEXT_RATIO}:1）`,
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
+  }
+});
+
+// 要件 1.2 / 4.4 / 正典 2.1: 通知の状態色が本番の面の実描画まで届いている。
+test('本番画面の通知に変種の状態色が実描画で届いている', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await openSurveySurface(page);
+
+  // 危険の通知: 満足度を選ばずに送信すると必須の通知が出る。
+  await page.getByRole('button', { name: '送信する' }).click();
+  const dangerAlert = page.locator('[data-slot="alert"]');
+  await expect(dangerAlert, '回答画面に必須の通知が 1 つに解決されていない').toHaveCount(1);
+  const danger = await readAlertStateColor(dangerAlert, '回答画面の必須の通知');
+
+  // 成功の通知: 下書き画面でコピーすると成功の通知が出る。
+  // 星を押した時点で上の必須の通知は消えるので、通知は常に 1 つに解決される。
+  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('button', { name: '送信する' }).click();
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+  await page.getByRole('button', { name: /コピー/ }).click();
+  await expect(page.getByText(/コピーしました/)).toBeVisible();
+
+  const successAlert = page.locator('[data-slot="alert"]');
+  await expect(successAlert, '下書き画面に成功の通知が 1 つに解決されていない').toHaveCount(1);
+  const success = await readAlertStateColor(successAlert, '下書き画面のコピー成功の通知');
+
+  // 成功と危険が同系色へ寄る退行は、輝度が近ければコントラストを見るどのガードにも掛からない
+  // （正典 2.4「成功色をアクション色と共有しない」の理由そのもの）。別色であることを直接見る。
+  // **各々の等値の表明より先に置く。** 後ろに置くと等値から導かれるだけの死んだ表明になる。
+  expect(
+    success.color,
+    `成功の通知（${success.color}）と危険の通知（${danger.color}）が同じ色で描かれている。` +
+      '色相だけが寄る退行は輝度を変えないため、コントラストを見るどのガードにも掛からない',
+  ).not.toBe(danger.color);
+
+  expectAlertStateColor(danger, colors.destructive, '回答画面の必須の通知');
+  expectAlertStateColor(success, colors.success, '下書き画面のコピー成功の通知');
+});
+
+test('客向け主操作が 48px / 16px の可視寸法で描画される', async ({ page }) => {
+  await openSurveySurface(page);
+  await expectProductionSurfaceSane(page, '回答画面');
+
+  const submit = page.getByRole('button', { name: '送信する' });
+  const answering = await submit.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { height: rect.height, fontSize: getComputedStyle(element).fontSize };
+  });
+  expect(answering.height, '回答画面の主操作が 48px で描画されていない').toBe(48);
+  expect(answering.fontSize, '回答画面の主操作が 16px で描画されていない').toBe('16px');
+
+  await page.getByRole('button', { name: '星5' }).click();
+  await submit.click();
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+
+  const draftActions = [
+    page.getByRole('button', { name: 'コピーして投稿する' }),
+    page.getByRole('button', { name: /別の文章を生成/ }),
+    page.getByRole('link', { name: 'Google のクチコミを書く' }),
+  ];
+  for (const action of draftActions) {
+    const rendered = await action.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        label: (element.textContent ?? '').trim(),
+        height: rect.height,
+        fontSize: getComputedStyle(element).fontSize,
+      };
+    });
+    expect(rendered.height, `${rendered.label} が 48px で描画されていない`).toBe(48);
+    expect(rendered.fontSize, `${rendered.label} が 16px で描画されていない`).toBe('16px');
+  }
+});
+
+// 要件 2.3 / 4.4 / 7.4: 本番の面の選択部品も操作領域の要求値を満たす。
+//
+// 検証面向けの同種のテストは /ui-check の Checkbox を測っており、本番の観点チップは
+// 一度も測られていなかった。部品が同じでも、面の側が包むラベルの寸法を落とせば
+// 「押せる部品が押しにくい行の中にある」状態は成立する。
+test('本番の回答画面の選択部品が操作領域の要求値を満たす', async ({ page }) => {
+  await openSurveySurface(page);
+  await expectProductionSurfaceSane(page, '回答画面');
+
+  // 非空の確認を先に置く（要件 7.4）。0 件なら以下の for は一度も回らず、
+  // 「すべて要求値を満たす」が空虚に成立して緑になる。
+  const boxes = await readTouchGeometries(page, '[data-slot="checkbox"]');
+  expect(
+    boxes.length,
+    '回答画面の選択部品を 1 つも実測できていない。面が選択部品を通らなくなったか、' +
+      '観点そのものが DB から返っていない（E2E の seed とマスタを確認すること）',
+  ).toBeGreaterThan(0);
+
+  for (const box of boxes) {
+    // 見えている矩形だけでは足りない。この部品は疑似要素で操作領域を広げており、
+    // 拡張はレイアウトフローから外れるため getBoundingClientRect には現れない。
+    expect(
+      box.hasExpansion,
+      `選択部品（${box.name}）の操作領域が視覚領域から広がっていない` +
+        `（視覚 ${box.visual.width}×${box.visual.height}px）。拡張の指定が効いていない`,
+    ).toBe(true);
+    for (const [axis, value] of [
+      ['高さ', box.effective.height],
+      ['幅', box.effective.width],
+    ] as const) {
+      expect(
+        value,
+        `選択部品（${box.name}）の操作領域の${axis}が ${value}px（下限 ${TOUCH_TARGET_COMPACT_PX}px）`,
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_COMPACT_PX);
+    }
+  }
+
+  // ラベルが制御を包む構成なので、要求の 44px は行全体で満たす（検証面と同じ律・要件 4.7）。
+  // 部品単体は項目間隔の制約で下限までしか広げられず、面の側の行がその不足を引き受けている。
+  const rows = await readTouchGeometries(page, 'label:has([data-slot="checkbox"])');
+  expect(
+    rows.length,
+    `観点の行（${rows.length} 件）と選択部品（${boxes.length} 件）が 1 対 1 に対応していない。` +
+      '包む構成が崩れており、行で 44px を満たすという前提が成り立たない',
+  ).toBe(boxes.length);
+  for (const row of rows) {
+    expect(
+      row.effective.height,
+      `観点の行（${row.name}）の操作領域の高さが ${row.effective.height}px` +
+        `（要求 ${TOUCH_TARGET_DEFAULT_PX}px）`,
+    ).toBeGreaterThanOrEqual(TOUCH_TARGET_DEFAULT_PX);
+  }
+});
+
+// 要件 1.1 / 1.5 / 4.4 / 7.4: 空状態の文字色と余白を実描画で固定する。
+//
+// **本番の 3 面には空状態が無い。** 客向けアンケートは一覧を持たず、管理ダッシュボードと
+// 店舗詳細には実ブラウザで測る足場が無い。したがってこの部品を実描画で測れる場所は検証面
+// だけであり、ここで測らなければ意匠は 1 度も実描画で確かめられないまま面へ配られる。
+test('空状態の文字色と余白が意匠のとおりに実描画される', async ({ page }) => {
+  await openComponentCatalog(page);
+  await expectVerificationSurfaceSane(page);
+
+  const empty = page.locator('[data-slot="empty-state"]');
+  // 非空の確認を先に置く（要件 7.4）。検証面から部品が消えれば以下は測る対象を失う。
+  await expect(empty, '検証面に空状態の部品が 1 つに解決されていない').toHaveCount(1);
+
+  const rendered = await readRenderedColors(empty);
+  const background = await readPageBackground(page);
+  expect(rendered.color, '空状態の文字色を実測できない').not.toBeNull();
+  expect(
+    rendered.color,
+    `空状態が補足色で描かれていない（実測 ${rendered.color ?? '不明'}）。` +
+      '空であることの案内は本文と同じ強さで主張しない',
+  ).toBe(colors.textMuted);
+
+  const ratio = contrastRatio(rendered.color as string, background);
+  expect(
+    ratio,
+    `空状態の文字 ${rendered.color ?? '不明'} on ${background} → ` +
+      `${ratio.toFixed(3)}:1（要求 ${AA_NORMAL_TEXT_RATIO}:1）`,
+  ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
+
+  const allowedPadding = namedSpacingPx(await readRootFontSizePx(page));
+  const padding = await empty.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      top: Number.parseFloat(style.paddingTop),
+      right: Number.parseFloat(style.paddingRight),
+      bottom: Number.parseFloat(style.paddingBottom),
+      left: Number.parseFloat(style.paddingLeft),
+    };
+  });
+  for (const [side, value] of [
+    ['上', padding.top],
+    ['右', padding.right],
+    ['下', padding.bottom],
+    ['左', padding.left],
+  ] as const) {
+    expect(
+      value,
+      `空状態の${side}の余白が ${value}px。文言が容器の端に接して描画されている`,
+    ).toBeGreaterThan(0);
+    expect(
+      allowedPadding.includes(value),
+      `空状態の${side}の余白 ${value}px が名前付き余白スケール` +
+        `（${allowedPadding.join(' / ')}px）のどれにも解決されていない`,
+    ).toBe(true);
+  }
+  expect(
+    padding.left,
+    `空状態の左右の余白が非対称（左 ${padding.left}px / 右 ${padding.right}px）`,
+  ).toBe(padding.right);
+  expect(
+    padding.top,
+    `空状態の上下の余白が非対称（上 ${padding.top}px / 下 ${padding.bottom}px）`,
+  ).toBe(padding.bottom);
 });
 
 // requirements 3.3: モバイル端末で横スクロールを発生させずに閲覧・操作できる（回答画面）。

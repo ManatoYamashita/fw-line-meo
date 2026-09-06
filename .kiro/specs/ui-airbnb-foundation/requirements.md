@@ -6,7 +6,8 @@
 本 spec が閉じる子 Issue: [#173](https://github.com/ManatoYamashita/fw-line-meo/issues/173)（トークン層）・
 [#174](https://github.com/ManatoYamashita/fw-line-meo/issues/174)（共通 UI プリミティブ層）。
 関連: #175（写像版ドキュメントと steering 昇格・本 spec の後）。
-後続 spec `ui-airbnb-surfaces` が #42・#43・#44・#45 を閉じる。
+後続 spec `ui-airbnb-surfaces` が #43・#44・#45（Web 3 面）を閉じる。
+#42（LINE 面）は本基盤を共有しないため別の単位で扱う（2026-09-03 に分界を見直した）。
 
 作業場所: 専用 worktree `.claude/worktrees/airbnb-design-tokens`（branch `feat/airbnb-design-tokens-41`・起点 `origin/main` = `498cd62`）。
 他セッションが 5 本並行稼働しているため隔離した。
@@ -130,7 +131,8 @@ heading.tsx の既定          leading-tight(1.25) / leading-tight / leading-snu
   各面が共通で必要とする 5 部品、参照した DESIGN.md の来歴とライセンスの保全、
   ならびに以上が失われたときに失敗する自動検証。
 - **Out of scope**:
-  - **各面の画面デザイン** — 後続 spec `ui-airbnb-surfaces` が #42 / #43 / #44 / #45 として扱う
+  - **各面の画面デザイン** — Web 3 面（#43 / #44 / #45）は後続 spec `ui-airbnb-surfaces` が扱う。
+    LINE 面（#42）は本基盤を共有しないため別の単位で扱う
   - **LINE Flex Message の色** — 変更しないことが決定事項
   - **Web フォントの導入** — `typography.ts` が既に「導入判断は #44」と分界を宣言している
   - **暗色パレットの定義** — `ui-design-foundation` の Non-Goals を継承する

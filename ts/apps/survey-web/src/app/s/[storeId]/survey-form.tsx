@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
+import { Checkbox } from '@fwlm/ui/components/checkbox';
+import { Textarea } from '@fwlm/ui/components/textarea';
 import type { SurveyAnswer, SurveyFormProps } from './types';
 
 // 回答フォーム（葉コンポーネント）。星評価（必須）・良かった点（複数選択）・一言（任意 200 字）を
@@ -61,8 +64,8 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         <legend className="mb-2 text-lg font-semibold">満足度（必須）</legend>
         {STARS.map((n) => (
           <button
-            className={`min-h-11 min-w-11 px-1 text-4xl leading-none ${
-              star !== null && n <= star ? 'text-primary' : 'text-muted-foreground'
+            className={`min-h-11 min-w-11 px-1 text-4xl leading-none transition-colors duration-150 ${
+              star !== null && n <= star ? 'text-foreground' : 'text-muted-foreground'
             }`}
             type="button"
             key={n}
@@ -77,36 +80,51 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
           </button>
         ))}
         {showStarError && (
-          <p className="text-sm font-medium text-destructive" role="alert">
-            満足度を選択してください
-          </p>
+          // 読み上げ役割（進行中の読み上げを中断するライブリージョン）は変種から部品が決める。
+          // 面の側で役割を手書きすると、部品の分岐と二重管理になる。
+          <Alert variant="destructive">
+            <AlertDescription>満足度を選択してください</AlertDescription>
+          </Alert>
         )}
       </fieldset>
 
       <fieldset className="space-y-2">
         <legend className="mb-2 text-lg font-semibold">良かった点</legend>
         {aspects.map((a) => (
-          // 折り返しは inline-flex + 余白で行い、包む要素を足さない（DOM 構造は据え置き）。
+          // 折り返しは inline-flex + 余白で行う。枠の色は選択状態によらず一定にし、選択済みで
+          // あることは選択部品自身の塗りとチェック印が担う。枠にも状態を持たせると、同じ状態が
+          // 面内で 2 通りに描かれ、片方だけが意匠の変更に取り残される。
+          //
+          // 読み上げ名は可視の文言そのものを指す。選択部品へ読み上げ名を直接書くと、同じ文言を
+          // 2 箇所で管理することになり、片方だけが古びても誰も気づけない。
+          //
+          // **明示する理由。** 指定を外しても名前自体は解決される。基盤ライブラリは
+          // `<span role="checkbox">` として描かれるため包む `<label>` からの補完が働き、
+          // そのとき **`<label>` 要素へ生成 id を書き込む**（実測: `base-ui-_r_2_` が付いた）。
+          // 名前の出所がライブラリの実行時判断になり、面の側の印字からは読めなくなる。
+          // ここで指す先を固定すると、出所が可視の文言そのものに定まる。
           <label
-            className={`mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 py-2 ${
-              selected.has(a.code) ? 'border-primary bg-secondary' : 'border-input'
-            }`}
+            className="mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border border-input px-4 py-2 transition-colors duration-150"
             key={a.code}
           >
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.has(a.code)}
-              onChange={() => toggleAspect(a.code)}
+              onCheckedChange={() => toggleAspect(a.code)}
+              aria-labelledby={`aspect-label-${a.code}`}
             />
-            {a.label}
+            <span id={`aspect-label-${a.code}`}>{a.label}</span>
           </label>
         ))}
       </fieldset>
 
-      <label className="block text-lg font-semibold">
-        一言（任意）
-        <textarea
-          className="mt-2 block w-full rounded-lg border border-input p-3 text-base font-normal placeholder:text-muted-foreground"
+      {/*
+        見出し相当の文字寸法はラベルの文言そのものへ与える。ラベル領域に与えると複数行入力へ
+        継承され、それを面の側で打ち消す指定が要る（＝部品が持つ文字寸法を面が書き換える形になる）。
+      */}
+      <label className="block">
+        <span className="text-lg font-semibold">一言（任意）</span>
+        <Textarea
+          className="mt-2"
           rows={3}
           value={comment}
           maxLength={COMMENT_MAX}
@@ -115,7 +133,8 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         />
       </label>
 
-      <Button className="min-h-11 w-full px-6 py-3 text-lg font-semibold" type="submit" disabled={submitting}>
+      {/* 客向け面の主操作は拡大の区分で全幅（正典 7.9 / 7.10）。寸法の実値は部品の側が持つ。 */}
+      <Button size="lg" className="w-full" type="submit" disabled={submitting}>
         送信する
       </Button>
     </form>

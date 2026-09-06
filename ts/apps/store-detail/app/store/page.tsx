@@ -26,9 +26,62 @@
 // ——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを送信できないため、
 // <button> を導入するより厳格な保証を維持できる。書込系 fetch（POST/PUT/DELETE/PATCH）も
 // 一切呼び出さない — 発行するのは `/api/detail` への GET のみ（test/store-page.test.tsx で検証）。
+//
+// 意匠（ui-airbnb-surfaces task 3.1）:
+//   版面・主見出し・処理中・通知を共通部品から描く。判断の正典は docs/design/design-language.md
+//   （版面は §7.9、見出しの階層は §6、余白は §3）であり、ここでは結論も数値も転記せず参照する。
+//   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。
+//
+//   使える部品は上記の no-write 保証で決まる。`Button` / `Input` / `Select` / `Textarea` は
+//   この面では**使ってはならない**（他の面では正解でも、ここでは要件 3.1 に真正面から反する）。
+//   PageShell は <div>／Heading は <h1>-<h6>／Spinner は <span>／Alert は <div> しか描かない。
+//
+// 意匠（ui-airbnb-surfaces task 3.2 / 3.3）:
+//   順位の巨大表示・自店の評価・新着・競合をカードへ寄せ、推移を表の部品へ移す。
+//   巨大表示の段は docs/design/design-language.md の 7.3 節（暫定であることも同節が持つ）、
+//   前日比を色ではなく矢印で示す判断は 7.7 節、表を表のまま装飾する判断は 7.2 節が正典であり、
+//   ここでは結論も数値も転記せず参照する。追加した部品も <div> / <span> / 表要素しか描かない。
+//
+//   **節の見出しは容器の外に置く。** 面の中で規則を 1 つに保つためであり、こうしておくと
+//   0 件のときに空状態の部品が容器をそのまま置き換えられる（見出しは分岐の外に残る）。
+//
+//   **要件 2.3 の「次に取れる操作への導線」はこの面では満たせない。理由は歯止めではなく、
+//   提示すべき操作そのものが存在しないことである。** 競合の範囲設定は第 2 フェーズ、推移は
+//   翌朝の日次バッチが埋め、新着を増やす口コミ QR には発行 UI が無い（Issue #152）。この面が持つ
+//   リンクは店舗切り替えの 2 種類だけで、行き先になりうる面が 1 つも無い。
+//   要件 3.1（書込要素 0 件）と 3.3（個数固定）は、その不在を構造として保証しているにすぎず、
+//   **緩めても導線は現れない**（「3.3 と両立しない」と書くと歯止めを外せば解決するように読める）。
+//   ここでは対象が無い旨の提示までとする。空状態の部品は押しボタンを内包しないので、
+//   children を渡さない限り上記の制約と両立する。
+//
+//   **導線が生まれる条件**: 口コミ QR の発行 UI（Issue #152 の周辺）か、競合範囲のオーナー設定
+//   （第 2 フェーズ）が入った時点で 2.3 の後件は満たせるようになる。そのとき空状態へ導線を
+//   足す判断をやり直し、リンクの個数を固定している検査の宣言も更新すること。
+//   文言が「いつ埋まるか」を伝えていない残余は Issue #203 が追う。
+//
+//   **一覧が空であることの案内は 3 つとも同じ部品で描く**（競合 0 件・推移 0 件・新着 0 件）。
+//   task 3.3 のタスク文が名指しするのは前 2 つだが、3 つ目も同じ役割であり、素の段落のまま
+//   残すと同一役割が同じ面の中で 2 通りに描かれて要件 1.2 が壊れる（店舗選択の見出しと同型）。
+//   一方、当日サマリーの「準備中」と「取得できませんでした」はここへ含めない。**一覧が空**
+//   なのではなく当日の行そのものが無い／取得に失敗した状態であり、役割が異なる。
 
 import { useEffect, useState } from 'react';
 import liff from '@line/liff';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { Card, CardContent } from '@fwlm/ui/components/card';
+import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Heading } from '@fwlm/ui/components/heading';
+import { PageShell } from '@fwlm/ui/components/page-shell';
+import { Spinner } from '@fwlm/ui/components/spinner';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '@fwlm/ui/components/table';
 
 import type { DailySummaryCompetitor, DailySummaryNewReview } from '@fwlm/db';
 // lib/data.ts / lib/contract.ts が定義する実際のレスポンス形状を型としてのみ取り込む
@@ -177,27 +230,37 @@ function NewReviewsList({
   readonly reviews: readonly DailySummaryNewReview[];
 }): React.JSX.Element {
   if (count <= 0) {
-    return <p>{NO_NEW_REVIEWS_TEXT}</p>;
+    // 空状態の部品へ移す。**導線（children）は渡さない**（冒頭の要件 2.3 の注記を参照）。
+    return (
+      <EmptyState>
+        <p>{NO_NEW_REVIEWS_TEXT}</p>
+      </EmptyState>
+    );
   }
   return (
-    <div>
-      <p>{count}件の新着クチコミ</p>
-      <ul>
-        {reviews.map((review, index) => (
-          <li key={`${review.authorName}-${review.publishTime}-${index}`}>
-            {review.authorName}さん ★{review.rating}「{review.textExcerpt}」
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Card>
+      <CardContent className="flex flex-col gap-2">
+        <p>{count}件の新着クチコミ</p>
+        {/* 一覧の意味論（list / listitem）を保つ。カードの並びへ置き換えない（正典 7.2 節と同じ規律）。 */}
+        <ul className="flex flex-col gap-2">
+          {reviews.map((review, index) => (
+            <li key={`${review.authorName}-${review.publishTime}-${index}`}>
+              {review.authorName}さん ★{review.rating}「{review.textExcerpt}」
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
 function SummarySection({ summary }: { readonly summary: StoreDetailSummary | null }): React.JSX.Element {
   if (summary === null) {
     return (
-      <section>
-        <h2>今日のポジション</h2>
+      <section className="flex flex-col gap-4">
+        <Heading level={2}>今日のポジション</Heading>
+        {/* 「まだ準備中」は一覧が空なのではなく当日の行そのものが無い状態である。
+            空状態の部品は一覧が空のときの案内であり、ここへ広げると意味がずれる。 */}
         <p>{NO_SUMMARY_TEXT}</p>
       </section>
     );
@@ -205,8 +268,10 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
 
   if (summary.status === 'failed') {
     return (
-      <section>
-        <h2>今日のポジション（{summary.summaryDate}）</h2>
+      <section className="flex flex-col gap-4">
+        <Heading level={2}>今日のポジション（{summary.summaryDate}）</Heading>
+        {/* 取得に失敗した旨。通知の部品（既定・危険とも読み上げ領域を持つ）へは載せない。
+            これはページ全体の失敗ではなく節の状態であり、読み上げを割り込ませる理由がない。 */}
         <p>{FAILED_SUMMARY_TEXT}</p>
       </section>
     );
@@ -216,22 +281,51 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
   const ratingDiff = formatRatingDiff(summary.rating, summary.ratingPrev);
 
   return (
-    <section>
-      <h2>今日のポジション（{summary.summaryDate}）</h2>
-      <p>
-        {summary.rank !== null && summary.rankTotal !== null
-          ? `近隣${summary.rankTotal}店中 ${summary.rank}位`
-          : '順位情報がありません'}
-        {rankDiff !== null ? `（前日比: ${rankDiff}）` : ''}
-      </p>
-      <h3>自店の評価</h3>
-      <p>
-        ★{summary.rating ?? '—'}（クチコミ{' '}
-        {summary.reviewCount !== null ? `${summary.reviewCount}件` : '—'}）
-        {ratingDiff !== null ? `（${ratingDiff}）` : ''}
-      </p>
-      <h3>新着クチコミ</h3>
-      <NewReviewsList count={summary.newReviewCount} reviews={summary.newReviews} />
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Heading level={2}>今日のポジション（{summary.summaryDate}）</Heading>
+        <Card>
+          <CardContent>
+            {/* 順位の数値だけを巨大表示にする（正典 7.3 節）。段は 6 節の文字サイズの最大段であり、
+             * 面の側は任意の値を持たない。**暫定であり、この段は主見出しと同じ寸法である**ため、
+             * 「プロダクト全体で 1 箇所」という一意性はここでは主張しない（追跡は Issue #185）。
+             *
+             * 数値を子要素へ切り出しても、この段落が読み上げる内容は 1 文字も変わらない
+             * （前後の文言は直下のテキストノードのまま残る）。
+             *
+             * 前日比は `formatRankDiff` が返す上下の矢印を伴う文言をそのまま置く（正典 7.7 節）。
+             * 独立した要素を与えないので、増減を色だけで伝えることが構造的に起こりえない。 */}
+            <p>
+              {summary.rank !== null && summary.rankTotal !== null ? (
+                <>
+                  {`近隣${summary.rankTotal}店中 `}
+                  <span className="text-2xl font-bold">{summary.rank}</span>
+                  {'位'}
+                </>
+              ) : (
+                '順位情報がありません'
+              )}
+              {rankDiff !== null ? `（前日比: ${rankDiff}）` : ''}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Heading level={3}>自店の評価</Heading>
+        <Card>
+          <CardContent>
+            <p>
+              ★{summary.rating ?? '—'}（クチコミ{' '}
+              {summary.reviewCount !== null ? `${summary.reviewCount}件` : '—'}）
+              {ratingDiff !== null ? `（${ratingDiff}）` : ''}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Heading level={3}>新着クチコミ</Heading>
+        <NewReviewsList count={summary.newReviewCount} reviews={summary.newReviews} />
+      </div>
     </section>
   );
 }
@@ -242,19 +336,25 @@ function CompetitorsSection({
   readonly competitors: readonly DailySummaryCompetitor[];
 }): React.JSX.Element {
   return (
-    <section>
-      <h2>競合との比較</h2>
+    <section className="flex flex-col gap-4">
+      <Heading level={2}>競合との比較</Heading>
       {competitors.length === 0 ? (
-        <p>{NO_COMPETITORS_TEXT}</p>
+        <EmptyState>
+          <p>{NO_COMPETITORS_TEXT}</p>
+        </EmptyState>
       ) : (
-        <ul>
-          {competitors.map((competitor, index) => (
-            <li key={`${competitor.name}-${index}`}>
-              {competitor.name}: ★{competitor.rating ?? '—'}（クチコミ{' '}
-              {competitor.reviewCount ?? '—'}件） 星差 {competitor.starDiff ?? '—'}
-            </li>
-          ))}
-        </ul>
+        <Card>
+          <CardContent>
+            <ul className="flex flex-col gap-2">
+              {competitors.map((competitor, index) => (
+                <li key={`${competitor.name}-${index}`}>
+                  {competitor.name}: ★{competitor.rating ?? '—'}（クチコミ{' '}
+                  {competitor.reviewCount ?? '—'}件） 星差 {competitor.starDiff ?? '—'}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
     </section>
   );
@@ -262,31 +362,39 @@ function CompetitorsSection({
 
 function TrendSection({ trend }: { readonly trend: readonly StoreDetailTrendPoint[] }): React.JSX.Element {
   return (
-    <section>
-      <h2>直近30日の推移</h2>
+    <section className="flex flex-col gap-4">
+      <Heading level={2}>直近30日の推移</Heading>
       {trend.length === 0 ? (
-        <p>推移データがありません</p>
+        <EmptyState>
+          <p>推移データがありません</p>
+        </EmptyState>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">日付</th>
-              <th scope="col">順位</th>
-              <th scope="col">評価</th>
-              <th scope="col">クチコミ数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trend.map((point) => (
-              <tr key={point.capturedOn}>
-                <td>{point.capturedOn}</td>
-                <td>{point.rank ?? '—'}</td>
-                <td>{point.rating ?? '—'}</td>
-                <td>{point.reviewCount ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        // 横方向の捲りは表の **外側** が持つ（正典 7.2 節・要件 2.5）。この容器がこの面で
+        // 唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
+        // 列見出しの文字列は 1 文字も変えない（要件 2.2）。scope は部品の既定が与える。
+        <TableContainer label="直近30日の推移">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>日付</TableHeaderCell>
+                <TableHeaderCell>順位</TableHeaderCell>
+                <TableHeaderCell>評価</TableHeaderCell>
+                <TableHeaderCell>クチコミ数</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {trend.map((point) => (
+                <TableRow key={point.capturedOn}>
+                  {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
+                  <TableCell>{point.capturedOn}</TableCell>
+                  <TableCell numeric>{point.rank ?? '—'}</TableCell>
+                  <TableCell numeric>{point.rating ?? '—'}</TableCell>
+                  <TableCell numeric>{point.reviewCount ?? '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
     </section>
   );
@@ -302,9 +410,12 @@ function TrendSection({ trend }: { readonly trend: readonly StoreDetailTrendPoin
  */
 function StoreSelector({ stores }: { readonly stores: readonly StoreRef[] }): React.JSX.Element {
   return (
-    <section>
-      <h2>{SELECT_STORE_HEADING}</h2>
-      <ul>
+    // 節の見出しは面の中で 1 通りに描く（要件 1.2）。この h2 は task 3.1 の時点でどのタスクにも
+    // 割り当てられておらず、親が task 3.3 へ割り当てた。他の 5 つが部品になるのにここだけ素の
+    // タグが残ると、同一役割が同じ面の中で 2 通りに描かれることになる。
+    <section className="flex flex-col gap-4">
+      <Heading level={2}>{SELECT_STORE_HEADING}</Heading>
+      <ul className="flex flex-col gap-2">
         {stores.map((store) => (
           <li key={store.storeId}>
             <a href={storeHref(store.storeId)}>{store.name}</a>
@@ -369,39 +480,55 @@ export default function StorePage(): React.JSX.Element {
     };
   }, []);
 
+  // 4 つの分岐はいずれも自前の主要領域を持っていた。版面の部品は既定で main を描くため、
+  // 素の <main> を **置換** する（内側へ入れると主要領域が 2 つになる）。
   if (state.status === 'loading') {
     return (
-      <main>
-        <h1>店舗詳細</h1>
-        <p>読み込み中です…</p>
-      </main>
+      <PageShell width="sm" className="flex flex-col gap-6">
+        <Heading level={1}>店舗詳細</Heading>
+        {/* Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
+         * 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
+         * （Spinner の aria-label へ移すと sr-only の子要素へ落ち、動き低減設定でない実ブラウザ
+         * では進行状態の手掛かりが回転だけになる・要件 4.5）。文言は 1 文字も変えない。 */}
+        <p role="status" className="flex items-center gap-2">
+          <Spinner aria-hidden />
+          読み込み中です…
+        </p>
+      </PageShell>
     );
   }
 
   if (state.status === 'error') {
     return (
-      <main>
-        <h1>店舗詳細</h1>
-        <p role="alert">{state.message}</p>
-      </main>
+      <PageShell width="sm" className="flex flex-col gap-6">
+        <Heading level={1}>店舗詳細</Heading>
+        {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
+            領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}
+        <Alert variant="destructive">
+          <AlertDescription>{state.message}</AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
   if (state.status === 'select') {
     // 選択待ちは異常ではないため role="alert" は使わない（支援技術に警告として読ませない）。
+    // 通知の部品も置かない。既定の変種は role="status" のライブリージョンであり、
+    // 「候補から選ぶ」という通常の画面状態を読み上げの割り込みに乗せる理由がない。
     return (
-      <main>
-        <h1>店舗詳細</h1>
+      <PageShell width="sm" className="flex flex-col gap-6">
+        <Heading level={1}>店舗詳細</Heading>
         <StoreSelector stores={state.stores} />
-      </main>
+      </PageShell>
     );
   }
 
   const { data } = state;
   return (
-    <main>
-      {/* 多店舗オーナーにとって「今どの店を見ているか」は必須の文脈（要件 4.7）。 */}
-      <h1>{data.storeName}</h1>
+    <PageShell width="sm" className="flex flex-col gap-6">
+      {/* 多店舗オーナーにとって「今どの店を見ているか」は必須の文脈（要件 4.7）。
+       * 主見出しは店名そのものであり、装飾も日付も内包しない（日付は各節の h2 側にある）。 */}
+      <Heading level={1}>{data.storeName}</Heading>
       {data.stores.length >= 2 ? (
         // storeId を持たない /store へ戻る → サーバーが再び 409 を返し選択画面に着地する。
         <p>
@@ -412,6 +539,6 @@ export default function StorePage(): React.JSX.Element {
       <CompetitorsSection competitors={data.competitors} />
       <TrendSection trend={data.trend} />
       <p>{GOOGLE_ATTRIBUTION_TEXT}</p>
-    </main>
+    </PageShell>
   );
 }

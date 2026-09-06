@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import type { StoreDetailResponse, StoreRef } from '../lib/contract';
+import { announcedText, ownText } from './live-region';
 
 // Task 5.3: 詳細閲覧画面（実データ描画・LIFF 認可・エラー分岐・no-write 構造保証）を検証する。
 // task 2.3 のプレースホルダ検証を置き換える（プレースホルダ文言は本タスクで撤去済み）が、
@@ -47,6 +48,25 @@ function stubFetch(resp: RouteResp): ReturnType<typeof vi.fn> {
 /** テスト中の URL（?storeId ヒント）を制御する。afterEach で必ず /store へ戻す。 */
 function setUrl(search: string): void {
   window.history.replaceState({}, '', `/store${search}`);
+}
+
+/** class 属性を空白で割ったトークン集合。**包含ではなく集合の完全一致**で固定するために使う。 */
+function classTokens(element: Element): readonly string[] {
+  return (element.getAttribute('class') ?? '').split(/\s+/).filter((token) => token.length > 0);
+}
+
+/**
+ * 「読み上げられる内容」で段落を掴む（ui-airbnb-surfaces task 3.2）。
+ *
+ * 巨大表示のため順位の数値を子要素へ切り出したので、**直下のテキストノードだけを見る**
+ * `getByText` ではこの段落へ届かなくなった。読み上げられる内容そのものは 1 文字も変わって
+ * いないため、そちらを鍵にする。ちょうど 1 つであることを毎回照合するのは、同じ文字列を
+ * 読み上げる段落が 2 つに増える改変（節の複製・分岐の取り違え）を緑のまま通さないためである。
+ */
+function soleParagraphAnnouncing(container: HTMLElement, expected: string): HTMLElement {
+  const found = Array.from(container.querySelectorAll('p')).filter((p) => announcedText(p) === expected);
+  expect(found, `読み上げ内容が "${expected}" の段落`).toHaveLength(1);
+  return found[0]!;
 }
 
 const SINGLE_STORE: StoreRef[] = [{ storeId: 'store-1', name: 'テスト自由が丘店' }];
@@ -102,13 +122,17 @@ describe('store detail page', () => {
   it('読み込み中の表示のあと実データ（順位・自店評価・競合・Google帰属）を描画する', async () => {
     stubFetch({ ok: true, status: 200, body: mockResult });
 
-    render(<StorePage />);
+    const { container } = render(<StorePage />);
 
     // ローディング状態がまず表示される。
     expect(screen.getByText('読み込み中です…')).toBeDefined();
 
+    // task 3.2 が順位の数値を巨大表示のため子要素へ切り出した。`getByText` は直下の
+    // テキストノードだけを見るため、この段落はもう `/近隣5店中\s*2位/` では掴めない。
+    // **読み上げられる内容は 1 文字も変わっていない**ので、追随先は announcedText である
+    // （部分一致だった正規表現を完全一致へ強めており、照合を弱めてはいない）。
     await waitFor(() => {
-      expect(screen.getByText(/近隣5店中\s*2位/)).toBeDefined();
+      expect(soleParagraphAnnouncing(container, '近隣5店中 2位（前日比: ↑ 上昇）')).toBeDefined();
     });
 
     expect(screen.getByText(/★4\.5/)).toBeDefined();
@@ -390,6 +414,800 @@ describe('store detail page', () => {
       });
 
       expect(container.querySelectorAll('form, button, input, textarea, select')).toHaveLength(0);
+    });
+  });
+
+  // --- ui-airbnb-surfaces task 3.1: 版面・主見出し・帰属・処理中と通知 --------------------
+  //
+  // **着手時点で無検証だった契約をここで先に固定する。** 上の 20 件は「実データが出ること」と
+  // 「書込操作が無いこと」を見ているが、意匠の適用で壊れうる次の契約はどれも押さえていなかった。
+  //
+  //   - 主見出しの読み上げ名と階層（正常分岐を除く 3 分岐にアサーションが 1 件も無かった）
+  //   - 主要領域がちょうど 1 つであること（4 分岐とも 0 件）
+  //   - 読み込み中の分岐の書込操作 0 件・リンク 0 件（この分岐だけ抜けていた）
+  //   - 失敗の文言の完全一致（既存は toContain の部分一致で、末尾を削っても緑のまま通る）
+  //   - 読み込み中の文言が **可視のテキスト**であること（sr-only へ落ちても getByText は緑）
+  //   - 帰属の文言が完全一致でちょうど 1 箇所であること
+  //   - リンクの読み上げ名（文言の一致は見ていたが、算出される名前は見ていなかった）
+  //
+  // 分岐ごとに走査する。片方の分岐だけを見る照合は「もう一方の版面を広い側へ変える」型の
+  // 改変を緑のまま通す（dashboard-web の task 2.2 / 2.3 で実測されている）。
+  describe('意匠の適用が構造を変えていないこと（task 3.1）', () => {
+    interface SurfaceBranch {
+      /** 失敗メッセージへ出す分岐名。どの分岐が壊れたのかを名指しさせる。 */
+      readonly name: string;
+      /** その分岐へ到達させる（liff / fetch のモックを整える）。 */
+      readonly arrange: () => void;
+      /** その分岐が描画され切るまで待つ。 */
+      readonly settle: () => Promise<void>;
+      /** 主見出しとして読み上げられる文字列。 */
+      readonly headingName: string;
+      /** その分岐に存在するリンクの読み上げ名（順序も含めて固定する）。 */
+      readonly linkNames: readonly string[];
+    }
+
+    const SELECTION_BODY = {
+      error: { code: 'STORE_SELECTION_REQUIRED', message: '表示する店舗を選んでください' },
+      stores: MULTI_STORES,
+    };
+
+    const SURFACE_BRANCHES: readonly SurfaceBranch[] = [
+      {
+        name: '読み込み中',
+        // 未ログインだと liff.login() がリダイレクトを開始し、状態は loading のまま留まる。
+        arrange: () => {
+          liffMocks.isLoggedIn.mockReturnValue(false);
+          stubFetch({ ok: true, status: 200, body: mockResult });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(liffMocks.login).toHaveBeenCalled();
+          });
+        },
+        headingName: '店舗詳細',
+        linkNames: [],
+      },
+      {
+        name: '失敗',
+        arrange: () => {
+          stubFetch({ ok: false, status: 404, body: { error: { code: 'STORE_NOT_FOUND', message: 'x' } } });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(screen.getByRole('alert')).toBeDefined();
+          });
+        },
+        headingName: '店舗詳細',
+        linkNames: [],
+      },
+      {
+        name: '店舗選択待ち',
+        arrange: () => {
+          stubFetch({ ok: false, status: 409, body: SELECTION_BODY });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(screen.getByText('テスト中目黒駅前店')).toBeDefined();
+          });
+        },
+        headingName: '店舗詳細',
+        linkNames: ['テスト自由が丘店', 'テスト中目黒駅前店'],
+      },
+      {
+        name: '正常',
+        arrange: () => {
+          stubFetch({ ok: true, status: 200, body: mockResult });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+          });
+        },
+        headingName: 'テスト自由が丘店',
+        // 単一店舗なので切替リンクは出ない（既存の 20 件が 0 件を固定している）。
+        linkNames: [],
+      },
+    ];
+
+    /** beforeEach と同じ初期状態へ戻す（1 つのテストの中で分岐を回すため）。 */
+    function armLiff(): void {
+      liffMocks.init.mockReset().mockResolvedValue(undefined);
+      liffMocks.isLoggedIn.mockReset().mockReturnValue(true);
+      liffMocks.getIDToken.mockReset().mockReturnValue('test-id-token');
+      liffMocks.login.mockReset();
+    }
+
+    /**
+     * 4 分岐を順に描画し、分岐ごとに検査させる。
+     *
+     * 走査した分岐の数を数えて返し、呼び出し側が母数と突き合わせる。**回らないループは
+     * 何も検査しないまま緑になる**ため、件数の照合を省かない（要件 7.4 と同型の規律）。
+     */
+    async function forEachBranch(
+      inspect: (branch: SurfaceBranch, container: HTMLElement) => void,
+    ): Promise<number> {
+      let visited = 0;
+      for (const branch of SURFACE_BRANCHES) {
+        armLiff();
+        branch.arrange();
+        const { container } = render(<StorePage />);
+        await branch.settle();
+        inspect(branch, container);
+        visited += 1;
+        cleanup();
+        vi.unstubAllGlobals();
+      }
+      return visited;
+    }
+
+    it('4 分岐すべてで主見出しの読み上げ名と階層を変えない（Req 3.2）', async () => {
+      const visited = await forEachBranch((branch) => {
+        const headings = screen.getAllByRole('heading', { level: 1 });
+        // 主見出しは 1 つ。装飾や日付を別要素として足すと 2 つになる。
+        expect(headings, branch.name).toHaveLength(1);
+        expect(headings[0]!.textContent, branch.name).toBe(branch.headingName);
+        // 算出される読み上げ名まで固定する。縦積みで子要素が箱になると区切りの空白が
+        // 入り、textContent は一致したまま読み上げ名だけがずれる（登録ウィザード 5.1 の先例）。
+        expect(
+          screen.getByRole('heading', { level: 1, name: branch.headingName }),
+          branch.name,
+        ).toBe(headings[0]);
+      });
+      expect(visited).toBe(SURFACE_BRANCHES.length);
+    });
+
+    it('4 分岐すべてで主要領域をちょうど 1 つに保つ（Req 3.3）', async () => {
+      const visited = await forEachBranch((branch, container) => {
+        expect(container.querySelectorAll('main'), branch.name).toHaveLength(1);
+        expect(screen.getAllByRole('main'), branch.name).toHaveLength(1);
+      });
+      expect(visited).toBe(SURFACE_BRANCHES.length);
+    });
+
+    it('4 分岐すべてで書込操作の要素を 1 つも描画しない（Req 3.1）', async () => {
+      const visited = await forEachBranch((branch, container) => {
+        expect(
+          container.querySelectorAll('form, button, input, textarea, select'),
+          branch.name,
+        ).toHaveLength(0);
+      });
+      expect(visited).toBe(SURFACE_BRANCHES.length);
+    });
+
+    it('4 分岐すべてでリンクの個数と読み上げ名を変えない（Req 3.2, 3.3）', async () => {
+      const visited = await forEachBranch((branch, container) => {
+        expect(container.querySelectorAll('a'), branch.name).toHaveLength(branch.linkNames.length);
+        const names = screen.queryAllByRole('link').map((link) => link.textContent);
+        expect(names, branch.name).toEqual(branch.linkNames);
+      });
+      expect(visited).toBe(SURFACE_BRANCHES.length);
+    });
+
+    it('5 種の失敗の文言を完全一致で固定し、読み上げ役割をちょうど 1 つに保つ（Req 3.2, 3.5）', async () => {
+      const failures: readonly { readonly name: string; readonly arrange: () => void; readonly message: string }[] = [
+        {
+          name: '401',
+          arrange: () => stubFetch({ ok: false, status: 401, body: { error: { code: 'UNAUTHORIZED', message: 'x' } } }),
+          message: '認証に失敗しました。LINE アプリを開き直してください。',
+        },
+        {
+          name: '404',
+          arrange: () => stubFetch({ ok: false, status: 404, body: { error: { code: 'STORE_NOT_FOUND', message: 'x' } } }),
+          message: '店舗情報を取得できませんでした。',
+        },
+        {
+          name: '500',
+          arrange: () => stubFetch({ ok: false, status: 500, body: { error: { code: 'INTERNAL', message: 'x' } } }),
+          message: 'サーバーエラーが発生しました。時間をおいて再度お試しください。',
+        },
+        {
+          name: '通信断',
+          arrange: () => {
+            vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('network down'))));
+          },
+          message: '通信に失敗しました。時間をおいて再度お試しください。',
+        },
+        {
+          name: 'LIFF 初期化失敗',
+          arrange: () => {
+            liffMocks.init.mockReset().mockRejectedValue(new Error('liff init failed'));
+            stubFetch({ ok: true, status: 200, body: mockResult });
+          },
+          message: 'LINE 連携でエラーが発生しました。LINE アプリからこの画面を開き直してください。',
+        },
+      ];
+
+      let visited = 0;
+      for (const failure of failures) {
+        armLiff();
+        failure.arrange();
+        render(<StorePage />);
+        await waitFor(() => {
+          expect(screen.getByRole('alert')).toBeDefined();
+        });
+        const alerts = screen.getAllByRole('alert');
+        // 読み上げを中断する役割は 1 つだけ。通知の部品の内側へ role を重ねると 2 つになる。
+        expect(alerts, failure.name).toHaveLength(1);
+        // 既存の照合は toContain（部分一致）なので、末尾を削っても緑のまま通る。完全一致で固定する。
+        expect(announcedText(alerts[0]!), failure.name).toBe(failure.message);
+        visited += 1;
+        cleanup();
+        vi.unstubAllGlobals();
+      }
+      expect(visited).toBe(failures.length);
+    });
+
+    it('読み込み中の文言は可視のテキストとして置かれる（Req 4.5）', async () => {
+      liffMocks.isLoggedIn.mockReturnValue(false);
+      stubFetch({ ok: true, status: 200, body: mockResult });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(liffMocks.login).toHaveBeenCalled();
+      });
+
+      const loading = screen.getByText('読み込み中です…');
+      // 直下のテキストノードとして置く。`<Spinner aria-label="…" />` の 1 要素へ畳むと
+      // 文言は sr-only の子要素へ落ち、動き低減設定でない実ブラウザでは見えなくなる。
+      // **getByText はその差し替えを緑のまま通す**ので、ここが唯一の網である。
+      expect(ownText(loading)).toBe('読み込み中です…');
+      // 三点リーダは U+2026。見た目のほぼ同じ ASCII 3 点へ置き換わっても気づけるようにする。
+      expect(screen.queryByText('読み込み中...')).toBeNull();
+    });
+
+    it('帰属の文言は完全一致でちょうど 1 箇所に描かれる（Req 3.2）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      // Google のデータを表示する面の必須表示であり、意匠の都合で削っても縮めてもいけない。
+      const attributions = screen.getAllByText('データ提供: Google Maps');
+      expect(attributions).toHaveLength(1);
+      expect(ownText(attributions[0]!)).toBe('データ提供: Google Maps');
+    });
+
+    it('切替リンクは読み上げ名の完全一致で掴める（Req 3.2, 3.3）', async () => {
+      stubFetch({ ok: true, status: 200, body: { ...mockResult, stores: MULTI_STORES } });
+
+      const { container } = render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      // 既存の照合は getByText（直下テキストの一致）だけで、算出される読み上げ名は見ていない。
+      const link = screen.getByRole('link', { name: '店舗を切り替える' });
+      expect(link.getAttribute('href')).toBe('/store');
+      expect(container.querySelectorAll('a')).toHaveLength(1);
+    });
+
+    it('店舗選択待ちには通知の役割を持ち込まない（Req 3.5）', async () => {
+      stubFetch({ ok: false, status: 409, body: SELECTION_BODY });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('テスト中目黒駅前店')).toBeDefined();
+      });
+
+      // 選択が必要なだけで異常ではない。読み上げを中断する alert はもちろん、
+      // 通知の部品（既定の変種は role="status"）もこの分岐へは置かない。
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+      expect(screen.queryAllByRole('status')).toHaveLength(0);
+    });
+
+    // --- ここから下は意匠の適用そのものを固定する ----------------------------------------
+    //
+    // 版面の段は docs/design/design-language.md §7.9、見出しの階層は §6、余白は §3 が正典であり、
+    // ここでは結論も数値も転記せず参照する。**面は色を 1 つも書かない**（色は部品側のトークン由来）。
+
+    it('4 分岐すべてを本文系の狭い版面へ置換し、主要領域を二重にしない（Req 1.1, 1.5, 3.3）', async () => {
+      const visited = await forEachBranch((branch, container) => {
+        const shell = container.querySelector('[data-slot="page-shell"]');
+        expect(shell, branch.name).not.toBeNull();
+        // 版面は 2 段しかない。店舗詳細は本文系（狭い方）を使う。
+        expect(shell!.getAttribute('data-width'), branch.name).toBe('sm');
+        // 既存の main を **置換** する（入れ子にすると主要領域が 2 つになる）。
+        expect(shell!.tagName, branch.name).toBe('MAIN');
+        expect(container.querySelectorAll('main'), branch.name).toHaveLength(1);
+        // **包含では足りない。** `max-w-*` を後ろへ足せば data-width は sm のまま実効の版面だけが変わる。
+        // 幅を与えるクラスの集合そのものを完全一致で固定する。
+        const tokens = shell!.className.split(/\s+/).filter((token) => token.length > 0);
+        const widthTokens = tokens.filter((token) => /(^|:)(?:max-|min-)?w-/.test(token));
+        expect(widthTokens, branch.name).toEqual(['w-full', 'max-w-xl']);
+      });
+      expect(visited).toBe(SURFACE_BRANCHES.length);
+    });
+
+    it('4 分岐すべてで主見出しを共通の見出し部品から描く（Req 1.1）', async () => {
+      const visited = await forEachBranch((branch) => {
+        const heading = screen.getByRole('heading', { level: 1 });
+        expect(heading.getAttribute('data-slot'), branch.name).toBe('heading');
+        // 支援技術に通知される階層と、部品へ渡した階層が一致していること。
+        expect(heading.getAttribute('data-level'), branch.name).toBe('1');
+      });
+      expect(visited).toBe(SURFACE_BRANCHES.length);
+    });
+
+    it('処理中は共通部品を装飾として添え、読み上げ領域を 1 つに保つ（Req 1.1, 4.5）', async () => {
+      armLiff();
+      liffMocks.isLoggedIn.mockReturnValue(false);
+      stubFetch({ ok: true, status: 200, body: mockResult });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(liffMocks.login).toHaveBeenCalled();
+      });
+
+      // 領域が 2 つになるのは、装飾として添えた Spinner が aria-hidden を失ったとき。
+      // Spinner のラッパは自身が role="status" を持つため、外し忘れると読み上げが二重になる。
+      const regions = screen.getAllByRole('status');
+      expect(regions).toHaveLength(1);
+      const region = regions[0]!;
+      expect(ownText(region)).toBe('読み込み中です…');
+      expect(announcedText(region)).toBe('読み込み中です…');
+      // 回転する図形は共通部品から来る。面の側で描くと意匠が面ごとにずれる。
+      const spinner = region.querySelector('[data-slot="spinner"]');
+      expect(spinner).not.toBeNull();
+      expect(spinner!.getAttribute('aria-hidden')).toBe('true');
+      // 読み込み中は異常ではない。読み上げを中断する役割はこの分岐に出さない。
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+    });
+
+    it('失敗は危険を伝える通知の部品へ載せ、読み上げ領域を二重にしない（Req 1.1, 3.5）', async () => {
+      stubFetch({ ok: false, status: 404, body: { error: { code: 'STORE_NOT_FOUND', message: 'x' } } });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeDefined();
+      });
+
+      const alert = screen.getByRole('alert');
+      expect(alert.getAttribute('data-slot')).toBe('alert');
+      // 危険を伝える変種であること。色は部品側のトークンが解決する（面は色を書かない）。
+      expect(alert.className).toContain('text-destructive');
+      // 変種そのものが読み上げ役割 alert を持つ。内側へ role を重ねると領域が 2 つになる。
+      expect(alert.querySelectorAll('[role="alert"], [role="status"]')).toHaveLength(0);
+      // 文言は説明の受け口へ置く（タイトルを新設して文言を分割しない）。
+      const description = alert.querySelector('[data-slot="alert-description"]');
+      expect(description).not.toBeNull();
+      expect(ownText(description!)).toBe('店舗情報を取得できませんでした。');
+    });
+  });
+
+  // --- ui-airbnb-surfaces task 3.2 / 3.3 -------------------------------------------------
+  //
+  // 3.1 までの 33 件は版面・主見出し・処理中・失敗・リンクを見ているが、**この面の中身**
+  // （順位・自店の評価・新着・競合・推移）は存在の部分一致が数点あるだけで、意匠の適用で
+  // 壊れうる契約はどれも押さえていなかった。**先に固定してから意匠を当てる。**
+  //
+  //   - 節の見出し（h2 4 種・h3 2 種）の読み上げ名と階層 …… 0 件
+  //   - 順位の段落が読み上げる内容（上昇・下降・変動なし・前日欠損・順位欠損・母数欠損）…… 0 件
+  //   - 自店の評価の段落が読み上げる内容（上昇・下降・同値・前日欠損・評価欠損・件数欠損）…… 0 件
+  //   - 新着クチコミの件数表記・各行の文字列・0 件の文言 …… 0 件
+  //   - 競合の各行の文字列 …… 存在の部分一致 `/競合A/` のみ
+  //   - 推移の列見出し 4 つ・scope・行数・セルの値 …… **要件 2.2 が守る対象が丸ごと 0 件**
+  //   - サマリーが取得できない 2 分岐の文言 …… 失敗の分岐は到達そのものが 0 件
+  //   - 競合・新着・店舗選択の一覧が list / listitem として読めること（要件 2.1）…… 0 件
+  describe('中身の契約と意匠の適用（task 3.2 / 3.3）', () => {
+    const BASE_SUMMARY = mockResult.summary as NonNullable<StoreDetailResponse['summary']>;
+
+    const SELECTION_BODY = {
+      error: { code: 'STORE_SELECTION_REQUIRED', message: '表示する店舗を選んでください' },
+      stores: MULTI_STORES,
+    };
+
+    /** 当日サマリーだけを差し替えた応答を作る。 */
+    function withSummary(patch: Partial<typeof BASE_SUMMARY>): StoreDetailResponse {
+      return { ...mockResult, summary: { ...BASE_SUMMARY, ...patch } };
+    }
+
+    interface ResponseCase {
+      /** 失敗メッセージへ出す分岐名。どの分岐が壊れたのかを名指しさせる。 */
+      readonly name: string;
+      readonly body: StoreDetailResponse;
+    }
+
+    /**
+     * 応答ごとに 1 回ずつ描画して検査する。
+     *
+     * **走査した件数を返して母数と突き合わせる**（回らないループは何も検査しないまま緑になる）。
+     * 反復のたびに fetch のスタブを張り直す。liff のモックは beforeEach が armed のまま残る。
+     */
+    async function forEachResponse<T extends ResponseCase>(
+      cases: readonly T[],
+      inspect: (item: T, container: HTMLElement) => void,
+    ): Promise<number> {
+      let visited = 0;
+      for (const item of cases) {
+        stubFetch({ ok: true, status: 200, body: item.body });
+        const { container } = render(<StorePage />);
+        await waitFor(() => {
+          expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+        });
+        inspect(item, container);
+        visited += 1;
+        cleanup();
+        vi.unstubAllGlobals();
+      }
+      return visited;
+    }
+
+    // --- 段 1: 着手前に無検証だった中身の契約 --------------------------------------------
+
+    it('順位の段落が読み上げる内容を 6 分岐で完全一致に固定する（Req 3.2, 4.7）', async () => {
+      const cases = [
+        { name: '上昇', body: withSummary({ rank: 2, rankPrev: 3 }), announced: '近隣5店中 2位（前日比: ↑ 上昇）' },
+        { name: '下降', body: withSummary({ rank: 4, rankPrev: 3 }), announced: '近隣5店中 4位（前日比: ↓ 下降）' },
+        { name: '変動なし', body: withSummary({ rank: 3, rankPrev: 3 }), announced: '近隣5店中 3位（前日比: → 変動なし）' },
+        { name: '前日なし', body: withSummary({ rankPrev: null }), announced: '近隣5店中 2位' },
+        { name: '順位なし', body: withSummary({ rank: null }), announced: '順位情報がありません' },
+        { name: '母数なし', body: withSummary({ rankTotal: null }), announced: '順位情報がありません（前日比: ↑ 上昇）' },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        const paragraph = soleParagraphAnnouncing(container, item.announced);
+        const marker = item.announced.indexOf('（前日比:');
+        if (marker >= 0) {
+          // 前日比は上下の矢印を伴う文言であり（正典 7.7 節・要件 4.7）、**段落の直下テキスト**
+          // として置かれる。独立した要素を持たない以上、増減を色だけで伝えることが
+          // 構造的にできない。色ユーティリティを足す改変は、まずこの assert を壊す。
+          expect(ownText(paragraph), item.name).toContain(item.announced.slice(marker));
+        }
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('自店の評価の段落が読み上げる内容を 6 分岐で完全一致に固定する（Req 3.2, 4.7）', async () => {
+      const cases = [
+        { name: '上昇', body: withSummary({ rating: '4.5', ratingPrev: '4.4' }), announced: '★4.5（クチコミ 120件）（前日比 +0.1）' },
+        { name: '下降', body: withSummary({ rating: '4.3', ratingPrev: '4.5' }), announced: '★4.3（クチコミ 120件）（前日比 -0.2）' },
+        { name: '同値', body: withSummary({ rating: '4.5', ratingPrev: '4.5' }), announced: '★4.5（クチコミ 120件）' },
+        { name: '前日なし', body: withSummary({ ratingPrev: null }), announced: '★4.5（クチコミ 120件）' },
+        { name: '評価なし', body: withSummary({ rating: null }), announced: '★—（クチコミ 120件）' },
+        { name: '件数なし', body: withSummary({ reviewCount: null }), announced: '★4.5（クチコミ —）（前日比 +0.1）' },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        // 評価の増減は符号（+ / -）で示され、こちらも段落の直下テキストである。
+        expect(ownText(soleParagraphAnnouncing(container, item.announced)), item.name).toBe(item.announced);
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('新着クチコミの件数表記と 0 件の文言を固定する（Req 3.2）', async () => {
+      const cases = [
+        { name: '2 件', body: mockResult, present: '2件の新着クチコミ', absent: '新着なし' },
+        { name: '0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), present: '新着なし', absent: '2件の新着クチコミ' },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item) => {
+        expect(screen.getAllByText(item.present), item.name).toHaveLength(1);
+        expect(screen.queryByText(item.absent), item.name).toBeNull();
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('競合と新着の一覧を list / listitem として読め、行の文字列を変えない（Req 2.1, 3.2）', async () => {
+      const NEW_REVIEW_ROW = '山田太郎さん ★5「とても美味しかったです」';
+      const COMPETITOR_ROW = '競合A: ★4.2（クチコミ 80件） 星差 0.3';
+      const cases = [
+        { name: '新着 1 行・競合 1 行', body: mockResult, lists: 2, items: [NEW_REVIEW_ROW, COMPETITOR_ROW] },
+        { name: '新着 0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), lists: 1, items: [COMPETITOR_ROW] },
+        { name: '競合 0 件', body: { ...mockResult, competitors: [] }, lists: 1, items: [NEW_REVIEW_ROW] },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        // カードの並びへ置き換えると list / listitem の役割が消える（正典 7.2 節と同じ規律）。
+        expect(screen.getAllByRole('list'), item.name).toHaveLength(item.lists);
+        expect(screen.getAllByRole('listitem').map((li) => announcedText(li)), item.name).toEqual(item.items);
+        expect(container.querySelectorAll('li'), item.name).toHaveLength(item.items.length);
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('推移の列見出し・scope・行数・セルの値を固定する（Req 2.1, 2.2）', async () => {
+      const HEADERS = ['日付', '順位', '評価', 'クチコミ数'];
+      const cases = [
+        {
+          name: '2 点',
+          body: mockResult,
+          rows: [
+            ['2026-07-10', '3', '4.4', '115'],
+            ['2026-07-11', '2', '4.5', '120'],
+          ],
+        },
+        {
+          name: '欠損値',
+          body: { ...mockResult, trend: [{ capturedOn: '2026-07-12', rank: null, rating: null, reviewCount: null }] },
+          rows: [['2026-07-12', '—', '—', '—']],
+        },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item) => {
+        const headers = screen.getAllByRole('columnheader');
+        // 要件 2.2 が守るのは「列見出しとして読み上げられる文字列」そのものである。
+        expect(headers.map((cell) => announcedText(cell)), item.name).toEqual(HEADERS);
+        expect(headers.map((cell) => cell.getAttribute('scope')), item.name).toEqual(['col', 'col', 'col', 'col']);
+
+        const rows = screen.getAllByRole('row');
+        expect(rows, item.name).toHaveLength(item.rows.length + 1);
+        expect(
+          rows.slice(1).map((row) => Array.from(row.querySelectorAll('td')).map((cell) => announcedText(cell))),
+          item.name,
+        ).toEqual(item.rows);
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('サマリーが取得できない 2 分岐の文言を完全一致で固定する（Req 3.2）', async () => {
+      const cases = [
+        {
+          name: 'サマリー無し',
+          body: { ...mockResult, summary: null },
+          text: '本日分のデータはまだ準備中です。しばらくしてから再度お試しください。',
+        },
+        { name: 'サマリー失敗', body: withSummary({ status: 'failed' }), text: '本日のポジションを取得できませんでした。' },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        soleParagraphAnnouncing(container, item.text);
+        // この 2 分岐は順位も自店の評価も新着も持たない（データが無いのだから当然だが、
+        // 「取得できなかったときにそれらしい値を描かない」ことは 7.4 の規律そのものである）。
+        expect(screen.queryByText(/新着クチコミ/), item.name).toBeNull();
+        expect(screen.queryByText(/自店の評価/), item.name).toBeNull();
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('節の見出しの読み上げ名と階層を分岐ごとに固定する（Req 3.2）', async () => {
+      const cases = [
+        {
+          name: '正常',
+          body: mockResult,
+          h2: ['今日のポジション（2026-07-11）', '競合との比較', '直近30日の推移'],
+          h3: ['自店の評価', '新着クチコミ'],
+        },
+        {
+          name: 'サマリー無し',
+          body: { ...mockResult, summary: null },
+          h2: ['今日のポジション', '競合との比較', '直近30日の推移'],
+          h3: [],
+        },
+        {
+          name: 'サマリー失敗',
+          body: withSummary({ status: 'failed' }),
+          h2: ['今日のポジション（2026-07-11）', '競合との比較', '直近30日の推移'],
+          h3: [],
+        },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item) => {
+        expect(screen.getAllByRole('heading', { level: 2 }).map((h) => announcedText(h)), item.name).toEqual(item.h2);
+        expect(screen.queryAllByRole('heading', { level: 3 }).map((h) => announcedText(h)), item.name).toEqual(item.h3);
+        // 算出される読み上げ名まで固定する（縦積みで子要素が箱になると区切りの空白が入り、
+        // textContent は一致したまま読み上げ名だけがずれる）。
+        for (const name of [...item.h2, ...item.h3]) {
+          expect(screen.getByRole('heading', { name }), `${item.name} / ${name}`).toBeDefined();
+        }
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('店舗選択待ちの節の見出しを読み上げ名と階層で固定する（Req 3.2）', async () => {
+      stubFetch({ ok: false, status: 409, body: SELECTION_BODY });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('テスト中目黒駅前店')).toBeDefined();
+      });
+
+      const headings = screen.getAllByRole('heading', { level: 2 });
+      expect(headings).toHaveLength(1);
+      expect(announcedText(headings[0]!)).toBe('表示する店舗を選んでください');
+      expect(screen.getByRole('heading', { level: 2, name: '表示する店舗を選んでください' })).toBe(headings[0]);
+    });
+
+    // --- 段 2: 意匠の適用そのものを固定する ----------------------------------------------
+    //
+    // 巨大表示の段は docs/design/design-language.md 7.3 節、前日比の示し方は 7.7 節、
+    // 表の扱いは 7.2 節、見出しの階層は 6 節が正典であり、ここでは結論も数値も転記せず参照する。
+
+    it('4 分岐すべてで節の見出しを共通の見出し部品から描く（Req 1.1, 1.2）', async () => {
+      /** 描画された全見出しが部品を通り、タグの階層と部品へ渡した階層が一致すること。 */
+      function inspectHeadings(where: string): void {
+        const headings = screen.getAllByRole('heading');
+        expect(headings.length, where).toBeGreaterThan(1);
+        for (const heading of headings) {
+          expect(heading.getAttribute('data-slot'), `${where} / ${heading.textContent}`).toBe('heading');
+          expect(heading.getAttribute('data-level'), `${where} / ${heading.textContent}`).toBe(
+            heading.tagName.slice(1),
+          );
+        }
+      }
+
+      const cases = [
+        { name: '正常', body: mockResult },
+        { name: 'サマリー無し', body: { ...mockResult, summary: null } },
+        { name: 'サマリー失敗', body: withSummary({ status: 'failed' }) },
+      ] as const;
+      const visited = await forEachResponse(cases, (item) => {
+        inspectHeadings(item.name);
+      });
+      expect(visited).toBe(cases.length);
+
+      // 店舗選択待ちの h2 はどのタスクにも割り当てられていなかった（task 3.1 の報告 → 3.3 へ）。
+      // 5 つが部品になるのに 1 つだけ素のタグが残ると、同一役割が同じ面の中で 2 通りに描かれる。
+      stubFetch({ ok: false, status: 409, body: SELECTION_BODY });
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('テスト中目黒駅前店')).toBeDefined();
+      });
+      inspectHeadings('店舗選択待ち');
+    });
+
+    it('順位の数値を文字サイズの最大段で描き、任意の値を書かない（Req 1.3, 4.7）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+      const { container } = render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      const paragraph = soleParagraphAnnouncing(container, '近隣5店中 2位（前日比: ↑ 上昇）');
+      // 巨大表示は段落の中の 1 要素だけ。前日比まで巻き込むと「唯一の大声」が意味を失う。
+      const children = Array.from(paragraph.children);
+      expect(children).toHaveLength(1);
+      const display = children[0]!;
+      expect(ownText(display)).toBe('2');
+      // **集合の完全一致で固定する。** 包含では `text-[64px]` のような任意値や色ユーティリティを
+      // 後ろへ足す改変が通る。段は正典 7.3 節が指す 6 節の最大段であり、面は値を持たない。
+      expect(classTokens(display)).toEqual(['text-2xl', 'font-bold']);
+
+      // 完了条件「巨大表示に任意の値を書いていない」を、巨大表示だけでなく**面が自分で書く
+      // 要素すべて**へ広げる。走査から外すのは `data-slot` を持つ要素（＝共通部品の描く要素）で、
+      // 角括弧記法は部品の内部実装が正当に使っている（`[--card-spacing:--spacing(4)]` 等）。
+      // 部品が面へ渡す受け口については、直後に差分で押さえる。
+      const arbitrary = Array.from(container.querySelectorAll('[class]:not([data-slot])')).filter((element) =>
+        classTokens(element).some((token) => token.includes('[')),
+      );
+      expect(arbitrary.map((element) => element.getAttribute('class'))).toEqual([]);
+
+      // 面が部品の受け口へ渡したトークンを、**渡していない受け口との差分**で取り出す。
+      // 部品側の内部クラスをテストへ書き写さずに、面が足した分だけを完全一致で固定できる
+      // （書き写すと部品を直した瞬間に面の検査が理由もなく壊れる）。
+      const contents = Array.from(container.querySelectorAll('[data-slot="card-content"]'));
+      const untouched = new Set(classTokens(contents[0]!));
+      expect(contents.map((element) => classTokens(element).filter((token) => !untouched.has(token)))).toEqual([
+        [],
+        [],
+        ['flex', 'flex-col', 'gap-2'],
+        [],
+      ]);
+    });
+
+    it('順位・自店の評価・新着・競合を情報の容器へ載せる（Req 1.1）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+      const { container } = render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      const cards = Array.from(container.querySelectorAll('[data-slot="card"]'));
+      expect(cards).toHaveLength(4);
+
+      // 見出しは容器の**外**に置く。容器は内容だけを持つ（面の中で規則を 1 つに保つため、
+      // 空状態の部品が容器をそのまま置き換えられる形にしてある）。
+      for (const card of cards) {
+        expect(card.querySelectorAll('[data-slot="heading"]'), card.textContent ?? '').toHaveLength(0);
+      }
+
+      const inCard = [
+        soleParagraphAnnouncing(container, '近隣5店中 2位（前日比: ↑ 上昇）'),
+        soleParagraphAnnouncing(container, '★4.5（クチコミ 120件）（前日比 +0.1）'),
+        screen.getByText('2件の新着クチコミ'),
+        screen.getByText('競合A: ★4.2（クチコミ 80件） 星差 0.3'),
+      ];
+      expect(inCard.map((element) => cards.indexOf(element.closest('[data-slot="card"]')!))).toEqual([0, 1, 2, 3]);
+
+      // 見出しと対応する内容を近い間隔でまとめ、各グループの間をその 2 倍以上空ける。
+      // 見出しと前のカードが等距離になると、どちらの内容を説明しているかが曖昧になる。
+      const summary = screen.getByRole('heading', { level: 2, name: /今日のポジション/ }).closest('section')!;
+      expect(classTokens(summary)).toEqual(['flex', 'flex-col', 'gap-6']);
+      const groups = Array.from(summary.children);
+      expect(groups).toHaveLength(3);
+      expect(groups.map((group) => classTokens(group))).toEqual([
+        ['flex', 'flex-col', 'gap-2'],
+        ['flex', 'flex-col', 'gap-2'],
+        ['flex', 'flex-col', 'gap-2'],
+      ]);
+      expect(groups.map((group) => group.querySelector('[data-slot="heading"]')?.textContent)).toEqual([
+        '今日のポジション（2026-07-11）',
+        '自店の評価',
+        '新着クチコミ',
+      ]);
+    });
+
+    it('推移を表の部品へ移し、横方向の捲りを表の外側に置く（Req 2.1, 2.5）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+      const { container } = render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      const table = screen.getByRole('table');
+      expect(table.getAttribute('data-slot')).toBe('table');
+      for (const cell of screen.getAllByRole('columnheader')) {
+        expect(cell.getAttribute('data-slot'), cell.textContent ?? '').toBe('table-header-cell');
+      }
+
+      // 捲りは表の **外側** が持つ（tbody の内側には置けない）。
+      const scroller = table.parentElement!;
+      expect(scroller.getAttribute('data-slot')).toBe('table-container');
+      expect(classTokens(scroller)).toContain('overflow-x-auto');
+      expect(classTokens(table)).not.toContain('overflow-x-auto');
+      // 捲りを担う領域はキーボードで到達できなければ、隠れた列が失われる（WCAG 2.1.1）。
+      expect(scroller.getAttribute('tabindex')).toBe('0');
+      expect(scroller.getAttribute('role')).toBe('region');
+      expect(scroller.getAttribute('aria-label')).toBe('直近30日の推移');
+      // 捲れる領域はこの面に 1 つだけ。e2e（store-surface.spec.ts）の宣言と同じ数である。
+      expect(container.querySelectorAll('[data-slot="table-container"]')).toHaveLength(1);
+
+      // 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。
+      const firstRow = screen.getAllByRole('row')[1]!;
+      expect(Array.from(firstRow.querySelectorAll('td')).map((cell) => cell.getAttribute('data-numeric'))).toEqual([
+        null,
+        'true',
+        'true',
+        'true',
+      ]);
+    });
+
+    it('0 件の案内を空状態の部品へ載せ、導線を 1 つも足さない（Req 2.3, 3.1, 3.3）', async () => {
+      const cases = [
+        {
+          name: '競合 0 件・推移 0 件・サマリー無し',
+          body: { ...mockResult, summary: null, competitors: [], trend: [] },
+          texts: ['競合が見つかっていません（自店のみの計測です）', '推移データがありません'],
+        },
+        {
+          name: '新着 0 件',
+          body: withSummary({ newReviewCount: 0, newReviews: [] }),
+          texts: ['新着なし'],
+        },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        const states = Array.from(container.querySelectorAll('[data-slot="empty-state"]'));
+        expect(states.map((state) => announcedText(state)), item.name).toEqual(item.texts);
+        for (const state of states) {
+          // **導線は足せない。** 要件 2.3 は「次に取れる操作への導線」も求めるが、この面は
+          // リンクと押しボタンの個数が固定されている（要件 3.1 / 3.3）。空状態の部品は
+          // 押しボタンを内包しないので、children を渡さない限りこの制約と両立する。
+          expect(state.querySelectorAll('a, button'), item.name).toHaveLength(0);
+        }
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('面の側が書く className はレイアウトと文字サイズだけである（Req 1.3, 1.5）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+      const { container } = render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      // 面が自分で class を書く要素は節と一覧だけ（版面は task 3.1 が別途固定している）。
+      // **集合の完全一致**で押さえるのは、色ユーティリティを後ろへ足す改変を通さないためである。
+      expect(Array.from(container.querySelectorAll('section')).map((element) => classTokens(element))).toEqual([
+        ['flex', 'flex-col', 'gap-6'],
+        ['flex', 'flex-col', 'gap-4'],
+        ['flex', 'flex-col', 'gap-4'],
+      ]);
+      expect(Array.from(container.querySelectorAll('ul')).map((element) => classTokens(element))).toEqual([
+        ['flex', 'flex-col', 'gap-2'],
+        ['flex', 'flex-col', 'gap-2'],
+      ]);
     });
   });
 });

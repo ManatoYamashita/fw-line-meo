@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { SurveyForm } from './survey-form';
 import { DraftPanel } from './draft-panel';
 import { isRecentlyAnswered, markAnswered } from './answered-flag';
@@ -101,9 +104,25 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
   if (phase === 'answered') {
     return (
       <section className="space-y-4">
-        <p>{storeName}へのご回答ありがとうございました。</p>
+        {/* 回答が届いたことの通知。読み上げ役割（穏やかなライブリージョン）は変種から部品が
+            決める。面の側で役割を手書きすると、部品の分岐と二重管理になる。
+            下書きパネルのような常時マウントの容器は要らない。あちらは同じ画面の中で通知だけが
+            現れたり消えたりするが、こちらは画面そのものが分岐で切り替わるためである。 */}
+        <Alert variant="success">
+          <AlertDescription>{storeName}へのご回答ありがとうございました。</AlertDescription>
+        </Alert>
+        {/* 投稿導線（全評価で同一。ゲーティングをしない）。
+            要素はリンクのまま、見た目だけを押しボタンの部品から借りる（正典 7.9 / 7.10）。
+            部品そのものを使わないのは、押しボタンとして描くと支援技術に押しボタンとして読まれ、
+            遷移であることが伝わらなくなるためである。寸法の実値はここに書かない。
+
+            **下書きパネルの投稿導線と同一の呼び出しにする。** 共有モジュールへ切り出さないのは、
+            回答済み画面と下書きパネルが別々の境界を持つ面だからである。切り出す代わりに、
+            2 箇所が食い違わないことを検証が機械強制する
+            （`test/survey-shell.test.tsx` の「面をまたいだ相等」。期待値は部品の算出結果から
+            取るので、片方だけを直す改変も、部品の側の変更に片方だけ追随する改変も落ちる）。 */}
         <a
-          className="block min-h-11 rounded-lg border border-primary px-6 py-3 text-center text-base font-semibold text-primary"
+          className={cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }))}
           href={googleReviewUrl}
           target="_blank"
           rel="noopener noreferrer"
@@ -130,9 +149,13 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
   return (
     <>
       {error !== null && (
-        <p className="mb-4 font-medium text-destructive" role="alert">
-          {error}
-        </p>
+        // 読み上げ役割（進行中の読み上げを中断するライブリージョン）は変種から部品が決める。
+        // 面の側で役割を手書きすると、部品の分岐と二重管理になる。
+        // 下の余白だけは面の側に残す。フォームとの間隔は外側の律であって、通知の部品の領分では
+        // ないためである（正典 7.10 が面の側に禁じたのは高さ・内側余白・文字寸法）。
+        <Alert className="mb-4" variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       <SurveyForm aspects={aspects} onSubmit={handleSubmit} submitting={submitting} />
     </>
