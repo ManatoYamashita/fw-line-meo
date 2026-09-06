@@ -167,7 +167,7 @@ describe('store detail page', () => {
       expect(screen.getByText('本日分のデータはまだ準備中です。しばらくしてから再度お試しください。')).toBeDefined();
     });
     expect(screen.getByText('競合が見つかっていません（自店のみの計測です）')).toBeDefined();
-    expect(screen.getByText('推移データがありません')).toBeDefined();
+    expect(screen.getByText('推移データはまだありません（毎朝の集計後に表示されます）')).toBeDefined();
     expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
   });
 
@@ -878,8 +878,18 @@ describe('store detail page', () => {
 
     it('新着クチコミの件数表記と 0 件の文言を固定する（Req 3.2）', async () => {
       const cases = [
-        { name: '2 件', body: mockResult, present: '2件の新着クチコミ', absent: '新着なし' },
-        { name: '0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), present: '新着なし', absent: '2件の新着クチコミ' },
+        {
+          name: '2 件',
+          body: mockResult,
+          present: '2件の新着クチコミ',
+          absent: '新着なし（前回の集計以降、新しいクチコミはありません）',
+        },
+        {
+          name: '0 件',
+          body: withSummary({ newReviewCount: 0, newReviews: [] }),
+          present: '新着なし（前回の集計以降、新しいクチコミはありません）',
+          absent: '2件の新着クチコミ',
+        },
       ] as const;
 
       const visited = await forEachResponse(cases, (item) => {
@@ -1168,12 +1178,15 @@ describe('store detail page', () => {
         {
           name: '競合 0 件・推移 0 件・サマリー無し',
           body: { ...mockResult, summary: null, competitors: [], trend: [] },
-          texts: ['競合が見つかっていません（自店のみの計測です）', '推移データがありません'],
+          texts: [
+            '競合が見つかっていません（自店のみの計測です）',
+            '推移データはまだありません（毎朝の集計後に表示されます）',
+          ],
         },
         {
           name: '新着 0 件',
           body: withSummary({ newReviewCount: 0, newReviews: [] }),
-          texts: ['新着なし'],
+          texts: ['新着なし（前回の集計以降、新しいクチコミはありません）'],
         },
       ] as const;
 
@@ -1181,9 +1194,9 @@ describe('store detail page', () => {
         const states = Array.from(container.querySelectorAll('[data-slot="empty-state"]'));
         expect(states.map((state) => announcedText(state)), item.name).toEqual(item.texts);
         for (const state of states) {
-          // **導線は足せない。** 要件 2.3 は「次に取れる操作への導線」も求めるが、この面は
-          // リンクと押しボタンの個数が固定されている（要件 3.1 / 3.3）。空状態の部品は
-          // 押しボタンを内包しないので、children を渡さない限りこの制約と両立する。
+          // **導線は足さない。** 要件 2.3 は「次に取れる操作への導線」も求めるが、この面には
+          // 0 件の状態を解消する操作そのものが存在しない。要件 3.1 / 3.3 は、その不在を構造で保証する。
+          // 空状態の部品へ children を渡さないことで、存在しない操作を見せかけることも防ぐ。
           expect(state.querySelectorAll('a, button'), item.name).toHaveLength(0);
         }
       });
