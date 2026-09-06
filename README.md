@@ -58,6 +58,7 @@ GCP に一元デプロイされる。
 - クラウド: GCP（Cloud Run / Cloud Scheduler / Cloud SQL(PostgreSQL) / Identity Platform）
 - 生成AI: Gemini API
 - 言語: TypeScript（リアルタイム応答層）＋ Go（日次バッチ層）
+- TypeScript 実行環境: Node.js 24 LTS
 
 ## リポジトリ構成
 

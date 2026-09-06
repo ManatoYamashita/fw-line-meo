@@ -9,7 +9,7 @@ npb_fixture() {
 export const url = process.env.NEXT_PUBLIC_LIFF_ID;
 EOF
   fx_write ts/apps/demo/Dockerfile <<'EOF'
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 ARG NEXT_PUBLIC_LIFF_ID
 ENV NEXT_PUBLIC_LIFF_ID=$NEXT_PUBLIC_LIFF_ID
 RUN npm run build
@@ -26,7 +26,7 @@ t_end
 t_begin 'check-next-public-buildargs: ARG 欠落を検出する'
 npb_fixture
 fx_write ts/apps/demo/Dockerfile <<'EOF'
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 RUN npm run build
 EOF
 fx_run check-next-public-buildargs

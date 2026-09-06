@@ -5,7 +5,7 @@
 #   docker build -f apps/dashboard-web/Dockerfile -t dashboard-web ts/
 # 注記: このマシンには docker が無いため本 Dockerfile は CI/デプロイ時に検証する。
 
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
