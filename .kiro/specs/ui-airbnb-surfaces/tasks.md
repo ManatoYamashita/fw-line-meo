@@ -1353,6 +1353,35 @@ const alerts = within(main).getAllByRole('alert');   // 取得の完了前に走
 段階 6 で再評価する。
 
 
+### 2 度目の合流 — Node.js 24（2026-09-06・`00f5b58`）
+
+**上の CI 実証（run 34006079270）を取っている間に、origin/main がさらに 3 コミット進んだ。**
+`/kiro-validate-impl` が NO-GO の根拠として挙げたのと同じ形が、同じ日のうちに再発した。
+
+| コミット | 内容 |
+|---|---|
+| [#198](https://github.com/ManatoYamashita/fw-line-meo/pull/198) | **Node.js 24 へ更新**（`ts/package.json` の engines・`setup-node` の node-version・Dockerfile 6 件・lockfile） |
+| [#199](https://github.com/ManatoYamashita/fw-line-meo/pull/199) | `infra/README.md` のリッチメニュー差し替え runbook |
+
+衝突は無かった。**ただし「衝突が無い」は「検証し直さなくてよい」ではない。**
+実行環境の版が動いており、直前の全緑は Node 20 に対する全緑だったからである。
+ローカルの既定は node 20 なので、**nvm の v24.13.0 へ切り替えて CI と同じ版で回し直した。**
+
+| 検査（Node 24.13.0） | 結果 |
+|---|---|
+| `pnpm install --frozen-lockfile` | 緑（lockfile の変更と整合） |
+| build / typecheck / lint | 緑 |
+| テスト 10 パッケージ | 全緑（件数は Node 20 と同一） |
+| E2E: survey-web | **42 passed** |
+| E2E: dashboard-web / store-detail | **13 passed** / **2 passed** |
+| read-only ガード | **17 本すべて緑** |
+| 実行コード容量 | JS **237.1 KB**・CSS **7.3 KB** |
+
+**JS の実測が Node 20 の 236.7 KB から 237.1 KB へ動いた。** 予算 300 KB に対しては誤差だが、
+**この 0.4 KB は CI の実測値と一致する**（run 34006079270 の `lint-build-test` も 237.1 KB）。
+直前のローカル計測が CI と 0.4 KB ずれていた原因は Node の版だった、という後追いの説明が付く。
+**容量を記録として残すときは、測った Node の版も併記すること。**
+
 ### 合流後の CI 実証（2026-09-06・run 34006079270）
 
 `51d70a1`（合流 `2afd503` ＋ 記録の是正）を使い捨ての `feat/ci-check-ui-airbnb-surfaces-final` へ
