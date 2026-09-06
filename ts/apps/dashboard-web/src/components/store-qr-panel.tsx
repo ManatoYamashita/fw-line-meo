@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { Card, CardContent, CardHeader } from '@fwlm/ui/components/card';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Spinner } from '@fwlm/ui/components/spinner';
@@ -194,11 +195,16 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
             // とき描画先へ role="button" を付けるため、支援技術にはリンクではなくボタンとして
             // 提示され、download 属性を持つ実リンクという実体と食い違う。見た目だけを
             // buttonVariants から借り、要素と役割は素の <a> のまま保つ。
+            //
+            // **借りるときは cn() を通す（Issue #208）。** 基底の透明枠と outline 変種の枠色は
+            // 競合し、cva の生出力では両方が class に残る。詳細度が同じなので生成 CSS の順序で
+            // 透明が勝ち、枠が消える。Button 部品は cn()（tailwind-merge）でこれを後勝ちに
+            // 解決しており、裸で呼ぶと部品と見た目だけが食い違う。
             <a
               ref={saveLinkRef}
               href={state.imageUrl}
               download={qrFileName(storeName, storeId)}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
               aria-label={`${storeName} の QR 画像を保存`}
             >
               画像を保存

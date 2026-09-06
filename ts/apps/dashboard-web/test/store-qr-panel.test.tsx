@@ -2,6 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
+import { buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
+
 import type { ApiResult, BinaryPayload } from '../src/lib/api';
 import { settleEffects } from './focus-observation';
 
@@ -70,6 +73,38 @@ describe('StoreQrPanel: 取得・表示・保存', () => {
 
     const link = await screen.findByRole('link', { name: new RegExp(STORE_NAME) });
     expect(link.tagName).toBe('A');
+  });
+
+  // 部品の見た目を借りるときは `cn()` を通す（Issue #208）。
+  //
+  // `buttonVariants()` を裸で呼ぶと、基底の `border-transparent` と outline 変種の `border-input`
+  // が **両方 class に残る**。詳細度が同じため生成 CSS の順序で `border-transparent` が勝ち、
+  // 実描画で枠が透明になる。`Button` 部品は `cn()`（tailwind-merge）を通しており競合を後勝ちで
+  // 解決するので、部品と裸呼びで**見た目だけが食い違う**。寸法も角丸も文字色も一致するため、
+  // 実描画の枠を測らない限り気づけない。
+  //
+  // **期待値は「面が使うべき式」から導く。** 裸の `buttonVariants()` から導くと、面と期待値が
+  // 同じ壊れ方をして緑のまま固定される（PR #200 の survey-web で実際に踏んだ形）。
+  it('保存リンクが借りる見た目に、基底の透明枠が残っていない（Issue #208）', async () => {
+    const fetchQr = vi.fn().mockResolvedValue(okPayload());
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    const link = await screen.findByRole('link', { name: new RegExp(STORE_NAME) });
+    const classes = link.getAttribute('class') ?? '';
+    expect(classes, '保存リンクが class を持たない（見た目を借りていない）').not.toBe('');
+
+    expect(
+      classes.split(/\s+/),
+      '基底の border-transparent が残っている。cn() を通していないため outline 変種の枠が' +
+        '実描画で透明になり、押せることが視覚的に伝わらない',
+    ).not.toContain('border-transparent');
+
+    expect(
+      classes,
+      '保存リンクの見た目が押しボタンの算出結果と一致しない',
+    ).toBe(cn(buttonVariants({ variant: 'outline', size: 'sm' })));
   });
 
   it('取得中は処理中であることを示し、保存操作を出さない（2.2）', async () => {
