@@ -521,6 +521,8 @@ interface MotionValues {
   animationDurationSeconds: number;
   animationIterationCount: string;
   transitionDurationSeconds: number;
+  /** 遷移させる性質の実効値。正典 7.11 が「名指しする」と定めた側（Issue #201）。 */
+  transitionProperty: string;
 }
 
 interface AnimatedElement {
@@ -627,6 +629,7 @@ function readMotion(locator: Locator): Promise<MotionValues> {
       animationDurationSeconds: maxSeconds(style.animationDuration),
       animationIterationCount: style.animationIterationCount,
       transitionDurationSeconds: maxSeconds(style.transitionDuration),
+      transitionProperty: style.transitionProperty,
     };
   });
 }
@@ -2478,4 +2481,53 @@ test.describe('スクロール領域の除外', () => {
       ).toBeGreaterThan(deviceWidth + 1);
     });
   }
+});
+
+// 正典 7.11 は「状態を示す色は 150ms で遷移させ、**遷移させる性質を名指しする**」と定めている。
+// 時間の側（transitionDuration）は既に複数箇所で測っているが、**性質の側は一度も測っていなかった**。
+// その結果、部品が `transition-all` を持っていても誰も落とせない状態が続いていた（Issue #201）。
+//
+// **罠**: `transition-property` の CSS 初期値は `all` である。したがって遷移を 1 つも持たない
+// 要素まで `all` を返す。実効の時間が 0 の要素を除いてから判定しないと、無関係な要素で
+// 常に赤くなり、この検査は「常に落ちるので消される」側へ倒れる。
+test('部品の遷移が性質を名指ししている（実際に遷移する要素が all を使わない）', async ({ page }) => {
+  await openComponentCatalog(page);
+
+  const transitioning = await page.evaluate(() => {
+    const maxSeconds = (value: string): number =>
+      value.split(',').reduce((longest, part) => {
+        const text = part.trim();
+        const amount = Number.parseFloat(text);
+        if (!Number.isFinite(amount)) return longest;
+        return Math.max(longest, text.endsWith('ms') ? amount / 1000 : amount);
+      }, 0);
+    return [...document.querySelectorAll('[data-slot]')]
+      .map((element) => {
+        const style = getComputedStyle(element);
+        return {
+          slot: element.getAttribute('data-slot'),
+          label: (element.textContent ?? '').trim().slice(0, 20),
+          property: style.transitionProperty,
+          seconds: maxSeconds(style.transitionDuration),
+        };
+      })
+      .filter((entry) => entry.seconds > 0);
+  });
+
+  // 空振り防止: 遷移を持つ部品が 1 つも無い状態で緑にしない。
+  expect(
+    transitioning.length,
+    '実際に遷移する部品が検証面に 1 つも無い。抽出が壊れているか部品から遷移が消えた',
+  ).toBeGreaterThan(0);
+
+  const unnamed = transitioning
+    .filter((entry) => entry.property.split(',').some((part) => part.trim() === 'all'))
+    .map((entry) => `${entry.slot}（${entry.label}）`);
+
+  expect(
+    unnamed,
+    '遷移させる性質を名指ししていない部品がある（正典 7.11）。' +
+      'まとめて指定すると、後から足した性質が意図せず遷移の対象になる。' +
+      '押しボタンは押下の沈み込みを持つため、寸法や位置が状態変化ではなく画面の移動として読まれる',
+  ).toEqual([]);
 });

@@ -350,6 +350,18 @@ export default function UiCheckPage() {
           <option value="oldest">古い順</option>
         </Select>
       </Field>
+
+      {/* 拡大の寸法区分。
+        *
+        * **この区分は検証面に一度も描かれていなかった。** `BUTTON_TOUCH_REQUIREMENT` は
+        * `lg` と `icon-lg` に 44px を要求しているが、対象が 0 件だったため、その行は
+        * 一度も発火していない。宣言があることと守られていることは別である。
+        *
+        * 配置の規律はこれまでと同じで、追加は必ず末尾に置く（最初の Tab が
+        * 「既定のボタン」へ入る契約）。名前は既存 locator の部分文字列にならないよう
+        * 「拡大の」で始め、互いの部分文字列にもならないようにしてある。 */}
+      <Button size="lg">拡大のボタン</Button>
+      <Button size="icon-lg" aria-label="拡大のアイコンボタン" />
     </PageShell>
   );
 }

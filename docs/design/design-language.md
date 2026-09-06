@@ -498,6 +498,7 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 3 版面の余白と版面の段（本番の回答画面と下書き画面） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番の回答画面と下書き画面の版面 |
 | 選択部品の操作領域（本番の回答画面） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番の回答画面の選択部品 |
 | 2.1 / 3 空状態の文字色と余白 | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 空状態の文字色と余白 |
+| 7.11 遷移させる性質の名指し（部品の実描画） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 性質を名指ししている |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
 | LINE 日次サマリーの意匠の不変条件 | `ts/apps/delivery-job/test/flex.test.ts` | 意匠の不変条件 |
 | LINE オンボーディングの意匠の不変条件 | `ts/apps/line-webhook/test/line/messages.test.ts` | 意匠の不変条件 |

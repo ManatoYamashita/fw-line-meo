@@ -1179,11 +1179,13 @@ const MOTION_CLASSIFICATIONS: readonly MotionClassification[] = [
     kind: 'progress',
     note: 'Spinner の無限回転。動き低減設定下で最も止めるべき対象',
   },
-  { utility: 'transition-all', kind: 'progress', note: 'Button / Badge の状態遷移' },
   {
     utility: 'transition-colors',
     kind: 'progress',
-    note: 'Input / Textarea / Checkbox の色遷移',
+    note: 'Button / Badge / Input / Textarea / Checkbox の色遷移。'
+      + 'かつて Button / Badge は transition-all を持っていたが、'
+      + '正典 7.11「遷移させる性質を名指しする」に反し、押下の沈み込み（到達状態）まで'
+      + '遷移の対象にしていたため色系へ絞った（Issue #201）',
   },
   {
     utility: 'transition-none',
