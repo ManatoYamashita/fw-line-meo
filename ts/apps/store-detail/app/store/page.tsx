@@ -281,45 +281,51 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
   const ratingDiff = formatRatingDiff(summary.rating, summary.ratingPrev);
 
   return (
-    <section className="flex flex-col gap-4">
-      <Heading level={2}>今日のポジション（{summary.summaryDate}）</Heading>
-      <Card>
-        <CardContent>
-          {/* 順位の数値だけを巨大表示にする（正典 7.3 節）。段は 6 節の文字サイズの最大段であり、
-           * 面の側は任意の値を持たない。**暫定であり、この段は主見出しと同じ寸法である**ため、
-           * 「プロダクト全体で 1 箇所」という一意性はここでは主張しない（追跡は Issue #185）。
-           *
-           * 数値を子要素へ切り出しても、この段落が読み上げる内容は 1 文字も変わらない
-           * （前後の文言は直下のテキストノードのまま残る）。
-           *
-           * 前日比は `formatRankDiff` が返す上下の矢印を伴う文言をそのまま置く（正典 7.7 節）。
-           * 独立した要素を与えないので、増減を色だけで伝えることが構造的に起こりえない。 */}
-          <p>
-            {summary.rank !== null && summary.rankTotal !== null ? (
-              <>
-                {`近隣${summary.rankTotal}店中 `}
-                <span className="text-2xl font-bold">{summary.rank}</span>
-                {'位'}
-              </>
-            ) : (
-              '順位情報がありません'
-            )}
-            {rankDiff !== null ? `（前日比: ${rankDiff}）` : ''}
-          </p>
-        </CardContent>
-      </Card>
-      <Heading level={3}>自店の評価</Heading>
-      <Card>
-        <CardContent>
-          <p>
-            ★{summary.rating ?? '—'}（クチコミ{' '}
-            {summary.reviewCount !== null ? `${summary.reviewCount}件` : '—'}）
-            {ratingDiff !== null ? `（${ratingDiff}）` : ''}
-          </p>
-        </CardContent>
-      </Card>
-      <Heading level={3}>新着クチコミ</Heading>
-      <NewReviewsList count={summary.newReviewCount} reviews={summary.newReviews} />
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Heading level={2}>今日のポジション（{summary.summaryDate}）</Heading>
+        <Card>
+          <CardContent>
+            {/* 順位の数値だけを巨大表示にする（正典 7.3 節）。段は 6 節の文字サイズの最大段であり、
+             * 面の側は任意の値を持たない。**暫定であり、この段は主見出しと同じ寸法である**ため、
+             * 「プロダクト全体で 1 箇所」という一意性はここでは主張しない（追跡は Issue #185）。
+             *
+             * 数値を子要素へ切り出しても、この段落が読み上げる内容は 1 文字も変わらない
+             * （前後の文言は直下のテキストノードのまま残る）。
+             *
+             * 前日比は `formatRankDiff` が返す上下の矢印を伴う文言をそのまま置く（正典 7.7 節）。
+             * 独立した要素を与えないので、増減を色だけで伝えることが構造的に起こりえない。 */}
+            <p>
+              {summary.rank !== null && summary.rankTotal !== null ? (
+                <>
+                  {`近隣${summary.rankTotal}店中 `}
+                  <span className="text-2xl font-bold">{summary.rank}</span>
+                  {'位'}
+                </>
+              ) : (
+                '順位情報がありません'
+              )}
+              {rankDiff !== null ? `（前日比: ${rankDiff}）` : ''}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Heading level={3}>自店の評価</Heading>
+        <Card>
+          <CardContent>
+            <p>
+              ★{summary.rating ?? '—'}（クチコミ{' '}
+              {summary.reviewCount !== null ? `${summary.reviewCount}件` : '—'}）
+              {ratingDiff !== null ? `（${ratingDiff}）` : ''}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Heading level={3}>新着クチコミ</Heading>
+        <NewReviewsList count={summary.newReviewCount} reviews={summary.newReviews} />
+      </div>
     </section>
   );
 }

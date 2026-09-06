@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
 import { openStoreSurface } from './fixtures/detail';
@@ -34,4 +34,34 @@ const TABLE_SCROLL_REGIONS = 1;
 test('モバイルビューポートの店舗詳細で横スクロールが発生しない', async ({ page }) => {
   await openStoreSurface(page);
   await expectNoHorizontalScroll(page, '店舗詳細', TABLE_SCROLL_REGIONS);
+});
+
+test('今日のポジションは見出しと内容を近接させ、各グループを明確に離す', async ({ page }) => {
+  await openStoreSurface(page);
+
+  const summary = page
+    .getByRole('heading', { level: 2, name: /今日のポジション/ })
+    .locator('xpath=ancestor::section[1]');
+  const groups = summary.locator(':scope > div');
+  await expect(groups).toHaveCount(3);
+
+  const spacing = await summary.evaluate((section) => {
+    const groupElements = Array.from(section.children);
+    return {
+      outerGap: Number.parseFloat(getComputedStyle(section).rowGap),
+      innerGaps: groupElements.map((group) => Number.parseFloat(getComputedStyle(group).rowGap)),
+      renderedInnerGaps: groupElements.map((group) => {
+        const [heading, content] = Array.from(group.children);
+        return content!.getBoundingClientRect().top - heading!.getBoundingClientRect().bottom;
+      }),
+      renderedOuterGaps: groupElements.slice(1).map((group, index) => {
+        return group.getBoundingClientRect().top - groupElements[index]!.getBoundingClientRect().bottom;
+      }),
+    };
+  });
+
+  expect(spacing.outerGap).toBe(24);
+  expect(spacing.innerGaps).toEqual([8, 8, 8]);
+  expect(spacing.renderedInnerGaps).toEqual([8, 8, 8]);
+  expect(spacing.renderedOuterGaps).toEqual([24, 24]);
 });

@@ -1109,6 +1109,23 @@ describe('store detail page', () => {
         screen.getByText('競合A: ★4.2（クチコミ 80件） 星差 0.3'),
       ];
       expect(inCard.map((element) => cards.indexOf(element.closest('[data-slot="card"]')!))).toEqual([0, 1, 2, 3]);
+
+      // 見出しと対応する内容を近い間隔でまとめ、各グループの間をその 2 倍以上空ける。
+      // 見出しと前のカードが等距離になると、どちらの内容を説明しているかが曖昧になる。
+      const summary = screen.getByRole('heading', { level: 2, name: /今日のポジション/ }).closest('section')!;
+      expect(classTokens(summary)).toEqual(['flex', 'flex-col', 'gap-6']);
+      const groups = Array.from(summary.children);
+      expect(groups).toHaveLength(3);
+      expect(groups.map((group) => classTokens(group))).toEqual([
+        ['flex', 'flex-col', 'gap-2'],
+        ['flex', 'flex-col', 'gap-2'],
+        ['flex', 'flex-col', 'gap-2'],
+      ]);
+      expect(groups.map((group) => group.querySelector('[data-slot="heading"]')?.textContent)).toEqual([
+        '今日のポジション（2026-07-11）',
+        '自店の評価',
+        '新着クチコミ',
+      ]);
     });
 
     it('推移を表の部品へ移し、横方向の捲りを表の外側に置く（Req 2.1, 2.5）', async () => {
@@ -1183,7 +1200,7 @@ describe('store detail page', () => {
       // 面が自分で class を書く要素は節と一覧だけ（版面は task 3.1 が別途固定している）。
       // **集合の完全一致**で押さえるのは、色ユーティリティを後ろへ足す改変を通さないためである。
       expect(Array.from(container.querySelectorAll('section')).map((element) => classTokens(element))).toEqual([
-        ['flex', 'flex-col', 'gap-4'],
+        ['flex', 'flex-col', 'gap-6'],
         ['flex', 'flex-col', 'gap-4'],
         ['flex', 'flex-col', 'gap-4'],
       ]);
