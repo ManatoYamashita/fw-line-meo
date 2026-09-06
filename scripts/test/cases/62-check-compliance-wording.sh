@@ -113,7 +113,7 @@ fx_run check-compliance-wording
 expect_green
 # **件数まで固定する。** シェル先食いの是正前は「走査 5 ファイル」だった（`.kiro/` 配下の
 # 2 件が射程から落ちていた）。射程が痩せたときに差分へ出る唯一の痕跡がこの数である。
-expect_output_matches '正典 4 ファイル / 走査 7 ファイル / アンカー 2 件・WHITELIST 0 件'
+expect_output_matches '正典 4 ファイル / 走査 7 ファイル / 正典アンカー 4 件 / 明文アンカー 2 件・WHITELIST 0 件'
 t_end
 
 t_begin 'check-compliance-wording: 正典に検知器の名前があると赤（規則1）'
@@ -129,6 +129,39 @@ t_end
 
 t_begin 'check-compliance-wording: 対照 — その 1 行を戻せば緑（赤の原因が検知器の名前であることの担保）'
 cw_fixture
+fx_run check-compliance-wording
+expect_green
+t_end
+
+t_begin 'check-compliance-wording: 正典に「検知の回避」型の複合語があると赤（規則1b）'
+cw_fixture
+# **是正の経緯を正典の更新履歴へ書こうとすると、まさにこの形になる。** 実際に一度
+# `_updated_at: …（多様性生成の目的を「検知の回避」から…へ書き直し）_` と書き、独立レビューに
+# 捕まった。検知器の名前を含まないので規則1a では当たらず、回避語との共起も無いので規則2 でも
+# 当たらない。**この規則だけがこの形を捕らえる。**
+printf '%s\n' '_updated_at: 2026-09-06（目的を「検知の回避」から書き直した）_' >> "${FX}/.kiro/steering/product.md"
+fx_run check-compliance-wording
+expect_red '.kiro/steering/product.md は外部審査で読まれる正典ですが、検知の回避を目的として述べる語形があります'
+expect_absent '.kiro/steering/product.md は外部審査で読まれる正典ですが、検知器の名前が書かれています'
+t_end
+
+t_begin 'check-compliance-wording: 規則1b は正典の外へは課さない（禁じる側が対象を名指しできる）'
+cw_fixture
+# ガード本体と ts-ci のステップ注記は「何を禁じるか」を書くために同じ語形を必ず含む。
+# 追跡下全体へ広げると自己言及の除外が 3 件へ増える。射程を正典に絞る判断の担保。
+printf '%s\n' '# 検知の回避を目的として述べる記述を禁じる。' >> "${FX}/scripts/some-other-guard.sh"
+fx_run check-compliance-wording
+expect_green
+t_end
+
+t_begin 'check-compliance-wording: 正典の正当な「判定」「すり抜け」は誤爆させない（隣接に限る根拠）'
+cw_fixture
+# 実在する 2 行と同型。行内共起まで広げると .kiro/specs/review-acquisition/design.md と
+# .kiro/steering/tech.md がこの形で誤爆するため、規則1b は隣接した複合語に限っている。
+printf '%s\n' '**回答済み判定はクライアント側**で行う（SSR から読めない制約の回避）。' \
+  >> "${FX}/.kiro/specs/review-acquisition/requirements.md"
+printf '%s\n' '空振り防止まですり抜けた。**判定は必ず呼び出し側で行い**、後置 true を使わない。' \
+  >> "${FX}/.kiro/steering/product.md"
 fx_run check-compliance-wording
 expect_green
 t_end
@@ -197,6 +230,26 @@ cw_fixture
 rm -f "${FX}/CLAUDE.md"
 fx_run check-compliance-wording
 expect_red 'アンカー CLAUDE.md が正典の走査対象に含まれていません'
+t_end
+
+t_begin 'check-compliance-wording: requirements.md が正典から外れても赤（規則2 では守れない行の担保）'
+cw_fixture
+# **明文アンカーは CLAUDE.md と product.md の 2 件しか無い。** 正典アンカーを 4 件すべて
+# 挙げていないと、実際の違反 4 件のうち 2 件を抱えていた requirements.md が移動・改名した
+# だけで規則1 の射程から静かに外れる。しかもその 1 件（§9 リスク表の行）は回避語を持たず
+# **規則2 では原理的に捕らえられない**（直上のケースが expect_absent で固定している）。
+# つまりこのファイルが外れると「二度と検出されない形」が復活する。
+mv "${FX}/requirements.md" "${FX}/docs-requirements.md"
+fx_run check-compliance-wording
+expect_red 'アンカー requirements.md が正典の走査対象に含まれていません'
+t_end
+
+t_begin 'check-compliance-wording: spec の正典アンカーが外れても赤（4 件が独立に効く）'
+cw_fixture
+rm -f "${FX}/.kiro/specs/review-acquisition/requirements.md"
+fx_run check-compliance-wording
+expect_red 'アンカー .kiro/specs/review-acquisition/requirements.md が正典の走査対象に含まれていません'
+expect_absent 'アンカー CLAUDE.md が正典の走査対象に含まれていません'
 t_end
 
 t_begin 'check-compliance-wording: 未追跡ファイルは走査しない（射程の明示・Issue #214）'

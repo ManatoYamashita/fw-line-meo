@@ -33,13 +33,16 @@
 # CLAUDE.md ・ .kiro/steering/** の**内容**を検査するガードは 1 本も存在しなかった。
 #
 # 検証内容（3 規則。否定と肯定を対で持つ）:
-#   規則1  正典文書に検知器の名前が現れないこと。必要な概念は「同一店舗で定型文が並ばない」で
+#   規則1a 正典文書に検知器の名前が現れないこと。必要な概念は「同一店舗で定型文が並ばない」で
 #          あって検知器の名前ではない。**この規則だけが `requirements.md` §9 のリスク表の行を
 #          捕らえる**（あの行には回避語が無いので、共起の正規表現では当たらない）。
+#   規則1b 正典文書に「検知の回避」型の複合語が現れないこと。検知器の名前を出さずに同じ動機を
+#          書く抜け道を塞ぐ。**是正の経緯を正典の更新履歴へ書こうとすると、まさにここへ掛かる**
+#          （実際に一度そう書き、独立レビューに捕まった）。経緯は Issue と PR に置く。
 #   規則2  追跡下の文書・コードで、同一行に検知器の名前と回避語が共起しないこと。正典の外へ
 #          同じ動機が漏れ出す形を塞ぐ（是正前は `ts/apps/line-webhook/test/line/messages.test.ts`
 #          が実際にそうなっていた。Issue #179 の本文はこの 1 件を数え落としている）。
-#   規則3  **肯定側のアンカー。** 「無いことの証明」は単独では空振りする。正典 2 文書の制約節に
+#   規則3  **肯定側のアンカー。** 「無いことの証明」は単独では空振りする。制約節を持つ 2 文書に
 #          文面介入の禁止が明文で在ることを対で要求する。オーナー・代理店が下書きの文面へ
 #          介入する経路が無いことは、改定後に新設された「特定のコンテンツを含めるよう依頼すること」
 #          の禁止に対する最大の防御でありながら、是正前は**偶然そうなっていただけ**だった。
@@ -81,11 +84,25 @@ NL='
 CANON_PATHSPECS='CLAUDE.md requirements.md .kiro/steering/*.md .kiro/specs/review-acquisition/*.md'
 
 # 規則2 の走査対象。文書とコードの両方（動機の記述はコメントにも漏れる）。
-SCAN_PATHSPECS='*.md *.ts *.tsx *.sql *.sh *.go *.yml *.yaml'
+# **散文を抱える拡張子を落とさない。** `infra/**/*.tf` は日本語の設計コメントを大量に持ち、
+# `eval/dataset.json` の `_comment` や `.mjs` の道具類も同様である。`check-e2e-goto-ownership.sh`
+# が「`.ts` だけに絞ると `.spec.mts` へ隠した goto が見えない」で踏んだ形と同型なので、
+# 拡張子で絞る側の穴を先に塞いでおく（広げた時点で違反 0 件であることを実測済み。
+# 追加分は .tf 47 件 / .mjs 系 5 件 / .json 64 件）。
+SCAN_PATHSPECS='*.md *.ts *.tsx *.mts *.cts *.mjs *.sql *.sh *.go *.yml *.yaml *.tf *.json'
 
-# 規則3 のアンカー。**走査対象が glob である以上、文書が移動・改名されると「対象から静かに
-# 外れて件数が減る」形で検査が痩せる。** 実在と、禁止の明文が在ることの双方を要求する。
-ANCHORS='CLAUDE.md .kiro/steering/product.md'
+# **アンカー。走査対象が glob である以上、文書が移動・改名されると「対象から静かに外れて
+# 件数が減る」形で検査が痩せる。** 差分にも CI にも痕跡が出ない。2 種類を分けて持つ。
+#
+# CANON_ANCHORS: 規則1 の走査集合に必ず居ること。**4 件すべてを挙げる。** 実際の違反 4 件のうち
+#   2 件は `requirements.md` にあり、うち 1 件（§9 リスク表の行）は回避語を持たないため
+#   **規則2 では原理的に捕らえられない**。この 1 件を守っているのは規則1 だけなので、
+#   requirements.md が対象から外れると「二度と検出されない形」が復活する。
+CANON_ANCHORS='CLAUDE.md requirements.md .kiro/steering/product.md .kiro/specs/review-acquisition/requirements.md'
+
+# MARKER_ANCHORS: 規則3。文面介入の禁止が明文で在ること。制約節を持つ 2 文書に限る
+#   （requirements.md と spec は制約の一覧を持たないので、ここへ入れると恒常的に赤くなる）。
+MARKER_ANCHORS='CLAUDE.md .kiro/steering/product.md'
 
 # 規則3 が要求する明文。この語をラベルとして持つ行が各アンカーに 1 つ以上あること。
 INTERVENTION_MARKER='下書き文面への介入禁止'
@@ -111,6 +128,14 @@ WHITELIST=()
 SPAM_RE=$'スパム'
 # 回避の意図を表す語。**回避の語だけでは技術的用法が大量に誤爆する**ので共起で見る。
 EVASION_RE='(回避|逃れ|すり抜|くぐり抜)'
+# 規則1b。検知器の名前を出さずに同じ動機を書く形（「検知の回避」「判定を回避」）。
+# **正典にだけ課す。** 追跡下全体へ広げると、禁止対象を名指しする本ガード自身と ts-ci の
+# ステップ注記が当たり、自己言及の除外を 3 件へ増やすことになる。**禁じる側は禁じる対象を
+# 名指しできなければならない**ので、射程を正典に絞るほうが筋が通る（正典 11 ファイルでの
+# 実測は 0 件。なお `(検知|判定|検出)` と回避語の**行内共起**まで広げると
+# `.kiro/specs/review-acquisition/design.md` と `.kiro/steering/tech.md` の正当な 2 行が
+# 誤爆するため、隣接した複合語に限っている）。
+EVASION_COMPOUND_RE='(検知|判定|検出)[のをはも]?回避'
 
 fail=0
 canon_scanned=0
@@ -212,18 +237,37 @@ while IFS= read -r f; do
 
   canon_scanned=$((canon_scanned + 1))
 
+  # 規則1a: 検知器の名前そのもの。
   n="$(grep_count "$SPAM_RE" "$f")" && grc=0 || grc=$?
   if [ "$grc" -ne 0 ]; then
     echo "ERROR: ${f} の走査が評価不能でした（grep exit=2）。読めなかったことを違反 0 件と読みません。" >&2
     fail=1
+  elif [ "$n" -gt 0 ]; then
+    canon_hits=$((canon_hits + n))
+    fail=1
+    echo "NG: ${f} は外部審査で読まれる正典ですが、検知器の名前が書かれています（${n} 件）。" >&2
+    lines="$(grep -nE "$SPAM_RE" "$f")" && lrc=0 || lrc=$?
+    if [ "$lrc" -ge 2 ]; then
+      echo "ERROR: ${f} の該当行を再走査できませんでした（grep exit=${lrc}）。" >&2
+    else
+      printf '%s\n' "$lines" | sed 's/^/    /' >&2
+    fi
+  fi
+
+  # 規則1b: 検知器の名前を出さずに同じ動機を書く形。**是正の経緯を正典へ書き残そうとすると
+  # ここに掛かる。** 何を直したかは Issue と PR に書けばよく、正典には直った後の記述だけを置く。
+  m="$(grep_count "$EVASION_COMPOUND_RE" "$f")" && mrc=0 || mrc=$?
+  if [ "$mrc" -ne 0 ]; then
+    echo "ERROR: ${f} の走査が評価不能でした（grep exit=2）。読めなかったことを違反 0 件と読みません。" >&2
+    fail=1
     continue
   fi
-  [ "$n" -gt 0 ] || continue
+  [ "$m" -gt 0 ] || continue
 
-  canon_hits=$((canon_hits + n))
+  canon_hits=$((canon_hits + m))
   fail=1
-  echo "NG: ${f} は外部審査で読まれる正典ですが、検知器の名前が書かれています（${n} 件）。" >&2
-  lines="$(grep -nE "$SPAM_RE" "$f")" && lrc=0 || lrc=$?
+  echo "NG: ${f} は外部審査で読まれる正典ですが、検知の回避を目的として述べる語形があります（${m} 件）。" >&2
+  lines="$(grep -nE "$EVASION_COMPOUND_RE" "$f")" && lrc=0 || lrc=$?
   if [ "$lrc" -ge 2 ]; then
     echo "ERROR: ${f} の該当行を再走査できませんでした（grep exit=${lrc}）。" >&2
   else
@@ -299,19 +343,27 @@ done <<EOF
 ${scan_files}
 EOF
 
-# ---- 規則3: 肯定側のアンカー ----
-# 「検知回避の記述が無い」だけでは、対象そのものが消えた場合にも緑になる。**あるべきものが
-# 在ること**を対にして初めて意味を持つ。
-for anchor in ${ANCHORS}; do
+# ---- 正典アンカー: 規則1 の走査集合が痩せていないこと ----
+for anchor in ${CANON_ANCHORS}; do
   case "${NL}${canon_files}${NL}" in
     *"${NL}${anchor}${NL}"*) ;;
     *)
       echo "ERROR: アンカー ${anchor} が正典の走査対象に含まれていません（移動・改名・追跡漏れの疑い）。" >&2
       echo "       対象から外れたまま残りの緑で通ると、この文書は誰も見なくなります。" >&2
       fail=1
-      continue
       ;;
   esac
+done
+
+# ---- 規則3: 肯定側のアンカー ----
+# 「検知回避の記述が無い」だけでは、対象そのものが消えた場合にも緑になる。**あるべきものが
+# 在ること**を対にして初めて意味を持つ。
+for anchor in ${MARKER_ANCHORS}; do
+  if [ ! -f "$anchor" ]; then
+    echo "ERROR: 明文アンカー ${anchor} が実在しません（移動・改名の疑い）。" >&2
+    fail=1
+    continue
+  fi
   an="$(grep_count "$INTERVENTION_MARKER" "$anchor")" && arc=0 || arc=$?
   if [ "$arc" -ne 0 ]; then
     echo "ERROR: アンカー ${anchor} の走査が評価不能でした（grep exit=2）。読めなかったことを「明文あり」と読みません。" >&2
@@ -351,5 +403,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "OK: コンプライアンス記述ガード緑（正典 ${canon_scanned} ファイル / 走査 ${scan_scanned} ファイル / アンカー $(set -- ${ANCHORS}; echo $#) 件・WHITELIST ${#WHITELIST[@]} 件）。"
+echo "OK: コンプライアンス記述ガード緑（正典 ${canon_scanned} ファイル / 走査 ${scan_scanned} ファイル / 正典アンカー $(set -- ${CANON_ANCHORS}; echo $#) 件 / 明文アンカー $(set -- ${MARKER_ANCHORS}; echo $#) 件・WHITELIST ${#WHITELIST[@]} 件）。"
 exit 0
