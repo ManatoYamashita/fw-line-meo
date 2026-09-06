@@ -31,7 +31,12 @@
 - `ts/apps/dashboard-web/src/lib/qr-filename.ts`（新規）— 保存ファイル名の決定規則
 - `ts/apps/dashboard-web/src/components/store-qr-panel.tsx`（新規）— QR の表示・保存・失敗提示と、表示資源の生存期間
 - `ts/apps/dashboard-web/src/app/stores/page.tsx` の発行列・未確定行の理由表示・パネルの開閉状態
-- 上記に対応する `ts/apps/dashboard-web/test/` のテスト
+- `ts/apps/dashboard-web/src/lib/qr-poster-text.ts`（新規・Requirement 7）— 掲示文言・禁止語・不可の例
+- `ts/apps/dashboard-web/src/app/globals.css` の `@media print`（Requirement 7.3）— 印刷対象の限定。
+  **この規則は `app/layout.tsx` 経由で全ルートへ効く**ため、掲示面を持たない面の印刷を壊さない
+  ように `body:has([data-print-region])` で入口を閉じる責任も本 spec が負う
+- 上記に対応する `ts/apps/dashboard-web/test/` のテストと、`ts/apps/dashboard-web/e2e/` のうち
+  QR パネルの面定義（`fixtures/api.ts`）と印刷・横スクロールの実測（`dashboard-surfaces.spec.ts`）
 
 ### Out of Boundary
 
@@ -46,7 +51,7 @@
 - `@fwlm/ui/components/{card,button,alert,badge,spinner}` — 既存部品の利用のみ。追加・改変はしない
 - `ts/apps/dashboard-web/src/lib/{api,auth-context,types}.ts` — 既存の窓口と型の利用
 - `GET /stores/:storeId/qr.png` — 既存契約のまま利用（`?size=` のみ指定）
-- ブラウザ標準の `Blob` / `URL.createObjectURL` / `URL.revokeObjectURL` / `download` 属性 — 外部ライブラリを追加しない
+- ブラウザ標準の `Blob` / `URL.createObjectURL` / `URL.revokeObjectURL` / `download` 属性 / `window.print()` / CSS の `@media print` と `:has()` — 外部ライブラリを追加しない（PDF も自前で組み立てない）
 
 ### Revalidation Triggers
 
@@ -113,15 +118,21 @@ graph TB
 ts/apps/dashboard-web/
 ├── src/
 │   ├── app/stores/page.tsx          # 変更: 発行列・未確定行の理由・パネル開閉状態
+│   ├── app/globals.css              # 変更: @media print（掲示面のみを紙に残す・Req 7.3）
 │   ├── components/
-│   │   └── store-qr-panel.tsx       # 新規: 表示・保存・失敗提示・object URL の生存期間
+│   │   └── store-qr-panel.tsx       # 新規: 表示・保存・失敗提示・object URL の生存期間・掲示面
 │   └── lib/
 │       ├── api.ts                   # 変更: apiFetchBinary / getStoreQr を追加
-│       └── qr-filename.ts           # 新規: 保存ファイル名の決定規則（純粋関数）
+│       ├── qr-filename.ts           # 新規: 保存ファイル名の決定規則（純粋関数）
+│       └── qr-poster-text.ts        # 新規: 掲示文言と禁止語・不可の例（純粋・Req 7.2/7.4）
+├── e2e/
+│   ├── fixtures/api.ts              # 変更: QR の PNG 応答と QR パネルの面定義
+│   └── dashboard-surfaces.spec.ts   # 変更: 印刷メディアの実測と QR パネルの横スクロール
 └── test/
     ├── qr-api.test.ts               # 新規: binary 窓口とエラー封筒の解釈（node 環境）
     ├── qr-filename.test.ts          # 新規: 命名規則（node 環境）
-    ├── store-qr-panel.test.tsx      # 新規: 表示・保存・失敗・資源解放（jsdom）
+    ├── qr-poster-text.test.ts       # 新規: 掲示文言と検出器の両方向照合（node 環境）
+    ├── store-qr-panel.test.tsx      # 新規: 表示・保存・失敗・資源解放・掲示面（jsdom）
     └── stores-page.test.tsx         # 変更: 発行列・未確定行・パネル開閉の検証を追加
 ```
 
@@ -208,6 +219,12 @@ stateDiagram-v2
 | 6.3 | 操作要素の名前 | StoresPage | `aria-label` に店名を含める | — |
 | 6.4 | 画像の代替テキスト | StoreQrPanel | `alt` に店名を含める | — |
 | 6.5 | コントラスト | StoresPage / StoreQrPanel | 既存トークンのみを使用 | — |
+| 7.1 | 掲示用の面の提示 | StoreQrPanel / qr-poster-text | `data-print-region` の領域に同一 object URL の画像と依頼文 | 発行フロー |
+| 7.2 | 依頼文が内容に影響を与えない | qr-poster-text | `POSTER_INVITATION` と `FORBIDDEN_TERM_GROUPS` の両方向照合 | — |
+| 7.3 | 印刷対象を掲示面に限る | globals.css / StoreQrPanel | `@media print` の visibility 切替（不可の例は領域の外） | — |
+| 7.4 | 不可の例と理由の提示 | StoreQrPanel / qr-poster-text | `PROHIBITED_EXAMPLES`（画面のみ） | — |
+| 7.5 | 掲示面に客の情報を載せない | StoreQrPanel | 領域の要素を店名・画像・依頼文・案内に限定 | — |
+| 7.6 | 未完了時は出さない | StoreQrPanel | `state.kind === 'ready'` の分岐 | 状態遷移 |
 
 ## Components and Interfaces
 
@@ -215,7 +232,8 @@ stateDiagram-v2
 |---|---|---|---|---|---|
 | api client（拡張） | lib | 認証付きで binary を取得しエラー封筒を解釈する | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1 | firebase auth (P0), dashboard-api (P0) | Service, API |
 | qr-filename | lib | 保存ファイル名を決定する純粋関数 | 2.4, 2.5, 2.6 | なし | Service |
-| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4 | api client (P0), qr-filename (P0), @fwlm/ui (P1) | Service, State |
+| qr-poster-text | lib | 掲示文言・禁止語・不可の例を規約の条項へ対応させて持つ純粋モジュール | 7.2, 7.4 | なし | Service |
+| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間・店頭掲示の面 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4, 7.1, 7.3–7.6 | api client (P0), qr-filename (P0), qr-poster-text (P0), @fwlm/ui (P1) | Service, State |
 | StoresPage（拡張） | app | 行への発行導線・未確定の理由・パネルの開閉 | 1.1–1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5 | StoreQrPanel (P0), auth-context (P1) | State |
 
 ### lib
@@ -319,8 +337,8 @@ export function qrFileName(storeName: string, storeId: string): string;
 
 | Field | Detail |
 |---|---|
-| Intent | 1 店舗ぶんの QR を取得・表示・保存させ、表示資源を確実に解放する |
-| Requirements | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4 |
+| Intent | 1 店舗ぶんの QR を取得・表示・保存させ、店頭掲示の面を提示し、表示資源を確実に解放する |
+| Requirements | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4, 7.1, 7.3, 7.4, 7.5, 7.6 |
 
 **Responsibilities & Constraints**
 
@@ -328,6 +346,8 @@ export function qrFileName(storeName: string, storeId: string): string;
 - object URL の生成と解放を単独で所有する。他のどのモジュールも解放責務を持たない
 - 取得結果を永続化しない（`localStorage` 等へ書かない）。生存期間はコンポーネントの生存期間に一致する（5.3）
 - 失敗時に一覧を再取得しない。影響をパネル内に閉じる（4.4）
+- 掲示面（`data-print-region`）は**画面の確認用と印刷用を兼ねる 1 つの領域**とし、QR 画像を二重に持たない（7.1）。不可の例と注意書きは領域の外へ置き、`print:hidden` を対にして紙へ出さない（7.3/7.4）
+- 掲示面と印刷操作は取得成功時にだけ描く（7.6）。失敗時に掲示文言だけが残る形は 4.5 が禁じる「成功したかのような表示」に当たる
 - **このパネルが焦点を壊した場合にだけ、このパネルが引き取る**（6.1）。押下元が生き残るなら何もしない。押下元が消える遷移でだけ、パネル内の次の操作へ移す。パネル外に焦点があるときは触らない（横取りになる）
 
 **Dependencies**
@@ -335,6 +355,7 @@ export function qrFileName(storeName: string, storeId: string): string;
 - Inbound: StoresPage — 対象店舗と閉じる操作を与える（P0）
 - Outbound: api client `getStoreQr` — 取得（P0）
 - Outbound: `qrFileName` — 保存名（P0）
+- Outbound: `qr-poster-text` — 掲示文言・不可の例（P0）。**実値を面の側に書かない**（規約の条項との対応と機械検証がそちらにある）
 - External: `@fwlm/ui` の Card / Button / Alert / Spinner（P1）
 
 **Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [x]
@@ -446,9 +467,40 @@ type QrState =
 4. 競合未設定の確定済み店舗にも発行操作が出ること（1.5）
 5. 別店舗の発行でパネルが差し替わること（2.8）
 
-### 手動確認（1 回・E2E 不在のため）
+### Unit Tests（node 環境・掲示文言・Requirement 7）
 
-実ブラウザで保存リンクを操作し、ファイルが期待したファイル名で保存され、印刷して読み取れることを確認する。dashboard-web に Playwright が無いため（Issue #53）、この 1 点のみ機械検証の対象外とし、実施結果を tasks の完了条件に記録する。
+1. 依頼文と案内文が禁止語を 1 つも含まないこと（7.2）
+2. **不可の例が実際に禁止語を含むこと**（7.4）。検出器が壊れて 0 件を返している状態と区別するための対照であり、これが無いと 1 が空振りしていても緑になる
+3. 規約の条項 4 群がいずれも 1 つ以上の不可の例で発火すること。群を足して例を足し忘れると、その条項は名前だけあって誰も見ていない状態になる
+4. 依頼文が評価にも書く内容にも触れず、日本語で提供されること（7.2・5.5）
+
+### Integration Tests（jsdom・StoreQrPanel・Requirement 7）
+
+1. 掲示面に店名・依頼文・案内文が載り、すべて印刷対象（`data-print-region`）の中にあること（7.1）
+2. QR 画像が掲示面の中にあり、画面に 1 枚しか存在しないこと（確認用と印刷用を二重に持たない）
+3. **不可の例と注意書きが印刷対象の外にあること**（7.3・7.4）。紙に不可の例が刷られると、この要件が防ごうとした違反そのものを製品が配ることになる
+4. 印刷操作がブラウザの印刷機能を起動すること（PDF を自前で組み立てない）
+5. 取得中と失敗時に掲示面も印刷操作も出さないこと（7.6）。既定側を固定しないと「常に出す」改変が素通りする
+6. 掲示面に評価・件数を指す語が混入しないこと（7.5）
+
+### E2E Tests（Playwright・実描画）
+
+**印刷の体裁は CSS が実行時に解決するため、クラス名の検証では届かない。** `@media print` は画面の
+描画に一切現れず、jsdom も印刷メディアを持たない。実測でしか測れない。
+
+1. 印刷メディアで掲示面だけが残り、不可の例と操作要素が紙に出ないこと。**対照として画面メディアへ
+   戻し、同じ要素が見えることまで確かめる**（描画していないから隠れて見えるだけ、と区別するため）（7.3）
+2. **掲示面を持たない面の印刷を壊さないこと**（7.3 の副作用の防止）。この規則は `app/layout.tsx`
+   経由で全ルートへ効くため、入口を閉じないと無関係な 6 面の印刷が全ページ白紙になる
+3. 掲示面のある面で外側が箱ごと畳まれること（`visibility` では箱が残り、白紙のページが後続する）
+4. QR パネルが自動 a11y 監査と横スクロール実測の対象に入っていること。**この面は Issue #179 まで
+   どちらの対象でもなかった**（店舗一覧の後続状態であり、一覧を開いただけでは描画されない）
+
+### 手動確認（1 回）
+
+実ブラウザで保存リンクを操作し、ファイルが期待したファイル名で保存されることを確認する。
+**物理的な印刷（余白・改ページ・プリンタ依存の再現）と、印刷物を実際にスマートフォンで読み取ること**は
+機械検証の対象外であり、実施結果を tasks の完了条件に記録する（残余は Issue #152 が追跡する）。
 
 ## Security Considerations
 

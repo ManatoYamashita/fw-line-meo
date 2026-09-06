@@ -25,3 +25,55 @@
     overflow-wrap: break-word;
   }
 }
+
+/* 店頭掲示の印刷（Issue #179・store-qr-issuance-ui Requirement 7）。
+ *
+ * 掲示物として刷るのは `data-print-region` を持つ領域だけで、帯・表・操作要素・不可の例は
+ * 紙に出さない。**不可の例を刷ってはならない** —— 掲示物に「星5でお願いします」と印刷された
+ * 紙が生まれると、この機能が防ごうとした違反そのものを製品が配ることになる。
+ *
+ * **レイヤの外に置く。** 素の CSS は @layer の中身より優先されるため、Tailwind のユーティリティ
+ * （print: 変種を含む）と競合したときにこちらが勝つ。掲示物の体裁を面の側の都合で崩されない。 */
+@media print {
+  /* **`body:has(...)` で入口を閉じる。この鍵が本規則の生命線である。**
+   *
+   * この stylesheet は `app/layout.tsx` 経由で dashboard-web の全ルートへ効く。掲示面を
+   * 持たない 6 面（店舗一覧・代理店管理・利用者管理・招待コード・店舗登録・ログイン）にも
+   * 当たるため、鍵を掛けずに「掲示面の外を隠す」と **それらの面の印刷が全ページ白紙になる**。
+   * 実測（`page.pdf({format:'A4'})`）: 鍵の無い版では `/stores` の content stream が 107 バイト
+   * ＝描画命令ゼロ。掲示物を配る機能が、無関係な 6 面の印刷を壊す形だった（レビューで検出）。
+   * 是正後の実測では、掲示面の無い一覧は 3 ページ 144,639 バイトで正常に刷れる。
+   *
+   * **隠すのは `visibility` ではなく `display`。** `visibility: hidden` の要素は箱を占め続ける
+   * ため、紙は一覧の高さぶん生成され、掲示面が載る 1 枚目以外がすべて白紙になる。実測:
+   *
+   *   店舗 40 件 / visibility … body 3014px → 3 ページ（2〜3 枚目は白紙）
+   *   店舗 40 件 / display    … body  394px → **1 ページ**
+   *
+   * `display: none` なら流れごと畳めるが、祖先を消すと子孫の指定では戻せない。**祖先を
+   * 選択できないという CSS の制約を解くのが `:has()` である** —— 掲示面の祖先だけを残し、
+   * それ以外の兄弟を箱ごと落とす。QR パネルは対象行の直下に描かれるので、`table` と `tbody`
+   * も祖先として残る（畳まれるのは主見出しや帯のような祖先でない要素のほうである）。
+   *
+   * `:has()` 未対応のブラウザではこのブロック全体が無視され、**面がそのまま印刷される**
+   * （掲示面も一覧も載る）。体裁は崩れるが、白紙にも情報の欠落にもならない。ただし
+   * **不可の例だけは絶対に紙へ出してはならない**ので、そちらは `:has()` に依存しない
+   * `print:hidden`（素の `@media print { display: none }`）を部品側で対にしてある。 */
+  body:has([data-print-region])
+    :not(:has([data-print-region])):not([data-print-region]):not([data-print-region] *) {
+    display: none;
+  }
+
+  /* 残した祖先の余白・枠・背景を落とし、掲示面を紙の左上から始める。 */
+  body:has([data-print-region]) :has([data-print-region]) {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  [data-print-region] {
+    width: 100%;
+  }
+}

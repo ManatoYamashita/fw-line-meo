@@ -11,10 +11,16 @@ import { Spinner } from '@fwlm/ui/components/spinner';
 
 import { getStoreQr, type ApiResult, type BinaryPayload } from '../lib/api';
 import { qrFileName } from '../lib/qr-filename';
+import {
+  POSTER_CAUTION,
+  POSTER_HOWTO,
+  POSTER_INVITATION,
+  PROHIBITED_EXAMPLES,
+} from '../lib/qr-poster-text';
 
 // 1 店舗ぶんの QR を取得・表示・保存させ、表示資源（object URL）を確実に解放する部品。
 // 設計: store-qr-issuance-ui「StoreQrPanel」（Requirements 2.1, 2.2, 2.3, 2.8, 3.3, 4.1-4.5,
-// 5.2, 5.3, 5.4, 6.2, 6.4）。
+// 5.2, 5.3, 5.4, 6.2, 6.4, 7.1, 7.3-7.6）。
 //
 // 対象は常に 1 店舗で、複数店舗の同時保持を行わない。取得結果は永続化せず、生存期間は
 // この部品の生存期間に一致する。失敗の影響はパネル内に閉じ、店舗一覧を再取得しない。
@@ -167,16 +173,54 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
         </p>
 
         {state.kind === 'ready' ? (
-          <img
-            // next/image を使わないのは意図的。最適化の実体はサーバ側でのフェッチと変換であり、
-            // クライアントで生成した blob: URL は取得できない。レイアウトのずれ防止は既知の
-            // 実寸を width/height に明示することで同じ効果を得る。
-            src={state.imageUrl}
-            alt={`${storeName} のアンケート QR コード`}
-            width={QR_PIXELS}
-            height={QR_PIXELS}
-            className="h-auto w-64 max-w-full"
-          />
+          // 店頭掲示の面（Requirement 7）。**画面の確認用と印刷用を同じ 1 つの領域にする。**
+          // 別々に持つと、画面で確認したものと紙に出るものが食い違う日が来る。
+          // 印刷時にこの領域だけを残す指定は globals.css の @media print が持つ。
+          <div
+            data-print-region
+            className="flex flex-col items-center gap-3 rounded-lg border border-input p-4 text-center"
+          >
+            <p className="text-base font-semibold">{storeName}</p>
+            <img
+              // next/image を使わないのは意図的。最適化の実体はサーバ側でのフェッチと変換であり、
+              // クライアントで生成した blob: URL は取得できない。レイアウトのずれ防止は既知の
+              // 実寸を width/height に明示することで同じ効果を得る。
+              src={state.imageUrl}
+              alt={`${storeName} のアンケート QR コード`}
+              width={QR_PIXELS}
+              height={QR_PIXELS}
+              className="h-auto w-64 max-w-full"
+            />
+            {/* 依頼文と案内文の実値は src/lib/qr-poster-text.ts が持つ。**面の側に書かない** ——
+                規約の条項との対応と、禁止語を含まないことの機械検証がそちらに置いてある。 */}
+            <p className="text-base">{POSTER_INVITATION}</p>
+            <p className="text-sm text-muted-foreground">{POSTER_HOWTO}</p>
+          </div>
+        ) : null}
+
+        {state.kind === 'ready' ? (
+          // 不可の例。**画面にだけ出し、掲示物には刷らない。**
+          // 紙に「星5でお願いします」と印刷されたら、この機能が防ごうとした違反そのものを
+          // 製品が配ることになる。
+          //
+          // 二重に守る。(1) `data-print-region` の外に置く（globals.css の @media print が
+          // 掲示面の外を畳む）。(2) `print:hidden` を直接与える。**(1) は `:has()` に依存する**
+          // ため、未対応のブラウザでは規則ごと無視されて面がそのまま印刷される。(2) は素の
+          // `@media print { display: none }` なのでどこでも効く。**この 1 点だけは退化を許さない。**
+          <section className="flex flex-col gap-2 text-sm print:hidden">
+            <Heading level={3} size="sm">
+              掲示してはいけない書き方
+            </Heading>
+            <p className="text-muted-foreground">{POSTER_CAUTION}</p>
+            <ul className="flex flex-col gap-1">
+              {PROHIBITED_EXAMPLES.map((example) => (
+                <li key={example.text}>
+                  <span className="font-semibold">「{example.text}」</span>
+                  <span className="text-muted-foreground"> — {example.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
         {state.kind === 'error' ? (
@@ -209,6 +253,21 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
             >
               画像を保存
             </a>
+          ) : null}
+          {state.kind === 'ready' ? (
+            // 掲示物の印刷。**PDF を組み立てない**（複数店舗の一括発行と印刷面付けは本 spec の
+            // Out of scope）。ブラウザの印刷機能へ渡すだけで、紙にも PDF にも利用者が選べる。
+            // 外部ライブラリを足さない方針（design.md「Allowed Dependencies」）とも整合する。
+            //
+            // 押しボタンとして描く。遷移でも保存でもなく、この場で機能を起動する操作である。
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.print()}
+              aria-label={`${storeName} の掲示物を印刷`}
+            >
+              掲示物を印刷
+            </Button>
           ) : null}
           {state.kind === 'error' || (state.kind === 'loading' && attempt > 0) ? (
             // 再試行はパネル内で完結させ、店舗一覧の再取得は伴わせない（Requirement 4.4）。

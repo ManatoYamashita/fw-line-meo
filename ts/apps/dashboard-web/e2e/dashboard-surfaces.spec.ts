@@ -1,7 +1,9 @@
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
 import { DASHBOARD_SURFACES } from './fixtures/api';
+// 文言の実値は面にもテストにも書かない。**実物の正典を読む**（写すと片方だけが古びる）。
+import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-text';
 
 // 管理ダッシュボードの実描画検証（Issue #53）。
 //
@@ -57,6 +59,104 @@ test('モバイルビューポートの店舗一覧で横スクロールが発�
   await surfaceByName('店舗一覧').open(page);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+// --- 店頭掲示の印刷（Issue #179・Requirement 7） --------------------------------------
+//
+// 印刷の体裁は **CSS が実行時に解決する**ため、クラス名の検証では届かない。`@media print` は
+// 画面の描画に一切現れず、単体テストの jsdom も印刷メディアを持たない。実測でしか測れない。
+//
+// **不可の例が紙に出ないことがこの機能の核心である。** 掲示物に「星5でお願いします」と
+// 印刷された紙が生まれると、この機能が防ごうとした違反そのものを製品が配ることになる。
+test.describe('店頭掲示の印刷', () => {
+  test('印刷時は掲示面だけが残り、不可の例と操作要素は紙に出ない', async ({ page }) => {
+    await surfaceByName('店舗一覧の QR パネル').open(page);
+
+    await page.emulateMedia({ media: 'print' });
+
+    // 残るもの: 掲示面と、その中の依頼文。
+    await expect(page.locator('[data-print-region]')).toBeVisible();
+    await expect(page.getByText(POSTER_INVITATION)).toBeVisible();
+
+    // 消えるもの: 不可の例（全件）と、パネルの操作要素。
+    for (const example of PROHIBITED_EXAMPLES) {
+      await expect(
+        page.getByText(example.text, { exact: false }),
+        `不可の例が紙に出ています: ${example.text}`,
+      ).toBeHidden();
+    }
+    await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeHidden();
+    await expect(page.getByRole('link', { name: /QR 画像を保存/ })).toBeHidden();
+
+    // **対照。** 画面へ戻すと同じ要素が見える。これが無いと「そもそも描画されていないから
+    // 隠れて見えるだけ」の状態と区別が付かない（`@media print` を丸ごと消しても、
+    // 不可の例を描画しなくすれば上の assert は緑になってしまう）。
+    await page.emulateMedia({ media: 'screen' });
+    for (const example of PROHIBITED_EXAMPLES) {
+      await expect(
+        page.getByText(example.text, { exact: false }),
+        `不可の例が画面にも出ていません: ${example.text}`,
+      ).toBeVisible();
+    }
+    await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeVisible();
+  });
+
+  // **この規則は全ルートへ効く。** globals.css は app/layout.tsx 経由で読み込まれるため、
+  // 掲示面を持たない面にも当たる。鍵（`body:has([data-print-region])`）を外すと、
+  // それらの面の印刷が**全ページ白紙**になる。実測では `/stores` の PDF の content stream が
+  // 107 バイト（描画命令ゼロ）まで落ちた。掲示物を配る機能が無関係な 6 面の印刷を壊す形で、
+  // レビューで検出した。**掲示面を開いた状態しか測らないと、この経路には網が無い。**
+  test('掲示面を持たない面の印刷を壊さない（規則の入口が閉じている）', async ({ page }) => {
+    await surfaceByName('店舗一覧').open(page); // QR パネルを開かない
+    await page.emulateMedia({ media: 'print' });
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: '店舗一覧' }),
+      '掲示面を持たない面の見出しが紙に出ません（全ページ白紙になります）',
+    ).toBeVisible();
+    await expect(page.getByRole('table'), '掲示面を持たない面の一覧が紙に出ません').toBeVisible();
+  });
+
+  // `visibility: hidden` で隠すと箱が残り、紙は一覧の高さぶん生成されて 2 枚目以降が白紙になる
+  // （実測: 店舗 40 件で body 3014px・A4 で 3 ページ）。**畳めていることを高さで測る。**
+  test('掲示面のある面では外側が箱ごと畳まれる（白紙のページを後続させない）', async ({ page }) => {
+    await surfaceByName('店舗一覧の QR パネル').open(page);
+
+    // **掲示面の祖先は畳まない**（畳むと掲示面ごと消える）。QR パネルは対象行の直下に挿入される
+    // ため、`<table>` も `<tbody>` も祖先であり残る。畳まれるのは祖先でない兄弟のほうなので、
+    // 主見出し（版面の直下にあり掲示面の祖先ではない）で測る。
+    const measure = () =>
+      page.evaluate(() => ({
+        body: Math.round(document.body.getBoundingClientRect().height),
+        heading: getComputedStyle(document.querySelector('h1')!).display,
+      }));
+
+    const onScreen = await measure();
+    await page.emulateMedia({ media: 'print' });
+    const onPaper = await measure();
+
+    expect(onScreen.heading, '画面で主見出しが畳まれています（対照が成立しません）').not.toBe('none');
+    expect(
+      onPaper.heading,
+      '印刷時に主見出しが箱ごと畳まれていません（visibility だけでは箱が残ります）',
+    ).toBe('none');
+    expect(
+      onPaper.body,
+      `印刷時に body の高さが縮んでいません（画面 ${onScreen.body}px / 紙 ${onPaper.body}px）。` +
+        '高さが残ると、その分だけ白紙のページが後続します',
+    ).toBeLessThan(onScreen.body);
+  });
+});
+
+test('モバイルビューポートの QR パネルで横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('店舗一覧の QR パネル').open(page);
+  // 同じ面の後続状態なので、捲れる領域は帯 1 件 + 表 1 件のまま。**掲示面は領域を増やさない**
+  // （QR 画像は `max-w-full` で端末幅に収まり、文言は折り返す）。増えればここが赤くなる。
+  await expectNoHorizontalScroll(
+    page,
+    '店舗一覧の QR パネル',
+    NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+  );
 });
 
 test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {

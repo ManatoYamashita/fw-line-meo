@@ -3,7 +3,7 @@ import { expectNoAxeViolations } from '@fwlm/e2e-support/a11y';
 
 import { DASHBOARD_SURFACES } from './fixtures/api';
 
-// 管理ダッシュボード 6 面の自動 a11y 監査（Issue #53）。
+// 管理ダッシュボード 7 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを追加）。
 //
 // 横スクロール実測（dashboard-surfaces.spec.ts）と同じ面定義を使う。面が本体を描けている
 // ことの前提 assert も各 open が持つ ——「空の画面には違反が出ようがない」ため、a11y 監査
