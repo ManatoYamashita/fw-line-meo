@@ -10,7 +10,7 @@ eis_tree() {
 
   # 差し替えを持つアプリ（正常形）。
   fx_write ts/apps/liff-face/Dockerfile <<'EOF'
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 ARG NEXT_PUBLIC_LIFF_ID
 ENV NEXT_PUBLIC_LIFF_ID=$NEXT_PUBLIC_LIFF_ID
 EOF
@@ -34,7 +34,7 @@ EOF
 
   # 差し替えを持たないアプリ（対象外として素通りすることの対照）。
   fx_write ts/apps/plain-face/Dockerfile <<'EOF'
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 EOF
   fx_write ts/apps/plain-face/next.config.ts <<'EOF'
 const nextConfig = { turbopack: {} };
@@ -68,7 +68,7 @@ t_end
 t_begin 'check-e2e-idp-stub-isolation: Dockerfile へ env が漏れると赤'
 eis_tree
 fx_write ts/apps/liff-face/Dockerfile <<'EOF'
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 ARG E2E_STUB_IDP
 ENV E2E_STUB_IDP=$E2E_STUB_IDP
 EOF

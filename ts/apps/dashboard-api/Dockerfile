@@ -3,7 +3,7 @@
 #   docker build -f apps/dashboard-api/Dockerfile -t dashboard-api ts/
 # 構成は CI 実績のある apps/delivery-job/Dockerfile と同型（deps 全体コピー・/repo 階層維持）。
 
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable

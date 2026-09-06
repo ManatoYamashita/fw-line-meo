@@ -132,7 +132,7 @@ types → config → @fwlm/db accessors → adapters (line/, places/) → onboar
 ts/apps/line-webhook/
 ├── package.json               # deps: hono, @hono/node-server, @line/bot-sdk, @fwlm/db
 ├── tsconfig.json              # dashboard-api と同系統（NodeNext・strict）
-├── Dockerfile                 # multi-stage・node:22-slim・PORT=8080
+├── Dockerfile                 # multi-stage・node:24-slim・PORT=8080
 ├── assets/
 │   ├── richmenu-onboarding.png   # デフォルトメニュー画像（比率>=1.45・<=1MB）
 │   └── richmenu-completed.png    # 完了後メニュー画像
