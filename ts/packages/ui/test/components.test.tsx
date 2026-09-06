@@ -1589,7 +1589,7 @@ const BUTTON_SIZE_CLASS = {
   default: 'expanded-default',
   lg: 'intrinsic-default',
   icon: 'expanded-default',
-  'icon-lg': 'expanded-default',
+  'icon-lg': 'intrinsic-default',
   xs: 'compact',
   sm: 'compact',
   'icon-xs': 'compact',
@@ -1659,5 +1659,73 @@ describe('押しボタンの寸法区分が漏れなく分類されている（R
     expect(classes).toContain('px-6');
     expect(classes).not.toContain('h-9');
     expect(classes).not.toContain('text-sm');
+  });
+});
+
+// --- 文字とアイコンの対の不変条件 -------------------------------------------------------
+//
+// 寸法区分は**文字の区分とアイコンの区分が対**になっており、対の高さは一致する。
+// `default`↔`icon`、`xs`↔`icon-xs`、`sm`↔`icon-sm`、`lg`↔`icon-lg`。
+//
+// **片方だけ動かすと尺度が尺度でなくなる。** 同じ段を指す 2 つの区分が、中身が文字かアイコンかで
+// 別の高さになると、並べたときに揃わず、面の側は「どちらの段を使えばよいか」を判断できなくなる。
+// 実際 `lg` を 48px へ上げたとき `icon-lg` は 36px のまま取り残された（Issue #204 の後始末）。
+// 高さは合成後の class から読む（jsdom は Tailwind を解決しないため、スケールの段で比べる）。
+const BUTTON_SIZE_PAIRS = [
+  ['default', 'icon'],
+  ['xs', 'icon-xs'],
+  ['sm', 'icon-sm'],
+  ['lg', 'icon-lg'],
+] as const satisfies readonly (readonly [ButtonSize, ButtonSize])[];
+
+/** 合成後の class から高さの段を読む。読み取れなければ null。 */
+function heightStepOf(size: ButtonSize): number | null {
+  const label = `寸法の的-${size}`;
+  render(
+    <Button size={size} aria-label={label}>
+      押す
+    </Button>,
+  );
+  const classes = classesOf(screen.getByRole('button', { name: label }));
+  const match = /(?:^|\s)(?:h|size)-(\d+(?:\.\d+)?)(?:\s|$)/.exec(classes);
+  return match === null ? null : Number(match[1]);
+}
+
+describe('押しボタンの寸法区分は文字とアイコンで対になる', () => {
+  it('対の表が寸法区分を漏れなく覆う（両方向）', () => {
+    const declared = variantKeysOf(buttonSource, 'size');
+    expect(
+      declared.length,
+      '寸法区分を抽出できませんでした（抽出器が壊れているか部品の書き方が変わっています）',
+    ).toBeGreaterThan(0);
+
+    const paired: readonly string[] = BUTTON_SIZE_PAIRS.flat();
+    const duplicated = paired.filter((size, index) => paired.indexOf(size) !== index);
+    expect(duplicated, `対の表に重複した区分があります: ${duplicated.join(', ')}`).toEqual([]);
+
+    const unpaired = declared.filter((size) => !paired.includes(size));
+    expect(
+      unpaired,
+      `対の相手が宣言されていない寸法区分があります: ${unpaired.join(', ')}。` +
+        '文字とアイコンのどちらの段に属するかを BUTTON_SIZE_PAIRS へ明記してください',
+    ).toEqual([]);
+
+    const phantom = paired.filter((size) => !declared.includes(size));
+    expect(
+      phantom,
+      `部品から消えた寸法区分が対の表に残っています: ${phantom.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it.each(BUTTON_SIZE_PAIRS)('%s と %s の高さが一致する', (text, icon) => {
+    const textStep = heightStepOf(text);
+    const iconStep = heightStepOf(icon);
+    expect(textStep, `${text} の高さ指定を読み取れません`).not.toBeNull();
+    expect(iconStep, `${icon} の高さ指定を読み取れません`).not.toBeNull();
+    expect(
+      iconStep,
+      `${text} は ${textStep! * 4}px、${icon} は ${iconStep! * 4}px で高さが揃っていません。` +
+        '同じ段を指す 2 つの区分が役割によって別の高さで描かれると、尺度として使えません',
+    ).toBe(textStep);
   });
 });
