@@ -446,4 +446,6 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.11 状態変化の遷移（客向けアンケートの星） | `ts/apps/survey-web/test/survey-form.test.tsx` | 状態変化の色遷移 |
 | 7.10 寸法区分の面側上書き（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 押しボタンの寸法区分 |
 | 7.9 全幅の押しボタン風リンク（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 投稿導線の見た目 |
+| 7.9 / 7.10 押しボタン風リンクが 2 つの面で同一（回答済み画面 ↔ 下書きパネル） | `ts/apps/survey-web/test/survey-shell.test.tsx` | 面をまたいだ相等 |
+| 2.1 成功と危険の役割の使い分け（客向けアンケートの通知） | `ts/apps/survey-web/test/survey-shell.test.tsx` | 読み上げ強度の分岐 |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
