@@ -40,7 +40,8 @@ function candidates(count: number): StoreCandidate[] {
   );
 }
 
-// スパム判定回避用の英語プレースホルダ混入がないことのスポットチェック（網羅的な言語判定ではない）。
+// 未置換の英語プレースホルダが本文へ混入していないことのスポットチェック（網羅的な言語判定ではない）。
+// オーナーへ届くのは日本語の案内であり、TODO や undefined がそのまま出れば体裁が壊れる（Issue #179）。
 const OBVIOUS_ENGLISH_PLACEHOLDERS = ['TODO', 'FIXME', 'Lorem ipsum', 'undefined', 'placeholder'];
 
 function assertNoObviousEnglishPlaceholder(text: string): void {
