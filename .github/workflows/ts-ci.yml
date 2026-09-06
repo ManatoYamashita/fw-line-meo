@@ -99,6 +99,17 @@ jobs:
         # shell glob の辞書順なので「たまたま」正しく流れ、db-migrate も db-test も緑になる。
         # HEAD と origin/main の合成集合で判定する（同じく read-only・git 以外は叩かない）。
         run: bash scripts/check-db-ordinals.sh
+      # name は引用する（" #" 以降が YAML のコメントとして捨てられるため）。
+      - name: '文書の節番号ガード（Issue #202・同じ番号の節が 2 つ生まれないこと）'
+        # 直上のガードと同型で、舞台が**文書の中**へ移った形である。2026-09-06 に
+        # docs/design/design-language.md の §7.8〜7.11 が 2 組できた。挿入位置が違うので
+        # git は衝突を報告せず、`git status` は clean を返した。
+        # **既存の検査は全部緑だった** —— design-language-doc.test.ts は `##` の表しか見ず
+        # （145 件緑）、check-markdown-emphasis.sh は強調記号しか見ない（緑）。実測済み。
+        # これらは他所から節番号で参照される文書であり（`§7.8` の参照が 17 箇所・
+        # infra/README.md は `§N` が 26 箇所）、番号がずれると指示先が変わる。
+        # 直上の連番ガードと違い origin/main を要さないので fetch の前に置ける。
+        run: bash scripts/check-doc-section-ordinals.sh
       - name: 'db/test CI カバレッジガード（Issue #156）'
         # db/test の検査資産（匿名性の構造保証 = Req 5・書込境界の単一所有 = Req 9.1/9.4）は
         # #156 まで**一度も CI に載ったことがなかった**。実行装置を足しただけでは、下の
