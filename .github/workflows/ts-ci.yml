@@ -67,6 +67,11 @@ jobs:
         # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
         # theme.css がトークンと同値であることを照合する（read-only grep 検証）。
         run: bash scripts/check-design-tokens.sh
+      - name: '部品の見た目を借りる形のガード（Issue #208・cn() を通さない buttonVariants の検出）'
+        # 裸の buttonVariants を className へ渡すと、競合するユーティリティが両方残り、
+        # outline 変種では枠が実描画で透明になる。寸法も角丸も文字色も一致するため
+        # class 比較でも jsdom でも落ちない（PR #200 / #211 で 3 回踏んだ・read-only grep 検証）。
+        run: bash scripts/check-button-variants-cn.sh
       - name: 'run-services デプロイカバレッジガード（Issue #33）'
         # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
         # 放置される事故の再発防止（同じく read-only grep 検証）。

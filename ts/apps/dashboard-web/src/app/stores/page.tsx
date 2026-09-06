@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
 import { Heading } from '@fwlm/ui/components/heading';
 import { PageShell } from '@fwlm/ui/components/page-shell';
@@ -113,7 +114,7 @@ function StoresView() {
         // （store-qr-panel.tsx の保存リンクと同じ作法）。
         <EmptyState>
           <p>担当店舗は 0件 です。</p>
-          <Link href="/stores/new" className={buttonVariants()}>
+          <Link href="/stores/new" className={cn(buttonVariants())}>
             店舗を登録する
           </Link>
         </EmptyState>
