@@ -223,6 +223,7 @@ sequenceDiagram
 | 4.4 | 全評価同一導線 | DraftPanel（評価分岐なし） | — | — |
 | 4.5 | 代理投稿しない | google-review-url.ts（遷移のみ） | 投稿 API 不使用 | — |
 | 4.6 | コピー不可時フォールバック | DraftPanel | 選択可能表示＋再試行 | — |
+| 4.7 | 由来の明示と推敲の促し | DraftPanel | 読み上げ領域の外の静的段落＋`aria-describedby` | — |
 | 5.1 | 個人情報非取得 | 全コンポーネント | 入力項目自体に PII なし | セキュリティ節 |
 | 5.2 | 月次集計のみ加算 | tallies.ts, ResponsesAPI, SessionToken（pageToken） | UPSERT 契約・pageToken 検証 | 回答フロー |
 | 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006` の列 allowlist | DDL に本文列を持たない・`30_compliance.sql` | 回答フロー |
@@ -237,7 +238,7 @@ sequenceDiagram
 |-----------|--------------|--------|--------------|------------------|-----------|
 | SurveyPage | survey-web UI | SSR 入口・分岐 | 2.1, 2.7, 2.8, 2.9 | packages/db (P0) | State |
 | SurveyForm | survey-web UI | 設問・検証・送信 | 2.2–2.6, 2.9, 2.10 | ResponsesAPI (P0) | State |
-| DraftPanel | survey-web UI | 下書き操作・投稿導線 | 3.6, 3.7, 4.1, 4.2, 4.4, 4.6 | DraftsAPI (P1) | State |
+| DraftPanel | survey-web UI | 下書き操作・投稿導線 | 3.6, 3.7, 4.1, 4.2, 4.4, 4.6, 4.7 | DraftsAPI (P1) | State |
 | ResponsesAPI | survey-web API | 回答受付・集計∥生成 | 2.3, 2.5, 3.1, 5.2–5.4 | DraftGenerator (P0), tallies (P0) | API |
 | DraftsAPI | survey-web API | 再生成 | 3.8, 3.9 | SessionToken (P0), DraftGenerator (P0) | API |
 | DraftGenerator | survey-web lib | Gemini 呼出・検証 | 3.1–3.5, 3.9 | @google/genai (P0) | Service |

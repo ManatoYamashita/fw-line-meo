@@ -19,6 +19,19 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
   const draft = page.getByLabel('口コミ下書き');
   await expect(draft).toBeVisible();
 
+  // 下書きの由来と推敲の促しが**実ブラウザで見えている**こと（Issue #179）。
+  //
+  // unit は DOM の構造（読み上げ領域の外・aria-describedby）を固定するが、「画面に出ているか」は
+  // 別の軸である。実測: 説明へ `display:none` を与えると unit は 29/29 緑のまま、この行だけが赤くなる。
+  //
+  // **ここが見るのは寸法と可視性であって色ではない。** `toBeVisible` は要素の外接矩形と
+  // 可視状態しか見ないため、`--muted-foreground` を面の背景色へ向け直すような改変は通す。
+  // 色の劣化を受け持つのは a11y-audit の下書き画面の監査（axe の color-contrast）である。
+  // 本 PR より前、その監査は**回答フェーズしか開いていなかった**ため、この面は色を含めて
+  // どこからも測られていなかった（PR #218 のレビュー指摘）。
+  await expect(page.getByText(/あなたの回答をもとに作成した下書きです。/)).toBeVisible();
+  await expect(page.getByText(/ご自身の言葉に直してから投稿してください。/)).toBeVisible();
+
   await page.getByRole('button', { name: /コピー/ }).click();
   await expect(page.getByText(/コピーしました/)).toBeVisible();
 
