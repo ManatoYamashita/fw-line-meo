@@ -10,6 +10,7 @@
 ## Core Technologies
 
 - **言語**: TypeScript（リアルタイム応答層）＋ Go（日次バッチ層）
+- **TypeScript 実行環境**: Node.js 24 LTS（CI・Cloud Run イメージともに統一）
 - **プラットフォーム**: LINE Messaging API（公式アカウント／Bot）＋ 必要箇所のみ LIFF。客向けは通常 Web（LIFF ではない）。
 - **クラウド**: GCP
   - **Cloud Run**: Webhook／客向け Web／ダッシュボード API（ゼロスケール）

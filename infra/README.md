@@ -487,10 +487,38 @@ make tf-apply   # line-webhook の新リビジョンが立つ
   `linkRichMenu` は失敗を空の `catch` で握りつぶし、ログも残さない。旧 ID のままだと完了済み
   オーナーへのリンクが失敗し続けるが、警告はどこにも出ない。
 
-### 10-3. 段 3: 旧リッチメニューの削除
+### 10-3. 段 3: 完了済みオーナーの個別リンクを張り替える
 
-**段 2 の新リビジョンが立ってから行う。** 順序を逆にすると、旧 ID を参照している間にメニューが
-消えて穴が開く。
+**旧メニューを削除する前に必ず行う。** `setDefaultRichMenu` は既定を差し替えるだけで、
+per-user リンクには触れない。完了済みオーナーは `conversation.ts` が `linkRichMenu` で個別に
+張った**旧完了メニューに繋がったまま**である。この状態で旧メニューを消すとリンクが外れ、
+**完了済みなのに既定（「登録を再開」の面）が表示される。**
+
+再リンクが起きる経路は `handleConfirm`（店舗確定の瞬間）だけなので、完了済みユーザーは
+二度とそこを通らない。放置すると恒久的に誤った面が出続ける。
+
+```bash
+# 対象の line_user_id を取る（§3 の Auth Proxy 経由）
+psql -h 127.0.0.1 -p 15432 -U postgres -d fwlm -t -A   -c "SELECT line_user_id FROM owners WHERE onboarding_status='store_identified';"
+
+# 張り替え前の状態を見る（旧 richMenuId が返るはず）
+curl -sS "https://api.line.me/v2/bot/user/<lineUserId>/richmenu" -K - <<CFG
+header = "Authorization: Bearer ${TOKEN}"
+CFG
+
+# 新しい完了メニューへ張り替える（成功は HTTP 200）
+curl -sS -X POST -o /dev/null -w '%{http_code}\n'   "https://api.line.me/v2/bot/user/<lineUserId>/richmenu/<新 完了 richMenuId>" -K - <<CFG
+header = "Authorization: Bearer ${TOKEN}"
+CFG
+```
+
+対象が多い場合は `POST /v2/bot/richmenu/bulk/link`（1 回 500 ユーザーまで）を使う。
+
+### 10-4. 段 4: 旧リッチメニューの削除
+
+**段 2 の新リビジョンが立ち、段 3 の張り替えが済んでから行う。** 順序を逆にすると、旧 ID を
+参照している間にメニューが消えて穴が開く（段 2 より前なら env が死んだ ID を指し、段 3 より前なら
+完了済みオーナーのリンクが外れて既定の面へ落ちる）。
 
 ```bash
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
@@ -512,12 +540,12 @@ header = "Authorization: Bearer ${TOKEN}"
 CFG
 ```
 
-### 10-4. 段 4: 実機で目視する
+### 10-5. 段 5: 実機で目視する
 
 未完了状態と完了状態の 2 面が切り替わることを、実機の LINE で確認する。
 **ここは自動化できない。** デプロイの成功はコードが載ったことしか言わない。
 
-### 10-5. 「全員へ再リンク」は不要である（2026-09-06 実測）
+### 10-6. 再リンクの「運用設計」は不要だが、張り替えそのものは要る（2026-09-06 実測）
 
 `setDefaultRichMenu` は既定メニューを差し替えるが、**完了済みオーナーは per-user リンクで旧完了
 メニューに繋がったまま残る**（`conversation.ts` が `linkRichMenu` で個別に張っているため）。
@@ -531,7 +559,10 @@ CFG
 | `onboarding_sessions` の `stage = 'await_invite_code'` | 4 |
 
 `await_invite_code` の 4 セッションは既定メニュー側にいるため、段 1 の `setDefaultRichMenu` で
-自動的に新しい絵へ移る。個別リンクを張り直す必要があるのは 1 人だけで、それは本人である。
+自動的に新しい絵へ移る。**したがって「全員へ再リンクするか旧メニューを残すか」という運用方針の
+判断は要らない。** ただし段 3 の張り替えそのものは省略できない（対象が 1 人でも、やらなければ
+その 1 人に誤った面が恒久的に出る）。2026-09-06 の実施では実際に旧完了メニューへ繋がったままで
+あることを確認し、削除前に張り替えた。
 
 **この数値は 2026-09-06 時点のものである。** オーナーが増えた後に差し替えるなら、この節を鵜呑みに
 せず件数を引き直すこと（§3 の Auth Proxy 経由で `SELECT onboarding_status, count(*) FROM owners

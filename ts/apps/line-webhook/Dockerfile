@@ -2,9 +2,9 @@
 # ビルドコンテキストはリポジトリの ts/（pnpm workspace ルート）。
 #   docker build -f apps/line-webhook/Dockerfile -t line-webhook ts/
 # 注記: このマシンには docker が無いため本 Dockerfile は CI/デプロイ時に検証する。
-# @line/bot-sdk の次期メジャーが Node >=22 を要求するため node:22-slim を使用する。
+# @line/bot-sdk の次期メジャーが Node >=22 を要求するため、Node.js 24 LTSを使用する。
 
-FROM node:22-slim AS base
+FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable

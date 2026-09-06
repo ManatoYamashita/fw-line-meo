@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.33.2",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=24"
   },
   "scripts": {
     "build": "pnpm -r build",
@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "eslint": "^9",
     "typescript": "^5",
     "typescript-eslint": "^8",

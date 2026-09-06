@@ -137,7 +137,7 @@ jobs:
           version: 10.33.2
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       # 日本語 Markdown で強調が閉じない形を機械検出する（Issue #89）。
@@ -241,7 +241,7 @@ jobs:
           version: 10.33.2
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - run: pnpm -C ts install --frozen-lockfile
@@ -282,7 +282,7 @@ jobs:
           version: 10.33.2
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - run: pnpm -C ts install --frozen-lockfile
@@ -337,7 +337,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           # 版は go.mod を単一の情報源にする（ワークフロー側へ数字を書くと二重管理になる）。
           go-version-file: go/go.mod
@@ -385,7 +385,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           # 版は go.mod を単一の情報源にする（go-test ジョブと同じ理由）。
           go-version-file: go/go.mod
@@ -395,7 +395,7 @@ jobs:
           version: 10.33.2
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       # `pnpm -C ts run build`（全 7 アプリ）は置かない。cross_runtime_steps.sh が
@@ -436,7 +436,7 @@ jobs:
           version: 10.33.2
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - run: pnpm -C ts install --frozen-lockfile
