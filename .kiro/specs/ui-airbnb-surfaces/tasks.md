@@ -1250,6 +1250,27 @@ ts/scripts/with-test-db.sh <script>
 「要件 4.6 は 2 面で機械検証できない」の前提が変わっている。task 7.2 の目視 3 件の扱いは
 段階 6 で再評価する。
 
+### 段階 5 の CI 実証（2026-09-06・run 34003416128）
+
+`18423ca` を使い捨ての `feat/ci-check-ui-airbnb-stage-5` へ push して発火させ、確認後に削除した。
+6 ジョブすべて success（`docker-build` / `notify` は設計どおり skip）。
+
+| ジョブ | 実行の証拠 |
+|---|---|
+| `e2e` | **`Running 39 tests` → `39 passed`**（着手前 34）。**追加した 5 件が名指しで緑** |
+| `e2e-surfaces` | `6 passed`（dashboard-web）＋ `1 passed`（store-detail） |
+| `lint-build-test` | 10 パッケージ全緑・skip は delivery-job の 2 件のみ |
+| `lighthouse` | 客向けアンケートの 1 URL × 3 run で通過 |
+
+```
+design-tokens 33 / db 100 / store-identification 16 / delivery-job 63(+2 skip)
+ui 592 / line-webhook 147 / dashboard-api 201 / store-detail 94
+survey-web 193 / dashboard-web 266
+```
+
+段階 3 の CI（run 34000514025）からの差は `ui` 587 → **592**（正典 §11 のガードポインタ 5 行）と
+`e2e` 34 → **39** の 2 点だけである。`src/**` を触っていないので他は動かない。
+
 ### 段階 3 の CI 実証（2026-09-06・run 34000514025）
 
 `5fcd2cb` を使い捨ての `feat/ci-check-ui-airbnb-stage-3` へ push して発火させ、確認後に削除した
