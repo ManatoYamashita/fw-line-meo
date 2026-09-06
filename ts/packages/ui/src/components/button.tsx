@@ -53,15 +53,18 @@ const buttonVariants = cva(
       // （Checkbox / RadioGroupItem が既に採っている作法）。疑似要素はレイアウトフローから外れるので、
       // 周囲の要素の位置も余白も動かない。
       //
-      // 拡大の区分（lg）は客向け主操作のための 48px / 16px の可視寸法を自分で持つ。既に 44px を
-      // 超えるため不可視の拡張面は付けない。面の側が高さや文字寸法を上書きすると同じ区分が面ごとに
+      // 拡大の区分（lg / icon-lg）は 48px の可視寸法を自分で持つ。既に 44px を超えるため
+      // 不可視の拡張面は付けない。面の側が高さや文字寸法を上書きすると同じ区分が面ごとに
       // 分岐するため、寸法の責任はここに集約する（docs/design/design-language.md §7.10）。
+      //
+      // **文字の区分とアイコンの区分は対であり、対の高さは一致させる。**
+      // lg を 48px へ上げたとき icon-lg は 36px のまま取り残されていた。同じ段を指す 2 つの区分が
+      // 中身によって別の高さになると尺度として使えない（対の不変条件は components.test.tsx が固定）。
       //
       // inset の値は視覚寸法から素直に引き算できない。`::after` の含有ブロックは本体の
       // **padding box** であり、border（1px）の分だけ内側から始まるため、外側への実効的な
       // はみ出しは inset − 1px になる。h-8（32px）を 44px 以上にするには片側 6px 以上が要り、
-      // inset は 8px（-inset-2）＝実効 7px → 46px。h-9 / size-9（36px）のアイコンは
-      // inset 6px（-inset-1.5）＝実効 5px → 46px。実測は survey-web の E2E が行う。
+      // inset は 8px（-inset-2）＝実効 7px → 46px。実測は survey-web の E2E が行う。
       //
       // 縮小寸法（xs / sm / icon-xs / icon-sm）には拡張を掛けない。24〜28px の部品を密集配置
       // （ボタングループ）で 44px へ広げると領域が隣の視覚領域を覆い、見えている部品を指したのに
@@ -77,7 +80,7 @@ const buttonVariants = cva(
           "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
           "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
-        "icon-lg": "relative size-9 after:absolute after:-inset-1.5",
+        "icon-lg": "size-12",
       },
     },
     defaultVariants: {
