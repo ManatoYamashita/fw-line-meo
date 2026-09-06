@@ -48,16 +48,20 @@ const buttonVariants = cva(
       // 操作領域の拡張（Issue #52 / ui-a11y-gaps Requirements 4.1, 4.3, 4.4）。
       //
       // 本プロダクトの主動線は QR → モバイル → LIFF であり、利用者は IT に不慣れであることが
-      // 前提（steering product.md）。押し損ねは離脱に直結する。視覚的な寸法は各面デザイン
-      // （#43 / #44）と衝突するため変えず、**部品の外側へはみ出す不可視の面**で操作領域だけを
-      // 広げる（Checkbox / RadioGroupItem が既に採っている作法）。疑似要素はレイアウトフローから
-      // 外れるので、周囲の要素の位置も余白も動かない。
+      // 前提（steering product.md）。押し損ねは離脱に直結する。既定とアイコンの寸法は各面デザインを
+      // 変えず、**部品の外側へはみ出す不可視の面**で操作領域だけを広げる
+      // （Checkbox / RadioGroupItem が既に採っている作法）。疑似要素はレイアウトフローから外れるので、
+      // 周囲の要素の位置も余白も動かない。
+      //
+      // 拡大の区分（lg）は客向け主操作のための 48px / 16px の可視寸法を自分で持つ。既に 44px を
+      // 超えるため不可視の拡張面は付けない。面の側が高さや文字寸法を上書きすると同じ区分が面ごとに
+      // 分岐するため、寸法の責任はここに集約する（docs/design/design-language.md §7.10）。
       //
       // inset の値は視覚寸法から素直に引き算できない。`::after` の含有ブロックは本体の
       // **padding box** であり、border（1px）の分だけ内側から始まるため、外側への実効的な
       // はみ出しは inset − 1px になる。h-8（32px）を 44px 以上にするには片側 6px 以上が要り、
-      // inset は 8px（-inset-2）＝実効 7px → 46px。h-9（36px）は inset 6px（-inset-1.5）
-      // ＝実効 5px → 46px。実測は survey-web の E2E が行う。
+      // inset は 8px（-inset-2）＝実効 7px → 46px。h-9 / size-9（36px）のアイコンは
+      // inset 6px（-inset-1.5）＝実効 5px → 46px。実測は survey-web の E2E が行う。
       //
       // 縮小寸法（xs / sm / icon-xs / icon-sm）には拡張を掛けない。24〜28px の部品を密集配置
       // （ボタングループ）で 44px へ広げると領域が隣の視覚領域を覆い、見えている部品を指したのに
@@ -67,7 +71,7 @@ const buttonVariants = cva(
           "relative h-8 gap-1.5 px-2.5 after:absolute after:-inset-2 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
         xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "relative h-9 gap-1.5 px-2.5 after:absolute after:-inset-1.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        lg: "h-12 gap-2 px-6 text-base has-data-[icon=inline-end]:pr-5 has-data-[icon=inline-start]:pl-5",
         icon: "relative size-8 after:absolute after:-inset-2",
         "icon-xs":
           "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
