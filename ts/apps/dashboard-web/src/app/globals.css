@@ -25,3 +25,33 @@
     overflow-wrap: break-word;
   }
 }
+
+/* 店頭掲示の印刷（Issue #179・store-qr-issuance-ui Requirement 7）。
+ *
+ * 掲示物として刷るのは `data-print-region` を持つ領域だけで、帯・表・操作要素・不可の例は
+ * 紙に出さない。**不可の例を刷ってはならない** —— 掲示物に「星5でお願いします」と印刷された
+ * 紙が生まれると、この機能が防ごうとした違反そのものを製品が配ることになる。
+ *
+ * `display: none` ではなく `visibility: hidden` を使う。祖先を display:none にすると子孫の
+ * 可視指定が効かず、領域だけを残せない。visibility は子孫で打ち消せる唯一の指定である。
+ * 隠した要素は箱を占め続けるので、印刷領域を絶対配置で紙の左上へ引き出す。
+ *
+ * **レイヤの外に置く。** 素の CSS は @layer の中身より優先されるため、Tailwind のユーティリティ
+ * （print: 変種を含む）と競合したときにこちらが勝つ。掲示物の体裁を面の側の都合で崩されない。 */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  [data-print-region],
+  [data-print-region] * {
+    visibility: visible;
+  }
+
+  [data-print-region] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

@@ -6,6 +6,12 @@ import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
 
 import type { ApiResult, BinaryPayload } from '../src/lib/api';
+import {
+  POSTER_CAUTION,
+  POSTER_HOWTO,
+  POSTER_INVITATION,
+  PROHIBITED_EXAMPLES,
+} from '../src/lib/qr-poster-text';
 import { settleEffects } from './focus-observation';
 
 // api.ts は './firebase' を取り込むため、モジュールごと差し替えて実 SDK を発火させない
@@ -522,5 +528,90 @@ describe('StoreQrPanel: 焦点の引き取り', () => {
     await screen.findByRole('img');
     await settleEffects();
     expect(document.activeElement).toBe(close);
+  });
+});
+
+// ---- ここから Issue #179 が追加した検証（店頭掲示の文言・Requirement 7） ----
+
+/** 印刷対象の領域。globals.css の @media print がこの印だけを紙に残す。 */
+function printRegion(): HTMLElement {
+  const region = document.querySelector('[data-print-region]');
+  expect(region, '印刷対象の領域がありません').not.toBeNull();
+  return region as HTMLElement;
+}
+
+async function renderReady(): Promise<void> {
+  const fetchQr = vi.fn().mockResolvedValue(okPayload());
+  render(
+    <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+  );
+  await screen.findByRole('img');
+}
+
+describe('StoreQrPanel: 店頭掲示の文言（Requirement 7）', () => {
+  it('掲示面に店名・依頼文・案内文が載り、すべて印刷対象の中にある', async () => {
+    await renderReady();
+    const region = printRegion();
+    expect(region.textContent).toContain(STORE_NAME);
+    expect(region.textContent).toContain(POSTER_INVITATION);
+    expect(region.textContent).toContain(POSTER_HOWTO);
+  });
+
+  it('QR 画像は掲示面の中にあり、画面に 1 枚しか存在しない（2.8・再取得なし）', async () => {
+    await renderReady();
+    const images = screen.getAllByRole('img');
+    expect(images, '画像が 2 枚以上あります（掲示面と確認用が二重になっています）').toHaveLength(1);
+    expect(printRegion().contains(images[0]!), 'QR 画像が印刷対象の外にあります').toBe(true);
+  });
+
+  it('**不可の例は印刷対象の外にある**（紙に刷ってはならない）', async () => {
+    await renderReady();
+    const region = printRegion();
+    for (const example of PROHIBITED_EXAMPLES) {
+      // 画面には出る（オーナー・代理店が見るべき情報である）。
+      expect(screen.getByText(new RegExp(example.text)), `画面に出ていません: ${example.text}`).toBeDefined();
+      // 紙には出ない。ここが破れると、この機能が防ごうとした違反そのものを製品が配ることになる。
+      expect(
+        region.textContent,
+        `不可の例が印刷対象に含まれています（紙に刷られます）: ${example.text}`,
+      ).not.toContain(example.text);
+    }
+    expect(region.textContent, '注意書きが印刷対象に含まれています').not.toContain(POSTER_CAUTION);
+  });
+
+  it('掲示物の印刷はブラウザの印刷機能を起動する（PDF を自前で組み立てない）', async () => {
+    const print = vi.fn();
+    Object.defineProperty(window, 'print', { value: print, configurable: true });
+    await renderReady();
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`${STORE_NAME} の掲示物を印刷`) }));
+    expect(print).toHaveBeenCalledTimes(1);
+  });
+
+  it('取得中と失敗時は掲示面も印刷操作も出さない（既定側の固定）', async () => {
+    // 条件つきの形だけを assert すると「常に出す」改変が素通りする。両端を押さえる。
+    const pending = deferred<ApiResult<BinaryPayload>>();
+    render(
+      <StoreQrPanel
+        storeId={STORE_ID}
+        storeName={STORE_NAME}
+        onClose={vi.fn()}
+        fetchQr={vi.fn().mockReturnValue(pending.promise)}
+      />,
+    );
+    expect(document.querySelector('[data-print-region]'), '取得中に掲示面が出ています').toBeNull();
+    expect(screen.queryByRole('button', { name: /掲示物を印刷/ })).toBeNull();
+
+    pending.resolve({ ok: false, code: 'FORBIDDEN', message: 'ignored' });
+    await screen.findByRole('alert');
+    expect(document.querySelector('[data-print-region]'), '失敗時に掲示面が出ています').toBeNull();
+    expect(screen.queryByRole('button', { name: /掲示物を印刷/ })).toBeNull();
+    // 失敗時に掲示文言だけが残る形も禁じる（Requirement 4.5「成功したかのような表示をしない」）。
+    expect(screen.queryByText(new RegExp(POSTER_INVITATION))).toBeNull();
+  });
+
+  it('掲示面に来店客に関する情報を載せない（Requirement 5.2）', async () => {
+    await renderReady();
+    // 掲示物は店頭に貼られる。客の回答・評価・件数の類が 1 文字でも載ってはならない。
+    expect(printRegion().textContent).not.toMatch(/評価|口コミ|レビュー|星|件/);
   });
 });

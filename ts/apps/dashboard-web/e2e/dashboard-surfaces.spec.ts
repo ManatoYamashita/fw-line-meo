@@ -1,7 +1,9 @@
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
 import { DASHBOARD_SURFACES } from './fixtures/api';
+// 文言の実値は面にもテストにも書かない。**実物の正典を読む**（写すと片方だけが古びる）。
+import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-text';
 
 // 管理ダッシュボードの実描画検証（Issue #53）。
 //
@@ -57,6 +59,58 @@ test('モバイルビューポートの店舗一覧で横スクロールが発�
   await surfaceByName('店舗一覧').open(page);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+// --- 店頭掲示の印刷（Issue #179・Requirement 7） --------------------------------------
+//
+// 印刷の体裁は **CSS が実行時に解決する**ため、クラス名の検証では届かない。`@media print` は
+// 画面の描画に一切現れず、単体テストの jsdom も印刷メディアを持たない。実測でしか測れない。
+//
+// **不可の例が紙に出ないことがこの機能の核心である。** 掲示物に「星5でお願いします」と
+// 印刷された紙が生まれると、この機能が防ごうとした違反そのものを製品が配ることになる。
+test.describe('店頭掲示の印刷', () => {
+  test('印刷時は掲示面だけが残り、不可の例と操作要素は紙に出ない', async ({ page }) => {
+    await surfaceByName('店舗一覧の QR パネル').open(page);
+
+    await page.emulateMedia({ media: 'print' });
+
+    // 残るもの: 掲示面と、その中の依頼文。
+    await expect(page.locator('[data-print-region]')).toBeVisible();
+    await expect(page.getByText(POSTER_INVITATION)).toBeVisible();
+
+    // 消えるもの: 不可の例（全件）と、パネルの操作要素。
+    for (const example of PROHIBITED_EXAMPLES) {
+      await expect(
+        page.getByText(example.text, { exact: false }),
+        `不可の例が紙に出ています: ${example.text}`,
+      ).toBeHidden();
+    }
+    await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeHidden();
+    await expect(page.getByRole('link', { name: /QR 画像を保存/ })).toBeHidden();
+
+    // **対照。** 画面へ戻すと同じ要素が見える。これが無いと「そもそも描画されていないから
+    // 隠れて見えるだけ」の状態と区別が付かない（`@media print` を丸ごと消しても、
+    // 不可の例を描画しなくすれば上の assert は緑になってしまう）。
+    await page.emulateMedia({ media: 'screen' });
+    for (const example of PROHIBITED_EXAMPLES) {
+      await expect(
+        page.getByText(example.text, { exact: false }),
+        `不可の例が画面にも出ていません: ${example.text}`,
+      ).toBeVisible();
+    }
+    await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeVisible();
+  });
+});
+
+test('モバイルビューポートの QR パネルで横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('店舗一覧の QR パネル').open(page);
+  // 同じ面の後続状態なので、捲れる領域は帯 1 件 + 表 1 件のまま。**掲示面は領域を増やさない**
+  // （QR 画像は `max-w-full` で端末幅に収まり、文言は折り返す）。増えればここが赤くなる。
+  await expectNoHorizontalScroll(
+    page,
+    '店舗一覧の QR パネル',
+    NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+  );
 });
 
 test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {

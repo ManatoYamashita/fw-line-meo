@@ -135,9 +135,28 @@ const RESPONSES: Record<string, unknown> = {
  * 未知のパスは 404 のエラー封筒で返す。素通りさせると実在しないサーバーへ出て行って
  * ネットワークエラーになり、原因が「fixture の取りこぼし」だと読み取れなくなる。
  */
+/**
+ * QR 応答の代わりに返す 1×1 の PNG（Issue #179）。
+ *
+ * **実物の QR は置かない。** 実物は完全な店舗 ID を含む URL を符号化しており、画像として
+ * リポジトリへ置くことは実値を書くことと同じである（store-qr-issuance-ui tasks.md の規律）。
+ * ここで要るのは「PNG として読み込める非空のバイト列」だけで、符号化の中身は要らない。
+ */
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+/** QR エンドポイントのパス（クエリは除いた形で照合する）。 */
+const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
+
 export async function stubDashboardApi(page: Page): Promise<void> {
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (QR_PATH.test(path)) {
+      await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
+      return;
+    }
     const body = RESPONSES[path];
     if (body === undefined) {
       await route.fulfill({
@@ -206,7 +225,22 @@ export interface DashboardSurface {
 }
 
 /**
- * 管理ダッシュボードの検証対象 6 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
+ * 店舗一覧から QR パネルを開き、**掲示面が実際に描けている**ことを先に固定する（Issue #179）。
+ *
+ * `goto` は持たない。開く手順は `openListSurface` に一本化し、ここは同じ面の中で
+ * パネルを開くだけである（Issue #53 の所有権の規律を壊さないため）。
+ *
+ * 前提 assert は掲示面（`data-print-region`）の可視。これが無いと、取得が失敗して
+ * エラー表示になった状態を監査対象と取り違える。**失敗画面には違反が出ようがない。**
+ */
+export async function openStoreQrPanel(page: Page): Promise<void> {
+  await openListSurface(page, '/stores', '店舗一覧', 3);
+  await page.getByRole('button', { name: new RegExp(`${STORES[0].name} の QR 発行`) }).click();
+  await expect(page.locator('[data-print-region]')).toBeVisible();
+}
+
+/**
+ * 管理ダッシュボードの検証対象 7 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
  */
 export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   {
@@ -215,6 +249,13 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: async (page) => {
       await openListSurface(page, '/stores', '店舗一覧', 3);
     },
+  },
+  {
+    // QR パネルは店舗一覧の中で開く後続状態であり、Issue #179 まで自動 a11y 監査の対象外だった
+    // （客向けの下書き画面が同じ形で漏れていたのと同型。PR #218 のレビューで判明した）。
+    where: '店舗一覧の QR パネル',
+    knownOverflow: false,
+    open: openStoreQrPanel,
   },
   {
     where: '代理店管理',

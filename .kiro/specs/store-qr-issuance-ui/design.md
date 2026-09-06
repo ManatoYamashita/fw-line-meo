@@ -113,15 +113,21 @@ graph TB
 ts/apps/dashboard-web/
 ├── src/
 │   ├── app/stores/page.tsx          # 変更: 発行列・未確定行の理由・パネル開閉状態
+│   ├── app/globals.css              # 変更: @media print（掲示面のみを紙に残す・Req 7.3）
 │   ├── components/
-│   │   └── store-qr-panel.tsx       # 新規: 表示・保存・失敗提示・object URL の生存期間
+│   │   └── store-qr-panel.tsx       # 新規: 表示・保存・失敗提示・object URL の生存期間・掲示面
 │   └── lib/
 │       ├── api.ts                   # 変更: apiFetchBinary / getStoreQr を追加
-│       └── qr-filename.ts           # 新規: 保存ファイル名の決定規則（純粋関数）
+│       ├── qr-filename.ts           # 新規: 保存ファイル名の決定規則（純粋関数）
+│       └── qr-poster-text.ts        # 新規: 掲示文言と禁止語・不可の例（純粋・Req 7.2/7.4）
+├── e2e/
+│   ├── fixtures/api.ts              # 変更: QR の PNG 応答と QR パネルの面定義
+│   └── dashboard-surfaces.spec.ts   # 変更: 印刷メディアの実測と QR パネルの横スクロール
 └── test/
     ├── qr-api.test.ts               # 新規: binary 窓口とエラー封筒の解釈（node 環境）
     ├── qr-filename.test.ts          # 新規: 命名規則（node 環境）
-    ├── store-qr-panel.test.tsx      # 新規: 表示・保存・失敗・資源解放（jsdom）
+    ├── qr-poster-text.test.ts       # 新規: 掲示文言と検出器の両方向照合（node 環境）
+    ├── store-qr-panel.test.tsx      # 新規: 表示・保存・失敗・資源解放・掲示面（jsdom）
     └── stores-page.test.tsx         # 変更: 発行列・未確定行・パネル開閉の検証を追加
 ```
 
@@ -208,6 +214,12 @@ stateDiagram-v2
 | 6.3 | 操作要素の名前 | StoresPage | `aria-label` に店名を含める | — |
 | 6.4 | 画像の代替テキスト | StoreQrPanel | `alt` に店名を含める | — |
 | 6.5 | コントラスト | StoresPage / StoreQrPanel | 既存トークンのみを使用 | — |
+| 7.1 | 掲示用の面の提示 | StoreQrPanel / qr-poster-text | `data-print-region` の領域に同一 object URL の画像と依頼文 | 発行フロー |
+| 7.2 | 依頼文が内容に影響を与えない | qr-poster-text | `POSTER_INVITATION` と `FORBIDDEN_TERM_GROUPS` の両方向照合 | — |
+| 7.3 | 印刷対象を掲示面に限る | globals.css / StoreQrPanel | `@media print` の visibility 切替（不可の例は領域の外） | — |
+| 7.4 | 不可の例と理由の提示 | StoreQrPanel / qr-poster-text | `PROHIBITED_EXAMPLES`（画面のみ） | — |
+| 7.5 | 掲示面に客の情報を載せない | StoreQrPanel | 領域の要素を店名・画像・依頼文・案内に限定 | — |
+| 7.6 | 未完了時は出さない | StoreQrPanel | `state.kind === 'ready'` の分岐 | 状態遷移 |
 
 ## Components and Interfaces
 
@@ -215,7 +227,8 @@ stateDiagram-v2
 |---|---|---|---|---|---|
 | api client（拡張） | lib | 認証付きで binary を取得しエラー封筒を解釈する | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1 | firebase auth (P0), dashboard-api (P0) | Service, API |
 | qr-filename | lib | 保存ファイル名を決定する純粋関数 | 2.4, 2.5, 2.6 | なし | Service |
-| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4 | api client (P0), qr-filename (P0), @fwlm/ui (P1) | Service, State |
+| qr-poster-text | lib | 掲示文言・禁止語・不可の例を規約の条項へ対応させて持つ純粋モジュール | 7.2, 7.4 | なし | Service |
+| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間・店頭掲示の面 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4, 7.1, 7.3–7.6 | api client (P0), qr-filename (P0), qr-poster-text (P0), @fwlm/ui (P1) | Service, State |
 | StoresPage（拡張） | app | 行への発行導線・未確定の理由・パネルの開閉 | 1.1–1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5 | StoreQrPanel (P0), auth-context (P1) | State |
 
 ### lib
