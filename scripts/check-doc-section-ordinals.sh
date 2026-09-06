@@ -105,7 +105,14 @@ grep_count() {
 # 走査対象の列挙。**作業ツリーではなく git 管理下から採る**（check-markdown-emphasis.sh と同じ理由。
 # 作業ツリーを列挙すると未追跡の第三者文書まで走査対象へ入り、こちらの管理外の内容で赤くなる）。
 # quotePath=false は非 ASCII を含むパスを 8 進エスケープさせないために要る。
-files="$(git -c core.quotePath=false ls-files -- ${SCAN_PATHSPECS} | grep -E '\.md$' | sort -u)" || true
+files="$(git -c core.quotePath=false ls-files -- ${SCAN_PATHSPECS} | grep -E '\.md$' | sort -u)" && frc=0 || frc=$?
+# 無一致（exit 1）と評価不能（exit 2 以上）を分ける。後置 true で潰すと、走査が壊れた状態が
+# 「対象 0 件」と同じ結果に化ける（下の 0 件判定も赤なので結果は同じだが、**原因の表示が
+# 消える**。「pathspec に当たらない」と「列挙できない」は打つ手がまるで違う）。
+if [ "$frc" -ge 2 ]; then
+  echo "ERROR: 走査対象の列挙が評価不能でした（exit=${frc}）。読めなかったことを「対象 0 件」と読みません。" >&2
+  exit 1
+fi
 
 if [ -z "$files" ]; then
   echo "ERROR: 走査対象の Markdown が 1 件もありません（pathspec: ${SCAN_PATHSPECS}）。" >&2
@@ -146,7 +153,15 @@ while IFS= read -r f; do
 
   # 序数だけを取り出して重複を数える。`sort | uniq -d` は入力を読み切るので
   # SIGPIPE の穴（check-shell-pipe-consumers.sh が禁じる形）には当たらない。
-  dups="$(grep -oE "$HEADING_RE" "$f" | sed -E 's/^#+ //; s/[. ]*$//' | sort | uniq -d)" || true
+  dups="$(grep -oE "$HEADING_RE" "$f" | sed -E 's/^#+ //; s/[. ]*$//' | sort | uniq -d)" && drc=0 || drc=$?
+  # ここへ来る時点で $n > 0 なので grep は必ず一致する。無一致（1）が返るなら抽出規則が
+  # 計数と抽出で食い違っている状態であり、評価不能（2 以上）と同じく黙って通してはならない。
+  if [ "$drc" -ne 0 ]; then
+    echo "ERROR: ${f} の序数抽出が失敗しました（exit=${drc}・計数では ${n} 件あった）。" >&2
+    echo "       計数と抽出で規則が食い違っています。読めなかったことを「重複なし」と読みません。" >&2
+    fail=1
+    continue
+  fi
 
   [ -n "$dups" ] || continue
 
