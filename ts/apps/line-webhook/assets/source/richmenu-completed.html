@@ -1,0 +1,41 @@
+<!doctype html><meta charset="utf-8">
+<!--
+  リッチメニュー画像「completed」の焼き元（Issue #195）。
+
+  正典は隣の ../richmenu-completed.png であり、本ファイルはその出所（provenance）である。
+  再現の保証ではない: フォントの描画は描画機に依存し、macOS のヒラギノと Linux の Noto では
+  字形も字幅も変わるため、同じ HTML から同じ PNG は出ない。焼き直すときは macOS + Google Chrome
+  で行い、焼いた PNG を目視してからコミットすること。
+
+  焼き出し（カレントディレクトリ = ts/apps/line-webhook/assets）:
+    CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "$CHROME" --headless --disable-gpu --no-sandbox --no-first-run --disable-extensions \
+      --hide-scrollbars --force-device-scale-factor=1 --window-size=2500,843 \
+      --screenshot="richmenu-completed.png" "file://$PWD/source/richmenu-completed.html"
+
+  制約（外すと絵が実装について嘘をつく。詳細は Issue #195 の決定コメント）:
+  - 寸法は 2500x843（LINE の Half (HD)）。scripts/setup-rich-menus.ts の
+    RICH_MENU_WIDTH / RICH_MENU_HEIGHT と一致していなければタップ座標が絵とずれる。
+  - タップ領域は画面全体でひとつだけ（areas[0] が全面）。ボタンに見える要素を描いてはならない。
+  - 配色は design-tokens の lineColors のみ。アクション色の緑 (#1DB446) は使わない
+    （design-language.md 7.11: 緑は押せるものだけが持つ）。
+  - 文言はタップして実際に返るものと一致させる。完了面のタップが返すのは
+    buildAlreadyCompletedMessage() の固定文であり、順位も競合も返らない。
+-->
+<style>
+  html,body{margin:0;padding:0;width:2500px;height:843px;overflow:hidden}
+  body{position:relative;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;padding-bottom:96px;box-sizing:border-box;
+    background:#F0FBF4;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Hiragino Sans",Meiryo,sans-serif;
+    color:#333333;-webkit-font-smoothing:antialiased}
+  .title{font-size:150px;font-weight:700;letter-spacing:.02em;line-height:1.15}
+  .sub{margin-top:40px;font-size:76px;font-weight:400;color:#666666;letter-spacing:.01em}
+  .foot{position:absolute;left:0;right:0;bottom:52px;
+    display:flex;flex-direction:column;align-items:center}
+  .rule{width:700px;height:5px;background:#AAAAAA;margin-bottom:30px}
+  .hint{font-size:62px;color:#888888;letter-spacing:.01em}
+</style>
+<div class="title">ステータス確認</div>
+<div class="sub">登録は完了しています</div>
+<div class="foot"><div class="rule"></div><div class="hint">画面のどこでもタップできます</div></div>
