@@ -1546,7 +1546,7 @@ test('ラベル領域の指定で対応する部品が反応する', async ({ pa
 
 // Requirements 1.1 / 1.2 / 4.5: 既定状態の対話的部品の枠が、フォーカスを当てずに
 // 3:1 以上で識別でき、識別用トークンの実描画値と一致する。
-test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以上で描画される', async ({ page }) => {
+test('既定状態の対話的部品の枠がフォーカスなしで識別用トークンどおりに描画される', async ({ page }) => {
   await openComponentCatalog(page);
   await expect(page.getByRole('textbox', { name: '一行入力' })).toBeVisible();
 
@@ -1586,6 +1586,7 @@ test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以
   ];
 
   for (const [where, locator] of outlineTargets) {
+    await expect(locator, `${where}: 検証面に実描画されていない`).toBeVisible();
     const rendered = await readRenderedBorder(locator, where);
     expect(rendered.focused, `${where}: 測定対象がフォーカスされている`).toBe(false);
     expect(
