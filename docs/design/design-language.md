@@ -1,3 +1,7 @@
+| LINE 日次サマリーの意匠の不変条件 | `ts/apps/delivery-job/test/flex.test.ts` | 意匠の不変条件 |
+| LINE オンボーディングの意匠の不変条件 | `ts/apps/line-webhook/test/line/messages.test.ts` | 意匠の不変条件 |
+| LINE の巨大表示は日次サマリーのカードで 1 件だけである | `ts/apps/delivery-job/test/flex.test.ts` |
+| LINE のオンボーディング 4 バブルは同じ内側余白を宣言する | `ts/apps/line-webhook/test/line/messages.test.ts` |
 # デザイン言語（fw-line-meo 写像版）
 
 このプロジェクトの意匠が「何を、なぜ、どの値で」決めているかを 1 箇所にまとめた文書である。
@@ -21,7 +25,8 @@
 
 本文書に無いもの。原典の逐語コピー（`docs/design/upstream/airbnb-DESIGN.md` にある）、
 面ごとの画面設計（後続 spec `ui-airbnb-surfaces` が扱う）、LINE Flex Message の配色
-（LINE アプリ自身の配色の中で成立させるため現行を維持し、意匠差し替えの対象外とした）。
+（LINE アプリ自身の配色の中で成立させるため現行を維持し、意匠差し替えの対象外とした。
+LINE 面のレイアウトと情報階層は §7 が扱う）。
 
 ---
 
@@ -215,7 +220,7 @@ system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Hira
 
 ## 7. 面適用で共有する設計判断
 
-**本節が面適用の判断の正典である。** 後続 spec `ui-airbnb-surfaces` が作られたら、その design.md は
+**本節が各判断の正典である。** 後続 spec `ui-airbnb-surfaces` が作られたら、その design.md は
 本節へリンクし、結論も数値も転記しない。転記は必ず古びる。由来欄が Issue を指している項目は、
 spec 側に審議の記録ができた時点で由来欄だけを差し替え、結論の本文はここから動かさない。
 
@@ -280,7 +285,6 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 
 **増減は上下の矢印で示し、色で示さない。** 緑を上昇・赤を下降に割り当てると新しいトークンを
 要求することになり、暖色一色のパレットとも衝突する。
-由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
 
 ### 7.8 帯の高さと現在地の示し方
 
@@ -335,6 +339,45 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 全面へ一括で効かせている。重ねて書くと二重管理になり、片方だけ古びても誰も検出できない。
 由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
 
+### 7.12 LINE 面の意匠は Web 面と別の律で決める
+
+**配色は凍結し、我々が決めるのは余白・階層・区切りだけである。** LINE Flex は LINE アプリ自身の
+UI の中に置かれるため、Web 面の意匠差し替えに追随させると周囲と衝突する。寸法の値も LINE 独自の
+キーワードであり、CSS の数値スケールへ写像できない。したがって LINE 用のトークンが共有するのは
+値ではなく役割であり、その正典は `ts/packages/design-tokens/src/line-layout.ts` にある。
+由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+
+### 7.13 LINE の巨大表示もプロダクト全体で 1 箇所
+
+**日次サマリーの順位数値だけが最大の段を持つ。** §7.3 の LINE 面への写像である。
+折り返しを持たない文字は容器の幅を超えると省略記号で切り詰められるため、段を上げるときは
+自動縮小の指定を対で添える。上げるだけでは劣化になる。
+由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+
+### 7.14 バブルの内側余白は 1 つの規則で表す
+
+**バブルの大きさに依らず、header・body・footer は同じ内側余白を宣言する。**
+バブルごとに変えると、次に触る人が守れる規則にならない。群として読ませる間隔は、
+セクションの内側を外側より詰め、節を閉じる区切り線はそれより広く取る。この 3 つの大小関係が
+崩れると、面が 1 枚の壁に見えるか、区切り線が節を閉じないかのどちらかになる。
+由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+
+### 7.15 LINE 面では緑は押せるものだけが持つ
+
+**アクション色と同値の緑を静的な文字に当てない。** LINE のアクション色は見出し用の緑と同値であり、
+成功を表す淡緑の面の上では読みづらいうえ、同じバブルの操作と同色になって、押せない見出しが
+押せるように読まれる。祝祭の面であることは面の背景色と主見出しの段が担う。
+由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+
+### 7.16 LINE のテキスト案内の書き方
+
+**絵文字は完了の 1 箇所だけに置き、案内・催促・エラーには使わない。** テキストメッセージは
+1 文 1 行で 3 行以内に収める。`**` による強調を書かない。LINE は Markdown を解さないため記号が
+そのまま表示されるうえ、`scripts/check-markdown-emphasis.sh` は Markdown ファイルしか走査しないので、
+TypeScript の文字列リテラルに書いた記号は機械検出されない。テキスト案内の Flex 化は行わない。
+由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
+
 ---
 
 ## 8. 面を組む前に読む構造契約
@@ -352,6 +395,8 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 | 星は押しボタン役割と押下状態で掴まれる | `ts/apps/survey-web/test/survey-form.test.tsx` |
 | LINE のメッセージ組立は本文要素の添字で検証される | `ts/apps/line-webhook/test/line/messages.test.ts` |
 | Flex の構造はスナップショットが固定する | `ts/apps/delivery-job/test/flex.test.ts` |
+| LINE の巨大表示は日次サマリーのカードで 1 件だけである | `ts/apps/delivery-job/test/flex.test.ts` |
+| LINE のオンボーディング 4 バブルは同じ内側余白を宣言する | `ts/apps/line-webhook/test/line/messages.test.ts` |
 | 部品固有のユーティリティをアプリ層に literal で書くと別パッケージのテストが落ちる | `ts/packages/ui/test/app-integration.test.ts` |
 
 ---
@@ -454,3 +499,5 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 選択部品の操作領域（本番の回答画面） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番の回答画面の選択部品 |
 | 2.1 / 3 空状態の文字色と余白 | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 空状態の文字色と余白 |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
+| LINE 日次サマリーの意匠の不変条件 | `ts/apps/delivery-job/test/flex.test.ts` | 意匠の不変条件 |
+| LINE オンボーディングの意匠の不変条件 | `ts/apps/line-webhook/test/line/messages.test.ts` | 意匠の不変条件 |

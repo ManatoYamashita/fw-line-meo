@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { Label } from '@fwlm/ui/components/label';
@@ -179,67 +180,75 @@ function UsersView() {
     <PageShell width="lg" className="flex flex-col gap-6">
       <Heading level={1}>利用者管理</Heading>
 
-      <div className="flex flex-col gap-4">
+      <FieldGroup>
         {/* **段落ではなく汎用の容器で包む。** 選択の部品は開閉の記号を重ねるために div を
           * 1 枚挟むので、段落の直下には置けない。置くとブラウザの構文解析が段落を早期に閉じ、
           * サーバ描画とクライアント描画の木が食い違う。
           * 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。値は
           * task 2.4 が招待コード・代理店管理で採った段と同一である（Req 1.2）。 */}
-        <div className="flex flex-col gap-2 sm:max-w-xs">
-          <Label htmlFor="user-role">ロール</Label>
-          {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
-            * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
-          <Select
-            id="user-role"
-            value={role}
-            onChange={(event) => setRole(event.target.value as DashboardRole)}
-          >
-            <option value="operator">運営</option>
-            <option value="agency">代理店</option>
-          </Select>
-        </div>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="user-role">ロール</Label>
+            {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
+              * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
+            <Select
+              id="user-role"
+              value={role}
+              onChange={(event) => setRole(event.target.value as DashboardRole)}
+            >
+              <option value="operator">運営</option>
+              <option value="agency">代理店</option>
+            </Select>
+          </div>
+        </Field>
 
         {/* 代理店ロールのときのみ所属代理店を必須で入力させる。運営ロールでは代理店欄を出さない（Req 6.3） */}
         {role === 'agency' && (
-          <div className="flex flex-col gap-2 sm:max-w-xs">
-            <Label htmlFor="user-agency">所属代理店</Label>
-            {/* 必須属性は包む要素ではなく選択要素そのものへ載る（部品が props を透過するため）。 */}
-            <Select
-              id="user-agency"
-              required
-              value={agencyId}
-              onChange={(event) => setAgencyId(event.target.value)}
-            >
-              <option value="">代理店を選択してください</option>
-              {agencies.map((agency) => (
-                <option key={agency.id} value={agency.id}>
-                  {agency.name}
-                </option>
-              ))}
-            </Select>
-          </div>
+          <Field className="contents">
+            <div className="flex flex-col gap-2 sm:max-w-xs">
+              <Label htmlFor="user-agency">所属代理店</Label>
+              {/* 必須属性は包む要素ではなく選択要素そのものへ載る（部品が props を透過するため）。 */}
+              <Select
+                id="user-agency"
+                required
+                value={agencyId}
+                onChange={(event) => setAgencyId(event.target.value)}
+              >
+                <option value="">代理店を選択してください</option>
+                {agencies.map((agency) => (
+                  <option key={agency.id} value={agency.id}>
+                    {agency.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Field>
         )}
 
-        <div className="flex flex-col gap-2 sm:max-w-xs">
-          <Label htmlFor="user-email">メールアドレス</Label>
-          <Input
-            id="user-email"
-            type="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </div>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="user-email">メールアドレス</Label>
+            <Input
+              id="user-email"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
+        </Field>
 
-        <div className="flex flex-col gap-2 sm:max-w-xs">
-          <Label htmlFor="user-display-name">表示名</Label>
-          <Input
-            id="user-display-name"
-            type="text"
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-          />
-        </div>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="user-display-name">表示名</Label>
+            <Input
+              id="user-display-name"
+              type="text"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+          </div>
+        </Field>
 
         {/* 版面は縦の flex なので、そのまま置くと押しボタンが行幅いっぱいに伸びる。
           * 主操作を全幅にするのはログイン画面の判断（正典 7.9）であってこの面の判断ではない。
@@ -252,7 +261,7 @@ function UsersView() {
         >
           利用者登録
         </Button>
-      </div>
+      </FieldGroup>
 
       {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
         * 領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}

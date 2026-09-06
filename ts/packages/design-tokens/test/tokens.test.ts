@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   colors,
   lineColors,
+  lineLayout,
   typography,
   spacing,
   radius,
@@ -71,6 +72,43 @@ describe('lineColors（LINE Flex Message 用セット）', () => {
       action: '#1DB446',
       muted: '#AAAAAA',
     });
+  });
+});
+
+describe('lineLayout（LINE Flex Message 用の寸法セット）', () => {
+  // 値は LINE 独自のキーワードであり rem へ写像できない（src/line-layout.ts の冒頭を参照）。
+  // 本テストが固定するのは「役割 → キーワード」の対応そのもので、
+  // 「組み立てた Flex がこの値を実際に使っている」は消費側（delivery-job / line-webhook）の
+  // 不変条件テストが assert する。両者は対でないと意味を持たない。
+  it('全ての意味役割が LINE のキーワードを 1 つ持つ', () => {
+    expect(lineLayout).toEqual({
+      bubbleSize: 'kilo',
+      blockPadding: 'lg',
+      headerPaddingBottom: 'md',
+      sectionGap: 'md',
+      itemGap: 'sm',
+      dividerMargin: 'lg',
+      displaySize: 'xxl',
+      titleSize: 'lg',
+      bodySize: 'md',
+      descriptionSize: 'sm',
+      noteSize: 'xs',
+      captionSize: 'xxs',
+      actionHeight: 'md',
+    });
+  });
+
+  it('群の内と外で間隔が異なり、区切り線はそれより大きい段を取る', () => {
+    // 「セクション内 < セクション間 < 区切り線の前」の順序が崩れると、
+    // 3 セクションが 1 枚の壁に見えるか、区切り線が節を閉じないかのどちらかになる。
+    const order = ['none', 'xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
+    const rank = (keyword: string): number => {
+      const index = order.indexOf(keyword);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    expect(rank(lineLayout.itemGap)).toBeLessThan(rank(lineLayout.sectionGap));
+    expect(rank(lineLayout.sectionGap)).toBeLessThan(rank(lineLayout.dividerMargin));
   });
 });
 

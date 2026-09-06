@@ -20,7 +20,6 @@
 function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
-
 /** 支援技術へ読み上げられる文字列（aria-hidden の部分木を除く）。 */
 export function announcedText(element: Element): string {
   const clone = element.cloneNode(true) as Element;

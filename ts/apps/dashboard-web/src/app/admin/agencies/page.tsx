@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { Label } from '@fwlm/ui/components/label';
@@ -105,24 +106,28 @@ function AgenciesView() {
       <Heading level={1}>代理店管理</Heading>
 
       {/* 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。 */}
-      <div className="flex flex-col gap-2 sm:max-w-xs">
-        <Label htmlFor="agency-name">代理店名</Label>
-        <Input
-          id="agency-name"
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-        />
-        {/* 無効の通知手段は変えない（素の無効属性のまま。焦点の到達を要求する箇所とは別枠）。 */}
-        <Button
-          type="button"
-          className="self-start"
-          onClick={() => void handleCreate()}
-          disabled={submitting}
-        >
-          代理店作成
-        </Button>
-      </div>
+      <FieldGroup>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="agency-name">代理店名</Label>
+            <Input
+              id="agency-name"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {/* 無効の通知手段は変えない（素の無効属性のまま。焦点の到達を要求する箇所とは別枠）。 */}
+            <Button
+              type="button"
+              className="self-start"
+              onClick={() => void handleCreate()}
+              disabled={submitting}
+            >
+              代理店作成
+            </Button>
+          </div>
+        </Field>
+      </FieldGroup>
 
       {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
         * 領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}

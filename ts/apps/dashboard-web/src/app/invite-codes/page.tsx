@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Label } from '@fwlm/ui/components/label';
 import { PageShell } from '@fwlm/ui/components/page-shell';
@@ -134,27 +135,31 @@ function InviteCodesView() {
       <Heading level={1}>招待コード</Heading>
 
       {isOperator && (
-        // **段落ではなく汎用の容器で包む。** 選択の部品は開閉の記号を重ねるために div を
-        // 1 枚挟むので、段落の直下には置けない。置くとブラウザの構文解析が段落を早期に閉じ、
-        // サーバ描画とクライアント描画の木が食い違う。
-        // 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。
-        <div className="flex flex-col gap-2 sm:max-w-xs">
-          <Label htmlFor="agency-select">代理店</Label>
-          {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
-            * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 5.4）。 */}
-          <Select
-            id="agency-select"
-            value={selectedAgencyId}
-            onChange={(event) => handleSelectAgency(event.target.value)}
-          >
-            <option value="">代理店を選択してください</option>
-            {(agencies ?? []).map((agency) => (
-              <option key={agency.id} value={agency.id}>
-                {agency.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <FieldGroup>
+          <Field className="contents">
+            {/* **段落ではなく汎用の容器で包む。** 選択の部品は開閉の記号を重ねるために div を
+              1 枚挟むので、段落の直下には置けない。置くとブラウザの構文解析が段落を早期に閉じ、
+              サーバ描画とクライアント描画の木が食い違う。
+              幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。 */}
+            <div className="flex flex-col gap-2 sm:max-w-xs">
+              <Label htmlFor="agency-select">代理店</Label>
+              {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
+                * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 5.4）。 */}
+              <Select
+                id="agency-select"
+                value={selectedAgencyId}
+                onChange={(event) => handleSelectAgency(event.target.value)}
+              >
+                <option value="">代理店を選択してください</option>
+                {(agencies ?? []).map((agency) => (
+                  <option key={agency.id} value={agency.id}>
+                    {agency.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Field>
+        </FieldGroup>
       )}
 
       {/* operator が代理店未選択のときは一覧を出さず、選択を促す（Req 5.4） */}

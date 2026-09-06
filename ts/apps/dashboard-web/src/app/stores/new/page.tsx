@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Card, CardContent } from '@fwlm/ui/components/card';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { Label } from '@fwlm/ui/components/label';
@@ -236,23 +237,27 @@ function RegisterWizard() {
             // 閉じ、サーバ描画とクライアント描画の木が食い違う）。
             // 幅の段は task 2.4 / 2.5 が招待コード・代理店管理・利用者管理で採ったものと同一である
             // （Req 1.2。面をまたいだ一致は admin-users-page.test.tsx がソースから照合する）。
-            <div className="flex flex-col gap-2 sm:max-w-xs">
-              <Label htmlFor="agency-select">代理店</Label>
-              {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
-                * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
-              <Select
-                id="agency-select"
-                value={selectedAgencyId}
-                onChange={(event) => handleSelectAgency(event.target.value)}
-              >
-                <option value="">代理店を選択してください</option>
-                {(agencies ?? []).map((agency) => (
-                  <option key={agency.id} value={agency.id}>
-                    {agency.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <FieldGroup>
+              <Field className="contents">
+                <div className="flex flex-col gap-2 sm:max-w-xs">
+                  <Label htmlFor="agency-select">代理店</Label>
+                  {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
+                    * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
+                  <Select
+                    id="agency-select"
+                    value={selectedAgencyId}
+                    onChange={(event) => handleSelectAgency(event.target.value)}
+                  >
+                    <option value="">代理店を選択してください</option>
+                    {(agencies ?? []).map((agency) => (
+                      <option key={agency.id} value={agency.id}>
+                        {agency.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </Field>
+            </FieldGroup>
           )}
 
           {/* 選択可能オーナーが 0 件のとき、招待コード先行の必要を案内する（Req 3.3） */}
@@ -266,21 +271,25 @@ function RegisterWizard() {
 
           {hasOwners && (
             <>
-              <div className="flex flex-col gap-2 sm:max-w-xs">
-                <Label htmlFor="owner-select">オーナー</Label>
-                <Select
-                  id="owner-select"
-                  value={selectedOwnerId}
-                  onChange={(event) => setSelectedOwnerId(event.target.value)}
-                >
-                  <option value="">オーナーを選択してください</option>
-                  {(owners ?? []).map((owner) => (
-                    <option key={owner.id} value={owner.id}>
-                      {owner.displayName ?? owner.id}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              <FieldGroup>
+                <Field className="contents">
+                  <div className="flex flex-col gap-2 sm:max-w-xs">
+                    <Label htmlFor="owner-select">オーナー</Label>
+                    <Select
+                      id="owner-select"
+                      value={selectedOwnerId}
+                      onChange={(event) => setSelectedOwnerId(event.target.value)}
+                    >
+                      <option value="">オーナーを選択してください</option>
+                      {(owners ?? []).map((owner) => (
+                        <option key={owner.id} value={owner.id}>
+                          {owner.displayName ?? owner.id}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </Field>
+              </FieldGroup>
               {/* 版面は縦の flex なので、そのまま置くと押しボタンが行幅いっぱいに伸びる。
                 * 主操作を全幅にするのはログイン画面の判断（正典 §7.9）であってこの面の判断ではない。
                 * 無効の通知手段は変えない（素の無効属性のまま・Req 3.5）。 */}
@@ -317,15 +326,19 @@ function RegisterWizard() {
             * base 層に一本化されており、面の側で打ち消すとレイヤ順により必ず勝つ（Issue #49）。 */}
           <Card>
             <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <Label htmlFor="store-name-input">店名</Label>
-                <Input
-                  id="store-name-input"
-                  type="text"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </div>
+              <FieldGroup className="contents">
+                <Field className="contents">
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <Label htmlFor="store-name-input">店名</Label>
+                    <Input
+                      id="store-name-input"
+                      type="text"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </div>
+                </Field>
+              </FieldGroup>
               <Button
                 type="button"
                 className="self-start sm:self-auto"
@@ -416,21 +429,25 @@ function RegisterWizard() {
           <Heading level={2}>基本情報</Heading>
           <p>店名: {candidate.name}</p>
           <p>住所: {candidate.address}</p>
-          <div className="flex flex-col gap-2 sm:max-w-xs">
-            <Label htmlFor="category-select">カテゴリ（任意）</Label>
-            <Select
-              id="category-select"
-              value={categoryCode}
-              onChange={(event) => setCategoryCode(event.target.value)}
-            >
-              <option value="">未選択</option>
-              {categories.map((category) => (
-                <option key={category.code} value={category.code}>
-                  {category.label}
-                </option>
-              ))}
-            </Select>
-          </div>
+          <FieldGroup>
+            <Field className="contents">
+              <div className="flex flex-col gap-2 sm:max-w-xs">
+                <Label htmlFor="category-select">カテゴリ（任意）</Label>
+                <Select
+                  id="category-select"
+                  value={categoryCode}
+                  onChange={(event) => setCategoryCode(event.target.value)}
+                >
+                  <option value="">未選択</option>
+                  {categories.map((category) => (
+                    <option key={category.code} value={category.code}>
+                      {category.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </Field>
+          </FieldGroup>
           <Button
             type="button"
             className="self-start"

@@ -1,7 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test } from '@playwright/test';
 import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { AGENCIES, stubDashboardApi } from './fixtures/api';
+import { DASHBOARD_SURFACES } from './fixtures/api';
 
 // 管理ダッシュボードの実描画検証（Issue #53）。
 //
@@ -20,50 +20,17 @@ import { AGENCIES, stubDashboardApi } from './fixtures/api';
 // 宣言と実測が食い違えば赤くなり、宣言の更新が強制される。**それが件数宣言の本来の働きである。**
 // （task 2.3 / 2.4 / 2.5 では実際にそう起きた: 宣言 1 に対して実測 2 で赤くなり、下の宣言を書き足した。）
 
-/** 未ログイン状態で開く（既定はログイン済み）。ログイン画面そのものを測るために使う。 */
-async function startSignedOut(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('e2e-auth-signed-out', '1');
-    } catch {
-      // 保存領域が使えない文脈（about:blank 等）では何もしない。
-    }
-  });
-}
-
 /**
- * 一覧面を開き、**表が実際に描かれている**ことを先に固定する。
+ * 面の起動と描画前提は fixtures/api.ts が単一所有する。
  *
- * これが無いと、認証の差し替えが効かず「読み込み中...」だけの画面になったときに、
- * 横スクロールの assert は当然のように緑を返す。測る対象が消えたことを緑と読まないための前置き。
+ * 面名の誤りはテスト定義の不整合なので、未知の面を黙ってスキップせず即時に失敗させる。
  */
-async function openListSurface(
-  page: Page,
-  path: string,
-  heading: string,
-  expectedRows: number,
-): Promise<void> {
-  await stubDashboardApi(page);
-  await page.goto(path);
-  await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
-  await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('row')).toHaveCount(expectedRows);
-}
-
-/**
- * 招待コードを開き、表が描かれるところまで進める。
- *
- * 他の一覧面と違い、operator は代理店を選ぶまで一覧を出さない（Req 5.4）。選択を経由するため
- * `openListSurface` に載らない。ラベルから選択要素を掴んでいるので、ラベルと選択の結び付きが
- * 切れれば（例: id が包む要素へ移れば）ここが赤くなる。
- */
-async function openInviteCodes(page: Page): Promise<void> {
-  await stubDashboardApi(page);
-  await page.goto('/invite-codes');
-  await expect(page.getByRole('heading', { level: 1, name: '招待コード' })).toBeVisible();
-  await page.getByLabel('代理店').selectOption(AGENCIES[0].id);
-  await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('row')).toHaveCount(3);
+function surfaceByName(where: string) {
+  const surface = DASHBOARD_SURFACES.find((candidate) => candidate.where === where);
+  if (!surface) {
+    throw new Error(`fixture 未定義の面: ${where}`);
+  }
+  return surface;
 }
 
 // --- 溢れていない面 --------------------------------------------------------------------
@@ -87,13 +54,13 @@ const NAV_SCROLL_REGIONS = 1;
 const TABLE_SCROLL_REGIONS = 1;
 
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
-  await openListSurface(page, '/stores', '店舗一覧', 3);
+  await surfaceByName('店舗一覧').open(page);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {
-  await openListSurface(page, '/admin/agencies', '代理店管理', 2);
+  await surfaceByName('代理店管理').open(page);
   // 帯 1 件 + 表 1 件（task 2.4 で `TableContainer` へ移った）。
   await expectNoHorizontalScroll(page, '代理店管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
@@ -104,7 +71,7 @@ test('モバイルビューポートの代理店管理で横スクロールが�
 // 「招待コード: 溢れが解消している（Expected: > 394 / Received: 393）」と赤を出し、
 // 宣言の更新を要求した。
 test('モバイルビューポートの招待コードで横スクロールが発生しない', async ({ page }) => {
-  await openInviteCodes(page);
+  await surfaceByName('招待コード').open(page);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '招待コード', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
@@ -114,7 +81,7 @@ test('モバイルビューポートの招待コードで横スクロールが�
 // **移動は自発ではなく強制である。** 是正した状態で走らせると、溢れの理由を固定していた網が
 // 「利用者管理: 溢れが解消している（Expected: > 394 / Received: 393）」と赤を出し、宣言の更新を要求した。
 test('モバイルビューポートの利用者管理で横スクロールが発生しない', async ({ page }) => {
-  await openListSurface(page, '/admin/users', '利用者管理', 3);
+  await surfaceByName('利用者管理').open(page);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '利用者管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
@@ -128,23 +95,13 @@ test('モバイルビューポートの利用者管理で横スクロールが�
 //
 // 是正を検出したのは「既知の溢れ」の 2 枚の網の**両方**である（下の「畳んだ理由」を参照）。
 test('モバイルビューポートの店舗登録で横スクロールが発生しない', async ({ page }) => {
-  await stubDashboardApi(page);
-  await page.goto('/stores/new');
-  // 測る対象が消えたことを緑と読まないための前置き（`openListSurface` と同じ思想）。
-  // 選択要素が描かれているところまで進めてから測る。
-  await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
-  await expect(page.getByRole('combobox').first()).toBeVisible();
+  await surfaceByName('店舗登録').open(page);
   // 帯 1 件のみ（表を持たない）。
   await expectNoHorizontalScroll(page, '店舗登録', NAV_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートのログイン画面で横スクロールが発生しない', async ({ page }) => {
-  await startSignedOut(page);
-  await stubDashboardApi(page);
-  await page.goto('/login');
-  await expect(page.getByRole('heading', { level: 1, name: 'ログイン' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Google でログイン' })).toBeEnabled();
+  await surfaceByName('ログイン').open(page);
   await expectNoHorizontalScroll(page, 'ログイン', 0);
 });
 
@@ -175,4 +132,3 @@ test('モバイルビューポートのログイン画面で横スクロール�
 // 起きる。供給源が無ければ発火する。どちらにせよ「既知の失敗を宣言するときは、失敗の**理由**を
 // 固定する第 2 の網を対で置く」という規律は変わらない（理由を固定する網だけが、
 // 何が直ったのかを名指しできる）。
-

@@ -8,13 +8,14 @@
       "settings": {
         "formFactor": "mobile",
         "throttlingMethod": "simulate",
-        "onlyCategories": ["performance"]
+        "onlyCategories": ["performance", "accessibility"]
       }
     },
     "assert": {
       "assertions": {
         "largest-contentful-paint": ["error", { "maxNumericValue": 3000 }],
-        "first-contentful-paint": ["warn", { "maxNumericValue": 2000 }]
+        "first-contentful-paint": ["warn", { "maxNumericValue": 2000 }],
+        "categories:accessibility": ["error", { "minScore": 1 }]
       }
     }
   }
