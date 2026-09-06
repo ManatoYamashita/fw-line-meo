@@ -1544,7 +1544,8 @@ test('ラベル領域の指定で対応する部品が反応する', async ({ pa
 // ここでの実測がその唯一の実証手段である。
 // ---------------------------------------------------------------------------
 
-// Requirements 1.1 / 1.2: 既定状態のフォーム部品の枠が、フォーカスを当てずに 3:1 以上で識別できる。
+// Requirements 1.1 / 1.2 / 4.5: 既定状態の対話的部品の枠が、フォーカスを当てずに
+// 3:1 以上で識別でき、識別用トークンの実描画値と一致する。
 test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以上で描画される', async ({ page }) => {
   await openComponentCatalog(page);
   await expect(page.getByRole('textbox', { name: '一行入力' })).toBeVisible();
@@ -1574,6 +1575,23 @@ test('既定状態のフォーム部品の枠がフォーカスなしで 3:1 以
   for (const [where, locator] of targets) {
     const rendered = await readRenderedBorder(locator, where);
     expect(rendered.focused, `${where}: 測定対象がフォーカスされている`).toBe(false);
+    expectNonTextContrast(rendered.borderColor as string, pageBackground, where);
+  }
+
+  // Issue #68: Button / Badge の outline は対話的部品の輪郭なので、識別用トークンを使う。
+  // 3:1 だけを測ると別の十分に濃い色への退行を許すため、実描画値そのものも固定する。
+  const outlineTargets: ReadonlyArray<readonly [string, Locator]> = [
+    ['枠線のボタン（Button）', page.getByRole('button', { name: '枠線のボタン' })],
+    ['枠線のバッジ（Badge）', page.getByTestId('outline-badge')],
+  ];
+
+  for (const [where, locator] of outlineTargets) {
+    const rendered = await readRenderedBorder(locator, where);
+    expect(rendered.focused, `${where}: 測定対象がフォーカスされている`).toBe(false);
+    expect(
+      rendered.borderColor,
+      `${where}: 枠が識別用トークン（${colors.borderInteractive}）で描画されていない`,
+    ).toBe(colors.borderInteractive);
     expectNonTextContrast(rendered.borderColor as string, pageBackground, where);
   }
 });

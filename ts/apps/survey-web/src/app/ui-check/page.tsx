@@ -362,6 +362,11 @@ export default function UiCheckPage() {
         * 「拡大の」で始め、互いの部分文字列にもならないようにしてある。 */}
       <Button size="lg">拡大のボタン</Button>
       <Button size="icon-lg" aria-label="拡大のアイコンボタン" />
+
+      {/* 対話的部品の輪郭。Issue #68 の E2E が実描画の枠色を測定する的にする。 */}
+      <Badge data-testid="outline-badge" variant="outline">
+        枠線のバッジ
+      </Badge>
     </PageShell>
   );
 }
