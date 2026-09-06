@@ -20,7 +20,7 @@ import {
 
 // 1 店舗ぶんの QR を取得・表示・保存させ、表示資源（object URL）を確実に解放する部品。
 // 設計: store-qr-issuance-ui「StoreQrPanel」（Requirements 2.1, 2.2, 2.3, 2.8, 3.3, 4.1-4.5,
-// 5.2, 5.3, 5.4, 6.2, 6.4）。
+// 5.2, 5.3, 5.4, 6.2, 6.4, 7.1, 7.3-7.6）。
 //
 // 対象は常に 1 店舗で、複数店舗の同時保持を行わない。取得結果は永続化せず、生存期間は
 // この部品の生存期間に一致する。失敗の影響はパネル内に閉じ、店舗一覧を再取得しない。
@@ -199,10 +199,15 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
         ) : null}
 
         {state.kind === 'ready' ? (
-          // 不可の例。**画面にだけ出し、掲示物には刷らない**（`data-print-region` の外にある）。
+          // 不可の例。**画面にだけ出し、掲示物には刷らない。**
           // 紙に「星5でお願いします」と印刷されたら、この機能が防ごうとした違反そのものを
           // 製品が配ることになる。
-          <section className="flex flex-col gap-2 text-sm">
+          //
+          // 二重に守る。(1) `data-print-region` の外に置く（globals.css の @media print が
+          // 掲示面の外を畳む）。(2) `print:hidden` を直接与える。**(1) は `:has()` に依存する**
+          // ため、未対応のブラウザでは規則ごと無視されて面がそのまま印刷される。(2) は素の
+          // `@media print { display: none }` なのでどこでも効く。**この 1 点だけは退化を許さない。**
+          <section className="flex flex-col gap-2 text-sm print:hidden">
             <Heading level={3} size="sm">
               掲示してはいけない書き方
             </Heading>

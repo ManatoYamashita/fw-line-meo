@@ -130,12 +130,6 @@ const RESPONSES: Record<string, unknown> = {
 };
 
 /**
- * dashboard-api への呼び出しを固定 fixture で置き換える。
- *
- * 未知のパスは 404 のエラー封筒で返す。素通りさせると実在しないサーバーへ出て行って
- * ネットワークエラーになり、原因が「fixture の取りこぼし」だと読み取れなくなる。
- */
-/**
  * QR 応答の代わりに返す 1×1 の PNG（Issue #179）。
  *
  * **実物の QR は置かない。** 実物は完全な店舗 ID を含む URL を符号化しており、画像として
@@ -150,6 +144,14 @@ const ONE_PIXEL_PNG = Buffer.from(
 /** QR エンドポイントのパス（クエリは除いた形で照合する）。 */
 const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
 
+/**
+ * dashboard-api への呼び出しを固定 fixture で置き換える。
+ *
+ * 未知のパスは 404 のエラー封筒で返す。素通りさせると実在しないサーバーへ出て行って
+ * ネットワークエラーになり、原因が「fixture の取りこぼし」だと読み取れなくなる。
+ *
+ * QR だけは JSON ではなく PNG を返す（`RESPONSES` の表に載せられない形のため先に分岐する）。
+ */
 export async function stubDashboardApi(page: Page): Promise<void> {
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;

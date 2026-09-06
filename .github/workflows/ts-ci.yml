@@ -317,7 +317,7 @@ jobs:
           pnpm -C ts --filter @fwlm/store-detail run build
       - name: install Playwright browsers
         run: pnpm -C ts --filter @fwlm/dashboard-web exec playwright install --with-deps chromium
-      - name: 'E2E（管理ダッシュボード 6 面の横スクロール実測）'
+      - name: 'E2E（管理ダッシュボード 7 面の横スクロール実測）'
         run: pnpm -C ts --filter @fwlm/dashboard-web exec playwright test
       - name: 'E2E（店舗詳細の横スクロール実測）'
         run: pnpm -C ts --filter @fwlm/store-detail exec playwright test

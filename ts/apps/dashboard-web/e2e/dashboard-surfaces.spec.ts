@@ -100,6 +100,52 @@ test.describe('店頭掲示の印刷', () => {
     }
     await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeVisible();
   });
+
+  // **この規則は全ルートへ効く。** globals.css は app/layout.tsx 経由で読み込まれるため、
+  // 掲示面を持たない面にも当たる。鍵（`body:has([data-print-region])`）を外すと、
+  // それらの面の印刷が**全ページ白紙**になる。実測では `/stores` の PDF の content stream が
+  // 107 バイト（描画命令ゼロ）まで落ちた。掲示物を配る機能が無関係な 6 面の印刷を壊す形で、
+  // レビューで検出した。**掲示面を開いた状態しか測らないと、この経路には網が無い。**
+  test('掲示面を持たない面の印刷を壊さない（規則の入口が閉じている）', async ({ page }) => {
+    await surfaceByName('店舗一覧').open(page); // QR パネルを開かない
+    await page.emulateMedia({ media: 'print' });
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: '店舗一覧' }),
+      '掲示面を持たない面の見出しが紙に出ません（全ページ白紙になります）',
+    ).toBeVisible();
+    await expect(page.getByRole('table'), '掲示面を持たない面の一覧が紙に出ません').toBeVisible();
+  });
+
+  // `visibility: hidden` で隠すと箱が残り、紙は一覧の高さぶん生成されて 2 枚目以降が白紙になる
+  // （実測: 店舗 40 件で body 3014px・A4 で 3 ページ）。**畳めていることを高さで測る。**
+  test('掲示面のある面では外側が箱ごと畳まれる（白紙のページを後続させない）', async ({ page }) => {
+    await surfaceByName('店舗一覧の QR パネル').open(page);
+
+    // **掲示面の祖先は畳まない**（畳むと掲示面ごと消える）。QR パネルは対象行の直下に挿入される
+    // ため、`<table>` も `<tbody>` も祖先であり残る。畳まれるのは祖先でない兄弟のほうなので、
+    // 主見出し（版面の直下にあり掲示面の祖先ではない）で測る。
+    const measure = () =>
+      page.evaluate(() => ({
+        body: Math.round(document.body.getBoundingClientRect().height),
+        heading: getComputedStyle(document.querySelector('h1')!).display,
+      }));
+
+    const onScreen = await measure();
+    await page.emulateMedia({ media: 'print' });
+    const onPaper = await measure();
+
+    expect(onScreen.heading, '画面で主見出しが畳まれています（対照が成立しません）').not.toBe('none');
+    expect(
+      onPaper.heading,
+      '印刷時に主見出しが箱ごと畳まれていません（visibility だけでは箱が残ります）',
+    ).toBe('none');
+    expect(
+      onPaper.body,
+      `印刷時に body の高さが縮んでいません（画面 ${onScreen.body}px / 紙 ${onPaper.body}px）。` +
+        '高さが残ると、その分だけ白紙のページが後続します',
+    ).toBeLessThan(onScreen.body);
+  });
 });
 
 test('モバイルビューポートの QR パネルで横スクロールが発生しない', async ({ page }) => {

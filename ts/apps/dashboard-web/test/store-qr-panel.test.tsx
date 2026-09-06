@@ -557,7 +557,10 @@ describe('StoreQrPanel: 店頭掲示の文言（Requirement 7）', () => {
     expect(region.textContent).toContain(POSTER_HOWTO);
   });
 
-  it('QR 画像は掲示面の中にあり、画面に 1 枚しか存在しない（2.8・再取得なし）', async () => {
+  // **受入基準の番号を名前に足さない。** ここが測っているのは「掲示面を足しても画像が
+  // 二重にならないこと」だけで、切替時の後始末（2.8）も取得回数（2.3）も踏んでいない。
+  // それらは既存のケース（アンマウントで資源解放／保存が再取得を起こさない）が持っている。
+  it('QR 画像は掲示面の中にあり、画面に 1 枚しか存在しない', async () => {
     await renderReady();
     const images = screen.getAllByRole('img');
     expect(images, '画像が 2 枚以上あります（掲示面と確認用が二重になっています）').toHaveLength(1);
@@ -609,7 +612,10 @@ describe('StoreQrPanel: 店頭掲示の文言（Requirement 7）', () => {
     expect(screen.queryByText(new RegExp(POSTER_INVITATION))).toBeNull();
   });
 
-  it('掲示面に来店客に関する情報を載せない（Requirement 5.2）', async () => {
+  // 測っているのは語の不在であって「客の情報の不在」そのものではない。名前を実態へ寄せる
+  // （Requirement 5.2 の担保は、掲示面の要素を店名・画像・依頼文・案内の 4 つに限った構造と、
+  // その 4 つを固定する上の 2 ケースが担う）。この網は禁止語の混入を拾う側で意味を持つ。
+  it('掲示面に評価・件数を指す語が混入しない', async () => {
     await renderReady();
     // 掲示物は店頭に貼られる。客の回答・評価・件数の類が 1 文字でも載ってはならない。
     expect(printRegion().textContent).not.toMatch(/評価|口コミ|レビュー|星|件/);
