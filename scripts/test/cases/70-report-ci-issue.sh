@@ -16,6 +16,8 @@
 
 RCI_TRACKER=''
 RCI_PREV_SIG=''
+# 追跡 Issue の状態遷移を許す ref。空なら「ref 不明」＝ Actions の外として通す。
+RCI_REF=''
 
 rci_stub_gh() {
   # issue list だけは「該当なし」を返す（追跡 Issue の探索経路を本物のまま通すため）。
@@ -84,6 +86,7 @@ rci_run() {
     REPORT_CI_ISSUE_DRY_RUN=1 \
     REPORT_CI_ISSUE_FAKE_TRACKER="$RCI_TRACKER" \
     REPORT_CI_ISSUE_FAKE_PREV_SIGNATURE="$RCI_PREV_SIG" \
+    GITHUB_REF_NAME="$RCI_REF" \
     bash scripts/report-ci-issue.sh "$@" 2>&1)" || RC=$?
 }
 
@@ -240,4 +243,70 @@ rci_notation_count '\[ -n "\$\{REPORT_CI_ISSUE_FAKE_[A-Z_]+:-\}" \]'
 OUT="PLUS_X: ${rci_plus_x} COLON: ${RCN_N}"
 # 空振り防止として `+x` の件数まで見る。0 件なら注入点ごと消えたか記法が変わっている。
 expect_output_matches '^PLUS_X: 2 COLON: 0$'
+t_end
+
+# --- 追跡 Issue の状態遷移は default branch の run だけが起こせる（2026-09-06 の事故）---
+#
+# external-api-smoke-freshness の追跡 Issue #188 は、運用者が **未 push の feature ブランチ**
+# （記録を更新済み）へ workflow_dispatch した run の緑で自動クローズされた。main の記録は
+# 期限切れのまま残っており、**赤い実体が消えないまま信号だけが消えた**。
+# 翌日の schedule が立て直すまでの間、状態は「緑」に見える。
+#
+# 逆向きも同じく誤りである。feature ブランチの赤で起票すると、main に無い問題の Issue が立つ。
+# したがって両方向とも書き込みを止める。判定は ref 名で行い、イベント種別では行わない
+# （schedule は必ず default branch で走り、dispatch は main からも feature からも撃てる）。
+
+t_begin 'report-ci-issue: default branch の run は状態を変更する（対照）'
+fx_guard report-ci-issue
+rci_stub_gh
+rci_body_file
+RCI_REF=main
+rci_run --state red --label prod-image-drift --title t --body-file "${FX}/body.md"
+RCI_REF=''
+expect_green
+# 書き込み経路まで到達していることを見る。ここが空振りだと下の feature ケースの対照にならない。
+expect_output_matches '^DRY-RUN: gh issue create '
+t_end
+
+t_begin 'report-ci-issue: default branch 以外の run は状態を変更しない（緑を消させない）'
+fx_guard report-ci-issue
+rci_stub_gh
+rci_body_file
+RCI_TRACKER=188
+RCI_REF=codex/update-node-24
+rci_run --state green --label external-api-smoke --title t --body-file "${FX}/body.md"
+RCI_TRACKER=''
+RCI_REF=''
+# 止めるが落とさない。通知ステップでジョブを赤くするのは筋が違う（成否は検証ステップが決める）。
+expect_green
+expect_output_matches 'ref .codex/update-node-24. の run では状態を変更しません'
+# **書き込みが 1 件も出ていないことまで見る。** SKIP と出しつつ close していれば意味がない。
+expect_absent 'DRY-RUN: gh issue close'
+expect_absent 'DRY-RUN: gh issue comment'
+expect_absent 'DRY-RUN: gh issue create'
+expect_absent 'STUB-GH-INVOKED'
+t_end
+
+# 赤の側も止める。feature ブランチの赤で「main に無い問題」の Issue を立てない。
+t_begin 'report-ci-issue: default branch 以外の run は起票もしない'
+fx_guard report-ci-issue
+rci_stub_gh
+rci_body_file
+RCI_REF=feat/whatever
+rci_run --state red --label prod-image-drift --title t --body-file "${FX}/body.md"
+RCI_REF=''
+expect_green
+expect_absent 'DRY-RUN: gh issue create'
+expect_absent 'STUB-GH-INVOKED'
+t_end
+
+# ref が分からない（Actions の外）なら通す。ここを止めると手元の dry-run と自己テストが死ぬ。
+t_begin 'report-ci-issue: ref が空なら Actions の外とみなして通す'
+fx_guard report-ci-issue
+rci_stub_gh
+rci_body_file
+RCI_REF=''
+rci_run --state red --label prod-image-drift --title t --body-file "${FX}/body.md"
+expect_green
+expect_output_matches '^DRY-RUN: gh issue create '
 t_end

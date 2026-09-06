@@ -82,6 +82,32 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+# 追跡 Issue は **default branch の状態** を表す。したがって状態遷移を起こしてよいのは
+# default branch を指す run だけである。
+#
+# 2026-09-06 に実際に壊れた: external-api-smoke-freshness の追跡 Issue #188 は、運用者が
+# **未 push の feature ブランチ**（記録を更新済み）に対して workflow_dispatch した run の緑で
+# 自動クローズされた。main の記録は期限切れのまま残っており、赤い実体が消えないまま
+# 信号だけが消えた。翌日の schedule が立て直すまでの間、状態は「緑」に見える。
+#
+# 逆向きも同じく誤りである。feature ブランチの赤で起票すると、main に無い問題の Issue が立つ。
+# したがって **両方向とも**書き込みを止める。
+#
+# 判定は ref 名で行い、イベント種別では行わない。schedule は必ず default branch で走り、
+# workflow_dispatch は main からも feature からも撃てる。止めたいのは後者だけである。
+#
+# `GITHUB_REF_NAME` が**空または未設定**なら「ref が分からない」＝ Actions の外（手元の
+# dry-run 等）とみなして通す。ここで止めると自己テストと手元検証ができなくなる。
+report_default_branch="${REPORT_CI_ISSUE_DEFAULT_BRANCH:-main}"
+report_ref="${GITHUB_REF_NAME:-}"
+if [ -n "$report_ref" ] && [ "$report_ref" != "$report_default_branch" ]; then
+  # 接頭は OK。**何もしないことがこの run の正しい成功**であり、赤でも警告でもない。
+  echo "OK: 追跡 Issue は default branch（${report_default_branch}）の状態を表すため、"
+  echo "  ref '${report_ref}' の run では状態を変更しません（--state ${state} / --label ${label}・書き込み 0 件）。"
+  echo "  → この ref の結果を追跡へ反映したい場合は、変更を ${report_default_branch} へ載せてください。"
+  exit 0
+fi
+
 dry_run="${REPORT_CI_ISSUE_DRY_RUN:-}"
 
 run_gh() {
