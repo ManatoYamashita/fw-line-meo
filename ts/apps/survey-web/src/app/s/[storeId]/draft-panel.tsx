@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -25,6 +25,7 @@ export function DraftPanel({
   const [text, setText] = useState(draft);
   const [copyState, setCopyState] = useState<CopyState>('idle');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const noteId = useId();
 
   // 再生成で新しい下書きが届いたら編集内容を更新する（再生成は上書き）。
   useEffect(() => {
@@ -145,6 +146,25 @@ export function DraftPanel({
 
   return (
     <section className="space-y-4">
+      {/* 下書きの由来と、投稿前に自分の言葉へ直すことの促し（Issue #179）。
+
+          **「AI」の語は出さない。** Google の 2026-04 改定（「評価の操作」の新設）を一次情報で
+          確認したところ、日英いずれの原文にも AI・自動生成への言及は無い。禁止の実体は
+          「実体験に基づいていないコンテンツ」であり、それを担保する主体はシステムではなく
+          客本人である。伝えるべきは生成技術の名前ではなく、素材が客自身の回答であることと、
+          投稿するのは客自身の言葉であることの 2 つになる。
+
+          **読み上げ領域の中へ置いてはならない。** 直下の `notification` は差し替え型の
+          ライブリージョンで、言うことが無いときも空のまま常時マウントされる。ここへ静的な
+          説明を入れると、生成中・コピー結果を通知するたびに説明ごと読み上げ直される。
+          同じ理由で通知の部品（Alert）も使わない。変種ごとに読み上げ役割を自分で付けるため、
+          この面の穏やかな読み上げ領域が 2 つになる（test/draft-panel.test.tsx の
+          `theLiveRegion()` が 1 つであることを固定している）。
+
+          入力欄からは `aria-describedby` で指す。読み上げ名（`aria-label`）は変えない。 */}
+      <p id={noteId} className="text-sm text-muted-foreground">
+        あなたの回答をもとに作成した下書きです。ご自身の言葉に直してから投稿してください。
+      </p>
       {/* 生成された下書きは全文が一目で読める高さを確保する。
           高さを実際に担っているのは **面の側の最小高さ** である。行数の指定は、部品が内容に
           応じて高さを決める指定を自分で持つため、対応するブラウザでは効かない（対応していない
@@ -155,6 +175,7 @@ export function DraftPanel({
         rows={10}
         ref={textareaRef}
         aria-label="口コミ下書き"
+        aria-describedby={noteId}
         value={text}
         onChange={(e) => {
           setText(e.target.value);

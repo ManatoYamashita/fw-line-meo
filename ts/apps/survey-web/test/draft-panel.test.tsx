@@ -527,3 +527,68 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     expect(screen.getAllByRole('link'), '生成失敗のリンクの個数').toHaveLength(1);
   });
 });
+
+// ---- ここから Issue #179 が追加した検証（下書きの由来と推敲の促し） ----
+
+/**
+ * 下書きの近傍に置く説明。**「AI」の語は出さない。**
+ *
+ * Google の 2026-04 改定を一次情報で確認したところ、日英いずれの原文にも AI・自動生成への
+ * 言及は無い。禁止の実体は「実体験に基づいていないコンテンツ」であり、それを担保する主体は
+ * システムではなく客本人である。したがって伝えるべきは生成技術の名前ではなく、
+ * **素材が客自身の回答であること**と、**投稿するのは客自身の言葉であること**の 2 つになる。
+ */
+const PROVENANCE = 'あなたの回答をもとに作成した下書きです。';
+const REVISION_PROMPT = 'ご自身の言葉に直してから投稿してください。';
+
+describe('下書きパネル: 由来の明示と推敲の促し（Issue #179）', () => {
+  it('下書きの由来と、自分の言葉へ直す促しを 1 つの段落として表示する', () => {
+    render(<DraftPanel {...props()} />);
+    // getByText は不在なら例外を投げるので、取得できたこと自体は assert にならない。
+    // **2 文が同じ段落に載っていること**まで見る（別々の要素へ割ると aria-describedby が
+    // 片方しか指せず、由来だけ、あるいは促しだけが読み上げられる形になる）。
+    const note = screen.getByText(
+      (_, element) => {
+        const text = element?.textContent ?? '';
+        return text.includes(PROVENANCE) && text.includes(REVISION_PROMPT);
+      },
+      { selector: 'p' },
+    );
+    expect(note.textContent?.trim()).toBe(`${PROVENANCE}${REVISION_PROMPT}`);
+  });
+
+  it('その説明は読み上げ領域の外にある（既存の a11y と競合しない）', () => {
+    render(<DraftPanel {...props()} />);
+    const region = theLiveRegion();
+    // 既存の読み上げ領域は差し替え型で、言うことが無いときは空のまま常時マウントされる。
+    // 静的な説明をそこへ入れると、通知のたびに説明ごと読み上げ直される。
+    expect(
+      announcedText(region),
+      '静的な説明が読み上げ領域の中にあります（通知のたびに読み上げ直されます）',
+    ).not.toContain(PROVENANCE);
+    // 領域の個数そのものは theLiveRegion() が 1 つに固定している。説明へ役割や aria-live を
+    // 付けるとそこで落ちるため、この面の読み上げ領域は増えない。
+  });
+
+  it('下書きの入力欄がその説明を説明として指している（aria-describedby）', () => {
+    render(<DraftPanel {...props()} />);
+    const textarea = screen.getByLabelText('口コミ下書き');
+    const describedBy = textarea.getAttribute('aria-describedby');
+    expect(describedBy, '入力欄が説明を指していません').not.toBeNull();
+    const note = document.getElementById(describedBy!);
+    expect(note, `aria-describedby=${String(describedBy)} の指す要素がありません`).not.toBeNull();
+    expect(note!.textContent).toContain(PROVENANCE);
+    expect(note!.textContent).toContain(REVISION_PROMPT);
+  });
+
+  it('生成に失敗した分岐では出さない（下書きが存在しないため）', () => {
+    render(<DraftPanel {...props({ generationFailed: true })} />);
+    // 条件つきの形だけを assert すると「無条件に出す」改変が素通りする。既定側を固定する。
+    expect(screen.queryByText(new RegExp(PROVENANCE))).toBeNull();
+    expect(screen.queryByText(new RegExp(REVISION_PROMPT))).toBeNull();
+  });
+});
+
+// 「説明を足しても操作要素とリンクの個数が変わらない」ことは、上の
+// 「操作要素とリンクの個数は分岐ごとに固定されている（Requirements 3.3）」が既に押しボタン 2 件・
+// リンク 1 件で固定している。同じことを 2 箇所で見る層は、片方が腐ったときに腐ったと言えない。

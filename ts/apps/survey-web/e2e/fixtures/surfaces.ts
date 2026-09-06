@@ -45,3 +45,27 @@ export async function openSurveySurface(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.getByRole('button', { name: '星5' })).toBeVisible();
 }
+
+/**
+ * 客向け下書き画面（同一 URL の後続フェーズ）を開く（Issue #179）。
+ *
+ * **この面は a11y の自動監査を一度も受けていなかった。** `openSurveySurface` が開くのは
+ * 回答フェーズであり、`SurveyShell` の状態が `answering` のままなので `DraftPanel` は
+ * 描画されない。つまり `a11y-audit.spec.ts` の 2 面は、客が実際に文章を読んで編集する
+ * 画面をどちらも見ていなかった（PR #218 のレビューで発覚）。
+ *
+ * `goto` は持たない。開く手順そのものは `openSurveySurface` に一本化し、ここは
+ * **同じ URL の中で状態を進めるだけ**である（Issue #53 の所有権の規律を壊さないため）。
+ *
+ * 前提 assert は下書きの入力欄の可視。これが無いと、生成が失敗して `generationFailed` の
+ * 分岐へ落ちた画面（下書きが存在しない）を監査対象と取り違える。**空の画面・失敗画面には
+ * 違反が出ようがない**ので、a11y 監査こそ前提の固定が要る。
+ *
+ * 生成は CI が供給する Gemini のモック（`NODE_OPTIONS=--import e2e/mock-gemini.mjs`）が返す。
+ */
+export async function openDraftingSurface(page: Page): Promise<void> {
+  await openSurveySurface(page);
+  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('button', { name: '送信する' }).click();
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+}

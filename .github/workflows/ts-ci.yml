@@ -115,6 +115,17 @@ jobs:
         # infra/README.md は `§N` が 26 箇所）、番号がずれると指示先が変わる。
         # 直上の連番ガードと違い origin/main を要さないので fetch の前に置ける。
         run: bash scripts/check-doc-section-ordinals.sh
+      - name: 'コンプライアンス記述ガード（Issue #179・検知の回避を目的として述べる記述の禁止）'
+        # 直上 2 つと同じく舞台は文書だが、見るのは**番号ではなく動機の書き方**である。
+        # 2026-04-17 の Google ポリシー改定で「評価の操作」が新設され、「異常なパターンの
+        # クチコミ」が販売者の禁止事項になった。この状況下で「検知を回避するために語彙を
+        # 変える」という**目的の記述**は、実装が正しくても検知回避の意図表明として読まれる。
+        # 是正前は 4 箇所（CLAUDE.md / requirements.md ×2 / .kiro/steering/product.md）が
+        # その順序で書かれており、**CLAUDE.md や steering の内容を見るガードは 1 本も無かった**。
+        # 否定（記述が無い）だけでは対象が消えたときも緑になるので、文面介入の禁止が
+        # 正典 2 文書に明文で在ることを肯定側のアンカーとして対で要求する。
+        # read-only の git ls-files + grep のみなので install 前に置ける。
+        run: bash scripts/check-compliance-wording.sh
       - name: 'db/test CI カバレッジガード（Issue #156）'
         # db/test の検査資産（匿名性の構造保証 = Req 5・書込境界の単一所有 = Req 9.1/9.4）は
         # #156 まで**一度も CI に載ったことがなかった**。実行装置を足しただけでは、下の
