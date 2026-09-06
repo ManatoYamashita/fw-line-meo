@@ -27,6 +27,11 @@ jobs:
       - name: 'NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）'
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
+      - name: '共有パッケージのコンテナ定義ガード（Issue #234）'
+        # 共有パッケージは各アプリのコンテナ定義へ名前で列挙されており、依存宣言の追加に
+        # 自動追従しない。依存解決の段の漏れは install が落とすが、ビルド・実行時配置の段の
+        # 漏れはイメージが作れてしまい実行時まで露見しない。宣言と定義を両方向で照合する。
+        run: bash scripts/check-workspace-package-dockerfiles.sh
       - name: 'E2E スタブ隔離ガード（Issue #53・IdP 差し替えが出荷経路へ漏れないこと）'
         # 管理ダッシュボードと店舗詳細を実ブラウザで測るため、外部 IdP の SDK をビルド時に
         # スタブへ差し替える口がある（E2E_STUB_IDP=1 のときだけ有効）。漏れたときの症状は
