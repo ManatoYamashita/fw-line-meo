@@ -4,8 +4,14 @@
 
 出典: GitHub Issue [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)（親・トラッキング）。
 本 spec が閉じる子 Issue: [#43](https://github.com/ManatoYamashita/fw-line-meo/issues/43)（店舗詳細画面）・
-[#44](https://github.com/ManatoYamashita/fw-line-meo/issues/44)（客向けアンケート）・
-[#45](https://github.com/ManatoYamashita/fw-line-meo/issues/45)（管理ダッシュボード）。
+[#44](https://github.com/ManatoYamashita/fw-line-meo/issues/44)（客向けアンケート）。
+
+**[#45](https://github.com/ManatoYamashita/fw-line-meo/issues/45)（管理ダッシュボード）は本 spec では閉じない**
+（2026-09-06 訂正）。起票時は本 spec が閉じる想定だったが、実装期間中に
+[PR #196](https://github.com/ManatoYamashita/fw-line-meo/pull/196) が別経路で先に着地し、
+2026-09-06T01:27:52Z に #45 をクローズした。本 spec の段階 1・4（tasks 2.1〜2.5・5.1・5.2）は
+同じ 20 ファイルを対象としており、合流にあたって **`origin/main` の版を正とした**（利用者判断）。
+経緯と、本 spec からのみ運んだ是正 1 件は design.md の「実装中に動いた境界」にある。
 先行 spec `ui-airbnb-foundation` が #173（トークン層）と #174（共通部品 5 点）を、#175 が写像版文書を閉じている。
 
 [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)（LINE 面）は本 spec に含めない。
