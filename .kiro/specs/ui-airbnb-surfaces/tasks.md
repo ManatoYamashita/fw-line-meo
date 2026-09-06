@@ -1353,6 +1353,27 @@ const alerts = within(main).getAllByRole('alert');   // 取得の完了前に走
 段階 6 で再評価する。
 
 
+### PR #200 と、その CI（2026-09-06・run 34006691415）
+
+`f426cb4` で [PR #200](https://github.com/ManatoYamashita/fw-line-meo/pull/200) を立てた。
+**13 チェックすべて pass**、run の conclusion は `success`（`notify` は main push 専用で skipping）。
+
+**使い捨て push（run 34006079270）では走らなかったものが、ここで初めて走った。**
+
+| ジョブ | 使い捨て push | PR |
+|---|---|---|
+| `docker-build` | **skipped**（`if: github.event_name == 'pull_request'`） | **7 イメージすべて success** |
+
+`docker-build` は 7 イメージを実ビルドする。PR #198 が Dockerfile 6 件の node 版を上げた直後
+であり、**Dockerfile の腐敗をここで初めて確かめた**（Issue #33/#35 の再発防止として置かれた職）。
+
+**この記録を足すコミット自身も CI を再発火させる。** 内容は文書のみなので緑になるが、
+「記録した時点の run」と「記録を含む run」は別物である。前者が上の 34006691415 で、
+それが本 spec の実装内容に対する実証である。
+
+**閉じる Issue**: #43（店舗詳細）・#44（客向けアンケート）。
+**#45 は閉じない**（PR #196 が先に閉じた。requirements.md の Project Description に訂正済み）。
+
 ### 2 度目の合流 — Node.js 24（2026-09-06・`00f5b58`）
 
 **上の CI 実証（run 34006079270）を取っている間に、origin/main がさらに 3 コミット進んだ。**
