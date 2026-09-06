@@ -201,6 +201,9 @@ describe('店舗一覧ページ: 着手前に無検証だった契約', () => {
     api.getStores.mockResolvedValue({ ok: true, value: [] });
     const { container } = render(<StoresPage />);
     const main = await screen.findByRole('main');
+    // 外枠の到達は取得の完了ではない。0 件の案内が出るまで待たないと、読み込み中の画面で
+    // リンクを数えることになる。
+    await within(main).findByText('担当店舗は 0件 です。');
     expect(container.querySelectorAll('main')).toHaveLength(1);
     // 帯のリンクを数に入れないため版面の内側へ限る。**個数の完全一致**で見るのは、
     // 「追加」型の改変（導線をもう 1 つ増やす）を包含判定が捕まえないためである。
@@ -757,6 +760,8 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     api.getStores.mockResolvedValue({ ok: false, code: 'network', message: '取得に失敗しました' });
     render(<StoresPage />);
     const main = await screen.findByRole('main');
+    // 外枠の到達は取得の完了ではない（invite-codes-page.test.tsx の同じ箇所に理由がある）。
+    await within(main).findByText('取得に失敗しました');
 
     const alerts = within(main).getAllByRole('alert');
     expect(alerts).toHaveLength(1);
