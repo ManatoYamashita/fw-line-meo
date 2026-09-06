@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import { Textarea } from '@fwlm/ui/components/textarea';
 import type { DraftPanelProps } from './types';
@@ -59,7 +60,7 @@ export function DraftPanel({
   // 遷移であることが伝わらなくなるためである。寸法の実値はここに書かない。
   const reviewLink = (
     <a
-      className={buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' })}
+      className={cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }))}
       href={googleReviewUrl}
       target="_blank"
       rel="noopener noreferrer"

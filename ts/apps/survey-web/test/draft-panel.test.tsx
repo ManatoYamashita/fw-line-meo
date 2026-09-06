@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { Alert } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { Textarea } from '@fwlm/ui/components/textarea';
 import { DraftPanel } from '../src/app/s/[storeId]/draft-panel';
 import type { DraftPanelProps } from '../src/app/s/[storeId]/types';
@@ -480,7 +481,7 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
 
   it('投稿導線の見た目は押しボタンの算出結果と相等する（正典 7.9 / 7.10）', () => {
     // 手書きの文字列で固定すると、部品の側が変わったときに古びたまま緑になる。
-    const expected = buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' });
+    const expected = cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }));
     expect(expected, '期待値を算出できていません').not.toBe('');
 
     for (const branch of [

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { SurveyForm } from './survey-form';
 import { DraftPanel } from './draft-panel';
 import { isRecentlyAnswered, markAnswered } from './answered-flag';
@@ -121,7 +122,7 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
             （`test/survey-shell.test.tsx` の「面をまたいだ相等」。期待値は部品の算出結果から
             取るので、片方だけを直す改変も、部品の側の変更に片方だけ追随する改変も落ちる）。 */}
         <a
-          className={buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' })}
+          className={cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }))}
           href={googleReviewUrl}
           target="_blank"
           rel="noopener noreferrer"

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { Alert } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
+import { cn } from '@fwlm/ui/lib/utils';
 import { markAnswered } from '../src/app/s/[storeId]/answered-flag';
 import { announcedText, ownText } from './live-region';
 
@@ -325,7 +326,7 @@ describe('回答済み画面と回答フェーズ: 通知が部品を通る（�
 describe('回答済み画面: 投稿導線が面をまたいだ相等になる', () => {
   it('投稿導線は下書き画面のものと面をまたいだ相等になる（正典 7.9 / 7.10）', async () => {
     // 手書きの文字列で固定すると、部品の側が変わったときに両方が古びたまま緑になる。
-    const expected = buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' });
+    const expected = cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }));
     expect(expected, '期待値を算出できていません').not.toBe('');
 
     await renderAnsweredScreen();
