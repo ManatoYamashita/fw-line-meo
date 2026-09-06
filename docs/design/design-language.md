@@ -448,4 +448,9 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.9 全幅の押しボタン風リンク（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 投稿導線の見た目 |
 | 7.9 / 7.10 押しボタン風リンクが 2 つの面で同一（回答済み画面 ↔ 下書きパネル） | `ts/apps/survey-web/test/survey-shell.test.tsx` | 面をまたいだ相等 |
 | 2.1 成功と危険の役割の使い分け（客向けアンケートの通知） | `ts/apps/survey-web/test/survey-shell.test.tsx` | 読み上げ強度の分岐 |
+| 7.1 星の色（客向けアンケートの本番画面の実描画） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番の回答画面の星が選択済み |
+| 2.1 成功と危険の状態色（本番の通知の実描画） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番画面の通知に変種の状態色 |
+| 3 版面の余白と版面の段（本番の回答画面と下書き画面） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番の回答画面と下書き画面の版面 |
+| 選択部品の操作領域（本番の回答画面） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 本番の回答画面の選択部品 |
+| 2.1 / 3 空状態の文字色と余白 | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 空状態の文字色と余白 |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
