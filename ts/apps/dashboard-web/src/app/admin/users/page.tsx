@@ -1,6 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { Button } from '@fwlm/ui/components/button';
+import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
+import { Heading } from '@fwlm/ui/components/heading';
+import { Input } from '@fwlm/ui/components/input';
+import { Label } from '@fwlm/ui/components/label';
+import { PageShell } from '@fwlm/ui/components/page-shell';
+import { Select } from '@fwlm/ui/components/select';
+import { Spinner } from '@fwlm/ui/components/spinner';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
 import { TopNav } from '../../../components/top-nav';
 import { useAuth } from '../../../lib/auth-context';
@@ -69,10 +88,15 @@ function UsersView() {
   // 非 operator には管理情報・登録手段を一切描画しない（Req 6.5）。
   if (!isOperator) {
     return (
-      <main>
-        <h1>利用者管理</h1>
-        <p role="alert">この画面は運営のみ利用できます。</p>
-      </main>
+      // 分岐ごとに版面を変えない（同じ面が分岐で別の幅に見えると、どちらが本来か読めなくなる）。
+      // 主要領域はここでも 1 つである（下の return と排他）。
+      <PageShell width="lg" className="flex flex-col gap-6">
+        <Heading level={1}>利用者管理</Heading>
+        {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねない。 */}
+        <Alert variant="destructive">
+          <AlertDescription>この画面は運営のみ利用できます。</AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
@@ -152,118 +176,184 @@ function UsersView() {
   }
 
   return (
-    <main>
-      <h1>利用者管理</h1>
+    // 一覧が主の面なので版面は広い側を使う。既存の main を **置換** する（入れ子にしない）。
+    <PageShell width="lg" className="flex flex-col gap-6">
+      <Heading level={1}>利用者管理</Heading>
 
-      <div>
-        <p>
-          <label htmlFor="user-role">ロール</label>
-          <select
-            id="user-role"
-            value={role}
-            onChange={(event) => setRole(event.target.value as DashboardRole)}
-          >
-            <option value="operator">運営</option>
-            <option value="agency">代理店</option>
-          </select>
-        </p>
+      <FieldGroup>
+        {/* **段落ではなく汎用の容器で包む。** 選択の部品は開閉の記号を重ねるために div を
+          * 1 枚挟むので、段落の直下には置けない。置くとブラウザの構文解析が段落を早期に閉じ、
+          * サーバ描画とクライアント描画の木が食い違う。
+          * 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。値は
+          * task 2.4 が招待コード・代理店管理で採った段と同一である（Req 1.2）。 */}
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="user-role">ロール</Label>
+            {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
+              * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
+            <Select
+              id="user-role"
+              value={role}
+              onChange={(event) => setRole(event.target.value as DashboardRole)}
+            >
+              <option value="operator">運営</option>
+              <option value="agency">代理店</option>
+            </Select>
+          </div>
+        </Field>
 
         {/* 代理店ロールのときのみ所属代理店を必須で入力させる。運営ロールでは代理店欄を出さない（Req 6.3） */}
         {role === 'agency' && (
-          <p>
-            <label htmlFor="user-agency">所属代理店</label>
-            <select
-              id="user-agency"
-              required
-              value={agencyId}
-              onChange={(event) => setAgencyId(event.target.value)}
-            >
-              <option value="">代理店を選択してください</option>
-              {agencies.map((agency) => (
-                <option key={agency.id} value={agency.id}>
-                  {agency.name}
-                </option>
-              ))}
-            </select>
-          </p>
+          <Field className="contents">
+            <div className="flex flex-col gap-2 sm:max-w-xs">
+              <Label htmlFor="user-agency">所属代理店</Label>
+              {/* 必須属性は包む要素ではなく選択要素そのものへ載る（部品が props を透過するため）。 */}
+              <Select
+                id="user-agency"
+                required
+                value={agencyId}
+                onChange={(event) => setAgencyId(event.target.value)}
+              >
+                <option value="">代理店を選択してください</option>
+                {agencies.map((agency) => (
+                  <option key={agency.id} value={agency.id}>
+                    {agency.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Field>
         )}
 
-        <p>
-          <label htmlFor="user-email">メールアドレス</label>
-          <input
-            id="user-email"
-            type="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </p>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="user-email">メールアドレス</Label>
+            <Input
+              id="user-email"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
+        </Field>
 
-        <p>
-          <label htmlFor="user-display-name">表示名</label>
-          <input
-            id="user-display-name"
-            type="text"
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-          />
-        </p>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="user-display-name">表示名</Label>
+            <Input
+              id="user-display-name"
+              type="text"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+          </div>
+        </Field>
 
-        <button type="button" onClick={() => void handleCreate()} disabled={submitting}>
+        {/* 版面は縦の flex なので、そのまま置くと押しボタンが行幅いっぱいに伸びる。
+          * 主操作を全幅にするのはログイン画面の判断（正典 7.9）であってこの面の判断ではない。
+          * 無効の通知手段は変えない（素の無効属性のまま。焦点の到達を要求する箇所とは別枠）。 */}
+        <Button
+          type="button"
+          className="self-start"
+          onClick={() => void handleCreate()}
+          disabled={submitting}
+        >
           利用者登録
-        </button>
-      </div>
+        </Button>
+      </FieldGroup>
 
-      {formError !== null && <p role="alert">{formError}</p>}
-      {actionError !== null && <p role="alert">{actionError}</p>}
+      {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
+        * 領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}
+      {formError !== null && (
+        <Alert variant="destructive">
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      )}
+      {actionError !== null && (
+        <Alert variant="destructive">
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
+      )}
 
-      {list.kind === 'loading' && <p>読み込み中...</p>}
-      {list.kind === 'error' && <p role="alert">{list.message}</p>}
+      {list.kind === 'loading' && (
+        // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
+        // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
+        // （Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
+        <p role="status" className="flex items-center gap-2">
+          <Spinner aria-hidden />
+          読み込み中...
+        </p>
+      )}
+      {list.kind === 'error' && (
+        <Alert variant="destructive">
+          <AlertDescription>{list.message}</AlertDescription>
+        </Alert>
+      )}
 
       {list.kind === 'ready' && list.users.length === 0 && (
-        <p>利用者はまだいません。登録してください。</p>
+        <EmptyState>
+          <p>利用者はまだいません。登録してください。</p>
+        </EmptyState>
       )}
 
       {list.kind === 'ready' && list.users.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>ロール</th>
-              <th>メールアドレス</th>
-              <th>所属代理店</th>
-              <th>状態</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.users.map((user) => (
-              <tr key={user.id}>
-                <td>{roleLabel(user.role)}</td>
-                <td>{user.email ?? '—'}</td>
-                {/* 運営ロールは所属代理店を持たない（agencyId=null）。 */}
-                <td>{user.agencyId === null ? '—' : agencyNameById.get(user.agencyId) ?? user.agencyId}</td>
-                {/* 有効/無効バッジ（Req 6.4） */}
-                <td>{user.disabled ? '無効' : '有効'}</td>
-                <td>
-                  {/* 無効化済み行には有効化ボタンを提供する（Req 1.6・API は冪等） */}
-                  {user.disabled && (
-                    <button type="button" onClick={() => void handleEnable(user.id)}>
-                      有効化
-                    </button>
-                  )}
-                  {/* 無効化は有効な利用者にのみ提供し、自分自身の行には出さない（Req 6.4, 2.2） */}
-                  {!user.disabled && user.id !== me?.id && (
-                    <button type="button" onClick={() => void handleDisable(user.id)}>
-                      無効化
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        // 横方向の捲りは表の **外側** が持つ。この容器は e2e（dashboard-surfaces.spec.ts）が
+        // 宣言する「表の捲れる領域 1 件」である。
+        <TableContainer label="利用者一覧">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>ロール</TableHeaderCell>
+                <TableHeaderCell>メールアドレス</TableHeaderCell>
+                <TableHeaderCell>所属代理店</TableHeaderCell>
+                <TableHeaderCell>状態</TableHeaderCell>
+                <TableHeaderCell>操作</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {list.users.map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell>{roleLabel(user.role)}</TableCell>
+                  <TableCell>{user.email ?? '—'}</TableCell>
+                  {/* 運営ロールは所属代理店を持たない（agencyId=null）。 */}
+                  <TableCell>
+                    {user.agencyId === null ? '—' : agencyNameById.get(user.agencyId) ?? user.agencyId}
+                  </TableCell>
+                  {/* 有効/無効の状態（Req 6.4）。招待コードの同じ列と同じく素の語のまま置く。
+                    * 装飾で包むと同一役割が面をまたいで 2 通りに描かれ、Req 1.2 が壊れる。 */}
+                  <TableCell>{user.disabled ? '無効' : '有効'}</TableCell>
+                  <TableCell>
+                    {/* 無効化済み行には有効化ボタンを提供する（Req 1.6・API は冪等） */}
+                    {user.disabled && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleEnable(user.id)}
+                      >
+                        有効化
+                      </Button>
+                    )}
+                    {/* 無効化は有効な利用者にのみ提供し、自分自身の行には出さない（Req 6.4, 2.2） */}
+                    {!user.disabled && user.id !== me?.id && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleDisable(user.id)}
+                      >
+                        無効化
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
-    </main>
+    </PageShell>
   );
 }
 
