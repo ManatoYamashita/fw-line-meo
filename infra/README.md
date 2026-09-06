@@ -429,3 +429,112 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 この節は**手順の正典**であり、状態の正典ではない。承認・却下・提出の事実は Issue #146 のコメントへ実測の証拠つきで残すこと（9-1 の判定コマンドの出力、クォータ画面のスクリーンショット、申請日と受領メールの日付）。
 
 実装側の手順（OAuth クライアントの作成・リダイレクト URI・secret 実値の投入・稼働確認）は Issue #8 の PR に付属する。両審査が通るまで、その PR は Draft から出せない。
+
+---
+
+## 10. リッチメニュー画像の差し替え（Issue #195）
+
+**「PNG の差し替えはコード変更ゼロ」は真だが「反映コストゼロ」は偽である。**
+`.claude/skills/messaging-api/references/rich-menu.md` が明記するとおり、LINE は
+アップロード済みの画像を上書きできない（*Cannot replace an image once uploaded — must create
+a new rich menu and re-upload.*）。差し替えは常に**メニューの作り直し**になる。
+
+**CI では一切検証できない。** `setup-rich-menus.test.ts` は fetch をスタブして「areas に resume
+postback がある」「`api-data.line.me` へ画像を送る」「宣言した size が実 PNG の IHDR と一致する」
+までしか見ない。実チャネルへの反映が正しいかは実機でしか分からない。**デモ直前に触らないこと。**
+
+### 10-0. 前提
+
+- 画像とコード定数（`RICH_MENU_WIDTH` / `RICH_MENU_HEIGHT`）が一致した状態が `main` にあること。
+  食い違いは `pnpm -C ts --filter @fwlm/line-webhook run test` が赤にする。
+- 画像そのものの仕様（PNG 署名・1MB 以下・アルファ無し）も同じ vitest が実 PNG のバイト列に対して
+  見ている。**画像の検査点はここ 1 箇所だけである**（別立ての shell ガードは置かない。同じことを
+  二重に見る層は、片方が腐ったときに腐ったと言えない）。
+- 焼き元は `ts/apps/line-webhook/assets/source/*.html`。**正典は PNG であり HTML は出所**である
+  （フォント描画が描画機に依存するため、同じ HTML から同じ PNG は出ない）。
+
+### 10-1. 段 1: メニューの再作成
+
+```bash
+cd ts/apps/line-webhook
+pnpm run build:scripts
+SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
+LINE_CHANNEL_ID='<§8-0 の方法で確認する>' LINE_CHANNEL_SECRET="$SECRET" pnpm run setup-rich-menus
+```
+
+- **シークレットを argv へ置かない**（§8-1・§8-3 と同じ理由）。env 経由で渡す。
+- 新しい `richMenuId` が 2 つ出力される。スクリプトは `setDefaultRichMenu` まで行うので、
+  この時点で**新しいオンボーディングメニューが既定になる**（新規友だち・未完了ユーザーは
+  ここで新しい絵に切り替わる）。
+- 完了用の `richMenuId` を控える。次の段で使う。
+
+### 10-2. 段 2: 完了用 ID を Terraform へ
+
+`infra/envs/prod/terraform.tfvars`（gitignore・main worktree にある）の
+`line_richmenu_completed_id` を段 1 の完了用 ID に差し替えてから:
+
+```bash
+make tf-plan    # 自分の差分を確認する
+make tf-apply   # line-webhook の新リビジョンが立つ
+```
+
+- `line_richmenu_completed_id` は `infra/envs/prod/main.tf` で `LINE_RICHMENU_COMPLETED_ID` env
+  として `line-webhook` に渡る。**新リビジョンが立つまで反映されない。**
+- **`client` / `client_version` の in-place 更新が 7 件出るのは既存ドリフト**であり自分の差分では
+  ない（デプロイパイプラインが刻み、tf 側は宣言していないため毎回出る）。切り分けは resource 名
+  ではなく attribute まで下りて見ること。
+- **この段を飛ばすと無音で壊れる。** `ts/apps/line-webhook/src/onboarding/conversation.ts` の
+  `linkRichMenu` は失敗を空の `catch` で握りつぶし、ログも残さない。旧 ID のままだと完了済み
+  オーナーへのリンクが失敗し続けるが、警告はどこにも出ない。
+
+### 10-3. 段 3: 旧リッチメニューの削除
+
+**段 2 の新リビジョンが立ってから行う。** 順序を逆にすると、旧 ID を参照している間にメニューが
+消えて穴が開く。
+
+```bash
+SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
+CHANNEL_ID='<§8-0 の方法で確認する>'
+TOKEN="$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' "$CHANNEL_ID" "$SECRET" \
+  | curl -sS -X POST 'https://api.line.me/oauth2/v3/token' \
+      -H 'Content-Type: application/x-www-form-urlencoded' --data @- \
+  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+
+# 一覧（API で作ったメニューのみ返る。OA Manager 作成分は出ない）
+curl -sS 'https://api.line.me/v2/bot/richmenu/list' -K - <<CFG
+header = "Authorization: Bearer ${TOKEN}"
+CFG
+
+# 旧 2 件を個別に削除する（新しい 2 件の richMenuId と取り違えないこと）
+curl -sS -X DELETE -o /dev/null -w '%{http_code}\n' \
+  "https://api.line.me/v2/bot/richmenu/<旧 richMenuId>" -K - <<CFG
+header = "Authorization: Bearer ${TOKEN}"
+CFG
+```
+
+### 10-4. 段 4: 実機で目視する
+
+未完了状態と完了状態の 2 面が切り替わることを、実機の LINE で確認する。
+**ここは自動化できない。** デプロイの成功はコードが載ったことしか言わない。
+
+### 10-5. 「全員へ再リンク」は不要である（2026-09-06 実測）
+
+`setDefaultRichMenu` は既定メニューを差し替えるが、**完了済みオーナーは per-user リンクで旧完了
+メニューに繋がったまま残る**（`conversation.ts` が `linkRichMenu` で個別に張っているため）。
+一般には「全員へ再リンクするか旧メニューを残すか」の運用判断が要るが、本番では対象が存在しない。
+
+| 対象 | 実測値 |
+| --- | --- |
+| `owners` 総数 | 1 |
+| うち `onboarding_status = 'store_identified'`（完了） | 1（リポジトリオーナー本人） |
+| `onboarding_sessions` の `stage = 'completed'` | 1 |
+| `onboarding_sessions` の `stage = 'await_invite_code'` | 4 |
+
+`await_invite_code` の 4 セッションは既定メニュー側にいるため、段 1 の `setDefaultRichMenu` で
+自動的に新しい絵へ移る。個別リンクを張り直す必要があるのは 1 人だけで、それは本人である。
+
+**この数値は 2026-09-06 時点のものである。** オーナーが増えた後に差し替えるなら、この節を鵜呑みに
+せず件数を引き直すこと（§3 の Auth Proxy 経由で `SELECT onboarding_status, count(*) FROM owners
+GROUP BY 1`）。なお `linkRichMenu` は失敗をログに残さないため、DB の件数は「実際に完了メニューへ
+繋がっている人数」の上限でしかない。LINE 側の実状は `GET /v2/bot/user/{userId}/richmenu` でしか
+読めない。

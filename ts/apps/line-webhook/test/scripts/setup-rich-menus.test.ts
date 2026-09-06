@@ -1,10 +1,32 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setupRichMenus } from '../../scripts/setup-rich-menus.js';
 import { decodePostback } from '../../src/onboarding/stages.js';
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const CREATE_URL = 'https://api.line.me/v2/bot/richmenu';
 const DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** リッチメニュー画像の上限（rich-menu.md「Image Specifications」の Max file size 1 MB）。 */
+const RICH_MENU_IMAGE_MAX_BYTES = 1024 * 1024;
+/** PNG のカラータイプのうちアルファチャネルを持つもの（4=グレースケール+A, 6=truecolor+A）。 */
+const PNG_COLOR_TYPES_WITH_ALPHA = [4, 6];
+
+// PNG の IHDR は署名 8 バイト + 長さ 4 + 型 4 の直後に固定位置で並ぶ（幅 4 / 高さ 4 /
+// ビット深度 1 / カラータイプ 1）。ここを読むだけなら外部依存もデコードも要らない。
+function readPngHeader(image: Buffer): { width: number; height: number; colorType: number } {
+  if (!image.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    throw new Error('PNG 署名が一致しない（assets に PNG 以外が置かれている）');
+  }
+  return {
+    width: image.readUInt32BE(16),
+    height: image.readUInt32BE(20),
+    colorType: image.readUInt8(25),
+  };
+}
 
 function jsonResponse(status: number, body: unknown): Response {
   return {
@@ -148,7 +170,7 @@ describe('setupRichMenus', () => {
     });
   });
 
-  it('作成リクエストの size・比率がリッチメニュー画像仕様を満たす（width 800 x height 540, ratio>=1.45）', async () => {
+  it('作成リクエストの size・比率がリッチメニュー画像仕様の範囲に収まる（幅 800-2500 / 高さ 250 以上 / 比 1.45 以上）', async () => {
     const { fetchMock, createCalls } = createFetchMock();
 
     await setupRichMenus({
@@ -166,6 +188,54 @@ describe('setupRichMenus', () => {
       expect(size.height).toBeGreaterThanOrEqual(250);
       expect(size.width / size.height).toBeGreaterThanOrEqual(1.45);
       expect((call.body.chatBarText as string).length).toBeLessThanOrEqual(14);
+    }
+  });
+
+  // Issue #195: 「宣言した size」と「実際にアップロードする PNG の寸法」が一致していることを、
+  // assets/ の実ファイルに対して確かめる。上の範囲判定だけでは、画像と定数のどちらか一方だけを
+  // 変えた状態が素通りする。areas は全面 1 タップ（bounds が RICH_MENU_WIDTH/HEIGHT そのもの）
+  // なので、寸法の食い違いはそのまま「押せる範囲と絵の食い違い」になる。
+  it('宣言した size が assets の実 PNG の寸法と一致し、画像が LINE の仕様を満たす', async () => {
+    const assetsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets');
+    const [onboardingImage, completedImage] = await Promise.all([
+      readFile(path.join(assetsDir, 'richmenu-onboarding.png')),
+      readFile(path.join(assetsDir, 'richmenu-completed.png')),
+    ]);
+
+    const { fetchMock, createCalls, uploadCalls } = createFetchMock();
+
+    await setupRichMenus({
+      channelId: 'id',
+      channelSecret: 'secret',
+      fetch: fetchMock,
+      onboardingImage,
+      completedImage,
+    });
+
+    expect(createCalls).toHaveLength(2);
+    expect(uploadCalls).toHaveLength(2);
+
+    // createFetchMock は 1 回目に richmenu-onboarding-1、2 回目に richmenu-completed-1 を払い出す。
+    const richMenuIds = ['richmenu-onboarding-1', 'richmenu-completed-1'];
+
+    for (const [index, createCall] of createCalls.entries()) {
+      const richMenuId = richMenuIds[index];
+      const upload = uploadCalls.find((call) => call.url.includes(richMenuId!));
+      expect(upload, `${richMenuId!} の画像アップロードが見つからない`).toBeDefined();
+      expect(upload!.contentType).toBe('image/png');
+
+      const image = upload!.body as Buffer;
+      const header = readPngHeader(image);
+      const declared = createCall.body.size as { width: number; height: number };
+
+      // 本検査の主眼: 宣言と実物の一致。
+      expect(declared.width).toBe(header.width);
+      expect(declared.height).toBe(header.height);
+
+      // rich-menu.md「Image Specifications」。透過は下地が白でない面で合成が崩れる。
+      expect(image.byteLength).toBeGreaterThan(0);
+      expect(image.byteLength).toBeLessThanOrEqual(RICH_MENU_IMAGE_MAX_BYTES);
+      expect(PNG_COLOR_TYPES_WITH_ALPHA).not.toContain(header.colorType);
     }
   });
 

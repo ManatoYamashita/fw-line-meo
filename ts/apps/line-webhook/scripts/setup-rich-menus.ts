@@ -39,9 +39,16 @@ const CREATE_RICHMENU_URL = 'https://api.line.me/v2/bot/richmenu';
 const UPLOAD_IMAGE_URL_BASE = 'https://api-data.line.me/v2/bot/richmenu';
 const SET_DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
 
-// Full (Compact) 800x540（ratio 1.481 >= 1.45 要件）。最小の標準サイズを採用しファイルサイズを抑える。
-const RICH_MENU_WIDTH = 800;
-const RICH_MENU_HEIGHT = 540;
+// Half (HD) 2500x843（ratio 2.965 >= 1.45 要件・Issue #195）。
+// 比を Full 系（約 1.48）から Half 系へ移したのは占有高さの問題である。比 1.48 は幅 390pt の端末で
+// 縦 263pt を占め、トーク画面の 1/3 超を 3 行しか無い面が食う。843 なら 131.5pt で収まる。
+// 幅を 2500 まで上げたのは解像度の問題で、原寸 800px は同じ端末で約 1.46 倍に引き伸ばされ文字が眠る。
+// 平面塗りのため 2500x843 でも実測 70-80KB であり、1MB の上限には遠く届かない。
+// **assets/richmenu-*.png の実寸法と必ず一致させること。** areas は全面 1 タップ（bounds が
+// この 2 定数そのもの）なので、食い違いはそのまま「押せる範囲と絵の食い違い」になる。
+// test/scripts/setup-rich-menus.test.ts が実 PNG の IHDR と突き合わせて機械的に強制する。
+const RICH_MENU_WIDTH = 2500;
+const RICH_MENU_HEIGHT = 843;
 
 interface RichMenuAction {
   type: 'postback' | 'message';
@@ -199,7 +206,9 @@ function buildCompletedRichMenu(): RichMenuObject {
     size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
     selected: false,
     name: 'line-onboarding-completed-menu',
-    chatBarText: 'メニュー',
+    // Issue #195: チャットバーの文字・画像の見出し・タップで送信される text の 3 者を揃える。
+    // 以前の 'メニュー' は、同 area が送る 'ステータス確認' とも画像の見出しとも食い違っていた。
+    chatBarText: 'ステータス確認',
     areas: [
       {
         bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
