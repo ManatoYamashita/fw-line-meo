@@ -542,8 +542,11 @@ const PROVENANCE = 'あなたの回答をもとに作成した下書きです。
 const REVISION_PROMPT = 'ご自身の言葉に直してから投稿してください。';
 
 describe('下書きパネル: 由来の明示と推敲の促し（Issue #179）', () => {
-  it('下書きの由来と、自分の言葉へ直す促しを表示する', () => {
+  it('下書きの由来と、自分の言葉へ直す促しを 1 つの段落として表示する', () => {
     render(<DraftPanel {...props()} />);
+    // getByText は不在なら例外を投げるので、取得できたこと自体は assert にならない。
+    // **2 文が同じ段落に載っていること**まで見る（別々の要素へ割ると aria-describedby が
+    // 片方しか指せず、由来だけ、あるいは促しだけが読み上げられる形になる）。
     const note = screen.getByText(
       (_, element) => {
         const text = element?.textContent ?? '';
@@ -551,7 +554,7 @@ describe('下書きパネル: 由来の明示と推敲の促し（Issue #179）'
       },
       { selector: 'p' },
     );
-    expect(note).toBeDefined();
+    expect(note.textContent?.trim()).toBe(`${PROVENANCE}${REVISION_PROMPT}`);
   });
 
   it('その説明は読み上げ領域の外にある（既存の a11y と競合しない）', () => {
@@ -584,10 +587,8 @@ describe('下書きパネル: 由来の明示と推敲の促し（Issue #179）'
     expect(screen.queryByText(new RegExp(PROVENANCE))).toBeNull();
     expect(screen.queryByText(new RegExp(REVISION_PROMPT))).toBeNull();
   });
-
-  it('説明を足しても操作要素とリンクの個数は変わらない（読み上げの巡回を増やさない）', () => {
-    render(<DraftPanel {...props()} />);
-    expect(screen.getAllByRole('button'), '通常分岐の押しボタンの個数').toHaveLength(2);
-    expect(screen.getAllByRole('link'), '通常分岐のリンクの個数').toHaveLength(1);
-  });
 });
+
+// 「説明を足しても操作要素とリンクの個数が変わらない」ことは、上の
+// 「操作要素とリンクの個数は分岐ごとに固定されている（Requirements 3.3）」が既に押しボタン 2 件・
+// リンク 1 件で固定している。同じことを 2 箇所で見る層は、片方が腐ったときに腐ったと言えない。
