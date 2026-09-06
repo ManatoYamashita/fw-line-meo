@@ -1,6 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { Button } from '@fwlm/ui/components/button';
+import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
+import { Heading } from '@fwlm/ui/components/heading';
+import { Label } from '@fwlm/ui/components/label';
+import { PageShell } from '@fwlm/ui/components/page-shell';
+import { Select } from '@fwlm/ui/components/select';
+import { Spinner } from '@fwlm/ui/components/spinner';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../components/auth-guard';
 import { TopNav } from '../../components/top-nav';
 import { useAuth } from '../../lib/auth-context';
@@ -112,85 +130,134 @@ function InviteCodesView() {
   }
 
   return (
-    <main>
-      <h1>招待コード</h1>
+    // 一覧が主の面なので版面は広い側を使う。既存の main を **置換** する（入れ子にしない）。
+    <PageShell width="lg" className="flex flex-col gap-6">
+      <Heading level={1}>招待コード</Heading>
 
       {isOperator && (
-        <p>
-          <label htmlFor="agency-select">代理店</label>
-          <select
-            id="agency-select"
-            value={selectedAgencyId}
-            onChange={(event) => handleSelectAgency(event.target.value)}
-          >
-            <option value="">代理店を選択してください</option>
-            {(agencies ?? []).map((agency) => (
-              <option key={agency.id} value={agency.id}>
-                {agency.name}
-              </option>
-            ))}
-          </select>
-        </p>
+        <FieldGroup>
+          <Field className="contents">
+            {/* **段落ではなく汎用の容器で包む。** 選択の部品は開閉の記号を重ねるために div を
+              1 枚挟むので、段落の直下には置けない。置くとブラウザの構文解析が段落を早期に閉じ、
+              サーバ描画とクライアント描画の木が食い違う。
+              幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。 */}
+            <div className="flex flex-col gap-2 sm:max-w-xs">
+              <Label htmlFor="agency-select">代理店</Label>
+              {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
+                * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 5.4）。 */}
+              <Select
+                id="agency-select"
+                value={selectedAgencyId}
+                onChange={(event) => handleSelectAgency(event.target.value)}
+              >
+                <option value="">代理店を選択してください</option>
+                {(agencies ?? []).map((agency) => (
+                  <option key={agency.id} value={agency.id}>
+                    {agency.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Field>
+        </FieldGroup>
       )}
 
       {/* operator が代理店未選択のときは一覧を出さず、選択を促す（Req 5.4） */}
-      {list.kind === 'idle' && <p>代理店を選択すると招待コードを表示します。</p>}
+      {list.kind === 'idle' && (
+        <EmptyState>
+          <p>代理店を選択すると招待コードを表示します。</p>
+        </EmptyState>
+      )}
 
       {canOperate && (
         <>
-          <button type="button" onClick={() => void handleIssue()}>
+          {/* 版面は縦の flex なので、そのまま置くと押しボタンが行幅いっぱいに伸びる。
+            * 主操作を全幅にするのはログイン画面の判断（正典 7.9）であってこの面の判断ではない。 */}
+          <Button type="button" className="self-start" onClick={() => void handleIssue()}>
             発行
-          </button>
+          </Button>
 
-          {/* 発行した新コードをオーナー案内用に強調表示する（Req 5.2） */}
+          {/* 発行した新コードをオーナー案内用に強調表示する（Req 5.2）。
+            * 失敗ではないので読み上げは polite（成功の変種が role="status" を自ら持つ）。 */}
           {issuedCode !== null && (
-            <p>
-              新しい招待コードを発行しました: <strong>{issuedCode}</strong>（このコードをオーナーにご案内ください）
-            </p>
+            <Alert variant="success">
+              <AlertDescription>
+                新しい招待コードを発行しました: <strong>{issuedCode}</strong>（このコードをオーナーにご案内ください）
+              </AlertDescription>
+            </Alert>
           )}
 
-          {actionError !== null && <p role="alert">{actionError}</p>}
+          {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
+            * 領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}
+          {actionError !== null && (
+            <Alert variant="destructive">
+              <AlertDescription>{actionError}</AlertDescription>
+            </Alert>
+          )}
 
-          {list.kind === 'loading' && <p>読み込み中...</p>}
-          {list.kind === 'error' && <p role="alert">{list.message}</p>}
+          {list.kind === 'loading' && (
+            // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
+            // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
+            // （Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
+            <p role="status" className="flex items-center gap-2">
+              <Spinner aria-hidden />
+              読み込み中...
+            </p>
+          )}
+          {list.kind === 'error' && (
+            <Alert variant="destructive">
+              <AlertDescription>{list.message}</AlertDescription>
+            </Alert>
+          )}
 
           {list.kind === 'ready' && list.codes.length === 0 && (
-            <p>招待コードはまだありません。発行してオーナーにご案内ください。</p>
+            <EmptyState>
+              <p>招待コードはまだありません。発行してオーナーにご案内ください。</p>
+            </EmptyState>
           )}
 
           {list.kind === 'ready' && list.codes.length > 0 && (
-            <table>
-              <thead>
-                <tr>
-                  <th>コード</th>
-                  <th>状態</th>
-                  <th>作成日時</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.codes.map((code) => (
-                  <tr key={code.id}>
-                    <td>{code.code}</td>
-                    {/* 有効/無効バッジ（Req 5.1） */}
-                    <td>{code.disabled ? '無効' : '有効'}</td>
-                    <td>{code.createdAt}</td>
-                    <td>
-                      {/* 無効化は有効な行にのみ提供する（Req 5.3。API は冪等） */}
-                      {!code.disabled && (
-                        <button type="button" onClick={() => void handleDisable(code.id)}>
-                          無効化
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            // 横方向の捲りは表の **外側** が持つ。この容器は e2e（dashboard-surfaces.spec.ts）が
+            // 宣言する「表の捲れる領域 1 件」である。
+            <TableContainer label="招待コード">
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableHeaderCell>コード</TableHeaderCell>
+                    <TableHeaderCell>状態</TableHeaderCell>
+                    <TableHeaderCell>作成日時</TableHeaderCell>
+                    <TableHeaderCell>操作</TableHeaderCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {list.codes.map((code) => (
+                    <TableRow key={code.id}>
+                      <TableCell>{code.code}</TableCell>
+                      {/* 有効/無効バッジ（Req 5.1） */}
+                      <TableCell>{code.disabled ? '無効' : '有効'}</TableCell>
+                      <TableCell>{code.createdAt}</TableCell>
+                      <TableCell>
+                        {/* 無効化は有効な行にのみ提供する（Req 5.3。API は冪等） */}
+                        {!code.disabled && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleDisable(code.id)}
+                          >
+                            無効化
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           )}
         </>
       )}
-    </main>
+    </PageShell>
   );
 }
 

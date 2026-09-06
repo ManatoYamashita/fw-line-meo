@@ -1,6 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { Button } from '@fwlm/ui/components/button';
+import { EmptyState } from '@fwlm/ui/components/empty-state';
+import { Field, FieldGroup } from '@fwlm/ui/components/field';
+import { Heading } from '@fwlm/ui/components/heading';
+import { Input } from '@fwlm/ui/components/input';
+import { Label } from '@fwlm/ui/components/label';
+import { PageShell } from '@fwlm/ui/components/page-shell';
+import { Spinner } from '@fwlm/ui/components/spinner';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
 import { TopNav } from '../../../components/top-nav';
 import { useAuth } from '../../../lib/auth-context';
@@ -41,10 +59,15 @@ function AgenciesView() {
   // 非 operator には管理情報・作成手段を一切描画しない（Req 6.5）。
   if (!isOperator) {
     return (
-      <main>
-        <h1>代理店管理</h1>
-        <p role="alert">この画面は運営のみ利用できます。</p>
-      </main>
+      // 分岐ごとに版面を変えない（同じ面が分岐で別の幅に見えると、どちらが本来か読めなくなる）。
+      // 主要領域はここでも 1 つである（下の return と排他）。
+      <PageShell width="lg" className="flex flex-col gap-6">
+        <Heading level={1}>代理店管理</Heading>
+        {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねない。 */}
+        <Alert variant="destructive">
+          <AlertDescription>この画面は運営のみ利用できます。</AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
@@ -78,50 +101,86 @@ function AgenciesView() {
   }
 
   return (
-    <main>
-      <h1>代理店管理</h1>
+    // 一覧が主の面なので版面は広い側を使う。既存の main を **置換** する（入れ子にしない）。
+    <PageShell width="lg" className="flex flex-col gap-6">
+      <Heading level={1}>代理店管理</Heading>
 
-      <div>
-        <label htmlFor="agency-name">代理店名</label>
-        <input
-          id="agency-name"
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-        />
-        <button type="button" onClick={() => void handleCreate()} disabled={submitting}>
-          代理店作成
-        </button>
-      </div>
+      {/* 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。 */}
+      <FieldGroup>
+        <Field className="contents">
+          <div className="flex flex-col gap-2 sm:max-w-xs">
+            <Label htmlFor="agency-name">代理店名</Label>
+            <Input
+              id="agency-name"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {/* 無効の通知手段は変えない（素の無効属性のまま。焦点の到達を要求する箇所とは別枠）。 */}
+            <Button
+              type="button"
+              className="self-start"
+              onClick={() => void handleCreate()}
+              disabled={submitting}
+            >
+              代理店作成
+            </Button>
+          </div>
+        </Field>
+      </FieldGroup>
 
-      {formError !== null && <p role="alert">{formError}</p>}
+      {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
+        * 領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}
+      {formError !== null && (
+        <Alert variant="destructive">
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      )}
 
-      {list.kind === 'loading' && <p>読み込み中...</p>}
-      {list.kind === 'error' && <p role="alert">{list.message}</p>}
+      {list.kind === 'loading' && (
+        // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
+        // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
+        // （Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
+        <p role="status" className="flex items-center gap-2">
+          <Spinner aria-hidden />
+          読み込み中...
+        </p>
+      )}
+      {list.kind === 'error' && (
+        <Alert variant="destructive">
+          <AlertDescription>{list.message}</AlertDescription>
+        </Alert>
+      )}
 
       {list.kind === 'ready' && list.agencies.length === 0 && (
-        <p>代理店はまだありません。作成してください。</p>
+        <EmptyState>
+          <p>代理店はまだありません。作成してください。</p>
+        </EmptyState>
       )}
 
       {list.kind === 'ready' && list.agencies.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>代理店名</th>
-              <th>作成日時</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.agencies.map((agency) => (
-              <tr key={agency.id}>
-                <td>{agency.name}</td>
-                <td>{agency.createdAt}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        // 横方向の捲りは表の **外側** が持つ。この容器は e2e（dashboard-surfaces.spec.ts）が
+        // 宣言する「表の捲れる領域 1 件」である。
+        <TableContainer label="代理店一覧">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>代理店名</TableHeaderCell>
+                <TableHeaderCell>作成日時</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {list.agencies.map((agency) => (
+                <TableRow key={agency.id}>
+                  <TableCell>{agency.name}</TableCell>
+                  <TableCell>{agency.createdAt}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
-    </main>
+    </PageShell>
   );
 }
 
