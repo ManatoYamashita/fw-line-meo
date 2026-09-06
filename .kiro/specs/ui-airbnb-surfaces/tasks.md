@@ -1352,6 +1352,28 @@ const alerts = within(main).getAllByRole('alert');   // 取得の完了前に走
 「要件 4.6 は 2 面で機械検証できない」の前提が変わっている。task 7.2 の目視 3 件の扱いは
 段階 6 で再評価する。
 
+### 段階 6 の CI 実証（2026-09-06・run 34003887862 → 34004205389）
+
+**1 回目（34003887862）は `lint-build-test` が落ちた。** 原因は段階 6 の変更ではなく、
+段階 1 で足したテストが抱えていた競合である（上の「段階 6 の CI が…あぶり出した」を参照）。
+是正後の 2 回目（34004205389）で 6 ジョブすべて success。確認後にブランチを削除した。
+
+| ジョブ | 実行の証拠 |
+|---|---|
+| `e2e` | **`Running 40 tests` → `40 passed`**（着手前 34）。**段階 6 で足した 1 件が名指しで緑** |
+| `e2e-surfaces` | `6 passed`（dashboard-web）＋ `1 passed`（store-detail）。**7.2 の 1 件目の根拠** |
+| `lint-build-test` | 10 パッケージ全緑・skip は delivery-job の 2 件のみ |
+| `lighthouse` | 客向けアンケートの 1 URL × 3 run で通過（描画完了時間の閾値 3000ms） |
+
+```
+design-tokens 33 / db 100 / store-identification 16 / delivery-job 63(+2 skip)
+ui 592 / line-webhook 147 / dashboard-api 201 / store-detail 94
+survey-web 193 / dashboard-web 266
+```
+
+**この失敗は段階ごとに CI を回す運用の価値を示している。** 競合は段階 1 で仕込まれ、
+段階 3・5 の CI を 3 回すり抜けていた。回す回数が増えるほど、間に合っていただけの緑は剥がれる。
+
 ### 段階 5 の CI 実証（2026-09-06・run 34003416128）
 
 `18423ca` を使い捨ての `feat/ci-check-ui-airbnb-stage-5` へ push して発火させ、確認後に削除した。
