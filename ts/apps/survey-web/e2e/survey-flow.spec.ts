@@ -19,6 +19,13 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
   const draft = page.getByLabel('口コミ下書き');
   await expect(draft).toBeVisible();
 
+  // 下書きの由来と推敲の促しが**実ブラウザで見えている**こと（Issue #179）。
+  // unit は DOM の構造（読み上げ領域の外・aria-describedby）を固定するが、
+  // 「画面に出ているか」は別の軸である。`text-muted-foreground` が背景と同化する等の
+  // 実行時解決の劣化は、ここと a11y-audit（axe のコントラスト規則）が受け持つ。
+  await expect(page.getByText(/あなたの回答をもとに作成した下書きです。/)).toBeVisible();
+  await expect(page.getByText(/ご自身の言葉に直してから投稿してください。/)).toBeVisible();
+
   await page.getByRole('button', { name: /コピー/ }).click();
   await expect(page.getByText(/コピーしました/)).toBeVisible();
 
