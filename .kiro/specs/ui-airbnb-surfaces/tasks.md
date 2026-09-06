@@ -1175,6 +1175,45 @@ task 2.5 が新設した照合（3 面のソースを読み `sm:max-w-*` の集�
 「要件 4.6 は 2 面で機械検証できない」の前提が変わっている。task 7.2 の目視 3 件の扱いは
 段階 6 で再評価する。
 
+### 段階 3 の CI 実証（2026-09-06・run 34000514025）
+
+`5fcd2cb` を使い捨ての `feat/ci-check-ui-airbnb-stage-3` へ push して発火させ、確認後に削除した
+（`spec/**` は `ts-ci` の発火条件 `push: [main, 'feat/**']` / `pull_request` に当たらない）。
+run はブランチ削除後も残る。push は段階 1〜4 と同じく資格情報の一覧をリセットする形で通した。
+
+| ジョブ | 結果 | 実行の証拠 |
+|---|---|---|
+| `lint-build-test` | success | vitest 10 パッケージ全緑・**skip 2 件のみ**（delivery-job） |
+| `e2e` | success | **`Running 34 tests` → `34 passed`**（survey-web） |
+| `e2e-surfaces` | success | **`Running 6 tests` → `6 passed`**（dashboard-web）＋ **`1 passed`**（store-detail） |
+| `lighthouse` | success | 客向けアンケートの 1 URL × 3 run で `All results processed!` |
+| `cross-runtime` | success | — |
+| `go-test` | success | — |
+| `docker-build` | skipped | **設計どおり**（`if: github.event_name == 'pull_request'`） |
+| `notify` | skipped | — |
+
+パッケージごとの実測件数:
+
+```
+design-tokens 33 / db 100 / store-identification 16 / delivery-job 63(+2 skip)
+ui 587 / line-webhook 147 / dashboard-api 201 / store-detail 94
+survey-web 193 / dashboard-web 266
+```
+
+**この run が段階 3 にとって決定的だった理由。** 段階 3 は回答画面と下書き画面の構造を全面的に
+入れ替えており、とくに観点チップの実要素が `<input type="checkbox">` から
+**`<span role="checkbox" tabindex="0">`** へ変わっている。次の 2 つは jsdom では確かめられず、
+**この run が初めての実ブラウザ実証**である。
+
+- **Tab 巡回**（`ui-foundation.spec.ts` の「たどれた操作可能要素が 7 件以上」かつ `送信する` へ到達）。
+  隠し記入欄が巡回に現れないこと・選択部品が焦点可能であること・焦点指標が出ることが実測された
+- **捲れる領域の件数**（回答画面 1 / 下書き画面 1）。`Textarea` / `Alert` / `Button` / `Checkbox` /
+  `Spinner` のどれも捲れる領域を作らないことが実測された
+
+`survey-web` が 188（ローカル）→ **193**（CI）なのは、CI に postgres があり DB 依存の 5 件が
+skip されずに走るためである。`@fwlm/ui` の `design-language-doc.test.ts` は 144 → **151** に増えた
+（段階 3 で正典 §11 のガードポインタが 9 → 16 行になったため）。
+
 ### 段階 1〜4 の CI 実証（2026-09-05・run 33969587342）
 
 `3182da2` を使い捨ての `feat/ci-check-ui-airbnb-stage-1-4` へ push して発火させ、確認後に削除した
