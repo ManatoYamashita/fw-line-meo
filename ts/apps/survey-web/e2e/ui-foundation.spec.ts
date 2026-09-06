@@ -1188,6 +1188,83 @@ test.describe('動き低減設定が有効な環境', () => {
       `処理中の文言「${cue.text}」が実描画で ${cue.width}px しかない（読み上げ専用のまま可視化されていない）`,
     ).toBeGreaterThan(8);
   });
+
+  // 上の 1 件は検証面（/ui-check）しか見ておらず、**本番画面の処理中表示は誰も測っていなかった**。
+  // 本 spec の task 4.2 が本番の下書き画面へ処理中の図形を入れたため、射程の外に穴が空いていた。
+  //
+  // 本番と検証面では文言の出所が違う。検証面の文言は部品が持つ読み上げ専用の要素で、
+  // 動きの低減が要求されたときだけ可視化される。本番は面の側が直下のテキストノードとして
+  // 常時可視で置き、図形は読み上げから隠した装飾として添える（task 4.2）。
+  // **どちらの形でも「動きを止めた環境で処理中が文言で伝わる」ことが成立する必要がある。**
+  test('本番の下書き画面の処理中表示が動きに依存しない可視の手掛かりを提示する', async ({
+    page,
+  }) => {
+    await page.goto(`/s/${STORE_ID}`);
+    expect(
+      await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+      '動き低減が模擬されていない文脈で実行されている（抑制規則が適用対象外になり空振りする）',
+    ).toBe(true);
+
+    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('button', { name: '送信する' }).click();
+    await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+    await page.getByRole('button', { name: /別の文章を生成/ }).click();
+
+    const measured = await page.evaluate(() => {
+      const region = document.querySelector('[role="status"]');
+      if (region === null) return null;
+      const spinner = region.querySelector('[data-slot="spinner"]');
+      const icon = spinner === null ? null : spinner.querySelector('svg');
+      // 文言は「直下のテキストノード」であることが要る。図形の読み上げ名へ畳むと
+      // 部品内部の読み上げ専用要素へ落ち、動きの低減が要求されていない環境で見えなくなる。
+      const range = document.createRange();
+      const own: string[] = [];
+      let width = 0;
+      for (const paragraph of Array.from(region.querySelectorAll('p'))) {
+        for (const node of Array.from(paragraph.childNodes)) {
+          const text = (node.textContent ?? '').trim();
+          if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
+            own.push(text);
+            range.selectNodeContents(node);
+            width = Math.max(width, range.getBoundingClientRect().width);
+          }
+        }
+      }
+      return {
+        ownText: own.join(''),
+        width,
+        spinnerPresent: spinner !== null,
+        spinnerHidden: spinner === null ? null : spinner.getAttribute('aria-hidden'),
+        animationDuration: icon === null ? null : getComputedStyle(icon).animationDuration,
+      };
+    });
+
+    // 空振り防止: 領域と図形を実際に掴めていること。掴めていないと以下はすべて空の比較になる。
+    expect(measured, '本番の下書き画面に読み上げ領域が無い').not.toBeNull();
+    const cue = measured as NonNullable<typeof measured>;
+    expect(cue.spinnerPresent, '処理中の図形を掴めていない（再生成が始まっていない疑い）').toBe(
+      true,
+    );
+
+    expect(
+      cue.ownText,
+      `処理中の文言が直下のテキストノードとして置かれていない（実測「${cue.ownText}」）。` +
+        '図形の読み上げ名へ畳むと、動きの低減が要求されていない環境で文言が見えなくなる',
+    ).toBe('生成中…');
+    expect(
+      cue.width,
+      `処理中の文言が実描画で ${cue.width}px しかない（可視化されていない）`,
+    ).toBeGreaterThan(8);
+    expect(
+      cue.spinnerHidden,
+      '処理中の図形が読み上げから隠されていない（読み上げ領域が二重になる）',
+    ).toBe('true');
+    // 図形の回転そのものは止まっていること（止めた代わりが上の文言である）。
+    expect(
+      Number.parseFloat(cue.animationDuration ?? '1'),
+      `処理中の図形の動きが抑制されていない（実測 ${cue.animationDuration ?? '不明'}）`,
+    ).toBeLessThanOrEqual(0.001);
+  });
 });
 
 // 要件 1.3: 設定が無効な環境では現在の動きの表現を変更しない（非後退）。
