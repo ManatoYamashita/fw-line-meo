@@ -1353,6 +1353,46 @@ const alerts = within(main).getAllByRole('alert');   // 取得の完了前に走
 段階 6 で再評価する。
 
 
+### 合流後の CI 実証（2026-09-06・run 34006079270）
+
+`51d70a1`（合流 `2afd503` ＋ 記録の是正）を使い捨ての `feat/ci-check-ui-airbnb-surfaces-final` へ
+push して発火させ、確認後にブランチを削除した（run は削除後も残る）。**6 ジョブすべて success**、
+`docker-build` / `notify` は設計どおり skip（push イベントでは走らない）。
+
+| ジョブ | 実行の証拠 |
+|---|---|
+| `e2e` | **`Running 42 tests` → `42 passed`**（合流前 40。+2 は main の a11y 監査 spec） |
+| `e2e-surfaces` | **`13 passed`**（dashboard-web = 横スクロール 6 + axe 6 + 非空ガード 1）＋ **`2 passed`**（store-detail = 横スクロール 1 + axe 1） |
+| `lint-build-test` | 10 パッケージ全緑・skip は delivery-job の 2 件のみ。予算 **JS 237.1 KB / 300.0 KB**・**CSS 7.3 KB / 12.0 KB** |
+| `lighthouse` | 客向けアンケートの 1 URL × 3 run で `All results processed!`。**`categories:accessibility` の minScore 1（満点必須）を含む assert が通過** |
+| `cross-runtime` | success |
+| `go-test` | success（`go build` / `go vet` / `go test` の 3 ステップとも） |
+
+```
+design-tokens 35 / db 100 / store-identification 16 / delivery-job 72(+2 skip)
+ui 596 / line-webhook 157 / dashboard-api 201 / store-detail 94
+survey-web 193 / dashboard-web 266
+```
+
+段階 6 の CI（run 34004205389）からの差は次の 3 点で、いずれも origin/main の取り込みで説明が付く。
+
+| 項目 | 段階 6 | 合流後 | 差の出所 |
+|---|---|---|---|
+| `ui` | 592 | **596** | PR #191 / #194 が §11 ガードポインタ表へ 4 行足した |
+| `store-detail` | 94 | 94 | 変化なし |
+| `e2e` | 40 | **42** | PR #191 が `a11y-audit.spec.ts` を 2 件新設した |
+| `e2e-surfaces` | 6 + 1 | **13 + 2** | PR #191 が両面へ axe 監査を足した（dashboard 6 + 非空ガード 1・store-detail 1） |
+| 予算 | JS のみ | **JS + CSS** | PR #191 が CSS 予算 12 KB を新設した |
+
+**この run が決定的だった理由。** 合流前のブランチは、以下を **一度も CI で走らせたことがなかった**。
+
+- `check-e2e-goto-ownership.sh` / `check-e2e-store-id-consistency.sh` / `check-a11y-audit-preconditions.sh`
+- 3 アプリ 9 面の axe 監査（うち **客向け回答画面と店舗詳細は本 spec が全面的に塗り替えた面**）
+- Lighthouse の a11y 満点条件
+- 生成 CSS の予算
+
+合流しなければ、これらは PR を出した瞬間に初めて当たっていた。
+
 ### 最終ゲート（GO/NO-GO）と origin/main への合流（2026-09-06）
 
 段階 6 の完了後に `/kiro-validate-impl` を GO/NO-GO ゲートとして回した。
