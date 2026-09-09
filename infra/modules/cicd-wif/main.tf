@@ -81,3 +81,29 @@ resource "google_secret_manager_secret_iam_member" "ci_metadata_viewer" {
   role      = "roles/secretmanager.viewer"
   member    = local.principal_set
 }
+
+# 本番の監視構成の乖離を CI が定期検証するための読み取り（Issue #230）
+#
+# #230 は「apply されたがコードが失われた」状態が 3 日以上誰にも気づかれなかった事故である。
+# 静的な照合では原理的に届かない（コードが消えている間、CI は何度でも緑になる）ため、
+# monitoring-drift ワークフローが 6 時間ごとに本番へ照会する。
+#
+# **付与するのは roles/monitoring.viewer だけで、logging 系のロールは付けない。**
+# ログベース指標の存在確認には Monitoring の metricDescriptors を使う（実測: 本番の
+# logging.googleapis.com/user/* 3 件が monitoring.metricDescriptors.list で返る）。
+# `gcloud logging metrics list` の方が素直に見えるが、それに必要な logging.logMetrics.* は
+# roles/monitoring.viewer に含まれず（gcloud iam roles describe で実測確認済み）、代わりに
+# roles/logging.viewer を付けると logging.logEntries.list まで付いてくる。それは
+# **CI がログ本文を読めるようになる**ということであり、#227「越えてはならない線」と Req 5.4 の
+# 思想に反する。監視を直すために、監視より広い読み取り面を開いてはならない。
+#
+# secret と違い project 単位で付与しているのは、この検証が「本番に在って宣言に無いもの」を
+# 見つけることそのものを目的としているためである。対象を列挙して 1 件ずつ照会する形にすると、
+# 列挙に無いものは原理的に見えず、**今回の事故（宣言に無いものが本番に在る）を検出できない**。
+# monitoring.viewer が読めるのは監視の構成とメトリクスの時系列だけで、そこに来訪客の識別子は
+# 構造的に存在しない（ログベース指標のラベルは storeId のみ = 事業者側の識別子・Req 5.7）。
+resource "google_project_iam_member" "ci_monitoring_viewer" {
+  project = var.project_id
+  role    = "roles/monitoring.viewer"
+  member  = local.principal_set
+}

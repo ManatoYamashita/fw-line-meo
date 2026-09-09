@@ -1,0 +1,136 @@
+# 本番の監視構成が宣言と乖離していないかの定期検証（Issue #230）
+#
+# #230 の実態は「監視が無い」ではなく **「apply されたがコードが失われた」** だった。
+# 2026-09-06 に alert policy 4 本と logging metric 1 本が本番へ apply されたが、対応する .tf は
+# commit されないまま作業ツリーから消え、2026-09-09 の実測時点で origin/main にも 49 本の
+# リモートブランチのいずれにも存在しなかった。terraform state だけがそれを保持しており、
+# **次の apply が監視を消す**寸前だった。
+#
+# 静的な照合（ts-ci の check-monitoring-coverage.sh）は「宣言の中で辻褄が合っているか」までしか
+# 言えない。「宣言が本番の実物と一致しているか」は本番を見ないと分からず、この欠陥はマージと
+# 無関係に恒常的に成り立つ（コードが消えている間、CI は何度でも緑になる）。デプロイ契機ではなく
+# 時間で回すのはこのためである（#91 / #63 で学んだのと同じ理由）。
+#
+# CI デプロイ契約（deploy.yml / gcp-auth-smoke.yml / prod-image-drift.yml / secret-version-drift.yml
+# と同一・厳守）:
+#   - 本ワークフローは read-only の照会のみ（gcloud monitoring policies list / Monitoring の
+#     metricDescriptors）。構成変更も terraform state への書き込みも行わない。
+#   - **ログを 1 行も読まない。** ログベース指標の存在確認には metricDescriptors を使い、
+#     `gcloud logging metrics list` は使わない。後者に必要な logging.logMetrics.* は
+#     roles/monitoring.viewer に含まれず、代わりに roles/logging.viewer を付けると
+#     logging.logEntries.list まで付いて CI がログ本文を読めるようになる。#227「越えてはならない線」
+#     と Req 5.4 の思想に反するため、その経路は採らない。
+#
+# 必要な GitHub リポジトリ変数（vars.*・deploy.yml と共通）:
+#   vars.WIF_PROVIDER   = terraform output wif_provider_name
+#   vars.GCP_PROJECT_ID = gen-fw-line-meo
+name: monitoring-drift
+
+on:
+  # 6 時間ごと。prod-image-drift（17 分）・secret-version-drift（43 分）と分を分ける。
+  # なお scheduled workflow は default branch の定義しか読まれず、リポジトリが 60 日無操作だと
+  # 自動停止する。
+  schedule:
+    - cron: '29 */6 * * *'
+  # 障害時の即時確認と、通知経路の end-to-end 実証（snapshot に fixture を渡して赤を作る）用。
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: 監視構成を注入する TSV のパス。通常は空（空なら gcloud で実測する）
+        required: false
+        default: ''
+
+concurrency:
+  group: monitoring-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # WIF の OIDC トークン発行に必須
+  issues: write # 追跡 Issue の起票・コメント・クローズ
+
+jobs:
+  monitoring-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout（正典は作業ツリーのファイル・git 履歴は不要）'
+        uses: actions/checkout@v5
+        # **fetch-depth: 0 を置かないこと。** 本検証は infra/*.tf を読むだけで git の履歴を
+        # 一切参照しない（判定は宣言と本番の集合だけで決まる）。
+
+      - name: 'Authenticate to Google Cloud (Direct WIF, no SA key)'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+
+      - name: 'Set up gcloud'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: '本番の監視構成の宣言乖離を検証（Issue #230）'
+        id: monitoring
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          # 未入力なら空文字が入り、スクリプト側の ${VAR:-} が「注入なし」へ落とす。
+          PROD_MONITORING_SNAPSHOT: ${{ github.event.inputs.snapshot }}
+        # 検証の赤はこのステップでは落とさず、通知まで通してから最終ステップで落とす。
+        # continue-on-error はジョブの結論を曖昧にするので使わない。
+        run: |
+          set -uo pipefail
+          bash scripts/check-monitoring-drift.sh > "$RUNNER_TEMP/monitoring-report.txt" 2>&1 && status=0 || status=$?
+          cat "$RUNNER_TEMP/monitoring-report.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/monitoring-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: '追跡 Issue へ通知'
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MONITORING_STATUS: ${{ steps.monitoring.outputs.status }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/monitoring-report.txt"
+          if [ ! -f "$report" ]; then
+            printf '%s\n' "検証ステップが report を残さずに終了しました（スクリプトの起動自体に失敗した可能性があります）。" > "$report"
+          fi
+          # 検証スクリプトは早期異常でも MONITORING-SIGNATURE を出す契約だが、それ以前に落ちた
+          # 場合（プロセスが殺された等）に備えて空を許さない。空のまま渡すと状態変化の判定が
+          # できず、赤が続く限り 6 時間ごとにコメントが増える。
+          sig="$(grep '^MONITORING-SIGNATURE: ' "$report" | tail -n 1 | sed 's/^MONITORING-SIGNATURE: //' || true)"
+          if [ -z "$sig" ]; then
+            sig="no-signature"
+          fi
+          state=red
+          if [ "${MONITORING_STATUS:-}" = "0" ]; then
+            state=green
+          fi
+
+          body="$RUNNER_TEMP/issue-body.md"
+          # 本文の組み立ては scripts/monitoring-drift-notify.sh が持つ。
+          # **この run ブロックへ戻さないこと。** 戻した瞬間に「緑と赤で文面を出し分けているか」を
+          # 検証する器が yml からの sed 抽出へ逆戻りし、Issue #109 と同じ形（孤児ケース検出で
+          # main の ts-ci が 3 日赤）を再生産する。
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/monitoring-drift-notify.sh \
+            --state "$state" \
+            --report "$report" \
+            --run-url "$run_url" > "$body"
+
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label monitoring-drift \
+            --title "fix(infra): 本番の監視構成が宣言と乖離しています（自動検出）" \
+            --body-file "$body" \
+            --signature "$sig"
+
+      - name: '検証結果でジョブの成否を決める'
+        if: always()
+        env:
+          MONITORING_STATUS: ${{ steps.monitoring.outputs.status }}
+        run: exit "${MONITORING_STATUS:-1}"
