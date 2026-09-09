@@ -10,6 +10,7 @@
 - **由来が `既存` の行は、備考に挙げた下流が壊れるため変更してはならない。**
 - **由来が `新規` の行は、全実行面で同一の名前を用いる**（要件 4.5）。既存の分岐は固定したまま、前方だけ統一する
 - **該当がない欄は空にせず `該当なし` と書く。** 空欄を許すと、棚卸しの漏れが「行が無い」という不可視の形になる
+- **「応答層」「日次バッチ層」の列は、実装のコード上で使う名前である。** 出力時に別の名前へ写す項目（集約基盤の特別項目）は、写し先を備考に書く。列に写し先を書くと、実装との突き合わせ（`check-log-field-binding.sh`）が食い違う
 - 出典は移送後の位置を書く。移送が完了するまで `check-log-field-binding.sh` は赤であり、その赤が移送すべき対象の一覧になる
 
 ### 新しく事象名を作るときの規約
@@ -26,7 +27,7 @@
 |---|---|---|---|---|---|
 | 重大度 | `severity` | `severity` | 新規 | `ts/packages/observability/src/sink.ts` ／ `go/internal/logging/logging.go` | 集約基盤が重大度として解釈する特別項目。**現行の `level` は解釈されない**（本番実測・`infra/modules/guardrails/main.tf` のコメント）。値は集約基盤の列挙に従い `DEBUG` / `INFO` / `WARNING` / `ERROR` を用いる。**警告は `WARNING` であって `WARN` ではない**（標準ライブラリは `WARN` を返すため写し替えが要る） |
 | 事象名 | `event` | 該当なし | 既存 | `ts/packages/observability/src/sink.ts` | 日次バッチ層は `msg` 文字列で識別する。事象名の付与は本 spec の範囲外（#232 が必要とした時点で別課題） |
-| 相関識別子 | `logging.googleapis.com/trace` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | 集約基盤が同一値の記録を 1 本に束ねる特別項目。**値の供給は #229**。本 spec では常に未設定であり、未設定なら項目ごと出力しない |
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | **出力時は集約基盤が解釈する `logging.googleapis.com/trace` へ写す**（同一値の記録が 1 本に束ねられる）。**値の供給は #229**。本 spec では常に未設定であり、未設定なら項目ごと出力しない |
 
 ### 1.2 面をまたいで使う項目
 
