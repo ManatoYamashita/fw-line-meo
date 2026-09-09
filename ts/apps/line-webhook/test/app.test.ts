@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createApp, type AppDeps, type AppLogger } from '../src/app.js';
+import type { WebhookLogger } from '../src/lib/structured-log.js';
 import type { SignatureVerifier } from '../src/webhook/signature.js';
 import type { ConversationHandlers } from '../src/onboarding/conversation.js';
 import type { LineMessenger } from '../src/line/client.js';
@@ -27,6 +28,10 @@ function fakeLogger(): AppLogger {
   return { error: vi.fn() };
 }
 
+function fakeStructuredLog(): WebhookLogger {
+  return vi.fn();
+}
+
 function fakeRecordWebhookEventOnce(): (webhookEventId: string) => Promise<boolean> {
   return vi.fn(async () => true);
 }
@@ -38,6 +43,7 @@ function baseDeps(overrides: Partial<AppDeps> = {}): AppDeps {
     conversationHandlers: fakeConversationHandlers(),
     messenger: fakeMessenger(),
     logger: fakeLogger(),
+    structuredLog: fakeStructuredLog(),
     ...overrides,
   };
 }
@@ -170,6 +176,63 @@ describe('line-webhook app', () => {
 
       expect(res.status).toBe(401);
       expect(conversationHandlers.handleEvent).not.toHaveBeenCalled();
+    });
+
+    // Issue #230: 401 は Cloud Run の 5xx 率に現れないため、この 1 行が出ないと
+    // 署名検証が全件失敗していても外からは無音になる。ログベース指標
+    // webhook_signature_failures が数える唯一の入力なので、事象名を固定して検証する。
+    it('署名不一致のとき固定イベントを構造化ログへ 1 件出し、reason=mismatch を載せる', async () => {
+      const structuredLog = fakeStructuredLog();
+      const app = createApp(
+        baseDeps({ signatureVerifier: fakeSignatureVerifier(false), structuredLog }),
+      );
+
+      const res = await app.request('/webhook', {
+        method: 'POST',
+        headers: {
+          'x-line-signature': 'invalid-signature',
+          'x-line-request-id': 'req-sig-1',
+        },
+        body: followEventBody(),
+      });
+
+      expect(res.status).toBe(401);
+      expect(structuredLog).toHaveBeenCalledTimes(1);
+      expect(structuredLog).toHaveBeenCalledWith('warn', 'webhook_signature_verification_failed', {
+        reason: 'mismatch',
+        requestId: 'req-sig-1',
+      });
+    });
+
+    it('署名ヘッダ欠落のときは reason=missing_header で区別される', async () => {
+      const structuredLog = fakeStructuredLog();
+      const app = createApp(
+        baseDeps({ signatureVerifier: fakeSignatureVerifier(false), structuredLog }),
+      );
+
+      const res = await app.request('/webhook', { method: 'POST', body: followEventBody() });
+
+      expect(res.status).toBe(401);
+      expect(structuredLog).toHaveBeenCalledWith('warn', 'webhook_signature_verification_failed', {
+        reason: 'missing_header',
+        requestId: undefined,
+      });
+    });
+
+    // 否定側。これが無いと「常に出す」実装でも上の 2 件が緑になり、指標が
+    // 正常なリクエストまで数えていることに気づけない。
+    it('署名が通ったリクエストでは署名失敗イベントを出さない', async () => {
+      const structuredLog = fakeStructuredLog();
+      const app = createApp(baseDeps({ structuredLog }));
+
+      const res = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': 'valid-signature' },
+        body: followEventBody(),
+      });
+
+      expect(res.status).toBe(200);
+      expect(structuredLog).not.toHaveBeenCalled();
     });
 
     it(

@@ -4,6 +4,7 @@ import type { SignatureVerifier } from './webhook/signature.js';
 import type { ConversationHandlers } from './onboarding/conversation.js';
 import type { LineMessenger } from './line/client.js';
 import { buildInternalErrorRetryMessage } from './line/messages.js';
+import { logSignatureVerificationFailed, type WebhookLogger } from './lib/structured-log.js';
 
 // 構造化ログの最小契約（design.md「Monitoring」: LINE はログを提供しないため自前で記録する）。
 // オーナーの自由入力テキストや displayName は本境界では扱わない（渡していない）ため、
@@ -21,6 +22,12 @@ export interface AppDeps {
   // LineMessenger 全体ではなく reply のみを要求する（狭い契約 = 誤用の余地を減らす）。
   messenger: Pick<LineMessenger, 'reply'>;
   logger: AppLogger;
+  // 構造化ログ（1 行 JSON）の sink。**AppLogger とは別経路である。**
+  // AppLogger は console.error(message, meta) をそのまま出す非構造化ログで、
+  // Cloud Logging から event 名で集計できない。ログベース指標
+  // （webhook_signature_failures・Issue #230）が読むのはこちらだけなので、
+  // 指標が数える事象はこの sink へ出す。
+  structuredLog: WebhookLogger;
 }
 
 const SIGNATURE_HEADER = 'x-line-signature';
@@ -87,6 +94,19 @@ export function createApp(deps: AppDeps): Hono {
 
     if (!deps.signatureVerifier.verify(rawBody, signatureHeader)) {
       // 署名不一致・ヘッダ欠落: 本文は一切処理せず 401 を返す（dispatcher は呼ばない）。
+      //
+      // Issue #230: **記録してから返す。** 401 は Cloud Run の 5xx 率に現れないため、
+      // ここで固定イベントを出さない限り、署名検証が全件失敗していても外からは無音である
+      // （チャネルシークレットの取り違え・再発行が起きると、オンボーディングが丸ごと
+      // 沈黙する）。この 1 行だけがログベース指標 webhook_signature_failures の入力になる。
+      //
+      // 載せるのは我々が名付けた区分と LINE 採番の requestId だけで、rawBody・
+      // signatureHeader の中身は sink の allowlist が構造的に排除する。
+      logSignatureVerificationFailed(
+        deps.structuredLog,
+        signatureHeader === undefined ? 'missing_header' : 'mismatch',
+        requestId,
+      );
       return c.body(null, 401);
     }
 
