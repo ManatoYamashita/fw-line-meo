@@ -57,6 +57,15 @@ const conversationHandlers = createConversationHandlers({
   identification: storeIdentificationService,
   messenger: lineMessenger,
   now: () => new Date(),
+  // 補助的処理の成否を記録する。注入の口は合成ルートにある（Issue #228 タスク 4）。
+  logger: {
+    info: (event, fields) => {
+      writeStructuredLog('info', event, fields);
+    },
+    warn: (event, fields) => {
+      writeStructuredLog('warn', event, fields);
+    },
+  },
   lineRichMenuCompletedId: config.lineRichMenuCompletedId,
   liffStoreDetailUrl: config.liffStoreDetailUrl,
 });
