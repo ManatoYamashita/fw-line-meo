@@ -51,7 +51,7 @@ describe('writeStructuredLog', () => {
 
     const smuggled = {
       reason: 'mismatch',
-      // 署名検証の境界で手元にあるが、決して記録してはいけない値（#227）。
+      // 署名検証の境界で手元にあるが、決して記録してはいけない値（Issue #227）。
       signature: 'aGVsbG8gd29ybGQ=',
       rawBody: '{"events":[{"source":{"userId":"U0123456789"}}]}',
       lineUserId: 'U0123456789',

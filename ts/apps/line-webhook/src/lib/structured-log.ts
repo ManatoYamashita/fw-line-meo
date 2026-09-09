@@ -27,7 +27,7 @@ export type SignatureFailureReason = 'missing_header' | 'mismatch';
  *
  * **ここへ何を足すかは privacy の判断である。** 署名検証は本文を一切処理する前の境界であり、
  * この時点で手元にある値（raw body・`x-line-signature` の中身・送信元・`line_user_id`）は
- * すべて記録してはいけない側にある（#227「越えてはならない線」）。
+ * すべて記録してはいけない側にある（Issue #227「越えてはならない線」）。
  */
 export interface WebhookLogFields {
   /** 署名検証失敗の区分。外部由来の値は含まない。 */
