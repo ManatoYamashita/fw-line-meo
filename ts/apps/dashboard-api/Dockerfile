@@ -12,6 +12,7 @@ FROM base AS deps
 WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
+COPY packages/observability/package.json packages/observability/
 COPY packages/store-identification/package.json packages/store-identification/
 COPY apps/dashboard-api/package.json apps/dashboard-api/
 RUN pnpm install --frozen-lockfile
@@ -24,6 +25,7 @@ WORKDIR /repo
 COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
+RUN pnpm -C packages/observability run build
 RUN pnpm -C packages/store-identification run build
 RUN pnpm -C apps/dashboard-api run build
 
@@ -36,6 +38,7 @@ WORKDIR /repo
 ENV NODE_ENV=production
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/db ./packages/db
+COPY --from=build /repo/packages/observability ./packages/observability
 COPY --from=build /repo/packages/store-identification ./packages/store-identification
 COPY --from=build /repo/apps/dashboard-api/node_modules ./apps/dashboard-api/node_modules
 COPY --from=build /repo/apps/dashboard-api/dist ./apps/dashboard-api/dist

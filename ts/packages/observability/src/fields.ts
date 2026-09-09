@@ -38,6 +38,8 @@ export interface LogFields {
   readonly errorKind?: string;
   /** 外部呼び出しに由来する状態コード。 */
   readonly status?: number;
+  /** 代理店の識別子。どの代理店の操作が失敗したかを特定する。 */
+  readonly agencyId?: string;
 
   // --- 外部プラットフォーム由来の識別子 ---
 

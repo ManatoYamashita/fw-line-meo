@@ -48,6 +48,7 @@ const PLAIN_FIELDS = [
   'storeId',
   'errorKind',
   'status',
+  'agencyId',
   'lineRequestId',
   'violatedAspects',
   'reason',
