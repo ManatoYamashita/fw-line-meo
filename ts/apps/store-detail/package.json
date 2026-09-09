@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
+    "@fwlm/observability": "workspace:*",
     "@fwlm/ui": "workspace:*",
     "@line/liff": "^2.29.1",
     "next": "^16",

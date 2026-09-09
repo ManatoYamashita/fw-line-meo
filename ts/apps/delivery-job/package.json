@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
-    "@fwlm/design-tokens": "workspace:*"
+    "@fwlm/design-tokens": "workspace:*",
+    "@fwlm/observability": "workspace:*"
   }
 }

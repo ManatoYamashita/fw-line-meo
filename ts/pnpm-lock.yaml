@@ -32,6 +32,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@fwlm/store-identification':
         specifier: workspace:*
         version: link:../../packages/store-identification
@@ -103,6 +106,9 @@ importers:
       '@fwlm/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@fwlm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
 
   apps/line-webhook:
     dependencies:
@@ -112,6 +118,9 @@ importers:
       '@fwlm/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@fwlm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@fwlm/store-identification':
         specifier: workspace:*
         version: link:../../packages/store-identification
@@ -130,6 +139,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@fwlm/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -176,6 +188,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@fwlm/ui':
         specifier: workspace:*
         version: link:../../packages/ui
