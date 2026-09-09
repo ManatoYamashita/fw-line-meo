@@ -133,8 +133,9 @@ ts/packages/observability/          # 応答層が使う唯一の記録経路
 │   ├── fields.ts                   # 許可項目の型定義と鍵集合の表明
 │   └── sink.ts                     # 標準出力への write と特別項目への写像
 └── test/
-    ├── sink.test.ts                # 許可外項目の遮断・特別項目の写像
-    └── fields.test.ts              # 鍵集合の表明が機能すること
+    └── sink.test.ts                # 許可外項目の遮断・特別項目の写像・出力の完全一致
+                                    # 鍵集合の表明は型レベルのため実行時テストを持たない
+                                    # （型検査が守る。実装時に確認・2026-09-09）
 
 docs/observability/
 ├── log-field-canon.md              # 項目名の正典（意味 → 各実行面の項目名）
