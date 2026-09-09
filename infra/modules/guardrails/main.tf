@@ -151,3 +151,182 @@ resource "google_logging_metric" "survey_funnel" {
     store_id = "EXTRACT(jsonPayload.storeId)"
   }
 }
+
+# ------------------------------------------------------------------------------
+# Cloud Run サービスの監視（Issue #230 / #227 の子）
+#
+# **このブロックは一度失われている。** 2026-09-06 に apply され本番で稼働していたが、
+# 対応する .tf が commit されないまま作業ツリーから消えた（2026-09-09 実測: 本番に
+# alert policy 4 本と logging metric 1 本が存在し、state serial 38 もそれを保持するのに、
+# origin/main にも 49 本のリモートブランチのいずれにも対応するコードが無かった）。
+# state にあって config に無いリソースは destroy 対象なので、**次の apply が監視を
+# 消すところだった**。監視を入れた変更が監視の穴を作るのは #151 と同じ本末転倒である。
+#
+# 復元にあたってはリソースアドレスを state と厳密に一致させた（moved は不要）。
+# destroy→create にすると、その隙間に起きた障害が誰にも通知されない。
+#
+# 同じ消え方が二度起きないよう、機械強制を 2 層で置いた:
+#   - scripts/check-monitoring-coverage.sh（ts-ci・静的）
+#   - .github/workflows/monitoring-drift.yml（6 時間ごと・本番と宣言の両方向照合）
+# 後者だけが「コードが消えても本番は生きている」を検出できる。
+# ------------------------------------------------------------------------------
+
+# 5xx 率（Req 7.3・検知）。**サービス名を列挙しない。**
+#
+# job_failure（上）と同じ思想である。述語にサービス名を持つと、サービスを足すたびに
+# ここへ足すことを思い出す必要が生まれ、思い出さなかったときに無音になる。
+# resource.type だけで絞れば、その忘れ方は構造的に起き得ない。
+# 現在の対象は 5 サービス（dashboard-api / dashboard-web / line-webhook / store-detail /
+# survey-web）だが、この式は 6 本目が生えた翌日から自動的にそれも見る。
+#
+# 比率で見るのは、絶対数だと低トラフィックのサービス（dashboard-web 等）が常に静かで、
+# 高トラフィックのサービスだけが鳴る非対称が生まれるためである。分母は同じ
+# request_count（response_code_class で絞らない全リクエスト）を同じ集約で取る。
+resource "google_monitoring_alert_policy" "service_5xx_rate" {
+  project      = var.project_id
+  display_name = "cloud run service 5xx rate"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "5xx rate above threshold"
+
+    condition_threshold {
+      filter          = "resource.type = \"cloud_run_revision\" AND metric.type = \"run.googleapis.com/request_count\" AND metric.labels.response_code_class = \"5xx\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0.05
+      duration        = "300s"
+
+      # 系列が無い間（ゼロスケールで 1 件もリクエストが無い等）を「異常」と読まない。
+      # 既定は欠測を評価対象にするため、静まり返っているサービスが鳴り続ける。
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
+
+      aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_RATE"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["resource.label.service_name"]
+      }
+
+      denominator_filter = "resource.type = \"cloud_run_revision\" AND metric.type = \"run.googleapis.com/request_count\""
+
+      denominator_aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_RATE"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["resource.label.service_name"]
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
+}
+
+# 客向け面のリクエスト遅延（Issue #230）。
+#
+# 5xx が全サービスを覆うのに対し、こちらは意図的に絞る。遅延が「離脱」という形で
+# 直接損失になるのは客の目の前で動く面だけで、代理店ダッシュボードが 2 秒遅いことと
+# アンケートページが 2 秒遅いことは事業上まったく別の意味を持つ。全面へ同じ SLO を
+# 敷くと、鳴っても誰も動かないアラートが増えて全体が信用されなくなる。
+#
+# **列挙してよいのはこの理由があるからで、忘れても無音にならないことは 5xx が担保する。**
+# 列挙が run-services の実体と食い違わないことは check-monitoring-coverage.sh が両方向で
+# 照合する（存在しない鍵を書いても、面を足して忘れても、CI が赤くなる）。
+resource "google_monitoring_alert_policy" "customer_latency" {
+  for_each = toset(var.latency_watched_services)
+
+  project      = var.project_id
+  display_name = "cloud run ${each.key} p95 latency"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "p95 request latency above threshold"
+
+    condition_threshold {
+      filter                  = "resource.type = \"cloud_run_revision\" AND metric.type = \"run.googleapis.com/request_latencies\" AND resource.labels.service_name = \"${each.key}\""
+      comparison              = "COMPARISON_GT"
+      threshold_value         = 2000
+      duration                = "300s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
+
+      # p95 を系列ごとに取り、リビジョン間は最大で畳む（新旧リビジョンが並走する
+      # デプロイ中に、遅い方が平均で薄まって見えなくなるのを避ける）。
+      aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_PERCENTILE_95"
+        cross_series_reducer = "REDUCE_MAX"
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
+}
+
+# Webhook 署名検証の失敗件数（Issue #230）。
+#
+# 急増は「攻撃」か「LINE 側の設定事故（チャネルシークレットの取り違え・再発行）」の
+# いずれかで、後者はオンボーディングが全件無言で 401 になるため、どちらも即座に知る
+# 必要がある。line-webhook は 401 を返すだけなので Cloud Run の 5xx 率には現れない。
+#
+# **severity では絞らないこと。** アプリは `level` フィールドを出しており、Cloud Run は
+# これを LogEntry.severity へ写さない（survey_funnel と同じ本番実測）。severity を条件に
+# 足すと 1 件も一致せず「指標は存在するのに常に 0」という静かな失敗になる。
+#
+# **この指標は実際に一度その状態になっている。** 2026-09-06 に実験イメージで実測した後、
+# アプリ側の出力コードが失われ、以後 main のイメージ（何もログしない）が稼働していた。
+# ゆえに「event 名がアプリから実際に出力されているか」を check-monitoring-coverage.sh が
+# 静的に両方向照合する。指標の側だけが生きている状態を CI が緑にしてはならない。
+resource "google_logging_metric" "webhook_signature_failures" {
+  project     = var.project_id
+  name        = "webhook_signature_failures"
+  description = "line-webhook の署名検証失敗件数（Issue #230）。"
+  filter      = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${var.webhook_service_name}\" AND jsonPayload.event = \"webhook_signature_verification_failed\""
+
+  # ラベルを持たない。署名検証は本文を一切処理する前に落ちる境界であり、この時点で
+  # 手元にある値（raw body・署名ヘッダ・送信元）はすべて **載せてはいけない側** である
+  # （#227「越えてはならない線」）。件数だけで用は足りる。
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_monitoring_alert_policy" "webhook_signature_failure" {
+  project      = var.project_id
+  display_name = "line-webhook signature verification failures"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "signature failures above threshold"
+
+    condition_threshold {
+      filter          = "metric.type = \"logging.googleapis.com/user/${google_logging_metric.webhook_signature_failures.name}\" AND resource.type = \"cloud_run_revision\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 5
+      duration        = "0s"
+
+      # ここは evaluation_missing_data を設定しない。ログベース指標は「失敗が無い間は
+      # 系列そのものが存在しない」が正常状態であり、欠測の扱いを明示すると
+      # 「無い＝評価できる」側へ倒れて意味が変わる。
+      aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
+}
