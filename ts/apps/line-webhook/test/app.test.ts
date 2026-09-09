@@ -220,8 +220,9 @@ describe('line-webhook app', () => {
       expect(res.status).toBe(200);
       expect(conversationHandlers.handleEvent).not.toHaveBeenCalled();
       expect(messenger.reply).not.toHaveBeenCalled();
+      // 返信を試みた失敗とは別の事象名で出る（運用者が案内の有無を判定できるように）。
       expect(logger.error).toHaveBeenCalledWith(
-        'line-webhook.dispatch_failed',
+        'line-webhook.dispatch_failed_before_reply_token',
         expect.any(Object),
       );
     });

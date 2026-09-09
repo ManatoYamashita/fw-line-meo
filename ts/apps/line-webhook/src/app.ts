@@ -125,7 +125,9 @@ export function createApp(deps: AppDeps): Hono {
       // 得られるのは再配信の追加コスト（無意味な再送ループの原因になり得る）のみである。
       // よって本境界は常に 200 を返す（500 は選択しない）。
       // replyToken が判明する前の失敗であり、再試行案内の返信は試みていない。
-      deps.logger.error('line-webhook.dispatch_failed', {
+      // **別の事象名で出す。** 同じ名前に潰すと、運用者が「オーナーに案内が届いたか」を
+      // 記録から判定できなくなる（移送前は文言で区別されていた）。
+      deps.logger.error('line-webhook.dispatch_failed_before_reply_token', {
         errorKind: errorKindOf(err),
         ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
       });

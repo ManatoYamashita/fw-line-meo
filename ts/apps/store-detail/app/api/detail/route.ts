@@ -113,10 +113,27 @@ function isTokenVerificationFailure(error: string): boolean {
 // フェイクサーバーへ差し替えるためのテスト用の任意 env（lib/liff-auth.ts の LiffAuthOptions が
 // 既に提供する verifyEndpoint 差替え口を、route.ts 単体でテスト可能にするために利用する）。
 
+/**
+ * 必須設定の欠落。**欠けた設定の識別子を構造として持つ。**
+ *
+ * 記録には例外の本文を載せない（要件 2.5）。環境変数名は有限集合の識別子なので、
+ * 構造として持てば本文なしで原因を追える。移送前は本文が名指ししていた情報であり、
+ * 種別だけに潰すと**移送後の記録が移送前より少なくなる**。
+ */
+class MissingConfigError extends Error {
+  readonly configKey: string;
+
+  constructor(configKey: string) {
+    super(`${configKey} is required`);
+    this.name = 'MissingConfigError';
+    this.configKey = configKey;
+  }
+}
+
 function readLiffAuthConfig(env: NodeJS.ProcessEnv): { clientId: string; options: LiffAuthOptions } {
   const clientId = env.LIFF_CHANNEL_ID;
   if (!clientId) {
-    throw new Error('LIFF_CHANNEL_ID is required');
+    throw new MissingConfigError('LIFF_CHANNEL_ID');
   }
   const verifyEndpoint = env.LIFF_VERIFY_ENDPOINT;
   return { clientId, options: verifyEndpoint ? { verifyEndpoint } : {} };
@@ -128,7 +145,10 @@ export async function GET(req: Request): Promise<Response> {
   try {
     ({ clientId, options: liffAuthOptions } = readLiffAuthConfig(process.env));
   } catch (err) {
-    writeStructuredLog('error', 'store-detail.config_error', { errorKind: errorKindOf(err) });
+    writeStructuredLog('error', 'store-detail.config_error', {
+      errorKind: errorKindOf(err),
+      ...(err instanceof MissingConfigError ? { configKey: err.configKey } : {}),
+    });
     return jsonError(500, 'INTERNAL', 'サーバーエラー');
   }
 

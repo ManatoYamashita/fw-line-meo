@@ -453,13 +453,29 @@ async function handleConfirm(
   // **成功も失敗も記録する**（Issue #228 タスク 4）。失敗だけを記録すると「記録が無い」が
   // 成功と未実行のどちらを意味するか判定できず、#151 と同型の無音になる。DB の行は成否の
   // 証拠にならない（infra/README.md が「実際に切り替わったか」を意味しないと記録している）。
+  //
+  // **記録は業務処理の外側で行う。** 同じ try の中へ入れると、記録の手段が投げたときに
+  // catch が走り、**成功した切り替えに対して失敗が記録される**（成功事象を足した理由が
+  // 自壊する）。さらに記録が catch の中で投げれば handleEvent を抜け、オーナーへ不要な
+  // 再試行案内が出る（要件 3.3 違反）。成否を先に確定させ、記録は別の try で包む。
+  let linked = false;
+  let linkError: unknown;
   try {
     await deps.messenger.linkRichMenu(event.lineUserId, deps.lineRichMenuCompletedId);
-    deps.logger.info('line-webhook.richmenu_linked');
+    linked = true;
   } catch (err) {
     // 業務処理は継続する（巻き戻すトランザクションは無く、reply も送信済み）。
-    // 記録だけを残し、握り潰しを無音にしない。
-    deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(err) });
+    linkError = err;
+  }
+
+  try {
+    if (linked) {
+      deps.logger.info('line-webhook.richmenu_linked');
+    } else {
+      deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(linkError) });
+    }
+  } catch {
+    // 記録できないことを理由に、利用者に見える振る舞いを変えない（要件 3.2 / 3.3）。
   }
 }
 

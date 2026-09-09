@@ -755,6 +755,37 @@ describe('createConversationHandlers', () => {
       expect(logger.warn).not.toHaveBeenCalled();
     });
 
+    it('記録の手段が投げても、成功した切り替えを失敗として記録しない', async () => {
+      // 記録を業務処理と同じ try の中へ置くと、記録が投げたときに catch が走り、
+      // **成功した切り替えに対して失敗が記録される**。成功事象を足した理由が自壊する。
+      const { deps, logger } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+      });
+      logger.info = vi.fn(() => {
+        throw new Error('log sink unavailable');
+      });
+      const handlers = createConversationHandlers(deps);
+
+      // 記録できないことを理由に利用者へ見える振る舞いを変えない（要件 3.2 / 3.3）。
+      await expect(
+        handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-log-throws',
+          data: encodePostback({ kind: 'confirm' }),
+        }),
+      ).resolves.toBeUndefined();
+
+      // 切り替えは成功しているので、失敗として記録してはならない。
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
     it('リッチメニューの切り替えが失敗しても業務処理は完了し、失敗を記録する', async () => {
       const messenger = createFakeMessenger();
       messenger.linkRichMenu = vi.fn(async () => {

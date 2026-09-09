@@ -149,6 +149,11 @@ function errorMessageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** 外部呼び出しの失敗が状態コードを持つか（LINE API 由来の例外が持つ）。 */
+function hasHttpStatus(err: unknown): err is { httpStatus: number | null } {
+  return typeof err === 'object' && err !== null && 'httpStatus' in err;
+}
+
 const defaultLogger: DeliveryJobLogger = {
   isolatedError(message, storeId, err) {
     // 失敗の要約は detail で出す。**message という名前は使えない** —
@@ -160,11 +165,14 @@ const defaultLogger: DeliveryJobLogger = {
     });
   },
   fatal(message, err) {
-    // 欠けた設定は識別子として載せる。本文を載せずに原因を追えるようにするため。
+    // 欠けた設定は識別子として、外部呼び出しの失敗は状態コードとして載せる。
+    // 本文を載せずに原因を追えるようにするため（要件 2.5 は「種別**および状態コード**」を許す）。
+    // 状態コードが無いと、#151 の再発時に 401 / 429 / ネットワーク断を区別できない。
     writeStructuredLog('error', 'delivery-job.fatal', {
       detail: message,
       errorKind: errorKindOf(err),
       ...(err instanceof MissingConfigError ? { configKey: err.configKey } : {}),
+      ...(hasHttpStatus(err) && err.httpStatus !== null ? { status: err.httpStatus } : {}),
     });
   },
 };
