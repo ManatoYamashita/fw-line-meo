@@ -13,13 +13,16 @@ import (
 
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/batch"
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/config"
+	"github.com/ManatoYamashita/fw-line-meo/go/internal/logging"
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/places"
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/repo"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// 重大度は集約基盤が解釈する項目名と綴りで出す（正典 docs/observability/log-field-canon.md）。
+	// 標準の handler をそのまま使うと "level":"WARN" になり、重大度として解釈されない。
+	logger := slog.New(logging.NewJSONHandler(os.Stdout))
 	ctx := context.Background()
 
 	cfg, err := config.Load()

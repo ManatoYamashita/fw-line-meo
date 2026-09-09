@@ -330,8 +330,15 @@ export type EmittedField = 'storeId' | 'error' | 'correlationId' | 'lineRequestI
 ##### Service Interface
 
 ```typescript
+/**
+ * 集約基盤が解釈する重大度。**警告は `WARNING` であって `WARN` ではない**。
+ * 単純な大文字化（`Uppercase<LogLevel>`）では `WARN` になり、集約側が重大度として
+ * 解釈しない（一次情報で確認・2026-09-09。`research.md` §7.1）。
+ */
+export type Severity = 'INFO' | 'WARNING' | 'ERROR';
+
 export interface LogRecord {
-  readonly severity: Uppercase<LogLevel>;
+  readonly severity: Severity;
   readonly event: string;
   readonly fields?: LogFields;
 }
@@ -615,5 +622,5 @@ graph TB
 
 - **コンテナ定義の網羅が人手依存**: 共有パッケージを追加すると、依存する各アプリのコンテナ定義へ 3 ステージ分の追記が要る。これを検証する仕組みが存在しない（`research.md` §1.3）。本 spec の要件に対応しないため範囲外としたが、**同型の欠落（#33 / #51 / #63 / #156）を繰り返してきた領域**であり、別 Issue として起票することを推奨する
 - **`message` 項目の改名**: 集約側が `message` を `textPayload` へ移すため、現在この名前で出している項目は `jsonPayload` から消えている。改名が必要だが、この項目を参照する下流は確認された範囲では存在しない（`research.md` §2）。実装時に再確認すること
-- **重大度の表記**: 集約側が受け付ける重大度の文字列表記は実装時に出力を実測して確かめる。一次情報は「一般的な重大度文字列に対応する」と述べるに留まる
+- ~~**重大度の表記**~~: **解決済み（2026-09-09）**。集約基盤の列挙は `DEBUG` / `INFO` / `NOTICE` / `WARNING` / `ERROR` / `CRITICAL` / `ALERT` / `EMERGENCY` であり、**警告は `WARNING`**。標準ライブラリの既定表記（`WARN`）とは異なるため、応答層・日次バッチ層とも写し替えが要る
 - **許可項目の型の肥大**: 6 実行面の項目を単一の集合に集めるため、面ごとに無関係な項目が型に見える。初版は単一集合とし、肥大が問題になった時点で面ごとの絞り込みを検討する

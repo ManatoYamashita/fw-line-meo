@@ -148,7 +148,7 @@ Option B の「Go にも事象名を足す」は、#232（保持の振り分け�
 
 | 意味 | 項目名 | 集約側の扱い |
 |---|---|---|
-| 重大度 | `severity` | 重大度として解釈される |
+| 重大度 | `severity` | 重大度として解釈される。値の列挙は `DEBUG` / `INFO` / `NOTICE` / `WARNING` / `ERROR` / `CRITICAL` / `ALERT` / `EMERGENCY`。**警告は `WARNING` であって `WARN` ではない**（2026-09-09 に一次情報で確認。標準ライブラリの既定表記と異なるため写し替えが要る） |
 | 相関識別子 | `logging.googleapis.com/trace` | `[TRACE_ID]` または `projects/[PROJECT_ID]/traces/[TRACE_ID]` の形式を受ける |
 | スパン | `logging.googleapis.com/spanId` | 16 進文字列 |
 | サンプリング | `logging.googleapis.com/trace_sampled` | 真偽値 |
