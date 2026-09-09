@@ -25,7 +25,7 @@
 
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
-| 重大度 | `severity` | `severity` | 新規 | `ts/packages/observability/src/sink.ts` ／ `go/internal/logging/logging.go` | 集約基盤が重大度として解釈する特別項目。**現行の `level` は解釈されない**（本番実測・`infra/modules/guardrails/main.tf` のコメント）。値は集約基盤の列挙に従い `DEBUG` / `INFO` / `WARNING` / `ERROR` を用いる。**警告は `WARNING` であって `WARN` ではない**（標準ライブラリは `WARN` を返すため写し替えが要る） |
+| 重大度 | `severity` | `severity` | 新規 | `ts/packages/observability/src/sink.ts` ／ `go/internal/logging/logging.go` | 集約基盤が重大度として解釈する特別項目。標準ライブラリが既定で出す `level` という名前では解釈されない（移送前の本番実測）。値は集約基盤の列挙に従い `DEBUG` / `INFO` / `WARNING` / `ERROR` を用いる。**警告は `WARNING` であって `WARN` ではない**（標準ライブラリは `WARN` を返すため写し替えが要る） |
 | 事象名 | `event` | 該当なし | 既存 | `ts/packages/observability/src/sink.ts` | 日次バッチ層は `msg` 文字列で識別する。事象名の付与は本 spec の範囲外（#232 が必要とした時点で別課題） |
 | 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | **出力時は集約基盤が解釈する `logging.googleapis.com/trace` へ写す**（同一値の記録が 1 本に束ねられる）。**値の供給は #229**。本 spec では常に未設定であり、未設定なら項目ごと出力しない |
 

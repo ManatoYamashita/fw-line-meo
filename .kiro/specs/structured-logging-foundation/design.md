@@ -114,7 +114,7 @@ graph LR
 
 | 意味 | 出力する項目名 | 集約側の扱い |
 |---|---|---|
-| 重大度 | `severity` | 重大度として解釈される（**現行の `level` は解釈されない**） |
+| 重大度 | `severity` | 重大度として解釈される（`level` という名前では解釈されない） |
 | 相関識別子 | `logging.googleapis.com/trace` | 同一値の記録が 1 本に束ねられる |
 | その他 | 任意の名前 | `jsonPayload` に残る |
 | **禁止** | `message` | **`textPayload` へ移され `jsonPayload` から消える** |
@@ -317,7 +317,7 @@ export interface LogFields {
 **Responsibilities & Constraints**
 
 - 渡された値を展開しない。**許可項目を 1 つずつ明示的に取り出す**。展開すると型検査を通り抜けた余剰項目が出力される
-- 重大度は集約側が解釈する項目名で出す（`severity`）。現行の `level` では解釈されない
+- 重大度は集約側が解釈する項目名で出す（`severity`）。`level` という名前では解釈されない
 - 相関識別子は値が未設定なら項目ごと出さない
 - `message` という項目名を使わない。集約側が `textPayload` へ移すため `jsonPayload` から消える
 - **例外を投げない**。記録の失敗が業務処理を止めてはならない

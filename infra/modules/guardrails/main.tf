@@ -116,10 +116,14 @@ resource "google_cloud_quotas_quota_preference" "places" {
 # ログベース指標へ写すと時系列は 24 か月残る（6 週までは 1 分粒度、以降は 10 分粒度へ集約）。
 # _Default バケットの保持延長を採らないのは、survey 以外の全ログまで課金対象になるため。
 #
-# **severity では絞らないこと。** アプリは `level` フィールドを出しており、Cloud Run はこれを
-# LogEntry.severity へ写さない（本番実測: {"event":"generation_failed","level":"error"} の
-# severity は null）。`severity = "INFO"` を条件に足すと 1 件も一致せず、「指標は存在するのに
-# 常に 0」という静かな失敗になる。event 名だけで絞る。
+# **本指標は event 名だけで絞る。** 記録の粒度としてそれで足りるためであり、以前ここに
+# 書かれていた「severity では絞れない」という理由は **2026-09-09 に解消した**（Issue #228）。
+#
+# 解消前は、アプリが `level` フィールドを出しており Cloud Run がこれを LogEntry.severity へ
+# 写さないため、`severity = "INFO"` を条件に足すと 1 件も一致しなかった（本番実測:
+# {"event":"generation_failed","level":"error"} の severity は null）。現在は全実行面が
+# `severity` を集約基盤の綴りで出すため、重大度による絞り込みは**可能**である
+# （正典 docs/observability/log-field-canon.md）。新しい指標を作る際はこの前提で設計してよい。
 #
 # **指標は作成時点から数え始める。** 段階4 の直前に作ってもベースラインは取れないので、
 # 本 spec のデプロイと同じタイミングで apply すること。
