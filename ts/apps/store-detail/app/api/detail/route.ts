@@ -37,6 +37,7 @@
 // 「export しない」こと自体が書込 API 不在の構造的な担保となる（test/route.db.test.ts で検証）。
 
 import { getPool } from '@fwlm/db';
+import { writeStructuredLog } from '@fwlm/observability';
 import type { Queryable, StoreRow } from '@fwlm/db';
 
 import {
@@ -127,7 +128,7 @@ export async function GET(req: Request): Promise<Response> {
   try {
     ({ clientId, options: liffAuthOptions } = readLiffAuthConfig(process.env));
   } catch (err) {
-    console.error(JSON.stringify({ event: 'store-detail.config_error', error: errorMessageOf(err) }));
+    writeStructuredLog('error', 'store-detail.config_error', { errorKind: errorKindOf(err) });
     return jsonError(500, 'INTERNAL', 'サーバーエラー');
   }
 
@@ -140,7 +141,7 @@ export async function GET(req: Request): Promise<Response> {
   try {
     pool = await getPool();
   } catch (err) {
-    console.error(JSON.stringify({ event: 'store-detail.pool_error', error: errorMessageOf(err) }));
+    writeStructuredLog('error', 'store-detail.pool_error', { errorKind: errorKindOf(err) });
     return jsonError(500, 'INTERNAL', 'サーバーエラー');
   }
 
@@ -162,13 +163,10 @@ export async function GET(req: Request): Promise<Response> {
   if (hint && !hinted) {
     // 無視した事実は残す（silent drop を作らない）。ただし storeId そのものはログに書かない
     // ——集合外の値は攻撃者由来でありうるため、ログを通じた反射・汚染の経路を作らない。
-    console.warn(
-      JSON.stringify({
-        event: 'store-detail.store_hint_ignored',
-        reason: 'not_in_authorized_set',
-        authorizedCount: stores.length,
-      }),
-    );
+    writeStructuredLog('warn', 'store-detail.store_hint_ignored', {
+      reason: 'not_in_authorized_set',
+      authorizedCount: stores.length,
+    });
   }
 
   // 集合が1件のときのみヒント無しでも表示対象が決まる。2件以上でヒントが解決しなければ、
@@ -183,11 +181,15 @@ export async function GET(req: Request): Promise<Response> {
     const detail = await queryStoreDetail(pool, chosen.id);
     return jsonOk({ ...detail, storeName: chosen.name, stores: toStoreRefs(stores) });
   } catch (err) {
-    console.error(JSON.stringify({ event: 'store-detail.query_error', error: errorMessageOf(err) }));
+    writeStructuredLog('error', 'store-detail.query_error', { errorKind: errorKindOf(err) });
     return jsonError(500, 'INTERNAL', 'サーバーエラー');
   }
 }
 
-function errorMessageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+/**
+ * 例外の**種別**だけを取り出す。本文は記録しない（要件 2.5）。
+ * 自由文には接続情報・問い合わせ内容・入力値が混ざりうるため、記録へ載せる経路を作らない。
+ */
+function errorKindOf(err: unknown): string {
+  return err instanceof Error ? err.constructor.name : 'UnknownError';
 }
