@@ -40,8 +40,8 @@ EOF
 EOF
 }
 
-# 成果物を内包しない形式（Node を直接実行する面）。3 段すべてが要る。
-wpd_direct_app() {
+# db だけに prod 依存するアプリの package.json。
+wpd_direct_pkg() {
   fx_write ts/apps/demo/package.json <<'EOF'
 {
   "name": "@fwlm/demo",
@@ -50,6 +50,11 @@ wpd_direct_app() {
   }
 }
 EOF
+}
+
+# 成果物を内包しない形式（Node を直接実行する面）。3 段すべてが要る。
+wpd_direct_app() {
+  wpd_direct_pkg
   fx_write ts/apps/demo/Dockerfile <<'EOF'
 FROM node:24-slim AS deps
 COPY packages/db/package.json packages/db/
@@ -269,4 +274,150 @@ CMD ["node", "apps/demo/dist/index.js"]
 EOF
 fx_run check-workspace-package-dockerfiles
 expect_red '1 件も抽出できませんでした'
+t_end
+
+# ---------------------------------------------------------------------------
+# 独立検証（2026-09-09）で実測された 4 つの穴を固定する。
+# いずれも「現行 6 面では発火しないが、書き方が変われば実際に噛む」型である。
+
+wpd_run_hops() {
+  # $1 = ホップ上限（WORKSPACE_CLOSURE_MAX_HOPS へ注入）。注入は関数内に閉じる。
+  OUT=''
+  RC=0
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+  OUT="$(cd "$FX" && WORKSPACE_CLOSURE_MAX_HOPS="$1" \
+    bash scripts/check-workspace-package-dockerfiles.sh 2>&1)" || RC=$?
+}
+
+t_begin 'check-workspace-package-dockerfiles: 段を跨いだ配置を検出する（行の存在だけで緑にしない）'
+fx_guard check-workspace-package-dockerfiles
+wpd_packages
+wpd_direct_pkg
+# 依存解決の行を **ビルドの段へ移す**。行はファイル内に存在するが段が違う。
+# ファイル全体への存在チェックだと、この壊れ方を緑で通してしまう。
+fx_write ts/apps/demo/Dockerfile <<'EOF'
+FROM node:24-slim AS deps
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-slim AS build
+COPY packages/db/package.json packages/db/
+RUN pnpm -C packages/db run build
+
+FROM node:24-slim AS runner
+COPY --from=build /repo/packages/db ./packages/db
+CMD ["node", "apps/demo/dist/index.js"]
+EOF
+fx_run check-workspace-package-dockerfiles
+expect_red '依存解決の段に取り込みがありません'
+t_end
+
+t_begin 'check-workspace-package-dockerfiles: ビルドの段の連結を誤検知しない'
+fx_guard check-workspace-package-dockerfiles
+wpd_packages
+fx_write ts/apps/demo/package.json <<'EOF'
+{
+  "name": "@fwlm/demo",
+  "dependencies": {
+    "@fwlm/db": "workspace:*",
+    "@fwlm/design-tokens": "workspace:*"
+  }
+}
+EOF
+# レイヤー削減のために 2 パッケージのビルドを 1 行へ連結するのは正しい書き方。
+fx_write ts/apps/demo/Dockerfile <<'EOF'
+FROM node:24-slim AS deps
+COPY packages/db/package.json packages/db/
+COPY packages/design-tokens/package.json packages/design-tokens/
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-slim AS build
+RUN pnpm -C packages/db run build && pnpm -C packages/design-tokens run build
+
+FROM node:24-slim AS runner
+COPY --from=build /repo/packages/db ./packages/db
+COPY --from=build /repo/packages/design-tokens ./packages/design-tokens
+CMD ["node", "apps/demo/dist/index.js"]
+EOF
+fx_run check-workspace-package-dockerfiles
+expect_green
+expect_absent 'ビルドの段がありません'
+t_end
+
+t_begin 'check-workspace-package-dockerfiles: 依存セクションの 1 行化を検出する'
+fx_guard check-workspace-package-dockerfiles
+wpd_packages
+# 1 行で書かれると範囲抽出の終端が同一行で成立せず、次のセクションまで伸びる。
+# dev 依存を prod として拾い、不要な段を要求する偽陽性になる。
+fx_write ts/apps/demo/package.json <<'EOF'
+{
+  "name": "@fwlm/demo",
+  "dependencies": { "@fwlm/db": "workspace:*" },
+  "devDependencies": {
+    "@fwlm/design-tokens": "workspace:*"
+  }
+}
+EOF
+fx_write ts/apps/demo/Dockerfile <<'EOF'
+FROM node:24-slim AS deps
+COPY packages/db/package.json packages/db/
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-slim AS build
+RUN pnpm -C packages/db run build
+
+FROM node:24-slim AS runner
+COPY --from=build /repo/packages/db ./packages/db
+CMD ["node", "apps/demo/dist/index.js"]
+EOF
+fx_run check-workspace-package-dockerfiles
+expect_red '1 行で書かれています'
+t_end
+
+t_begin 'check-workspace-package-dockerfiles: 3 ステージを識別できなければ赤（空振り防止）'
+fx_guard check-workspace-package-dockerfiles
+wpd_packages
+wpd_direct_pkg
+# ステージ名が前提と違うと、段の検証がすべて空振りする。緑にしてはならない。
+fx_write ts/apps/demo/Dockerfile <<'EOF'
+FROM node:24-slim AS install
+COPY packages/db/package.json packages/db/
+
+FROM node:24-slim AS compile
+RUN pnpm -C packages/db run build
+
+FROM node:24-slim AS serve
+COPY --from=build /repo/packages/db ./packages/db
+EOF
+fx_run check-workspace-package-dockerfiles
+expect_red '3 ステージを識別できませんでした'
+t_end
+
+t_begin 'check-workspace-package-dockerfiles: 閉包が収束しなければ赤（黙って切り捨てない）'
+fx_guard check-workspace-package-dockerfiles
+wpd_packages
+# demo → ui → design-tokens の 2 ホップ。上限 1 では展開しきれず、
+# 打ち切ると design-tokens が閉包から黙って消える。
+fx_write ts/apps/demo/package.json <<'EOF'
+{
+  "name": "@fwlm/demo",
+  "dependencies": {
+    "@fwlm/ui": "workspace:*"
+  }
+}
+EOF
+fx_write ts/apps/demo/Dockerfile <<'EOF'
+FROM node:24-slim AS deps
+COPY packages/ui/package.json packages/ui/
+COPY packages/design-tokens/package.json packages/design-tokens/
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-slim AS build
+RUN pnpm -C apps/demo run build
+
+FROM node:24-slim AS runner
+COPY --from=build /repo/apps/demo/.next/standalone ./
+CMD ["node", "apps/demo/server.js"]
+EOF
+wpd_run_hops 1
+expect_red '収束しませんでした'
 t_end

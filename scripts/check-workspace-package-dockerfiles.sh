@@ -62,6 +62,14 @@ fi
 # 整形（2 スペースインデント）を前提とする。崩れて 0 件になった場合は末尾の空振り防止が拾う。
 extract_workspace_deps() {
   # $1: package.json のパス / $2: セクション名（dependencies | devDependencies）
+  # 範囲抽出は「開始行が { で終わり、閉じが単独行」という整形を前提にする。
+  # 1 行で書かれると終端が同一行で成立せず、範囲が**次のセクションの閉じ括弧まで伸びる**。
+  # dev 依存を prod として拾う誤検知になるため、前提が崩れていたら赤にする（独立検証で実測）。
+  if grep -qE "^  \"$2\": \{.*\}" "$1"; then
+    echo "ERROR: $1 の \"$2\" が 1 行で書かれています。範囲抽出が次のセクションへ漏れます。" >&2
+    echo "       → 整形（1 依存 1 行）へ戻してください。" >&2
+    exit 1
+  fi
   # 無一致（該当セクションに workspace 依存が無い）は正常。評価不能とは区別して扱う。
   local out rc
   out="$(sed -n "/^  \"$2\": {/,/^  }/p" "$1" 2>/dev/null \
@@ -81,9 +89,17 @@ resolve_closure() {
   local pending="$1"
   local mode="$2"
   local seen=""
+  # ホップ上限。自己テストから注入できる（未設定と空文字を区別する。空文字を既定へ倒すと
+  # 「注入したつもりで既定が使われる」経路ができ、検証が空振りする）。
+  local max_hops
+  if [ -n "${WORKSPACE_CLOSURE_MAX_HOPS+x}" ]; then
+    max_hops="$WORKSPACE_CLOSURE_MAX_HOPS"
+  else
+    max_hops=20
+  fi
   local round=0
   local p sub next pkg
-  while [ -n "$pending" ] && [ "$round" -lt 20 ]; do
+  while [ -n "$pending" ] && [ "$round" -lt "$max_hops" ]; do
     round=$((round + 1))
     next=""
     while IFS= read -r p; do
@@ -104,7 +120,37 @@ $pending
 EOF
     pending="$(printf '%s\n' "$next" | sed '/^$/d' | sort -u)"
   done
+  # 上限で打ち切ると、未展開のパッケージが閉包から**黙って消える**。
+  # 不完全な集合を返すのは空振り防止の思想に反するので、収束しなければ赤にする。
+  if [ -n "$pending" ]; then
+    echo "ERROR: 依存の閉包が ${round} ホップで収束しませんでした（循環または想定外の深さ）。" >&2
+    exit 1
+  fi
   printf '%s\n' "$seen" | tr '|' '\n' | sed '/^$/d' | sort -u
+}
+
+# 指定ステージの本文だけを取り出す。ステージが無ければ空を返す。
+# **段の検証は必ずこの本文に対して行う。** ファイル全体へ存在チェックを掛けると、
+# 依存解決の行がビルドの段へ移っていても緑になり、ガードの名に反して「段」を見なくなる
+# （独立検証で実測: deps の COPY を build へ移しても検出できなかった）。
+stage_body() {
+  # $1: Dockerfile のパス / $2: ステージ名
+  awk -v s="$2" '
+    /^FROM /  { active = ($0 ~ ("[ \t]AS[ \t]+" s "[ \t]*$")); next }
+    active    { print }
+  ' "$1"
+}
+
+# 本文が正規表現に一致するか。quiet 系はパイプ下流に置かない（EPIPE を避ける）。
+body_matches() {
+  # $1: 本文 / $2: ERE
+  local n rc
+  n="$(printf '%s\n' "$1" | grep -cE -- "$2")" && rc=0 || rc=$?
+  if [ "$rc" -gt 1 ]; then
+    echo "ERROR: ステージ本文の照合が評価不能でした（grep exit ${rc}）。" >&2
+    exit 1
+  fi
+  [ "$n" -gt 0 ]
 }
 
 # ビルド成果物を持つパッケージか（build スクリプトの有無で判定する）。
@@ -160,6 +206,18 @@ for app_path in "$APPS_DIR"/*/; do
   closure_all="$(resolve_closure "$direct_all" all)"
   closure_prod="$(resolve_closure "$direct_prod" prod)"
 
+  deps_body="$(stage_body "$dockerfile" deps)"
+  build_body="$(stage_body "$dockerfile" build)"
+  runner_body="$(stage_body "$dockerfile" runner)"
+
+  # 3 ステージを識別できなければ、以降の検証は全て空振りする。緑にしてはならない。
+  if [ -z "$deps_body" ] || [ -z "$build_body" ] || [ -z "$runner_body" ]; then
+    echo "ERROR: ${app} のコンテナ定義から deps / build / runner の 3 ステージを識別できませんでした。" >&2
+    echo "       → ステージ名が前提と異なります。命名を揃えるか、本ガードの判定を更新してください。" >&2
+    fail=1
+    continue
+  fi
+
   if bundles_dependencies "$dockerfile"; then
     needs_runtime_stage=0
   else
@@ -173,7 +231,7 @@ for app_path in "$APPS_DIR"/*/; do
 
     # (1) 依存解決の段: 全経路の閉包すべてに必要
     checked_stages=$((checked_stages + 1))
-    if ! grep -qE "^COPY packages/${dep}/package\.json" "$dockerfile"; then
+    if ! body_matches "$deps_body" "^COPY packages/${dep}/package\.json"; then
       echo "ERROR: ${app} は @fwlm/${dep} へ（間接を含め）依存しますが、依存解決の段に取り込みがありません。" >&2
       echo "       → ${dockerfile#$ROOT/} の deps ステージへ 'COPY packages/${dep}/package.json packages/${dep}/' を足してください。" >&2
       fail=1
@@ -183,7 +241,7 @@ for app_path in "$APPS_DIR"/*/; do
       # (2) ビルドの段: prod 経路かつビルド成果物を持つものに必要
       if has_build_output "$dep"; then
         checked_stages=$((checked_stages + 1))
-        if ! grep -qE "^RUN pnpm -C packages/${dep} run build" "$dockerfile"; then
+        if ! body_matches "$build_body" "^RUN .*pnpm -C packages/${dep} run build"; then
           echo "ERROR: ${app} は @fwlm/${dep}（ビルド成果物を持つ）を実行時に使いますが、ビルドの段がありません。" >&2
           echo "       → ${dockerfile#$ROOT/} の build ステージへ 'RUN pnpm -C packages/${dep} run build' を足してください。" >&2
           echo "         この漏れはイメージが作れてしまうため、実行時まで露見しません。" >&2
@@ -194,7 +252,7 @@ for app_path in "$APPS_DIR"/*/; do
       # (3) 実行時配置の段: 成果物を内包しない形式の面でのみ必要
       if [ "$needs_runtime_stage" -eq 1 ]; then
         checked_stages=$((checked_stages + 1))
-        if ! grep -qE "^COPY --from=build /repo/packages/${dep}( |\$)" "$dockerfile"; then
+        if ! body_matches "$runner_body" "^COPY --from=build /repo/packages/${dep}( |\$)"; then
           echo "ERROR: ${app} は @fwlm/${dep} を実行時に使いますが、実行時配置の段に取り込みがありません。" >&2
           echo "       → ${dockerfile#$ROOT/} の runner ステージへ 'COPY --from=build /repo/packages/${dep} ./packages/${dep}' を足してください。" >&2
           fail=1
