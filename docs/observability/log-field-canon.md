@@ -74,7 +74,7 @@
 | 上限超過で処理を打ち切ったか | `quotaExceededStopped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | プロセスの終了コード | `exitCode` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 終了時に残っていた資源の種別 | `activeResources` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | 配列。閉じ忘れの検知に使う（#151 の再発防止） |
-| 失敗の要約 | `detail` | 該当なし | **新規** | `ts/apps/delivery-job/src/index.ts` | 現行の名前は `message`。**集約基盤が `message` を `textPayload` へ移すため `jsonPayload` から消えており、項目検索で引けない**。移送時に改名する |
+| 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 現行の名前は `message`。**集約基盤が `message` を `textPayload` へ移すため `jsonPayload` から消えており、項目検索で引けない**。移送時に改名する |
 
 ### 1.7 日次バッチ層に固有の項目
 
@@ -117,13 +117,13 @@
 | `delivery-job.fatal` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | `delivery-job.isolated_error` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 1 店舗の失敗を他店から隔離したときの記録 |
 | `delivery-job.exit` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 資源の閉じ忘れ検知（#151） |
-| `line-webhook.dispatch_failed` | line-webhook | **新規** | `ts/apps/line-webhook/src/app.ts` | 現行は事象名を持たず、メッセージ文字列で識別している |
-| `line-webhook.retry_reply_failed` | line-webhook | **新規** | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
-| `line-webhook.reply_failed` | line-webhook | **新規** | `ts/apps/line-webhook/src/line/client.ts` | |
-| `line-webhook.richmenu_linked` | line-webhook | **新規** | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4） |
-| `line-webhook.richmenu_link_failed` | line-webhook | **新規** | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**失敗**。現在は記録そのものを諦めている（`conversation.ts` のコメントが明記） |
-| `dashboard-api.category_followup_failed` | dashboard-api | **新規** | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名を持たない |
-| `dashboard-api.invite_code_issue_failed` | dashboard-api | **新規** | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
+| `line-webhook.dispatch_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 現行は事象名を持たず、メッセージ文字列で識別している |
+| `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
+| `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
+| `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4） |
+| `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**失敗**。現在は記録そのものを諦めている（`conversation.ts` のコメントが明記） |
+| `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名を持たない |
+| `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
 
 ---
 
