@@ -64,6 +64,7 @@ const PLAIN_FIELDS = [
   'exitCode',
   'activeResources',
   'detail',
+  'configKey',
 ] as const satisfies readonly PlainField[];
 
 // 一覧が通常項目を網羅していることの表明。項目を型へ足して一覧へ足し忘れると、

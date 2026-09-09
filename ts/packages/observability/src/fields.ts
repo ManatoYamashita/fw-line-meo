@@ -84,4 +84,6 @@ export interface LogFields {
   readonly activeResources?: readonly string[];
   /** 失敗の要約。**`message` という名前は使えない**（集約基盤が本文として吸い、項目検索から消える）。 */
   readonly detail?: string;
+  /** 欠落した設定の識別子。自由文ではなく有限集合（環境変数名）である。 */
+  readonly configKey?: string;
 }

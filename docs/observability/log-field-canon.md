@@ -76,6 +76,7 @@
 | プロセスの終了コード | `exitCode` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 終了時に残っていた資源の種別 | `activeResources` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | 配列。閉じ忘れの検知に使う（#151 の再発防止） |
 | 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 現行の名前は `message`。**集約基盤が `message` を `textPayload` へ移すため `jsonPayload` から消えており、項目検索で引けない**。移送時に改名する |
+| 欠落した設定の識別子 | `configKey` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 起動時に必須設定が欠けた場合の識別子。**自由文ではなく有限集合**（環境変数名）であり、例外の本文を載せずに原因を特定できる |
 
 ### 1.7 日次バッチ層に固有の項目
 

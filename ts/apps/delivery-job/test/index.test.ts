@@ -121,9 +121,12 @@ describe('main — 致命的エラー時は例外を投げずに process.exitCod
     const loggedLine = errorSpy.mock.calls[0]?.[0];
     expect(typeof loggedLine).toBe('string');
     expect((loggedLine as string).includes('\n')).toBe(false); // スタックトレース丸出しにしない
-    const parsed = JSON.parse(loggedLine as string) as { event: string; error: string };
+    const parsed = JSON.parse(loggedLine as string) as { event: string; errorKind?: string; configKey?: string };
     expect(parsed.event).toBe('delivery-job.fatal');
-    expect(parsed.error).toContain('LINE_CHANNEL_ID');
+    // 例外の本文は記録しない（要件 2.5）。欠けた設定は識別子として載るため、
+    // 本文なしで原因を特定できる。
+    expect(parsed.errorKind).toBe('MissingConfigError');
+    expect(parsed.configKey).toBe('LINE_CHANNEL_ID');
   });
 
   it('LINE token 発行失敗（ネットワークエラー）: クラッシュせず process.exitCode=1 で終了する', async () => {
@@ -146,7 +149,7 @@ describe('main — 致命的エラー時は例外を投げずに process.exitCod
     const loggedLine = errorSpy.mock.calls.at(-1)?.[0];
     expect(typeof loggedLine).toBe('string');
     expect((loggedLine as string).includes('\n')).toBe(false);
-    const parsed = JSON.parse(loggedLine as string) as { event: string; error: string };
+    const parsed = JSON.parse(loggedLine as string) as { event: string; errorKind?: string; configKey?: string };
     expect(parsed.event).toBe('delivery-job.fatal');
   });
 });

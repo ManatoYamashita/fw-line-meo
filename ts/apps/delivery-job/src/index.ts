@@ -18,6 +18,7 @@
 // 単位でエラーを隔離し、失敗は必ず行またはログに痕跡を残す（silent drop 禁止）」）。
 
 import { randomUUID } from 'node:crypto';
+import { writeStructuredLog } from '@fwlm/observability';
 
 import { closePool, getPool } from '@fwlm/db';
 import type { Queryable, SummaryDeliveryStatus } from '@fwlm/db';
@@ -44,19 +45,36 @@ export interface DeliveryJobConfig {
   readonly liffUrl: string;
 }
 
+/**
+ * 必須設定の欠落。**欠けた設定の識別子を構造として持つ。**
+ *
+ * 記録には例外の本文を載せない（要件 2.5）。本文へ頼ると、原因の特定と引き換えに
+ * 接続情報や入力値が混ざる経路を開くことになる。環境変数名は有限集合の識別子なので、
+ * 構造として持てば本文なしで原因を追える。
+ */
+export class MissingConfigError extends Error {
+  readonly configKey: string;
+
+  constructor(configKey: string) {
+    super(`${configKey} is required`);
+    this.name = 'MissingConfigError';
+    this.configKey = configKey;
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): DeliveryJobConfig {
   const lineChannelId = env.LINE_CHANNEL_ID;
   const lineChannelSecret = env.LINE_CHANNEL_SECRET;
   const liffUrl = env.LIFF_URL;
 
   if (!lineChannelId) {
-    throw new Error('LINE_CHANNEL_ID is required');
+    throw new MissingConfigError('LINE_CHANNEL_ID');
   }
   if (!lineChannelSecret) {
-    throw new Error('LINE_CHANNEL_SECRET is required');
+    throw new MissingConfigError('LINE_CHANNEL_SECRET');
   }
   if (!liffUrl) {
-    throw new Error('LIFF_URL is required');
+    throw new MissingConfigError('LIFF_URL');
   }
 
   return { lineChannelId, lineChannelSecret, liffUrl };
@@ -114,29 +132,40 @@ export interface DeliveryJobLogger {
   fatal(message: string, err: unknown): void;
 }
 
+/**
+ * 例外の**種別**だけを取り出す。**記録（ログ）にはこちらを使う。**
+ * 自由文には接続情報・問い合わせ内容・入力値が混ざりうるため、記録へ載せる経路を作らない（要件 2.5）。
+ */
+function errorKindOf(err: unknown): string {
+  return err instanceof Error ? err.constructor.name : 'UnknownError';
+}
+
+/**
+ * 例外の本文を取り出す。**用途は DB の失敗詳細に限る**（summary_deliveries.error_detail）。
+ * 運営が配信の失敗理由を追うための業務データであり、記録経路とは別である。
+ * これを記録へ載せてはならない。
+ */
 function errorMessageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
 const defaultLogger: DeliveryJobLogger = {
   isolatedError(message, storeId, err) {
-    console.error(
-      JSON.stringify({
-        event: 'delivery-job.isolated_error',
-        message,
-        storeId,
-        error: errorMessageOf(err),
-      }),
-    );
+    // 失敗の要約は detail で出す。**message という名前は使えない** —
+    // 集約基盤がこれを本文として吸い、項目検索から消えてしまう。
+    writeStructuredLog('error', 'delivery-job.isolated_error', {
+      detail: message,
+      storeId,
+      errorKind: errorKindOf(err),
+    });
   },
   fatal(message, err) {
-    console.error(
-      JSON.stringify({
-        event: 'delivery-job.fatal',
-        message,
-        error: errorMessageOf(err),
-      }),
-    );
+    // 欠けた設定は識別子として載せる。本文を載せずに原因を追えるようにするため。
+    writeStructuredLog('error', 'delivery-job.fatal', {
+      detail: message,
+      errorKind: errorKindOf(err),
+      ...(err instanceof MissingConfigError ? { configKey: err.configKey } : {}),
+    });
   },
 };
 
@@ -407,7 +436,8 @@ export async function main(): Promise<void> {
 
   try {
     const summary = await runDeliveryJob({ pool, lineClient, liffUrl: config.liffUrl });
-    console.log(JSON.stringify(summary));
+    const { event, ...summaryFields } = summary;
+    writeStructuredLog('info', event, summaryFields);
   } catch (err) {
     // token 発行失敗・対象抽出クエリ失敗などジョブ全体の致命的エラー（R5.1: 当日中に検知可能に）。
     defaultLogger.fatal('delivery-job run failed fatally (token issuance or target query)', err);
@@ -432,12 +462,11 @@ if (isDirectRun) {
       // 残存ハンドルの種類がログに出て原因の起点になる。
       // main() の中ではなくここに置くのは、テストが呼ぶ main() へテストプロセス自身の
       // ハンドルを混ぜないため（テストは main() を直接 await する）。
-      console.log(
-        JSON.stringify({
-          event: 'delivery-job.exit',
-          exitCode: process.exitCode ?? 0,
-          activeResources: process.getActiveResourcesInfo(),
-        }),
-      );
+      writeStructuredLog('info', 'delivery-job.exit', {
+        // process.exitCode は string も取りうる（Node の型定義）。移送前は直接
+        // 文字列化していたため型が緩かったが、記録の型は数値を要求する。
+        exitCode: typeof process.exitCode === 'number' ? process.exitCode : 0,
+        activeResources: process.getActiveResourcesInfo(),
+      });
     });
 }
