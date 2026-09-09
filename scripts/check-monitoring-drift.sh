@@ -35,7 +35,15 @@
 #
 # 環境変数（既定はすべて本番挙動）:
 #   PROJECT_ID                GCP プロジェクト ID。**必須**（既定値を置かない）
-#   PROD_MONITORING_SNAPSHOT  クラウド実測の注入。未設定なら gcloud / Monitoring API を叩く
+#   PROD_MONITORING_SNAPSHOT  正規化済み実測（2 列 TSV）の注入。未設定なら収集へ進む
+#   PROD_MONITORING_RAW_DIR   **収集経路そのもの**の注入。gcloud / API 応答の生の形を渡し、
+#                             正規化（抽出・件数対照）を fixture で走らせるための口である。
+#                             `policies.txt`（displayName の 1 行 1 件）と
+#                             `metric-descriptors.json`（Monitoring API の応答）を置く。
+#                             SNAPSHOT だけを持つと **収集経路が CI でも自己テストでも一度も
+#                             実行されない**。#230 の偽緑（指標名の文字集合を絞りすぎて
+#                             `store-qr-scans` のような名前が無言で live から落ちる）は、
+#                             まさにその未検査の区間に潜んでいた
 #
 # **時刻の注入は持たない。** 判定は集合の一致だけで決まり、猶予や経過時間の閾値を持たない。
 #
@@ -70,6 +78,7 @@ fi
 
 PROJECT_ID="${PROJECT_ID:-}"
 PROD_MONITORING_SNAPSHOT="${PROD_MONITORING_SNAPSHOT:-}"
+PROD_MONITORING_RAW_DIR="${PROD_MONITORING_RAW_DIR:-}"
 
 GUARDRAILS_TF="${ROOT}/infra/modules/guardrails/main.tf"
 ROOT_TF="${ROOT}/infra/envs/prod/main.tf"
@@ -124,10 +133,18 @@ for f in "$GUARDRAILS_TF" "$ROOT_TF"; do
   fi
 done
 
+injected=""
+if [ -n "$PROD_MONITORING_SNAPSHOT" ]; then injected="${injected}PROD_MONITORING_SNAPSHOT "; fi
+if [ -n "$PROD_MONITORING_RAW_DIR" ]; then injected="${injected}PROD_MONITORING_RAW_DIR "; fi
 injected_note=""
-if [ -n "$PROD_MONITORING_SNAPSHOT" ]; then
-  echo "WARNING: 注入モードで実行中です（本番の実測ではありません）: PROD_MONITORING_SNAPSHOT" >&2
+if [ -n "$injected" ]; then
+  echo "WARNING: 注入モードで実行中です（本番の実測ではありません）: ${injected}" >&2
   injected_note="（注入モード）"
+fi
+if [ -n "$PROD_MONITORING_SNAPSHOT" ] && [ -n "$PROD_MONITORING_RAW_DIR" ]; then
+  fail_early config-error \
+    "ERROR: PROD_MONITORING_SNAPSHOT と PROD_MONITORING_RAW_DIR は同時に指定できません。" \
+    "       → 正規化済みを渡すのか、生の応答から正規化を走らせるのかが曖昧になります。"
 fi
 
 # ---------------------------------------------------------------------------
@@ -162,19 +179,45 @@ awk -v outdir="$TMPWORK" '
 #   for_each = toset(["a", "b"])   → リテラル
 #   for_each = toset(var.X)        → root 配線の X = ["a", "b"]
 # for_each を持たないブロックは何も出さない（呼び出し側が「単一」として扱う）。
-resolve_for_each() {
-  rfe_rc=0
-  rfe_line="$(grep -E '^[[:space:]]*for_each[[:space:]]*=' "$1")" || rfe_rc=$?
-  if [ "$rfe_rc" -gt 1 ]; then
-    echo "ERROR: for_each の行を評価できません（grep exit=${rfe_rc}）: $1" >&2
+
+# 属性 $2 への代入を、**角括弧が閉じるまで**読んで 1 行へ畳む（$1 = ファイル）。
+#
+# **1 行 grep で読んではならない。** terraform fmt は要素の多いリストを複数行のまま許す
+# （実測: `latency_watched_services = [` + 要素 + `]` の 3 行は fmt -check を通る）。1 行だけ
+# 読むと、3 つ目の要素を足した瞬間に抽出が空になり、原因を名指ししない赤が出る。しかも
+# 「そこへ足せ」と誘っているのは本ガード自身のコメントである。
+#
+# 角括弧を持たない代入（`x = module.y.z["k"]` のような添字は括弧が同一行で閉じる）は
+# 最初の 1 行で確定する。行全体がコメントの行は畳み込みから除く（リストの中に注記が
+# 書かれうるため）。
+read_assignment_span() {
+  ras_rc=0
+  ras_out="$(awk -v attr="$2" '
+    !collecting && $0 ~ ("^[[:space:]]*" attr "[[:space:]]*=") { collecting = 1 }
+    collecting {
+      probe = $0
+      if (probe ~ /^[[:space:]]*#/) { next }
+      buf = buf " " probe
+      depth += gsub(/\[/, "[", probe) - gsub(/\]/, "]", probe)
+      if (depth <= 0) { print buf; exit }
+    }
+  ' "$1")" || ras_rc=$?
+  if [ "$ras_rc" -ne 0 ]; then
+    echo "ERROR: 代入 $2 の読み取りに失敗しました（awk exit=${ras_rc}）: $1" >&2
     return 2
   fi
+  printf '%s\n' "$ras_out"
+  return 0
+}
+
+resolve_for_each() {
+  rfe_line="$(read_assignment_span "$1" for_each)" || return 2
   [ -n "$rfe_line" ] || return 0
 
   rfe_var="$(printf '%s\n' "$rfe_line" | sed -nE 's/.*toset\(var\.([a-z_]+)\).*/\1/p')"
   if [ -n "$rfe_var" ]; then
-    rfe_line="$(grep -E "^[[:space:]]*${rfe_var}[[:space:]]*=" "$ROOT_TF")" || rfe_rc=$?
-    if [ "$rfe_rc" -gt 1 ] || [ -z "$rfe_line" ]; then
+    rfe_line="$(read_assignment_span "$ROOT_TF" "$rfe_var")" || return 2
+    if [ -z "$rfe_line" ]; then
       echo "ERROR: for_each が参照する var.${rfe_var} を ${ROOT_TF#"$ROOT"/} から解決できません。" >&2
       return 2
     fi
@@ -273,11 +316,34 @@ declared_count="$(count_lines "$declared")"
 # 2. クラウド実測（snapshot）
 # ---------------------------------------------------------------------------
 collect_live_snapshot() {
+  # 生の応答の入手。RAW_DIR が与えられていれば **そこから読むだけ** で、以降の正規化は
+  # 本番実行とまったく同じ経路を通る（抽出パターンの劣化を fixture で赤にできる）。
+  if [ -n "$PROD_MONITORING_RAW_DIR" ]; then
+    cls_policies_src="${PROD_MONITORING_RAW_DIR}/policies.txt"
+    cls_body_src="${PROD_MONITORING_RAW_DIR}/metric-descriptors.json"
+    for cls_f in "$cls_policies_src" "$cls_body_src"; do
+      if [ ! -f "$cls_f" ]; then
+        echo "ERROR: PROD_MONITORING_RAW_DIR に ${cls_f##*/} がありません: ${cls_f}" >&2
+        return 1
+      fi
+    done
+    cls_policies="$(cat "$cls_policies_src")"
+    cls_body="$(cat "$cls_body_src")"
+    normalize_live_snapshot
+    return $?
+  fi
+
+  # **解析する値へ stderr を混ぜない。** gcloud は exit 0 のまま stderr へ警告を書くことがあり
+  # （component の更新通知・非推奨警告・quota project の注意など）、混ぜるとその 1 行が
+  # `policy\t<警告文>` という幽霊資産として live 集合へ入る。追跡 Issue に「本番に在る policy
+  # "WARNING: …" が宣言にありません → 次の apply がこれを destroy します」という、存在しない
+  # ものについての誤指示が載る。診断は別ファイルへ取る（check-prod-image-drift.sh と同じ規律）。
+  cls_err="${TMPWORK}/gcloud.err"
   cls_rc=0
-  cls_policies="$(gcloud monitoring policies list --project="$PROJECT_ID" --format='value(displayName)' 2>&1)" || cls_rc=$?
+  cls_policies="$(gcloud monitoring policies list --project="$PROJECT_ID" --format='value(displayName)' 2>"$cls_err")" || cls_rc=$?
   if [ "$cls_rc" -ne 0 ]; then
     echo "ERROR: alert policy を照会できません（gcloud exit=${cls_rc}）。" >&2
-    printf '%s\n' "$cls_policies" >&2
+    cat "$cls_err" >&2
     echo "       → CI に roles/monitoring.viewer が付いているか確認してください（infra/modules/cicd-wif）。" >&2
     return 1
   fi
@@ -299,9 +365,68 @@ collect_live_snapshot() {
     return 1
   fi
 
+  normalize_live_snapshot
+  return $?
+}
+
+# 生の応答（$cls_policies / $cls_body）を 2 列 TSV へ正規化する。
+# **本番実行と RAW_DIR 注入が共有する唯一の経路**であり、抽出の劣化はここで赤になる。
+normalize_live_snapshot() {
+  # **指標名の文字集合を絞らない。** Cloud Logging のログベース指標名には `-` `.` `/` `%` などが
+  # 使え、`google_logging_metric.name` も同じ。`[A-Za-z0-9_]+` に限ると `store-qr-scans` のような
+  # 名前が live 集合から **無言で落ちる**。落ちた指標は「本番に在って宣言に無い」判定に現れず、
+  # 本ガードの存在理由そのもの（#230 と同じ状態の検出）が偽緑になる。
+  cls_body_file="${TMPWORK}/metric-descriptors.json"
+  printf '%s\n' "$cls_body" > "$cls_body_file"
+
+  # **1 行あたり 1 件しか取れない sed 置換で抽出しない。** API が応答を 1 行へ詰めて返すと、
+  # 行内の 2 件目以降が無言で落ちる（現在の実測では pretty-print で返るが、それはサーバ側の
+  # 都合であって契約ではない。自己テストの fixture を 1 行 JSON にした瞬間、初版は 3 件中
+  # 1 件しか拾わなかった）。`grep -o` は出現ごとに 1 行を出すので行の詰め方に依存しない。
+  cls_hits_rc=0
+  cls_hits="$(grep -oE '"logging\.googleapis\.com/user/[^"]+"' "$cls_body_file")" || cls_hits_rc=$?
+  # cls_hits の件数は使わない（対照は下の固定文字列で取る）。
+  if [ "$cls_hits_rc" -gt 1 ]; then
+    echo "ERROR: 指標名の抽出を評価できません（grep exit=${cls_hits_rc}）。" >&2
+    return 1
+  fi
+  # **対照は抽出と同じ正規表現で取ってはならない。** 同じ式で数えると、文字集合を絞る劣化が
+  # 両側で同時に起きて件数が一致し、対照が空振りする（それが #230 の偽緑の作られ方だった）。
+  # 名前の形を一切仮定しない固定文字列の出現数を、独立した物差しとして使う。
+  cls_seen_rc=0
+  # 引用符の直後に来る出現だけを数える。応答は `"name": "projects/…/metricDescriptors/
+  # logging.googleapis.com/user/<name>"` にも同じ接頭辞を含むため、引用符で錨を打たないと
+  # 実測 3 件が 6 件に化けて対照が常に食い違う（本番実行が即座に暴いた）。
+  # **名前そのものの形は一切仮定しない**ので、文字集合を絞る劣化はこちらへ波及しない。
+  cls_seen="$(grep -oF '"logging.googleapis.com/user/' "$cls_body_file" | wc -l | tr -d '[:space:]')" || cls_seen_rc=$?
+  if [ "$cls_seen_rc" -gt 1 ]; then
+    echo "ERROR: 指標名の出現件数を評価できません（grep exit=${cls_seen_rc}）。" >&2
+    return 1
+  fi
+
+  cls_names=""
+  if [ -n "$cls_hits" ]; then
+    cls_names="$(printf '%s\n' "$cls_hits" | sed -E 's#^"logging\.googleapis\.com/user/##; s#"$##')"
+  fi
+
+  # 落としていないことの対照。剥がしたあとに件数が減っていたら、**減った live 集合で
+  # 「乖離なし」を返すのが最悪**なので赤にする（抽出パターンの劣化を件数で検出する）。
+  cls_kept_rc=0
+  cls_kept="$(printf '%s\n' "$cls_names" | grep -cE '^.+$')" || cls_kept_rc=$?
+  if [ "$cls_kept_rc" -gt 1 ]; then
+    echo "ERROR: 指標名の件数を評価できません（grep exit=${cls_kept_rc}）。" >&2
+    return 1
+  fi
+  if [ "${cls_kept:-0}" -ne "$cls_seen" ]; then
+    echo "ERROR: 本番の指標名を ${cls_seen} 件中 ${cls_kept} 件しか抽出できませんでした。" >&2
+    echo "       → 落とした指標は「本番に在って宣言に無い」判定に現れず、偽の緑になります。" >&2
+    return 1
+  fi
+
   printf '%s\n' "$cls_policies" | sed -E '/^[[:space:]]*$/d; s/^/policy\t/'
-  printf '%s\n' "$cls_body" \
-    | sed -nE 's#.*"type"[[:space:]]*:[[:space:]]*"logging\.googleapis\.com/user/([A-Za-z0-9_]+)".*#metric\t\1#p'
+  if [ -n "$cls_names" ]; then
+    printf '%s\n' "$cls_names" | sed -E 's/^/metric\t/'
+  fi
   return 0
 }
 
@@ -336,7 +461,11 @@ live_count="$(count_lines "$live")"
 fail=0
 checked=0
 signature=""
-used_whitelist=""
+# **前後を改行で挟んで初期化する。** 空文字で始めると、最初に記帳された 1 件は前置改行を
+# 持たず `*"${NL}${wl}${NL}"*` に一致しない。その結果、SKIP した直後に「検出されなかったので
+# WHITELIST から削除してください」という自己矛盾した WARNING が出て、正しく効いている除外を
+# 消す方向へ誘導する（check-secret-version-drift.sh:316 が同じ理由で $NL から始めている）。
+used_whitelist="$NL"
 
 # 集合の所属判定。**パイプの下流へ grep -q を置かない。** 最初の一致で抜けると上流の printf が
 # EPIPE で 141 になり、pipefail の下では「一致した」が「失敗」として返る。しかもこの退行は

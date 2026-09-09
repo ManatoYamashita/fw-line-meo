@@ -125,6 +125,11 @@ resource "google_cloud_quotas_quota_preference" "places" {
 # 本 spec のデプロイと同じタイミングで apply すること。
 # ------------------------------------------------------------------------------
 resource "google_logging_metric" "survey_funnel" {
+  # monitoring-coverage: analytics-only (#137)
+  # この 2 指標はアラートを持たない。段階4（導線変更）の効果を施策前後で比較するための計測で
+  # あり、閾値を割ったら人を起こす類のものではないため。scripts/check-monitoring-coverage.sh は
+  # この宣言が無い指標に「読むアラートが無い」と赤を出す（指標だけが生き残る #230 の鏡像を
+  # 防ぐため）。**通知が要るのに面倒だからここへ逃がしてはならない。**
   for_each = toset(["survey_page_viewed", "survey_response_submitted"])
 
   project     = var.project_id
@@ -233,8 +238,11 @@ resource "google_monitoring_alert_policy" "service_5xx_rate" {
 # 敷くと、鳴っても誰も動かないアラートが増えて全体が信用されなくなる。
 #
 # **列挙してよいのはこの理由があるからで、忘れても無音にならないことは 5xx が担保する。**
-# 列挙が run-services の実体と食い違わないことは check-monitoring-coverage.sh が両方向で
-# 照合する（存在しない鍵を書いても、面を足して忘れても、CI が赤くなる）。
+# check-monitoring-coverage.sh が見るのは片方向だけである（ここに書いた名前がデプロイ正典に
+# 実在すること。綴り違いと撤去済みサービスは赤くなる）。**逆方向は見ていない。** 客向けの面を
+# 足してここへ足し忘れても CI は緑のままで、原理的にもガードには「どのサービスが客向けか」が
+# 分からない。足し忘れの帰結は「その面の遅延だけが無監視になる」ことであり、5xx は
+# サービス名を持たない述語で覆い続ける。
 resource "google_monitoring_alert_policy" "customer_latency" {
   for_each = toset(var.latency_watched_services)
 

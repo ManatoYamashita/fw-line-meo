@@ -17,9 +17,12 @@
 #   2. p95 遅延の列挙（latency_watched_services）が、デプロイ正典のサービスに実在すること
 #   3. **ログベース指標が読む event 名が、その指標が指すサービスのソースから実際に出力されて
 #      いること。** 今回の「指標だけが生きている」を静的に捕まえる唯一の網である
-#   4. 全 alert policy が通知チャネルへ接続されていること（鳴っても届かない状態の検出）
-#   5. 全 alert policy が auto_close を持つこと（既定 7 日では復旧を短時間で観測できない）
-#   6. 空振り防止: resource ブロック 0 件・policy 0 件・metric 0 件・正典 0 件はいずれも赤
+#   4. **ログベース指標を読む alert policy が実在すること。** 指標だけが生き残り、それを読む
+#      アラートが消えると、値は数え続けるのに誰にも通知されない（#230 の鏡像であり、指標側の
+#      検査 3 だけでは素通りする）。アラートを持たない指標は tf 内へ理由を in-band で宣言する
+#   5. 全 alert policy が通知チャネルへ接続されていること（鳴っても届かない状態の検出）
+#   6. 全 alert policy が auto_close を持つこと（既定 7 日では復旧を短時間で観測できない）
+#   7. 空振り防止: resource ブロック 0 件・policy 0 件・metric 0 件・正典 0 件はいずれも赤
 #
 # **サービス名の一覧をこのスクリプトへ列挙しない。** 正典は
 # check-deploy-image-coverage.sh --print-targets であり、上流が赤ならここも即座に落ちる。
@@ -98,6 +101,57 @@ has_match() {
     return 0
   fi
   return 1
+}
+
+# 属性 $2 への代入を、**角括弧が閉じるまで**読んで 1 行へ畳む（$1 = ファイル）。
+#
+# **1 行 grep で読んではならない。** terraform fmt は要素の多いリストを複数行のまま許す
+# （実測: `latency_watched_services = [` + 要素 + `]` の 3 行は fmt -check を通る）。1 行だけ
+# 読むと、3 つ目の要素を足した瞬間に抽出が空になり、原因を名指ししない赤が出る。しかも
+# 「そこへ足せ」と誘っているのは本ガード自身のコメントである。
+#
+# 角括弧を持たない代入は最初の 1 行で確定する。行全体がコメントの行は畳み込みから除く。
+read_assignment_span() {
+  ras_rc=0
+  ras_out="$(awk -v attr="$2" '
+    !collecting && $0 ~ ("^[[:space:]]*" attr "[[:space:]]*=") { collecting = 1 }
+    collecting {
+      probe = $0
+      if (probe ~ /^[[:space:]]*#/) { next }
+      buf = buf " " probe
+      depth += gsub(/\[/, "[", probe) - gsub(/\]/, "]", probe)
+      if (depth <= 0) { print buf; exit }
+    }
+  ' "$1")" || ras_rc=$?
+  if [ "$ras_rc" -ne 0 ]; then
+    echo "ERROR: 代入 $2 の読み取りに失敗しました（awk exit=${ras_rc}）: $1" >&2
+    return 2
+  fi
+  printf '%s\n' "$ras_out"
+  return 0
+}
+
+# 指標ブロック $1 が宣言する指標名を列挙する（for_each を展開する）。
+metric_names() {
+  mn_tmpl="$(grep -E '^[[:space:]]*name[[:space:]]*=' "$1" | sed -n '1,1p' | sed -E 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*//; s/^"//; s/"[[:space:]]*$//')" || return 2
+  [ -n "$mn_tmpl" ] || return 2
+  mn_fe="$(read_assignment_span "$1" for_each)" || return 2
+  mn_keys="$(printf '%s\n' "$mn_fe" | tr ',' '\n' | sed -nE 's/.*"([A-Za-z0-9_.-]+)".*/\1/p')"
+  if [ -z "$mn_keys" ]; then
+    case "$mn_tmpl" in
+      *'each.key'*) return 2 ;;
+    esac
+    printf '%s\n' "$mn_tmpl"
+    return 0
+  fi
+  for mn_k in $mn_keys; do
+    case "$mn_tmpl" in
+      'each.key') printf '%s\n' "$mn_k" ;;
+      *'${each.key}'*) printf '%s\n' "$mn_tmpl" | sed "s/\${each.key}/${mn_k}/g" ;;
+      *) printf '%s\n' "$mn_tmpl" ;;
+    esac
+  done
+  return 0
 }
 
 fail=0
@@ -229,9 +283,9 @@ fi
 
 # --- 検証3: p95 遅延の列挙が正典に実在すること ------------------------------------------------
 latency_raw_rc=0
-latency_raw="$(grep -E '^[[:space:]]*latency_watched_services[[:space:]]*=' "$ROOT_TF")" || latency_raw_rc=$?
-if [ "$latency_raw_rc" -gt 1 ]; then
-  echo "ERROR: latency_watched_services の宣言を評価できません（grep exit=${latency_raw_rc}）。" >&2
+latency_raw="$(read_assignment_span "$ROOT_TF" latency_watched_services)" || latency_raw_rc=$?
+if [ "$latency_raw_rc" -ne 0 ]; then
+  echo "ERROR: latency_watched_services の宣言を読めません。" >&2
   fail=1
 elif [ -z "$latency_raw" ]; then
   echo "ERROR: ${ROOT_TF#"$ROOT"/} に latency_watched_services の配線がありません。" >&2
@@ -310,9 +364,9 @@ for mf in $metric_files; do
   events="$(printf '%s\n' "$mfilter" | sed -nE 's/.*jsonPayload\.event = \\"([a-z0-9_]+)\\".*/\1/p')"
   if [ -z "$events" ]; then
     fe_rc=0
-    fe_line="$(grep -E '^[[:space:]]*for_each[[:space:]]*=' "$mpath")" || fe_rc=$?
-    if [ "$fe_rc" -gt 1 ]; then
-      echo "ERROR: google_logging_metric.${mname} の for_each を評価できません（grep exit=${fe_rc}）。" >&2
+    fe_line="$(read_assignment_span "$mpath" for_each)" || fe_rc=$?
+    if [ "$fe_rc" -ne 0 ]; then
+      echo "ERROR: google_logging_metric.${mname} の for_each を読めません。" >&2
       fail=1
       continue
     fi
@@ -358,6 +412,91 @@ if [ "$checked_events" -eq 0 ]; then
   echo "ERROR: event 名を照合した指標が 0 件でした（抽出パターンの前提が崩れています）。" >&2
   echo "       → 検査 0 件のまま緑にするのが最悪の空振りであるため、ここで fail します。" >&2
   fail=1
+fi
+
+# --- 検証4-b: 指標を読む alert policy が実在すること ------------------------------------------
+#
+# 検証4 は「指標 → アプリ」を見るが、「指標 → アラート」は見ない。実測（セルフレビュー）で、
+# webhook_signature_failure のポリシーブロックだけを消しても本ガードは緑のままだった。
+# 指標は数え続け、アプリは event を出し続け、しかし誰にも通知されない。#230 の鏡像である。
+#
+# 分析専用の指標（survey_funnel 等）まで一律に要求すると偽陽性になるため、除外は **tf の中へ
+# in-band で** 宣言させる（スクリプト内の除外表を併設すると、同じ意味を 2 箇所で書けてしまい
+# どちらが正かが決まらない）。書式は run-db-test-suites.sh の SKIP 表と同じく Issue 番号必須:
+#
+#   # monitoring-coverage: analytics-only (#137)
+#
+# 照合は「宣言された名前が、いずれかの policy の filter に現れること」で行う。tf は指標名を
+# ${google_logging_metric.<res>.name} で参照するのが正しい書き方なので、リテラル名と
+# その参照式の**どちらか**が現れれば接続されているとみなす。
+policy_filters="${TMPDIR_BLOCKS}/all-policy-filters.txt"
+: > "$policy_filters"
+for pf in $policy_files; do
+  pf_rc=0
+  pf_lines="$(grep -E '^[[:space:]]*(filter|denominator_filter)[[:space:]]*=' "${TMPDIR_BLOCKS}/${pf}")" || pf_rc=$?
+  if [ "$pf_rc" -gt 1 ]; then
+    echo "ERROR: alert policy の filter を評価できません（grep exit=${pf_rc}）: ${pf}" >&2
+    fail=1
+    continue
+  fi
+  if [ -n "$pf_lines" ]; then
+    printf '%s\n' "$pf_lines" >> "$policy_filters"
+  fi
+done
+
+linked_checked=0
+for mf in $metric_files; do
+  mres="${mf#google_logging_metric.}"
+  mres="${mres%.hcl}"
+  mpath="${TMPDIR_BLOCKS}/${mf}"
+
+  mnames="$(metric_names "$mpath")" || {
+    echo "ERROR: google_logging_metric.${mres} の name を解決できません。" >&2
+    fail=1
+    continue
+  }
+  if [ -z "$mnames" ]; then
+    echo "ERROR: google_logging_metric.${mres} から指標名を1件も解決できませんでした。" >&2
+    fail=1
+    continue
+  fi
+
+  # in-band の除外（Issue 番号必須）。
+  has_match '^[[:space:]]*#[[:space:]]*monitoring-coverage:[[:space:]]*analytics-only[[:space:]]*\(#[0-9]+\)' "$mpath" && ao_rc=0 || ao_rc=$?
+  if [ "$ao_rc" -eq 2 ]; then
+    echo "ERROR: ${mres} の analytics-only 宣言を評価できません。" >&2
+    fail=1
+    continue
+  fi
+  if [ "$ao_rc" -eq 0 ]; then
+    continue
+  fi
+
+  for mn in $mnames; do
+    linked_checked=$((linked_checked + 1))
+    has_match "logging\.googleapis\.com/user/(${mn}|\\$\{google_logging_metric\.${mres}\.name\})" "$policy_filters" && ln_rc=0 || ln_rc=$?
+    if [ "$ln_rc" -eq 2 ]; then
+      echo "ERROR: 指標 ${mn} とアラートの接続を評価できません。" >&2
+      fail=1
+      continue
+    fi
+    if [ "$ln_rc" -ne 0 ]; then
+      echo "ERROR: 指標 ${mn} を読む alert policy がありません。" >&2
+      echo "       → 指標は数え続けますが、誰にも通知されません（#230 の鏡像）。" >&2
+      echo "       → 通知が要らない分析専用の指標なら、その resource ブロックの中へ" >&2
+      echo "         「# monitoring-coverage: analytics-only (#NNN)」を Issue 番号つきで書いてください。" >&2
+      fail=1
+    fi
+  done
+done
+
+if [ "$linked_checked" -eq 0 ]; then
+  ao_all_rc=0
+  has_match 'monitoring-coverage:[[:space:]]*analytics-only' "$GUARDRAILS_TF" && ao_all_rc=0 || ao_all_rc=$?
+  if [ "$ao_all_rc" -ne 0 ]; then
+    echo "ERROR: アラート接続を照合した指標が 0 件でした（抽出パターンの前提が崩れています）。" >&2
+    fail=1
+  fi
 fi
 
 # --- 検証5/6: 全 alert policy の通知先と auto_close ------------------------------------------

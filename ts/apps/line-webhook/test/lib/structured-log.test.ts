@@ -96,3 +96,54 @@ describe('logSignatureVerificationFailed', () => {
     });
   });
 });
+
+// 署名検証**前**の経路から渡る requestId は、送信者が完全に制御できる値である
+// （検証に失敗した時点で LINE 由来である証明が無い）。allowlist は「どの項目を出すか」しか
+// 守らないので、中身の形は sink 側で絞る。
+describe('writeStructuredLog: requestId の形の検査', () => {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['64 文字を超える', 'a'.repeat(65)],
+    ['英数字とハイフン以外を含む', 'req/../../etc/passwd'],
+    ['空白と改行を含む', 'req 1\nreq 2'],
+    ['空文字', ''],
+  ];
+
+  for (const [label, value] of cases) {
+    it(`${label} requestId は出力しない`, () => {
+      const output = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      writeStructuredLog('warn', 'webhook_signature_verification_failed', {
+        reason: 'mismatch',
+        requestId: value,
+      });
+
+      expect(output).toHaveBeenCalledWith(
+        JSON.stringify({
+          level: 'warn',
+          event: 'webhook_signature_verification_failed',
+          reason: 'mismatch',
+        }),
+      );
+      output.mockRestore();
+    });
+  }
+
+  it('UUID 形式の requestId は出力する（診断を失わない対照）', () => {
+    const output = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    writeStructuredLog('warn', 'webhook_signature_verification_failed', {
+      reason: 'mismatch',
+      requestId: '0f3b2c1a-4d5e-6f70-8192-a3b4c5d6e7f8',
+    });
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        level: 'warn',
+        event: 'webhook_signature_verification_failed',
+        reason: 'mismatch',
+        requestId: '0f3b2c1a-4d5e-6f70-8192-a3b4c5d6e7f8',
+      }),
+    );
+    output.mockRestore();
+  });
+});

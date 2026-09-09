@@ -35,6 +35,11 @@ export interface WebhookLogFields {
   /**
    * LINE が採番したリクエスト ID（`x-line-request-id`）。障害追跡のキーで、客にも店舗にも紐づかない。
    *
+   * **この値は署名検証を通っていない経路からも渡る。** 署名検証に失敗した時点で、その要求が
+   * LINE 由来である証明は無く、ヘッダの中身は送信者が完全に制御できる。allowlist が守るのは
+   * 「どの項目を出すか」であって「中身が何か」ではないため、ここは sink 側で形を検査する
+   * （`REQUEST_ID_PATTERN`）。検査に落ちた値は載せない（fail-closed）。
+   *
    * `| undefined` を明示するのは exactOptionalPropertyTypes 下での意図の表明である。
    * ヘッダは欠落しうるので「未指定」ではなく「値として undefined」が実際に渡る。
    * 省略可能とだけ書くと、呼び出し側が undefined を渡せず条件分岐で組み立てる羽目になり、
@@ -70,13 +75,30 @@ export function logSignatureVerificationFailed(
  * 関数戻り値・キャスト経由の余剰プロパティは構造的部分型として合法に通るため、
  * **型ではこの経路を塞げない**（survey-web で実測済み・PR #75 レビュー指摘）。
  */
+/**
+ * `x-line-request-id` として受け入れる形。
+ *
+ * LINE が採番する実値は UUID である。**未認証経路から任意長・任意内容の値が渡りうる**ため、
+ * ここで形を絞る。絞らないと、署名検証に失敗した第三者が Cloud Logging へ任意のテキストを
+ * 書き込めることになり、「持たないデータは漏れない」という防壁を我々の側から崩す。
+ * 上限を UUID より少し広く取るのは、LINE 側の採番形式が変わっても診断を失わないため。
+ */
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
+
 export const writeStructuredLog: WebhookLogger = (level, event, fields) => {
+  // 形に合わない requestId は落とす（fail-closed）。落としたこと自体は reason 側で追える
+  // （どの区分で失敗したかは残るので、診断の骨格は失われない）。
+  const requestId =
+    fields?.requestId !== undefined && REQUEST_ID_PATTERN.test(fields.requestId)
+      ? fields.requestId
+      : undefined;
+
   console[level](
     JSON.stringify({
       level,
       event,
       ...(fields?.reason !== undefined ? { reason: fields.reason } : {}),
-      ...(fields?.requestId !== undefined ? { requestId: fields.requestId } : {}),
+      ...(requestId !== undefined ? { requestId } : {}),
     }),
   );
 };

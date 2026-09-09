@@ -81,6 +81,21 @@ mdr_run() {
     bash scripts/check-monitoring-drift.sh 2>&1)" || RC=$?
 }
 
+mdr_whitelist() {
+  # 合成ツリーへ複製したガードの `WHITELIST=()` へ項目を注入する（$1 = 括弧の中身をそのまま）。
+  awk -v entry="$1" '
+    /^WHITELIST=\(\)$/ { print "WHITELIST=(" entry ")"; next }
+    { print }
+  ' "${FX}/scripts/check-monitoring-drift.sh" > "${FX}/scripts/mdr-whitelist.tmp"
+  mv "${FX}/scripts/mdr-whitelist.tmp" "${FX}/scripts/check-monitoring-drift.sh"
+
+  # **注入が当たったことを先に確かめる。** 空振りしたまま走らせると、ガードが元のまま緑を
+  # 返した結果を「WHITELIST が効いた証拠」と読み違える。
+  if [ "$(grep -cF "$1" "${FX}/scripts/check-monitoring-drift.sh")" -eq 0 ]; then
+    _t_fail "WHITELIST の注入が空振りしました: $1"
+  fi
+}
+
 mdr_fixture() {
   fx_guard check-monitoring-drift
   mdr_guardrails
@@ -238,6 +253,182 @@ mdr_fixture
 rm -f "${FX}/snapshot.tsv"
 mdr_run
 expect_red 'PROD_MONITORING_SNAPSHOT が見つかりません'
+t_end
+
+# ---------------------------------------------------------------------------
+# WHITELIST の記帳（セルフレビューで検出した欠陥の回帰テスト）
+#
+# `used_whitelist` を空文字で初期化すると、最初に記帳された 1 件は前置改行を持たず
+# `*"${NL}${wl}${NL}"*` に一致しない。その結果 **SKIP した直後に「検出されなかったので
+# WHITELIST から削除してください」** という自己矛盾した WARNING が出て、正しく効いている
+# 除外を消す方向へ誘導する。先例（check-secret-version-drift.sh）は $NL から始めている。
+# 先例のケースは SKIP の存在しか見ておらず、この矛盾を検出できていなかったので、
+# ここでは **WARNING の不在**まで assert する。
+
+t_begin 'check-monitoring-drift: WHITELIST に載せた乖離は SKIP し、削除を促す WARNING を出さない'
+mdr_fixture
+mdr_snapshot \
+  'policy|cloud run job failure' \
+  'policy|cloud run store-detail p95 latency' \
+  'policy|cloud run survey-web p95 latency' \
+  'policy|cloud run service 5xx rate' \
+  'metric|survey_page_viewed' \
+  'metric|survey_response_submitted' \
+  'metric|webhook_signature_failures'
+mdr_whitelist "'policy|cloud run service 5xx rate|undeclared-in-prod'"
+mdr_run
+expect_green
+expect_output_matches 'SKIP: policy cloud run service 5xx rate'
+expect_absent 'WHITELIST から削除してください'
+t_end
+
+# 対照: 当たらなくなった除外は削除を促す。上の是正で WARNING を殺してしまうと、
+# 是正済みの組を除外したまま残し、次に同じ乖離が起きたとき無言で見逃す。
+t_begin 'check-monitoring-drift: 当たらなくなった WHITELIST は削除を促す（対照）'
+mdr_fixture
+mdr_whitelist "'policy|cloud run service 5xx rate|undeclared-in-prod'"
+mdr_run
+expect_green
+expect_output_matches 'WHITELIST に載っていますが乖離として検出されませんでした'
+t_end
+
+# ---------------------------------------------------------------------------
+# 複数行のリスト（セルフレビューで検出した欠陥の回帰テスト）
+#
+# terraform fmt は要素の多いリストを複数行のまま許す（実測で fmt -check を通ることを確認）。
+# 1 行 grep で読んでいると、3 つ目の要素を足した瞬間に抽出が空になり、原因を名指ししない
+# 赤が出る。しかも「そこへ足せ」と誘っているのはガード自身のコメントである。
+
+t_begin 'check-monitoring-drift: for_each のリテラルを複数行で書いても解決できる'
+mdr_fixture
+fx_write infra/modules/guardrails/main.tf <<'EOF'
+resource "google_monitoring_alert_policy" "job_failure" {
+  project      = var.project_id
+  display_name = "cloud run job failure"
+}
+
+resource "google_monitoring_alert_policy" "customer_latency" {
+  for_each = toset(var.latency_watched_services)
+
+  project      = var.project_id
+  display_name = "cloud run ${each.key} p95 latency"
+}
+
+resource "google_logging_metric" "survey_funnel" {
+  for_each = toset([
+    "survey_page_viewed",
+    # リストの中に注記が書かれても畳み込みから除く
+    "survey_response_submitted",
+  ])
+
+  project = var.project_id
+  name    = each.key
+}
+
+resource "google_logging_metric" "webhook_signature_failures" {
+  project = var.project_id
+  name    = "webhook_signature_failures"
+}
+EOF
+mdr_run
+expect_green
+expect_output_matches '宣言 6 件 / 本番 6 件'
+t_end
+
+t_begin 'check-monitoring-drift: for_each が参照する変数を複数行で書いても解決できる'
+mdr_fixture
+fx_write infra/envs/prod/main.tf <<'EOF'
+module "guardrails" {
+  source = "../../modules/guardrails"
+
+  latency_watched_services = [
+    "store-detail",
+    "survey-web",
+  ]
+}
+EOF
+mdr_run
+expect_green
+expect_output_matches '宣言 6 件 / 本番 6 件'
+t_end
+
+# ---------------------------------------------------------------------------
+# 収集経路そのものの検査（独立レビューで検出した偽緑の回帰テスト）
+#
+# SNAPSHOT 注入は **正規化済みの 2 列 TSV** を渡すため、gcloud/API の応答から TSV を組み立てる
+# 区間が CI でも自己テストでも一度も実行されない。#230 の偽緑（指標名の文字集合を
+# `[A-Za-z0-9_]+` に絞ったせいで `store-qr-scans` のような名前が無言で live から落ち、
+# 「本番に在って宣言に無い」判定に現れなくなる）は、まさにその未検査の区間に潜んでいた。
+# RAW_DIR 注入は本番実行とまったく同じ正規化を通る。
+
+mdr_raw() {
+  # $1 = policies.txt の中身, $2 = metric-descriptors.json の中身
+  mkdir -p "${FX}/raw"
+  printf '%s\n' "$1" > "${FX}/raw/policies.txt"
+  printf '%s\n' "$2" > "${FX}/raw/metric-descriptors.json"
+}
+
+mdr_run_raw() {
+  OUT=''
+  RC=0
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+  OUT="$(cd "$FX" && \
+    PROJECT_ID="${MDR_PROJECT_ID-proj}" \
+    PROD_MONITORING_RAW_DIR="${FX}/raw" \
+    bash scripts/check-monitoring-drift.sh 2>&1)" || RC=$?
+}
+
+t_begin 'check-monitoring-drift: 生の応答から正規化しても宣言と突き合わせられる'
+mdr_fixture
+rm -f "${FX}/snapshot.tsv"
+mdr_raw 'cloud run job failure
+cloud run store-detail p95 latency
+cloud run survey-web p95 latency' \
+  '{"metricDescriptors":[{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/survey_page_viewed","type":"logging.googleapis.com/user/survey_page_viewed"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/survey_response_submitted","type":"logging.googleapis.com/user/survey_response_submitted"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/webhook_signature_failures","type":"logging.googleapis.com/user/webhook_signature_failures"}]}'
+mdr_run_raw
+expect_green
+expect_output_matches '宣言 6 件 / 本番 6 件'
+t_end
+
+# **本命。** ハイフンを含む指標名を落とさないこと。落ちると「本番に在って宣言に無い」が
+# 出なくなり、#230 と同じ状態を検出できない偽の緑になる。
+t_begin 'check-monitoring-drift: ハイフンを含む指標名を live から落とさない'
+mdr_fixture
+rm -f "${FX}/snapshot.tsv"
+mdr_raw 'cloud run job failure
+cloud run store-detail p95 latency
+cloud run survey-web p95 latency' \
+  '{"metricDescriptors":[{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/survey_page_viewed","type":"logging.googleapis.com/user/survey_page_viewed"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/survey_response_submitted","type":"logging.googleapis.com/user/survey_response_submitted"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/webhook_signature_failures","type":"logging.googleapis.com/user/webhook_signature_failures"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/store-qr-scans","type":"logging.googleapis.com/user/store-qr-scans"}]}'
+mdr_run_raw
+expect_red '本番に在る metric "store-qr-scans" が宣言にありません'
+t_end
+
+# 抽出パターンが劣化して名前を取りこぼしたら、減った live で「乖離なし」を返さず赤にする。
+t_begin 'check-monitoring-drift: 抽出が取りこぼしたら件数の対照で赤にする'
+mdr_fixture
+rm -f "${FX}/snapshot.tsv"
+mdr_raw 'cloud run job failure
+cloud run store-detail p95 latency
+cloud run survey-web p95 latency' \
+  '{"metricDescriptors":[{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/survey_page_viewed","type":"logging.googleapis.com/user/survey_page_viewed"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/survey_response_submitted","type":"logging.googleapis.com/user/survey_response_submitted"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/webhook_signature_failures","type":"logging.googleapis.com/user/webhook_signature_failures"},{"name":"projects/p/metricDescriptors/logging.googleapis.com/user/store-qr-scans","type":"logging.googleapis.com/user/store-qr-scans"}]}'
+# 抽出側の文字集合だけを絞る（対照は固定文字列で数えているので、こちらだけが減る）。
+fx_guard_mutate check-monitoring-drift -e 's/\[^"\]+/[A-Za-z0-9_]+/'
+mdr_run_raw
+expect_red '件中'
+expect_output_matches '偽の緑になります'
+t_end
+
+t_begin 'check-monitoring-drift: 2 つの注入を同時に渡したら曖昧にせず落とす'
+mdr_fixture
+mdr_raw 'cloud run job failure' '{"metricDescriptors":[]}'
+OUT=''
+RC=0
+OUT="$(cd "$FX" && \
+  PROJECT_ID=proj \
+  PROD_MONITORING_SNAPSHOT="${FX}/snapshot.tsv" \
+  PROD_MONITORING_RAW_DIR="${FX}/raw" \
+  bash scripts/check-monitoring-drift.sh 2>&1)" || RC=$?
+expect_red '同時に指定できません'
 t_end
 
 # 分岐到達性。赤の理由が **所属判定そのもの** から来ていることを、判別子を「常に一致」へ

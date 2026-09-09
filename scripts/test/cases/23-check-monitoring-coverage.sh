@@ -126,6 +126,7 @@ resource "google_monitoring_alert_policy" "customer_latency" {
 }
 
 resource "google_logging_metric" "survey_funnel" {
+  # monitoring-coverage: analytics-only (#137)
   for_each = toset(["survey_page_viewed", "survey_response_submitted"])
 
   project = var.project_id
@@ -137,6 +138,23 @@ resource "google_logging_metric" "webhook_signature_failures" {
   project = var.project_id
   name    = "webhook_signature_failures"
   filter  = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${var.webhook_service_name}\" AND jsonPayload.event = \"webhook_signature_verification_failed\""
+}
+
+resource "google_monitoring_alert_policy" "webhook_signature_failure" {
+  project      = var.project_id
+  display_name = "line-webhook signature verification failures"
+
+  conditions {
+    condition_threshold {
+      filter = "metric.type = \"logging.googleapis.com/user/${google_logging_metric.webhook_signature_failures.name}\" AND resource.type = \"cloud_run_revision\""
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
 }
 EOF
 }
@@ -154,7 +172,7 @@ t_begin 'check-monitoring-coverage: 宣言とアプリの実体が揃ってい�
 mcov_fixture
 fx_run check-monitoring-coverage
 expect_green
-expect_output_matches '正典 2 サービス / alert policy 2 本 / logging metric 2 本 / 事象名 3 件'
+expect_output_matches '正典 2 サービス / alert policy 3 本 / logging metric 2 本 / 事象名 3 件'
 t_end
 
 # 偽陽性の検証。group_by_fields の service_name は「サービスごとに率を出す」集約軸であって
@@ -451,6 +469,119 @@ fx_run check-monitoring-coverage
 expect_red 'デプロイ正典を取得できません'
 t_end
 
+# ---------------------------------------------------------------------------
+# 指標 → アラートの接続（独立レビューで検出した偽緑の回帰テスト）
+#
+# 検証4 は「指標 → アプリ」を見るが「指標 → アラート」を見ていなかった。実測で、
+# webhook_signature_failure のポリシーブロックだけを消しても緑のままだった。
+# 指標は数え続け、アプリは event を出し続け、しかし誰にも通知されない（#230 の鏡像）。
+
+t_begin 'check-monitoring-coverage: 指標を読むアラートが消えたら赤（#230 の鏡像）'
+mcov_fixture
+fx_write infra/modules/guardrails/main.tf <<'EOF'
+resource "google_monitoring_notification_channel" "email" {
+  project = var.project_id
+}
+
+resource "google_monitoring_alert_policy" "service_5xx_rate" {
+  project = var.project_id
+
+  conditions {
+    condition_threshold {
+      filter = "resource.type = \"cloud_run_revision\" AND metric.labels.response_code_class = \"5xx\""
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
+}
+
+resource "google_logging_metric" "webhook_signature_failures" {
+  project = var.project_id
+  name    = "webhook_signature_failures"
+  filter  = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${var.webhook_service_name}\" AND jsonPayload.event = \"webhook_signature_verification_failed\""
+}
+EOF
+fx_run check-monitoring-coverage
+expect_red '指標 webhook_signature_failures を読む alert policy がありません'
+t_end
+
+t_begin 'check-monitoring-coverage: 分析専用の in-band 宣言があれば通す（偽陽性を出さない）'
+mcov_fixture
+fx_run check-monitoring-coverage
+expect_green
+expect_absent 'を読む alert policy がありません'
+t_end
+
+t_begin 'check-monitoring-coverage: 分析専用の宣言に Issue 番号が無ければ除外として認めない'
+mcov_fixture
+fx_write infra/modules/guardrails/main.tf <<'EOF'
+resource "google_monitoring_notification_channel" "email" {
+  project = var.project_id
+}
+
+resource "google_monitoring_alert_policy" "service_5xx_rate" {
+  project = var.project_id
+
+  conditions {
+    condition_threshold {
+      filter = "resource.type = \"cloud_run_revision\" AND metric.labels.response_code_class = \"5xx\""
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
+}
+
+resource "google_logging_metric" "survey_funnel" {
+  # monitoring-coverage: analytics-only
+  for_each = toset(["survey_page_viewed"])
+
+  project = var.project_id
+  name    = each.key
+  filter  = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${var.survey_service_name}\" AND jsonPayload.event = \"${each.key}\""
+}
+EOF
+fx_run check-monitoring-coverage
+expect_red '指標 survey_page_viewed を読む alert policy がありません'
+t_end
+
+# ---------------------------------------------------------------------------
+# 複数行のリスト（セルフレビューで検出した欠陥の回帰テスト）
+
+t_begin 'check-monitoring-coverage: 遅延監視の列挙を複数行で書いても解決できる'
+mcov_fixture
+fx_write infra/envs/prod/main.tf <<'EOF'
+module "run-services" {
+  services = {
+    "survey-web" = {
+      image = "cloudrun/container/hello"
+    }
+    "line-webhook" = {
+      image = "cloudrun/container/hello"
+    }
+  }
+}
+
+module "guardrails" {
+  source               = "../../modules/guardrails"
+  survey_service_name  = module.run_services.service_names["survey-web"]
+  webhook_service_name = module.run_services.service_names["line-webhook"]
+
+  latency_watched_services = [
+    "survey-web",
+  ]
+}
+EOF
+fx_run check-monitoring-coverage
+expect_green
+t_end
 # 分岐到達性。事象名の照合が「常に見つかった」へ定数化していないことを、判別子を潰す
 # 最小改変で確かめる。変異が当たらなければハーネス側が失敗する。
 t_begin 'check-monitoring-coverage: 事象名の照合が定数化していない（分岐到達性）'
