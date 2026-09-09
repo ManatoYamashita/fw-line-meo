@@ -31,8 +31,13 @@ export interface LogFields {
 }
 EOF
   fx_write ts/apps/demo/src/log.ts <<'EOF'
-export const EVENT = 'demo.started';
+import { writeStructuredLog } from '@fwlm/observability';
+
 export const STORE_KEY = 'storeId';
+
+export function run(): void {
+  writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+}
 EOF
   fx_write go/internal/demo/log.go <<'EOF'
 package demo
@@ -46,7 +51,7 @@ fx_guard check-log-field-binding
 lfb_fixture
 fx_run check-log-field-binding
 expect_green
-expect_output_matches '出典 4 件 / 型の項目 2 件'
+expect_output_matches '出典 4 件 / 型の項目 2 件 / 実装の事象名 1 件'
 t_end
 
 t_begin 'check-log-field-binding: 出典が実在しないと赤'
@@ -74,7 +79,13 @@ t_begin 'check-log-field-binding: 出典に事象名が現れないと赤'
 fx_guard check-log-field-binding
 lfb_fixture
 fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
 export const STORE_KEY = 'storeId';
+
+export function run(): void {
+  writeStructuredLog('info', 'demo.other', { storeId: 'store-1' });
+}
 EOF
 fx_run check-log-field-binding
 expect_red '事象名「demo.started」が現れません'
@@ -126,8 +137,12 @@ export interface LogFields {
 }
 EOF
 fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
 // store-detail 側の責務である（この語に当たって緑になってはならない）
-export const EVENT = 'demo.started';
+export function run(): void {
+  writeStructuredLog('info', 'demo.started');
+}
 EOF
 fx_run check-log-field-binding
 expect_red '項目名「detail」が現れません'
@@ -191,4 +206,37 @@ export interface LogFields {
 EOF
 fx_run check-log-field-binding
 expect_red '1 件も検証できませんでした'
+t_end
+
+# ---------------------------------------------------------------------------
+# 独立検証（2026-09-09）の指摘: 実装が正典に無い事象名を出しても捕まらなかった。
+# 正典が「名前の唯一の基準」であるという主張が、前方に対して成立していなかった。
+
+t_begin 'check-log-field-binding: 正典に無い事象名を実装が出すと赤'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
+export const STORE_KEY = 'storeId';
+
+export function run(): void {
+  writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+  writeStructuredLog('warn', 'demo.unregistered', { storeId: 'store-1' });
+}
+EOF
+fx_run check-log-field-binding
+expect_red '正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: 実装の事象名を 1 件も拾えなければ赤（空振り防止）'
+fx_guard check-log-field-binding
+lfb_fixture
+# 共有経路の呼び出しが無い＝抽出の前提が崩れている。取りこぼしを緑と報告してはならない。
+fx_write ts/apps/demo/src/log.ts <<'EOF'
+export const STORE_KEY = 'storeId';
+export const EVENT = 'demo.started';
+EOF
+fx_run check-log-field-binding
+expect_red '実装から事象名を 1 件も抽出できませんでした'
 t_end

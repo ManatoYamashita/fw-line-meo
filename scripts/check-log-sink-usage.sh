@@ -53,13 +53,16 @@ fi
 #   （店舗詳細面の記録は app/ 配下にあるため、src/ だけに絞ると移送前でも赤くならない）
 # 対象外: 運用者が手で叩く補助スクリプト・テスト・E2E・性能計測・評価・生成物。
 runtime_sources() {
+  # **リポジトリ相対へ落としてから照合する。** 絶対パスのまま `/(src|app|lib)/` を当てると、
+  # チェックアウト先が `…/app/…` 配下にある環境で全ファイルが通り、ガードが丸ごと空振りする。
   find "$APPS_DIR" "$PACKAGES_DIR" \
     \( -path '*/node_modules' -o -path '*/dist' -o -path '*/.next' \
        -o -path '*/test' -o -path '*/e2e' -o -path '*/perf' -o -path '*/eval' \
        -o -path "${APPS_DIR}/line-webhook/scripts" \) -prune -o \
-    -type f \( -name '*.ts' -o -name '*.tsx' \) -print \
-    | grep -E "/(src|app|lib)/" \
-    | grep -vE "\.(test|spec)\.tsx?$" \
+    -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \) -print \
+    | sed "s|^${ROOT}/||" \
+    | grep -E "^ts/(apps|packages)/[^/]+/(src|app|lib)/" \
+    | grep -vE "\.(test|spec)\.[cm]?tsx?$" \
     | sort
 }
 
@@ -71,12 +74,15 @@ hit_count=0
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   file_count=$((file_count + 1))
-  rel="${path#$ROOT/}"
+  rel="$path"
+  path="${ROOT}/${rel}"
 
   # 直接の書き出しを 3 記法すべてで探す。ドット記法だけでは sink 自身を検出できない。
   n=0
   rc=0
-  n="$(grep -cE 'console\.(log|info|warn|error|debug)|console\[|process\.stdout\.write|process\.stderr\.write' "$path")" || rc=$?
+  # `const c = console; c.error(...)` のように束縛し直せば 3 記法の外へ出られる。
+  # **識別子としての出現**まで網を広げ、迂回の余地を残さない。
+  n="$(grep -cE '(^|[^a-zA-Z0-9_.$])(console|process\.(stdout|stderr))([^a-zA-Z0-9_]|$)' "$path")" || rc=$?
   if [ "$rc" -gt 1 ]; then
     echo "ERROR: ${rel} の走査が評価不能でした（grep exit ${rc}）。" >&2
     exit 1

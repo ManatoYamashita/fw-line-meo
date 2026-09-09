@@ -61,7 +61,8 @@ unquote() {
 
 # 出典セルは全角スラッシュで複数のパスを並べうる。1 行 1 パスへ割る。
 split_sources() {
-  printf '%s\n' "$1" | tr '／' '\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/^`//; s/`$//' | sed '/^$/d'
+  printf '%s\n' "$1" | sed 's|／|\
+|g' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/^`//; s/`$//' | sed '/^$/d'
 }
 
 # 正規表現のメタ文字を打ち消す（名前には . や - が含まれうる）。
@@ -102,6 +103,7 @@ set_contains() {
 fail=0
 checked=0
 realtime_names=''
+event_names=''
 
 # --- 1〜2: 項目名の表（順方向） ---
 while IFS= read -r row; do
@@ -121,6 +123,8 @@ ${realtime}"
     [ -n "$src" ] || continue
 
     # 出典の層から、その出典で期待される名前を決める。
+    # **毎回初期化する。** case が取りこぼすと前反復の値を持ち越し、静かに誤判定する。
+    expected=''
     case "$src" in
       ts/*) expected="$realtime" ;;
       go/*) expected="$batch" ;;
@@ -136,6 +140,11 @@ ${realtime}"
       echo "ERROR: 「${expected}」の層に出典 ${src} が宣言されています（名前が無いのに出典がある）。" >&2
       fail=1
       continue
+    fi
+
+    if [ -z "$expected" ]; then
+      echo "ERROR: 出典 ${src} に対する期待名を決められませんでした。走査前提が崩れています。" >&2
+      exit 1
     fi
 
     checked=$((checked + 1))
@@ -164,6 +173,10 @@ while IFS= read -r row; do
 
   name="$(unquote "$(row_col "$row" 1)")"
   sources="$(row_col "$row" 4)"
+
+  # 逆方向の照合に使うため、宣言された事象名を集めておく。
+  event_names="${event_names}
+${name}"
 
   while IFS= read -r src; do
     [ -n "$src" ] || continue
@@ -209,12 +222,46 @@ done <<EOF
 $type_keys
 EOF
 
+# --- 3b: 逆方向（実装の事象名 → 正典） ---
+#
+# 正典は「名前の唯一の基準」である。実装が正典に無い事象名を出せてしまうと、その主張が
+# 前方に対して成立しない（後から足された名前が規約の外で増えていく）。
+# 抽出源は共有経路の呼び出しに限る。散文から拾うと誤検知が支配的になる。
+emitted_events=0
+call_sites="$(grep -rlE 'writeStructuredLog\(' "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
+  --include='*.ts' --include='*.tsx' \
+  --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
+  --exclude-dir=test --exclude-dir=e2e --exclude-dir=perf --exclude-dir=eval 2>/dev/null || true)"
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  used="$(grep -oE "writeStructuredLog\('[a-z]+', *'[a-zA-Z0-9_.-]+'" "$f" \
+    | sed -E "s/.*, *'//; s/'$//" | sort -u || true)"
+  while IFS= read -r ev; do
+    [ -n "$ev" ] || continue
+    emitted_events=$((emitted_events + 1))
+    if ! set_contains "$event_names" "$ev"; then
+      echo "ERROR: ${f#$ROOT/} が事象名「${ev}」を出しますが、正典に登録されていません。" >&2
+      echo "       → 先に ${CANON#$ROOT/} へ行を足してください（正典が先、実装が後）。" >&2
+      fail=1
+    fi
+  done <<INNER
+$used
+INNER
+done <<EOF
+$call_sites
+EOF
+
 # --- 4: 空振り防止 ---
 # 表の抽出はヘッダの完全一致に、型の抽出は宣言の書式に依存する。どちらも崩れると
 # **全件を取りこぼしても 0 件＝緑** になる。乖離を検出するのが目的である以上、
 # 取りこぼしを緑と報告してはならない。
 if [ "$checked" -eq 0 ]; then
   echo "ERROR: 正典から出典を 1 件も検証できませんでした。ガードが空振りしています。" >&2
+  exit 1
+fi
+if [ "$emitted_events" -eq 0 ]; then
+  echo "ERROR: 実装から事象名を 1 件も抽出できませんでした。ガードが空振りしています。" >&2
+  echo "       → writeStructuredLog の呼び出し形式が前提と異なります。" >&2
   exit 1
 fi
 if [ "$declared_count" -eq 0 ]; then
@@ -228,5 +275,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "OK: 正典と実装の照合ガード緑（出典 ${checked} 件 / 型の項目 ${declared_count} 件を両方向検証）。"
+echo "OK: 正典と実装の照合ガード緑（出典 ${checked} 件 / 型の項目 ${declared_count} 件 / 実装の事象名 ${emitted_events} 件を両方向検証）。"
 exit 0

@@ -162,3 +162,112 @@ fx_guard check-log-field-canon
 fx_run check-log-field-canon
 expect_red 'がありません'
 t_end
+
+# ---------------------------------------------------------------------------
+# 独立検証（2026-09-09）で「ガード本体へ変異を当てても落ちない」と指摘された分岐を固定する。
+# 事象名の表の検証は、ケースが常に整った 1 行しか持たなかったため丸ごと空いていた。
+
+t_begin 'check-log-field-canon: 事象名の表の列数不足を検出する'
+fx_guard check-log-field-canon
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | 受け皿 |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | 既存 |
+EOF
+fx_run check-log-field-canon
+expect_red '事象名の表に列数'
+t_end
+
+t_begin 'check-log-field-canon: 事象名の表の空欄を検出する'
+fx_guard check-log-field-canon
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | 受け皿 |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` |  | 既存 | `ts/apps/demo/src/log.ts` | 実行面が空 |
+EOF
+fx_run check-log-field-canon
+expect_red '事象名の表に空欄があります'
+t_end
+
+t_begin 'check-log-field-canon: 事象名の表の由来が 2 値でないと赤'
+fx_guard check-log-field-canon
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | 受け皿 |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | たぶん既存 | `ts/apps/demo/src/log.ts` | 由来が 2 値でない |
+EOF
+fx_run check-log-field-canon
+expect_red '「既存」か「新規」であるべきです'
+t_end
+
+t_begin 'check-log-field-canon: 事象名の表が空でも緑を返さない（空振り防止）'
+fx_guard check-log-field-canon
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | 受け皿 |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 | 追加列 |
+|---|---|---|---|---|---|
+| `demo.started` | demo | 既存 | `ts/apps/demo/src/log.ts` | | |
+EOF
+fx_run check-log-field-canon
+expect_red '事象名の表から 1 行も抽出できませんでした'
+t_end
+
+t_begin 'check-log-field-canon: 項目名の表の列数不足を検出する'
+fx_guard check-log-field-canon
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 相関識別子 | `correlationId` | 該当なし | 新規 |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | 既存 | `ts/apps/demo/src/log.ts` | |
+EOF
+fx_run check-log-field-canon
+expect_red '項目名の表に列数'
+t_end
