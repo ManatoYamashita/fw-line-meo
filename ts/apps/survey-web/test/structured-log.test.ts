@@ -8,7 +8,7 @@ import {
 } from '../src/lib/structured-log';
 
 describe('writeStructuredLog', () => {
-  it('event・errorKind・status だけを 1 行 JSON で出力する', () => {
+  it('重大度・event・errorKind・status だけを 1 行 JSON で出力する', () => {
     const output = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     writeStructuredLog('error', 'generation_failed', {
@@ -18,7 +18,7 @@ describe('writeStructuredLog', () => {
 
     expect(output).toHaveBeenCalledWith(
       JSON.stringify({
-        level: 'error',
+        severity: 'ERROR',
         event: 'generation_failed',
         errorKind: 'API_ERROR',
         status: 400,
@@ -46,7 +46,7 @@ describe('writeStructuredLog', () => {
 
     expect(output).toHaveBeenCalledWith(
       JSON.stringify({
-        level: 'error',
+        severity: 'ERROR',
         event: 'generation_failed',
         errorKind: 'API_ERROR',
         status: 400,
@@ -55,18 +55,18 @@ describe('writeStructuredLog', () => {
     output.mockRestore();
   });
 
-  it('fields 未指定なら level と event だけを出力する', () => {
+  it('fields 未指定なら重大度と event だけを出力する', () => {
     const output = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     writeStructuredLog('warn', 'tally_failed');
 
-    expect(output).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'tally_failed' }));
+    expect(output).toHaveBeenCalledWith(JSON.stringify({ severity: 'WARNING', event: 'tally_failed' }));
     output.mockRestore();
   });
 });
 
 // Issue #132・案B: 事後検証で作り直してもなお残った未選択観点の記録。
-// 下書き自体は客へ返すため「失敗」ではない（level は warn）。合意した残差が実運用で
+// 下書き自体は客へ返すため「失敗」ではない（重大度は警告）。合意した残差が実運用で
 // どう推移するかを後から集計できるようにするために残す。
 describe('logFactualityResidual', () => {
   it('観点の code だけを warn で出力する（本文・一言・プロンプトは載せない）', () => {
@@ -76,7 +76,7 @@ describe('logFactualityResidual', () => {
 
     expect(output).toHaveBeenCalledWith(
       JSON.stringify({
-        level: 'warn',
+        severity: 'WARNING',
         event: 'factuality_residual',
         violatedAspects: 'atmosphere,service',
       }),
@@ -104,7 +104,7 @@ describe('ファネルの構造化ログ', () => {
     logSurveyPageViewed(writeStructuredLog, 'store-1');
 
     expect(output).toHaveBeenCalledWith(
-      JSON.stringify({ level: 'info', event: 'survey_page_viewed', storeId: 'store-1' }),
+      JSON.stringify({ severity: 'INFO', event: 'survey_page_viewed', storeId: 'store-1' }),
     );
     output.mockRestore();
   });
@@ -115,7 +115,7 @@ describe('ファネルの構造化ログ', () => {
     logSurveyResponseSubmitted(writeStructuredLog, 'store-1');
 
     expect(output).toHaveBeenCalledWith(
-      JSON.stringify({ level: 'info', event: 'survey_response_submitted', storeId: 'store-1' }),
+      JSON.stringify({ severity: 'INFO', event: 'survey_response_submitted', storeId: 'store-1' }),
     );
     output.mockRestore();
   });
@@ -131,7 +131,7 @@ describe('ファネルの構造化ログ', () => {
     writeStructuredLog('info', 'survey_page_viewed', smuggled);
 
     expect(output).toHaveBeenCalledWith(
-      JSON.stringify({ level: 'info', event: 'survey_page_viewed', storeId: 'store-1' }),
+      JSON.stringify({ severity: 'INFO', event: 'survey_page_viewed', storeId: 'store-1' }),
     );
     output.mockRestore();
   });
