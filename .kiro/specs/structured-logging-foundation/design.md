@@ -277,30 +277,28 @@ graph TB
 ```typescript
 export type LogLevel = 'info' | 'warn' | 'error';
 
-/** 例外を記録するときの表現。本文は持たない（2.5）。 */
-export interface ErrorDescriptor {
-  /** 例外の種別。有限集合の識別子であり、自由文ではない。 */
-  readonly kind: string;
-  /** 外部呼び出しに由来する状態コード。 */
-  readonly status?: number;
-}
-
-/** 記録に載せてよい項目の全集合。 */
+/**
+ * 記録に載せてよい項目の全集合。**正典に載る項目をすべて持つ。**
+ *
+ * 例外は種別と状態コードを **平坦な 2 項目**として持ち、入れ子にしない（実装時に決着・2026-09-09）。
+ * 入れ子（`error.kind`）にすると出力鍵が変わり、既存 `survey-web` の出力形が崩れる。
+ * これらは 6.2 の制約下にある項目ではないため変更自体は可能だが、移送のリスクを最小にする方を採った。
+ */
 export interface LogFields {
   readonly storeId?: string;
-  readonly error?: ErrorDescriptor;
+  /** 例外の種別。有限集合の識別子であり、自由文ではない（2.5）。 */
+  readonly errorKind?: string;
+  /** 外部呼び出しに由来する状態コード。 */
+  readonly status?: number;
   readonly correlationId?: string;
   readonly lineRequestId?: string;
-  /** 実行面ごとの追加項目は、正典へ登録した上でここへ足す。 */
+  /** 実行面に固有の項目もここへ足す。正典への登録が先である。 */
 }
-
-/** 出力される鍵の集合。sink の取り出しと一致しなければ型エラーとなる（7.2）。 */
-export type EmittedField = 'storeId' | 'error' | 'correlationId' | 'lineRequestId';
 ```
 
 - Preconditions: なし
 - Postconditions: なし
-- Invariants: `LogFields` の鍵集合と `EmittedField` は一致する。表明が破れた時点で型検査が落ちる
+- Invariants: `LogFields` の鍵集合と、sink が実際に取り出す鍵の集合は一致する。表明が破れた時点で型検査が落ちる（表明の実体は `sink.ts` が持つ。名前付き型へ固定すると、引数の型を差し替えた瞬間に無言で無効化するため）
 
 **Implementation Notes**
 
