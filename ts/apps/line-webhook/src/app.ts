@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { LogFields } from '@fwlm/observability';
 import { createEventDispatcher, type InboundEvent } from './webhook/dispatch.js';
 import type { SignatureVerifier } from './webhook/signature.js';
 import type { ConversationHandlers } from './onboarding/conversation.js';
@@ -9,7 +10,8 @@ import { buildInternalErrorRetryMessage } from './line/messages.js';
 // オーナーの自由入力テキストや displayName は本境界では扱わない（渡していない）ため、
 // ここでの meta にそれらが混入する余地は構造的にない。
 export interface AppLogger {
-  error(message: string, meta?: Record<string, unknown>): void;
+  /** 事象名で識別する。正典 docs/observability/log-field-canon.md に登録済みのものを使う。 */
+  error(event: string, fields?: LogFields): void;
 }
 
 export interface AppDeps {
@@ -21,6 +23,14 @@ export interface AppDeps {
   // LineMessenger 全体ではなく reply のみを要求する（狭い契約 = 誤用の余地を減らす）。
   messenger: Pick<LineMessenger, 'reply'>;
   logger: AppLogger;
+}
+
+/**
+ * 例外の**種別**だけを取り出す。本文は記録しない（要件 2.5）。
+ * 自由文には接続情報・入力値が混ざりうるため、記録へ載せる経路を作らない。
+ */
+function errorKindOf(err: unknown): string {
+  return err instanceof Error ? err.constructor.name : 'UnknownError';
 }
 
 const SIGNATURE_HEADER = 'x-line-signature';
@@ -62,17 +72,17 @@ export function createApp(deps: AppDeps): Hono {
         try {
           await deps.conversationHandlers.handleEvent(event);
         } catch (err) {
-          deps.logger.error('line-webhook: internal error while dispatching webhook event', {
-            error: err instanceof Error ? err.message : String(err),
-            requestId,
+          deps.logger.error('line-webhook.dispatch_failed', {
+            errorKind: errorKindOf(err),
+            ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
           });
           try {
             await deps.messenger.reply(event.replyToken, [buildInternalErrorRetryMessage()]);
           } catch (replyErr) {
             // design.md「reply 失敗は structured log（X-Line-Request-Id 併記）に記録」。
-            deps.logger.error('line-webhook: retry-guidance reply attempt failed', {
-              error: replyErr instanceof Error ? replyErr.message : String(replyErr),
-              requestId,
+            deps.logger.error('line-webhook.retry_reply_failed', {
+              errorKind: errorKindOf(replyErr),
+              ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
             });
           }
         }
@@ -114,10 +124,11 @@ export function createApp(deps: AppDeps): Hono {
       // つまり 500 を返しても「redelivery による回復」という利益は得られず、
       // 得られるのは再配信の追加コスト（無意味な再送ループの原因になり得る）のみである。
       // よって本境界は常に 200 を返す（500 は選択しない）。
-      deps.logger.error(
-        'line-webhook: internal error occurred before any replyToken was known; retry-guidance reply not attempted',
-        { error: err instanceof Error ? err.message : String(err), requestId },
-      );
+      // replyToken が判明する前の失敗であり、再試行案内の返信は試みていない。
+      deps.logger.error('line-webhook.dispatch_failed', {
+        errorKind: errorKindOf(err),
+        ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
+      });
     }
 
     return c.json({ status: 'ok' }, 200);

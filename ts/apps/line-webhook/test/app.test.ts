@@ -197,9 +197,10 @@ describe('line-webhook app', () => {
         expect(messenger.reply).toHaveBeenCalledTimes(1);
         expect(messenger.reply).toHaveBeenCalledWith('reply-fail', [buildInternalErrorRetryMessage()]);
 
+        // 例外の本文は記録しない（要件 2.5）。種別で原因を切り分ける。
         expect(logger.error).toHaveBeenCalledWith(
-          'line-webhook: internal error while dispatching webhook event',
-          expect.objectContaining({ error: expect.stringContaining('boom') }),
+          'line-webhook.dispatch_failed',
+          expect.objectContaining({ errorKind: 'Error' }),
         );
       },
     );
@@ -220,7 +221,7 @@ describe('line-webhook app', () => {
       expect(conversationHandlers.handleEvent).not.toHaveBeenCalled();
       expect(messenger.reply).not.toHaveBeenCalled();
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('before any replyToken was known'),
+        'line-webhook.dispatch_failed',
         expect.any(Object),
       );
     });
@@ -244,8 +245,8 @@ describe('line-webhook app', () => {
       expect(res.status).toBe(200);
       expect(messenger.reply).toHaveBeenCalledTimes(1);
       expect(logger.error).toHaveBeenCalledWith(
-        'line-webhook: retry-guidance reply attempt failed',
-        expect.objectContaining({ error: expect.stringContaining('LINE reply API unavailable') }),
+        'line-webhook.retry_reply_failed',
+        expect.objectContaining({ errorKind: 'Error' }),
       );
     });
 
@@ -403,9 +404,10 @@ describe('line-webhook app', () => {
         body: followEventBody({ replyToken: 'reply-req-id' }),
       });
 
+      // 項目名は正典が定める lineRequestId（相関識別子と紛らわしいため改名した）。
       expect(logger.error).toHaveBeenCalledWith(
-        'line-webhook: internal error while dispatching webhook event',
-        expect.objectContaining({ requestId: 'req-abc-123' }),
+        'line-webhook.dispatch_failed',
+        expect.objectContaining({ lineRequestId: 'req-abc-123' }),
       );
     });
 

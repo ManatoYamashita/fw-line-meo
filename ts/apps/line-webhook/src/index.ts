@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { writeStructuredLog } from '@fwlm/observability';
 import {
   getPool,
   recordWebhookEventOnce as dbRecordWebhookEventOnce,
@@ -36,8 +37,8 @@ const lineMessenger = createLineMessenger({
   channelSecret: config.lineChannelSecret,
   fetch,
   logger: {
-    warn: (message, meta) => {
-      console.warn(message, meta ?? {});
+    warn: (event, fields) => {
+      writeStructuredLog('warn', event, fields);
     },
   },
 });
@@ -69,9 +70,9 @@ const deps: AppDeps = {
   conversationHandlers,
   messenger: lineMessenger,
   logger: {
-    // LINE はログを提供しないため自前で標準出力へ記録する。
-    error: (message, meta) => {
-      console.error(message, meta ?? {});
+    // LINE はログを提供しないため自前で記録する。出力は共有経路が担う。
+    error: (event, fields) => {
+      writeStructuredLog('error', event, fields);
     },
   },
 };
