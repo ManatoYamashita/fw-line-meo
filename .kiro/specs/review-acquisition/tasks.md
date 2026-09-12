@@ -70,7 +70,7 @@
   - _Depends: 3.1_
 
 - [x] 3.5 (P) プロンプト組立層を実装する
-  - systemInstruction（素材の事実のみ・誇張禁止・公序良俗・低評価は節度）と、自由記述をデリミタで隔離し指示として解釈させない構造を定義する
+  - systemInstruction（素材の事実のみ・誇張禁止・公序良俗・低評価は節度。この指示は Issue #221 のタスク 7.3 で「不満の事実を薄めない・誹謗中傷しない」へ改めた）と、自由記述をデリミタで隔離し指示として解釈させない構造を定義する
   - 文体・書き出し・切り口の候補からサーバーが変動要素を選び、試行間で語彙が変わるようにする
   - Observable: 生成入力に素材以外の事実が現れず、低評価分岐と変動要素の切替がユニットテストで確認できる
   - _Requirements: 3.1, 3.2, 3.3, 3.5_
@@ -181,6 +181,42 @@
   - _Requirements: 2.8_
   - _Boundary: test survey-web perf_
   - _Depends: 4.3, 4.4_
+
+- [ ] 7. 素材収集の両面化：気になった点を全員に尋ね、不満の事実を薄めない（Issue #221）
+- [x] 7.1 気になった点の匿名集計を追加する（`0008`）
+  - `survey_concern_tallies`（店舗×月×観点のカウンタ）を追加し、`survey_material_tallies` に `concern_count` を足して一意制約を張り替える
+  - `db/write-boundary.md`・`db/ERD.md`・`infra/sql/grants.sql`（ヘッダと GRANT 文）・`30_compliance.sql` の allowlist・assertions / smoke を同時に更新する
+  - Observable: `scripts/run-db-test-suites.sh` が緑、かつ allowlist から新表を外すと赤
+  - _Requirements: 5.2, 5.5, 5.6_
+  - _Boundary: db/migrations, db/test, db/ERD.md, db/write-boundary.md, infra/sql/grants.sql_
+
+- [x] 7.2 集計書込を気になった点へ広げる
+  - `incrementTallies` に `concernCodes` を足し、同一トランザクションで concern 行と `concern_count` を加算する（どちらも重複除去後の件数で、行の加算数と一致する）
+  - Observable: DB テストで両群の加算・同一回答内の重複・厚みの件数の一致が緑
+  - _Requirements: 5.2, 5.6_
+  - _Boundary: packages/db tallies_
+  - _Depends: 7.1_
+
+- [x] 7.3 入力検証・素材・プロンプトを両面化する
+  - `validate` が `concernCodes` を許可 code のみ受理し、ResponsesAPI が `concernLabels` を素材へ、`concernCodes` を集計へ渡す。未選択の観点は「どちらの群にも入っていないもの」とする
+  - PromptBuilder が素材に「気になった点」の行を出し、気になった点がある／星 1–2 のときは「不満の事実を薄めない・誹謗中傷しない」を指示する。旧「節度」の指示は出さない
+  - `concernLabels` を持たない旧 sessionToken でも再生成が壊れない
+  - Observable: validate・prompt・api-responses のユニットテストが緑
+  - _Requirements: 2.3, 2.4, 3.1, 3.2, 3.5_
+  - _Depends: 7.2_
+
+- [x] 7.4 回答フォームに気になった点を足す
+  - 良かった点と同じ観点・同じ見た目で「気になった点」を出し、星の値によって設問を出し分けない
+  - Observable: フォームのユニットテストと E2E（設問の見出しの集合と順序が星で変わらない・星 1 で気になった点を選んで送信し同一導線）が緑、a11y 監査が緑
+  - _Requirements: 2.2, 2.4, 2.11, 4.4_
+  - _Depends: 7.3_
+
+- [ ] 7.5 本番へ適用する
+  - `0008` → `grants.sql` を本番へ当ててからマージする。デプロイ後、実回答で concern 行と `concern_count` が加算されることを確かめる
+  - Observable: 本番の `survey_concern_tallies` に加算が現れる（本番識別子は先頭 8 文字まで書く）
+  - Issue #221 の完了条件 4（変更前後で口コミ獲得率がどう動いたかを読む手段）は Issue #137 の計測基盤に依存するため、本タスクでは閉じない。**追跡は #137**
+  - _Requirements: 5.2_
+  - _Depends: 7.4_
 
 ## Implementation Notes
 

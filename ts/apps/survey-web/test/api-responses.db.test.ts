@@ -69,12 +69,17 @@ async function ratingCount(star: number): Promise<number> {
   return res.rows[0]?.count ?? 0;
 }
 
-/** 素材の厚み（Issue #137 段階3）のカウンタを読む。 */
-async function materialCount(aspects: number, hasComment: boolean): Promise<number> {
+/**
+ * 素材の厚み（Issue #137 段階3）のカウンタを読む。`concerns` は気になった点の選択数（Issue #221）で、
+ * 既定の 0 は「気になった点を選ばなかった回答」。条件に含めないと、気になった点つきの行と
+ * 同じ条件に 2 行が当たり、先頭の 1 行だけを読むことになる。
+ */
+async function materialCount(aspects: number, hasComment: boolean, concerns = 0): Promise<number> {
   const pool = await getPool();
   const res = await pool.query<{ count: number }>(
-    'SELECT count FROM survey_material_tallies WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3',
-    [STORE, aspects, hasComment],
+    `SELECT count FROM survey_material_tallies
+     WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3 AND concern_count=$4`,
+    [STORE, aspects, hasComment, concerns],
   );
   return res.rows[0]?.count ?? 0;
 }
@@ -180,5 +185,36 @@ describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => 
     expect((await res2.json()).generation).toBe('ok');
     expect(await ratingCount(3)).toBe(1); // 二重加算なし
     expect(await materialCount(0, false)).toBe(1); // 厚みも二重加算されない
+  });
+
+  // Issue #221: 気になった点は、実経路で別表と厚みの concern_count へ加算される。
+  it('気になった点つきの回答は concern 行と concern_count へ加算され、良かった点は変えない', async () => {
+    const pool = await getPool();
+    const read = async (table: string, code: string): Promise<number> => {
+      const res = await pool.query<{ count: number }>(
+        `SELECT count FROM ${table} WHERE store_id=$1 AND aspect_code=$2`,
+        [STORE, code],
+      );
+      return res.rows[0]?.count ?? 0;
+    };
+    const serviceGoodBefore = await read('survey_aspect_tallies', 'service');
+    const bareBefore = await materialCount(0, false);
+    const pageToken = tokens.signPage(STORE);
+    const res = await handleResponses(
+      post('http://x/api/responses', {
+        pageToken,
+        storeId: STORE,
+        star: 1,
+        aspectCodes: [],
+        concernCodes: ['service'],
+      }),
+      responsesDeps(okGen()),
+    );
+    expect(res.status).toBe(200);
+    expect(await read('survey_concern_tallies', 'service')).toBe(1);
+    expect(await read('survey_aspect_tallies', 'service')).toBe(serviceGoodBefore);
+    expect(await materialCount(0, false, 1)).toBe(1);
+    // 気になった点を選んだ回答を「素材が薄い回答」に数えない
+    expect(await materialCount(0, false)).toBe(bareBefore);
   });
 });

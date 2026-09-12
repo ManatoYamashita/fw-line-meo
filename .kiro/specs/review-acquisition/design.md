@@ -27,19 +27,19 @@
 - **下書き生成パイプライン**: プロンプト（素材限定・変動注入）・安全設定・構造化出力・再試行・出力検証
 - **セッショントークン契約**（HMAC 署名・attempt/exp 封入）: 再生成上限のステートレス強制
 - **Google 投稿 URL 組立**（writereview 形式）: 単一モジュールに隔離
-- **tallies 3 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で追加）
+- **tallies 4 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で、`survey_concern_tallies` は `0008` で追加）
 - **QR 生成エンドポイント**（`ts/apps/dashboard-api` の種アプリ・Firebase ID トークン検証・RBAC）
 - **TS モノレポ基盤**（`ts/` pnpm workspace・`packages/db`・lint/test 規約）
 
 ### Out of Boundary
 - ダッシュボード UI・ログインフロー・セッション管理（Issue #5。本 spec の QR API は Bearer ID トークンを受けるだけ）
 - `stores.place_id` の充足・鮮度（オンボーディング／バッチ側。本 spec は毎回 DB から読むのみ）
-- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）のみで、既存表は変更しない
+- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）と、`survey_concern_tallies` および `survey_material_tallies.concern_count`（`0008`・Issue #221）のみで、4 階層側の表は変更しない
 - インフラ本体の構成変更（下記の最小追加を除き gcp-infra-foundation の所有。追加も同 spec の規約に従う）
 - 集計データの読み出し・可視化
 
 ### Allowed Dependencies
-- **four-tier-data-model**: `stores`/`owners`/`dashboard_users`/`survey_aspects` の読取、`survey_rating_tallies`/`survey_aspect_tallies`/`survey_material_tallies` への DML（grants.sql 付与済み・write-boundary.md 準拠）
+- **four-tier-data-model**: `stores`/`owners`/`dashboard_users`/`survey_aspects` の読取、`survey_rating_tallies`/`survey_aspect_tallies`/`survey_concern_tallies`/`survey_material_tallies` への DML（grants.sql 付与済み・write-boundary.md 準拠）
 - **gcp-infra-foundation**: Cloud Run `survey-web`/`dashboard-api`、IAM DB 認証、Secret Manager（`GEMINI_API_KEY` 既存）
 - **外部**: Gemini API（@google/genai・API キー）、Google writereview URL、Identity Platform（ID トークン検証）
 - **依存方向の制約**: `packages/db → apps/*`（apps が db を import。逆流禁止）。app 内は `lib → app/api → app/(pages)`。UI コンポーネントは DB・Gemini へ直接依存しない
@@ -53,7 +53,7 @@
 ## Architecture
 
 ### Existing Architecture Analysis
-- 書き込み境界: tallies 3 表は「TS リアルタイム応答層」書込（`db/write-boundary.md`）— 本設計はこの境界の**内側**で完結
+- 書き込み境界: tallies 4 表は「TS リアルタイム応答層」書込（`db/write-boundary.md`）— 本設計はこの境界の**内側**で完結
 - `stores.ck_place_confirmed`（confirmed ⇔ place_id 非 NULL）が QR 発行可否と投稿導線の前提条件を構造化済み
 - Cloud Run 3 サービス・IAM DB 認証（パスワードレス）・Secret 供給は稼働済み。本 spec はイメージの中身を提供する
 
@@ -199,20 +199,21 @@ sequenceDiagram
 | 1.3 | Place 未確定は拒否 | QrRoute | 409 応答 | — |
 | 1.4 | 認証・担当店限定 | AuthMw, dashboard-users.ts | Bearer ID トークン + RBAC | — |
 | 2.1 | ログイン等不要 | SurveyPage | 公開 URL | 回答フロー |
-| 2.2 | 3 問タップ中心 | SurveyForm | — | 回答フロー |
+| 2.2 | 4 問タップ中心（良かった点・気になった点を含む） | SurveyForm | — | 回答フロー |
 | 2.3 | 星のみ必須 | SurveyForm, validate.ts | POST /api/responses | 回答フロー |
-| 2.4 | 観点は定義済み選択肢 | aspects.ts, SurveyForm | seed 読取 | 回答フロー |
+| 2.4 | 良かった点・気になった点は同一の定義済み観点 | aspects.ts, SurveyForm, validate.ts | seed 読取・両群とも許可 code のみ受理 | 回答フロー |
 | 2.5 | 一言 200 字制限 | SurveyForm, validate.ts | 双方で検証 | — |
 | 2.6 | 星未入力は拒否 | SurveyForm, validate.ts | 400 応答 | — |
 | 2.7 | 無効 URL エラーページ | SurveyPage, stores.ts | notFound | 回答フロー |
 | 2.8 | 3 秒表示 | SurveyPage（SSR・JS 最小） | — | 性能節 |
 | 2.9 | 24h 再回答抑止 | answered-flag.ts, SurveyPage | localStorage | 回答フロー |
 | 2.10 | 個人特定手段なし | answered-flag.ts | — | セキュリティ節 |
-| 3.1 | 素材のみから生成 | ResponsesAPI, PromptBuilder | 生成入力契約 | 回答フロー |
+| 2.11 | 設問は評価で分岐しない | SurveyForm（評価分岐なし） | 星の選択前後で設問の集合と順序が不変（E2E で固定） | 回答フロー |
+| 3.1 | 素材のみから生成（星・良かった点・気になった点・一言） | ResponsesAPI, PromptBuilder | 生成入力契約 | 回答フロー |
 | 3.2 | 素材外の事実禁止 | PromptBuilder, DraftGenerator | systemInstruction＋出力検証 | — |
 | 3.3 | 語彙・構成の多様性 | PromptBuilder | 変動要素注入＋temperature | — |
 | 3.4 | 誇張・公序良俗禁止 | DraftGenerator | safetySettings＋指示 | — |
-| 3.5 | 低評価は節度 | PromptBuilder, DraftGenerator | 低評価用指示分岐 | — |
+| 3.5 | 不満の事実を薄めない・誹謗中傷しない | PromptBuilder | 気になった点あり／星 1–2 のときの指示 | — |
 | 3.6 | 生成中表示 | DraftPanel | ローディング状態 | 回答フロー |
 | 3.7 | 下書き編集可 | DraftPanel | 編集可能 textarea | — |
 | 3.8 | 再生成 3 回まで | SessionToken, DraftsAPI | attempt 封入・409 | 回答フロー |
@@ -226,18 +227,18 @@ sequenceDiagram
 | 4.7 | 由来の明示と推敲の促し | DraftPanel | 読み上げ領域の外の静的段落＋`aria-describedby` | — |
 | 5.1 | 個人情報非取得 | 全コンポーネント | 入力項目自体に PII なし | セキュリティ節 |
 | 5.2 | 月次集計のみ加算 | tallies.ts, ResponsesAPI, SessionToken（pageToken） | UPSERT 契約・pageToken 検証 | 回答フロー |
-| 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006` の列 allowlist | DDL に本文列を持たない・`30_compliance.sql` | 回答フロー |
+| 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006`/`0008` の列 allowlist | 良かった点の数・気になった点の数・一言の有無のみ。本文列を持たない・`30_compliance.sql` | 回答フロー |
 | 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log, guardrails のログベース指標 | sink の allowlist（storeId のみ）・指標の label は `store_id` のみ | Monitoring |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
-| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 3 表のみ（`0006` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
+| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 4 表のみ（`0006`・`0008` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |-----------|--------------|--------|--------------|------------------|-----------|
 | SurveyPage | survey-web UI | SSR 入口・分岐 | 2.1, 2.7, 2.8, 2.9 | packages/db (P0) | State |
-| SurveyForm | survey-web UI | 設問・検証・送信 | 2.2–2.6, 2.9, 2.10 | ResponsesAPI (P0) | State |
+| SurveyForm | survey-web UI | 設問・検証・送信 | 2.2–2.6, 2.9–2.11 | ResponsesAPI (P0) | State |
 | DraftPanel | survey-web UI | 下書き操作・投稿導線 | 3.6, 3.7, 4.1, 4.2, 4.4, 4.6, 4.7 | DraftsAPI (P1) | State |
 | ResponsesAPI | survey-web API | 回答受付・集計∥生成 | 2.3, 2.5, 3.1, 5.2–5.4 | DraftGenerator (P0), tallies (P0) | API |
 | DraftsAPI | survey-web API | 再生成 | 3.8, 3.9 | SessionToken (P0), DraftGenerator (P0) | API |
@@ -269,7 +270,7 @@ sequenceDiagram
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
-| POST | /api/responses | `{ pageToken: string, storeId: uuid, star: 1..5, aspectCodes: string[], comment?: string }` | `200 { generation: 'ok'\|'failed', draft: string\|null, sessionToken, regenerationsLeft: 3 }` | 400 VALIDATION / PAGE_TOKEN_INVALID（画面再読込を案内）, 404 STORE_NOT_AVAILABLE, 429 RATE_LIMITED |
+| POST | /api/responses | `{ pageToken: string, storeId: uuid, star: 1..5, aspectCodes: string[], concernCodes?: string[], comment?: string }` | `200 { generation: 'ok'\|'failed', draft: string\|null, sessionToken, regenerationsLeft: 3 }` | 400 VALIDATION / PAGE_TOKEN_INVALID（画面再読込を案内）, 404 STORE_NOT_AVAILABLE, 429 RATE_LIMITED |
 
 - Preconditions: store が存在し `place_status = 'confirmed'`・pageToken（SSR 発行・5 分・HMAC）が有効
 - Postconditions: **sessionToken は生成の成否に関わらず必ず発行**（tallies 加算後）。tallies は高々 1 回加算（失敗許容）・draft は出力検証済み（generation=ok 時）
@@ -304,7 +305,8 @@ sequenceDiagram
 interface DraftMaterial {
   storeName: string;
   star: 1 | 2 | 3 | 4 | 5;
-  aspectLabels: string[];   // 選択済み観点の label（seed 由来）
+  aspectLabels: string[];   // 選択済みの良かった点の label（seed 由来）
+  concernLabels?: string[]; // 選択済みの気になった点の label（Issue #221。旧 sessionToken には無いので省略可能）
   comment?: string;         // ≤200 字・デリミタ内でのみ使用
 }
 type DraftError =
@@ -320,7 +322,7 @@ interface DraftGenerator {
 - 出力検証: 非空・400 字以内・JSON スキーマ準拠。違反は `INVALID_OUTPUT`（クライアントは再試行可能）
 
 #### PromptBuilder
-- systemInstruction: 「素材に含まれる事実のみ・誇張禁止・公序良俗・低評価時は節度（星 1–2 で表現トーン指示を分岐）・日本語 100〜200 字」
+- systemInstruction: 「素材に含まれる事実のみ・誇張禁止・公序良俗・気になった点がある／星 1–2 のときは不満の事実を薄めず、誹謗中傷・人格攻撃・過剰な悪口を書かない・日本語 100〜200 字」（Issue #221 で旧「低評価時は節度」を改めた。トーンを製品側で下げる指示は、否定的な事実を薄める方向にも効くため）
 - 素材はデリミタで隔離し、自由記述を指示として解釈しない旨を明示（プロンプトインジェクション緩和）
 - VariationSeed: 文体・書き出し・切り口の候補リストからサーバーがランダム選択（3.3 の実務担保。research.md 参照）
 
@@ -357,12 +359,12 @@ interface SessionTokenService {
 | Requirements | 5.2, 5.4, 5.5 |
 
 ```typescript
-interface TallyInput { storeId: string; star: 1|2|3|4|5; aspectCodes: string[]; hasComment: boolean }
+interface TallyInput { storeId: string; star: 1|2|3|4|5; aspectCodes: string[]; concernCodes: string[]; hasComment: boolean }
 incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び手がログのみ）
 ```
-- 単一 TX: `survey_rating_tallies` 1 行 + `survey_aspect_tallies` N 行 + `survey_material_tallies` 1 行を `ON CONFLICT ... DO UPDATE SET count = count + 1`
+- 単一 TX: `survey_rating_tallies` 1 行 + `survey_aspect_tallies` N 行 + `survey_concern_tallies` M 行 + `survey_material_tallies` 1 行を `ON CONFLICT ... DO UPDATE SET count = count + 1`
 - **厚みを別 TX にしない**: 部分成功すると `sum(material.count)` と `sum(rating.count)` が恒久的にずれ、「観点ゼロの回答が何割か」の母数が信用できなくなる（5.6）
-- `aspect_count` は重複除去後の件数（aspect 行の加算数と必ず一致）、`hasComment` は素材へ渡す `comment` と**同じ値**から導く
+- `aspect_count` は重複除去後の件数（aspect 行の加算数と必ず一致）、`concern_count` も同様（concern 行の加算数と必ず一致）、`hasComment` は素材へ渡す `comment` と**同じ値**から導く
 - `period_month = date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo')::date`（JST 月境界を SQL 側で確定）
 - 既存 UNIQUE 制約（store_id, period_month, star/aspect_code）に整合。aspect code は seed 由来のみ（FK が構造強制）
 
@@ -392,14 +394,16 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 
 ## Data Models
 
-**スキーマ追加は 1 表のみ**（`survey_material_tallies`・`0006`・Issue #137 段階3）。既存表は変更しない。
+**スキーマ追加は 2 表と 1 列**（`survey_material_tallies`・`0006`・Issue #137 段階3／`survey_concern_tallies` と `survey_material_tallies.concern_count`・`0008`・Issue #221）。4 階層側の表は変更しない。
+
+`0008` は `survey_material_tallies` の一意制約を `(store_id, period_month, aspect_count, concern_count, has_comment)` へ張り替える。**旧コードの UPSERT は旧制約の列を名指ししているため、適用からデプロイ完了までの間は集計の加算が失敗する**（客の体験は 5.4 で守られる）。本番は `0008` → `grants.sql` → マージの順で、適用はマージ直前に行う。
 
 - **読取**: `stores`（存在・place 確定・名前）、`owners`（agency 連鎖）、`dashboard_users`（RBAC）、`survey_aspects`（選択肢 SoT）
-- **書込**: `survey_rating_tallies` / `survey_aspect_tallies` / `survey_material_tallies` のみ（TS 層書込境界の内側）
+- **書込**: `survey_rating_tallies` / `survey_aspect_tallies` / `survey_concern_tallies` / `survey_material_tallies` のみ（TS 層書込境界の内側）
 - **不変条件（本 spec が追加する運用semantics）**:
   - period_month は **JST** 月初日（four-tier の UNIQUE/CHECK 制約に整合）
-  - 1 回答 = rating 1 加算 + 選択 aspect ごとに 1 加算 + 厚み 1 加算。再生成・コピー・遷移は集計に影響しない
-  - 厚みが持つのは「選択数（0 以上・上限なし）」と「一言の有無」だけ。本文を持つ列は存在しない（5.6）
+  - 1 回答 = rating 1 加算 + 選択した良かった点ごとに 1 加算 + 選択した気になった点ごとに 1 加算 + 厚み 1 加算。再生成・コピー・遷移は集計に影響しない
+  - 厚みが持つのは「良かった点の選択数」「気になった点の選択数」（いずれも 0 以上・上限なし）と「一言の有無」だけ。本文を持つ列は存在しない（5.6）
   - 自由記述・個別回答はいかなるテーブル・ログにも書かない
 
 ### Data Contracts & Integration
@@ -427,8 +431,8 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 
 ### Unit Tests（vitest）
 1. `session-token`: sign→verify 往復・改ざん検知・exp 失効・attempt 上限（3.8）・kind 相互流用拒否（pageToken を sessionToken として使えない）
-2. `validate`: 星必須（2.3/2.6）・aspects 不正 code 拒否（2.4）・200 字境界（2.5）
-3. `prompt`: 素材のみが本文に含まれる・デリミタ隔離・低評価トーン分岐（3.1/3.2/3.5）・変動要素が試行間で変化（3.3）
+2. `validate`: 星必須（2.3/2.6）・良かった点／気になった点の不正 code 拒否（2.4）・200 字境界（2.5）
+3. `prompt`: 素材のみが本文に含まれる（気になった点の行を含む）・デリミタ隔離・気になった点あり／低評価時に「不満の事実を薄めない」指示が出て、旧「節度」の指示が出ない（3.1/3.2/3.5）・変動要素が試行間で変化（3.3）
 4. `draft/generator`: safetySettings 4 カテゴリが必ず付与される（3.4・設定漏れ検知）・出力検証（非空/長さ/スキーマ）
 5. `google-review-url`: placeid エンコード（4.3）
 6. `tallies` の period_month SQL: JST 月境界（月末 23:59 JST vs UTC ずれ）で正しい月に加算（5.2）
@@ -445,6 +449,8 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 ### E2E/UI Tests（Playwright・Gemini モック・最重要ユーザーフロー）
 1. QR URL → 回答（星のみ）→ 下書き表示 → 編集 → コピー → writereview URL 遷移リンク検証（Issue #3 完了条件の機械化）
 2. 低評価（星 1）でも同一導線が表示される（4.4・ゲーティング不在の証明）
+2b. 星の選択前・星 1・星 5 のいずれでも、設問の見出しの集合と順序が同一（2.11・素材の集め方が評価で分岐しないことの証明）
+2c. 星 1 で気になった点を選んで送信でき、下書きと同一の投稿導線が表示される（2.2・3.1・4.4）
 3. 回答完了 → 再訪 → 回答済み画面＋投稿導線（2.9）
 4. 生成失敗モックで再試行 UI と投稿導線維持（3.9）
 
