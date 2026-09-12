@@ -10,7 +10,7 @@
 
 ### ドキュメント（一次情報源）
 **Location**: リポジトリ直下 / `docs/`
-**Purpose**: 全設計判断の根拠。`requirements.md`（要件定義 v1.0・章番号で参照）、`docs/proposal.md`（クライアント合意用・機能A/B/C = 機能3/1/2）、`README.md`（技術スタック要約）、`docs/architecture.md`（サービス構成とフローの俯瞰）、`docs/design/`（意匠。写像版が `design-language.md`、原典の逐語コピーが `upstream/`）。
+**Purpose**: 全設計判断の根拠。`requirements.md`（要件定義・章番号で参照。版と改訂履歴は同書の冒頭）、`docs/proposal.md`（クライアント合意用・機能A/B/C = 機能3/1/2）、`README.md`（技術スタック要約）、`docs/architecture.md`（サービス構成とフローの俯瞰）、`docs/design/`（意匠。写像版が `design-language.md`、原典の逐語コピーが `upstream/`）。
 
 ### Kiro 仕様駆動開発
 **Location**: `.kiro/`

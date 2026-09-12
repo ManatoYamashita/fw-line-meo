@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジション把握・Google クチコミ獲得促進・（将来）GBP 投稿を完結できるサービス。
 
 現状は **要件定義・提案フェーズ完了直後／実装コード未着手** のリポジトリ。一次情報源は以下:
-- `requirements.md` — 要件定義書 v1.0（全設計判断の根拠。章番号で参照される）
+- `requirements.md` — 要件定義書（全設計判断の根拠。章番号で参照される。版と改訂履歴は同書の冒頭にだけ持つ）
 - `docs/proposal.md` — クライアント合意用の提案書（機能A/B/C = 機能3/1/2 の対応に注意）
 - `README.md` — 技術スタック要約
 

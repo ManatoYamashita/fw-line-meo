@@ -40,7 +40,7 @@ ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジショ�
 - **GBP OAuth は第2フェーズ**: 審査リスクが高く MVP の生死を賭けない。
 
 ---
-_一次情報源: `requirements.md`（v1.0）／`docs/proposal.md`（機能A/B/C = 機能3/1/2）／`README.md`_
+_一次情報源: `requirements.md`（版と改訂履歴は同書の冒頭）／`docs/proposal.md`（機能A/B/C = 機能3/1/2）／`README.md`_
 _Focus on patterns and purpose, not exhaustive feature lists_
 _created_at: 2026-06-28_
 _updated_at: 2026-09-06（#179: 下書きが客ごとに異なる理由を実装どおりの記述へ改め、文面介入の禁止と一次情報による判断を制約へ明文化した。是正前の記述と経緯は Issue 179 と該当 PR にある）_
