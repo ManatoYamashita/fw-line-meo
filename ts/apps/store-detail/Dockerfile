@@ -13,6 +13,7 @@ RUN corepack enable
 FROM base AS deps
 WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/observability/package.json packages/observability/
 COPY packages/db/package.json packages/db/
 COPY packages/design-tokens/package.json packages/design-tokens/
 COPY packages/e2e-support/package.json packages/e2e-support/
@@ -34,6 +35,7 @@ COPY . .
 ARG NEXT_PUBLIC_LIFF_ID
 ENV NEXT_PUBLIC_LIFF_ID=$NEXT_PUBLIC_LIFF_ID
 RUN pnpm -C packages/db run build
+RUN pnpm -C packages/observability run build
 RUN pnpm -C apps/store-detail run build
 
 # --- 実行（standalone 最小成果物のみ） ---

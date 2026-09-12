@@ -189,6 +189,8 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       identification,
       messenger: deps.messenger,
       now: () => new Date(),
+      // 補助的処理の成否の記録。内容の検証は conversation.test.ts が担う。
+      logger: { info: vi.fn(), warn: vi.fn() },
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
       liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
     });

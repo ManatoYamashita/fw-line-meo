@@ -25,6 +25,7 @@ import {
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
 } from '@fwlm/db';
+import { writeStructuredLog } from '@fwlm/observability';
 import {
   createPlacesSearchAdapter,
   createStoreIdentificationService,
@@ -81,7 +82,7 @@ async function registerStore(input: RegisterStoreInput): Promise<ConfirmOutcome>
       await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
     } catch {
       // category 設定は非クリティカル（登録本体は既に成立済み）。PII・クエリは出さない。
-      console.error('registerStore: category follow-up update failed', {
+      writeStructuredLog('error', 'dashboard-api.category_followup_failed', {
         storeId: outcome.storeId,
       });
     }
@@ -99,7 +100,8 @@ async function issueCode(agencyId: string) {
       create: async (code) => createInviteCode(await getPool(), { agencyId, code }),
     });
   } catch (err) {
-    console.error('issueCode: failed to issue invite code (retry exhausted or db error)');
+    // 識別子が無いと、どの代理店の操作が失敗したのか記録から判定できない。
+    writeStructuredLog('error', 'dashboard-api.invite_code_issue_failed', { agencyId });
     throw err;
   }
 }

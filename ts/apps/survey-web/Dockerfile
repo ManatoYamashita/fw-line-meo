@@ -14,12 +14,13 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/design-tokens/package.json packages/design-tokens/
+COPY packages/observability/package.json packages/observability/
 COPY packages/e2e-support/package.json packages/e2e-support/
 COPY packages/ui/package.json packages/ui/
 COPY apps/survey-web/package.json apps/survey-web/
 RUN pnpm install --frozen-lockfile
 
-# --- ビルド（@fwlm/db を tsc、survey-web を next build standalone） ---
+# --- ビルド（@fwlm/db と @fwlm/observability を tsc、survey-web を next build standalone） ---
 FROM base AS build
 WORKDIR /repo
 # deps ステージ全体をコピー（pnpm はパッケージ単位で node_modules を持つため、
@@ -28,6 +29,7 @@ WORKDIR /repo
 COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
+RUN pnpm -C packages/observability run build
 RUN pnpm -C apps/survey-web run build
 
 # --- 実行（standalone 最小成果物のみ） ---

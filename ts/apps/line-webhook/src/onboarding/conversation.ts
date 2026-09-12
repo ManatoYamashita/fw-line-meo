@@ -1,4 +1,5 @@
 import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
+import type { LogFields } from '@fwlm/observability';
 import type { InboundEvent } from '../webhook/dispatch.js';
 import type { LineMessage, LineMessenger } from '../line/client.js';
 import type {
@@ -58,6 +59,19 @@ export interface InviteCodesAccessor {
   findActiveInviteCode(db: Queryable, code: string): Promise<{ agencyId: string } | null>;
 }
 
+/**
+ * 例外の**種別**だけを取り出す。本文は記録しない（要件 2.5）。
+ */
+function errorKindOf(err: unknown): string {
+  return err instanceof Error ? err.constructor.name : 'UnknownError';
+}
+
+/** 補助的処理の成否を記録する契約。事象名で識別する。 */
+export interface ConversationLogger {
+  info(event: string, fields?: LogFields): void;
+  warn(event: string, fields?: LogFields): void;
+}
+
 export interface ConversationDeps {
   db: Queryable;
   pool: ConnectablePool;
@@ -67,6 +81,11 @@ export interface ConversationDeps {
   // 店名検索・店舗確定（タスク 3.1 で構築済み・会話非依存のサービス）。
   identification: StoreIdentificationService;
   messenger: LineMessenger;
+  /**
+   * 補助的処理の成否を記録する（Issue #228 タスク 4）。事象名は正典が定めるものを使う。
+   * 記録できないことを理由に業務処理の振る舞いを変えない。
+   */
+  logger: ConversationLogger;
   // 現在時刻を注入する（ロック判定・ロック設定の両方でテスト可能性のため `new Date()` を直接使わない）。
   now(): Date;
   // Req 6.3: 店舗特定完了時に切り替える「完了後」リッチメニューの ID。
@@ -431,12 +450,32 @@ async function handleConfirm(
   // 巻き戻すべきトランザクションは存在せず、また reply は既に送信済みのため、
   // handleEvent 全体を失敗させることなく握りつぶす
   // （design.md「LineMessenger」の reply 失敗時の扱いと同じ「例外にしない」方針）。
-  // ConversationDeps には専用ロガーが注入されていないため、ここでは記録しない
-  // （将来ロガーが追加された場合はここに warn を追加すること）。
+  // **成功も失敗も記録する**（Issue #228 タスク 4）。失敗だけを記録すると「記録が無い」が
+  // 成功と未実行のどちらを意味するか判定できず、Issue 151 と同型の無音になる。DB の行は成否の
+  // 証拠にならない（infra/README.md が「実際に切り替わったか」を意味しないと記録している）。
+  //
+  // **記録は業務処理の外側で行う。** 同じ try の中へ入れると、記録の手段が投げたときに
+  // catch が走り、**成功した切り替えに対して失敗が記録される**（成功事象を足した理由が
+  // 自壊する）。さらに記録が catch の中で投げれば handleEvent を抜け、オーナーへ不要な
+  // 再試行案内が出る（要件 3.3 違反）。成否を先に確定させ、記録は別の try で包む。
+  let linked = false;
+  let linkError: unknown;
   try {
     await deps.messenger.linkRichMenu(event.lineUserId, deps.lineRichMenuCompletedId);
+    linked = true;
+  } catch (err) {
+    // 業務処理は継続する（巻き戻すトランザクションは無く、reply も送信済み）。
+    linkError = err;
+  }
+
+  try {
+    if (linked) {
+      deps.logger.info('line-webhook.richmenu_linked');
+    } else {
+      deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(linkError) });
+    }
   } catch {
-    // 意図的に無視する（上記コメント参照）。
+    // 記録できないことを理由に、利用者に見える振る舞いを変えない（要件 3.2 / 3.3）。
   }
 }
 

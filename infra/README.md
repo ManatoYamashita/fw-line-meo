@@ -484,9 +484,11 @@ make tf-apply   # line-webhook の新リビジョンが立つ
 - **`client` / `client_version` の in-place 更新が 7 件出るのは既存ドリフト**であり自分の差分では
   ない（デプロイパイプラインが刻み、tf 側は宣言していないため毎回出る）。切り分けは resource 名
   ではなく attribute まで下りて見ること。
-- **この段を飛ばすと無音で壊れる。** `ts/apps/line-webhook/src/onboarding/conversation.ts` の
-  `linkRichMenu` は失敗を空の `catch` で握りつぶし、ログも残さない。旧 ID のままだと完了済み
-  オーナーへのリンクが失敗し続けるが、警告はどこにも出ない。
+- **この段を飛ばすと完了済みオーナーへのリンクが失敗し続ける。** 旧 ID のままだと
+  `ts/apps/line-webhook/src/onboarding/conversation.ts` の `linkRichMenu` が失敗する。
+  失敗は握り潰して業務処理を継続する設計のままだが、**Issue #228 以降は記録が残る**
+  （`line-webhook.richmenu_link_failed`）。成功時も `line-webhook.richmenu_linked` が出るため、
+  「記録が無い」が成功と未実行のどちらかを判別できる。
 
 ### 10-3. 段 3: 完了済みオーナーの個別リンクを張り替える
 
@@ -567,9 +569,10 @@ CFG
 
 **この数値は 2026-09-06 時点のものである。** オーナーが増えた後に差し替えるなら、この節を鵜呑みに
 せず件数を引き直すこと（§3 の Auth Proxy 経由で `SELECT onboarding_status, count(*) FROM owners
-GROUP BY 1`）。なお `linkRichMenu` は失敗をログに残さないため、DB の件数は「実際に完了メニューへ
-繋がっている人数」の上限でしかない。LINE 側の実状は `GET /v2/bot/user/{userId}/richmenu` でしか
-読めない。
+GROUP BY 1`）。なお DB の件数は「実際に完了メニューへ繋がっている人数」の上限である（切り替えの成否は
+owners の状態遷移と独立に決まるため）。**Issue #228 以降、切り替えの成否は記録から読める**
+（`line-webhook.richmenu_linked` / `line-webhook.richmenu_link_failed` の件数）。
+個々のオーナーの実状を確かめるなら `GET /v2/bot/user/{userId}/richmenu` を使う。
 
 ---
 

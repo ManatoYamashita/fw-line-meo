@@ -232,6 +232,7 @@ function buildDeps(overrides: {
   identificationFake: ReturnType<typeof createFakeIdentificationService>;
   messenger: ReturnType<typeof createFakeMessenger>;
   poolFake: ReturnType<typeof createFakePool>;
+  logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
 } {
   const sessionsFake = createFakeSessionsAccessor(overrides.session);
   const ownersFake = createFakeOwnersAccessor(overrides.existingOwner ?? null);
@@ -241,6 +242,8 @@ function buildDeps(overrides: {
     confirmOutcome: overrides.confirmOutcome,
   });
   const messenger = overrides.messenger ?? createFakeMessenger();
+  // 補助的処理の成否を記録する手段。テストから呼ばれた事象名を検証できるようにする。
+  const logger = { info: vi.fn(), warn: vi.fn() };
   const poolFake = createFakePool();
   const db: Queryable = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) } as unknown as Queryable;
 
@@ -253,11 +256,12 @@ function buildDeps(overrides: {
     identification: identificationFake.service,
     messenger,
     now: () => overrides.now ?? FIXED_NOW,
+    logger,
     lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
     liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
   };
 
-  return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake };
+  return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake, logger };
 }
 
 describe('createConversationHandlers', () => {
@@ -726,6 +730,100 @@ describe('createConversationHandlers', () => {
   });
 
   describe('確定・取りやめの postback（confirm/restart・Req 4.2, 4.4, 4.5）', () => {
+    // Issue #228 タスク 4: 補助的処理（リッチメニューの切り替え）は握り潰す設計のままだが、
+    // **成功も失敗も記録する**。失敗だけを記録すると「記録が無い」が成功と未実行のどちらを
+    // 意味するか判定できず、#151 と同型の無音になる。
+    it('リッチメニューの切り替えが成功したら、その事実を記録する', async () => {
+      const { deps, logger } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+      });
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-linked',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(logger.info).toHaveBeenCalledWith('line-webhook.richmenu_linked');
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('記録の手段が投げても、成功した切り替えを失敗として記録しない', async () => {
+      // 記録を業務処理と同じ try の中へ置くと、記録が投げたときに catch が走り、
+      // **成功した切り替えに対して失敗が記録される**。成功事象を足した理由が自壊する。
+      const { deps, logger } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+      });
+      logger.info = vi.fn(() => {
+        throw new Error('log sink unavailable');
+      });
+      const handlers = createConversationHandlers(deps);
+
+      // 記録できないことを理由に利用者へ見える振る舞いを変えない（要件 3.2 / 3.3）。
+      await expect(
+        handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-log-throws',
+          data: encodePostback({ kind: 'confirm' }),
+        }),
+      ).resolves.toBeUndefined();
+
+      // 切り替えは成功しているので、失敗として記録してはならない。
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('リッチメニューの切り替えが失敗しても業務処理は完了し、失敗を記録する', async () => {
+      const messenger = createFakeMessenger();
+      messenger.linkRichMenu = vi.fn(async () => {
+        throw new Error('LINE richmenu API unavailable');
+      });
+      const { deps, logger, sessionsFake } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+        messenger,
+      });
+      const handlers = createConversationHandlers(deps);
+
+      // 例外は握り潰され、業務処理は最後まで進む。
+      await expect(
+        handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-link-failed',
+          data: encodePostback({ kind: 'confirm' }),
+        }),
+      ).resolves.toBeUndefined();
+
+      // 完了への状態遷移は済んでいる（記録の有無で振る舞いを変えない）。
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+
+      // 例外の本文は載せず、種別だけを記録する（要件 2.5）。
+      expect(logger.warn).toHaveBeenCalledWith('line-webhook.richmenu_link_failed', {
+        errorKind: 'Error',
+      });
+      expect(logger.info).not.toHaveBeenCalledWith('line-webhook.richmenu_linked');
+    });
+
     it('確定 → confirmStore が session 由来の ownerId・candidate で呼ばれ、完了 reply・stage は completed（Req 4.2）', async () => {
       const candidates = storeCandidates(3);
       const session = baseSession({

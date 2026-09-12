@@ -8,6 +8,8 @@
 // 実行時発行する（research.md「Decision 2」）。事前発行された長期チャネルアクセストークン
 // （Secret Manager 管理）はここでは意図的に未配線（Console 運用・将来用に温存）。
 
+import type { LogFields } from '@fwlm/observability';
+
 // LINE メッセージオブジェクトの wire 形状（references/message-objects.md 準拠）。
 // 本タスクでは reply() の輸送に必要な最小限の variant のみを定義する。
 // 具体的な文言・Flex コンテンツの組み立ては別タスク（MessageBuilders）が担う。
@@ -22,7 +24,8 @@ export interface LineMessenger {
 }
 
 export interface LineMessengerLogger {
-  warn(message: string, meta?: Record<string, unknown>): void;
+  /** 事象名で識別する。正典 docs/observability/log-field-canon.md に登録済みのものを使う。 */
+  warn(event: string, fields?: LogFields): void;
 }
 
 export interface LineMessengerDeps {
@@ -113,7 +116,7 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
       if (!response.ok) {
         // Invalid reply token（400）等。再配信側で救済されるため、呼び出し元の会話フローを
         // 例外で中断させずログのみに留める。
-        deps.logger.warn('line reply failed', { status: response.status });
+        deps.logger.warn('line-webhook.reply_failed', { status: response.status });
       }
     },
 

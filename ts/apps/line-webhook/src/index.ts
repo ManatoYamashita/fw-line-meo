@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { writeStructuredLog } from '@fwlm/observability';
 import {
   getPool,
   recordWebhookEventOnce as dbRecordWebhookEventOnce,
@@ -15,7 +16,6 @@ import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
-import { writeStructuredLog } from './lib/structured-log.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -37,8 +37,8 @@ const lineMessenger = createLineMessenger({
   channelSecret: config.lineChannelSecret,
   fetch,
   logger: {
-    warn: (message, meta) => {
-      console.warn(message, meta ?? {});
+    warn: (event, fields) => {
+      writeStructuredLog('warn', event, fields);
     },
   },
 });
@@ -57,6 +57,15 @@ const conversationHandlers = createConversationHandlers({
   identification: storeIdentificationService,
   messenger: lineMessenger,
   now: () => new Date(),
+  // 補助的処理の成否を記録する。注入の口は合成ルートにある（Issue #228 タスク 4）。
+  logger: {
+    info: (event, fields) => {
+      writeStructuredLog('info', event, fields);
+    },
+    warn: (event, fields) => {
+      writeStructuredLog('warn', event, fields);
+    },
+  },
   lineRichMenuCompletedId: config.lineRichMenuCompletedId,
   liffStoreDetailUrl: config.liffStoreDetailUrl,
 });
@@ -70,9 +79,9 @@ const deps: AppDeps = {
   conversationHandlers,
   messenger: lineMessenger,
   logger: {
-    // LINE はログを提供しないため自前で標準出力へ記録する。
-    error: (message, meta) => {
-      console.error(message, meta ?? {});
+    // LINE はログを提供しないため自前で記録する。出力は共有経路が担う。
+    error: (event, fields) => {
+      writeStructuredLog('error', event, fields);
     },
   },
   // Issue #230: ログベース指標が読む 1 行 JSON の出力先。allowlist sink なので、
