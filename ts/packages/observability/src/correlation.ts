@@ -15,7 +15,7 @@ export function correlationIdFromTraceId(traceId: string | undefined, projectId:
   return `${TRACE_PREFIX}${projectId}/traces/${traceId.toLowerCase()}`;
 }
 
-export function traceIdFromHeaders(headers: Headers): string | undefined {
+export function traceIdFromHeaders(headers: Pick<Headers, 'get'>): string | undefined {
   const cloudTrace = headers.get('x-cloud-trace-context');
   const cloudMatch = cloudTrace ? CLOUD_TRACE_CONTEXT_RE.exec(cloudTrace.trim()) : null;
   if (cloudMatch) return cloudMatch[1]!.toLowerCase();
@@ -26,7 +26,7 @@ export function traceIdFromHeaders(headers: Headers): string | undefined {
 }
 
 export function correlationIdFromHeaders(
-  headers: Headers,
+  headers: Pick<Headers, 'get'>,
   projectId = projectIdFromEnv(),
 ): string | undefined {
   return correlationIdFromTraceId(traceIdFromHeaders(headers), projectId);

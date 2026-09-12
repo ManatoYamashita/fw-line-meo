@@ -68,6 +68,17 @@ export function createApp(deps: AppDeps): Hono {
     const requestLogger: AppLogger = correlationId
       ? { error: (event, fields) => requestLog('error', event, fields) }
       : deps.logger;
+    const conversationLogger: ConversationLogger | undefined =
+      deps.conversationHandlers.handleEvent.length >= 2
+        ? {
+            info: (eventName, fields) => requestLog('info', eventName, fields),
+            warn: (eventName, fields) => requestLog('warn', eventName, fields),
+          }
+        : undefined;
+    const lineLogger: LineMessengerLogger | undefined =
+      deps.conversationHandlers.handleEvent.length >= 3
+        ? { warn: (eventName, fields) => requestLog('warn', eventName, fields) }
+        : undefined;
 
     // dispatch() へ渡す onEvent は ConversationHandlers.handleEvent をそのまま渡すのではなく、
     // イベント単位でエラー境界を完結させる薄いラッパーにする。
@@ -89,21 +100,10 @@ export function createApp(deps: AppDeps): Hono {
       recordWebhookEventOnce: deps.recordWebhookEventOnce,
       onEvent: async (event: InboundEvent) => {
         try {
-          if (deps.conversationHandlers.handleEvent.length >= 2) {
-            const conversationLogger: ConversationLogger = {
-              info: (eventName, fields) => requestLog('info', eventName, fields),
-              warn: (eventName, fields) => requestLog('warn', eventName, fields),
-            };
-            const lineLogger: LineMessengerLogger = {
-              warn: (eventName, fields) => requestLog('warn', eventName, fields),
-            };
-            if (deps.conversationHandlers.handleEvent.length >= 3) {
-              await deps.conversationHandlers.handleEvent(event, conversationLogger, lineLogger);
-            } else if (deps.conversationHandlers.handleEvent.length >= 2) {
-              await deps.conversationHandlers.handleEvent(event, conversationLogger);
-            } else {
-              await deps.conversationHandlers.handleEvent(event);
-            }
+          if (conversationLogger && lineLogger) {
+            await deps.conversationHandlers.handleEvent(event, conversationLogger, lineLogger);
+          } else if (conversationLogger) {
+            await deps.conversationHandlers.handleEvent(event, conversationLogger);
           } else {
             await deps.conversationHandlers.handleEvent(event);
           }
@@ -113,7 +113,15 @@ export function createApp(deps: AppDeps): Hono {
             ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
           });
           try {
-            await deps.messenger.reply(event.replyToken, [buildInternalErrorRetryMessage(supportCode)]);
+            if (lineLogger) {
+              await deps.messenger.reply(
+                event.replyToken,
+                [buildInternalErrorRetryMessage(supportCode)],
+                lineLogger,
+              );
+            } else {
+              await deps.messenger.reply(event.replyToken, [buildInternalErrorRetryMessage(supportCode)]);
+            }
           } catch (replyErr) {
             // design.md「reply 失敗は structured log（X-Line-Request-Id 併記）に記録」。
             requestLogger.error('line-webhook.retry_reply_failed', {

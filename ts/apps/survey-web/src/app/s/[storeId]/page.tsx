@@ -1,4 +1,6 @@
 import { getPool, findStoreForSurvey, listSurveyAspects } from '@fwlm/db';
+import { headers } from 'next/headers';
+import { correlationIdFromHeaders, withCorrelation } from '@fwlm/observability';
 import { Heading } from '@fwlm/ui/components/heading';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { buildGoogleReviewUrl } from '../../../lib/google-review-url';
@@ -11,16 +13,27 @@ import { SurveyShell } from './survey-shell';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+async function requestCorrelationId(): Promise<string | undefined> {
+  try {
+    // Next.js の request scope がある実リクエストでは Cloud Run の trace を取得する。
+    // 単体テストなど request scope 外の呼び出しでは、観測用情報を付けずに描画を続ける。
+    return correlationIdFromHeaders(await headers());
+  } catch {
+    return undefined;
+  }
+}
+
 async function buildDeps(): Promise<SurveyPageDeps> {
   const signingKey = process.env.SESSION_SIGNING_KEY;
   if (!signingKey) throw new Error('SESSION_SIGNING_KEY is required');
   const tokens = createSessionTokenService(signingKey);
+  const correlationId = await requestCorrelationId();
   return {
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
     listAspects: async () => listSurveyAspects(await getPool()),
     signPage: (storeId) => tokens.signPage(storeId),
     buildReviewUrl: (placeId) => buildGoogleReviewUrl(placeId),
-    log: writeStructuredLog,
+    log: withCorrelation(writeStructuredLog, correlationId),
   };
 }
 
