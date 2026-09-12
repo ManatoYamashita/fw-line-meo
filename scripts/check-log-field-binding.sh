@@ -228,13 +228,15 @@ EOF
 # 前方に対して成立しない（後から足された名前が規約の外で増えていく）。
 # 抽出源は共有経路の呼び出しに限る。散文から拾うと誤検知が支配的になる。
 emitted_events=0
-call_sites="$(grep -rlE 'writeStructuredLog\(' "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
+# 相関 ID を付与した sink は `correlationLog` という名前で呼び出すため、
+# 共有 sink の直呼びと同じく検査対象へ含める。
+call_sites="$(grep -rlE '(writeStructuredLog|correlationLog)\(' "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
   --include='*.ts' --include='*.tsx' \
   --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
   --exclude-dir=test --exclude-dir=e2e --exclude-dir=perf --exclude-dir=eval 2>/dev/null || true)"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  used="$(grep -oE "writeStructuredLog\('[a-z]+', *'[a-zA-Z0-9_.-]+'" "$f" \
+  used="$(grep -oE "(writeStructuredLog|correlationLog)\('[a-z]+', *'[a-zA-Z0-9_.-]+'" "$f" \
     | sed -E "s/.*, *'//; s/'$//" | sort -u || true)"
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
