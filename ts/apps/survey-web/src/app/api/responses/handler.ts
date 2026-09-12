@@ -38,6 +38,7 @@ export interface ResponsesDeps {
     storeId: string;
     star: number;
     aspectCodes: string[];
+    concernCodes: string[];
     hasComment: boolean;
   }) => Promise<void>;
   clientKey: (req: Request) => string;
@@ -85,13 +86,17 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   if (!validated.ok) {
     return error(deps, 400, 'VALIDATION', '入力内容をご確認ください');
   }
-  const { star, aspectCodes, comment } = validated.value;
+  const { star, aspectCodes, concernCodes, comment } = validated.value;
 
   const labelByCode = new Map(aspects.map((a) => [a.code, a.label]));
   const aspectLabels = aspectCodes.map((c) => labelByCode.get(c) ?? c);
+  const concernLabels = concernCodes.map((c) => labelByCode.get(c) ?? c);
   // 選ばれなかった観点も渡す（Issue #132）。プロンプト側が名指しで言及を禁止するのに使う。
   // 全選択のときは空配列になり、禁止句自体が出ない。
-  const selectedCodes = new Set(aspectCodes);
+  //
+  // 「選ばれた」は良かった点と気になった点の **どちらかに入っている** こと（Issue #221）。
+  // 気になった点に選んだ観点を禁止句へ入れると、客が選んだ不満を下書きから消すことになる。
+  const selectedCodes = new Set([...aspectCodes, ...concernCodes]);
   const unselected = aspects.filter((a) => !selectedCodes.has(a.code));
   // label はプロンプトの禁止文言に、code は生成後の事後検証に使う（Issue #132）。
   // 同じ差集合から両方を導くことで、「禁止した観点」と「検証する観点」がずれない。
@@ -103,6 +108,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
           storeName: store.name,
           star,
           aspectLabels,
+          concernLabels,
           comment,
           unselectedAspectLabels,
           unselectedAspectCodes,
@@ -111,6 +117,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
           storeName: store.name,
           star,
           aspectLabels,
+          concernLabels,
           unselectedAspectLabels,
           unselectedAspectCodes,
         };
@@ -120,7 +127,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   // 導くと「プロンプトが見た厚み」と「記録した厚み」がずれ、入力導線を変えた効果をこの
   // データで検証できなくなる（Issue #137 段階3）。
   const tally = deps
-    .incrementTallies({ storeId, star, aspectCodes, hasComment: comment !== undefined })
+    .incrementTallies({ storeId, star, aspectCodes, concernCodes, hasComment: comment !== undefined })
     .catch(() => deps.log('warn', 'tally_failed'));
   const generation = deps.generator.generate(
     material,

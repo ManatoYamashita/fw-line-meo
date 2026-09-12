@@ -6,7 +6,7 @@ const ALLOWED = ['taste', 'service', 'volume', 'atmosphere', 'price', 'cleanline
 describe('validateSurveyAnswer', () => {
   it('星のみで有効（aspects 空・comment 無し）', () => {
     const res = validateSurveyAnswer({ star: 5 }, ALLOWED);
-    expect(res).toEqual({ ok: true, value: { star: 5, aspectCodes: [] } });
+    expect(res).toEqual({ ok: true, value: { star: 5, aspectCodes: [], concernCodes: [] } });
   });
 
   it('星＋aspects＋comment で有効', () => {
@@ -52,7 +52,7 @@ describe('validateSurveyAnswer', () => {
 
   it('空文字 comment は未回答扱い（result に含めない）', () => {
     const res = validateSurveyAnswer({ star: 5, comment: '' }, ALLOWED);
-    expect(res).toEqual({ ok: true, value: { star: 5, aspectCodes: [] } });
+    expect(res).toEqual({ ok: true, value: { star: 5, aspectCodes: [], concernCodes: [] } });
   });
 
   it('複数フィールドのエラーを全件収集する', () => {
@@ -81,5 +81,35 @@ describe('validateSurveyAnswer', () => {
     const r = validateSurveyAnswer({ star: 5, comment: ' '.repeat(300) }, ALLOWED);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.comment).toBeUndefined();
+  });
+
+  // ---- 気になった点（Issue #221）----
+  it('気になった点を良かった点と同じ許可 code で受理する', () => {
+    const res = validateSurveyAnswer(
+      { star: 2, aspectCodes: ['taste'], concernCodes: ['service', 'price'] },
+      ALLOWED,
+    );
+    expect(res).toEqual({
+      ok: true,
+      value: { star: 2, aspectCodes: ['taste'], concernCodes: ['service', 'price'] },
+    });
+  });
+
+  it('concernCodes を省いた送信（旧クライアント）は空配列として受理する', () => {
+    const res = validateSurveyAnswer({ star: 4, aspectCodes: ['taste'] }, ALLOWED);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.concernCodes).toEqual([]);
+  });
+
+  it('未知の気になった点の code は concernCodes の UNKNOWN_CODE', () => {
+    const res = validateSurveyAnswer({ star: 1, concernCodes: ['__nope__'] }, ALLOWED);
+    expect(res).toEqual({ ok: false, error: [{ field: 'concernCodes', code: 'UNKNOWN_CODE' }] });
+  });
+
+  it('concernCodes が文字列配列でないと INVALID', () => {
+    for (const bad of ['service', [1], { a: 1 }]) {
+      const res = validateSurveyAnswer({ star: 1, concernCodes: bad }, ALLOWED);
+      expect(res).toEqual({ ok: false, error: [{ field: 'concernCodes', code: 'INVALID' }] });
+    }
   });
 });
