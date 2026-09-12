@@ -167,7 +167,7 @@ const defaultLogger: DeliveryJobLogger = {
   fatal(message, err) {
     // 欠けた設定は識別子として、外部呼び出しの失敗は状態コードとして載せる。
     // 本文を載せずに原因を追えるようにするため（要件 2.5 は「種別**および状態コード**」を許す）。
-    // 状態コードが無いと、#151 の再発時に 401 / 429 / ネットワーク断を区別できない。
+    // 状態コードが無いと、Issue 151 の再発時に 401 / 429 / ネットワーク断を区別できない。
     writeStructuredLog('error', 'delivery-job.fatal', {
       detail: message,
       errorKind: errorKindOf(err),
