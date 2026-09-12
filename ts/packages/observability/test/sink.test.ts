@@ -39,6 +39,17 @@ describe('writeStructuredLog', () => {
     );
   });
 
+  it('lineRequestId は許可された形だけを出す', () => {
+    const line = captureOutput('warn', () => {
+      writeStructuredLog('warn', 'webhook_signature_verification_failed', {
+        lineRequestId: 'not allowed: arbitrary input',
+      });
+    });
+    expect(line).toBe(
+      JSON.stringify({ severity: 'WARNING', event: 'webhook_signature_verification_failed' }),
+    );
+  });
+
   it('警告の綴りは WARNING である（WARN ではない）', () => {
     // 単純な大文字化だと WARN になり、集約基盤が重大度として解釈しない。
     const line = captureOutput('warn', () => {

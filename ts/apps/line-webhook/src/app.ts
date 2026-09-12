@@ -1,11 +1,10 @@
 import { Hono } from 'hono';
-import type { LogFields } from '@fwlm/observability';
+import type { LogFields, Sink } from '@fwlm/observability';
 import { createEventDispatcher, type InboundEvent } from './webhook/dispatch.js';
 import type { SignatureVerifier } from './webhook/signature.js';
 import type { ConversationHandlers } from './onboarding/conversation.js';
 import type { LineMessenger } from './line/client.js';
 import { buildInternalErrorRetryMessage } from './line/messages.js';
-import { logSignatureVerificationFailed, type WebhookLogger } from './lib/structured-log.js';
 
 // 構造化ログの最小契約（design.md「Monitoring」: LINE はログを提供しないため自前で記録する）。
 // オーナーの自由入力テキストや displayName は本境界では扱わない（渡していない）ため、
@@ -25,11 +24,11 @@ export interface AppDeps {
   messenger: Pick<LineMessenger, 'reply'>;
   logger: AppLogger;
   // 構造化ログ（1 行 JSON）の sink。**AppLogger とは別経路である。**
-  // AppLogger は console.error(message, meta) をそのまま出す非構造化ログで、
+  // AppLogger は標準エラー出力へそのまま出す非構造化ログで、
   // Cloud Logging から event 名で集計できない。ログベース指標
   // （webhook_signature_failures・Issue #230）が読むのはこちらだけなので、
   // 指標が数える事象はこの sink へ出す。
-  structuredLog: WebhookLogger;
+  structuredLog: Sink;
 }
 
 /**
@@ -112,11 +111,10 @@ export function createApp(deps: AppDeps): Hono {
       //
       // 載せるのは我々が名付けた区分と LINE 採番の requestId だけで、rawBody・
       // signatureHeader の中身は sink の allowlist が構造的に排除する。
-      logSignatureVerificationFailed(
-        deps.structuredLog,
-        signatureHeader === undefined ? 'missing_header' : 'mismatch',
-        requestId,
-      );
+      deps.structuredLog('warn', 'webhook_signature_verification_failed', {
+        reason: signatureHeader === undefined ? 'missing_header' : 'mismatch',
+        ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
+      });
       return c.body(null, 401);
     }
 

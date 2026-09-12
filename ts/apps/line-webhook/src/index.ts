@@ -16,7 +16,6 @@ import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
-import { writeStructuredLog } from './lib/structured-log.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //

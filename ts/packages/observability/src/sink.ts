@@ -22,6 +22,9 @@ const SEVERITY_BY_LEVEL: Readonly<Record<LogLevel, Severity>> = {
   error: 'ERROR',
 };
 
+// 署名検証前にも現れる値なので、任意長・任意内容を記録しない。
+const LINE_REQUEST_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
+
 /** 記録を 1 件書き出す契約。事象名は省略できない。 */
 export type Sink = (level: LogLevel, event: string, fields?: LogFields) => void;
 
@@ -86,6 +89,12 @@ export const writeStructuredLog: Sink = (level, event, fields) => {
   for (const key of PLAIN_FIELDS) {
     const value = fields?.[key];
     if (value !== undefined) {
+      if (
+        key === 'lineRequestId' &&
+        (typeof value !== 'string' || !LINE_REQUEST_ID_PATTERN.test(value))
+      ) {
+        continue;
+      }
       record[key] = value;
     }
   }

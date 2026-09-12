@@ -232,6 +232,7 @@ function buildDeps(overrides: {
   identificationFake: ReturnType<typeof createFakeIdentificationService>;
   messenger: ReturnType<typeof createFakeMessenger>;
   poolFake: ReturnType<typeof createFakePool>;
+  logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
 } {
   const sessionsFake = createFakeSessionsAccessor(overrides.session);
   const ownersFake = createFakeOwnersAccessor(overrides.existingOwner ?? null);

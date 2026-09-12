@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createApp, type AppDeps, type AppLogger } from '../src/app.js';
-import type { WebhookLogger } from '../src/lib/structured-log.js';
+import type { Sink } from '@fwlm/observability';
 import type { SignatureVerifier } from '../src/webhook/signature.js';
 import type { ConversationHandlers } from '../src/onboarding/conversation.js';
 import type { LineMessenger } from '../src/line/client.js';
@@ -28,7 +28,7 @@ function fakeLogger(): AppLogger {
   return { error: vi.fn() };
 }
 
-function fakeStructuredLog(): WebhookLogger {
+function fakeStructuredLog(): Sink {
   return vi.fn();
 }
 
@@ -200,7 +200,7 @@ describe('line-webhook app', () => {
       expect(structuredLog).toHaveBeenCalledTimes(1);
       expect(structuredLog).toHaveBeenCalledWith('warn', 'webhook_signature_verification_failed', {
         reason: 'mismatch',
-        requestId: 'req-sig-1',
+        lineRequestId: 'req-sig-1',
       });
     });
 
@@ -215,7 +215,6 @@ describe('line-webhook app', () => {
       expect(res.status).toBe(401);
       expect(structuredLog).toHaveBeenCalledWith('warn', 'webhook_signature_verification_failed', {
         reason: 'missing_header',
-        requestId: undefined,
       });
     });
 
