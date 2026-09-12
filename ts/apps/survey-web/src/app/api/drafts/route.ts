@@ -3,6 +3,7 @@ import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
 import { handleDrafts, type DraftsDeps } from './handler';
+import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation } from '@fwlm/observability';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,9 +28,16 @@ async function buildDeps(): Promise<DraftsDeps> {
 export async function POST(req: Request): Promise<Response> {
   try {
     depsPromise ??= buildDeps();
-    return await handleDrafts(req, await depsPromise);
+    const correlationId = correlationIdFromHeaders(req.headers);
+    const deps = await depsPromise;
+    return await handleDrafts(req, {
+      ...deps,
+      log: withCorrelation(deps.log, correlationId),
+      supportCode: supportCodeFromCorrelationId(correlationId),
+    });
   } catch {
-    return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'サーバーエラー' } }), {
+    const supportCode = supportCodeFromCorrelationId(correlationIdFromHeaders(req.headers));
+    return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'サーバーエラー' }, ...(supportCode ? { supportCode } : {}) }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });

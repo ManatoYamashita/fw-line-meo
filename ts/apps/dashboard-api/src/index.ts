@@ -25,7 +25,7 @@ import {
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
 } from '@fwlm/db';
-import { writeStructuredLog } from '@fwlm/observability';
+import { writeStructuredLog, type Sink } from '@fwlm/observability';
 import {
   createPlacesSearchAdapter,
   createStoreIdentificationService,
@@ -75,14 +75,14 @@ const storeIdentification = createStoreIdentificationService({
 // owner store_identified の単一 TX・ux_stores_place_id 違反の冪等/409 正規化）はそのまま再利用し、
 // confirmed かつ categoryCode 指定時のみ非クリティカルな category を後追いで設定する
 // （category はメタデータで Go バッチ側にフォールバックがあるため、設定失敗は登録全体を失敗させない）。
-async function registerStore(input: RegisterStoreInput): Promise<ConfirmOutcome> {
+async function registerStore(input: RegisterStoreInput, log: Sink = writeStructuredLog): Promise<ConfirmOutcome> {
   const outcome = await storeIdentification.confirmStore(input.ownerId, input.candidate);
   if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
     try {
       await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
     } catch {
       // category 設定は非クリティカル（登録本体は既に成立済み）。PII・クエリは出さない。
-      writeStructuredLog('error', 'dashboard-api.category_followup_failed', {
+      log('error', 'dashboard-api.category_followup_failed', {
         storeId: outcome.storeId,
       });
     }
@@ -93,7 +93,7 @@ async function registerStore(input: RegisterStoreInput): Promise<ConfirmOutcome>
 // issueCode 合成（2.4 handoff）: 一意コード発行（衝突は最大 3 回再生成）。
 // リトライ切れ・DB 障害はここでログ出力（PII・クエリは出さない）してから rethrow し、
 // ハンドラが 500 internal に写像する（design Monitoring「5xx 詳細はログへ」）。
-async function issueCode(agencyId: string) {
+async function issueCode(agencyId: string, log: Sink = writeStructuredLog) {
   try {
     return await createUniqueInviteCode({
       generate: generateInviteCode,
@@ -101,12 +101,13 @@ async function issueCode(agencyId: string) {
     });
   } catch (err) {
     // 識別子が無いと、どの代理店の操作が失敗したのか記録から判定できない。
-    writeStructuredLog('error', 'dashboard-api.invite_code_issue_failed', { agencyId });
+    log('error', 'dashboard-api.invite_code_issue_failed', { agencyId });
     throw err;
   }
 }
 
 const app = createApp({
+  structuredLog: writeStructuredLog,
   corsOrigin: config.corsOrigin,
   qr: {
     auth: authDeps,

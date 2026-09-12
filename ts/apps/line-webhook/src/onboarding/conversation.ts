@@ -1,7 +1,7 @@
 import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
 import type { LogFields } from '@fwlm/observability';
 import type { InboundEvent } from '../webhook/dispatch.js';
-import type { LineMessage, LineMessenger } from '../line/client.js';
+import { withLineMessengerLogger, type LineMessage, type LineMessenger, type LineMessengerLogger } from '../line/client.js';
 import type {
   ConnectablePool,
   StoreIdentificationService,
@@ -97,7 +97,11 @@ export interface ConversationDeps {
 }
 
 export interface ConversationHandlers {
-  handleEvent(event: InboundEvent): Promise<void>;
+  handleEvent(
+    event: InboundEvent,
+    logger?: ConversationLogger,
+    lineLogger?: LineMessengerLogger,
+  ): Promise<void>;
 }
 
 // Req 2.3: 同一 LINE ユーザーからの連続無効コード送信がこの回数に達したらロックする。
@@ -106,16 +110,28 @@ const INVITE_CODE_LOCK_DURATION_MS = 10 * 60 * 1000;
 
 export function createConversationHandlers(deps: ConversationDeps): ConversationHandlers {
   return {
-    async handleEvent(event: InboundEvent): Promise<void> {
+    async handleEvent(
+      event: InboundEvent,
+      logger?: ConversationLogger,
+      lineLogger?: LineMessengerLogger,
+    ): Promise<void> {
+      const requestDeps =
+        logger === undefined && lineLogger === undefined
+          ? deps
+          : {
+              ...deps,
+              logger: logger ?? deps.logger,
+              messenger: lineLogger ? withLineMessengerLogger(deps.messenger, lineLogger) : deps.messenger,
+            };
       switch (event.kind) {
         case 'follow':
-          return handleFollow(deps, event);
+          return handleFollow(requestDeps, event);
         case 'text':
-          return handleText(deps, event);
+          return handleText(requestDeps, event);
         case 'postback':
-          return handlePostback(deps, event);
+          return handlePostback(requestDeps, event);
         case 'unsupported':
-          return handleUnsupported(deps, event);
+          return handleUnsupported(requestDeps, event);
       }
     },
   };

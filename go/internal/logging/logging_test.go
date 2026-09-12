@@ -100,3 +100,12 @@ func TestGroupedAttributeUntouched(t *testing.T) {
 		t.Errorf("グループ内の level が書き換えられた: %v", nested["level"])
 	}
 }
+
+func TestExecutionCorrelationID(t *testing.T) {
+	if got := ExecutionCorrelationID("project-1", "daily-batch-abc123"); got != "projects/project-1/traces/daily-batch-abc123" {
+		t.Fatalf("unexpected correlation ID: %q", got)
+	}
+	if got := ExecutionCorrelationID("project-1", "bad execution id"); got != "" {
+		t.Fatalf("invalid execution ID must be rejected: %q", got)
+	}
+}

@@ -37,7 +37,7 @@
 // 「export しない」こと自体が書込 API 不在の構造的な担保となる（test/route.db.test.ts で検証）。
 
 import { getPool } from '@fwlm/db';
-import { writeStructuredLog } from '@fwlm/observability';
+import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation, writeStructuredLog } from '@fwlm/observability';
 import type { Queryable, StoreRow } from '@fwlm/db';
 
 import {
@@ -62,8 +62,8 @@ function jsonOk(body: unknown): Response {
   });
 }
 
-function jsonError(status: number, code: string, message: string): Response {
-  return new Response(JSON.stringify({ error: { code, message } }), {
+function jsonError(status: number, code: string, message: string, supportCode?: string): Response {
+  return new Response(JSON.stringify({ error: { code, message }, ...(supportCode ? { supportCode } : {}) }), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -140,38 +140,41 @@ function readLiffAuthConfig(env: NodeJS.ProcessEnv): { clientId: string; options
 }
 
 export async function GET(req: Request): Promise<Response> {
+  const correlationId = correlationIdFromHeaders(req.headers);
+  const log = withCorrelation(writeStructuredLog, correlationId);
+  const supportCode = supportCodeFromCorrelationId(correlationId);
   let clientId: string;
   let liffAuthOptions: LiffAuthOptions;
   try {
     ({ clientId, options: liffAuthOptions } = readLiffAuthConfig(process.env));
   } catch (err) {
-    writeStructuredLog('error', 'store-detail.config_error', {
+    log('error', 'store-detail.config_error', {
       errorKind: errorKindOf(err),
       ...(err instanceof MissingConfigError ? { configKey: err.configKey } : {}),
     });
-    return jsonError(500, 'INTERNAL', 'サーバーエラー');
+    return jsonError(500, 'INTERNAL', 'サーバーエラー', supportCode);
   }
 
   const idToken = extractBearerToken(req);
   if (!idToken) {
-    return jsonError(401, 'UNAUTHORIZED', '認証情報が見つかりません');
+    return jsonError(401, 'UNAUTHORIZED', '認証情報が見つかりません', supportCode);
   }
 
   let pool: Queryable;
   try {
     pool = await getPool();
   } catch (err) {
-    writeStructuredLog('error', 'store-detail.pool_error', { errorKind: errorKindOf(err) });
-    return jsonError(500, 'INTERNAL', 'サーバーエラー');
+    log('error', 'store-detail.pool_error', { errorKind: errorKindOf(err) });
+    return jsonError(500, 'INTERNAL', 'サーバーエラー', supportCode);
   }
 
   const authResult = await authorizeStoreDetailRequest(idToken, clientId, pool, liffAuthOptions);
   if (!authResult.ok) {
     if (isTokenVerificationFailure(authResult.error)) {
-      return jsonError(401, 'UNAUTHORIZED', '認証に失敗しました');
+      return jsonError(401, 'UNAUTHORIZED', '認証に失敗しました', supportCode);
     }
     // STORE_NOT_IDENTIFIED | OWNER_NOT_FOUND — 上部コメント参照。
-    return jsonError(404, 'STORE_NOT_FOUND', '店舗情報が見つかりません');
+    return jsonError(404, 'STORE_NOT_FOUND', '店舗情報が見つかりません', supportCode);
   }
 
   const stores = authResult.value;
@@ -183,7 +186,7 @@ export async function GET(req: Request): Promise<Response> {
   if (hint && !hinted) {
     // 無視した事実は残す（silent drop を作らない）。ただし storeId そのものはログに書かない
     // ——集合外の値は攻撃者由来でありうるため、ログを通じた反射・汚染の経路を作らない。
-    writeStructuredLog('warn', 'store-detail.store_hint_ignored', {
+    log('warn', 'store-detail.store_hint_ignored', {
       reason: 'not_in_authorized_set',
       authorizedCount: stores.length,
     });
@@ -201,8 +204,8 @@ export async function GET(req: Request): Promise<Response> {
     const detail = await queryStoreDetail(pool, chosen.id);
     return jsonOk({ ...detail, storeName: chosen.name, stores: toStoreRefs(stores) });
   } catch (err) {
-    writeStructuredLog('error', 'store-detail.query_error', { errorKind: errorKindOf(err) });
-    return jsonError(500, 'INTERNAL', 'サーバーエラー');
+    log('error', 'store-detail.query_error', { errorKind: errorKindOf(err) });
+    return jsonError(500, 'INTERNAL', 'サーバーエラー', supportCode);
   }
 }
 

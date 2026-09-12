@@ -66,6 +66,7 @@ resource "google_cloud_run_v2_job" "delivery" {
             CLOUDSQL_CONNECTION_NAME = var.db_connection_name
             DB_NAME                  = var.db_name
             DB_IAM_USER              = trimsuffix(google_service_account.job.email, ".gserviceaccount.com")
+            GOOGLE_CLOUD_PROJECT     = var.project_id
           }
           content {
             name  = env.key
