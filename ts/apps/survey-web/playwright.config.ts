@@ -17,7 +17,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'pnpm start',
-        url: 'http://127.0.0.1:3100/healthz',
+        url: 'http://127.0.0.1:3100/health',
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
         env: { PORT: '3100' },

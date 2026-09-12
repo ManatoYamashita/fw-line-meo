@@ -3,7 +3,7 @@ import { createApp, clampSize, type AppDeps } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import type { QrDeps } from '../src/qr.js';
 
-// 最小の QR deps（healthz とルート配線の確認用。RBAC 詳細は qr.test / 6.2 が担う）。
+// 最小の QR deps（health とルート配線の確認用。RBAC 詳細は qr.test / 6.2 が担う）。
 function fakeQrDeps(): QrDeps {
   return {
     auth: {
@@ -20,7 +20,7 @@ function fakeQrDeps(): QrDeps {
   };
 }
 
-// createApp は全業務ルート用の deps を要求する。healthz と CORS 非適用の確認には
+// createApp は全業務ルート用の deps を要求する。health と CORS 非適用の確認には
 // qr 以外はハンドラを呼ばない（未認証で早期 401）ため、認証面のみ最小スタブで満たす。
 function stubAuth() {
   return {
@@ -75,8 +75,8 @@ function app(): ReturnType<typeof createApp> {
 }
 
 describe('dashboard-api app', () => {
-  it('GET /healthz は 200 で status ok を返す', async () => {
-    const res = await app().request('/healthz');
+  it('GET /health は 200 で status ok を返す', async () => {
+    const res = await app().request('/health');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok' });
   });

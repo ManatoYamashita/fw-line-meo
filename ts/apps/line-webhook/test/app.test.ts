@@ -91,8 +91,8 @@ function twoEventsBody(
 }
 
 describe('line-webhook app', () => {
-  it('GET /healthz は 200 で status ok を返す', async () => {
-    const res = await createApp(baseDeps()).request('/healthz');
+  it('GET /health は 200 で status ok を返す', async () => {
+    const res = await createApp(baseDeps()).request('/health');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok' });
   });

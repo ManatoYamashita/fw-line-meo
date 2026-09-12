@@ -261,7 +261,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     await closePool();
   });
 
-  it('認証なしの全業務ルートは 401（healthz を除く）', async () => {
+  it('認証なしの全業務ルートは 401（health を除く）', async () => {
     const app = buildApp();
     const cases: [string, RequestInit][] = [
       ['/me', { method: 'GET' }],
@@ -286,8 +286,8 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     }
   });
 
-  it('healthz は認証不要で 200', async () => {
-    const res = await buildApp().request('/healthz');
+  it('health は認証不要で 200', async () => {
+    const res = await buildApp().request('/health');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok' });
   });

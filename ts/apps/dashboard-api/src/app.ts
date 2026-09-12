@@ -103,7 +103,9 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
 
   // 公開・CORS 非適用（cors ミドルウェアより前に登録＝以降の業務ルートにのみ CORS が掛かる）。
-  app.get('/healthz', (c) => c.json({ status: 'ok' }));
+  // `/healthz` にしないこと。Cloud Run は z で終わる一部のパスを予約しており、本番では
+  // コンテナへ届く前に 404 が返る（Issue #219・scripts/check-cloud-run-reserved-paths.sh）。
+  app.get('/health', (c) => c.json({ status: 'ok' }));
 
   // 以降の全業務ルートに CORS を適用。許可は単一オリジンのみ・GET/POST・Authorization/Content-Type。
   // credentials は不使用（Cookie 非採用）。design Security Considerations に準拠。
