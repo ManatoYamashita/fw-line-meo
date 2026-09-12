@@ -14,7 +14,11 @@ export type DraftError =
 export type DraftErrorKind = DraftError['kind'];
 
 export interface DraftGenerator {
-  generate(material: DraftMaterial, variation: VariationSeed): Promise<Result<string, DraftError>>;
+  generate(
+    material: DraftMaterial,
+    variation: VariationSeed,
+    onResidual?: (aspectCodes: string[]) => void,
+  ): Promise<Result<string, DraftError>>;
 }
 
 // @google/genai の応答が構造的に満たす最小面。
@@ -91,7 +95,7 @@ export function createDraftGenerator(
   const onResidual = options.onResidual;
 
   return {
-    async generate(material, variation) {
+    async generate(material, variation, requestOnResidual) {
       const { systemInstruction, userContent } = buildPrompt(material, variation);
       const req: GenAiRequest = {
         model,
@@ -156,7 +160,7 @@ export function createDraftGenerator(
 
       const residual = detectAspectMentions(second.value, targets, lexicon);
       if (residual.length > 0) {
-        onResidual?.(residual.map((v) => v.aspectCode));
+        (requestOnResidual ?? onResidual)?.(residual.map((v) => v.aspectCode));
       }
       return ok(second.value);
     },

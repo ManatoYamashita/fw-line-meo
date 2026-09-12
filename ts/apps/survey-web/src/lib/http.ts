@@ -1,7 +1,7 @@
 // API 共通のレスポンスヘルパ。エラーは { error: { code, message } } 封筒で統一する。
 
-export function jsonError(status: number, code: string, message: string): Response {
-  return new Response(JSON.stringify({ error: { code, message } }), {
+export function jsonError(status: number, code: string, message: string, supportCode?: string): Response {
+  return new Response(JSON.stringify({ error: { code, message }, ...(supportCode ? { supportCode } : {}) }), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });

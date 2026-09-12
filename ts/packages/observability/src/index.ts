@@ -10,3 +10,12 @@
 export type { LogFields, LogLevel, Severity } from './fields.js';
 export type { Sink } from './sink.js';
 export { writeStructuredLog } from './sink.js';
+export {
+  correlationIdFromHeaders,
+  correlationIdFromTraceId,
+  executionCorrelationId,
+  projectIdFromEnv,
+  supportCodeFromCorrelationId,
+  traceIdFromHeaders,
+  withCorrelation,
+} from './correlation.js';
