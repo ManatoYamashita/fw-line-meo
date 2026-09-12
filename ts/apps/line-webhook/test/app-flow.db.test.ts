@@ -199,6 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       conversationHandlers,
       messenger: deps.messenger,
       logger: { error: vi.fn() },
+      structuredLog: vi.fn(),
     };
 
     return createApp(appDeps);
