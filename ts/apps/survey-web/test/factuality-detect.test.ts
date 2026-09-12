@@ -136,12 +136,18 @@ describe('語彙と評価軸の正典との同期', () => {
     expect(Object.keys(lexicon).sort()).toEqual([...readSeedAspects().keys()].sort());
   });
 
-  it('dataset が参照する aspectCodes はすべて正典に存在する', () => {
+  it('dataset が参照する aspectCodes / concernCodes はすべて正典に存在する', () => {
     const known = new Set(readSeedAspects().keys());
     const unknown = datasetRaw.materials.flatMap((m) =>
-      m.aspectCodes.filter((c: string) => !known.has(c)),
+      [...m.aspectCodes, ...(m.concernCodes ?? [])].filter((c: string) => !known.has(c)),
     );
     expect(unknown).toEqual([]);
+  });
+
+  // Issue #221: 気になった点つきの素材が 1 件も無いと、両面化した経路（気になった点を禁止句から
+  // 外す・気になった点だけの素材が観点ありの字数規則に入る）を評価が一度も通らない。
+  it('dataset は気になった点つきの素材を持つ（両面化した経路を評価が通る）', () => {
+    expect(datasetRaw.materials.some((m) => (m.concernCodes ?? []).length > 0)).toBe(true);
   });
 
   it('lexicon の語はすべて 2 文字以上（1 文字は部分一致で誤検出する）', () => {

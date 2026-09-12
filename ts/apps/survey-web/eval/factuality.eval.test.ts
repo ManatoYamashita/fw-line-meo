@@ -29,15 +29,27 @@ interface Sample {
   readonly materialId: string;
   readonly storeNameKind: string;
   readonly selected: readonly string[];
+  /** 選ばれた気になった点の code（Issue #221）。 */
+  readonly concerns: readonly string[];
   /** 字数の指示を切り替える素材の厚み。**本番と同じ関数で判定する**（Issue #137 段階2）。 */
   readonly thickness: MaterialThickness;
   readonly draft: string;
   readonly violations: readonly { aspectCode: string; matchedTerm: string }[];
 }
 
+/** 気になった点の code。省略した素材は「選ばなかった」として扱う（本番の validate と同じ）。 */
+function concernCodesOf(m: (typeof datasetRaw.materials)[number]): string[] {
+  return m.concernCodes ?? [];
+}
+
 function toDraftMaterial(m: (typeof datasetRaw.materials)[number]): DraftMaterial {
-  const selected = new Set<string>(m.aspectCodes);
+  const concernCodes = concernCodesOf(m);
+  // 「選ばれた」は良かった点と気になった点の **どちらかに入っている** こと（Issue #221）。
+  // 本番の /api/responses と同じ和集合から差集合を取る。良かった点だけから導くと、客が選んだ不満の
+  // 観点を禁止句へ入れた「本番とは違うプロンプト」を測り、その観点への言及を逸脱と数えてしまう。
+  const selected = new Set<string>([...m.aspectCodes, ...concernCodes]);
   const aspectLabels = m.aspectCodes.map((c: string) => labels[c] ?? c);
+  const concernLabels = concernCodes.map((c) => labels[c] ?? c);
   // 本番の /api/responses と同じく、選ばれなかった観点も渡す（Issue #132・案 A）。
   // ここを渡さないと「本番とは違うプロンプト」を測ることになり、比較が成立しない。
   const unselectedEntries = Object.entries(labels).filter(([code]) => !selected.has(code));
@@ -45,6 +57,7 @@ function toDraftMaterial(m: (typeof datasetRaw.materials)[number]): DraftMateria
     storeName: m.storeName,
     star: m.star as Star,
     aspectLabels,
+    concernLabels,
     unselectedAspectLabels: unselectedEntries.map(([, label]) => label),
     unselectedAspectCodes: unselectedEntries.map(([code]) => code),
   };
@@ -89,6 +102,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             materialId: material.id,
             storeNameKind: material.storeNameKind,
             selected: material.aspectCodes,
+            concerns: concernCodesOf(material),
             thickness: materialThickness(dm),
             draft: result.value,
             // 検証対象は本番と同じく「素材が持つ未選択 code」。プロンプトで禁止した集合と一致する。
@@ -180,7 +194,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       if (violating.length > 0) {
         console.log('\n--- 逸脱サンプルの実例（先頭 3 件）---');
         for (const s of violating.slice(0, 3)) {
-          console.log(`  [${s.materialId}] 選択=${s.selected.join('/') || 'なし'} 創作=${s.violations.map((v) => `${v.aspectCode}(${v.matchedTerm})`).join(', ')}`);
+          console.log(`  [${s.materialId}] 選択=${s.selected.join('/') || 'なし'} 気になった点=${s.concerns.join('/') || 'なし'} 創作=${s.violations.map((v) => `${v.aspectCode}(${v.matchedTerm})`).join(', ')}`);
           console.log(`    ${s.draft}`);
         }
       }
@@ -199,7 +213,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       const control = samples.filter((s) => s.materialId === 'all-selected-star5');
       expect(control.flatMap((s) => s.violations), '対照群で逸脱が検出されました').toEqual([]);
     },
-    // 16 素材 × 3 回 × 約 2 秒 + 再試行の余裕。
+    // 20 素材 × 3 回 × 約 2 秒 + 再試行の余裕。
     10 * 60 * 1000,
   );
 });

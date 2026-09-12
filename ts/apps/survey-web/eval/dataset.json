@@ -15,7 +15,11 @@
     "    理由ありの一言は検出語彙と重ならない表現にする（素材由来の言及まで逸脱と数えないため）。",
     "  - 高評価にも『理由あり／理由なし／抽象的な一言』の三つ組を持つ（Issue #137 段階2）。",
     "    薄さの判定に一言を織り込む変更は観点ゼロの素材だけに効くが、既存の観点ゼロ素材は低評価に",
-    "    偏っていた。星の高低と交絡させないため星5 側にも対を置く。"
+    "    偏っていた。星の高低と交絡させないため星5 側にも対を置く。",
+    "  - 気になった点（Issue #221）は concernCodes で持つ（省略した素材は「選ばなかった」扱い）。本番と同じく、",
+    "    良かった点・気になった点の *どちらにも入っていない* 観点だけを「選ばれなかった軸」として禁止・検出する。",
+    "    気になった点だけの素材は観点ありの字数規則に入るので、薄い素材で具体を創作しないかを見る。",
+    "    高評価で気になった点を 1 つ選んだ素材と、同じ観点を両群で選んだ素材も置く。"
   ],
   "materials": [
     {
@@ -168,6 +172,54 @@
       "star": 5,
       "aspectCodes": [],
       "comment": "とても良かったです"
+    },
+    {
+      "id": "concern-only-star1",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 1,
+      "aspectCodes": [],
+      "concernCodes": [
+        "service"
+      ],
+      "comment": null
+    },
+    {
+      "id": "concern-only-star2",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 2,
+      "aspectCodes": [],
+      "concernCodes": [
+        "volume"
+      ],
+      "comment": null
+    },
+    {
+      "id": "taste-good-service-concern-star5",
+      "storeName": "カフェ みなも",
+      "storeNameKind": "fictional",
+      "star": 5,
+      "aspectCodes": [
+        "taste"
+      ],
+      "concernCodes": [
+        "service"
+      ],
+      "comment": null
+    },
+    {
+      "id": "taste-both-sides-star3",
+      "storeName": "定食屋 あおば",
+      "storeNameKind": "fictional",
+      "star": 3,
+      "aspectCodes": [
+        "taste"
+      ],
+      "concernCodes": [
+        "taste"
+      ],
+      "comment": null
     }
   ]
 }
