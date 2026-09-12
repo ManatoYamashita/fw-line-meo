@@ -9,6 +9,7 @@ import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
 import {
   logGenerationFailure,
+  logFactualityResidual,
   logSurveyResponseSubmitted,
   type SurveyLogger,
 } from '../../../lib/structured-log';
@@ -41,6 +42,11 @@ export interface ResponsesDeps {
   }) => Promise<void>;
   clientKey: (req: Request) => string;
   log: SurveyLogger;
+  supportCode?: string;
+}
+
+function error(deps: ResponsesDeps, status: number, code: string, message: string): Response {
+  return jsonError(status, code, message, deps.supportCode);
 }
 
 export async function handleResponses(req: Request, deps: ResponsesDeps): Promise<Response> {
@@ -48,7 +54,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   try {
     body = await req.json();
   } catch {
-    return jsonError(400, 'VALIDATION', '不正なリクエストです');
+    return error(deps, 400, 'VALIDATION', '不正なリクエストです');
   }
   const obj = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const storeId = typeof obj.storeId === 'string' ? obj.storeId : '';
@@ -56,18 +62,18 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
 
   // pageToken 検証（ページ経由の正規フロー証明・直接 POST を拒否）
   if (!deps.tokens.verifyPage(pageToken, storeId).ok) {
-    return jsonError(400, 'PAGE_TOKEN_INVALID', 'ページを再読み込みしてください');
+    return error(deps, 400, 'PAGE_TOKEN_INVALID', 'ページを再読み込みしてください');
   }
 
   // インスタンス内レート制限（コスト濫用の敷居上げ）
   if (!deps.rateLimiter.check(deps.clientKey(req))) {
-    return jsonError(429, 'RATE_LIMITED', '時間をおいて再度お試しください');
+    return error(deps, 429, 'RATE_LIMITED', '時間をおいて再度お試しください');
   }
 
   // 店舗（存在＋place 確定のみ）
   const store = await deps.findStore(storeId);
   if (!store || store.placeStatus !== 'confirmed') {
-    return jsonError(404, 'STORE_NOT_AVAILABLE', 'このアンケートは現在利用できません');
+    return error(deps, 404, 'STORE_NOT_AVAILABLE', 'このアンケートは現在利用できません');
   }
 
   // 選択肢（seed 由来・許可 code の SoT）
@@ -77,7 +83,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   // 入力検証
   const validated = validateSurveyAnswer(body, allowed);
   if (!validated.ok) {
-    return jsonError(400, 'VALIDATION', '入力内容をご確認ください');
+    return error(deps, 400, 'VALIDATION', '入力内容をご確認ください');
   }
   const { star, aspectCodes, comment } = validated.value;
 
@@ -116,7 +122,11 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   const tally = deps
     .incrementTallies({ storeId, star, aspectCodes, hasComment: comment !== undefined })
     .catch(() => deps.log('warn', 'tally_failed'));
-  const generation = deps.generator.generate(material, pickVariation());
+  const generation = deps.generator.generate(
+    material,
+    pickVariation(),
+    (aspectCodes) => logFactualityResidual(deps.log, aspectCodes),
+  );
   const [, gen] = await Promise.all([tally, generation]);
 
   // ファネルの分子（Issue #137 段階3）。生成の成否や集計の成否とは独立に、「客が送信した」

@@ -22,7 +22,8 @@ import (
 func main() {
 	// 重大度は集約基盤が解釈する項目名と綴りで出す（正典 docs/observability/log-field-canon.md）。
 	// 標準の handler をそのまま使うと "level":"WARN" になり、重大度として解釈されない。
-	logger := slog.New(logging.NewJSONHandler(os.Stdout))
+	logger := slog.New(logging.NewJSONHandler(os.Stdout,
+		logging.ExecutionCorrelationID(os.Getenv("GOOGLE_CLOUD_PROJECT"), os.Getenv("CLOUD_RUN_EXECUTION"))))
 	ctx := context.Background()
 
 	cfg, err := config.Load()

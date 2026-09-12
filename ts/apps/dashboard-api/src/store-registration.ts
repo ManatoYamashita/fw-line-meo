@@ -2,6 +2,7 @@ import type { StoreCandidate } from '@fwlm/db';
 import type { ConfirmOutcome, SearchOutcome } from '@fwlm/store-identification';
 import { authenticate, canAccessStore, type AuthDeps } from './auth.js';
 import { jsonError } from './http.js';
+import type { Sink } from '@fwlm/observability';
 
 // POST /stores/search・POST /stores の中核ロジック（依存注入でテスト可能・ルート配線は app 側の責務）。
 // 店舗登録フロー（design「店舗登録（オンボーディング代行）」）:
@@ -81,13 +82,14 @@ export interface StoreRegistrationDeps {
   // categoryCode が categories（seed）に存在するコードかの検証。
   isValidCategory: (code: string) => Promise<boolean>;
   // 確定登録（confirmed 登録＋owner の store_identified 遷移＋categoryCode 設定）。
-  registerStore: (input: RegisterStoreInput) => Promise<ConfirmOutcome>;
+  registerStore: (input: RegisterStoreInput, log?: Sink) => Promise<ConfirmOutcome>;
 }
 
 export interface StoreRegisterRequest {
   authorization: string | undefined;
   // ルート層でパースした JSON body（形状は本ハンドラが検証する）。
   body: unknown;
+  log?: Sink;
 }
 
 // UUID 形式でない ownerId は DB を叩かず 404 扱い（存在の探り当てを許さない・qr 経路と同じ規律）。
@@ -137,7 +139,9 @@ export async function handleStoreRegister(
   }
 
   // 6. 確定登録。登録済み Place（他店舗として登録済み）は 409 に写像する（3.9）。
-  const outcome = await deps.registerStore(input);
+  const outcome = req.log === undefined
+    ? await deps.registerStore(input)
+    : await deps.registerStore(input, req.log);
   switch (outcome.kind) {
     case 'confirmed':
       return jsonOk(201, { storeId: outcome.storeId });

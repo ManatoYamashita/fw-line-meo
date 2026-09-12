@@ -2,6 +2,7 @@ import type { DashboardUserIdentity, InviteCodeItem } from '@fwlm/db';
 import { authenticate, type AuthDeps } from './auth.js';
 import { resolveAgencyScope } from './scope.js';
 import { jsonError } from './http.js';
+import type { Sink } from '@fwlm/observability';
 
 // GET /invite-codes・POST /invite-codes・POST /invite-codes/:id/disable の中核ロジック
 // （依存注入でテスト可能・ルート配線は app 側の責務。Req 5.1–5.4）。
@@ -51,13 +52,14 @@ export interface InviteCodeIssueDeps {
   auth: AuthDeps;
   // createUniqueInviteCode（invite-code-gen）＋ createInviteCode（@fwlm/db）を合成した発行。
   // 衝突リトライ（最大 3 回）を使い切ったら投げる契約（本ハンドラが 500 internal に写像）。
-  issueCode: (agencyId: string) => Promise<InviteCodeItem>;
+  issueCode: (agencyId: string, log?: Sink) => Promise<InviteCodeItem>;
 }
 
 export interface InviteCodeIssueRequest {
   authorization: string | undefined;
   // ルート層でパースした JSON body（{ agencyId?: string }。agency は省略＝自代理店）。
   body: unknown;
+  log?: Sink;
 }
 
 export async function handleInviteCodeIssue(
@@ -81,7 +83,9 @@ export async function handleInviteCodeIssue(
   // 4. 発行。生成リトライ切れ・DB 障害は偽装せず 500 を返す（7.4）。
   let item: InviteCodeItem;
   try {
-    item = await deps.issueCode(scoped.agencyId);
+    item = req.log === undefined
+      ? await deps.issueCode(scoped.agencyId)
+      : await deps.issueCode(scoped.agencyId, req.log);
   } catch {
     return jsonError(500, 'internal', '招待コードの発行に失敗しました。時間をおいて再試行してください');
   }

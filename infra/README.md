@@ -666,3 +666,21 @@ gcloud alpha monitoring policies list --project="$PROJECT_ID" \
 （系列が返ること）の照会に留める。
 
 記録は Issue へ残す。**署名値・鍵・応答本文は載せない。**
+
+### 11-4. 相関 ID からログを束ねる（Issue #229）
+
+Cloud Run のリクエストログには `X-Cloud-Trace-Context`（未提供時は `traceparent`）から抽出した
+トレース ID を `logging.googleapis.com/trace` として出力する。画面や LINE のエラーに表示された
+サポートコードはその先頭 8 文字であり、個人や店舗の識別子ではない。ログ本文や DB へ保存せず、
+問い合わせ時だけ次の検索へ置き換える。
+
+```bash
+TRACE_ID="<サポートコードに対応する完全な trace ID>"
+gcloud logging read \
+  "resource.type=\"cloud_run_revision\" AND trace=\"projects/${PROJECT_ID}/traces/${TRACE_ID}\"" \
+  --project="$PROJECT_ID" --limit=50 --freshness=1h \
+  --format='value(timestamp,resource.labels.service_name,jsonPayload.event,severity)'
+```
+
+Cloud Run Job は HTTP トレースを持たないため、`CLOUD_RUN_EXECUTION` を同じ項目へ載せる。
+Webhook から後続の配信 Job への非同期処理はトレースで接続せず、業務キー（店舗 ID）で照合する。

@@ -448,11 +448,12 @@ export function buildCandidateSelectionExpiredMessage(): LineMessage {
  * どの段階（招待コード／店名検索／確認）で発生した障害かに関わらず共通の汎用文言とする
  * （design.md ConversationHandlers「汎用の再試行案内 reply」）。
  */
-export function buildInternalErrorRetryMessage(): LineMessage {
+export function buildInternalErrorRetryMessage(supportCode?: string): LineMessage {
   return {
     type: 'text',
     text:
       '申し訳ございません、処理中にエラーが発生しました。\n' +
+      (supportCode ? `サポートコード: ${supportCode}\n` : '') +
       'お手数ですが、少し時間をおいてもう一度お試しください。\n' +
       '解決しない場合は、運営までお問い合わせください。',
   };

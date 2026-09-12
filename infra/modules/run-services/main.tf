@@ -94,6 +94,12 @@ resource "google_cloud_run_v2_service" "svc" {
           value = env.value
         }
       }
+
+      # 相関ログの Cloud Logging resource 名を組み立てるためのプロジェクト ID。
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
     }
   }
 

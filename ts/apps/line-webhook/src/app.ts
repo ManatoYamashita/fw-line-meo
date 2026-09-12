@@ -1,9 +1,16 @@
 import { Hono } from 'hono';
-import type { LogFields, Sink } from '@fwlm/observability';
+import {
+  correlationIdFromHeaders,
+  supportCodeFromCorrelationId,
+  withCorrelation,
+  type LogFields,
+  type Sink,
+} from '@fwlm/observability';
 import { createEventDispatcher, type InboundEvent } from './webhook/dispatch.js';
 import type { SignatureVerifier } from './webhook/signature.js';
-import type { ConversationHandlers } from './onboarding/conversation.js';
+import type { ConversationHandlers, ConversationLogger } from './onboarding/conversation.js';
 import type { LineMessenger } from './line/client.js';
+import type { LineMessengerLogger } from './line/client.js';
 import { buildInternalErrorRetryMessage } from './line/messages.js';
 
 // 構造化ログの最小契約（design.md「Monitoring」: LINE はログを提供しないため自前で記録する）。
@@ -55,6 +62,23 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post('/webhook', async (c) => {
     const requestId = c.req.header(REQUEST_ID_HEADER);
+    const correlationId = correlationIdFromHeaders(c.req.raw.headers);
+    const requestLog = withCorrelation(deps.structuredLog, correlationId);
+    const supportCode = supportCodeFromCorrelationId(correlationId);
+    const requestLogger: AppLogger = correlationId
+      ? { error: (event, fields) => requestLog('error', event, fields) }
+      : deps.logger;
+    const conversationLogger: ConversationLogger | undefined =
+      deps.conversationHandlers.handleEvent.length >= 2
+        ? {
+            info: (eventName, fields) => requestLog('info', eventName, fields),
+            warn: (eventName, fields) => requestLog('warn', eventName, fields),
+          }
+        : undefined;
+    const lineLogger: LineMessengerLogger | undefined =
+      deps.conversationHandlers.handleEvent.length >= 3
+        ? { warn: (eventName, fields) => requestLog('warn', eventName, fields) }
+        : undefined;
 
     // dispatch() へ渡す onEvent は ConversationHandlers.handleEvent をそのまま渡すのではなく、
     // イベント単位でエラー境界を完結させる薄いラッパーにする。
@@ -76,17 +100,31 @@ export function createApp(deps: AppDeps): Hono {
       recordWebhookEventOnce: deps.recordWebhookEventOnce,
       onEvent: async (event: InboundEvent) => {
         try {
-          await deps.conversationHandlers.handleEvent(event);
+          if (conversationLogger && lineLogger) {
+            await deps.conversationHandlers.handleEvent(event, conversationLogger, lineLogger);
+          } else if (conversationLogger) {
+            await deps.conversationHandlers.handleEvent(event, conversationLogger);
+          } else {
+            await deps.conversationHandlers.handleEvent(event);
+          }
         } catch (err) {
-          deps.logger.error('line-webhook.dispatch_failed', {
+          requestLogger.error('line-webhook.dispatch_failed', {
             errorKind: errorKindOf(err),
             ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
           });
           try {
-            await deps.messenger.reply(event.replyToken, [buildInternalErrorRetryMessage()]);
+            if (lineLogger) {
+              await deps.messenger.reply(
+                event.replyToken,
+                [buildInternalErrorRetryMessage(supportCode)],
+                lineLogger,
+              );
+            } else {
+              await deps.messenger.reply(event.replyToken, [buildInternalErrorRetryMessage(supportCode)]);
+            }
           } catch (replyErr) {
             // design.md「reply 失敗は structured log（X-Line-Request-Id 併記）に記録」。
-            deps.logger.error('line-webhook.retry_reply_failed', {
+            requestLogger.error('line-webhook.retry_reply_failed', {
               errorKind: errorKindOf(replyErr),
               ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
             });
@@ -111,7 +149,7 @@ export function createApp(deps: AppDeps): Hono {
       //
       // 載せるのは我々が名付けた区分と LINE 採番の requestId だけで、rawBody・
       // signatureHeader の中身は sink の allowlist が構造的に排除する。
-      deps.structuredLog('warn', 'webhook_signature_verification_failed', {
+      requestLog('warn', 'webhook_signature_verification_failed', {
         reason: signatureHeader === undefined ? 'missing_header' : 'mismatch',
         ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
       });
@@ -145,7 +183,7 @@ export function createApp(deps: AppDeps): Hono {
       // replyToken が判明する前の失敗であり、再試行案内の返信は試みていない。
       // **別の事象名で出す。** 同じ名前に潰すと、運用者が「オーナーに案内が届いたか」を
       // 記録から判定できなくなる（移送前は文言で区別されていた）。
-      deps.logger.error('line-webhook.dispatch_failed_before_reply_token', {
+      requestLogger.error('line-webhook.dispatch_failed_before_reply_token', {
         errorKind: errorKindOf(err),
         ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
       });

@@ -76,7 +76,14 @@ async function parseErrorEnvelope(res: Response): Promise<{ code: string; messag
       const record = err as Record<string, unknown>;
       const code = typeof record.code === 'string' ? record.code : fallback.code;
       const message = typeof record.message === 'string' ? record.message : fallback.message;
-      return { code, message };
+      const supportCode = (parsed as { supportCode?: unknown }).supportCode;
+      return {
+        code,
+        message:
+          typeof supportCode === 'string' && /^[A-Za-z0-9_-]{8}$/.test(supportCode)
+            ? `${message}（サポートコード: ${supportCode}）`
+            : message,
+      };
     }
   }
   return fallback;

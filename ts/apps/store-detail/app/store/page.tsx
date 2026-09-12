@@ -169,7 +169,15 @@ type DetailFetchResult =
   | { readonly ok: true; readonly data: StoreDetailResponse }
   /** 409: 表示対象が決まらないので候補から選ばせる（異常ではない）。 */
   | { readonly ok: false; readonly kind: 'select'; readonly stores: readonly StoreRef[] }
-  | { readonly ok: false; readonly kind: 'error'; readonly message: string };
+  | { readonly ok: false; readonly kind: 'error'; readonly message: string; readonly supportCode?: string };
+
+function supportCodeFromResponse(body: unknown): string | undefined {
+  if (body !== null && typeof body === 'object' && 'supportCode' in body) {
+    const value = (body as { supportCode?: unknown }).supportCode;
+    return typeof value === 'string' ? value : undefined;
+  }
+  return undefined;
+}
 
 async function fetchStoreDetail(idToken: string, storeIdHint: string | null): Promise<DetailFetchResult> {
   const url = storeIdHint === null ? '/api/detail' : `/api/detail?storeId=${encodeURIComponent(storeIdHint)}`;
@@ -187,12 +195,12 @@ async function fetchStoreDetail(idToken: string, storeIdHint: string | null): Pr
     return { ok: false, kind: 'select', stores: body.stores };
   }
   if (res.status === 401) {
-    return { ok: false, kind: 'error', message: AUTH_ERROR_MESSAGE };
+    return { ok: false, kind: 'error', message: AUTH_ERROR_MESSAGE, supportCode: supportCodeFromResponse(await res.json()) };
   }
   if (res.status === 404) {
-    return { ok: false, kind: 'error', message: NOT_FOUND_MESSAGE };
+    return { ok: false, kind: 'error', message: NOT_FOUND_MESSAGE, supportCode: supportCodeFromResponse(await res.json()) };
   }
-  return { ok: false, kind: 'error', message: SERVER_ERROR_MESSAGE };
+  return { ok: false, kind: 'error', message: SERVER_ERROR_MESSAGE, supportCode: supportCodeFromResponse(await res.json()) };
 }
 
 // --- 表示ヘルパー（flex.ts と同一の順位比較・文言規約） ---------------------------------
@@ -471,7 +479,12 @@ export default function StorePage(): React.JSX.Element {
       } else if (detailResult.kind === 'select') {
         setState({ status: 'select', stores: detailResult.stores });
       } else {
-        setState({ status: 'error', message: detailResult.message });
+        setState({
+          status: 'error',
+          message: detailResult.supportCode
+            ? `${detailResult.message}（サポートコード: ${detailResult.supportCode}）`
+            : detailResult.message,
+        });
       }
     }
 

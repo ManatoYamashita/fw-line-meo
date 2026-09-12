@@ -11,18 +11,34 @@
 package logging
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
 )
 
 // severityKey は集約基盤が重大度として解釈する項目名。正典の「重大度」の行に対応する。
 const severityKey = "severity"
 
 // NewJSONHandler は、重大度を集約基盤の綴りで出力する JSON ハンドラを返す。
-func NewJSONHandler(w io.Writer) slog.Handler {
-	return slog.NewJSONHandler(w, &slog.HandlerOptions{
+func NewJSONHandler(w io.Writer, correlationID ...string) slog.Handler {
+	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		ReplaceAttr: toSeverity,
 	})
+	if len(correlationID) == 0 || correlationID[0] == "" {
+		return handler
+	}
+	return handler.WithAttrs([]slog.Attr{slog.String("logging.googleapis.com/trace", correlationID[0])})
+}
+
+var executionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// ExecutionCorrelationID は Cloud Run Job の実行単位を Cloud Logging の trace 項目へ束ねる。
+func ExecutionCorrelationID(projectID, executionID string) string {
+	if projectID == "" || !executionIDPattern.MatchString(executionID) {
+		return ""
+	}
+	return fmt.Sprintf("projects/%s/traces/%s", projectID, executionID)
 }
 
 // toSeverity は最上位の level 属性だけを severity へ改め、値を集約基盤の綴りへ揃える。

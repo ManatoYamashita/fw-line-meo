@@ -65,6 +65,11 @@ resource "google_cloud_run_v2_job" "batch" {
           name  = "DB_IAM_USER"
           value = trimsuffix(google_service_account.job.email, ".gserviceaccount.com")
         }
+
+        env {
+          name  = "GOOGLE_CLOUD_PROJECT"
+          value = var.project_id
+        }
       }
     }
   }

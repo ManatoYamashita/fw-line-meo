@@ -35,6 +35,13 @@ interface ApiResult {
   draft?: string | null;
   sessionToken?: string;
   regenerationsLeft?: number;
+  supportCode?: string;
+  error?: { message?: string };
+}
+
+function apiErrorMessage(json: ApiResult, fallback: string): string {
+  const message = json.error?.message ?? fallback;
+  return json.supportCode ? `${message}（サポートコード: ${json.supportCode}）` : message;
 }
 
 export function SurveyShell({ storeId, storeName, aspects, pageToken, googleReviewUrl }: Props) {
@@ -59,7 +66,7 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
       });
       const json = (await res.json()) as ApiResult;
       if (!res.ok) {
-        setError('送信に失敗しました。時間をおいて再度お試しください。');
+        setError(apiErrorMessage(json, '送信に失敗しました。時間をおいて再度お試しください。'));
         return;
       }
       markAnswered(storeId);
@@ -87,7 +94,10 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
         body: JSON.stringify({ sessionToken: draftState.sessionToken }),
       });
       const json = (await res.json()) as ApiResult;
-      if (!res.ok) return; // 上限(409)等は現状の下書き・残数を維持
+      if (!res.ok) {
+        setError(apiErrorMessage(json, '再生成に失敗しました。時間をおいて再度お試しください。'));
+        return;
+      }
       setDraftState({
         draft: json.draft ?? draftState.draft,
         sessionToken: json.sessionToken ?? draftState.sessionToken,

@@ -34,6 +34,7 @@ import {
   type DashboardUserEnableDeps,
 } from './admin.js';
 import { jsonError } from './http.js';
+import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation, type Sink } from '@fwlm/observability';
 
 // 実起動なしで app.request からテスト可能な Hono アプリのファクトリ。
 // 純粋ハンドラ（2.1–2.5）を実依存（index.ts で注入）と結線する統合層（3.1）。
@@ -62,6 +63,7 @@ export interface AppDeps {
     userDisable: DashboardUserDisableDeps;
     userEnable: DashboardUserEnableDeps;
   };
+  structuredLog?: Sink;
 }
 
 const SIZE_MIN = 128;
@@ -99,8 +101,27 @@ async function readJsonBody(c: Context): Promise<BodyResult> {
   }
 }
 
-export function createApp(deps: AppDeps): Hono {
-  const app = new Hono();
+export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Sink } }> {
+  const app = new Hono<{ Variables: { correlationLog: Sink } }>();
+
+  // 入口で相関 ID を確定し、エラー封筒へサポートコードを付与する。
+  // ハンドラは純粋な契約を保ち、外部から渡された依存だけをリクエスト単位に差し替える。
+  app.use('*', async (c, next) => {
+    const correlationId = correlationIdFromHeaders(c.req.raw.headers);
+    const supportCode = supportCodeFromCorrelationId(correlationId);
+    const baseLog: Sink = deps.structuredLog ?? (() => undefined);
+    c.set('correlationLog', withCorrelation(baseLog, correlationId));
+    await next();
+    if (!supportCode || c.res.status < 400) return;
+    const contentType = c.res.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/json')) return;
+    const body = (await c.res.clone().json().catch(() => undefined)) as unknown;
+    if (body === null || typeof body !== 'object' || !('error' in body) || 'supportCode' in body) return;
+    c.res = new Response(JSON.stringify({ ...body, supportCode }), {
+      status: c.res.status,
+      headers: c.res.headers,
+    });
+  });
 
   // 公開・CORS 非適用（cors ミドルウェアより前に登録＝以降の業務ルートにのみ CORS が掛かる）。
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
@@ -153,6 +174,7 @@ export function createApp(deps: AppDeps): Hono {
     return handleStoreRegister(deps.storeRegistration.register, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -172,6 +194,7 @@ export function createApp(deps: AppDeps): Hono {
     return handleInviteCodeIssue(deps.inviteCodes.issue, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 

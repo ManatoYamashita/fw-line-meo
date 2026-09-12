@@ -18,7 +18,7 @@
 // 単位でエラーを隔離し、失敗は必ず行またはログに痕跡を残す（silent drop 禁止）」）。
 
 import { randomUUID } from 'node:crypto';
-import { writeStructuredLog } from '@fwlm/observability';
+import { executionCorrelationId, withCorrelation, writeStructuredLog } from '@fwlm/observability';
 
 import { closePool, getPool } from '@fwlm/db';
 import type { Queryable, SummaryDeliveryStatus } from '@fwlm/db';
@@ -30,6 +30,8 @@ import type { LinePushResult } from './line.js';
 import { queryDeliveryTargets, queryOwnersDueWithoutSummary } from './targets.js';
 import type { DeliveryTarget, SkippedNoSummaryTarget } from './targets.js';
 import { recordDeliveryResult, reserveDelivery } from './deliveries.js';
+
+const correlationLog = withCorrelation(writeStructuredLog, executionCorrelationId());
 
 // --- 設定読取（Task 4.4 の一部・dashboard-api の loadConfig 規約に準拠: 必須 env 欠落は
 // 起動時に明示エラーで fail-fast する） -------------------------------------------------
@@ -158,7 +160,7 @@ const defaultLogger: DeliveryJobLogger = {
   isolatedError(message, storeId, err) {
     // 失敗の要約は detail で出す。**message という名前は使えない** —
     // 集約基盤がこれを本文として吸い、項目検索から消えてしまう。
-    writeStructuredLog('error', 'delivery-job.isolated_error', {
+    correlationLog('error', 'delivery-job.isolated_error', {
       detail: message,
       storeId,
       errorKind: errorKindOf(err),
@@ -168,7 +170,7 @@ const defaultLogger: DeliveryJobLogger = {
     // 欠けた設定は識別子として、外部呼び出しの失敗は状態コードとして載せる。
     // 本文を載せずに原因を追えるようにするため（要件 2.5 は「種別**および状態コード**」を許す）。
     // 状態コードが無いと、Issue 151 の再発時に 401 / 429 / ネットワーク断を区別できない。
-    writeStructuredLog('error', 'delivery-job.fatal', {
+    correlationLog('error', 'delivery-job.fatal', {
       detail: message,
       errorKind: errorKindOf(err),
       ...(err instanceof MissingConfigError ? { configKey: err.configKey } : {}),
@@ -445,7 +447,7 @@ export async function main(): Promise<void> {
   try {
     const summary = await runDeliveryJob({ pool, lineClient, liffUrl: config.liffUrl });
     const { event, ...summaryFields } = summary;
-    writeStructuredLog('info', event, summaryFields);
+    correlationLog('info', event, summaryFields);
   } catch (err) {
     // token 発行失敗・対象抽出クエリ失敗などジョブ全体の致命的エラー（R5.1: 当日中に検知可能に）。
     defaultLogger.fatal('delivery-job run failed fatally (token issuance or target query)', err);
@@ -470,7 +472,7 @@ if (isDirectRun) {
       // 残存ハンドルの種類がログに出て原因の起点になる。
       // main() の中ではなくここに置くのは、テストが呼ぶ main() へテストプロセス自身の
       // ハンドルを混ぜないため（テストは main() を直接 await する）。
-      writeStructuredLog('info', 'delivery-job.exit', {
+      correlationLog('info', 'delivery-job.exit', {
         // process.exitCode は string も取りうる（Node の型定義）。移送前は直接
         // 文字列化していたため型が緩かったが、記録の型は数値を要求する。
         exitCode: typeof process.exitCode === 'number' ? process.exitCode : 0,
