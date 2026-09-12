@@ -34,7 +34,9 @@
 #
 # 照合するガード:
 #   scripts/check-external-api-smoke.sh            構造照合（ts-ci・gcloud 不要・日付を一切見ない）
-#   scripts/check-external-api-smoke-freshness.sh  鮮度照合（定期ワークフロー・PENDING と期限切れを赤）
+#   scripts/check-external-api-smoke-freshness.sh  鮮度照合（定期ワークフロー・PENDING と期限切れを赤・
+#                                                  有効期限（最終確認日 + 14 日）の 2 日前からは緑のまま
+#                                                  追跡 Issue で期限間近を予告）
 #
 # 実疎通の実行: bash scripts/run-external-api-smoke.sh（運用者の gcloud 資格情報で走る。CI では呼ばない）
 db-admin-password	-	-	-	#125	Cloud SQL の postgres 管理ユーザー。外部 API ではない。
