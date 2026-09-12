@@ -94,6 +94,21 @@ jobs:
         # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
         # 放置される事故の再発防止（同じく read-only grep 検証）。
         run: bash scripts/check-deploy-image-coverage.sh
+      - name: 'サービス監視カバレッジガード（Issue #230）'
+        # 本 Issue の実態は「監視が無い」ではなく「監視はあったがコードが失われた」だった。
+        # しかもその指標は、アプリ側の出力コードが一緒に失われたため「指標は存在するのに
+        # 一致するログが 1 件も出ない」状態で本番に生き残っていた（2026-09-06〜09-09）。
+        # ここでは宣言の中の辻褄だけを見る（read-only grep/awk 検証・GCP へは問い合わせない）:
+        # 5xx がサービス名を述語に持たないこと・遅延監視の列挙が実在すること・**指標が数える
+        # 事象名をそのサービスが実際に出力していること**・通知先と auto_close の接続。
+        #
+        # 「コードが消えても本番は生きている」は静的には見えないため、そちらは
+        # monitoring-drift ワークフロー（6 時間ごと）が本番と両方向で照合する。
+        #
+        # このガードは直上の check-deploy-image-coverage.sh を --print-targets で呼び、
+        # サービス正典をそこから導出する（列挙を二重管理しない）。上流が赤なら救済せず
+        # 落ちるので、順序は直後を保つこと。
+        run: bash scripts/check-monitoring-coverage.sh
       - name: 'シークレット宣言カバレッジガード（Issue #63）'
         # Secret Manager の値（version）は tf が作らず、人間が out-of-band 投入する。枠だけ作って
         # 実値を入れ忘れた gemini-api-key は go-live 以降 4 週間 400 を返し続け、機能A は一度も

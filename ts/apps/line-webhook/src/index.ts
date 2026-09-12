@@ -16,6 +16,7 @@ import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
+import { writeStructuredLog } from './lib/structured-log.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -84,6 +85,9 @@ const deps: AppDeps = {
       writeStructuredLog('error', event, fields);
     },
   },
+  // Issue #230: ログベース指標が読む 1 行 JSON の出力先。allowlist sink なので、
+  // 型を通り抜けた余剰プロパティが Cloud Logging へ永続化されることはない。
+  structuredLog: writeStructuredLog,
 };
 
 const app = createApp(deps);

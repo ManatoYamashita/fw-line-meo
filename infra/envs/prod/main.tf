@@ -186,6 +186,15 @@ module "guardrails" {
   places_quota_caps  = var.places_quota_caps
   # review-acquisition のファネル指標（Issue #137 段階3）の対象サービス。
   survey_service_name = module.run_services.service_names["survey-web"]
+  # Issue #230: 署名検証失敗の指標（ログベース）の対象サービス。
+  webhook_service_name = module.run_services.service_names["line-webhook"]
+
+  # Issue #230: p95 遅延を監視する客向け面。**リテラルで渡す**（module.run_services の
+  # output は computed であり、for_each の集合要素にすると新サービス追加時に plan ごと
+  # 落ちる — 上の cicd_wif の keys()/values() と同じ罠）。run-services は name = each.key
+  # なので、ここに書く名前は上の services マップの鍵そのものである。その対応は
+  # scripts/check-monitoring-coverage.sh が両方向で照合する。
+  latency_watched_services = ["store-detail", "survey-web"]
 
   depends_on = [module.project_services]
 }

@@ -117,6 +117,7 @@ gcloud sql databases create fwlm_staging --instance=fwlm-pg --project=gen-fw-lin
 - 検証: `.github/workflows/gcp-auth-smoke.yml` を `workflow_dispatch` で起動 → SA キーなしで認証し `gcloud run services list` が成功すること（Req 6.1/6.2）。
 - **稼働実態の定期検証（Issue #91）**: `.github/workflows/prod-image-drift.yml`（`prod-image-drift`）が 6 時間ごとに、稼働イメージのタグと `origin/main` を突き合わせる。**read-only の照会のみ**（`gcloud run services/jobs list`）であり、イメージ更新も構成変更も行わないため本契約に抵触しない。`deploy-prod` はマージ契機でしか動かず、main が動かない期間は run 自体が生成されない（＝失敗という兆候すら出ない）ため、時間で回す検証がこの穴を埋める。
 - **シークレット実値の定期検証（Issue #63）**: `.github/workflows/secret-version-drift.yml`（`secret-version-drift`）が 6 時間ごとに、`infra/secrets-provisioned.tsv` の宣言と本番の version 構成を突き合わせる。**read-only のメタデータ照会のみ**（`gcloud secrets describe` / `versions list`）であり、値（payload）は読まないため本契約に抵触しない。CI に付く IAM は secret 単位の `roles/secretmanager.viewer` だけで、このロールは `secretmanager.versions.access` を含まない。project 単位の付与は行わない（Req 5.4）。
+- **監視構成の定期検証（Issue #230）**: `.github/workflows/monitoring-drift.yml`（`monitoring-drift`）が 6 時間ごとに、`infra/modules/guardrails/main.tf` の宣言と本番の alert policy / ログベース指標を **両方向で** 突き合わせる。**read-only の照会のみ**（`gcloud monitoring policies list` と Monitoring の `metricDescriptors`）であり、構成変更も state への書き込みも行わないため本契約に抵触しない。CI に付く IAM は `roles/monitoring.viewer` のみで、**`gcloud logging metrics list` の経路は採らない**（それに必要な `logging.logMetrics.*` はこのロールに含まれず、代わりに `roles/logging.viewer` を付けると `logging.logEntries.list` まで付いて CI がログ本文を読めるようになる。Req 5.4 に反する）。
 - **外部 API への実疎通は CI では行わない（Issue #125）**: 実疎通には値そのものが要るが、CI の責務はイメージ更新であり外部 API 呼出ではない。CI へ `roles/secretmanager.secretAccessor` を付けることは Req 5.4（各実行環境は自身の責務に必要なシークレットのみ読み取り可能）に反するため行わない。実疎通は §8 の手順で運用者が自分の資格情報で実行し、CI は `infra/external-api-smoke.tsv` の宣言の構造と鮮度だけを検証する。
 - per-app のビルド/デプロイワークフローは各アプリ spec がこの雛形を基に追加する。
 
@@ -572,3 +573,96 @@ GROUP BY 1`）。なお DB の件数は「実際に完了メニューへ繋が�
 owners の状態遷移と独立に決まるため）。**Issue #228 以降、切り替えの成否は記録から読める**
 （`line-webhook.richmenu_linked` / `line-webhook.richmenu_link_failed` の件数）。
 個々のオーナーの実状を確かめるなら `GET /v2/bot/user/{userId}/richmenu` を使う。
+
+---
+
+## 11. 監視とアラート（Issue #230）
+
+宣言の正典は `infra/modules/guardrails/main.tf` である。本番の実物は Terraform だけが作り、
+手で作らない。
+
+| 資産 | 対象 | 鳴る条件 |
+|---|---|---|
+| `google_monitoring_alert_policy.job_failure` | Cloud Run **Job** 全部（名前で絞らない） | 失敗 execution > 0 / 5 分 |
+| `google_monitoring_alert_policy.service_5xx_rate` | Cloud Run **Service** 全部（名前で絞らない） | 5xx 率 > 5% が 5 分継続 |
+| `google_monitoring_alert_policy.customer_latency` | 客向け 2 面（`store-detail` / `survey-web`） | p95 遅延 > 2000ms が 5 分継続 |
+| `google_monitoring_alert_policy.webhook_signature_failure` | `line-webhook` | 署名検証失敗 > 5 件 / 5 分 |
+| `google_logging_metric.webhook_signature_failures` | 同上（上のアラートの入力） | — |
+| `google_logging_metric.survey_funnel` | `survey-web`（Issue #137） | — |
+
+通知先はすべて `google_monitoring_notification_channel.email`（`var.alert_email`）である。
+
+### 11-1. 二度と失われないための 2 層
+
+2026-09-06、この監視は本番へ apply されたが **対応する .tf が commit されないまま消えた**。
+9 月 9 日の実測時点で本番には 4 ポリシー + 1 指標が稼働し、terraform state（serial 38）も
+それを保持していたが、`origin/main` にも 49 本のリモートブランチのいずれにもコードが無かった。
+**次の `terraform apply` がこれを destroy する寸前だった。**
+
+さらにアプリ側の出力コードも一緒に失われたため、`webhook_signature_failures` は
+「指標は存在するのに一致するログが 1 件も出ない」状態で生き残っていた（`line-webhook` は
+401 を返すだけで何も記録しない実装に戻っていた）。
+
+この 2 つは別の失敗であり、別の網が要る。
+
+| 層 | 仕組み | 捕まえるもの |
+|---|---|---|
+| 静的（ts-ci） | `scripts/check-monitoring-coverage.sh` | 5xx がサービス名を述語に持つ／遅延監視の列挙が実在しない／**指標が数える事象をアプリが出していない**／通知先・`auto_close` の欠落 |
+| 定期（6 時間） | `scripts/check-monitoring-drift.sh` + `monitoring-drift` ワークフロー | 宣言に在って本番に無い（apply 忘れ）／**本番に在って宣言に無い（コードが失われた）** |
+
+静的な層は「宣言の中で辻褄が合っているか」までしか言えない。コードが消えている間、ts-ci は
+何度でも緑になる。**「コードが消えても本番は生きている」を検出できるのは定期の層だけ**である。
+
+### 11-2. `undeclared-in-prod` が出たときの手順
+
+**先に `make tf-plan` を打つこと。** 宣言に無いものは削除対象なので、確認せずに
+`make tf-apply` すると監視が消える。
+
+1. `make tf-plan` で destroy 予定に入っていないか確認する
+2. 意図して作った監視なら `guardrails/main.tf` へ書き起こす。**state のリソースアドレスに
+   厳密一致させること**（ずれると destroy→create になり、その隙間に起きた障害が誰にも
+   通知されない）。state の実属性は次で読める:
+
+```bash
+gcloud storage cat gs://<TF_STATE_BUCKET>/terraform/state/default.tfstate
+```
+
+3. 不要なら宣言と本番の両方から消す（片方だけ消すと同じ乖離が残る）
+
+### 11-3. アラートの発火を実測する
+
+閾値と条件式が実データに対して正しいことは、鳴らしてみるまで分からない。署名検証失敗は
+**客に一切影響が無い**（401 を返すだけ）ので、実測はここで行う。
+
+```bash
+# 稼働リビジョンを確認する
+gcloud run services describe line-webhook --project="$PROJECT_ID" --region=asia-northeast1 \
+  --format='value(status.traffic[0].revisionName,spec.template.spec.containers[0].image)'
+
+# 無効署名を閾値超（5 分に 6 回以上）送る。**本物のチャネルシークレットは使わない。**
+SVC_URL="$(gcloud run services describe line-webhook --project="$PROJECT_ID" \
+  --region=asia-northeast1 --format='value(status.url)')"
+for i in $(seq 1 12); do
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST "${SVC_URL}/webhook" \
+    -H 'Content-Type: application/json' \
+    -H 'x-line-signature: aW52YWxpZC1zaWduYXR1cmU=' \
+    -d '{"destination":"U0","events":[]}'
+done
+
+# ログが出ているか（**署名値も本文も載っていないこと**を同時に確認する）
+gcloud logging read \
+  'resource.type="cloud_run_revision" AND resource.labels.service_name="line-webhook" AND jsonPayload.event="webhook_signature_verification_failed"' \
+  --project="$PROJECT_ID" --limit=20 --freshness=10m \
+  --format='value(timestamp,resource.labels.revision_name,jsonPayload.reason)'
+
+# Incident が立ったか
+gcloud alpha monitoring policies list --project="$PROJECT_ID" \
+  --filter='displayName:"line-webhook signature verification failures"' --format='value(name)'
+```
+
+発火通知と復旧通知の両方がメールに届くところまで見る。**復旧まで見ないと `auto_close` が
+効いていることを確認できない**（開いたままのインシデントは「今も壊れている」ことを意味しなく
+なる）。5xx と遅延は本番へ意図的に障害を起こす必要があるため、条件式が実データに一致すること
+（系列が返ること）の照会に留める。
+
+記録は Issue へ残す。**署名値・鍵・応答本文は載せない。**
