@@ -1,7 +1,7 @@
 -- assertions 70: survey_material_tallies（素材の厚みの匿名カウンタ・Issue #137 段階3）
 -- 各拒否は DO ブロック + EXCEPTION で捕捉。期待通り拒否されなければ FAIL を RAISE（非ゼロ終了）。
 --
--- 本表は CHECK を 3 つ持つ（period_month の月初・aspect_count の非負・count の非負）。
+-- 本表は CHECK を 4 つ持つ（period_month の月初・aspect_count の非負・concern_count の非負・count の非負）。
 -- どれか 1 つでも発火すれば check_violation になるため、**CONSTRAINT 名まで確認する**。
 -- 名前を見ないと「別の CHECK が代わりに発火していた」ケースを取り違えたまま緑になる。
 BEGIN;
@@ -22,7 +22,8 @@ BEGIN
     END;
     RAISE NOTICE 'PASS 70a: orphan store_id rejected';
 
-    -- (b) 自然キーの一意性（store_id, period_month, aspect_count, has_comment）
+    -- (b) 自然キーの一意性（store_id, period_month, aspect_count, concern_count, has_comment）。
+    --     concern_count を省いた行は既定の 0 になる（0007 以前の行と同じ扱い）。
     INSERT INTO survey_material_tallies(store_id, period_month, aspect_count, has_comment, count)
         VALUES (s, DATE '2026-06-01', 2, true, 1);
     BEGIN
@@ -94,5 +95,30 @@ BEGIN
     EXCEPTION WHEN not_null_violation THEN NULL;
     END;
     RAISE NOTICE 'PASS 70g: has_comment is NOT NULL';
+
+    -- (h) concern_count は非負（Issue #221）。上限は aspect_count と同じ理由で持たない。
+    BEGIN
+        INSERT INTO survey_material_tallies(store_id, period_month, aspect_count, concern_count, has_comment, count)
+            VALUES (s, DATE '2026-10-01', 0, -1, false, 1);
+        RAISE EXCEPTION 'FAIL(h): 負の concern_count が受理された';
+    EXCEPTION WHEN check_violation THEN
+        GET STACKED DIAGNOSTICS cname = CONSTRAINT_NAME;
+        IF cname IS DISTINCT FROM 'survey_material_tallies_concern_count_check' THEN
+            RAISE EXCEPTION 'FAIL(h): 別の CHECK が発火した: %', cname;
+        END IF;
+    END;
+    RAISE NOTICE 'PASS 70h: negative concern_count rejected by the concern_count CHECK';
+
+    -- (i) concern_count は自然キーの一部。良かった点の数と一言の有無が同じでも、気になった点の
+    --     数が違えば別の行として共存する（ここが分かれていないと、気になった点だけを選んだ回答が
+    --     「観点ゼロ」と同じ行に数えられ、素材の厚みの分布が壊れる・Req 5.6）。
+    INSERT INTO survey_material_tallies(store_id, period_month, aspect_count, concern_count, has_comment, count)
+        VALUES (s, DATE '2026-06-01', 2, 1, true, 1);
+    SELECT count(*) INTO n FROM survey_material_tallies
+        WHERE store_id = s AND period_month = DATE '2026-06-01' AND aspect_count = 2 AND has_comment = true;
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'FAIL(i): concern_count 違いが別行にならない（行数=%）', n;
+    END IF;
+    RAISE NOTICE 'PASS 70i: concern_count distinguishes rows within the same aspect_count and has_comment';
 END $$;
 ROLLBACK;

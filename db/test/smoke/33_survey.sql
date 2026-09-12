@@ -19,6 +19,9 @@ BEGIN
         VALUES (s, DATE '2026-06-01', 5, 3);
     INSERT INTO survey_aspect_tallies(store_id, period_month, aspect_code, count)
         VALUES (s, DATE '2026-06-01', 'taste', 3);
+    -- 気になった点（Issue #221）。良かった点と同じ観点を、別の表で数える。
+    INSERT INTO survey_concern_tallies(store_id, period_month, aspect_code, count)
+        VALUES (s, DATE '2026-06-01', 'taste', 1);
     RAISE NOTICE 'PASS 3.3b: anonymous tallies insertable';
 
     BEGIN
