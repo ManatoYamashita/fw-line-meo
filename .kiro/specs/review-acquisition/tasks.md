@@ -182,7 +182,7 @@
   - _Boundary: test survey-web perf_
   - _Depends: 4.3, 4.4_
 
-- [ ] 7. 素材収集の両面化：気になった点を全員に尋ね、不満の事実を薄めない（Issue #221）
+- [x] 7. 素材収集の両面化：気になった点を全員に尋ね、不満の事実を薄めない（Issue #221）
 - [x] 7.1 気になった点の匿名集計を追加する（`0008`）
   - `survey_concern_tallies`（店舗×月×観点のカウンタ）を追加し、`survey_material_tallies` に `concern_count` を足して一意制約を張り替える
   - `db/write-boundary.md`・`db/ERD.md`・`infra/sql/grants.sql`（ヘッダと GRANT 文）・`30_compliance.sql` の allowlist・assertions / smoke を同時に更新する
@@ -211,7 +211,8 @@
   - _Requirements: 2.2, 2.4, 2.11, 4.4_
   - _Depends: 7.3_
 
-- [ ] 7.5 本番へ適用する
+- [x] 7.5 本番へ適用する
+  - 実施記録: 末尾の「Issue #221 の本番実施記録（2026-09-13）」。本番には `0007` が未適用だったので先に当てた（`grants.sql` が `audit_logs` を前提にするため）
   - `0008` → `grants.sql` を本番へ当ててからマージする。デプロイ後、実回答で concern 行と `concern_count` が加算されることを確かめる
   - Observable: 本番の `survey_concern_tallies` に加算が現れる（本番識別子は先頭 8 文字まで書く）
   - Issue #221 の完了条件 4（変更前後で口コミ獲得率がどう動いたかを読む手段）は Issue #137 の計測基盤に依存するため、本タスクでは閉じない。**追跡は #137**
@@ -330,3 +331,88 @@ CI へ載せて対照で赤化を示すまで「機械強制する」は成立�
 `pageToken` を取り `POST /api/responses`）へ到達する唯一の関門で、知られれば第三者が実店舗の
 匿名集計と Gemini の生成コストへ加算できる（steering `tech.md`「spec の実施記録の規律」）。
 DB の行と照合する用途には先頭 8 文字で足りるため、完全値は書かない。
+
+## Issue #221 の本番実施記録（2026-09-13）
+
+**対象**: 本番 `survey-web` リビジョン `survey-web-00108-8mm`（2026-09-12T19:32:57Z 作成）。
+`deploy-prod` run 34714179584（トリガー元はマージコミット `88ebc6d`・PR #246）の deploy ジョブが success で、
+トラフィック 100%、`metadata.generation` と `status.observedGeneration` がともに 113、`latestReady` と
+`latestCreated` が一致、Ready / ConfigurationsReady / RoutesReady がいずれも True。リビジョンのイメージ
+digest `sha256:d39296a4…` は、同 run の稼働確認の出力（`OK: survey-web → …@sha256:d39296a4…`）と一致する。
+サービス定義のイメージタグは `survey-web:88ebc6d` である。
+
+### 事前に out-of-band で行ったこと
+
+| 作業 | 結果 |
+|---|---|
+| `db/migrations/0007_audit_logs.sql`（PR #244 由来）の適用 | 未適用だった（`audit_logs` と enum 2 つが不在）。19:05〜19:10Z の間に 0007 と、その時点の main（`693ca95`）の `grants.sql` を当てた。`audit_logs` への権限は dashboard-api と line-webhook が INSERT のみ |
+| `db/migrations/0008_survey_concern_tallies.sql` の適用 | 19:22:05Z。public の BASE TABLE が 19 → 20。`survey_material_tallies` の一意制約は 5 列へ張り替わり、既存の 1 行は `concern_count=0` になった |
+| `infra/sql/grants.sql`（`91ee60c`）の適用 | 0008 の直後。`survey_concern_tallies` へ TS 層の 3 SA が SELECT / INSERT / UPDATE / DELETE、daily-batch と store-detail は SELECT のみ |
+| マージ | 19:22:16Z（`88ebc6d`）。集計が失敗する窓を短くするため、0008 の直後に行った |
+
+**0007 を先に当てたのは、`grants.sql` が `audit_logs` への GRANT を含むからである。** 0007 が無いまま
+「0008 → `grants.sql`」を流すと `grants.sql` は失敗して全体がロールバックし、survey の SA は
+`survey_concern_tallies` への権限を持たないまま新コードが出る。その場合、気になった点つきの回答は
+集計のトランザクションごと失われる。後続 PR の手順どおりに進めても、先行 PR の migration が本番に
+未適用なら同じことが起きる。適用の前に、先行する migration の対象が本番にあるかを `to_regclass` で確かめること。
+
+**集計が失敗する窓は約 11 分だった**（0008 の適用 19:22:05Z から新リビジョンの作成 19:32:57Z まで）。
+その間、旧コードの UPSERT は `there is no unique or exclusion constraint matching the ON CONFLICT
+specification` で失敗する（一時 postgres で再現済み）。本番の survey-web のログでは 19:00Z 以降、
+`survey_page_viewed` / `survey_response_submitted` / `tally_failed` のいずれも 0 件で、窓の間に失われた回答は無い。
+
+### 観測したこと
+
+客と同じ経路で 1 件だけ送信した（`GET /s/<storeId>` の SSR HTML から `pageToken` を取り
+`POST /api/responses`）。星 2・良かった点 `taste`・気になった点 `service`・一言なし。
+
+1. 4 つの集計がそれぞれ 0 → 1 になった（`ONIBUS COFFEE 中目黒駅前店` / `2026-09-01`）。
+   `survey_rating_tallies`（星 2）、`survey_aspect_tallies`（`taste`）、`survey_concern_tallies`（`service`）、
+   `survey_material_tallies`（`aspect_count=1` / `concern_count=1` / `has_comment=f`）
+2. 生成は `ok`。下書きは良かった点（味）と気になった点（接客）の両方を書き、不満を和らげていない
+   （「接客については残念に感じることがありました」）。未選択の 4 観点（雰囲気・清潔さ・コスパ・量）の
+   検出語彙は 1 つも現れなかった
+3. 応答の `sessionToken` の素材は `concernLabels=['接客']` で、`unselectedAspectLabels` は上の 4 観点だった。
+   気になった点に選んだ観点が禁止の対象から外れている
+4. 構造化ログは `survey_page_viewed`（19:35:19Z）→ `survey_response_submitted`（19:35:22Z）の 2 本で、
+   `tally_failed` は出ていない
+
+### 事実性の実測（eval・本番投入の前）
+
+`eval:factuality` を base（`13af2b7`）と head で同じ条件で回した（`gemini-3.1-flash-lite`・各素材 6 回・
+事後検証なし＝プロンプト単体の効果）。数えたのは評価の検出器が拾う「未選択の観点への言及」である。
+
+| 区分 | base | head |
+|---|---|---|
+| 既存 16 素材 | 4/96（4.2%） | 3/96（3.1%） |
+| 低評価 4 素材（新しい指示が不満の材料なしで発火する経路） | 0/24 | 0/24 |
+| 高評価・気になった点なしの素材で「不満はない」と断定した下書き | 0/66 | 0/66 |
+
+気になった点だけの素材は、同じ厚み（観点 1 つ・一言なし）の良かった点側の素材を対照に置き、各 15 回で追加に測った。
+
+| 素材 | 事後検証なし | 事後検証あり（本番構成） |
+|---|---|---|
+| 気になった点だけ・星 1（接客） | 1/15 | 0/15 |
+| 気になった点だけ・星 2（量） | 1/15 | 0/15 |
+| 対照: 良かった点 1 つ・星 5（味） | 2/15 | 1/15 |
+| 対照: 良かった点 1 つ・星 4（接客） | 1/15 | 1/15 |
+
+気になった点だけの素材は対照と同程度で、観点ありの字数規則（100〜200 字）へ入ったことによる悪化は見えない。
+選んだ不満は本文へ反映された（接客 36/36・量 36/36。量は検出語彙が「量について」を拾わないため「量」の出現で数えた）。
+人格攻撃に近い表現は 72 件中 1 件（「人としてあまり気持ちの良い接客ではなかった」）だった。
+
+### 確認していないこと
+
+以下は実施していない。テストで満たしていることと本番で確認したことを混ぜない。
+
+- **実際の来店客による気になった点の回答** — 本番の 1 件はこちらの `curl` である
+- **気になった点だけの回答（`aspect_count=0` かつ `concern_count>0`）が本番で別の行に分かれること** — 本番へ送ったのは
+  両方ありの 1 件だけ。行が分かれることは `db/test/assertions/70_survey_material_tallies.sql` の 70i と
+  `ts/packages/db/test/tallies.db.test.ts` でのみ確認している
+- **再生成（`/api/drafts`）で気になった点が保たれること** — sessionToken の往復を単体テストで確認しただけで、本番では叩いていない
+- **Issue #221 の完了条件 4（変更前後で口コミ獲得率がどう動いたか）** — 7.5 の本文のとおり #137 に依存する
+
+### 識別子について
+
+本記録に書いた店舗 ID は先頭 8 文字の `865d1c0e` だけである。理由は「Issue #137 段階3 の本番実施記録」の
+同名の節と同じで、店舗 ID は客向けアンケート経路へ到達する唯一の関門だからである。
