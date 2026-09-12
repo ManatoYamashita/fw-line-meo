@@ -475,6 +475,7 @@ async function handleConfirm(
       deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(linkError) });
     }
   } catch {
+    // swallowed-exception: intentional — 記録経路自身の失敗を業務処理へ伝播させない。
     // 記録できないことを理由に、利用者に見える振る舞いを変えない（要件 3.2 / 3.3）。
   }
 }

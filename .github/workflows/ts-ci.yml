@@ -109,6 +109,10 @@ jobs:
         # サービス正典をそこから導出する（列挙を二重管理しない）。上流が赤なら救済せず
         # 落ちるので、順序は直後を保つこと。
         run: bash scripts/check-monitoring-coverage.sh
+      - name: '例外握り潰しガード（Issue #233）'
+        # コメントだけの catch は失敗の事実を消し、観測値を壊す。実行時コードだけを字句走査し、
+        # テスト用スタブや文字列中の catch には誤爆しない。意図的な吸収は理由付き注釈を要する。
+        run: bash scripts/check-swallowed-exceptions.sh
       - name: 'シークレット宣言カバレッジガード（Issue #63）'
         # Secret Manager の値（version）は tf が作らず、人間が out-of-band 投入する。枠だけ作って
         # 実値を入れ忘れた gemini-api-key は go-live 以降 4 週間 400 を返し続け、機能A は一度も
