@@ -23,7 +23,7 @@ BEGIN
     RAISE NOTICE 'PASS 70a: orphan store_id rejected';
 
     -- (b) 自然キーの一意性（store_id, period_month, aspect_count, concern_count, has_comment）。
-    --     concern_count を省いた行は既定の 0 になる（0007 以前の行と同じ扱い）。
+    --     concern_count を省いた行は既定の 0 になる（0008 以前の行と同じ扱い）。
     INSERT INTO survey_material_tallies(store_id, period_month, aspect_count, has_comment, count)
         VALUES (s, DATE '2026-06-01', 2, true, 1);
     BEGIN

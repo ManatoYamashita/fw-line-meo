@@ -27,14 +27,14 @@
 - **下書き生成パイプライン**: プロンプト（素材限定・変動注入）・安全設定・構造化出力・再試行・出力検証
 - **セッショントークン契約**（HMAC 署名・attempt/exp 封入）: 再生成上限のステートレス強制
 - **Google 投稿 URL 組立**（writereview 形式）: 単一モジュールに隔離
-- **tallies 4 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で、`survey_concern_tallies` は `0007` で追加）
+- **tallies 4 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で、`survey_concern_tallies` は `0008` で追加）
 - **QR 生成エンドポイント**（`ts/apps/dashboard-api` の種アプリ・Firebase ID トークン検証・RBAC）
 - **TS モノレポ基盤**（`ts/` pnpm workspace・`packages/db`・lint/test 規約）
 
 ### Out of Boundary
 - ダッシュボード UI・ログインフロー・セッション管理（Issue #5。本 spec の QR API は Bearer ID トークンを受けるだけ）
 - `stores.place_id` の充足・鮮度（オンボーディング／バッチ側。本 spec は毎回 DB から読むのみ）
-- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）と、`survey_concern_tallies` および `survey_material_tallies.concern_count`（`0007`・Issue #221）のみで、4 階層側の表は変更しない
+- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）と、`survey_concern_tallies` および `survey_material_tallies.concern_count`（`0008`・Issue #221）のみで、4 階層側の表は変更しない
 - インフラ本体の構成変更（下記の最小追加を除き gcp-infra-foundation の所有。追加も同 spec の規約に従う）
 - 集計データの読み出し・可視化
 
@@ -227,11 +227,11 @@ sequenceDiagram
 | 4.7 | 由来の明示と推敲の促し | DraftPanel | 読み上げ領域の外の静的段落＋`aria-describedby` | — |
 | 5.1 | 個人情報非取得 | 全コンポーネント | 入力項目自体に PII なし | セキュリティ節 |
 | 5.2 | 月次集計のみ加算 | tallies.ts, ResponsesAPI, SessionToken（pageToken） | UPSERT 契約・pageToken 検証 | 回答フロー |
-| 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006`/`0007` の列 allowlist | 良かった点の数・気になった点の数・一言の有無のみ。本文列を持たない・`30_compliance.sql` | 回答フロー |
+| 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006`/`0008` の列 allowlist | 良かった点の数・気になった点の数・一言の有無のみ。本文列を持たない・`30_compliance.sql` | 回答フロー |
 | 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log, guardrails のログベース指標 | sink の allowlist（storeId のみ）・指標の label は `store_id` のみ | Monitoring |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
-| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 4 表のみ（`0006`・`0007` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
+| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 4 表のみ（`0006`・`0008` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
 
 ## Components and Interfaces
 
@@ -394,9 +394,9 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 
 ## Data Models
 
-**スキーマ追加は 2 表と 1 列**（`survey_material_tallies`・`0006`・Issue #137 段階3／`survey_concern_tallies` と `survey_material_tallies.concern_count`・`0007`・Issue #221）。4 階層側の表は変更しない。
+**スキーマ追加は 2 表と 1 列**（`survey_material_tallies`・`0006`・Issue #137 段階3／`survey_concern_tallies` と `survey_material_tallies.concern_count`・`0008`・Issue #221）。4 階層側の表は変更しない。
 
-`0007` は `survey_material_tallies` の一意制約を `(store_id, period_month, aspect_count, concern_count, has_comment)` へ張り替える。**旧コードの UPSERT は旧制約の列を名指ししているため、適用からデプロイ完了までの間は集計の加算が失敗する**（客の体験は 5.4 で守られる）。本番は `0007` → `grants.sql` → マージの順で、適用はマージ直前に行う。
+`0008` は `survey_material_tallies` の一意制約を `(store_id, period_month, aspect_count, concern_count, has_comment)` へ張り替える。**旧コードの UPSERT は旧制約の列を名指ししているため、適用からデプロイ完了までの間は集計の加算が失敗する**（客の体験は 5.4 で守られる）。本番は `0008` → `grants.sql` → マージの順で、適用はマージ直前に行う。
 
 - **読取**: `stores`（存在・place 確定・名前）、`owners`（agency 連鎖）、`dashboard_users`（RBAC）、`survey_aspects`（選択肢 SoT）
 - **書込**: `survey_rating_tallies` / `survey_aspect_tallies` / `survey_concern_tallies` / `survey_material_tallies` のみ（TS 層書込境界の内側）

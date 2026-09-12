@@ -1,4 +1,4 @@
--- 0007_survey_concern_tallies.sql
+-- 0008_survey_concern_tallies.sql
 -- review-acquisition（Issue #221）: 気になった点の匿名集計と、素材の厚みへの個数の追加。
 --
 -- 背景: アンケートは観点を「良かった点」でしか尋ねず、星 1〜2 の客にも肯定側の観点だけを
@@ -22,7 +22,7 @@
 -- `ON CONFLICT (store_id, period_month, aspect_count, has_comment)` と旧制約の列を名指ししており、
 -- 張り替え後は一致する一意制約が無くなる。rating / aspect と同一トランザクションなので、その回答の
 -- 集計は丸ごとロールバックされる（客の体験は Requirement 5.4 で守られる）。本番は
--- 0007 → infra/sql/grants.sql → マージの順で、適用はマージ直前に行う。
+-- 0008 → infra/sql/grants.sql → マージの順で、適用はマージ直前に行う。
 --
 -- 匿名性: 追加するのは固定のカウンタ列だけで、本文を持つ列は無い。
 -- db/test/assertions/30_compliance.sql の列 allowlist と 71 / 70 が機械強制する。

@@ -183,7 +183,7 @@
   - _Depends: 4.3, 4.4_
 
 - [ ] 7. 素材収集の両面化：気になった点を全員に尋ね、不満の事実を薄めない（Issue #221）
-- [ ] 7.1 気になった点の匿名集計を追加する（`0007`）
+- [ ] 7.1 気になった点の匿名集計を追加する（`0008`）
   - `survey_concern_tallies`（店舗×月×観点のカウンタ）を追加し、`survey_material_tallies` に `concern_count` を足して一意制約を張り替える
   - `db/write-boundary.md`・`db/ERD.md`・`infra/sql/grants.sql`（ヘッダと GRANT 文）・`30_compliance.sql` の allowlist・assertions / smoke を同時に更新する
   - Observable: `scripts/run-db-test-suites.sh` が緑、かつ allowlist から新表を外すと赤
@@ -212,7 +212,7 @@
   - _Depends: 7.3_
 
 - [ ] 7.5 本番へ適用する
-  - `0007` → `grants.sql` を本番へ当ててからマージする。デプロイ後、実回答で concern 行と `concern_count` が加算されることを確かめる
+  - `0008` → `grants.sql` を本番へ当ててからマージする。デプロイ後、実回答で concern 行と `concern_count` が加算されることを確かめる
   - Observable: 本番の `survey_concern_tallies` に加算が現れる（本番識別子は先頭 8 文字まで書く）
   - Issue #221 の完了条件 4（変更前後で口コミ獲得率がどう動いたかを読む手段）は Issue #137 の計測基盤に依存するため、本タスクでは閉じない。**追跡は #137**
   - _Requirements: 5.2_

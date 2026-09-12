@@ -5,7 +5,7 @@
 DO $$
 DECLARE bad text;
 BEGIN
-    -- テーブル allowlist: public の BASE TABLE は既知 19 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
+    -- テーブル allowlist: public の BASE TABLE は既知 20 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
     SELECT string_agg(table_name, ', ') INTO bad
     FROM information_schema.tables
     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
