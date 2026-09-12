@@ -8,6 +8,7 @@ import {
   findOwnerByLineUserId,
   createOwner,
   findActiveInviteCode,
+  createAuditLog,
 } from '@fwlm/db';
 import { createApp, type AppDeps } from './app.js';
 import { loadConfig } from './config.js';
@@ -66,6 +67,7 @@ const conversationHandlers = createConversationHandlers({
       writeStructuredLog('warn', event, fields);
     },
   },
+  auditLog: (input) => createAuditLog(pool, input),
   lineRichMenuCompletedId: config.lineRichMenuCompletedId,
   liffStoreDetailUrl: config.liffStoreDetailUrl,
 });

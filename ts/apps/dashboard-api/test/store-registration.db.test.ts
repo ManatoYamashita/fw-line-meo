@@ -21,6 +21,7 @@ import {
   disableDashboardUserGuarded,
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
+  createAuditLog,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -156,6 +157,7 @@ function buildApp(): ReturnType<typeof createApp> {
         isValidCategory: async (code) =>
           (await listCategories(await getPool())).some((cat) => cat.code === code),
         registerStore,
+        auditLog: async (input) => createAuditLog(await getPool(), input),
       },
     },
     inviteCodes: {
@@ -317,6 +319,20 @@ describe.skipIf(!process.env.DATABASE_URL)('店舗登録の TX 副作用・重�
     // (b) owner の onboarding_status が store_identified へ遷移している。
     //     (a) と (b) が同時に真であることが confirmStore の単一 TX 実行を証明する（Req 3.8, 3.10）。
     expect(await ownerStatus(OW_A1)).toBe('store_identified');
+
+    const audit = await (await getPool()).query<{ actor_type: string; action: string; target_id: string }>(
+      `SELECT actor_type, action, target_id
+         FROM audit_logs
+        WHERE target_id = $1
+        ORDER BY occurred_at DESC
+        LIMIT 1`,
+      [body.storeId],
+    );
+    expect(audit.rows[0]).toEqual({
+      actor_type: 'agency',
+      action: 'store_registered',
+      target_id: body.storeId,
+    });
   });
 
   it('重複 Place: 別オーナーで同一 placeId → 409 place_already_registered・2 件目の stores 行は作られない', async () => {

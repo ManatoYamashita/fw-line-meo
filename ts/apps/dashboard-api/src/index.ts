@@ -24,6 +24,7 @@ import {
   disableDashboardUserGuarded,
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
+  createAuditLog,
 } from '@fwlm/db';
 import { writeStructuredLog, type Sink } from '@fwlm/observability';
 import {
@@ -143,6 +144,7 @@ const app = createApp({
       isValidCategory: async (code) =>
         (await listCategories(await getPool())).some((cat) => cat.code === code),
       registerStore,
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
   },
   inviteCodes: {
@@ -153,10 +155,12 @@ const app = createApp({
     issue: {
       auth: authDeps,
       issueCode,
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
     disable: {
       auth: authDeps,
       disableCode: async (id, agencyId) => disableInviteCode(await getPool(), id, agencyId),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
   },
   admin: {
@@ -167,6 +171,7 @@ const app = createApp({
     agencyCreate: {
       auth: authDeps,
       createAgency: async (input) => createAgency(await getPool(), input),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
     usersList: {
       auth: authDeps,
@@ -179,6 +184,7 @@ const app = createApp({
       // ハンドラ契約 (operatorId, email) から順序を入れ替えて渡す（Req 3.2・越境秘匿）。
       findUserByEmailInOperator: async (operatorId, email) =>
         findDashboardUserByEmailInOperator(await getPool(), email, operatorId),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
     userDisable: {
       auth: authDeps,
@@ -186,11 +192,13 @@ const app = createApp({
       // getPool() の戻り値 Pool は TransactionCapable（connect を持つ）に構造適合する。
       disableUser: async (id, operatorId) =>
         disableDashboardUserGuarded(await getPool(), id, operatorId),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
     userEnable: {
       auth: authDeps,
       // 再有効化（disabled_at を NULL に戻す・operator_id スコープ）。不在・越権は null → 404。
       enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
   },
 });

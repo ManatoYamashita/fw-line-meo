@@ -1,4 +1,4 @@
-import type { StoreCandidate } from '@fwlm/db';
+import type { AuditLogger, StoreCandidate } from '@fwlm/db';
 import type { ConfirmOutcome, SearchOutcome } from '@fwlm/store-identification';
 import { authenticate, canAccessStore, type AuthDeps } from './auth.js';
 import { jsonError } from './http.js';
@@ -83,6 +83,7 @@ export interface StoreRegistrationDeps {
   isValidCategory: (code: string) => Promise<boolean>;
   // 確定登録（confirmed 登録＋owner の store_identified 遷移＋categoryCode 設定）。
   registerStore: (input: RegisterStoreInput, log?: Sink) => Promise<ConfirmOutcome>;
+  auditLog?: AuditLogger;
 }
 
 export interface StoreRegisterRequest {
@@ -144,6 +145,13 @@ export async function handleStoreRegister(
     : await deps.registerStore(input, req.log);
   switch (outcome.kind) {
     case 'confirmed':
+      await deps.auditLog?.({
+        actorType: auth.user.role,
+        actorId: auth.user.id,
+        action: 'store_registered',
+        targetType: 'store',
+        targetId: outcome.storeId,
+      });
       return jsonOk(201, { storeId: outcome.storeId });
     case 'place_already_registered':
       return jsonError(

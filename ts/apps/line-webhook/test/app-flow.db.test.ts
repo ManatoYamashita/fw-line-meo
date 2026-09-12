@@ -10,6 +10,7 @@ import {
   findActiveInviteCode,
   findStoreByPlaceId,
   recordWebhookEventOnce,
+  createAuditLog,
 } from '@fwlm/db';
 import type { StoreCandidate } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
@@ -191,6 +192,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       now: () => new Date(),
       // 補助的処理の成否の記録。内容の検証は conversation.test.ts が担う。
       logger: { info: vi.fn(), warn: vi.fn() },
+      auditLog: (input) => createAuditLog(deps.pool, input),
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
       liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
     });
@@ -298,6 +300,21 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(store?.place_status).toBe('confirmed');
       expect(store?.place_id).toBe(candidate0.placeId);
       expect(store?.owner_id).toBe(ownerFinal?.id);
+      const storeId = store?.id;
+      expect(storeId).toBeDefined();
+
+      const auditRows = await pool.query<{ action: string; target_type: string; target_id: string }>(
+        `SELECT action, target_type, target_id
+           FROM audit_logs
+          WHERE actor_id = $1
+          ORDER BY occurred_at ASC`,
+        [ownerFinal?.id],
+      );
+      expect(auditRows.rows).toEqual(expect.arrayContaining([
+        { action: 'owner_created', target_type: 'owner', target_id: ownerFinal?.id },
+        { action: 'onboarding_completed', target_type: 'store', target_id: storeId },
+        { action: 'rich_menu_linked', target_type: 'owner', target_id: ownerFinal?.id },
+      ]));
 
       // Req 6.3: 完了時にリッチメニューが完了後メニューへ切り替わる。
       expect(messenger.linkRichMenu).toHaveBeenCalledWith(userId, RICHMENU_COMPLETED_ID);

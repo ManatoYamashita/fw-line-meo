@@ -21,6 +21,7 @@
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
 | `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
 | `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
+| `audit_logs` | TS リアルタイム応答層 | 運営・代理店・オーナーによる業務書込操作の追記型監査記録。`customer` は主体にしない |
 | `competitors` | Go 日次バッチ層 | Places API による競合探索・churn 更新 |
 | `rating_snapshots` | Go 日次バッチ層 | Places API による毎朝の評価/順位スナップショット |
 | `daily_summaries` | Go 日次バッチ層 | `competitive-daily-summary`: Go 日次バッチによる順位/前日比算出・確定「配信素材」生成（`0004`） |
@@ -35,3 +36,6 @@
 - 読み取りは両層に許容するが、書き込みは責任層のみ。クロス言語の典型 seam は「Go が `rating_snapshots`/`competitors`/`daily_summaries` を書き、TS が日次サマリー配信（`summary_deliveries` 書込）で `daily_summaries` を read」。
 - 共有定数（`categories`・`survey_aspects`）はコード内に列挙を二重定義せず、seed の code 値を参照する（Req 9.3）。
 - 将来的に PostgreSQL のテーブル単位 GRANT で物理強制も可能（MVP はアプリ規律＋本表＋機械検証で担保）。
+- `audit_logs` の `actor_id` は、`actor_type` が `operator` / `agency` の場合は `dashboard_users.id`、
+  `owner` の場合は `owners.id`。多相参照のため単一の FK は張らず、actor type は ENUM で 3 種に限定する。
+  顧客操作は記録対象外で、`line_user_id` や認証 subject を監査列へコピーしない。
