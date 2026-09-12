@@ -198,3 +198,10 @@ module "guardrails" {
 
   depends_on = [module.project_services]
 }
+
+# 既存のシステム作成 sink は apply 前に state へ取り込む必要がある。
+# 取り込み対象をコードに固定し、手作業の import 忘れによる 409 を防ぐ。
+import {
+  id = "projects/${var.project_id}/sinks/_Default"
+  to = module.guardrails.google_logging_project_sink.default
+}

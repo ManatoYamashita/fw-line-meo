@@ -9,6 +9,142 @@
 # ジョブを足すたびに配線を思い出す設計は、思い出さなかったときに無音になる。
 # 述語そのものを持たなければ、その忘れ方は起き得ない。
 
+# ------------------------------------------------------------------------------
+# Cloud Logging の用途別ルーティング（Issue #232 / #227）
+#
+# 正本の順序を先に固定する:
+#   - audit: #231 の audit_logs（DB）が正本。Cloud Logging は直近30日の補助証跡。
+#   - app_error: エラー・警告の個別調査窓（90日）。
+#   - app_info: 高頻度の情報ログ（30日）。ファネルの長期比較は logging metric（24か月）。
+#
+# `severity` では振り分けない。アプリの実イベント名を jsonPayload.event で分類し、
+# default sink から同じ行を除外する。シンクはコピーを作るだけなので、_Default から除外
+# しなければ重複保存になる。_Default の既存リソースは prod root の import block で
+# Terraform state に取り込み、既存の必須ログ除外を保ったまま exclusions を追加する。
+# ------------------------------------------------------------------------------
+
+locals {
+  # #231 のDB監査行と対応するアプリイベント。`audit.` は将来の補助イベント用で、
+  # rich menu の成否は現在の line-webhook 実イベントをそのまま収容する。
+  audit_log_filter = <<-EOT
+    resource.type = "cloud_run_revision" AND (
+      jsonPayload.event =~ "^audit\\." OR
+      jsonPayload.event =~ "^line-webhook\\.richmenu_(linked|link_failed)$"
+    )
+  EOT
+
+  app_error_log_filter = <<-EOT
+    resource.type = "cloud_run_revision" AND
+    jsonPayload.event =~ ".*(_failed|_error|_ignored|_warning|_warn)$" AND
+    NOT (${local.audit_log_filter})
+  EOT
+}
+
+resource "google_logging_project_bucket_config" "audit" {
+  project        = var.project_id
+  location       = var.logging_bucket_location
+  bucket_id      = "fwlm-audit"
+  description    = "監査補助ログ（正本はDB audit_logs・Issue #231/232）"
+  retention_days = var.audit_log_retention_days
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_logging_project_bucket_config" "app_error" {
+  project        = var.project_id
+  location       = var.logging_bucket_location
+  bucket_id      = "fwlm-app-error"
+  description    = "アプリのエラー・警告ログ（Issue #232）"
+  retention_days = var.app_error_log_retention_days
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_logging_project_bucket_config" "app_info" {
+  project        = var.project_id
+  location       = var.logging_bucket_location
+  bucket_id      = "fwlm-app-info"
+  description    = "アプリの情報ログ（Issue #232・ファネル指標の補助）"
+  retention_days = var.app_info_log_retention_days
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_logging_project_sink" "audit" {
+  project                = var.project_id
+  name                   = "fwlm-audit"
+  destination            = "logging.googleapis.com/projects/${var.project_id}/locations/${var.logging_bucket_location}/buckets/${google_logging_project_bucket_config.audit.bucket_id}"
+  filter                 = local.audit_log_filter
+  unique_writer_identity = true
+}
+
+resource "google_logging_project_sink" "app_error" {
+  project                = var.project_id
+  name                   = "fwlm-app-error"
+  destination            = "logging.googleapis.com/projects/${var.project_id}/locations/${var.logging_bucket_location}/buckets/${google_logging_project_bucket_config.app_error.bucket_id}"
+  filter                 = local.app_error_log_filter
+  unique_writer_identity = true
+}
+
+resource "google_logging_project_sink" "app_info" {
+  project                = var.project_id
+  name                   = "fwlm-app-info"
+  destination            = "logging.googleapis.com/projects/${var.project_id}/locations/${var.logging_bucket_location}/buckets/${google_logging_project_bucket_config.app_info.bucket_id}"
+  filter                 = "resource.type = \"cloud_run_revision\" AND NOT (${local.audit_log_filter}) AND NOT (${local.app_error_log_filter})"
+  unique_writer_identity = true
+}
+
+# 同一プロジェクト内のカスタムバケットでも sink writer へ Logs Bucket Writer が必要。
+# writer_identity は sink ごとに分離し、他 sink のサービスアカウントを再利用しない。
+resource "google_project_iam_member" "audit_bucket_writer" {
+  project = var.project_id
+  role    = "roles/logging.bucketWriter"
+  member  = google_logging_project_sink.audit.writer_identity
+}
+
+resource "google_project_iam_member" "app_error_bucket_writer" {
+  project = var.project_id
+  role    = "roles/logging.bucketWriter"
+  member  = google_logging_project_sink.app_error.writer_identity
+}
+
+resource "google_project_iam_member" "app_info_bucket_writer" {
+  project = var.project_id
+  role    = "roles/logging.bucketWriter"
+  member  = google_logging_project_sink.app_info.writer_identity
+}
+
+resource "google_logging_project_sink" "default" {
+  project     = var.project_id
+  name        = "_Default"
+  destination = "logging.googleapis.com/projects/${var.project_id}/locations/${var.logging_bucket_location}/buckets/_Default"
+
+  exclusions {
+    name   = "fwlm-audit-routed"
+    filter = local.audit_log_filter
+  }
+
+  exclusions {
+    name   = "fwlm-app-error-routed"
+    filter = local.app_error_log_filter
+  }
+
+  exclusions {
+    name   = "fwlm-app-info-routed"
+    filter = "resource.type = \"cloud_run_revision\" AND NOT (${local.audit_log_filter}) AND NOT (${local.app_error_log_filter})"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # 通知チャネル（budget 通知とバッチ失敗アラートで共用）
 resource "google_monitoring_notification_channel" "email" {
   project      = var.project_id

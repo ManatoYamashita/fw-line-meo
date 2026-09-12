@@ -684,3 +684,43 @@ gcloud logging read \
 
 Cloud Run Job は HTTP トレースを持たないため、`CLOUD_RUN_EXECUTION` を同じ項目へ載せる。
 Webhook から後続の配信 Job への非同期処理はトレースで接続せず、業務キー（店舗 ID）で照合する。
+
+## 12. Cloud Logging の用途別バケット（Issue #232 / #227）
+
+宣言の正典は `infra/modules/guardrails/main.tf` である。#231 の `audit_logs` は DB を正本とし、
+Cloud Logging の監査バケットは「直近の補助証跡」として扱う。Cloud Logging だけを監査の正本に
+すると、ログ保持設定の変更で業務証跡まで失われるためである。
+
+| バケット | 保持 | 収容するもの | 長期調査の正本 |
+|---|---:|---|---|
+| `fwlm-audit` | 30日 | 監査対応イベント、リッチメニュー切替の成否 | DB `audit_logs` |
+| `fwlm-app-error` | 90日 | event 名で分類したエラー・警告・無視イベント | 当該バケット |
+| `fwlm-app-info` | 30日 | その他の Cloud Run アプリイベント | ログベース指標（24か月） |
+
+振り分けは `severity` ではなく `jsonPayload.event` で行う。アプリの水準値が集約基盤の
+`severity` と一致することに依存すると、イベントは出ているのに別バケットへ入らない「静かな0」を
+作るためである。#231 のDB監査行そのものは Cloud Logging へコピーせず、ログ側は補助イベントだけを
+保持する。`_Default` sink には同じ Cloud Run 行の除外を追加し、カスタムバケットとの二重保存を避ける。
+既存の `_Default` sink は prod root の import block で state へ取り込む。
+
+### 12-1. 費用見積り（apply 前の仮定）
+
+実際のログ量が未確定のため、10 GiB/月のアプリログが均等に発生し、そのうち全量を
+`app-error` とした保守的な上限例を置く。30日保持を基準にすると、90日保持による追加の平均保存量は
+およそ 20 GiB-month である。30日超のログ保持単価を $0.01/GiB-month として、追加分は
+**約 $0.20/月（無料枠・リージョン・実際の圧縮率を考慮する前）**となる。
+
+計算式は `max(0, app_error_GiB_per_month * 2) * $0.01`。30日以内の保持とログルーティング自体は
+この差分見積りに含めない。除外は受信後に適用されるため、API受信量の削減にはならない。apply後は
+Billing の Logs Storage と実際の月間 GiB を7日後・30日後に確認し、この仮定を実測値へ更新する。
+
+### 12-2. 適用前後の手順
+
+1. `make tf-plan` で、既存 `_Default` sink が import 対象になっていること、監査・エラー・情報の
+   3バケットと writer IAM だけが追加されることを確認する。
+2. 上の費用見積りと実測方法について承認を得る。
+3. 承認後に `make tf-apply` を実行する。未承認の本番 apply は行わない。
+4. `gcloud logging sinks describe _Default` と各カスタム sink の destination/filter を確認し、
+   `_Default` に同じ Cloud Run 行が残っていないことを観測する。
+5. 30日を超えた個別アプリログの調査は `app-error` の保持窓外となるため、エラーの再現と
+   DB `audit_logs` の業務証跡照会へ切り替える。ファネルの期間比較は対応する logging metric を使う。
