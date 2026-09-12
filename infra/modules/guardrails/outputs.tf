@@ -24,6 +24,15 @@ output "service_alert_policy_names" {
   )
 }
 
+output "logging_bucket_names" {
+  description = "用途別 Cloud Logging バケット名（Issue #232）。"
+  value = {
+    audit     = google_logging_project_bucket_config.audit.bucket_id
+    app_error = google_logging_project_bucket_config.app_error.bucket_id
+    app_info  = google_logging_project_bucket_config.app_info.bucket_id
+  }
+}
+
 output "webhook_signature_metric_name" {
   description = "署名検証失敗の指標名（Issue #230・logging.googleapis.com/user/<name> として読む）。"
   value       = google_logging_metric.webhook_signature_failures.name

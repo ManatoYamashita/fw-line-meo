@@ -57,3 +57,27 @@ variable "latency_watched_services" {
   EOT
   type        = list(string)
 }
+
+variable "logging_bucket_location" {
+  description = "Cloud Logging のユーザー管理バケットのロケーション。既存プロジェクトと合わせる。"
+  type        = string
+  default     = "global"
+}
+
+variable "audit_log_retention_days" {
+  description = "監査系ログの保持日数。監査の正本はDBなので、ログ側は補助窓として30日を既定とする。"
+  type        = number
+  default     = 30
+}
+
+variable "app_error_log_retention_days" {
+  description = "アプリのエラー・警告ログの保持日数。個別不具合報告の追跡窓として90日を既定とする。"
+  type        = number
+  default     = 90
+}
+
+variable "app_info_log_retention_days" {
+  description = "高頻度の情報ログの保持日数。ファネル集計はログベース指標へ委譲し30日を既定とする。"
+  type        = number
+  default     = 30
+}
