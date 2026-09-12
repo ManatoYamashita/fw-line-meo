@@ -9,6 +9,10 @@
 # 自分から赤くなる。fixture の日付を「今日」から相対で作るのも同じ罠で、日付演算の誤りを
 # テスト側と実装側の両方で同じ向きに間違えると打ち消し合って気づけない。基準日と実施日の
 # 両方を定数で置く。
+#
+# 期限間近の予告（残り WARN_WITHIN_DAYS 日以内）は **緑のまま** 出す。期限切れの翌朝に初めて
+# 鳴るのでは、人手の実疎通が間に合わない。予告の境界（経過 11 / 12 / 14 / 15 日）はすべて
+# 実日付の定数で固定する。
 
 easf_decl() {
   # $1 以降 = '<secret_id>|<api>|<最終確認日>|<証拠>|<Issue-PR>|<説明>'。`|` を実タブへ変換する。
@@ -61,6 +65,50 @@ EOF
   easf_decl \
     'alpha-key|alpha|PENDING|-|#125|外部 API を叩く鍵' \
     'ops-only|-|-|-|#125|外部 API を叩かない'
+}
+
+easf_fixture_two() {
+  # 実疎通対象を 2 API（alpha / beta）持つ合成ツリー。判定が行ごとに独立していること
+  # （後続行が前の行の期限間近・期限切れを上書きしない）と、予告の有効期限が最も早いもので
+  # あることを見るために使う。層1 の両方向照合を通すため、正典・投入宣言・README の投入手順と
+  # §8 見出しの 4 箇所へ同時に beta を足す。
+  easf_fixture
+  fx_write infra/modules/secrets/main.tf <<'EOF'
+locals {
+  secret_ids = [
+    "alpha-key",
+    "beta-key",
+    "ops-only",
+  ]
+}
+EOF
+  {
+    printf 'alpha-key\t2\t2026-07-12\t#63\n'
+    printf 'beta-key\t1\t2026-07-12\t#63\n'
+    printf 'ops-only\t1\t2026-07-20\t#63\n'
+  } > "${FX}/infra/secrets-provisioned.tsv"
+  fx_write infra/README.md <<'EOF'
+# infra runbook（自己テスト fixture）
+
+5. Secret Manager の値投入:
+   printf %s "<VALUE>" | gcloud secrets versions add alpha-key --data-file=- --project=proj
+   printf %s "<VALUE>" | gcloud secrets versions add beta-key  --data-file=- --project=proj
+   printf %s "<VALUE>" | gcloud secrets versions add ops-only  --data-file=- --project=proj
+
+## 8. 外部 API 実疎通の手順
+
+### 8-1. alpha: 自己テスト用の節
+
+### 8-2. beta: 自己テスト用の節
+
+### 8-4. 記録の更新
+EOF
+}
+
+easf_sig() {
+  # 直前の実行の署名（`EXTERNAL-API-SMOKE-SIGNATURE: ` 以降）を stdout へ返す。
+  # `sed -n …p` は入力を最後まで読むため、上流の printf へ SIGPIPE を起こさない。
+  printf '%s\n' "$OUT" | sed -n 's/^EXTERNAL-API-SMOKE-SIGNATURE: //p'
 }
 
 easf_run() {
@@ -165,6 +213,194 @@ expect_red '基準日 2026-08-16 より未来です'
 expect_output_matches 'EXTERNAL-API-SMOKE-SIGNATURE: alpha=future-date;'
 # 未来日を stale と同じ診断に混ぜると、原因（記録の捏造 / 単なる放置）を取り違える。
 expect_absent '有効期間 14 日を超えています'
+t_end
+
+# ---------------------------------------------------------------------------
+# 本命 3: 期限間近の予告。期限切れの翌朝に初めて鳴るのでは、人手の実疎通（運用者の資格情報で
+# 叩き、PR で記録を更新する）が間に合わない。残り WARN_WITHIN_DAYS（= 2）日以内は **緑のまま**
+# WARN と署名 `<api>=warn;` を出し、ワークフローが追跡 Issue で予告する。
+#
+# 境界は 4 点すべてを実日付で固定する（最終確認日 2026-09-12・有効期限 2026-09-26）:
+#   09-23 経過 11 日 → ok（予告窓の外）   09-24 経過 12 日 → warn（予告窓の入口）
+#   09-26 経過 14 日 → warn（最終日・赤にしない）   09-27 経過 15 日 → stale（従来どおり赤）
+# 片側だけを固定すると、比較演算子の向きやオフバイワンが素通りする。
+
+t_begin 'check-external-api-smoke-freshness: 予告の境界 — 経過 11 日（残り 3 日）は予告せず素の OK'
+easf_fixture
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|外部 API を叩く鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-23
+expect_green
+expect_output_matches '^OK: alpha（alpha-key）→ 2026-09-12（11 日前'
+expect_output_matches '^EXTERNAL-API-SMOKE-SIGNATURE: alpha=ok;$'
+# 予告窓の外で予告を出すと「毎日鳴る予告」になり、予告そのものが読まれなくなる。
+expect_absent 'WARN'
+expect_absent '期限間近'
+expect_absent 'EXTERNAL-API-SMOKE-EXPIRY'
+t_end
+
+t_begin 'check-external-api-smoke-freshness: 予告の境界 — 経過 12 日（残り 2 日）は緑のまま期限間近を予告する'
+easf_fixture
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|外部 API を叩く鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-24
+# 予告は赤にしない。赤は「今まさに記録が無効」だけを意味させる（期限前に赤くすると、有効期間が
+# 実質的に縮み、赤の意味そのものが薄まる）。
+expect_green
+expect_output_matches '^WARN: alpha（alpha-key）の実疎通記録が期限間近です'
+# 運用者の次の行動を決めるのは「いつまでに」である。経過日数・最終確認日・有効期限（最終確認日 +
+# 有効期間）・残り日数を 1 行で出す。
+expect_output_matches '最終確認 2026-09-12（12 日前）'
+expect_output_matches '有効期限 2026-09-26（残り 2 日）'
+# 同じ API へ OK と WARN の両方を出さない（判定が 2 つあると読み手が迷う）。
+expect_absent 'OK: alpha（'
+# ワークフローは散文を読まず、署名だけで予告を判断する。**行全体を固定する**のは、日数が
+# 混入していないことも同時に見るためである（混入すると予告期間中に毎日コメントが増える）。
+expect_output_matches '^EXTERNAL-API-SMOKE-SIGNATURE: alpha=warn;$'
+expect_output_matches '^EXTERNAL-API-SMOKE-EXPIRY: 2026-09-26$'
+expect_output_matches '期限間近 1 件'
+t_end
+
+t_begin 'check-external-api-smoke-freshness: 予告の境界 — 経過 14 日（有効期間の最終日）も予告のまま exit 0'
+easf_fixture
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|外部 API を叩く鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-26
+expect_green
+expect_output_matches '^WARN: alpha（alpha-key）の実疎通記録が期限間近です'
+# 残り 0 日を「残り 0 日」と書くと期限切れと読み違える。最終日であることを明示する。
+expect_output_matches '有効期限 2026-09-26（本日が最終日）'
+# 経過 12 日と同じ署名であること（予告の間は日数が進んでも状態が変わらない）。
+expect_output_matches '^EXTERNAL-API-SMOKE-SIGNATURE: alpha=warn;$'
+expect_output_matches '^EXTERNAL-API-SMOKE-EXPIRY: 2026-09-26$'
+expect_absent '有効期間 14 日を超えています'
+t_end
+
+t_begin 'check-external-api-smoke-freshness: 予告の境界 — 経過 15 日は予告ではなく従来どおり赤'
+easf_fixture
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|外部 API を叩く鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-27
+expect_red '15 日前（2026-09-12）で、有効期間 14 日を超えています'
+expect_output_matches '^EXTERNAL-API-SMOKE-SIGNATURE: alpha=stale;$'
+# 予告の判定を期限切れより先に置くと、残り日数が負でも「予告」に化けて赤が消える。
+expect_absent 'WARN:'
+expect_absent 'EXTERNAL-API-SMOKE-EXPIRY'
+t_end
+
+# 有効期限（通日 → YYYY-MM-DD）の逆変換は整数演算で行う（`date -d` / `date -j -f` は非互換）。
+# 月末・年末・うるう年と平年の 2 月を 1 ケースで通す。誤った日付を告げる予告は、予告が無いより悪い。
+t_begin 'check-external-api-smoke-freshness: 予告の有効期限は月末・年末・うるう日をまたいでも合う'
+easf_fixture
+easf_exps=''
+for easf_pair in '2026-09-20|2026-10-02' '2026-12-20|2027-01-01' '2024-02-15|2024-02-27' '2023-02-15|2023-02-27'; do
+  easf_decl \
+    "alpha-key|alpha|${easf_pair%%|*}|run-12345|#125|有効期限の算出" \
+    'ops-only|-|-|-|#125|外部 API を叩かない'
+  easf_run "${easf_pair#*|}"
+  easf_exps="${easf_exps}$(printf '%s\n' "$OUT" | sed -n 's/^EXTERNAL-API-SMOKE-EXPIRY: //p'),"
+done
+# shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+OUT="EXPIRIES: ${easf_exps}"
+# shellcheck disable=SC2034 # 同上
+RC=0
+# いずれも経過 12 日（予告窓の入口）。最終確認日 + 14 日 = 9/20 → 10/4（月をまたぐ）、
+# 12/20 → 翌年 1/3（年をまたぐ）、うるう年 2/15 → 2/29、平年 2/15 → 3/1。
+expect_output_matches '^EXPIRIES: 2026-10-04,2027-01-03,2024-02-29,2023-03-01,$'
+t_end
+
+t_begin 'check-external-api-smoke-freshness: 期限間近と有効が混在しても予告は該当 API だけ・署名で区別できる'
+easf_fixture_two
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|期限間近になる鍵' \
+  'beta-key|beta|2026-09-20|run-67890|#125|まだ新しい鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-24
+expect_green
+expect_output_matches '^WARN: alpha（alpha-key）の実疎通記録が期限間近です'
+expect_output_matches '^OK: beta（beta-key）→ 2026-09-20（4 日前'
+expect_absent 'WARN: beta'
+expect_output_matches '^EXTERNAL-API-SMOKE-SIGNATURE: alpha=warn;beta=ok;$'
+# 後続の ok 行が前の行の期限間近を上書きしないこと（最終行だけで状態を決める誤りの検出）。
+expect_output_matches '期限間近 1 件'
+expect_output_matches '^EXTERNAL-API-SMOKE-EXPIRY: 2026-09-26$'
+t_end
+
+t_begin 'check-external-api-smoke-freshness: 予告の有効期限は期限間近のうち最も早いもの'
+easf_fixture_two
+# **先に期限が来る行を先頭に置く。** 素朴な上書き（最後に見た行が勝つ）を検出する並びである。
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|先に期限が来る鍵' \
+  'beta-key|beta|2026-09-13|run-67890|#125|1 日遅れて期限が来る鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-25
+expect_green
+expect_output_matches '有効期限 2026-09-26（残り 1 日）'
+expect_output_matches '有効期限 2026-09-27（残り 2 日）'
+expect_output_matches '期限間近 2 件'
+# 追跡 Issue へ出す「いつまでに」は最小値でなければならない（遅いほうを告げると 1 日遅れる）。
+expect_output_matches '^EXTERNAL-API-SMOKE-EXPIRY: 2026-09-26$'
+t_end
+
+t_begin 'check-external-api-smoke-freshness: 期限切れと期限間近が混在したら赤（予告が赤を緑へ化かさない）'
+easf_fixture_two
+easf_decl \
+  'alpha-key|alpha|2026-09-11|run-12345|#125|期限切れの鍵' \
+  'beta-key|beta|2026-09-12|run-67890|#125|最終日の鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-26
+# 期限切れの行が先・期限間近の行が後。予告の分岐が失敗フラグを戻すと、ここで緑へ化ける。
+expect_red '15 日前（2026-09-11）で、有効期間 14 日を超えています'
+expect_output_matches '^WARN: beta（beta-key）の実疎通記録が期限間近です'
+expect_output_matches '^EXTERNAL-API-SMOKE-SIGNATURE: alpha=stale;beta=warn;$'
+expect_absent 'すべて有効期間内'
+t_end
+
+# 予告窓は名前付き定数 1 つが決める（MAX_AGE_DAYS と同じく env で上書きできない）。経過日数の
+# 閾値（12）を別の場所へ直書きすると、定数を変えても挙動が変わらない二重管理になる。
+# 定数を 0 へ縮める変異で、経過 12 日が予告の外へ出て最終日だけが残ることを確かめる。
+t_begin 'check-external-api-smoke-freshness: 予告窓は名前付き定数 WARN_WITHIN_DAYS が決める（分岐到達性）'
+easf_fixture
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|外部 API を叩く鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+if fx_guard_mutate check-external-api-smoke-freshness -e 's/^WARN_WITHIN_DAYS=2$/WARN_WITHIN_DAYS=0/'; then
+  easf_run 2026-09-24
+  easf_sig_12="$(easf_sig)"
+  easf_run 2026-09-26
+  easf_sig_14="$(easf_sig)"
+  # shellcheck disable=SC2034 # OUT / RC は run.sh の expect_* が読むハーネス側のグローバル
+  OUT="AGE12: ${easf_sig_12} / AGE14: ${easf_sig_14}"
+  # shellcheck disable=SC2034 # 同上
+  RC=0
+  expect_output_matches '^AGE12: alpha=ok; / AGE14: alpha=warn;$'
+fi
+t_end
+
+# check → notify の契約を **実物の出力で** 結ぶ。notify 側の自己テスト（95）は手書きの検証結果を
+# 使うため、check が出す行の形が変わっても 95 は緑のまま残る（表への書き写しは修正を固定しない）。
+# ここでは check を実走した出力をそのまま notify へ渡し、予告の本文に有効期限が載ること、
+# 同じ出力を緑（復旧）として組ませると拒否されることを確かめる。
+t_begin 'check-external-api-smoke-freshness: 予告の実出力はそのまま通知の本文組み立てに通る（check → notify）'
+easf_fixture
+fx_guard external-api-smoke-notify
+easf_decl \
+  'alpha-key|alpha|2026-09-12|run-12345|#125|外部 API を叩く鍵' \
+  'ops-only|-|-|-|#125|外部 API を叩かない'
+easf_run 2026-09-24
+printf '%s\n' "$OUT" > "${FX}/report.txt"
+fx_run_stdout external-api-smoke-notify \
+  --state warn --report report.txt --run-url https://github.com/owner/repo/actions/runs/1
+# report には check の `OK:` 行（期限間近 1 件の注記付き）がそのまま載る。
+expect_green
+expect_output_matches '^有効期限: \*\*2026-09-26\*\*'
+fx_run_args external-api-smoke-notify \
+  --state green --report report.txt --run-url https://github.com/owner/repo/actions/runs/1
+expect_red '期限間近を示しています'
 t_end
 
 # ---------------------------------------------------------------------------
