@@ -5,11 +5,17 @@ import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
 import { Textarea } from '@fwlm/ui/components/textarea';
-import type { SurveyAnswer, SurveyFormProps } from './types';
+import type { AspectOption, SurveyAnswer, SurveyFormProps } from './types';
 
-// 回答フォーム（葉コンポーネント）。星評価（必須）・良かった点（複数選択）・一言（任意 200 字）を
-// タップ中心で入力し、星未入力時は送信を止めて必須を明示、onSubmit で親シェルへ回答を渡す。
-// API 呼出はシェル(4.3)が所有し、本コンポーネントは入力と即時のクライアント検証のみ。
+// 回答フォーム（葉コンポーネント）。星評価（必須）・良かった点（複数選択）・気になった点（複数選択）・
+// 一言（任意 200 字）をタップ中心で入力し、星未入力時は送信を止めて必須を明示、onSubmit で親シェルへ
+// 回答を渡す。API 呼出はシェル(4.3)が所有し、本コンポーネントは入力と即時のクライアント検証のみ。
+//
+// **良かった点と気になった点は、同じ観点を同じ部品・同じ順序で出す（Issue #221・Requirement 2.4）。**
+// 観点を「良かった点」でしか尋ねない形は、星 1〜2 の客にも肯定側だけを選ばせ、否定的なクチコミを
+// 書きにくくする。投稿導線を分岐させていなくても、素材の集め方が偏れば作用は同じである。
+// **設問は星の値で出し分けない（Requirement 2.11）。** 評価によって尋ねる内容を変えると、それ自体が
+// 評価で扱いを分ける導線になる。
 
 const COMMENT_MAX = 200;
 const STARS = [1, 2, 3, 4, 5] as const;
@@ -26,29 +32,31 @@ const STARS = [1, 2, 3, 4, 5] as const;
 //     なる。これは導線を分岐させていなくても実質的にレビューゲーティングへ近づく作用を持つ。
 const COMMENT_PLACEHOLDER = '例）料理が熱々だった／提供まで少し待った';
 
+function toggled(prev: ReadonlySet<string>, code: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(code)) next.delete(code);
+  else next.add(code);
+  return next;
+}
+
 export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
   const [star, setStar] = useState<number | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [good, setGood] = useState<Set<string>>(new Set());
+  const [concerns, setConcerns] = useState<Set<string>>(new Set());
   const [comment, setComment] = useState('');
   const [showStarError, setShowStarError] = useState(false);
-
-  function toggleAspect(code: string): void {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  }
 
   function submit(): void {
     if (star === null) {
       setShowStarError(true);
       return;
     }
-    const aspectCodes = [...selected];
+    const aspectCodes = [...good];
+    const concernCodes = [...concerns];
     const answer: SurveyAnswer =
-      comment.trim() !== '' ? { star, aspectCodes, comment } : { star, aspectCodes };
+      comment.trim() !== ''
+        ? { star, aspectCodes, concernCodes, comment }
+        : { star, aspectCodes, concernCodes };
     onSubmit(answer);
   }
 
@@ -88,34 +96,21 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         )}
       </fieldset>
 
-      <fieldset className="space-y-2">
-        <legend className="mb-2 text-lg font-semibold">良かった点</legend>
-        {aspects.map((a) => (
-          // 折り返しは inline-flex + 余白で行う。枠の色は選択状態によらず一定にし、選択済みで
-          // あることは選択部品自身の塗りとチェック印が担う。枠にも状態を持たせると、同じ状態が
-          // 面内で 2 通りに描かれ、片方だけが意匠の変更に取り残される。
-          //
-          // 読み上げ名は可視の文言そのものを指す。選択部品へ読み上げ名を直接書くと、同じ文言を
-          // 2 箇所で管理することになり、片方だけが古びても誰も気づけない。
-          //
-          // **明示する理由。** 指定を外しても名前自体は解決される。基盤ライブラリは
-          // `<span role="checkbox">` として描かれるため包む `<label>` からの補完が働き、
-          // そのとき **`<label>` 要素へ生成 id を書き込む**（実測: `base-ui-_r_2_` が付いた）。
-          // 名前の出所がライブラリの実行時判断になり、面の側の印字からは読めなくなる。
-          // ここで指す先を固定すると、出所が可視の文言そのものに定まる。
-          <label
-            className="mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border border-input px-4 py-2 transition-colors duration-150"
-            key={a.code}
-          >
-            <Checkbox
-              checked={selected.has(a.code)}
-              onCheckedChange={() => toggleAspect(a.code)}
-              aria-labelledby={`aspect-label-${a.code}`}
-            />
-            <span id={`aspect-label-${a.code}`}>{a.label}</span>
-          </label>
-        ))}
-      </fieldset>
+      <AspectGroup
+        groupId="good"
+        legend="良かった点"
+        aspects={aspects}
+        selected={good}
+        onToggle={(code) => setGood((prev) => toggled(prev, code))}
+      />
+
+      <AspectGroup
+        groupId="concern"
+        legend="気になった点"
+        aspects={aspects}
+        selected={concerns}
+        onToggle={(code) => setConcerns((prev) => toggled(prev, code))}
+      />
 
       {/*
         見出し相当の文字寸法はラベルの文言そのものへ与える。ラベル領域に与えると複数行入力へ
@@ -138,5 +133,49 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         送信する
       </Button>
     </form>
+  );
+}
+
+interface AspectGroupProps {
+  /** id の接頭辞。2 つの群が同じ観点を持つので、群ごとに分けないと読み上げ名の参照先が衝突する。 */
+  groupId: 'good' | 'concern';
+  legend: string;
+  aspects: AspectOption[];
+  selected: ReadonlySet<string>;
+  onToggle: (code: string) => void;
+}
+
+// 観点の群（良かった点・気になった点で共用する）。見た目と読み上げの規律を 1 箇所に持つ。
+// 2 群を別々に書くと、片方だけが意匠の変更に取り残される。
+function AspectGroup({ groupId, legend, aspects, selected, onToggle }: AspectGroupProps) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-2 text-lg font-semibold">{legend}</legend>
+      {aspects.map((a) => (
+        // 折り返しは inline-flex + 余白で行う。枠の色は選択状態によらず一定にし、選択済みで
+        // あることは選択部品自身の塗りとチェック印が担う。枠にも状態を持たせると、同じ状態が
+        // 面内で 2 通りに描かれ、片方だけが意匠の変更に取り残される。
+        //
+        // 読み上げ名は可視の文言そのものを指す。選択部品へ読み上げ名を直接書くと、同じ文言を
+        // 2 箇所で管理することになり、片方だけが古びても誰も気づけない。
+        //
+        // **明示する理由。** 指定を外しても名前自体は解決される。基盤ライブラリは
+        // `<span role="checkbox">` として描かれるため包む `<label>` からの補完が働き、
+        // そのとき **`<label>` 要素へ生成 id を書き込む**（実測: `base-ui-_r_2_` が付いた）。
+        // 名前の出所がライブラリの実行時判断になり、面の側の印字からは読めなくなる。
+        // ここで指す先を固定すると、出所が可視の文言そのものに定まる。
+        <label
+          className="mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border border-input px-4 py-2 transition-colors duration-150"
+          key={a.code}
+        >
+          <Checkbox
+            checked={selected.has(a.code)}
+            onCheckedChange={() => onToggle(a.code)}
+            aria-labelledby={`aspect-${groupId}-${a.code}`}
+          />
+          <span id={`aspect-${groupId}-${a.code}`}>{a.label}</span>
+        </label>
+      ))}
+    </fieldset>
   );
 }

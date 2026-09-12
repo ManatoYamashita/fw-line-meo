@@ -2,7 +2,7 @@ import type { DraftMaterial } from '../domain';
 
 // 下書き生成のプロンプト組立。
 // - 事実性: 素材に含まれる事実のみ・誇張禁止・公序良俗（Req 3.1/3.2/3.4）
-// - 低評価: 星 1-2 は節度ある表現に分岐（Req 3.5）
+// - 不満の扱い: 気になった点がある／星 1-2 のときは、不満の事実を薄めず、誹謗中傷しない（Req 3.5）
 // - 多様性: 文体・書き出し・切り口をサーバー側でランダム選択し試行間で変える（Req 3.3）
 // - 安全: 自由記述をデリミタで隔離し「指示ではなくデータ」と明示（プロンプトインジェクション緩和）
 
@@ -54,7 +54,8 @@ function substantiveComment(material: DraftMaterial): string | undefined {
  * 計測の見出しが静かにずれ、前後比較が読めなくなる。
  */
 export function materialThickness(material: DraftMaterial): MaterialThickness {
-  if (material.aspectLabels.length > 0) return 'aspects';
+  // 観点の極性は問わない（Issue #221）。気になった点も、客が選んだ事実として書く材料になる。
+  if (material.aspectLabels.length > 0 || (material.concernLabels ?? []).length > 0) return 'aspects';
   return substantiveComment(material) !== undefined ? 'comment-only' : 'bare';
 }
 
@@ -110,9 +111,17 @@ export const LENGTH_RULE: Record<MaterialThickness, string> = {
 
 /** 素材と変動要素からプロンプト（systemInstruction / userContent）を組み立てる。 */
 export function buildPrompt(material: DraftMaterial, variation: VariationSeed): PromptParts {
-  const moderation =
-    material.star <= 2
-      ? '\n- 低評価だが、節度ある表現に留め、誹謗中傷・過剰な悪口・攻撃的な語は書かない'
+  // 不満の扱い（Requirement 3.5・Issue #221）。旧指示は「節度ある表現に留め」で、誹謗中傷を避ける
+  // 目的は正しいものの、否定的な事実そのものを和らげる方向にも効いた。下書きは客が自分の言葉として
+  // 投稿する文面であり、事実を薄めることは否定的なクチコミを抑える作用と区別できない。守る線は
+  // 「事実を薄めない」と「誹謗中傷しない」の 2 つで、トーンを製品側で下げることではない。
+  //
+  // 星だけでなく気になった点の有無でも出す。星 5 でも気になった点を選んだ客はいる。
+  const concerns = material.concernLabels ?? [];
+  const concernRule =
+    material.star <= 2 || concerns.length > 0
+      ? '\n- 気になった点や不満は、事実を薄めずに書く（和らげたり、良い話にすり替えたりしない）。' +
+        'ただし誹謗中傷・人格攻撃・過剰な悪口・攻撃的な語は書かない'
       : '';
 
   const lengthRule = LENGTH_RULE[materialThickness(material)];
@@ -139,7 +148,7 @@ export function buildPrompt(material: DraftMaterial, variation: VariationSeed): 
       `- 文体は「${variation.tone}」、${variation.opening}、${variation.angle}`,
     ].join('\n') +
     forbidden +
-    moderation;
+    concernRule;
 
   // comment 内にデリミタ・トークン自体が含まれるとデータブロックを早期クローズし得るため除去する
   // （プロンプトインジェクションの一段ハードニング）。
@@ -151,6 +160,7 @@ export function buildPrompt(material: DraftMaterial, variation: VariationSeed): 
     `店名: ${material.storeName}`,
     `評価: ${material.star} / 5`,
     `良かった点: ${material.aspectLabels.length > 0 ? material.aspectLabels.join('、') : 'なし'}`,
+    `気になった点: ${concerns.length > 0 ? concerns.join('、') : 'なし'}`,
     `一言: ${comment}`,
     MATERIAL_END,
     '上記の素材から口コミ下書きを 1 つ作成してください。',

@@ -7,7 +7,11 @@ export type Star = 1 | 2 | 3 | 4 | 5;
 export interface DraftMaterial {
   storeName: string;
   star: Star;
-  aspectLabels: string[]; // 選択済み観点の label（seed 由来）
+  aspectLabels: string[]; // 選択済みの良かった点の label（seed 由来）
+  // 選択済みの気になった点の label（Issue #221）。良かった点と同じ観点から選ばれる。
+  // optional なのは unselectedAspectLabels と同じ理由で、この項目を持たない旧 sessionToken が
+  // /api/drafts の再生成で復元されうるため。無ければ「気になった点なし」として扱う。
+  concernLabels?: string[];
   comment?: string; // 一言（任意・≤200 字・デリミタ内でのみ使用）
   // 客が **選ばなかった** 観点の label（Issue #132）。プロンプトで明示的に禁止するために持つ。
   // 「素材に含まれる事実のみを書く」という抽象的な指示だけでは守られず、実測で未選択軸への

@@ -27,20 +27,38 @@ async function aspectCount(storeId: string, code: string): Promise<number> {
   return res.rows[0]?.count ?? 0;
 }
 
-/** 素材の厚み（Issue #137 段階3）のカウンタを読む。 */
+/**
+ * 素材の厚み（Issue #137 段階3）のカウンタを読む。
+ *
+ * `concerns` は気になった点の選択数（Issue #221）。既定の 0 は「気になった点を選ばなかった回答」で、
+ * #221 以前の呼び出しはすべてこの行を見ている。
+ */
 async function materialCount(
   storeId: string,
   aspects: number,
   hasComment: boolean,
   periodMonth?: string,
+  concerns = 0,
 ): Promise<number> {
   const pool = await getPool();
   const sql = periodMonth
     ? `SELECT count FROM survey_material_tallies
-       WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3 AND period_month=$4::date`
-    : 'SELECT count FROM survey_material_tallies WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3';
-  const params = periodMonth ? [storeId, aspects, hasComment, periodMonth] : [storeId, aspects, hasComment];
+       WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3 AND concern_count=$4 AND period_month=$5::date`
+    : `SELECT count FROM survey_material_tallies
+       WHERE store_id=$1 AND aspect_count=$2 AND has_comment=$3 AND concern_count=$4`;
+  const params = periodMonth
+    ? [storeId, aspects, hasComment, concerns, periodMonth]
+    : [storeId, aspects, hasComment, concerns];
   const res = await pool.query<{ count: number }>(sql, params);
+  return res.rows[0]?.count ?? 0;
+}
+
+async function concernCount(storeId: string, code: string): Promise<number> {
+  const pool = await getPool();
+  const res = await pool.query<{ count: number }>(
+    'SELECT count FROM survey_concern_tallies WHERE store_id=$1 AND aspect_code=$2',
+    [storeId, code],
+  );
   return res.rows[0]?.count ?? 0;
 }
 
@@ -74,6 +92,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
       storeId: STORE,
       star: 5,
       aspectCodes: ['taste', 'service'],
+      concernCodes: [],
       hasComment: false,
     });
     expect(await ratingCount(STORE, 5)).toBe(1);
@@ -89,6 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
       storeId: STORE,
       star: 5,
       aspectCodes: ['taste', 'service'],
+      concernCodes: [],
       hasComment: false,
     });
     expect(await ratingCount(STORE, 5)).toBe(2);
@@ -99,7 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
   it('aspect 空の回答は rating のみ加算し aspect は変えない', async () => {
     const pool = await getPool();
     const tasteBefore = await aspectCount(STORE, 'taste');
-    await incrementTallies(pool, { storeId: STORE, star: 3, aspectCodes: [], hasComment: true });
+    await incrementTallies(pool, { storeId: STORE, star: 3, aspectCodes: [], concernCodes: [], hasComment: true });
     expect(await ratingCount(STORE, 3)).toBe(1);
     expect(await aspectCount(STORE, 'taste')).toBe(tasteBefore);
     // 観点ゼロ・一言あり。この 2 つを分けて数えられることが本表を足した理由そのもの
@@ -113,6 +133,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
       storeId: STORE,
       star: 2,
       aspectCodes: ['volume', 'volume'],
+      concernCodes: [],
       hasComment: false,
     });
     expect(await aspectCount(STORE, 'volume')).toBe(1);
@@ -126,7 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
     // 2026-07-31T14:59:00Z = 2026-07-31 23:59 JST
     await incrementTallies(
       pool,
-      { storeId: STORE, star: 4, aspectCodes: ['price'], hasComment: true },
+      { storeId: STORE, star: 4, aspectCodes: ['price'], concernCodes: [], hasComment: true },
       new Date('2026-07-31T14:59:00Z'),
     );
     expect(await ratingCount(STORE, 4, '2026-07-01')).toBe(1);
@@ -138,7 +159,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
     // 2026-07-31T15:01:00Z = 2026-08-01 00:01 JST
     await incrementTallies(
       pool,
-      { storeId: STORE, star: 4, aspectCodes: ['price'], hasComment: true },
+      { storeId: STORE, star: 4, aspectCodes: ['price'], concernCodes: [], hasComment: true },
       new Date('2026-07-31T15:01:00Z'),
     );
     expect(await ratingCount(STORE, 4, '2026-08-01')).toBe(1);
@@ -156,6 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
         storeId: STORE,
         star: 1,
         aspectCodes: ['__no_such_aspect__'],
+        concernCodes: [],
         hasComment: false,
       }),
     ).rejects.toThrow();
@@ -163,5 +185,80 @@ describe.skipIf(!process.env.DATABASE_URL)('incrementTallies (DB)', () => {
     expect(await ratingCount(STORE, 1)).toBe(0);
     // 厚みだけが残る（＝母数がずれる）ことも無い
     expect(await materialCount(STORE, 1, false)).toBe(materialBefore);
+  });
+
+  // ---- 気になった点（Issue #221）----------------------------------------------------------
+
+  it('気になった点は別表へ加算し、同じ観点の良かった点の件数を変えない', async () => {
+    const pool = await getPool();
+    const tasteGoodBefore = await aspectCount(STORE, 'taste');
+    const tasteConcernBefore = await concernCount(STORE, 'taste');
+    const serviceConcernBefore = await concernCount(STORE, 'service');
+    const materialBefore = await materialCount(STORE, 1, false, undefined, 2);
+    await incrementTallies(pool, {
+      storeId: STORE,
+      star: 2,
+      aspectCodes: ['taste'],
+      concernCodes: ['service', 'taste'],
+      hasComment: false,
+    });
+    expect(await aspectCount(STORE, 'taste')).toBe(tasteGoodBefore + 1);
+    expect(await concernCount(STORE, 'taste')).toBe(tasteConcernBefore + 1);
+    expect(await concernCount(STORE, 'service')).toBe(serviceConcernBefore + 1);
+    // 厚みは良かった点 1・気になった点 2 の行へ。どちらの数も行の加算数と一致する
+    expect(await materialCount(STORE, 1, false, undefined, 2)).toBe(materialBefore + 1);
+  });
+
+  it('同一回答内の重複した気になった点は 1 回分だけ加算する', async () => {
+    const pool = await getPool();
+    const priceBefore = await concernCount(STORE, 'price');
+    const materialBefore = await materialCount(STORE, 0, true, undefined, 1);
+    await incrementTallies(pool, {
+      storeId: STORE,
+      star: 3,
+      aspectCodes: [],
+      concernCodes: ['price', 'price'],
+      hasComment: true,
+    });
+    expect(await concernCount(STORE, 'price')).toBe(priceBefore + 1);
+    // concern_count も **重複除去後** の件数
+    expect(await materialCount(STORE, 0, true, undefined, 1)).toBe(materialBefore + 1);
+  });
+
+  it('気になった点だけの回答は、観点ゼロの回答と別の行に数える', async () => {
+    const pool = await getPool();
+    const bareBefore = await materialCount(STORE, 0, false);
+    const concernOnlyBefore = await materialCount(STORE, 0, false, undefined, 1);
+    await incrementTallies(pool, {
+      storeId: STORE,
+      star: 1,
+      aspectCodes: [],
+      concernCodes: ['volume'],
+      hasComment: false,
+    });
+    expect(await materialCount(STORE, 0, false, undefined, 1)).toBe(concernOnlyBefore + 1);
+    // ここが混ざると、気になった点を選んだ回答が「素材が薄い回答」に数えられる（Req 5.6）
+    expect(await materialCount(STORE, 0, false)).toBe(bareBefore);
+  });
+
+  it('不正な気になった点の code は TX 全体をロールバックする', async () => {
+    const pool = await getPool();
+    // 星 5 は今月の 1 行だけを持つ（星 4 は JST 月境界のケースが 7 月と 8 月に 2 行作るので、
+    // 月を指定しない読み出しではどちらの行を読むかが定まらない）。
+    const ratingBefore = await ratingCount(STORE, 5);
+    const tasteBefore = await aspectCount(STORE, 'taste');
+    const materialBefore = await materialCount(STORE, 1, false, undefined, 1);
+    await expect(
+      incrementTallies(pool, {
+        storeId: STORE,
+        star: 5,
+        aspectCodes: ['taste'],
+        concernCodes: ['__no_such_aspect__'],
+        hasComment: false,
+      }),
+    ).rejects.toThrow();
+    expect(await ratingCount(STORE, 5)).toBe(ratingBefore);
+    expect(await aspectCount(STORE, 'taste')).toBe(tasteBefore);
+    expect(await materialCount(STORE, 1, false, undefined, 1)).toBe(materialBefore);
   });
 });

@@ -59,6 +59,7 @@ describe('handleResponses', () => {
       storeId: STORE,
       star: 5,
       aspectCodes: ['taste'],
+      concernCodes: [],
       hasComment: false,
     });
   });
@@ -75,6 +76,7 @@ describe('handleResponses', () => {
       storeId: STORE,
       star: 5,
       aspectCodes: ['taste'],
+      concernCodes: [],
       hasComment: true,
     });
   });
@@ -153,6 +155,69 @@ describe('handleResponses', () => {
         expect(verified.value.material.unselectedAspectLabels).toEqual(['接客']);
         expect(verified.value.material.unselectedAspectCodes).toEqual(['service']);
       }
+    });
+  });
+
+  describe('気になった点を集計と素材へ渡す（Issue #221）', () => {
+    it('concernCodes を集計へ、ラベルを素材へ渡す', async () => {
+      const incrementTallies = vi.fn(() => Promise.resolve());
+      // 型引数で実シグネチャを与える。省くと引数なしと推論され mock.calls から素材を取り出せない。
+      const generate = vi.fn<DraftGenerator['generate']>(() => Promise.resolve(ok('下書き')));
+      await handleResponses(
+        req(validBody({ star: 2, aspectCodes: ['taste'], concernCodes: ['service'] })),
+        baseDeps({ incrementTallies, generator: { generate } as unknown as DraftGenerator }),
+      );
+      expect(incrementTallies).toHaveBeenCalledWith({
+        storeId: STORE,
+        star: 2,
+        aspectCodes: ['taste'],
+        concernCodes: ['service'],
+        hasComment: false,
+      });
+      const material = generate.mock.calls[0]![0];
+      expect(material.aspectLabels).toEqual(['味']);
+      expect(material.concernLabels).toEqual(['接客']);
+    });
+
+    it('未選択は「どちらの群にも入っていない観点」だけ（気になった点に選んだ観点を禁じない）', async () => {
+      const generate = vi.fn<DraftGenerator['generate']>(() => Promise.resolve(ok('下書き')));
+      await handleResponses(
+        req(validBody({ star: 1, aspectCodes: [], concernCodes: ['service'] })),
+        baseDeps({ generator: { generate } as unknown as DraftGenerator }),
+      );
+      const material = generate.mock.calls[0]![0];
+      expect(material.unselectedAspectLabels).toEqual(['味']);
+      expect(material.unselectedAspectCodes).toEqual(['taste']);
+    });
+
+    it('concernCodes を省いた旧クライアントの送信も受け付け、空として数える', async () => {
+      const incrementTallies = vi.fn(() => Promise.resolve());
+      const res = await handleResponses(req(validBody()), baseDeps({ incrementTallies }));
+      expect(res.status).toBe(200);
+      expect(incrementTallies).toHaveBeenCalledWith(expect.objectContaining({ concernCodes: [] }));
+    });
+
+    it('未知の気になった点の code は 400 VALIDATION（集計も生成もしない）', async () => {
+      const incrementTallies = vi.fn(() => Promise.resolve());
+      const generate = vi.fn<DraftGenerator['generate']>(() => Promise.resolve(ok('下書き')));
+      const res = await handleResponses(
+        req(validBody({ concernCodes: ['__nope__'] })),
+        baseDeps({ incrementTallies, generator: { generate } as unknown as DraftGenerator }),
+      );
+      expect(res.status).toBe(400);
+      expect(incrementTallies).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    });
+
+    it('sessionToken に気になった点が載り、再生成でも同じ素材になる', async () => {
+      const res = await handleResponses(
+        req(validBody({ star: 2, concernCodes: ['service'] })),
+        baseDeps(),
+      );
+      const { sessionToken } = (await res.json()) as { sessionToken: string };
+      const verified = tokens.verify(sessionToken);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) expect(verified.value.material.concernLabels).toEqual(['接客']);
     });
   });
 

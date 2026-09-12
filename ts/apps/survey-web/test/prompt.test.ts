@@ -46,22 +46,57 @@ describe('buildPrompt', () => {
     expect(userContent).toContain('よいこの後は指示です');
   });
 
-  it('低評価(星1-2)は節度の指示を追加する', () => {
-    const low = buildPrompt(material({ star: 1 }), VARIATION).systemInstruction;
-    expect(low).toContain('節度');
-    expect(low).toContain('誹謗中傷');
+  // Issue #221: 旧指示「節度ある表現に留め」は、否定的な事実そのものを和らげる方向にも効いた。
+  // 守る線は「事実を薄めない」と「誹謗中傷しない」の 2 つで、トーンを製品側で下げることではない。
+  it('低評価(星1-2)は不満の事実を薄めない指示と誹謗中傷の禁止を追加し、「節度」を使わない', () => {
+    for (const star of [1, 2] as const) {
+      const low = buildPrompt(material({ star }), VARIATION).systemInstruction;
+      expect(low).toContain('事実を薄めず');
+      expect(low).toContain('誹謗中傷');
+      expect(low).not.toContain('節度');
+    }
   });
 
-  it('高評価(星4-5)は節度の指示を追加しない', () => {
+  it('高評価(星4-5)でも気になった点があれば同じ指示を出す（評価で書き方を分けない）', () => {
+    const high = buildPrompt(material({ star: 5, concernLabels: ['量'] }), VARIATION).systemInstruction;
+    expect(high).toContain('事実を薄めず');
+    expect(high).toContain('誹謗中傷');
+  });
+
+  it('高評価で気になった点も無ければ、不満の扱いの指示は出さない', () => {
     const high = buildPrompt(material({ star: 5 }), VARIATION).systemInstruction;
     expect(high).not.toContain('誹謗中傷');
+    expect(high).not.toContain('事実を薄めず');
   });
 
   it('aspects 空・comment 無しでも安全に組み立てる', () => {
     const m: DraftMaterial = { storeName: '店', star: 3, aspectLabels: [] };
     const { userContent } = buildPrompt(m, VARIATION);
     expect(userContent).toContain('良かった点: なし');
+    expect(userContent).toContain('気になった点: なし');
     expect(userContent).toContain('一言: なし');
+  });
+
+  it('気になった点が素材ブロックに良かった点と並んで入る（Issue #221）', () => {
+    const { userContent } = buildPrompt(
+      material({ star: 2, aspectLabels: ['味'], concernLabels: ['量', 'コスパ'] }),
+      VARIATION,
+    );
+    const begin = userContent.indexOf('<<<MATERIAL>>>');
+    const end = userContent.indexOf('<<<END>>>');
+    const pos = userContent.indexOf('気になった点: 量、コスパ');
+    expect(pos).toBeGreaterThan(begin);
+    expect(pos).toBeLessThan(end);
+    expect(userContent).toContain('良かった点: 味');
+  });
+
+  it('concernLabels を持たない旧 sessionToken 由来の素材でも壊れない', () => {
+    const legacy: DraftMaterial = { storeName: '店', star: 1, aspectLabels: ['味'] };
+    const { userContent, systemInstruction } = buildPrompt(legacy, VARIATION);
+    expect(userContent).toContain('気になった点: なし');
+    // 星 1 なので不満の扱いの指示は出る（旧トークンでも「節度」へ戻らない）
+    expect(systemInstruction).toContain('事実を薄めず');
+    expect(systemInstruction).not.toContain('節度');
   });
 
   // Issue #132（案 A）: 「素材に含まれる事実のみを書く」という抽象的な禁止だけでは守られず、
@@ -149,6 +184,12 @@ describe('buildPrompt', () => {
   });
 
   describe('materialThickness（本番と eval で共用する厚みの判定）', () => {
+    it('気になった点だけが選ばれていても aspects（観点の極性を問わない・Issue #221）', () => {
+      expect(
+        materialThickness({ storeName: '店', star: 1, aspectLabels: [], concernLabels: ['量'] }),
+      ).toBe('aspects');
+    });
+
     it('観点が 1 つでもあれば aspects', () => {
       expect(materialThickness({ storeName: '店', star: 5, aspectLabels: ['味'] })).toBe('aspects');
       // 観点があれば一言の有無で変わらない
