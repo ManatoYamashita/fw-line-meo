@@ -49,6 +49,52 @@ test('低評価（星1）でも同一の投稿導線が表示される', async (
   await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
+// 素材の集め方を評価で分岐させない（Requirement 2.11・Issue #221）。
+// 投稿導線が同一でも、星によって尋ねる内容を変えれば評価で扱いを分ける導線になる。星を選ぶ前・
+// 星 1・星 5 のいずれでも、設問の見出しと観点の並びがまったく同じであることを実ブラウザで固定する。
+test('設問の見出しと観点の並びは星の値で変わらない', async ({ page }) => {
+  await openSurveySurface(page);
+  const form = page.locator('form');
+  const snapshot = async () => ({
+    legends: await form.locator('legend').allTextContents(),
+    good: await page.getByRole('group', { name: '良かった点' }).locator('label').allTextContents(),
+    concern: await page.getByRole('group', { name: '気になった点' }).locator('label').allTextContents(),
+  });
+
+  const before = await snapshot();
+  expect(before.legends).toEqual(['満足度（必須）', '良かった点', '気になった点']);
+  // 非空アンカー。観点を 1 つも掴めていなければ、以降の相等は空配列同士で成立してしまう。
+  expect(before.good.length, '観点を 1 つも掴めていません').toBeGreaterThan(0);
+  // 2 つの群は同じ観点を同じ順序で持つ（Requirement 2.4・同じ重みで尋ねる）
+  expect(before.concern).toEqual(before.good);
+
+  await page.getByRole('button', { name: '星1' }).click();
+  expect(await snapshot()).toEqual(before);
+  await page.getByRole('button', { name: '星5' }).click();
+  expect(await snapshot()).toEqual(before);
+});
+
+// 低評価の客が不満の所在を選んで送信でき、同じ投稿導線へ進める（Issue #221）。
+// 送信本文まで見る。wire のフィールド名がずれると、画面は選べるのにサーバーへは届かない
+// （silent drop）。画面の見た目だけでは検出できない。
+test('星1 で気になった点を選んで送信すると、送信に載って同一の投稿導線が表示される', async ({ page }) => {
+  await openSurveySurface(page);
+  await page.getByRole('button', { name: '星1' }).click();
+  await page.getByRole('group', { name: '気になった点' }).getByRole('checkbox', { name: '接客' }).click();
+
+  const posted = page.waitForRequest(
+    (request) => request.url().endsWith('/api/responses') && request.method() === 'POST',
+  );
+  await page.getByRole('button', { name: '送信する' }).click();
+  const body = (await posted).postDataJSON() as { star: number; aspectCodes: string[]; concernCodes: string[] };
+  expect(body.star).toBe(1);
+  expect(body.aspectCodes).toEqual([]);
+  expect(body.concernCodes).toEqual(['service']);
+
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+});
+
 // 回答完了後の再訪は回答済み画面＋投稿導線（localStorage・24h）。
 test('回答済みで再訪すると回答済み画面と投稿導線が出る', async ({ page }) => {
   await openSurveySurface(page);

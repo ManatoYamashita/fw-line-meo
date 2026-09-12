@@ -7,7 +7,8 @@ export interface AspectOption {
 
 export interface SurveyAnswer {
   star: number;
-  aspectCodes: string[];
+  aspectCodes: string[]; // 良かった点
+  concernCodes: string[]; // 気になった点（Issue #221）
   comment?: string;
 }
 

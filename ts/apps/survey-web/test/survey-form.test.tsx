@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { SurveyForm } from '../src/app/s/[storeId]/survey-form';
 
@@ -27,6 +27,14 @@ const ASPECTS = [
 
 afterEach(cleanup);
 
+/**
+ * 設問の群（fieldset の見出しが名前になる group）の中へ絞る。良かった点と気になった点は同じ観点を
+ * 同じ読み上げ名で持つので、群を指定しないと単数形の getByRole が複数一致で落ちる（Issue #221）。
+ */
+function inGroup(name: string) {
+  return within(screen.getByRole('group', { name }));
+}
+
 function setup(submitting = false) {
   const onSubmit = vi.fn();
   render(<SurveyForm aspects={ASPECTS} onSubmit={onSubmit} submitting={submitting} />);
@@ -38,7 +46,7 @@ describe('SurveyForm', () => {
     const { onSubmit } = setup();
     fireEvent.click(screen.getByRole('button', { name: '星5' }));
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
-    expect(onSubmit).toHaveBeenCalledWith({ star: 5, aspectCodes: [] });
+    expect(onSubmit).toHaveBeenCalledWith({ star: 5, aspectCodes: [], concernCodes: [] });
   });
 
   it('星なしでは送信できず必須エラーを表示する', () => {
@@ -51,20 +59,25 @@ describe('SurveyForm', () => {
   it('星＋良かった点＋一言を送信する', () => {
     const { onSubmit } = setup();
     fireEvent.click(screen.getByRole('button', { name: '星4' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '味' }));
+    fireEvent.click(inGroup('良かった点').getByRole('checkbox', { name: '味' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'おいしい' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
-    expect(onSubmit).toHaveBeenCalledWith({ star: 4, aspectCodes: ['taste'], comment: 'おいしい' });
+    expect(onSubmit).toHaveBeenCalledWith({
+      star: 4,
+      aspectCodes: ['taste'],
+      concernCodes: [],
+      comment: 'おいしい',
+    });
   });
 
   it('良かった点は選択・解除できる', () => {
     const { onSubmit } = setup();
     fireEvent.click(screen.getByRole('button', { name: '星3' }));
-    const taste = screen.getByRole('checkbox', { name: '味' });
+    const taste = inGroup('良かった点').getByRole('checkbox', { name: '味' });
     fireEvent.click(taste); // 選択
     fireEvent.click(taste); // 解除
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
-    expect(onSubmit).toHaveBeenCalledWith({ star: 3, aspectCodes: [] });
+    expect(onSubmit).toHaveBeenCalledWith({ star: 3, aspectCodes: [], concernCodes: [] });
   });
 
   it('一言は 200 字上限（maxLength 属性）', () => {
@@ -93,7 +106,62 @@ describe('SurveyForm', () => {
     fireEvent.click(screen.getByRole('button', { name: '星5' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
-    expect(onSubmit).toHaveBeenCalledWith({ star: 5, aspectCodes: [] });
+    expect(onSubmit).toHaveBeenCalledWith({ star: 5, aspectCodes: [], concernCodes: [] });
+  });
+
+  // ---- 気になった点（Issue #221）----------------------------------------------------------
+
+  it('気になった点を選んで送信できる（良かった点とは別の群）', () => {
+    const { onSubmit } = setup();
+    fireEvent.click(screen.getByRole('button', { name: '星1' }));
+    fireEvent.click(inGroup('気になった点').getByRole('checkbox', { name: '接客' }));
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+    expect(onSubmit).toHaveBeenCalledWith({ star: 1, aspectCodes: [], concernCodes: ['service'] });
+  });
+
+  it('同じ観点を良かった点と気になった点の両方で選べる（互いの選択を消さない）', () => {
+    const { onSubmit } = setup();
+    fireEvent.click(screen.getByRole('button', { name: '星3' }));
+    fireEvent.click(inGroup('良かった点').getByRole('checkbox', { name: '味' }));
+    fireEvent.click(inGroup('気になった点').getByRole('checkbox', { name: '味' }));
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+    expect(onSubmit).toHaveBeenCalledWith({ star: 3, aspectCodes: ['taste'], concernCodes: ['taste'] });
+  });
+
+  it('2 つの群は同じ観点を同じ順序で持つ（Requirement 2.4・同じ重みで尋ねる）', () => {
+    setup();
+    const names = (group: string) =>
+      inGroup(group)
+        .getAllByRole('checkbox')
+        .map((box) => box.getAttribute('aria-labelledby'))
+        .map((id) => (id === null ? null : document.getElementById(id)?.textContent ?? null));
+    expect(names('良かった点')).toEqual(['味', '接客']);
+    expect(names('気になった点')).toEqual(names('良かった点'));
+  });
+
+  // Requirement 2.11: 素材の集め方を評価で分岐させない。星を選ぶ前・星 1・星 5 のいずれでも、
+  // 設問の見出しの集合と順序が同じであることを固定する。星で出し分ける改変はここで落ちる。
+  it('設問の見出しの集合と順序は星の値で変わらない', () => {
+    setup();
+    const legends = () => screen.getAllByRole('group').map((g) => g.querySelector('legend')?.textContent);
+    const before = legends();
+    expect(before).toEqual(['満足度（必須）', '良かった点', '気になった点']);
+    fireEvent.click(screen.getByRole('button', { name: '星1' }));
+    expect(legends()).toEqual(before);
+    fireEvent.click(screen.getByRole('button', { name: '星5' }));
+    expect(legends()).toEqual(before);
+  });
+
+  it('観点の読み上げ名を指す id は文書内で重複しない（2 群が同じ観点を持つため）', () => {
+    setup();
+    const ids = screen
+      .getAllByRole('checkbox')
+      .map((box) => box.getAttribute('aria-labelledby'))
+      .filter((id): id is string => id !== null);
+    // 非空アンカー。1 つも掴めていなければ下の「重複なし」は空振りで成立する。
+    expect(ids, '観点のチェックボックスを掴めていません').toHaveLength(ASPECTS.length * 2);
+    expect(new Set(ids).size, `id が重複しています: ${ids.join(', ')}`).toBe(ids.length);
+    for (const id of ids) expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
   });
 });
 
