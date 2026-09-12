@@ -21,6 +21,8 @@ export interface LineMessenger {
   reply(replyToken: string, messages: readonly LineMessage[], logger?: LineMessengerLogger): Promise<void>;
   getProfile(lineUserId: string): Promise<{ displayName: string } | null>;
   linkRichMenu(lineUserId: string, richMenuId: string): Promise<void>;
+  /** リクエスト単位のログ出力先を適用する。テスト用の偽実装では省略可能。 */
+  withLogger?(logger: LineMessengerLogger): LineMessenger;
 }
 
 export interface LineMessengerLogger {
@@ -29,11 +31,9 @@ export interface LineMessengerLogger {
 }
 
 export function withLineMessengerLogger(messenger: LineMessenger, logger: LineMessengerLogger): LineMessenger {
-  return {
-    reply: (replyToken, messages) => messenger.reply(replyToken, messages, logger),
-    getProfile: (lineUserId) => messenger.getProfile(lineUserId),
-    linkRichMenu: (lineUserId, richMenuId) => messenger.linkRichMenu(lineUserId, richMenuId),
-  };
+  // 偽 Messenger は元のオブジェクトをそのまま返し、reply の引数個数を変えない。
+  // 実装本体だけが提供する withLogger を通して、リクエスト単位の logger を適用する。
+  return messenger.withLogger ? messenger.withLogger(logger) : messenger;
 }
 
 export interface LineMessengerDeps {
@@ -108,7 +108,7 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     return cachedToken.accessToken;
   }
 
-  return {
+  const messenger: LineMessenger = {
     async reply(
       replyToken: string,
       messages: readonly LineMessage[],
@@ -175,5 +175,16 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
         throw new Error(`LineMessenger: linkRichMenu failed with status ${response.status}`);
       }
     },
+
+    withLogger(logger: LineMessengerLogger): LineMessenger {
+      return {
+        reply: (replyToken, messages) => messenger.reply(replyToken, messages, logger),
+        getProfile: (lineUserId) => messenger.getProfile(lineUserId),
+        linkRichMenu: (lineUserId, richMenuId) => messenger.linkRichMenu(lineUserId, richMenuId),
+        withLogger: (nextLogger) => withLineMessengerLogger(messenger, nextLogger),
+      };
+    },
   };
+
+  return messenger;
 }
