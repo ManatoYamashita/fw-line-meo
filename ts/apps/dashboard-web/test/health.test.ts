@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { GET } from '../src/app/healthz/route';
+import { GET } from '../src/app/health/route';
 
-describe('healthz GET', () => {
+describe('health GET', () => {
   it('200 と { status: "ok" } を返す', async () => {
     const res = GET();
     expect(res.status).toBe(200);

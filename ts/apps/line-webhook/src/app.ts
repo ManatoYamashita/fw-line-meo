@@ -58,7 +58,9 @@ const REQUEST_ID_HEADER = 'x-line-request-id';
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
 
-  app.get('/healthz', (c) => c.json({ status: 'ok' }));
+  // `/healthz` にしないこと。Cloud Run は z で終わる一部のパスを予約しており、本番では
+  // コンテナへ届く前に 404 が返る（Issue #219・scripts/check-cloud-run-reserved-paths.sh）。
+  app.get('/health', (c) => c.json({ status: 'ok' }));
 
   app.post('/webhook', async (c) => {
     const requestId = c.req.header(REQUEST_ID_HEADER);

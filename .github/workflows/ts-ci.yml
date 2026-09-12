@@ -90,6 +90,11 @@ jobs:
         # outline 変種では枠が実描画で透明になる。寸法も角丸も文字色も一致するため
         # class 比較でも jsdom でも落ちない（PR #200 / #211 で 3 回踏んだ・read-only grep 検証）。
         run: bash scripts/check-button-variants-cn.sh
+      - name: 'Cloud Run 予約パスガード（Issue #219・z で終わるルートと /_ah/ の検出）'
+        # Cloud Run は /_ah/ で始まるパスと z で終わる一部のパスを予約しており、該当する要求は
+        # コンテナへ届く前に Google Frontend が 404 を返す。ローカル起動でも E2E でも 200 が返る
+        # ためテストでは落ちない（/healthz が全 5 サービスで本番到達不能だった・read-only grep/find 検証）。
+        run: bash scripts/check-cloud-run-reserved-paths.sh
       - name: 'run-services デプロイカバレッジガード（Issue #33）'
         # tf の run-services が push-images.sh / deploy.yml から漏れて placeholder のまま
         # 放置される事故の再発防止（同じく read-only grep 検証）。
