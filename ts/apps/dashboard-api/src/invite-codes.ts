@@ -1,4 +1,4 @@
-import type { DashboardUserIdentity, InviteCodeItem } from '@fwlm/db';
+import type { AuditLogger, DashboardUserIdentity, InviteCodeItem } from '@fwlm/db';
 import { authenticate, type AuthDeps } from './auth.js';
 import { resolveAgencyScope } from './scope.js';
 import { jsonError } from './http.js';
@@ -53,6 +53,7 @@ export interface InviteCodeIssueDeps {
   // createUniqueInviteCode（invite-code-gen）＋ createInviteCode（@fwlm/db）を合成した発行。
   // 衝突リトライ（最大 3 回）を使い切ったら投げる契約（本ハンドラが 500 internal に写像）。
   issueCode: (agencyId: string, log?: Sink) => Promise<InviteCodeItem>;
+  auditLog?: AuditLogger;
 }
 
 export interface InviteCodeIssueRequest {
@@ -89,6 +90,13 @@ export async function handleInviteCodeIssue(
   } catch {
     return jsonError(500, 'internal', '招待コードの発行に失敗しました。時間をおいて再試行してください');
   }
+  await deps.auditLog?.({
+    actorType: auth.user.role,
+    actorId: auth.user.id,
+    action: 'invite_code_issued',
+    targetType: 'invite_code',
+    targetId: item.id,
+  });
   return jsonOk(201, { inviteCode: toJson(item) });
 }
 
@@ -99,6 +107,7 @@ export interface InviteCodeDisableDeps {
   // disableInviteCode（@fwlm/db）委譲。agency_id をスコープ列に含む UPDATE で、
   // 不在・越権はいずれも null（本ハンドラが 404 に写像・存在の秘匿）。既無効は現状値を返し冪等。
   disableCode: (id: string, agencyId: string) => Promise<InviteCodeItem | null>;
+  auditLog?: AuditLogger;
 }
 
 export interface InviteCodeDisableRequest {
@@ -138,6 +147,13 @@ export async function handleInviteCodeDisable(
   if (item === null) {
     return jsonError(404, 'not_found', '招待コードが見つかりません');
   }
+  await deps.auditLog?.({
+    actorType: auth.user.role,
+    actorId: auth.user.id,
+    action: 'invite_code_disabled',
+    targetType: 'invite_code',
+    targetId: item.id,
+  });
   return jsonOk(200, { inviteCode: toJson(item) });
 }
 

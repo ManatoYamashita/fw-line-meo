@@ -25,6 +25,9 @@ erDiagram
     stores ||--o{ summary_deliveries : "delivered to"
     agencies ||--o{ agency_invite_codes : issues
     owners ||--o{ onboarding_sessions : "progress of"
+    audit_logs }o..|| operators : "actor (dashboard user)"
+    audit_logs }o..|| agencies : "actor (dashboard user)"
+    audit_logs }o..|| owners : "actor"
 ```
 
 ## エンティティ一覧（PK / 自然キー / 主な FK）
@@ -49,6 +52,7 @@ erDiagram
 | agency_invite_codes | id (uuid) | code (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
 | onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
 | line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
+| audit_logs | id (uuid) | — | 多相 actor/target（ID は UUID、参照先は `actor_type` / `target_type` で解釈） | 運営・代理店・オーナーの書込操作の追記型監査記録（`customer` は存在しない） |
 
 ## 凡例・補足
 
@@ -64,3 +68,6 @@ erDiagram
 - `owners.delivery_hour`（`competitive-daily-summary`・`0004`）: 日次サマリー配信時刻（時単位・デフォルト 7・0-23）。`owners` は既存 TS 境界のため書込責任は変わらず TS。
 - `onboarding_sessions`: `stage='await_invite_code' ⇔ owner_id IS NULL`（`ck_session_owner_stage`）。owner 誕生前の LINE ユーザー状態も本表が唯一保持する。
 - `agency_invite_codes`: `code` は代理店ごとに共有・使い回し可能（`disabled_at` が無効化するまで複数オーナーが同一コードで登録できる。Req 2.5）。
+- `audit_logs`: 正本はDB。`actor_type` は `operator` / `agency` / `owner` のENUMのみで、顧客を監査主体にできない。
+  ダッシュボード操作の `actor_id` は `dashboard_users.id`、LINE オンボーディング操作の `actor_id` は `owners.id`。
+  `target_type` / `target_id` も業務エンティティの UUID を記録し、`line_user_id` や認証 subject は保持しない。

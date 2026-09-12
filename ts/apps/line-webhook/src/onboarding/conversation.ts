@@ -1,4 +1,12 @@
-import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
+import type {
+  AuditLogInput,
+  AuditLogger,
+  OnboardingSessionRow,
+  OwnerRow,
+  Queryable,
+  SessionPatch,
+  StoreCandidate,
+} from '@fwlm/db';
 import type { LogFields } from '@fwlm/observability';
 import type { InboundEvent } from '../webhook/dispatch.js';
 import { withLineMessengerLogger, type LineMessage, type LineMessenger, type LineMessengerLogger } from '../line/client.js';
@@ -86,6 +94,8 @@ export interface ConversationDeps {
    * 記録できないことを理由に業務処理の振る舞いを変えない。
    */
   logger: ConversationLogger;
+  /** 業務書込の監査記録。顧客識別子ではなく owners.id のみを渡す。 */
+  auditLog?: AuditLogger;
   // 現在時刻を注入する（ロック判定・ロック設定の両方でテスト可能性のため `new Date()` を直接使わない）。
   now(): Date;
   // Req 6.3: 店舗特定完了時に切り替える「完了後」リッチメニューの ID。
@@ -307,6 +317,13 @@ async function handleValidInviteCode(
     client.release();
   }
 
+  await tryAuditLog(deps, {
+    actorType: 'owner',
+    actorId: newOwner.id,
+    action: 'owner_created',
+    targetType: 'owner',
+    targetId: newOwner.id,
+  });
   await deps.messenger.reply(event.replyToken, [buildStoreNameInputGuidanceMessage()]);
 }
 
@@ -457,6 +474,13 @@ async function handleConfirm(
   }
 
   await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'completed' });
+  await tryAuditLog(deps, {
+    actorType: 'owner',
+    actorId: session.owner_id,
+    action: 'onboarding_completed',
+    targetType: 'store',
+    targetId: outcome.storeId,
+  });
   await deps.messenger.reply(event.replyToken, [buildCompletionMessage(deps.liffStoreDetailUrl)]);
 
   // Req 6.3: 完了時にリッチメニューを完了後メニューへ即時切り替える。
@@ -487,12 +511,36 @@ async function handleConfirm(
   try {
     if (linked) {
       deps.logger.info('line-webhook.richmenu_linked');
+      await tryAuditLog(deps, {
+        actorType: 'owner',
+        actorId: session.owner_id,
+        action: 'rich_menu_linked',
+        targetType: 'owner',
+        targetId: session.owner_id,
+      });
     } else {
       deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(linkError) });
+      await tryAuditLog(deps, {
+        actorType: 'owner',
+        actorId: session.owner_id,
+        action: 'rich_menu_link_failed',
+        targetType: 'owner',
+        targetId: session.owner_id,
+      });
     }
   } catch {
     // swallowed-exception: intentional — 記録経路自身の失敗を業務処理へ伝播させない。
     // 記録できないことを理由に、利用者に見える振る舞いを変えない（要件 3.2 / 3.3）。
+  }
+}
+
+/** 監査記録の障害は業務フローを巻き戻さず、正典イベントへ警告を残す。 */
+async function tryAuditLog(deps: ConversationDeps, input: AuditLogInput): Promise<void> {
+  if (!deps.auditLog) return;
+  try {
+    await deps.auditLog(input);
+  } catch (err) {
+    deps.logger.warn('line-webhook.audit_log_failed', { errorKind: errorKindOf(err) });
   }
 }
 

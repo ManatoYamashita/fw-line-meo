@@ -64,6 +64,9 @@ GRANT INSERT, UPDATE, DELETE ON
   agency_invite_codes, onboarding_sessions, line_webhook_events
   TO :"line_webhook", :"survey", :"dashboard";
 
+-- 監査記録は TS 層が追記する。証跡の改変を防ぐため UPDATE/DELETE は付与しない。
+GRANT INSERT ON audit_logs TO :"line_webhook", :"dashboard";
+
 -- Go 層書込テーブルへの DML（batch SA・daily_summaries は competitive-daily-summary 0004 で追加）
 GRANT INSERT, UPDATE, DELETE ON
   competitors, rating_snapshots, daily_summaries

@@ -1,5 +1,6 @@
 import type {
   AgencyItem,
+  AuditLogger,
   DashboardRole,
   DashboardUserIdentity,
   DashboardUserItem,
@@ -61,6 +62,7 @@ export interface AgencyCreateDeps {
   auth: AuthDeps;
   // createAgency（@fwlm/db）委譲。operatorId は認証ユーザー由来をハンドラが設定する。
   createAgency: (input: AgencyCreateInput) => Promise<AgencyItem>;
+  auditLog?: AuditLogger;
 }
 
 export interface DashboardUsersListDeps {
@@ -82,6 +84,7 @@ export interface DashboardUserCreateDeps {
     operatorId: string,
     normalizedEmail: string,
   ) => Promise<{ id: string; disabled: boolean } | null>;
+  auditLog?: AuditLogger;
 }
 
 export interface DashboardUserDisableDeps {
@@ -91,6 +94,7 @@ export interface DashboardUserDisableDeps {
   //   - 'disabled'（成功／既に無効・冪等）／'last_operator'（最後の有効な運営で拒否・Req 2.3）／
   //     'not_found'（不在・越権の秘匿・Req 1.5）。拒否時は DAL が ROLLBACK 済みで対象状態不変（Req 2.6）。
   disableUser: (id: string, operatorId: string) => Promise<DisableOutcome>;
+  auditLog?: AuditLogger;
 }
 
 export interface DashboardUserEnableDeps {
@@ -99,6 +103,7 @@ export interface DashboardUserEnableDeps {
   // NULL に戻す）で、行があればその利用者を返す（既に有効でも冪等に行を返す・Req 1.1, 1.4）。
   // 不在・越権は null（本ハンドラが 404 に写像・存在の秘匿・Req 1.5, 4.1）。
   enableUser: (id: string, operatorId: string) => Promise<DashboardUserItem | null>;
+  auditLog?: AuditLogger;
 }
 
 // --- リクエスト形 ---
@@ -164,6 +169,13 @@ export async function handleAgencyCreate(
 
   // operatorId は認証ユーザー由来（クライアント入力の operatorId は無視する・Req 7.1）。
   const agency = await deps.createAgency({ operatorId: guard.user.operatorId, name });
+  await deps.auditLog?.({
+    actorType: 'operator',
+    actorId: guard.user.id,
+    action: 'agency_created',
+    targetType: 'agency',
+    targetId: agency.id,
+  });
   return jsonOk(201, { agency: toAgencyJson(agency) });
 }
 
@@ -227,6 +239,13 @@ export async function handleDashboardUserCreate(
     }
     return jsonError(500, 'internal', '利用者の登録に失敗しました。時間をおいて再試行してください');
   }
+  await deps.auditLog?.({
+    actorType: 'operator',
+    actorId: guard.user.id,
+    action: 'dashboard_user_created',
+    targetType: 'dashboard_user',
+    targetId: user.id,
+  });
   return jsonOk(201, { user: toUserJson(user) });
 }
 
@@ -260,6 +279,13 @@ export async function handleDashboardUserDisable(
   const outcome = await deps.disableUser(targetId, guard.user.operatorId);
   if (outcome.kind === 'disabled') {
     // 無効化成功／既に無効（冪等）。現状の利用者行を 200 で返す（Req 2.4）。
+    await deps.auditLog?.({
+      actorType: 'operator',
+      actorId: guard.user.id,
+      action: 'dashboard_user_disabled',
+      targetType: 'dashboard_user',
+      targetId: outcome.user.id,
+    });
     return jsonOk(200, { user: toUserJson(outcome.user) });
   }
   if (outcome.kind === 'last_operator') {
@@ -296,6 +322,13 @@ export async function handleDashboardUserEnable(
     // 不在・越権は不在と同じ 404（存在の秘匿・Req 1.5, 4.1）。
     return jsonError(404, 'not_found', '利用者が見つかりません');
   }
+  await deps.auditLog?.({
+    actorType: 'operator',
+    actorId: guard.user.id,
+    action: 'dashboard_user_enabled',
+    targetType: 'dashboard_user',
+    targetId: user.id,
+  });
   return jsonOk(200, { user: toUserJson(user) });
 }
 
