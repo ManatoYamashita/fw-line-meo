@@ -183,21 +183,21 @@
   - _Depends: 4.3, 4.4_
 
 - [ ] 7. 素材収集の両面化：気になった点を全員に尋ね、不満の事実を薄めない（Issue #221）
-- [ ] 7.1 気になった点の匿名集計を追加する（`0008`）
+- [x] 7.1 気になった点の匿名集計を追加する（`0008`）
   - `survey_concern_tallies`（店舗×月×観点のカウンタ）を追加し、`survey_material_tallies` に `concern_count` を足して一意制約を張り替える
   - `db/write-boundary.md`・`db/ERD.md`・`infra/sql/grants.sql`（ヘッダと GRANT 文）・`30_compliance.sql` の allowlist・assertions / smoke を同時に更新する
   - Observable: `scripts/run-db-test-suites.sh` が緑、かつ allowlist から新表を外すと赤
   - _Requirements: 5.2, 5.5, 5.6_
   - _Boundary: db/migrations, db/test, db/ERD.md, db/write-boundary.md, infra/sql/grants.sql_
 
-- [ ] 7.2 集計書込を気になった点へ広げる
+- [x] 7.2 集計書込を気になった点へ広げる
   - `incrementTallies` に `concernCodes` を足し、同一トランザクションで concern 行と `concern_count` を加算する（どちらも重複除去後の件数で、行の加算数と一致する）
   - Observable: DB テストで両群の加算・同一回答内の重複・厚みの件数の一致が緑
   - _Requirements: 5.2, 5.6_
   - _Boundary: packages/db tallies_
   - _Depends: 7.1_
 
-- [ ] 7.3 入力検証・素材・プロンプトを両面化する
+- [x] 7.3 入力検証・素材・プロンプトを両面化する
   - `validate` が `concernCodes` を許可 code のみ受理し、ResponsesAPI が `concernLabels` を素材へ、`concernCodes` を集計へ渡す。未選択の観点は「どちらの群にも入っていないもの」とする
   - PromptBuilder が素材に「気になった点」の行を出し、気になった点がある／星 1–2 のときは「不満の事実を薄めない・誹謗中傷しない」を指示する。旧「節度」の指示は出さない
   - `concernLabels` を持たない旧 sessionToken でも再生成が壊れない
@@ -205,7 +205,7 @@
   - _Requirements: 2.3, 2.4, 3.1, 3.2, 3.5_
   - _Depends: 7.2_
 
-- [ ] 7.4 回答フォームに気になった点を足す
+- [x] 7.4 回答フォームに気になった点を足す
   - 良かった点と同じ観点・同じ見た目で「気になった点」を出し、星の値によって設問を出し分けない
   - Observable: フォームのユニットテストと E2E（設問の見出しの集合と順序が星で変わらない・星 1 で気になった点を選んで送信し同一導線）が緑、a11y 監査が緑
   - _Requirements: 2.2, 2.4, 2.11, 4.4_
