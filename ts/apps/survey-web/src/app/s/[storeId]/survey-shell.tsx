@@ -95,6 +95,7 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
         generationFailed: json.generation === 'failed',
       });
     } catch {
+      // swallowed-exception: intentional — 再生成の通信失敗時も既存の投稿導線を維持する。
       // 通信失敗時は現状維持（投稿導線は残る）
     } finally {
       setRegenerating(false);

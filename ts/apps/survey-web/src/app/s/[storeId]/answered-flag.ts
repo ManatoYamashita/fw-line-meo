@@ -12,6 +12,7 @@ export function markAnswered(storeId: string, now: number = Date.now()): void {
   try {
     localStorage.setItem(key(storeId), String(now));
   } catch {
+    // swallowed-exception: intentional — localStorage 非対応環境でも回答導線を止めない。
     // localStorage 不可（プライベートモード等）は無視。
   }
 }
@@ -24,6 +25,7 @@ export function isRecentlyAnswered(storeId: string, now: number = Date.now()): b
     const elapsed = now - at;
     return Number.isFinite(at) && elapsed >= 0 && elapsed < WINDOW_MS;
   } catch {
+    // swallowed-exception: intentional — localStorage 非対応環境は未回答として扱う。
     return false;
   }
 }

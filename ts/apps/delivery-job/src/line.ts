@@ -148,6 +148,7 @@ function extractErrorMessage(rawBody: string): string {
       return parsed.message;
     }
   } catch {
+    // swallowed-exception: intentional — 不正な JSON は catch 後に生本文へフォールバックする。
     // JSON でない場合は生本文をそのまま使う。
   }
   return rawBody;
