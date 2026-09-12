@@ -16,17 +16,27 @@
 # （実疎通を CI から行わない理由は infra/README.md §5・§8 を参照）。
 #
 # 判定（api が '-' 以外の行のみ・'-' は実疎通の対象外）:
-#   pending  最終確認日が PENDING = 一度も本番で叩いていない。go-live の完了条件を満たしていない。
-#   stale    最終確認日が MAX_AGE_DAYS より古い。
-#   ok       上記以外。
+#   pending      最終確認日が PENDING = 一度も本番で叩いていない。go-live の完了条件を満たしていない。
+#   future-date  最終確認日が基準日より未来 = 叩かずに日付だけ埋めた形。
+#   stale        最終確認日が MAX_AGE_DAYS より古い。
+#   warn         有効期間内だが残り WARN_WITHIN_DAYS 日以内（期限間近）。**赤にしない**（exit 0）。
+#   ok           上記以外。
+# 有効期限は「最終確認日 + MAX_AGE_DAYS 日」で、その日の検証までは有効・翌日の検証から stale になる。
+#
+# 機械可読な出力（通知側との契約。散文は読ませない）:
+#   EXTERNAL-API-SMOKE-SIGNATURE: <api>=<判定>;…  追跡 Issue の重複抑止の鍵。判定だけを載せる。
+#                                                ワークフローは <api>=warn; の有無で予告を決める。
+#   EXTERNAL-API-SMOKE-EXPIRY: YYYY-MM-DD        期限間近の API のうち最も早い有効期限。
+#                                                期限間近が 1 件も無ければ出さない。
 #
 # 環境変数:
 #   EXTERNAL_API_SMOKE_NOW  「今日」を YYYY-MM-DD で注入する（既定は JST の今日）。
-#                           自己テストと、赤の実証（workflow_dispatch の now 入力）で使う。
+#                           自己テストと、赤・予告の実証（workflow_dispatch の now 入力）で使う。
 #                           注入値も JST として解釈する（記録側が JST であるため）。
 #
 # 使い方: bash scripts/check-external-api-smoke-freshness.sh
-#   期限切れ・未実施があれば該当を stderr に出して exit 1、無ければ exit 0。
+#   期限切れ・未実施があれば該当を stderr に出して exit 1。期限間近は WARN を出して exit 0、
+#   いずれも無ければ exit 0。
 
 set -euo pipefail
 
@@ -36,7 +46,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ $# -gt 0 ]; then
   case "$1" in
     -h|--help)
-      sed -n '2,29p' "$0"
+      sed -n '2,39p' "$0"
       exit 0
       ;;
     *)
@@ -51,6 +61,20 @@ fi
 # 上書き口があると、赤くなったとき最も安い行動が「閾値を伸ばす」になる。閾値の変更はレビューを
 # 伴う差分として残すべきである。両側の境界は EXTERNAL_API_SMOKE_NOW を動かせば検証できる。
 MAX_AGE_DAYS=14
+
+# 期限間近として予告する窓（日）。残り日数（MAX_AGE_DAYS − 経過日数）がこの値以下なら warn。
+# MAX_AGE_DAYS=14 に対して 2 なら、経過 12・13・14 日が予告、15 日から stale（赤）になる。
+#
+# なぜ要るか: stale は有効期限の **翌朝** に初めて鳴る。実疎通は運用者が自分の資格情報で叩き、
+# PR で記録を更新して main へ載せるまでが 1 セットの人手作業であり、赤を見てから始めると
+# その間ずっと「期限切れ」が続く。期限の前に知らせれば、赤を一度も出さずに更新できる。
+#
+# なぜ赤にしないか: 赤は「今まさに記録が無効」だけを意味させる。期限前に赤くすると有効期間が
+# 実質的に縮み、赤の意味そのものが薄まる。予告はワークフローが署名の warn を見て追跡 Issue へ
+# 流し、ジョブは緑のまま保つ。
+#
+# MAX_AGE_DAYS と同じ理由で env から上書きできるようにしない（窓の変更はレビューを伴う差分で行う）。
+WARN_WITHIN_DAYS=2
 
 DECL_FILE="${ROOT}/infra/external-api-smoke.tsv"
 STRUCTURE_GUARD="${SCRIPT_DIR}/check-external-api-smoke.sh"
@@ -88,6 +112,25 @@ days_from_civil() {
   _doy=$(( (153 * _mp + 2) / 5 + _d - 1 ))
   _doe=$((_yoe * 365 + _yoe / 4 - _yoe / 100 + _doy))
   printf '%s\n' $((_era * 146097 + _doe - 719468))
+}
+
+# 1970-01-01 起点の通日を YYYY-MM-DD へ戻す（Howard Hinnant の civil_from_days・上の逆変換）。
+# 有効期限（最終確認日 + MAX_AGE_DAYS）を人間に告げるために使う。上と同じ理由で date には寄せない。
+# 誤った日付を告げる予告は予告が無いより悪いため、月末・年末・うるう日は自己テストが固定している。
+civil_from_days() {
+  _cz=$(($1 + 719468))
+  _cera=$(( (_cz >= 0 ? _cz : _cz - 146096) / 146097 ))
+  _cdoe=$((_cz - _cera * 146097))
+  _cyoe=$(( (_cdoe - _cdoe / 1460 + _cdoe / 36524 - _cdoe / 146096) / 365 ))
+  _cy=$((_cyoe + _cera * 400))
+  _cdoy=$((_cdoe - (365 * _cyoe + _cyoe / 4 - _cyoe / 100)))
+  _cmp=$(( (5 * _cdoy + 2) / 153 ))
+  _cd=$((_cdoy - (153 * _cmp + 2) / 5 + 1))
+  _cm=$(( _cmp < 10 ? _cmp + 3 : _cmp - 9 ))
+  if [ "$_cm" -le 2 ]; then
+    _cy=$((_cy + 1))
+  fi
+  printf '%04d-%02d-%02d\n' "$_cy" "$_cm" "$_cd"
 }
 
 if [ ! -f "$DECL_FILE" ]; then
@@ -156,6 +199,11 @@ echo "--- 層2（鮮度）の検証・基準日 ${now}・有効期間 ${MAX_AGE_
 signature=""
 checked=0
 fail=0
+# 期限間近の件数と、そのうち最も早い有効期限（通日と YYYY-MM-DD）。判定フラグと同じく
+# **ループ本体（親シェル）で更新する**。`$( )` の中で立てると subshell ごと消える。
+warn_count=0
+earliest_expiry_days=''
+earliest_expiry=''
 
 while IFS= read -r raw || [ -n "$raw" ]; do
   trimmed="${raw#"${raw%%[![:space:]]*}"}"
@@ -207,6 +255,29 @@ TSVROW
     continue
   fi
 
+  # ここへ来るのは 0 ≤ age ≤ MAX_AGE_DAYS の行だけである。**期限切れの判定より後に置くこと。**
+  # 前へ出すと、残り日数が負（期限切れ）でも「残り WARN_WITHIN_DAYS 日以下」を満たして予告に化け、
+  # 赤が消える。
+  remaining=$((MAX_AGE_DAYS - age))
+  if [ "$remaining" -le "$WARN_WITHIN_DAYS" ]; then
+    expiry_days=$((last_days + MAX_AGE_DAYS))
+    expiry_ymd="$(civil_from_days "$expiry_days")"
+    signature="${signature}${d_api}=warn;"
+    warn_count=$((warn_count + 1))
+    if [ -z "$earliest_expiry_days" ] || [ "$expiry_days" -lt "$earliest_expiry_days" ]; then
+      earliest_expiry_days="$expiry_days"
+      earliest_expiry="$expiry_ymd"
+    fi
+    # 残り 0 日を「残り 0 日」と書くと期限切れと読み違えるため、最終日であることを明示する。
+    if [ "$remaining" -eq 0 ]; then
+      remaining_note='本日が最終日'
+    else
+      remaining_note="残り ${remaining} 日"
+    fi
+    echo "WARN: ${d_api}（${d_id}）の実疎通記録が期限間近です — 最終確認 ${d_last}（${age} 日前）・有効期限 ${expiry_ymd}（${remaining_note}）・証拠: ${d_evid}"
+    continue
+  fi
+
   signature="${signature}${d_api}=ok;"
   echo "OK: ${d_api}（${d_id}）→ ${d_last}（${age} 日前・証拠: ${d_evid}）"
 done < "$DECL_FILE"
@@ -222,11 +293,26 @@ fi
 echo ""
 # 署名には **判定だけを載せ、経過日数を載せない。** 日数を載せると赤が続く限り毎日署名が変わり、
 # 追跡 Issue へ毎日コメントが増える（report-ci-issue.sh の重複抑止が効かなくなる）。
+# 予告（warn）も同じで、経過 12 日と 14 日で署名が変わらないため、予告の間はコメントが増えない。
 echo "EXTERNAL-API-SMOKE-SIGNATURE: ${signature}"
+# 有効期限は日付そのもの（絶対値）なので、署名と違って日が進んでも変わらない。通知側は
+# この行から「いつまでに」を取る（WARN 行の散文を解析させない）。
+if [ "$warn_count" -gt 0 ]; then
+  echo "EXTERNAL-API-SMOKE-EXPIRY: ${earliest_expiry}"
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "NG: 外部 API の実疎通記録に未実施または期限切れがあります（${checked} 件検証・上記参照）。${injected_note}" >&2
   exit 1
+fi
+
+if [ "$warn_count" -gt 0 ]; then
+  # 期限間近は赤にしない（WARN_WITHIN_DAYS の注記を参照）。exit 0 のまま、ワークフローが
+  # 署名の warn を見て追跡 Issue で予告する。
+  echo "WARN: ${warn_count} 件が期限間近です（最も早い有効期限 ${earliest_expiry}）。期限を過ぎると翌日の検証から赤になります。"
+  echo "      → 期限までに infra/README.md §8 の手順で叩き直し、infra/external-api-smoke.tsv の最終確認日と証拠を更新してください。"
+  echo "OK: 外部 API の実疎通記録はすべて有効期間内（${checked} 件検証・有効期間 ${MAX_AGE_DAYS} 日・期限間近 ${warn_count} 件）。${injected_note}"
+  exit 0
 fi
 
 echo "OK: 外部 API の実疎通記録はすべて有効期間内（${checked} 件検証・有効期間 ${MAX_AGE_DAYS} 日）。${injected_note}"

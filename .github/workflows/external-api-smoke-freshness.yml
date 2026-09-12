@@ -16,6 +16,14 @@
 # （#91 で学んだのと同じ理由。main が動かない期間は run 自体が生成されず、失敗という兆候すら
 #  出ない）。
 #
+# 状態は 3 つ（判定の正典は scripts/check-external-api-smoke-freshness.sh の冒頭コメント）:
+#   green  すべて有効期間内            → 追跡 Issue があれば復旧として閉じる
+#   warn   有効期間内だが期限間近       → 追跡 Issue を起票／コメントして予告する。**ジョブは緑のまま**
+#   red    未実施・期限切れ             → 追跡 Issue を起票／コメントし、ジョブを赤にする
+# 期限切れの翌朝に初めて鳴るのでは、人手の実疎通（運用者の資格情報で叩き、PR で記録を更新する）が
+# 間に合わない。予告の窓は検証スクリプトの定数 WARN_WITHIN_DAYS が決める（ここへ日数を書き写さない）。
+# 予告も期限切れも同じラベルの同じ追跡 Issue を使う（ラベルごとに 1 本・重複起票しない）。
+#
 # CI デプロイ契約（deploy.yml / prod-image-drift.yml / secret-version-drift.yml と同一・厳守）:
 #   - 本ワークフローは **GCP へ一切アクセスしない**。読むのはリポジトリ内の宣言ファイルだけで、
 #     gcloud も鍵も使わない。したがって WIF 認証のステップも `id-token: write` も持たない
@@ -29,7 +37,7 @@ on:
   # 自動停止する。
   schedule:
     - cron: '7 21 * * *'
-  # 障害時の即時確認と、通知経路の end-to-end 実証（基準日を未来へ送って赤を作る）用。
+  # 障害時の即時確認と、通知経路の end-to-end 実証（基準日を未来へ送って赤・期限間近の予告を作る）用。
   workflow_dispatch:
     inputs:
       now:
@@ -94,23 +102,46 @@ jobs:
           state=red
           if [ "${SMOKE_STATUS:-}" = "0" ]; then
             state=green
+            # 期限間近は検証を緑（exit 0）のまま、署名へ <api>=warn; を載せる契約である。
+            # 散文（WARN 行）は読まず、署名だけで判断する。
+            case "$sig" in
+              *'=warn;'*) state=warn ;;
+            esac
           fi
+
+          # report-ci-issue.sh は red / green しか受け付けない（fail-closed）。その契約は緩めず、
+          # ここで写す。予告は「起票、または状態が変わったときだけコメント」が要るので red の経路を使う。
+          # 予告の署名（<api>=warn;）は期限切れの署名（<api>=stale;）と異なるため、期限を過ぎた日には
+          # 同じ追跡 Issue へ期限切れとしてコメントが付く。予告の間（署名が同じ間）はコメントしない。
+          case "$state" in
+            green) issue_state=green ;;
+            warn | red) issue_state=red ;;
+            *)
+              echo "ERROR: 未知の state です: ${state}" >&2
+              exit 1
+              ;;
+          esac
 
           body="$RUNNER_TEMP/issue-body.md"
           # 本文の組み立ては scripts/external-api-smoke-notify.sh が持つ。
           # **この run ブロックへ戻さないこと。** 戻した瞬間に「緑と赤で文面を出し分けているか」を
           # 検証する器が yml からの sed 抽出へ逆戻りし、Issue #109 と同じ形（孤児ケース検出で
           # main の ts-ci が 3 日赤）を再生産する。
+          # notify には写す前の state（warn）を渡す。期限間近の検証結果を green で渡すと notify が
+          # 拒否する（予告中の追跡 Issue を復旧として閉じないため）ので、上の導出が壊れれば
+          # このステップが赤くなって気づける。
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           bash scripts/external-api-smoke-notify.sh \
             --state "$state" \
             --report "$report" \
             --run-url "$run_url" > "$body"
 
+          # タイトルは起票時にしか付かず、以後の状態変化（予告 → 期限切れ）では変わらない。
+          # どの状態で起票されても読み違えない文面にする。
           bash scripts/report-ci-issue.sh \
-            --state "$state" \
+            --state "$issue_state" \
             --label external-api-smoke \
-            --title "chore(ci): 外部 API への実疎通が未実施または期限切れです（自動検出）" \
+            --title "chore(ci): 外部 API への実疎通が必要です（期限間近・期限切れ・未実施を自動検出）" \
             --body-file "$body" \
             --signature "$sig"
 
