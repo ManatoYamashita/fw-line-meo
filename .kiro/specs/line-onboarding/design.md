@@ -67,7 +67,7 @@ graph TB
         LinePf[LINE Messaging API]
     end
     subgraph CloudRun line webhook
-        App[Hono App webhook healthz]
+        App[Hono App webhook health]
         Sig[SignatureVerifier]
         Disp[EventDispatcher dedup routing]
         Conv[ConversationHandlers stage logic]
@@ -118,7 +118,7 @@ types → config → @fwlm/db accessors → adapters (line/, places/) → onboar
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| Backend / Services | Node 22＋Hono＋@hono/node-server | Webhook 受信・healthz | 新アプリのみ Node 22（bot-sdk 次メジャー対応。research.md 参照） |
+| Backend / Services | Node 22＋Hono＋@hono/node-server | Webhook 受信・health | 新アプリのみ Node 22（bot-sdk 次メジャー対応。research.md 参照） |
 | LINE SDK | @line/bot-sdk v11 | 署名検証・reply・profile・richmenu 操作 | Apache-2.0。Express middleware 不使用・`validateSignature()` を raw body に適用 |
 | 外部 API | Google Places API (New) searchText | 店名→候補検索 | fetch 直叩き・FieldMask 5 フィールド固定（Pro SKU）・timeout 1.5s |
 | Data / Storage | Cloud SQL (PostgreSQL)＋@fwlm/db | 会話状態・招待コード・冪等化・owners/stores 書込 | migration 0003 追加 |
@@ -141,7 +141,7 @@ ts/apps/line-webhook/
 ├── src/
 │   ├── index.ts               # 実依存の配線（config, pool, bot-sdk, serve）
 │   ├── config.ts              # 必須 env 検証（LINE_CHANNEL_ID/SECRET, PLACES_API_KEY, RICHMENU_COMPLETED_ID, PORT）
-│   ├── app.ts                 # createApp(deps): POST /webhook, GET /healthz（薄い route）
+│   ├── app.ts                 # createApp(deps): POST /webhook, GET /health（薄い route）
 │   ├── webhook/
 │   │   ├── signature.ts       # raw body の HMAC-SHA256 署名検証
 │   │   └── dispatch.ts        # イベント正規化・events空配列ping・userId欠落ガード・dedup・ハンドラ振分け

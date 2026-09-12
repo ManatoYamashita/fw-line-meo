@@ -6,7 +6,7 @@
 
 **Users**: 代理店ロールの利用者は店舗登録・一覧・招待コード管理に利用する。運営ロールの利用者は全店舗の俯瞰と代理店・利用者アカウントの管理に利用する。
 
-**Impact**: 既存の `dashboard-api`（現状 `/healthz` と QR 発行のみ）を業務 API へ拡張し、新規 Next.js アプリ `dashboard-web` を追加する。`dashboard_users` テーブルに列追加（migration 0005）を行い、line-webhook 内の店舗特定ロジックを共有パッケージへ移設する。
+**Impact**: 既存の `dashboard-api`（現状 `/health` と QR 発行のみ）を業務 API へ拡張し、新規 Next.js アプリ `dashboard-web` を追加する。`dashboard_users` テーブルに列追加（migration 0005）を行い、line-webhook 内の店舗特定ロジックを共有パッケージへ移設する。
 
 ### Goals
 
@@ -163,7 +163,7 @@ ts/apps/dashboard-web/
         ├── invite-codes/page.tsx# 招待コード一覧・発行・無効化
         ├── admin/agencies/page.tsx  # 代理店作成・一覧（operator 専用）
         ├── admin/users/page.tsx     # 利用者登録・一覧・無効化（operator 専用）
-        └── healthz/route.ts     # ヘルスチェック（force-static）
+        └── health/route.ts     # ヘルスチェック（force-static）
 
 ts/packages/db/src/
 ├── agencies.ts                  # createAgency / listAgencies / findAgencyName（/me の agencyName 用）
@@ -304,7 +304,7 @@ sequenceDiagram
 | 6.3 | 代理店ロールは必ず1代理店所属 | 既存 CHECK ck_dashboard_role_scope＋入力検証 | 400 封筒 |
 | 6.4 | 利用者無効化→ログイン拒否 | disableDashboardUser, authenticate（disabled） | 認証フロー図・403 |
 | 6.5 | 代理店ロールの管理機能拒否 | admin.ts 冒頭の operator 限定ガード | 403 封筒 |
-| 7.1 | 未認証要求に情報を返さない | 全ルートの authenticate 前置（healthz 除く） | 401 封筒のみ |
+| 7.1 | 未認証要求に情報を返さない | 全ルートの authenticate 前置（health 除く） | 401 封筒のみ |
 | 7.2 | 来店客情報を扱わない | データモデル上、客のエンティティに一切触れない | — |
 | 7.3 | 全画面・案内文が日本語 | dashboard-web 全 UI・エラーメッセージ | — |
 | 7.4 | 内部障害時の正直なエラー表示 | jsonError（500）＋api.ts の失敗時 UI | 成功表示の偽装をしない |
@@ -581,7 +581,7 @@ CREATE UNIQUE INDEX ux_dashboard_users_email ON dashboard_users (lower(email)) W
 
 ## Security Considerations
 
-- 全業務エンドポイントは authenticate 前置（`/healthz` のみ例外）。未認証には一切のデータ・存在情報を返さない（7.1）。
+- 全業務エンドポイントは authenticate 前置（`/health` のみ例外）。未認証には一切のデータ・存在情報を返さない（7.1）。
 - CORS は `DASHBOARD_WEB_ORIGIN`（単一オリジン）のみ許可。`Authorization` ヘッダ許可・credentials 不使用（Cookie 非採用）。
 - リンク条件（google.com プロバイダ＋email_verified）により、メールだけ知る第三者が別プロバイダで同メールを主張して乗っ取る経路を遮断。
 - 認可の真実は Postgres（`dashboard_users`）にのみ存在。Firebase カスタムクレームは使わない（失効反映の遅延を避け、無効化を即時にする）。

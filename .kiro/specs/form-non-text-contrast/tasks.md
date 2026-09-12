@@ -150,7 +150,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f ts/apps/survey-web/e2e/seed.sql
 # 自分のサーバを 3157 で起動（生成 AI のモックは *サーバ側* に要る）
 cd "$WT/ts/apps/survey-web"
 PORT=3157 NODE_OPTIONS="--import $WT/ts/apps/survey-web/e2e/mock-gemini.mjs" nohup pnpm start > /tmp/e2e57-server.log 2>&1 &
-until curl -sf http://127.0.0.1:3157/healthz >/dev/null; do sleep 1; done
+until curl -sf http://127.0.0.1:3157/health >/dev/null; do sleep 1; done
 
 # 測る（NODE_OPTIONS は Playwright 側には不要）
 E2E_BASE_URL="http://127.0.0.1:3157" pnpm exec playwright test
