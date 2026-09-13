@@ -1,6 +1,7 @@
 // 公開エンドポイントの生成コスト濫用に対する簡易レート制限（固定ウィンドウ）。
 // ベストエフォート: ゼロスケール・複数インスタンス前提のため完全防御は狙わず、
-// インスタンス内メモリで敷居を上げる。/api/responses と /api/drafts が共有する。
+// インスタンス内メモリで敷居を上げる。/api/responses・/api/drafts・/api/review-link-opened が
+// それぞれ別のインスタンスとして使う（上限は route ごとに決める）。
 
 interface Bucket {
   count: number;
