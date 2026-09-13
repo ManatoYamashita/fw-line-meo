@@ -35,10 +35,12 @@ function baseSummary(overrides: Partial<DailySummaryRow> = {}): DailySummaryRow 
     ],
     // rating/starDiff は number（jsonb 内の Go 実出力に一致。task 7.1 で発見・是正した
     // DailySummaryCompetitor の型 — ts/packages/db/src/types.ts のコメント参照）。
+    // 並びは順位の順、星差は「自店 − 競合」（自店 4.2 に対して 4.5 の店は -0.3）。以前は符号が
+    // 定義と逆で、並びも順位の順ではなかった（Issue #255 で定義を spec に書いた際に揃えた）。
     competitors: [
-      { name: '近隣カフェA', rating: 4.5, reviewCount: 200, starDiff: 0.3 },
-      { name: '近隣カフェB', rating: 3.9, reviewCount: 80, starDiff: -0.3 },
-      { name: '近隣カフェC', rating: 4.0, reviewCount: 60, starDiff: -0.2 },
+      { name: '近隣カフェA', rating: 4.5, reviewCount: 200, starDiff: -0.3 },
+      { name: '近隣カフェC', rating: 4.0, reviewCount: 60, starDiff: 0.2 },
+      { name: '近隣カフェB', rating: 3.9, reviewCount: 80, starDiff: 0.3 },
     ],
     created_at: new Date('2026-07-11T22:00:00Z'),
     ...overrides,
@@ -231,6 +233,95 @@ describe('buildDailySummaryFlex', () => {
     });
   });
 
+  // Issue #255: Google に評価が無い店（クチコミ 0 件）。行は読込時に正規化済み（評価なしは null・
+  // 自店が未評価なら順位と星差も null）で届く。
+  describe('自店が未評価（rating=null・順位なし）', () => {
+    const result = buildDailySummaryFlex(
+      baseSummary({
+        rank: null,
+        rank_total: null,
+        rank_prev: null,
+        rating: null,
+        review_count: 0,
+        rating_prev: null,
+        review_count_prev: 0,
+        new_review_count: 0,
+        new_reviews: [],
+        competitors: [
+          { name: '近隣カフェA', rating: 4.5, reviewCount: 200, starDiff: null },
+          { name: '近隣カフェC', rating: 4.0, reviewCount: 60, starDiff: null },
+        ],
+      }),
+      LIFF_URL,
+    );
+
+    it('取得失敗ではなく、評価が無いため順位を出せない旨を見出しに出す', () => {
+      const headerTexts = collectTexts(findBlock(result.contents, 'header'));
+      expect(headerTexts).toEqual(['まだ Google の評価が無いため、順位は出せません']);
+    });
+
+    it('自店の評価を「評価なし」と出す（★0 や ★— を出さない）', () => {
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      expect(bodyTexts).toContain('評価なし（クチコミ 0件）');
+      expect(bodyTexts.some((text) => text.startsWith('★0') || text.startsWith('★—'))).toBe(false);
+    });
+
+    it('競合の評価は出し、自店と比べられない星差は出さない', () => {
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      const start = bodyTexts.indexOf('競合との比較');
+      expect(bodyTexts.slice(start + 1)).toEqual(['近隣カフェA', '★4.5', '近隣カフェC', '★4.0']);
+    });
+
+    it('altText も取得失敗ではなく、順位を出せない旨と「評価なし」を伝える', () => {
+      expect(result.altText).toBe(
+        '【今朝のポジション】まだ Google の評価が無いため、順位は出せません。評価なし（クチコミ0件）。',
+      );
+    });
+  });
+
+  describe('評価の無い競合がいる（rating=null・starDiff=null）', () => {
+    const result = buildDailySummaryFlex(
+      baseSummary({
+        rank_total: 4,
+        competitors: [
+          { name: '近隣カフェA', rating: 4.5, reviewCount: 200, starDiff: -0.3 },
+          { name: '近隣カフェC', rating: 4.0, reviewCount: 60, starDiff: 0.2 },
+          { name: '近隣カフェB', rating: 3.9, reviewCount: 80, starDiff: 0.3 },
+          { name: '近隣カフェD', rating: null, reviewCount: 0, starDiff: null },
+        ],
+      }),
+      LIFF_URL,
+    );
+
+    it('評価の無い店は「評価なし」の 2 列で出し、星差を出さない', () => {
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      const start = bodyTexts.indexOf('近隣カフェD');
+      expect(start).toBeGreaterThan(0);
+      expect(bodyTexts.slice(start, start + 2)).toEqual(['近隣カフェD', '評価なし']);
+      expect(JSON.stringify(result.contents)).not.toContain('★0');
+    });
+
+    it('評価の無い店を順位に含めていない旨を一覧の下に添える', () => {
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      expect(bodyTexts.at(-1)).toBe('評価のない店は順位に含めていません');
+    });
+
+    it('評価の無い店がいないときは注記を出さない', () => {
+      // 条件つきの分岐は既定側も固定しないと、無条件に出す実装が素通りする。
+      const texts = collectTexts(buildDailySummaryFlex(baseSummary(), LIFF_URL).contents);
+      expect(texts).not.toContain('評価のない店は順位に含めていません');
+    });
+
+    it('評価のある店の星差は符号つき小数 1 桁で出す', () => {
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      expect(bodyTexts).toEqual(expect.arrayContaining(['-0.3', '+0.2', '+0.3']));
+    });
+
+    it('スナップショット: 評価の無い競合がいる Flex JSON', () => {
+      expect(result).toMatchSnapshot();
+    });
+  });
+
   describe('failed ステータス（想定外呼出時の縮退表示）', () => {
     const result = buildDailySummaryFlex(
       baseSummary({
@@ -258,6 +349,14 @@ describe('buildDailySummaryFlex', () => {
     it('altText も空にならず取得失敗を伝える', () => {
       expect(result.altText.length).toBeGreaterThan(0);
       expect(result.altText).toContain('取得できませんでした');
+    });
+
+    it('本文でも自店の評価を「評価なし」と言わない（取得失敗と評価なしを取り違えさせない・Issue #255）', () => {
+      // failed の行は取得できなかったので rating が NULL になっているだけで、評価が無いとは限らない。
+      // 見出しだけを固定すると、本文が「評価なし」に化けても素通りする（独立レビューで検出）。
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      expect(bodyTexts).toContain('★—（クチコミ —）');
+      expect(bodyTexts.some((text) => text.includes('評価なし'))).toBe(false);
     });
   });
 

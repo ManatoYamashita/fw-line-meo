@@ -12,6 +12,7 @@
 // queryOwnersDueWithoutSummary も提供する（実際の skipped_no_summary 行の書込は deliveries.ts の責務）。
 
 import type { DailySummaryRow, Queryable } from '@fwlm/db';
+import { normalizeSummaryRatings } from '@fwlm/db/daily-summary';
 
 /** queryDeliveryTargets が返す 1 件（配信可能＝当日 summary あり・未配信）。 */
 export interface DeliveryTarget {
@@ -68,7 +69,9 @@ export async function queryDeliveryTargets(
 
   return res.rows.map((row) => {
     const { owner_line_user_id: lineUserId, ...summary } = row;
-    return { storeId: summary.store_id, lineUserId, summary };
+    // 評価の無い店（旧 Go のゼロ値 0 / 新 Go の null）を同じ形へ揃えてから渡す（Issue #255）。
+    // Flex 組立は正規化済みの行を前提にする。
+    return { storeId: summary.store_id, lineUserId, summary: { ...summary, ...normalizeSummaryRatings(summary) } };
   });
 }
 
