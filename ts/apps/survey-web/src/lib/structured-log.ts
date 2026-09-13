@@ -78,3 +78,17 @@ export function logSurveyPageViewed(log: SurveyLogger, storeId: string): void {
 export function logSurveyResponseSubmitted(log: SurveyLogger, storeId: string): void {
   log('info', 'survey_response_submitted', { storeId });
 }
+
+/**
+ * 投稿導線（「Google のクチコミを書く」）が押された（ファネルの送信の次の段・Issue #137）。
+ *
+ * Google への投稿そのものは客と Google の間で完結し、本システムは観測できない。製品の側で観測できる
+ * 最後の段がこの押下である。実際に口コミが増えたかは、日次バッチが記録する自店の
+ * `rating_snapshots.review_count` で読む（`docs/observability/review-acquisition-funnel.md`）。
+ *
+ * 呼ぶのは token を検証できた押下だけ（`app/api/review-link-opened/handler.ts`）。数え方の癖は
+ * design.md の ReviewLinkAPI の節にある。
+ */
+export function logSurveyReviewLinkOpened(log: SurveyLogger, storeId: string): void {
+  log('info', 'survey_review_link_opened', { storeId });
+}

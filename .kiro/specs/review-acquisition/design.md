@@ -46,7 +46,7 @@
 
 ### Revalidation Triggers
 - アンケート URL スキーム変更 → 発行済み QR が無効化（実質不可変更。変更時は全 QR 再発行の運用判断）
-- インフラへの追加（Secret `survey-session-key`・env `SESSION_SIGNING_KEY`/`GEMINI_MODEL`/`SURVEY_BASE_URL`・run-services モジュールの plain env 対応・guardrails モジュールの `google_logging_metric` 2 本＝ファネル指標）→ gcp-infra-foundation の `tf-plan` 差分確認を必須とする
+- インフラへの追加（Secret `survey-session-key`・env `SESSION_SIGNING_KEY`/`GEMINI_MODEL`/`SURVEY_BASE_URL`・run-services モジュールの plain env 対応・guardrails モジュールの `google_logging_metric` 3 本＝ファネル指標（表示・送信・投稿導線の押下））→ gcp-infra-foundation の `tf-plan` 差分確認を必須とする
 - セッショントークン契約・QR API 契約の変更 → Issue #5（ダッシュボード）の再検証
 - tallies 書込セマンティクス（月次粒度・JST）変更 → four-tier-data-model ドキュメント整合の再検証
 
@@ -68,6 +68,7 @@ graph TB
         SurveyPage[アンケートページ SSR] --> SurveyForm[回答フォーム]
         SurveyForm --> ResponsesAPI[POST api responses]
         DraftPanel[下書きパネル] --> DraftsAPI[POST api drafts]
+        DraftPanel --> ReviewLinkAPI[POST api review-link-opened]
         ResponsesAPI --> DraftGen[DraftGenerator]
         DraftsAPI --> DraftGen
     end
@@ -132,6 +133,7 @@ ts/
 │   │       ├── app/s/[storeId]/draft-panel.tsx  # client 葉: 下書き編集/コピー/遷移（props 経由・API は呼ばない）
 │   │       ├── app/api/responses/route.ts   # POST: 検証→集計∥生成→token 発行
 │   │       ├── app/api/drafts/route.ts      # POST: token 検証→再生成→attempt+1
+│   │       ├── app/api/review-link-opened/route.ts  # POST: token 検証→投稿導線の押下を記録（DB 非接触・Issue #137）
 │   │       └── lib/
 │   │           ├── draft/generator.ts       # Gemini 呼出（schema/safety/backoff/出力検証）
 │   │           ├── draft/prompt.ts          # systemInstruction・素材デリミタ・変動注入
@@ -139,6 +141,7 @@ ts/
 │   │           ├── validate.ts              # 入力検証（手書き）
 │   │           ├── google-review-url.ts     # writereview URL 組立（形式変更の単一点）
 │   │           ├── answered-flag.ts         # localStorage 回答済みフラグ（client util）
+│   │           ├── review-link-beacon.ts    # 投稿導線の押下の通知（sendBeacon・投げっぱなし・client util・Issue #137）
 │   │           └── rate-limit.ts            # インスタンス内簡易レート制限
 │   └── dashboard-api/         # 管理向け（認証必須）種アプリ
 │       ├── package.json
@@ -185,10 +188,11 @@ sequenceDiagram
         S-->>C: draft + token（attempt は生成成功時のみ +1）
         C->>C: 編集 → コピー（ジェスチャー内同期 writeText）
         C->>C: Google 投稿画面を開く（writereview URL）
+        C-)S: POST /api/review-link-opened（sendBeacon・token 同梱・結果を待たない）
     end
 ```
 
-**フロー上の決定**: 集計と生成は並行し、集計失敗は応答に影響しない（5.4）。**回答済み判定はクライアント側**で行う（localStorage は SSR から読めないため）。POST /api/responses は SSR が発行する短寿命 **pageToken**（5 分・HMAC）を必須とし、ページを経由しない直接 POST による集計汚染・生成コスト濫用の敷居を上げる（5.2 の集計信頼性防御）。**sessionToken は生成の成否に関わらず必ず発行**し、生成失敗時の再試行は集計に触れない /api/drafts に一本化する——これにより再試行が tallies を二重加算する経路が構造的に存在しない（3.9・5.2 の両立）。`googleReviewUrl` は SSR 時点でクライアントへ渡すため、生成失敗時も投稿導線が消えない（3.9・4.4）。コピーは表示済み state からの同期呼び出しで Safari 制約を回避（research.md）。
+**フロー上の決定**: 集計と生成は並行し、集計失敗は応答に影響しない（5.4）。**回答済み判定はクライアント側**で行う（localStorage は SSR から読めないため）。POST /api/responses は SSR が発行する短寿命 **pageToken**（5 分・HMAC）を必須とし、ページを経由しない直接 POST による集計汚染・生成コスト濫用の敷居を上げる（5.2 の集計信頼性防御）。**sessionToken は生成の成否に関わらず必ず発行**し、生成失敗時の再試行は集計に触れない /api/drafts に一本化する——これにより再試行が tallies を二重加算する経路が構造的に存在しない（3.9・5.2 の両立）。`googleReviewUrl` は SSR 時点でクライアントへ渡すため、生成失敗時も投稿導線が消えない（3.9・4.4）。**投稿導線の押下の通知は遷移と独立に投げっぱなしで送る**（5.8）。投稿リンクは writereview への直リンクのまま残し、自サーバーを経由するリダイレクトにはしない——自サーバーを導線の途中に置くと、その障害が投稿そのものを塞ぐためである。コピーは表示済み state からの同期呼び出しで Safari 制約を回避（research.md）。
 
 ## Requirements Traceability
 
@@ -228,7 +232,8 @@ sequenceDiagram
 | 5.1 | 個人情報非取得 | 全コンポーネント | 入力項目自体に PII なし | セキュリティ節 |
 | 5.2 | 月次集計のみ加算 | tallies.ts, ResponsesAPI, SessionToken（pageToken） | UPSERT 契約・pageToken 検証 | 回答フロー |
 | 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006`/`0008` の列 allowlist | 良かった点の数・気になった点の数・一言の有無のみ。本文列を持たない・`30_compliance.sql` | 回答フロー |
-| 5.7 | 表示/送信を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, structured-log, guardrails のログベース指標 | sink の allowlist（storeId のみ）・指標の label は `store_id` のみ | Monitoring |
+| 5.7 | 表示/送信/投稿導線の押下を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, ReviewLinkAPI, structured-log, guardrails のログベース指標 | sink の allowlist（storeId のみ）・指標の label は `store_id` のみ・押下は token を検証できたものだけを記録 | Monitoring |
+| 5.8 | 押下の通知は遷移と独立 | SurveyShell, DraftPanel, review-link-beacon | sendBeacon（投げっぱなし・結果を待たない）・投稿リンクは writereview への直リンクのまま | 回答フロー |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
 | 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 4 表のみ（`0006`・`0008` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
@@ -239,9 +244,10 @@ sequenceDiagram
 |-----------|--------------|--------|--------------|------------------|-----------|
 | SurveyPage | survey-web UI | SSR 入口・分岐 | 2.1, 2.7, 2.8, 2.9 | packages/db (P0) | State |
 | SurveyForm | survey-web UI | 設問・検証・送信 | 2.2–2.6, 2.9–2.11 | ResponsesAPI (P0) | State |
-| DraftPanel | survey-web UI | 下書き操作・投稿導線 | 3.6, 3.7, 4.1, 4.2, 4.4, 4.6, 4.7 | DraftsAPI (P1) | State |
+| DraftPanel | survey-web UI | 下書き操作・投稿導線 | 3.6, 3.7, 4.1, 4.2, 4.4, 4.6, 4.7, 5.8 | DraftsAPI (P1) | State |
 | ResponsesAPI | survey-web API | 回答受付・集計∥生成 | 2.3, 2.5, 3.1, 5.2–5.4 | DraftGenerator (P0), tallies (P0) | API |
 | DraftsAPI | survey-web API | 再生成 | 3.8, 3.9 | SessionToken (P0), DraftGenerator (P0) | API |
+| ReviewLinkAPI | survey-web API | 投稿導線の押下の観測 | 5.7 | SessionToken (P0) | API |
 | DraftGenerator | survey-web lib | Gemini 呼出・検証 | 3.1–3.5, 3.9 | @google/genai (P0) | Service |
 | PromptBuilder | survey-web lib | 指示・素材・変動注入 | 3.1–3.3, 3.5 | — | Service |
 | SessionToken | survey-web lib | 正規フロー証明と再生成上限の無状態強制 | 3.8, 5.2, 5.3 | Node crypto | Service |
@@ -290,6 +296,23 @@ sequenceDiagram
 | POST | /api/drafts | `{ sessionToken: string }` | `200 { generation: 'ok'\|'failed', draft: string\|null, sessionToken, regenerationsLeft }` | 400 TOKEN_INVALID/EXPIRED（再回答を案内）, 409 REGEN_LIMIT, 429 |
 
 - Invariants: 集計には一切触れない（再試行・再生成で二重加算しない）・**attempt は生成成功時のみ +1**（失敗した試行は再生成回数を消費しない）・attempt ≥ 3 での再生成要求は 409
+
+#### ReviewLinkAPI
+
+| Field | Detail |
+|-------|--------|
+| Intent | 投稿導線の押下を、token を検証できたものだけ店舗単位で記録する（Issue #137・#221 の完了条件 4） |
+| Requirements | 5.1, 5.7 |
+
+##### API Contract
+| Method | Endpoint | Request | Response | Errors |
+|--------|----------|---------|----------|--------|
+| POST | /api/review-link-opened | `{ storeId: uuid, token: string }`（`sendBeacon` が送るので Content-Type は問わず、本文を JSON として読む） | `204`（本文なし） | 400（token 不正・期限切れ・他店舗・形式不正。記録しない）, 429（記録しない） |
+
+- 数える条件: `token` が **pageToken（`verifyPage(token, storeId)` が通る）** か、**sessionToken（`verify(token)` が通り、封入された storeId が一致する）** のどちらか。通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録する
+- **2 つの token は証明するものが違う。** 下書き画面から送る sessionToken は `/api/responses` の後にしか発行されないので、「実際の回答の後の押下」を証明する。回答済み画面（24 時間以内の再訪）から送る pageToken は SSR が発行するので、証明するのは「ページが配信された」ことまでで、信頼水準は表示件数（`survey_page_viewed`）と同じである。回答済み画面の判定は localStorage にあり、サーバーは再訪が本物かを確かめられない。sessionToken を localStorage へ保存すれば確かめられるが、素材（回答の中身）を端末に 24 時間残すことになるので採らない
+- Invariants: DB に触れない・応答本文を持たない（クライアントは結果を読まない）・記録するのは `storeId` だけ・レート制限（インスタンス内・IP 単位）を超えた押下は記録しない
+- 数え方の癖: 下振れは token の失効と送達失敗。pageToken は 5 分、sessionToken は発行（または最後の再生成）から 30 分で失効するので、回答済み画面を開いて 5 分、下書き画面で 30 分を超えてからの押下は数えない。上振れは 2 つ。同一 token の多重送信はレート制限まで区別しない（無状態のため、正しい token を持つ者が押し続ければ上限まで数える）。同じ客が下書き画面と 24 時間以内の再訪の回答済み画面の両方で押すと、別の token なので別件になる。したがって押下件数は絶対値ではなく施策前後の変化を見る指標であり、回答から投稿までの所要時間や再訪の割合を変える施策では単独で読まない
 
 ### survey-web lib 層
 
@@ -424,7 +447,8 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 ### Monitoring
 - 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
 - ファネル（Issue #137 段階3・5.7）: `survey_page_viewed`（INFO・回答可能な状態で表示できたときのみ）と `survey_response_submitted`（INFO・生成と集計の成否に依らず送信時）。フィールドは `storeId` だけで、来店客に紐づく値は載せない。**数え方の癖**: ページは `force-dynamic` なので bot・プリフェッチ・回答済みの再訪（24 時間判定は localStorage 側で SSR は走る）も表示に数える。したがって「送信 / 表示」は転換率の**下限**であり、絶対値ではなく施策前後の変化を見る指標である。送信は tallies にも入るが、**集計失敗時はログにだけ残るため両者の乖離が集計障害の検知になる**
-- ファネルの保持（Issue #137 段階3・5.7）: 表示件数は **ログにしか存在しない**（tallies は送信された回答しか数えない）。Cloud Run の stdout が入る `_Default` バケットの保持は既定 30 日で、本番にログベース指標もシンクも無かった（実測）。段階4 の判断は施策前後の比較なので、`survey_page_viewed` / `survey_response_submitted` をログベース指標（`infra/modules/guardrails`・時系列 24 か月・label は `store_id` のみ）へ写して残す。**指標は作成時点から数え始める**ため、本 spec のデプロイと同じタイミングで `make tf-apply` すること。フィルタで `severity` を条件にしてはいけない（アプリは `level` を出しており Cloud Run は `severity` へ写さない。本番実測で `severity` は null。条件に入れると常に 0 件の指標になる）
+- 投稿導線の押下（Issue #137・5.7・5.8）: `survey_review_link_opened`（INFO・ReviewLinkAPI が token を検証できたときだけ）。フィールドは `storeId` だけ。送信の後の段として「送信した客が Google の投稿画面へ進んだか」を読む。Google への投稿そのものは観測できない（代理投稿をしない以上、客と Google の間で完結する）ので、実際に口コミが増えたかは日次バッチが記録する自店の `rating_snapshots.review_count` で読む。ただしこの表は Places の規約に合わせた 30 日ローリング保持なので（competitive-daily-summary の research.md の Decision）、施策の前後を比べられる期間に期限がある。数え方の癖は ReviewLinkAPI の節を参照。施策の前後で並べて読む手順は `docs/observability/review-acquisition-funnel.md`
+- ファネルの保持（Issue #137 段階3・5.7）: 表示件数は **ログにしか存在しない**（tallies は送信された回答しか数えない）。Cloud Run の stdout が入る `_Default` バケットの保持は既定 30 日で、本番にログベース指標もシンクも無かった（実測）。段階4 の判断は施策前後の比較なので、`survey_page_viewed` / `survey_response_submitted` をログベース指標（`infra/modules/guardrails`・時系列 24 か月・label は `store_id` のみ）へ写して残す。**指標は作成時点から数え始める**ため、本 spec のデプロイと同じタイミングで `make tf-apply` すること。フィルタで `severity` を条件にしてはいけない（アプリは `level` を出しており Cloud Run は `severity` へ写さない。本番実測で `severity` は null。条件に入れると常に 0 件の指標になる）。押下（`survey_review_link_opened`）も同じ指標群へ足す（Issue #137）。これも作成時点から数え始めるので、デプロイと同じタイミングで apply する
 - guardrails の既存分（予算・アラート・クォータ）は変更なし。Gemini コストは AI Studio のレート/使用量ページで運用確認（runbook 記載）
 
 ## Testing Strategy
@@ -436,6 +460,7 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 4. `draft/generator`: safetySettings 4 カテゴリが必ず付与される（3.4・設定漏れ検知）・出力検証（非空/長さ/スキーマ）
 5. `google-review-url`: placeid エンコード（4.3）
 6. `tallies` の period_month SQL: JST 月境界（月末 23:59 JST vs UTC ずれ）で正しい月に加算（5.2）
+7. `review-link-opened` の handler: pageToken と sessionToken のそれぞれで記録・他店舗向け／改ざん／期限切れ／形式不正は記録しない・記録は `storeId` だけ・レート制限（5.7）。通知モジュールは sendBeacon → keepalive の fetch へ落ち、どちらも使えない・失敗する環境で例外を外へ出さない（5.8）。シェルは下書き画面で sessionToken、回答済み画面で pageToken を載せる
 
 ### Integration Tests（ローカル postgres・Gemini はモック）
 1. POST /api/responses 正常系: rating+aspects の UPSERT が既存 UNIQUE に対し加算動作・応答に draft/token（5.2, 3.1）
@@ -453,12 +478,13 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 2c. 星 1 で気になった点を選んで送信でき、下書きと同一の投稿導線が表示される（2.2・3.1・4.4）
 3. 回答完了 → 再訪 → 回答済み画面＋投稿導線（2.9）
 4. 生成失敗モックで再試行 UI と投稿導線維持（3.9）
+5. 下書き画面と回答済み画面のそれぞれで投稿導線を押すと、押下の通知が送られて 204 で受理され、リンクは writereview への直リンクのまま（5.7・5.8。実 token を実サーバーが検証する経路を通す）
 
 ### Performance
 1. survey ページの Lighthouse モバイル（4G シミュレート）で FCP/LCP 計測 → 3 秒以内（2.8）。JS 転送量に予算を設定（初回 < 150KB gzip 目安）
 
 ## Security Considerations
-- **PII ゼロ設計**: 入力項目に個人情報が存在しない（5.1）。Cookie・トラッキング・アナリティクス不使用。localStorage は回答済みフラグのみ（2.10）
+- **PII ゼロ設計**: 入力項目に個人情報が存在しない（5.1）。Cookie・サードパーティのトラッキング・アナリティクスは使わない。表示・送信・投稿導線の押下の観測は、自サーバーの構造化ログへ `storeId` だけを出す形で行い、来店客を識別する値も端末を識別する値も持たない（5.7）。localStorage は回答済みフラグのみ（2.10）
 - **プロンプトインジェクション**: 素材デリミタ・役割固定・構造化出力・出力検証・maxOutputTokens（research.md）
 - **API キー**: 既存 Secret Manager 供給。運用として API キーに「Generative Language API のみ」の制限を付与（runbook 追記・google-cloud-recipe-auth 準拠）
 - **コスト濫用・集計汚染**: /api/responses は pageToken（SSR 発行・5 分）必須＝ページ非経由の直接 POST を拒否。再生成は sessionToken の attempt 封入で上限強制。加えてインスタンス内簡易レート制限（ベストエフォート。ゼロスケール・無状態の制約下では完全防御を狙わず、敷居上げと監視で対処）

@@ -20,6 +20,7 @@ export function DraftPanel({
   regenerationsLeft,
   googleReviewUrl,
   onRegenerate,
+  onReviewLinkOpen,
   regenerating,
 }: DraftPanelProps) {
   const [text, setText] = useState(draft);
@@ -59,12 +60,15 @@ export function DraftPanel({
   // 要素はリンクのまま、見た目だけを押しボタンの部品から借りる（正典 7.9 / 7.10）。
   // 部品そのものを使わないのは、押しボタンとして描くと支援技術に押しボタンとして読まれ、
   // 遷移であることが伝わらなくなるためである。寸法の実値はここに書かない。
+  //
+  // 押下はシェルへ知らせるだけで、遷移は止めない（Issue #137・Requirement 5.8）。
   const reviewLink = (
     <a
       className={cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }))}
       href={googleReviewUrl}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={() => onReviewLinkOpen()}
     >
       Google のクチコミを書く
     </a>

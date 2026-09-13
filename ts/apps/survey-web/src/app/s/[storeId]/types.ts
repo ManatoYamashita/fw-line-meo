@@ -26,5 +26,8 @@ export interface DraftPanelProps {
   regenerationsLeft: number;
   googleReviewUrl: string;
   onRegenerate: () => void;
+  // 投稿導線が押されたことをシェルへ知らせる（Issue #137・Requirement 5.8）。通知の送り方と載せる
+  // token はシェルが決める。パネルはリンクの遷移を変えない。
+  onReviewLinkOpen: () => void;
   regenerating: boolean;
 }
