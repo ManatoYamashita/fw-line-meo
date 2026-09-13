@@ -104,22 +104,27 @@ export interface DailySummaryNewReview {
   textExcerpt: string;
 }
 
-// jsonb 列 competitors の要素形。表示順は rank 順。
+// jsonb 列 competitors の要素形。表示順は rank 順（評価の無い店は末尾）。
 //
 // rating/starDiff は number（string ではない）: go/internal/repo/summaries.go の
-// SummaryCompetitor は Rating/StarDiff を float64 で保持し encoding/json でそのまま JSON数値と
-// して書き込む（go/internal/batch/run.go の書込元も同様、フォーマット処理を挟まない）。これは
-// daily_summaries.rating のような「テーブル直下の numeric 列は pg ドライバが精度保持のため
-// 文字列で返す」という規約（このファイル冒頭コメント）とは無関係で、jsonb 内にネストされた
-// 数値は Go の json.Marshal → jsonb パーサ経由であり pg の numeric 文字列化は適用されない。
-// task 7.1（クロスランタイム契約検証）で発見: 修正前は `string | null` と誤って宣言されていた
-// （実行時の値は常に number で null にもならない。詳細は
-// ts/apps/delivery-job/test/cross-runtime.e2e.test.ts のコメント参照）。
+// SummaryCompetitor は Rating/StarDiff を JSON 数値としてそのまま書き込む（フォーマット処理を
+// 挟まない）。これは daily_summaries.rating のような「テーブル直下の numeric 列は pg ドライバが
+// 精度保持のため文字列で返す」という規約（このファイル冒頭コメント）とは無関係で、jsonb 内に
+// ネストされた数値は Go の json.Marshal → jsonb パーサ経由であり pg の numeric 文字列化は
+// 適用されない（task 7.1 のクロスランタイム契約検証で発見・ts/apps/delivery-job/test/
+// cross-runtime.e2e.test.ts のコメント参照）。
+//
+// null になりうる（Issue #255）: Google に評価が無い店（クチコミ 0 件で Places API が rating を
+// 返さない）は rating が null、自店と競合のどちらかが評価なしなら starDiff も null。旧 Go は
+// 評価の欠落をゼロ値 0 として書いていたため、読込側は必ず `@fwlm/db/daily-summary` の
+// normalizeDailySummaryRow を通してから使うこと（0 を null として読み、母数も補正する）。
 export interface DailySummaryCompetitor {
   name: string;
-  rating: number;
+  /** Google の星評価（1.0〜5.0）。評価の無い店は null。 */
+  rating: number | null;
   reviewCount: number;
-  starDiff: number;
+  /** 自店 − 競合（小数 1 桁）。自店と競合のどちらかが評価なしなら null。 */
+  starDiff: number | null;
 }
 
 // 日次サマリー（Go 書込・店舗×日付で一意・生成後は不変）。

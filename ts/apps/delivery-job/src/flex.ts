@@ -15,6 +15,14 @@
 // 厳密なローカル型として定義する（no `any`）。詳細は CONCERNS 参照。
 
 import type { DailySummaryCompetitor, DailySummaryNewReview, DailySummaryRow } from '@fwlm/db';
+import {
+  SELF_UNRATED_RANK_TEXT,
+  UNRATED_EXCLUDED_NOTE,
+  formatRatingLabel,
+  formatStarDiff,
+  hasUnratedCompetitor,
+  isUnratedSelf,
+} from '@fwlm/db/daily-summary';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
 
 // --- Flex JSON の最小・厳密な型（このモジュールが実際に使う形のみ） -----------------
@@ -158,7 +166,17 @@ function formatRankDiffArrow(rank: number | null, rankPrev: number | null): stri
 function buildHeader(summary: DailySummaryRow): FlexBox {
   const contents: FlexText[] = [];
 
-  if (summary.status === 'failed' || summary.rank === null || summary.rank_total === null) {
+  if (isUnratedSelf(summary.status, summary.rating)) {
+    // Issue #255: 自店に Google の評価が無い日は順位を持たない（評価の無い店は比較集合に入らない）。
+    // これは取得失敗ではないので、失敗の文言と取り違えさせない。
+    contents.push({
+      type: 'text',
+      text: SELF_UNRATED_RANK_TEXT,
+      weight: 'bold',
+      size: lineLayout.bodySize,
+      wrap: true,
+    });
+  } else if (summary.status === 'failed' || summary.rank === null || summary.rank_total === null) {
     contents.push({
       type: 'text',
       text: '本日のポジションを取得できませんでした',
@@ -210,7 +228,6 @@ function buildSectionHeading(text: string): FlexText {
 }
 
 function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
-  const ratingText = summary.rating ?? '—';
   const reviewCountText = summary.review_count !== null ? `${summary.review_count}件` : '—';
   return {
     type: 'box',
@@ -220,7 +237,8 @@ function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
       buildSectionHeading('自店の評価'),
       {
         type: 'text',
-        text: `★${ratingText}（クチコミ ${reviewCountText}）`,
+        // ★4.2 / 評価なし（Issue #255: 評価の無い店を ★0 や ★— で出さない）。
+        text: `${formatRatingLabel(summary.rating)}（クチコミ ${reviewCountText}）`,
         weight: 'bold',
         size: lineLayout.bodySize,
       },
@@ -288,30 +306,33 @@ function buildNewReviewsSection(summary: DailySummaryRow): FlexBox {
   };
 }
 
-/**
- * competitor.starDiff（自店 - 競合、design.md 定義）を符号付きの表示文字列に整形する。
- * 正の値には「+」を付与し、0・負値はそのまま toFixed(1) の符号表現に従う。
- */
-function formatStarDiff(diff: number): string {
-  return diff > 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1);
-}
-
 function formatCompetitorLine(competitor: DailySummaryCompetitor): FlexBox {
   // task 7.1（クロスランタイム契約検証）で発見: competitor.rating/starDiff は jsonb 内の
-  // number であり（Go の SummaryCompetitor は文字列化せず float64 をそのまま json.Marshal
-  // する）、あらかじめフォーマット済みの文字列ではない。表示直前に本関数で明示的に文字列化する
-  // （旧コードは `?? '—'` で string 型を期待しており、型を number に是正した際に
-  // コンパイルエラーで顕在化した。詳細は ts/packages/db/src/types.ts のコメント参照）。
-  const ratingText = competitor.rating.toFixed(1);
+  // number であり、あらかじめフォーマット済みの文字列ではない。表示直前に共有の整形関数で
+  // 文字列化する（LIFF と同じ関数・同じ規則。星差の定義「自店 − 競合」は
+  // competitive-daily-summary の requirements.md / design.md にある）。
+  const nameText: FlexText = { type: 'text', text: competitor.name, size: lineLayout.descriptionSize, wrap: true, flex: 3 };
+  const ratingText = formatRatingLabel(competitor.rating);
   const diffText = formatStarDiff(competitor.starDiff);
+
+  if (diffText === null) {
+    // 評価の無い店、または自店に評価が無い日は星差を出さない（Issue #255）。評価の列を星差の列まで
+    // 広げ、店名の列幅（flex 3）は星差のある行と揃える。空文字の text は作らない。
+    return {
+      type: 'box',
+      layout: 'horizontal',
+      contents: [nameText, { type: 'text', text: ratingText, size: lineLayout.descriptionSize, align: 'end', flex: 2 }],
+    };
+  }
+
   return {
     type: 'box',
     layout: 'horizontal',
     contents: [
-      { type: 'text', text: competitor.name, size: lineLayout.descriptionSize, wrap: true, flex: 3 },
+      nameText,
       {
         type: 'text',
-        text: `★${ratingText}`,
+        text: ratingText,
         size: lineLayout.descriptionSize,
         align: 'end',
         flex: 1,
@@ -347,11 +368,25 @@ function buildCompetitorsSection(summary: DailySummaryRow): FlexBox {
     };
   }
 
+  // 評価の無い店は順位の比較集合に入らない（Issue #255）。一覧には残るので、「近隣N店中」の N と
+  // 一覧の件数が食い違う理由を、該当する店がいるときだけ一覧の下に添える。
+  const excludedNote: readonly FlexText[] = hasUnratedCompetitor(summary.competitors)
+    ? [
+        {
+          type: 'text',
+          text: UNRATED_EXCLUDED_NOTE,
+          size: lineLayout.descriptionSize,
+          color: lineColors.description,
+          wrap: true,
+        },
+      ]
+    : [];
+
   return {
     type: 'box',
     layout: 'vertical',
     spacing: lineLayout.itemGap,
-    contents: [heading, ...summary.competitors.map(formatCompetitorLine)],
+    contents: [heading, ...summary.competitors.map(formatCompetitorLine), ...excludedNote],
   };
 }
 
@@ -410,18 +445,23 @@ function truncateAltText(text: string): string {
 }
 
 function buildAltText(summary: DailySummaryRow): string {
+  const ratingSuffix = `${formatRatingLabel(summary.rating)}（クチコミ${summary.review_count ?? 0}件）。`;
+  const newReviewSuffix =
+    summary.new_review_count > 0 ? ` 新着クチコミ${summary.new_review_count}件あり。` : '';
+
+  if (isUnratedSelf(summary.status, summary.rating)) {
+    return truncateAltText(`【今朝のポジション】${SELF_UNRATED_RANK_TEXT}。${ratingSuffix}${newReviewSuffix}`);
+  }
+
   if (summary.status === 'failed' || summary.rank === null || summary.rank_total === null) {
     return truncateAltText('【今朝のポジション】本日のデータを取得できませんでした');
   }
 
   const diffText = formatRankDiffArrow(summary.rank, summary.rank_prev);
   const diffSuffix = diffText !== null ? `（前日比${diffText}）` : '';
-  const newReviewSuffix =
-    summary.new_review_count > 0 ? ` 新着クチコミ${summary.new_review_count}件あり。` : '';
 
   const text =
-    `【今朝のポジション】近隣${summary.rank_total}店中${summary.rank}位${diffSuffix}。` +
-    `★${summary.rating ?? '—'}（クチコミ${summary.review_count ?? 0}件）。${newReviewSuffix}`;
+    `【今朝のポジション】近隣${summary.rank_total}店中${summary.rank}位${diffSuffix}。` + ratingSuffix + newReviewSuffix;
 
   return truncateAltText(text);
 }

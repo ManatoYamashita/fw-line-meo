@@ -56,4 +56,51 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // store-detail のクライアントに同梱されるファイルから、root の `@fwlm/db` を値として import
+    // させない。root は pg / cloud-sql-connector を含み、1 つでも値 import があると Node 専用依存が
+    // クライアントバンドルへ入る。型の import と、pg を含まない純関数のサブパス
+    // `@fwlm/db/daily-summary`（Issue #255）は許す。
+    //
+    // 以前は lib/contract.ts と page.tsx のコメントで「import type に限ること」と注意するだけだった。
+    // `next build` が混入で落ちるかは Turbopack の実装に依存し、このリポジトリからは確かめられない
+    // ため、build より前に走る lint で止める。route.ts はサーバー側なので対象外。
+    files: ['apps/store-detail/app/**/*.{ts,tsx}', 'apps/store-detail/lib/contract.ts'],
+    ignores: ['apps/store-detail/app/**/route.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@fwlm/db',
+              allowTypeImports: true,
+              message:
+                'クライアントに同梱されるファイルからは型の import のみ（値 import は pg をバンドルへ持ち込む）。整形関数は @fwlm/db/daily-summary から取り込む。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // `@fwlm/db/daily-summary` はクライアントにも同梱されるため、値の import を 1 つも持たせない
+    // （型の import だけを許す）。ここに値 import が入ると、上の規則が許したサブパス経由で
+    // 同じ混入が起きる。
+    files: ['packages/db/src/daily-summary.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['*'],
+              allowTypeImports: true,
+              message: 'このモジュールはクライアントに同梱される。値の import を持たせない（型の import のみ）。',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

@@ -86,6 +86,18 @@ import {
 } from '@fwlm/ui/components/table';
 
 import type { DailySummaryCompetitor, DailySummaryNewReview } from '@fwlm/db';
+// 評価・星差の整形と文言は Flex（delivery-job）と共有する（Issue #255）。root の `@fwlm/db` からの
+// 値 import は pg をクライアントへ持ち込むので禁止だが、`@fwlm/db/daily-summary` は値の import を
+// 1 つも持たない純関数だけのサブパスで、ここからの値 import は許される。どちらも
+// ts/eslint.config.js の no-restricted-imports が機械強制する。
+import {
+  SELF_UNRATED_RANK_TEXT,
+  UNRATED_EXCLUDED_NOTE,
+  formatRatingLabel,
+  formatStarDiff,
+  hasUnratedCompetitor,
+  isUnratedSelf,
+} from '@fwlm/db/daily-summary';
 // lib/data.ts / lib/contract.ts が定義する実際のレスポンス形状を型としてのみ取り込む
 // （import type は実行時コードを一切バンドルしない — pg 等 Node 専用依存をクライアントへ持ち込まない）。
 import type { StoreDetailSummary, StoreDetailTrendPoint } from '../../lib/data';
@@ -324,6 +336,8 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
   const rankDiff = formatRankDiff(summary.rank, summary.rankPrev);
   const ratingDiff = formatRatingDiff(summary.rating, summary.ratingPrev);
   const reviewCountDiff = formatReviewCountDiff(summary.reviewCount, summary.reviewCountPrev);
+  // 自店に Google の評価が無い日は順位を持たない（Issue #255）。取得失敗や欠損とは別の状態として描く。
+  const unratedSelf = isUnratedSelf(summary.status, summary.rating);
 
   return (
     <section className="flex flex-col gap-6">
@@ -340,10 +354,12 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
             <dl>
               <div className="flex flex-col gap-1">
                 <dt className="text-sm">
-                  {summary.rankTotal !== null ? `近隣${summary.rankTotal}店中` : '近隣順位'}
+                  {!unratedSelf && summary.rankTotal !== null ? `近隣${summary.rankTotal}店中` : '近隣順位'}
                 </dt>
                 <dd className="flex flex-wrap items-baseline gap-2">
-                  {summary.rank !== null && summary.rankTotal !== null ? (
+                  {unratedSelf ? (
+                    <span className="font-medium">{SELF_UNRATED_RANK_TEXT}</span>
+                  ) : summary.rank !== null && summary.rankTotal !== null ? (
                     <>
                       <span className="text-2xl font-bold tabular-nums">{summary.rank}</span>
                       <span>位</span>
@@ -368,7 +384,7 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
         <Card>
           <CardContent className="flex flex-col gap-4">
             <dl className="grid grid-cols-2 gap-4">
-              <Metric label="Google 評価" prominent value={`★${summary.rating ?? '—'}`} />
+              <Metric label="Google 評価" prominent value={formatRatingLabel(summary.rating)} />
               <Metric
                 label="クチコミ"
                 prominent
@@ -404,23 +420,33 @@ function CompetitorsSection({
         <Card>
           <CardContent>
             <ul className="divide-y">
-              {competitors.map((competitor, index) => (
-                <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={`${competitor.name}-${index}`}>
-                  <p className="font-semibold">{competitor.name}</p>
-                  <dl className="grid grid-cols-3 gap-3">
-                    <Metric label="評価" value={`★${competitor.rating ?? '—'}`} />
-                    <Metric
-                      label="クチコミ"
-                      value={competitor.reviewCount !== null ? `${competitor.reviewCount}件` : '—'}
-                    />
-                    <Metric label="星差" value={competitor.starDiff ?? '—'} />
-                  </dl>
-                </li>
-              ))}
+              {competitors.map((competitor, index) => {
+                // 星差は「自店 − 競合」を符号つき小数 1 桁で出す（Flex と同じ関数）。評価の無い店、
+                // または自店に評価が無い日は null で、星差の指標そのものを出さない（Issue #255）。
+                const starDiff = formatStarDiff(competitor.starDiff);
+                return (
+                  <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={`${competitor.name}-${index}`}>
+                    <p className="font-semibold">{competitor.name}</p>
+                    <dl className="grid grid-cols-3 gap-3">
+                      <Metric label="評価" value={formatRatingLabel(competitor.rating)} />
+                      <Metric
+                        label="クチコミ"
+                        value={competitor.reviewCount !== null ? `${competitor.reviewCount}件` : '—'}
+                      />
+                      {starDiff !== null ? <Metric label="星差" value={starDiff} /> : null}
+                    </dl>
+                  </li>
+                );
+              })}
             </ul>
           </CardContent>
         </Card>
       )}
+      {/* 評価の無い店は順位の比較集合に入らない。一覧には残るので、「近隣N店中」の N と一覧の件数が
+          食い違う理由を、該当する店がいるときだけ一覧の下に添える（Flex の注記と同じ文言）。
+          カードの内側へ置かないのは、カードの内容の容器に面から余白を足さないため（意匠の検査が
+          競合カードを「面が何も足していない容器」の基準に使っている）。 */}
+      {hasUnratedCompetitor(competitors) ? <p className="text-sm">{UNRATED_EXCLUDED_NOTE}</p> : null}
     </section>
   );
 }
