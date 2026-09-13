@@ -15,7 +15,9 @@
 #   - 使うポートに先客がいたら、その層を止める。playwright.config.ts はローカルで既存サーバーを再利用
 #     するため、先客が別アプリだとその画面を測って大量に赤くなる。先客は殺さない（他セッションの
 #     ものでありうる）。ポートは各 playwright.config.ts と lighthouserc.json から読む
-#   - IdP スタブ入りのビルドを残さない。surfaces の後、2 画面を通常のビルドへ戻す
+#   - IdP スタブ入りのビルドを残さない。surfaces の後、2 画面を通常のビルドへ戻す。中断（Ctrl-C）されたときは
+#     戻さずに止まり、スタブ入りのビルドが残りうることと戻し方を表示する
+#   - 前提のコマンドが無い層だけを止め、ほかの層は流す（全層に要る node 24 と pnpm は例外）
 #   - Gemini モックの NODE_OPTIONS は survey の playwright にだけ渡す（広く渡すと関係ない node を巻き込む）
 #   - DB と鍵は常に明示する。survey-web の .env.local（gitignore 済み）は既存の env を上書きしないので、
 #     明示しておけば開発用 DB や実の鍵へは繋がらない
@@ -35,6 +37,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# どこから呼ばれても同じに動くよう、リポジトリのルートで動かす。
+cd "$ROOT"
 TS_DIR="${ROOT}/ts"
 SURVEY_DIR="${TS_DIR}/apps/survey-web"
 SEED_SQL="${SURVEY_DIR}/e2e/seed.sql"
@@ -256,49 +260,81 @@ for layer in survey surfaces lighthouse; do
 done
 
 banner "準備（選んだ層: ${selected[*]}）"
+# 全層に要る前提（node 24 と pnpm）が欠けたら全層を止める。層ごとの前提は layer_blocker が見て、
+# 欠けた層だけを止める（go が無いだけで survey まで止めない）。
 prep_ok=1
 ensure_node24 || prep_ok=0
-require_cmds pnpm lsof || prep_ok=0
-if is_selected survey || is_selected lighthouse || is_selected cross-runtime; then
-    require_cmds psql initdb pg_ctl || prep_ok=0
-fi
-if is_selected cross-runtime; then
-    require_cmds go || prep_ok=0
-fi
-if is_selected lighthouse; then
-    require_cmds npx || prep_ok=0
-fi
+require_cmds pnpm || prep_ok=0
 
+seed_ok=0
 store_id=''
 store_name=''
 if is_selected survey || is_selected lighthouse; then
     # storeId は 4 箇所（seed・fixtures・ts-ci.yml・lighthouserc.json）で一致している前提で読む。
     # ずれていると Lighthouse は存在しない店舗を測って緑になりうるので、先に既存のガードで確かめる。
+    seed_ok=1
     if ! bash "${SCRIPT_DIR}/check-e2e-store-id-consistency.sh"; then
-        prep_ok=0
+        seed_ok=0
     fi
     store_id="$(seed_store_field 2)" || store_id=''
     store_name="$(seed_store_field 6)" || store_name=''
     if ! [[ "$store_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || [ -z "$store_name" ]; then
         echo "ERROR: ${SEED_SQL#"${ROOT}"/} から店舗の id と店名を読めませんでした（id='${store_id}' name='${store_name}'）" >&2
-        prep_ok=0
+        seed_ok=0
     else
         echo "-- seed の店舗: ${store_id}（${store_name}）"
     fi
 fi
 
-build_ok=1
+# 見つからないコマンドを空白区切りで出す（すべてあれば空）。
+missing_cmds() {
+    local cmd out=''
+    for cmd in "$@"; do
+        command -v "$cmd" >/dev/null 2>&1 || out="${out:+${out} }${cmd}"
+    done
+    printf '%s' "$out"
+}
+
+# 層を止める理由を出す（止めなくてよければ空）。判定は呼び出し側で行う（ここでフラグを立てない）。
+layer_blocker() {
+    local missing=''
+    case "$1" in
+        survey) missing="$(missing_cmds lsof psql initdb pg_ctl)" ;;
+        surfaces) missing="$(missing_cmds lsof)" ;;
+        lighthouse) missing="$(missing_cmds lsof psql initdb pg_ctl npx)" ;;
+        cross-runtime) missing="$(missing_cmds psql initdb pg_ctl go)" ;;
+        *) ;;
+    esac
+    if [ -n "$missing" ]; then
+        printf 'コマンドが見つかりません: %s' "$missing"
+        return 0
+    fi
+    case "$1" in
+        survey|lighthouse)
+            [ "$seed_ok" -eq 1 ] || printf 'seed の店舗を確定できません（準備の出力を参照）'
+            ;;
+        *) ;;
+    esac
+}
+
+# 依存の導入は全層に要る。画面のビルドとブラウザの導入は画面の 3 層だけに要る（cross-runtime は
+# 自分に要る依存だけを自前でビルドする）ので、成否を分けて持つ。
+install_ok=0
+web_ok=0
 if [ "$prep_ok" -eq 1 ]; then
     echo "-- node $(node -v)・$(pnpm -v 2>/dev/null | sed 's/^/pnpm /')"
-    pnpm -C "$TS_DIR" install --frozen-lockfile || build_ok=0
-    if [ "$build_ok" -eq 1 ] && [ "$needs_web_build" -eq 1 ]; then
-        normal_build run build || build_ok=0
+    if pnpm -C "$TS_DIR" install --frozen-lockfile; then
+        install_ok=1
     fi
-    if [ "$build_ok" -eq 1 ] && is_selected survey; then
-        pnpm -C "$TS_DIR" --filter @fwlm/survey-web exec playwright install chromium || build_ok=0
-    fi
-    if [ "$build_ok" -eq 1 ] && is_selected surfaces; then
-        pnpm -C "$TS_DIR" --filter @fwlm/dashboard-web exec playwright install chromium || build_ok=0
+    if [ "$install_ok" -eq 1 ] && [ "$needs_web_build" -eq 1 ]; then
+        web_ok=1
+        normal_build run build || web_ok=0
+        if [ "$web_ok" -eq 1 ] && is_selected survey; then
+            pnpm -C "$TS_DIR" --filter @fwlm/survey-web exec playwright install chromium || web_ok=0
+        fi
+        if [ "$web_ok" -eq 1 ] && is_selected surfaces; then
+            pnpm -C "$TS_DIR" --filter @fwlm/dashboard-web exec playwright install chromium || web_ok=0
+        fi
     fi
 fi
 
@@ -315,6 +351,9 @@ layer_surfaces() {
         return 1
     fi
     echo "-- IdP をスタブへ差し替えてビルドします（API の起点: ${api_origin}）"
+    # 中断（Ctrl-C）されたら戻さずに止まり、スタブ入りのビルドが残りうることと戻し方を出す。
+    # 中断した利用者に数十秒のビルドを待たせないため、自動では戻さない。
+    trap on_surfaces_interrupt INT TERM
     if E2E_STUB_IDP=1 NEXT_PUBLIC_API_BASE_URL="$api_origin" NEXT_PUBLIC_LIFF_ID="$SURFACES_LIFF_ID" \
         pnpm -C "$TS_DIR" --filter @fwlm/dashboard-web run build &&
         E2E_STUB_IDP=1 NEXT_PUBLIC_API_BASE_URL="$api_origin" NEXT_PUBLIC_LIFF_ID="$SURFACES_LIFF_ID" \
@@ -331,7 +370,15 @@ layer_surfaces() {
         echo "ERROR: 通常のビルドへ戻せませんでした。dashboard-web / store-detail の .next はスタブ入りのままです" >&2
         rc=1
     fi
+    trap - INT TERM
     return "$rc"
+}
+
+on_surfaces_interrupt() {
+    echo >&2
+    echo "中断しました。dashboard-web / store-detail の .next は IdP スタブ入りのままの可能性があります。" >&2
+    echo "通常のビルドへ戻すには: pnpm -C ts --filter @fwlm/dashboard-web run build && pnpm -C ts --filter @fwlm/store-detail run build" >&2
+    exit 130
 }
 
 layer_lighthouse() {
@@ -384,10 +431,20 @@ for layer in "${ALL_LAYERS[@]}"; do
     is_selected "$layer" || continue
     banner "[${layer}]"
     if [ "$prep_ok" -ne 1 ]; then
-        record "$layer" FAIL 0 '前提の確認に失敗したため実行していません'
+        record "$layer" FAIL 0 'node 24 か pnpm が無いため実行していません'
         continue
     fi
-    if [ "$layer" != 'cross-runtime' ] && [ "$build_ok" -ne 1 ]; then
+    blocker="$(layer_blocker "$layer")"
+    if [ -n "$blocker" ]; then
+        echo "ERROR: ${blocker}" >&2
+        record "$layer" FAIL 0 "${blocker}"
+        continue
+    fi
+    if [ "$install_ok" -ne 1 ]; then
+        record "$layer" FAIL 0 '依存の導入に失敗したため実行していません'
+        continue
+    fi
+    if [ "$layer" != 'cross-runtime' ] && [ "$web_ok" -ne 1 ]; then
         record "$layer" FAIL 0 '前提のビルドに失敗したため実行していません'
         continue
     fi

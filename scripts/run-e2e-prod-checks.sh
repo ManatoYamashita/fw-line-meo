@@ -8,14 +8,14 @@
 #   3. 外部 API 実疎通の記録の鮮度          scripts/check-external-api-smoke-freshness.sh（GCP へ繋がない）
 #   4. 本番のコミットに対する ts-ci の結果   gh（e2e / e2e-surfaces / lighthouse / cross-runtime が success）
 #   5. 日次ジョブの直近の実行               gcloud run jobs executions list（daily-batch・summary-delivery）
-#   6. 直近の配信の件数                     gcloud logging read（delivery-job.run の件数の項目だけを表示）
+#   6. 直近の配信                           gcloud logging read（delivery-job.run の件数と delivery-job.fatal の有無）
 #
 # 4 を置く理由: ローカルで流した自動層（run-e2e-local.sh）は、本番のコミットの証拠にならないことがある。
 # 2026-09-13 の実施では、ローカルで検査したのが 9ab90f5、本番は 16 コミット先の 1ce6986 だった。
 # 本番のコミットの自動層は、そのコミットに対する CI の結果で確かめる。
 #
 # 6 は運用者の資格情報で読む（roles/logging.viewer 相当）。CI からは呼ばない。CI にログ本文を
-# 読む権限を付けない設計だからである（infra/README.md §5・§11）。表示するのは件数の項目だけで、
+# 読む権限を付けない設計だからである（infra/README.md §5・§11）。表示するのは件数と時刻だけで、
 # ログの本文は出さない。
 #
 # 使い方:
@@ -27,11 +27,13 @@
 #   REGION      既定 asia-northeast1
 #
 # 前提: gcloud（本番プロジェクトの閲覧権限）・gh（リポジトリの閲覧権限）・git・node。
-# 最初の失敗で止めず、全項目を流してから集約する。1 項目でも赤なら exit 1。
+# 最初の失敗で止めず、全項目を流してから集約する。1 項目でも FAIL なら exit 1。WARN は exit を変えない。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# gh はカレントディレクトリからリポジトリを決めるので、どこから呼ばれてもルートで動かす。
+cd "$ROOT"
 
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-asia-northeast1}"
@@ -68,21 +70,13 @@ banner() {
     echo '=================================================================='
 }
 
-# ISO 8601 の時刻から経過時間（時間・小数 1 桁）を出す。解釈できなければ exit 2。
-age_hours() {
-    node -e '
-const t = Date.parse(process.argv[1]);
-if (Number.isNaN(t)) process.exit(2);
-console.log(((Date.now() - t) / 3600e3).toFixed(1));
-' "$1"
-}
+# 照会結果を列で読むときは JSON で受けて node で判定する。**タブ区切り（value() や @tsv）を
+# IFS=$'\t' の read で読んではならない。** タブは IFS の空白文字なので連続すると 1 つに潰れ、
+# 空の列があると後ろの列が前へずれる。実例: 失敗した実行では API が succeededCount を返さず
+# （0 の項目は省かれる）、「成功 空・失敗 1」が「成功 1・失敗 空」と読まれて PASS になった
+# （PR #262 のレビューで実測）。
 
-# $1（時間・小数）が $2 以下なら 0。
-within_hours() {
-    node -e 'process.exit(Number(process.argv[1]) <= Number(process.argv[2]) ? 0 : 1)' "$1" "$2"
-}
-
-git -C "$ROOT" fetch --quiet origin main || echo "WARN: origin/main を fetch できませんでした。手元の参照で比較します" >&2
+git fetch --quiet origin main || echo "WARN: origin/main を fetch できませんでした。手元の参照で比較します" >&2
 
 # --- 1. 稼働イメージ ---------------------------------------------------------------------
 banner '1. 本番の稼働イメージと origin/main の一致'
@@ -93,21 +87,39 @@ else
 fi
 printf '%s\n' "$drift_out"
 # 署名行（prod-image-drift-notify.sh が重複判定に使う行）から、稼働中のコミットを読む。
-# デプロイの途中は、サービスごとに別のコミットが動いている（2026-09-13 に実測: 7 件のうち 4 件が新、3 件が旧）。
-# そのときは 1 つに決め打ちせず、動いているコミットをすべて 4. で確かめる。
+# 各項目は <kind>/<name>=<status>@<tag>。status が in-flight の項目は、main がまだ本番へ届いていない
+# （デプロイ待ち、またはデプロイの途中）ことを表す。drift は猶予内なら exit 0 を返すので、ここで拾う。
 signature="$(printf '%s\n' "$drift_out" | sed -n 's/^DRIFT-SIGNATURE: //p')"
-prod_shas="$(printf '%s\n' "$signature" | tr ';' '\n' | sed -n -E 's/.*@([0-9a-f]{7,40})$/\1/p' | sort -u)"
-prod_sha_count="$(printf '%s\n' "$prod_shas" | sed '/^$/d' | wc -l)"
-prod_sha_count=$((prod_sha_count + 0))
-prod_sha_list="$(printf '%s\n' "$prod_shas" | tr '\n' ' ' | sed 's/ *$//')"
+entries="$(printf '%s\n' "$signature" | tr ';' '\n' | sed '/^$/d')"
+in_flight="$(printf '%s\n' "$entries" | sed -n '/=in-flight@/p' | sed '/^$/d' | wc -l)"
+in_flight=$((in_flight + 0))
+short_tags="$(printf '%s\n' "$entries" | sed -n -E 's/.*@([0-9a-f]{7,40})$/\1/p' | sort -u)"
+# 短い SHA は桁数がそろうとは限らない（core.abbrev=auto）。完全な SHA へ解決してから重複を除く。
+prod_full_shas=()
+unresolved_tags=()
+for tag in $short_tags; do
+    if full="$(git rev-parse --verify --quiet "${tag}^{commit}")"; then
+        dup=0
+        for seen in ${prod_full_shas[@]+"${prod_full_shas[@]}"}; do
+            [ "$seen" = "$full" ] && dup=1
+        done
+        [ "$dup" -eq 1 ] || prod_full_shas+=("$full")
+    else
+        unresolved_tags+=("$tag")
+    fi
+done
+prod_sha_list=''
+for full in ${prod_full_shas[@]+"${prod_full_shas[@]}"}; do
+    prod_sha_list="${prod_sha_list:+${prod_sha_list} }${full:0:7}"
+done
 if [ "$drift_rc" -eq 0 ]; then
     record '稼働イメージ' PASS "本番のコミット ${prod_sha_list:-不明}"
 else
     record '稼働イメージ' FAIL "check-prod-image-drift.sh が exit ${drift_rc}"
 fi
-if [ "$prod_sha_count" -gt 1 ]; then
-    echo "WARN: 本番で ${prod_sha_count} つのコミットが動いています（デプロイの途中）。実機の確認はデプロイの完了を待ってください" >&2
-    record '稼働イメージ' WARN "コミットが混在（${prod_sha_list}）。デプロイの完了後に実機を確認する"
+if [ "$in_flight" -gt 0 ] || [ "${#prod_full_shas[@]}" -gt 1 ]; then
+    echo "WARN: main がまだ本番へ届いていません（in-flight ${in_flight} 件・稼働中のコミット ${#prod_full_shas[@]} 種類）。実機の確認はデプロイの完了を待ってください" >&2
+    record '稼働イメージ' WARN "デプロイ待ち・デプロイ中（in-flight ${in_flight} 件）。完了後に実機を確認する"
 fi
 
 # --- 2. シークレット ---------------------------------------------------------------------
@@ -128,17 +140,9 @@ fi
 
 # --- 4. 本番のコミットの CI --------------------------------------------------------------
 banner '4. 本番のコミットに対する ts-ci の結果'
-# 本番で動いているコミットの完全な SHA（5. 以降と集約の比較に使う）。
-prod_full_shas=()
 check_ci_for_sha() {
-    local sha="$1" item full run_line run_id run_status run_conclusion jobs_tsv missing job conclusion name concl
-    item="本番コミットの CI ${sha}"
-    if ! full="$(git -C "$ROOT" rev-parse --verify --quiet "${sha}^{commit}")"; then
-        echo "ERROR: ${sha} をこのリポジトリで解決できません（fetch が必要です）" >&2
-        record "$item" FAIL 'コミットを解決できない'
-        return
-    fi
-    prod_full_shas+=("$full")
+    local full="$1" item run_line run_id run_status run_conclusion jobs_tsv missing job conclusion name concl
+    item="本番コミットの CI ${full:0:7}"
     if ! run_line="$(gh run list --workflow ts-ci.yml --commit "$full" --limit 1 \
         --json databaseId,status,conclusion --jq '.[] | [.databaseId, .status, .conclusion] | @tsv')"; then
         echo "ERROR: gh run list が失敗しました（gh auth status を確かめてください）" >&2
@@ -146,12 +150,13 @@ check_ci_for_sha() {
         return
     fi
     if [ -z "$run_line" ]; then
-        echo "ERROR: ${sha} に対する ts-ci の実行が見つかりません" >&2
+        echo "ERROR: ${full:0:7} に対する ts-ci の実行が見つかりません" >&2
         record "$item" FAIL 'ts-ci の実行が無い'
         return
     fi
+    # 空になりうるのは末尾の conclusion（実行中）だけなので、タブの潰れで列はずれない。
     IFS=$'\t' read -r run_id run_status run_conclusion <<< "$run_line"
-    echo "-- ${sha}: ts-ci run ${run_id}（${run_status} / ${run_conclusion:-未完了}）"
+    echo "-- ${full:0:7}: ts-ci run ${run_id}（${run_status} / ${run_conclusion:-未完了}）"
     jobs_tsv="$(gh run view "$run_id" --json jobs --jq '.jobs[] | [.name, .conclusion] | @tsv')" || jobs_tsv=''
     missing=0
     for job in "${REQUIRED_CI_JOBS[@]}"; do
@@ -170,71 +175,122 @@ check_ci_for_sha() {
         record "$item" FAIL "run ${run_id} の結論 ${run_conclusion:-未完了}・E2E ジョブの不足あり"
     fi
 }
-if [ "$prod_sha_count" -eq 0 ]; then
+for tag in ${unresolved_tags[@]+"${unresolved_tags[@]}"}; do
+    echo "ERROR: ${tag} をこのリポジトリで解決できません（fetch が必要です）" >&2
+    record "本番コミットの CI ${tag}" FAIL 'コミットを解決できない'
+done
+if [ "${#prod_full_shas[@]}" -eq 0 ] && [ "${#unresolved_tags[@]}" -eq 0 ]; then
     echo "ERROR: 稼働イメージの確認から、本番のコミットを読めませんでした" >&2
     record '本番コミットの CI' FAIL '本番のコミットを読めない'
-else
-    for sha in $prod_shas; do
-        check_ci_for_sha "$sha"
-    done
 fi
+for full in ${prod_full_shas[@]+"${prod_full_shas[@]}"}; do
+    check_ci_for_sha "$full"
+done
 
 # --- 5. 日次ジョブ -----------------------------------------------------------------------
 banner '5. 日次ジョブの直近の実行'
 check_job() {
-    local job="$1" max_age="$2" line name created succeeded failed age
-    if ! line="$(gcloud run jobs executions list --job="$job" --region="$REGION" --project="$PROJECT_ID" \
-        --limit=1 --format='value(metadata.name,metadata.creationTimestamp,status.succeededCount,status.failedCount)' --quiet)"; then
+    local job="$1" max_age="$2" json verdict v_status v_info
+    if ! json="$(gcloud run jobs executions list --job="$job" --region="$REGION" --project="$PROJECT_ID" --limit=3 \
+        --format='json(metadata.name,metadata.creationTimestamp,status.completionTime,status.succeededCount,status.failedCount)' --quiet)"; then
         echo "ERROR: ${job} の実行一覧を取得できません（gcloud の認証と権限を確かめてください）" >&2
         record "ジョブ ${job}" FAIL '実行一覧を取得できない'
         return
     fi
-    if [ -z "$line" ]; then
-        echo "ERROR: ${job} の実行が 1 件もありません" >&2
-        record "ジョブ ${job}" FAIL '実行が無い'
+    # 実行中（completionTime が無い）のものは飛ばし、最も新しい完了済みの実行で判定する。
+    # 一覧は未開始・実行中が先頭、その後は開始時刻の降順に並ぶ。
+    # shellcheck disable=SC2016  # node へ渡す JS をそのまま書くため、単一引用符の中で展開させない。
+    if ! verdict="$(JOB_JSON="$json" MAX_AGE_H="$max_age" node -e '
+const list = JSON.parse(process.env.JOB_JSON || "[]");
+const idx = list.findIndex((e) => e.status && e.status.completionTime);
+if (idx < 0) {
+  console.log(`FAIL|完了した実行がありません（取得 ${list.length} 件）`);
+  process.exit(0);
+}
+const e = list[idx];
+const succeeded = Number(e.status.succeededCount ?? 0);
+const failed = Number(e.status.failedCount ?? 0);
+const created = e.metadata.creationTimestamp;
+const age = (Date.now() - Date.parse(created)) / 3600e3;
+if (Number.isNaN(age)) {
+  console.log(`FAIL|作成時刻を解釈できません: ${created}`);
+  process.exit(0);
+}
+const ok = succeeded >= 1 && failed === 0 && age <= Number(process.env.MAX_AGE_H);
+const note = idx > 0 ? `・実行中 ${idx} 件を飛ばした` : "";
+console.log(`${ok ? "PASS" : "FAIL"}|${e.metadata.name}・${created}（${age.toFixed(1)} 時間前）・成功 ${succeeded}・失敗 ${failed}${note}`);
+')"; then
+        echo "ERROR: ${job} の実行一覧を解釈できません" >&2
+        record "ジョブ ${job}" FAIL '実行一覧を解釈できない'
         return
     fi
-    IFS=$'\t' read -r name created succeeded failed <<< "$line"
-    if ! age="$(age_hours "$created")"; then
-        echo "ERROR: ${job} の作成時刻を解釈できません: ${created}" >&2
-        record "ジョブ ${job}" FAIL '作成時刻を解釈できない'
-        return
-    fi
-    echo "-- ${job}: ${name}・${created}（${age} 時間前）・成功 ${succeeded:-0}・失敗 ${failed:-0}"
-    if [ "${succeeded:-0}" = '1' ] && within_hours "$age" "$max_age"; then
-        record "ジョブ ${job}" PASS "${age} 時間前に成功"
+    IFS='|' read -r v_status v_info <<< "$verdict"
+    echo "-- ${job}: ${v_info}"
+    if [ "$v_status" = 'PASS' ]; then
+        record "ジョブ ${job}" PASS "直近の完了済みの実行が成功（${max_age} 時間以内）"
     else
-        record "ジョブ ${job}" FAIL "直近の実行が成功でないか、${max_age} 時間より古い（${age} 時間前）"
+        record "ジョブ ${job}" FAIL "直近の完了済みの実行が失敗か、${max_age} 時間より古い"
     fi
 }
 check_job daily-batch "$DAILY_BATCH_MAX_AGE_H"
 check_job summary-delivery "$SUMMARY_DELIVERY_MAX_AGE_H"
 
-# --- 6. 配信の件数 -----------------------------------------------------------------------
-banner '6. 直近の配信の件数（配信対象があった実行・件数の項目だけ）'
+# --- 6. 直近の配信 -----------------------------------------------------------------------
+banner '6. 直近の配信（配信対象があった実行の件数・致命的な失敗の有無）'
 # logName で絞らないと、同じ条件でも数分かかる（2026-09-13 実測: 無しで 2 分超・有りで 2 秒）。
-log_filter="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"summary-delivery\""
-log_filter="${log_filter} AND logName=\"projects/${PROJECT_ID}/logs/run.googleapis.com%2Fstdout\""
-log_filter="${log_filter} AND jsonPayload.event=\"delivery-job.run\" AND jsonPayload.targetsTotal>0"
-if ! log_line="$(gcloud logging read "$log_filter" --project="$PROJECT_ID" --freshness=1d --limit=1 --quiet \
-    --format='value(timestamp,jsonPayload.currentJstHour,jsonPayload.targetsTotal,jsonPayload.delivered,jsonPayload.failed,jsonPayload.skipped,jsonPayload.quotaExceeded)')"; then
+# 件数の要約（delivery-job.run）は info なので stdout、致命的な失敗（delivery-job.fatal）は error なので
+# stderr へ出る（@fwlm/observability の sink が console[level] で書く）。
+log_base="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"summary-delivery\""
+run_filter="${log_base} AND logName=\"projects/${PROJECT_ID}/logs/run.googleapis.com%2Fstdout\""
+run_filter="${run_filter} AND jsonPayload.event=\"delivery-job.run\" AND jsonPayload.targetsTotal>0"
+fatal_filter="${log_base} AND logName=\"projects/${PROJECT_ID}/logs/run.googleapis.com%2Fstderr\""
+fatal_filter="${fatal_filter} AND jsonPayload.event=\"delivery-job.fatal\""
+
+# shellcheck disable=SC2016  # node へ渡す JS をそのまま書くため、単一引用符の中で展開させない。
+if ! run_json="$(gcloud logging read "$run_filter" --project="$PROJECT_ID" --freshness=1d --limit=1 --quiet \
+    --format='json(timestamp,jsonPayload.currentJstHour,jsonPayload.targetsTotal,jsonPayload.delivered,jsonPayload.failed,jsonPayload.skipped,jsonPayload.quotaExceeded)')"; then
     echo "ERROR: 配信のログを読めません（roles/logging.viewer 相当の権限が要ります）" >&2
     record '配信の件数' FAIL 'ログを読めない'
-elif [ -z "$log_line" ]; then
-    echo "ERROR: 直近 24 時間に、配信対象のある summary-delivery の実行がありません" >&2
-    record '配信の件数' FAIL '直近 24 時間に配信対象のある実行が無い'
+elif ! run_verdict="$(RUN_JSON="$run_json" node -e '
+const list = JSON.parse(process.env.RUN_JSON || "[]");
+if (list.length === 0) {
+  console.log("FAIL|直近 24 時間に、配信対象のある実行がありません");
+  process.exit(0);
+}
+const p = list[0].jsonPayload || {};
+const keys = ["targetsTotal", "delivered", "failed", "skipped", "quotaExceeded"];
+const absent = keys.filter((k) => typeof p[k] !== "number");
+if (absent.length > 0) {
+  console.log(`FAIL|件数の項目が欠けています: ${absent.join(", ")}`);
+  process.exit(0);
+}
+const ok = p.delivered === p.targetsTotal && p.failed === 0 && p.skipped === 0 && p.quotaExceeded === 0;
+console.log(`${ok ? "PASS" : "FAIL"}|${list[0].timestamp}（${p.currentJstHour} 時の実行）: 対象 ${p.targetsTotal}・送信 ${p.delivered}・失敗 ${p.failed}・スキップ ${p.skipped}・上限超過 ${p.quotaExceeded}`);
+')"; then
+    echo "ERROR: 配信のログを解釈できません" >&2
+    record '配信の件数' FAIL 'ログを解釈できない'
 else
-    IFS=$'\t' read -r l_ts l_hour l_targets l_delivered l_failed l_skipped l_quota <<< "$log_line"
-    echo "-- ${l_ts}（${l_hour} 時の実行）: 対象 ${l_targets}・送信 ${l_delivered}・失敗 ${l_failed}・スキップ ${l_skipped}・上限超過 ${l_quota}"
-    if [ "$l_delivered" = "$l_targets" ] && [ "${l_failed:-0}" = '0' ] && [ "${l_skipped:-0}" = '0' ] && [ "${l_quota:-0}" = '0' ]; then
-        record '配信の件数' PASS "対象 ${l_targets} 件をすべて送信"
-    else
-        record '配信の件数' FAIL "対象 ${l_targets}・送信 ${l_delivered}・失敗 ${l_failed}・スキップ ${l_skipped}・上限超過 ${l_quota}"
-    fi
+    IFS='|' read -r r_status r_info <<< "$run_verdict"
+    echo "-- ${r_info}"
+    record '配信の件数' "$r_status" "$r_info"
+fi
+
+# 件数の要約は成功した実行しか出さない。致命的に失敗した実行は delivery-job.fatal だけを出すので、
+# 上の照会は 24 時間以内の古い成功を拾いうる。失敗は別に数える。
+if ! fatal_ts="$(gcloud logging read "$fatal_filter" --project="$PROJECT_ID" --freshness=1d --limit=1 --quiet \
+    --format='value(timestamp)')"; then
+    echo "ERROR: 配信の失敗ログを読めません" >&2
+    record '配信の致命的な失敗' FAIL 'ログを読めない'
+elif [ -n "$fatal_ts" ]; then
+    echo "-- 直近 24 時間に delivery-job.fatal があります: ${fatal_ts}（相関 ID からの追い方は infra/README.md §11-4）"
+    record '配信の致命的な失敗' FAIL "直近 24 時間にあり（${fatal_ts}）"
+else
+    echo "-- 直近 24 時間に delivery-job.fatal はありません"
+    record '配信の致命的な失敗' PASS '直近 24 時間になし'
 fi
 
 # --- 集約 -------------------------------------------------------------------------------
-head_full_sha="$(git -C "$ROOT" rev-parse HEAD)"
+head_full_sha="$(git rev-parse HEAD)"
 banner "本番の読み取り確認の結果（本番のコミット: ${prod_sha_list:-不明}・このツリー: ${head_full_sha:0:7}）"
 # 状態を先頭に置く。printf の幅指定はバイト数で数えるので、日本語の項目名を左に置くと列がずれる。
 for entry in ${results[@]+"${results[@]}"}; do
@@ -250,7 +306,7 @@ done
 echo
 echo "次は実機の確認です: docs/testing/e2e.md の「4. 本番の実機確認」"
 if [ "$fail" -ne 0 ]; then
-    echo "NG: 赤の項目があります（各項目の出力は上にあります）" >&2
+    echo "NG: FAIL の項目があります（各項目の出力は上にあります）" >&2
     exit 1
 fi
-echo "OK: 読み取りで確かめられる項目はすべて緑です"
+echo "OK: 読み取りで確かめられる項目に FAIL はありません"
