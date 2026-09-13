@@ -216,6 +216,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       for (const [title, key, candidates] of [
         ['書き出し', 'opening', OPENING_TEXTS],
         ['切り口', 'angle', VARIATION_CANDIDATES.angles.map((c) => c.text)],
+        ['文体', 'tone', [...VARIATION_CANDIDATES.tones]],
       ] as const) {
         console.log(`\n--- ${title}の候補ごと（未選択の観点への言及 / 来店の経緯・動機の創作）---`);
         for (const candidate of candidates) {
@@ -225,12 +226,14 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
           const visitBad = mine.filter((s) => s.visitClaims.length > 0).length;
           const starBad = mine.filter((s) => s.starNarration).length;
           const absentBad = mine.filter((s) => s.absenceAssertion).length;
+          // 字数の規則の下限（観点あり 100 字・それ以外 40 字）を割った本数。候補が字数を縮めていないかを見る。
+          const short = mine.filter((s) => [...s.draft].length < (s.thickness === 'aspects' ? 100 : 40)).length;
           const aspects = new Map<string, number>();
           for (const s of mine) for (const v of s.violations) aspects.set(v.aspectCode, (aspects.get(v.aspectCode) ?? 0) + 1);
           const top = [...aspects.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c}×${n}`).join(' ');
           console.log(
             `  ${candidate}  n=${mine.length}  観点 ${aspectBad} (${pct(aspectBad, mine.length)})  経緯 ${visitBad} (${pct(visitBad, mine.length)})` +
-              `  星 ${starBad}  断定 ${absentBad}` +
+              `  星 ${starBad}  断定 ${absentBad}  字数不足 ${short}` +
               (top.length > 0 ? `  言及された観点: ${top}` : ''),
           );
         }
