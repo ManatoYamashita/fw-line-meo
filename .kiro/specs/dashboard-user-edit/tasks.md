@@ -57,7 +57,7 @@
   - _Depends: 1.1, 1.2_
 
 - [ ] 3. dashboard-web: 編集 UI
-- [ ] 3.1 (P) API クライアントに更新を追加
+- [x] 3.1 (P) API クライアントに更新を追加
   - 更新の呼び出しを足す。利用者 ID を URL 符号化して POST する。body は「運営にする」「代理店にする（代理店を添える）」「代理店ロールのまま所属を移す（ロールを入れない）」の 3 形と、表示名（変えたときだけ）へ写す。
   - 完了状態: クライアントのテストで、URL・メソッド・3 形の body と表示名の有無の完全一致が緑。
   - _Requirements: 3.1, 3.4_
@@ -165,4 +165,8 @@
   - テストの `buildApp` は合成根の複製なので、捕まえられるのは複製側の取り違えだけである。
   - 既存コメント `test/app-routes.db.test.ts` の冒頭（「配線の整合を機械検証する」）と `email_conflict_disabled` の assert の直前（「index.ts … 転置すると … 決定的に捕捉する」）は、index.ts については事実でない。
   - 構造の変更が要るので、この機能の範囲外として別 Issue で扱う。
+- 3.1 `updateDashboardUser` の形は design の正典どおり `({ id, changes }, options)` にした。パネルが受け取る `updateUser?: (id, changes)` とは形が違うので、3.2 の既定値はアダプタで包む。
+  - 空の変更 `{}` は型では許されている。送ればサーバが 400 を返すので、「変更が無ければ送らない」はパネル（3.2）が固定する。
+  - クライアントの body を本物の `handleDashboardUserUpdate` へ流す突き合わせを独立レビューで行い、10 形すべてがサーバで意図どおりに解釈されることを確かめた。
+  - `JSON.parse` した body には、値が undefined のキーが残らない。そのため `toEqual` と `toStrictEqual` で検出数に差は無い。「表示名を常に代入する（undefined のまま）」は送信内容が変わらない等価な変異である。
 - 2.1/2.2 src のコメントで Issue を指すときは `Issue #NNN` と書く。種別の無い `#250` は `scripts/check-design-tokens.sh` に 3 桁の hex 色として検出され、ts-ci が赤になる（2.1 のコミットで入り、2.2 のレビューが全ガードを流して見つけた）。タスクごとの検証には、ts-ci が呼ぶ `scripts/check-*.sh` を全部含める。

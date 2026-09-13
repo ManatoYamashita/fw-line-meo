@@ -17,6 +17,8 @@ import {
   createDashboardUser,
   disableDashboardUser,
   enableDashboardUser,
+  updateDashboardUser,
+  type DashboardUserChanges,
 } from '../src/lib/api';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -129,5 +131,97 @@ describe('管理 API クライアント', () => {
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(String(url)).toContain('/dashboard-users/u2/enable');
     expect(init.method).toBe('POST');
+  });
+});
+
+// 利用者の属性更新（dashboard-user-edit / Requirements 3.1, 3.4）。
+// body は JSON.parse してから toStrictEqual で比べ、キーの集合の完全一致を固定する。
+// JSON を経由した body に値が undefined のキーは残らないので、送ってはならないキー（運営にするときの
+// agencyId・所属の移動のときの role・変えていない表示名）の混入は、必ず値を持つキーとして現れて赤になる。
+describe('updateDashboardUser（利用者の属性更新）', () => {
+  const AGENCY_A = '0a0a0a0a-0000-4000-8000-00000000000a';
+  const AGENCY_B = '0b0b0b0b-0000-4000-8000-00000000000b';
+
+  it('POST /dashboard-users/:id/update へ id を URL 符号化して送り、Bearer を付け、{ user } をアンラップする', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { user }));
+    const result = await updateDashboardUser(
+      { id: 'a/b?c d', changes: { displayName: '花子' } },
+      { getToken: async () => 'tok', fetchImpl, baseUrl: 'https://api.test' },
+    );
+    expect(result).toStrictEqual({ ok: true, value: user });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    // 期待値は encodeURIComponent で導かずに文字で書く（実装と同じ式で期待値を作ると、符号化の欠落を検出できない）。
+    expect(String(url)).toBe('https://api.test/dashboard-users/a%2Fb%3Fc%20d/update');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
+
+  // 3 形の割り当て × 表示名の有無。表示名を変えていない行は displayName キーを持たないことまで固定する（3.1）。
+  const cases: ReadonlyArray<{
+    name: string;
+    changes: DashboardUserChanges;
+    expected: Record<string, unknown>;
+  }> = [
+    {
+      name: '運営にする: role だけを送り、agencyId も displayName も含めない',
+      changes: { assignment: { kind: 'scope', role: 'operator' } },
+      expected: { role: 'operator' },
+    },
+    {
+      name: '代理店にする: role と agencyId を送り、displayName を含めない',
+      changes: { assignment: { kind: 'scope', role: 'agency', agencyId: AGENCY_A } },
+      expected: { role: 'agency', agencyId: AGENCY_A },
+    },
+    {
+      name: '代理店ロールのまま所属を移す: agencyId だけを送り、role も displayName も含めない（3.4）',
+      changes: { assignment: { kind: 'agency', agencyId: AGENCY_B } },
+      expected: { agencyId: AGENCY_B },
+    },
+    {
+      name: '表示名だけを変える: displayName だけを送る',
+      changes: { displayName: '花子' },
+      expected: { displayName: '花子' },
+    },
+    {
+      name: '表示名を未設定にする: null をそのまま送る',
+      changes: { displayName: null },
+      expected: { displayName: null },
+    },
+    {
+      name: '運営にしつつ表示名を変える',
+      changes: { assignment: { kind: 'scope', role: 'operator' }, displayName: '花子' },
+      expected: { role: 'operator', displayName: '花子' },
+    },
+    {
+      name: '代理店にしつつ表示名を未設定にする',
+      changes: { assignment: { kind: 'scope', role: 'agency', agencyId: AGENCY_A }, displayName: null },
+      expected: { role: 'agency', agencyId: AGENCY_A, displayName: null },
+    },
+    {
+      name: '所属を移しつつ表示名を変える: role は含めない（3.4）',
+      changes: { assignment: { kind: 'agency', agencyId: AGENCY_B }, displayName: '花子' },
+      expected: { agencyId: AGENCY_B, displayName: '花子' },
+    },
+  ];
+
+  it.each(cases)('$name', async ({ changes, expected }) => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { user }));
+    await updateDashboardUser({ id: 'u2', changes }, { getToken: async () => 't', fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toStrictEqual(expected);
+  });
+
+  it('409 role_changed を { ok:false, code, message } のまま返す（画面がコードから文言を選ぶ・3.4）', async () => {
+    const message = '他の操作でロールが変わったため、所属代理店を変更できませんでした。画面を再読み込みしてください';
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(409, { error: { code: 'role_changed', message } }));
+    const result = await updateDashboardUser(
+      { id: 'u2', changes: { assignment: { kind: 'agency', agencyId: AGENCY_B } } },
+      { getToken: async () => 't', fetchImpl },
+    );
+    expect(result).toStrictEqual({ ok: false, code: 'role_changed', message });
   });
 });
