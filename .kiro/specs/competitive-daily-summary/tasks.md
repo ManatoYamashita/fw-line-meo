@@ -208,11 +208,34 @@
   - _Boundary: go batch/crossruntime_test, delivery-job/cross-runtime, store-detail/cross-runtime, db/test/cross_runtime_steps.sh_
   - _Depends: 8.2_
 
-- [ ] 8.4 本番で評価なしの扱いを確認する
+- [x] 8.4 本番で評価なしの扱いを確認する
+  - **残余: 実機（オーナーの LINE で受け取る朝の Flex と、そこから開く LIFF）での表示の確認は未実施。追跡は #271。** 詳細画面と Flex は代理（本番と同じソースへ本番の行を通した再現）でしか確かめていない（下の実施結果）
   - 8.2 のデプロイ後の日次バッチで、評価なしの競合が null で記録され rank_total に数えられていないことを read-only で照合し、詳細画面で「評価なし」と注記を確認する
   - 観察可能な完了: 本番の当日行と詳細画面の実測が記録され（識別子は先頭 8 文字・店名は伏せる）、Issue #255 の完了条件が埋まる
   - _Requirements: 2.8, 2.9, 3.13, 4.8_
   - _Depends: 8.3_
+  - **実施結果（2026-09-13・本番 gen-fw-line-meo）**: 識別子は本番の値の先頭 8 文字に切っている（公開リポジトリで、確定済み店舗の ID は客向けアンケート経路へ到達する関門のため）。店名は伏せる。
+    - **デプロイ**: #266（`cc21824`）と #267（`8e21c88`）を順にマージした。それぞれの deploy-prod の deploy ジョブが success。`scripts/check-prod-image-drift.sh` で、本番の 7 イメージ（サービス 5・ジョブ 2）がそれぞれのマージコミットと一致し、収束していることを照合した。#267 は #266 のデプロイを照合してからマージした（null を読めない版の配信を本番に残さないため）
+    - **日次バッチ**: 翌朝の定時実行を待たず、`infra/README.md` §7-3 の手動実行（`gcloud run jobs execute daily-batch --wait`・execution `daily-batch-l64lw`・39 秒・succeededCount 1）で、当日（2026-09-13）の行を新しい Go で書き直した。同日の再実行は上書きになり、重複しない（R2.6）。直後に動いた毎時の配信ジョブ（新しい TS・`summary-delivery-55vkh`）も成功
+    - **daily_summaries**（店舗 `865d1c0e`・read-only で照合）: rank 1・rank_total 5（書き直す前は 6）。評価の無い競合は competitors の末尾にあり、`rating`・`starDiff` とも JSON の null（キーは存在）。評価のある 4 店の starDiff は `0.3`・`0.4`・`0.6`・`1`
+    - **rating_snapshots**: 同店舗の評価の無い競合は rating・rank とも NULL。自店は 1 位、評価のある競合は 2〜5 位
+    - **対照**: 評価の無い競合がいない店舗 `9407f4cc` は、6 店中 3 位のまま変化なし
+    - **旧形の不在**: 当日分に rating 0 は 0 件（スナップショット・自店・competitors のいずれも）
+    - **再配信の不在**: summary_deliveries は、当日 07:00 の delivered が 1 件ずつのまま
+    - **表示（代理）**: 本番と同じソース（`8e21c88`）でビルドした delivery-job の `buildDailySummaryFlex` と `@fwlm/db/daily-summary` に、本番の当日行を read-only（`default_transaction_read_only=on`）で通した。Flex と詳細画面に出る文字列を再現し、次を確認した
+      - 見出しが「近隣5店中 1位」
+      - 評価の無い競合が「評価なし」で、星差が出ない
+      - 一覧の下に「評価のない店は順位に含めていません」
+      - 評価のある競合の星差が `+0.3` の形
+      - 「★0」が無い
+      - 店舗 `9407f4cc` には注記が出ず、星差 0 は `0.0`
+    - **代理では埋まらない差**: 次の 3 つは代理では確かめられない
+      - LINE アプリでの Flex の描画（折り返し・列の幅）
+      - LIFF の起動と認可
+      - 画面のレイアウト
+
+      当日 07:00 の配信は、#266 のデプロイ前の旧コードで組み立てられた。そのため新しい表示の Flex が実際に届くのは 2026-09-14 07:00 からで、実機での確認は #271 で追う
+    - **本番の読み取り確認**: `scripts/run-e2e-prod-checks.sh` は全項目 PASS（本番のコミット `8e21c88`）
 
 ## Implementation Notes
 - **2026-09-13: Issue #255 の着手前の実測（本番 read-only・`default_transaction_read_only=on`）**: `daily_summaries` は 60 行（2 店舗 × 30 日）。店舗 `865d1c0e` の競合 1 店が 30 日すべて rating 0・reviewCount 0 で、`rating_snapshots` でもその日の最下位（6 位）だった。自店の rating 0 と rating_prev 0 は 0 行、jsonb に数値以外の rating は無い。rating 0 を含む 30 行のすべてで自店の順位は「rank_total − 評価 0 の件数」以内に収まり、8.1 の母数の補正が実データの形と一致することを確かめた（識別子は本番の値の先頭 8 文字）。
