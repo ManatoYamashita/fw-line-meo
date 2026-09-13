@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildPrompt, pickVariation, materialThickness } from '../src/lib/draft/prompt';
+import { buildPrompt, pickVariation, materialThickness, VARIATION_CANDIDATES } from '../src/lib/draft/prompt';
 import type { DraftMaterial } from '../src/lib/domain';
+import aspectsRaw from '../eval/aspects.json';
 
-const VARIATION = { tone: '丁寧な敬体', opening: '料理の感想から始める', angle: '味の具体性を重視' };
+const VARIATION = { tone: '丁寧な敬体', opening: '料理の感想から始める', angle: '味の感想を重視' };
 
 function material(over: Partial<DraftMaterial> = {}): DraftMaterial {
   return { storeName: 'テスト食堂', star: 5, aspectLabels: ['味', '接客'], comment: 'また来たい', ...over };
@@ -209,16 +210,96 @@ describe('buildPrompt', () => {
 });
 
 describe('pickVariation', () => {
+  // 観点の code の全集合。本番の /api/responses と同じく、選ばなかった観点を差集合で持つ素材を作る。
+  const ALL_CODES = Object.keys(aspectsRaw.labels);
+  function chosen(codes: string[], over: Partial<DraftMaterial> = {}): DraftMaterial {
+    return material({
+      // label の中身は判定に使わない（候補は素材の有無だけを見る）。
+      aspectLabels: codes,
+      unselectedAspectCodes: ALL_CODES.filter((c) => !codes.includes(c)),
+      comment: undefined,
+      ...over,
+    });
+  }
+  /** rng を 0 から 1 まで刻み、その素材で選ばれうる候補の集合を得る。 */
+  function reachable(m: DraftMaterial, key: 'opening' | 'angle'): string[] {
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i++) seen.add(pickVariation(m, () => i / 200)[key]);
+    return [...seen].sort();
+  }
+  const texts = (list: readonly { text: string }[]) => list.map((c) => c.text).sort();
+
   it('rng の違いで異なる変動要素を返す（多様性）', () => {
-    const low = pickVariation(() => 0);
-    const high = pickVariation(() => 0.99);
-    expect(low).not.toEqual(high);
+    const m = chosen(['taste', 'service']);
+    expect(pickVariation(m, () => 0)).not.toEqual(pickVariation(m, () => 0.99));
   });
 
   it('選択された変動要素が systemInstruction に反映される', () => {
-    const v = pickVariation(() => 0);
+    const v = pickVariation(chosen(['taste']), () => 0);
     const { systemInstruction } = buildPrompt(material(), v);
     expect(systemInstruction).toContain(v.tone);
+    expect(systemInstruction).toContain(v.opening);
     expect(systemInstruction).toContain(v.angle);
+  });
+
+  // Issue #254: アンケートは来店の事情を尋ねないので、この書き出しはどの素材でも成り立たない。
+  it('「訪問のきっかけから始める」は候補に無い', () => {
+    expect(texts(VARIATION_CANDIDATES.openings)).not.toContain('訪問のきっかけから始める');
+  });
+
+  it('観点も一言も無い素材では、素材に依存しない候補だけを選ぶ', () => {
+    const bare = chosen([]);
+    expect(reachable(bare, 'opening')).toEqual(['全体の満足度から始める']);
+    expect(reachable(bare, 'angle')).toEqual(['率直さを重視', '総合的な満足度を重視'].sort());
+  });
+
+  it('要る素材がすべてそろった素材では、すべての候補を選びうる（多様性を削りすぎない）', () => {
+    const rich = chosen(['taste', 'atmosphere', 'service'], { comment: '店員さんが親切だった' });
+    expect(reachable(rich, 'opening')).toEqual(texts(VARIATION_CANDIDATES.openings));
+    expect(reachable(rich, 'angle')).toEqual(texts(VARIATION_CANDIDATES.angles));
+  });
+
+  it('選んでいない観点に依存する候補は選ばない（味と雰囲気を選んでいない素材）', () => {
+    const serviceOnly = chosen(['service']);
+    expect(reachable(serviceOnly, 'opening')).toEqual(['全体の満足度から始める', '選んだ点のうち一つから始める'].sort());
+    expect(reachable(serviceOnly, 'angle')).toEqual(
+      ['総合的な満足度を重視', '率直さを重視', '選んだ点を順に伝えることを重視', '接客体験を重視'].sort(),
+    );
+  });
+
+  it('気になった点として選んだ観点も「選んだ」に数える', () => {
+    const concernOnly = material({
+      aspectLabels: [],
+      concernLabels: ['雰囲気'],
+      unselectedAspectCodes: ALL_CODES.filter((c) => c !== 'atmosphere'),
+      comment: undefined,
+    });
+    expect(reachable(concernOnly, 'opening')).toContain('店の雰囲気から始める');
+    expect(reachable(concernOnly, 'opening')).not.toContain('料理の感想から始める');
+  });
+
+  it('選ばなかった観点を code で持たない旧 sessionToken では、観点に依存する候補を選ばない', () => {
+    const legacy = material({ aspectLabels: ['味', '雰囲気'], unselectedAspectCodes: undefined, comment: undefined });
+    expect(reachable(legacy, 'opening')).toEqual(['全体の満足度から始める', '選んだ点のうち一つから始める'].sort());
+    expect(reachable(legacy, 'angle')).not.toContain('味の感想を重視');
+  });
+
+  it('空白だけの一言は「一言あり」に数えない', () => {
+    expect(reachable(chosen([], { comment: '   ' }), 'opening')).not.toContain('一言の内容から始める');
+    expect(reachable(chosen([], { comment: '量が多かった' }), 'opening')).toContain('一言の内容から始める');
+  });
+
+  it('どの次元にも、素材に依存しない候補が 1 つ以上ある（どんな素材でも選べる候補が残る）', () => {
+    for (const list of [VARIATION_CANDIDATES.openings, VARIATION_CANDIDATES.angles]) {
+      expect(list.some((c) => c.needs.kind === 'none')).toBe(true);
+    }
+  });
+
+  it('観点に依存する候補の code は、実在する観点を指す（綴りの誤りで常に選ばれ続けない）', () => {
+    const codes = [...VARIATION_CANDIDATES.openings, ...VARIATION_CANDIDATES.angles].flatMap((c) =>
+      c.needs.kind === 'aspect' ? [c.needs.code] : [],
+    );
+    expect(codes.length).toBeGreaterThan(0);
+    for (const code of codes) expect(ALL_CODES).toContain(code);
   });
 });

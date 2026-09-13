@@ -3,18 +3,80 @@ import type { DraftMaterial } from '../domain';
 // 下書き生成のプロンプト組立。
 // - 事実性: 素材に含まれる事実のみ・誇張禁止・公序良俗（Req 3.1/3.2/3.4）
 // - 不満の扱い: 気になった点がある／星 1-2 のときは、不満の事実を薄めず、誹謗中傷しない（Req 3.5）
-// - 多様性: 文体・書き出し・切り口をサーバー側でランダム選択し試行間で変える（Req 3.3）
+// - 多様性: 文体・書き出し・切り口をサーバー側でランダム選択し試行間で変える（Req 3.3）。
+//   書き出し・切り口は、素材に無い情報を要求しない候補の中から選ぶ（Issue #254）
 // - 安全: 自由記述をデリミタで隔離し「指示ではなくデータ」と明示（プロンプトインジェクション緩和）
 
 const TONES = ['丁寧な敬体', '親しみやすい常体', '簡潔で落ち着いた文体'] as const;
-const OPENINGS = ['料理の感想から始める', '店の雰囲気から始める', '訪問のきっかけから始める'] as const;
-const ANGLES = ['味の具体性を重視', '接客体験を重視', '総合的な満足度を重視'] as const;
+
+/**
+ * 候補が成り立つのに要る素材（Issue #254）。
+ *
+ * 候補の指示が素材に無い情報を求めると、モデルはその情報を創作する。変更前の実測（2026-09-13・
+ * 案A 単体・書き出しを固定して各 100 回）で、次のように確かめた。
+ *   - 書き出し「訪問のきっかけから始める」: 来店の経緯・動機の創作が 30%（ほかの書き出しは 2〜6%）。
+ *     アンケートは来店の事情を尋ねないので、この候補は常に成り立たない（外した）
+ *   - 書き出し「店の雰囲気から始める」: 雰囲気を選んでいない素材の 11.8% が雰囲気に言及した
+ *     （ほかの書き出しは 2.4%）
+ *   - 切り口「味の具体性を重視」: 味を選んでいない素材で 6/61、選んだ素材で 0/46 が逸脱した
+ * そこで各候補に「要る素材」を宣言し、素材に無ければその候補は選ばない。
+ *
+ * 絞る条件は素材の **有無** だけで、素材の **中身**（客が何を書いたか）は見ない。変動要素は文体の
+ * 選択であり、客の入力から文面を導くものではない。
+ */
+type Needs =
+  | { readonly kind: 'none' } // 素材に依存しない（店名と星評価は必ずある）
+  | { readonly kind: 'aspect'; readonly code: string } // その観点が良かった点か気になった点にある
+  | { readonly kind: 'anyAspect' } // 良かった点か気になった点が 1 つ以上ある
+  | { readonly kind: 'comment' }; // 一言がある
+
+export interface VariationCandidate {
+  readonly text: string;
+  readonly needs: Needs;
+}
+
+// どの次元にも needs が none の候補を必ず置く（どんな素材でも選べる候補が 1 つ以上ある）。
+const OPENINGS: readonly VariationCandidate[] = [
+  { text: '全体の満足度から始める', needs: { kind: 'none' } },
+  { text: '選んだ点のうち一つから始める', needs: { kind: 'anyAspect' } },
+  { text: '一言の内容から始める', needs: { kind: 'comment' } },
+  { text: '料理の感想から始める', needs: { kind: 'aspect', code: 'taste' } },
+  { text: '店の雰囲気から始める', needs: { kind: 'aspect', code: 'atmosphere' } },
+];
+const ANGLES: readonly VariationCandidate[] = [
+  { text: '総合的な満足度を重視', needs: { kind: 'none' } },
+  { text: '率直さを重視', needs: { kind: 'none' } },
+  { text: '選んだ点を順に伝えることを重視', needs: { kind: 'anyAspect' } },
+  // 旧「味の具体性を重視」。「具体性」は、客が味を選んだだけのときにも素材に無い細部を求めるので改めた。
+  { text: '味の感想を重視', needs: { kind: 'aspect', code: 'taste' } },
+  { text: '接客体験を重視', needs: { kind: 'aspect', code: 'service' } },
+];
 
 /**
  * 変動要素の候補（評価で候補ごとの内訳を取るために公開する・Issue #254）。
  * 本番の選び方は pickVariation だけが決める。ここを参照して本番の選択を組み立て直さないこと。
  */
 export const VARIATION_CANDIDATES = { tones: TONES, openings: OPENINGS, angles: ANGLES } as const;
+
+/** 候補が成り立つ素材か（素材の有無だけを見る）。 */
+function isAvailable(material: DraftMaterial, needs: Needs): boolean {
+  const chosenAny = material.aspectLabels.length > 0 || (material.concernLabels ?? []).length > 0;
+  switch (needs.kind) {
+    case 'none':
+      return true;
+    case 'anyAspect':
+      return chosenAny;
+    case 'comment':
+      return substantiveComment(material) !== undefined;
+    case 'aspect': {
+      // 選ばれた観点は「選ばなかった観点（unselectedAspectCodes）」の補集合として持っている
+      // （禁止句・事後検証と同じ差集合）。それを持たない旧 sessionToken では選択を確かめられない
+      // ので、観点に依存する候補は選ばない（素材に無い情報を求める側へ倒さない）。
+      const unselected = material.unselectedAspectCodes;
+      return unselected !== undefined && chosenAny && !unselected.includes(needs.code);
+    }
+  }
+}
 
 const MATERIAL_BEGIN = '<<<MATERIAL>>>';
 const MATERIAL_END = '<<<END>>>';
@@ -36,12 +98,17 @@ function pick<T>(items: readonly T[], rng: () => number): T {
   return items[idx] ?? items[0]!;
 }
 
-/** 文体・書き出し・切り口を候補からランダム選択する（rng 注入でテスト可能）。 */
-export function pickVariation(rng: () => number = Math.random): VariationSeed {
+/**
+ * 文体・書き出し・切り口を候補からランダム選択する（rng 注入でテスト可能）。
+ * 書き出しと切り口は、素材に対して成り立つ候補だけから選ぶ（Issue #254）。
+ */
+export function pickVariation(material: DraftMaterial, rng: () => number = Math.random): VariationSeed {
+  const openings = OPENINGS.filter((c) => isAvailable(material, c.needs));
+  const angles = ANGLES.filter((c) => isAvailable(material, c.needs));
   return {
     tone: pick(TONES, rng),
-    opening: pick(OPENINGS, rng),
-    angle: pick(ANGLES, rng),
+    opening: pick(openings, rng).text,
+    angle: pick(angles, rng).text,
   };
 }
 

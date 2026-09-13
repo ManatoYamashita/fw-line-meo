@@ -32,14 +32,17 @@ const RUNS = Number.parseInt(process.env.EVAL_RUNS ?? '3', 10);
 // 書き出しを 1 つに固定して流す（Issue #254: 候補ごとの創作率を同じ素材で比べるため）。
 // 未指定なら本番と同じく pickVariation に任せる。候補に無い値は測定を始める前に止める
 // （打ち間違いのまま流すと、存在しない書き出しの指示を測って結果を読み違える）。
+// 固定は候補の成立条件（needs）を無視する。素材に無い情報を求める候補が何を起こすかを測るための
+// 切り分け用であり、本番の構成を測るときは指定しない。
 const FORCED_OPENING = process.env.EVAL_OPENING ?? '';
-if (FORCED_OPENING !== '' && !(VARIATION_CANDIDATES.openings as readonly string[]).includes(FORCED_OPENING)) {
+const OPENING_TEXTS = VARIATION_CANDIDATES.openings.map((c) => c.text);
+if (FORCED_OPENING !== '' && !OPENING_TEXTS.includes(FORCED_OPENING)) {
   throw new Error(
-    `EVAL_OPENING は書き出しの候補のいずれかである必要があります: ${VARIATION_CANDIDATES.openings.join(' / ')}`,
+    `EVAL_OPENING は書き出しの候補のいずれかである必要があります: ${OPENING_TEXTS.join(' / ')}`,
   );
 }
-function variationFor(): VariationSeed {
-  const picked = pickVariation();
+function variationFor(material: DraftMaterial): VariationSeed {
+  const picked = pickVariation(material);
   return FORCED_OPENING === '' ? picked : { ...picked, opening: FORCED_OPENING };
 }
 // 既定は本番と同じ構成（案A + 案B）。EVAL_POSTCHECK=0 で事後検証だけを外し、
@@ -119,7 +122,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       for (const material of datasetRaw.materials) {
         const dm = toDraftMaterial(material);
         for (let run = 0; run < RUNS; run++) {
-          const variation = variationFor();
+          const variation = variationFor(dm);
           const result = await generator.generate(dm, variation);
           if (!result.ok) {
             // 生成失敗はサンプルとして数えない。多発する場合は測定自体が成立していない。
@@ -193,8 +196,8 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       // 変動要素の候補ごとの内訳（Issue #254）。候補の指示が素材に無い情報を求めていれば、
       // その候補だけ創作率が跳ねる。全体の率だけでは、どの候補が原因かを言えない。
       for (const [title, key, candidates] of [
-        ['書き出し', 'opening', VARIATION_CANDIDATES.openings],
-        ['切り口', 'angle', VARIATION_CANDIDATES.angles],
+        ['書き出し', 'opening', OPENING_TEXTS],
+        ['切り口', 'angle', VARIATION_CANDIDATES.angles.map((c) => c.text)],
       ] as const) {
         console.log(`\n--- ${title}の候補ごと（未選択の観点への言及 / 来店の経緯・動機の創作）---`);
         for (const candidate of candidates) {
