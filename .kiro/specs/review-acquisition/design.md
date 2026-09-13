@@ -312,7 +312,7 @@ sequenceDiagram
 - 数える条件: `token` が **pageToken（`verifyPage(token, storeId)` が通る）** か、**sessionToken（`verify(token)` が通り、封入された storeId が一致する）** のどちらか。通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録する
 - **2 つの token は証明するものが違う。** 下書き画面から送る sessionToken は `/api/responses` の後にしか発行されないので、「実際の回答の後の押下」を証明する。回答済み画面（24 時間以内の再訪）から送る pageToken は SSR が発行するので、証明するのは「ページが配信された」ことまでで、信頼水準は表示件数（`survey_page_viewed`）と同じである。回答済み画面の判定は localStorage にあり、サーバーは再訪が本物かを確かめられない。sessionToken を localStorage へ保存すれば確かめられるが、素材（回答の中身）を端末に 24 時間残すことになるので採らない
 - Invariants: DB に触れない・応答本文を持たない（クライアントは結果を読まない）・記録するのは `storeId` だけ・レート制限（インスタンス内・IP 単位）を超えた押下は記録しない
-- 数え方の癖: pageToken は 5 分で失効するので、回答済み画面を開いて 5 分以上経ってからの押下は数えない。レート制限と同一 token の多重送信は区別しない（無状態のため、正しい token を持つ者が押し続ければ上限まで数える）。したがって押下件数は絶対値ではなく施策前後の変化を見る指標である
+- 数え方の癖: 下振れは token の失効と送達失敗。pageToken は 5 分、sessionToken は発行（または最後の再生成）から 30 分で失効するので、回答済み画面を開いて 5 分、下書き画面で 30 分を超えてからの押下は数えない。上振れは 2 つ。同一 token の多重送信はレート制限まで区別しない（無状態のため、正しい token を持つ者が押し続ければ上限まで数える）。同じ客が下書き画面と 24 時間以内の再訪の回答済み画面の両方で押すと、別の token なので別件になる。したがって押下件数は絶対値ではなく施策前後の変化を見る指標であり、回答から投稿までの所要時間や再訪の割合を変える施策では単独で読まない
 
 ### survey-web lib 層
 
@@ -447,7 +447,7 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 ### Monitoring
 - 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
 - ファネル（Issue #137 段階3・5.7）: `survey_page_viewed`（INFO・回答可能な状態で表示できたときのみ）と `survey_response_submitted`（INFO・生成と集計の成否に依らず送信時）。フィールドは `storeId` だけで、来店客に紐づく値は載せない。**数え方の癖**: ページは `force-dynamic` なので bot・プリフェッチ・回答済みの再訪（24 時間判定は localStorage 側で SSR は走る）も表示に数える。したがって「送信 / 表示」は転換率の**下限**であり、絶対値ではなく施策前後の変化を見る指標である。送信は tallies にも入るが、**集計失敗時はログにだけ残るため両者の乖離が集計障害の検知になる**
-- 投稿導線の押下（Issue #137・5.7・5.8）: `survey_review_link_opened`（INFO・ReviewLinkAPI が token を検証できたときだけ）。フィールドは `storeId` だけ。送信の後の段として「送信した客が Google の投稿画面へ進んだか」を読む。Google への投稿そのものは観測できない（代理投稿をしない以上、客と Google の間で完結する）ので、実際に口コミが増えたかは日次バッチが記録する自店の `rating_snapshots.review_count` で読む。数え方の癖は ReviewLinkAPI の節を参照。施策の前後で並べて読む手順は `docs/observability/review-acquisition-funnel.md`
+- 投稿導線の押下（Issue #137・5.7・5.8）: `survey_review_link_opened`（INFO・ReviewLinkAPI が token を検証できたときだけ）。フィールドは `storeId` だけ。送信の後の段として「送信した客が Google の投稿画面へ進んだか」を読む。Google への投稿そのものは観測できない（代理投稿をしない以上、客と Google の間で完結する）ので、実際に口コミが増えたかは日次バッチが記録する自店の `rating_snapshots.review_count` で読む。ただしこの表は Places の規約に合わせた 30 日ローリング保持なので（competitive-daily-summary の research.md の Decision）、施策の前後を比べられる期間に期限がある。数え方の癖は ReviewLinkAPI の節を参照。施策の前後で並べて読む手順は `docs/observability/review-acquisition-funnel.md`
 - ファネルの保持（Issue #137 段階3・5.7）: 表示件数は **ログにしか存在しない**（tallies は送信された回答しか数えない）。Cloud Run の stdout が入る `_Default` バケットの保持は既定 30 日で、本番にログベース指標もシンクも無かった（実測）。段階4 の判断は施策前後の比較なので、`survey_page_viewed` / `survey_response_submitted` をログベース指標（`infra/modules/guardrails`・時系列 24 か月・label は `store_id` のみ）へ写して残す。**指標は作成時点から数え始める**ため、本 spec のデプロイと同じタイミングで `make tf-apply` すること。フィルタで `severity` を条件にしてはいけない（アプリは `level` を出しており Cloud Run は `severity` へ写さない。本番実測で `severity` は null。条件に入れると常に 0 件の指標になる）。押下（`survey_review_link_opened`）も同じ指標群へ足す（Issue #137）。これも作成時点から数え始めるので、デプロイと同じタイミングで apply する
 - guardrails の既存分（予算・アラート・クォータ）は変更なし。Gemini コストは AI Studio のレート/使用量ページで運用確認（runbook 記載）
 

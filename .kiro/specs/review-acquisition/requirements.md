@@ -146,4 +146,5 @@
 > 通知を遷移から独立させる（受入基準 8）のは、自サーバーを投稿導線の途中に置くと、その障害が投稿
 > そのものを塞ぎ、Requirement 3.9・4.4 の「投稿導線は失敗時も維持する」に反するためである。
 > 施策の前後で、これらと自店の Google クチコミ件数（日次バッチが記録する `rating_snapshots.review_count`）を
-> 並べて読む手順は `docs/observability/review-acquisition-funnel.md` に置く。
+> 並べて読む手順は `docs/observability/review-acquisition-funnel.md` に置く。クチコミ件数は Places の規約に
+> 合わせて 30 日で削除されるので、前後を比べられる期間には期限がある（手順書の 3）。
