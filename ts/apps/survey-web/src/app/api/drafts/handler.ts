@@ -51,7 +51,7 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
 
   const gen = await deps.generator.generate(
     material,
-    pickVariation(),
+    pickVariation(material),
     (aspectCodes) => logFactualityResidual(deps.log, aspectCodes),
   );
 

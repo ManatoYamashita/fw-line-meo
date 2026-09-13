@@ -19,12 +19,15 @@ type Snapshot struct {
 }
 
 // SnapshotWrite は自店/競合いずれかの当日スナップショット書込値。
+//
+// Rating・Rank の nil は NULL として書く。評価の無い店（クチコミ 0 件）は Rating を、比較集合に入らない
+// 店（評価なし）は Rank を持たない（Issue #255）。
 type SnapshotWrite struct {
 	PlaceID     string
 	CapturedOn  time.Time
-	Rating      float64
+	Rating      *float64
 	ReviewCount int
-	Rank        int
+	Rank        *int
 }
 
 // WriteSelfSnapshot は自店の当日スナップショットを書き込む。R2.6（同日再実行で重複させない）

@@ -22,6 +22,18 @@ const ST_TREND = 'e6000000-0000-0000-0000-000000000001'; // 30日境界テスト
 const ST_NO_COMPETITORS = 'e6000000-0000-0000-0000-000000000002'; // 競合0店
 const ST_WITH_COMPETITORS = 'e6000000-0000-0000-0000-000000000003'; // 競合5店
 const ST_NO_SUMMARY_TODAY = 'e6000000-0000-0000-0000-000000000004'; // 当日summary無し
+const ST_LEGACY_COMPETITOR_ZERO = 'e6000000-0000-0000-0000-000000000005'; // 旧 Go: 競合の評価 0（Issue #255）
+const ST_LEGACY_SELF_ZERO = 'e6000000-0000-0000-0000-000000000006'; // 旧 Go: 自店の評価 0（Issue #255）
+const ST_NEW_NULL = 'e6000000-0000-0000-0000-000000000007'; // 新 Go: 評価の無い競合は null（Issue #255）
+
+// 自店 4.3・6 店中 3 位の当日サマリーに載る競合（表示は順位の順・星差は「自店 − 競合」）。
+const FIVE_COMPETITORS = [
+  { name: '競合店舗1', rating: 4.5, reviewCount: 20, starDiff: -0.2 },
+  { name: '競合店舗2', rating: 4.4, reviewCount: 21, starDiff: -0.1 },
+  { name: '競合店舗3', rating: 4.2, reviewCount: 22, starDiff: 0.1 },
+  { name: '競合店舗4', rating: 4.1, reviewCount: 23, starDiff: 0.2 },
+  { name: '競合店舗5', rating: 4.0, reviewCount: 24, starDiff: 0.3 },
+] as const;
 
 const AS_OF = '2026-08-30';
 // cutoff = AS_OF - 30日 = 2026-07-31。保持は captured_on > cutoff。
@@ -48,6 +60,9 @@ describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => 
       [ST_NO_COMPETITORS, 'places/detail-no-competitors'],
       [ST_WITH_COMPETITORS, 'places/detail-with-competitors'],
       [ST_NO_SUMMARY_TODAY, 'places/detail-no-summary-today'],
+      [ST_LEGACY_COMPETITOR_ZERO, 'places/detail-legacy-competitor-zero'],
+      [ST_LEGACY_SELF_ZERO, 'places/detail-legacy-self-zero'],
+      [ST_NEW_NULL, 'places/detail-new-null'],
     ] as const) {
       await pool.query(
         'INSERT INTO stores (id, owner_id, name, place_id, place_status) VALUES ($1, $2, $3, $4, $5)',
@@ -73,21 +88,71 @@ describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => 
     );
 
     // --- ST_WITH_COMPETITORS: 競合5店（上限件数）の当日サマリー ---
-    const fiveCompetitors = JSON.stringify(
-      Array.from({ length: 5 }, (_, i) => ({
-        name: `競合店舗${i + 1}`,
-        rating: `${4.0 + i * 0.1}`,
-        reviewCount: 20 + i,
-        starDiff: `${(i - 2) * 0.1}`,
-      })),
-    );
+    // Go が実際に書く形（rating・starDiff は JSON の数値・星差は「自店 − 競合」・表示は順位の順）に
+    // 揃える。以前は文字列で書いていたが、読込時の正規化（Issue #255）は数値以外を評価として扱わない
+    // ので、実物と違う形の fixture は黙って「評価なし」に化けてしまう。
     await pool.query(
       `INSERT INTO daily_summaries
          (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count, competitors)
        VALUES ($1, $2, 'ready', 3, 6, '4.3', 80, 2, $3::jsonb)`,
-      [ST_WITH_COMPETITORS, AS_OF, fiveCompetitors],
+      [ST_WITH_COMPETITORS, AS_OF, JSON.stringify(FIVE_COMPETITORS)],
     );
     // ST_NO_SUMMARY_TODAY: 意図的に daily_summaries を挿入しない（当日未生成のケース）。
+
+    // --- Issue #255: Google に評価が無い店の読込時の正規化 ---
+    // 旧 Go は評価の欠落をゼロ値 0 として書いていた。新 Go は null を書き、比較集合から外す。
+    await pool.query(
+      `INSERT INTO daily_summaries
+         (store_id, summary_date, status, rank, rank_total, rank_prev, rating, review_count, rating_prev,
+          review_count_prev, new_review_count, competitors)
+       VALUES ($1, $2, 'ready', 1, 6, 1, '4.3', 2288, '4.3', 2286, 2, $3::jsonb)`,
+      [
+        ST_LEGACY_COMPETITOR_ZERO,
+        AS_OF,
+        JSON.stringify([
+          { name: '競合イチ', rating: 4.0, reviewCount: 300, starDiff: 0.3 },
+          { name: '競合ニ', rating: 3.9, reviewCount: 200, starDiff: 0.4 },
+          { name: '競合サン', rating: 3.7, reviewCount: 100, starDiff: 0.6 },
+          { name: '競合ヨン', rating: 3.3, reviewCount: 50, starDiff: 1.0 },
+          { name: '競合ゴ', rating: 0, reviewCount: 0, starDiff: 4.3 },
+        ]),
+      ],
+    );
+    await pool.query(
+      `INSERT INTO daily_summaries
+         (store_id, summary_date, status, rank, rank_total, rank_prev, rating, review_count, rating_prev,
+          review_count_prev, new_review_count, competitors)
+       VALUES ($1, $2, 'ready', 3, 3, 3, '0.0', 0, '0.0', 0, 0, $3::jsonb)`,
+      [
+        ST_LEGACY_SELF_ZERO,
+        AS_OF,
+        JSON.stringify([
+          { name: '競合イチ', rating: 4.5, reviewCount: 120, starDiff: -4.5 },
+          { name: '競合ニ', rating: 4.0, reviewCount: 80, starDiff: -4.0 },
+        ]),
+      ],
+    );
+    // 旧 Go は自店の評価が無い日も rating 0・順位つきでスナップショットへ書いていた。
+    await pool.query(
+      `INSERT INTO rating_snapshots (store_id, subject_kind, competitor_id, place_id, captured_on, rating, review_count, rank)
+       VALUES ($1, 'self', NULL, 'places/detail-legacy-self-zero', $2, 0, 0, 3)`,
+      [ST_LEGACY_SELF_ZERO, AS_OF],
+    );
+    await pool.query(
+      `INSERT INTO daily_summaries
+         (store_id, summary_date, status, rank, rank_total, rank_prev, rating, review_count, rating_prev,
+          review_count_prev, new_review_count, competitors)
+       VALUES ($1, $2, 'ready', 2, 3, 2, '4.3', 50, '4.3', 50, 0, $3::jsonb)`,
+      [
+        ST_NEW_NULL,
+        AS_OF,
+        JSON.stringify([
+          { name: '競合イチ', rating: 4.5, reviewCount: 100, starDiff: -0.2 },
+          { name: '競合ニ', rating: 4.0, reviewCount: 30, starDiff: 0.3 },
+          { name: '競合サン', rating: null, reviewCount: 0, starDiff: null },
+        ]),
+      ],
+    );
   });
 
   afterAll(async () => {
@@ -141,14 +206,8 @@ describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => 
       const pool = await getPool();
       const result = await queryStoreDetail(pool, ST_WITH_COMPETITORS, { asOf: AS_OF });
 
-      expect(result.competitors).toHaveLength(5);
-      expect(result.competitors.map((c) => c.name)).toEqual([
-        '競合店舗1',
-        '競合店舗2',
-        '競合店舗3',
-        '競合店舗4',
-        '競合店舗5',
-      ]);
+      // 名前の並びだけでなく値まで固定する（形の違う fixture が黙って別の値に化けても気づけるように）。
+      expect(result.competitors).toEqual(FIVE_COMPETITORS);
       expect(result.summary).toMatchObject({
         summaryDate: AS_OF,
         status: 'ready',
@@ -169,6 +228,56 @@ describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => 
       expect(result.summary).toBeNull();
       expect(result.competitors).toEqual([]);
       expect(result.trend).toEqual([]);
+    });
+  });
+
+  describe('Google に評価が無い店の正規化（Issue #255）', () => {
+    it('旧 Go の評価 0 の競合を「評価なし」として読み、水増しされた母数をその件数だけ戻す', async () => {
+      const pool = await getPool();
+      const result = await queryStoreDetail(pool, ST_LEGACY_COMPETITOR_ZERO, { asOf: AS_OF });
+
+      // 評価 0 の店は常に最下位に数えられていたので、自店の順位は正しく、母数だけが 1 つ多い。
+      expect(result.summary).toMatchObject({ rank: 1, rankTotal: 5, rankPrev: 1, rating: '4.3', ratingPrev: '4.3' });
+      expect(result.competitors).toEqual([
+        { name: '競合イチ', rating: 4.0, reviewCount: 300, starDiff: 0.3 },
+        { name: '競合ニ', rating: 3.9, reviewCount: 200, starDiff: 0.4 },
+        { name: '競合サン', rating: 3.7, reviewCount: 100, starDiff: 0.6 },
+        { name: '競合ヨン', rating: 3.3, reviewCount: 50, starDiff: 1.0 },
+        { name: '競合ゴ', rating: null, reviewCount: 0, starDiff: null },
+      ]);
+    });
+
+    it('旧 Go の自店の評価 0 を「評価なし」として読み、順位と星差を持たせない', async () => {
+      const pool = await getPool();
+      const result = await queryStoreDetail(pool, ST_LEGACY_SELF_ZERO, { asOf: AS_OF });
+
+      expect(result.summary).toMatchObject({
+        rating: null,
+        ratingPrev: null,
+        rank: null,
+        rankTotal: null,
+        rankPrev: null,
+        reviewCount: 0,
+      });
+      // 競合自身の評価は残し、自店と比べられない星差だけを消す。
+      expect(result.competitors).toEqual([
+        { name: '競合イチ', rating: 4.5, reviewCount: 120, starDiff: null },
+        { name: '競合ニ', rating: 4.0, reviewCount: 80, starDiff: null },
+      ]);
+      // 推移も同じ規則で読む（評価の無い日は順位を持たない）。
+      expect(result.trend).toEqual([{ capturedOn: AS_OF, rank: null, rating: null, reviewCount: 0 }]);
+    });
+
+    it('新 Go の null はそのまま読み、母数を二重に引かない', async () => {
+      const pool = await getPool();
+      const result = await queryStoreDetail(pool, ST_NEW_NULL, { asOf: AS_OF });
+
+      expect(result.summary).toMatchObject({ rank: 2, rankTotal: 3 });
+      expect(result.competitors).toEqual([
+        { name: '競合イチ', rating: 4.5, reviewCount: 100, starDiff: -0.2 },
+        { name: '競合ニ', rating: 4.0, reviewCount: 30, starDiff: 0.3 },
+        { name: '競合サン', rating: null, reviewCount: 0, starDiff: null },
+      ]);
     });
   });
 

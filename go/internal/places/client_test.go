@@ -16,6 +16,11 @@ func fastBackoff() Option {
 	return WithBackoff(1*time.Millisecond, 5*time.Millisecond, 5)
 }
 
+func ratingPtr(v float64) *float64 { return &v }
+
+// ratingIs は取得結果の評価が want であるか（nil は評価なし）。
+func ratingIs(got *float64, want float64) bool { return got != nil && *got == want }
+
 func TestNearbyCompetitors_RequestShapeAndFieldMask(t *testing.T) {
 	var gotFieldMask, gotMethod, gotPath, gotAPIKey string
 	var gotBody nearbySearchRequest
@@ -106,7 +111,7 @@ func TestFetchSelfMetrics_UsesSelfFieldMaskAndDecodesReviews(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(placeDetailsResponse{
-			Rating:          4.5,
+			Rating:          ratingPtr(4.5),
 			UserRatingCount: 120,
 			BusinessStatus:  BusinessStatusOperational,
 			Reviews: []reviewDTO{
@@ -138,7 +143,7 @@ func TestFetchSelfMetrics_UsesSelfFieldMaskAndDecodesReviews(t *testing.T) {
 		t.Errorf("field mask = %q, want %q", gotFieldMask, selfFieldMask)
 	}
 
-	if metrics.Rating != 4.5 || metrics.UserRatingCount != 120 {
+	if !ratingIs(metrics.Rating, 4.5) || metrics.UserRatingCount != 120 {
 		t.Errorf("metrics = %+v, unexpected", metrics)
 	}
 	if len(metrics.Reviews) != 1 {
@@ -160,7 +165,7 @@ func TestFetchCompetitorMetrics_UsesCompetitorFieldMaskDistinctFromSelf(t *testi
 		gotFieldMask = r.Header.Get("X-Goog-FieldMask")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(placeDetailsResponse{
-			Rating:          3.8,
+			Rating:          ratingPtr(3.8),
 			UserRatingCount: 40,
 			BusinessStatus:  BusinessStatusOperational,
 			DisplayName:     displayNameDTO{Text: "競合ラーメン店"},
@@ -181,7 +186,7 @@ func TestFetchCompetitorMetrics_UsesCompetitorFieldMaskDistinctFromSelf(t *testi
 	if gotFieldMask == selfFieldMask {
 		t.Errorf("competitor field mask must differ from self field mask, both were %q", gotFieldMask)
 	}
-	if metrics.DisplayName != "競合ラーメン店" || metrics.Rating != 3.8 || metrics.UserRatingCount != 40 {
+	if metrics.DisplayName != "競合ラーメン店" || !ratingIs(metrics.Rating, 3.8) || metrics.UserRatingCount != 40 {
 		t.Errorf("metrics = %+v, unexpected", metrics)
 	}
 }
@@ -197,7 +202,7 @@ func TestFetchSelfMetrics_RetriesOn429ThenSucceeds(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(placeDetailsResponse{Rating: 4.0, UserRatingCount: 10, BusinessStatus: BusinessStatusOperational})
+		_ = json.NewEncoder(w).Encode(placeDetailsResponse{Rating: ratingPtr(4.0), UserRatingCount: 10, BusinessStatus: BusinessStatusOperational})
 	}))
 	defer server.Close()
 
@@ -210,7 +215,7 @@ func TestFetchSelfMetrics_RetriesOn429ThenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected eventual success, got error: %v", err)
 	}
-	if metrics.Rating != 4.0 {
+	if !ratingIs(metrics.Rating, 4.0) {
 		t.Errorf("Rating = %v, want 4.0", metrics.Rating)
 	}
 	if got := atomic.LoadInt32(&callCount); got != 3 {
@@ -232,7 +237,7 @@ func TestFetchCompetitorMetrics_RetriesOn5xxThenSucceeds(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(placeDetailsResponse{Rating: 3.5, UserRatingCount: 5, BusinessStatus: BusinessStatusOperational})
+		_ = json.NewEncoder(w).Encode(placeDetailsResponse{Rating: ratingPtr(3.5), UserRatingCount: 5, BusinessStatus: BusinessStatusOperational})
 	}))
 	defer server.Close()
 
@@ -242,7 +247,7 @@ func TestFetchCompetitorMetrics_RetriesOn5xxThenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected eventual success, got error: %v", err)
 	}
-	if metrics.Rating != 3.5 {
+	if !ratingIs(metrics.Rating, 3.5) {
 		t.Errorf("Rating = %v, want 3.5", metrics.Rating)
 	}
 	if got := atomic.LoadInt32(&callCount); got != 4 {
@@ -405,5 +410,41 @@ func TestFetchSelfMetrics_ContextCancellationDuringBackoffReturnsPromptly(t *tes
 	}
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("context cancellation should return promptly, took %v", elapsed)
+	}
+}
+
+// Issue #255: クチコミ 0 件の店は、Place Details (New) の応答に rating も userRatingCount も含まれない
+// （proto3 の JSON はゼロ値のフィールドを省く）。欠落を 0 に化けさせず nil（評価なし）のまま返す。
+// 以前は float64 で受けていたため 0 になり、評価の無い店が「★0」として最下位に数えられていた。
+func TestFetchMetrics_MissingRatingIsNilNotZero(t *testing.T) {
+	// 実物と同じ形を生の JSON で返す（構造体をエンコードすると rating が必ず出てしまうため）。
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"businessStatus":"OPERATIONAL","displayName":{"text":"クチコミの無い店","languageCode":"ja"}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-api-key", WithBaseURL(server.URL), fastBackoff())
+
+	self, err := client.FetchSelfMetrics(context.Background(), "unrated-self")
+	if err != nil {
+		t.Fatalf("FetchSelfMetrics returned error: %v", err)
+	}
+	if self.Rating != nil {
+		t.Errorf("self Rating = %v, want nil (a missing rating must not become 0)", *self.Rating)
+	}
+	if self.UserRatingCount != 0 {
+		t.Errorf("self UserRatingCount = %d, want 0", self.UserRatingCount)
+	}
+
+	competitor, err := client.FetchCompetitorMetrics(context.Background(), "unrated-competitor")
+	if err != nil {
+		t.Fatalf("FetchCompetitorMetrics returned error: %v", err)
+	}
+	if competitor.Rating != nil {
+		t.Errorf("competitor Rating = %v, want nil (a missing rating must not become 0)", *competitor.Rating)
+	}
+	if competitor.DisplayName != "クチコミの無い店" || competitor.UserRatingCount != 0 {
+		t.Errorf("competitor = %+v, unexpected", competitor)
 	}
 }

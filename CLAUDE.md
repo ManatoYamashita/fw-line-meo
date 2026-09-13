@@ -28,6 +28,11 @@ Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で
 - コンテナイメージは `go/Dockerfile`（multi-stage・distroless/static-debian12:nonroot 実行時）。このマシンには docker/apple-container が無いため実ビルド検証は CI/デプロイ時に行う
 - **CI では `ts-ci` の `go-test` ジョブが `go build ./...` / `go vet ./...` / `go test ./...` を実行する**（Issue #163 で新設。それ以前は Go が CI に一切載っておらず `make go-test` は main で赤いまま気づかれていなかった）。DB を使うテストは `go/internal/testdb` の `Isolated` が**テストごとに専用データベース**を作って migrations を適用する。共有 DB（`DATABASE_URL`）へ直接つないでよいのは、言語をまたいで同じ行を見る cross-runtime 契約テスト（`testdb.Shared`）だけである
 
+E2E（Issue #257・手順書は `docs/testing/e2e.md`。自動層・本番の読み取り確認・本番の実機確認の 3 層）:
+- `make e2e`（`bash scripts/run-e2e-local.sh`）— 自動層をローカルで一括実行する。層は `survey`（客向け画面の Playwright・一時 DB＋seed＋Gemini モック）／`surfaces`（管理ダッシュボードと店舗詳細の Playwright・IdP スタブのビルド）／`lighthouse`（LCP 要素が seed の店名であることまで確かめる）／`cross-runtime`。`--only survey,lighthouse` で絞れる。ts-ci の e2e / e2e-surfaces / lighthouse / cross-runtime と同じものを流す（lighthouse の LCP 要素の確認だけは、今はこの装置にしか無い・#264）。node 24 への切り替え・ポートの先客検出・スタブ入りビルドの巻き戻しは装置の側で行う。集約実行
+- `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks`（`bash scripts/run-e2e-prod-checks.sh`）— 本番の読み取り専用の確認（稼働イメージ・シークレット・実疎通の鮮度・**本番のコミットに対する ts-ci の E2E ジョブ**・日次ジョブ・配信の件数と致命的な失敗）。デプロイ待ち・デプロイ中は WARN。**運用者用・CI からは呼ばない**（ログを読むため）。本番の状態は変えない
+- **`playwright test` を素で打たない。** survey-web の `.env.local` は開発用 DB と実の Gemini キーを持つので、env を明示しない実行はそちらへ繋がる。`make ts-test-e2e` は `run-e2e-local.sh --only survey` を呼ぶ
+
 CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
 - `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
 - `scripts/check-prod-image-drift.sh` — 本番稼働イメージと `origin/main` の乖離検証（Issue #91）。`PROJECT_ID` 必須。`PROD_IMAGE_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
@@ -72,7 +77,7 @@ Cloud Run（Webhook/客向けWeb/ダッシュボードAPI・ゼロスケール�
 - **Google クチコミは客本人が投稿**: API 代理投稿は規約違反。システムの責務は「下書き生成 → 客がコピペして貼る」まで。
 - **スクレイピング禁止**: 競合データは Google Places API のみ（従量課金を許容）。
 - **客の個人情報を一切取得しない**: アンケート回答は **Place 単位の匿名集計のみ** 保持。個別回答の永続保存は行わない。
-- **AI ガードレール**: 嘘・誇張・誹謗中傷を生成しない。客本人が選んだ事実のみ反映。下書きが客ごとに異なるのは 2 つの理由による — **素材（星評価・選んだ観点・一言）が客ごとに異なること**と、**文体・書き出し・切り口をサーバー側が候補から選ぶこと**（`ts/apps/survey-web/src/lib/draft/prompt.ts` の `pickVariation`。素材からは導かれない独立の選択である）。結果として同一店舗で定型文が並ばない。
+- **AI ガードレール**: 嘘・誇張・誹謗中傷を生成しない。客本人が選んだ事実のみ反映。下書きが客ごとに異なるのは 2 つの理由による — **素材（星評価・選んだ観点・一言）が客ごとに異なること**と、**文体・書き出し・切り口をサーバー側が候補から選ぶこと**（`ts/apps/survey-web/src/lib/draft/prompt.ts` の `pickVariation`。素材の中身からは導かない選択である）。結果として同一店舗で定型文が並ばない。**ただし、素材に無い情報を要求する候補は選ばない**（例: アンケートが尋ねない来店のきっかけ、客が選ばなかった観点）。候補の指示が素材に無い情報を求めると、モデルはその情報を創作する（#254 で実測: 書き出し「訪問のきっかけから始める」のもとで来店の経緯・動機の創作が 31%）。候補を足すときは、成立に要る素材を宣言すること。多様性は素材に依存しない文体で確保し、文体の候補は文の形だけを変えるものに限る（事実を求める指示・感情の強さを変える指示・字数を縮める指示を入れない）。
 - **下書き文面への介入禁止**: オーナー・代理店が下書きの文面・プロンプトへ介入する経路を実装してはならない。Google「評価の操作」が禁じる「特定のコンテンツを含めるよう依頼すること」に直接該当する。現在 `stores` にプロンプト・文面の列は無く dashboard-api にも経路が無いが、これは**構造の偶然ではなく守るべき禁止事項**である（機械強制は `scripts/check-compliance-wording.sh`）。
 - **外部ポリシーは一次情報で判断する**: Google 規約の解釈は原文（`support.google.com/contributionpolicy`）を当たる。二次情報を根拠にしない。実例として 2026-04 改定を「AI 生成レビューの禁止」と報じた記事が多数あるが、**原文には日英とも AI・自動生成への言及が無い**。禁止の実体は「実体験に基づかないこと」であり、販売者側の分水嶺は「内容に影響を与えたか」である。
 - **GBP API（OAuth）は第2フェーズ**: 審査リスクが高く MVP の生死を賭けない。MVP に OAuth 連携を持ち込まない。

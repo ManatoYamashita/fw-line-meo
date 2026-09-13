@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import type { StoreDetailResponse, StoreRef } from '../lib/contract';
 import { announcedText, ownText } from './live-region';
+import { UNRATED_COMPETITOR_FROM_GO } from './fixtures/unrated-competitor';
 
 // Task 5.3: 詳細閲覧画面（実データ描画・LIFF 認可・エラー分岐・no-write 構造保証）を検証する。
 // task 2.3 のプレースホルダ検証を置き換える（プレースホルダ文言は本タスクで撤去済み）が、
@@ -872,7 +873,7 @@ describe('store detail page', () => {
         { name: '下降', body: withSummary({ rating: '4.3', ratingPrev: '4.5' }), pairs: [['Google 評価', '★4.3'], ['クチコミ', '120件'], ['評価の前日比', '-0.2'], ['クチコミの前日比', '+5件']] },
         { name: '同値', body: withSummary({ rating: '4.5', ratingPrev: '4.5' }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
         { name: '前日なし', body: withSummary({ ratingPrev: null }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
-        { name: '評価なし', body: withSummary({ rating: null }), pairs: [['Google 評価', '★—'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
+        { name: '評価なし', body: withSummary({ rating: null }), pairs: [['Google 評価', '評価なし'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
         { name: '件数なし', body: withSummary({ reviewCount: null }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '—'], ['評価の前日比', '+0.1']] },
       ] as const;
 
@@ -911,8 +912,8 @@ describe('store detail page', () => {
     it('競合と新着の一覧を list / listitem として読め、行の文字列を変えない（Req 2.1, 3.2）', async () => {
       const NEW_REVIEW_ROW = '山田太郎さん ★5「とても美味しかったです」';
       const cases = [
-        { name: '新着 1 行・競合 1 行', body: mockResult, lists: 2, items: [NEW_REVIEW_ROW, '競合A評価★4.2クチコミ80件星差0.3'] },
-        { name: '新着 0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), lists: 1, items: ['競合A評価★4.2クチコミ80件星差0.3'] },
+        { name: '新着 1 行・競合 1 行', body: mockResult, lists: 2, items: [NEW_REVIEW_ROW, '競合A評価★4.2クチコミ80件星差+0.3'] },
+        { name: '新着 0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), lists: 1, items: ['競合A評価★4.2クチコミ80件星差+0.3'] },
         { name: '競合 0 件', body: { ...mockResult, competitors: [] }, lists: 1, items: [NEW_REVIEW_ROW] },
       ] as const;
 
@@ -926,11 +927,95 @@ describe('store detail page', () => {
           expect(definitionPairs(competitor.querySelector('dl')!), item.name).toEqual([
             ['評価', '★4.2'],
             ['クチコミ', '80件'],
-            ['星差', '0.3'],
+            ['星差', '+0.3'],
           ]);
         }
       });
       expect(visited).toBe(cases.length);
+    });
+
+    // Issue #255: Google に評価が無い店（クチコミ 0 件）。応答は読込時に正規化済み（評価なしは null・
+    // 自店が未評価なら順位と星差も null）で届く。Flex と同じ規則・同じ文言で描く。
+    it('評価の無い競合を「評価なし」と描き、星差を出さず、順位に含めていない旨を添える（Issue #255）', async () => {
+      const EXCLUDED_NOTE = '評価のない店は順位に含めていません';
+      const cases = [
+        {
+          name: '評価の無い競合あり',
+          body: {
+            ...mockResult,
+            // Go が実際に書く評価なしの形（cross-runtime.e2e.test.ts が同じ定数で実データと照合する）。
+            competitors: [{ name: '競合A', rating: 4.2, reviewCount: 80, starDiff: 0.3 }, UNRATED_COMPETITOR_FROM_GO],
+          },
+          rows: {
+            競合A: [
+              ['評価', '★4.2'],
+              ['クチコミ', '80件'],
+              ['星差', '+0.3'],
+            ],
+            [UNRATED_COMPETITOR_FROM_GO.name]: [
+              ['評価', '評価なし'],
+              ['クチコミ', '0件'],
+            ],
+          },
+          note: true,
+        },
+        {
+          // 条件つきの分岐は既定側も固定しないと、無条件に出す実装が素通りする。
+          name: '全店に評価あり',
+          body: mockResult,
+          rows: {
+            競合A: [
+              ['評価', '★4.2'],
+              ['クチコミ', '80件'],
+              ['星差', '+0.3'],
+            ],
+          },
+          note: false,
+        },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        for (const [name, pairs] of Object.entries(item.rows)) {
+          const row = screen.getByText(name).closest('li');
+          expect(row, `${item.name}: ${name}`).not.toBeNull();
+          expect(definitionPairs(row!.querySelector('dl')!), `${item.name}: ${name}`).toEqual(pairs);
+        }
+        expect(container.textContent ?? '', item.name).not.toContain('★0');
+        const notes = Array.from(container.querySelectorAll('p')).filter((p) => announcedText(p) === EXCLUDED_NOTE);
+        expect(notes, item.name).toHaveLength(item.note ? 1 : 0);
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('自店が未評価の日は、取得失敗ではなく評価が無いため順位を出せない旨を描く（Issue #255）', async () => {
+      const body: StoreDetailResponse = {
+        ...withSummary({
+          rank: null,
+          rankTotal: null,
+          rankPrev: null,
+          rating: null,
+          ratingPrev: null,
+          reviewCount: 0,
+          reviewCountPrev: 0,
+        }),
+        competitors: [{ name: '競合A', rating: 4.2, reviewCount: 80, starDiff: null }],
+      };
+
+      const visited = await forEachResponse([{ name: '自店が未評価', body }], (item) => {
+        const position = screen.getByRole('heading', { level: 2, name: /今日のポジション/ }).parentElement!.querySelector('dl');
+        expect(definitionPairs(position!), item.name).toEqual([['近隣順位', 'まだ Google の評価が無いため、順位は出せません']]);
+
+        const own = screen.getByRole('heading', { level: 3, name: '自店の評価' }).parentElement!.querySelector('dl');
+        expect(definitionPairs(own!)[0], item.name).toEqual(['Google 評価', '評価なし']);
+
+        // 競合自身の評価は出し、自店と比べられない星差は出さない。
+        const row = screen.getByText('競合A').closest('li');
+        expect(definitionPairs(row!.querySelector('dl')!), item.name).toEqual([
+          ['評価', '★4.2'],
+          ['クチコミ', '80件'],
+        ]);
+      });
+      expect(visited).toBe(1);
     });
 
     it('推移の列見出し・scope・行数・セルの値を固定する（Req 2.1, 2.2）', async () => {
