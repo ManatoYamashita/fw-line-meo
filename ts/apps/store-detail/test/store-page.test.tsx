@@ -69,6 +69,17 @@ function soleParagraphAnnouncing(container: HTMLElement, expected: string): HTML
   return found[0]!;
 }
 
+/** dl 直下の各グループを、読み上げられるラベルと値の組として取り出す。 */
+function definitionPairs(list: Element): readonly (readonly [string, string])[] {
+  return Array.from(list.children).map((group) => {
+    const term = group.querySelector('dt');
+    const description = group.querySelector('dd');
+    expect(term, '指標ラベル').not.toBeNull();
+    expect(description, '指標値').not.toBeNull();
+    return [announcedText(term!), announcedText(description!)] as const;
+  });
+}
+
 const SINGLE_STORE: StoreRef[] = [{ storeId: 'store-1', name: 'テスト自由が丘店' }];
 const MULTI_STORES: StoreRef[] = [
   { storeId: 'store-1', name: 'テスト自由が丘店' },
@@ -127,17 +138,15 @@ describe('store detail page', () => {
     // ローディング状態がまず表示される。
     expect(screen.getByText('読み込み中です…')).toBeDefined();
 
-    // task 3.2 が順位の数値を巨大表示のため子要素へ切り出した。`getByText` は直下の
-    // テキストノードだけを見るため、この段落はもう `/近隣5店中\s*2位/` では掴めない。
-    // **読み上げられる内容は 1 文字も変わっていない**ので、追随先は announcedText である
-    // （部分一致だった正規表現を完全一致へ強めており、照合を弱めてはいない）。
+    // Issue #258 で順位は文章ではなくラベルと値の組へ移した。描画完了はその主指標で待つ。
     await waitFor(() => {
-      expect(soleParagraphAnnouncing(container, '近隣5店中 2位（前日比: ↑ 上昇）')).toBeDefined();
+      expect(screen.getByText('近隣5店中')).toBeDefined();
+      expect(screen.getByText('前日比: ↑ 上昇')).toBeDefined();
     });
 
-    expect(screen.getByText(/★4\.5/)).toBeDefined();
-    expect(screen.getByText(/2件の新着クチコミ/)).toBeDefined();
-    expect(screen.getByText(/競合A/)).toBeDefined();
+    expect(screen.getByText('★4.5')).toBeDefined();
+    expect(soleParagraphAnnouncing(container, '2件の新着クチコミ')).toBeDefined();
+    expect(screen.getByText('競合A')).toBeDefined();
     expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
 
     // LIFF ID トークンを Authorization ヘッダに載せて GET している。
@@ -783,8 +792,8 @@ describe('store detail page', () => {
   // 壊れうる契約はどれも押さえていなかった。**先に固定してから意匠を当てる。**
   //
   //   - 節の見出し（h2 4 種・h3 2 種）の読み上げ名と階層 …… 0 件
-  //   - 順位の段落が読み上げる内容（上昇・下降・変動なし・前日欠損・順位欠損・母数欠損）…… 0 件
-  //   - 自店の評価の段落が読み上げる内容（上昇・下降・同値・前日欠損・評価欠損・件数欠損）…… 0 件
+  //   - 順位指標が読み上げる内容（上昇・下降・変動なし・前日欠損・順位欠損・母数欠損）…… 0 件
+  //   - 自店評価の指標が読み上げる内容（上昇・下降・同値・前日欠損・評価欠損・件数欠損）…… 0 件
   //   - 新着クチコミの件数表記・各行の文字列・0 件の文言 …… 0 件
   //   - 競合の各行の文字列 …… 存在の部分一致 `/競合A/` のみ
   //   - 推移の列見出し 4 つ・scope・行数・セルの値 …… **要件 2.2 が守る対象が丸ごと 0 件**
@@ -836,42 +845,42 @@ describe('store detail page', () => {
 
     // --- 段 1: 着手前に無検証だった中身の契約 --------------------------------------------
 
-    it('順位の段落が読み上げる内容を 6 分岐で完全一致に固定する（Req 3.2, 4.7）', async () => {
+    it('順位をラベルと値の組として 6 分岐で固定する（Issue #258, Req 4.7）', async () => {
       const cases = [
-        { name: '上昇', body: withSummary({ rank: 2, rankPrev: 3 }), announced: '近隣5店中 2位（前日比: ↑ 上昇）' },
-        { name: '下降', body: withSummary({ rank: 4, rankPrev: 3 }), announced: '近隣5店中 4位（前日比: ↓ 下降）' },
-        { name: '変動なし', body: withSummary({ rank: 3, rankPrev: 3 }), announced: '近隣5店中 3位（前日比: → 変動なし）' },
-        { name: '前日なし', body: withSummary({ rankPrev: null }), announced: '近隣5店中 2位' },
-        { name: '順位なし', body: withSummary({ rank: null }), announced: '順位情報がありません' },
-        { name: '母数なし', body: withSummary({ rankTotal: null }), announced: '順位情報がありません（前日比: ↑ 上昇）' },
+        { name: '上昇', body: withSummary({ rank: 2, rankPrev: 3 }), pair: ['近隣5店中', '2位 前日比: ↑ 上昇'] },
+        { name: '下降', body: withSummary({ rank: 4, rankPrev: 3 }), pair: ['近隣5店中', '4位 前日比: ↓ 下降'] },
+        { name: '変動なし', body: withSummary({ rank: 3, rankPrev: 3 }), pair: ['近隣5店中', '3位 前日比: → 変動なし'] },
+        { name: '前日なし', body: withSummary({ rankPrev: null }), pair: ['近隣5店中', '2位'] },
+        { name: '順位なし', body: withSummary({ rank: null }), pair: ['近隣5店中', '順位情報がありません'] },
+        { name: '母数なし', body: withSummary({ rankTotal: null }), pair: ['近隣順位', '順位情報がありません 前日比: ↑ 上昇'] },
       ] as const;
 
       const visited = await forEachResponse(cases, (item, container) => {
-        const paragraph = soleParagraphAnnouncing(container, item.announced);
-        const marker = item.announced.indexOf('（前日比:');
-        if (marker >= 0) {
-          // 前日比は上下の矢印を伴う文言であり（正典 7.7 節・要件 4.7）、**段落の直下テキスト**
-          // として置かれる。独立した要素を持たない以上、増減を色だけで伝えることが
-          // 構造的にできない。色ユーティリティを足す改変は、まずこの assert を壊す。
-          expect(ownText(paragraph), item.name).toContain(item.announced.slice(marker));
-        }
+        const heading = screen.getByRole('heading', { level: 2, name: /今日のポジション/ });
+        const list = heading.parentElement!.querySelector('dl');
+        expect(list, item.name).not.toBeNull();
+        expect(definitionPairs(list!), item.name).toEqual([item.pair]);
+        expect(list!.querySelectorAll('[data-slot="badge"]'), item.name).toHaveLength(item.pair[1].includes('前日比') ? 1 : 0);
+        expect(container.querySelectorAll('dl').length, item.name).toBeGreaterThan(0);
       });
       expect(visited).toBe(cases.length);
     });
 
-    it('自店の評価の段落が読み上げる内容を 6 分岐で完全一致に固定する（Req 3.2, 4.7）', async () => {
+    it('自店の評価を独立した指標として 6 分岐で固定する（Issue #258, Req 4.7）', async () => {
       const cases = [
-        { name: '上昇', body: withSummary({ rating: '4.5', ratingPrev: '4.4' }), announced: '★4.5（クチコミ 120件）（前日比 +0.1）' },
-        { name: '下降', body: withSummary({ rating: '4.3', ratingPrev: '4.5' }), announced: '★4.3（クチコミ 120件）（前日比 -0.2）' },
-        { name: '同値', body: withSummary({ rating: '4.5', ratingPrev: '4.5' }), announced: '★4.5（クチコミ 120件）' },
-        { name: '前日なし', body: withSummary({ ratingPrev: null }), announced: '★4.5（クチコミ 120件）' },
-        { name: '評価なし', body: withSummary({ rating: null }), announced: '★—（クチコミ 120件）' },
-        { name: '件数なし', body: withSummary({ reviewCount: null }), announced: '★4.5（クチコミ —）（前日比 +0.1）' },
+        { name: '上昇', body: withSummary({ rating: '4.5', ratingPrev: '4.4' }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '120件'], ['評価の前日比', '+0.1'], ['クチコミの前日比', '+5件']] },
+        { name: '下降', body: withSummary({ rating: '4.3', ratingPrev: '4.5' }), pairs: [['Google 評価', '★4.3'], ['クチコミ', '120件'], ['評価の前日比', '-0.2'], ['クチコミの前日比', '+5件']] },
+        { name: '同値', body: withSummary({ rating: '4.5', ratingPrev: '4.5' }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
+        { name: '前日なし', body: withSummary({ ratingPrev: null }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
+        { name: '評価なし', body: withSummary({ rating: null }), pairs: [['Google 評価', '★—'], ['クチコミ', '120件'], ['クチコミの前日比', '+5件']] },
+        { name: '件数なし', body: withSummary({ reviewCount: null }), pairs: [['Google 評価', '★4.5'], ['クチコミ', '—'], ['評価の前日比', '+0.1']] },
       ] as const;
 
-      const visited = await forEachResponse(cases, (item, container) => {
-        // 評価の増減は符号（+ / -）で示され、こちらも段落の直下テキストである。
-        expect(ownText(soleParagraphAnnouncing(container, item.announced)), item.name).toBe(item.announced);
+      const visited = await forEachResponse(cases, (item) => {
+        const heading = screen.getByRole('heading', { level: 3, name: '自店の評価' });
+        const list = heading.parentElement!.querySelector('dl');
+        expect(list, item.name).not.toBeNull();
+        expect(definitionPairs(list!), item.name).toEqual(item.pairs);
       });
       expect(visited).toBe(cases.length);
     });
@@ -892,19 +901,18 @@ describe('store detail page', () => {
         },
       ] as const;
 
-      const visited = await forEachResponse(cases, (item) => {
-        expect(screen.getAllByText(item.present), item.name).toHaveLength(1);
-        expect(screen.queryByText(item.absent), item.name).toBeNull();
+      const visited = await forEachResponse(cases, (item, container) => {
+        expect(soleParagraphAnnouncing(container, item.present), item.name).toBeDefined();
+        expect(Array.from(container.querySelectorAll('p')).some((p) => announcedText(p) === item.absent), item.name).toBe(false);
       });
       expect(visited).toBe(cases.length);
     });
 
     it('競合と新着の一覧を list / listitem として読め、行の文字列を変えない（Req 2.1, 3.2）', async () => {
       const NEW_REVIEW_ROW = '山田太郎さん ★5「とても美味しかったです」';
-      const COMPETITOR_ROW = '競合A: ★4.2（クチコミ 80件） 星差 0.3';
       const cases = [
-        { name: '新着 1 行・競合 1 行', body: mockResult, lists: 2, items: [NEW_REVIEW_ROW, COMPETITOR_ROW] },
-        { name: '新着 0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), lists: 1, items: [COMPETITOR_ROW] },
+        { name: '新着 1 行・競合 1 行', body: mockResult, lists: 2, items: [NEW_REVIEW_ROW, '競合A評価★4.2クチコミ80件星差0.3'] },
+        { name: '新着 0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), lists: 1, items: ['競合A評価★4.2クチコミ80件星差0.3'] },
         { name: '競合 0 件', body: { ...mockResult, competitors: [] }, lists: 1, items: [NEW_REVIEW_ROW] },
       ] as const;
 
@@ -913,6 +921,14 @@ describe('store detail page', () => {
         expect(screen.getAllByRole('list'), item.name).toHaveLength(item.lists);
         expect(screen.getAllByRole('listitem').map((li) => announcedText(li)), item.name).toEqual(item.items);
         expect(container.querySelectorAll('li'), item.name).toHaveLength(item.items.length);
+        const competitor = screen.queryByText('競合A')?.closest('li');
+        if (competitor) {
+          expect(definitionPairs(competitor.querySelector('dl')!), item.name).toEqual([
+            ['評価', '★4.2'],
+            ['クチコミ', '80件'],
+            ['星差', '0.3'],
+          ]);
+        }
       });
       expect(visited).toBe(cases.length);
     });
@@ -1064,15 +1080,12 @@ describe('store detail page', () => {
         expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
       });
 
-      const paragraph = soleParagraphAnnouncing(container, '近隣5店中 2位（前日比: ↑ 上昇）');
-      // 巨大表示は段落の中の 1 要素だけ。前日比まで巻き込むと「唯一の大声」が意味を失う。
-      const children = Array.from(paragraph.children);
-      expect(children).toHaveLength(1);
-      const display = children[0]!;
+      const display = screen.getByText('近隣5店中').parentElement!.querySelector('.text-2xl')!;
+      expect(display.closest('dd')?.textContent).toContain('前日比: ↑ 上昇');
       expect(ownText(display)).toBe('2');
       // **集合の完全一致で固定する。** 包含では `text-[64px]` のような任意値や色ユーティリティを
       // 後ろへ足す改変が通る。段は正典 7.3 節が指す 6 節の最大段であり、面は値を持たない。
-      expect(classTokens(display)).toEqual(['text-2xl', 'font-bold']);
+      expect(classTokens(display)).toEqual(['text-2xl', 'font-bold', 'tabular-nums']);
 
       // 完了条件「巨大表示に任意の値を書いていない」を、巨大表示だけでなく**面が自分で書く
       // 要素すべて**へ広げる。走査から外すのは `data-slot` を持つ要素（＝共通部品の描く要素）で、
@@ -1087,12 +1100,13 @@ describe('store detail page', () => {
       // 部品側の内部クラスをテストへ書き写さずに、面が足した分だけを完全一致で固定できる
       // （書き写すと部品を直した瞬間に面の検査が理由もなく壊れる）。
       const contents = Array.from(container.querySelectorAll('[data-slot="card-content"]'));
-      const untouched = new Set(classTokens(contents[0]!));
+      const untouched = new Set(classTokens(contents[3]!));
       expect(contents.map((element) => classTokens(element).filter((token) => !untouched.has(token)))).toEqual([
+        ['flex', 'flex-col', 'gap-4'],
+        ['flex', 'flex-col', 'gap-4'],
+        ['flex', 'flex-col', 'gap-4'],
         [],
-        [],
-        ['flex', 'flex-col', 'gap-2'],
-        [],
+        ['flex', 'flex-col', 'gap-4'],
       ]);
     });
 
@@ -1104,7 +1118,7 @@ describe('store detail page', () => {
       });
 
       const cards = Array.from(container.querySelectorAll('[data-slot="card"]'));
-      expect(cards).toHaveLength(4);
+      expect(cards).toHaveLength(5);
 
       // 見出しは容器の**外**に置く。容器は内容だけを持つ（面の中で規則を 1 つに保つため、
       // 空状態の部品が容器をそのまま置き換えられる形にしてある）。
@@ -1113,12 +1127,13 @@ describe('store detail page', () => {
       }
 
       const inCard = [
-        soleParagraphAnnouncing(container, '近隣5店中 2位（前日比: ↑ 上昇）'),
-        soleParagraphAnnouncing(container, '★4.5（クチコミ 120件）（前日比 +0.1）'),
-        screen.getByText('2件の新着クチコミ'),
-        screen.getByText('競合A: ★4.2（クチコミ 80件） 星差 0.3'),
+        screen.getByText('近隣5店中'),
+        screen.getByText('Google 評価'),
+        soleParagraphAnnouncing(container, '2件の新着クチコミ'),
+        screen.getByText('競合A'),
+        screen.getByText('表示期間の変化'),
       ];
-      expect(inCard.map((element) => cards.indexOf(element.closest('[data-slot="card"]')!))).toEqual([0, 1, 2, 3]);
+      expect(inCard.map((element) => cards.indexOf(element.closest('[data-slot="card"]')!))).toEqual([0, 1, 2, 3, 4]);
 
       // 見出しと対応する内容を近い間隔でまとめ、各グループの間をその 2 倍以上空ける。
       // 見出しと前のカードが等距離になると、どちらの内容を説明しているかが曖昧になる。
@@ -1147,6 +1162,7 @@ describe('store detail page', () => {
 
       const table = screen.getByRole('table');
       expect(table.getAttribute('data-slot')).toBe('table');
+      expect(classTokens(table)).toContain('min-w-sm');
       for (const cell of screen.getAllByRole('columnheader')) {
         expect(cell.getAttribute('data-slot'), cell.textContent ?? '').toBe('table-header-cell');
       }
@@ -1162,6 +1178,13 @@ describe('store detail page', () => {
       expect(scroller.getAttribute('aria-label')).toBe('直近30日の推移');
       // 捲れる領域はこの面に 1 つだけ。e2e（store-surface.spec.ts）の宣言と同じ数である。
       expect(container.querySelectorAll('[data-slot="table-container"]')).toHaveLength(1);
+
+      const overview = screen.getByText('表示期間の変化').closest('[data-slot="card"]')!;
+      expect(definitionPairs(overview.querySelector('dl')!)).toEqual([
+        ['順位', '3位 → 2位'],
+        ['評価', '4.4 → 4.5'],
+        ['クチコミ増減', '+5件'],
+      ]);
 
       // 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。
       const firstRow = screen.getAllByRole('row')[1]!;
@@ -1218,8 +1241,8 @@ describe('store detail page', () => {
         ['flex', 'flex-col', 'gap-4'],
       ]);
       expect(Array.from(container.querySelectorAll('ul')).map((element) => classTokens(element))).toEqual([
-        ['flex', 'flex-col', 'gap-2'],
-        ['flex', 'flex-col', 'gap-2'],
+        ['divide-y'],
+        ['divide-y'],
       ]);
     });
   });

@@ -378,6 +378,26 @@ TypeScript の文字列リテラルに書いた記号は機械検出されない
 由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
 由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
 
+### 7.17 店舗詳細は文章の列ではなく指標のダッシュボードとして組む
+
+**順位・評価・クチコミ数・新着件数は、ラベルと値を分けた指標として描く。**
+1 つの文章へ数値を連結すると、利用者は毎朝同じ文を読み解いてから昨日との差を探すことになる。
+店舗詳細は日次確認の面なので、順位を最初の大きな値、評価とクチコミ数を次の指標群、新着を
+独立した一覧として配置する。値の集合には `dl` / `dt` / `dd` を使い、視覚上の分離と
+支援技術上の対応関係を同じ DOM から導く。
+
+**競合は店舗ごとの比較行とし、店名の下に評価・クチコミ数・星差を同じ順序で並べる。**
+店舗ごとに文章を組み立てない。長い店名は折り返し、数値は等幅数字で揃える。行そのものは
+操作できないため hover 面は持たず、行の境界は一覧の区切り線だけで示す。
+
+**30 日推移の表の前に、表示期間の始点と終点から求めた要約を置く。**
+順位と評価は `始点 → 終点`、クチコミ数は差分で示し、変化を表の全行から探さなくてもよい状態にする。
+表は日別の一次情報として残し、列・行・セルの意味論と横方向の捲りを維持する。要約は既存データから
+表示時に算出し、API や保存形式を増やさない。狭い画面で日付や短い列名を過剰に折り返さず、
+表の最小幅は既存の寸法トークンで確保して、外側の焦点可能な容器で横へ捲れるようにする。
+
+由来: [#258](https://github.com/ManatoYamashita/fw-line-meo/issues/258)
+
 ---
 
 ## 8. 面を組む前に読む構造契約
@@ -390,6 +410,7 @@ TypeScript の文字列リテラルに書いた記号は機械検出されない
 | store-detail は記入欄・押しボタン・選択のいずれも描画しない | `ts/apps/store-detail/test/store-page.test.tsx` |
 | store-detail の複数店舗表示でリンクがちょうど 1 件 | `ts/apps/store-detail/test/store-page.test.tsx` |
 | store-detail の第 1 見出しは店名の完全一致 | `ts/apps/store-detail/test/store-page.test.tsx` |
+| store-detail の指標は `dl` / `dt` / `dd` の対応関係を持つ | `ts/apps/store-detail/test/store-page.test.tsx` |
 | ダッシュボードの選択はプログラムによる値変更で操作される | `ts/apps/dashboard-web/test/admin-users-page.test.tsx` |
 | 一覧はセル役割と行要素で掴まれるため、カード化できない | `ts/apps/dashboard-web/test/admin-users-page.test.tsx`, `ts/apps/dashboard-web/test/stores-page.test.tsx` |
 | 星は押しボタン役割と押下状態で掴まれる | `ts/apps/survey-web/test/survey-form.test.tsx` |

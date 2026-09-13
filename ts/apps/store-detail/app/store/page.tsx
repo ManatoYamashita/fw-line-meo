@@ -69,6 +69,7 @@
 import { useEffect, useState } from 'react';
 import liff from '@line/liff';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
+import { Badge } from '@fwlm/ui/components/badge';
 import { Card, CardContent } from '@fwlm/ui/components/card';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
 import { Heading } from '@fwlm/ui/components/heading';
@@ -230,7 +231,33 @@ function formatRatingDiff(rating: string | null, ratingPrev: string | null): str
   return `前日比 ${sign}${diff.toFixed(1)}`;
 }
 
+function formatReviewCountDiff(current: number | null, previous: number | null): string | null {
+  if (current === null || previous === null) {
+    return null;
+  }
+  const diff = current - previous;
+  const sign = diff > 0 ? '+' : '';
+  return `${sign}${diff}件`;
+}
+
 // --- サブコンポーネント ----------------------------------------------------------------
+
+function Metric({
+  label,
+  value,
+  prominent = false,
+}: {
+  readonly label: string;
+  readonly value: React.ReactNode;
+  readonly prominent?: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-1">
+      <dt className="text-sm">{label}</dt>
+      <dd className={prominent ? 'text-lg font-semibold tabular-nums' : 'font-medium tabular-nums'}>{value}</dd>
+    </div>
+  );
+}
 
 function NewReviewsList({
   count,
@@ -249,13 +276,20 @@ function NewReviewsList({
   }
   return (
     <Card>
-      <CardContent className="flex flex-col gap-2">
-        <p>{count}件の新着クチコミ</p>
+      <CardContent className="flex flex-col gap-4">
+        <p className="flex items-baseline gap-1">
+          <span className="text-2xl font-bold tabular-nums">{count}</span>
+          <span>件の新着クチコミ</span>
+        </p>
         {/* 一覧の意味論（list / listitem）を保つ。カードの並びへ置き換えない（正典 7.2 節と同じ規律）。 */}
-        <ul className="flex flex-col gap-2">
+        <ul className="divide-y">
           {reviews.map((review, index) => (
-            <li key={`${review.authorName}-${review.publishTime}-${index}`}>
-              {review.authorName}さん ★{review.rating}「{review.textExcerpt}」
+            <li className="grid gap-1 py-4 first:pt-0 last:pb-0" key={`${review.authorName}-${review.publishTime}-${index}`}>
+              <div className="flex items-start justify-between gap-4">
+                <span className="font-semibold">{review.authorName}さん </span>
+                <span className="shrink-0 tabular-nums">★{review.rating}</span>
+              </div>
+              <p>「{review.textExcerpt}」</p>
             </li>
           ))}
         </ul>
@@ -289,46 +323,60 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
 
   const rankDiff = formatRankDiff(summary.rank, summary.rankPrev);
   const ratingDiff = formatRatingDiff(summary.rating, summary.ratingPrev);
+  const reviewCountDiff = formatReviewCountDiff(summary.reviewCount, summary.reviewCountPrev);
 
   return (
     <section className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <Heading level={2}>今日のポジション（{summary.summaryDate}）</Heading>
         <Card>
-          <CardContent>
+          <CardContent className="flex flex-col gap-4">
             {/* 順位の数値だけを巨大表示にする（正典 7.3 節）。段は 6 節の文字サイズの最大段であり、
              * 面の側は任意の値を持たない。**暫定であり、この段は主見出しと同じ寸法である**ため、
              * 「プロダクト全体で 1 箇所」という一意性はここでは主張しない（追跡は Issue #185）。
              *
-             * 数値を子要素へ切り出しても、この段落が読み上げる内容は 1 文字も変わらない
-             * （前後の文言は直下のテキストノードのまま残る）。
-             *
              * 前日比は `formatRankDiff` が返す上下の矢印を伴う文言をそのまま置く（正典 7.7 節）。
-             * 独立した要素を与えないので、増減を色だけで伝えることが構造的に起こりえない。 */}
-            <p>
-              {summary.rank !== null && summary.rankTotal !== null ? (
-                <>
-                  {`近隣${summary.rankTotal}店中 `}
-                  <span className="text-2xl font-bold">{summary.rank}</span>
-                  {'位'}
-                </>
-              ) : (
-                '順位情報がありません'
-              )}
-              {rankDiff !== null ? `（前日比: ${rankDiff}）` : ''}
-            </p>
+             * Badge に分離しても矢印と文言を残すため、増減を色だけで伝えない。 */}
+            <dl>
+              <div className="flex flex-col gap-1">
+                <dt className="text-sm">
+                  {summary.rankTotal !== null ? `近隣${summary.rankTotal}店中` : '近隣順位'}
+                </dt>
+                <dd className="flex flex-wrap items-baseline gap-2">
+                  {summary.rank !== null && summary.rankTotal !== null ? (
+                    <>
+                      <span className="text-2xl font-bold tabular-nums">{summary.rank}</span>
+                      <span>位</span>
+                    </>
+                  ) : (
+                    <span className="font-medium">順位情報がありません</span>
+                  )}
+                  {rankDiff !== null ? (
+                    <>
+                      {' '}
+                      <Badge variant="secondary">前日比: {rankDiff}</Badge>
+                    </>
+                  ) : null}
+                </dd>
+              </div>
+            </dl>
           </CardContent>
         </Card>
       </div>
       <div className="flex flex-col gap-2">
         <Heading level={3}>自店の評価</Heading>
         <Card>
-          <CardContent>
-            <p>
-              ★{summary.rating ?? '—'}（クチコミ{' '}
-              {summary.reviewCount !== null ? `${summary.reviewCount}件` : '—'}）
-              {ratingDiff !== null ? `（${ratingDiff}）` : ''}
-            </p>
+          <CardContent className="flex flex-col gap-4">
+            <dl className="grid grid-cols-2 gap-4">
+              <Metric label="Google 評価" prominent value={`★${summary.rating ?? '—'}`} />
+              <Metric
+                label="クチコミ"
+                prominent
+                value={summary.reviewCount !== null ? `${summary.reviewCount}件` : '—'}
+              />
+              {ratingDiff !== null ? <Metric label="評価の前日比" value={ratingDiff.replace('前日比 ', '')} /> : null}
+              {reviewCountDiff !== null ? <Metric label="クチコミの前日比" value={reviewCountDiff} /> : null}
+            </dl>
           </CardContent>
         </Card>
       </div>
@@ -355,11 +403,18 @@ function CompetitorsSection({
       ) : (
         <Card>
           <CardContent>
-            <ul className="flex flex-col gap-2">
+            <ul className="divide-y">
               {competitors.map((competitor, index) => (
-                <li key={`${competitor.name}-${index}`}>
-                  {competitor.name}: ★{competitor.rating ?? '—'}（クチコミ{' '}
-                  {competitor.reviewCount ?? '—'}件） 星差 {competitor.starDiff ?? '—'}
+                <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={`${competitor.name}-${index}`}>
+                  <p className="font-semibold">{competitor.name}</p>
+                  <dl className="grid grid-cols-3 gap-3">
+                    <Metric label="評価" value={`★${competitor.rating ?? '—'}`} />
+                    <Metric
+                      label="クチコミ"
+                      value={competitor.reviewCount !== null ? `${competitor.reviewCount}件` : '—'}
+                    />
+                    <Metric label="星差" value={competitor.starDiff ?? '—'} />
+                  </dl>
                 </li>
               ))}
             </ul>
@@ -371,6 +426,10 @@ function CompetitorsSection({
 }
 
 function TrendSection({ trend }: { readonly trend: readonly StoreDetailTrendPoint[] }): React.JSX.Element {
+  const first = trend[0];
+  const latest = trend.at(-1);
+  const reviewCountDiff = formatReviewCountDiff(latest?.reviewCount ?? null, first?.reviewCount ?? null);
+
   return (
     <section className="flex flex-col gap-4">
       <Heading level={2}>直近30日の推移</Heading>
@@ -379,32 +438,50 @@ function TrendSection({ trend }: { readonly trend: readonly StoreDetailTrendPoin
           <p>{NO_TREND_TEXT}</p>
         </EmptyState>
       ) : (
-        // 横方向の捲りは表の **外側** が持つ（正典 7.2 節・要件 2.5）。この容器がこの面で
-        // 唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
-        // 列見出しの文字列は 1 文字も変えない（要件 2.2）。scope は部品の既定が与える。
-        <TableContainer label="直近30日の推移">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>日付</TableHeaderCell>
-                <TableHeaderCell>順位</TableHeaderCell>
-                <TableHeaderCell>評価</TableHeaderCell>
-                <TableHeaderCell>クチコミ数</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {trend.map((point) => (
-                <TableRow key={point.capturedOn}>
-                  {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
-                  <TableCell>{point.capturedOn}</TableCell>
-                  <TableCell numeric>{point.rank ?? '—'}</TableCell>
-                  <TableCell numeric>{point.rating ?? '—'}</TableCell>
-                  <TableCell numeric>{point.reviewCount ?? '—'}</TableCell>
+        <div className="flex flex-col gap-4">
+          <Card>
+            <CardContent className="flex flex-col gap-4">
+              <p className="font-semibold">表示期間の変化</p>
+              <dl className="grid gap-4 sm:grid-cols-3">
+                <Metric
+                  label="順位"
+                  value={first?.rank != null && latest?.rank != null ? `${first.rank}位 → ${latest.rank}位` : '—'}
+                />
+                <Metric
+                  label="評価"
+                  value={first?.rating != null && latest?.rating != null ? `${first.rating} → ${latest.rating}` : '—'}
+                />
+                <Metric label="クチコミ増減" value={reviewCountDiff ?? '—'} />
+              </dl>
+            </CardContent>
+          </Card>
+          {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・要件 2.5）。この容器がこの面で
+              唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
+              列見出しの文字列は 1 文字も変えない（要件 2.2）。scope は部品の既定が与える。 */}
+          <TableContainer label="直近30日の推移">
+            <Table className="min-w-sm">
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>日付</TableHeaderCell>
+                  <TableHeaderCell>順位</TableHeaderCell>
+                  <TableHeaderCell>評価</TableHeaderCell>
+                  <TableHeaderCell>クチコミ数</TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              </TableHead>
+              <TableBody>
+                {trend.map((point) => (
+                  <TableRow key={point.capturedOn}>
+                    {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
+                    <TableCell>{point.capturedOn}</TableCell>
+                    <TableCell numeric>{point.rank ?? '—'}</TableCell>
+                    <TableCell numeric>{point.rating ?? '—'}</TableCell>
+                    <TableCell numeric>{point.reviewCount ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </div>
       )}
     </section>
   );
@@ -543,17 +620,21 @@ export default function StorePage(): React.JSX.Element {
     <PageShell width="sm" className="flex flex-col gap-6">
       {/* 多店舗オーナーにとって「今どの店を見ているか」は必須の文脈（要件 4.7）。
        * 主見出しは店名そのものであり、装飾も日付も内包しない（日付は各節の h2 側にある）。 */}
-      <Heading level={1}>{data.storeName}</Heading>
-      {data.stores.length >= 2 ? (
-        // storeId を持たない /store へ戻る → サーバーが再び 409 を返し選択画面に着地する。
-        <p>
-          <a href="/store">{SWITCH_STORE_LABEL}</a>
-        </p>
-      ) : null}
+      <header className="flex flex-col gap-2">
+        <Heading level={1}>{data.storeName}</Heading>
+        {data.stores.length >= 2 ? (
+          // storeId を持たない /store へ戻る → サーバーが再び 409 を返し選択画面に着地する。
+          <p>
+            <a href="/store">{SWITCH_STORE_LABEL}</a>
+          </p>
+        ) : null}
+      </header>
       <SummarySection summary={data.summary} />
       <CompetitorsSection competitors={data.competitors} />
       <TrendSection trend={data.trend} />
-      <p>{GOOGLE_ATTRIBUTION_TEXT}</p>
+      <footer>
+        <p className="text-sm">{GOOGLE_ATTRIBUTION_TEXT}</p>
+      </footer>
     </PageShell>
   );
 }
