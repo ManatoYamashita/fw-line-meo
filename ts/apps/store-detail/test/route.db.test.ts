@@ -44,8 +44,12 @@ const TOKEN_UNCONFIRMED = 'token-unconfirmed';
 const TOKEN_MULTI = 'token-multi';
 const TOKEN_INVALID = 'token-invalid';
 
+// route.ts は queryStoreDetail を asOf 省略で呼び、基準日は JST の暦日になる（Issue #268）。
+// 種まきの「今日」も JST の暦日に揃える。UTC の日付で種をまくと、両者が分かれる
+// 15:00〜24:00 UTC（＝0:00〜9:00 JST）に実行したときだけ 200 系の検証が落ちる。
+// 物差しは実装から import せず、ここで独立に計算する（同じ関数を使うと、実装が壊れても一緒にずれて緑のままになる）。
 function todayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 // --- フェイク LINE verify サーバー ------------------------------------------------------
