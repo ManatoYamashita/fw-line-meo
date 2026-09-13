@@ -305,3 +305,147 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
 - 推移の順位は、正規化した `daily_summaries` の行から読む。母数（比較可能かどうか）が要るので、`rating_snapshots` だけでは足りない
 - 本 spec の Go の変更（口コミの帰属情報の保存・4-1）は、PR-2 と同じファイル（`go/internal/places/types.go`・`client.go`・`go/internal/repo/summaries.go`）と TS の `ts/packages/db/src/types.ts` を触る。PR-2 の後に載せて衝突を避ける
 - 本 spec の本番提供は PR-1 と PR-2 の両方の本番反映を前提にする（Req 9.3）
+
+---
+
+## 設計フェーズの調査と決定（2026-09-13・/kiro-spec-design）
+
+### Summary（設計）
+
+- Discovery Scope: Extension（軽量ディスカバリ）。外部依存（LINE Messaging API・Google Places）は既に統合済みで、新しいライブラリは入れない。規約適合と移行手順の 2 点だけ一次情報を取り直した
+- Key Findings:
+  - Places のテキストの帰属表示には細則がある（文字の改変・改行・翻訳の禁止、Roboto 400、12〜16sp、色は白・#1F1F1F・#5E5E5E、同じ容器の上端か下端）。既存の日次カードは `xxs`（12sp 未満）と `#AAAAAA` で満たしていない。LINE では書体を指定できない
+  - 代理店がダッシュボードから店舗を登録する経路では、LINE の会話が未完了のままオーナーの店舗が確定し、完了後メニューへのリンクが一度も張られない。通知の前に照合して張る仕組みが要る
+  - #255 の PR #266 が、正規化と表示整形を `@fwlm/db/daily-summary` に置いた。本 spec はこれをそのまま使える
+
+### Research Log（設計）
+
+#### Places の帰属表示の細則
+
+- Context: Req 8.1 はポリシーが定める形式での帰属表示を求める。どこまで LINE で満たせるかを確かめる
+- Sources Consulted: `https://developers.google.com/maps/documentation/places/web-service/policies`（2026-09-13 取得）、`.claude/skills/messaging-api/references/flex-message.md`（Text の `size` はキーワードかピクセル、`action` を持てる）
+- Findings:
+  - "Don't modify the text Google Maps in any way"（大文字小文字を変えない・複数行へ折り返さない・翻訳しない）
+  - "Font family: Roboto. Font weight: 400. Font size: Minimum font size: 12sp Maximum font size: 16sp"、色は "White, black (#1F1F1F), or gray (#5E5E5E)"、配置は "near the top or bottom of the content, and within the same visual container"
+  - 口コミ本文の切り詰め、帰属リンクをタップ可能にすべきかは原文に記述が無い
+  - LINE Flex の Text は `size` にピクセル値を取れる。書体を指定するプロパティは無い。テキストメッセージ（`type: text`）は大きさも色も指定できない
+- Implications: 通知もレポートも Flex の footer にテキストの帰属表示を置き、大きさを 12〜16 の範囲のピクセル値に、色を #5E5E5E に固定する。書体は既知の逸脱として残す。通知をテキストメッセージにすると大きさと色まで逸脱するため、通知も Flex にする
+
+#### 口コミの帰属情報の取得元
+
+- Context: Req 8.2・8.6・8.7 を満たすための項目が、既存の取得で手に入るか
+- Sources Consulted: Places API リファレンス（`places` リソースの Review と AuthorAttribution・2026-09-13 取得）、`go/internal/places/client.go:23`（自店のフィールドマスクは `reviews`）、`go/internal/places/types.go:112-126`
+- Findings: Review は `googleMapsUri` を、AuthorAttribution は `displayName`・`uri`・`photoUri` を持つ。Go は `displayName` だけを構造体へ受けている
+- Implications: Go の受け皿と jsonb の要素に 3 項目を足すだけで、取得回数とフィールドマスクは変えない。実レスポンスに 3 項目が含まれることは、実疎通（`infra/README.md` §8）で確かめる
+
+#### 完了後メニューのリンクが張られる経路
+
+- Context: Req 2.8（どの経路でも最初の通知より前に完了後メニュー）と Req 1.10（メニューが無いオーナーへメニューへ誘導する通知を送らない）
+- Sources Consulted: `conversation.ts:476-535`（リンクは `handleConfirm` だけ）、`ts/apps/dashboard-api/src/index.ts:79-80`（代理店登録は `confirmStore` を呼ぶだけで LINE に触れない）、`.claude/skills/messaging-api/references/rich-menu.md`（per-user リンクは既定より優先・削除されたメニューへのリンクは既定へ落ちる）
+- Findings: 代理店登録の経路ではリンクが一度も張られない。dashboard-api は LINE の資格情報を持たない。delivery-job は LINE の資格情報を持ち、通知の直前に動く
+- Implications: 通知の直前に delivery-job がオーナーのメニューを確かめ、違えば張ってから送る。張れなければ送らない。LINE の資格情報を新しいサービスへ配らない
+
+#### PR #266（#255 前半）の公開 API
+
+- Context: 本 spec が未評価の扱いを独自に持たないため
+- Sources Consulted: `origin/fix/unrated-rating-255`（6763813）の `ts/packages/db/src/daily-summary.ts`・`targets.ts`・`ts/eslint.config.js`
+- Findings: `normalizeSummaryRatings`・`normalizeSnapshotRating`・`formatRatingLabel`・`formatStarDiff`・`hasUnratedCompetitor`・`isUnratedSelf` と文言 3 つを、pg を含まないサブパス `@fwlm/db/daily-summary` から公開する。`queryDeliveryTargets` は正規化した行を返す
+- Implications: レポートの組立も通知の判定も、正規化した行だけを入力にする。本 spec の実装は #266 のマージを前提にする
+
+### Architecture Pattern Evaluation（設計）
+
+| Option | Description | Strengths | Risks / Limitations | Notes |
+|---|---|---|---|---|
+| 振り分けを conversation.ts の completed 分岐へ足す | 段階ごとの分岐の中にレポートを書く | ファイルが増えない | 代理店経路のオーナーは completed に来ないので Req 2.9 を満たせない。オンボーディングの状態機械が肥大する | 不採用 |
+| 店舗特定済みオーナー用の振り分け口を前段に置く | `handleEvent` の冒頭でオーナーの状態を見て、専用の router へ渡す | 経路を問わず同じ扱い（Req 2.9）。第2フェーズは router に 1 分岐を足すだけ | オーナーの照会が 1 回増える | 採用 |
+| レポート codec を line-webhook の中に置く | codec をアプリ内に閉じる | パッケージが増えない | delivery-job がメニューの準備判定に同じ codec を要し、アプリ間 import か二重定義になる | 不採用 |
+| レポート codec を共有パッケージに置く | `@fwlm/line-report`（実行時依存なし） | line-webhook・スクリプト・delivery-job が同じ定義を読む | 新パッケージの配線（Dockerfile・型検査と試験の網羅ガード） | 採用 |
+| メニューのリンク状態を DB に持つ | `owner_rich_menu_links` 表で照合する | API 照会が減る | migration・書込境界・権限が増え、LINE 側の実状態と食い違いうる | 不採用。LINE の実状態を照会する |
+
+### Design Decisions（設計）
+
+#### Decision: 店舗特定済みオーナーの判定と振り分け
+
+- Context: Req 2.9・3.4 と、2 系統の完了の定義（4-5）
+- Alternatives Considered: 1. `onboarding_sessions.stage` で判定する 2. `owners.onboarding_status` で判定する
+- Selected Approach: `owners.onboarding_status = 'store_identified'` で判定する。確定店舗の作成は `confirmStore` だけが行い、同じトランザクションでこの状態へ遷移させるので、「確定店舗を 1 店以上持つ」と同値である
+- Rationale: 代理店経路を含む唯一の判定点で、既存の張り替え手順（`infra/README.md` §10-3）の SQL とも一致する
+- Trade-offs: 会話のセッションが未完了のまま残るオーナーが生まれる。router が初回の操作でリンクを張り、段階を completed に揃える
+- Follow-up: 第2フェーズの GBP 委譲（phase2 ブランチは `session.stage === 'completed'` で判定している）を統合するときに、判定を router へ寄せる
+
+#### Decision: レポートの postback 契約
+
+- Context: Req 2.3・3.2・3.10 と、メニューに埋め込まれた data が作り直すまで変えられないこと
+- Selected Approach: `a=rpt&k=<nr|cmp|tr>`、店舗の指定は `&s=<storeId>`、選択肢の頁は `&p=<n>`。メニューの area は店舗も頁も持たない形だけを使う
+- Rationale: オンボーディング（`a=select|confirm|restart|resume`）と第2フェーズ（`a=g_post|g_reply|g_status`）の action と衝突しない。店舗を storeId で運ぶので、候補の保存（セッション）が要らない
+- Trade-offs: 形式を変えると、利用者の手元のメニューとトーク履歴の選択肢が古い data を送り続ける。形式は Revalidation Trigger に入れる
+- Follow-up: 復号器が onboarding の data を受理しないこと、onboarding の復号器がレポートの data を受理しないことを試験で固定する
+
+#### Decision: 通知を Flex にする
+
+- Context: Req 1.6・8.1 と、帰属表示の細則
+- Alternatives Considered: 1. テキストメッセージ（§7.16 の書き方） 2. 小さな Flex バブル
+- Selected Approach: 本文 1〜2 文と footer の帰属表示だけを持つ Flex バブルにする。altText に同じ文と帰属を入れる
+- Rationale: テキストメッセージは帰属の大きさと色を指定できず、細則から 3 点逸脱する。Flex なら書体の 1 点だけになる。§7.16 は案内文の書き方であり、Places 由来のデータを載せる通知には帰属の細則が優先する
+- Trade-offs: 通知のバブルが案内文より重く見える。ボタンは置かない（誘導先はリッチメニュー）
+- Follow-up: `docs/design/design-language.md` §7.16 に、Places 由来の通知は Flex にする例外を書く（Req 9.1）
+
+#### Decision: 帰属表示はテキストで、ロゴは別判断にする
+
+- Context: ポリシーは「可能な限りロゴ」、場所が限られればテキストを認める
+- Selected Approach: 本 spec はテキスト「データ提供: Google Maps」を採り、大きさ 13px・色 #5E5E5E・折り返しなし・同じバブルの footer に置く
+- Rationale: 既存の LINE 面と LIFF もテキストで揃っており、ロゴへ切り替えるなら画像の配信元（公開 HTTPS）とロゴの使用条件の確認を 3 面まとめて行うべきである
+- Trade-offs: 書体（Roboto）を指定できない逸脱が残る
+- Follow-up: ロゴへの切り替えと、LIFF の帰属表示の細則適合を、横断の別 Issue で判断する
+
+#### Decision: 通知の前にメニューを照合する
+
+- Context: Req 1.10・2.8
+- Selected Approach: delivery-job は実行ごとに、設定された完了後メニュー（`LINE_RICHMENU_COMPLETED_ID`）がレポートの 3 導線を持つかを 1 回照会する。持たなければ、その実行ではメニューへ誘導する通知を送らない。持つ場合は、通知するオーナーごとに現在のメニューを照会し、違えば張ってから送る。張れなければ送らない
+- Rationale: 差し替え前にコードが出ても、誤った設定値が入っても、ボタンの無い面へ誘導する通知が構造的に出ない。代理店経路のオーナーにも最初の通知より前にメニューが付く
+- Trade-offs: 通知 1 件ごとに LINE API の照会が 1〜2 回増える（通知は変化があった日だけなので件数は少ない）
+- Follow-up: 第2フェーズでタブ切り替え（`richmenuswitch`）を入れると、per-user のメニューがタブの側を指しうる。そのときは照合の「同じメニュー」の定義を広げる（Revalidation Trigger）
+
+#### Decision: 通知しなかった日も記録する
+
+- Context: Req 1.4・1.5・1.8・1.10 と、`infra/README.md:204` の成功の証拠、silent drop の禁止
+- Selected Approach: `summary_deliveries.status` に `skipped_no_change`・`skipped_not_comparable`・`skipped_menu_unavailable` を足す（CHECK の作り直し）。予約→判定→記録の既存の 2 段を保つ
+- Rationale: 再実行時の重複判定（1.8）と、送らなかった理由の追跡が同じ行で済む
+- Trade-offs: migration の番号が #259（0009 予定）と重なりうる。後着側が振り直す
+- Follow-up: `db/test/assertions/15_competitive_daily_summary.sql` の分岐を 7 値にする
+
+#### Decision: 推移の読み元は daily_summaries
+
+- Context: Req 6.4・6.8（失敗日・未実行日・比較不能日を区別する）
+- Selected Approach: 最新の対象日から 7 暦日の `daily_summaries` を読み、正規化してから日ごとに「比較可能・比較不能・取得失敗・行なし」に分ける
+- Rationale: `rating_snapshots` は失敗日に行が無く、順位母数（比較可能かどうか）も持たない
+
+#### Decision: リッチメニューの構成と第2フェーズの足し方
+
+- Context: Req 2.1・2.2・2.7
+- Selected Approach: Full（2500×1686）。上段 3 区画に 3 つのレポート（postback＋displayText）、下段 2 区画に「詳細を見る」（LIFF への uri）と「ステータス確認」（既存と同じ message）。第2フェーズは下段を 3 区画に割り直し、3 つ目に「Google 連携」（postback で第2フェーズの Flex メニューを返す）を置く。口コミ返信は新着口コミレポートの口コミごとに置く
+- Rationale: 既存 5 導線の名称と動作を変えずに第2フェーズの入口を足せる。画像を変える以上メニューの作り直しは避けられないので、配置の割り直しは許容する
+- Trade-offs: #195 が Half に縮めた占有高さが再び増える。代わりに `selected: true` で既定表示にし、レポートの主導線として扱う
+
+### Synthesis（設計）
+
+- Generalization: 3 つのレポートはどれも「オーナーの確定店舗を解決し、最新の日次集計を読み、正規化して組み立てる」同じ流れの変種である。店舗の解決（1 店は即応答・複数は選択・集合外は再提示）と、データ状態の分岐（行なし・失敗・正常）を 1 つの handler に集め、組立だけを種類ごとに分ける
+- Build vs Adopt: 未評価の正規化と整形は #266 のモジュールを採る。LINE の型は `@line/bot-sdk` を実行時依存に入れず、既存どおり局所的な型で組む（line-webhook と delivery-job の既存方針）。棒グラフの描画は作らない
+- Simplification: メニューのリンク状態を DB に持たない（LINE の実状態を照会する）。旧来の日次カードへ戻す分岐を持たない（差し替え前はメニュー照合で通知が止まる）。推移の棒は描かず、要約 1 行と表にする
+
+### Risks & Mitigations（設計）
+
+- 差し替えの前にコードが本番へ出ると、差し替えまでの間は通知が 1 通も出ない — 本番のオーナーはまだ検証用だけである。差し替えをデプロイの直後に行う手順にする
+- 帰属表示の書体が細則と異なる — 既知の逸脱として記録し、ロゴへの切り替えを別 Issue で判断する
+- LIFF の `?storeId=` が `liff.state` 経由で届かない — 届かなくても、単一店舗は正しく表示され、複数店舗は選択画面に着地する。実機確認の項目に入れる
+- 第2フェーズの統合で router と conversation.ts が衝突する — 第2フェーズの委譲は router の分岐として足すことを design に記録する
+- 既存の LIFF は口コミを Google Maps への導線なしで表示している（規約の "must always have access"） — 本 spec の境界外（既存詳細画面）。別 Issue を提案する
+- 投稿者の画像（Google のプロフィール画像 URL）を LINE の画像部品が描けない（HTTPS の JPEG か PNG を要求する） — 描く設計にし、本番の実機確認で確かめる。描けなければ外して名前とリンクだけにし、Req 8.6 の判断を記録し直す
+- design.md が 1000 行に達した — 応答・通知・メニュー移行・Go の保存項目・文書整合を横断するためである。実装タスクは PR 単位（共有パッケージ／line-webhook／delivery-job と migration／Go／スクリプトと運用／文書）に分けて並行できる境界にした
+
+### References（設計）
+
+- [Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies) — 地図なしの帰属、テキストの帰属の細則、口コミの投稿者の帰属と `googleMapsUri`
+- [Places API reference（places）](https://developers.google.com/maps/documentation/places/web-service/reference/rest/v1/places) — Review と AuthorAttribution の項目
+- `.claude/skills/messaging-api/references/rich-menu.md` / `action-objects.md` / `flex-message.md` / `message-objects.md` — リッチメニューの上限・postback の displayText・Flex の Text・クイックリプライの上限
+- Issue #255 のコメント（2026-09-13T02:10Z）と PR #266 — 未評価の扱い
