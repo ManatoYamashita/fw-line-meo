@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import type { StoreDetailResponse, StoreRef } from '../lib/contract';
 import { announcedText, ownText } from './live-region';
+import { UNRATED_COMPETITOR_FROM_GO } from './fixtures/unrated-competitor';
 
 // Task 5.3: 詳細閲覧画面（実データ描画・LIFF 認可・エラー分岐・no-write 構造保証）を検証する。
 // task 2.3 のプレースホルダ検証を置き換える（プレースホルダ文言は本タスクで撤去済み）が、
@@ -942,10 +943,8 @@ describe('store detail page', () => {
           name: '評価の無い競合あり',
           body: {
             ...mockResult,
-            competitors: [
-              { name: '競合A', rating: 4.2, reviewCount: 80, starDiff: 0.3 },
-              { name: '競合B', rating: null, reviewCount: 0, starDiff: null },
-            ],
+            // Go が実際に書く評価なしの形（cross-runtime.e2e.test.ts が同じ定数で実データと照合する）。
+            competitors: [{ name: '競合A', rating: 4.2, reviewCount: 80, starDiff: 0.3 }, UNRATED_COMPETITOR_FROM_GO],
           },
           rows: {
             競合A: [
@@ -953,7 +952,7 @@ describe('store detail page', () => {
               ['クチコミ', '80件'],
               ['星差', '+0.3'],
             ],
-            競合B: [
+            [UNRATED_COMPETITOR_FROM_GO.name]: [
               ['評価', '評価なし'],
               ['クチコミ', '0件'],
             ],
