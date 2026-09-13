@@ -132,7 +132,10 @@ ts/apps/store-detail/
 │   ├── trend-view.test.ts         # 新規（node）
 │   ├── trend-scale.test.ts        # 新規（node）
 │   ├── competitor-filter.test.ts  # 新規（node）
-│   ├── trend-dashboard.test.tsx   # 新規（jsdom）: 切替・一貫性・検索・無副作用・グラフの意味論と色の語彙
+│   ├── trend-chart.test.tsx       # 新規（jsdom）: グラフの意味論・色の語彙・style の範囲・焦点を受け取らないこと
+│   ├── trend-controls.test.tsx    # 新規（jsdom）: 札ごとの選択・群の名前・隠し input に name が無いこと
+│   ├── competitor-search.test.tsx # 新規（jsdom）: ラベルの関連づけ・件数の文言
+│   ├── trend-dashboard.test.tsx   # 新規（jsdom）: ページ全体での切替・一貫性・検索・無副作用
 │   └── store-page.test.tsx        # 変更: 構造契約を許可リストへ書き換える
 └── e2e/
     ├── fixtures/detail.ts     # 変更: 表示状態の一覧 STORE_SURFACE_STATES と要求の計数
@@ -657,8 +660,15 @@ export function filterCompetitors<T extends { readonly name: string }>(
   - 評価の無い店も、一致の対象と総数に入る。
   - 元の順を保つ。
 
-### Component Tests（jsdom・`trend-dashboard.test.tsx`）
-- jsdom 用の準備: PointerEvent の互換実装（`ts/packages/ui/test/components.test.tsx` と同じ）を置き、操作は `fireEvent` で行う。
+### Component Tests（jsdom）
+- テストファイルの分担:
+  - 部品単体の検査は、部品ごとのテストファイル（`trend-chart.test.tsx`・`trend-controls.test.tsx`・`competitor-search.test.tsx`）に置く。
+  - ページ全体の検査（切替・一貫性・検索・無副作用）は、`trend-dashboard.test.tsx` に置く。
+  - 部品のタスクは並列に実装できるので、ページ全体のテストファイルには書かない。
+- jsdom 用の準備:
+  - PointerEvent の互換実装（`ts/packages/ui/test/components.test.tsx` と同じもの）を、test/ 配下の共有ヘルパとして置く。前例は `test/live-region.ts`。
+  - 操作は `fireEvent` で行う。
+  - ページ全体のテストは、`store-page.test.tsx` にある LIFF のモックと fetch のスタブの形に倣って、足場を自前で用意する。
 - 期間と要約の一貫性:
   - 8 日以上にわたる応答で「7日」を選ぶ。h2・表の名前・行数・要約の 3 組・グラフの名前・現在値が、同じ窓へ同時に変わる（3.2）。
   - 同じ応答で、表の最初と最後の行の値が、グラフの名前に含まれる始点と終点の値と一致する（3.1・3.7）。
@@ -685,8 +695,12 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - 軸の端: クチコミ数が全日 0 件のとき、目盛りに負の値が無い（範囲 0〜1）。
 
 ### 構造契約（`store-page.test.tsx` の 2 件を置き換える）
-- 分岐ごとに、許可リストの件数を完全一致で固定する（上の表）。
-- 分岐を回った数も固定する（現行の `forEachBranch` に倣う）。
+- 許可リストの検査は、**専用の状態表**で回す。
+  - 状態は、構造契約表の全行とする（読み込み中・失敗・店舗選択待ちの 3 つと、正常の 4 通り）。
+  - 既存の 4 分岐の表には足さない。見出し・主要領域・リンク・版面を検査する他の検査の網羅を変えないためである。
+  - 回った状態の数は 7 で固定する。
+- 状態ごとに、許可リストの件数を完全一致で固定する。
+- name の検査が単独で効くことを示す変異は、件数が 5 になった後で行う。RadioGroup に name を渡し、件数は 5 のまま、name を持つ input の検査だけが赤になることを確かめる。
 
 ### E2E（Playwright・Pixel 5 と 320px）
 - `fixtures/detail.ts` に `STORE_SURFACE_STATES` を置く。内容は次の 4 つである。
@@ -737,16 +751,17 @@ export function filterCompetitors<T extends { readonly name: string }>(
 ## Migration Strategy（着地の順序）
 - データの移行は無い。着地は次の順に進める。
   1. 正典と要件の訂正（§7.18 ほか。要件 9.1）
-  2. 構造契約の検証の置き換え。今のコードでは隠し radio が 0 件なので赤になることを確かめる。
+  2. 構造契約の検証を、許可リスト方式へ置き換える。件数はまず現行の実装どおり（隠し radio 0・検索欄 0）で固定して緑にする。検査が機能することは、変異の注入で赤を見て確かめる。
   3. 純関数
   4. 部品
-  5. e2e
+  5. 節への組み込み。件数を改定後の値（隠し radio 5・検索欄 1）へ上げる変更を先に書き、赤を見てから実装で緑にする。各タスクの終わりには、テストがすべて緑になるようにする。
+  6. e2e
 - #268（PR #269）は、この spec とは独立にマージできる。この spec の窓は、取得済みの最新の記録日だけで決まる。
 
 ## 正典の更新（要件 7.8・9.1）
 - **design-language §7.18「店舗詳細の推移はグラフと表を同じ期間から描く」**を新設する。散文には数値を書かず、既存の表と節を参照する。書く判断は次の 5 つ。
   1. グラフ・要約・表・現在値は 1 つの窓から導く。
-  2. 1 系列で描き、系列の色を増やさない。面の側に置く色は §7.8 の閉じた集合に倣い、本文色・区切り線色・カードの地色・補助文字色の 4 つに限る。
+  2. 1 系列で描き、系列の色を増やさない。面の側に置く色は §7.8 の閉じた集合に倣い、本文色・区切り線色・カードの地色・補助文字色の 4 つに限る。店舗詳細の面で色を書くのは、グラフの部品だけとする（検索欄・件数の文言・選択肢の札には色を書かない）。
   3. 操作は表示を変えるだけで、書込・再取得・保存をしない。
   4. 選択肢は Field 構成の札で組み、Card の外に置く。
   5. 軸は指標ごとに持ち、順位は上ほど上位にする。評価は小さな変化を誇張しない。ツールチップは使わない（§7.5）。
