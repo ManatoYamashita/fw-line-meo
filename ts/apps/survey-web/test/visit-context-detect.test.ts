@@ -84,12 +84,15 @@ describe('来店の経緯・動機の創作を検出する', () => {
     { text: '友人に勧められて来ました。', category: 'motive' },
     { text: '家族と訪れました。', category: 'companion' },
     { text: '同僚と一緒に来ました。', category: 'companion' },
+    { text: '友人と伺いました。', category: 'companion' },
     { text: '一人で入った店です。', category: 'companion' },
     { text: '初めての来店でした。', category: 'history' },
     { text: '初めて訪れました。', category: 'history' },
     { text: '久しぶりに伺いました。', category: 'history' },
+    { text: '初めて伺いました。', category: 'history' },
+    { text: '初めて利用しました。', category: 'history' },
     { text: '何度も通っているお店です。', category: 'history' },
-    { text: '常連のお客さんが多いです。', category: 'history' },
+    { text: '常連になっています。', category: 'history' },
     { text: 'リピートしています。', category: 'history' },
     { text: 'いつも利用しています。', category: 'history' },
   ] as const;
@@ -100,7 +103,7 @@ describe('来店の経緯・動機の創作を検出する', () => {
 
   it('語彙のすべてのパターンが、陽性例のどれかで発火する（死んだパターンが無い）', () => {
     const dead: string[] = [];
-    for (const [category, patterns] of Object.entries(lexicon)) {
+    for (const [category, patterns] of Object.entries(lexicon.patterns)) {
       for (const pattern of patterns) {
         if (!POSITIVE.some((p) => pattern.test(p.text))) dead.push(`${category}: ${pattern.source}`);
       }
@@ -125,6 +128,20 @@ describe('来店の経緯・動機の創作を検出する', () => {
     'また立ち寄ったときには別のメニューも試したいです。',
     '近くに用事がある際はまた寄りたいです。',
     '家族と来た時にもまた楽しめそうです。',
+    // PR #270 の独立レビューで示された誤検出の形（希望の「〜たく」・後置条件の漏れ・勧誘・描写）。
+    '気軽に立ち寄りたくなるお店です。',
+    '何度も訪れたくなるお店です。',
+    '家族と訪れたくなる雰囲気です。',
+    'また近くを通りかかった際には寄りたいです。',
+    '近くに用事があった際には寄りたいです。',
+    '近くを通る際に立ち寄りたいです。',
+    'リピートしてみたいです。',
+    'いつも利用したくなるお店です。',
+    '今度は家族と来ましょう。',
+    '初めての来店でも入りやすいお店です。',
+    '初めて来店する方にもおすすめです。',
+    '常連になりたいお店です。',
+    '久しぶりに美味しいものを食べたくなりました。',
   ];
 
   it.each(NEGATIVE)('拾ってはならない形を拾わない: %s', (text) => {
@@ -138,6 +155,12 @@ describe('来店の経緯・動機の創作を検出する', () => {
     expect(categoriesOf(draft, '友達と来ました')).toEqual([]);
     // 一言が別の分類の事情なら、この分類は除外しない。
     expect(categoriesOf(draft, '評判を聞いて来ました')).toEqual(['companion']);
+  });
+
+  it('一言の事情は、下書きと言い回しが違っても同じ分類として除外する（手がかりは下書き側より広い）', () => {
+    const draft = '初めて訪れました。料理が美味しかったです。';
+    expect(categoriesOf(draft)).toEqual(['history']);
+    expect(categoriesOf(draft, '初めて行った')).toEqual([]);
   });
 
   it('本文の先頭と末尾のどちらに置いても拾う（位置に依存しない）', () => {
@@ -156,13 +179,29 @@ describe('来店の経緯・動機の創作を検出する', () => {
 
 describe('語彙の読み込み', () => {
   it('4 つの分類をすべて持つ', () => {
-    expect(Object.keys(lexicon).sort()).toEqual(['circumstance', 'companion', 'history', 'motive']);
+    expect(Object.keys(lexicon.patterns).sort()).toEqual(['circumstance', 'companion', 'history', 'motive']);
   });
 
   it('形式が不正なら読み込みで止める（黙って空の語彙にしない）', () => {
+    const hints = { motive: ['目当て'] };
     expect(() => readVisitContextLexicon({})).toThrow();
-    expect(() => readVisitContextLexicon({ patterns: { motive: [] } })).toThrow();
-    expect(() => readVisitContextLexicon({ patterns: { motive: ['x'] } })).toThrow();
-    expect(() => readVisitContextLexicon({ patterns: { motive: ['(未閉じ'] } })).toThrow();
+    expect(() => readVisitContextLexicon({ patterns: { motive: [] }, commentHints: hints })).toThrow();
+    expect(() => readVisitContextLexicon({ patterns: { motive: ['x'] }, commentHints: hints })).toThrow();
+    expect(() => readVisitContextLexicon({ patterns: { motive: ['(未閉じ'] }, commentHints: hints })).toThrow();
+    // 未定義の置き換えは、そのまま正規表現の {NAME} として黙って通さない。
+    expect(() => readVisitContextLexicon({ patterns: { motive: ['目当て{NOPE}'] }, commentHints: hints })).toThrow();
+    // 分類の食い違い（片方にしか無い分類は、除外か検出のどちらかが黙って効かなくなる）。
+    expect(() =>
+      readVisitContextLexicon({ patterns: { motive: ['目当て'] }, commentHints: { history: ['初めて'] } }),
+    ).toThrow();
+  });
+
+  it('過去形の後置条件は placeholders.PAST の 1 か所だけで定義する（パターンごとの除外漏れを作らない）', () => {
+    const raw = lexiconRaw as { placeholders: Record<string, string>; patterns: Record<string, string[]> };
+    const sources = Object.values(raw.patterns).flat();
+    expect(raw.placeholders.PAST).toContain('際');
+    expect(sources.filter((s) => s.includes('{PAST}')).length).toBeGreaterThan(0);
+    // 過去形の語尾（「まし」「た(?!」）をパターンに直接書くと、PAST の除外がそのパターンだけ漏れる。
+    expect(sources.filter((s) => s.includes('まし') || s.includes('た(?!'))).toEqual([]);
   });
 });

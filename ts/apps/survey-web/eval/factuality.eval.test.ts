@@ -65,7 +65,16 @@ interface Sample {
   readonly variation: VariationSeed;
   /** 来店の経緯・動機などの創作（Issue #254）。未選択の観点への言及とは別の軸として数える。 */
   readonly visitClaims: readonly { category: string; matchedText: string }[];
+  /** 星の数を数値で読み上げたか（「評価は5点」「5段階中2」。定型文の原因・Issue #254 のレビュー）。 */
+  readonly starNarration: boolean;
+  /** 素材の「なし」を「良かった点は無かった」と断定したか（客が言っていない否定の創作）。 */
+  readonly absenceAssertion: boolean;
 }
+
+// 下書きの自然さ・事実性の副作用（Issue #254 のレビュー）。語彙ではなく形で数え、検出したものは確実に該当するよう狭く取る。
+// 先頭 10 字の重複率では捉えられない（先頭は店名になりやすい）ので、別に数える。
+const STAR_NARRATION = /評価は\s*[1-5１-５]|[1-5１-５]\s*段階|星\s*[1-5１-５]|★\s*[1-5１-５]|[1-5１-５]\s*点(?!心)|[1-5１-５]つ星/;
+const ABSENCE_ASSERTION = /(?:良かった|よかった|良い)(?:点|ところ)(?:は|が)?(?:特に|とくに)?(?:なく|なし|無く|無し|ありません|ない|見当たり)/;
 
 /** 気になった点の code。省略した素材は「選ばなかった」として扱う（本番の validate と同じ）。 */
 function concernCodesOf(m: (typeof datasetRaw.materials)[number]): string[] {
@@ -140,6 +149,8 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             violations: detectAspectMentions(result.value, dm.unselectedAspectCodes ?? [], lexicon),
             variation,
             visitClaims: detectVisitContextClaims(result.value, dm.comment, visitLexicon),
+            starNarration: STAR_NARRATION.test(result.value),
+            absenceAssertion: ABSENCE_ASSERTION.test(result.value),
           });
         }
       }
@@ -193,6 +204,13 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
         console.log(`  ${category.padEnd(14)} ${n} 件`);
       }
 
+      // 自然さ・事実性の副作用（Issue #254 のレビュー）。
+      const starN = samples.filter((s) => s.starNarration).length;
+      const absentN = samples.filter((s) => s.absenceAssertion).length;
+      console.log('\n--- 星の数の読み上げ・「無かった」の断定（Issue #254）---');
+      console.log(`  星の数の読み上げ: ${starN} / ${samples.length}（${pct(starN, samples.length)}）`);
+      console.log(`  「良かった点は無かった」の断定: ${absentN} / ${samples.length}（${pct(absentN, samples.length)}）`);
+
       // 変動要素の候補ごとの内訳（Issue #254）。候補の指示が素材に無い情報を求めていれば、
       // その候補だけ創作率が跳ねる。全体の率だけでは、どの候補が原因かを言えない。
       for (const [title, key, candidates] of [
@@ -205,11 +223,14 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
           if (mine.length === 0) continue;
           const aspectBad = mine.filter((s) => s.violations.length > 0).length;
           const visitBad = mine.filter((s) => s.visitClaims.length > 0).length;
+          const starBad = mine.filter((s) => s.starNarration).length;
+          const absentBad = mine.filter((s) => s.absenceAssertion).length;
           const aspects = new Map<string, number>();
           for (const s of mine) for (const v of s.violations) aspects.set(v.aspectCode, (aspects.get(v.aspectCode) ?? 0) + 1);
           const top = [...aspects.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c}×${n}`).join(' ');
           console.log(
             `  ${candidate}  n=${mine.length}  観点 ${aspectBad} (${pct(aspectBad, mine.length)})  経緯 ${visitBad} (${pct(visitBad, mine.length)})` +
+              `  星 ${starBad}  断定 ${absentBad}` +
               (top.length > 0 ? `  言及された観点: ${top}` : ''),
           );
         }
