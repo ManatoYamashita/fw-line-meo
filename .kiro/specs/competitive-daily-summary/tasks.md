@@ -190,7 +190,7 @@
   - _Requirements: 2.8, 3.12, 3.13, 3.14, 4.8_
   - _Boundary: packages/db daily-summary, delivery-job/targets, delivery-job/flex, store-detail/data, store-detail/ui, eslint_
 
-- [ ] 8.2 Go で評価なしを null として記録し、比較集合から除く
+- [x] 8.2 Go で評価なしを null として記録し、比較集合から除く
   - places の DTO と出力型の rating を `*float64` にし、欠落を nil のまま保つ（生値を加工しない）
   - summary に `RankAll` を新設して比較関数を 1 つにし（rank_prev も同じ関数で求める）、評価なしの店舗を比較集合から除く。自店が評価なしなら rank・rank_total を NULL、全競合の starDiff を null にする
   - repo の `SummaryCompetitor` の rating・starDiff と、`SnapshotWrite` の rating・rank を nullable にする
@@ -201,7 +201,7 @@
   - _Boundary: places/client, summary/compute, batch/run, repo/snapshots, repo/summaries_
   - _Depends: 8.1（表示側を先にデプロイする。null を読めない版の配信は Flex 組立で落ちるため）_
 
-- [ ] 8.3 評価なしの店舗を含む言語間契約を検証する
+- [x] 8.3 評価なしの店舗を含む言語間契約を検証する
   - クロスランタイム契約テストの競合に評価なしの店舗を 1 件加え、Go が書いた行を配信（Flex の文言）と詳細画面の読込（`queryStoreDetail`）が「評価なし」として扱うことを確かめる
   - 観察可能な完了: cross-runtime ジョブで、評価なしの競合が jsonb の null で書かれて rank_total に数えられず、Flex に「評価なし」と注記が出て「★0」が出ないこと、詳細画面の読込結果が画面の単体テストと同じ形であることが検証される
   - _Requirements: 2.9, 3.13, 4.8_
@@ -219,7 +219,7 @@
 - この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
 - `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
 - go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。
-- `summary/compute.Rank` は rank_prev を算出しない（design.md の Service Interface に rank_prev 専用関数が無いため）。task 3.3/3.5 の実装者は前日の active 競合集合（self含む）を用意し、`Rank` を再適用して rank_prev を得ること。
+- rank_prev 専用の関数は持たない（design.md の Service Interface にも無い）。前日の active 競合集合（self含む）を用意し、当日と同じ順位付けの関数を前日の値へ再適用して rank_prev を得る。関数は task 3.2 の `summary/compute.Rank` から、8.2 で比較関数を 1 つに寄せた `summary.RankAll` へ置き換わった（評価なしの店舗を比較集合から除き、前日の自店が評価なしなら rank_prev は NULL）。
 - go.mod の `go` ディレクティブは `go mod tidy` により pgx v5.10.0 の要求で 1.24→1.25.0 に自動昇格した（design.md「Go 1.24+」の範囲内）。CI/デプロイイメージが 1.24.x 固定の場合は task 6.x で toolchain バージョンの確認が必要。
 - `stores.category_code` → Places `primaryType` のマッピングは既存コードに無かったため task 3.4 で新設した（`go/internal/competitor/extract.go` の `categoryToPrimaryType`）。seeded 全11カテゴリを網羅、Table A に対応語が無い一部（izakaya/washoku/curry→japanese_restaurant, yakiniku→barbecue_restaurant）は近似。より正確なマッピングが必要になった場合はオンボーディング時に実 primaryType を取得する方式への変更を検討。
 - rank_prev の比較集合は「今日成功取得した競合のうち、昨日分のスナップショットが存在するもの」の交差を採用（同日churnした競合は今日・昨日どちらの比較集合からも除外）。design.md に厳密な規定が無いための判断。同日churn時のrank_prevテストは未整備（follow-up）。
