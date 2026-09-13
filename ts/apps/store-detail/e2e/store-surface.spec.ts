@@ -36,6 +36,46 @@ test('モバイルビューポートの店舗詳細で横スクロールが発�
   await expectNoHorizontalScroll(page, '店舗詳細', TABLE_SCROLL_REGIONS);
 });
 
+test('320px 幅でも指標・競合比較・推移要約がクリップされない', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await openStoreSurface(page);
+  await expectNoHorizontalScroll(page, '店舗詳細（320px）', TABLE_SCROLL_REGIONS);
+
+  await expect(page.getByText('近隣24店中')).toBeVisible();
+  await expect(page.getByText('Google 評価')).toBeVisible();
+  await expect(page.getByText('クチコミの前日比')).toBeVisible();
+  await expect(page.getByText('近隣の競合店舗としては最も名前の長いケース 丸の内本店')).toBeVisible();
+  await expect(page.getByText('表示期間の変化')).toBeVisible();
+});
+
+test('主要数値と競合の比較軸を説明リストとして描く', async ({ page }) => {
+  await openStoreSurface(page);
+
+  const summary = page
+    .getByRole('heading', { level: 2, name: /今日のポジション/ })
+    .locator('xpath=ancestor::section[1]');
+  await expect(summary.locator('dl')).toHaveCount(2);
+  await expect(summary.locator('dt')).toHaveText([
+    '近隣24店中',
+    'Google 評価',
+    'クチコミ',
+    '評価の前日比',
+    'クチコミの前日比',
+  ]);
+
+  const competitors = page
+    .getByRole('heading', { level: 2, name: '競合との比較' })
+    .locator('xpath=ancestor::section[1]');
+  await expect(competitors.locator('li')).toHaveCount(5);
+  await expect(competitors.locator('li').first().locator('dt')).toHaveText(['評価', 'クチコミ', '星差']);
+
+  const trend = page
+    .getByRole('heading', { level: 2, name: '直近30日の推移' })
+    .locator('xpath=ancestor::section[1]');
+  await expect(trend.locator('dl dt')).toHaveText(['順位', '評価', 'クチコミ増減']);
+  await expect(trend.locator('dl dd')).toHaveText(['3位 → 4位', '4.0 → 4.9', '+203件']);
+});
+
 test('今日のポジションは見出しと内容を近接させ、各グループを明確に離す', async ({ page }) => {
   await openStoreSurface(page);
 
