@@ -3,7 +3,7 @@
 > リリースの順序（design.md「Migration Strategy」）: 7.1 の関門を確かめ、1 の PR をマージして 7.2 で本番へ当ててから、2〜6 のコードをマージする。完了後メニューの差し替え（7.4）はパイロットと実演の期間を避ける。`LIFF_URL` の撤去（7.6）は実機確認の後に行う。
 
 - [ ] 1. 通知記録の拡張と env の先行配線（移行の Step A）
-- [ ] 1.1 通知記録の status を 7 値に広げる
+- [x] 1.1 通知記録の status を 7 値に広げる
   - `summary_deliveries.status` の CHECK を明示名で作り直し、既存 4 値に「変化なし」「比較不能」「メニュー未準備」の 3 値を足す migration を追加する。番号は着地の時点で空いている連番を使い、`scripts/check-db-ordinals.sh` で確かめる。既存の無名の CHECK の実名は作成時に確かめて落とす
   - TS の通知記録の status の型に 3 値を足す。旧コードが書く 4 値の意味は変えない
   - `db/test/assertions/15_competitive_daily_summary.sql` の分岐を 7 値の受理と不正値の拒否に広げ、`db/write-boundary.md`・`db/ERD.md` に通知記録の意味（送らなかった理由も記録する）を書く
@@ -269,6 +269,11 @@
 - tasks.md に env 宣言表を書くのは、出典の実装が入った後にする（`check-spec-env-names.sh` は表の env 名が出典に実在することを要求する）
 - 文言の掃討は `rg --hidden`（`.kiro/` を含める）で行う
 - 新しい worktree では install だけでなく build まで通してから試験を読む
+- （1.1）`summary_deliveries.status` の CHECK は 0009 で 7 値になった。delivery-job の次の注記は Step A のマージから古くなるので、これらのファイルを書き換える 4.4 で改める。注記の結論（予約時に `failed` を仮置きすること、push の結果 3 値と対応すること）は正しいままである
+  - `src/deliveries.ts:14-15`
+  - `src/index.ts:115-117`
+  - `src/line.ts:86-87`
+- （1.1）`scripts/check-db-ordinals.sh` と `scripts/check-compliance-wording.sh` は git の追跡下しか見ない。新しい migration は `git add` の後にこの 2 本を流す
 
 ## 実施記録
 
