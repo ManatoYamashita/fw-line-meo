@@ -28,6 +28,11 @@ Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で
 - コンテナイメージは `go/Dockerfile`（multi-stage・distroless/static-debian12:nonroot 実行時）。このマシンには docker/apple-container が無いため実ビルド検証は CI/デプロイ時に行う
 - **CI では `ts-ci` の `go-test` ジョブが `go build ./...` / `go vet ./...` / `go test ./...` を実行する**（Issue #163 で新設。それ以前は Go が CI に一切載っておらず `make go-test` は main で赤いまま気づかれていなかった）。DB を使うテストは `go/internal/testdb` の `Isolated` が**テストごとに専用データベース**を作って migrations を適用する。共有 DB（`DATABASE_URL`）へ直接つないでよいのは、言語をまたいで同じ行を見る cross-runtime 契約テスト（`testdb.Shared`）だけである
 
+E2E（Issue #257・手順書は `docs/testing/e2e.md`。自動層・本番の読み取り確認・本番の実機確認の 3 層）:
+- `make e2e`（`bash scripts/run-e2e-local.sh`）— 自動層をローカルで一括実行する。層は `survey`（客向け画面の Playwright・一時 DB＋seed＋Gemini モック）／`surfaces`（管理ダッシュボードと店舗詳細の Playwright・IdP スタブのビルド）／`lighthouse`（LCP 要素が seed の店名であることまで確かめる）／`cross-runtime`。`--only survey,lighthouse` で絞れる。ts-ci の e2e / e2e-surfaces / lighthouse / cross-runtime と同じものを流す（lighthouse の LCP 要素の確認だけは、今はこの装置にしか無い・#264）。node 24 への切り替え・ポートの先客検出・スタブ入りビルドの巻き戻しは装置の側で行う。集約実行
+- `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks`（`bash scripts/run-e2e-prod-checks.sh`）— 本番の読み取り専用の確認（稼働イメージ・シークレット・実疎通の鮮度・**本番のコミットに対する ts-ci の E2E ジョブ**・日次ジョブ・配信の件数と致命的な失敗）。デプロイ待ち・デプロイ中は WARN。**運用者用・CI からは呼ばない**（ログを読むため）。本番の状態は変えない
+- **`playwright test` を素で打たない。** survey-web の `.env.local` は開発用 DB と実の Gemini キーを持つので、env を明示しない実行はそちらへ繋がる。`make ts-test-e2e` は `run-e2e-local.sh --only survey` を呼ぶ
+
 CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
 - `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
 - `scripts/check-prod-image-drift.sh` — 本番稼働イメージと `origin/main` の乖離検証（Issue #91）。`PROJECT_ID` 必須。`PROD_IMAGE_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
