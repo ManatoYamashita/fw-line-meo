@@ -607,9 +607,10 @@ describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded (DB)', (
 const F8C_OP = 'f8000000-0000-0000-0000-000000009003'; // 有効運営ちょうど2名のテナント
 const F8C_OP1 = 'f8000000-0000-0000-0000-e10000000001';
 const F8C_OP2 = 'f8000000-0000-0000-0000-e10000000002';
-// disableDashboardUserGuarded と同一の advisory ロッククラス（src の OPERATOR_GUARD_LOCK_CLASS と一致させる）。
+// disableDashboardUserGuarded・updateDashboardUserGuarded と同一の advisory ロッククラス
+// （src の OPERATOR_GUARD_LOCK_CLASS と一致させる。名前は lifecycle 当時のまま据え置く）。
 // src の定数を import せずリテラルで持つのは意図的である。値を変えるとリビジョン切替中の旧コードと
-// 直列化が切れるため、src 側で値を変えたときに本テストが赤くなる番人として働く。
+// 直列化が切れるため、src 側で値を変えたときに本テストと末尾の f9c の並行テストが赤くなる番人として働く。
 const DISABLE_LOCK_CLASS = 0x64756c31;
 
 describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded 並行安全性 (DB)', () => {
@@ -1173,6 +1174,25 @@ describe.skipIf(!process.env.DATABASE_URL)('updateDashboardUserGuarded 逐次 (D
     expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
   });
 
+  it('最後の有効な運営を不在・他運営の代理店へ降格すると、残数より先に所属先を確かめて agency_not_found を返し、行を変えない（評価順・Req 4.4, 2.6）', async () => {
+    const pool = await getPool();
+    // 残数の判定まで進めば last_operator になる状況である（有効な運営は F9_U_SOLO_OP の 1 名だけ）。
+    // 2 つの拒否が同時に成り立つ入力で、どちらが返るかによって評価順（所属先の確認 → 残数の判定）を固定する。
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+    const prior = await f9Raw(F9_U_SOLO_OP);
+
+    for (const agencyId of [F9_AG_MISSING, F9_AG_OTHER]) {
+      const res = await updateDashboardUserGuarded(pool, F9_U_SOLO_OP, F9_OP_SOLO, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId } },
+        displayName: 'f9拒否されるはずの名前',
+      });
+      expect(res, agencyId).toEqual({ kind: 'agency_not_found' });
+      // xmin まで一致する＝表示名も含めて何も確定していない。
+      expect(await f9Raw(F9_U_SOLO_OP), agencyId).toEqual(prior);
+    }
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+  });
+
   it('無効化済みの運営の降格は残数を判定せずに許し、無効のまま残す（Req 2.4, 1.7）', async () => {
     const pool = await getPool();
     // 有効な運営は F9_U_SOLO_OP の 1 名だけ。判定を行えば last_operator になる状況で許されることを見る。
@@ -1356,5 +1376,222 @@ describe.skipIf(!process.env.DATABASE_URL)('updateDashboardUserGuarded 逐次 (D
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).not.toContain(F9_U_MISSING);
     expect(F9_AGS).not.toContain(F9_AG_MISSING);
+  });
+});
+
+// ============================================================
+// dashboard-user-edit Task 1.3: 降格と無効化の並行安全性（Req 2.5・write-skew の決定的検証）。
+// design「並行ガードの拡張」の直列化を、上の f8c（lifecycle の無効化×無効化）と同じ型で検証する。
+// 別の接続でテナントロックを取り、先行する操作を未確定のまま保持している間に本物の関数を起動して、
+//   1. 500ms の有界待機の間は解決しない（＝同じロックを待っている）こと
+//   2. 先行の操作を確定した後は最新の状態で数え直し、last_operator で拒否すること
+// を確かめる。本物の関数どうしを Promise.all で競わせる形は、多くの環境で自然に直列化して
+// ロックを外しても通ってしまう（lifecycle tasks の 1.3 の知見）ので使わない。
+//
+// 先行の操作は SQL で直接書く（本物の関数をトランザクションの途中で止める手段が無いため）。
+// そのため 1 本のテストが確かめられるのは「後から来た本物の関数が、先行の操作と同じロックを取ること」で、
+// 無効化と降格の相互の排他は次の 2 つを合わせて成り立つ。
+//   - 更新（降格）が DISABLE_LOCK_CLASS のロックを取る: 下の (a)・(c)
+//   - 無効化が同じロックを取る: 下の (b) と上の f8c
+// 接頭辞は f9c（1.2 の f9000000 帯と交差しない）。先行の操作を確定させて状態が変わるので、
+// テナントを組み合わせごとに分ける。どのテナントも、初期状態は有効な運営ちょうど 2 名である。
+// ============================================================
+interface F9cTenant {
+  operatorId: string;
+  agencyId: string; // 降格先の代理店（同じテナント配下）
+  heldUserId: string; // 別の接続で保持する先行の操作の対象
+  targetUserId: string; // 本物の関数の対象
+}
+
+// (a) 無効化を保持中の降格
+const F9C_DEMOTE_WHILE_DISABLE_HELD: F9cTenant = {
+  operatorId: 'f9c00000-0000-0000-0000-0000000000a1',
+  agencyId: 'f9c00000-0000-0000-0000-00000000a001',
+  heldUserId: 'f9c00000-0000-0000-0000-d000000000a1',
+  targetUserId: 'f9c00000-0000-0000-0000-d000000000a2',
+};
+// (b) 降格を保持中の無効化
+const F9C_DISABLE_WHILE_DEMOTE_HELD: F9cTenant = {
+  operatorId: 'f9c00000-0000-0000-0000-0000000000b2',
+  agencyId: 'f9c00000-0000-0000-0000-00000000b001',
+  heldUserId: 'f9c00000-0000-0000-0000-d000000000b1',
+  targetUserId: 'f9c00000-0000-0000-0000-d000000000b2',
+};
+// (c) 降格を保持中の降格
+const F9C_DEMOTE_WHILE_DEMOTE_HELD: F9cTenant = {
+  operatorId: 'f9c00000-0000-0000-0000-0000000000c3',
+  agencyId: 'f9c00000-0000-0000-0000-00000000c001',
+  heldUserId: 'f9c00000-0000-0000-0000-d000000000c1',
+  targetUserId: 'f9c00000-0000-0000-0000-d000000000c2',
+};
+const F9C_TENANTS = [
+  F9C_DEMOTE_WHILE_DISABLE_HELD,
+  F9C_DISABLE_WHILE_DEMOTE_HELD,
+  F9C_DEMOTE_WHILE_DEMOTE_HELD,
+];
+
+interface F9cHeldOperation {
+  sql: string;
+  params: unknown[];
+}
+
+// 先行の操作（別の接続で未確定のまま保持する SQL）。
+function f9cHeldDisable(t: F9cTenant): F9cHeldOperation {
+  return {
+    sql: 'UPDATE dashboard_users SET disabled_at = now() WHERE id = $1',
+    params: [t.heldUserId],
+  };
+}
+
+function f9cHeldDemote(t: F9cTenant): F9cHeldOperation {
+  return {
+    sql: `UPDATE dashboard_users SET role = 'agency', agency_id = $2 WHERE id = $1`,
+    params: [t.heldUserId, t.agencyId],
+  };
+}
+
+// 別の接続でテナントロックを取り、held（先行の操作）を未確定のまま保持している間に act（本物の関数）を起動する。
+// 500ms の有界待機の間に act が解決しないことを確かめてから held を確定し、act の結果を返す。
+// act がロックを取らない（または別のキーを取る）実装なら、act は held の未確定の変更を見ないまま
+// 有効な運営を 2 名と数えて先に確定するので、待機の assert が赤になる。
+async function f9cRunWhileHeld<T>(
+  t: F9cTenant,
+  held: F9cHeldOperation,
+  act: () => Promise<T>,
+): Promise<T> {
+  const pool = await getPool();
+  const holder = await pool.connect();
+  let holderCommitted = false;
+  let pending: Promise<T> | undefined;
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT pg_advisory_xact_lock($1::int4, hashtext($2)::int4)', [
+      DISABLE_LOCK_CLASS,
+      t.operatorId,
+    ]);
+    const heldResult = await holder.query(held.sql, held.params);
+    // 先行の操作が実際に 1 行を変えていること（未確定の変更が無いまま「待たせた」ことにしない）。
+    expect(heldResult.rowCount).toBe(1);
+
+    let settled = false;
+    pending = act().then((r) => {
+      settled = true;
+      return r;
+    });
+
+    // 有界待機の間、act はロック待ちで解決しない（＝直列化が働いている決定的な証拠）。
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(settled).toBe(false);
+
+    // 先行の操作を確定する（ロックも解放される）。
+    await holder.query('COMMIT');
+    holderCommitted = true;
+    return await pending;
+  } finally {
+    if (!holderCommitted) {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      // 失敗の経路でも act を宙に浮かせない（ロックが解けるので完了する）。
+      await pending?.catch(() => undefined);
+    }
+    holder.release();
+  }
+}
+
+describe.skipIf(!process.env.DATABASE_URL)('updateDashboardUserGuarded 並行安全性 (DB)', () => {
+  beforeAll(async () => {
+    const pool = await getPool();
+    for (const t of F9C_TENANTS) {
+      await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [
+        t.operatorId,
+        'f9c並行運営',
+      ]);
+      await pool.query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [
+        t.agencyId,
+        t.operatorId,
+        'f9c代理店',
+      ]);
+      await pool.query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject)
+         VALUES ($1, 'operator', $3, NULL, $4), ($2, 'operator', $3, NULL, $5)`,
+        [
+          t.heldUserId,
+          t.targetUserId,
+          t.operatorId,
+          `authsub-${t.heldUserId}`,
+          `authsub-${t.targetUserId}`,
+        ],
+      );
+    }
+  });
+
+  afterAll(async () => {
+    const pool = await getPool();
+    const operatorIds = F9C_TENANTS.map((t) => t.operatorId);
+    await pool.query('DELETE FROM dashboard_users WHERE operator_id = ANY($1)', [operatorIds]);
+    await pool.query('DELETE FROM agencies WHERE operator_id = ANY($1)', [operatorIds]);
+    await pool.query('DELETE FROM operators WHERE id = ANY($1)', [operatorIds]);
+    await closePool();
+  });
+
+  it('(a) 無効化を保持している間、降格はブロックし、確定後は last_operator で 0 人化を防ぐ（Req 2.5・決定的）', async () => {
+    const t = F9C_DEMOTE_WHILE_DISABLE_HELD;
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(2);
+    const prior = await f9Raw(t.targetUserId);
+
+    const result = await f9cRunWhileHeld(t, f9cHeldDisable(t), () =>
+      updateDashboardUserGuarded(pool, t.targetUserId, t.operatorId, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: t.agencyId } },
+      }),
+    );
+
+    // 降格は確定した無効化を観測して数え直す。有効な運営は target だけなので、最後の運営の降格になる。
+    expect(result).toEqual({ kind: 'last_operator' });
+    expect((await f9Raw(t.heldUserId)).disabled_at).not.toBeNull();
+    // target は xmin まで変わらず、有効な運営として 1 名残る（ロックアウトしない）。
+    expect(await f9Raw(t.targetUserId)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(1);
+  });
+
+  it('(b) 降格を保持している間、無効化はブロックし、確定後は last_operator で 0 人化を防ぐ（Req 2.5・決定的）', async () => {
+    // 本テストが守るのは無効化の側（disableDashboardUserGuarded が同じロックを取ること）である。
+    // 先行の降格は SQL で書いているので、更新の関数からロックを外しても本テストは赤にならない（その網は (a)・(c)）。
+    const t = F9C_DISABLE_WHILE_DEMOTE_HELD;
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(2);
+    const prior = await f9Raw(t.targetUserId);
+
+    const result = await f9cRunWhileHeld(t, f9cHeldDemote(t), () =>
+      disableDashboardUserGuarded(pool, t.targetUserId, t.operatorId),
+    );
+
+    // 無効化は確定した降格を観測して数え直す。有効な運営は target だけなので、最後の運営の無効化になる。
+    expect(result).toEqual({ kind: 'last_operator' });
+    expect(await f9Raw(t.heldUserId)).toMatchObject({ role: 'agency', agency_id: t.agencyId });
+    expect(await f9Raw(t.targetUserId)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(1);
+  });
+
+  it('(c) 降格を保持している間、別の降格はブロックし、確定後は last_operator で 0 人化を防ぐ（Req 2.5・決定的）', async () => {
+    const t = F9C_DEMOTE_WHILE_DEMOTE_HELD;
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(2);
+    const prior = await f9Raw(t.targetUserId);
+
+    const result = await f9cRunWhileHeld(t, f9cHeldDemote(t), () =>
+      updateDashboardUserGuarded(pool, t.targetUserId, t.operatorId, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: t.agencyId } },
+      }),
+    );
+
+    expect(result).toEqual({ kind: 'last_operator' });
+    expect(await f9Raw(t.heldUserId)).toMatchObject({ role: 'agency', agency_id: t.agencyId });
+    expect(await f9Raw(t.targetUserId)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(1);
+  });
+
+  it('f9c の id はすべて一意（テスト自己検証）', () => {
+    const ids = F9C_TENANTS.flatMap((t) => [t.operatorId, t.agencyId, t.heldUserId, t.targetUserId]);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

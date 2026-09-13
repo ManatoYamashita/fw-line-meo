@@ -62,7 +62,7 @@
 - 依存方向（違反はエラーとして扱う）: `types` → `pool` → DAL → ハンドラ → ルート → 合成根。dashboard-web は `api.ts` → 部品 → ページ の順で、HTTP 経由でのみ API に依存する。
 
 ### Revalidation Triggers
-- **ロックキー `(0x64756c31, hashtext(operatorId))` の変更** → 無効化（lifecycle）と降格の相互の直列化が壊れる。両者を同時に変え、並行テスト 2 本（無効化側・降格側）を再実行すること。
+- **ロックキー `(0x64756c31, hashtext(operatorId))` の変更** → 無効化（lifecycle）と降格の相互の直列化が壊れる。両者を同時に変え、`ts/packages/db/test/dashboard-users.db.test.ts` の並行テスト（無効化側の f8c と、降格側の f9c の 3 組み合わせ）を再実行すること。
 - **監査 action の集合の変更**（本仕様・#252・以後の追加）→ 0009 以降の `ck_audit_logs_action` と `AUDIT_LOG_ACTIONS` を同時に変える。集合一致テストが赤で知らせる。
 - **`POST /dashboard-users/:id/update` の body・応答・エラーコードの変更** → `api.ts` の `updateDashboardUser` とパネルのコード→文言の対応表。
 - **`dashboard_users` のロールと所属の制約（`ck_dashboard_role_scope`・`fk_dashboard_agency_operator`）の変更** → `parseRoleScope` と DAL の事前確認。
@@ -366,8 +366,8 @@ export function updateDashboardUserGuarded(
   4. assignment が所属の移動（`kind: 'agency'`）で、対象の `role` が `agency` でなければ `role_changed`
   5. 所属先を指定している（scope が agency、または所属の移動）なら `SELECT 1 FROM agencies WHERE id = $1 AND operator_id = $2`（無ければ `agency_not_found`）
   6. 対象が `role = 'operator' AND disabled_at IS NULL` で、scope が agency なら残数を数え、1 以下なら `last_operator`
-  7. 入力と現在値に差分が無ければ UPDATE せず COMMIT し、`before = user = 現在値` を返す
-  8. 差分があれば `UPDATE … WHERE id = $1 AND operator_id = $2 RETURNING` して COMMIT
+  7. 入力で指定された列だけを SET し、WHERE に差分の述語（指定した列ごとの `列 IS DISTINCT FROM $n::列の型` を OR でつないだもの）を足した `UPDATE … WHERE id = $1 AND operator_id = $2 AND (…) RETURNING` を行って COMMIT する。比較は DB が列の型（uuid など）で行う。変更する項目が 1 つも無い入力は、UPDATE を発行せずに COMMIT する
+  8. 更新が 0 行なら差分なしとして、手順 3 で取得した行を `before = user` として返す（行は書き換えない。`before` と `user` が同じなので、ハンドラが導く監査も 0 件になる）。1 行なら `before` は手順 3 の行、`user` は RETURNING の行である
   9. 例外時は ROLLBACK して再送出し、`finally` で接続を返す（無効化と同じ形）
 - 返す `before` と `user` は DB の行である。入力値ではない。
 
