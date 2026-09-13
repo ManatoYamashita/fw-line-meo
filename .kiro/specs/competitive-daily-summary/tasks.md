@@ -190,7 +190,7 @@
   - _Requirements: 2.8, 3.12, 3.13, 3.14, 4.8_
   - _Boundary: packages/db daily-summary, delivery-job/targets, delivery-job/flex, store-detail/data, store-detail/ui, eslint_
 
-- [ ] 8.2 Go で評価なしを null として記録し、比較集合から除く
+- [x] 8.2 Go で評価なしを null として記録し、比較集合から除く
   - places の DTO と出力型の rating を `*float64` にし、欠落を nil のまま保つ（生値を加工しない）
   - summary に `RankAll` を新設して比較関数を 1 つにし（rank_prev も同じ関数で求める）、評価なしの店舗を比較集合から除く。自店が評価なしなら rank・rank_total を NULL、全競合の starDiff を null にする
   - repo の `SummaryCompetitor` の rating・starDiff と、`SnapshotWrite` の rating・rank を nullable にする
@@ -201,25 +201,48 @@
   - _Boundary: places/client, summary/compute, batch/run, repo/snapshots, repo/summaries_
   - _Depends: 8.1（表示側を先にデプロイする。null を読めない版の配信は Flex 組立で落ちるため）_
 
-- [ ] 8.3 評価なしの店舗を含む言語間契約を検証する
+- [x] 8.3 評価なしの店舗を含む言語間契約を検証する
   - クロスランタイム契約テストの競合に評価なしの店舗を 1 件加え、Go が書いた行を配信（Flex の文言）と詳細画面の読込（`queryStoreDetail`）が「評価なし」として扱うことを確かめる
   - 観察可能な完了: cross-runtime ジョブで、評価なしの競合が jsonb の null で書かれて rank_total に数えられず、Flex に「評価なし」と注記が出て「★0」が出ないこと、詳細画面の読込結果が画面の単体テストと同じ形であることが検証される
   - _Requirements: 2.9, 3.13, 4.8_
   - _Boundary: go batch/crossruntime_test, delivery-job/cross-runtime, store-detail/cross-runtime, db/test/cross_runtime_steps.sh_
   - _Depends: 8.2_
 
-- [ ] 8.4 本番で評価なしの扱いを確認する
+- [x] 8.4 本番で評価なしの扱いを確認する
+  - **残余: 実機（オーナーの LINE で受け取る朝の Flex と、そこから開く LIFF）での表示の確認は未実施。追跡は #271。** 詳細画面と Flex は代理（本番と同じソースへ本番の行を通した再現）でしか確かめていない（下の実施結果）
   - 8.2 のデプロイ後の日次バッチで、評価なしの競合が null で記録され rank_total に数えられていないことを read-only で照合し、詳細画面で「評価なし」と注記を確認する
   - 観察可能な完了: 本番の当日行と詳細画面の実測が記録され（識別子は先頭 8 文字・店名は伏せる）、Issue #255 の完了条件が埋まる
   - _Requirements: 2.8, 2.9, 3.13, 4.8_
   - _Depends: 8.3_
+  - **実施結果（2026-09-13・本番 gen-fw-line-meo）**: 識別子は本番の値の先頭 8 文字に切っている（公開リポジトリで、確定済み店舗の ID は客向けアンケート経路へ到達する関門のため）。店名は伏せる。
+    - **デプロイ**: #266（`cc21824`）と #267（`8e21c88`）を順にマージした。それぞれの deploy-prod の deploy ジョブが success。`scripts/check-prod-image-drift.sh` で、本番の 7 イメージ（サービス 5・ジョブ 2）がそれぞれのマージコミットと一致し、収束していることを照合した。#267 は #266 のデプロイを照合してからマージした（null を読めない版の配信を本番に残さないため）
+    - **日次バッチ**: 翌朝の定時実行を待たず、`infra/README.md` §7-3 の手動実行（`gcloud run jobs execute daily-batch --wait`・execution `daily-batch-l64lw`・39 秒・succeededCount 1）で、当日（2026-09-13）の行を新しい Go で書き直した。同日の再実行は上書きになり、重複しない（R2.6）。直後に動いた毎時の配信ジョブ（新しい TS・`summary-delivery-55vkh`）も成功
+    - **daily_summaries**（店舗 `865d1c0e`・read-only で照合）: rank 1・rank_total 5（書き直す前は 6）。評価の無い競合は competitors の末尾にあり、`rating`・`starDiff` とも JSON の null（キーは存在）。評価のある 4 店の starDiff は `0.3`・`0.4`・`0.6`・`1`
+    - **rating_snapshots**: 同店舗の評価の無い競合は rating・rank とも NULL。自店は 1 位、評価のある競合は 2〜5 位
+    - **対照**: 評価の無い競合がいない店舗 `9407f4cc` は、6 店中 3 位のまま変化なし
+    - **旧形の不在**: 当日分に rating 0 は 0 件（スナップショット・自店・competitors のいずれも）
+    - **再配信の不在**: summary_deliveries は、当日 07:00 の delivered が 1 件ずつのまま
+    - **表示（代理）**: 本番と同じソース（`8e21c88`）でビルドした delivery-job の `buildDailySummaryFlex` と `@fwlm/db/daily-summary` に、本番の当日行を read-only（`default_transaction_read_only=on`）で通した。Flex と詳細画面に出る文字列を再現し、次を確認した
+      - 見出しが「近隣5店中 1位」
+      - 評価の無い競合が「評価なし」で、星差が出ない
+      - 一覧の下に「評価のない店は順位に含めていません」
+      - 評価のある競合の星差が `+0.3` の形
+      - 「★0」が無い
+      - 店舗 `9407f4cc` には注記が出ず、星差 0 は `0.0`
+    - **代理では埋まらない差**: 次の 3 つは代理では確かめられない
+      - LINE アプリでの Flex の描画（折り返し・列の幅）
+      - LIFF の起動と認可
+      - 画面のレイアウト
+
+      当日 07:00 の配信は、#266 のデプロイ前の旧コードで組み立てられた。そのため新しい表示の Flex が実際に届くのは 2026-09-14 07:00 からで、実機での確認は #271 で追う
+    - **本番の読み取り確認**: `scripts/run-e2e-prod-checks.sh` は全項目 PASS（本番のコミット `8e21c88`）
 
 ## Implementation Notes
 - **2026-09-13: Issue #255 の着手前の実測（本番 read-only・`default_transaction_read_only=on`）**: `daily_summaries` は 60 行（2 店舗 × 30 日）。店舗 `865d1c0e` の競合 1 店が 30 日すべて rating 0・reviewCount 0 で、`rating_snapshots` でもその日の最下位（6 位）だった。自店の rating 0 と rating_prev 0 は 0 行、jsonb に数値以外の rating は無い。rating 0 を含む 30 行のすべてで自店の順位は「rank_total − 評価 0 の件数」以内に収まり、8.1 の母数の補正が実データの形と一致することを確かめた（識別子は本番の値の先頭 8 文字）。
 - この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
 - `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
 - go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。
-- `summary/compute.Rank` は rank_prev を算出しない（design.md の Service Interface に rank_prev 専用関数が無いため）。task 3.3/3.5 の実装者は前日の active 競合集合（self含む）を用意し、`Rank` を再適用して rank_prev を得ること。
+- rank_prev 専用の関数は持たない（design.md の Service Interface にも無い）。前日の active 競合集合（self含む）を用意し、当日と同じ順位付けの関数を前日の値へ再適用して rank_prev を得る。関数は task 3.2 の `summary/compute.Rank` から、8.2 で比較関数を 1 つに寄せた `summary.RankAll` へ置き換わった（評価なしの店舗を比較集合から除き、前日の自店が評価なしなら rank_prev は NULL）。
 - go.mod の `go` ディレクティブは `go mod tidy` により pgx v5.10.0 の要求で 1.24→1.25.0 に自動昇格した（design.md「Go 1.24+」の範囲内）。CI/デプロイイメージが 1.24.x 固定の場合は task 6.x で toolchain バージョンの確認が必要。
 - `stores.category_code` → Places `primaryType` のマッピングは既存コードに無かったため task 3.4 で新設した（`go/internal/competitor/extract.go` の `categoryToPrimaryType`）。seeded 全11カテゴリを網羅、Table A に対応語が無い一部（izakaya/washoku/curry→japanese_restaurant, yakiniku→barbecue_restaurant）は近似。より正確なマッピングが必要になった場合はオンボーディング時に実 primaryType を取得する方式への変更を検討。
 - rank_prev の比較集合は「今日成功取得した競合のうち、昨日分のスナップショットが存在するもの」の交差を採用（同日churnした競合は今日・昨日どちらの比較集合からも除外）。design.md に厳密な規定が無いための判断。同日churn時のrank_prevテストは未整備（follow-up）。
