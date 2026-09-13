@@ -1,12 +1,35 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
-import { openSurveySurface } from './fixtures/surfaces';
+import { openSurveySurface, STORE_ID } from './fixtures/surfaces';
 
 // 面を開く手順（と「本体が描けていること」の前提 assert・storeId の受け取り）は
 // fixtures/surfaces.ts が単一の定義を持つ。ここで goto を書き直すと、同じ既定値と同じ前提が
 // 2 箇所に生まれ、片方だけが古びる日が来る（Issue #53・PR #191 のレビューで実際に踏んだ形）。
 
 const WRITEREVIEW = /search\.google\.com\/local\/writereview/;
+
+/** token の payload から kind（page / session）を読む。署名の検証はサーバーの仕事なのでここではしない。 */
+function tokenKind(token: string): unknown {
+  const payload = token.split('.')[0] ?? '';
+  return (JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { kind?: unknown }).kind;
+}
+
+/**
+ * 投稿導線を押し、自サーバーへの押下の通知（Issue #137・Requirement 5.7 / 5.8）とその応答を捕まえる。
+ *
+ * リンクは別タブで Google を開く。確かめたいのは自サーバーへの通知であって Google の画面ではないので、
+ * 外部へ出ないよう Google への遷移は止め、開いたタブは閉じる。
+ */
+async function openReviewLinkAndCaptureNotice(page: Page) {
+  await page.context().route(/search\.google\.com/, (route) => route.abort());
+  const response = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/review-link-opened');
+  const popup = page.context().waitForEvent('page');
+  await page.getByRole('link', { name: /クチコミを書く/ }).click();
+  const res = await response;
+  await (await popup).close();
+  const body = JSON.parse(res.request().postData() ?? '{}') as { storeId?: string; token?: string };
+  return { status: res.status(), body };
+}
 
 // Issue #3 完了条件の機械化: QR URL → 回答 → 下書き → 編集 → コピー → writereview 遷移リンク。
 test('客が回答し下書きをコピーして Google 投稿画面リンクへ到達する', async ({ page, context }) => {
@@ -105,4 +128,37 @@ test('回答済みで再訪すると回答済み画面と投稿導線が出る',
   await page.reload();
   await expect(page.getByText(/ご回答ありがとうございました/)).toBeVisible();
   await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+});
+
+// 投稿導線の押下の観測（Issue #137・Requirement 5.7 / 5.8）。実 token を実サーバーが検証する経路を通す。
+// 単体テストはシェルが載せる token と handler の検証を別々に見るので、両者が噛み合って 204 になることは
+// ここでしか確かめられない（例: クライアントが送る本文の形とサーバーが読む形のずれ）。
+test('下書き画面で投稿導線を押すと、sessionToken つきの押下の通知が受理され、リンクは直リンクのまま', async ({ page }) => {
+  await openSurveySurface(page);
+  await page.getByRole('button', { name: '星3' }).click();
+  await page.getByRole('button', { name: '送信する' }).click();
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+  // 通知を足しても、投稿導線は Google の投稿画面への直リンクのまま（自サーバーを経由しない）
+  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+
+  const { status, body } = await openReviewLinkAndCaptureNotice(page);
+
+  expect(status).toBe(204);
+  expect(body.storeId).toBe(STORE_ID);
+  expect(tokenKind(body.token ?? '')).toBe('session');
+});
+
+test('回答済み画面で投稿導線を押すと、pageToken つきの押下の通知が受理される', async ({ page }) => {
+  await openSurveySurface(page);
+  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('button', { name: '送信する' }).click();
+  await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/ご回答ありがとうございました/)).toBeVisible();
+
+  const { status, body } = await openReviewLinkAndCaptureNotice(page);
+
+  expect(status).toBe(204);
+  expect(body.storeId).toBe(STORE_ID);
+  expect(tokenKind(body.token ?? '')).toBe('page');
 });

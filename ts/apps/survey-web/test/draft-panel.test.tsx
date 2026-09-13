@@ -18,6 +18,7 @@ function props(over: Partial<DraftPanelProps> = {}): DraftPanelProps {
     regenerationsLeft: 3,
     googleReviewUrl: URL,
     onRegenerate: vi.fn(),
+    onReviewLinkOpen: vi.fn(),
     regenerating: false,
     ...over,
   };
@@ -101,6 +102,23 @@ describe('DraftPanel', () => {
     expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('最初');
     rerender(<DraftPanel {...props({ draft: '再生成後' })} />);
     expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('再生成後');
+  });
+
+  // Issue #137・Requirement 5.8: 押下を観測する通知は遷移と独立。パネルはシェルへ知らせるだけで、
+  // リンクそのもの（writereview への直リンク・既定の遷移）は変えない。
+  it('投稿導線を押すと onReviewLinkOpen を 1 回呼び、既定の遷移を止めない（成功・失敗の両状態）', () => {
+    for (const generationFailed of [false, true]) {
+      const onReviewLinkOpen = vi.fn();
+      render(<DraftPanel {...props({ generationFailed, onReviewLinkOpen })} />);
+      const link = screen.getByRole('link', { name: /クチコミを書く/ });
+
+      // fireEvent.click は preventDefault されると false を返す
+      expect(fireEvent.click(link)).toBe(true);
+      expect(onReviewLinkOpen).toHaveBeenCalledTimes(1);
+      expect(link.getAttribute('href')).toBe(URL);
+      expect(link.getAttribute('target')).toBe('_blank');
+      cleanup();
+    }
   });
 });
 

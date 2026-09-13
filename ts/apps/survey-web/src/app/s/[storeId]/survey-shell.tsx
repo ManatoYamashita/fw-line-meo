@@ -7,6 +7,7 @@ import { cn } from '@fwlm/ui/lib/utils';
 import { SurveyForm } from './survey-form';
 import { DraftPanel } from './draft-panel';
 import { isRecentlyAnswered, markAnswered } from './answered-flag';
+import { notifyReviewLinkOpened } from '../../../lib/review-link-beacon';
 import type { AspectOption, SurveyAnswer } from './types';
 
 // クライアント合成シェル（統合の中心）。回答フェーズと結果 state を所有し、
@@ -131,12 +132,17 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
             回答済み画面と下書きパネルが別々の境界を持つ面だからである。切り出す代わりに、
             2 箇所が食い違わないことを検証が機械強制する
             （`test/survey-shell.test.tsx` の「面をまたいだ相等」。期待値は部品の算出結果から
-            取るので、片方だけを直す改変も、部品の側の変更に片方だけ追随する改変も落ちる）。 */}
+            取るので、片方だけを直す改変も、部品の側の変更に片方だけ追随する改変も落ちる）。
+
+            押下の通知には pageToken を載せる（Issue #137）。回答済み画面には sessionToken が無い
+            （回答の中身を封入しているので端末に残さない）。pageToken が証明するのは「ページが
+            配信された」ことまでで、信頼水準は表示件数と同じである（design.md の ReviewLinkAPI）。 */}
         <a
           className={cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }))}
           href={googleReviewUrl}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => notifyReviewLinkOpened(storeId, pageToken)}
         >
           Google のクチコミを書く
         </a>
@@ -152,6 +158,9 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
         regenerationsLeft={draftState.regenerationsLeft}
         googleReviewUrl={googleReviewUrl}
         onRegenerate={handleRegenerate}
+        // 下書き画面の押下は sessionToken を載せる（Issue #137）。/api/responses の後にしか発行されない
+        // ので「実際の回答の後の押下」を証明できる。再生成で進んだ最新の token を使う。
+        onReviewLinkOpen={() => notifyReviewLinkOpened(storeId, draftState.sessionToken)}
         regenerating={regenerating}
       />
     );

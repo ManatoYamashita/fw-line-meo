@@ -29,12 +29,13 @@ vi.mock('../src/app/s/[storeId]/draft-panel', () => ({
     generationFailed: boolean;
     googleReviewUrl: string;
     onRegenerate: () => void;
+    onReviewLinkOpen: () => void;
   }) => (
     <div>
       <span data-testid="draft">{props.draft}</span>
       <span data-testid="left">{props.regenerationsLeft}</span>
       <span data-testid="failed">{String(props.generationFailed)}</span>
-      <a data-testid="review-link" href={props.googleReviewUrl}>
+      <a data-testid="review-link" href={props.googleReviewUrl} onClick={() => props.onReviewLinkOpen()}>
         Google のクチコミを書く
       </a>
       <button data-testid="regen" onClick={() => props.onRegenerate()}>
@@ -43,8 +44,12 @@ vi.mock('../src/app/s/[storeId]/draft-panel', () => ({
     </div>
   ),
 }));
+// 押下の通知の送り方（sendBeacon → keepalive の fetch）は review-link-beacon.test.ts が検証する。
+// ここではシェルが「どの token を載せるか」だけを見る。
+vi.mock('../src/lib/review-link-beacon', () => ({ notifyReviewLinkOpened: vi.fn() }));
 
 import { SurveyShell } from '../src/app/s/[storeId]/survey-shell';
+import { notifyReviewLinkOpened } from '../src/lib/review-link-beacon';
 
 const STORE = '44444444-4444-4444-4444-444444444444';
 
@@ -74,10 +79,59 @@ function renderShell() {
   );
 }
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  vi.mocked(notifyReviewLinkOpened).mockClear();
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+// Issue #137・Requirement 5.7 / 5.8: 投稿導線の押下の通知。下書き画面は回答の後にしか発行されない
+// sessionToken を、回答済み画面は SSR が発行した pageToken を載せる（サーバーはどちらかを検証できた
+// ときだけ数える）。通知は遷移と独立で、リンクの既定の遷移は止めない。
+describe('SurveyShell: 投稿導線の押下の通知', () => {
+  it('下書き画面では最新の sessionToken を載せて通知する（再生成で token が進んだ後も追随する）', async () => {
+    stubFetch({
+      '/api/responses': { body: { generation: 'ok', draft: 'D1', sessionToken: 'T1', regenerationsLeft: 3 } },
+      '/api/drafts': { body: { generation: 'ok', draft: 'D2', sessionToken: 'T2', regenerationsLeft: 2 } },
+    });
+    renderShell();
+    fireEvent.click(screen.getByTestId('submit'));
+    await screen.findByTestId('draft');
+
+    fireEvent.click(screen.getByTestId('review-link'));
+    expect(notifyReviewLinkOpened).toHaveBeenLastCalledWith(STORE, 'T1');
+
+    fireEvent.click(screen.getByTestId('regen'));
+    await screen.findByText('D2');
+    fireEvent.click(screen.getByTestId('review-link'));
+    expect(notifyReviewLinkOpened).toHaveBeenLastCalledWith(STORE, 'T2');
+    expect(notifyReviewLinkOpened).toHaveBeenCalledTimes(2);
+  });
+
+  it('回答済み画面では pageToken を載せて通知し、既定の遷移は止めない', async () => {
+    markAnswered(STORE);
+    stubFetch({});
+    renderShell();
+    await screen.findByText(/ご回答ありがとうございました/);
+    const link = screen.getByRole('link', { name: /クチコミを書く/ });
+
+    // fireEvent.click は preventDefault されると false を返す
+    expect(fireEvent.click(link)).toBe(true);
+    expect(notifyReviewLinkOpened).toHaveBeenCalledTimes(1);
+    expect(notifyReviewLinkOpened).toHaveBeenCalledWith(STORE, 'PT');
+  });
+
+  it('押すまでは通知しない（表示しただけでは数えない）', async () => {
+    markAnswered(STORE);
+    stubFetch({});
+    renderShell();
+    await screen.findByText(/ご回答ありがとうございました/);
+
+    expect(notifyReviewLinkOpened).not.toHaveBeenCalled();
+  });
 });
 
 describe('SurveyShell', () => {
@@ -263,6 +317,7 @@ async function renderRealDraftPanel(): Promise<void> {
       regenerationsLeft={3}
       googleReviewUrl={REVIEW_URL}
       onRegenerate={() => {}}
+      onReviewLinkOpen={() => {}}
       regenerating={false}
     />,
   );
