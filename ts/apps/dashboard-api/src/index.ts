@@ -23,6 +23,7 @@ import {
   createPendingDashboardUser,
   disableDashboardUserGuarded,
   enableDashboardUser,
+  updateDashboardUserGuarded,
   findDashboardUserByEmailInOperator,
   createAuditLog,
 } from '@fwlm/db';
@@ -198,6 +199,16 @@ const app = createApp({
       auth: authDeps,
       // 再有効化（disabled_at を NULL に戻す・operator_id スコープ）。不在・越権は null → 404。
       enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
+    },
+    userUpdate: {
+      auth: authDeps,
+      // 保護付きの属性更新（自分のロール変更の拒否はハンドラ側・所属先の確認と最後の運営の保護は DAL 側）。
+      // 無効化と同じテナントロックを取るので、降格と無効化は互いに直列化される。
+      // getPool() の戻り値 Pool は TransactionCapable（connect を持つ）に構造適合する。
+      updateUser: async (id, operatorId, input) =>
+        updateDashboardUserGuarded(await getPool(), id, operatorId, input),
+      // 新しい 4 つの action は migration 0009 の CHECK が受け付ける。本番では 0009 をこのコードより先に当てる。
       auditLog: async (input) => createAuditLog(await getPool(), input),
     },
   },
