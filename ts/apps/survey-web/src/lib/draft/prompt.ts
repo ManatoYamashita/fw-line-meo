@@ -10,6 +10,12 @@ const TONES = ['丁寧な敬体', '親しみやすい常体', '簡潔で落ち�
 const OPENINGS = ['料理の感想から始める', '店の雰囲気から始める', '訪問のきっかけから始める'] as const;
 const ANGLES = ['味の具体性を重視', '接客体験を重視', '総合的な満足度を重視'] as const;
 
+/**
+ * 変動要素の候補（評価で候補ごとの内訳を取るために公開する・Issue #254）。
+ * 本番の選び方は pickVariation だけが決める。ここを参照して本番の選択を組み立て直さないこと。
+ */
+export const VARIATION_CANDIDATES = { tones: TONES, openings: OPENINGS, angles: ANGLES } as const;
+
 const MATERIAL_BEGIN = '<<<MATERIAL>>>';
 const MATERIAL_END = '<<<END>>>';
 
