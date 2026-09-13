@@ -11,7 +11,7 @@ RUN := db/test/run.sh
 # Terraform（gcp-infra-foundation）: 単一環境ルートは infra/envs/prod
 TF_DIR ?= infra/envs/prod
 
-.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-typecheck ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test image-build image-push db-dev-setup db-dev-reset ts-dev-survey ts-dev-dashboard ts-dev-store-detail help
+.PHONY: db-migrate db-reset db-smoke db-test db-verify-docs tf-init tf-fmt tf-plan tf-apply ts-install ts-build ts-typecheck ts-lint ts-test ts-test-db ts-test-e2e ts-test-perf go-build go-test cross-runtime-test e2e e2e-prod-checks image-build image-push db-dev-setup db-dev-reset ts-dev-survey ts-dev-dashboard ts-dev-store-detail help
 
 help: ## 利用可能なターゲットを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -66,10 +66,10 @@ ts-test: ## TS: 全ワークスペースパッケージのテスト（DB 不要�
 ts-test-db: ## TS: native postgres を起動し DB 依存テストを実行（docker/container 不要）
 	$(TS_DIR)/scripts/with-test-db.sh pnpm -C $(TS_DIR) run test
 
-ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。実行は CI 前提（要ブラウザ・起動アプリ・Gemini モック）
-	pnpm -C $(TS_DIR) --filter @fwlm/survey-web exec playwright test
+ts-test-e2e: ## TS: 客向けフロー E2E（Playwright）。一時 DB・seed・Gemini モックを用意して流す（make e2e の survey 層）
+	bash scripts/run-e2e-local.sh --only survey
 
-ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は CI）
+ts-test-perf: ## TS: 客向けページの JS バンドル予算チェック（要 ts-build。フル Lighthouse は make e2e の lighthouse 層）
 	pnpm -C $(TS_DIR) --filter @fwlm/survey-web run perf:budget
 
 # Go モジュール（go/ 日次バッチ層・competitive-daily-summary）
@@ -83,6 +83,12 @@ go-test: ## Go: go/ 配下の全パッケージのテストを実行
 
 cross-runtime-test: ## VALIDATE: Go バッチ→TS 配信の一気通貫（実postgres・フェイクPlaces/LINE）＋能力不在チェック（task 7.1）
 	db/test/cross_runtime_integration.sh
+
+e2e: ## VALIDATE: E2E の自動層をローカルで一括実行（survey・surfaces・lighthouse・cross-runtime。手順は docs/testing/e2e.md）
+	bash scripts/run-e2e-local.sh
+
+e2e-prod-checks: ## VALIDATE: 本番の読み取り専用の E2E 確認（要 PROJECT_ID と gcloud・gh の認証。本番の状態は変えない）
+	bash scripts/run-e2e-prod-checks.sh
 
 # コンテナイメージ（competitive-daily-summary / task 6.3）: daily-batch・summary-delivery・store-detail。
 # 上の CONTAINER_CMD（既定 container・db-* 用に export 済み）とは独立に IMAGE_CONTAINER_CMD を持つ

@@ -62,6 +62,10 @@ function ratingFromJson(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
+function isObject(value: unknown): boolean {
+  return value !== null && typeof value === 'object';
+}
+
 function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -86,7 +90,11 @@ function finiteOrNull(value: unknown): number | null {
  */
 export function normalizeSummaryRatings(row: SummaryRatingFields): NormalizedSummaryRatings {
   const selfRated = isRatedColumn(row.rating);
-  const rawCompetitors: readonly DailySummaryCompetitor[] = Array.isArray(row.competitors) ? row.competitors : [];
+  // jsonb から来た値は型どおりとは限らない。オブジェクトでない要素（null など）は表示できないので
+  // 読み飛ばす（ここで投げると、配信ジョブではその時刻の全オーナーの配信が止まる）。
+  const rawCompetitors: readonly DailySummaryCompetitor[] = Array.isArray(row.competitors)
+    ? row.competitors.filter((competitor) => isObject(competitor))
+    : [];
 
   let legacyZeroCount = 0;
   const competitors = rawCompetitors.map((competitor): DailySummaryCompetitor => {
@@ -170,8 +178,9 @@ export function hasUnratedCompetitor(competitors: readonly DailySummaryCompetito
 
 /**
  * 自店に評価が無い日か。取得失敗（failed）は別の状態なので含めない。
- * 正規化後の行を前提にする（rating が null なら評価なし）。
+ * 評価の判定は formatRatingLabel と同じ規則にする（null・'0.0' は評価なし）。正規化の前の行を
+ * 渡されても、見出しと本文で判定が食い違わないようにするため。
  */
 export function isUnratedSelf(status: DailySummaryStatus, rating: string | null): boolean {
-  return status !== 'failed' && rating === null;
+  return status !== 'failed' && !isRatedColumn(rating);
 }

@@ -229,6 +229,9 @@ function buildSectionHeading(text: string): FlexText {
 
 function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
   const reviewCountText = summary.review_count !== null ? `${summary.review_count}件` : '—';
+  // 取得失敗（failed）の行は取得できなかったので rating が NULL なだけで、評価が無いとは限らない。
+  // 「評価なし」と言わず、値が無いことだけを示す（取得失敗と評価なしを取り違えさせない・R3.14）。
+  const ratingLabel = summary.status === 'failed' ? '★—' : formatRatingLabel(summary.rating);
   return {
     type: 'box',
     layout: 'vertical',
@@ -238,7 +241,7 @@ function buildSelfMetricsSection(summary: DailySummaryRow): FlexBox {
       {
         type: 'text',
         // ★4.2 / 評価なし（Issue #255: 評価の無い店を ★0 や ★— で出さない）。
-        text: `${formatRatingLabel(summary.rating)}（クチコミ ${reviewCountText}）`,
+        text: `${ratingLabel}（クチコミ ${reviewCountText}）`,
         weight: 'bold',
         size: lineLayout.bodySize,
       },
