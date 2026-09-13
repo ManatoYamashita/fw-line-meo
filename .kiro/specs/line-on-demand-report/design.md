@@ -252,7 +252,7 @@ db/migrations/00NN_summary_notification_statuses.sql   # status の CHECK を 7 
   - `db/test/assertions/15_competitive_daily_summary.sql`・`db/write-boundary.md`・`db/ERD.md` — status の 7 値と通知記録の意味
 - design-tokens: `src/colors.ts`（`lineColors.attribution`）・`src/line-layout.ts`（`lineLayout.attributionSize`）と試験
 - Go: `go/internal/places/types.go`・`client.go`、`go/internal/summary/compute.go`（`Review`）、`go/internal/batch/run.go`（変換）、`go/internal/repo/summaries.go`（`NewReviewExcerpt`）と各試験、`go/internal/batch/crossruntime_test.go`
-- infra: `infra/modules/delivery-job/main.tf`・`variables.tf`、`infra/envs/prod/main.tf`・`variables.tf`、`infra/README.md`（§10 の書き直しと :204 の成功の証拠）
+- infra: `infra/modules/delivery-job/main.tf`・`variables.tf`、`infra/envs/prod/main.tf`・`variables.tf`、`infra/README.md`（§10 の書き直しと :204 の成功の証拠）。`LINE_RICHMENU_COMPLETED_ID` の追加（Step A）と `LIFF_URL` の撤去（Step D）は別の PR に分ける
 - 文書（9.1）: `requirements.md` 3.3.4、`docs/proposal.md`、`.kiro/specs/competitive-daily-summary/requirements.md`・`design.md`（日次配信・Flex 構成契約・LIFF URL 契約）、`.kiro/specs/line-onboarding/requirements.md`・`design.md`（完了後メニュー）、`.kiro/steering/product.md`、`README.md`、`docs/architecture.md`、`docs/design/design-language.md`（§7.13 と §7.16）、`docs/observability/log-field-canon.md`
 
 ## System Flows
@@ -298,13 +298,14 @@ flowchart TD
     Lookup -->|unknown or not identified| Onboarding[Existing onboarding flow]
     RouterNode -->|report postback| ReportNode[ReportHandler]
     RouterNode -->|text sticker follow or other postback| Status[Status guidance reply]
-    RouterNode --> Reconcile{Session completed}
-    Reconcile -->|no| Link[Link completed menu then mark session completed]
-    Reconcile -->|yes| Keep[No change]
+    RouterNode --> Reconcile{Session not completed or follow or resume}
+    Reconcile -->|yes| Link[Link completed menu and mark session completed when it was not]
+    Reconcile -->|no| Keep[No change]
 ```
 
 - 判定は `owners.onboarding_status = 'store_identified'` で行う。確定店舗の作成は `confirmStore` だけが行い、同じトランザクションでオーナーをこの状態にするので、「確定店舗を 1 店以上持つ」と同値である
-- 会話の段階が completed でないオーナー（代理店経路）は、最初の操作でメニューを張り、段階を completed に揃える。以後の照合は起きない
+- 会話の段階が completed でないオーナー（代理店経路）は、最初の操作でメニューを張り、段階を completed に揃える
+- 友だち追加（ブロックの解除を含む）と再開の postback は、段階によらずメニューを張る。張り替えのときに到達不能だったオーナーや、旧メニューの削除で既定の面へ落ちたオーナーを、通知を待たずに戻すためである
 
 ### 通知の実行
 
@@ -531,7 +532,7 @@ Responsibilities & Constraints
 
 - 会話ハンドラは、イベントごとにまず `findOwnerByLineUserId` を呼び、`onboarding_status = 'store_identified'` なら router へ渡す。それ以外は既存のオンボーディングの状態機械へ渡す（2.6）
 - postback のうちレポートの data はレポートへ渡す。それ以外の postback（再開・候補の選択・確定・やり直し・不明）、テキスト（「ステータス確認」を含む）、スタンプなど、友だち追加には、ステータス案内を返す（2.5・2.9）
-- Reply の後、会話の段階が completed でなければ完了後メニューを張り、成功したら段階を completed に揃える。成否は既存の事象 `line-webhook.richmenu_linked` と `line-webhook.richmenu_link_failed`、監査記録 `rich_menu_linked` と `rich_menu_link_failed` に残す（2.8）
+- Reply の後、次のいずれかに当たれば完了後メニューを張る。(1) 会話の段階が completed でない（代理店経路）、(2) 友だち追加のイベント（ブロックの解除を含む。旧メニューの削除で既定の面へ落ちている可能性がある）、(3) 再開の postback（オンボーディング用メニューにしか無い導線なので、送った時点でそのメニューを見ている）。(1) で張れたときだけ段階を completed に揃える。成否は既存の事象 `line-webhook.richmenu_linked` と `line-webhook.richmenu_link_failed`、監査記録 `rich_menu_linked` と `rich_menu_link_failed` に残す（2.1・2.6・2.8）
 - 第2フェーズは、この router に postback の分岐を 1 つ足して GBP の会話へ渡す。既存の分岐と応答は変えない（2.7）
 
 Dependencies
@@ -729,7 +730,6 @@ export interface NotificationSubject {
 }
 
 export interface NotificationToday extends NotificationSubject {
-  readonly rank_prev: number | null;
   readonly review_count_prev: number | null;
   readonly new_review_count: number;
 }
@@ -752,7 +752,7 @@ export function buildChangeNotification(storeName: string, changes: NotifiedChan
 
 1. 当日が比較可能でなければ `not_comparable`（1.5）
 2. 新着: `review_count_prev` が値を持ち（＝前日の自店スナップショットがあり、前日の集計が取得失敗でない）、`new_review_count` が 1 以上（1.1）
-3. 順位変動: 前日の行があって比較可能で、当日の `rank_prev` が値を持ち、`rank` と異なる（1.2）。自店が前日に未評価なら正規化で `rank_prev` が null になり、変動にならない
+3. 順位変動: 前日の行があって比較可能で、前日の行の `rank` と当日の `rank` が異なる（1.2）。起点と終点はこの 2 つの値で、オーナーが前日と当日のレポートで見る順位と一致する。当日の行の `rank_prev`（Go が当日の競合集合で前日の値を計算し直したもの）は判定にも文言にも使わない。自店が前日に未評価なら、正規化で前日の順位が null になって比較可能でなくなり、変動にならない。競合の一時的な取得失敗で集合が変わると、その日と復帰した日の両方で通知が出うるが、レポートの表示と食い違わない事実なので許容する（2026-09-13 の設計レビューで決定）
 4. 2 と 3 のどちらも成り立たなければ `no_change`（1.4）。両方なら 1 通にまとめる（1.3）
 
 通知の構成（1.6）:
@@ -816,7 +816,7 @@ Contracts: Batch [x]
 - Input / validation: 当日の行があり未記録の店舗を、店舗名・オーナーの LINE ユーザー・前日の行（`summary_date = 当日 - 1` の LEFT JOIN）とともに抽出し、当日と前日を正規化する。#252 の停止状態が先に入った場合は、抽出の述語に停止を除く条件を足す（3.5）
 - Output / destination: 通知の push と `summary_deliveries` の 1 行
 - Idempotency & recovery: 予約（`UNIQUE (store_id, summary_date)` の `ON CONFLICT DO NOTHING`）→判定→記録の既存の 2 段を保つ。送らない判定も予約してから記録するので、同じ日の再実行は同じ店舗を判定し直さない（1.8）
-- 実行サマリー（`delivery-job.run`）に `skippedNoChange`・`skippedNotComparable`・`skippedMenuUnavailable`・`reportMenuReady` を足す。設定から `LIFF_URL` を外し、`LINE_RICHMENU_COMPLETED_ID` を必須にする
+- 実行サマリー（`delivery-job.run`）に `skippedNoChange`・`skippedNotComparable`・`skippedMenuUnavailable`・`reportMenuReady` を足す。設定から `LIFF_URL` を外し、`LINE_RICHMENU_COMPLETED_ID` を必須にする。env の配線はイメージより先に足し、`LIFF_URL` の配線はイメージより後に外す（「Migration Strategy」の Step A と Step D）
 
 ### 運用（リッチメニュー）
 
@@ -844,10 +844,15 @@ Contracts: Batch [x]
 - `relink-completed-menu --to <新ID> [--delete-old <旧ID>] [--dry-run]`:
   1. `--to` のメニューが `exposesAllReportActions` を満たすことを確かめる。満たさなければ何もせずに非ゼロで終わる
   2. `DATABASE_URL` から `owners.onboarding_status = 'store_identified'` の LINE ユーザーを読む
-  3. 各オーナーへ個別リンクを張り、`GET` で新 ID が返ることを確かめる
-  4. 件数（対象・張れた・確かめた・失敗）と、失敗したユーザーの先頭 8 文字を出す
-  5. `--delete-old` があり、確かめた件数が対象の件数と一致し、失敗が 0 のときに限り、旧メニューを削除する。それ以外は削除せず非ゼロで終わる（9.5）
+  3. 各オーナーへ個別リンクを張り、メニューを照会して結果を 4 つに分ける。LINE はブロック中・友だち解除・退会済みのユーザーへのリンクを 200 で受理して黙って失敗する（`.claude/skills/messaging-api/references/rich-menu.md` の Link conditions）ため、照会で新 ID が返らなければプロフィールを照会して見分ける
+     - `verified`: 照会が新 ID を返した
+     - `unreachable`: 新 ID が返らず、プロフィールの照会が 404（ブロック中・友だち解除・退会済み）。メニューを表示しようがない
+     - `mismatch`: 新 ID が返らず、プロフィールは取れた（友だちなのに張れていない）
+     - `error`: ネットワークや 5xx で判定できなかった
+  4. 分類ごとの件数と、`unreachable`・`mismatch`・`error` のユーザーの先頭 8 文字を出す
+  5. `--delete-old` があり、`mismatch` と `error` が 0 件のときに限り、旧メニューを削除する。`unreachable` は削除を妨げないが、一覧を運用記録に残す。それ以外は削除せず非ゼロで終わる（9.5 の「全員分の確認」は、全員を `verified` か `unreachable` のどちらかに確定させることとする）
 - 必要な env は `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET`・`DATABASE_URL`
+- `unreachable` だったオーナーがブロックを解除すると、友だち追加のイベントで router がメニューを張る。通知が先に来た場合は、通知前の照合が張る
 
 ### Go 日次バッチ
 
@@ -928,9 +933,11 @@ Contracts: Batch [x]
 
 - `@fwlm/line-report`: 3 種類の往復、300 字の上限、`rpt` 以外の data の拒否、オンボーディングの data との相互不受理、`exposesAllReportActions` の真偽（1 つ欠けたら偽）
 - `report/stores`: 1 店・複数・集合外（戻り値が入力の要素であること、集合外の応答が ID によらず同じこと）、13 店以上の頁送り、20 文字の省略
-- `notification`: 規則表の全分岐（前日なし・前日が失敗・当日が失敗・評価を持つ競合なし・自店未評価・前日が未評価・新着だけ・順位だけ・両方）と、1〜2 文と帰属を含む Flex、altText の上限
+- `notification`: 規則表の全分岐（前日なし・前日が失敗・当日が失敗・評価を持つ競合なし・自店未評価・前日が未評価・新着だけ・順位だけ・両方）と、1〜2 文と帰属を含む Flex、altText の上限。当日の `rank_prev` と前日の行の `rank` が食い違う行を与え、判定と文言が前日の行の順位を採ることを固定する（採る値を入れ替える変異で赤くなることを確かめる）
 - report builders: 各レポートのスナップショットと 30KB の検証、`googleMapsUri` の無い口コミを出さないこと、評価なしの末尾と注記、推移の 4 種類の日の表示、店舗名とデータ対象日の存在
 - `rich-menu-definitions`: 区画が寸法の中に収まり重ならないこと、3 つの postback が codec の出力と一致すること、ラベル 20 字以内、PNG の IHDR とメニューごとの寸法の一致
+- `owner/router`: メニューを張る 3 つの契機（段階が completed でない・友だち追加・再開の postback）で張り、それ以外（段階が completed のテキストやレポート）では張らないこと。張れたときだけ段階を completed にすること
+- `relink-completed-menu`: 偽の LINE で 4 分類（照会が新 ID・照会が別 ID でプロフィール 404・照会が別 ID でプロフィールあり・5xx）を作り、分類と、`mismatch` か `error` が 1 件でもあれば削除しないこと、`unreachable` だけなら削除することを固定する
 
 ### Integration Tests
 
@@ -970,23 +977,30 @@ Contracts: Batch [x]
 
 ```mermaid
 flowchart TD
-    Pr266[PR 266 merged and deployed] --> GoFix[255 Go half merged and deployed]
-    GoFix --> Schema[Apply status migration to production]
-    Schema --> Code[This spec merged and deployed]
-    Code --> Period{Pilot or demo period}
+    Pr266[PR 266 merged] --> GoFix[255 Go half merged and deployed]
+    GoFix --> StepA[Step A schema and env PR merged]
+    StepA --> ApplyA[Apply migration and terraform with current menu id]
+    ApplyA --> StepB[Step B code PRs merged and images deployed]
+    StepB --> Period{Pilot or demo period}
     Period -->|yes| Wait[Wait until the period ends]
     Period -->|no| Create[Create completed menu with completed only mode]
-    Create --> Apply[Set tfvars and apply to line-webhook and delivery-job]
-    Apply --> Relink[Relink all store identified owners and verify]
-    Relink -->|all verified| Delete[Delete old completed menu]
-    Relink -->|not all verified| Retry[Investigate and rerun relink]
+    Create --> ApplyC[Set tfvars to new id and apply]
+    ApplyC --> Relink[Relink store identified owners and classify]
+    Relink -->|no mismatch and no error| Delete[Delete old completed menu]
+    Relink -->|mismatch or error| Retry[Investigate and rerun relink]
     Delete --> Device[Device check of entries replies and notification]
+    Device --> StepD[Step D remove LIFF URL wiring and apply]
 ```
 
-- 関門: #255 の前半（PR #266）と後半（Go）の本番反映を確かめてから本 spec を出す（9.3）
-- status の migration は旧コードと互換（値の集合を広げるだけ）なので、コードのマージより先に本番へ当て、`to_regclass` と CHECK の定義で適用を確かめる。先にコードが出ると、送らない判定の記録が CHECK に弾かれる
-- コードの本番反映から差し替えまでの間、通知は `skipped_menu_unavailable` になり 1 通も出ない。差し替えはデプロイの直後に行う（本番のオーナーはまだ検証用だけである）
-- 差し替えはパイロットと実演の期間を避ける（9.4）。張り替えスクリプトが全員を確かめたときに限り、旧メニューを削除する（9.5）
+CI はイメージだけを差し替え（`gcloud run jobs update --image`）、env は Terraform が持つ（`infra/modules/delivery-job/main.tf` は image を `ignore_changes` する）。イメージはマージで自動的に出るが、env は人手の `tf apply` まで変わらない。そのため、env を足す変更は必ずイメージより先に、env を外す変更は必ずイメージより後に出す。
+
+- 関門: #255 の前半（PR #266・マージ済み）と後半（Go）の本番反映を確かめてから本 spec を出す（9.3）
+- Step A（schema と env）: status の CHECK を広げる migration と、delivery-job への `LINE_RICHMENU_COMPLETED_ID` の配線（値は現行の tf 変数＝旧メニューの ID）だけを持つ PR を先にマージする。どちらも旧コードと互換である（値の集合を広げるだけ・旧イメージは知らない env を無視する）。マージ後に migration を本番へ当て、`to_regclass` と CHECK の定義で適用を確かめてから `tf apply` する。まだマージしていない migration を本番へ当てない
+- Step B（コード）: `@fwlm/line-report`・line-webhook・delivery-job・スクリプト・Go の帰属項目・文書の PR をマージする。新しい delivery-job は `LINE_RICHMENU_COMPLETED_ID` を必須にし、`LIFF_URL` を読まなくなる。env は Step A で付いているので起動に失敗しない。この時点の設定値は旧メニューを指すので、準備判定が通らず、通知は `skipped_menu_unavailable` になる
+- Step C（差し替え）: パイロットと実演の期間を避ける（9.4）。完了後メニューを `--completed-only` で作り、tfvars を新 ID にして `tf apply` し、張り替えスクリプトを流す。削除の条件は「張り替えスクリプト」の分類に従う（9.5）
+- Step D（後始末）: 新しいイメージが本番で動いていることを確かめてから、delivery-job の `LIFF_URL` の配線を外す PR をマージして `tf apply` する。先に外すと旧イメージが起動時に落ちる
+- Step B から Step C までの間、通知は 1 通も出ない。差し替えは Step B の直後に行う（本番のオーナーはまだ検証用だけである）
+- 旧メニューの削除は、張り替えスクリプトが全員を `verified` か `unreachable` に確定させ、`mismatch` と `error` が 0 件のときに限る（9.5）
 - 巻き戻し: 旧メニューを削除する前なら、tfvars を旧 ID に戻して apply し、同じスクリプトを `--to <旧ID>` で流す。削除した後は作り直しになる
 - `infra/README.md` §10 をこの手順で書き直し、§10-6 の「対象が存在しない」を改める（2026-09-13 の本番 E2E で完了済みの検証用オーナーが実在する）
 

@@ -449,3 +449,27 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
 - [Places API reference（places）](https://developers.google.com/maps/documentation/places/web-service/reference/rest/v1/places) — Review と AuthorAttribution の項目
 - `.claude/skills/messaging-api/references/rich-menu.md` / `action-objects.md` / `flex-message.md` / `message-objects.md` — リッチメニューの上限・postback の displayText・Flex の Text・クイックリプライの上限
 - Issue #255 のコメント（2026-09-13T02:10Z）と PR #266 — 未評価の扱い
+
+---
+
+## 設計レビュー（2026-09-13・/kiro-validate-design）
+
+判定は NO-GO（初版のまま）で、次の 3 点を design へ反映した。いずれも design の中で閉じる修正で、要件の改訂は要らない。レビューの時点で PR #266 は main へマージ済み（2026-09-13T03:36Z）で、最終修正（f21b113）は公開 API を変えていないことを確かめた。
+
+### 指摘 1: 順位変動の比較対象
+
+- 初版は当日の行の `rank_prev`（Go が当日の競合集合で前日の値を計算し直したもの）と比べていた。Req 1.2 は「前日の日次集計で確認できる自店の順位」と比べると定めている
+- 競合の一時的な取得失敗などで集合が日によって違うと、`rank_prev` と前日の行の `rank` は食い違う。その場合、オーナーが前日のレポートで見た順位と通知の起点が合わない
+- 利用者の選択（2026-09-13）: 前日の行の `rank` と当日の `rank` を、両日とも比較可能なときに比べる。集合が変わった日と復帰した日の両方で通知が出うるが、レポートの表示と食い違わない事実なので許容する
+
+### 指摘 2: env の変更とイメージの自動デプロイの順序
+
+- CI はイメージだけを差し替え（`.github/workflows/deploy.yml` の `gcloud run jobs update --image`）、env は Terraform が持つ（`infra/modules/delivery-job/main.tf` は image を `ignore_changes`）
+- 初版の移行手順では、新しいイメージが `LINE_RICHMENU_COMPLETED_ID` を必須にしてマージで出た瞬間から、`tf apply` までの間、配信ジョブが毎時 `MissingConfigError` で落ちていた。`LIFF_URL` を先に外せば旧イメージが落ちる。まだマージしていない migration を本番へ当てる段取りも含んでいた
+- 反映: Step A（migration と env の追加だけの PR をマージして適用）→ Step B（コード）→ Step C（差し替え）→ Step D（`LIFF_URL` の撤去）に分けた。env を足す変更はイメージより先、外す変更はイメージより後に出す
+
+### 指摘 3: 張り替えの「全員確認」とブロック中のオーナー
+
+- LINE はブロック中・友だち解除・退会済みのユーザーへのリンクを 200/202 で受理して黙って失敗する（`.claude/skills/messaging-api/references/rich-menu.md` の Link conditions）。初版の「全員を確かめたときに限り削除」は、ブロック中のオーナーが 1 人いるだけで永久に満たせなかった
+- router の照合は会話の段階が completed でないときだけで、ブロックを解除したオーナーは通知が来るまで既定の面（登録を再開）を見続けた
+- 反映: 張り替えの結果を `verified`・`unreachable`（プロフィールの照会が 404）・`mismatch`・`error` に分け、`mismatch` と `error` が 0 件なら削除できるようにした。router は友だち追加と再開の postback でも、段階によらずメニューを張る
