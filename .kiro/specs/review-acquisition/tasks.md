@@ -220,26 +220,26 @@
   - _Depends: 7.4_
 
 - [ ] 8. 投稿導線の押下を数え、口コミ獲得を施策の前後で読めるようにする（Issue #137・Issue #221 の完了条件 4）
-- [ ] 8.1 押下の通知を受ける API と記録を追加する
+- [x] 8.1 押下の通知を受ける API と記録を追加する
   - `POST /api/review-link-opened` が pageToken（storeId 一致）か sessionToken（封入された storeId が一致）を HMAC 検証し、通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録して 204 を返す。DB には触れない
   - 事象名を記録の正典（`docs/observability/log-field-canon.md`）へ先に登録する
   - Observable: handler のユニットテスト（token 2 種で記録・他店舗／改ざん／期限切れ／形式不正で記録しない・レート制限）と、正典の照合ガードが緑
   - _Requirements: 5.1, 5.7_
   - _Boundary: survey-web api/review-link-opened, lib/structured-log, docs/observability_
 
-- [ ] 8.2 投稿リンクの押下で通知を送る
+- [x] 8.2 投稿リンクの押下で通知を送る
   - 下書き画面は sessionToken、回答済み画面は pageToken を載せ、`sendBeacon`（使えなければ keepalive の fetch）で投げる。リンクは writereview への直リンクのままにし、通知の結果を待たない
   - Observable: 通知モジュール・シェル・パネルのユニットテストと、E2E（両画面で押すと通知が 204 で受理され、href は writereview のまま）が緑
   - _Requirements: 4.3, 4.4, 5.7, 5.8_
   - _Depends: 8.1_
 
-- [ ] 8.3 ログベース指標を足す
+- [x] 8.3 ログベース指標を足す
   - `infra/modules/guardrails` の `survey_funnel` に `survey_review_link_opened` を足す（label は `store_id` のみ・アラートを持たない分析用）
   - Observable: `scripts/check-monitoring-coverage.sh` が緑（指標が数える事象名を survey-web が実際に出す）
   - _Requirements: 5.7_
   - _Depends: 8.1_
 
-- [ ] 8.4 施策の前後で口コミ獲得を読む手順を書く
+- [x] 8.4 施策の前後で口コミ獲得を読む手順を書く
   - 表示・送信・押下（ログとログベース指標）と、自店の Google クチコミ件数（`rating_snapshots.review_count`）を施策日の前後で同じ長さの窓に並べる手順と、読み方の癖を `docs/observability/review-acquisition-funnel.md` に置く
   - Observable: 手順のコマンドを本番で実行し、出力の形を確かめてある
   - _Requirements: 5.7_
