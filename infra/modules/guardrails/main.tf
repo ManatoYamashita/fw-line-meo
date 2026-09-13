@@ -265,14 +265,18 @@ resource "google_cloud_quotas_quota_preference" "places" {
 #
 # **指標は作成時点から数え始める。** 段階4 の直前に作ってもベースラインは取れないので、
 # 本 spec のデプロイと同じタイミングで apply すること。
+#
+# 投稿導線の押下（survey_review_link_opened・Issue #137 / #221 の完了条件 4・Req 5.7）も同じ理由で
+# ここへ写す。送信の次の段で、「送信した客が Google の投稿画面へ進んだか」を読む。これも作成時点から
+# 数え始めるので、ベースラインは apply した日から始まる。
 # ------------------------------------------------------------------------------
 resource "google_logging_metric" "survey_funnel" {
   # monitoring-coverage: analytics-only (#137)
-  # この 2 指標はアラートを持たない。段階4（導線変更）の効果を施策前後で比較するための計測で
+  # この 3 指標はアラートを持たない。段階4（導線変更）の効果を施策前後で比較するための計測で
   # あり、閾値を割ったら人を起こす類のものではないため。scripts/check-monitoring-coverage.sh は
   # この宣言が無い指標に「読むアラートが無い」と赤を出す（指標だけが生き残る #230 の鏡像を
   # 防ぐため）。**通知が要るのに面倒だからここへ逃がしてはならない。**
-  for_each = toset(["survey_page_viewed", "survey_response_submitted"])
+  for_each = toset(["survey_page_viewed", "survey_response_submitted", "survey_review_link_opened"])
 
   project     = var.project_id
   name        = each.key
