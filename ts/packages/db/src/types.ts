@@ -117,7 +117,7 @@ export interface DailySummaryNewReview {
 // null になりうる（Issue #255）: Google に評価が無い店（クチコミ 0 件で Places API が rating を
 // 返さない）は rating が null、自店と競合のどちらかが評価なしなら starDiff も null。旧 Go は
 // 評価の欠落をゼロ値 0 として書いていたため、読込側は必ず `@fwlm/db/daily-summary` の
-// normalizeDailySummaryRow を通してから使うこと（0 を null として読み、母数も補正する）。
+// normalizeSummaryRatings を通してから使うこと（0 を null として読み、母数も補正する）。
 export interface DailySummaryCompetitor {
   name: string;
   /** Google の星評価（1.0〜5.0）。評価の無い店は null。 */

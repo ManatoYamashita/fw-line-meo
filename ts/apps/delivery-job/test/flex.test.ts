@@ -350,6 +350,14 @@ describe('buildDailySummaryFlex', () => {
       expect(result.altText.length).toBeGreaterThan(0);
       expect(result.altText).toContain('取得できませんでした');
     });
+
+    it('本文でも自店の評価を「評価なし」と言わない（取得失敗と評価なしを取り違えさせない・Issue #255）', () => {
+      // failed の行は取得できなかったので rating が NULL になっているだけで、評価が無いとは限らない。
+      // 見出しだけを固定すると、本文が「評価なし」に化けても素通りする（独立レビューで検出）。
+      const bodyTexts = collectTexts(findBlock(result.contents, 'body'));
+      expect(bodyTexts).toContain('★—（クチコミ —）');
+      expect(bodyTexts.some((text) => text.includes('評価なし'))).toBe(false);
+    });
   });
 
   describe('altText', () => {

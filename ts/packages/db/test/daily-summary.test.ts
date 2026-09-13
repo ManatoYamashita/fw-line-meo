@@ -171,6 +171,23 @@ describe('normalizeSummaryRatings', () => {
     expect(() => normalizeSummaryRatings(broken)).not.toThrow();
     expect(normalizeSummaryRatings(broken).competitors).toEqual([]);
   });
+
+  it('例外を投げない（競合一覧にオブジェクトでない要素があれば、その要素だけを読み飛ばす）', () => {
+    // 配信ジョブはオーナー単位の隔離の外でこの関数を呼ぶ。1 要素の不正で投げると、その時刻の
+    // 全オーナーの配信が止まる（独立レビューで検出）。
+    const broken = row({
+      rank_total: 3,
+      competitors: [
+        null,
+        'x',
+        { name: '競合イチ', rating: 4.0, reviewCount: 300, starDiff: 0.3 },
+      ] as unknown as DailySummaryCompetitor[],
+    });
+    expect(() => normalizeSummaryRatings(broken)).not.toThrow();
+    const result = normalizeSummaryRatings(broken);
+    expect(result.competitors).toEqual([{ name: '競合イチ', rating: 4.0, reviewCount: 300, starDiff: 0.3 }]);
+    expect(result.rank_total).toBe(3);
+  });
 });
 
 describe('normalizeSnapshotRating', () => {
@@ -229,6 +246,13 @@ describe('hasUnratedCompetitor / isUnratedSelf', () => {
     expect(isUnratedSelf('no_competitors', null)).toBe(true);
     expect(isUnratedSelf('failed', null)).toBe(false);
     expect(isUnratedSelf('ready', '4.3')).toBe(false);
+  });
+
+  it("正規化していない行の '0.0'（旧 Go のゼロ値）も評価なしと判定する", () => {
+    // formatRatingLabel('0.0') は「評価なし」を返すので、判定だけが食い違うと見出しは順位・本文は
+    // 「評価なし」という矛盾したカードになる（独立レビューで検出）。
+    expect(isUnratedSelf('ready', '0.0')).toBe(true);
+    expect(isUnratedSelf('failed', '0.0')).toBe(false);
   });
 });
 

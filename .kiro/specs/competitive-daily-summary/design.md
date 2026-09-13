@@ -148,6 +148,8 @@ infra/modules/delivery-job/         # TS Job・毎時 Scheduler・SA・line toke
 
 ### Modified Files
 - `ts/packages/db/src/…` — 新テーブルの行型追加・`updateDeliveryHour(lineUserId, hour)` 追加（webhook 配線用の公開関数）
+- `ts/packages/db/src/daily-summary.ts`（Issue #255 で追加）— 評価なしの正規化と、星評価・星差の表示整形。値の import を持たない純関数だけで構成し、`package.json` の exports のサブパス `@fwlm/db/daily-summary` からだけ公開する（store-detail のクライアントにも同梱されるため）
+- `ts/eslint.config.js`（Issue #255 で追加）— クライアントからの root `@fwlm/db` の値 import と、`daily-summary.ts` への値 import を no-restricted-imports で禁じる
 - `db/write-boundary.md` / `db/ERD.md` — 新テーブルの書込責任言語（daily_summaries=Go、summary_deliveries=TS）と ER 追記。`make db-verify-docs` を通すこと
 - `infra/`（root 配線）＋ `infra/modules/run-services/` — `store-detail` サービス追加、`delivery-job` モジュール配線
 - `infra/modules/secrets/` 相当 — `line-channel-access-token` の accessor を delivery-job SA へ追加付与
@@ -251,14 +253,14 @@ sequenceDiagram
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |-----------|--------------|--------|--------------|------------------|-----------|
-| places/client | Go/外部統合 | Places API (New) の唯一の呼出点 | 1.1, 2.1, 2.2, 2.7 | Places API (External, P0) | Service |
+| places/client | Go/外部統合 | Places API (New) の唯一の呼出点 | 1.1, 2.1, 2.2, 2.7, 2.8 | Places API (External, P0) | Service |
 | competitor/extract | Go/ドメイン | 競合抽出・固定ルール | 1.1–1.3 | places/client (P0), repo (P0) | Service |
-| summary/compute | Go/ドメイン | 順位・前日比・新着差分・素材組立（純関数） | 1.3, 2.4, 3.5, 3.7 | なし（入力は値） | Service |
-| batch/run | Go/ランタイム | オーケストレーション・エラー隔離・パージ | 1.5, 2.1, 2.5–2.7, 5.1–5.2 | 全 Go コンポーネント | Batch |
-| repo/* | Go/データ | 書込境界の実装（competitors, snapshots, summaries） | 2.3, 2.6 | pgx (P0) | State |
-| delivery-job | TS/配信 | 時刻別対象抽出・Flex 組立・Push・記録 | 3.1–3.11 | packages/db (P0), LINE API (External, P0) | Batch, API(外部) |
-| store-detail | TS/閲覧 | LIFF 認可＋読取専用詳細画面 | 4.1–4.4 | packages/db (P0), LINE Login verify (External, P0) | API |
-| packages/db 拡張 | TS/データ | 新行型・updateDeliveryHour | 3.2, 3.3 | 既存 Pool | Service |
+| summary/compute | Go/ドメイン | 順位・前日比・新着差分・素材組立（純関数） | 1.3, 2.4, 2.9, 3.5, 3.7 | なし（入力は値） | Service |
+| batch/run | Go/ランタイム | オーケストレーション・エラー隔離・パージ | 1.5, 2.1, 2.5–2.9, 5.1–5.2 | 全 Go コンポーネント | Batch |
+| repo/* | Go/データ | 書込境界の実装（competitors, snapshots, summaries） | 2.3, 2.6, 2.8 | pgx (P0) | State |
+| delivery-job | TS/配信 | 時刻別対象抽出・Flex 組立・Push・記録 | 3.1–3.14 | packages/db (P0), LINE API (External, P0) | Batch, API(外部) |
+| store-detail | TS/閲覧 | LIFF 認可＋読取専用詳細画面 | 4.1–4.8 | packages/db (P0), LINE Login verify (External, P0) | API |
+| packages/db 拡張 | TS/データ | 新行型・updateDeliveryHour・評価なしの正規化と表示整形（`@fwlm/db/daily-summary`） | 3.2, 3.3, 3.12–3.14, 4.8 | 既存 Pool | Service |
 | migration 0004 | DB | スキーマ追加＋境界文書更新 | 2.3, 3.2, 3.9 | 0001/0002 | State |
 | infra/delivery-job | Infra | TS Job・毎時 Scheduler・SA・accessor | 3.1, 5.1 | batch-job パターン | — |
 
@@ -267,7 +269,7 @@ sequenceDiagram
 | Field | Detail |
 |-------|--------|
 | Intent | Places API (New) への唯一の呼出点（Nearby Search / Place Details・バックオフ・マスク管理） |
-| Requirements | 1.1, 2.1, 2.2, 2.7 |
+| Requirements | 1.1, 2.1, 2.2, 2.7, 2.8 |
 
 **Responsibilities & Constraints**
 - フィールドマスクは2種のみを定数定義: 自店用 `rating,userRatingCount,businessStatus,reviews`／競合用 `rating,userRatingCount,businessStatus,displayName`（SKU 分離・research.md）
@@ -318,7 +320,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Field | Detail |
 |-------|--------|
 | Intent | 日次バッチのオーケストレーション（抽出→取得→記録→パージ→集計） |
-| Requirements | 1.5, 2.1, 2.5, 2.6, 2.7, 5.1, 5.2 |
+| Requirements | 1.5, 2.1, 2.5, 2.6, 2.7, 2.8, 2.9, 5.1, 5.2 |
 
 ##### Batch / Job Contract
 - Trigger: Cloud Scheduler（06:00 JST・既設）→ Cloud Run Job `daily-batch`。開始時に 0–120 秒のジッター
@@ -377,7 +379,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Field | Detail |
 |-------|--------|
 | Intent | 新テーブル行型の提供と、webhook（#6）から呼ばれる設定更新関数 |
-| Requirements | 3.2, 3.3 |
+| Requirements | 3.2, 3.3, 3.12–3.14, 4.8 |
 
 ##### Service Interface
 ```typescript
