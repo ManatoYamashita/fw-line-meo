@@ -520,6 +520,22 @@ jobs:
         # （生成は /api/responses のクライアント操作のみ）ため Gemini モックは不要。
         # npx --yes は実行時に lhci をレジストリ取得するため、ここに --import mock を被せると npm が壊れる。
         run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
+      # name は引用する（" #" 以降が YAML のコメントとして捨てられるため）。
+      - name: '測った画面が seed の店舗の回答画面であることの確認（Issue #264）'
+        working-directory: ts/apps/survey-web
+        # 上の lhci の判定（LCP・accessibility）は、店舗が見つからない 1 段落の画面
+        # （「このアンケートは現在ご利用いただけません。」）を測っても合格する。LCP は速く、a11y も
+        # 満点になるためである（実測: seed を外すと 3 回とも合格し、assertion-results.json は空だった）。
+        # storeId が 4 箇所で一致していても、seed の投入の失敗・店舗の状態を変える migration・
+        # 画面側の分岐の変更で、この形になる。
+        #
+        # そこで lhci が残した .lighthouseci/lhr-*.json を読み、件数・URL・LCP 要素（店名）・
+        # 回答フォームの a11y 監査が評価されたことを確かめる。判定の正典は perf/lhr-verification.mjs で、
+        # ローカルの実行装置（scripts/run-e2e-local.sh の lighthouse 層）も同じ perf/verify-lhr.mjs を呼ぶ。
+        # **この行は引数なしの 1 行のまま保つ。** continue-on-error や if: を付けたり、別のジョブへ
+        # 移したりすると scripts/check-e2e-store-id-consistency.sh が赤になる（配線が消えると、
+        # この穴は緑のまま静かに開き直るため）。
+        run: node perf/verify-lhr.mjs
 
   docker-build:
     # Issue #33/#35 再発防止: Dockerfile の腐敗（pnpm workspace 追従漏れ等）が deploy-prod で

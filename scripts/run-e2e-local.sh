@@ -21,8 +21,9 @@
 #   - Gemini モックの NODE_OPTIONS は survey の playwright にだけ渡す（広く渡すと関係ない node を巻き込む）
 #   - DB と鍵は常に明示する。survey-web の .env.local（gitignore 済み）は既存の env を上書きしないので、
 #     明示しておけば開発用 DB や実の鍵へは繋がらない
-#   - Lighthouse は「店舗が見つからない 1 段落の画面」でも合格しうる。LCP 要素が seed の店名で
-#     あることを確かめる
+#   - Lighthouse は「店舗が見つからない 1 段落の画面」でも合格しうる。lhci の後に、測った画面が
+#     seed の店舗の回答画面であることを perf/verify-lhr.mjs で確かめる（CI の lighthouse ジョブと
+#     同じ判定を呼ぶ。判定を 2 箇所に持たない・Issue #264）
 #   - 最後に、検査したコミットを表示する（本番のコミットとの突き合わせは run-e2e-prod-checks.sh）
 #
 # 使い方:
@@ -234,15 +235,6 @@ ports_free_for() {
     return "$busy"
 }
 
-# seed.sql の stores 行から値を取る。値の並びは (id, owner_id, name, place_id, place_status) で、
-# 引用符で区切ると 2 番目が id、6 番目が name になる。
-seed_store_field() {
-    awk -v idx="$1" '
-        /^INSERT INTO stores/ { in_stores = 1; next }
-        in_stores && /VALUES/ { n = split($0, part, "\047"); if (n >= idx) print part[idx]; exit }
-    ' "$SEED_SQL"
-}
-
 surfaces_api_origin() {
     sed -n -E "s#^export const API_ORIGIN = '([^']+)';.*#\1#p" "$SURFACES_API_FIXTURE"
 }
@@ -276,8 +268,11 @@ if is_selected survey || is_selected lighthouse; then
     if ! bash "${SCRIPT_DIR}/check-e2e-store-id-consistency.sh"; then
         seed_ok=0
     fi
-    store_id="$(seed_store_field 2)" || store_id=''
-    store_name="$(seed_store_field 6)" || store_name=''
+    # 店舗の id と店名は、lighthouse 層の判定と同じパーサー（seed.sql の列名で対応づける）で読む。
+    # 出力は `<id>\t<店名>` の 1 行。IFS=$'\t' の read は空の列を潰して列をずらすので、cut で分ける。
+    seed_line="$(node "${SURVEY_DIR}/perf/verify-lhr.mjs" --print-seed)" || seed_line=''
+    store_id="$(printf '%s\n' "$seed_line" | cut -f1)"
+    store_name="$(printf '%s\n' "$seed_line" | cut -f2-)"
     if ! [[ "$store_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || [ -z "$store_name" ]; then
         echo "ERROR: ${SEED_SQL#"${ROOT}"/} から店舗の id と店名を読めませんでした（id='${store_id}' name='${store_name}'）" >&2
         seed_ok=0
@@ -382,45 +377,14 @@ on_surfaces_interrupt() {
 }
 
 layer_lighthouse() {
-    local started
-    started="$(date +%s)"
     E2E_SEED_STORE_ID="$store_id" bash "$WITH_TEST_DB" bash "$SELF" __inside-db lighthouse || return 1
-    # lhci の判定（LCP・accessibility）に加えて、測った画面そのものを確かめる。
-    # shellcheck disable=SC2016  # node へ渡す JS をそのまま書くため、単一引用符の中で展開させない。
-    LHR_DIR="${SURVEY_DIR}/.lighthouseci" EXPECT_ID="$store_id" EXPECT_NAME="$store_name" \
-        SINCE_MS="$((started * 1000))" node -e '
-const fs = require("fs");
-const path = require("path");
-const dir = process.env.LHR_DIR;
-const since = Number(process.env.SINCE_MS);
-const files = fs.readdirSync(dir)
-  .filter((f) => /^lhr-\d+\.json$/.test(f))
-  .map((f) => path.join(dir, f))
-  .filter((f) => fs.statSync(f).mtimeMs >= since);
-if (files.length === 0) {
-  console.error("ERROR: 今回の実行で作られた lhr-*.json がありません");
-  process.exit(1);
-}
-let bad = 0;
-for (const f of files) {
-  const r = JSON.parse(fs.readFileSync(f, "utf8"));
-  const url = r.finalDisplayedUrl || r.finalUrl || "";
-  const node = r.audits["largest-contentful-paint-element"]?.details?.items?.[0]?.items?.[0]?.node;
-  const label = node?.nodeLabel ?? "";
-  const lcp = Math.round(r.audits["largest-contentful-paint"]?.numericValue ?? NaN);
-  const a11y = r.categories.accessibility?.score;
-  console.log(`   ${path.basename(f)}  LCP=${lcp}ms  accessibility=${a11y}  LCP要素=${label.slice(0, 40)}`);
-  if (!url.includes(process.env.EXPECT_ID)) {
-    console.error(`   NG: 計測した URL に seed の店舗 ID がありません: ${url}`);
-    bad++;
-  }
-  if (!label.includes(process.env.EXPECT_NAME)) {
-    console.error("   NG: LCP 要素が seed の店名ではありません（店舗が見つからない画面を測った可能性があります）");
-    bad++;
-  }
-}
-process.exit(bad === 0 ? 0 : 1);
-'
+    # lhci の判定（LCP・accessibility）に加えて、測った画面そのものを確かめる。判定は CI の
+    # lighthouse ジョブと同じ perf/verify-lhr.mjs（中身は perf/lhr-verification.mjs）。
+    # 今回の結果だけを読むことは件数の一致で確かめる（lhci の collect は開始時に古い lhr-*.json を消す）。
+    # **この呼び出しを本体の最後の行に保つ。** 層は `layer_lighthouse || rc=$?` の形で呼ばれ、
+    # set -e が効かない。後ろに行を足すと判定の終了コードが捨てられる
+    # （scripts/check-e2e-store-id-consistency.sh が機械強制する）。
+    node "${SURVEY_DIR}/perf/verify-lhr.mjs"
 }
 
 layer_cross_runtime() {
