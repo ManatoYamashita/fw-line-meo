@@ -180,7 +180,42 @@
     - ❌ **`_Blocked: LINE_CHANNEL_ID・LIFFチャネル未設定_`** — 実LINE受信確認・summary_deliveriesへのdelivered行生成には実LINEチャネル認証情報とLIFFチャネルが必要。**2026-07-13再検証（Issue #6/LINE基盤はPR #15・#16で main へマージ済み）**: main合流後、`line-channel-secret`/`line-channel-access-token`両シークレットは実値相当のversion 2が投入済み（2026-07-12作成）だが、実デプロイ済み `webhook` Cloud Run Service は Channel Access Token 方式（`LINE_CHANNEL_ACCESS_TOKEN`＋`LINE_CHANNEL_SECRET`）のみを使用しており、本specの `summary-delivery`（Stateless token発行方式）が要求する非秘匿値 `LINE_CHANNEL_ID` はline-onboarding側に元々存在しない値のため、`infra/envs/prod/terraform.tfvars` に未設定のまま（実 `summary-delivery` Job の env を確認済み: `LINE_CHANNEL_ID`/`LIFF_URL`とも空）。LIFFチャネル（`LIFF_CHANNEL_ID`/`LIFF_ID`/`LIFF_URL`）も同様に未作成（README §1 item 9・LINE Developersコンソールでの手動作業）。運用者は以下を実施すること: (1) LINE Developers コンソールで対象 Messaging API チャネルの Basic ID 設定画面から `LINE_CHANNEL_ID`（非秘匿）を取得、同コンソールで同一プロバイダー配下に LINE Login チャネル＋LIFFアプリを新規作成、(2) `infra/envs/prod/terraform.tfvars` に `line_channel_id`/`liff_channel_id`/`liff_id`/`liff_url` を設定し `terraform apply`（同時に `moved.tf` の `webhook`→`line-webhook` リネームも未適用のため反映される）、(3) 既存のスモークテスト店舗（owner_id=`a0000000-0000-0000-0000-000000000003`・line_user_id はダミー値のため実LINEユーザーIDへ更新が必要）を使うか新規に実オーナーを友だち登録の上、(4) `gcloud run jobs execute summary-delivery` を実行し実LINE受信・`summary_deliveries` の delivered 行を確認。
     - 実DBに残したスモークテストデータ（operators/agencies/owners/stores の `a0000000-...` 系4行）はテストと分かる命名（"smoke test"）。delivery_hour=7で有効だが配信ジョブはLINE設定欠如により即fail-fastするため実害なし。上記運用者手順完了後の実配信テストの足がかりとして意図的に残置。
 
+- [ ] 8. 評価の無い店の扱い（Issue #255）
+- [x] 8.1 読込時の正規化と、配信・詳細画面の表示を実装する
+  - `@fwlm/db/daily-summary`（値の import を持たない純関数・サブパスでのみ公開）に正規化（`normalizeSummaryRatings`・`normalizeSnapshotRating`）・表示整形（`formatRatingLabel`・`formatStarDiff`）・文言を置き、配信の対象抽出（`targets.ts`）と詳細画面の読込（`lib/data.ts`）で通す
+  - rating 0 は評価の定義域の外なので評価なしとして読む。評価 0 の競合を最下位に数えていた行は、自店に評価があれば rank_total をその件数だけ戻す。null の行はそのまま読む（二重に引かない）
+  - Flex と詳細画面は評価なしを「評価なし」と表示し、星差を符号つき小数 1 桁で出し（評価なしなら出さない）、評価なしの競合がいれば注記を添え、自店が評価なしの日は取得失敗と区別した文を出す
+  - クライアントからの root `@fwlm/db` の値 import と、共有モジュールへの値 import を ESLint（no-restricted-imports）で禁じる
+  - 観察可能な完了: 0 と null の行を実 postgres で読んだ結果が同じ形になり、母数が二重に補正されない（targets.db / data.db）。Flex と詳細画面の単体テストで、評価なし・注記・自店が評価なしの日・符号つき星差が固定される。変異（0 を評価として読む・母数の補正を外す・値 import の注入）で該当テストと lint が赤くなる
+  - _Requirements: 2.8, 3.12, 3.13, 3.14, 4.8_
+  - _Boundary: packages/db daily-summary, delivery-job/targets, delivery-job/flex, store-detail/data, store-detail/ui, eslint_
+
+- [ ] 8.2 Go で評価なしを null として記録し、比較集合から除く
+  - places の DTO と出力型の rating を `*float64` にし、欠落を nil のまま保つ（生値を加工しない）
+  - summary に `RankAll` を新設して比較関数を 1 つにし（rank_prev も同じ関数で求める）、評価なしの店舗を比較集合から除く。自店が評価なしなら rank・rank_total を NULL、全競合の starDiff を null にする
+  - repo の `SummaryCompetitor` の rating・starDiff と、`SnapshotWrite` の rating・rank を nullable にする
+  - 前日スナップショットは rating が無くても review_count があれば読み、新着件数を失わない（rating が 0 以下の行も評価なしとして読む）
+  - Implementation Notes の `summary/compute.Rank` への言及を `RankAll` へ追随させる
+  - 観察可能な完了: 実 postgres の E2E（`testdb.Isolated`）で、評価なしの競合・評価なしの自店・前日評価なし→当日初クチコミ・前日が 0.0 の 4 ケースが固定され、型変更前のコードでは赤くなる
+  - _Requirements: 2.4, 2.8, 2.9, 3.7_
+  - _Boundary: places/client, summary/compute, batch/run, repo/snapshots, repo/summaries_
+  - _Depends: 8.1（表示側を先にデプロイする。null を読めない版の配信は Flex 組立で落ちるため）_
+
+- [ ] 8.3 評価なしの店舗を含む言語間契約を検証する
+  - クロスランタイム契約テストの競合に評価なしの店舗を 1 件加え、Go が書いた行を配信（Flex の文言）と詳細画面の読込（`queryStoreDetail`）が「評価なし」として扱うことを確かめる
+  - 観察可能な完了: cross-runtime ジョブで、評価なしの競合が jsonb の null で書かれて rank_total に数えられず、Flex に「評価なし」と注記が出て「★0」が出ないこと、詳細画面の読込結果が画面の単体テストと同じ形であることが検証される
+  - _Requirements: 2.9, 3.13, 4.8_
+  - _Boundary: go batch/crossruntime_test, delivery-job/cross-runtime, store-detail/cross-runtime, db/test/cross_runtime_steps.sh_
+  - _Depends: 8.2_
+
+- [ ] 8.4 本番で評価なしの扱いを確認する
+  - 8.2 のデプロイ後の日次バッチで、評価なしの競合が null で記録され rank_total に数えられていないことを read-only で照合し、詳細画面で「評価なし」と注記を確認する
+  - 観察可能な完了: 本番の当日行と詳細画面の実測が記録され（識別子は先頭 8 文字・店名は伏せる）、Issue #255 の完了条件が埋まる
+  - _Requirements: 2.8, 2.9, 3.13, 4.8_
+  - _Depends: 8.3_
+
 ## Implementation Notes
+- **2026-09-13: Issue #255 の着手前の実測（本番 read-only・`default_transaction_read_only=on`）**: `daily_summaries` は 60 行（2 店舗 × 30 日）。店舗 `865d1c0e` の競合 1 店が 30 日すべて rating 0・reviewCount 0 で、`rating_snapshots` でもその日の最下位（6 位）だった。自店の rating 0 と rating_prev 0 は 0 行、jsonb に数値以外の rating は無い。rating 0 を含む 30 行のすべてで自店の順位は「rank_total − 評価 0 の件数」以内に収まり、8.1 の母数の補正が実データの形と一致することを確かめた（識別子は本番の値の先頭 8 文字）。
 - この開発環境には apple/container・docker・podman が無い。`make db-migrate`/`make db-test` を直接使わず、native Homebrew postgres 16.14 を initdb/pg_ctl で手動起動して検証する（scratchpad の長いパスは AF_UNIX ソケットパス上限103バイトを超えるため、短い `/tmp/pgrev_$$` 等をソケットディレクトリに使うこと）。
 - `db/test/assertions/30_compliance.sql` はテーブル allowlist を持つレビューゲートで、新テーブル追加時に allowlist 追記が意図的に必要（ファイル自身のコメントに明記）。新テーブルを追加するタスクは対応する 30_compliance.sql の追記も自タスクの境界内として扱ってよい。
 - go/go.mod で `go get` のみで pgx v5 を事前宣言しても、後続タスクで誰かが `go mod tidy` を実行すると未 import のため自動的に削除される（`go mod tidy -diff` で再現確認済み）。task 3.1/3.3 の実装者は pgx を実際に import した直後に `go mod tidy` を実行し、go.sum の整合を取ること。事前宣言は go.sum のバージョンピン留めとしては機能するが、go.mod の require 行自体の永続化は保証されない。

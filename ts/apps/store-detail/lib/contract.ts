@@ -6,6 +6,8 @@
 // ⚠️ このファイルはクライアントバンドルに取り込まれる。`@fwlm/db` からの取り込みは必ず
 //    `import type` に限ること（tsconfig は isolatedModules: true）。値 import を 1 つでも
 //    書くと pg / cloud-sql-connector が Node 専用依存ごとクライアントへ引きずり込まれる。
+//    pg を含まない純関数のサブパス `@fwlm/db/daily-summary` だけは値 import してよい。
+//    どちらも ts/eslint.config.js の no-restricted-imports が lint で機械強制する。
 
 import type { StoreDetailResult } from './data';
 

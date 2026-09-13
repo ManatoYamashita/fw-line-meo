@@ -56,7 +56,7 @@
 
 ### Existing Architecture Analysis
 - **二刀流の書込境界**（write-boundary.md）: `competitors`・`rating_snapshots` は Go 書込、`owners`・`stores` は TS 書込、読取は両層可。「日次サマリー配信での read は TS」と既定済み → 本設計はこれに完全準拠する
-- **rank 定義**（four-tier design 確定）: 比較集合 {自店＋当日 active 競合}、星評価降順→同率はクチコミ総数降順、point-in-time 固定、算出は Go の責務
+- **rank 定義**（four-tier design 確定）: 比較集合 {自店＋当日 active 競合}、星評価降順→同率はクチコミ総数降順、point-in-time 固定、算出は Go の責務。比較集合には星評価の存在する店舗だけを入れる（評価なしの店舗の扱いは「評価なしの店舗の扱い」節・Issue #255）
 - **インフラ**: Cloud Run Job `daily-batch`（placeholder イメージ・max_retries=1・timeout 30分・SA `sa-daily-batch`・Places API キー accessor 付与済み）と 06:00 JST Scheduler が稼働検証済み
 - **技術的負債の回避**: LINE Push クライアントは本 spec では `delivery-job` アプリ内に閉じる（#6 の webhook アプリとの共有パッケージ化は両者安定後に統合検討。二重化は限定的・意図的）
 
@@ -148,6 +148,8 @@ infra/modules/delivery-job/         # TS Job・毎時 Scheduler・SA・line toke
 
 ### Modified Files
 - `ts/packages/db/src/…` — 新テーブルの行型追加・`updateDeliveryHour(lineUserId, hour)` 追加（webhook 配線用の公開関数）
+- `ts/packages/db/src/daily-summary.ts`（Issue #255 で追加）— 評価なしの正規化と、星評価・星差の表示整形。値の import を持たない純関数だけで構成し、`package.json` の exports のサブパス `@fwlm/db/daily-summary` からだけ公開する（store-detail のクライアントにも同梱されるため）
+- `ts/eslint.config.js`（Issue #255 で追加）— クライアントからの root `@fwlm/db` の値 import と、`daily-summary.ts` への値 import を no-restricted-imports で禁じる
 - `db/write-boundary.md` / `db/ERD.md` — 新テーブルの書込責任言語（daily_summaries=Go、summary_deliveries=TS）と ER 追記。`make db-verify-docs` を通すこと
 - `infra/`（root 配線）＋ `infra/modules/run-services/` — `store-detail` サービス追加、`delivery-job` モジュール配線
 - `infra/modules/secrets/` 相当 — `line-channel-access-token` の accessor を delivery-job SA へ追加付与
@@ -223,6 +225,8 @@ sequenceDiagram
 | 2.5 | 部分失敗の継続と記録 | batch/run | 実行サマリーログ | 日次バッチ |
 | 2.6 | 同日再実行で重複させない | repo/snapshots, repo/summaries | 1日1行の一意制約＋ upsert | 日次バッチ |
 | 2.7 | 約6コール/日/店 | places/client, batch/run | フィールドマスク2種・競合固定 | 日次バッチ |
+| 2.8 | 評価なしを 0 で代替せず記録 | places/client, repo/snapshots, repo/summaries | rating は nullable（jsonb は null） | 日次バッチ |
+| 2.9 | 評価なしを比較集合から除く・自店が評価なしなら順位なし | summary/compute, batch/run | rank・rank_total は NULL 許容 | 日次バッチ |
 | 3.1 | 特定済み全オーナーへ日次 Flex 配信 | targets.ts, flex.ts, line.ts | Push API 契約 | 毎時配信 |
 | 3.2 | デフォルト 7:00 | owners.delivery_hour DEFAULT 7 | migration 0004 | — |
 | 3.3 | LINE 上で配信時刻変更 | packages/db updateDeliveryHour＋postback 契約 | 統合ポイント（#6 配線） | — |
@@ -234,10 +238,14 @@ sequenceDiagram
 | 3.9 | 同日重複配信禁止 | deliveries.ts, line.ts | 一意制約＋Retry-Key | 毎時配信 |
 | 3.10 | オプトアウト無し | （能力を提供しない） | — | — |
 | 3.11 | 日本語 | flex.ts（文言リソース） | — | — |
+| 3.12 | 星差の定義と表示形式 | packages/db daily-summary, flex.ts | formatStarDiff | 毎時配信 |
+| 3.13 | 評価なしの競合の表示と注記 | packages/db daily-summary, flex.ts | formatRatingLabel・UNRATED_EXCLUDED_NOTE | 毎時配信 |
+| 3.14 | 自店が評価なしの日の表示 | packages/db daily-summary, flex.ts | isUnratedSelf・SELF_UNRATED_RANK_TEXT | 毎時配信 |
 | 4.1 | 詳細を見る→LINE 内閲覧 | store-detail 一式 | LIFF URL 契約・detail API | 詳細閲覧 |
 | 4.2 | 閲覧のみ・OAuth 不要 | store-detail（書込 API を持たない） | — | — |
 | 4.3 | 競合0店は自店のみ表示 | data.ts, page.tsx | — | 詳細閲覧 |
 | 4.4 | 日本語 | store-detail | — | — |
+| 4.8 | 詳細画面の評価・星差の表示を配信と同じ規則で | packages/db daily-summary, data.ts, page.tsx | 同上 | 詳細閲覧 |
 | 5.1 | 全体失敗の当日検知 | cmd/main, index.ts の構造化ログ＋Job 実行履歴 | guardrails 既存アラート面 | 両ジョブ |
 | 5.2 | 実行サマリー記録 | batch/run, index.ts | 構造化ログ（件数フィールド固定） | 両ジョブ |
 
@@ -245,14 +253,14 @@ sequenceDiagram
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |-----------|--------------|--------|--------------|------------------|-----------|
-| places/client | Go/外部統合 | Places API (New) の唯一の呼出点 | 1.1, 2.1, 2.2, 2.7 | Places API (External, P0) | Service |
+| places/client | Go/外部統合 | Places API (New) の唯一の呼出点 | 1.1, 2.1, 2.2, 2.7, 2.8 | Places API (External, P0) | Service |
 | competitor/extract | Go/ドメイン | 競合抽出・固定ルール | 1.1–1.3 | places/client (P0), repo (P0) | Service |
-| summary/compute | Go/ドメイン | 順位・前日比・新着差分・素材組立（純関数） | 1.3, 2.4, 3.5, 3.7 | なし（入力は値） | Service |
-| batch/run | Go/ランタイム | オーケストレーション・エラー隔離・パージ | 1.5, 2.1, 2.5–2.7, 5.1–5.2 | 全 Go コンポーネント | Batch |
-| repo/* | Go/データ | 書込境界の実装（competitors, snapshots, summaries） | 2.3, 2.6 | pgx (P0) | State |
-| delivery-job | TS/配信 | 時刻別対象抽出・Flex 組立・Push・記録 | 3.1–3.11 | packages/db (P0), LINE API (External, P0) | Batch, API(外部) |
-| store-detail | TS/閲覧 | LIFF 認可＋読取専用詳細画面 | 4.1–4.4 | packages/db (P0), LINE Login verify (External, P0) | API |
-| packages/db 拡張 | TS/データ | 新行型・updateDeliveryHour | 3.2, 3.3 | 既存 Pool | Service |
+| summary/compute | Go/ドメイン | 順位・前日比・新着差分・素材組立（純関数） | 1.3, 2.4, 2.9, 3.5, 3.7 | なし（入力は値） | Service |
+| batch/run | Go/ランタイム | オーケストレーション・エラー隔離・パージ | 1.5, 2.1, 2.5–2.9, 5.1–5.2 | 全 Go コンポーネント | Batch |
+| repo/* | Go/データ | 書込境界の実装（competitors, snapshots, summaries） | 2.3, 2.6, 2.8 | pgx (P0) | State |
+| delivery-job | TS/配信 | 時刻別対象抽出・Flex 組立・Push・記録 | 3.1–3.14 | packages/db (P0), LINE API (External, P0) | Batch, API(外部) |
+| store-detail | TS/閲覧 | LIFF 認可＋読取専用詳細画面 | 4.1–4.8 | packages/db (P0), LINE Login verify (External, P0) | API |
+| packages/db 拡張 | TS/データ | 新行型・updateDeliveryHour・評価なしの正規化と表示整形（`@fwlm/db/daily-summary`） | 3.2, 3.3, 3.12–3.14, 4.8 | 既存 Pool | Service |
 | migration 0004 | DB | スキーマ追加＋境界文書更新 | 2.3, 3.2, 3.9 | 0001/0002 | State |
 | infra/delivery-job | Infra | TS Job・毎時 Scheduler・SA・accessor | 3.1, 5.1 | batch-job パターン | — |
 
@@ -261,7 +269,7 @@ sequenceDiagram
 | Field | Detail |
 |-------|--------|
 | Intent | Places API (New) への唯一の呼出点（Nearby Search / Place Details・バックオフ・マスク管理） |
-| Requirements | 1.1, 2.1, 2.2, 2.7 |
+| Requirements | 1.1, 2.1, 2.2, 2.7, 2.8 |
 
 **Responsibilities & Constraints**
 - フィールドマスクは2種のみを定数定義: 自店用 `rating,userRatingCount,businessStatus,reviews`／競合用 `rating,userRatingCount,businessStatus,displayName`（SKU 分離・research.md）
@@ -289,18 +297,22 @@ type PlacesClient interface {
 | Field | Detail |
 |-------|--------|
 | Intent | 順位・前日比・新着差分・配信素材の算出（副作用なしの純関数群） |
-| Requirements | 1.3, 2.4, 3.5, 3.7 |
+| Requirements | 1.3, 2.4, 2.9, 3.5, 3.7 |
 
 ##### Service Interface
 ```go
-// Rank は {自店＋active競合} を星評価降順（同率は reviewCount 降順）で順位付けし自店順位と母数を返す。
-func Rank(self Metrics, competitors []Metrics) (rank, total int)
+// Metrics.Rating は *float64。nil は Google の星評価が無い店舗（クチコミ 0 件）を表す（R2.8）。
+// RankAll は {自店＋active競合} のうち星評価のある店舗を星評価降順（同率は reviewCount 降順）で
+// 順位付けする。評価なしの店舗は比較集合に入れない（R2.9）。自店が評価なしなら SelfRank は nil、
+// Total は評価のある店舗の数（自店を含む N）、CompetitorRanks は competitors と同じ添字で評価なしは nil。
+// rank_prev もこの関数を前日の値へ適用して求める（比較関数を 1 つにする）。
+func RankAll(self Metrics, competitors []Metrics) Ranking
 // Diff は前日スナップショット（nil 許容）との差分を返す。前日なしは各 *Prev が nil。
 func Diff(today Metrics, yesterday *Metrics) MetricsDiff
 // NewReviews は review_count 差分を新着件数の正とし、publishTime > lastBatchDate のレビュー抜粋（帰属情報付き）を添える。
 func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewReviewInfo
 ```
-- Invariants: rank 定義は four-tier design の確定定義と一致（同率時はクチコミ総数降順、それも同率なら安定ソートで自店を下位にしない）
+- Invariants: rank 定義は four-tier design の確定定義と一致（同率時はクチコミ総数降順、それも同率なら安定ソートで自店を下位にしない）。評価なしの店舗は比較集合の外に置き、順位も母数も持たない
 - 新着「件数」の正は review_count 差分。抜粋はベストエフォート（関連度上位5件の制約を型のコメントに明記）
 
 ### Go / batch/run
@@ -308,7 +320,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Field | Detail |
 |-------|--------|
 | Intent | 日次バッチのオーケストレーション（抽出→取得→記録→パージ→集計） |
-| Requirements | 1.5, 2.1, 2.5, 2.6, 2.7, 5.1, 5.2 |
+| Requirements | 1.5, 2.1, 2.5, 2.6, 2.7, 2.8, 2.9, 5.1, 5.2 |
 
 ##### Batch / Job Contract
 - Trigger: Cloud Scheduler（06:00 JST・既設）→ Cloud Run Job `daily-batch`。開始時に 0–120 秒のジッター
@@ -322,13 +334,14 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Field | Detail |
 |-------|--------|
 | Intent | 毎時起動し当該時刻のオーナーへ Flex を Push、結果を記録 |
-| Requirements | 3.1–3.11, 5.1, 5.2 |
+| Requirements | 3.1–3.14, 5.1, 5.2 |
 
 **Responsibilities & Constraints**
 - 対象抽出: `owners.delivery_hour = 現在JST時` AND 当日 `daily_summaries` 存在 AND `summary_deliveries` 未存在
 - Flex 組立は `daily_summaries` のみを入力とする（rating_snapshots は読まない — 素材はバッチが確定済み）
 - Google 帰属: バブル末尾に「データ提供: Google Maps」テキスト＋クチコミ抜粋に投稿者名を表示
-- altText: 「【今朝のポジション】近隣N店中X位（前日比↑）」形式・400字以内
+- altText: 「【今朝のポジション】近隣N店中X位（前日比↑）」形式・400字以内。自店が評価なしの日は「【今朝のポジション】まだ Google の評価が無いため、順位は出せません。」で始める（R3.14）
+- 対象抽出で読んだ行は、Flex 組立の前に `@fwlm/db/daily-summary` の `normalizeSummaryRatings` で正規化する（「評価なしの店舗の扱い」節）
 
 ##### Batch / Job Contract
 - Trigger: Cloud Scheduler（毎時 HH:00 JST・新設）→ Cloud Run Job `summary-delivery`
@@ -341,11 +354,12 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Field | Detail |
 |-------|--------|
 | Intent | LIFF からの詳細閲覧（読取専用・自店のみ認可） |
-| Requirements | 4.1–4.4 |
+| Requirements | 4.1–4.8 |
 
 **Responsibilities & Constraints**
 - 認可: `liff.getIDToken()` → サーバーで `POST /oauth2/v2.1/verify` → `sub`（=userId）→ `owners.line_user_id` 突合 → **その sub が所有する confirmed 店舗の集合（認可済み集合）のみ返却**。**getProfile の userId を認可に使わない**
-- 表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示
+- 表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示。星評価・星差・評価なしの表示は Flex と同じ関数と文言（`@fwlm/db/daily-summary`）で行う（R4.8）
+- 読込（`lib/data.ts`）は当日サマリーと推移を `normalizeSummaryRatings`・`normalizeSnapshotRating` で正規化してから返す
 - 書込 API を一切持たない（4.2 の構造的担保）
 - **設定値の注入経路（2種を混同しないこと）**: サーバー側の `LIFF_CHANNEL_ID`（`/api/detail` の IDトークン検証 client_id）は Cloud Run のランタイム env で注入する。一方 **クライアント側の `NEXT_PUBLIC_LIFF_ID`（`liff.init` の liffId）は Next.js が `next build` 時にクライアントバンドルへインライン化する値であり、ランタイム env では一切反映されない — 必ず Dockerfile の build-arg（`ARG NEXT_PUBLIC_LIFF_ID`）でビルド時に渡す**。terraform の `liff_id` 変数はランタイム env として設定しても LIFF 起動には効かず、イメージビルド時に同値を build-arg として渡して初めて機能する（2026-07-14 に本番で発覚・修正。tasks.md Implementation Notes 参照）。
 
@@ -365,7 +379,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 | Field | Detail |
 |-------|--------|
 | Intent | 新テーブル行型の提供と、webhook（#6）から呼ばれる設定更新関数 |
-| Requirements | 3.2, 3.3 |
+| Requirements | 3.2, 3.3, 3.12–3.14, 4.8 |
 
 ##### Service Interface
 ```typescript
@@ -392,8 +406,8 @@ CREATE TABLE daily_summaries (
   store_id         -- stores.id と同型・REFERENCES stores(id)
   summary_date     date NOT NULL,
   status           text NOT NULL CHECK (status IN ('ready','no_competitors','failed')),
-  rank             integer,            -- failed 時 NULL
-  rank_total       integer,            -- 比較集合サイズ（自店含む N）
+  rank             integer,            -- failed 時・自店が評価なしの日は NULL
+  rank_total       integer,            -- 比較集合サイズ（評価のある自店・競合の数 N。自店が評価なしの日は NULL）
   rank_prev        integer,            -- 前日なしは NULL（R3.7）
   rating           numeric(2,1),
   review_count     integer,
@@ -401,7 +415,7 @@ CREATE TABLE daily_summaries (
   review_count_prev integer,
   new_review_count integer NOT NULL DEFAULT 0,
   new_reviews      jsonb NOT NULL DEFAULT '[]',  -- [{authorName, publishTime, rating, textExcerpt}] 帰属表示用
-  competitors      jsonb NOT NULL DEFAULT '[]',  -- [{name, rating, reviewCount, starDiff}] 表示順は rank 順
+  competitors      jsonb NOT NULL DEFAULT '[]',  -- [{name, rating, reviewCount, starDiff}] 表示順は rank 順（評価なしは末尾・rating/starDiff は null）
   created_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (store_id, summary_date)
 );
@@ -432,8 +446,17 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - **Consistency**: 店舗単位でトランザクション（snapshots＋summary を同一 Tx で確定）。言語間は結果整合（配信は素材確定後の毎時ジョブ）
 
 ### Data Contracts & Integration
-- **Flex Message 構成契約**（R3.4 の順序を固定）: ①ヘッダ=順位＋前日比矢印 ②自店 星/クチコミ総数 ③新着クチコミ（件数＋抜粋 or「新着なし」）④競合一覧（星差）＋「詳細を見る」ボタン＋Google 帰属。Bubble 30KB 以内・組立後にサイズ検証
+- **Flex Message 構成契約**（R3.4 の順序を固定）: ①ヘッダ=順位＋前日比矢印（自店が評価なしの日は順位の代わりにその旨・R3.14）②自店 星/クチコミ総数 ③新着クチコミ（件数＋抜粋 or「新着なし」）④競合一覧（星差。評価なしの店舗は「評価なし」で末尾に置き、順位に含めていない旨を添える・R3.13）＋「詳細を見る」ボタン＋Google 帰属。Bubble 30KB 以内・組立後にサイズ検証
 - **競合一覧の上限**: daily_summaries.competitors は最大5要素（抽出時固定の上限に一致）
+
+### 評価なしの店舗の扱い（Issue #255）
+- **評価なし**: Google の星評価は 1.0〜5.0 で定義され、クチコミ 0 件の店舗は Places API の応答に `rating` を持たない。Go はこれを 0 などの数値で代替せず、`rating_snapshots.rating`・`daily_summaries.rating` を NULL、`competitors[].rating` を JSON の null として書く（R2.8）
+- **比較集合**: 評価なしの店舗は順位の比較集合に入れない。`rank_total` は評価のある自店・競合の数で、評価なしの競合のスナップショットは `rank` を NULL にする。自店が評価なしの日は `rank`・`rank_total`・`rank_prev` を NULL にする（status は ready / no_competitors のまま。取得失敗の failed とは別の状態）（R2.9）
+- **星差**: `starDiff` = 自店の星評価 − 競合の星評価（小数 1 桁に丸める）。自店と競合のどちらかが評価なしなら null。表示は符号つき小数 1 桁（`+0.3` / `-0.2` / `0.0`）で、null のときは星差そのものを出さない（R3.12）
+- **表示順**: 評価のある競合を順位の順に並べ、その後ろに評価なしの競合を置く
+- **前日比**: 前日の自店が評価なしなら `rating_prev`・`rank_prev` は NULL。前日のスナップショットは rating が無くても review_count があれば読み、新着件数（review_count の差分）を失わない
+- **読込側の正規化**: 表示の前に `@fwlm/db/daily-summary` の `normalizeSummaryRatings`（当日サマリー）・`normalizeSnapshotRating`（推移）を通す。rating が 0 以下の値も評価なしとして読み（評価の定義域の外）、評価 0 の競合を最下位に数えていた行は、自店に評価があれば `rank_total` からその件数を引いて母数を戻す（評価 0 の店舗は常に最下位なので自店の順位は変わらない）。null で書かれた行は引かない
+- **表示の共有**: 星評価の文字列（`formatRatingLabel`）・星差（`formatStarDiff`）・評価なしの判定（`hasUnratedCompetitor`・`isUnratedSelf`）・文言（評価なし／注記／自店が評価なしの日の文）は `@fwlm/db/daily-summary` の 1 箇所に置き、Flex と LIFF が同じものを使う。このモジュールは値の import を持たない純関数だけで構成し、サブパスからだけ公開する（root の `@fwlm/db` は pg を含むため）。クライアントからの root の値 import と、このモジュールへの値 import は `ts/eslint.config.js` の no-restricted-imports が禁じる
 
 ## Error Handling
 
@@ -457,11 +480,12 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 ## Testing Strategy
 
 ### Unit Tests（Go: `go test`／TS: vitest）
-1. `summary.Rank`: 星同率→クチコミ数降順の決着、自店単独（total=1）、競合 active 除外後の母数 — 2.4, 1.3, 1.5
+1. `summary.RankAll`: 星同率→クチコミ数降順の決着、自店単独（total=1）、競合 active 除外後の母数、評価なしの競合を比較集合から除く・自店が評価なしなら順位なし・全競合が評価なしなら 1 店中 1 位 — 2.4, 2.9, 1.3, 1.5
 2. `summary.Diff`/`NewReviews`: 前日なし（Prev=nil）、review_count 差分と publishTime 差分の不一致ケース（取りこぼし）— 3.7, 3.5
 3. `competitor/extract`: 自店 place_id 除外・6件→5件採用・0件時の no_competitors — 1.1–1.3
 4. `flex.ts`: 4段構成の順序・「新着なし」文言・altText 400字・30KB 超過検出・Google 帰属の存在 — 3.4, 3.6, 3.11
 5. `targets.ts` 抽出条件・`deliveries.ts` 一意制約競合時のスキップ・`line.ts` 再送規則（409=成功/400=失敗/500=再送）— 3.1, 3.8, 3.9
+6. `@fwlm/db/daily-summary`: 評価 0（旧 Go）と null（新 Go）の正規化・母数の補正と二重補正の不在・星差の整形（`-0.0` を出さない）・評価なしの表示 — 2.8, 2.9, 3.12–3.14, 4.8
 
 ### Integration Tests
 1. migration 0004 適用＋`db/test/assertions` 追加分（一意制約・CHECK・delivery_hour 範囲）＋ `make db-verify-docs` 通過 — 2.6, 3.2

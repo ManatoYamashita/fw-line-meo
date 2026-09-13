@@ -235,6 +235,7 @@ stores.owner_id → owners.agency_id → agencies.id (→ operators.id)
 - `rank` = ある `store_id` の比較集合 **{自店 + その日の active 競合}** における当日順位。
 - 順序指標は **星評価の降順**、同点は **クチコミ総数(review_count)の降順** で決定（1 位が最上位）。
 - `rank` はスナップショット時点の値を固定保持する（point-in-time）。算出ロジック自体は Go 日次バッチ層の責務（本 spec はカラム意味のみ確定）。
+- 但し書き（Issue #255）: 比較集合には星評価の存在する店舗だけを入れる。Google の星評価は 1.0〜5.0 で定義され、クチコミ 0 件の店舗には存在しないため、その店舗の `rating` と `rank` は NULL とし、母数にも数えない。自店に評価が無い日は自店の `rank` も NULL とする（詳細は `competitive-daily-summary` の requirements.md Req 2・design.md「評価なしの店舗の扱い」）。
 
 **スケール戦略**: `rating_snapshots` は将来 `captured_on` 月次の宣言的パーティション化が可能（テーブル形不変のため後付け可）。MVP は単一表（`research.md` 参照）。
 

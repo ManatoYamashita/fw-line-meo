@@ -30,6 +30,7 @@ import type {
   DailySummaryStatus,
   Queryable,
 } from '@fwlm/db';
+import { normalizeSnapshotRating, normalizeSummaryRatings } from '@fwlm/db/daily-summary';
 
 // --- 応答形状 ------------------------------------------------------------------------
 
@@ -145,7 +146,9 @@ export async function queryStoreDetail(
     ),
   ]);
 
-  const summaryRow = summaryRes.rows[0];
+  const rawSummaryRow = summaryRes.rows[0];
+  // 評価の無い店（旧 Go のゼロ値 0 / 新 Go の null）を同じ形へ揃えてから画面へ渡す（Issue #255）。
+  const summaryRow = rawSummaryRow ? { ...rawSummaryRow, ...normalizeSummaryRatings(rawSummaryRow) } : undefined;
 
   const summary: StoreDetailSummary | null = summaryRow
     ? {
@@ -167,8 +170,7 @@ export async function queryStoreDetail(
 
   const trend: StoreDetailTrendPoint[] = trendRes.rows.map((row) => ({
     capturedOn: row.captured_on,
-    rank: row.rank,
-    rating: row.rating,
+    ...normalizeSnapshotRating(row),
     reviewCount: row.review_count,
   }));
 
