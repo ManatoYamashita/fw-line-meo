@@ -3,6 +3,7 @@ import {
   logFactualityResidual,
   logSurveyPageViewed,
   logSurveyResponseSubmitted,
+  logSurveyReviewLinkOpened,
   writeStructuredLog,
   type SurveyLogFields,
 } from '../src/lib/structured-log';
@@ -116,6 +117,17 @@ describe('ファネルの構造化ログ', () => {
 
     expect(output).toHaveBeenCalledWith(
       JSON.stringify({ severity: 'INFO', event: 'survey_response_submitted', storeId: 'store-1' }),
+    );
+    output.mockRestore();
+  });
+
+  it('survey_review_link_opened は storeId だけを info で出力する（Issue #137）', () => {
+    const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    logSurveyReviewLinkOpened(writeStructuredLog, 'store-1');
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ severity: 'INFO', event: 'survey_review_link_opened', storeId: 'store-1' }),
     );
     output.mockRestore();
   });
