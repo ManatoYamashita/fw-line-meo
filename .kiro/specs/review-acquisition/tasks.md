@@ -219,7 +219,7 @@
   - _Requirements: 5.2_
   - _Depends: 7.4_
 
-- [ ] 8. 投稿導線の押下を数え、口コミ獲得を施策の前後で読めるようにする（Issue #137・Issue #221 の完了条件 4）
+- [x] 8. 投稿導線の押下を数え、口コミ獲得を施策の前後で読めるようにする（Issue #137・Issue #221 の完了条件 4）
 - [x] 8.1 押下の通知を受ける API と記録を追加する
   - `POST /api/review-link-opened` が pageToken（storeId 一致）か sessionToken（封入された storeId が一致）を HMAC 検証し、通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録して 204 を返す。DB には触れない
   - 事象名を記録の正典（`docs/observability/log-field-canon.md`）へ先に登録する
@@ -244,7 +244,8 @@
   - Observable: 手順のコマンドを本番で実行し、出力の形を確かめてある
   - _Requirements: 5.7_
 
-- [ ] 8.5 本番へ適用する
+- [x] 8.5 本番へ適用する
+  - 実施記録: 末尾の「Issue #137 の本番実施記録（2026-09-13・投稿導線の押下）」。apply は指標に絞ったが、依存で付いてきた run-services の更新に PR #242 の未適用の環境変数が含まれていた（記録の節を参照）
   - マージ後に terraform apply（指標だけに絞る）→ デプロイの digest を照合 → 客と同じ経路で押下を 1 回送り、ログと指標に現れることを確かめる
   - Observable: 本番で `survey_review_link_opened` が記録され、ログベース指標が計上する（本番識別子は先頭 8 文字まで書く）
   - _Requirements: 5.7_
@@ -447,3 +448,50 @@ specification` で失敗する（一時 postgres で再現済み）。本番の 
 
 本記録に書いた店舗 ID は先頭 8 文字の `865d1c0e` だけである。理由は「Issue #137 段階3 の本番実施記録」の
 同名の節と同じで、店舗 ID は客向けアンケート経路へ到達する唯一の関門だからである。
+
+## Issue #137 の本番実施記録（2026-09-13・投稿導線の押下）
+
+**対象**: 本番 `survey-web` リビジョン `survey-web-00111-jgk`（2026-09-13T01:37Z 作成）。
+マージコミット `8b14255`（PR #253）を契機とする `deploy-prod` run 34730618736 の deploy ジョブが success で、
+まず `survey-web-00110-bq6`（01:34:44Z）が作られ、digest `sha256:75d44530…` が同 run の稼働確認の出力と一致した。
+その後の terraform apply が同じ digest のまま `00111-jgk` を作った（下の表）。トラフィックは 100% がこのリビジョンにある。
+
+### マージ後に out-of-band で行ったこと
+
+| 作業 | 結果 |
+|---|---|
+| terraform apply（`-target=module.guardrails.google_logging_metric.survey_funnel["survey_review_link_opened"]`） | 01:36:52〜01:37:19Z。deploy-prod の完了を待ってから、保存しない plan で当てた。`1 added, 5 changed`。added は指標 `survey_review_link_opened`（filter は event 名、label は `store_id` のみ） |
+| 上の `5 changed` の中身 | 指標の `survey_service_name` が run-services の出力に依存するため、`-target` でも Cloud Run 5 サービスの更新が付いてくる。既知の `client` / `client_version` に加えて、**PR #242（#229）が宣言し本番に未適用だった `GOOGLE_CLOUD_PROJECT` の追加**を含んでいた。plan を属性まで読まずに当てた見落としである。5 サービスとも新しいリビジョンが作られた。digest は apply 前と同一で、`/health` はすべて 200、apply 後のエラーログは 0 件。この環境変数が無い間は相関 ID とサポートコードが本番で出ていなかった（`ts/packages/observability/src/correlation.ts`）。ジョブ 2 本（`daily-batch` / `summary-delivery`）は対象外で、未適用のまま |
+| 全体の plan に出る PR #245（#232）の差分 | ログバケットの分離。費用の承認待ちで意図的に保留されている（Issue #232）ので当てていない |
+
+**`-target` の plan も属性まで読むこと。** 依存で付いてくるリソースには、他の PR が宣言して未適用のまま
+残っている差分がそのまま乗る。`client` / `client_version` の更新だけでも新しいリビジョンが作られる。
+
+### 観測したこと
+
+客と同じ経路で送った（`GET /s/<storeId>` の SSR HTML から `pageToken` を取り、押下の通知は
+`sendBeacon` と同じ `text/plain` の本文で `POST /api/review-link-opened`）。
+
+| 送ったもの | 応答 | 記録 |
+|---|---|---|
+| 回答済み画面の経路（pageToken） | 204 | される |
+| 下書き画面の経路（`POST /api/responses` で得た sessionToken） | 204 | される |
+| 署名を差し替えた pageToken | 400 | されない |
+| 別の店舗（`9407f4cc`）向けの pageToken | 400 | されない |
+
+1. `survey_review_link_opened` は 2 件だけ記録された（01:40:07Z・01:40:09Z）。`severity` は INFO、
+   `jsonPayload` の項目は `event` と `storeId` だけ。`trace` による相関も付いていた（上の環境変数による）
+2. ログベース指標は約 1 分後に `865d1c0e` へ 2 を計上した（1 時間幅・`ALIGN_DELTA` で照会）
+3. 下書き画面の経路のために回答を 1 件送ったので、この店舗の 2026-09 の匿名集計に 1 回答分が加算された
+
+### 確認していないこと
+
+- **本番の実ブラウザで投稿導線を押したときの通知** — 本番では `curl` で同じ要求を送っただけである。
+  ブラウザの `sendBeacon` が同じ要求を出し、実サーバーが 204 を返すことは E2E（CI の e2e ジョブ・Gemini モック）で確かめている
+- **実際の来店客による押下** と、`sendBeacon` の送達率
+- **回答済み画面を開いて 5 分を超えてからの押下が数えられないこと**（pageToken の失効） — ユニットテストでのみ確認
+- **施策の前後の比較そのもの** — 本番の実トラフィックはまだほぼ無い。読み方は `docs/observability/review-acquisition-funnel.md`
+
+### 識別子について
+
+本記録に書いた店舗 ID は先頭 8 文字の `865d1c0e` と `9407f4cc` だけである（理由は上の節と同じ）。
