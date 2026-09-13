@@ -253,18 +253,34 @@ describe('pickVariation', () => {
     expect(reachable(bare, 'angle')).toEqual(['率直さを重視', '総合的な満足度を重視'].sort());
   });
 
-  it('要る素材がすべてそろった素材では、すべての候補を選びうる（多様性を削りすぎない）', () => {
+  it('要る素材がすべてそろった素材では、観点が無いときだけの候補を除くすべてを選びうる（多様性を削りすぎない）', () => {
     const rich = chosen(['taste', 'atmosphere', 'service'], { comment: '店員さんが親切だった' });
     expect(reachable(rich, 'opening')).toEqual(texts(VARIATION_CANDIDATES.openings));
-    expect(reachable(rich, 'angle')).toEqual(texts(VARIATION_CANDIDATES.angles));
+    expect(reachable(rich, 'angle')).toEqual(
+      texts(VARIATION_CANDIDATES.angles.filter((c) => c.needs.kind !== 'noAspect')),
+    );
   });
 
   it('選んでいない観点に依存する候補は選ばない（味と雰囲気を選んでいない素材）', () => {
     const serviceOnly = chosen(['service']);
     expect(reachable(serviceOnly, 'opening')).toEqual(['全体の満足度から始める', '選んだ点のうち一つから始める'].sort());
     expect(reachable(serviceOnly, 'angle')).toEqual(
-      ['総合的な満足度を重視', '率直さを重視', '選んだ点を順に伝えることを重視', '接客体験を重視'].sort(),
+      ['総合的な満足度を重視', '選んだ点を順に伝えることを重視', '接客体験を重視'].sort(),
     );
+  });
+
+  // 観点のある素材では字数の規則（100〜200 字）より短く書かせたため、観点の無い素材に限る（#254 の実測）。
+  it('「率直さを重視」は観点の無い素材でだけ選ぶ', () => {
+    expect(reachable(chosen([]), 'angle')).toContain('率直さを重視');
+    expect(reachable(chosen([], { comment: '量が多かった' }), 'angle')).toContain('率直さを重視');
+    expect(reachable(chosen(['price']), 'angle')).not.toContain('率直さを重視');
+    const concernOnly = material({
+      aspectLabels: [],
+      concernLabels: ['清潔さ'],
+      unselectedAspectCodes: ALL_CODES.filter((c) => c !== 'cleanliness'),
+      comment: undefined,
+    });
+    expect(reachable(concernOnly, 'angle')).not.toContain('率直さを重視');
   });
 
   it('気になった点として選んだ観点も「選んだ」に数える', () => {

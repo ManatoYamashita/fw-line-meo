@@ -28,6 +28,7 @@ type Needs =
   | { readonly kind: 'none' } // 素材に依存しない（店名と星評価は必ずある）
   | { readonly kind: 'aspect'; readonly code: string } // その観点が良かった点か気になった点にある
   | { readonly kind: 'anyAspect' } // 良かった点か気になった点が 1 つ以上ある
+  | { readonly kind: 'noAspect' } // 良かった点も気になった点も無い（字数の規則が 40〜80 字の素材）
   | { readonly kind: 'comment' }; // 一言がある
 
 export interface VariationCandidate {
@@ -45,7 +46,10 @@ const OPENINGS: readonly VariationCandidate[] = [
 ];
 const ANGLES: readonly VariationCandidate[] = [
   { text: '総合的な満足度を重視', needs: { kind: 'none' } },
-  { text: '率直さを重視', needs: { kind: 'none' } },
+  // 観点のある素材では字数の規則（100〜200 字）より短く書かせた（修正後の実測で 100 字未満が 14/45。
+  // この候補を除くと規則内は 127/135 で変更前の 93% と同水準）。観点の無い素材（規則 40〜80 字）では
+  // 規則を守った（一言だけ 45/48・何も無し 14/15）ので、そちらに限って使う。
+  { text: '率直さを重視', needs: { kind: 'noAspect' } },
   { text: '選んだ点を順に伝えることを重視', needs: { kind: 'anyAspect' } },
   // 旧「味の具体性を重視」。「具体性」は、客が味を選んだだけのときにも素材に無い細部を求めるので改めた。
   { text: '味の感想を重視', needs: { kind: 'aspect', code: 'taste' } },
@@ -66,6 +70,8 @@ function isAvailable(material: DraftMaterial, needs: Needs): boolean {
       return true;
     case 'anyAspect':
       return chosenAny;
+    case 'noAspect':
+      return !chosenAny;
     case 'comment':
       return substantiveComment(material) !== undefined;
     case 'aspect': {
