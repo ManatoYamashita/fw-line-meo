@@ -131,7 +131,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
     .catch(() => deps.log('warn', 'tally_failed'));
   const generation = deps.generator.generate(
     material,
-    pickVariation(),
+    pickVariation(material),
     (aspectCodes) => logFactualityResidual(deps.log, aspectCodes),
   );
   const [, gen] = await Promise.all([tally, generation]);
