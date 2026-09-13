@@ -397,7 +397,7 @@ export async function handleDashboardUserUpdate(
   switch (outcome.kind) {
     case 'updated': {
       // 前後の DB 行の差分から action を導き、1 件ずつ記録する。変化なしは 0 件（Req 5.1, 5.3, 5.5）。
-      // 監査は業務の書込を確定した後に書く（既存の書込と同じ形・失敗時の扱いは #250 が決める）。
+      // 監査は業務の書込を確定した後に書く（既存の書込と同じ形・失敗時の扱いは Issue #250 が決める）。
       for (const action of auditActionsForUserUpdate(outcome.before, outcome.user)) {
         await deps.auditLog?.({
           actorType: 'operator',
