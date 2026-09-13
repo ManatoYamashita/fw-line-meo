@@ -180,7 +180,7 @@ ts/apps/line-webhook/src/
 │   ├── handler.ts                              # 店舗の解決→読み出し→組立→Reply
 │   ├── stores.ts                               # 店舗の解決・選択肢の頁・ラベルの省略（純関数）
 │   ├── errors.ts                               # StoreScopedReportError
-│   ├── format.ts                               # 日付の JST 表記と帰属表示の footer 部品
+│   ├── format.ts                               # 日付の JST 表記・帰属表示の footer 部品・30KB の検証・正規化済みの行の型
 │   └── builders/
 │       ├── new-reviews.ts                      # 新着口コミレポート
 │       ├── comparison.ts                       # 競合店との比較レポート
@@ -198,7 +198,8 @@ ts/apps/line-webhook/assets/source/richmenu-completed.html    # 焼き元
 
 ts/apps/line-webhook/test/
 ├── owner/router.test.ts
-├── report/stores.test.ts, report/builders.test.ts（スナップショットと 30KB 検証）, report/handler.test.ts
+├── report/stores.test.ts, report/format.test.ts, report/handler.test.ts
+├── report/new-reviews.test.ts, report/comparison.test.ts, report/trend.test.ts, report/notices.test.ts（ビルダーごとにスナップショットと 30KB 検証を持つ。並行して書いても衝突しない）
 ├── report-flow.db.test.ts                      # 署名つき webhook からの通し
 └── scripts/rich-menu-definitions.test.ts, scripts/relink-completed-menu.test.ts
 
@@ -246,6 +247,7 @@ db/migrations/00NN_summary_notification_statuses.sql   # status の CHECK を 7 
   - `src/line.ts` — リッチメニューの取得、ユーザーのメニューの照会、リンクを足す
   - `src/flex.ts`・`test/flex.test.ts`・`test/__snapshots__/flex.test.ts.snap` — 削除（日次カードの廃止）
   - `package.json`・`Dockerfile`、試験: `test/index.e2e.test.ts`・`test/cross-runtime.e2e.test.ts`・`test/targets.db.test.ts`・`test/deliveries.db.test.ts`
+  - `scripts/run-e2e-prod-checks.sh` — 本番の読み取り確認の配信の判定（現在は「対象をすべて送信した」を合格にする）を、失敗と上限超過が 0 件、準備判定が true、対象が送信か理由つきの見送りのどちらかに数えられていることへ改める（見送りだけの実行を合格にしつつ、差し替え後もメニュー未準備が続く状態は赤にする。Step B から C の間は意図どおり赤になる）。判定を外から試せるよう、実行サマリーの JSON を渡す注入口（`${VAR+x}` で判定する）と自己試験のケースを足す。判定と対になる `docs/testing/e2e.md` の表と「朝の Flex」の手順も同じ変更で改める
 - db パッケージとスキーマ
   - `ts/packages/db/src/types.ts` — `SummaryDeliveryStatus` の 3 値追加、`DailySummaryNewReview` の任意項目 3 つ、`DailySummaryReadRow`
   - `ts/packages/db/src/index.ts` — `report-reads` の再エクスポート
@@ -327,7 +329,7 @@ flowchart TD
 ```
 
 - 当日の集計が無い店舗は、既存どおり `skipped_no_summary` を記録する
-- 準備判定（設定された完了後メニューがレポート 3 導線を持つか）は、通知すべき店舗が現れた時点で実行ごとに 1 回だけ行う
+- 準備判定（設定された完了後メニューがレポート 3 導線を持つか）は、対象の有無によらず実行ごとに 1 回だけ行い、結果を実行サマリーに出す。本番で変化の無い日にも、差し替えの前後を実行サマリーで確かめられるようにするため
 - オーナーの照合は実行内でオーナーごとに 1 回だけ行い、同じオーナーの別店舗では結果を再利用する
 
 ## Requirements Traceability
@@ -364,7 +366,7 @@ flowchart TD
 | 6.6 | 詳細画面の 30 日推移への導線 | TrendBuilder | `storeDetailUrlFor` | — |
 | 6.7 | 30 日を超える Places 由来データを出さない | ReportReads | 読み出しの日付窓 | — |
 | 7.1, 7.2 | 行なし・最新が取得失敗 | ReportHandler, NoticeBuilders | `buildPreparingNotice`, `buildFetchFailedNotice` | レポート要求 |
-| 7.3 | 5 秒以内 | ReportHandler, StoreIdentifiedOwnerRouter | 同期処理・読み出し 4 回以内 | 性能 |
+| 7.3 | 5 秒以内 | ReportHandler, StoreIdentifiedOwnerRouter | 同期処理・読み出しは新着と比較が 4 回以内、推移が 5 回以内 | 性能 |
 | 7.4 | Reply は最大 1 回・push しない | ReportHandler, AppBoundary | 1 イベント 1 Reply | レポート要求 |
 | 7.5 | 店舗名つきの再試行案内 | StoreScopedReportError, AppBoundary | `buildInternalErrorRetryMessage` | レポート要求 |
 | 8.1 | 帰属表示の形式 | ReportFormat, NotificationPolicy, AttributionTokens | `attributionFooter` | — |
@@ -468,7 +470,7 @@ Responsibilities & Constraints
 
 - SELECT だけを発行する。書き込みはしない（line-webhook は `daily_summaries` を読むだけ）
 - 日付は `to_char(summary_date, 'YYYY-MM-DD')` で読み、実行環境の TZ に依存させない
-- 30 日の窓を SQL 側で切る: `summary_date > ((now() AT TIME ZONE 'Asia/Tokyo')::date - 30)`。Go の 30 日ローリング削除（`go/internal/repo/summaries.go:112-119`）と同じ境界にし、削除が遅れても 30 日を超える行を返さない（6.7）
+- 30 日の窓は、呼出元が渡す基準日（日本時間の日付 `asOf`）から SQL 側で切る: `summary_date > ($asOf::date - 30)`。Go の 30 日ローリング削除（`go/internal/repo/summaries.go:112-119`）と同じ境界にし、削除が遅れても 30 日を超える行を返さない（6.7）。基準日を引数にするのは、store-detail の `queryStoreDetail` と同じく、試験（Go の言語間試験は固定日で行を書く）で日付を固定できるようにするためである。ReportHandler は日本時間の今日を渡す
 - 店舗は `stores.owner_id = $ownerId AND place_status = 'confirmed'` を `created_at, id` の順に返す。#252 の停止状態が先に入った場合は、この 1 か所に停止を除く述語を足す（3.5）
 
 Contracts: Service [x]
@@ -499,15 +501,16 @@ export interface DailySummaryReadRow {
 
 export function listReportableStores(db: Queryable, ownerId: string): Promise<ReportableStore[]>;
 
-/** 30 日の窓の中で最も新しい行。無ければ null。 */
-export function findLatestDailySummary(db: Queryable, storeId: string): Promise<DailySummaryReadRow | null>;
+/** 基準日 asOf（日本時間の 'YYYY-MM-DD'）から見た 30 日の窓の中で最も新しい行。無ければ null。 */
+export function findLatestDailySummary(db: Queryable, storeId: string, asOf: string): Promise<DailySummaryReadRow | null>;
 
-/** endDate から days 暦日さかのぼった範囲の行を日付の昇順で返す。30 日の窓の外は含めない。 */
+/** endDate から days 暦日さかのぼった範囲の行を日付の昇順で返す。asOf から見た 30 日の窓の外は含めない。 */
 export function listDailySummariesEndingAt(
   db: Queryable,
   storeId: string,
   endDate: string,
   days: number,
+  asOf: string,
 ): Promise<DailySummaryReadRow[]>;
 ```
 
@@ -772,7 +775,7 @@ export function buildChangeNotification(storeName: string, changes: NotifiedChan
 
 Responsibilities & Constraints
 
-- 準備判定: `GET /v2/bot/richmenu/{LINE_RICHMENU_COMPLETED_ID}` の区画の action に `exposesAllReportActions` を当てる。実行ごとに 1 回だけ照会して結果を覚える。照会の失敗（ネットワーク・5xx・404）は `not_ready` として扱い、`delivery-job.report_menu_not_ready` を 1 回だけ出す
+- 準備判定: `GET /v2/bot/richmenu/{LINE_RICHMENU_COMPLETED_ID}` の区画の action に `exposesAllReportActions` を当てる。対象の有無によらず実行ごとに 1 回だけ照会して結果を覚え、実行サマリーの `reportMenuReady` に出す。照会の失敗（ネットワーク・5xx・404）は `not_ready` として扱い、`delivery-job.report_menu_not_ready` を 1 回だけ出す
 - オーナーの照合: `GET /v2/bot/user/{userId}/richmenu` が同じ ID を返せば `already_linked`。404（個別リンクなし）か別の ID なら `POST /v2/bot/user/{userId}/richmenu/{id}` で張り、成功なら `linked`（`delivery-job.richmenu_linked`）、失敗なら `link_failed`（`delivery-job.richmenu_link_failed`）。実行内でオーナーごとに結果を覚える
 
 Contracts: Service [x]
@@ -851,7 +854,7 @@ Contracts: Batch [x]
      - `error`: ネットワークや 5xx で判定できなかった
   4. 分類ごとの件数と、`unreachable`・`mismatch`・`error` のユーザーの先頭 8 文字を出す
   5. `--delete-old` があり、`mismatch` と `error` が 0 件のときに限り、旧メニューを削除する。`unreachable` は削除を妨げないが、一覧を運用記録に残す。それ以外は削除せず非ゼロで終わる（9.5 の「全員分の確認」は、全員を `verified` か `unreachable` のどちらかに確定させることとする）
-- 必要な env は `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET`・`DATABASE_URL`
+- 必要な env は `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET`・`DATABASE_URL`。トークンの発行はスクリプト自身が持つ（`setup-rich-menus.ts` の非公開関数を import しない。既存のスクリプトと同じく素朴に再実装する）
 - `unreachable` だったオーナーがブロックを解除すると、友だち追加のイベントで router がメニューを張る。通知が先に来た場合は、通知前の照合が張る
 
 ### Go 日次バッチ
@@ -956,7 +959,7 @@ Contracts: Batch [x]
 
 ### Performance
 
-- ReportHandler の DB 読み出しは 4 回以内（オーナー・セッション・店舗・集計）。統合試験で回数を固定する
+- ReportHandler の DB 読み出しは、新着と比較が 4 回以内（オーナー・セッション・店舗・最新の集計）、推移が 5 回以内（最新の集計の日付を終点に範囲を読むため 1 回多い）。統合試験で種類ごとに回数を固定する
 
 ## Security Considerations
 
