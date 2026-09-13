@@ -31,7 +31,7 @@ func TestWriteDailySummary_SameDayTwice_DoesNotDuplicate_FullReplace(t *testing.
 			{AuthorName: "Aさん", PublishTime: today, Rating: 5, TextExcerpt: "美味しかった"},
 		},
 		Competitors: []SummaryCompetitor{
-			{Name: "競合A", Rating: 4.0, ReviewCount: 30, StarDiff: 0.5},
+			{Name: "競合A", Rating: f64p(4.0), ReviewCount: 30, StarDiff: f64p(0.5)},
 		},
 	}); err != nil {
 		t.Fatalf("WriteDailySummary (2nd, same day): %v", err)
@@ -108,7 +108,7 @@ func TestPurgeOlderThan_30DayBoundary(t *testing.T) {
 
 	for _, d := range []time.Time{cutoff, justInside, wellInside} {
 		if err := WriteSelfSnapshot(ctx, pool, storeID, SnapshotWrite{
-			PlaceID: "place-self-purge", CapturedOn: d, Rating: 4.0, ReviewCount: 1, Rank: 1,
+			PlaceID: "place-self-purge", CapturedOn: d, Rating: f64p(4.0), ReviewCount: 1, Rank: intp(1),
 		}); err != nil {
 			t.Fatalf("WriteSelfSnapshot(%s): %v", d.Format(time.DateOnly), err)
 		}
@@ -158,5 +158,50 @@ func TestPurgeOlderThan_30DayBoundary(t *testing.T) {
 	err = pool.QueryRow(ctx, `SELECT true FROM daily_summaries WHERE store_id = $1 AND summary_date = $2`, storeID, cutoff).Scan(&cutoffSummaryExists)
 	if err == nil {
 		t.Fatalf("expected cutoff-boundary summary to be purged, but it still exists")
+	}
+}
+
+// Issue #255: 評価の無い競合は rating・starDiff を JSON の null として書く（キーを省かない）。
+// TS 側の DailySummaryCompetitor は `number | null` のキーの存在を前提にし、0 を書くと「★0」に化ける。
+// 自店が評価なしの日は rating・rank・rank_total を NULL で書く（取得失敗ではないので status は ready）。
+func TestWriteDailySummary_UnratedWritesNullsNotZeros(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	storeID := seedStore(t, ctx, pool, "U-summary-unrated", "place-self-summary-unrated")
+
+	today := dateOnly(t, "2026-07-12")
+	reviews := 0
+	if err := WriteDailySummary(ctx, pool, DailySummaryInput{
+		StoreID: storeID, SummaryDate: today, Status: "ready",
+		Rank: nil, RankTotal: nil, Rating: nil, ReviewCount: &reviews,
+		Competitors: []SummaryCompetitor{
+			{Name: "競合A", Rating: f64p(4.5), ReviewCount: 100, StarDiff: nil},
+			{Name: "競合B", Rating: nil, ReviewCount: 0, StarDiff: nil},
+		},
+	}); err != nil {
+		t.Fatalf("WriteDailySummary: %v", err)
+	}
+
+	var status string
+	var rankNull, totalNull, ratingNull bool
+	var aRating, aStarDiff, bRating, bStarDiff, bHasRatingKey string
+	if err := pool.QueryRow(ctx, `
+		SELECT status, rank IS NULL, rank_total IS NULL, rating IS NULL,
+		       jsonb_typeof(competitors->0->'rating'), jsonb_typeof(competitors->0->'starDiff'),
+		       jsonb_typeof(competitors->1->'rating'), jsonb_typeof(competitors->1->'starDiff'),
+		       (competitors->1 ? 'rating')::text
+		FROM daily_summaries WHERE store_id = $1 AND summary_date = $2
+	`, storeID, today).Scan(&status, &rankNull, &totalNull, &ratingNull, &aRating, &aStarDiff, &bRating, &bStarDiff, &bHasRatingKey); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+
+	if status != "ready" || !rankNull || !totalNull || !ratingNull {
+		t.Errorf("status=%s rank IS NULL=%v rank_total IS NULL=%v rating IS NULL=%v, want ready/true/true/true", status, rankNull, totalNull, ratingNull)
+	}
+	if aRating != "number" || aStarDiff != "null" {
+		t.Errorf("競合A rating/starDiff types = %s/%s, want number/null", aRating, aStarDiff)
+	}
+	if bRating != "null" || bStarDiff != "null" || bHasRatingKey != "true" {
+		t.Errorf("競合B rating/starDiff types = %s/%s (key present=%s), want null/null (key present=true)", bRating, bStarDiff, bHasRatingKey)
 	}
 }

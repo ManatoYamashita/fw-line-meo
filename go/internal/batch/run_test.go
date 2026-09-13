@@ -115,9 +115,13 @@ type fakeReview struct {
 	Text              fakeReviewText        `json:"text"`
 	AuthorAttribution fakeAuthorAttribution `json:"authorAttribution"`
 }
+
+// fakeDetailsResponse は Place Details (New) の応答の形。Places API (New) は proto3 の JSON なので、
+// クチコミ 0 件の店の応答には rating も userRatingCount も含まれない（Issue #255）。rating を
+// ポインタ＋omitempty にして、その「フィールドが無い」形を再現できるようにする。
 type fakeDetailsResponse struct {
-	Rating          float64         `json:"rating"`
-	UserRatingCount int             `json:"userRatingCount"`
+	Rating          *float64        `json:"rating,omitempty"`
+	UserRatingCount int             `json:"userRatingCount,omitempty"`
 	BusinessStatus  string          `json:"businessStatus"`
 	DisplayName     fakeDisplayName `json:"displayName"`
 	Reviews         []fakeReview    `json:"reviews"`
@@ -133,9 +137,15 @@ type fakeErrorResponse struct {
 
 func operational(rating float64, reviewCount int, displayName string, reviews ...fakeReview) fakeDetailsResponse {
 	return fakeDetailsResponse{
-		Rating: rating, UserRatingCount: reviewCount, BusinessStatus: "OPERATIONAL",
+		Rating: &rating, UserRatingCount: reviewCount, BusinessStatus: "OPERATIONAL",
 		DisplayName: fakeDisplayName{Text: displayName}, Reviews: reviews,
 	}
+}
+
+// unrated は Google の評価が無い店（クチコミ 0 件）の応答を返す。実物と同じく rating と
+// userRatingCount を含まない（Issue #255）。
+func unrated(displayName string) fakeDetailsResponse {
+	return fakeDetailsResponse{BusinessStatus: "OPERATIONAL", DisplayName: fakeDisplayName{Text: displayName}}
 }
 
 // fakePlacesServer は Nearby Search を固定リストで、Place Details を place_id 別の canned
@@ -385,8 +395,8 @@ func TestRun_CompetitorNotFound_DeactivatesAndExcludesFromToday(t *testing.T) {
 }
 
 // TestRun_RankPrev_ComputedFromYesterdaySnapshots は Implementation Notes が指示する
-// rank_prev の算出（前日の active 競合集合を用意し Rank を再適用する）を検証する
-// （task 3.2 で summary.Rank に rank_prev 専用関数が無いため task 3.5 側で解決する責務）。
+// rank_prev の算出（前日の active 競合集合を用意し、当日と同じ順位付け summary.RankAll を再適用する）を
+// 検証する（rank_prev 専用の関数は持たず、batch 側で解決する責務）。
 func TestRun_RankPrev_ComputedFromYesterdaySnapshots(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
@@ -400,13 +410,13 @@ func TestRun_RankPrev_ComputedFromYesterdaySnapshots(t *testing.T) {
 	yesterday := today.AddDate(0, 0, -1)
 
 	// 前日: 自店 3.5(20件) は 競合1 4.0(30件) の下・競合2 3.0(10件) の上で2位。
-	if err := repo.WriteSelfSnapshot(ctx, pool, storeE, repo.SnapshotWrite{PlaceID: "storeE-self", CapturedOn: yesterday, Rating: 3.5, ReviewCount: 20, Rank: 2}); err != nil {
+	if err := repo.WriteSelfSnapshot(ctx, pool, storeE, repo.SnapshotWrite{PlaceID: "storeE-self", CapturedOn: yesterday, Rating: f64(3.5), ReviewCount: 20, Rank: intPtr(2)}); err != nil {
 		t.Fatalf("seed yesterday self snapshot: %v", err)
 	}
-	if err := repo.WriteCompetitorSnapshot(ctx, pool, storeE, comp1ID, repo.SnapshotWrite{PlaceID: "storeE-comp-1", CapturedOn: yesterday, Rating: 4.0, ReviewCount: 30, Rank: 1}); err != nil {
+	if err := repo.WriteCompetitorSnapshot(ctx, pool, storeE, comp1ID, repo.SnapshotWrite{PlaceID: "storeE-comp-1", CapturedOn: yesterday, Rating: f64(4.0), ReviewCount: 30, Rank: intPtr(1)}); err != nil {
 		t.Fatalf("seed yesterday comp1 snapshot: %v", err)
 	}
-	if err := repo.WriteCompetitorSnapshot(ctx, pool, storeE, comp2ID, repo.SnapshotWrite{PlaceID: "storeE-comp-2", CapturedOn: yesterday, Rating: 3.0, ReviewCount: 10, Rank: 3}); err != nil {
+	if err := repo.WriteCompetitorSnapshot(ctx, pool, storeE, comp2ID, repo.SnapshotWrite{PlaceID: "storeE-comp-2", CapturedOn: yesterday, Rating: f64(3.0), ReviewCount: 10, Rank: intPtr(3)}); err != nil {
 		t.Fatalf("seed yesterday comp2 snapshot: %v", err)
 	}
 

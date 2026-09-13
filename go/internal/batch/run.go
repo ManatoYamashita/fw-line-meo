@@ -358,10 +358,10 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 
 	todaySelf := summary.Metrics{Rating: selfMetrics.Rating, ReviewCount: selfMetrics.UserRatingCount}
 
-	// 表示順・スナップショットの rank は「星評価降順・同率はクチコミ総数降順」で自店＋成功競合
-	// 全体を並べた通し順位とする（summary.Rank と同じ比較基準。自店を先頭要素として安定ソートし、
-	// 同率時に自店が競合より下位に落ちないことを保証する点も summary.Rank と揃える）。
-	selfRank, total, competitorRanks := rankAll(todaySelf, successful)
+	// 表示順・スナップショットの rank は「星評価降順・同率はクチコミ総数降順」で、評価のある自店＋
+	// 成功競合を並べた通し順位とする（summary.RankAll。評価の無い店舗は比較集合に入らず順位を持たない
+	// ・Issue #255）。
+	ranking, competitorRanks := rankAll(todaySelf, successful)
 
 	// 前日比較（rank_prev・rating_prev・review_count_prev・新着件数）。
 	yesterdaySnapshots, err := repo.SnapshotsOn(ctx, deps.Pool, store.ID, yesterday)
@@ -373,10 +373,13 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 	var yesterdaySelf *summary.Metrics
 	yesterdayCompetitorByID := make(map[string]summary.Metrics, len(yesterdaySnapshots))
 	for _, snap := range yesterdaySnapshots {
-		if snap.Rating == nil || snap.ReviewCount == nil {
+		// rating が無くても（前日は評価なし）review_count があれば読む。読み飛ばすと、クチコミが
+		// 0 件→1 件になった日の新着件数（review_count の差分）が 0 になる（Issue #255）。評価なしかどうか
+		// （NULL・旧コードのゼロ値 0）は summary.Metrics.Rated が判定する。
+		if snap.ReviewCount == nil {
 			continue
 		}
-		m := summary.Metrics{Rating: *snap.Rating, ReviewCount: *snap.ReviewCount}
+		m := summary.Metrics{Rating: snap.Rating, ReviewCount: *snap.ReviewCount}
 		switch {
 		case snap.SubjectKind == "self":
 			ym := m
@@ -388,7 +391,7 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 
 	var rankPrev *int
 	if yesterdaySelf != nil {
-		// Implementation Notes: 前日の active 競合集合を用意し Rank を再適用して rank_prev を得る。
+		// Implementation Notes: 前日の active 競合集合を用意し、当日と同じ順位付け（summary.RankAll）を再適用して rank_prev を得る。
 		// 「as of yesterday」の競合 churn の扱いは design.md 未規定のため、今日の active 競合集合
 		// （＝ successful に採用された競合）を両日の比較集合として使う。ただし前日のスナップショットが
 		// 存在しない競合（本日新規固定など）は前日側の比較対象に含めない（前日には存在し得ないため）。
@@ -398,8 +401,8 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 				yesterdayCompareMetrics = append(yesterdayCompareMetrics, m)
 			}
 		}
-		rp, _ := summary.Rank(*yesterdaySelf, yesterdayCompareMetrics)
-		rankPrev = &rp
+		// 当日と同じ比較関数を前日の値へ適用する。前日の自店が評価なしなら順位は無い（nil）。
+		rankPrev = summary.RankAll(*yesterdaySelf, yesterdayCompareMetrics).SelfRank
 	}
 
 	diff := summary.Diff(todaySelf, yesterdaySelf)
@@ -415,21 +418,33 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 		status = "no_competitors"
 	}
 
-	// competitors 表示リスト（表示順=rank順）。
+	// competitors 表示リスト（表示順=rank順。評価の無い競合は順位を持たないので末尾へ、元の順のまま置く）。
 	displayOrder := append([]competitorOutcome(nil), successful...)
 	sort.SliceStable(displayOrder, func(i, j int) bool {
-		return competitorRanks[displayOrder[i].competitor.ID] < competitorRanks[displayOrder[j].competitor.ID]
+		ri, rj := competitorRanks[displayOrder[i].competitor.ID], competitorRanks[displayOrder[j].competitor.ID]
+		if ri == nil || rj == nil {
+			return ri != nil && rj == nil
+		}
+		return *ri < *rj
 	})
 
 	summaryCompetitors := make([]repo.SummaryCompetitor, 0, len(displayOrder))
 	for _, s := range displayOrder {
-		summaryCompetitors = append(summaryCompetitors, repo.SummaryCompetitor{
+		competitorMetrics := summary.Metrics{Rating: s.metrics.Rating, ReviewCount: s.metrics.UserRatingCount}
+		entry := repo.SummaryCompetitor{
 			Name:        s.metrics.DisplayName,
-			Rating:      s.metrics.Rating,
 			ReviewCount: s.metrics.UserRatingCount,
-			// starDiff は「自店 - 競合」（正なら自店が優位）。
-			StarDiff: roundToOneDecimal(todaySelf.Rating - s.metrics.Rating),
-		})
+		}
+		if competitorMetrics.Rated() {
+			rating := *s.metrics.Rating
+			entry.Rating = &rating
+		}
+		// starDiff は「自店 - 競合」（正なら自店が優位）。どちらかが評価なしなら比べる元が無いので null。
+		if todaySelf.Rated() && competitorMetrics.Rated() {
+			diff := roundToOneDecimal(*todaySelf.Rating - *s.metrics.Rating)
+			entry.StarDiff = &diff
+		}
+		summaryCompetitors = append(summaryCompetitors, entry)
 	}
 
 	newReviewExcerpts := make([]repo.NewReviewExcerpt, 0, len(newReviews.Excerpts))
@@ -442,8 +457,19 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 		})
 	}
 
-	rankVal, totalVal := selfRank, total
-	ratingVal, reviewCountVal := todaySelf.Rating, todaySelf.ReviewCount
+	// 自店が評価なしの日は順位を記録しない（rank・rank_total とも NULL。取得失敗ではないので status は
+	// ready / no_competitors のまま・Issue #255）。評価は 0 で代替せず NULL で記録する。
+	var rankVal, totalVal *int
+	if ranking.SelfRank != nil {
+		selfRankVal, total := *ranking.SelfRank, ranking.Total
+		rankVal, totalVal = &selfRankVal, &total
+	}
+	var ratingVal *float64
+	if todaySelf.Rated() {
+		rating := *todaySelf.Rating
+		ratingVal = &rating
+	}
+	reviewCountVal := todaySelf.ReviewCount
 
 	// snapshots + daily_summaries + competitors の active=false 化を店舗単位の単一トランザクションで
 	// 確定する（design.md「Consistency: 店舗単位でトランザクション（snapshots＋summary を同一 Tx
@@ -461,17 +487,22 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 	}()
 
 	if err := repo.WriteSelfSnapshot(ctx, tx, store.ID, repo.SnapshotWrite{
-		PlaceID: store.PlaceID, CapturedOn: today, Rating: todaySelf.Rating, ReviewCount: todaySelf.ReviewCount, Rank: selfRank,
+		PlaceID: store.PlaceID, CapturedOn: today, Rating: ratingVal, ReviewCount: todaySelf.ReviewCount, Rank: ranking.SelfRank,
 	}); err != nil {
 		logger.Error("batch: write self snapshot failed", "error", err.Error())
 		return result
 	}
 
 	for _, s := range successful {
+		var competitorRating *float64
+		if (summary.Metrics{Rating: s.metrics.Rating}).Rated() {
+			rating := *s.metrics.Rating
+			competitorRating = &rating
+		}
 		if err := repo.WriteCompetitorSnapshot(ctx, tx, store.ID, s.competitor.ID, repo.SnapshotWrite{
 			PlaceID:     s.competitor.PlaceID,
 			CapturedOn:  today,
-			Rating:      s.metrics.Rating,
+			Rating:      competitorRating,
 			ReviewCount: s.metrics.UserRatingCount,
 			Rank:        competitorRanks[s.competitor.ID],
 		}); err != nil {
@@ -489,11 +520,11 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 		StoreID:     store.ID,
 		SummaryDate: today,
 		Status:      status,
-		Rank:        &rankVal,
-		RankTotal:   &totalVal,
+		Rank:        rankVal,
+		RankTotal:   totalVal,
 		RankPrev:    rankPrev,
 
-		Rating:      &ratingVal,
+		Rating:      ratingVal,
 		ReviewCount: &reviewCountVal,
 
 		RatingPrev:      diff.RatingPrev,
@@ -517,45 +548,22 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 	return result
 }
 
-// rankAll は自店＋成功取得できた競合を summary.Rank と同じ比較基準（星評価降順・同率は
-// クチコミ総数降順・自店を先頭要素とした安定ソート）で通し順位付けし、自店の順位・母数に加え、
-// 各競合自身の順位（rating_snapshots.rank・表示順に使う）を返す。
-//
-// summary.Rank は自店の順位・母数のみを返し競合個々の順位は返さないため、rating_snapshots への
-// 競合行書込み（各競合の rank 列）に必要な粒度をここで別途算出する。tie-break ロジックは
-// summary.Rank と完全に一致させている（同じ比較関数）。
-func rankAll(self summary.Metrics, competitors []competitorOutcome) (selfRank, total int, competitorRanks map[string]int) {
-	type entry struct {
-		id      string // 空文字は自店
-		isSelf  bool
-		rating  float64
-		reviews int
+// rankAll は自店＋成功取得できた競合を summary.RankAll で順位付けし、その結果と、各競合の順位
+// （rating_snapshots.rank・表示順に使う）を競合 ID で引ける形にして返す。比較関数は summary.RankAll の
+// 1 つだけで、ここでは添字と ID の対応を付けるだけにする（rank_prev も同じ関数で求めるため、当日と
+// 前日の順位付けが食い違わない）。評価の無い競合の順位は nil。
+func rankAll(self summary.Metrics, competitors []competitorOutcome) (summary.Ranking, map[string]*int) {
+	metrics := make([]summary.Metrics, len(competitors))
+	for i, c := range competitors {
+		metrics[i] = summary.Metrics{Rating: c.metrics.Rating, ReviewCount: c.metrics.UserRatingCount}
 	}
+	ranking := summary.RankAll(self, metrics)
 
-	entries := make([]entry, 0, len(competitors)+1)
-	entries = append(entries, entry{isSelf: true, rating: self.Rating, reviews: self.ReviewCount})
-	for _, c := range competitors {
-		entries = append(entries, entry{id: c.competitor.ID, rating: c.metrics.Rating, reviews: c.metrics.UserRatingCount})
+	competitorRanks := make(map[string]*int, len(competitors))
+	for i, c := range competitors {
+		competitorRanks[c.competitor.ID] = ranking.CompetitorRanks[i]
 	}
-
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].rating != entries[j].rating {
-			return entries[i].rating > entries[j].rating
-		}
-		return entries[i].reviews > entries[j].reviews
-	})
-
-	competitorRanks = make(map[string]int, len(competitors))
-	for i, e := range entries {
-		rank := i + 1
-		if e.isSelf {
-			selfRank = rank
-		} else {
-			competitorRanks[e.id] = rank
-		}
-	}
-	total = len(entries)
-	return selfRank, total, competitorRanks
+	return ranking, competitorRanks
 }
 
 func convertToSummaryReviews(reviews []places.Review) []summary.Review {

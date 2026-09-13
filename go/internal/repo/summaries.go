@@ -15,12 +15,16 @@ type NewReviewExcerpt struct {
 	TextExcerpt string    `json:"textExcerpt"`
 }
 
-// SummaryCompetitor は daily_summaries.competitors の1要素（表示順は rank 順・design.md）。
+// SummaryCompetitor は daily_summaries.competitors の1要素（表示順は rank 順・評価なしは末尾・design.md）。
+//
+// Rating は Google の星評価、StarDiff は「自店 − 競合」。評価の無い店（クチコミ 0 件）は Rating が、
+// 自店と競合のどちらかが評価なしなら StarDiff が nil で、JSON では null として書く（キーは省かない。
+// TS 側の DailySummaryCompetitor は `number | null` のキーの存在を前提にする・Issue #255）。
 type SummaryCompetitor struct {
-	Name        string  `json:"name"`
-	Rating      float64 `json:"rating"`
-	ReviewCount int     `json:"reviewCount"`
-	StarDiff    float64 `json:"starDiff"`
+	Name        string   `json:"name"`
+	Rating      *float64 `json:"rating"`
+	ReviewCount int      `json:"reviewCount"`
+	StarDiff    *float64 `json:"starDiff"`
 }
 
 // DailySummaryInput は daily_summaries への確定書込値（design.md Domain Model:
