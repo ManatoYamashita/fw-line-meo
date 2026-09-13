@@ -254,6 +254,7 @@ graph LR
 
 **Responsibilities & Constraints**
 - 窓の終点は、日付を解釈できる最新の記録日とする。窓は終点を含めて遡った暦日 N 日（`dayNumber(capturedOn) > dayNumber(end) − N`）。
+- 窓の始点は**公称の始点**（終点 − N + 1）であり、窓の中で最初に記録された日ではない。記録が N 日に満たない店では、始点から最初の記録までの区間が空白として描かれ、7 日と 30 日の切替で横軸が必ず変わる。要件 1.11・5.1 の「期間の始点」はこの公称の始点を指す。値のある最初の日は、要約（3.4）と説明文の始点の値にだけ使う（2026-09-13 の design 検証で確定）。
 - 日付 `YYYY-MM-DD` は `Date.UTC` で日数に直す。解釈できない日付の点は、窓に含めない（4 つの表示すべてから同時に外れる）。
 - 評価（numeric の文字列）は数値に直す。有限でない値と null は「値が無い」として扱い、0 として扱わない（8.4）。
 - React・DOM・`@fwlm/db` の値に依存しない。
@@ -279,8 +280,9 @@ export interface TrendWindow {
   readonly periodDays: TrendPeriodDays;
   /** 窓に含まれる点（capturedOn 昇順）。表の行はこれをそのまま描く。 */
   readonly points: readonly StoreDetailTrendPoint[];
-  /** points の先頭と末尾の capturedOn。 */
+  /** 公称の始点（endDate − periodDays + 1）。points の先頭とは限らない。 */
   readonly startDate: string;
+  /** 終点 = 日付を解釈できる最新の記録日（points の末尾）。 */
   readonly endDate: string;
 }
 
@@ -351,11 +353,12 @@ export function describeMetric(window: TrendWindow, extent: MetricExtent): strin
   - **クチコミ数**
     - 間隔は 1・2・5 × 10^k から選び、区間が 4 つ以下になるようにする。範囲はその倍数に丸める。
     - 値がすべて同じなら、上下に 1 間隔ずつ広げる。目盛りはすべて整数にする。
-- 横の位置は、窓の始点から数えた暦日の番号で決める。始点と終点が同じ日（1 日だけ）なら、中央に置く。
+    - **下端は 0 で止める**。件数は負にならないので、全日 0 件の店（評価の無い新しい店）に負の目盛りを出さない。そのときの範囲は 0〜1 とする（2026-09-13 の design 検証で追加）。
+- 横の位置は、窓の**公称の始点**から数えた暦日の番号で決める（`x = 日番号 ÷ (periodDays − 1) × 100`）。periodDays は 7 以上なので、0 で割ることは無い。
 - 線分は、暦日で連続し、ともに値がある点の並びだけで作る。1 本の線分は 2 点以上。
 - 印の規則（決定 D4）:
   - 常に印を置くのは、端点（期間内の最新の値）と孤立点（前後どちらとも結ばれない値）。
-  - `spanDays <= ALL_MARKERS_MAX_DAYS`（10）なら、すべての値に印を置く。
+  - `spanDays`（= periodDays）が `ALL_MARKERS_MAX_DAYS`（10）以下なら、すべての値に印を置く。現行の選択肢では、7 日で全点に置き、30 日で端点と孤立点だけに置くことになる。
 
 **Contracts**: Service [x]
 
@@ -517,19 +520,27 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - **配置**:
   - 描画領域は固定高（`h-40`）とする。左に目盛りの帯（固定幅）、下に日付の帯を置き、容器全体の高さは内容に従わせる（dataviz: 固定高は x 軸の帯を含める）。
   - 点と端点の輪が枠で切れないよう、描画領域には内側の余白を取る。
-- **SVG**:
-  - `viewBox="0 0 100 100"`、`preserveAspectRatio="none"`、`overflow-visible`。
-  - 罫線: 目盛りの位置に 1px の実線（`stroke-border`）。
-  - 線: `polyline` を 2px で描き、角と端を丸める（`stroke-current`・`fill-none`）。
-  - 印: 長さ 0 の `line` を 8px で丸い端に描く。端点には、下にカードの地色の 12px（`stroke-card`、輪 2px）を重ねる。
-  - 図形はすべて `vector-effect: non-scaling-stroke` にする。
+- **SVG は 2 枚を同じ描画領域に重ねる**（決定 D2。2026-09-13 の design 検証で改定）:
+  - **線の層**: `viewBox="0 0 100 100"`、`preserveAspectRatio="none"`、`overflow-visible`。
+    - 罫線: 目盛りの位置に 1px の実線（`stroke-border`）。
+    - 線: `polyline` を 2px で描き、角と端を丸める（`stroke-current`・`fill-none`）。
+    - 線と罫線はすべて `vector-effect: non-scaling-stroke` にする。
+  - **点の層**: viewBox を持たない SVG に、`<circle cx="{x}%" cy="{y}%">` を百分率座標で描く。
+    - 印: 半径 4（8px）を `fill-current` で描く。
+    - 端点: 下に半径 6 の `fill-card`（カードの地色の輪 2px）を置き、その上に半径 4 を重ねる。
+    - viewBox が無いので、縦横の伸縮を受けない。Chromium と WebKit の両方で真円になる（research.md に実測を記録）。長さ 0 の線分を丸い端で描く案は、WebKit では楕円になるため採らない。
+  - 線の太さ・端・角・vector-effect は、**SVG の属性**（`strokeWidth`・`strokeLinecap`・`strokeLinejoin`・`vectorEffect`）で書く。クラスでは書かない。Tailwind 4.3 には端・角・vector-effect のユーティリティが無く、任意値で書くと `data-slot` を持たない要素への任意値の禁止に当たる。`stroke-2` のような太さのクラスは、色の語彙の検査と紛れる。
+  - role="img" と名前は線の層に付ける。点の層は `aria-hidden` にする。
 - **HTML のラベル**:
   - 目盛りの位置と最新値の位置は、`style` の `top`（と必要なら `left`）の百分率だけで与える。色・寸法・余白は `style` に書かない。
   - 最新値のラベルは右端に揃え、点の上に置く。点が上端に近い（y < 25）ときは点の下に置く。
   - 文字は `text-xs` と `tabular-nums` で描く。目盛りと日付は `text-muted-foreground`、最新値は継承した本文色にする。
 - **色の語彙（決定 D6）**:
-  - このファイルが書く色のクラスは、次の 5 つに限る: `stroke-current`・`fill-none`・`stroke-border`・`stroke-card`・`text-muted-foreground`。
+  - このファイルが書く色のクラスは、次の 6 つに限る: `stroke-current`・`fill-none`・`stroke-border`・`fill-current`・`fill-card`・`text-muted-foreground`。
   - 検証は、描画結果の class から色のユーティリティを抜き出し、完全一致で照合する。
+    - 抜き出す規則: `stroke-`・`fill-` で始まるクラスのすべてと、`text-` で始まるクラスのうち文字サイズの段（`text-xs`〜`text-2xl`）と揃え（`text-left` など）を除いたもの。
+    - 抜き出しの規則そのものを、`text-xs` と `text-muted-foreground` を混ぜた fixture で自己検証する。
+    - 抜き出した件数が 1 以上であることも assert する（空振り対策）。
 - **任意値**: 任意値（`[`）を書かない。`id` は `useId` の値だけを使い、手書きの `#…` を置かない（hex と誤検出されるため）。
 
 #### CompetitorsSection（page.tsx の節）
@@ -574,7 +585,8 @@ export function filterCompetitors<T extends { readonly name: string }>(
 |---|---|---|
 | 読み込み中・失敗・店舗選択待ち | 0 件 | 下のすべて |
 | 正常・推移 0 件・競合 1 店以下 | 0 件 | 同上 |
-| 正常・推移あり | `input[type=radio][aria-hidden=true][tabindex="-1"]` 5 件 | 同上 |
+| 正常・推移 0 件・競合 2 店以上 | `input[type=search][data-slot=input]` 1 件 | 同上 |
+| 正常・推移あり・競合 1 店以下 | `input[type=radio][aria-hidden=true][tabindex="-1"]` 5 件 | 同上 |
 | 正常・推移あり・競合 2 店以上 | 上に加えて `input[type=search][data-slot=input]` 1 件 | 同上 |
 
 「0 件を保つもの」は次のとおり。
@@ -664,8 +676,13 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - グラフの意味論:
   - `getByRole('img', { name })` で説明文が取れる。
   - SVG の中に、焦点を受け取る要素が 0 件（5.2）。
-- 色の語彙: グラフが描く色のユーティリティの集合が、決定 D6 の 5 つと完全一致する（5.3・9.3）。
-- `style` 属性: 現れる要素の style のプロパティが `top` / `left` の百分率だけである。
+- 色の語彙: グラフが描く色のユーティリティの集合が、決定 D6 の 6 つと完全一致する（5.3・9.3）。
+- `style` 属性:
+  - 走査の範囲は `TrendChart` の `figure` の子孫に限る。Base UI の隠し radio が `visuallyHidden` のインライン style を持つので、ページや節全体で取ると必ず赤になる。
+  - 範囲内の style のプロパティは、`top` / `left` の百分率だけである。
+  - 範囲内に style を持つ要素が 1 件以上あることも assert する。
+- 選択肢の札: `TREND_PERIODS` / `TREND_METRICS` から map で作る。札ごとにクリックして選択状態が移ることを確かめる。`RadioGroup` の値の型は `any` なので、値の書き違いは型で止まらず、型ガードに黙って捨てられて「押しても変わらない札」になる。これを札ごとの試験で捕まえる。
+- 軸の端: クチコミ数が全日 0 件のとき、目盛りに負の値が無い（範囲 0〜1）。
 
 ### 構造契約（`store-page.test.tsx` の 2 件を置き換える）
 - 分岐ごとに、許可リストの件数を完全一致で固定する（上の表）。
@@ -686,14 +703,26 @@ export function filterCompetitors<T extends { readonly name: string }>(
   - 4 状態 × 2 幅で `expectNoHorizontalScroll` を当てる（捲れる領域は 1）。
   - キーボード: Tab で期間の群に入り、矢印キーで「7日」を選ぶ。h2 が追随し、焦点の輪郭が実際に描かれて切れていないことを実測する（2.7・5.5）。
   - 目盛りの文字の算出サイズが、320px と 393px で等しい（6.5）。
+- 操作領域: 期間と指標の札（`FieldLabel` の行）と、検索欄の Field（ラベル行と入力の合計）の高さが 44px 以上であることを実測する（5.6）。
+- 点の切り取り: 点は `circle` なので、bounding box が 8×8 として `expectNoHorizontalScroll` の母数に入る。一方、Chromium は SVG の線について太さを含まない箱を返すので、線のはみ出しはこの検査では捕まらない。そのため、描画領域に内側余白を取ることを設計で担保する（6.1）。
 - `a11y-audit.spec.ts`: 4 状態を回して `expectNoAxeViolations` を当て、回った状態の数を `toBe(4)` で固定する（9.4）。
+- WebKit での実描画（9.5）: e2e は Chromium（Pixel 5）だけなので、iOS の LINE 内ブラウザと同じ WebKit で描画して確かめ、記録を残す。確かめる項目は次の 3 つ。
+  - 点が真円であること
+  - 端点の輪が見えること
+  - 320px で溢れないこと
+
+  手段は、手元の WKWebView か Playwright の webkit である。CI への webkit の追加はこの spec の範囲外とする。
 
 ### 変異の記録（要件 9.2・9.3・9.6）
 - 構造契約: 次の 3 つを、それぞれ別の分岐・位置へ注入して赤になることを記録する。
   - `<button type="button">`
   - `<input type="text">`
   - `name` 付きの radio
-- 一貫性: 窓の導出を 1 箇所だけずらす（例: 表だけ窓の外の点を含める）と、一貫性の検査が赤になることを記録する。
+- 一貫性: 4 つの表示それぞれについて、その表示だけ窓の導出をずらすと一貫性の検査が赤になることを、1 つずつ記録する（計 4 通り）。
+  - 表: 窓の外の点を 1 つ含める
+  - 要約: 窓ではなく全推移から始点を取る
+  - グラフ: 公称の始点を 1 日ずらす
+  - 現在値: 値のある最後の日ではなく末尾の点を使う
 - 走査が 0 件にならないこと: 色の語彙の検査、style の検査、構造契約の検査のそれぞれで、抜き出した対象が 1 件以上あることを assert する。
 
 ## Security Considerations
@@ -744,3 +773,5 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - `scripts/check-swallowed-exceptions.sh`: `catch {}` を書かない。
 - lint: 新しい `lib/*.ts` を ts/eslint.config.js のクライアント同梱ファイルの一覧へ加えるまで、root の `@fwlm/db` の値 import が網を抜ける。
 - jsdom: `PointerEvent` と `ResizeObserver` が無い。この設計は ResizeObserver を使わない。
+- 描画エンジン差: 点を長さ 0 の線分で描かない（WebKit では楕円になる）。点は viewBox を持たない層の `circle` で描く。e2e は Chromium だけなので、WebKit での見え方は e2e の緑では保証されない。
+- Base UI の隠し radio はインライン style を持つ。style を検査するときは、範囲を `TrendChart` の figure の中に限る。
