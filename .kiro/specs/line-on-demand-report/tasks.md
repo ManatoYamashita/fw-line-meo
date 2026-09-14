@@ -18,7 +18,7 @@
   - _Boundary: infra/modules/delivery-job, infra/envs/prod_
 
 - [ ] 2. 共有の土台（postback 契約・読み出し・帰属表示・口コミの帰属項目）
-- [ ] 2.1 レポートの postback 契約のパッケージを新設する
+- [x] 2.1 レポートの postback 契約のパッケージを新設する
   - 3 種類のレポートの符号化と復号、導線の文言、メニューの action 群がレポート 3 導線を持つかの判定を、実行時の依存を持たないパッケージとして用意する
   - `rpt` 以外の action（オンボーディングの `select`・`confirm`・`restart`・`resume`、第2フェーズの `g_post`・`g_reply`・`g_status`）を受理しないこと、300 字の上限、往復で値が戻ること、1 導線でも欠けたメニューを「持たない」と判定することを試験で固定する
   - 型検査・試験・Dockerfile の網羅ガードが要求する登録を行い、line-webhook と delivery-job のイメージへ取り込む
@@ -286,6 +286,8 @@
   - `module.run_services.google_cloud_run_v2_service.svc["line-webhook"]`
   - `module.delivery_job.google_cloud_run_v2_job.delivery`
   - 7.6 でも、#232 が承認待ちのままなら `-target` を付ける
+- （2.1）`docs/architecture.md:49` と `README.md:65` の共有パッケージの一覧に `@fwlm/line-report` が無い。6.2 で足す
+- （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録
 
