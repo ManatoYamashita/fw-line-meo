@@ -26,7 +26,7 @@
   - _Requirements: 1.10, 2.3, 2.7_
   - _Boundary: packages/line-report, apps/line-webhook と apps/delivery-job の package.json と Dockerfile_
 
-- [ ] 2.2 (P) レポート用の読み出しと口コミの任意項目の型を用意する
+- [x] 2.2 (P) レポート用の読み出しと口コミの任意項目の型を用意する
   - オーナーの確定店舗を作成順に返す読み出し、30 日の窓の中で最も新しい日次集計、ある日から N 暦日さかのぼった日次集計を、日付を文字列にして返す読み出しを用意する。書き込みはしない
   - 30 日の窓は、呼出元が渡す基準日（日本時間の日付）から SQL 側で切り、Go の 30 日ローリング削除と同じ境界にする（store-detail の読み出しと同じ形。試験で日付を固定できる）
   - TS の新着口コミの型に、口コミの帰属 3 項目（Google Maps 上の URL・投稿者のプロフィール URL・画像 URL）を任意項目として足す（既存行は持たない）
@@ -287,6 +287,10 @@
   - `module.delivery_job.google_cloud_run_v2_job.delivery`
   - 7.6 でも、#232 が承認待ちのままなら `-target` を付ける
 - （2.1）`docs/architecture.md:49` と `README.md:65` の共有パッケージの一覧に `@fwlm/line-report` が無い。6.2 で足す
+- （2.2）次の 2 つの注記は、2.4 と 2.5 が入って初めて事実になる。両タスクの審査で、事実になったことを確かめる
+  - `ts/packages/db/src/report-reads.ts` の「30 日の定数の食い違いは言語間の契約試験で検出する」
+  - `ts/packages/db/src/types.ts` の「帰属 3 項目は Go が空でないときだけ書く」
+- （2.2）`daily_summaries` の範囲の読み出しは一意索引の順に出るので、ORDER BY を落としても試験が緑のまま通る。並び順は、索引を使わない計画（`SET LOCAL enable_*scan = off`）でも確かめる
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

@@ -120,11 +120,22 @@ export interface SurveyAspectTallyRow {
 
 // --- competitive-daily-summary（機能1・0004）---
 // jsonb 列 new_reviews の要素形。帰属表示用（新着は自店のみ・Req 3.5）。
+//
+// 後ろの 3 項目は line-on-demand-report で足した口コミの帰属情報で、Go が空でないときだけ書く。
+// 足す前に書かれた行の要素は 3 項目を持たない（null ではなくキーが無い）。行は 30 日で入れ替わる。
+// 読込側は項目の有無で「導線を取得できているか」を判定する（Google Maps 上の URL が無い口コミは
+// 内容を表示しない）。
 export interface DailySummaryNewReview {
   authorName: string;
   publishTime: string;
   rating: number;
   textExcerpt: string;
+  /** 投稿者のプロフィールの URL（Places API の authorAttribution.uri）。 */
+  authorUri?: string;
+  /** 投稿者のプロフィール画像の URL（Places API の authorAttribution.photoUri）。 */
+  authorPhotoUri?: string;
+  /** その口コミを Google Maps 上で表示する URL（Places API の Review.googleMapsUri）。 */
+  googleMapsUri?: string;
 }
 
 // jsonb 列 competitors の要素形。表示順は rank 順（評価の無い店は末尾）。
@@ -167,6 +178,29 @@ export interface DailySummaryRow {
   new_reviews: DailySummaryNewReview[];
   competitors: DailySummaryCompetitor[];
   created_at: Date;
+}
+
+/**
+ * daily_summaries の読み出し用の行（line-on-demand-report のレポート用の読み出しが返す）。
+ *
+ * summary_date は `to_char(summary_date, 'YYYY-MM-DD')` で読んだ文字列である（pg 既定の Date への
+ * 変換は実行環境の TZ に依存するため使わない）。id・store_id・created_at は持たない。
+ * 値は正規化の前の生の値なので、呼出元は必ず `@fwlm/db/daily-summary` の normalizeSummaryRatings を
+ * 通してから使う。
+ */
+export interface DailySummaryReadRow {
+  readonly summary_date: string;
+  readonly status: DailySummaryStatus;
+  readonly rank: number | null;
+  readonly rank_total: number | null;
+  readonly rank_prev: number | null;
+  readonly rating: string | null; // numeric(2,1)
+  readonly review_count: number | null;
+  readonly rating_prev: string | null; // numeric(2,1)
+  readonly review_count_prev: number | null;
+  readonly new_review_count: number;
+  readonly new_reviews: readonly DailySummaryNewReview[];
+  readonly competitors: readonly DailySummaryCompetitor[];
 }
 
 // 配信記録（TS 書込・店舗×日付で一意・retry_key で冪等再送）。
