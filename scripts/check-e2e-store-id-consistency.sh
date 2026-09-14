@@ -40,7 +40,8 @@
 #      実行装置の両方が同じ形で呼んでいる:
 #      - ts-ci.yml の lighthouse ジョブに、引数なしの `run: node perf/verify-lhr.mjs` がちょうど 1 行あり、
 #        lhci の autorun より後ろにあり、そのステップに continue-on-error も if: も無い
-#        （ジョブ名は完全一致で照合する。別のジョブ・コメント・引数付きの呼び出しは数えない）
+#        （ジョブ名は完全一致で照合する。別のジョブ・コメント・引数付きの呼び出しは数えない。
+#        そのステップを読めなければ赤にする。読めないまま「付いていない」とは読まない）
 #      - scripts/run-e2e-local.sh の layer_lighthouse() が、`__inside-db lighthouse` の後に同じ判定を
 #        **最後の実行行として**呼ぶ（層は `layer_lighthouse || rc=$?` で呼ばれ set -e が効かないため、
 #        後ろに行があると判定の終了コードが捨てられる）
@@ -223,7 +224,11 @@ if [ ! -f "$VERIFY_CLI" ]; then
 fi
 
 # 5-1. ts-ci.yml の lighthouse ジョブ。
-#   出力: <ジョブの数> <正規形の行の数> <その行番号> <autorun の最後の行番号> <そのステップに if:/continue-on-error:> <形の違う呼び出しの数>
+#   出力: <ジョブの数> <正規形の行の数> <その行番号> <autorun の最後の行番号> <そのステップに if:/continue-on-error:> <形の違う呼び出しの数> <そのステップを読めたか>
+# 「if:/continue-on-error: が付いていない」は否定側の検査なので、確認の行が属するステップを読めたときに
+# だけ意味を持つ。ステップの境界は `    steps:` の行から数え始めるため、その行を読めない（行末コメントなど）と
+# 境界が 0 件のまま「付いていない」と読んでしまう。読めたかを別に返し、読めなければ赤にする
+# （PR #273 のレビューで実測: steps: の行に行末コメントを足すと continue-on-error が素通りした）。
 ci_rc=0
 ci_probe="$(awk -v job='lighthouse' -v want="$CI_VERIFY_LINE" '
     function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
@@ -254,8 +259,9 @@ ci_probe="$(awk -v job='lighthouse' -v want="$CI_VERIFY_LINE" '
         if (insteps && line ~ /^(- )?(if|continue-on-error):/) guarded[step] = 1
     }
     END {
-        g = (verify_step != "" && (verify_step in guarded)) ? 1 : 0
-        printf "%d %d %d %d %d %d\n", found + 0, hits + 0, verify_nr + 0, autorun_nr + 0, g, loose + 0
+        known = (verify_step != "") ? 1 : 0
+        g = (known && (verify_step in guarded)) ? 1 : 0
+        printf "%d %d %d %d %d %d %d\n", found + 0, hits + 0, verify_nr + 0, autorun_nr + 0, g, loose + 0, known
     }
 ' "$CI_FILE")" || ci_rc=$?
 if [ "$ci_rc" -ne 0 ]; then
@@ -263,7 +269,7 @@ if [ "$ci_rc" -ne 0 ]; then
   fail=1
 else
   set -- $ci_probe
-  ci_found="$1" ci_hits="$2" ci_verify_nr="$3" ci_autorun_nr="$4" ci_guarded="$5" ci_loose="$6"
+  ci_found="$1" ci_hits="$2" ci_verify_nr="$3" ci_autorun_nr="$4" ci_guarded="$5" ci_loose="$6" ci_step_known="$7"
   ci_ok=1
   if [ "$ci_found" -ne 1 ]; then
     echo "ERROR: 判定: ${CI_FILE#$ROOT/} に lighthouse ジョブが ${ci_found} 個あります（ちょうど 1 個であるべきです）。" >&2
@@ -286,7 +292,12 @@ else
       echo "       → まだ今回の結果が無い .lighthouseci を読むことになります。autorun の後ろへ置いてください。" >&2
       ci_ok=0
     fi
-    if [ "$ci_hits" -eq 1 ] && [ "$ci_guarded" -eq 1 ]; then
+    if [ "$ci_hits" -eq 1 ] && [ "$ci_step_known" -eq 0 ]; then
+      echo "ERROR: 判定: lighthouse ジョブの測った画面の確認が、どのステップに属するかを読めません。" >&2
+      echo "       → steps: の行を読めていないため、continue-on-error や if: が付いていても「付いていない」と読みます。" >&2
+      echo "         steps: の行はキーだけにしてください（行末のコメントは別の行へ）。" >&2
+      ci_ok=0
+    elif [ "$ci_hits" -eq 1 ] && [ "$ci_guarded" -eq 1 ]; then
       echo "ERROR: 判定: lighthouse ジョブの測った画面の確認に continue-on-error か if: が付いています。" >&2
       echo "       → 赤を捨てる・確認を飛ばす形です。何も付けずに、autorun が合格したら必ず走らせてください。" >&2
       ci_ok=0

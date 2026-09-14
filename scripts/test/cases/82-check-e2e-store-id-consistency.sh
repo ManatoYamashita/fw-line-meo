@@ -399,6 +399,32 @@ fx_run check-e2e-store-id-consistency
 expect_red 'lighthouse ジョブの測った画面の確認に continue-on-error か if: が付いています。'
 t_end
 
+# 「付いていない」という否定側の検査は、確認の行が属するステップを読めたときにだけ意味を持つ。
+# steps: の行に行末コメントがあると、ステップの境界を数え始められない。以前はそのまま
+# 「付いていない」と読み、continue-on-error が付いていても緑を返していた（PR #273 のレビューで実測）。
+t_begin 'check-e2e-store-id-consistency: 判定: 確認のステップを読めないと赤（steps: の行末コメント・continue-on-error 付き）'
+esi_tree
+fx_write .github/workflows/ts-ci.yml <<'EOF'
+name: ts-ci
+jobs:
+  e2e:
+    env:
+      E2E_STORE_ID: '44444444-4444-4444-4444-444444444444'
+    steps:
+      - run: echo ok
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:  # lhci と、測った画面の確認
+      - name: Lighthouse
+        run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
+      - name: '測った画面の確認（Issue #264）'
+        continue-on-error: true
+        run: node perf/verify-lhr.mjs
+EOF
+fx_run check-e2e-store-id-consistency
+expect_red 'lighthouse ジョブの測った画面の確認が、どのステップに属するかを読めません。'
+t_end
+
 t_begin 'check-e2e-store-id-consistency: 判定: 確認がコメントの中にしか無いと赤'
 esi_tree
 esi_replace .github/workflows/ts-ci.yml \
