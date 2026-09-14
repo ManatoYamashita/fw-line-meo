@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
+import { DashboardUserEditPanel } from '../../../components/dashboard-user-edit-panel';
 import { TopNav } from '../../../components/top-nav';
 import { useAuth } from '../../../lib/auth-context';
 import {
@@ -44,6 +45,24 @@ function roleLabel(role: DashboardRole): string {
   return role === 'operator' ? '運営' : '代理店';
 }
 
+// 一覧の列数（ロール・表示名・メールアドレス・所属代理店・状態・操作）。編集パネルの行の colSpan は
+// ここから取る。下の見出しセルの並びとは別に列数を持つ点は店舗一覧と同じで、両者が一致することは
+// 画面のテストが列見出しの実数と突き合わせて固定している（dashboard-user-edit Req 6.3）。
+const COLUMN_COUNT = 6;
+
+// 編集の押しボタンから開閉先のパネルを指す id（aria-controls 用）。パネル内の入力の id
+// （user-edit-role-… など）と同じ接頭辞の並びにしないため、panel の語を挟む。利用者 ID から決定的に
+// 作るので、サーバ描画とクライアント描画で食い違わない。
+function editPanelId(userId: string): string {
+  return `user-edit-panel-${userId}`;
+}
+
+// 編集の対象を名指す語。パネルの見出し（「〇〇 の編集」）と同じ規則で引き、押しボタンの読み上げ名と
+// 開いたパネルの見出しが同じ利用者を同じ語で指すようにする。
+function userLabel(user: DashboardUserItem): string {
+  return user.email ?? user.displayName ?? '利用者';
+}
+
 function UsersView() {
   const { me } = useAuth();
   // operator 専用画面。agency ロールは案内のみ（クライアント側 UX ゲート。実際の認可は API 側・Req 6.5）。
@@ -61,6 +80,13 @@ function UsersView() {
   const [submitting, setSubmitting] = useState(false);
   // 無効化操作のエラー（登録フォームのエラーとは別枠・Req 7.4）。
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // 編集パネルを開いている利用者。開閉状態は一覧が所有し、同時に開けるのは 1 つだけである
+  // （dashboard-user-edit Req 6.4）。パネル自身は開閉を持たない（店舗一覧の QR パネルと同型）。
+  const [openUserId, setOpenUserId] = useState<string | null>(null);
+  // 直近に押された編集の押しボタン。パネルを閉じると焦点の載っていた要素ごと消えるため、
+  // 焦点を呼び出し元へ戻す（戻さないと body へ落ち、焦点の位置が判別できなくなる・dashboard-user-edit Req 6.5）。
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   // operator のみ利用者・代理店一覧を取得する（agency では依存 API を一切呼ばない）。
   useEffect(() => {
@@ -173,6 +199,27 @@ function UsersView() {
     } else {
       setActionError('有効化に失敗しました。時間をおいて再試行してください。');
     }
+  }
+
+  // 編集の開始（dashboard-user-edit Req 6.3, 6.4）。別の行のパネルが開いていれば、状態を差し替える
+  // ことで閉じる。押された押しボタンを控え、閉じるときの焦点の戻り先にする。
+  function openEditPanel(event: MouseEvent<HTMLButtonElement>, userId: string) {
+    triggerRef.current = event.currentTarget;
+    setOpenUserId(userId);
+  }
+
+  // 編集パネルを閉じる（取りやめ・変更なしでの保存・保存の成功）。閉じて外れるのはパネルの行だけ
+  // なので、先に焦点を移してよい（この後の再描画でパネルの行が外れる・dashboard-user-edit Req 6.5）。
+  function closeEditPanel() {
+    triggerRef.current?.focus();
+    setOpenUserId(null);
+  }
+
+  // 保存の成功（dashboard-user-edit Req 1.12）。一覧を取り直してから焦点を戻して閉じる。取り直しの間はパネルが保存を
+  // 押せないままにしている（パネルは onSaved の完了を待つ）。
+  async function handleEditSaved() {
+    await reloadUsers();
+    closeEditPanel();
   }
 
   return (
@@ -299,12 +346,14 @@ function UsersView() {
 
       {list.kind === 'ready' && list.users.length > 0 && (
         // 横方向の捲りは表の **外側** が持つ。この容器は e2e（dashboard-surfaces.spec.ts）が
-        // 宣言する「表の捲れる領域 1 件」である。
+        // 宣言する「表の捲れる領域 1 件」である。tbody の内側へ挟むと行の隣接関係が壊れ、
+        // 編集パネルを対象行の直後へ挿す構成が成立しなくなる。
         <TableContainer label="利用者一覧">
           <Table>
             <TableHead>
               <TableRow>
                 <TableHeaderCell>ロール</TableHeaderCell>
+                <TableHeaderCell>表示名</TableHeaderCell>
                 <TableHeaderCell>メールアドレス</TableHeaderCell>
                 <TableHeaderCell>所属代理店</TableHeaderCell>
                 <TableHeaderCell>状態</TableHeaderCell>
@@ -313,41 +362,85 @@ function UsersView() {
             </TableHead>
             <TableBody>
               {list.users.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell>{roleLabel(user.role)}</TableCell>
-                  <TableCell>{user.email ?? '—'}</TableCell>
-                  {/* 運営ロールは所属代理店を持たない（agencyId=null）。 */}
-                  <TableCell>
-                    {user.agencyId === null ? '—' : agencyNameById.get(user.agencyId) ?? user.agencyId}
-                  </TableCell>
-                  {/* 有効/無効の状態（Req 6.4）。招待コードの同じ列と同じく素の語のまま置く。
-                    * 装飾で包むと同一役割が面をまたいで 2 通りに描かれ、Req 1.2 が壊れる。 */}
-                  <TableCell>{user.disabled ? '無効' : '有効'}</TableCell>
-                  <TableCell>
-                    {/* 無効化済み行には有効化ボタンを提供する（Req 1.6・API は冪等） */}
-                    {user.disabled && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void handleEnable(user.id)}
-                      >
-                        有効化
-                      </Button>
-                    )}
-                    {/* 無効化は有効な利用者にのみ提供し、自分自身の行には出さない（Req 6.4, 2.2） */}
-                    {!user.disabled && user.id !== me?.id && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void handleDisable(user.id)}
-                      >
-                        無効化
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
+                <Fragment key={user.id}>
+                  <TableRow>
+                    <TableCell>{roleLabel(user.role)}</TableCell>
+                    {/* 表示名が未設定の利用者は、他の不在の列と同じ「—」で未設定と分かるようにする
+                      * （dashboard-user-edit Req 6.1）。 */}
+                    <TableCell>{user.displayName ?? '—'}</TableCell>
+                    <TableCell>{user.email ?? '—'}</TableCell>
+                    {/* 運営ロールは所属代理店を持たない（agencyId=null）。 */}
+                    <TableCell>
+                      {user.agencyId === null ? '—' : agencyNameById.get(user.agencyId) ?? user.agencyId}
+                    </TableCell>
+                    {/* 有効/無効の状態（Req 6.4）。招待コードの同じ列と同じく素の語のまま置く。
+                      * 装飾で包むと同一役割が面をまたいで 2 通りに描かれ、Req 1.2 が壊れる。 */}
+                    <TableCell>{user.disabled ? '無効' : '有効'}</TableCell>
+                    <TableCell>
+                      {/* 押しボタンが 2 つ並ぶ行があるので、間隔を容器が持つ（編集パネルの押しボタンの並びと
+                        * 同じ段）。狭い幅では折り返し、列を押し広げない。 */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* 編集は自分・無効化済みを含むすべての行に出し、有効化・無効化より前に置く
+                          * （dashboard-user-edit Req 6.2）。 */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={(event) => openEditPanel(event, user.id)}
+                          aria-expanded={openUserId === user.id}
+                          // 制御先は開いているときだけ指す（閉じている間は指す先が DOM に無い）。
+                          aria-controls={openUserId === user.id ? editPanelId(user.id) : undefined}
+                          // 見えている文言（編集）を読み上げ名へそのまま含める。含めないと、音声入力の
+                          // 利用者が見えているとおりに発話しても操作できない（WCAG 2.5.3 Label in Name）。
+                          // 対象を名指すのは、同じ「編集」が行の数だけ並ぶため。
+                          aria-label={`${userLabel(user)} を編集`}
+                        >
+                          編集
+                        </Button>
+                        {/* 無効化済み行には有効化ボタンを提供する（Req 1.6・API は冪等） */}
+                        {user.disabled && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleEnable(user.id)}
+                          >
+                            有効化
+                          </Button>
+                        )}
+                        {/* 無効化は有効な利用者にのみ提供し、自分自身の行には出さない（Req 6.4, 2.2） */}
+                        {!user.disabled && user.id !== me?.id && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleDisable(user.id)}
+                          >
+                            無効化
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {openUserId === user.id && (
+                    // 対象行の直下へ挿入し、対応関係を視覚的にも DOM 順でも読み取れるようにする
+                    // （dashboard-user-edit Req 6.3）。重ね表示は使わない（docs/design/design-language.md §7.5）。
+                    <TableRow>
+                      <TableCell colSpan={COLUMN_COUNT} id={editPanelId(user.id)}>
+                        {/* パネルは開いた時点の値に固定するので、利用者ごとに作り直す（key）。
+                          * 自分の行ではロールと所属を固定表示にする（dashboard-user-edit Req 2.2）。 */}
+                        <DashboardUserEditPanel
+                          key={user.id}
+                          user={user}
+                          agencies={agencies}
+                          isSelf={user.id === me?.id}
+                          onSaved={handleEditSaved}
+                          onCancel={closeEditPanel}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

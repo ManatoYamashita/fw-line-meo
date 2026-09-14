@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, within, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { announcedText, ownText } from './live-region';
 
@@ -37,6 +37,10 @@ const api = vi.hoisted(() => ({
   disableDashboardUser: vi.fn(),
   enableDashboardUser: vi.fn(),
   getAgencies: vi.fn(),
+  // 行直下の編集パネル（dashboard-user-edit task 3.3）が既定で使う送信の窓口。ページはパネルへ
+  // 送信関数を注入しないので、パネルは同じモジュールのこの関数を呼ぶ。差し替えを忘れると
+  // undefined が呼ばれ、保存の経路が例外の汎用文言へ落ちる。
+  updateDashboardUser: vi.fn(),
 }));
 vi.mock('../src/lib/api', () => api);
 
@@ -274,8 +278,10 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
     const scope = within(await screen.findByRole('main'));
     await scope.findByText('agency@example.com');
     // **集合の完全一致**で見る。包含では列を 1 つ足す改変を捕まえられない。
+    // 表示名の列はロールの次に置く（dashboard-user-edit の design「Web: 利用者一覧」の 6 列の順）。
     expect(scope.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
       'ロール',
+      '表示名',
       'メールアドレス',
       '所属代理店',
       '状態',
@@ -283,13 +289,14 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
     ]);
   });
 
-  it('行のセルの文字列を完全一致で固定する（ロール表示・不在の —・状態の語・Req 6.2, 6.4）', async () => {
+  it('行のセルの文字列を完全一致で固定する（ロール表示・不在の —・状態の語・編集の操作・Req 6.2, 6.4）', async () => {
     ready('operator');
-    // email も所属代理店も持たない無効化済みの行を混ぜ、`—` の 2 経路と `無効` を同時に走査する。
+    // 表示名も email も所属代理店も持たない無効化済みの行を混ぜ、`—` の 3 経路と `無効` を同時に走査する。
     const retiredUser = {
       ...operatorUser,
       id: 'u3',
       email: null,
+      displayName: null,
       agencyId: null,
       disabled: true,
     };
@@ -304,12 +311,14 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
     // 状態を表す語を装飾で包んでも、テキストとしての完全一致は保つ（tasks.md 2.5 の指定）。
     // 見出し行を除いた本体行の全セルを行列で突き合わせる。
     const bodyRows = scope.getAllByRole('row').slice(1);
+    // 操作の列は、どの行でも編集を先頭に置き、有効化・無効化をその後ろに続ける。
+    // 自分の行は無効化を持たないので編集だけになる。
     expect(
       bodyRows.map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent)),
     ).toEqual([
-      ['運営', 'op@example.com', '—', '有効', ''],
-      ['代理店', 'agency@example.com', '代理店アルファ', '有効', '無効化'],
-      ['運営', '—', '—', '無効', '有効化'],
+      ['運営', '運営太郎', 'op@example.com', '—', '有効', '編集'],
+      ['代理店', '代理花子', 'agency@example.com', '代理店アルファ', '有効', '編集無効化'],
+      ['運営', '—', '—', '—', '無効', '編集有効化'],
     ]);
   });
 
@@ -407,10 +416,25 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
     const scope = within(await screen.findByRole('main'));
     await scope.findByText('op@example.com');
     // **集合の完全一致**で見る。押しボタンを 1 つ足す改変を包含判定は捕まえない。
+    // 見えている文言の並び。編集は全行に 1 つずつあり（自分の行を含む）、無効化は他人の有効な行だけ。
     expect(scope.getAllByRole('button').map((button) => button.textContent)).toEqual([
       '利用者登録',
+      '編集',
+      '編集',
       '無効化',
     ]);
+    // 読み上げ名の並び。編集だけが対象の利用者を名指しする読み上げ名を持つ（同じ「編集」が
+    // 行の数だけ並んでも、支援技術の一覧で区別できる）。
+    // 読み上げ名を「aria-label、無ければ文言」で近似するので、先に aria-labelledby が無いことを確かめる
+    // （あれば近似が成り立たず、この比較は別のものを見ることになる）。
+    expect(
+      scope.getAllByRole('button').filter((button) => button.hasAttribute('aria-labelledby')),
+    ).toHaveLength(0);
+    expect(
+      scope
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label') ?? button.textContent),
+    ).toEqual(['利用者登録', 'op@example.com を編集', 'agency@example.com を編集', '無効化']);
     // 選択は既定 role=代理店 なので 2 つ（ロール・所属代理店）。
     expect(scope.getAllByRole('combobox').map((select) => select.getAttribute('id'))).toEqual([
       'user-role',
@@ -557,16 +581,18 @@ describe('利用者管理ページ: 意匠の適用', () => {
       'table-row',
       'table-row',
     ]);
+    // 列は 6 つ（表示名の列を足した・dashboard-user-edit task 3.3）。
     const headers = scope.getAllByRole('columnheader');
     expect(headers.map((header) => header.getAttribute('data-slot'))).toEqual(
-      Array.from({ length: 5 }, () => 'table-header-cell'),
+      Array.from({ length: 6 }, () => 'table-header-cell'),
     );
     // 素の <th> は scope を持っていなかった。部品化で支援技術に対する後退を作らない。
     expect(headers.map((header) => header.getAttribute('scope'))).toEqual(
-      Array.from({ length: 5 }, () => 'col'),
+      Array.from({ length: 6 }, () => 'col'),
     );
+    // 2 行 × 6 列。
     expect(scope.getAllByRole('cell').map((cell) => cell.getAttribute('data-slot'))).toEqual(
-      Array.from({ length: 10 }, () => 'table-cell'),
+      Array.from({ length: 12 }, () => 'table-cell'),
     );
   });
 
@@ -606,7 +632,7 @@ describe('利用者管理ページ: 意匠の適用', () => {
     expect(spinner!.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('取得の失敗・登録の失敗・操作の失敗・運営専用の案内が同じ危険の通知の部品に載る（4 経路・Req 1.1, 3.5）', async () => {
+  it('取得の失敗・登録の失敗・操作の失敗・編集の拒否・運営専用の案内が同じ危険の通知の部品に載る（5 経路・Req 1.1, 3.5）', async () => {
     const branches = [
       {
         name: '一覧の取得失敗',
@@ -652,6 +678,27 @@ describe('利用者管理ページ: 意匠の適用', () => {
         text: '最後の運営は無効化できません。先に別の運営を追加してください。',
       },
       {
+        // 行直下の編集パネルが出す拒否（dashboard-user-edit task 3.3）。通知の整理（ページの操作エラー・
+        // 成功通知との排他）は task 3.4 の範囲なので、ここはページに他の通知が無い状態からの 1 経路に留める。
+        name: '編集の拒否',
+        role: 'operator' as const,
+        arrange: () => {
+          api.getDashboardUsers.mockResolvedValue({ ok: true, value: [agencyUser] });
+          api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+          api.updateDashboardUser.mockResolvedValue({ ok: false, code: 'not_found', message: 'x' });
+        },
+        act: async () => {
+          fireEvent.click(
+            await screen.findByRole('button', { name: 'agency@example.com を編集' }),
+          );
+          fireEvent.change(screen.getByLabelText('表示名', { selector: '#user-edit-display-name-u2' }), {
+            target: { value: '代理花子（改）' },
+          });
+          fireEvent.click(screen.getByRole('button', { name: '保存' }));
+        },
+        text: '利用者が見つかりません。画面を再読み込みしてください。',
+      },
+      {
         name: '運営専用の案内',
         role: 'agency' as const,
         arrange: () => {},
@@ -680,7 +727,8 @@ describe('利用者管理ページ: 意匠の適用', () => {
       visited += 1;
       cleanup();
     }
-    expect(visited).toBe(branches.length);
+    // 件数は literal で持つ。配列の長さと比べると、経路を空にする改変が 0 = 0 で緑になる。
+    expect(visited).toBe(5);
   });
 
   it('0 件の案内を空状態の部品へ移し、文言を変えない（Req 1.1, 2.3）', async () => {
@@ -772,7 +820,7 @@ describe('利用者管理ページ: 意匠の適用', () => {
     ]);
   });
 
-  it('押しボタン 3 種を部品へ移し、読み上げ名と型を変えない（Req 1.1, 3.2）', async () => {
+  it('押しボタン 4 種を部品へ移し、読み上げ名と型を変えない（Req 1.1, 3.2）', async () => {
     ready('operator');
     api.getDashboardUsers.mockResolvedValue({
       ok: true,
@@ -783,15 +831,24 @@ describe('利用者管理ページ: 意匠の適用', () => {
     const scope = within(await screen.findByRole('main'));
     await scope.findByText('off@example.com');
 
+    // 編集（dashboard-user-edit task 3.3）は有効な行と無効化済みの行の両方で見る（Req 6.2）。
+    const names = [
+      '利用者登録',
+      '無効化',
+      '有効化',
+      'agency@example.com を編集',
+      'off@example.com を編集',
+    ];
     let checked = 0;
-    for (const name of ['利用者登録', '無効化', '有効化']) {
+    for (const name of names) {
       const button = scope.getByRole('button', { name });
       expect(button.getAttribute('data-slot'), name).toBe('button');
       // 押しボタンの既定の型は submit である。素の実装が持っていた type を落とさない。
       expect(button.getAttribute('type'), name).toBe('button');
       checked += 1;
     }
-    expect(checked).toBe(3);
+    // 件数は literal で持つ。配列の長さと比べると、配列を空にする改変が 0 = 0 で緑になる。
+    expect(checked).toBe(5);
   });
 
   it('フォーム部品を包むのは段落ではなく汎用の容器であり、幅の段は面をまたいで同一である（Req 1.2, 1.3）', async () => {
@@ -829,17 +886,22 @@ describe('利用者管理ページ: 意匠の適用', () => {
 describe('管理ダッシュボードのフォーム部品の幅は面をまたいで同一である（Req 1.2, 1.3）', () => {
   // vitest の作業ディレクトリは各パッケージの根である（`RUN v3.2.6 …/ts/apps/dashboard-web`）。
   // 解決に失敗したら下の存在確認が赤くなるので、静かに読み飛ばされることはない。
-  const SOURCE_ROOT = resolve(process.cwd(), 'src/app');
+  // 起点は src である。利用者の編集パネルは src/components にあるので、src/app を起点にすると
+  // 対象へ足せない（dashboard-user-edit task 3.3）。
+  const SOURCE_ROOT = resolve(process.cwd(), 'src');
 
   // task 5.2（店舗登録）が同じ段を採ったので、この配列へ自分を足した。
+  // 利用者の編集パネル（dashboard-user-edit）は一覧の行の直下に置くフォームで、登録フォームと
+  // 同じ段を採る（design「Web: 編集パネル」）。面ではなく部品なので、置き場所が異なる。
   const SURFACE_SOURCES = [
-    'admin/users/page.tsx',
-    'admin/agencies/page.tsx',
-    'invite-codes/page.tsx',
-    'stores/new/page.tsx',
+    'app/admin/users/page.tsx',
+    'app/admin/agencies/page.tsx',
+    'app/invite-codes/page.tsx',
+    'app/stores/new/page.tsx',
+    'components/dashboard-user-edit-panel.tsx',
   ] as const;
 
-  it('4 面のフォーム容器が同一の幅の段を使う', () => {
+  it('4 面と利用者の編集パネルのフォーム容器が同一の幅の段を使う', () => {
     const found = new Set<string>();
     let scanned = 0;
     for (const relative of SURFACE_SOURCES) {
@@ -856,5 +918,348 @@ describe('管理ダッシュボードのフォーム部品の幅は面をまた�
     expect(scanned).toBe(SURFACE_SOURCES.length);
     // 段が 2 つに割れた時点で赤くなる。
     expect(Array.from(found)).toEqual(['sm:max-w-xs']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dashboard-user-edit task 3.3。一覧に表示名の列・編集の押しボタン・行直下の編集パネルを統合した。
+// 行直下パネルの形は店舗一覧の QR 発行（stores-page.test.tsx）に揃える。保存の成功通知・通知の
+// 整理・代理店一覧の取得失敗の伝達は task 3.4 の範囲なので、ここでは扱わない。
+// ---------------------------------------------------------------------------
+
+// 無効化済みの代理店ロール（表示名は未設定）。編集は状態を問わず全行に出す（Req 6.2）。
+const disabledAgencyUser = {
+  ...agencyUser,
+  id: 'u4',
+  email: 'off@example.com',
+  displayName: null,
+  disabled: true,
+};
+
+/** 運営として一覧を開き、表が描かれるまで待って主要領域を返す。 */
+async function renderUserList(users: readonly object[]): Promise<HTMLElement> {
+  ready('operator');
+  api.getDashboardUsers.mockResolvedValue({ ok: true, value: users });
+  api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+  render(<AdminUsersPage />);
+  const main = await screen.findByRole('main');
+  await within(main).findByRole('table');
+  return main;
+}
+
+/** 指定の文字列のセルを持つ本文の行を返す。 */
+function rowOf(main: HTMLElement, cellText: string): HTMLTableRowElement {
+  const row = within(main).getByRole('cell', { name: cellText }).closest('tr');
+  if (row === null) throw new Error(`row not found for ${cellText}`);
+  return row;
+}
+
+/**
+ * 見出しで指定したパネルの取りやめを、キーボードで押した状態（焦点を取りやめに載せてから押す）で
+ * 押し、パネルが閉じたことまでを確かめる。焦点が取りやめに載ったままパネルごと消えるので、
+ * 戻り先を持たない実装では焦点が body へ落ちる。
+ */
+async function cancelPanel(main: HTMLElement, headingName: string): Promise<void> {
+  const heading = await within(main).findByRole('heading', { level: 2, name: headingName });
+  const cancel = within(heading.closest('td') as HTMLElement).getByRole('button', {
+    name: 'キャンセル',
+  });
+  cancel.focus();
+  expect(document.activeElement).toBe(cancel);
+  fireEvent.click(cancel);
+  expect(within(main).queryByRole('heading', { level: 2 })).toBeNull();
+}
+
+describe('利用者管理ページ: 表示名の列と編集の押しボタン', () => {
+  it('表示名の列を設け、未設定の利用者は「—」で未設定と分かるように出す（Req 6.1）', async () => {
+    const main = await renderUserList([agencyUser, disabledAgencyUser]);
+    // 列の位置は見出しから引く。見出しとセルの並びが食い違えば、ここで別の列を読んで赤くなる。
+    const column = within(main)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent)
+      .indexOf('表示名');
+    expect(column).toBeGreaterThanOrEqual(0);
+    const bodyRows = within(main).getAllByRole('row').slice(1);
+    expect(
+      bodyRows.map((row) => within(row).getAllByRole('cell')[column]?.textContent),
+    ).toEqual(['代理花子', '—']);
+  });
+
+  it('すべての行（自分・有効・無効化済み）に編集を 1 つずつ、有効化・無効化より前に置く（Req 6.2, 2.2）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser, disabledAgencyUser]);
+    const expected = [
+      { label: 'op@example.com を編集', buttons: ['編集'] },
+      { label: 'agency@example.com を編集', buttons: ['編集', '無効化'] },
+      { label: 'off@example.com を編集', buttons: ['編集', '有効化'] },
+    ];
+    const bodyRows = within(main).getAllByRole('row').slice(1);
+    expect(bodyRows).toHaveLength(expected.length);
+    let visited = 0;
+    bodyRows.forEach((row, index) => {
+      const want = expected[index]!;
+      const buttons = within(row).getAllByRole('button');
+      // 編集は操作の先頭に置く（design「操作列では、編集ボタンを既存の有効化・無効化の前に置く」）。
+      expect(buttons.map((button) => button.textContent), want.label).toEqual(want.buttons);
+      const edit = buttons[0]!;
+      expect(edit.getAttribute('data-slot'), want.label).toBe('button');
+      expect(edit.getAttribute('type'), want.label).toBe('button');
+      // 対象の利用者を名指しし、見えている文言をそのまま含める。含めないと、音声入力の利用者が
+      // 見えているとおりに発話しても操作できない（WCAG 2.5.3 Label in Name）。
+      expect(edit.getAttribute('aria-label'), want.label).toBe(want.label);
+      const visible = edit.textContent ?? '';
+      expect(visible, want.label).toBe('編集');
+      expect(edit.getAttribute('aria-label') ?? '', want.label).toContain(visible);
+      // 閉じている間は開閉の状態を false で伝え、制御先を指さない（開いているときだけ指す）。
+      expect(edit.getAttribute('aria-expanded'), want.label).toBe('false');
+      expect(edit.hasAttribute('aria-controls'), want.label).toBe(false);
+      visited += 1;
+    });
+    // 自分・有効・無効化済みの 3 行を確かに走査した（literal で持つ）。
+    expect(visited).toBe(3);
+  });
+
+  it('読み上げ名が名指す対象は、パネルの見出しと同じ規則（メール → 表示名 → 「利用者」）で引く', async () => {
+    const noEmail = { ...agencyUser, id: 'u6', email: null, displayName: 'メール無し' };
+    const anonymous = { ...agencyUser, id: 'u7', email: null, displayName: null };
+    const main = await renderUserList([noEmail, anonymous]);
+    const edits = within(main).getAllByRole('button', { name: /を編集$/ });
+    expect(edits.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'メール無し を編集',
+      '利用者 を編集',
+    ]);
+    fireEvent.click(edits[0]!);
+    expect(
+      await within(main).findByRole('heading', { level: 2, name: 'メール無し の編集' }),
+    ).toBeTruthy();
+    fireEvent.click(edits[1]!);
+    expect(
+      await within(main).findByRole('heading', { level: 2, name: '利用者 の編集' }),
+    ).toBeTruthy();
+  });
+});
+
+describe('利用者管理ページ: 行直下の編集パネル', () => {
+  it('編集を始めると対象行の直後に 1 段だけパネル行を挿し、全列にまたがらせる（Req 6.3, 1.1）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser, disabledAgencyUser]);
+    // 対象は中ほどの行にする。末尾の行を対象にすると、表の末尾へ挿す改変と区別できない。
+    const targetRow = rowOf(main, 'agency@example.com');
+    const nextUserRow = rowOf(main, 'off@example.com');
+    const edit = within(targetRow).getByRole('button', { name: 'agency@example.com を編集' });
+    fireEvent.click(edit);
+
+    const heading = await within(main).findByRole('heading', {
+      level: 2,
+      name: 'agency@example.com の編集',
+    });
+    const panelRow = targetRow.nextElementSibling as HTMLElement | null;
+    expect(panelRow).not.toBeNull();
+    // 対象行の直後であり、その次は元の次の行である（間に挟まる。末尾に付くのではない）。
+    expect(panelRow!.contains(heading)).toBe(true);
+    expect(panelRow!.nextElementSibling).toBe(nextUserRow);
+    // 表の部品を通り、tbody の直下で行として隣り合う（間に要素を挟むと隣接関係が壊れる）。
+    expect(panelRow!.tagName).toBe('TR');
+    expect(panelRow!.getAttribute('data-slot')).toBe('table-row');
+    expect(panelRow!.parentElement).toBe(targetRow.parentElement);
+    expect(targetRow.parentElement?.getAttribute('data-slot')).toBe('table-body');
+
+    // セルは 1 つだけで全列にまたがる。桁数は列見出しの実数と一致する。列数の起点は
+    // 見出しセルの並びとは別に持たれているので、両者をここで結び付ける。
+    const cells = Array.from(panelRow!.children) as HTMLElement[];
+    expect(cells).toHaveLength(1);
+    const panelCell = cells[0]!;
+    expect(panelCell.tagName).toBe('TD');
+    expect(panelCell.getAttribute('data-slot')).toBe('table-cell');
+    expect(panelCell.getAttribute('colspan')).toBe('6');
+    expect(panelCell.getAttribute('colspan')).toBe(
+      String(within(main).getAllByRole('columnheader').length),
+    );
+
+    // 押しボタンは開いていることと制御先を伝え、制御先はこのセルである。
+    expect(edit.getAttribute('aria-expanded')).toBe('true');
+    expect(panelCell.getAttribute('id')).toBe('user-edit-panel-u2');
+    expect(edit.getAttribute('aria-controls')).toBe(panelCell.getAttribute('id'));
+
+    // 行は見出し 1 ＋ 利用者 3 ＋ パネル 1。パネルは表の捲れる容器の内側にあり、捲れる領域を
+    // 増やさない（e2e の件数宣言と食い違わない）。
+    expect(within(main).getAllByRole('row')).toHaveLength(5);
+    expect(main.querySelectorAll('[data-slot="table-container"]')).toHaveLength(1);
+
+    // 開いた時点のロール・所属代理店・表示名を初期値として出す（Req 1.1）。所属の選択肢は
+    // 一覧と同じ取得結果である。
+    const inside = within(panelCell);
+    expect(inside.getByLabelText<HTMLSelectElement>('ロール').value).toBe('agency');
+    const agencySelect = inside.getByLabelText<HTMLSelectElement>('所属代理店');
+    expect(agencySelect.value).toBe('a1');
+    expect(Array.from(agencySelect.options).map((option) => option.textContent)).toEqual([
+      '代理店を選択してください',
+      '代理店アルファ',
+    ]);
+    expect(inside.getByLabelText<HTMLInputElement>('表示名').value).toBe('代理花子');
+  });
+
+  it('パネルを開いても文書内の id は重複しない（制御先の id はパネル内の入力の id と分ける）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser]);
+    fireEvent.click(within(main).getByRole('button', { name: 'agency@example.com を編集' }));
+    await within(main).findByRole('heading', { level: 2 });
+    const ids = Array.from(document.querySelectorAll('[id]')).map((element) => element.id);
+    // 走査の対象が空のまま緑にならないよう、制御先とパネル内の入力が含まれていることを先に確かめる。
+    expect(ids).toContain('user-edit-panel-u2');
+    expect(ids).toContain('user-edit-display-name-u2');
+    expect(ids).toContain('user-display-name');
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('別の行の編集を始めると前のパネルを閉じ、開いているパネルを 1 つに保つ（Req 6.4）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser, disabledAgencyUser]);
+    const first = within(main).getByRole('button', { name: 'agency@example.com を編集' });
+    const second = within(main).getByRole('button', { name: 'off@example.com を編集' });
+    fireEvent.click(first);
+    await within(main).findByRole('heading', { level: 2, name: 'agency@example.com の編集' });
+    fireEvent.click(second);
+    await within(main).findByRole('heading', { level: 2, name: 'off@example.com の編集' });
+
+    expect(
+      within(main)
+        .getAllByRole('heading', { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(['off@example.com の編集']);
+    expect(main.querySelectorAll('[id^="user-edit-panel-"]')).toHaveLength(1);
+    expect(within(main).getAllByRole('row')).toHaveLength(5);
+    // 開閉の状態も 1 つだけが開いている。閉じた側は制御先を指さない。
+    expect(first.getAttribute('aria-expanded')).toBe('false');
+    expect(first.hasAttribute('aria-controls')).toBe(false);
+    expect(second.getAttribute('aria-expanded')).toBe('true');
+    expect(second.getAttribute('aria-controls')).toBe('user-edit-panel-u4');
+    // 新しいパネルは、新しく押した行の直後にある。
+    expect(
+      rowOf(main, 'off@example.com').nextElementSibling?.querySelector('#user-edit-panel-u4'),
+    ).not.toBeNull();
+  });
+
+  it('取りやめるとパネルを閉じ、焦点を編集を始めた押しボタンへ戻す（Req 6.5）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser]);
+    const edit = within(main).getByRole('button', { name: 'agency@example.com を編集' });
+    edit.focus();
+    fireEvent.click(edit);
+    const heading = await within(main).findByRole('heading', {
+      level: 2,
+      name: 'agency@example.com の編集',
+    });
+    const panelCell = heading.closest('td') as HTMLElement;
+    const cancel = within(panelCell).getByRole('button', { name: 'キャンセル' });
+    // キーボードで取りやめを押した状態を作る。焦点が取りやめに載ったままパネルごと消えると、
+    // 焦点は body へ落ちる（戻さない実装はここで赤くなる）。
+    cancel.focus();
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.click(cancel);
+
+    expect(within(main).queryByRole('heading', { level: 2 })).toBeNull();
+    expect(main.querySelector('[id^="user-edit-panel-"]')).toBeNull();
+    expect(within(main).getAllByRole('row')).toHaveLength(3);
+    // 焦点は押下の処理の中で同期に移す（passive effect ではない）ので、待たずに比べる。
+    expect(document.activeElement).toBe(edit);
+    expect(edit.getAttribute('aria-expanded')).toBe('false');
+    expect(edit.hasAttribute('aria-controls')).toBe(false);
+  });
+
+  // 上のテストはページで最初に押した編集だけを見ている。戻り先を最初の 1 回しか控えない実装
+  // （控えが空のときだけ代入する等）はそれでは緑のままなので、押し替えた後の戻り先を 2 経路で固定する。
+  // 経路ごとにテストを分ける。1 本にまとめると、先の経路で赤くなった時点で後の経路が走らない。
+  it('別の行へ切り替えてから取りやめると、焦点は後から押した行の編集へ戻る（最初に押した行ではない・Req 6.5）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser, disabledAgencyUser]);
+    const editA = within(main).getByRole('button', { name: 'agency@example.com を編集' });
+    const editB = within(main).getByRole('button', { name: 'off@example.com を編集' });
+
+    editA.focus();
+    fireEvent.click(editA);
+    await within(main).findByRole('heading', { level: 2, name: 'agency@example.com の編集' });
+    editB.focus();
+    fireEvent.click(editB);
+    await cancelPanel(main, 'off@example.com の編集');
+
+    // 焦点が「移る」向きの比較なので、収束を待って肯定側で観測する（Issue #166）。
+    await waitFor(() => expect(document.activeElement).toBe(editB));
+    expect(document.activeElement).not.toBe(editA);
+    expect(editA.getAttribute('aria-expanded')).toBe('false');
+    expect(editB.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('取りやめた後に別の行を開いて取りやめると、焦点はその行の編集へ戻る（Req 6.5）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser, disabledAgencyUser]);
+    const editA = within(main).getByRole('button', { name: 'agency@example.com を編集' });
+    const editB = within(main).getByRole('button', { name: 'off@example.com を編集' });
+
+    // 1 回目: A を開いて取りやめる。戻り先は A。
+    editA.focus();
+    fireEvent.click(editA);
+    await cancelPanel(main, 'agency@example.com の編集');
+    await waitFor(() => expect(document.activeElement).toBe(editA));
+
+    // 2 回目: B を開いて取りやめる。戻り先は B へ替わる（1 回目の A のままではない）。
+    editB.focus();
+    fireEvent.click(editB);
+    await cancelPanel(main, 'off@example.com の編集');
+    await waitFor(() => expect(document.activeElement).toBe(editB));
+    expect(document.activeElement).not.toBe(editA);
+  });
+
+  it('保存に成功すると一覧を取り直し、焦点を編集の押しボタンへ戻してパネルを閉じる（Req 1.12, 6.5）', async () => {
+    ready('operator');
+    const renamed = { ...agencyUser, displayName: '代理花子（改）' };
+    api.getDashboardUsers
+      .mockResolvedValueOnce({ ok: true, value: [operatorUser, agencyUser] }) // 初期
+      .mockResolvedValueOnce({ ok: true, value: [operatorUser, renamed] }); // 保存後
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.updateDashboardUser.mockResolvedValue({ ok: true, value: renamed });
+    render(<AdminUsersPage />);
+    const main = await screen.findByRole('main');
+    const edit = await within(main).findByRole('button', { name: 'agency@example.com を編集' });
+    fireEvent.click(edit);
+    const input = await within(main).findByLabelText<HTMLInputElement>('表示名', {
+      selector: '#user-edit-display-name-u2',
+    });
+    fireEvent.change(input, { target: { value: '代理花子（改）' } });
+    fireEvent.click(within(main).getByRole('button', { name: '保存' }));
+
+    // 取り直した一覧が描かれる（表示名の列に新しい値が出る）。
+    expect(await within(main).findByRole('cell', { name: '代理花子（改）' })).toBeTruthy();
+    // 移る向きの比較なので収束を待つ（Issue #166）。
+    await waitFor(() => expect(document.activeElement).toBe(edit));
+    expect(within(main).queryByRole('heading', { level: 2 })).toBeNull();
+    expect(edit.getAttribute('aria-expanded')).toBe('false');
+    // 送ったのは表示名だけで、一覧は初期と保存後の 2 回取得した。
+    expect(api.updateDashboardUser.mock.calls).toStrictEqual([
+      [{ id: 'u2', changes: { displayName: '代理花子（改）' } }],
+    ]);
+    expect(api.getDashboardUsers).toHaveBeenCalledTimes(2);
+  });
+
+  it('自分の行で開いたパネルはロールと所属を固定表示にし、他人の行では選べる（Req 2.2）', async () => {
+    const main = await renderUserList([operatorUser, agencyUser]);
+    fireEvent.click(within(main).getByRole('button', { name: 'op@example.com を編集' }));
+    const selfHeading = await within(main).findByRole('heading', {
+      level: 2,
+      name: 'op@example.com の編集',
+    });
+    const selfPanel = within(selfHeading.closest('td') as HTMLElement);
+    // 選択の部品を出さず、理由を添え、表示名だけを受け付ける。
+    expect(selfPanel.queryAllByRole('combobox')).toHaveLength(0);
+    expect(selfPanel.getByText('自分自身のロールは変更できません。')).toBeTruthy();
+    expect(selfPanel.getAllByRole('textbox').map((input) => input.id)).toEqual([
+      'user-edit-display-name-u1',
+    ]);
+
+    // 対照: 他人の行では同じページでロールと所属を選べる（常に固定表示にする実装を緑にしない）。
+    fireEvent.click(within(main).getByRole('button', { name: 'agency@example.com を編集' }));
+    const otherHeading = await within(main).findByRole('heading', {
+      level: 2,
+      name: 'agency@example.com の編集',
+    });
+    const otherPanel = within(otherHeading.closest('td') as HTMLElement);
+    expect(otherPanel.getAllByRole('combobox').map((select) => select.id)).toEqual([
+      'user-edit-role-u2',
+      'user-edit-agency-u2',
+    ]);
+    expect(otherPanel.queryByText('自分自身のロールは変更できません。')).toBeNull();
   });
 });
