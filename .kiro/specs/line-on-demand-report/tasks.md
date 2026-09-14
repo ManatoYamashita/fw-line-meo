@@ -11,7 +11,7 @@
   - _Requirements: 1.4, 1.5, 1.8, 1.10_
   - _Boundary: db/migrations, db/test/assertions, db/write-boundary.md, db/ERD.md, packages/db types_
 
-- [ ] 1.2 (P) 配信ジョブへ完了後メニューの ID を配線する
+- [x] 1.2 (P) 配信ジョブへ完了後メニューの ID を配線する
   - delivery-job のモジュールに、完了後メニューの ID の env を足し、既存の tf 変数 `line_richmenu_completed_id` の値を渡す。`LIFF_URL` の配線はこの段では外さない（旧イメージが読んでいるため）
   - Observable: `terraform -chdir=infra/envs/prod validate` が成功し、plan の差分が summary-delivery ジョブへの env 1 つの追加だけである
   - _Requirements: 1.10, 2.8_
@@ -274,6 +274,18 @@
   - `src/index.ts:115-117`
   - `src/line.ts:86-87`
 - （1.1）`scripts/check-db-ordinals.sh` と `scripts/check-compliance-wording.sh` は git の追跡下しか見ない。新しい migration は `git add` の後にこの 2 本を流す
+- （1.2）2026-09-13 の読み取りだけの plan（`-lock=false`）で、main と本番の間に、本 spec と無関係な差分が 2 種類あった
+  - Cloud Run の 7 つの `client`・`client_version`（既知のずれ）
+  - `module.guardrails` の追加（#245・Issue #232）。費用の承認待ちで、意図的に当てていない
+  - #232 が承認待ちの間、本 spec の apply はすべて `-target` で絞る
+- （1.2）7.2 の apply
+  - アドレスは `-target=module.delivery_job.google_cloud_run_v2_job.delivery`
+  - Step A のマージで動く deploy-prod が終わってから、保存しない plan で行う。in-place の更新は plan の時点のイメージの値を送るので、デプロイ前の plan を当てるとイメージが巻き戻る
+  - 属性まで見て、`+ env`（`LINE_RICHMENU_COMPLETED_ID`）と既知のずれだけであることを確かめる
+- （1.2）7.4 で tf 変数 `line_richmenu_completed_id` を新 ID に変える apply は、次の 2 つのアドレスを同じ apply で指定する。片方だけだと、2 つが別々のメニューへ張り合う
+  - `module.run_services.google_cloud_run_v2_service.svc["line-webhook"]`
+  - `module.delivery_job.google_cloud_run_v2_job.delivery`
+  - 7.6 でも、#232 が承認待ちのままなら `-target` を付ける
 
 ## 実施記録
 

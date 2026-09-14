@@ -81,6 +81,8 @@ variable "line_richmenu_completed_id" {
   description = <<-EOT
     完了後リッチメニューの richMenuId（line-webhook の LINE_RICHMENU_COMPLETED_ID env）。
     `setup-rich-menus.ts` を実チャネルに対して実行した後に得られる値を設定する。
+    line-on-demand-report の delivery-job（summary-delivery ジョブの LINE_RICHMENU_COMPLETED_ID env・
+    通知の前の完了後リッチメニューの照合）も同一値を共有する。値を変えて apply すると両方が更新される。
   EOT
   type        = string
   default     = ""

@@ -66,6 +66,19 @@ variable "liff_url" {
   default     = ""
 }
 
+variable "line_richmenu_completed_id" {
+  description = <<-EOT
+    完了後リッチメニューの richMenuId（env LINE_RICHMENU_COMPLETED_ID・line-on-demand-report の
+    design.md「ReportMenuGate」）。line-webhook の同名 env と同じ値（root の line_richmenu_completed_id）を渡す。
+    変化があった日の通知はリッチメニューからの確認を案内するため、送信の前に、このメニューがレポート導線を
+    持つかと、オーナーにこのメニューが張られているかを照合するのに使う。
+    CI はイメージだけを差し替え、env は Terraform が持つので、この env はそれを読むイメージより先に配線する
+    （line-on-demand-report の design.md「Migration Strategy」の Step A）。呼出側の配線漏れを validate で
+    止めるため、既定値を持たせない。
+  EOT
+  type        = string
+}
+
 variable "image" {
   description = "初期プレースホルダイメージ。実イメージは CI が更新（TF は ignore_changes）。"
   type        = string
