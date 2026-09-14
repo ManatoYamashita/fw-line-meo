@@ -595,6 +595,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
 「0 件を保つもの」は次のとおり。
 - `form`・`button`・`textarea`・`select`・`[contenteditable]`
 - `[role=button|textbox|combobox|checkbox|switch|slider|spinbutton]`
+- `[role=searchbox|listbox|option|menu|menuitem|menuitemcheckbox|menuitemradio|tab|treeitem]`（2026-09-14 追記。タスク 1.3 の独立レビューで、自前の `div role="searchbox"` が許可リストの外の入力として要件 7.2 をすり抜けると分かった。`radio` と `radiogroup` は、選択肢の札が描くので含めない）
 - `[form]`・`input[name]`
 - 許可リストの外にある `input`
 

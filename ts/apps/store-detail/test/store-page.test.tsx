@@ -11,6 +11,12 @@ import { UNRATED_COMPETITOR_FROM_GO } from './fixtures/unrated-competitor';
 //
 // task 5.4（Issue #61）: 多店舗オーナー向けの店舗選択・店舗名表示・切替導線を追加検証する。
 // 選択はリンク（<a>）で行い <button> を導入しないため、上記 no-write 保証は無改変で維持される。
+//
+// store-detail-trend-dashboard task 1.3（Issue #265）: 構造契約を「書込要素 0 件」の許可リスト方式へ
+// 改定した（同 spec の design.md「構造契約（改定後）」）。書込の手段（form・button・textarea・select・
+// contenteditable・操作系の role・form 属性・name を持つ input・許可リストの外の input）は引き続き
+// 1 つも描かない。入力は競合の検索欄と、指標・期間の選択肢が描く隠し radio の 2 種類に限り、件数を
+// 状態ごとに完全一致で固定する。検査は末尾の describe「構造契約（許可リスト方式）」の専用の状態表が持つ。
 
 // --- @line/liff のモック（vi.hoisted でモジュール初期化前に参照可能にする） -----------------
 const liffMocks = vi.hoisted(() => ({
@@ -222,21 +228,8 @@ describe('store detail page', () => {
     });
   });
 
-  it('書込操作（フォーム・ボタン等）を一切含まない（正常系・エラー系いずれも）', async () => {
-    stubFetch({ ok: true, status: 200, body: mockResult });
-    const { container } = render(<StorePage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
-    });
-
-    // task 5.3 の必須境界（zero form / button[type=submit] / input / textarea / select）。
-    expect(
-      container.querySelectorAll('form, button[type="submit"], input, textarea, select'),
-    ).toHaveLength(0);
-    // task 2.3 由来の元の保証（button 全般も無し）を維持し、より厳格に検証する。
-    expect(container.querySelectorAll('button')).toHaveLength(0);
-  });
+  // 正常系の書込要素 0 件の検査は、Issue #265 で末尾の「構造契約（許可リスト方式）」の状態表へ置き換えた。
+  // 正常系は入力（検索欄・選択肢）を持ちうるので、input 0 件ではなく許可リストの件数で固定する。
 
   it('エラー画面にも書込操作を一切含まない', async () => {
     stubFetch({ ok: false, status: 404, body: { error: { code: 'STORE_NOT_FOUND', message: 'x' } } });
@@ -429,12 +422,14 @@ describe('store detail page', () => {
 
   // --- ui-airbnb-surfaces task 3.1: 版面・主見出し・帰属・処理中と通知 --------------------
   //
-  // **着手時点で無検証だった契約をここで先に固定する。** 上の 20 件は「実データが出ること」と
-  // 「書込操作が無いこと」を見ているが、意匠の適用で壊れうる次の契約はどれも押さえていなかった。
+  // **着手時点で無検証だった契約をここで先に固定する。** 着手時点で上にあった 20 件は「実データが
+  // 出ること」と「書込操作が無いこと」を見ていたが、意匠の適用で壊れうる次の契約はどれも押さえて
+  // いなかった（Issue #265 で、そのうち正常系の書込要素 0 件の検査を末尾の「構造契約（許可リスト方式）」へ移した）。
   //
   //   - 主見出しの読み上げ名と階層（正常分岐を除く 3 分岐にアサーションが 1 件も無かった）
   //   - 主要領域がちょうど 1 つであること（4 分岐とも 0 件）
-  //   - 読み込み中の分岐の書込操作 0 件・リンク 0 件（この分岐だけ抜けていた）
+  //   - 読み込み中の分岐の書込操作 0 件・リンク 0 件（この分岐だけ抜けていた。書込操作の側は、
+  //     Issue #265 以降は末尾の「構造契約（許可リスト方式）」が 7 状態で固定する）
   //   - 失敗の文言の完全一致（既存は toContain の部分一致で、末尾を削っても緑のまま通る）
   //   - 読み込み中の文言が **可視のテキスト**であること（sr-only へ落ちても getByText は緑）
   //   - 帰属の文言が完全一致でちょうど 1 箇所であること
@@ -514,7 +509,8 @@ describe('store detail page', () => {
           });
         },
         headingName: 'テスト自由が丘店',
-        // 単一店舗なので切替リンクは出ない（既存の 20 件が 0 件を固定している）。
+        // 単一店舗なので切替リンクは出ない（上の「単一店舗の場合は「店舗を切り替える」リンクを出さない」が
+        // 0 件を固定している）。
         linkNames: [],
       },
     ];
@@ -574,15 +570,9 @@ describe('store detail page', () => {
       expect(visited).toBe(SURFACE_BRANCHES.length);
     });
 
-    it('4 分岐すべてで書込操作の要素を 1 つも描画しない（Req 3.1）', async () => {
-      const visited = await forEachBranch((branch, container) => {
-        expect(
-          container.querySelectorAll('form, button, input, textarea, select'),
-          branch.name,
-        ).toHaveLength(0);
-      });
-      expect(visited).toBe(SURFACE_BRANCHES.length);
-    });
+    // 4 分岐の書込要素 0 件の検査は、Issue #265 で末尾の「構造契約（許可リスト方式）」へ置き換えた。
+    // 正常の分岐を推移と競合の有無で 4 通りに分けて回すため、この 4 分岐の表には足さず専用の表を持つ
+    // （この表へ足すと、見出し・主要領域・リンク・版面の検査の網羅まで変わってしまう）。
 
     it('4 分岐すべてでリンクの個数と読み上げ名を変えない（Req 3.2, 3.3）', async () => {
       const visited = await forEachBranch((branch, container) => {
@@ -788,9 +778,10 @@ describe('store detail page', () => {
 
   // --- ui-airbnb-surfaces task 3.2 / 3.3 -------------------------------------------------
   //
-  // 3.1 までの 33 件は版面・主見出し・処理中・失敗・リンクを見ているが、**この面の中身**
-  // （順位・自店の評価・新着・競合・推移）は存在の部分一致が数点あるだけで、意匠の適用で
-  // 壊れうる契約はどれも押さえていなかった。**先に固定してから意匠を当てる。**
+  // 3.2 の着手時点で 3.1 までにあった 33 件（Issue #265 で、そのうち書込要素 0 件の 2 件を末尾の
+  // 「構造契約（許可リスト方式）」へ置き換えた）は版面・主見出し・処理中・失敗・リンクを見ていたが、
+  // **この面の中身**（順位・自店の評価・新着・競合・推移）は存在の部分一致が数点あるだけで、
+  // 意匠の適用で壊れうる契約はどれも押さえていなかった。**先に固定してから意匠を当てる。**
   //
   //   - 節の見出し（h2 4 種・h3 2 種）の読み上げ名と階層 …… 0 件
   //   - 順位指標が読み上げる内容（上昇・下降・変動なし・前日欠損・順位欠損・母数欠損）…… 0 件
@@ -1329,6 +1320,314 @@ describe('store detail page', () => {
         ['divide-y'],
         ['divide-y'],
       ]);
+    });
+  });
+
+  // --- store-detail-trend-dashboard task 1.3（Issue #265）---------------------------------
+  //
+  // 正典は同 spec の design.md「構造契約（改定後）」、判断の根拠は research.md の決定 D7 である。
+  // competitive-daily-summary 要件 4.2 が禁じているのは書込操作であり、入力そのものではない。
+  // そこで「input 0 件」をやめ、次の 2 段で固定する。
+  //
+  //   - 書込の手段になる要素は、どの状態でも 0 件を保つ。
+  //   - 入力は許可リストの 2 種類（検索欄・選択肢の隠し radio）に限り、状態ごとに件数を完全一致で固定する。
+  //
+  // 許可リストなので、ほかの種類の入力を足せば必ず赤になる。件数を完全一致にするのは、許可した種類の
+  // 入力を別の状態・別の場所へ増やす改変も通さないためである。
+  describe('構造契約（許可リスト方式）（Issue #265）', () => {
+    /** 入力を受け付ける要素のうち、許すものの件数（許可リスト）。 */
+    interface AllowedInputCounts {
+      /** 競合の検索欄。`@fwlm/ui` の Input が data-slot="input" を描く。 */
+      readonly searchBox: number;
+      /** 指標・期間の選択肢。Base UI の Radio が描く隠し input で、焦点も読み上げも受けない。 */
+      readonly hiddenRadio: number;
+    }
+
+    /** 走査の結果。0 件を保つものは規則ごとに鍵を分け、赤の差分がどの規則に当たったのかを名指しさせる。 */
+    interface InputSurfaceCounts extends AllowedInputCounts {
+      readonly form: number;
+      readonly button: number;
+      readonly textarea: number;
+      readonly select: number;
+      readonly contentEditable: number;
+      readonly interactiveRole: number;
+      readonly formAttribute: number;
+      readonly namedInput: number;
+      readonly inputOutsideAllowlist: number;
+    }
+
+    const ALLOWED_INPUT_SELECTORS: Readonly<Record<keyof AllowedInputCounts, string>> = {
+      searchBox: 'input[type="search"][data-slot="input"]',
+      hiddenRadio: 'input[type="radio"][aria-hidden="true"][tabindex="-1"]',
+    };
+
+    /**
+     * 操作系の role（design.md の列挙どおり）。
+     *
+     * 後半の 9 つは 2026-09-14 に足した。input 要素でなく role だけで入力を名乗る要素（例: 自前の
+     * `div role="searchbox"`）は、input の許可リストを素通りするためである。radio / radiogroup は
+     * 選択肢の部品が描くので含めない。
+     */
+    const INTERACTIVE_ROLES: ReadonlySet<string> = new Set([
+      'button',
+      'textbox',
+      'combobox',
+      'checkbox',
+      'switch',
+      'slider',
+      'spinbutton',
+      'searchbox',
+      'listbox',
+      'option',
+      'menu',
+      'menuitem',
+      'menuitemcheckbox',
+      'menuitemradio',
+      'tab',
+      'treeitem',
+    ]);
+
+    /** どの状態でも 0 件を保つもの。 */
+    const KEPT_AT_ZERO: Omit<InputSurfaceCounts, keyof AllowedInputCounts> = {
+      form: 0,
+      button: 0,
+      textarea: 0,
+      select: 0,
+      contentEditable: 0,
+      interactiveRole: 0,
+      formAttribute: 0,
+      namedInput: 0,
+      inputOutsideAllowlist: 0,
+    };
+
+    /** role は空白区切りの並び（代替の指定）を取りうる。大文字小文字の違いで取りこぼさないよう小文字に揃える。 */
+    function roleTokens(element: Element): readonly string[] {
+      return (element.getAttribute('role') ?? '')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((token) => token.length > 0);
+    }
+
+    /**
+     * root の子孫を 1 つずつ走査し、許可リストの件数と、0 件を保つ規則ごとの件数を数える。
+     *
+     * 1 つの要素が複数の規則に当たれば、それぞれで数える。たとえば name を持つ隠し radio は
+     * hiddenRadio と namedInput の両方に数える（name の規則が単独で効くようにするため）。
+     */
+    function scanInputSurface(root: Element): { readonly scanned: readonly Element[]; readonly counts: InputSurfaceCounts } {
+      const scanned = Array.from(root.querySelectorAll('*'));
+      const count = (matches: (element: Element) => boolean): number => scanned.filter(matches).length;
+      const isAllowedInput = (element: Element): boolean =>
+        Object.values(ALLOWED_INPUT_SELECTORS).some((selector) => element.matches(selector));
+      return {
+        scanned,
+        counts: {
+          searchBox: count((element) => element.matches(ALLOWED_INPUT_SELECTORS.searchBox)),
+          hiddenRadio: count((element) => element.matches(ALLOWED_INPUT_SELECTORS.hiddenRadio)),
+          form: count((element) => element.localName === 'form'),
+          button: count((element) => element.localName === 'button'),
+          textarea: count((element) => element.localName === 'textarea'),
+          select: count((element) => element.localName === 'select'),
+          contentEditable: count((element) => element.hasAttribute('contenteditable')),
+          interactiveRole: count((element) => roleTokens(element).some((role) => INTERACTIVE_ROLES.has(role))),
+          formAttribute: count((element) => element.hasAttribute('form')),
+          namedInput: count((element) => element.localName === 'input' && element.hasAttribute('name')),
+          inputOutsideAllowlist: count((element) => element.localName === 'input' && !isAllowedInput(element)),
+        },
+      };
+    }
+
+    interface StructureState {
+      /** 失敗メッセージへ出す状態名。design.md の構造契約表の行と 1 対 1 に対応させる。 */
+      readonly name: string;
+      /** その状態へ到達させる（liff / fetch のモックを整える）。 */
+      readonly arrange: () => void;
+      /** その状態が描画され切るまで待ち、宣言した状態へ実際に着いたことを確かめる。 */
+      readonly settle: (container: HTMLElement) => Promise<void>;
+      /** 許可リストの件数。状態ごとに完全一致で固定する。 */
+      readonly inputs: AllowedInputCounts;
+    }
+
+    const SELECTION_BODY = {
+      error: { code: 'STORE_SELECTION_REQUIRED', message: '表示する店舗を選んでください' },
+      stores: MULTI_STORES,
+    };
+
+    // 競合の件数は、検索欄を出す境界の両側にそろえる（1 店以下の代表は 1 店、2 店以上の代表は 2 店）。
+    const TWO_COMPETITORS: StoreDetailResponse['competitors'] = [
+      ...mockResult.competitors,
+      { name: '競合B', rating: 4.1, reviewCount: 60, starDiff: 0.4 },
+    ];
+
+    /** 正常の分岐の状態を作る。推移と競合の有無は応答で決まる。 */
+    function readyState(name: string, body: StoreDetailResponse, inputs: AllowedInputCounts): StructureState {
+      return {
+        name,
+        arrange: () => {
+          stubFetch({ ok: true, status: 200, body });
+        },
+        settle: async (container) => {
+          await waitFor(() => {
+            expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+          });
+          // 応答を取り違えて 4 通りが同じ画面になると、状態を分けた意味が無いまま緑になる。
+          // 推移の表の有無と競合の件数で、宣言した状態へ着いたことを確かめる。
+          expect(container.querySelectorAll('table'), name).toHaveLength(body.trend.length > 0 ? 1 : 0);
+          const competitorsHeading = screen.getByRole('heading', { level: 2, name: '競合との比較' });
+          expect(competitorsHeading.closest('section')!.querySelectorAll('li'), name).toHaveLength(body.competitors.length);
+        },
+        inputs,
+      };
+    }
+
+    // 状態は design.md の構造契約表の全行である。見出し・主要領域・リンク・版面を検査する
+    // 4 分岐の表（SURFACE_BRANCHES）には足さない。あちらの網羅を変えないためである。
+    //
+    // 件数は現行の実装どおり（隠し radio 0・検索欄 0）で固定している（design.md の Migration Strategy
+    // の手順 2）。構造契約表の値（推移ありで隠し radio 5、競合 2 店以上で検索欄 1）へ上げるのは
+    // task 4.1 / 4.2 であり、上げる変更を先に書いて赤を見てから、実装で緑にする。
+    const STRUCTURE_STATES: readonly StructureState[] = [
+      {
+        name: '読み込み中',
+        // 未ログインだと liff.login() がリダイレクトを開始し、状態は loading のまま留まる。
+        arrange: () => {
+          liffMocks.isLoggedIn.mockReturnValue(false);
+          stubFetch({ ok: true, status: 200, body: mockResult });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(liffMocks.login).toHaveBeenCalled();
+          });
+          expect(screen.getByText('読み込み中です…')).toBeDefined();
+        },
+        inputs: { searchBox: 0, hiddenRadio: 0 },
+      },
+      {
+        name: '失敗',
+        arrange: () => {
+          stubFetch({ ok: false, status: 404, body: { error: { code: 'STORE_NOT_FOUND', message: 'x' } } });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(screen.getByRole('alert')).toBeDefined();
+          });
+        },
+        inputs: { searchBox: 0, hiddenRadio: 0 },
+      },
+      {
+        name: '店舗選択待ち',
+        arrange: () => {
+          stubFetch({ ok: false, status: 409, body: SELECTION_BODY });
+        },
+        settle: async () => {
+          await waitFor(() => {
+            expect(screen.getByText('テスト中目黒駅前店')).toBeDefined();
+          });
+        },
+        inputs: { searchBox: 0, hiddenRadio: 0 },
+      },
+      readyState('正常・推移 0 件・競合 1 店以下', { ...mockResult, trend: [] }, { searchBox: 0, hiddenRadio: 0 }),
+      readyState(
+        '正常・推移 0 件・競合 2 店以上',
+        { ...mockResult, trend: [], competitors: TWO_COMPETITORS },
+        { searchBox: 0, hiddenRadio: 0 },
+      ),
+      readyState('正常・推移あり・競合 1 店以下', mockResult, { searchBox: 0, hiddenRadio: 0 }),
+      readyState(
+        '正常・推移あり・競合 2 店以上',
+        { ...mockResult, competitors: TWO_COMPETITORS },
+        { searchBox: 0, hiddenRadio: 0 },
+      ),
+    ];
+
+    /** 1 つのテストの中で状態を回すので、beforeEach と同じ初期状態へ毎回戻す。 */
+    function armLiff(): void {
+      liffMocks.init.mockReset().mockResolvedValue(undefined);
+      liffMocks.isLoggedIn.mockReset().mockReturnValue(true);
+      liffMocks.getIDToken.mockReset().mockReturnValue('test-id-token');
+      liffMocks.login.mockReset();
+    }
+
+    it('7 状態すべてで書込の手段を 0 件に保ち、入力を許可リストの件数に限る（Req 7.1, 7.2, 7.4, 7.7）', async () => {
+      // 状態の数は構造契約表の行数で固定する。行を消す改変を緑のまま通さない。
+      expect(STRUCTURE_STATES).toHaveLength(7);
+
+      let visited = 0;
+      for (const state of STRUCTURE_STATES) {
+        armLiff();
+        state.arrange();
+        const { container } = render(<StorePage />);
+        await state.settle(container);
+        // 走査の範囲は document.body とする。container の外へ描く要素（portal）も取りこぼさないためである。
+        const scan = scanInputSurface(document.body);
+        // 空振り対策: 走査した要素が 1 件以上あり、その中に描いた画面の主要領域が含まれること。
+        expect(scan.scanned.length, state.name).toBeGreaterThan(0);
+        expect(scan.scanned, state.name).toContain(container.querySelector('main'));
+        expect(scan.counts, state.name).toEqual({ ...KEPT_AT_ZERO, ...state.inputs });
+        visited += 1;
+        cleanup();
+        vi.unstubAllGlobals();
+      }
+      // 回らないループは何も検査しないまま緑になる。回った数を母数と突き合わせる。
+      expect(visited).toBe(7);
+    });
+
+    it('走査器は許可リストの内外と、0 件を保つ規則を 1 件ずつ数え分ける（走査器の自己検証・Req 7.7）', () => {
+      // 画面への変異で確かめられるのは、注入した一部の規則だけである。すべての規則が効くことはここで確かめる。
+      // 走査が末尾の要素まで届くことも確かめるため、最後に 0 件を保つ規則の要素を置く。
+      const root = document.createElement('div');
+      root.innerHTML = [
+        '<form></form>',
+        '<button type="button"></button>',
+        '<select></select>',
+        '<div contenteditable="true"></div>',
+        '<span role="button"></span>',
+        '<span role="textbox"></span>',
+        '<span role="combobox"></span>',
+        '<span role="checkbox"></span>',
+        // 大文字で書かれた role も、代替の並びの 2 つ目に置かれた role も数える。
+        '<span role="SWITCH"></span>',
+        '<span role="none slider"></span>',
+        '<span role="spinbutton"></span>',
+        // 2026-09-14 に足した 9 つも、1 つずつ置いて数える（列挙の書き違いを捕まえるため）。
+        '<div role="searchbox" tabindex="0"></div>',
+        '<span role="listbox"></span>',
+        '<span role="option"></span>',
+        '<span role="menu"></span>',
+        '<span role="menuitem"></span>',
+        '<span role="menuitemcheckbox"></span>',
+        '<span role="menuitemradio"></span>',
+        '<span role="tab"></span>',
+        '<span role="treeitem"></span>',
+        // 操作系ではない role は数えない（選択肢の部品は role="radio" の span を描く）。
+        '<span role="radio"></span>',
+        '<span role="radiogroup"></span>',
+        '<div form="f"></div>',
+        '<input type="search" data-slot="input">',
+        '<input type="radio" aria-hidden="true" tabindex="-1">',
+        '<input type="radio" aria-hidden="true" tabindex="-1" name="x">',
+        // 許可リストに似ているが、属性が 1 つ欠けるか違うので外にある input。
+        '<input type="search">',
+        '<input type="radio" tabindex="-1">',
+        '<input type="radio" aria-hidden="true">',
+        '<input type="text" data-slot="input">',
+        '<input>',
+        '<textarea></textarea>',
+      ].join('');
+
+      expect(scanInputSurface(root).counts).toEqual({
+        searchBox: 1,
+        hiddenRadio: 2,
+        form: 1,
+        button: 1,
+        textarea: 1,
+        select: 1,
+        contentEditable: 1,
+        interactiveRole: 16,
+        formAttribute: 1,
+        namedInput: 1,
+        inputOutsideAllowlist: 5,
+      });
     });
   });
 });

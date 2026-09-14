@@ -182,7 +182,7 @@ design フェーズで決定する。
        - 期間と指標の選択肢（`@fwlm/ui` の `RadioGroup`）の中で、Base UI の Radio が描く隠し radio（`input[type=radio][aria-hidden=true][tabindex="-1"]`）。推移データがあるとき 5 件（期間 2・指標 3）
        - 競合の検索欄（`input[type=search][data-slot=input]`）。当日の競合が 2 店以上のとき 1 件
      - 読み込み中・取得失敗・店舗選択待ちの 3 つの状態では、入力を 0 件のまま据え置く。
-     - どの状態でも次を 0 件に保つ: `form`・`button`・`textarea`・`select`・`[contenteditable]`、操作系の role（`button`・`textbox`・`combobox`・`checkbox`・`switch`・`slider`・`spinbutton`）、`[form]`・`input[name]`、許可リストの外にある `input`。
+     - どの状態でも次を 0 件に保つ: `form`・`button`・`textarea`・`select`・`[contenteditable]`、操作系の role（`button`・`textbox`・`combobox`・`checkbox`・`switch`・`slider`・`spinbutton`・`searchbox`・`listbox`・`option`・`menu`・`menuitem`・`menuitemcheckbox`・`menuitemradio`・`tab`・`treeitem`。`searchbox` 以降の 9 種は 2026-09-14 に加えた。`radio` と `radiogroup` は選択肢の札が描くので含めない）、`[form]`・`input[name]`、許可リストの外にある `input`。
      - 操作の後も、サーバーへの要求は詳細の取得（`/api/detail` への GET）の 1 回だけとし、端末の保存領域・クッキー・閲覧履歴・画面の URL を変えない。
      - 改定の根拠: competitive-daily-summary の要件 4.2 が禁じているのは、クチコミ返信・投稿作成などの書込操作である。この要件の「1 つも描画しない」は、4.2 を画面の構造で確かめるための代理指標だった。表示だけを変える入力を足しても、4.2 は真のまま保たれる。書込を不可能にしている最終的な担保は変えない。店舗詳細の DB ユーザーにはテーブルの SELECT だけを付与し（`infra/sql/grants.sql`）、API の route は GET だけを export する（`ts/apps/store-detail/test/route.db.test.ts` が検査する）。
      - 改定の要件・設計・判断の経緯は `.kiro/specs/store-detail-trend-dashboard/` にある（requirements.md の要件 7、design.md の「構造契約（改定後）」、research.md の決定 D7）。
