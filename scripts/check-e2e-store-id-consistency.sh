@@ -10,8 +10,15 @@
 # **4 のずれが最も静かである。** 種の UUID を変えて lighthouserc.json を直し忘れると、
 # Lighthouse は存在しない店舗の URL を開く。そのとき出るのは 404 ではなく
 # 「このアンケートは現在ご利用いただけません。」の 1 段落だけの面で、LCP は当然速く、
-# accessibility も 1.0 を返す。**つまり別の面を測ったまま両方の assert が緑になる。**
+# accessibility も 1.0 を返す。**つまり別の面を測ったまま lhci の両方の assert が緑になる。**
 # これは Issue #53 が塞いだ「前提が崩れたまま緑を返す」形そのものである。
+# lighthouse ジョブの画面の確認（perf/verify-lhr.mjs・Issue #264）もこのずれで赤くなるが、
+# あちらは「測った画面が違う」としか言えない。原因が storeId のずれだと名指しするのはここである。
+#
+# **storeId が 4 箇所で一致していても、画面が描けないことはある**（seed の投入の失敗・店舗の状態を
+# 変える migration・画面側の分岐の変更）。それは storeId の照合の射程の外であり、lighthouse ジョブの
+# 画面の確認が赤にする。**ただし、その確認の呼び出しが消えても何も赤くならない。** 穴は緑のまま
+# 静かに開き直る。そこで 5. で配線そのものを固定する（Issue #264）。
 #
 # 2 のずれは、env を渡さないローカル実行だけに効く（CI は 3 が勝つ）。前提 assert が入った
 # 今は赤くなるが、原因は「storeId が違う」ではなく「面が描けていない」として現れる。
@@ -29,6 +36,20 @@
 #        一致するため、複写であること自体が観測できなかった）
 #   4. Markdown の手順書に書かれた `E2E_STORE_ID=...` の値も一致する（あれば照合する。
 #      無くてもよい —— 手順書の有無まで要求すると、文書を消しただけで赤くなる）
+#   5. 判定の配線（Issue #264）。測った画面の確認 `perf/verify-lhr.mjs` を、CI とローカルの
+#      実行装置の両方が同じ形で呼んでいる:
+#      - ts-ci.yml の lighthouse ジョブに、引数なしの `run: node perf/verify-lhr.mjs` がちょうど 1 行あり、
+#        lhci の autorun より後ろにあり、そのステップに continue-on-error も if: も無い
+#        （ジョブ名は完全一致で照合する。別のジョブ・コメント・引数付きの呼び出しは数えない。
+#        そのステップを読めなければ赤にする。読めないまま「付いていない」とは読まない）
+#      - scripts/run-e2e-local.sh の layer_lighthouse() が、`__inside-db lighthouse` の後に同じ判定を
+#        **最後の実行行として**呼ぶ（層は `layer_lighthouse || rc=$?` で呼ばれ set -e が効かないため、
+#        後ろに行があると判定の終了コードが捨てられる）
+#      - 判定の中身（largest-contentful-paint-element を読む処理）が、どちらのファイルにも無い
+#        （判定を 2 箇所に持たない。正典は perf/lhr-verification.mjs）
+#
+# 種の抽出は **位置で読む**（VALUES の最初の値）。stores の列の並びを変えると誤った赤になる
+# （偽の緑にはならない）。そのときは抽出式を列の並びに合わせること。
 #
 # **UUID の一致を無条件には要求しない。** 同じ UUID は単体テストにも多数現れるが、あちらは
 # 隔離された文脈で任意に選んだリテラルであり、種の値と一致する義務は無い。役割で照合する。
@@ -45,9 +66,18 @@ SEED_FILE="${ROOT}/ts/apps/survey-web/e2e/seed.sql"
 FIXTURE_FILE="${ROOT}/ts/apps/survey-web/e2e/fixtures/surfaces.ts"
 CI_FILE="${ROOT}/.github/workflows/ts-ci.yml"
 LHCI_FILE="${ROOT}/ts/apps/survey-web/perf/lighthouserc.json"
+RUNNER_FILE="${ROOT}/scripts/run-e2e-local.sh"
+VERIFY_CLI="${ROOT}/ts/apps/survey-web/perf/verify-lhr.mjs"
+# 判定の呼び出しの正規形（前後の空白を除いた行と完全一致で照合する。引数も `||` も許さない）。
+CI_VERIFY_LINE='run: node perf/verify-lhr.mjs'
+# shellcheck disable=SC2016  # 実行装置の行を字面のまま照合するため、展開させない。
+RUNNER_VERIFY_LINE='node "${SURVEY_DIR}/perf/verify-lhr.mjs"'
+# 判定の中身がここにあれば、判定が 2 箇所にある（LCP 要素の監査 ID で見分ける）。
+JUDGE_MARKER='largest-contentful-paint-element'
 
 fail=0
 doc_checked=0
+wired=0
 
 # 役割ごとに値を 1 つだけ取り出す。0 件と 2 件以上はどちらも「抽出できなかった」として空を返す。
 # 値は空白を含まないので、位置パラメータで件数を数えられる（パイプを作らない）。
@@ -113,7 +143,8 @@ if [ -n "$seed_id" ]; then
       echo "       ${p_label}: ${p_value}" >&2
       if [ "$p_label" = '計測' ]; then
         echo "       → Lighthouse は存在しない店舗の URL を開き、1 段落だけの面を測ります。" >&2
-        echo "         LCP も accessibility も緑を返すため、別の面を測っていることに誰も気づけません。" >&2
+        echo "         lhci の判定（LCP・accessibility）は緑を返します。lighthouse ジョブの画面の確認も赤くなりますが、" >&2
+        echo "         そちらは「測った画面が違う」としか言えません。原因は storeId のずれです。" >&2
       fi
       fail=1
     fi
@@ -176,9 +207,191 @@ if [ -n "$seed_id" ]; then
   done
 fi
 
+# --- 5. 判定の配線（Issue #264） ----------------------------------------------------------
+# lhci の判定は、店舗が見つからない 1 段落の面を測っても合格する。それを赤にするのが
+# perf/verify-lhr.mjs であり、CI の lighthouse ジョブとローカルの実行装置の両方がこれを呼ぶ。
+# **呼び出しが消えても、ずれても、何も赤くならない**（lhci は合格し続ける）。ここで配線を固定する。
+#
+# 走査は awk 1 回ずつで、件数と行番号を返させて判定は親シェルで行う（副シェルの中で fail を
+# 立てない・上の extract_one と同じ理由）。ジョブの切り出しは check-db-test-ci-coverage.sh と
+# 同じ形にそろえる（ジョブ名は完全一致・非コメント行だけを見る）。括弧は mawk / BSD awk の
+# 両方で字面どおりに読ませるため、ブラケット表現で書く。
+
+if [ ! -f "$VERIFY_CLI" ]; then
+  echo "ERROR: 判定: ${VERIFY_CLI#$ROOT/} がありません。" >&2
+  echo "       → lighthouse ジョブと実行装置が呼ぶ判定の実体です。消すと、測った画面を誰も確かめなくなります。" >&2
+  fail=1
+fi
+
+# 5-1. ts-ci.yml の lighthouse ジョブ。
+#   出力: <ジョブの数> <正規形の行の数> <その行番号> <autorun の最後の行番号> <そのステップに if:/continue-on-error:> <形の違う呼び出しの数> <そのステップを読めたか>
+# 「if:/continue-on-error: が付いていない」は否定側の検査なので、確認の行が属するステップを読めたときに
+# だけ意味を持つ。ステップの境界は `    steps:` の行から数え始めるため、その行を読めない（行末コメントなど）と
+# 境界が 0 件のまま「付いていない」と読んでしまう。読めたかを別に返し、読めなければ赤にする
+# （PR #273 のレビューで実測: steps: の行に行末コメントを足すと continue-on-error が素通りした）。
+ci_rc=0
+ci_probe="$(awk -v job='lighthouse' -v want="$CI_VERIFY_LINE" '
+    function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    /^jobs:[[:space:]]*$/ { injobs = 1; next }
+    /^[^[:space:]#]/      { injobs = 0; injob = 0 }
+    injobs && /^  [A-Za-z][A-Za-z0-9_-]*:[[:space:]]*$/ {
+        name = $0
+        sub(/:[[:space:]]*$/, "", name)
+        sub(/^  /, "", name)
+        injob = (name == job) ? 1 : 0
+        if (injob) found++
+        insteps = 0
+        next
+    }
+    !injob { next }
+    /^[[:space:]]*#/ { next }
+    /^    steps:[[:space:]]*$/ { insteps = 1; next }
+    insteps && /^[[:space:]]*- / {
+        ind = match($0, /[^[:space:]]/) - 1
+        if (step_indent == "") step_indent = ind
+        if (ind == step_indent) step++
+    }
+    {
+        line = trim($0)
+        if (index(line, "@lhci/cli") > 0 && index(line, "autorun") > 0) autorun_nr = NR
+        if (line == want || line == ("- " want)) { hits++; verify_nr = NR; verify_step = step }
+        else if (index(line, "verify-lhr.mjs") > 0) loose++
+        if (insteps && line ~ /^(- )?(if|continue-on-error):/) guarded[step] = 1
+    }
+    END {
+        known = (verify_step != "") ? 1 : 0
+        g = (known && (verify_step in guarded)) ? 1 : 0
+        printf "%d %d %d %d %d %d %d\n", found + 0, hits + 0, verify_nr + 0, autorun_nr + 0, g, loose + 0, known
+    }
+' "$CI_FILE")" || ci_rc=$?
+if [ "$ci_rc" -ne 0 ]; then
+  echo "ERROR: 判定: ${CI_FILE#$ROOT/} を走査できません（awk exit=${ci_rc}）。" >&2
+  fail=1
+else
+  set -- $ci_probe
+  ci_found="$1" ci_hits="$2" ci_verify_nr="$3" ci_autorun_nr="$4" ci_guarded="$5" ci_loose="$6" ci_step_known="$7"
+  ci_ok=1
+  if [ "$ci_found" -ne 1 ]; then
+    echo "ERROR: 判定: ${CI_FILE#$ROOT/} に lighthouse ジョブが ${ci_found} 個あります（ちょうど 1 個であるべきです）。" >&2
+    ci_ok=0
+  else
+    if [ "$ci_hits" -ne 1 ]; then
+      echo "ERROR: 判定: lighthouse ジョブに測った画面の確認（'${CI_VERIFY_LINE}' の 1 行）が ${ci_hits} 行あります（ちょうど 1 行であるべきです）。" >&2
+      if [ "$ci_loose" -gt 0 ]; then
+        echo "       → 形の違う呼び出し（引数付き・複数行の run: など）が ${ci_loose} 行あります。引数なしの 1 行へ戻してください。" >&2
+      else
+        echo "       → 確認が無いと、lhci は 1 段落の面を測っても合格します（Issue #264）。" >&2
+      fi
+      ci_ok=0
+    fi
+    if [ "$ci_autorun_nr" -eq 0 ]; then
+      echo "ERROR: 判定: lighthouse ジョブに lhci の autorun がありません（確認の前提が崩れています）。" >&2
+      ci_ok=0
+    elif [ "$ci_hits" -eq 1 ] && [ "$ci_verify_nr" -le "$ci_autorun_nr" ]; then
+      echo "ERROR: 判定: lighthouse ジョブの測った画面の確認が、lhci の autorun より前にあります。" >&2
+      echo "       → まだ今回の結果が無い .lighthouseci を読むことになります。autorun の後ろへ置いてください。" >&2
+      ci_ok=0
+    fi
+    if [ "$ci_hits" -eq 1 ] && [ "$ci_step_known" -eq 0 ]; then
+      echo "ERROR: 判定: lighthouse ジョブの測った画面の確認が、どのステップに属するかを読めません。" >&2
+      echo "       → steps: の行を読めていないため、continue-on-error や if: が付いていても「付いていない」と読みます。" >&2
+      echo "         steps: の行はキーだけにしてください（行末のコメントは別の行へ）。" >&2
+      ci_ok=0
+    elif [ "$ci_hits" -eq 1 ] && [ "$ci_guarded" -eq 1 ]; then
+      echo "ERROR: 判定: lighthouse ジョブの測った画面の確認に continue-on-error か if: が付いています。" >&2
+      echo "       → 赤を捨てる・確認を飛ばす形です。何も付けずに、autorun が合格したら必ず走らせてください。" >&2
+      ci_ok=0
+    fi
+  fi
+  if [ "$ci_ok" -eq 1 ]; then
+    wired=$((wired + 1))
+  else
+    fail=1
+  fi
+fi
+
+# 5-2. scripts/run-e2e-local.sh の layer_lighthouse()。
+#   出力: <関数の数> <正規形の行の数> <その行番号> <__inside-db lighthouse の行番号> <最後の実行行の行番号> <形の違う呼び出しの数>
+if [ ! -f "$RUNNER_FILE" ]; then
+  echo "ERROR: 判定: ${RUNNER_FILE#$ROOT/} がありません（ローカルの実行装置が CI と同じ判定を呼ぶことを確かめられません）。" >&2
+  fail=1
+else
+  rn_rc=0
+  rn_probe="$(awk -v want="$RUNNER_VERIFY_LINE" '
+      function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+      /^layer_lighthouse[(][)][[:space:]]*[{][[:space:]]*$/ { found++; inbody = 1; next }
+      inbody && /^[}][[:space:]]*$/ { inbody = 0; next }
+      !inbody { next }
+      {
+          line = trim($0)
+          if (line == "" || line ~ /^#/) next
+          last_nr = NR
+          if (index(line, "__inside-db lighthouse") > 0) inside_nr = NR
+          if (line == want) { hits++; verify_nr = NR }
+          else if (index(line, "verify-lhr.mjs") > 0) loose++
+      }
+      END { printf "%d %d %d %d %d %d\n", found + 0, hits + 0, verify_nr + 0, inside_nr + 0, last_nr + 0, loose + 0 }
+  ' "$RUNNER_FILE")" || rn_rc=$?
+  if [ "$rn_rc" -ne 0 ]; then
+    echo "ERROR: 判定: ${RUNNER_FILE#$ROOT/} を走査できません（awk exit=${rn_rc}）。" >&2
+    fail=1
+  else
+    set -- $rn_probe
+    rn_found="$1" rn_hits="$2" rn_verify_nr="$3" rn_inside_nr="$4" rn_last_nr="$5" rn_loose="$6"
+    rn_ok=1
+    if [ "$rn_found" -ne 1 ]; then
+      echo "ERROR: 判定: ${RUNNER_FILE#$ROOT/} に layer_lighthouse() が ${rn_found} 個あります（ちょうど 1 個であるべきです）。" >&2
+      rn_ok=0
+    else
+      if [ "$rn_hits" -ne 1 ]; then
+        echo "ERROR: 判定: layer_lighthouse() に測った画面の確認（'${RUNNER_VERIFY_LINE}' の 1 行）が ${rn_hits} 行あります（ちょうど 1 行であるべきです）。" >&2
+        if [ "$rn_loose" -gt 0 ]; then
+          echo "       → 形の違う呼び出し（引数付き・|| 付きなど）が ${rn_loose} 行あります。引数なしの 1 行へ戻してください。" >&2
+        fi
+        rn_ok=0
+      fi
+      if [ "$rn_inside_nr" -eq 0 ]; then
+        echo "ERROR: 判定: layer_lighthouse() に lhci の実行（__inside-db lighthouse）がありません（確認の前提が崩れています）。" >&2
+        rn_ok=0
+      elif [ "$rn_hits" -eq 1 ] && [ "$rn_verify_nr" -le "$rn_inside_nr" ]; then
+        echo "ERROR: 判定: layer_lighthouse() の測った画面の確認が、lhci の実行（__inside-db lighthouse）より前にあります。" >&2
+        rn_ok=0
+      fi
+      if [ "$rn_hits" -eq 1 ] && [ "$rn_verify_nr" -ne "$rn_last_nr" ]; then
+        echo "ERROR: 判定: layer_lighthouse() の測った画面の確認が、本体の最後の実行行ではありません。" >&2
+        echo "       → 層は 'layer_lighthouse || rc=\$?' で呼ばれ set -e が効かないため、後ろの行が判定の終了コードを上書きします。" >&2
+        rn_ok=0
+      fi
+    fi
+    if [ "$rn_ok" -eq 1 ]; then
+      wired=$((wired + 1))
+    else
+      fail=1
+    fi
+  fi
+fi
+
+# 5-3. 判定を 2 箇所に持たない。判定の中身が CI やローカルの実行装置へ書き戻されると、
+# 片方だけが直され、もう片方が古い基準のまま緑を返す。
+for jd_file in "$CI_FILE" "$RUNNER_FILE"; do
+  [ -f "$jd_file" ] || continue
+  jd_rc=0
+  jd_n="$(awk -v m="$JUDGE_MARKER" '$0 !~ /^[[:space:]]*#/ && index($0, m) > 0 { n++ } END { print n + 0 }' "$jd_file")" || jd_rc=$?
+  if [ "$jd_rc" -ne 0 ]; then
+    echo "ERROR: 判定: ${jd_file#$ROOT/} を走査できません（awk exit=${jd_rc}）。" >&2
+    fail=1
+    continue
+  fi
+  if [ "$jd_n" -gt 0 ]; then
+    echo "ERROR: 判定: ${jd_file#$ROOT/} に判定の中身（${JUDGE_MARKER} を読む処理）が ${jd_n} 行あります。" >&2
+    echo "       → 判定は ts/apps/survey-web/perf/lhr-verification.mjs の 1 箇所に置き、ここからは perf/verify-lhr.mjs を呼ぶだけにしてください。" >&2
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
-  echo "NG: E2E の storeId に不整合があります（上記参照）。" >&2
+  echo "NG: E2E の storeId か、測った画面の確認の配線に不整合があります（上記参照）。" >&2
   exit 1
 fi
 
-echo "OK: E2E の storeId を検証しました（役割 4 件が一致 ${seed_id} / 既定値の宣言 ${decl_count} 件 / ts 走査 ${decl_scanned} ファイル / 手順書 ${doc_checked} 件照合）。"
+echo "OK: E2E の storeId を検証しました（役割 4 件が一致 ${seed_id} / 既定値の宣言 ${decl_count} 件 / ts 走査 ${decl_scanned} ファイル / 手順書 ${doc_checked} 件照合 / 判定の配線 ${wired} 箇所）。"
