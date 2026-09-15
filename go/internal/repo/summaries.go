@@ -8,11 +8,24 @@ import (
 )
 
 // NewReviewExcerpt は daily_summaries.new_reviews の1要素（帰属表示用・design.md Physical Data Model）。
+//
+// 後ろの 3 項目は口コミの帰属情報（line-on-demand-report Req 8.2・8.6・8.7）で、空のときはキーごと
+// 書かない（omitempty。空文字も null も書かない）。line-on-demand-report の新着口コミのレポート
+// （TS・DailySummaryNewReview の任意項目）は、キーの有無で「Google Maps への導線を取得できているか」を
+// 判定し、導線の無い口コミは内容を表示しない。
+// 3 項目を足す前に書かれた行の要素も、キーを持たない同じ形になる。
 type NewReviewExcerpt struct {
 	AuthorName  string    `json:"authorName"`
 	PublishTime time.Time `json:"publishTime"`
 	Rating      float64   `json:"rating"`
 	TextExcerpt string    `json:"textExcerpt"`
+
+	// AuthorURI は投稿者のプロフィールの URL。
+	AuthorURI string `json:"authorUri,omitempty"`
+	// AuthorPhotoURI は投稿者のプロフィール画像の URL。
+	AuthorPhotoURI string `json:"authorPhotoUri,omitempty"`
+	// GoogleMapsURI はその口コミを Google Maps で開く URL。
+	GoogleMapsURI string `json:"googleMapsUri,omitempty"`
 }
 
 // SummaryCompetitor は daily_summaries.competitors の1要素（表示順は rank 順・評価なしは末尾・design.md）。

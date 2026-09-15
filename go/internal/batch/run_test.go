@@ -106,14 +106,20 @@ type fakeNearbyResponse struct {
 type fakeReviewText struct {
 	Text string `json:"text"`
 }
+
+// fakeAuthorAttribution・fakeReview の帰属の URL は omitempty にして、実物（proto3 の JSON）と同じく
+// 値の無い口コミの応答からキーごと省けるようにする。
 type fakeAuthorAttribution struct {
 	DisplayName string `json:"displayName"`
+	URI         string `json:"uri,omitempty"`
+	PhotoURI    string `json:"photoUri,omitempty"`
 }
 type fakeReview struct {
 	Rating            float64               `json:"rating"`
 	PublishTime       string                `json:"publishTime"`
 	Text              fakeReviewText        `json:"text"`
 	AuthorAttribution fakeAuthorAttribution `json:"authorAttribution"`
+	GoogleMapsURI     string                `json:"googleMapsUri,omitempty"`
 }
 
 // fakeDetailsResponse は Place Details (New) の応答の形。Places API (New) は proto3 の JSON なので、

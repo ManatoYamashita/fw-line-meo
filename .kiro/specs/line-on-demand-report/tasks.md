@@ -40,7 +40,7 @@
   - _Requirements: 1.6, 8.1_
   - _Boundary: packages/design-tokens_
 
-- [ ] 2.4 (P) 日次集計に口コミの帰属 3 項目を保存する（Go）
+- [x] 2.4 (P) 日次集計に口コミの帰属 3 項目を保存する（Go）
   - 自店の取得応答から、口コミの Google Maps 上の URL、投稿者のプロフィール URL と画像 URL を受け取り、新着口コミの要素に空でないときだけ書く。フィールドマスクと呼び出し回数は変えない
   - 書込の生の jsonb の形（3 項目の有無と値）を Go の試験で直接確かめる（読込側の寛容さで書込の回帰を見逃さないため）
   - Observable: places と repo と batch の試験が緑で、3 項目を落とす変異で書込の形の試験が赤になる
@@ -298,6 +298,9 @@
 - （2.3）`ts/apps/delivery-job/src/flex.ts` は、4.5 で撤去するまで帰属を `captionSize`・`muted` で描く（`captionSize` の新しい説明と食い違う過渡状態）
 - （2.3）13px と、ポリシーの 12〜16sp の対応には一次情報が無い。7.5 の実機確認で、端末の文字サイズの設定を変えて帰属表示の見え方を確かめる
 - （2.3）`scripts/check-design-tokens.sh` は、`ts/packages/design-tokens/src` の hex をコメントも含めて許容集合に数える。src のコメントにトークン値でない hex を書かない
+- （2.4）新着口コミのレポート（3.4）が、Google Maps 上の URL の無い口コミの内容を出さないことで、Go の `NewReviewExcerpt` と TS の `DailySummaryNewReview` の注記は事実になる。3.4 の審査で確かめる。既存の LIFF と日次カードはこの判定をしない（LIFF は本 spec の境界外）
+- （2.4）Go は URL を加工せずに保存する。LINE の Flex は、画像の url に HTTPS を、uri アクションに http・https・line・tel を求め、1 つでも不適合があるとメッセージ全体を拒否する。3.4 では https の絶対 URL だけを部品に使い、`googleMapsUri` が不適合なら導線が無いものとして内容を出さない（8.7）ことを試験で固定する
+- （2.4）`.kiro/specs/competitive-daily-summary/design.md` の new_reviews の要素の形（4 項目）に、任意の 3 項目を 6.1 で足す。`db/migrations/0004_competitive_daily_summary.sql` の同じコメントは、適用済みの migration なので改めない
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

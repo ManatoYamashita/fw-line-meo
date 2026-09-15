@@ -236,6 +236,30 @@ func TestNewReviews_PartialExcerptWhenSomeReviewsPredateLastBatch(t *testing.T) 
 	}
 }
 
+// line-on-demand-report（Req 8.2・8.6・8.7）: 抜粋は口コミの帰属 3 項目をそのまま持ち運ぶ。ここで落とすと
+// 日次集計へ書かれず、レポートはその口コミの内容を表示できない。
+func TestNewReviews_ExcerptKeepsAttribution(t *testing.T) {
+	lastBatchDate := mustParseTime(t, "2026-07-10T00:00:00Z")
+	reviews := []Review{
+		{
+			AuthorName: "New1", PublishTime: mustParseTime(t, "2026-07-11T09:00:00Z"), Rating: 5, Text: "new review",
+			AuthorURI:      "https://www.google.com/maps/contrib/test-author-1/reviews",
+			AuthorPhotoURI: "https://lh3.googleusercontent.com/a/test-photo-1",
+			GoogleMapsURI:  "https://www.google.com/maps/reviews/data=test-review-1",
+		},
+	}
+
+	info := NewReviews(1, reviews, lastBatchDate)
+
+	if len(info.Excerpts) != 1 {
+		t.Fatalf("Excerpts len = %d, want 1", len(info.Excerpts))
+	}
+	got := info.Excerpts[0]
+	if got.AuthorURI != reviews[0].AuthorURI || got.AuthorPhotoURI != reviews[0].AuthorPhotoURI || got.GoogleMapsURI != reviews[0].GoogleMapsURI {
+		t.Fatalf("Excerpts[0] = %+v, want the attribution URLs of the input review", got)
+	}
+}
+
 func TestNewReviews_ZeroOrNegativeDeltaMeansNoNewReviews(t *testing.T) {
 	lastBatchDate := mustParseTime(t, "2026-07-10T00:00:00Z")
 	reviews := []Review{

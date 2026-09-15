@@ -123,8 +123,8 @@ export interface SurveyAspectTallyRow {
 //
 // 後ろの 3 項目は line-on-demand-report で足した口コミの帰属情報で、Go が空でないときだけ書く。
 // 足す前に書かれた行の要素は 3 項目を持たない（null ではなくキーが無い）。行は 30 日で入れ替わる。
-// 読込側は項目の有無で「導線を取得できているか」を判定する（Google Maps 上の URL が無い口コミは
-// 内容を表示しない）。
+// line-on-demand-report の新着口コミのレポートは、項目の有無で「導線を取得できているか」を判定する
+// （Google Maps 上の URL が無い口コミは内容を表示しない）。
 export interface DailySummaryNewReview {
   authorName: string;
   publishTime: string;
