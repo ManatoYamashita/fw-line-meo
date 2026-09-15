@@ -15,7 +15,8 @@
 //
 // LINE は、部品の URL が 1 つでも不適合だとメッセージ全体を拒否する（画像の url は https、uri アクションは
 // http・https・line・tel。references/flex-message.md・action-objects.md）。Go は Places API の URL を
-// 加工せずに保存するので、ここでは https の絶対 URL だけを部品に使い、不適合な値は無いものとして扱う。
+// 加工せずに保存するので、ここでは https の絶対 URL だけを部品に使い（format.ts の toFlexHttpsUrl）、
+// 不適合な値は無いものとして扱う。
 //
 // 投稿日時は日本時間の `M月D日 HH:mm` で書く。時刻の計算は Date.UTC と getUTC*、日本時間への変換は
 // 固定の +9 時間で行い、実行環境の TZ に依存させない。
@@ -30,10 +31,13 @@ import type {
   FlexTextComponent,
 } from '../../line/flex-types.js';
 import {
+  IMAGE_URL_MAX_LENGTH,
+  URI_ACTION_MAX_LENGTH,
   buildReportBubble,
   fitText,
   fitsFlexBubbleLimit,
   formatDataDate,
+  toFlexHttpsUrl,
   toReportMessage,
   type NormalizedReadRow,
   type ReportContext,
@@ -64,41 +68,6 @@ const AUTHOR_LINK_LABEL = '投稿者のプロフィール';
 
 // 投稿者の画像の大きさ。名前の左に置く最小の段で、LINE のキーワードを使う（design.md の Report builders）。
 const AUTHOR_PHOTO_SIZE = 'xxs';
-
-// uri アクションの uri は 1000 文字まで、画像の url は 2000 文字まで（references/action-objects.md・flex-message.md）。
-const URI_ACTION_MAX_LENGTH = 1000;
-const IMAGE_URL_MAX_LENGTH = 2000;
-
-// --- URL ---------------------------------------------------------------------------
-
-// RFC 3986 の文字（非予約文字・予約文字・百分率符号）だけでできた https の URL。LINE は URL が UTF-8 で
-// 百分率符号化されていることを求めるので、空白・非 ASCII・逆斜線を含む値は使わない。
-const HTTPS_URL_PATTERN = /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
-// 「%」の後に 16 進の 2 桁が続かない（百分率符号化として壊れている）。
-const BROKEN_PERCENT_ENCODING = /%(?![0-9A-Fa-f]{2})/;
-
-/**
- * value が LINE の部品に使える https の絶対 URL なら、そのまま返す。使えなければ null を返す。
- *
- * スキームの無い `//…`、http、javascript: などは使わない。ホストを持たない値、利用者情報を含む値、
- * 上限（maxLength）を超える値も使わない。値を書き換えて救うことはしない（別の URL へ変わりうる）。
- */
-export function toFlexHttpsUrl(value: string | undefined, maxLength: number): string | null {
-  if (
-    value === undefined ||
-    value.length > maxLength ||
-    !HTTPS_URL_PATTERN.test(value) ||
-    BROKEN_PERCENT_ENCODING.test(value)
-  ) {
-    return null;
-  }
-  const parsed = URL.parse(value);
-  if (parsed === null || parsed.protocol !== 'https:' || parsed.hostname === '') {
-    return null;
-  }
-  // 書かれたとおりの位置にホストがあること（`https:///…` のように解釈で補われた形と、利用者情報を除く）。
-  return value.startsWith(`https://${parsed.host}`) ? value : null;
-}
 
 // --- 表示できる口コミ ----------------------------------------------------------------
 

@@ -107,6 +107,15 @@
 |---|---|---|---|---|---|
 | 代理店の識別子 | `agencyId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 招待コード発行の失敗記録で、どの代理店の操作が失敗したかを特定する。現行は識別子を 1 つも残しておらず対象を判定できない |
 
+### 1.9 LINE Webhook 面に固有の項目
+
+レポート要求（spec: `.kiro/specs/line-on-demand-report/`）の応答の記録に使う。どちらも有限集合の識別子であり、店舗 ID と LINE ユーザー ID の代わりにはならない（載せない）。
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| レポートの種類 | `reportKind` | 該当なし | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | 値は `new_reviews`、`comparison`、`trend` のいずれか（`@fwlm/line-report` の ReportKind） |
+| レポート要求への応答の区分 | `reportOutcome` | 該当なし | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | 値は `report`、`store_choice`、`no_store`、`preparing`、`fetch_failed` のいずれか。`fetch_failed` は最新の日次集計が取得失敗だった応答で、推移のレポート（失敗日を示した表と注記）もここに数える |
+
 ---
 
 ## 2. 事象名
@@ -136,6 +145,8 @@
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
 | `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4） |
 | `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**失敗**。現在は記録そのものを諦めている（`conversation.ts` のコメントが明記） |
+| `line-webhook.report_replied` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | レポート要求への応答。Reply を送った後に、応答ごとに 1 件出す。項目は `reportKind` と `reportOutcome` だけである。例外で終わった要求は出さない（`line-webhook.dispatch_failed` が記録する） |
+| `line-webhook.report_store_hint_ignored` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | オーナーの確定店舗の集合の外にある店舗が指定され、選択肢を再提示した場合。指定された店舗 ID は載せない（集合外の値は攻撃者に由来しうる。`store-detail.store_hint_ignored` と同じ考え方）。他のオーナーに実在する ID と存在しない ID で記録を変えない |
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名を持たない |
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
 

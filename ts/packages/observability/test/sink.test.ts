@@ -169,4 +169,22 @@ describe('writeStructuredLog', () => {
       }),
     );
   });
+
+  it('レポート要求の応答の区分（reportKind・reportOutcome）を出力する', () => {
+    // 型へ足した項目が出力の一覧から漏れると、黙って出力されない（#62 と同じ状態）。
+    const line = captureOutput('info', () => {
+      writeStructuredLog('info', 'line-webhook.report_replied', {
+        reportKind: 'trend',
+        reportOutcome: 'fetch_failed',
+      });
+    });
+    expect(line).toBe(
+      JSON.stringify({
+        severity: 'INFO',
+        event: 'line-webhook.report_replied',
+        reportKind: 'trend',
+        reportOutcome: 'fetch_failed',
+      }),
+    );
+  });
 });

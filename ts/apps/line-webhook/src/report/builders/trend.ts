@@ -30,10 +30,12 @@ import type {
   FlexTextComponent,
 } from '../../line/flex-types.js';
 import {
+  URI_ACTION_MAX_LENGTH,
   buildReportBubble,
   formatDataDate,
   formatPeriod,
   isComparableRow,
+  toFlexHttpsUrl,
   toReportMessage,
   type NormalizedReadRow,
   type ReportContext,
@@ -169,32 +171,13 @@ export function classifyTrendDays(endDate: string, rows: readonly NormalizedRead
 }
 
 // --- 詳細画面への導線 --------------------------------------------------------------
+//
+// LINE は部品の URL が 1 つでも不適合だとメッセージ全体を拒否するので、uri アクションに使えない値は
+// 導線ごと落とす。検証は新着口コミのレポートと同じ format.ts の toFlexHttpsUrl で行う。
 
-// uri アクションの uri は 1000 文字まで（references/action-objects.md）。
-const URI_ACTION_MAX_LENGTH = 1000;
-// RFC 3986 の文字（非予約文字・予約文字・百分率符号）だけでできた https の URL。LINE は URL が UTF-8 で
-// 百分率符号化されていることを求めるので、空白・非 ASCII・逆斜線を含む値は使わない。
-const HTTPS_URL_PATTERN = /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
-// 「%」の後に 16 進の 2 桁が続かない（百分率符号化として壊れている）。
-const BROKEN_PERCENT_ENCODING = /%(?![0-9A-Fa-f]{2})/;
-
-/**
- * value が uri アクションに使える https の絶対 URL なら、そのまま返す。使えなければ null を返す。
- *
- * LINE は部品の URL が 1 つでも不適合だとメッセージ全体を拒否するので、不適合な値は導線ごと落とす。
- * 規則は新着口コミのレポートの URL の検証と同じである（スキームの無い形・http・ホストを持たない値・
- * 利用者情報を含む値・上限を超える値を使わない。値を書き換えて救うことはしない）。
- */
+// uri アクションに使える https の絶対 URL なら、そのまま返す。使えなければ null を返す。
 function toHttpsUri(value: string): string | null {
-  if (value.length > URI_ACTION_MAX_LENGTH || !HTTPS_URL_PATTERN.test(value) || BROKEN_PERCENT_ENCODING.test(value)) {
-    return null;
-  }
-  const parsed = URL.parse(value);
-  if (parsed === null || parsed.protocol !== 'https:' || parsed.hostname === '') {
-    return null;
-  }
-  // 書かれたとおりの位置にホストがあること（`https:///…` のように解釈で補われた形と、利用者情報を除く）。
-  return value.startsWith(`https://${parsed.host}`) ? value : null;
+  return toFlexHttpsUrl(value, URI_ACTION_MAX_LENGTH);
 }
 
 /**

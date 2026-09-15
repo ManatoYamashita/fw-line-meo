@@ -102,7 +102,7 @@
   - _Boundary: line-webhook report/builders/trend とその試験ファイル_
   - _Depends: 3.3_
 
-- [ ] 3.7 レポート要求の応答を統合する
+- [x] 3.7 レポート要求の応答を統合する
   - 店舗の一覧→解決→種類ごとの読み出し→正規化→組立→Reply 1 回、の順で 1 つの要求に応える。読み出しの基準日には日本時間の今日を渡す。推移は最新の集計を読んでからその日付を終点に範囲を読む。行が無い・最新が取得失敗・店舗なしの分岐を持つ
   - 店舗を解決した後の例外を店舗名つきの例外に包んで投げ直す。応答ごとの事象と、集合外の指定を無視した事象（店舗 ID は載せない）を記録の正典へ登録してから出す
   - Observable: 偽の読み出しと偽の Reply による単体試験で、全分岐の Reply がちょうど 1 回、例外時は 0 回であり、記録の正典の照合ガードが緑
@@ -342,6 +342,13 @@
   - `buildTrendReport` は、`latestFailed` が最終日の分類と食い違うときと、日付が昇順でないときに例外を投げる。3.7 は `latest.status === 'failed'` と `classifyTrendDays` の結果をそのまま渡す
   - https の URL の検証が `builders/new-reviews.ts` と `builders/trend.ts` で重複している。3.7 で 1 か所に寄せる
 - （7.2）本番の接続先は、`SELECT version()` が `x86_64-pc-linux-gnu` を返すことで確かめる。この機械のローカルの postgres は `aarch64-apple-darwin` と出る。#280 の migration（0009・`audit_logs` の CHECK）は 2026-09-15 に本番へ適用済みで、`summary_deliveries` の CHECK は変わっていない（#259 のセッションからの連絡）
+- （3.7）記録の新しい項目（`reportKind`・`reportOutcome`）を出すには、正典に加えて `ts/packages/observability/src/fields.ts`（型）と `sink.ts` の `PLAIN_FIELDS`（出力の許可）への追加が要る。design の Modified Files はこの 2 つを挙げていない（6.x か最終検証で design へ追記する）。共有パッケージを変えたら、アプリの試験の前に build する
+- （3.7）ほかに決めたこと
+  - 推移で最新が取得失敗の日の `reportOutcome` は、design に定義が無いので `fetch_failed` とした（最新のデータの状態を表す区分）
+  - handler はロガーを作成時に固定する。相関 ID を記録に残すなら、3.9・3.10 でリクエストごとに handler を作る
+  - エラー境界（3.10）が記録する種別は `StoreScopedReportError` になる。元の種別は `cause` から取る
+- （3.7・既存の穴）`scripts/check-log-field-binding.sh` の「実装→正典」の照合は `writeStructuredLog(`・`correlationLog(` を直接呼ぶ箇所しか見ず、ロガーを注入して呼ぶ line-webhook の事象は対象外である（正典から行を消しても緑。既存の `line-webhook.audit_log_failed` も未登録のまま）。本 spec の範囲外なので、別 Issue を提案する（最終報告で挙げる）。storeId を記録に載せる漏れは、型でもガードでもなく試験だけが捕まえる
+- （3.7）`flex-types.ts` で 3.1〜3.4 が足した任意項目は、すべて使われていることを確かめた
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

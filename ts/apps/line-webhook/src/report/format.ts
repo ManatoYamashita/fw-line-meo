@@ -7,6 +7,7 @@
 // - 見出し（店舗名とデータの時点）と、同じバブルの footer に置く帰属表示
 // - 30KB の検証と、altText を上限に収めた Flex のメッセージ
 // - 文字数を数えて書記素の境目で切る道具（選択肢のラベル・displayText・altText が使う）
+// - Flex の部品に使える https の URL の検証（新着口コミの導線・画像と、推移の詳細画面への導線が使う）
 //
 // どれも DB にも LINE にも触れない純関数で、記録（ログ）も出さない。
 
@@ -230,6 +231,47 @@ export function attributionFooter(contents: readonly FlexBoxContent[] = []): Fle
     paddingAll: lineLayout.blockPadding,
     contents: [...contents, buildAttributionText()],
   };
+}
+
+// --- URL ---------------------------------------------------------------------------
+//
+// LINE は、部品の URL が 1 つでも不適合だとメッセージ全体を拒否する（画像の url は https、uri アクションは
+// http・https・line・tel。references/flex-message.md・action-objects.md）。レポートは https の絶対 URL だけを
+// 部品に使い、不適合な値は無いものとして扱う（呼出元が導線や画像ごと落とす）。
+
+/** uri アクションの uri の上限の文字数（references/action-objects.md）。 */
+export const URI_ACTION_MAX_LENGTH = 1000;
+
+/** 画像の url の上限の文字数（references/flex-message.md）。 */
+export const IMAGE_URL_MAX_LENGTH = 2000;
+
+// RFC 3986 の文字（非予約文字・予約文字・百分率符号）だけでできた https の URL。LINE は URL が UTF-8 で
+// 百分率符号化されていることを求めるので、空白・非 ASCII・逆斜線を含む値は使わない。
+const HTTPS_URL_PATTERN = /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
+// 「%」の後に 16 進の 2 桁が続かない（百分率符号化として壊れている）。
+const BROKEN_PERCENT_ENCODING = /%(?![0-9A-Fa-f]{2})/;
+
+/**
+ * value が LINE の部品に使える https の絶対 URL なら、そのまま返す。使えなければ null を返す。
+ *
+ * スキームの無い `//…`、http、javascript: などは使わない。ホストを持たない値、利用者情報を含む値、
+ * 上限（maxLength）を超える値も使わない。値を書き換えて救うことはしない（別の URL へ変わりうる）。
+ */
+export function toFlexHttpsUrl(value: string | undefined, maxLength: number): string | null {
+  if (
+    value === undefined ||
+    value.length > maxLength ||
+    !HTTPS_URL_PATTERN.test(value) ||
+    BROKEN_PERCENT_ENCODING.test(value)
+  ) {
+    return null;
+  }
+  const parsed = URL.parse(value);
+  if (parsed === null || parsed.protocol !== 'https:' || parsed.hostname === '') {
+    return null;
+  }
+  // 書かれたとおりの位置にホストがあること（`https:///…` のように解釈で補われた形と、利用者情報を除く）。
+  return value.startsWith(`https://${parsed.host}`) ? value : null;
 }
 
 // --- バブルとメッセージ ------------------------------------------------------------

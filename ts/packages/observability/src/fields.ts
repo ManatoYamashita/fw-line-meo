@@ -86,4 +86,11 @@ export interface LogFields {
   readonly detail?: string;
   /** 欠落した設定の識別子。自由文ではなく有限集合（環境変数名）である。 */
   readonly configKey?: string;
+
+  // --- LINE Webhook 面（レポート要求） ---
+
+  /** レポートの種類。有限集合の識別子（new_reviews・comparison・trend）。 */
+  readonly reportKind?: string;
+  /** レポート要求への応答の区分。有限集合の識別子（report・store_choice・no_store・preparing・fetch_failed）。 */
+  readonly reportOutcome?: string;
 }

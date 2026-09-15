@@ -24,7 +24,6 @@ import {
   buildNewReviewsReport,
   displayableReviews,
   formatPublishTimeJst,
-  toFlexHttpsUrl,
 } from '../../src/report/builders/new-reviews.js';
 import {
   ATTRIBUTION_TEXT,
@@ -35,6 +34,7 @@ import {
   fitsFlexBubbleLimit,
   flexBubbleByteLength,
   normalizeReadRow,
+  toFlexHttpsUrl,
   type NormalizedReadRow,
   type ReportContext,
 } from '../../src/report/format.js';
