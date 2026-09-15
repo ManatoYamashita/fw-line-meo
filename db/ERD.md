@@ -1,6 +1,6 @@
 # ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0009_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -69,7 +69,7 @@ erDiagram
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
 - `daily_summaries`（Go 書込）と `summary_deliveries`（TS 書込）は `competitive-daily-summary` spec で追加。両テーブルとも `stores` に対する `(store_id, summary_date)` 一意制約を持ち、日次バッチ（Go）→ 配信ジョブ（TS）のパイプラインで `daily_summaries` を TS が read → `summary_deliveries` へ結果を書込む、というクロス言語 seam を構成する（`db/write-boundary.md` 参照）。
-- `summary_deliveries.status`（CHECK は `ck_summary_deliveries_status`・`0009` で `0004` の無名の列 CHECK を作り直した）: 通知記録は送った結果だけでなく、送らなかった理由も記録する。送らない判定も予約してから記録するので、同じ日の再実行は同じ店舗を判定し直さない。先頭の 4 値は `0004` からの値で意味を変えない。後ろの 3 値は `line-on-demand-report`（`0009`）で足した。TS の型 `SummaryDeliveryStatus` はこの 7 値と一致させる。
+- `summary_deliveries.status`（CHECK は `ck_summary_deliveries_status`・`0010` で `0004` の無名の列 CHECK を作り直した）: 通知記録は送った結果だけでなく、送らなかった理由も記録する。送らない判定も予約してから記録するので、同じ日の再実行は同じ店舗を判定し直さない。先頭の 4 値は `0004` からの値で意味を変えない。後ろの 3 値は `line-on-demand-report`（`0010`）で足した。TS の型 `SummaryDeliveryStatus` はこの 7 値と一致させる。
 
   | 値 | 意味 |
   |---|---|
