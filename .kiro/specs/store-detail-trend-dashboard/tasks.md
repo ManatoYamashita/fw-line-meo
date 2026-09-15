@@ -376,7 +376,7 @@
       - lint・型検査・ビルド・ui の 604 件・ガード類: 緑。
     - 独立レビュー: 1 回目の審査役は途中で止まった。別の審査役で承認。任意の改善として、テストのコメントにある D8 の出典を research.md に直した。
 
-- [ ] 3.3 (P) 競合の検索欄と、件数の文言を描く
+- [x] 3.3 (P) 競合の検索欄と、件数の文言を描く
   - 構成は、縦に積む Field に、見えるラベル「店名で絞り込む」と、検索の種類の入力欄を置く形。入力欄は自動補完を切り、name を渡さない。
   - 件数の文言は、常に置いた状態通知の要素に「競合{総数}店のうち{表示数}店を表示」と出す。
   - 観察可能な完了: 検索欄の部品テストファイル（ページ全体のテストファイルには書かない）で、次が緑になる。
@@ -387,6 +387,27 @@
   - _Requirements: 4.7, 4.8, 5.6, 5.7_
   - _Boundary: CompetitorSearch_
   - _Depends: 2.3_
+  - 実施記録（2026-09-15）:
+    - 新しく作ったのは `app/store/competitor-search.tsx` と `test/competitor-search.test.tsx`（jsdom・15 件）。組み込みは 4.2 で行う。
+    - 構造:
+      - 縦の Field に、`FieldLabel htmlFor={useId}`「店名で絞り込む」と、`Input type="search" autoComplete="off"` を置く（name は無い）。
+      - その後ろに、常に置いた `<p role="status">` で「競合{総数}店のうち{表示数}店を表示」と出す。
+      - props は design どおり `{ query, onQueryChange, total, visibleCount }`。
+    - 赤（実装より前）:
+      - モジュールが無い状態では、import の解決に失敗。
+      - null を返す stub では、15 件がすべて失敗。
+    - 変異:
+      - 実装役の 26 通りは、すべて赤。name、htmlFor、type=text、autoComplete、検索語を文言へ映す、aria-live 系、2 つ目の status、件数の固定・取り違え、絞り込み中だけ置く、作り直し、制御しない値、手書きの id、色、文言の位置、sr-only、横向き、output、list 属性、文言違い、通知しない、を当てた。
+      - レビュー側の 5 通りも、すべて赤。name、検索語の表示、2 つ目の status、容器の aria-live、`title={query}` を当てた。
+    - design に無い判断:
+      - 包む `div.flex.flex-col.gap-2` と、件数の文言の `text-sm`。色は書いていない。
+      - デバウンスはしない。件数が変わらない入力では、状態通知に変化が 0 件であることを MutationObserver で固定した。
+      - aria-live と aria-atomic は明示しない（role=status の既定に任せる）。
+      - 44px は、5.2 の実測に任せる（design がそう定めている）。
+    - 検証:
+      - store-detail は 275 件緑・34 件スキップ。
+      - lint・型検査・ビルド・ui の 604 件・ガード類: 緑。
+    - 独立レビュー: 1 回目で承認。
 
 - [ ] 4. 統合: 店舗詳細の節への組み込み
 
@@ -513,7 +534,13 @@
 - 窓の境界を散文で書くときは、要件 2.4 の定義文「終点を含めて遡った暦日の日数」をそのまま使う。数字を抜いて言い換えると、1 日ずれた窓の読み方が生まれる。
 - spec の Markdown も、強調記号の検査の対象になる。`**…「…」**を` のように約物で閉じた強調は、GFM では閉じない。
 - テストのコメントに、今の件数（「上の 20 件」など）を書かない。検査を消すと黙って偽になる。書くなら「着手時点で」と時点を付けるか、テストの名前で指す。
-- 構造契約の閉じた一覧（0 件を保つ role など）は、写しが 4 か所ある（design・research の D7・ui-airbnb-surfaces の要件 3.1 の訂正・store-page.test.tsx）。一覧を変えるときは、既存の要素名で全文検索して 4 か所を揃える。
+- 構造契約の閉じた一覧（0 件を保つ role など）には、写しが 5 か所ある。
+  - design
+  - research の D7
+  - ui-airbnb-surfaces の要件 3.1 の訂正
+  - store-page.test.tsx（正典の検査）
+  - competitor-search.test.tsx（3.3 で増えた部品テストの写し）
+  一覧を変えるときは、既存の要素名（`spinbutton` など）で全文検索して、見つかった写しをすべて揃える。
 - 構造契約の件数を上げるとき（4.1・4.2）は、store-page.test.tsx の `STRUCTURE_STATES` の各行の `inputs` を書き換える。推移ありの状態で隠し radio を 5、競合 2 店以上の状態で検索欄を 1 にする。変異の実行装置は、1.3 の実装役が scratchpad の `mutate.mjs` に残した。
 - lint の網（1.4）が見るのは root の `@fwlm/db` だけである。3 つの純関数モジュールから `./data` や `./liff-auth` を値として import しても通る（実測で終了コード 0）。これらのモジュールは `./contract` の型と `@fwlm/db/daily-summary` だけに依存させる。5.5 では、バンドルに pg が入っていないことを確かめる。
 - グラフの説明文（`describeMetric`、aria-label に使う）の日付は「9月13日」、figcaption の日付（`formatShortDate`）は「9/13」と、書式が違う。4.3 の一貫性の検査では、両方の書式を別々に作って照合する。
@@ -533,4 +560,10 @@
   - Base UI は、矢印キーによる焦点の移動を `queueMicrotask` で後に回す。jsdom で矢印キーを確かめるときは、`await act(async () => fireEvent.keyDown(...))` の形にする。
   - 札のクリックは、印（radio）を押す経路だけが PointerEvent の互換実装を要る。題を押す経路は、ラベルの標準の働きで動く。
   - `[data-slot="field-label"]` は、札の label・札の題・群の名前の 3 つが持つ。5.2 で 44px を測るときは `label[data-slot="field-label"]` で選ぶ。
-  - 札の Field は、それぞれ `role="group"` を描く（推移ありで 5 件）。構造契約の操作系の role には入っていない。5.3 の axe では、label の中に group、その中に radio がある入れ子を確かめる。
+  - 札の Field は、それぞれ `role="group"` を描く（推移ありで 5 件）。検索欄の Field も、名前の無い `role="group"` を 1 つ描く（競合 2 店以上）。どちらも、構造契約の操作系の role には入っていない。5.3 の axe では、次の 2 つを確かめる。
+    - label の中に group、その中に radio がある入れ子。
+    - 検索欄の group。
+- 検索欄（CompetitorSearch）の注意（3.3 で判明）:
+  - jsdom は、ラベルを押しても入力欄へ焦点を移さない。ラベルと入力欄の結びつきは `input.labels` で構造として確かめ、焦点の移動は e2e で確かめる。
+  - React は、制御する input の value を属性にも書く。「検索語を画面に映さない」検査は、入力欄の value 属性だけを除いて走査する。
+  - 読み上げ領域が打つたびに変わらないことは、`MutationObserver.takeRecords()` で同期的に確かめられる。
