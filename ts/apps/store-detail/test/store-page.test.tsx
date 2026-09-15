@@ -700,7 +700,8 @@ describe('store detail page', () => {
     // --- ここから下は意匠の適用そのものを固定する ----------------------------------------
     //
     // 版面の段は docs/design/design-language.md §7.9、見出しの階層は §6、余白は §3 が正典であり、
-    // ここでは結論も数値も転記せず参照する。**面は色を 1 つも書かない**（色は部品側のトークン由来）。
+    // ここでは結論も数値も転記せず参照する。**面は色を書かない**（色は部品側のトークン由来）。唯一の例外は
+    // 推移グラフの部品で（§7.18・Issue #265）、その色の語彙は test/trend-chart.test.tsx が完全一致で固定する。
 
     it('4 分岐すべてを本文系の狭い版面へ置換し、主要領域を二重にしない（Req 1.1, 1.5, 3.3）', async () => {
       const visited = await forEachBranch((branch, container) => {
@@ -765,7 +766,7 @@ describe('store detail page', () => {
 
       const alert = screen.getByRole('alert');
       expect(alert.getAttribute('data-slot')).toBe('alert');
-      // 危険を伝える変種であること。色は部品側のトークンが解決する（面は色を書かない）。
+      // 危険を伝える変種であること。色は部品側のトークンが解決する（面の側は通知に色を書かない）。
       expect(alert.className).toContain('text-destructive');
       // 変種そのものが読み上げ役割 alert を持つ。内側へ role を重ねると領域が 2 つになる。
       expect(alert.querySelectorAll('[role="alert"], [role="status"]')).toHaveLength(0);
@@ -1302,15 +1303,17 @@ describe('store detail page', () => {
       expect(visited).toBe(cases.length);
     });
 
-    it('面の側が書く className はレイアウトと文字サイズだけである（Req 1.3, 1.5）', async () => {
+    it('面の側が節と一覧に書く className はレイアウトと文字サイズだけである（Req 1.3, 1.5）', async () => {
       stubFetch({ ok: true, status: 200, body: mockResult });
       const { container } = render(<StorePage />);
       await waitFor(() => {
         expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
       });
 
-      // 面が自分で class を書く要素は節と一覧だけ（版面は task 3.1 が別途固定している）。
+      // この検査が見るのは、面が自分で class を書く要素のうち節と一覧である（版面は task 3.1 が別途固定している）。
       // **集合の完全一致**で押さえるのは、色ユーティリティを後ろへ足す改変を通さないためである。
+      // 店舗詳細の面で色を書くのは推移グラフの部品だけであり（§7.18・Issue #265）、その色の語彙は
+      // test/trend-chart.test.tsx が完全一致で固定する。グラフは節も一覧も描かないので、この検査の範囲は変えない。
       expect(Array.from(container.querySelectorAll('section')).map((element) => classTokens(element))).toEqual([
         ['flex', 'flex-col', 'gap-6'],
         ['flex', 'flex-col', 'gap-4'],
@@ -1483,9 +1486,10 @@ describe('store detail page', () => {
     // 状態は design.md の構造契約表の全行である。見出し・主要領域・リンク・版面を検査する
     // 4 分岐の表（SURFACE_BRANCHES）には足さない。あちらの網羅を変えないためである。
     //
-    // 件数は現行の実装どおり（隠し radio 0・検索欄 0）で固定している（design.md の Migration Strategy
-    // の手順 2）。構造契約表の値（推移ありで隠し radio 5、競合 2 店以上で検索欄 1）へ上げるのは
-    // task 4.1 / 4.2 であり、上げる変更を先に書いて赤を見てから、実装で緑にする。
+    // 件数は、design.md の構造契約表の値へ、節への組み込みのタスクごとに上げる（Migration Strategy の
+    // 手順 5）。推移ありの状態の隠し radio（期間と指標の札）は task 4.1 で表の値へ上げた。競合 2 店以上の
+    // 状態の検索欄は、task 4.2 で上げるまで現行の実装どおりの件数で固定している。どちらも、上げる変更を
+    // 先に書いて赤を見てから、実装で緑にする。
     const STRUCTURE_STATES: readonly StructureState[] = [
       {
         name: '読み込み中',
@@ -1532,11 +1536,11 @@ describe('store detail page', () => {
         { ...mockResult, trend: [], competitors: TWO_COMPETITORS },
         { searchBox: 0, hiddenRadio: 0 },
       ),
-      readyState('正常・推移あり・競合 1 店以下', mockResult, { searchBox: 0, hiddenRadio: 0 }),
+      readyState('正常・推移あり・競合 1 店以下', mockResult, { searchBox: 0, hiddenRadio: 5 }),
       readyState(
         '正常・推移あり・競合 2 店以上',
         { ...mockResult, competitors: TWO_COMPETITORS },
-        { searchBox: 0, hiddenRadio: 0 },
+        { searchBox: 0, hiddenRadio: 5 },
       ),
     ];
 

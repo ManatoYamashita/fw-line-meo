@@ -21,8 +21,11 @@
 // liff.init / liff.getIDToken はブラウザ専用 API のため、このページ自体を Client Component とする
 // （'use client'。survey-web の survey-shell.tsx と同じ「クライアント合成シェル」パターンに倣う）。
 //
-// 構造的な no-write 保証（4.2）: このファイルは <form>・<button>・<input>・<textarea>・<select> の
-// いずれも一切レンダリングしない（純粋な読取専用の表示のみ）。店舗選択は <a> リンクで行う
+// 構造的な no-write 保証（4.2）: このファイルは <form>・<button>・<textarea>・<select> のいずれも
+// 一切レンダリングしない（純粋な読取専用の表示のみ）。<input> は、期間と指標の選択肢の札
+// （trend-controls.tsx）が描く隠し radio だけを許す。札は表示を切り替えるだけで書込の手段ではなく、
+// Issue #265 で改定した構造契約の許可リストに従う（正典は test/store-page.test.tsx の「構造契約
+// （許可リスト方式）」、判断は docs/design/design-language.md §7.18）。店舗選択は <a> リンクで行う
 // ——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを送信できないため、
 // <button> を導入するより厳格な保証を維持できる。書込系 fetch（POST/PUT/DELETE/PATCH）も
 // 一切呼び出さない — 発行するのは `/api/detail` への GET のみ（test/store-page.test.tsx で検証）。
@@ -30,7 +33,10 @@
 // 意匠（ui-airbnb-surfaces task 3.1）:
 //   版面・主見出し・処理中・通知を共通部品から描く。判断の正典は docs/design/design-language.md
 //   （版面は §7.9、見出しの階層は §6、余白は §3）であり、ここでは結論も数値も転記せず参照する。
-//   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。
+//   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。唯一の例外は推移グラフの
+//   部品（trend-chart.tsx）で、店舗詳細の面で色を書くのはそこに限る（§7.18・Issue #265）。書いてよい色の
+//   語彙も §7.18 が閉じた集合として定め、test/trend-chart.test.tsx が完全一致で固定する。このファイル
+//   自身と、選択肢の札は色を書かない。
 //
 //   使える部品は上記の no-write 保証で決まる。`Button` / `Input` / `Select` / `Textarea` は
 //   この面では**使ってはならない**（他の面では正解でも、ここでは要件 3.1 に真正面から反する）。
@@ -102,6 +108,17 @@ import {
 // （import type は実行時コードを一切バンドルしない — pg 等 Node 専用依存をクライアントへ持ち込まない）。
 import type { StoreDetailSummary, StoreDetailTrendPoint } from '../../lib/data';
 import type { StoreDetailResponse, StoreRef, StoreSelectionRequiredBody } from '../../lib/contract';
+import {
+  DEFAULT_METRIC,
+  DEFAULT_PERIOD,
+  selectTrendWindow,
+  summarizeWindow,
+  type TrendMetric,
+  type TrendPeriodDays,
+  type TrendWindow,
+} from '../../lib/trend-view';
+import { TrendChart } from './trend-chart';
+import { TrendControls } from './trend-controls';
 
 // --- 文言（flex.ts / task 4.1 と同一の Google 帰属表示テキストに揃える） --------------------
 
@@ -243,13 +260,17 @@ function formatRatingDiff(rating: string | null, ratingPrev: string | null): str
   return `前日比 ${sign}${diff.toFixed(1)}`;
 }
 
+/** 件数の増減を符号つきで書く（増えたときだけ「+」を付ける）。前日比と期間の変化で同じ書式を使う。 */
+function formatSignedCount(diff: number): string {
+  const sign = diff > 0 ? '+' : '';
+  return `${sign}${diff}件`;
+}
+
 function formatReviewCountDiff(current: number | null, previous: number | null): string | null {
   if (current === null || previous === null) {
     return null;
   }
-  const diff = current - previous;
-  const sign = diff > 0 ? '+' : '';
-  return `${sign}${diff}件`;
+  return formatSignedCount(current - previous);
 }
 
 // --- サブコンポーネント ----------------------------------------------------------------
@@ -451,40 +472,81 @@ function CompetitorsSection({
   );
 }
 
-function TrendSection({ trend }: { readonly trend: readonly StoreDetailTrendPoint[] }): React.JSX.Element {
-  const first = trend[0];
-  const latest = trend.at(-1);
-  const reviewCountDiff = formatReviewCountDiff(latest?.reviewCount ?? null, first?.reviewCount ?? null);
+/**
+ * 「表示期間の変化」の 3 組。指標ごとに、窓の中で値が記録されている最初と最後の日から作り、値が 1 件も
+ * 無い組は「—」にする（store-detail-trend-dashboard の要件 3.4・3.5）。
+ */
+function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow }): React.JSX.Element {
+  const summary = summarizeWindow(trendWindow);
+  return (
+    <dl className="grid gap-4 sm:grid-cols-3">
+      <Metric
+        label="順位"
+        value={summary.rank !== null ? `${summary.rank.first}位 → ${summary.rank.last}位` : '—'}
+      />
+      <Metric
+        label="評価"
+        value={summary.rating !== null ? `${summary.rating.first} → ${summary.rating.last}` : '—'}
+      />
+      <Metric
+        label="クチコミ増減"
+        value={summary.reviewCountDiff !== null ? formatSignedCount(summary.reviewCountDiff) : '—'}
+      />
+    </dl>
+  );
+}
+
+/**
+ * 推移の節（store-detail-trend-dashboard task 4.1・Issue #265）。この節のコメントが指す要件と決定（D1・D8）は、
+ * 特に断らない限り同 spec（.kiro/specs/store-detail-trend-dashboard）の requirements.md と research.md のもの
+ * である。
+ */
+function TrendSection({
+  trend,
+  rankTotal,
+}: {
+  readonly trend: readonly StoreDetailTrendPoint[];
+  /** 当日サマリーの母数（近隣の店の数）。グラフの順位の軸の下端にだけ使う。 */
+  readonly rankTotal: number | null;
+}): React.JSX.Element {
+  // 期間と指標は、この節の中だけに持つ（決定 D8）。URL にも端末にも残さないので、
+  // 開き直すと既定の選択に戻る（要件 2.3・2.9）。ほかの節はこの状態を読まない（要件 3.8）。
+  const [period, setPeriod] = useState<TrendPeriodDays>(DEFAULT_PERIOD);
+  const [metric, setMetric] = useState<TrendMetric>(DEFAULT_METRIC);
+
+  // 要約・グラフ・現在値・表と、節の見出し・表の名前は、ここで 1 回だけ切り出した窓から導く
+  // （決定 D1・docs/design/design-language.md §7.18）。切り替えると、どれもこの窓に揃って追随する
+  // （要件 3.1〜3.3）。入力は最大 30 点なので、描画のたびに導き直し、メモ化しない。
+  const trendWindow = selectTrendWindow(trend, period);
+  const title = `直近${period}日の推移`;
 
   return (
     <section className="flex flex-col gap-4">
-      <Heading level={2}>直近30日の推移</Heading>
-      {trend.length === 0 ? (
+      <Heading level={2}>{title}</Heading>
+      {/* 日付を解釈できる点が 1 つも無いときは窓が作れない。推移 0 件と同じく既存の案内を出し、
+          選択肢は出さない（要件 2.8）。 */}
+      {trendWindow === null ? (
         <EmptyState>
           <p>{NO_TREND_TEXT}</p>
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* 選択肢は要約のカードの外に置く。期間は下の表示のすべてに効くので、カードの中に置くと
+              効く範囲がカードの中だけに見える（§7.18）。 */}
+          <TrendControls period={period} onPeriodChange={setPeriod} metric={metric} onMetricChange={setMetric} />
           <Card>
             <CardContent className="flex flex-col gap-4">
               <p className="font-semibold">表示期間の変化</p>
-              <dl className="grid gap-4 sm:grid-cols-3">
-                <Metric
-                  label="順位"
-                  value={first?.rank != null && latest?.rank != null ? `${first.rank}位 → ${latest.rank}位` : '—'}
-                />
-                <Metric
-                  label="評価"
-                  value={first?.rating != null && latest?.rating != null ? `${first.rating} → ${latest.rating}` : '—'}
-                />
-                <Metric label="クチコミ増減" value={reviewCountDiff ?? '—'} />
-              </dl>
+              <WindowSummaryList trendWindow={trendWindow} />
+              {/* グラフは要約の 3 組の下に置く。現在値（最新の値とその日付）もグラフの部品が描く。 */}
+              <TrendChart window={trendWindow} metric={metric} rankTotal={rankTotal} />
             </CardContent>
           </Card>
-          {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・要件 2.5）。この容器がこの面で
+          {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・ui-airbnb-surfaces の要件 2.5）。この容器がこの面で
               唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
-              列見出しの文字列は 1 文字も変えない（要件 2.2）。scope は部品の既定が与える。 */}
-          <TableContainer label="直近30日の推移">
+              列見出しの文字列は 1 文字も変えない（ui-airbnb-surfaces の要件 2.2）。scope は部品の既定が与える。
+              行は窓の点をそのまま描く。グラフの各点の値は、同じ日付の行で確かめられる（要件 3.7）。 */}
+          <TableContainer label={title}>
             <Table className="min-w-sm">
               <TableHead>
                 <TableRow>
@@ -495,7 +557,7 @@ function TrendSection({ trend }: { readonly trend: readonly StoreDetailTrendPoin
                 </TableRow>
               </TableHead>
               <TableBody>
-                {trend.map((point) => (
+                {trendWindow.points.map((point) => (
                   <TableRow key={point.capturedOn}>
                     {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
                     <TableCell>{point.capturedOn}</TableCell>
@@ -657,7 +719,7 @@ export default function StorePage(): React.JSX.Element {
       </header>
       <SummarySection summary={data.summary} />
       <CompetitorsSection competitors={data.competitors} />
-      <TrendSection trend={data.trend} />
+      <TrendSection trend={data.trend} rankTotal={data.summary?.rankTotal ?? null} />
       <footer>
         <p className="text-sm">{GOOGLE_ATTRIBUTION_TEXT}</p>
       </footer>
