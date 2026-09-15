@@ -66,6 +66,7 @@ function fakeAppDeps(): AppDeps {
       userCreate: { auth, createUser: notCalled, findUserByEmailInOperator: notCalled },
       userDisable: { auth, disableUser: notCalled },
       userEnable: { auth, enableUser: notCalled },
+      userUpdate: { auth, updateUser: notCalled },
     },
   };
 }

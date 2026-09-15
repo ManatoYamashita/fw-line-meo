@@ -1,18 +1,24 @@
 import type {
   AgencyItem,
+  AuditLogAction,
   AuditLogger,
   DashboardRole,
+  DashboardUserAssignmentChange,
   DashboardUserIdentity,
   DashboardUserItem,
+  DashboardUserScope,
+  DashboardUserUpdateInput,
   DisableOutcome,
+  UpdateOutcome,
 } from '@fwlm/db';
 import { authenticate, type AuthDeps } from './auth.js';
 import { requireOperator } from './scope.js';
 import { isUniqueViolation } from './invite-code-gen.js';
 import { jsonError } from './http.js';
 
-// 管理 API（運営専用）: GET/POST /agencies・GET/POST /dashboard-users・POST /dashboard-users/:id/disable
-// の中核ロジック（依存注入でテスト可能・ルート配線は app 側の責務。Req 6.1–6.5）。
+// 管理 API（運営専用）: GET/POST /agencies・GET/POST /dashboard-users・
+// POST /dashboard-users/:id/{disable,enable,update} の中核ロジック（依存注入でテスト可能・
+// ルート配線は app 側の責務。Req 6.1–6.5）。
 // 全ハンドラ共通の前置ガード: 認証 → 401/403 → requireOperator（agency ロールは 403 forbidden・
 // dep を一切呼ばない・Req 6.5）。以降の全 DAL 呼び出しは運営自身の operatorId でスコープする。
 // operator の operatorId は認証ユーザー由来であり、クライアント入力は信用しない（Req 7.1）。
@@ -106,6 +112,21 @@ export interface DashboardUserEnableDeps {
   auditLog?: AuditLogger;
 }
 
+export interface DashboardUserUpdateDeps {
+  auth: AuthDeps;
+  // updateDashboardUserGuarded（@fwlm/db）委譲。無効化と同じテナントロックの下で、所属の移動の前提・
+  // 所属先・最後の有効な運営を確かめてから部分更新し、結果を判別共用体 UpdateOutcome で返す
+  // （本ハンドラが 200 / 409 / 404 に写像する）。拒否時は DAL が ROLLBACK 済みで、同じ入力の
+  // 表示名の変更も含めて対象は変わらない（dashboard-user-edit Req 2.6, 3.4）。
+  // id は本ハンドラが形式を検証して小文字化した値、operatorId は認証ユーザー由来である。
+  updateUser: (
+    id: string,
+    operatorId: string,
+    input: DashboardUserUpdateInput,
+  ) => Promise<UpdateOutcome>;
+  auditLog?: AuditLogger;
+}
+
 // --- リクエスト形 ---
 
 export interface AgenciesListRequest {
@@ -134,6 +155,12 @@ export interface DashboardUserDisableRequest {
 export interface DashboardUserEnableRequest {
   authorization: string | undefined;
   id: string; // パスパラメータ :id（UUID 形式を事前検証する・disable と同型）。
+}
+
+export interface DashboardUserUpdateRequest {
+  authorization: string | undefined;
+  id: string; // パスパラメータ :id（UUID 形式を事前検証し、小文字へ正規化する・disable と同型）。
+  body: unknown; // ルート層の readJsonBody でパースした JSON body（形状は本ハンドラが検証する）。
 }
 
 // UUID 形式でない id は DB を叩かず 404 扱い（存在の探り当てを許さない・invite-codes と同じ規律）。
@@ -332,6 +359,119 @@ export async function handleDashboardUserEnable(
   return jsonOk(200, { user: toUserJson(user) });
 }
 
+// --- POST /dashboard-users/:id/update ---
+
+export async function handleDashboardUserUpdate(
+  deps: DashboardUserUpdateDeps,
+  req: DashboardUserUpdateRequest,
+): Promise<Response> {
+  const guard = await requireOperatorUser(deps.auth, req.authorization);
+  if (!guard.ok) return guard.response;
+
+  // UUID 事前ガード（DAL に到達させない）。不正形式は不在と同じ 404（存在の秘匿・disable と同じ規律）。
+  if (!UUID_RE.test(req.id)) {
+    return jsonError(404, 'not_found', '利用者が見つかりません');
+  }
+
+  // UUID を小文字へ正規化してから自己判定・DAL へ渡す（無効化と同じ理由・dashboard-user-edit Req 4.6）。
+  // UUID_RE は /i のため大文字表記も通過するが、PostgreSQL の uuid 比較は大文字小文字を無視するため、
+  // 厳密文字列一致だけでは大文字表記で自分のロール変更の禁止を迂回できてしまう
+  // （guard.user.id は PG 由来で小文字正規形）。
+  const targetId = req.id.toLowerCase();
+
+  // body を「ロールを変える」「代理店ロールのまま所属を移す」「表示名」へ写す。不正なら DAL を呼ばない。
+  const input = parseUpdateUserBody(req.body);
+  if (input === null) {
+    return jsonError(400, 'validation_failed', '入力内容が正しくありません');
+  }
+
+  // 自分のロール・所属の変更の拒否（DB 到達前・Req 2.1）。行為者は必ず運営で所属を持たないので、
+  // 自分に許す assignment は「運営のまま」だけである。代理店ロールへの変更と所属の移動はどちらも
+  // 自分の権限を変える。表示名だけの変更と、変化の無い「運営」の指定は許す（Req 2.2）。
+  if (targetId === guard.user.id && changesOwnAssignment(input.assignment)) {
+    return jsonError(409, 'self_role_change_forbidden', '自分自身のロールは変更できません');
+  }
+
+  // 保護付き属性更新。結果を HTTP へ写像する。拒否時は DAL が ROLLBACK 済みで対象は変わらない（Req 2.6）。
+  const outcome = await deps.updateUser(targetId, guard.user.operatorId, input);
+  switch (outcome.kind) {
+    case 'updated': {
+      // 前後の DB 行の差分から action を導き、1 件ずつ記録する。変化なしは 0 件（Req 5.1, 5.3, 5.5）。
+      // 監査は業務の書込を確定した後に書く（既存の書込と同じ形・失敗時の扱いは Issue #250 が決める）。
+      for (const action of auditActionsForUserUpdate(outcome.before, outcome.user)) {
+        await deps.auditLog?.({
+          actorType: 'operator',
+          actorId: guard.user.id,
+          action,
+          targetType: 'dashboard_user',
+          targetId: outcome.user.id,
+        });
+      }
+      return jsonOk(200, { user: toUserJson(outcome.user) });
+    }
+    case 'last_operator':
+      // 最後の有効な運営は代理店に変更できない（ロックアウト防止・Req 2.3）。
+      return jsonError(
+        409,
+        'last_operator',
+        '最後の運営は代理店に変更できないため、先に別の運営を追加してください',
+      );
+    case 'role_changed':
+      // 所属の移動を求めたが、他の操作で対象が代理店ロールでなくなっていた。降格として推測で
+      // 実行せず、画面の再読み込みを促す（Req 3.4）。
+      return jsonError(
+        409,
+        'role_changed',
+        '他の操作でロールが変わったため、所属代理店を変更できませんでした。画面を再読み込みしてください',
+      );
+    case 'agency_not_found':
+      // 所属先の不在・他運営の代理店は同じ応答にする（存在の秘匿・Req 4.4）。
+      return jsonError(404, 'agency_not_found', '所属代理店が見つかりません');
+    case 'not_found':
+      // 対象の不在・他運営の利用者は不在と同じ 404（存在の秘匿・Req 4.3, 4.5）。
+      return jsonError(404, 'not_found', '利用者が見つかりません');
+  }
+}
+
+/**
+ * 前後の DB 行の差分から、記録すべき監査 action を並べる（dashboard-user-edit Req 5.1〜5.5）。
+ *
+ * - 出力の順序は「ロール・所属 → 表示名」で固定する。
+ * - 降格は所属の設定を含めて `dashboard_user_demoted_to_agency` の 1 件にし、所属変更を重ねない
+ *   （Req 5.3）。昇格で所属が外れる場合も同様に昇格の 1 件だけにする。
+ * - 所属変更は代理店ロールのまま所属が変わった場合だけに出す（運営ロールは所属を持たない・
+ *   ck_dashboard_role_scope）。
+ * - 表示名は値を記録しない。action の名前だけで「表示名が変わった」ことを表す（Req 5.4）。
+ * - 変化が無ければ空配列を返す（Req 5.5）。
+ *
+ * before と after はどちらも DB の行（PostgreSQL が返す正規形）であり、入力値ではない。そのため
+ * 所属の UUID は厳密一致で比べてよい。入力の文字列と比べると、大文字の UUID を「変化あり」と誤る。
+ */
+export function auditActionsForUserUpdate(
+  before: DashboardUserItem,
+  after: DashboardUserItem,
+): AuditLogAction[] {
+  const actions: AuditLogAction[] = [];
+  if (before.role === 'agency' && after.role === 'operator') {
+    actions.push('dashboard_user_promoted_to_operator');
+  } else if (before.role === 'operator' && after.role === 'agency') {
+    actions.push('dashboard_user_demoted_to_agency');
+  } else if (before.role === 'agency' && after.role === 'agency' && before.agencyId !== after.agencyId) {
+    actions.push('dashboard_user_agency_updated');
+  }
+  if (before.displayName !== after.displayName) {
+    actions.push('dashboard_user_display_name_updated');
+  }
+  return actions;
+}
+
+// 自分自身に対する assignment が、自分の権限を変えるか。行為者は必ず role = 'operator'・所属なしなので、
+// 「scope で role が operator」（変化なし）以外はすべて自分の権限を変える（Req 2.1）。
+function changesOwnAssignment(assignment: DashboardUserAssignmentChange | undefined): boolean {
+  if (assignment === undefined) return false;
+  return !(assignment.kind === 'scope' && assignment.scope.role === 'operator');
+}
+
 // --- 共通ガード ---
 
 type OperatorResult =
@@ -374,23 +514,28 @@ interface ParsedCreateUser {
   displayName: string | null;
 }
 
+// ロールと所属の組み合わせの検証（ck_dashboard_role_scope のアプリ側先取り・Req 6.3）。作成と更新で共有する。
+//   role は 2 値のいずれか。agency ⇒ agencyId 必須（UUID 形式）/ operator ⇒ agencyId は不在（undefined/null）のみ。
+// 表示名の扱いは作成（trim しない）と更新（trim して空なら null）で異なるため、ここでは扱わない。
+function parseRoleScope(role: unknown, agencyId: unknown): DashboardUserScope | null {
+  if (role === 'agency') {
+    if (typeof agencyId !== 'string' || !UUID_RE.test(agencyId)) return null;
+    return { role: 'agency', agencyId };
+  }
+  if (role === 'operator') {
+    if (agencyId !== undefined && agencyId !== null) return null;
+    return { role: 'operator', agencyId: null };
+  }
+  return null;
+}
+
 function parseCreateUserBody(body: unknown): ParsedCreateUser | null {
   if (!isRecord(body)) return null;
   const { role, agencyId, email, displayName } = body;
 
-  // role は 2 値のいずれか。
-  if (role !== 'operator' && role !== 'agency') return null;
-
-  // agencyId の整合（ck_dashboard_role_scope のアプリ側先取り・Req 6.3）:
-  //   agency ⇒ agencyId 必須（UUID 形式）/ operator ⇒ agencyId は不在（undefined/null）のみ。
-  let normalizedAgencyId: string | null;
-  if (role === 'agency') {
-    if (typeof agencyId !== 'string' || !UUID_RE.test(agencyId)) return null;
-    normalizedAgencyId = agencyId;
-  } else {
-    if (agencyId !== undefined && agencyId !== null) return null;
-    normalizedAgencyId = null;
-  }
+  // role と agencyId の整合（更新と共有する規則）。
+  const scope = parseRoleScope(role, agencyId);
+  if (scope === null) return null;
 
   // email は必須・簡易な妥当性（非空・@ を含む・空白なし）。DAL/リンク照合と一貫させるため
   // trim + 小文字化して渡す（過剰な形式検証はしない）。
@@ -406,7 +551,51 @@ function parseCreateUserBody(body: unknown): ParsedCreateUser | null {
   }
   const normalizedDisplayName = typeof displayName === 'string' ? displayName : null;
 
-  return { role, agencyId: normalizedAgencyId, email: normalizedEmail, displayName: normalizedDisplayName };
+  return {
+    role: scope.role,
+    agencyId: scope.agencyId,
+    email: normalizedEmail,
+    displayName: normalizedDisplayName,
+  };
+}
+
+// 更新の body を部分更新の入力へ写す（dashboard-user-edit design「API Contract」）。不正なら null（400）。
+//   - role がある: ロールを変える。所属は parseRoleScope（作成と同じ規則）で検証する。
+//   - role が無く agencyId がある: 代理店ロールのまま所属を移す。UUID 形式の文字列だけを受け付ける。
+//     null は「所属を外す」意味になり代理店ロールと両立しないので 400（Req 3.4）。
+//   - displayName: 無ければ変更しない。null なら未設定にする。文字列なら trim し、空なら null（Req 1.5）。
+//   - どれも無い body は 400。operatorId・email・disabled などのキーは読まない（無視する）。
+// 送らなかった項目は、undefined の値を持つキーではなくキーごと省く（exactOptionalPropertyTypes・Req 3.1）。
+function parseUpdateUserBody(body: unknown): DashboardUserUpdateInput | null {
+  if (!isRecord(body)) return null;
+  const { role, agencyId, displayName } = body;
+
+  let assignment: DashboardUserAssignmentChange | undefined;
+  if (role !== undefined) {
+    const scope = parseRoleScope(role, agencyId);
+    if (scope === null) return null;
+    assignment = { kind: 'scope', scope };
+  } else if (agencyId !== undefined) {
+    if (typeof agencyId !== 'string' || !UUID_RE.test(agencyId)) return null;
+    assignment = { kind: 'agency', agencyId };
+  }
+
+  let nextDisplayName: string | null | undefined;
+  if (displayName === null) {
+    nextDisplayName = null;
+  } else if (typeof displayName === 'string') {
+    const trimmed = displayName.trim();
+    nextDisplayName = trimmed === '' ? null : trimmed;
+  } else if (displayName !== undefined) {
+    return null;
+  }
+
+  if (assignment === undefined && nextDisplayName === undefined) return null;
+
+  const input: DashboardUserUpdateInput = {};
+  if (assignment !== undefined) input.assignment = assignment;
+  if (nextDisplayName !== undefined) input.displayName = nextDisplayName;
+  return input;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
