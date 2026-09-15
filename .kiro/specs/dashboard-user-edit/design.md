@@ -547,12 +547,14 @@ export interface DashboardUserEditPanelProps {
   - パネル行は Fragment の中で対象行の直後に `<TableRow><TableCell colSpan={COLUMN_COUNT} id=…>` として挿す（6.3）。
 - **焦点**（6.5）: `triggerRef` に押されたボタンを保持する。閉じるときは先に `triggerRef.current?.focus()` を呼び、その後に `openUserId` を null にする。
 - **保存の成功**（1.12）: `reloadUsers()` → 焦点を戻す → 閉じる → `successMessage = '利用者情報を更新しました。'` を `<Alert variant="success">`（role=status）で出す。
+  - 取り直しに失敗したときは、登録・無効化・有効化と同じく一覧の失敗の通知を出す（表は出さない）。保存は確定しているので成功通知も出し、パネルは閉じる。焦点は、戻り先の編集ボタンが残るとき（取り直しに成功し、要素が DOM にあるとき）だけ戻す。表ごと外れるときは焦点を扱わない（task 3.4 で決定）。
 - **代理店一覧の取得状態**（1.14）:
-  - 既存の画面は `GET /agencies` の失敗を黙って捨て、空の一覧を保持している（`page.tsx:72`）。
+  - task 3.4 より前の画面は、`GET /agencies` の失敗を黙って捨て、空の一覧を保持していた。
   - `agenciesFailed: boolean` を足し、失敗したら true にする。パネルへは `agencies={agenciesFailed ? null : agencies}` を渡す。
   - 登録フォームの既存の挙動（空の一覧のまま）は変えない。
 - **通知の整理**（6.6）:
-  - 編集を始めたときに、ページの `actionError` と `successMessage` を消す。パネル内の失敗と合わせて、危険の通知は 1 件に保つ。
+  - 編集を始めたときに、ページの `actionError` と `successMessage` を消す。ページの操作エラーとパネル内の失敗を重ねない。
+  - 登録フォームの誤り（`formError`・入力の検証と登録の失敗）は消さない。登録フォームの入力に結びついた未解決の誤りだからである。
   - 成功通知は、次の操作（編集の開始・登録・無効化・有効化）で消す。
 - `me` の取り直しはしない（`me.displayName` を描いている箇所は無い）。
 

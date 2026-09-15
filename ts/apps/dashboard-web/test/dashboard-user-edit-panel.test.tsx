@@ -767,6 +767,34 @@ describe('DashboardUserEditPanel: 送信と結果', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 
+  // 上のテストは 2 回目の結果が出た後だけを見ている。保存の開始で前の警告を消さない実装でも、
+  // 結果が出れば新しい理由へ置き換わるので緑のまま通る。送信の間を観測点にして塞ぐ。
+  it('失敗の後にもう一度保存すると、送信の間は前の警告を消す（古い理由を読ませ続けない・Req 6.6）', async () => {
+    const pending = deferred<ApiResult<DashboardUserItem>>();
+    const updateUser = vi
+      .fn<UpdateUser>()
+      .mockResolvedValueOnce(errorResult('agency_not_found', 'サーバが返した文言'))
+      .mockReturnValueOnce(pending.promise);
+    const { onSaved } = renderPanel({ user: agencyUser, updateUser });
+
+    fireEvent.change(agencySelect(), { target: { value: 'a2' } });
+    fireEvent.click(saveButton());
+    // 前提: 1 回目の失敗の警告が出ている（出ていない状態から 0 件を見ても何も確かめない）。
+    await screen.findByRole('alert');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+
+    fireEvent.click(saveButton());
+    // 2 回目の送信が始まっている（所属の未選択などの検証で止まったのではない）ことを先に確かめる。
+    expect(updateUser).toHaveBeenCalledTimes(2);
+    expect(saveButton().getAttribute('aria-disabled')).toBe('true');
+    // 「出さない」向きの比較なので、観測点を確定させてから比べる（Issue #166）。
+    await settleEffects();
+    expect(screen.queryAllByRole('alert')).toHaveLength(0);
+
+    pending.resolve(okResult(agencyUser));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+  });
+
   it('送信の失敗の後に所属の未選択で止めても、警告は 1 件である', async () => {
     const updateUser = vi
       .fn<UpdateUser>()
