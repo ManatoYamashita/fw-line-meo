@@ -248,6 +248,44 @@ export async function enableDashboardUser(
   return { ok: true, value: result.value.user };
 }
 
+// 利用者の属性更新で送る変更内容。操作者が編集手段の中で変えた項目だけを持つ（Req 3.1）。
+// 持たない項目はサーバが保存時点の現在値のまま保つので、他の運営が並行して変えた項目を巻き戻さない。
+export interface DashboardUserChanges {
+  assignment?:
+    | { kind: 'scope'; role: 'operator' } // 運営にする
+    | { kind: 'scope'; role: 'agency'; agencyId: string } // 代理店にする
+    | { kind: 'agency'; agencyId: string }; // 代理店ロールのまま所属を移す
+  // null は表示名を未設定にする。キーが無い（undefined）ときは表示名を変えない。
+  displayName?: string | null;
+}
+
+// POST /dashboard-users/:id/update: 利用者のロール・所属代理店・表示名を更新（operator 専用）。200 で { user }。
+// 所属の移動は role を載せず agencyId だけを送る。role を載せると「代理店にする」と同じ意味になり、他の操作で
+// 運営になっていた対象を降格させてしまう（Req 3.4。role を載せなければサーバは 409 role_changed で何も変えない）。
+// 拒否は 409(self_role_change_forbidden / last_operator / role_changed)・404(not_found / agency_not_found)・400(validation_failed)。
+export async function updateDashboardUser(
+  input: { id: string; changes: DashboardUserChanges },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<DashboardUserItem>> {
+  const { assignment, displayName } = input.changes;
+  const body: Record<string, unknown> = {};
+  if (assignment?.kind === 'agency') {
+    body.agencyId = assignment.agencyId;
+  } else if (assignment?.kind === 'scope') {
+    body.role = assignment.role;
+    // 運営にするときは agencyId を送らない（運営は所属を持たない・ck_dashboard_role_scope）。
+    if (assignment.role === 'agency') body.agencyId = assignment.agencyId;
+  }
+  // 表示名は変えたときだけ載せる。null は「未設定にする」という変更なのでそのまま送る。
+  if (displayName !== undefined) body.displayName = displayName;
+  const result = await apiFetch<{ user: DashboardUserItem }>(
+    `/dashboard-users/${encodeURIComponent(input.id)}/update`,
+    { ...options, method: 'POST', body },
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.user };
+}
+
 // GET /categories: 業態カテゴリ一覧（seed が単一情報源）。
 export async function getCategories(options: ApiClientOptions = {}): Promise<ApiResult<Category[]>> {
   const result = await apiFetch<{ categories: Category[] }>('/categories', options);

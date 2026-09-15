@@ -9,7 +9,12 @@ import {
   findDashboardUserDisplayName,
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
+  updateDashboardUserGuarded,
+  type DashboardUserAssignmentChange,
+  type DashboardUserUpdateInput,
+  type UpdateOutcome,
 } from '../src/dashboard-users.js';
+import type { DashboardUserItem } from '../src/types.js';
 
 // 共有テスト DB での衝突回避のため専用 UUID プレフィックス（f4）を用いる（f3 までは他ファイルで使用済み）。
 const OP_A = 'f4000000-0000-0000-0000-0000000000a1';
@@ -602,7 +607,10 @@ describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded (DB)', (
 const F8C_OP = 'f8000000-0000-0000-0000-000000009003'; // 有効運営ちょうど2名のテナント
 const F8C_OP1 = 'f8000000-0000-0000-0000-e10000000001';
 const F8C_OP2 = 'f8000000-0000-0000-0000-e10000000002';
-// disableDashboardUserGuarded と同一の advisory ロッククラス（src の DISABLE_LOCK_CLASS と一致させる）。
+// disableDashboardUserGuarded・updateDashboardUserGuarded と同一の advisory ロッククラス
+// （src の OPERATOR_GUARD_LOCK_CLASS と一致させる。名前は lifecycle 当時のまま据え置く）。
+// src の定数を import せずリテラルで持つのは意図的である。値を変えるとリビジョン切替中の旧コードと
+// 直列化が切れるため、src 側で値を変えたときに本テストと末尾の f9c の並行テストが赤くなる番人として働く。
 const DISABLE_LOCK_CLASS = 0x64756c31;
 
 describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded 並行安全性 (DB)', () => {
@@ -673,5 +681,917 @@ describe.skipIf(!process.env.DATABASE_URL)('disableDashboardUserGuarded 並行�
       [F8C_OP],
     );
     expect(active.rows[0]?.n).toBe(1);
+  });
+});
+
+// ============================================================
+// dashboard-user-edit Task 1.2: 保護付きの属性更新（updateDashboardUserGuarded）の逐次検証。
+// 接頭辞 f9（2026-09-13 に未使用を確認）。並行（無効化×降格など）の決定的検証は Task 1.3 が担う。
+// テナントは 4 つに分ける。
+//   - F9_OP:       主テナント（昇格・所属の変更・表示名・各拒否の経路）
+//   - F9_OP_OTHER: 越権の検証用の他運営（利用者と代理店を 1 つずつ持つ）
+//   - F9_OP_SOLO:  有効な運営が 1 名だけのテナント（最後の運営の保護・無効化済みの運営の降格）
+//   - F9_OP_PAIR:  有効な運営がリンク済み 1 名＋保留中 1 名のテナント（保留中も数えることの検証）
+// 各テストは専用の利用者行を持ち、実行順に依存しない（読むだけの行は複数のテストで共有する）。
+// ============================================================
+const F9_OP = 'f9000000-0000-0000-0000-0000000000a1';
+const F9_OP_OTHER = 'f9000000-0000-0000-0000-0000000000b2';
+const F9_OP_SOLO = 'f9000000-0000-0000-0000-0000000000c3';
+const F9_OP_PAIR = 'f9000000-0000-0000-0000-0000000000d4';
+const F9_OPS = [F9_OP, F9_OP_OTHER, F9_OP_SOLO, F9_OP_PAIR];
+
+const F9_AG_1 = 'f9000000-0000-0000-0000-00000000a001'; // F9_OP 配下（多くの利用者の初期の所属）
+const F9_AG_2 = 'f9000000-0000-0000-0000-00000000a002'; // F9_OP 配下（移動先）
+const F9_AG_OTHER = 'f9000000-0000-0000-0000-00000000b001'; // F9_OP_OTHER 配下（越権の代理店）
+const F9_AG_SOLO = 'f9000000-0000-0000-0000-00000000c001'; // F9_OP_SOLO 配下
+const F9_AG_PAIR = 'f9000000-0000-0000-0000-00000000d001'; // F9_OP_PAIR 配下
+const F9_AG_MISSING = 'f9000000-0000-0000-0000-00000000ffff'; // どこにも作らない
+const F9_AGS = [F9_AG_1, F9_AG_2, F9_AG_OTHER, F9_AG_SOLO, F9_AG_PAIR];
+
+// F9_OP の利用者。
+const F9_U_PROMOTE = 'f9000000-0000-0000-0000-d00000000001';
+const F9_U_SCOPE_AGENCY = 'f9000000-0000-0000-0000-d00000000002';
+const F9_U_MOVE = 'f9000000-0000-0000-0000-d00000000003';
+const F9_U_NAMED = 'f9000000-0000-0000-0000-d00000000004';
+const F9_U_NOCHANGE = 'f9000000-0000-0000-0000-d00000000005';
+const F9_U_PARTIAL = 'f9000000-0000-0000-0000-d00000000006';
+const F9_U_MAIN_OP = 'f9000000-0000-0000-0000-d00000000007';
+const F9_U_AGENCY_BAD = 'f9000000-0000-0000-0000-d00000000008';
+const F9_U_DISABLED_AGENCY = 'f9000000-0000-0000-0000-d00000000009';
+const F9_U_PENDING_PROMOTE = 'f9000000-0000-0000-0000-d0000000000a';
+const F9_U_PENDING_MOVE = 'f9000000-0000-0000-0000-d0000000000b';
+// F9_OP_OTHER の利用者。
+const F9_U_OTHER = 'f9000000-0000-0000-0000-d0000000000c';
+// F9_OP_SOLO の利用者。有効な運営は F9_U_SOLO_OP だけである。
+const F9_U_SOLO_OP = 'f9000000-0000-0000-0000-d0000000000d';
+const F9_U_SOLO_DISABLED_OP = 'f9000000-0000-0000-0000-d0000000000e';
+const F9_U_SOLO_DISABLED_KEEP = 'f9000000-0000-0000-0000-d0000000000f';
+const F9_U_SOLO_AGENCY = 'f9000000-0000-0000-0000-d00000000010';
+// F9_OP_PAIR の利用者。有効な運営はリンク済み 1 名＋保留中 1 名である。
+const F9_U_PAIR_LINKED = 'f9000000-0000-0000-0000-d00000000011';
+const F9_U_PAIR_PENDING = 'f9000000-0000-0000-0000-d00000000012';
+const F9_U_MISSING = 'f9000000-0000-0000-0000-d0000000ffff'; // どこにも作らない
+
+const F9_PENDING_PROMOTE_EMAIL = 'f9-pending-promote@example.com';
+const F9_PENDING_MOVE_EMAIL = 'f9-pending-move@example.com';
+
+// 代理店に属するデータ（Req 1.11 の検証用）。所属の移動の前後で F9_AG_1 に残ることを確かめる。
+const F9_OWNER_AG_1 = 'f9000000-0000-0000-0000-0000000e0001';
+const F9_INVITE_AG_1 = 'f9000000-0000-0000-0000-0000000f0001';
+
+interface F9UserFixture {
+  id: string;
+  role: 'operator' | 'agency';
+  operatorId: string;
+  agencyId: string | null;
+  authSubject: string | null; // null は保留中（未ログイン）
+  email: string | null;
+  displayName: string | null;
+  disabled: boolean;
+}
+
+type F9UserSpec = Pick<F9UserFixture, 'id' | 'role' | 'operatorId' | 'agencyId'> &
+  Partial<Omit<F9UserFixture, 'id' | 'role' | 'operatorId' | 'agencyId'>>;
+
+// 既定はリンク済み（auth_subject あり）・メールなし・表示名なし・有効。保留中は authSubject: null で表す。
+// ck_dashboard_users_identity のため、保留中の行には必ず email を持たせる。
+function f9User(spec: F9UserSpec): F9UserFixture {
+  return {
+    authSubject: `authsub-${spec.id}`,
+    email: null,
+    displayName: null,
+    disabled: false,
+    ...spec,
+  };
+}
+
+const F9_USERS: F9UserFixture[] = [
+  // 昇格（代理店 → 運営）。
+  f9User({
+    id: F9_U_PROMOTE,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    email: 'f9-promote@example.com',
+    displayName: 'f9昇格',
+  }),
+  // ロールの変更（scope）で所属だけが変わる。
+  f9User({ id: F9_U_SCOPE_AGENCY, role: 'agency', operatorId: F9_OP, agencyId: F9_AG_1 }),
+  // 所属の移動（kind: agency）。代理店のデータは動かない。
+  f9User({
+    id: F9_U_MOVE,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    displayName: 'f9移動',
+  }),
+  // 表示名を未設定にする。
+  f9User({
+    id: F9_U_NAMED,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    displayName: 'f9表示名あり',
+  }),
+  // 変化なし（読むだけ）。
+  f9User({
+    id: F9_U_NOCHANGE,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    displayName: 'f9変化なし',
+  }),
+  // 送らない項目を保つ・同じ項目は後勝ち。
+  f9User({
+    id: F9_U_PARTIAL,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    displayName: 'f9開いた時点の名前',
+  }),
+  // 運営のまま（所属の移動の拒否・運営のまま変化なし。読むだけ）。
+  f9User({
+    id: F9_U_MAIN_OP,
+    role: 'operator',
+    operatorId: F9_OP,
+    agencyId: null,
+    displayName: 'f9運営のまま',
+  }),
+  // 代理店なしの拒否（読むだけ）。
+  f9User({
+    id: F9_U_AGENCY_BAD,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    displayName: 'f9元の名前',
+  }),
+  // 無効化済みの利用者の編集（有効／無効・メール・認証主体は不変）。
+  f9User({
+    id: F9_U_DISABLED_AGENCY,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    email: 'f9-disabled-agency@example.com',
+    disabled: true,
+  }),
+  // 保留中の利用者（初回ログインで新しいロール・所属）。
+  f9User({
+    id: F9_U_PENDING_PROMOTE,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    authSubject: null,
+    email: F9_PENDING_PROMOTE_EMAIL,
+  }),
+  f9User({
+    id: F9_U_PENDING_MOVE,
+    role: 'agency',
+    operatorId: F9_OP,
+    agencyId: F9_AG_1,
+    authSubject: null,
+    email: F9_PENDING_MOVE_EMAIL,
+  }),
+  // 他運営の利用者（読むだけ）。
+  f9User({
+    id: F9_U_OTHER,
+    role: 'agency',
+    operatorId: F9_OP_OTHER,
+    agencyId: F9_AG_OTHER,
+    displayName: 'f9他運営',
+  }),
+  // 単独運営のテナント。無効化済みの運営と有効な代理店ロールは、残数に数えてはならない番人である。
+  f9User({
+    id: F9_U_SOLO_OP,
+    role: 'operator',
+    operatorId: F9_OP_SOLO,
+    agencyId: null,
+    displayName: 'f9唯一の運営',
+  }),
+  f9User({
+    id: F9_U_SOLO_DISABLED_OP,
+    role: 'operator',
+    operatorId: F9_OP_SOLO,
+    agencyId: null,
+    disabled: true,
+  }),
+  f9User({
+    id: F9_U_SOLO_DISABLED_KEEP,
+    role: 'operator',
+    operatorId: F9_OP_SOLO,
+    agencyId: null,
+    disabled: true,
+  }),
+  f9User({ id: F9_U_SOLO_AGENCY, role: 'agency', operatorId: F9_OP_SOLO, agencyId: F9_AG_SOLO }),
+  // 有効な運営がリンク済み 1 名＋保留中 1 名のテナント。保留中の運営は触らない（数えられる側の番人）。
+  f9User({ id: F9_U_PAIR_LINKED, role: 'operator', operatorId: F9_OP_PAIR, agencyId: null }),
+  f9User({
+    id: F9_U_PAIR_PENDING,
+    role: 'operator',
+    operatorId: F9_OP_PAIR,
+    agencyId: null,
+    authSubject: null,
+    email: 'f9-pair-pending@example.com',
+  }),
+];
+
+// 行を DB から直に読む（戻り値の型ではなく実物の列で確かめるため）。
+// xmin は行の版を作ったトランザクションの ID で、同じ値での UPDATE でも新しい版になり値が変わる。
+// 「行を書き換えていない」ことを、値の一致だけでなく版の一致で確かめるために読む。
+interface F9RawRow {
+  role: string;
+  agency_id: string | null;
+  display_name: string | null;
+  email: string | null;
+  auth_subject: string | null;
+  disabled_at: Date | null;
+  xmin: string;
+}
+
+async function f9Raw(id: string): Promise<F9RawRow> {
+  const pool = await getPool();
+  const res = await pool.query<F9RawRow>(
+    `SELECT role, agency_id, display_name, email, auth_subject, disabled_at, xmin::text AS xmin
+       FROM dashboard_users WHERE id = $1`,
+    [id],
+  );
+  const row = res.rows[0];
+  if (!row) throw new Error(`f9Raw: dashboard_users ${id} が見つかりません`);
+  return row;
+}
+
+async function f9ActiveOperatorCount(operatorId: string): Promise<number> {
+  const pool = await getPool();
+  const res = await pool.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM dashboard_users
+      WHERE operator_id = $1 AND role = 'operator' AND disabled_at IS NULL`,
+    [operatorId],
+  );
+  return res.rows[0]?.n ?? 0;
+}
+
+// updated 以外なら、結果の種類を添えて失敗させる（後続の assert を条件分岐の中へ隠さない）。
+function expectUpdated(res: UpdateOutcome): { before: DashboardUserItem; user: DashboardUserItem } {
+  if (res.kind !== 'updated') throw new Error(`updated を期待したが ${res.kind} が返った`);
+  return res;
+}
+
+const TO_OPERATOR: DashboardUserAssignmentChange = {
+  kind: 'scope',
+  scope: { role: 'operator', agencyId: null },
+};
+
+describe.skipIf(!process.env.DATABASE_URL)('updateDashboardUserGuarded 逐次 (DB)', () => {
+  beforeAll(async () => {
+    const pool = await getPool();
+    await pool.query(
+      'INSERT INTO operators (id, name) VALUES ($1, $2), ($3, $4), ($5, $6), ($7, $8)',
+      [F9_OP, 'f9主運営', F9_OP_OTHER, 'f9他運営', F9_OP_SOLO, 'f9単独運営', F9_OP_PAIR, 'f9二名運営'],
+    );
+    await pool.query(
+      `INSERT INTO agencies (id, operator_id, name)
+       VALUES ($1, $2, 'f9代理店1'), ($3, $2, 'f9代理店2'), ($4, $5, 'f9他運営の代理店'),
+              ($6, $7, 'f9単独運営の代理店'), ($8, $9, 'f9二名運営の代理店')`,
+      [F9_AG_1, F9_OP, F9_AG_2, F9_AG_OTHER, F9_OP_OTHER, F9_AG_SOLO, F9_OP_SOLO, F9_AG_PAIR, F9_OP_PAIR],
+    );
+    for (const u of F9_USERS) {
+      await pool.query(
+        `INSERT INTO dashboard_users
+           (id, role, operator_id, agency_id, auth_subject, email, display_name, disabled_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $8::boolean THEN now() ELSE NULL END)`,
+        [u.id, u.role, u.operatorId, u.agencyId, u.authSubject, u.email, u.displayName, u.disabled],
+      );
+    }
+    // F9_AG_1 に属するオーナーと招待コード（所属の移動で動かないことの検証用）。
+    await pool.query('INSERT INTO owners (id, agency_id, line_user_id) VALUES ($1, $2, $3)', [
+      F9_OWNER_AG_1,
+      F9_AG_1,
+      'f9-line-user-ag1',
+    ]);
+    await pool.query(
+      'INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)',
+      [F9_INVITE_AG_1, F9_AG_1, 'f9-invite-ag1'],
+    );
+  });
+
+  afterAll(async () => {
+    const pool = await getPool();
+    await pool.query('DELETE FROM dashboard_users WHERE operator_id = ANY($1)', [F9_OPS]);
+    await pool.query('DELETE FROM agency_invite_codes WHERE agency_id = ANY($1)', [F9_AGS]);
+    await pool.query('DELETE FROM owners WHERE agency_id = ANY($1)', [F9_AGS]);
+    await pool.query('DELETE FROM agencies WHERE id = ANY($1)', [F9_AGS]);
+    await pool.query('DELETE FROM operators WHERE id = ANY($1)', [F9_OPS]);
+    await closePool();
+  });
+
+  it('代理店ロールを運営ロールへ変えると所属は NULL になり、前後の DB 行を返す（Req 1.2）', async () => {
+    const pool = await getPool();
+    const prior = await f9Raw(F9_U_PROMOTE);
+
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_PROMOTE, F9_OP, { assignment: TO_OPERATOR }),
+    );
+    expect(res.before).toMatchObject({ id: F9_U_PROMOTE, role: 'agency', agencyId: F9_AG_1 });
+    expect(res.user).toMatchObject({
+      id: F9_U_PROMOTE,
+      role: 'operator',
+      operatorId: F9_OP,
+      agencyId: null,
+      displayName: 'f9昇格',
+      email: 'f9-promote@example.com',
+      disabled: false,
+    });
+
+    const after = await f9Raw(F9_U_PROMOTE);
+    expect(after).toMatchObject({ role: 'operator', agency_id: null });
+    // 指定していない列は変わらない（有効のまま・メール・認証主体・表示名）。
+    expect(after).toMatchObject({
+      display_name: prior.display_name,
+      email: prior.email,
+      auth_subject: prior.auth_subject,
+      disabled_at: null,
+    });
+  });
+
+  it('有効な運営がリンク済み 1 名＋保留中 1 名なら、リンク済みの運営を代理店へ降格できる（保留中も数える・Req 1.3, 2.3）', async () => {
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(F9_OP_PAIR)).toBe(2);
+
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_PAIR_LINKED, F9_OP_PAIR, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_PAIR } },
+      }),
+    );
+    expect(res.before).toMatchObject({ role: 'operator', agencyId: null });
+    expect(res.user).toMatchObject({ role: 'agency', agencyId: F9_AG_PAIR, disabled: false });
+    expect(await f9Raw(F9_U_PAIR_LINKED)).toMatchObject({ role: 'agency', agency_id: F9_AG_PAIR });
+
+    // 残るのは保留中の運営 1 名で、0 人にはならない。
+    expect(await f9ActiveOperatorCount(F9_OP_PAIR)).toBe(1);
+    expect(await f9Raw(F9_U_PAIR_PENDING)).toMatchObject({ role: 'operator', disabled_at: null });
+  });
+
+  it('ロールの変更（scope）で代理店ロールの所属を別の代理店へ変えられる（Req 1.4）', async () => {
+    const pool = await getPool();
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_SCOPE_AGENCY, F9_OP, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_2 } },
+      }),
+    );
+    expect(res.before).toMatchObject({ role: 'agency', agencyId: F9_AG_1 });
+    expect(res.user).toMatchObject({ role: 'agency', agencyId: F9_AG_2 });
+    expect(await f9Raw(F9_U_SCOPE_AGENCY)).toMatchObject({ role: 'agency', agency_id: F9_AG_2 });
+  });
+
+  it('所属の移動（kind: agency）は所属だけを変え、返すのは入力ではなく DB の行・代理店のデータは動かさない（Req 1.4, 1.11）', async () => {
+    const pool = await getPool();
+    // 移動前に、F9_AG_1 に属するデータが実在すること（下の「残っている」を空振りさせない）。
+    const ownersBefore = await pool.query('SELECT 1 FROM owners WHERE agency_id = $1', [F9_AG_1]);
+    expect(ownersBefore.rowCount).toBe(1);
+
+    // 大文字の UUID で所属先を指定する（DB の uuid 型は大小を区別しない）。
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_MOVE, F9_OP, {
+        assignment: { kind: 'agency', agencyId: F9_AG_2.toUpperCase() },
+      }),
+    );
+    expect(res.before).toMatchObject({ role: 'agency', agencyId: F9_AG_1, displayName: 'f9移動' });
+    // 入力の大文字ではなく、DB の小文字の正規形が返る。
+    expect(res.user).toMatchObject({ role: 'agency', agencyId: F9_AG_2, displayName: 'f9移動' });
+    expect(await f9Raw(F9_U_MOVE)).toMatchObject({ role: 'agency', agency_id: F9_AG_2 });
+
+    // 代理店に属するオーナー・招待コードは元の代理店に残る。
+    const owner = await pool.query<{ agency_id: string }>(
+      'SELECT agency_id FROM owners WHERE id = $1',
+      [F9_OWNER_AG_1],
+    );
+    expect(owner.rows[0]?.agency_id).toBe(F9_AG_1);
+    const invite = await pool.query<{ agency_id: string }>(
+      'SELECT agency_id FROM agency_invite_codes WHERE id = $1',
+      [F9_INVITE_AG_1],
+    );
+    expect(invite.rows[0]?.agency_id).toBe(F9_AG_1);
+  });
+
+  it('表示名に null を渡すと未設定になり、ロール・所属は変わらない（Req 1.5, 3.1）', async () => {
+    const pool = await getPool();
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_NAMED, F9_OP, { displayName: null }),
+    );
+    expect(res.before.displayName).toBe('f9表示名あり');
+    expect(res.user).toMatchObject({ role: 'agency', agencyId: F9_AG_1, displayName: null });
+    expect(await f9Raw(F9_U_NAMED)).toMatchObject({
+      role: 'agency',
+      agency_id: F9_AG_1,
+      display_name: null,
+    });
+  });
+
+  it('送らない項目は COMMIT 直前の値を保ち、同じ項目は後から確定した値になる（Req 3.1, 3.2, 3.3）', async () => {
+    const pool = await getPool();
+    // 編集を開いた後に、他の運営が表示名を変えて確定した状態を模す。
+    await pool.query('UPDATE dashboard_users SET display_name = $2 WHERE id = $1', [
+      F9_U_PARTIAL,
+      'f9他の運営が変えた名前',
+    ]);
+
+    // 所属だけを送る。表示名は開いた時点の値へ巻き戻らない。
+    const moved = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_PARTIAL, F9_OP, {
+        assignment: { kind: 'agency', agencyId: F9_AG_2 },
+      }),
+    );
+    expect(moved.before.displayName).toBe('f9他の運営が変えた名前');
+    expect(moved.user).toMatchObject({ agencyId: F9_AG_2, displayName: 'f9他の運営が変えた名前' });
+
+    // 表示名だけを送る。所属とロールは直前の確定値のまま、表示名は後から確定した値になる。
+    const renamed = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_PARTIAL, F9_OP, {
+        displayName: 'f9後から確定した名前',
+      }),
+    );
+    expect(renamed.user).toMatchObject({
+      role: 'agency',
+      agencyId: F9_AG_2,
+      displayName: 'f9後から確定した名前',
+    });
+    expect(await f9Raw(F9_U_PARTIAL)).toMatchObject({
+      role: 'agency',
+      agency_id: F9_AG_2,
+      display_name: 'f9後から確定した名前',
+    });
+  });
+
+  it('現在値と同じ入力（大文字の UUID を含む）は行を書き換えず、before と user が同じ現在値の updated を返す（Req 1.13）', async () => {
+    const pool = await getPool();
+    const prior = await f9Raw(F9_U_NOCHANGE);
+    const inputs: DashboardUserUpdateInput[] = [
+      {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_1.toUpperCase() } },
+        displayName: 'f9変化なし',
+      },
+      { assignment: { kind: 'agency', agencyId: F9_AG_1.toUpperCase() } },
+      { displayName: 'f9変化なし' },
+      {},
+    ];
+    for (const input of inputs) {
+      const label = JSON.stringify(input);
+      const res = expectUpdated(
+        await updateDashboardUserGuarded(pool, F9_U_NOCHANGE, F9_OP, input),
+      );
+      expect(res.user, label).toEqual(res.before);
+      expect(res.user, label).toMatchObject({
+        id: F9_U_NOCHANGE,
+        role: 'agency',
+        agencyId: F9_AG_1,
+        displayName: 'f9変化なし',
+      });
+      // xmin まで一致する＝同じ値での UPDATE も走っていない。
+      expect(await f9Raw(F9_U_NOCHANGE), label).toEqual(prior);
+    }
+
+    // 運営のまま運営を指定するのも変化なし（自分に role: operator を送る経路）。
+    const opPrior = await f9Raw(F9_U_MAIN_OP);
+    const opRes = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_MAIN_OP, F9_OP, { assignment: TO_OPERATOR }),
+    );
+    expect(opRes.user).toEqual(opRes.before);
+    expect(opRes.user).toMatchObject({ role: 'operator', agencyId: null });
+    expect(await f9Raw(F9_U_MAIN_OP)).toEqual(opPrior);
+  });
+
+  it('最後の有効な運営の降格は last_operator で、同じ入力の表示名も含めて行を変えない（Req 2.3, 2.6）', async () => {
+    const pool = await getPool();
+    // 無効化済みの運営 2 名と有効な代理店ロール 1 名がいても、有効な運営は 1 名である。
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+    const prior = await f9Raw(F9_U_SOLO_OP);
+
+    const res = await updateDashboardUserGuarded(pool, F9_U_SOLO_OP, F9_OP_SOLO, {
+      assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_SOLO } },
+      displayName: 'f9拒否されるはずの名前',
+    });
+    expect(res).toEqual({ kind: 'last_operator' });
+    expect(await f9Raw(F9_U_SOLO_OP)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+  });
+
+  it('最後の有効な運営を不在・他運営の代理店へ降格すると、残数より先に所属先を確かめて agency_not_found を返し、行を変えない（評価順・Req 4.4, 2.6）', async () => {
+    const pool = await getPool();
+    // 残数の判定まで進めば last_operator になる状況である（有効な運営は F9_U_SOLO_OP の 1 名だけ）。
+    // 2 つの拒否が同時に成り立つ入力で、どちらが返るかによって評価順（所属先の確認 → 残数の判定）を固定する。
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+    const prior = await f9Raw(F9_U_SOLO_OP);
+
+    for (const agencyId of [F9_AG_MISSING, F9_AG_OTHER]) {
+      const res = await updateDashboardUserGuarded(pool, F9_U_SOLO_OP, F9_OP_SOLO, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId } },
+        displayName: 'f9拒否されるはずの名前',
+      });
+      expect(res, agencyId).toEqual({ kind: 'agency_not_found' });
+      // xmin まで一致する＝表示名も含めて何も確定していない。
+      expect(await f9Raw(F9_U_SOLO_OP), agencyId).toEqual(prior);
+    }
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+  });
+
+  it('無効化済みの運営の降格は残数を判定せずに許し、無効のまま残す（Req 2.4, 1.7）', async () => {
+    const pool = await getPool();
+    // 有効な運営は F9_U_SOLO_OP の 1 名だけ。判定を行えば last_operator になる状況で許されることを見る。
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+    const prior = await f9Raw(F9_U_SOLO_DISABLED_OP);
+    expect(prior.disabled_at).not.toBeNull();
+
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_SOLO_DISABLED_OP, F9_OP_SOLO, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_SOLO } },
+      }),
+    );
+    expect(res.before).toMatchObject({ role: 'operator', agencyId: null, disabled: true });
+    expect(res.user).toMatchObject({ role: 'agency', agencyId: F9_AG_SOLO, disabled: true });
+    const after = await f9Raw(F9_U_SOLO_DISABLED_OP);
+    expect(after).toMatchObject({ role: 'agency', agency_id: F9_AG_SOLO });
+    // 無効化の時刻も据え置き（有効／無効に触れない）。
+    expect(after.disabled_at).toEqual(prior.disabled_at);
+    expect(await f9ActiveOperatorCount(F9_OP_SOLO)).toBe(1);
+  });
+
+  it('運営ロールへの所属の移動は role_changed で、他運営・不在の代理店を指定しても同じ結果・行は変わらない（Req 3.4, 2.6）', async () => {
+    const pool = await getPool();
+    const prior = await f9Raw(F9_U_MAIN_OP);
+    for (const agencyId of [F9_AG_1, F9_AG_OTHER, F9_AG_MISSING]) {
+      const res = await updateDashboardUserGuarded(pool, F9_U_MAIN_OP, F9_OP, {
+        assignment: { kind: 'agency', agencyId },
+        displayName: 'f9拒否されるはずの名前',
+      });
+      // 所属先の確認より先に判定するので、代理店の存在は結果から読み取れない。
+      expect(res, agencyId).toEqual({ kind: 'role_changed' });
+      expect(await f9Raw(F9_U_MAIN_OP), agencyId).toEqual(prior);
+    }
+  });
+
+  it('他運営・不在の代理店は同一の agency_not_found で、表示名も含めて行を変えない（Req 4.4, 2.6）', async () => {
+    const pool = await getPool();
+    // 他運営の代理店は実在する（不在と越権を同じ応答にしていることの対照）。
+    const exists = await pool.query('SELECT 1 FROM agencies WHERE id = $1', [F9_AG_OTHER]);
+    expect(exists.rowCount).toBe(1);
+
+    const prior = await f9Raw(F9_U_AGENCY_BAD);
+    const inputs: DashboardUserUpdateInput[] = [
+      {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_OTHER } },
+        displayName: 'f9拒否されるはずの名前',
+      },
+      {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_MISSING } },
+        displayName: 'f9拒否されるはずの名前',
+      },
+      { assignment: { kind: 'agency', agencyId: F9_AG_OTHER }, displayName: 'f9拒否されるはずの名前' },
+      { assignment: { kind: 'agency', agencyId: F9_AG_MISSING }, displayName: 'f9拒否されるはずの名前' },
+    ];
+    for (const input of inputs) {
+      const label = JSON.stringify(input);
+      const res = await updateDashboardUserGuarded(pool, F9_U_AGENCY_BAD, F9_OP, input);
+      expect(res, label).toEqual({ kind: 'agency_not_found' });
+      expect(await f9Raw(F9_U_AGENCY_BAD), label).toEqual(prior);
+    }
+
+    // 運営を他運営の代理店へ降格する場合も、複合 FK の違反（500）ではなく agency_not_found で止まる。
+    const opPrior = await f9Raw(F9_U_MAIN_OP);
+    const demote = await updateDashboardUserGuarded(pool, F9_U_MAIN_OP, F9_OP, {
+      assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_OTHER } },
+    });
+    expect(demote).toEqual({ kind: 'agency_not_found' });
+    expect(await f9Raw(F9_U_MAIN_OP)).toEqual(opPrior);
+  });
+
+  it('他運営・不在の利用者は not_found で、他運営の代理店を指定しても not_found（Req 4.1, 4.3, 4.5）', async () => {
+    const pool = await getPool();
+    const prior = await f9Raw(F9_U_OTHER);
+    const inputs: DashboardUserUpdateInput[] = [
+      { displayName: 'f9越権の名前' },
+      { assignment: TO_OPERATOR },
+      // 利用者も代理店も他運営。代理店の判定が先だと agency_not_found が返り、利用者の存在が漏れる。
+      {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: F9_AG_OTHER } },
+        displayName: 'f9越権の名前',
+      },
+      { assignment: { kind: 'agency', agencyId: F9_AG_OTHER } },
+      { assignment: { kind: 'agency', agencyId: F9_AG_MISSING } },
+    ];
+    for (const input of inputs) {
+      const label = JSON.stringify(input);
+      const res = await updateDashboardUserGuarded(pool, F9_U_OTHER, F9_OP, input);
+      expect(res, label).toEqual({ kind: 'not_found' });
+      expect(await f9Raw(F9_U_OTHER), label).toEqual(prior);
+    }
+
+    // 不在の利用者も同じ not_found（自運営・他運営・不在のどの代理店を指定しても）。
+    for (const agencyId of [F9_AG_1, F9_AG_OTHER, F9_AG_MISSING]) {
+      const res = await updateDashboardUserGuarded(pool, F9_U_MISSING, F9_OP, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId } },
+      });
+      expect(res, agencyId).toEqual({ kind: 'not_found' });
+    }
+
+    // 対照: 正しい運営のスコープでは同じ行に届く（上の not_found は越権の秘匿であって、行の不在ではない）。
+    const inScope = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_OTHER, F9_OP_OTHER, {
+        displayName: prior.display_name,
+      }),
+    );
+    expect(inScope.user).toMatchObject({ id: F9_U_OTHER, operatorId: F9_OP_OTHER });
+    expect(await f9Raw(F9_U_OTHER)).toEqual(prior);
+  });
+
+  it('保留中の利用者のロール・所属を変えると、初回ログインの紐付けが新しいロール・所属を返す（Req 1.9）', async () => {
+    const pool = await getPool();
+
+    const promoted = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_PENDING_PROMOTE, F9_OP, {
+        assignment: TO_OPERATOR,
+      }),
+    );
+    expect(promoted.user).toMatchObject({ role: 'operator', agencyId: null, disabled: false });
+    // 更新は認証主体に触れない（保留のまま・紐付けの対象に残る）。
+    expect((await f9Raw(F9_U_PENDING_PROMOTE)).auth_subject).toBeNull();
+    const linkedPromoted = await linkAuthSubjectByEmail(
+      pool,
+      F9_PENDING_PROMOTE_EMAIL,
+      'uid-f9-pending-promote',
+    );
+    expect(linkedPromoted).toEqual({
+      id: F9_U_PENDING_PROMOTE,
+      role: 'operator',
+      operatorId: F9_OP,
+      agencyId: null,
+    });
+
+    expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_PENDING_MOVE, F9_OP, {
+        assignment: { kind: 'agency', agencyId: F9_AG_2 },
+      }),
+    );
+    expect((await f9Raw(F9_U_PENDING_MOVE)).auth_subject).toBeNull();
+    const linkedMoved = await linkAuthSubjectByEmail(
+      pool,
+      F9_PENDING_MOVE_EMAIL,
+      'uid-f9-pending-move',
+    );
+    expect(linkedMoved).toEqual({
+      id: F9_U_PENDING_MOVE,
+      role: 'agency',
+      operatorId: F9_OP,
+      agencyId: F9_AG_2,
+    });
+  });
+
+  it('無効化済みの利用者も編集でき、有効／無効・メール・認証主体は変わらない（Req 1.7, 1.8）', async () => {
+    const pool = await getPool();
+    const prior = await f9Raw(F9_U_DISABLED_AGENCY);
+    expect(prior.disabled_at).not.toBeNull();
+
+    const res = expectUpdated(
+      await updateDashboardUserGuarded(pool, F9_U_DISABLED_AGENCY, F9_OP, {
+        assignment: { kind: 'agency', agencyId: F9_AG_2 },
+        displayName: 'f9無効化済みの名前',
+      }),
+    );
+    expect(res.user).toMatchObject({
+      agencyId: F9_AG_2,
+      displayName: 'f9無効化済みの名前',
+      disabled: true,
+      email: 'f9-disabled-agency@example.com',
+    });
+
+    const after = await f9Raw(F9_U_DISABLED_AGENCY);
+    // 指定した列は変わる。
+    expect(after).toMatchObject({ agency_id: F9_AG_2, display_name: 'f9無効化済みの名前' });
+    // 指定していない列は変わらない（無効化の時刻・メール・認証主体）。
+    expect(after.disabled_at).toEqual(prior.disabled_at);
+    expect(after.email).toBe(prior.email);
+    expect(after.auth_subject).toBe(prior.auth_subject);
+  });
+
+  it('掃除対象の f9 利用者 id はすべて一意（テスト自己検証）', () => {
+    const ids = F9_USERS.map((u) => u.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).not.toContain(F9_U_MISSING);
+    expect(F9_AGS).not.toContain(F9_AG_MISSING);
+  });
+});
+
+// ============================================================
+// dashboard-user-edit Task 1.3: 降格と無効化の並行安全性（Req 2.5・write-skew の決定的検証）。
+// design「並行ガードの拡張」の直列化を、上の f8c（lifecycle の無効化×無効化）と同じ型で検証する。
+// 別の接続でテナントロックを取り、先行する操作を未確定のまま保持している間に本物の関数を起動して、
+//   1. 500ms の有界待機の間は解決しない（＝同じロックを待っている）こと
+//   2. 先行の操作を確定した後は最新の状態で数え直し、last_operator で拒否すること
+// を確かめる。本物の関数どうしを Promise.all で競わせる形は、多くの環境で自然に直列化して
+// ロックを外しても通ってしまう（lifecycle tasks の 1.3 の知見）ので使わない。
+//
+// 先行の操作は SQL で直接書く（本物の関数をトランザクションの途中で止める手段が無いため）。
+// そのため 1 本のテストが確かめられるのは「後から来た本物の関数が、先行の操作と同じロックを取ること」で、
+// 無効化と降格の相互の排他は次の 2 つを合わせて成り立つ。
+//   - 更新（降格）が DISABLE_LOCK_CLASS のロックを取る: 下の (a)・(c)
+//   - 無効化が同じロックを取る: 下の (b) と上の f8c
+// 接頭辞は f9c（1.2 の f9000000 帯と交差しない）。先行の操作を確定させて状態が変わるので、
+// テナントを組み合わせごとに分ける。どのテナントも、初期状態は有効な運営ちょうど 2 名である。
+// ============================================================
+interface F9cTenant {
+  operatorId: string;
+  agencyId: string; // 降格先の代理店（同じテナント配下）
+  heldUserId: string; // 別の接続で保持する先行の操作の対象
+  targetUserId: string; // 本物の関数の対象
+}
+
+// (a) 無効化を保持中の降格
+const F9C_DEMOTE_WHILE_DISABLE_HELD: F9cTenant = {
+  operatorId: 'f9c00000-0000-0000-0000-0000000000a1',
+  agencyId: 'f9c00000-0000-0000-0000-00000000a001',
+  heldUserId: 'f9c00000-0000-0000-0000-d000000000a1',
+  targetUserId: 'f9c00000-0000-0000-0000-d000000000a2',
+};
+// (b) 降格を保持中の無効化
+const F9C_DISABLE_WHILE_DEMOTE_HELD: F9cTenant = {
+  operatorId: 'f9c00000-0000-0000-0000-0000000000b2',
+  agencyId: 'f9c00000-0000-0000-0000-00000000b001',
+  heldUserId: 'f9c00000-0000-0000-0000-d000000000b1',
+  targetUserId: 'f9c00000-0000-0000-0000-d000000000b2',
+};
+// (c) 降格を保持中の降格
+const F9C_DEMOTE_WHILE_DEMOTE_HELD: F9cTenant = {
+  operatorId: 'f9c00000-0000-0000-0000-0000000000c3',
+  agencyId: 'f9c00000-0000-0000-0000-00000000c001',
+  heldUserId: 'f9c00000-0000-0000-0000-d000000000c1',
+  targetUserId: 'f9c00000-0000-0000-0000-d000000000c2',
+};
+const F9C_TENANTS = [
+  F9C_DEMOTE_WHILE_DISABLE_HELD,
+  F9C_DISABLE_WHILE_DEMOTE_HELD,
+  F9C_DEMOTE_WHILE_DEMOTE_HELD,
+];
+
+interface F9cHeldOperation {
+  sql: string;
+  params: unknown[];
+}
+
+// 先行の操作（別の接続で未確定のまま保持する SQL）。
+function f9cHeldDisable(t: F9cTenant): F9cHeldOperation {
+  return {
+    sql: 'UPDATE dashboard_users SET disabled_at = now() WHERE id = $1',
+    params: [t.heldUserId],
+  };
+}
+
+function f9cHeldDemote(t: F9cTenant): F9cHeldOperation {
+  return {
+    sql: `UPDATE dashboard_users SET role = 'agency', agency_id = $2 WHERE id = $1`,
+    params: [t.heldUserId, t.agencyId],
+  };
+}
+
+// 別の接続でテナントロックを取り、held（先行の操作）を未確定のまま保持している間に act（本物の関数）を起動する。
+// 500ms の有界待機の間に act が解決しないことを確かめてから held を確定し、act の結果を返す。
+// act がロックを取らない（または別のキーを取る）実装なら、act は held の未確定の変更を見ないまま
+// 有効な運営を 2 名と数えて先に確定するので、待機の assert が赤になる。
+async function f9cRunWhileHeld<T>(
+  t: F9cTenant,
+  held: F9cHeldOperation,
+  act: () => Promise<T>,
+): Promise<T> {
+  const pool = await getPool();
+  const holder = await pool.connect();
+  let holderCommitted = false;
+  let pending: Promise<T> | undefined;
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT pg_advisory_xact_lock($1::int4, hashtext($2)::int4)', [
+      DISABLE_LOCK_CLASS,
+      t.operatorId,
+    ]);
+    const heldResult = await holder.query(held.sql, held.params);
+    // 先行の操作が実際に 1 行を変えていること（未確定の変更が無いまま「待たせた」ことにしない）。
+    expect(heldResult.rowCount).toBe(1);
+
+    let settled = false;
+    pending = act().then((r) => {
+      settled = true;
+      return r;
+    });
+
+    // 有界待機の間、act はロック待ちで解決しない（＝直列化が働いている決定的な証拠）。
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(settled).toBe(false);
+
+    // 先行の操作を確定する（ロックも解放される）。
+    await holder.query('COMMIT');
+    holderCommitted = true;
+    return await pending;
+  } finally {
+    if (!holderCommitted) {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      // 失敗の経路でも act を宙に浮かせない（ロックが解けるので完了する）。
+      await pending?.catch(() => undefined);
+    }
+    holder.release();
+  }
+}
+
+describe.skipIf(!process.env.DATABASE_URL)('updateDashboardUserGuarded 並行安全性 (DB)', () => {
+  beforeAll(async () => {
+    const pool = await getPool();
+    for (const t of F9C_TENANTS) {
+      await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [
+        t.operatorId,
+        'f9c並行運営',
+      ]);
+      await pool.query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [
+        t.agencyId,
+        t.operatorId,
+        'f9c代理店',
+      ]);
+      await pool.query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject)
+         VALUES ($1, 'operator', $3, NULL, $4), ($2, 'operator', $3, NULL, $5)`,
+        [
+          t.heldUserId,
+          t.targetUserId,
+          t.operatorId,
+          `authsub-${t.heldUserId}`,
+          `authsub-${t.targetUserId}`,
+        ],
+      );
+    }
+  });
+
+  afterAll(async () => {
+    const pool = await getPool();
+    const operatorIds = F9C_TENANTS.map((t) => t.operatorId);
+    await pool.query('DELETE FROM dashboard_users WHERE operator_id = ANY($1)', [operatorIds]);
+    await pool.query('DELETE FROM agencies WHERE operator_id = ANY($1)', [operatorIds]);
+    await pool.query('DELETE FROM operators WHERE id = ANY($1)', [operatorIds]);
+    await closePool();
+  });
+
+  it('(a) 無効化を保持している間、降格はブロックし、確定後は last_operator で 0 人化を防ぐ（Req 2.5・決定的）', async () => {
+    const t = F9C_DEMOTE_WHILE_DISABLE_HELD;
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(2);
+    const prior = await f9Raw(t.targetUserId);
+
+    const result = await f9cRunWhileHeld(t, f9cHeldDisable(t), () =>
+      updateDashboardUserGuarded(pool, t.targetUserId, t.operatorId, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: t.agencyId } },
+      }),
+    );
+
+    // 降格は確定した無効化を観測して数え直す。有効な運営は target だけなので、最後の運営の降格になる。
+    expect(result).toEqual({ kind: 'last_operator' });
+    expect((await f9Raw(t.heldUserId)).disabled_at).not.toBeNull();
+    // target は xmin まで変わらず、有効な運営として 1 名残る（ロックアウトしない）。
+    expect(await f9Raw(t.targetUserId)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(1);
+  });
+
+  it('(b) 降格を保持している間、無効化はブロックし、確定後は last_operator で 0 人化を防ぐ（Req 2.5・決定的）', async () => {
+    // 本テストが守るのは無効化の側（disableDashboardUserGuarded が同じロックを取ること）である。
+    // 先行の降格は SQL で書いているので、更新の関数からロックを外しても本テストは赤にならない（その網は (a)・(c)）。
+    const t = F9C_DISABLE_WHILE_DEMOTE_HELD;
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(2);
+    const prior = await f9Raw(t.targetUserId);
+
+    const result = await f9cRunWhileHeld(t, f9cHeldDemote(t), () =>
+      disableDashboardUserGuarded(pool, t.targetUserId, t.operatorId),
+    );
+
+    // 無効化は確定した降格を観測して数え直す。有効な運営は target だけなので、最後の運営の無効化になる。
+    expect(result).toEqual({ kind: 'last_operator' });
+    expect(await f9Raw(t.heldUserId)).toMatchObject({ role: 'agency', agency_id: t.agencyId });
+    expect(await f9Raw(t.targetUserId)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(1);
+  });
+
+  it('(c) 降格を保持している間、別の降格はブロックし、確定後は last_operator で 0 人化を防ぐ（Req 2.5・決定的）', async () => {
+    const t = F9C_DEMOTE_WHILE_DEMOTE_HELD;
+    const pool = await getPool();
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(2);
+    const prior = await f9Raw(t.targetUserId);
+
+    const result = await f9cRunWhileHeld(t, f9cHeldDemote(t), () =>
+      updateDashboardUserGuarded(pool, t.targetUserId, t.operatorId, {
+        assignment: { kind: 'scope', scope: { role: 'agency', agencyId: t.agencyId } },
+      }),
+    );
+
+    expect(result).toEqual({ kind: 'last_operator' });
+    expect(await f9Raw(t.heldUserId)).toMatchObject({ role: 'agency', agency_id: t.agencyId });
+    expect(await f9Raw(t.targetUserId)).toEqual(prior);
+    expect(await f9ActiveOperatorCount(t.operatorId)).toBe(1);
+  });
+
+  it('f9c の id はすべて一意（テスト自己検証）', () => {
+    const ids = F9C_TENANTS.flatMap((t) => [t.operatorId, t.agencyId, t.heldUserId, t.targetUserId]);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

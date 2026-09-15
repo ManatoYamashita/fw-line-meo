@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import QRCode from 'qrcode';
 import {
   getPool,
@@ -21,8 +21,10 @@ import {
   createPendingDashboardUser,
   disableDashboardUserGuarded,
   enableDashboardUser,
+  updateDashboardUserGuarded,
   findDashboardUserByEmailInOperator,
   findDashboardUserDisplayName,
+  createAuditLog,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -66,6 +68,21 @@ const CROSSOP_EMAIL = 'f5-crossop@example.com'; // 他運営(OP2)配下の利用
 
 // 認可前置の 403 を確認するための整形式ダミー UUID（存在しない id・operator ガードで先に弾かれる）。
 const DUMMY_UUID = 'f5000000-0000-0000-0000-0000000000ff';
+
+// --- dashboard-user-edit（#259）の統合検証用（f5 の e 帯・既存 f5 と非交差）---
+// 行はすべて各テストの中で作り、afterEach（deleteEditFixtures）で片付ける。beforeAll の共有フィクスチャと、
+// 「OP_TOKEN の運営が OP1 の唯一の有効な運営である」状態は動かさない（降格の観測で一時的に
+// 有効な運営を 2 名にするが、同じ afterEach で元に戻す）。
+const EDIT_TARGET = 'f5000000-0000-0000-0000-0000000000e1'; // OP1・agency(AG1)・保留（表示名の更新・所属先の拒否の対象）
+const EDIT_OPERATOR_TARGET = 'f5000000-0000-0000-0000-0000000000e2'; // OP1・operator・無効（所属の移動が role_changed になる対象。無効なので有効な運営の数に入らない）
+const EDIT_MOVER = 'f5000000-0000-0000-0000-0000000000e3'; // OP1・agency(AG1)・リンク済み・有効（所属の移動が次の要求から効くことの観測）
+const EDIT_DEMOTED = 'f5000000-0000-0000-0000-0000000000e4'; // OP1・operator・リンク済み・有効（降格が次の要求から効くことの観測）
+const EDIT_OP2_AGENCY = 'f5000000-0000-0000-0000-0000000000e5'; // OP2 配下の代理店（他運営の代理店の指定）
+const EDIT_CROSSOP_TARGET = 'f5000000-0000-0000-0000-0000000000e6'; // OP2・agency(EDIT_OP2_AGENCY)・保留（他運営の利用者）
+const EDIT_MISSING_AGENCY = 'f5000000-0000-0000-0000-0000000000ef'; // どこにも作らない代理店 id（不在の代理店の指定）
+
+const EDIT_MOVER_TOKEN = 'f5-edit-mover-uid';
+const EDIT_DEMOTED_TOKEN = 'f5-edit-demoted-uid';
 
 let config: DashboardApiConfig;
 
@@ -172,6 +189,13 @@ function buildApp(): ReturnType<typeof createApp> {
         auth: authDeps,
         enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
       },
+      userUpdate: {
+        auth: authDeps,
+        updateUser: async (id, operatorId, input) =>
+          updateDashboardUserGuarded(await getPool(), id, operatorId, input),
+        // 監査は実物を配線する。モックでは 0009 の CHECK が新しい action を受け付けるかを観測できない。
+        auditLog: async (input) => createAuditLog(await getPool(), input),
+      },
     },
   };
   return createApp(deps);
@@ -191,6 +215,125 @@ interface StoreRow {
 async function storesOf(res: Response): Promise<StoreRow[]> {
   const body = (await res.json()) as { stores: StoreRow[] };
   return body.stores;
+}
+
+// --- dashboard-user-edit の統合検証で使う DB 観測ヘルパ（f5 の e 帯の行と、既存の行の不変を見る）---
+
+async function postUpdate(
+  app: ReturnType<typeof createApp>,
+  bearer: string,
+  id: string,
+  body: unknown,
+): Promise<Response> {
+  return await app.request(`/dashboard-users/${id}/update`, {
+    method: 'POST',
+    headers: { ...h(bearer), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+interface UserJsonObs {
+  id: string;
+  role: string;
+  agencyId: string | null;
+  displayName: string | null;
+  disabled: boolean;
+}
+
+interface UserRowObs {
+  role: string;
+  agency_id: string | null;
+  display_name: string | null;
+  email: string | null;
+  auth_subject: string | null;
+  disabled: boolean;
+}
+
+// 更新が触れてよい列（role・agency_id・display_name）と、触れてはならない列（email・auth_subject・
+// 無効化の状態）をまとめて読む。拒否のテストは、この形の前後一致で「行が変わらない」を確かめる。
+async function userRow(id: string): Promise<UserRowObs | null> {
+  const res = await (
+    await getPool()
+  ).query<UserRowObs>(
+    `SELECT role, agency_id, display_name, email, auth_subject, disabled_at IS NOT NULL AS disabled
+       FROM dashboard_users WHERE id = $1`,
+    [id],
+  );
+  return res.rows[0] ?? null;
+}
+
+interface AuditRowObs {
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  target_type: string;
+}
+
+// 対象の利用者を指す監査行を発生順に返す。更新の前後で取り、増えた分（末尾）だけを比べる。
+async function auditRowsFor(targetId: string): Promise<AuditRowObs[]> {
+  const res = await (
+    await getPool()
+  ).query<AuditRowObs>(
+    `SELECT actor_type, actor_id, action, target_type
+       FROM audit_logs
+      WHERE target_id = $1
+      ORDER BY occurred_at, id`,
+    [targetId],
+  );
+  return res.rows;
+}
+
+// 行為者（OP_TOKEN の運営）の dashboard_user id。監査行の行為者と、自分のロール変更の対象に使う。
+async function operatorSelfId(): Promise<string> {
+  const res = await (
+    await getPool()
+  ).query<{ id: string }>('SELECT id FROM dashboard_users WHERE auth_subject = $1', [OP_TOKEN]);
+  const id = res.rows[0]?.id;
+  if (id === undefined) throw new Error('OP_TOKEN の運営が見つかりません（beforeAll のフィクスチャ）');
+  return id;
+}
+
+// OP1 の有効な運営（無効化されていない運営・保留中を含む）の数。降格の観測の前後で前提を確かめる。
+async function activeOperatorCount(operatorId: string): Promise<number> {
+  const res = await (
+    await getPool()
+  ).query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM dashboard_users
+      WHERE operator_id = $1 AND role = 'operator' AND disabled_at IS NULL`,
+    [operatorId],
+  );
+  return res.rows[0]?.n ?? 0;
+}
+
+// テストの中で作った e 帯の行を片付ける（dashboard_users を参照する FK は無い）。
+async function deleteEditFixtures(): Promise<void> {
+  const pool = await getPool();
+  await pool.query('DELETE FROM dashboard_users WHERE id = ANY($1::uuid[])', [
+    [EDIT_TARGET, EDIT_OPERATOR_TARGET, EDIT_MOVER, EDIT_DEMOTED, EDIT_CROSSOP_TARGET],
+  ]);
+  await pool.query('DELETE FROM agencies WHERE id = $1', [EDIT_OP2_AGENCY]);
+}
+
+// OP1・AG1 所属の保留中の代理店利用者（email のみ・auth_subject なし）を作る。
+async function insertPendingAgencyUser(id: string, email: string, displayName: string): Promise<void> {
+  await (
+    await getPool()
+  ).query(
+    `INSERT INTO dashboard_users (id, role, operator_id, agency_id, email, display_name)
+     VALUES ($1, 'agency', $2, $3, $4, $5)`,
+    [id, OP1, AG1, email, displayName],
+  );
+}
+
+// OP2 配下の代理店を作る（他運営の代理店の指定に使う）。
+async function insertOp2Agency(): Promise<void> {
+  await (
+    await getPool()
+  ).query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [
+    EDIT_OP2_AGENCY,
+    OP2,
+    '第2運営の代理店',
+  ]);
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB)', () => {
@@ -279,6 +422,10 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       [`/invite-codes/${DUMMY_UUID}/disable`, { method: 'POST' }],
       [`/dashboard-users/${DUMMY_UUID}/disable`, { method: 'POST' }],
       [`/dashboard-users/${DUMMY_UUID}/enable`, { method: 'POST' }],
+      [
+        `/dashboard-users/${DUMMY_UUID}/update`,
+        { method: 'POST', body: JSON.stringify({ displayName: 'x' }) },
+      ],
     ];
     for (const [path, init] of cases) {
       const res = await app.request(path, init);
@@ -308,6 +455,14 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       ],
       [`/dashboard-users/${DUMMY_UUID}/disable`, { method: 'POST', headers: h(AG1_TOKEN) }],
       [`/dashboard-users/${DUMMY_UUID}/enable`, { method: 'POST', headers: h(AG1_TOKEN) }],
+      [
+        `/dashboard-users/${DUMMY_UUID}/update`,
+        {
+          method: 'POST',
+          headers: h(AG1_TOKEN),
+          body: JSON.stringify({ role: 'operator', displayName: 'x' }),
+        },
+      ],
     ];
     for (const [path, init] of cases) {
       const res = await app.request(path, init);
@@ -476,5 +631,275 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     const methods = res.headers.get('Access-Control-Allow-Methods') ?? '';
     expect(methods).toContain('GET');
     expect(methods).toContain('POST');
+  });
+
+  // --- POST /dashboard-users/:id/update（dashboard-user-edit #259）---
+  // 実物の認証解決（findByAuthSubject）・保護付き更新（updateDashboardUserGuarded）・監査（createAuditLog）を
+  // 通して、ルートの配線と、更新後の権限が次の要求から効くことを観測する。
+  describe('POST /dashboard-users/:id/update（dashboard-user-edit）', () => {
+    afterEach(async () => {
+      await deleteEditFixtures();
+    });
+
+    it('運営の更新は 200 で DB に反映され、表示名変更の監査行が 1 行増える（Req 5.1）', async () => {
+      const app = buildApp();
+      await insertPendingAgencyUser(EDIT_TARGET, 'f5-edit-target@example.com', '編集前');
+      const actorId = await operatorSelfId();
+      const auditBefore = await auditRowsFor(EDIT_TARGET);
+
+      const res = await postUpdate(app, OP_TOKEN, EDIT_TARGET, { displayName: '  編集後  ' });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user: UserJsonObs };
+      expect(body.user).toMatchObject({
+        id: EDIT_TARGET,
+        role: 'agency',
+        agencyId: AG1,
+        displayName: '編集後',
+        disabled: false,
+      });
+
+      // DB へ反映されている（前後の空白は取り除く）。メール・認証主体・有効／無効は変わらない。
+      expect(await userRow(EDIT_TARGET)).toEqual({
+        role: 'agency',
+        agency_id: AG1,
+        display_name: '編集後',
+        email: 'f5-edit-target@example.com',
+        auth_subject: null,
+        disabled: false,
+      });
+
+      // 監査行はちょうど 1 行増え、行為者は認証された運営、種類は表示名の変更である（値は残さない）。
+      const auditAfter = await auditRowsFor(EDIT_TARGET);
+      expect(auditAfter.length - auditBefore.length).toBe(1);
+      expect(auditAfter.slice(auditBefore.length)).toEqual([
+        {
+          actor_type: 'operator',
+          actor_id: actorId,
+          action: 'dashboard_user_display_name_updated',
+          target_type: 'dashboard_user',
+        },
+      ]);
+    });
+
+    it('JSON として壊れた body は 400 validation_failed で行を変えない', async () => {
+      const app = buildApp();
+      await insertPendingAgencyUser(EDIT_TARGET, 'f5-edit-target@example.com', '編集前');
+      const rowBefore = await userRow(EDIT_TARGET);
+      const auditBefore = await auditRowsFor(EDIT_TARGET);
+
+      const res = await app.request(`/dashboard-users/${EDIT_TARGET}/update`, {
+        method: 'POST',
+        headers: { ...h(OP_TOKEN), 'Content-Type': 'application/json' },
+        body: '{"displayName":',
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('validation_failed');
+
+      expect(await userRow(EDIT_TARGET)).toEqual(rowBefore);
+      expect(await auditRowsFor(EDIT_TARGET)).toEqual(auditBefore);
+    });
+
+    it('自分のロール変更は 409 self_role_change_forbidden で、同じ保存の表示名も含めて自分の行を変えない（Req 2.1）', async () => {
+      const app = buildApp();
+      const selfId = await operatorSelfId();
+      const rowBefore = await userRow(selfId);
+      const auditBefore = await auditRowsFor(selfId);
+
+      const res = await postUpdate(app, OP_TOKEN, selfId, {
+        role: 'agency',
+        agencyId: AG1,
+        displayName: '変更されてはならない',
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('self_role_change_forbidden');
+
+      expect(await userRow(selfId)).toEqual(rowBefore);
+      expect(rowBefore).toMatchObject({ role: 'operator', agency_id: null, display_name: '運営スタッフ' });
+      expect(await auditRowsFor(selfId)).toEqual(auditBefore);
+    });
+
+    it('他運営の利用者は 404 not_found。他運営の代理店を添えても利用者の not_found になる（Req 4.3, 4.5）', async () => {
+      const app = buildApp();
+      await insertOp2Agency();
+      await (
+        await getPool()
+      ).query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, email, display_name)
+         VALUES ($1, 'agency', $2, $3, $4, '他運営の利用者')`,
+        [EDIT_CROSSOP_TARGET, OP2, EDIT_OP2_AGENCY, 'f5-edit-crossop@example.com'],
+      );
+      const rowBefore = await userRow(EDIT_CROSSOP_TARGET);
+      const auditBefore = await auditRowsFor(EDIT_CROSSOP_TARGET);
+
+      const onlyName = await postUpdate(app, OP_TOKEN, EDIT_CROSSOP_TARGET, { displayName: '越境' });
+      expect(onlyName.status).toBe(404);
+      const onlyNameBody = (await onlyName.json()) as { error: { code: string } };
+      expect(onlyNameBody.error.code).toBe('not_found');
+
+      // 対象の取得を所属先の確認より先に行うので、代理店の判定結果から利用者の存在は読めない。
+      const withAgency = await postUpdate(app, OP_TOKEN, EDIT_CROSSOP_TARGET, {
+        agencyId: EDIT_OP2_AGENCY,
+        displayName: '越境',
+      });
+      expect(withAgency.status).toBe(404);
+      const withAgencyBody = (await withAgency.json()) as { error: { code: string } };
+      expect(withAgencyBody.error.code).toBe('not_found');
+
+      expect(await userRow(EDIT_CROSSOP_TARGET)).toEqual(rowBefore);
+      expect(await auditRowsFor(EDIT_CROSSOP_TARGET)).toEqual(auditBefore);
+    });
+
+    it('他運営の代理店と不在の代理店は同じ 404 agency_not_found で、表示名も含めて行を変えない（Req 4.4）', async () => {
+      const app = buildApp();
+      await insertPendingAgencyUser(EDIT_TARGET, 'f5-edit-target@example.com', '編集前');
+      await insertOp2Agency();
+      const rowBefore = await userRow(EDIT_TARGET);
+      const auditBefore = await auditRowsFor(EDIT_TARGET);
+
+      const otherOperator = await postUpdate(app, OP_TOKEN, EDIT_TARGET, {
+        agencyId: EDIT_OP2_AGENCY,
+        displayName: '変更されてはならない',
+      });
+      const missing = await postUpdate(app, OP_TOKEN, EDIT_TARGET, {
+        agencyId: EDIT_MISSING_AGENCY,
+        displayName: '変更されてはならない',
+      });
+      expect(otherOperator.status).toBe(404);
+      expect(missing.status).toBe(404);
+      const otherOperatorBody = (await otherOperator.json()) as { error: { code: string } };
+      const missingBody = (await missing.json()) as { error: { code: string } };
+      expect(otherOperatorBody.error.code).toBe('agency_not_found');
+      // 存在しない代理店と他運営の代理店を区別できない同一の応答にする。
+      expect(otherOperatorBody).toEqual(missingBody);
+
+      expect(await userRow(EDIT_TARGET)).toEqual(rowBefore);
+      expect(await auditRowsFor(EDIT_TARGET)).toEqual(auditBefore);
+    });
+
+    it('運営ロールの利用者への所属の移動は 409 role_changed で、同じ保存の表示名も変えない（Req 3.4）', async () => {
+      const app = buildApp();
+      // 無効化済みの運営にする（有効な運営の数に入らないので、行為者が唯一の有効な運営である状態を崩さない）。
+      await (
+        await getPool()
+      ).query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, email, display_name, disabled_at)
+         VALUES ($1, 'operator', $2, NULL, $3, '運営ロールの対象', now())`,
+        [EDIT_OPERATOR_TARGET, OP1, 'f5-edit-operator@example.com'],
+      );
+      const rowBefore = await userRow(EDIT_OPERATOR_TARGET);
+      const auditBefore = await auditRowsFor(EDIT_OPERATOR_TARGET);
+
+      const res = await postUpdate(app, OP_TOKEN, EDIT_OPERATOR_TARGET, {
+        agencyId: AG1,
+        displayName: '変更されてはならない',
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('role_changed');
+
+      // 降格として実行されていない（ロール・所属・表示名のいずれも変わらない）。
+      expect(await userRow(EDIT_OPERATOR_TARGET)).toEqual(rowBefore);
+      expect(rowBefore).toMatchObject({ role: 'operator', agency_id: null });
+      expect(await auditRowsFor(EDIT_OPERATOR_TARGET)).toEqual(auditBefore);
+    });
+
+    it('リンク済みの代理店利用者の所属を移すと、次の要求から店舗一覧が新しい代理店の範囲になり、店舗は移らない（Req 1.10, 1.11）', async () => {
+      const app = buildApp();
+      await (
+        await getPool()
+      ).query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, display_name)
+         VALUES ($1, 'agency', $2, $3, $4, '所属を移す代理店スタッフ')`,
+        [EDIT_MOVER, OP1, AG1, EDIT_MOVER_TOKEN],
+      );
+
+      // 対照: 移す前は元の代理店（AG1）の店舗だけが見える。
+      const beforeRes = await app.request('/stores', { headers: h(EDIT_MOVER_TOKEN) });
+      expect(beforeRes.status).toBe(200);
+      const beforeStores = await storesOf(beforeRes);
+      expect(beforeStores.length).toBeGreaterThan(0);
+      expect(beforeStores.every((s) => s.agencyId === AG1)).toBe(true);
+      expect(beforeStores.some((s) => s.id === S1)).toBe(true);
+      expect(beforeStores.some((s) => s.id === S2)).toBe(false);
+
+      const actorId = await operatorSelfId();
+      const auditBefore = await auditRowsFor(EDIT_MOVER);
+      const res = await postUpdate(app, OP_TOKEN, EDIT_MOVER, { agencyId: AG2 });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user: UserJsonObs };
+      expect(body.user).toMatchObject({ id: EDIT_MOVER, role: 'agency', agencyId: AG2 });
+
+      // 同じトークンの次の要求は、実物の認証解決を経て新しい代理店（AG2）の範囲で返る。
+      const afterRes = await app.request('/stores', { headers: h(EDIT_MOVER_TOKEN) });
+      expect(afterRes.status).toBe(200);
+      const afterStores = await storesOf(afterRes);
+      expect(afterStores.length).toBeGreaterThan(0);
+      expect(afterStores.every((s) => s.agencyId === AG2)).toBe(true);
+      expect(afterStores.some((s) => s.id === S2)).toBe(true);
+      expect(afterStores.some((s) => s.id === S1)).toBe(false);
+
+      // 店舗は利用者と一緒に移らない（代理店に属する情報は元の代理店のまま）。
+      const pool = await getPool();
+      expect((await findStoreWithAgency(pool, S1))?.agencyId).toBe(AG1);
+      expect((await findStoreWithAgency(pool, S2))?.agencyId).toBe(AG2);
+
+      const auditAfter = await auditRowsFor(EDIT_MOVER);
+      expect(auditAfter.length - auditBefore.length).toBe(1);
+      expect(auditAfter.slice(auditBefore.length)).toEqual([
+        {
+          actor_type: 'operator',
+          actor_id: actorId,
+          action: 'dashboard_user_agency_updated',
+          target_type: 'dashboard_user',
+        },
+      ]);
+    });
+
+    it('有効な運営を降格すると、次の要求から管理 API が 403 になる（降格の前は 200・Req 1.10, 4.2）', async () => {
+      const app = buildApp();
+      // 前提: 行為者（OP_TOKEN）が OP1 の唯一の有効な運営である（先行テストの片付けの確認を兼ねる）。
+      expect(await activeOperatorCount(OP1)).toBe(1);
+      await (
+        await getPool()
+      ).query(
+        `INSERT INTO dashboard_users (id, role, operator_id, agency_id, auth_subject, display_name)
+         VALUES ($1, 'operator', $2, NULL, $3, '降格される運営')`,
+        [EDIT_DEMOTED, OP1, EDIT_DEMOTED_TOKEN],
+      );
+      // 有効な運営が 2 名なので、この降格は最後の運営の保護に当たらない。
+      expect(await activeOperatorCount(OP1)).toBe(2);
+
+      // 対照: 降格の前は、同じトークンで管理 API に届く（ここが 403 だと、後の 403 は降格の証拠にならない）。
+      const beforeRes = await app.request('/dashboard-users', { headers: h(EDIT_DEMOTED_TOKEN) });
+      expect(beforeRes.status).toBe(200);
+
+      const actorId = await operatorSelfId();
+      const auditBefore = await auditRowsFor(EDIT_DEMOTED);
+      const res = await postUpdate(app, OP_TOKEN, EDIT_DEMOTED, { role: 'agency', agencyId: AG1 });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user: UserJsonObs };
+      expect(body.user).toMatchObject({ id: EDIT_DEMOTED, role: 'agency', agencyId: AG1 });
+
+      // 同じトークンの次の要求は、実物の認証解決を経て代理店ロールとして扱われ、管理 API は 403。
+      const afterRes = await app.request('/dashboard-users', { headers: h(EDIT_DEMOTED_TOKEN) });
+      expect(afterRes.status).toBe(403);
+      const afterBody = (await afterRes.json()) as { error: { code: string } };
+      expect(afterBody.error.code).toBe('forbidden');
+      expect(await activeOperatorCount(OP1)).toBe(1);
+
+      // 降格は所属の設定を含めて 1 件だけ記録する（所属変更の行を重ねない・Req 5.3）。
+      const auditAfter = await auditRowsFor(EDIT_DEMOTED);
+      expect(auditAfter.length - auditBefore.length).toBe(1);
+      expect(auditAfter.slice(auditBefore.length)).toEqual([
+        {
+          actor_type: 'operator',
+          actor_id: actorId,
+          action: 'dashboard_user_demoted_to_agency',
+          target_type: 'dashboard_user',
+        },
+      ]);
+    });
   });
 });

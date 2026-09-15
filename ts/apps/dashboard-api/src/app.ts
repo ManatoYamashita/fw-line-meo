@@ -26,12 +26,14 @@ import {
   handleDashboardUserCreate,
   handleDashboardUserDisable,
   handleDashboardUserEnable,
+  handleDashboardUserUpdate,
   type AgenciesListDeps,
   type AgencyCreateDeps,
   type DashboardUsersListDeps,
   type DashboardUserCreateDeps,
   type DashboardUserDisableDeps,
   type DashboardUserEnableDeps,
+  type DashboardUserUpdateDeps,
 } from './admin.js';
 import { jsonError } from './http.js';
 import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation, type Sink } from '@fwlm/observability';
@@ -62,6 +64,7 @@ export interface AppDeps {
     userCreate: DashboardUserCreateDeps;
     userDisable: DashboardUserDisableDeps;
     userEnable: DashboardUserEnableDeps;
+    userUpdate: DashboardUserUpdateDeps;
   };
   structuredLog?: Sink;
 }
@@ -254,6 +257,19 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       id: c.req.param('id'),
     }),
   );
+
+  // 属性の更新（ロール・所属代理店・表示名の部分更新）。状態を変える操作なので POST のサブパスで表し、
+  // CORS の許可メソッドは GET/POST のまま変えない。JSON として壊れた body は作成と同じ 400 にする。
+  // body の形の検証・自分のロール変更の拒否・結果の写像はハンドラの責務である。
+  app.post('/dashboard-users/:id/update', async (c) => {
+    const parsed = await readJsonBody(c);
+    if (!parsed.ok) return jsonError(400, 'validation_failed', '入力内容が正しくありません');
+    return handleDashboardUserUpdate(deps.admin.userUpdate, {
+      authorization: authHeader(c),
+      id: c.req.param('id'),
+      body: parsed.body,
+    });
+  });
 
   // --- 既存 QR エンドポイント（CORS 適用下・挙動は不変）。 ---
 
