@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { openStoreSurface } from './fixtures/detail';
+import { STORE_SURFACE_STATES, openStoreSurface } from './fixtures/detail';
 
 // 店舗詳細（LIFF 面）の実描画検証（Issue #53 完了条件 3）。
 //
@@ -33,6 +33,23 @@ import { openStoreSurface } from './fixtures/detail';
 // これらが捲れる領域を増やしていないことも、この宣言が確かめる（増えれば件数が食い違って赤になる）。
 // つまり店舗詳細の捲れる領域は、この表の 1 件が全部である。
 const TABLE_SCROLL_REGIONS = 1;
+
+// 表示状態の一覧（fixtures/detail.ts の STORE_SURFACE_STATES）を回った数の宣言（store-detail-trend-dashboard の
+// 要件 9.4・Issue #265）。一覧の長さから導かずに数で書く。導くと、状態を 1 つ消したときに宣言も一緒に
+// 減り、検査が緑のまま状態が減ったことを見逃すためである。
+const SURFACE_STATE_COUNT = 4;
+
+test('4 つの表示状態に、それぞれの操作が効いた状態で入れる', async ({ page }) => {
+  // 各状態の入口は、操作後の表示と、詳細の取得がちょうど 1 回だったことを自分で確かめてから返る。
+  let visited = 0;
+  for (const state of STORE_SURFACE_STATES) {
+    await state.open(page);
+    visited += 1;
+  }
+  expect(visited, `回った状態: ${STORE_SURFACE_STATES.map((state) => state.name).join('・')}`).toBe(
+    SURFACE_STATE_COUNT,
+  );
+});
 
 test('モバイルビューポートの店舗詳細で横スクロールが発生しない', async ({ page }) => {
   await openStoreSurface(page);
