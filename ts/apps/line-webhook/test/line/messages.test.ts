@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import type { StoreCandidate } from '@fwlm/db';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
+import { REPORT_LABELS } from '@fwlm/line-report';
 import type { LineMessage } from '../../src/line/client.js';
 import { decodePostback } from '../../src/onboarding/stages.js';
+import * as messageModule from '../../src/line/messages.js';
 import {
   buildGreetingMessage,
   buildInvalidInviteCodeMessage,
@@ -10,6 +12,7 @@ import {
   buildConfirmationMessage,
   buildCompletionMessage,
   buildPlaceAlreadyRegisteredMessage,
+  buildStatusGuidanceMessage,
 } from '../../src/line/messages.js';
 import type {
   FlexCarouselContents,
@@ -97,6 +100,75 @@ describe('buildInvalidInviteCodeMessage', () => {
     expect(message.text).toContain('招待コード');
     assertContainsJapanese(message.text);
     assertNoObviousEnglishPlaceholder(message.text);
+  });
+});
+
+describe('buildStatusGuidanceMessage（line-on-demand-report Req 2.5・2.10）', () => {
+  function guidanceText(): string {
+    const message = buildStatusGuidanceMessage();
+    if (message.type !== 'text') throw new Error('text メッセージではない');
+    return message.text;
+  }
+
+  function guidanceLine(index: number): string {
+    const line = guidanceText().split('\n')[index];
+    if (line === undefined) throw new Error(`${index + 1} 行目が無い`);
+    return line;
+  }
+
+  it('text メッセージとして 1 文 1 行の 3 行で案内する（design-language §7.16）', () => {
+    expect(buildStatusGuidanceMessage().type).toBe('text');
+    const lines = guidanceText().split('\n');
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      // 1 行に 1 文: 句点で終わり、行の途中に句点を持たない。
+      expect(line.endsWith('。'), line).toBe(true);
+      expect(line.split('。'), line).toHaveLength(2);
+      assertContainsJapanese(line);
+      assertNoObviousEnglishPlaceholder(line);
+    }
+  });
+
+  it('1 行目は店舗の登録が完了していることを伝える', () => {
+    const first = guidanceLine(0);
+    expect(first).toContain('登録');
+    expect(first).toContain('完了');
+  });
+
+  it('2 行目はメニューの 3 つのレポートの導線と詳細画面の導線を、メニューの文言のまま挙げる', () => {
+    const second = guidanceLine(1);
+    expect(second).toContain('メニュー');
+    expect(Object.values(REPORT_LABELS)).toHaveLength(3);
+    for (const label of Object.values(REPORT_LABELS)) {
+      expect(second).toContain(`「${label}」`);
+    }
+    expect(second).toContain('レポート');
+    expect(second).toContain('「詳細を見る」');
+    expect(second).toContain('詳細画面');
+  });
+
+  it('3 行目は変化があった日に配信時刻に知らせることを伝え、固定の時刻を書かない（Req 1.9）', () => {
+    const third = guidanceLine(2);
+    expect(third).toContain('変化があった日');
+    expect(third).toContain('配信時刻');
+    expect(third).toContain('お知らせします');
+    // 配信時刻はオーナーごとの値（owners.delivery_hour）なので、固定の時刻や時間帯を書くと食い違いうる。
+    expect(guidanceText()).not.toMatch(/[0-9０-９]+\s*時/);
+    expect(guidanceText()).not.toContain('朝');
+  });
+
+  it('オンボーディングの案内（招待コード・店名の入力）を含めない（Req 2.9）', () => {
+    const text = guidanceText();
+    expect(text).not.toContain('招待コード');
+    expect(text).not.toContain('店名');
+    expect(text).not.toContain('お店の名前');
+    expect(text).not.toContain('オンボーディング');
+  });
+
+  it('絵文字と ** の強調を使わない（design-language §7.16）', () => {
+    const text = guidanceText();
+    expect(text).not.toMatch(/\p{Extended_Pictographic}/u);
+    expect(text).not.toContain('**');
   });
 });
 
@@ -265,6 +337,21 @@ describe('buildCompletionMessage', () => {
     assertNoObviousEnglishPlaceholder(joined);
   });
 
+  it('本文は変化があった日に知らせることとメニューから確認できることを案内する（line-on-demand-report Req 2.10）', () => {
+    // 毎朝の配信を約束しない（「毎朝」「毎日」「日次」の不在は全ビルダーを対象とする試験が持つ）。
+    // ここでは、約束の代わりに置く 2 つの案内が本文にあることを固定する。
+    const message = buildCompletionMessage(LIFF_URL);
+    if (message.type !== 'flex') throw new Error('unreachable');
+    const contents = message.contents as FlexBubbleContents;
+    const joined = contents.body.contents
+      .filter((c): c is Extract<typeof c, { type: 'text' }> => c.type === 'text')
+      .map((t) => t.text)
+      .join('\n');
+    expect(joined).toContain('変化があった日');
+    expect(joined).toContain('お知らせします');
+    expect(joined).toContain('メニューから');
+  });
+
   it('footer に機能1の詳細（store-detail LIFF）への URI 導線ボタンを持つ', () => {
     const message = buildCompletionMessage(LIFF_URL);
     if (message.type !== 'flex') throw new Error('unreachable');
@@ -400,6 +487,98 @@ describe('4 バブルの意匠の不変条件（スナップショット更新�
     expect(button).toBeDefined();
     expect(button?.color).toBe(lineColors.action);
     expect(button?.height).toBe(lineLayout.actionHeight);
+  });
+});
+
+// メッセージの JSON から文字列の値をすべて再帰的に集める。鍵を列挙しないので、text・altText・
+// ボタンの label・displayText・クイックリプライなど、どこに文言が入っても拾う。
+function collectStrings(node: unknown): string[] {
+  if (typeof node === 'string') return [node];
+  if (Array.isArray(node)) return (node as readonly unknown[]).flatMap((child) => collectStrings(child));
+  if (node !== null && typeof node === 'object') {
+    return Object.values(node as Record<string, unknown>).flatMap((child) => collectStrings(child));
+  }
+  return [];
+}
+
+// messages.ts が公開するビルダー（LineMessage を返す関数の export）の名前。
+type MessageModule = typeof messageModule;
+type ExportedBuilderName = {
+  [K in keyof MessageModule]: MessageModule[K] extends (...args: never[]) => LineMessage ? K : never;
+}[keyof MessageModule];
+
+// 毎日の定期配信を約束する語、または毎日届くと読める語（line-on-demand-report Req 2.10）。
+const DAILY_PROMISE_WORDS = ['毎朝', '毎日', '日次'] as const;
+
+describe('全ビルダーの文言が毎日の定期配信を約束しない（line-on-demand-report Req 2.10）', () => {
+  const LIFF_URL = 'https://liff.line.me/2010693573-NxEVPPoc';
+
+  // 公開するビルダーを 1 つ残らず呼ぶ表。鍵の過不足は、型検査（必須の鍵と余剰の鍵）と、下の試験の
+  // 実行時の照合（関数の export の一覧との一致）の両方で検出する。引数で文言が分かれるものは両方の形を呼ぶ。
+  const INVOKE_EVERY_BUILDER: { readonly [K in ExportedBuilderName]: () => readonly LineMessage[] } = {
+    buildGreetingMessage: () => [messageModule.buildGreetingMessage()],
+    buildInvalidInviteCodeMessage: () => [messageModule.buildInvalidInviteCodeMessage()],
+    buildInviteCodeLockedMessage: () => [messageModule.buildInviteCodeLockedMessage()],
+    buildStoreNameInputGuidanceMessage: () => [messageModule.buildStoreNameInputGuidanceMessage()],
+    buildAlreadyCompletedMessage: () => [messageModule.buildAlreadyCompletedMessage()],
+    buildStatusGuidanceMessage: () => [messageModule.buildStatusGuidanceMessage()],
+    buildCandidateCarouselMessage: () => [messageModule.buildCandidateCarouselMessage(candidates(10))],
+    buildConfirmationMessage: () => [messageModule.buildConfirmationMessage(candidate())],
+    buildCompletionMessage: () => [messageModule.buildCompletionMessage(LIFF_URL)],
+    buildStoreNotFoundMessage: () => [messageModule.buildStoreNotFoundMessage()],
+    buildSearchFailedMessage: () => [messageModule.buildSearchFailedMessage()],
+    buildPlaceAlreadyRegisteredMessage: () => [messageModule.buildPlaceAlreadyRegisteredMessage()],
+    buildCandidateSelectionExpiredMessage: () => [messageModule.buildCandidateSelectionExpiredMessage()],
+    buildInternalErrorRetryMessage: () => [
+      messageModule.buildInternalErrorRetryMessage(),
+      messageModule.buildInternalErrorRetryMessage('SUPPORT-0001'),
+    ],
+  };
+
+  it('表は messages.ts が公開する関数を 1 つ残らず呼ぶ', () => {
+    const exportedFunctions = Object.entries(messageModule)
+      .filter(([, value]) => typeof value === 'function')
+      .map(([name]) => name)
+      .sort();
+    expect(exportedFunctions.length).toBeGreaterThan(0);
+    expect(Object.keys(INVOKE_EVERY_BUILDER).sort()).toEqual(exportedFunctions);
+  });
+
+  it('文字列の収集は入れ子の奥と末尾に置いた文言も拾う（収集器が空振りしないことの確認）', () => {
+    const fixture = {
+      type: 'flex',
+      altText: '先頭の文言',
+      contents: {
+        type: 'carousel',
+        contents: [{ footer: { contents: [{ action: { label: '押す', displayText: '奥の毎朝' } }] } }],
+      },
+      quickReply: { items: [{ type: 'action', action: { label: '末尾の毎日' } }] },
+    };
+    const strings = collectStrings(fixture);
+    expect(strings).toContain('先頭の文言');
+    expect(strings).toContain('奥の毎朝');
+    expect(strings).toContain('末尾の毎日');
+  });
+
+  for (const [name, invoke] of Object.entries(INVOKE_EVERY_BUILDER)) {
+    it(`${name} の文言は「毎朝」「毎日」「日次」を含まない`, () => {
+      const messages = invoke();
+      expect(messages.length).toBeGreaterThan(0);
+      for (const message of messages) {
+        const strings = collectStrings(message);
+        // 空振りの防止: 日本語の文言を 1 つ以上拾えていること（0 件を「不在」と読まない）。
+        expect(strings.some((value) => JAPANESE_CHAR_PATTERN.test(value)), `${name} の日本語の文言`).toBe(true);
+        for (const word of DAILY_PROMISE_WORDS) {
+          expect(strings.filter((value) => value.includes(word)), `${name} の「${word}」`).toEqual([]);
+        }
+      }
+    });
+  }
+});
+
+describe('テキスト案内のスナップショット（文言の差分を目視する材料）', () => {
+  it('ステータス案内', () => {
+    expect(buildStatusGuidanceMessage()).toMatchSnapshot();
   });
 });
 

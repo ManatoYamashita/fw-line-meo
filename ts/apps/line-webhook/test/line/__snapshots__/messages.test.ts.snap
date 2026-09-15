@@ -57,7 +57,7 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
 
 exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 完了 1`] = `
 {
-  "altText": "店舗の登録が完了しました。機能1（競合店舗の日次サマリー）がご利用いただけます。",
+  "altText": "店舗の登録が完了しました。機能1（競合店との比較などのレポート）がご利用いただけます。",
   "contents": {
     "body": {
       "contents": [
@@ -75,7 +75,7 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
           "color": "#333333",
           "margin": "md",
           "size": "sm",
-          "text": "お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。",
+          "text": "お店の登録が完了しました。これで機能1（競合店との比較などのレポート）がご利用いただけます。",
           "type": "text",
           "wrap": true,
         },
@@ -83,7 +83,7 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
           "align": "center",
           "color": "#888888",
           "size": "xs",
-          "text": "毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。",
+          "text": "新着口コミや順位の変化があった日にお知らせします。レポートはメニューからいつでもご確認いただけます。",
           "type": "text",
           "wrap": true,
         },
@@ -239,5 +239,14 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
     "type": "bubble",
   },
   "type": "flex",
+}
+`;
+
+exports[`テキスト案内のスナップショット（文言の差分を目視する材料） > ステータス案内 1`] = `
+{
+  "text": "店舗の登録は完了しています。
+メニューの「新着口コミをみる」「競合店との比較をみる」「直近の推移を見る」でレポートを、「詳細を見る」で詳細画面をご確認いただけます。
+新着口コミや順位の変化があった日は、配信時刻にこのトークでお知らせします。",
+  "type": "text",
 }
 `;

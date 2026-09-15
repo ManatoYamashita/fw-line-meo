@@ -1,5 +1,6 @@
 import type { StoreCandidate } from '@fwlm/db';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
+import { REPORT_LABELS } from '@fwlm/line-report';
 import { encodePostback } from '../onboarding/stages.js';
 import type { LineMessage } from './client.js';
 import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
@@ -12,6 +13,8 @@ import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
 // Requirement 4.1: 選択済み候補の確認＋確定/やり直しの意思確認を提示する。
 // Requirement 4.3: 店舗特定完了案内（機能1 が利用可能になる旨）。
 // Requirement 7.4: すべての案内文を日本語で提供する（文言をこのモジュールに集約する）。
+// line-on-demand-report Requirement 2.5・2.10: ステータス案内と完了メッセージは、毎日の定期配信を
+//   約束せず、変化があった日に知らせることとメニューから確認できることを案内する。
 //
 // 純粋関数のみ（design.md「MessageBuilders」制約）。I/O・副作用・LineMessenger/DB への
 // 依存は一切持たない。postback data の符号化は onboarding/stages.ts の encodePostback を
@@ -22,6 +25,15 @@ import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
 // LINE の Carousel 上限は 12 だが、本サービスの契約はさらに厳しい 10 件のため、
 // それを超える呼び出しは（LINE の上限内であっても）契約違反として早期に落とす。
 const MAX_CANDIDATES = 10;
+
+// 詳細画面（store-detail LIFF）への導線の文言。完了メッセージのボタンとステータス案内で同じ語を使う。
+const DETAIL_ACTION_LABEL = '詳細を見る';
+
+// ステータス案内で挙げるレポートの導線。メニューのラベル（@fwlm/line-report の REPORT_LABELS）を
+// そのまま引用し、オーナーが案内の語でメニューの区画を探せるようにする。
+const REPORT_MENU_LABELS_QUOTED = [REPORT_LABELS.new_reviews, REPORT_LABELS.comparison, REPORT_LABELS.trend]
+  .map((label) => `「${label}」`)
+  .join('');
 
 function assertCandidatesWithinContract(candidates: readonly StoreCandidate[]): void {
   if (candidates.length === 0) {
@@ -114,19 +126,30 @@ export function buildStoreNameInputGuidanceMessage(): LineMessage {
 }
 
 /**
- * Requirement 4.6: 「店舗特定済み」到達後の入力に対する固定案内。
+ * ステータス案内（line-on-demand-report Requirement 2.5・2.10、design.md「StatusGuidance と AppBoundary」）。
+ * 店舗特定済みオーナーの「ステータス確認」やレポート以外の操作に返す、1 文 1 行・3 行のテキスト。
+ * 店舗の登録が完了していること、メニューから 3 つのレポートと詳細画面を確認できること、
+ * 変化があった日に配信時刻に知らせることを案内する。
+ * Requirement 4.6（「店舗特定済み」到達後の入力に対する固定案内）もこの文言で兼ねる。
  * Requirement 4.3 の完了直後メッセージ（buildCompletionMessage）とは異なる場面
- * （「たった今完了した」ではなく「すでに完了済みであり追加操作は不要」）のための、
- * 意図的に別立てのメッセージ。
+ * （「たった今完了した」ではなく「すでに完了済み」）のための、意図的に別立てのメッセージ。
+ * 配信時刻はオーナーごとの値（owners.delivery_hour）なので、固定の時刻を書かない（Requirement 1.9）。
  */
-export function buildAlreadyCompletedMessage(): LineMessage {
+export function buildStatusGuidanceMessage(): LineMessage {
   return {
     type: 'text',
     text:
-      'オンボーディングはすでに完了しています。\n' +
-      '機能1（競合店舗の日次サマリー）をご利用いただけます。追加の操作は必要ありません。',
+      '店舗の登録は完了しています。\n' +
+      `メニューの${REPORT_MENU_LABELS_QUOTED}でレポートを、「${DETAIL_ACTION_LABEL}」で詳細画面をご確認いただけます。\n` +
+      '新着口コミや順位の変化があった日は、配信時刻にこのトークでお知らせします。',
   };
 }
+
+/**
+ * 旧名。会話の completed 段階（onboarding/conversation.ts）がまだこの名前で呼ぶため、ステータス案内と
+ * 同じものを返す別名として残す。呼び出し側をステータス案内へ移すとき（line-on-demand-report tasks 3.10）に消す。
+ */
+export const buildAlreadyCompletedMessage: () => LineMessage = buildStatusGuidanceMessage;
 
 /**
  * Requirement 3.1: 店舗候補一覧（最大 10 件・店名＋住所）を選択可能な Flex カルーセルで提示する。
@@ -206,6 +229,8 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
  * 長いオンボーディングの完走を祝う装飾 Flex とし、機能1の詳細（store-detail LIFF）への
  * 明確な導線ボタン（URI アクション）を添える（Issue #21・完了演出のリッチ化）。
  * storeDetailUrl は環境依存のため呼び出し側（config 由来）から注入する。
+ * 毎日の定期配信は約束せず、変化があった日に知らせることとメニューから確認できることを案内する
+ * （line-on-demand-report Requirement 2.10）。
  */
 export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
   const contents: FlexBubbleContents = {
@@ -234,7 +259,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
         },
         {
           type: 'text',
-          text: 'お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。',
+          text: 'お店の登録が完了しました。これで機能1（競合店との比較などのレポート）がご利用いただけます。',
           size: lineLayout.descriptionSize,
           color: lineColors.body,
           align: 'center',
@@ -243,7 +268,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
         },
         {
           type: 'text',
-          text: '毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。',
+          text: '新着口コミや順位の変化があった日にお知らせします。レポートはメニューからいつでもご確認いただけます。',
           size: lineLayout.noteSize,
           color: lineColors.caption,
           align: 'center',
@@ -267,7 +292,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           action: {
             type: 'uri',
             // 日次サマリーの同じ導線と語彙を揃える（同じ LIFF 画面へ飛ぶ）。
-            label: '詳細を見る',
+            label: DETAIL_ACTION_LABEL,
             uri: storeDetailUrl,
           },
         },
@@ -277,7 +302,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
 
   return {
     type: 'flex',
-    altText: '店舗の登録が完了しました。機能1（競合店舗の日次サマリー）がご利用いただけます。',
+    altText: '店舗の登録が完了しました。機能1（競合店との比較などのレポート）がご利用いただけます。',
     contents,
   };
 }
