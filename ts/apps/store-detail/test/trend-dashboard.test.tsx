@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // store-detail-trend-dashboard（Issue #265）: 推移の節（task 4.1）と競合の節の検索（task 4.2）を、ページ全体で
-// 検証する（app/store/page.tsx の TrendSection と CompetitorsSection）。
+// 検証する（app/store/page.tsx の TrendSection と CompetitorsSection）。操作の無副作用と、推移の 4 つの表示の
+// 一貫性（task 4.3）も、ページ全体でここに置く。
 //
 // 推移の節は、期間と指標の状態を節の中だけに持つ。期間の要約・グラフ・現在値・推移の表の 4 つと、節の見出し・
 // 表の名前は、1 回だけ切り出した期間の窓から導く（同 spec の research.md の決定 D1・D8、
@@ -17,6 +18,13 @@
 // - 評価の無い店の注記は、絞り込みの結果ではなく全件から判定する。
 // - 検索は、近隣順位とその母数・グラフ・推移の表・期間の要約を変えない（要件 4.10）。
 //
+// 操作の無副作用と表示の一貫性（task 4.3）:
+// - 期間・指標・検索をどう操作しても、取得は描画時の GET の 1 回のままで、端末の保存領域・クッキー・閲覧履歴・
+//   URL を変えない。帰属表示は 1 箇所に描かれ続ける（要件 7.3・8.1）。
+// - 期間の要約・グラフ・現在値・推移の表の 4 つは、表示ごとに照合する相手を固定して確かめる（要件 3.1・3.7・
+//   9.3）。表の行の日付はリテラルの窓の日付と、グラフの期間はリテラルの公称の始点〜終点と照合する。要約の
+//   始点と終点・グラフの説明文の値・現在値は、表の値のある最初と最後の行と照合する（表示どうしの照合）。
+//
 // 部品単体の検査は、部品ごとのテストファイル（trend-chart / trend-controls / competitor-search）が持つ。検索語の
 // 正規化の網羅は competitor-filter.test.ts が持つ。既定の状態の DOM が現行と同じであること（要件 8.3）と、
 // 構造契約の件数は、store-page.test.tsx が持つ。
@@ -28,7 +36,7 @@
 // 期待する文言・日付・説明文・行は、リテラルで書く。窓の計算をテストの中で組み立て直すと、実装と同じ誤りを
 // 期待値へ写しうるためである。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { StoreDetailResponse } from '../lib/contract';
 import { UNRATED_COMPETITOR_FROM_GO } from './fixtures/unrated-competitor';
@@ -902,5 +910,533 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
     expect(searchBox().value).toBe('');
     expect(listedNames()).toEqual(FIVE_NAMES);
     expect(countText()).toBe('競合5店のうち5店を表示');
+  });
+});
+
+// --- 操作の無副作用（task 4.3） -------------------------------------------------------------
+
+/** 帰属表示の文言（page.tsx の GOOGLE_ATTRIBUTION_TEXT。Flex の帰属表示と同じ文言）。 */
+const ATTRIBUTION_TEXT = 'データ提供: Google Maps';
+
+/**
+ * 帰属表示の要素。完全一致の文言で、面の中にちょうど 1 箇所あることを確かめてから返す（要件 8.1）。
+ * 文言を消しても、2 箇所に増やしても赤になる。
+ */
+function soleAttribution(step: string): HTMLElement {
+  const found = screen.queryAllByText(ATTRIBUTION_TEXT);
+  expect(found, `${step}: 帰属表示の数`).toHaveLength(1);
+  expect(ownText(found[0]!), `${step}: 帰属表示の文言`).toBe(ATTRIBUTION_TEXT);
+  return found[0]!;
+}
+
+/** 端末の保存領域の中身（キーと値の組を、キーの順に並べたもの）。 */
+function storageEntries(storage: Storage): readonly (readonly [string, string | null])[] {
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key !== null) {
+      keys.push(key);
+    }
+  }
+  return keys.sort().map((key) => [key, storage.getItem(key)] as const);
+}
+
+/** URL・閲覧履歴・クッキー・端末の保存領域の、その時点の状態。 */
+interface DeviceState {
+  readonly href: string;
+  readonly historyLength: number;
+  readonly cookie: string;
+  readonly localStorage: readonly (readonly [string, string | null])[];
+  readonly sessionStorage: readonly (readonly [string, string | null])[];
+}
+
+function deviceState(): DeviceState {
+  return {
+    href: window.location.href,
+    historyLength: window.history.length,
+    cookie: document.cookie,
+    localStorage: storageEntries(window.localStorage),
+    sessionStorage: storageEntries(window.sessionStorage),
+  };
+}
+
+/** 付けた見張りを外す関数を、付けた順に積む。 */
+type Restorers = (() => void)[];
+
+/**
+ * 見張りを付けたらすぐ、外す関数を積む。後の spyOn が投げても、それまでに付けた見張りは finally で外せる。
+ */
+function track<S extends { mockRestore(): void }>(restorers: Restorers, spy: S): S {
+  restorers.push(() => spy.mockRestore());
+  return spy;
+}
+
+/**
+ * 端末の保存領域・クッキー・閲覧履歴を書き換える API の見張り。元の働きはそのまま通し、呼ばれた記録だけを取る。
+ * jsdom はこれらを各 interface の prototype に定義している（localStorage と sessionStorage は同じ
+ * Storage.prototype を共有する）ので、見張りも prototype に付ける。見張りが面のコードと同じ入口の呼び出しを
+ * 実際に捉えることは、テストの末尾の対照で確かめる。
+ */
+function watchWrites(restorers: Restorers) {
+  return {
+    setItem: track(restorers, vi.spyOn(Storage.prototype, 'setItem')),
+    removeItem: track(restorers, vi.spyOn(Storage.prototype, 'removeItem')),
+    clear: track(restorers, vi.spyOn(Storage.prototype, 'clear')),
+    cookie: track(restorers, vi.spyOn(Document.prototype, 'cookie', 'set')),
+    pushState: track(restorers, vi.spyOn(History.prototype, 'pushState')),
+    replaceState: track(restorers, vi.spyOn(History.prototype, 'replaceState')),
+  };
+}
+
+/**
+ * console.error の記録を、各呼び出しの最初の引数の 1 行目に直したもの。
+ *
+ * jsdom は、ハッシュだけの変更を除くページの遷移（location.href への代入・location.assign・location.replace）
+ * を実装していない。遷移を求められても URL を変えずに捨て、「Not implemented: navigation (except hash
+ * changes)」を持つ Error の stack を console.error へ出す。このため、遷移は URL の比較では捕まらず、この
+ * 記録でだけ捕まる。window.open など、jsdom が実装していないほかの副作用も同じ形で記録に出る。
+ */
+function consoleErrorLines(spy: { readonly mock: { readonly calls: readonly (readonly unknown[])[] } }): readonly string[] {
+  return spy.mock.calls.map(([first]) => String(first).split('\n')[0] ?? '');
+}
+
+/** jsdom が遷移を捨てたときに console.error へ出す行（not-implemented の Error の stack の 1 行目）。 */
+const JSDOM_NAVIGATION_DROPPED = 'Error: Not implemented: navigation (except hash changes)';
+
+/** 見張りごとの、呼ばれた回数。 */
+function callCounts(watch: ReturnType<typeof watchWrites>): Readonly<Record<string, number>> {
+  return Object.fromEntries(Object.entries(watch).map(([name, spy]) => [name, spy.mock.calls.length]));
+}
+
+describe('操作の無副作用（store-detail-trend-dashboard task 4.3・Issue #265）', () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_LIFF_ID = 'test-liff-id';
+    liffMocks.init.mockReset().mockResolvedValue(undefined);
+    liffMocks.isLoggedIn.mockReset().mockReturnValue(true);
+    liffMocks.getIDToken.mockReset().mockReturnValue('test-id-token');
+    liffMocks.login.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    delete process.env.NEXT_PUBLIC_LIFF_ID;
+  });
+
+  it('期間・指標・検索を操作しても、取得は GET の 1 回のまま、端末の保存領域・クッキー・閲覧履歴・URL を変えず、帰属表示を 1 箇所に描き続ける（要件 7.3・8.1・8.6）', async () => {
+    // 競合 5 店の応答にして、検索欄も出す（期間・指標・検索の 3 つの操作をすべて行うため）。
+    const fetchMock = await renderPage(withCompetitors(FIVE_COMPETITORS));
+    const attribution = soleAttribution('描画の直後');
+    // 操作の前の状態を控える。描画時の取得（1 回）は、この時点で済んでいる。
+    const before = deviceState();
+
+    // 見張りは try の中で付ける。付ける途中で投げても、付けた分は finally で外れる。
+    const restorers: Restorers = [];
+    try {
+      const writes = watchWrites(restorers);
+      // ページの遷移を捕まえるための記録（consoleErrorLines の説明を参照）。元の働きは通すので、想定外の出力も
+      // そのまま表に出る。
+      const consoleError = track(restorers, vi.spyOn(console, 'error'));
+
+      // 各段で操作し、操作が効いたこと（対照）と、帰属表示が同じ 1 箇所に残っていることを確かめる。
+      // 操作が効かないまま無副作用を確かめると、空振りで緑になるためである。
+      const steps: readonly {
+        readonly name: string;
+        readonly run: () => void | Promise<void>;
+        readonly check: () => void;
+      }[] = [
+        {
+          name: '期間「7日」を押す',
+          run: () => choose('7日'),
+          check: () => {
+            expectSelected('7日', '順位');
+            expect(announcedText(trendHeading())).toBe('直近7日の推移');
+          },
+        },
+        { name: '指標「評価」を押す', run: () => choose('評価'), check: () => expectSelected('7日', '評価') },
+        { name: '指標「クチコミ」を押す', run: () => choose('クチコミ'), check: () => expectSelected('7日', 'クチコミ') },
+        {
+          name: '期間の群で矢印キーを押す',
+          run: async () => {
+            const seven = within(screen.getByRole('radiogroup', { name: '期間' })).getByRole('radio', { name: '7日' });
+            // jsdom では札を押しても焦点が移らないので、群が矢印キーの起点にする札（Base UI の highlightedIndex）は、
+            // 描画時に選ばれていた「30日」のまま残っている。焦点を当てて起点を「7日」へ移す更新を、act の中で描画まで
+            // 流し切ってから矢印キーを押す（流さないと、古い起点から数えて「7日」へ戻り、選択が変わらない）。
+            await act(async () => {
+              seven.focus();
+            });
+            expect(document.activeElement).toBe(seven);
+            // Base UI は、矢印キーで次の札へ焦点を移す処理を queueMicrotask で後に回す。act の中で流し切る。
+            await act(async () => {
+              fireEvent.keyDown(seven, { key: 'ArrowRight' });
+            });
+          },
+          check: () => {
+            expectSelected('30日', 'クチコミ');
+            expect(announcedText(trendHeading())).toBe('直近30日の推移');
+          },
+        },
+        { name: '検索語「店」を入れる', run: () => typeQuery('店'), check: () => expect(countText()).toBe('競合5店のうち2店を表示') },
+        {
+          name: '0 件になる検索語を入れる',
+          run: () => typeQuery(NO_MATCH_QUERY),
+          check: () => expect(countText()).toBe('競合5店のうち0店を表示'),
+        },
+        { name: '検索欄を空にする', run: () => typeQuery(''), check: () => expect(countText()).toBe('競合5店のうち5店を表示') },
+        { name: '指標「順位」を押す', run: () => choose('順位'), check: () => expectSelected('30日', '順位') },
+      ];
+
+      let visited = 0;
+      for (const step of steps) {
+        await step.run();
+        step.check();
+        expect(soleAttribution(step.name), `${step.name}: 帰属表示が同じ要素のまま残る`).toBe(attribution);
+        visited += 1;
+      }
+      expect(visited).toBe(steps.length);
+
+      // 取得は、描画時の 1 回のまま。その 1 回は /api/detail への GET で、本文を持たない（要件 7.3・7.6）。
+      // 入力した検索語は、要求の URL にも本文にも載らず、下の検査のとおり端末にも残らない（要件 8.6）。
+      expect(fetchMock.mock.calls).toHaveLength(1);
+      const call = fetchMock.mock.calls[0] ?? [];
+      const init = call[1] as RequestInit | undefined;
+      expect(call[0]).toBe('/api/detail');
+      expect(init?.method).toBe('GET');
+      expect(init?.body).toBeUndefined();
+
+      // 端末の保存領域・クッキー・閲覧履歴を書き換える API は、1 度も呼ばれない（要件 7.3）。
+      expect(callCounts(writes)).toEqual({
+        setItem: 0,
+        removeItem: 0,
+        clear: 0,
+        cookie: 0,
+        pushState: 0,
+        replaceState: 0,
+      });
+      // 状態そのものも変わらない。見張りを通らない経路のうち、localStorage へのプロパティの代入と、ハッシュだけの
+      // 変更（location.hash への代入）は、ここで捕まる。ハッシュ以外への遷移（location.href への代入・
+      // location.assign・location.replace）は、jsdom が実行せずに URL をそのまま残すので、この比較では捕まらない。
+      expect(deviceState()).toEqual(before);
+      // ページの遷移を求めていない。jsdom が捨てた遷移は console.error の記録にだけ残るので、記録が 0 件である
+      // ことで確かめる。jsdom が実装していないほかの副作用（window.open など）も、同じ記録に出る。
+      expect(consoleErrorLines(consoleError), 'console.error の記録').toEqual([]);
+
+      // 対照: 見張りは、面のコードが通るのと同じ入口（window の localStorage と sessionStorage、document.cookie、
+      // window.history）の呼び出しを実際に捉える。何も捉えない見張りでは、上の 0 回が空振りでも緑になる。
+      // 対照の呼び出しは元の働きへ通さないので、端末の状態は変わらない。
+      for (const spy of Object.values(writes)) {
+        spy.mockImplementation(() => {});
+      }
+      window.localStorage.setItem('probe', '1');
+      window.sessionStorage.setItem('probe', '1');
+      window.localStorage.removeItem('probe');
+      window.sessionStorage.clear();
+      document.cookie = 'probe=1';
+      window.history.pushState(null, '', '/probe');
+      window.history.replaceState(null, '', '/probe');
+      expect(callCounts(writes)).toEqual({
+        setItem: 2,
+        removeItem: 1,
+        clear: 1,
+        cookie: 1,
+        pushState: 1,
+        replaceState: 1,
+      });
+      expect(writes.setItem.mock.contexts[0]).toBe(window.localStorage);
+      expect(writes.setItem.mock.contexts[1]).toBe(window.sessionStorage);
+
+      // 対照: console.error の記録は、ページの遷移を実際に捉える。一方、jsdom は遷移を捨てるので URL は変わらず、
+      // 状態の比較だけでは遷移を見られない。遷移を捕まえるのがこの記録だけであることを、ここで確かめる。
+      consoleError.mockImplementation(() => {});
+      window.location.assign('/probe');
+      expect(consoleErrorLines(consoleError), '遷移を求めたときの console.error の記録').toEqual([
+        JSDOM_NAVIGATION_DROPPED,
+      ]);
+      expect(window.location.href, '遷移を求めても URL は変わらない').toBe(before.href);
+      expect(deviceState()).toEqual(before);
+    } finally {
+      // 付けた順の逆に外す。
+      for (const restore of [...restorers].reverse()) {
+        restore();
+      }
+    }
+  });
+});
+
+// --- 表示の一貫性（task 4.3） ---------------------------------------------------------------
+
+/**
+ * 一貫性の検査に使う推移（9/6〜9/13 の 8 日）。「7日」を選ぶと、窓は終点の 9/13 を含めて遡った暦日の 7 日、
+ * つまり 9/7〜9/13 になる。
+ * - 窓の外の点は、9/6 の 1 点だけである。その値は、どの指標でも窓の最初の点（9/7）の値と異なる。表示のどれかを
+ *   窓ではなく推移の全体から作ると、始点の値がずれて見分けられる。
+ * - 選択中の指標（既定の順位）は、末尾の点（9/13）で null である。評価も同じ日に null にした（自店の評価が
+ *   無い日は順位も持たない・Issue #255）。クチコミ数は末尾の点にも値がある。このため、窓の終点（9/13）と、
+ *   順位の値のある最後の日（9/12）が食い違う。現在値を窓の終点から作ると見分けられる（2 つの出どころが
+ *   食い違う fixture を置く規律）。
+ * - 順位は、値のある最初の日と次の日（6 位と 5 位）、値のある最後の日と前の日（3 位と 2 位）で値を変えた。
+ *   1 日ずれた点を読む誤りが、同じ値に隠れないためである。
+ */
+const CONSISTENCY_TREND: StoreDetailResponse['trend'] = [
+  { capturedOn: '2026-09-06', rank: 8, rating: '3.7', reviewCount: 60 },
+  { capturedOn: '2026-09-07', rank: 6, rating: '3.9', reviewCount: 64 },
+  { capturedOn: '2026-09-08', rank: 5, rating: '4.0', reviewCount: 66 },
+  { capturedOn: '2026-09-09', rank: 5, rating: '4.0', reviewCount: 69 },
+  { capturedOn: '2026-09-10', rank: 4, rating: '4.1', reviewCount: 71 },
+  { capturedOn: '2026-09-11', rank: 3, rating: '4.1', reviewCount: 74 },
+  { capturedOn: '2026-09-12', rank: 2, rating: '4.2', reviewCount: 76 },
+  { capturedOn: '2026-09-13', rank: null, rating: null, reviewCount: 79 },
+];
+
+/** 窓の外の点の日付。 */
+const OUTSIDE_DATE = '2026-09-06';
+
+/** 「7日」の窓の日付（リテラル）。公称の始点は先頭、終点は末尾である。 */
+const WINDOW_DATES: readonly string[] = [
+  '2026-09-07',
+  '2026-09-08',
+  '2026-09-09',
+  '2026-09-10',
+  '2026-09-11',
+  '2026-09-12',
+  '2026-09-13',
+];
+
+/** 「7日」の窓の公称の始点と終点を、グラフの説明文の書式（読み上げ用）と figcaption の書式で書いたもの。 */
+const NOMINAL_SPOKEN = { start: '9月7日', end: '9月13日' } as const;
+const NOMINAL_SHORT = '9/7〜9/13';
+
+/**
+ * 一貫性の検査の応答。当日サマリーは無しにする（推移の日付と食い違う当日サマリーを置かないため。グラフの順位の
+ * 軸の下端は、期間内の最大順位で決まる）。
+ */
+const CONSISTENCY_RESPONSE: StoreDetailResponse = { ...RESPONSE, summary: null, trend: CONSISTENCY_TREND };
+
+/** 推移の表の列の位置（日付の列が 0）。列見出しの並び（日付・順位・評価・クチコミ数）と同じである。 */
+const COLUMN = { date: 0, rank: 1, rating: 2, reviewCount: 3 } as const;
+
+/** 値の無いセルの記号（page.tsx の推移の表）。 */
+const NO_VALUE = '—';
+
+interface ValuedRow {
+  readonly date: string;
+  readonly value: string;
+}
+
+/**
+ * 推移の表の行のうち、列に値のある（「—」でない）最初の行と最後の行の、日付とセルの値。値のある行が 1 つも
+ * 無ければ赤にする（照合が空振りしないため）。
+ */
+function valuedEnds(
+  rows: readonly (readonly string[])[],
+  column: number,
+  label: string,
+): { readonly first: ValuedRow; readonly last: ValuedRow } {
+  const valued = rows.flatMap((row) => {
+    const date = row[COLUMN.date];
+    const value = row[column];
+    return date === undefined || value === undefined || value === NO_VALUE ? [] : [{ date, value }];
+  });
+  expect(valued.length, `${label}の列に値のある行`).toBeGreaterThan(0);
+  return { first: valued[0]!, last: valued.at(-1)! };
+}
+
+/** 'YYYY-MM-DD' を、月と日の数に分ける。形式が違えば赤にする。 */
+function monthDayOf(date: string): { readonly month: number; readonly day: number } {
+  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(date);
+  expect(match, `日付の形式: ${date}`).not.toBeNull();
+  return { month: Number(match![1]), day: Number(match![2]) };
+}
+
+/** figcaption の日付の書式（'9/12'）。 */
+function shortDateOf(date: string): string {
+  const { month, day } = monthDayOf(date);
+  return `${month}/${day}`;
+}
+
+/** グラフの説明文の日付の書式（'9月12日'）。figcaption とは書式が違うので、別に作る。 */
+function spokenDateOf(date: string): string {
+  const { month, day } = monthDayOf(date);
+  return `${month}月${day}日`;
+}
+
+/**
+ * 順位のグラフの説明文（describeMetric の文）を、期間の始点と終点・最初と最後の記録・最新の値と日付に分ける。
+ * 文の全体を前後の端まで照合するので、文の形が変わると（分けられないと）赤になる。
+ */
+function parseRankDescription(name: string | null): {
+  readonly start: string;
+  readonly end: string;
+  readonly first: string;
+  readonly last: string;
+  readonly latestValue: string;
+  readonly latestDate: string;
+} {
+  const match =
+    /^順位の推移、(.+?)から(.+?)まで。最初の記録は(.+?)、最後の記録は(.+?)。最高は.+?、最低は.+?。最新は(.+?)（(.+?)）。$/.exec(
+      name ?? '',
+    );
+  expect(match, `グラフの説明文の形: ${name}`).not.toBeNull();
+  const [, start = '', end = '', first = '', last = '', latestValue = '', latestDate = ''] = match!;
+  return { start, end, first, last, latestValue, latestDate };
+}
+
+/**
+ * figcaption の行から、期間の行（「9/7〜9/13」）と現在値の行（「最新 2位（9/12）」）を取り出す。どちらも
+ * ちょうど 1 行であることを確かめる。
+ */
+function parseCaption(lines: readonly string[]): {
+  readonly period: string;
+  readonly currentValue: string;
+  readonly currentDate: string;
+} {
+  const periods = lines.filter((line) => /^\d+\/\d+〜\d+\/\d+$/.test(line));
+  expect(periods, `figcaption の期間の行: ${lines.join(' / ')}`).toHaveLength(1);
+  const currents = lines.flatMap((line) => {
+    const match = /^最新 (.+)（(.+)）$/.exec(line);
+    return match === null ? [] : [{ currentValue: match[1] ?? '', currentDate: match[2] ?? '' }];
+  });
+  expect(currents, `figcaption の現在値の行: ${lines.join(' / ')}`).toHaveLength(1);
+  return { period: periods[0]!, ...currents[0]! };
+}
+
+/**
+ * 一貫性の応答で面を開き、「7日」を選んでから、推移の節の表示を読み取る。
+ * 選択が効いたことと、応答の形（末尾の点で順位が null）が表まで届いていることを先に確かめる。
+ */
+async function readSevenDayConsistencyView(): Promise<TrendView> {
+  await renderPage(CONSISTENCY_RESPONSE);
+  choose('7日');
+  // 対照: 切替が効いている（既定の 30 日のまま読むと、照合が意図しない窓を相手にする）。
+  expectSelected('7日', '順位');
+  const view = readTrendView();
+  expect(view.heading).toBe('直近7日の推移');
+  // 応答の形が表まで届いている: 末尾の行は窓の終点で、その順位のセルは値が無い。
+  expect(view.rows.at(-1)?.[COLUMN.date]).toBe(WINDOW_DATES.at(-1));
+  expect(view.rows.at(-1)?.[COLUMN.rank]).toBe(NO_VALUE);
+  return view;
+}
+
+describe('表示の一貫性（store-detail-trend-dashboard task 4.3・Issue #265）', () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_LIFF_ID = 'test-liff-id';
+    liffMocks.init.mockReset().mockResolvedValue(undefined);
+    liffMocks.isLoggedIn.mockReset().mockReturnValue(true);
+    liffMocks.getIDToken.mockReset().mockReturnValue('test-id-token');
+    liffMocks.login.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    delete process.env.NEXT_PUBLIC_LIFF_ID;
+  });
+
+  it('一貫性の検査の応答と読み取りの補助が、照合の前提を満たす（応答と補助の自己検証）', () => {
+    const dates = CONSISTENCY_TREND.map((point) => point.capturedOn);
+    // 推移は 8 日以上で、窓の外の点はちょうど 1 つ（9/6）。窓の日付は、推移のうち窓の外の点を除いた日付と一致する。
+    expect(dates.length).toBeGreaterThanOrEqual(8);
+    expect(dates.filter((date) => date < WINDOW_DATES[0]!)).toEqual([OUTSIDE_DATE]);
+    expect(dates.filter((date) => date >= WINDOW_DATES[0]!)).toEqual(WINDOW_DATES);
+    // 窓は、終点を含めて遡った暦日の 7 日である（リテラルどうしの照合）。
+    expect(WINDOW_DATES).toHaveLength(7);
+    expect([spokenDateOf(WINDOW_DATES[0]!), spokenDateOf(WINDOW_DATES.at(-1)!)]).toEqual([
+      NOMINAL_SPOKEN.start,
+      NOMINAL_SPOKEN.end,
+    ]);
+    expect(`${shortDateOf(WINDOW_DATES[0]!)}〜${shortDateOf(WINDOW_DATES.at(-1)!)}`).toBe(NOMINAL_SHORT);
+
+    // 選択中の指標（順位）は、末尾の点で null。
+    expect(CONSISTENCY_TREND.at(-1)?.rank).toBeNull();
+    // 窓の最初の点の値は、どの指標でも窓の外の点の値と異なる。
+    const outside = CONSISTENCY_TREND.find((point) => point.capturedOn === OUTSIDE_DATE);
+    const first = CONSISTENCY_TREND.find((point) => point.capturedOn === WINDOW_DATES[0]);
+    expect(outside).toBeDefined();
+    expect(first).toBeDefined();
+    expect(first!.rank).not.toBe(outside!.rank);
+    expect(first!.rating).not.toBe(outside!.rating);
+    expect(first!.reviewCount).not.toBe(outside!.reviewCount);
+
+    // 読み取りの補助の自己検証（既知の表示から、既知の部分を取り出せる）。
+    expect(parseRankDescription(VIEW_7_DAYS_RANK.chartName)).toEqual({
+      start: '8月25日',
+      end: '8月31日',
+      first: '4位',
+      last: '2位',
+      latestValue: '2位',
+      latestDate: '8月31日',
+    });
+    expect(parseCaption(VIEW_7_DAYS_RANK.caption)).toEqual({
+      period: '8/25〜8/31',
+      currentValue: '2位',
+      currentDate: '8/31',
+    });
+    // 値のある行の最後は、「—」の行を飛ばした行になる。
+    expect(
+      valuedEnds(
+        [
+          ['2026-09-11', '3', '4.1', '74'],
+          ['2026-09-12', '2', '4.2', '76'],
+          ['2026-09-13', NO_VALUE, NO_VALUE, '79'],
+        ],
+        COLUMN.rank,
+        '順位',
+      ),
+    ).toEqual({ first: { date: '2026-09-11', value: '3' }, last: { date: '2026-09-12', value: '2' } });
+    expect(shortDateOf('2026-09-07')).toBe('9/7');
+    expect(spokenDateOf('2026-09-07')).toBe('9月7日');
+  });
+
+  it('照合 1（表）: 表の行の日付の集合が、窓の日付の集合と一致する（要件 3.1・3.2）', async () => {
+    const view = await readSevenDayConsistencyView();
+
+    const dates = view.rows.map((row) => row[COLUMN.date]);
+    expect(dates, '表の行の数').toHaveLength(WINDOW_DATES.length);
+    expect(new Set(dates), '表の行の日付の集合').toEqual(new Set(WINDOW_DATES));
+  });
+
+  it('照合 2（要約）: 要約の始点と終点が、表の値のある最初と最後の行と一致する（要件 3.1・3.4）', async () => {
+    const view = await readSevenDayConsistencyView();
+
+    const rank = valuedEnds(view.rows, COLUMN.rank, '順位');
+    const rating = valuedEnds(view.rows, COLUMN.rating, '評価');
+    const reviewCount = valuedEnds(view.rows, COLUMN.reviewCount, 'クチコミ数');
+    // 順位と評価は、末尾の行（値なし）を飛ばした行が終点になる。クチコミ数は末尾の行が終点になる。
+    expect([rank.last.date, rating.last.date, reviewCount.last.date]).toEqual([
+      '2026-09-12',
+      '2026-09-12',
+      '2026-09-13',
+    ]);
+    const reviewCountDiff = Number(reviewCount.last.value) - Number(reviewCount.first.value);
+    expect(view.summary, '要約の 3 組').toEqual([
+      ['順位', `${rank.first.value}位 → ${rank.last.value}位`],
+      ['評価', `${rating.first.value} → ${rating.last.value}`],
+      ['クチコミ増減', `${reviewCountDiff > 0 ? '+' : ''}${reviewCountDiff}件`],
+    ]);
+  });
+
+  it('照合 3（グラフ）: 説明文と figcaption の期間が公称の始点〜終点と一致し、説明文の始点と終点の値が表の値のある最初と最後の行と一致する（要件 3.1・3.7・5.1）', async () => {
+    const view = await readSevenDayConsistencyView();
+
+    const rank = valuedEnds(view.rows, COLUMN.rank, '順位');
+    const description = parseRankDescription(view.chartName);
+    expect(description.start, '説明文の期間の始点').toBe(NOMINAL_SPOKEN.start);
+    expect(description.end, '説明文の期間の終点').toBe(NOMINAL_SPOKEN.end);
+    expect(parseCaption(view.caption).period, 'figcaption の期間').toBe(NOMINAL_SHORT);
+    expect(description.first, '説明文の最初の記録').toBe(`${rank.first.value}位`);
+    expect(description.last, '説明文の最後の記録').toBe(`${rank.last.value}位`);
+  });
+
+  it('照合 4（現在値）: 現在値が、表の値のある最後の行の値と日付に一致する（要件 3.1・3.6）', async () => {
+    const view = await readSevenDayConsistencyView();
+
+    const rank = valuedEnds(view.rows, COLUMN.rank, '順位');
+    const caption = parseCaption(view.caption);
+    expect(caption.currentValue, '現在値').toBe(`${rank.last.value}位`);
+    expect(caption.currentDate, '現在値の日付').toBe(shortDateOf(rank.last.date));
+    // グラフの説明文が読み上げる現在値も、同じ行を指す。
+    const description = parseRankDescription(view.chartName);
+    expect(description.latestValue, '説明文の現在値').toBe(`${rank.last.value}位`);
+    expect(description.latestDate, '説明文の現在値の日付').toBe(spokenDateOf(rank.last.date));
   });
 });
