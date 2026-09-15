@@ -129,8 +129,10 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（競合なし）', 35.6, 139.6, $3, 'confirmed')`,
 		nocompStoreID, nocompOwnerID, "cross-runtime-nocomp-self")
 
-	// readyStore: 競合2件を事前固定（extraction をバイパスし、決定的な place_id を確保する）。
-	var comp1ID, comp2ID string
+	// readyStore: 競合3件を事前固定（extraction をバイパスし、決定的な place_id を確保する）。
+	// 3件目は Google の評価が無い店（クチコミ 0 件・Issue #255）で、比較集合に入らず jsonb に null で
+	// 書かれることを、TS の配信（Flex）と詳細画面の読込が「評価なし」として扱う契約を検証する。
+	var comp1ID, comp2ID, comp3ID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO competitors (store_id, place_id, name, latitude, longitude, active)
 		VALUES ($1, $2, $3, 35.5001, 139.5001, true) RETURNING id
@@ -143,6 +145,12 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	`, readyStoreID, "cross-runtime-ready-comp-2", "競合ニ").Scan(&comp2ID); err != nil {
 		t.Fatalf("seed competitor 2: %v", err)
 	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO competitors (store_id, place_id, name, latitude, longitude, active)
+		VALUES ($1, $2, $3, 35.5003, 139.5003, true) RETURNING id
+	`, readyStoreID, "cross-runtime-ready-comp-3", "競合サン").Scan(&comp3ID); err != nil {
+		t.Fatalf("seed competitor 3: %v", err)
+	}
 
 	now := time.Date(2026, 7, 12, 6, 0, 0, 0, jst)
 	today := jstDateAsUTC(now)
@@ -151,7 +159,7 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	// 前日スナップショット（自店のみ）を用意し、new_review_count/rating_prev/review_count_prev/
 	// rank_prev の各非NULL分岐（R3.7 の「前日ありのとき値を返す」側）を実データで通す。
 	if err := repo.WriteSelfSnapshot(ctx, pool, readyStoreID, repo.SnapshotWrite{
-		PlaceID: "cross-runtime-ready-self", CapturedOn: yesterday, Rating: 4.0, ReviewCount: 90, Rank: 1,
+		PlaceID: "cross-runtime-ready-self", CapturedOn: yesterday, Rating: f64(4.0), ReviewCount: 90, Rank: intPtr(1),
 	}); err != nil {
 		t.Fatalf("seed yesterday self snapshot: %v", err)
 	}
@@ -172,6 +180,7 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	)
 	server.details["cross-runtime-ready-comp-1"] = operational(4.0, 50, "競合イチ")
 	server.details["cross-runtime-ready-comp-2"] = operational(3.8, 40, "競合ニ")
+	server.details["cross-runtime-ready-comp-3"] = unrated("競合サン")
 	server.details["cross-runtime-nocomp-self"] = operational(3.5, 10, "クロスランタイム店舗（競合なし）")
 
 	deps := newDeps(t, pool, server, now)
@@ -203,7 +212,7 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		t.Errorf("readyStore status = %q, want ready", status)
 	}
 	if rank != 1 || rankTotal != 3 {
-		t.Errorf("readyStore rank/total = %d/%d, want 1/3 (self 4.5 > comp1 4.0 > comp2 3.8)", rank, rankTotal)
+		t.Errorf("readyStore rank/total = %d/%d, want 1/3 (self 4.5 > comp1 4.0 > comp2 3.8; the unrated comp3 is not counted)", rank, rankTotal)
 	}
 	if rankPrev != 1 {
 		t.Errorf("readyStore rank_prev = %d, want 1 (self alone yesterday)", rankPrev)
@@ -227,7 +236,33 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	t.Logf("readyStore new_reviews raw JSON: %s", newReviewsJSON)
 	t.Logf("readyStore competitors raw JSON: %s", competitorsJSON)
 	if len(competitorsJSON) == 0 || string(competitorsJSON) == "[]" {
-		t.Fatalf("readyStore competitors is empty, want 2 entries; got %s", competitorsJSON)
+		t.Fatalf("readyStore competitors is empty, want 3 entries; got %s", competitorsJSON)
+	}
+
+	// 評価の無い競合（Issue #255）: 評価のある競合の後ろに並び、rating・starDiff は JSON の null
+	// （キーは省かない）。スナップショットも rating・rank とも NULL。TS 側がこの行を「評価なし」と描く。
+	var nComp int
+	var comp3Name, comp3RatingType, comp3StarDiffType string
+	if err := pool.QueryRow(ctx, `
+		SELECT jsonb_array_length(competitors), competitors->2->>'name',
+		       jsonb_typeof(competitors->2->'rating'), jsonb_typeof(competitors->2->'starDiff')
+		FROM daily_summaries WHERE store_id = $1 AND summary_date = $2
+	`, readyStoreID, today).Scan(&nComp, &comp3Name, &comp3RatingType, &comp3StarDiffType); err != nil {
+		t.Fatalf("select readyStore unrated competitor: %v", err)
+	}
+	if nComp != 3 || comp3Name != "競合サン" || comp3RatingType != "null" || comp3StarDiffType != "null" {
+		t.Errorf("readyStore competitors[2] = {len=%d name=%s rating=%s starDiff=%s}, want {3 競合サン null null}",
+			nComp, comp3Name, comp3RatingType, comp3StarDiffType)
+	}
+	var comp3RatingNull, comp3RankNull bool
+	if err := pool.QueryRow(ctx, `
+		SELECT rating IS NULL, rank IS NULL FROM rating_snapshots
+		WHERE store_id = $1 AND competitor_id = $2 AND captured_on = $3
+	`, readyStoreID, comp3ID, today).Scan(&comp3RatingNull, &comp3RankNull); err != nil {
+		t.Fatalf("select unrated competitor snapshot: %v", err)
+	}
+	if !comp3RatingNull || !comp3RankNull {
+		t.Errorf("unrated competitor snapshot rating IS NULL=%v rank IS NULL=%v, want true/true", comp3RatingNull, comp3RankNull)
 	}
 
 	// --- nocompStore: 0件競合 → status='no_competitors'・competitors=[] の実データ検証（R1.3）---

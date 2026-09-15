@@ -74,12 +74,17 @@ jobs:
         # 面を開く手順が spec 側にあると同じ前提が複写され、片側だけが古びる。実際 PR #191 では
         # ui-foundation.spec.ts の 26 箇所のうち 10 箇所が fixtures と同じ assert を重複して持っていた。
         run: bash scripts/check-e2e-goto-ownership.sh
-      - name: 'E2E storeId 整合ガード（Issue #53・種／既定／注入／計測の 4 役割）'
+      - name: 'E2E storeId 整合ガード（Issue #53 / #264・種／既定／注入／計測の 4 役割と、測った画面の確認の配線）'
         # E2E の確定店舗 storeId は役割の違う 4 箇所に現れる（seed.sql・fixtures の既定値・
-        # 本ファイルの E2E_STORE_ID・lighthouserc.json の URL）。**ずれても CI は緑を返しうる。**
-        # とくに lighthouserc.json のずれは、存在しない店舗の 1 段落だけの面を測ることになり、
-        # LCP も accessibility も緑を返す（別の面を測ったまま両方の assert が通る）。
+        # 本ファイルの E2E_STORE_ID・lighthouserc.json の URL）。ずれると、別の面を測ったまま
+        # assert が通りうる。とくに lighthouserc.json のずれは、存在しない店舗の 1 段落だけの面を
+        # 測ることになり、lhci の LCP も accessibility も緑を返す。下の lighthouse ジョブの
+        # 「測った画面の確認」も赤くなるが、あちらは画面が違うとしか言えない。原因（storeId のずれ）を
+        # 名指しするのはこのガードである。
         # 既定値の宣言が 1 箇所であることも併せて要求する（複写は env が渡る限り観測できない）。
+        # さらに、その「測った画面の確認」（perf/verify-lhr.mjs）を lighthouse ジョブとローカルの
+        # 実行装置が同じ形で呼んでいることも見る（Issue #264）。呼び出しが消えても lhci は合格し
+        # 続けるので、配線はここで固定しないと誰も気づけない。
         run: bash scripts/check-e2e-store-id-consistency.sh
       - name: 'デザイントークンガード（Issue #41・直書き色の混入検出と theme.css 同値照合）'
         # 色の単一情報源（ts/packages/design-tokens）を迂回する直書き hex を検出し、
@@ -520,6 +525,22 @@ jobs:
         # （生成は /api/responses のクライアント操作のみ）ため Gemini モックは不要。
         # npx --yes は実行時に lhci をレジストリ取得するため、ここに --import mock を被せると npm が壊れる。
         run: npx --yes @lhci/cli@0.15.x autorun --config=perf/lighthouserc.json
+      # name は引用する（" #" 以降が YAML のコメントとして捨てられるため）。
+      - name: '測った画面が seed の店舗の回答画面であることの確認（Issue #264）'
+        working-directory: ts/apps/survey-web
+        # 上の lhci の判定（LCP・accessibility）は、店舗が見つからない 1 段落の画面
+        # （「このアンケートは現在ご利用いただけません。」）を測っても合格する。LCP は速く、a11y も
+        # 満点になるためである（実測: seed を外すと 3 回とも合格し、assertion-results.json は空だった）。
+        # storeId が 4 箇所で一致していても、seed の投入の失敗・店舗の状態を変える migration・
+        # 画面側の分岐の変更で、この形になる。
+        #
+        # そこで lhci が残した .lighthouseci/lhr-*.json を読み、件数・URL・LCP 要素（店名）・
+        # 回答フォームの a11y 監査が評価されたことを確かめる。判定の正典は perf/lhr-verification.mjs で、
+        # ローカルの実行装置（scripts/run-e2e-local.sh の lighthouse 層）も同じ perf/verify-lhr.mjs を呼ぶ。
+        # **この行は引数なしの 1 行のまま保つ。** continue-on-error や if: を付けたり、別のジョブへ
+        # 移したりすると scripts/check-e2e-store-id-consistency.sh が赤になる（配線が消えると、
+        # この穴は緑のまま静かに開き直るため）。
+        run: node perf/verify-lhr.mjs
 
   docker-build:
     # Issue #33/#35 再発防止: Dockerfile の腐敗（pnpm workspace 追従漏れ等）が deploy-prod で

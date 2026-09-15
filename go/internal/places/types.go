@@ -34,8 +34,11 @@ type Review struct {
 }
 
 // SelfMetrics は自店用フィールドマスク（rating,userRatingCount,businessStatus,reviews）の取得結果。
+//
+// Rating は Google の星評価（1.0〜5.0）。クチコミ 0 件の店は応答に rating を持たないので nil になる
+// （Issue #255）。0 などの数値で代替しない（取得時点の生値を加工しない・design.md Postconditions）。
 type SelfMetrics struct {
-	Rating          float64
+	Rating          *float64
 	UserRatingCount int
 	BusinessStatus  string
 	Reviews         []Review
@@ -43,9 +46,11 @@ type SelfMetrics struct {
 
 // CompetitorMetrics は競合用フィールドマスク（rating,userRatingCount,businessStatus,displayName）の取得結果。
 // reviews を含まないため Enterprise（Atmosphere 無し）SKU に収まる（research.md コスト分離の根拠）。
+//
+// Rating の nil の意味は SelfMetrics と同じ（評価の無い店）。
 type CompetitorMetrics struct {
 	DisplayName     string
-	Rating          float64
+	Rating          *float64
 	UserRatingCount int
 	BusinessStatus  string
 }
@@ -101,8 +106,12 @@ type nearbyPlaceDTO struct {
 
 // placeDetailsResponse は GET places/{id} のレスポンスボディ（自店・競合共通の受け皿。
 // フィールドマスクにより実際に埋まるフィールドは呼出ごとに異なる）。
+//
+// Places API (New) の応答は proto3 の JSON で、クチコミ 0 件の店は rating を含まない。rating を
+// float64 で受けるとゼロ値 0 に化け、評価の無い店が「★0」として最下位に数えられる（Issue #255）
+// ので、ポインタで受けて欠落を nil のまま保つ。userRatingCount の欠落は 0 件の意味どおり 0 でよい。
 type placeDetailsResponse struct {
-	Rating          float64        `json:"rating"`
+	Rating          *float64       `json:"rating"`
 	UserRatingCount int            `json:"userRatingCount"`
 	BusinessStatus  string         `json:"businessStatus"`
 	DisplayName     displayNameDTO `json:"displayName"`

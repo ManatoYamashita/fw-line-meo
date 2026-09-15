@@ -82,6 +82,15 @@ function respondJson(res: ServerResponse, status: number, body: unknown, headers
   res.end(JSON.stringify(body));
 }
 
+/** 送信本文の JSON から Flex の text をすべて集める（構造に依存しない検査用）。 */
+function collectFlexTexts(node: unknown): string[] {
+  if (node === null || typeof node !== 'object') return [];
+  if (Array.isArray(node)) return node.flatMap(collectFlexTexts);
+  const obj = node as Record<string, unknown>;
+  const own = obj['type'] === 'text' && typeof obj['text'] === 'string' ? [obj['text']] : [];
+  return [...own, ...Object.values(obj).flatMap(collectFlexTexts)];
+}
+
 // CROSS_RUNTIME_GO_SEEDED 未設定時は前提データ（Go 側書込み）が無いため無条件 skip する。
 const goSideRan = process.env.CROSS_RUNTIME_GO_SEEDED === '1';
 
@@ -144,10 +153,10 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
       // JSONB の中にネストされた数値フィールドにも誤って適用したものだった。JSONB 内の数値は
       // pg 側ではなく Go の encoding/json → jsonb パーサ経由であり、この規約は適用されない
       // （実際には JS number のまま）。型注釈と実行時の値が食い違っていた。
-      expect(summary.competitors).toHaveLength(2);
-      const [comp1, comp2] = summary.competitors;
-      if (comp1 === undefined || comp2 === undefined) {
-        throw new Error('expected 2 competitors');
+      expect(summary.competitors).toHaveLength(3);
+      const [comp1, comp2, comp3] = summary.competitors;
+      if (comp1 === undefined || comp2 === undefined || comp3 === undefined) {
+        throw new Error('expected 3 competitors');
       }
       expect(typeof comp1.rating).toBe('number');
       expect(typeof comp1.starDiff).toBe('number');
@@ -159,6 +168,11 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
       expect(comp1.starDiff).toBeCloseTo(0.5, 5); // 自店4.5 - 競合4.0
       expect(comp2.name).toBe('競合ニ');
       expect(comp2.starDiff).toBeCloseTo(0.7, 5); // 自店4.5 - 競合3.8
+
+      // Issue #255: Google の評価が無い競合（クチコミ 0 件）は比較集合に入らず（rank_total は 3 のまま）、
+      // 評価のある競合の後ろに並ぶ。rating・starDiff はキーを持ったまま JSON の null（0 ではない）。
+      expect(comp3).toEqual({ name: '競合サン', rating: null, reviewCount: 0, starDiff: null });
+      expect(Object.keys(comp3).sort()).toEqual(['name', 'rating', 'reviewCount', 'starDiff']);
 
       expect(summary.new_reviews.length).toBeGreaterThanOrEqual(1);
       const review = summary.new_reviews[0];
@@ -244,6 +258,20 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
         .filter((r) => r.url === '/v2/bot/message/push')
         .map((r) => (JSON.parse(r.body) as { to: string }).to);
       expect(pushedTo).toContain(READY_LINE_USER_ID);
+
+      // Issue #255: Go が null で書いた評価の無い競合を、実際に送った Flex が「評価なし」と描き、
+      // 順位に含めていない旨を添える。「★0」は 1 箇所も出さない。母数は評価のある 3 店。
+      const readyPush = server.requests.find(
+        (r) => r.url === '/v2/bot/message/push' && (JSON.parse(r.body) as { to: string }).to === READY_LINE_USER_ID,
+      );
+      if (readyPush === undefined) {
+        throw new Error('readyStore push request not found');
+      }
+      const flexTexts = collectFlexTexts(JSON.parse(readyPush.body));
+      expect(flexTexts).toContain('近隣3店中 1位');
+      expect(flexTexts).toContain('評価なし');
+      expect(flexTexts).toContain('評価のない店は順位に含めていません');
+      expect(flexTexts.some((text) => text.includes('★0'))).toBe(false);
 
       // --- nocompStore（status='no_competitors'・competitors=[]）も同様に delivered すること
       // （R1.3: 競合0件でも自店のみのサマリーを配信する。flex.ts の buildCompetitorsSection が

@@ -65,12 +65,13 @@ export const DETAIL_RESPONSE = {
       },
     ],
   },
+  // 星差は「自店 − 競合」（自店 4.3 に対して 4.5 の店は -0.2）。
   competitors: [
-    { name: '近隣の競合店舗としては最も名前の長いケース 丸の内本店', rating: 4.5, reviewCount: 2310, starDiff: 0.2 },
-    { name: '喫茶店 B', rating: 4.1, reviewCount: 880, starDiff: -0.2 },
-    { name: '喫茶店 C', rating: 4.0, reviewCount: 655, starDiff: -0.3 },
-    { name: '喫茶店 D', rating: 3.8, reviewCount: 431, starDiff: -0.5 },
-    { name: '喫茶店 E', rating: 3.6, reviewCount: 210, starDiff: -0.7 },
+    { name: '近隣の競合店舗としては最も名前の長いケース 丸の内本店', rating: 4.5, reviewCount: 2310, starDiff: -0.2 },
+    { name: '喫茶店 B', rating: 4.1, reviewCount: 880, starDiff: 0.2 },
+    { name: '喫茶店 C', rating: 4.0, reviewCount: 655, starDiff: 0.3 },
+    { name: '喫茶店 D', rating: 3.8, reviewCount: 431, starDiff: 0.5 },
+    { name: '喫茶店 E', rating: 3.6, reviewCount: 210, starDiff: 0.7 },
   ],
   // 保持窓の上限（直近 30 日）。行数が最大のときに測る。
   trend: trendPoints(30),

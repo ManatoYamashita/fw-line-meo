@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// E2E は CI 実行を前提（ローカルは `playwright test --list` のサニティのみ）。
-// webServer・DB・Gemini モック（NODE_OPTIONS=--import e2e/mock-gemini.mjs）は CI が env で供給する。
+// 客向けフローの E2E。DB・seed・Gemini モック（NODE_OPTIONS=--import e2e/mock-gemini.mjs）は
+// 外から env で供給する。CI は ts-ci の e2e ジョブ、ローカルは `bash scripts/run-e2e-local.sh --only survey`
+// が用意して流す（Issue #257）。**このディレクトリで `playwright test` を素で打たないこと。**
+// .env.local（gitignore 済み）の開発用 DB と実の Gemini キーで動いてしまう。
 // 外部で起動済みなら E2E_BASE_URL を指定して webServer を無効化できる。
 export default defineConfig({
   testDir: './e2e',

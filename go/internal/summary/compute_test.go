@@ -5,76 +5,123 @@ import (
 	"time"
 )
 
-// --- Rank ---
+// --- RankAll ---
 
-func TestRank_TieBreaksByReviewCountDescending(t *testing.T) {
-	// 星評価が同率の場合、クチコミ総数の降順で決着する（R2.4）。
-	self := Metrics{Rating: 4.0, ReviewCount: 50}
-	competitors := []Metrics{
-		{Rating: 4.0, ReviewCount: 100}, // 同率星・クチコミ数多い → 自店より上位
-		{Rating: 4.0, ReviewCount: 30},  // 同率星・クチコミ数少ない → 自店より下位
-		{Rating: 3.5, ReviewCount: 999}, // 星が低い → クチコミ数に関わらず自店より下位
-	}
+func rated(v float64, reviewCount int) Metrics { return Metrics{Rating: &v, ReviewCount: reviewCount} }
 
-	rank, total := Rank(self, competitors)
+func unratedMetrics() Metrics { return Metrics{ReviewCount: 0} }
 
-	if total != 4 {
-		t.Fatalf("total = %d, want 4", total)
+func intOrNil(v *int) any {
+	if v == nil {
+		return nil
 	}
-	// 並び: competitor(4.0,100) > self(4.0,50) > competitor(4.0,30) > competitor(3.5,999)
-	if rank != 2 {
-		t.Fatalf("rank = %d, want 2", rank)
-	}
+	return *v
 }
 
-func TestRank_ExactTieDoesNotDemoteSelf(t *testing.T) {
-	// 星評価・クチコミ総数の両方が同率の場合、安定ソートにより自店を競合より
-	// 下位に置かない（design.md Invariant）。
-	self := Metrics{Rating: 4.2, ReviewCount: 80}
-	competitors := []Metrics{
-		{Rating: 4.2, ReviewCount: 80}, // 完全同率
-		{Rating: 4.2, ReviewCount: 80}, // 完全同率（複数）
+func TestRankAll(t *testing.T) {
+	zero := 0.0
+	cases := []struct {
+		name            string
+		self            Metrics
+		competitors     []Metrics
+		wantSelfRank    any // int か nil
+		wantTotal       int
+		wantCompetitors []any
+	}{
+		{
+			// 星評価が同率の場合、クチコミ総数の降順で決着する（R2.4）。
+			// 並び: competitor(4.0,100) > self(4.0,50) > competitor(4.0,30) > competitor(3.5,999)
+			name:            "同率はクチコミ総数の降順で決着する",
+			self:            rated(4.0, 50),
+			competitors:     []Metrics{rated(4.0, 100), rated(4.0, 30), rated(3.5, 999)},
+			wantSelfRank:    2,
+			wantTotal:       4,
+			wantCompetitors: []any{1, 3, 4},
+		},
+		{
+			// 星評価・クチコミ総数の両方が同率の場合、安定ソートにより自店を競合より下位に置かない
+			// （design.md Invariant）。
+			name:            "完全同率でも自店を下位に置かない",
+			self:            rated(4.2, 80),
+			competitors:     []Metrics{rated(4.2, 80), rated(4.2, 80)},
+			wantSelfRank:    1,
+			wantTotal:       3,
+			wantCompetitors: []any{2, 3},
+		},
+		{
+			// 競合0件（R1.3）: 自店のみで rank=1, total=1。
+			name:            "競合なしは自店のみで 1 店中 1 位",
+			self:            rated(3.8, 12),
+			competitors:     nil,
+			wantSelfRank:    1,
+			wantTotal:       1,
+			wantCompetitors: []any{},
+		},
+		{
+			name:            "自店が最下位",
+			self:            rated(2.0, 5),
+			competitors:     []Metrics{rated(4.5, 10), rated(4.0, 10), rated(3.0, 10)},
+			wantSelfRank:    4,
+			wantTotal:       4,
+			wantCompetitors: []any{1, 2, 3},
+		},
+		{
+			// Issue #255: 評価の無い競合は比較集合に入らず、順位も母数も持たない（R2.9）。
+			// 最下位に数えると「近隣 N 店中」の N が水増しされる。
+			name:            "評価の無い競合は比較集合に入らない",
+			self:            rated(4.3, 50),
+			competitors:     []Metrics{rated(4.5, 100), unratedMetrics(), rated(4.0, 30)},
+			wantSelfRank:    2,
+			wantTotal:       3,
+			wantCompetitors: []any{1, nil, 3},
+		},
+		{
+			// 自店に評価が無い日は順位を持たない。評価のある競合どうしの順位と母数は付ける。
+			name:            "自店が評価なしなら自店の順位は無い",
+			self:            unratedMetrics(),
+			competitors:     []Metrics{rated(4.0, 30), rated(4.5, 100)},
+			wantSelfRank:    nil,
+			wantTotal:       2,
+			wantCompetitors: []any{2, 1},
+		},
+		{
+			// 全競合が評価なしなら、評価のある店は自店だけ（1 店中 1 位）。
+			name:            "全競合が評価なしなら 1 店中 1 位",
+			self:            rated(3.9, 20),
+			competitors:     []Metrics{unratedMetrics(), unratedMetrics()},
+			wantSelfRank:    1,
+			wantTotal:       1,
+			wantCompetitors: []any{nil, nil},
+		},
+		{
+			// 旧コードがゼロ値 0 で書いたスナップショット（前日の値として再適用される）も評価なしとして扱う。
+			name:            "評価 0 は評価の定義域の外なので評価なし",
+			self:            rated(4.0, 10),
+			competitors:     []Metrics{{Rating: &zero, ReviewCount: 0}, rated(3.0, 5)},
+			wantSelfRank:    1,
+			wantTotal:       2,
+			wantCompetitors: []any{nil, 2},
+		},
 	}
 
-	rank, total := Rank(self, competitors)
-
-	if total != 3 {
-		t.Fatalf("total = %d, want 3", total)
-	}
-	if rank != 1 {
-		t.Fatalf("rank = %d, want 1 (self must not be demoted on exact ties)", rank)
-	}
-}
-
-func TestRank_SelfOnlyWhenNoCompetitors(t *testing.T) {
-	// 競合0件（R1.3）: 自店のみで rank=1, total=1。
-	self := Metrics{Rating: 3.8, ReviewCount: 12}
-
-	rank, total := Rank(self, nil)
-
-	if rank != 1 {
-		t.Fatalf("rank = %d, want 1", rank)
-	}
-	if total != 1 {
-		t.Fatalf("total = %d, want 1", total)
-	}
-}
-
-func TestRank_SelfLastPlace(t *testing.T) {
-	self := Metrics{Rating: 2.0, ReviewCount: 5}
-	competitors := []Metrics{
-		{Rating: 4.5, ReviewCount: 10},
-		{Rating: 4.0, ReviewCount: 10},
-		{Rating: 3.0, ReviewCount: 10},
-	}
-
-	rank, total := Rank(self, competitors)
-
-	if total != 4 {
-		t.Fatalf("total = %d, want 4", total)
-	}
-	if rank != 4 {
-		t.Fatalf("rank = %d, want 4", rank)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RankAll(tc.self, tc.competitors)
+			if intOrNil(got.SelfRank) != tc.wantSelfRank {
+				t.Errorf("SelfRank = %v, want %v", intOrNil(got.SelfRank), tc.wantSelfRank)
+			}
+			if got.Total != tc.wantTotal {
+				t.Errorf("Total = %d, want %d", got.Total, tc.wantTotal)
+			}
+			if len(got.CompetitorRanks) != len(tc.wantCompetitors) {
+				t.Fatalf("CompetitorRanks len = %d, want %d", len(got.CompetitorRanks), len(tc.wantCompetitors))
+			}
+			for i, want := range tc.wantCompetitors {
+				if intOrNil(got.CompetitorRanks[i]) != want {
+					t.Errorf("CompetitorRanks[%d] = %v, want %v", i, intOrNil(got.CompetitorRanks[i]), want)
+				}
+			}
+		})
 	}
 }
 
@@ -82,7 +129,7 @@ func TestRank_SelfLastPlace(t *testing.T) {
 
 func TestDiff_NoYesterdayRecordOmitsComparison(t *testing.T) {
 	// 前日レコードが無い場合（初回配信等）、各 *Prev は nil（R3.7）。
-	today := Metrics{Rating: 4.0, ReviewCount: 20}
+	today := rated(4.0, 20)
 
 	diff := Diff(today, nil)
 
@@ -95,16 +142,36 @@ func TestDiff_NoYesterdayRecordOmitsComparison(t *testing.T) {
 }
 
 func TestDiff_WithYesterdayRecordReturnsPrevValues(t *testing.T) {
-	today := Metrics{Rating: 4.2, ReviewCount: 25}
-	yesterday := &Metrics{Rating: 4.0, ReviewCount: 20}
+	today := rated(4.2, 25)
+	yesterday := rated(4.0, 20)
 
-	diff := Diff(today, yesterday)
+	diff := Diff(today, &yesterday)
 
 	if diff.RatingPrev == nil || *diff.RatingPrev != 4.0 {
 		t.Fatalf("RatingPrev = %v, want 4.0", diff.RatingPrev)
 	}
 	if diff.ReviewCountPrev == nil || *diff.ReviewCountPrev != 20 {
 		t.Fatalf("ReviewCountPrev = %v, want 20", diff.ReviewCountPrev)
+	}
+	// 呼出元の値とポインタを共有しない（前日の値を後から書き換えても結果が変わらない）。
+	*yesterday.Rating = 1.0
+	if *diff.RatingPrev != 4.0 {
+		t.Fatalf("RatingPrev shares the caller's pointer: got %v after mutating the input", *diff.RatingPrev)
+	}
+}
+
+func TestDiff_UnratedYesterdayKeepsReviewCountOnly(t *testing.T) {
+	// Issue #255: 前日の自店が評価なし（クチコミ 0 件）なら、評価の前日値は無いが件数の前日値は残す
+	// （0 件→1 件の日の新着件数を失わないため）。旧コードのゼロ値 0 も評価なしとして読む。
+	zero := 0.0
+	for _, yesterday := range []Metrics{unratedMetrics(), {Rating: &zero, ReviewCount: 0}} {
+		diff := Diff(rated(5.0, 1), &yesterday)
+		if diff.RatingPrev != nil {
+			t.Errorf("RatingPrev = %v, want nil", *diff.RatingPrev)
+		}
+		if diff.ReviewCountPrev == nil || *diff.ReviewCountPrev != 0 {
+			t.Errorf("ReviewCountPrev = %v, want 0", diff.ReviewCountPrev)
+		}
 	}
 }
 

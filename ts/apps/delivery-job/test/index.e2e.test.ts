@@ -15,6 +15,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { closePool, getPool } from '@fwlm/db';
+import type { DailySummaryCompetitor } from '@fwlm/db';
 import { LineClient } from '../src/line.js';
 import { runDeliveryJob } from '../src/index.js';
 
@@ -97,13 +98,16 @@ const lineUserId = (ownerId: string): string => `U-${ownerId}`;
 
 /** 30KB 超の Flex Bubble を確実に作らせるための異常肥大化 competitors（buildDailySummaryFlex の
  * FlexBubbleTooLargeError を実データで誘発する。5件上限は Go 抽出パイプラインのアプリ制約であり
- * DB・flex.ts 自体には無いため、直接大量件数を書き込める）。 */
+ * DB・flex.ts 自体には無いため、直接大量件数を書き込める）。
+ *
+ * 要素の形は Go が実際に書く形（rating・starDiff は JSON の数値）に揃え、型注釈で固定する。
+ * 以前は文字列で書いており、30KB 超過ではなく TypeError で失敗していた（Issue #255）。 */
 function oversizedCompetitorsJson(): string {
-  const competitors = Array.from({ length: 400 }, (_, i) => ({
+  const competitors: DailySummaryCompetitor[] = Array.from({ length: 400 }, (_, i) => ({
     name: `競合ストア番号${i}のとても長い名称サンプルテキストです`,
-    rating: '4.2',
+    rating: 4.2,
     reviewCount: 50,
-    starDiff: '0.3',
+    starDiff: 0.3,
   }));
   return JSON.stringify(competitors);
 }
@@ -287,7 +291,10 @@ describe.skipIf(!process.env.DATABASE_URL)('delivery-job index.ts — 一気通�
 
     const flexFail = byStore.get(ST_FLEX_FAIL);
     expect(flexFail?.status).toBe('failed');
-    expect(flexFail?.error_detail).toContain('flex build failed');
+    // 失敗の理由まで固定する。接頭辞だけを見ると、fixture の不整合（例: jsonb の rating を
+    // 文字列で書く）で起きた TypeError も「flex build failed」になり、30KB 超過の経路を
+    // 一度も通らないまま緑になる（Issue #255 で実際にそうなっていた）。
+    expect(flexFail?.error_detail).toMatch(/^flex build failed: Flex bubble size \d+ bytes exceeds limit 30720 bytes$/);
     expect(flexFail?.delivered_at).toBeNull();
 
     const quota = byStore.get(ST_QUOTA);
