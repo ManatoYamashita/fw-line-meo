@@ -15,7 +15,7 @@ import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-tex
 // 前提: `E2E_STUB_IDP=1` と `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199` を与えて
 // ビルドしたものに対して走らせる（playwright.config.ts の説明）。
 //
-// 捲れる領域の宣言件数は面ごとに異なる。帯を描く 6 面は帯の案内リストで 1 件（task 2.1）、
+// 捲れる領域の宣言件数は面ごとに異なる。帯を描く 7 面は帯の案内リストで 1 件（task 2.1）、
 // 店舗一覧・招待コード・代理店管理・利用者管理はさらに表の容器で 1 件（task 2.3 / 2.4 / 2.5）、
 // 帯も表も持たないログイン画面は 0 件である。**店舗登録は表を持たない**ので帯の 1 件だけである
 // （候補一覧は押しボタンの並びであって表ではない）。
@@ -184,6 +184,22 @@ test('モバイルビューポートの利用者管理で横スクロールが�
   await surfaceByName('利用者管理').open(page);
   // 帯 1 件 + 表 1 件。
   await expectNoHorizontalScroll(page, '利用者管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+// 編集パネルを開いた状態（dashboard-user-edit Req 6.9・Issue #259）。
+test('モバイルビューポートの利用者管理の編集パネルで横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('利用者管理の編集パネル').open(page);
+  // 同じ面の後続状態なので、捲れる領域は帯 1 件 + 表 1 件のまま。パネルは表の捲れる容器の内側へ
+  // 挿入されるので、領域を増やさない。増えればここが赤くなる。
+  //
+  // **この実測が見るのはページ全体のはみ出しだけである。** 容器の内側は免除されるので、
+  // パネルの中身（入力の右端など）が容器の内側で画面外へ溢れても、ここは赤にならない。
+  // パネルの中身の網は、実ブラウザでの観察（dashboard-user-edit tasks 4.2）が受け持つ。
+  await expectNoHorizontalScroll(
+    page,
+    '利用者管理の編集パネル',
+    NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+  );
 });
 
 // 店舗登録は Issue #186 の**最後の 1 面**であり、task 5.2 が `@fwlm/ui` の `Select` へ移して

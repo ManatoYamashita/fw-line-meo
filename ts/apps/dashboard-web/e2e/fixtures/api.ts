@@ -242,7 +242,36 @@ export async function openStoreQrPanel(page: Page): Promise<void> {
 }
 
 /**
- * 管理ダッシュボードの検証対象 7 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
+ * 利用者管理から編集パネルを開き、**パネルが実際に描けている**ことを先に固定する（Issue #259）。
+ *
+ * `goto` は持たない。`openStoreQrPanel` と同じく、開く手順は `openListSurface` に一本化し、
+ * ここは同じ面の中でパネルを開くだけである。
+ *
+ * 対象は `DASHBOARD_USERS[1]`（代理店・無効化済み）。代理店ロールなので所属代理店の選択が加わり、
+ * パネルが最も横に広い状態になる。編集ボタンは**完全一致の名前**で押す。部分一致にすると、
+ * 名前が前方で重なる利用者を fixture へ足したときに、別の行のパネルを黙って開きうる。
+ *
+ * 前提 assert はパネルにしか無い要素（level 2 の見出し・保存ボタン）で置く。一覧にもある要素で
+ * 置くと、押下が効かずパネルが開かなかった状態でも前提が通り、一覧だけを監査して緑を返す。
+ * 所属代理店の選択は、上の「最も横に広い状態」の前提を固定する。代理店一覧の取得が失敗すると
+ * パネルはロールと所属を固定表示にするため（dashboard-user-edit Req 1.14）、見出しと保存ボタン
+ * だけでは狭い状態へ変わったことを検出できない。登録フォームにも同名の選択があるので、
+ * パネルの置き場所である表の内側に絞って探す。
+ */
+export async function openUserEditPanel(page: Page): Promise<void> {
+  const target = DASHBOARD_USERS[1];
+  await openListSurface(page, '/admin/users', '利用者管理', 3);
+  await page.getByRole('button', { name: `${target.email} を編集`, exact: true }).click();
+  const table = page.getByRole('table');
+  await expect(
+    table.getByRole('heading', { level: 2, name: `${target.email} の編集`, exact: true }),
+  ).toBeVisible();
+  await expect(table.getByRole('combobox', { name: '所属代理店', exact: true })).toBeVisible();
+  await expect(table.getByRole('button', { name: '保存', exact: true })).toBeVisible();
+}
+
+/**
+ * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
  */
 export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   {
@@ -296,6 +325,13 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: async (page) => {
       await openListSurface(page, '/admin/users', '利用者管理', 3);
     },
+  },
+  {
+    // 編集パネルは利用者管理の中で開く後続状態である。一覧の URL だけを監査しても、パネルは
+    // 構造的に一度も監査されない（QR パネルと同じ理由で、面として明示する・Issue #259）。
+    where: '利用者管理の編集パネル',
+    knownOverflow: false,
+    open: openUserEditPanel,
   },
   {
     where: '店舗登録',
