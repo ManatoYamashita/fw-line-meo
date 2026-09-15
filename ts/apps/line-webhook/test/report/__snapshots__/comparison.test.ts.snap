@@ -1,0 +1,667 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 比較可能: 評価のない競合を含む 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 近隣4店中 2位（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "adjustMode": "shrink-to-fit",
+          "color": "#333333",
+          "size": "xxl",
+          "text": "近隣4店中 2位",
+          "type": "text",
+          "weight": "bold",
+        },
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "size": "md",
+              "text": "★4.2（クチコミ 120件）",
+              "type": "text",
+              "weight": "bold",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合A",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "★4.5（クチコミ 300件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                    {
+                      "align": "end",
+                      "color": "#666666",
+                      "flex": 0,
+                      "size": "sm",
+                      "text": "星差 -0.3",
+                      "type": "text",
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合B",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "★4.0（クチコミ 80件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                    {
+                      "align": "end",
+                      "color": "#666666",
+                      "flex": 0,
+                      "size": "sm",
+                      "text": "星差 +0.2",
+                      "type": "text",
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合C",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "★3.8（クチコミ 40件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                    {
+                      "align": "end",
+                      "color": "#666666",
+                      "flex": 0,
+                      "size": "sm",
+                      "text": "星差 +0.4",
+                      "type": "text",
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合D",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "評価なし（クチコミ 0件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "評価のない店は順位に含めていません",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 競合なし 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 競合店との比較に使えるデータがありません（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "size": "md",
+              "text": "★4.2（クチコミ 120件）",
+              "type": "text",
+              "weight": "bold",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "size": "sm",
+              "text": "競合店との比較に使えるデータがありません",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 自店が未評価 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: まだ Google の評価が無いため、順位は出せません（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "color": "#333333",
+          "size": "md",
+          "text": "まだ Google の評価が無いため、順位は出せません",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "size": "md",
+              "text": "評価なし（クチコミ 0件）",
+              "type": "text",
+              "weight": "bold",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合A",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "★4.5（クチコミ 300件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合D",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "評価なし（クチコミ 0件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "評価のない店は順位に含めていません",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 評価を持つ競合なし（既存データの評価 0 の競合） 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 競合店との比較に使えるデータがありません（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "自店の評価",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "size": "md",
+              "text": "★4.2（クチコミ 120件）",
+              "type": "text",
+              "weight": "bold",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "contents": [
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "競合との比較",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "size": "sm",
+              "text": "競合店との比較に使えるデータがありません",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験競合D",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "contents": [
+                    {
+                      "color": "#333333",
+                      "flex": 1,
+                      "size": "sm",
+                      "text": "評価なし（クチコミ 0件）",
+                      "type": "text",
+                      "wrap": true,
+                    },
+                  ],
+                  "layout": "horizontal",
+                  "spacing": "sm",
+                  "type": "box",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "color": "#666666",
+              "size": "sm",
+              "text": "評価のない店は順位に含めていません",
+              "type": "text",
+              "wrap": true,
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
