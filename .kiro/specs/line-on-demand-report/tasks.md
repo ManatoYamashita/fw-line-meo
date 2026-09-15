@@ -131,7 +131,7 @@
   - Observable: 既存の会話と境界の試験が新しい振る舞いで緑で、店舗名つきの再試行案内がちょうど 1 回返る試験が緑
   - _Requirements: 2.6, 2.9, 7.4, 7.5_
 
-- [ ] 3.11 レポートの通しの統合試験を実装する
+- [x] 3.11 レポートの通しの統合試験を実装する
   - 署名つきの webhook から DB と偽の Reply までを通し、単一店舗の 3 レポート、複数店舗の選択肢→選択、他のオーナーの店舗 ID の再提示、行なしと取得失敗、代理店経路のオーナー（段階が店名入力待ちのまま確定店舗を持つ）がオンボーディングの案内を受け取らずメニューが張られることを確かめる
   - 1 回のレポート要求の DB 読み出しが、新着と比較で 4 回以内、推移で 5 回以内であることを固定する
   - 2.5 の line-webhook の言語間試験を、Go が書いた行から新着口コミレポートを組み立て、口コミの Google Maps への導線が出るところまで広げる
@@ -364,6 +364,13 @@
 - （3.9→3.10）完了後メニューのリンクと監査記録の処理が、router.ts と conversation.ts の `handleConfirm` で重複している。3.10 で 1 か所に寄せる。router と ReportHandler はリクエストごとに作る（相関 ID のため）
 - （3.10）完了後メニューのリンクと監査記録の処理は、新しい `ts/apps/line-webhook/src/owner/completed-menu.ts` に寄せた（router とオンボーディングの完了の両方が使う）。design.md のファイル構成と依存の向きにこのファイルが無いので、最終検証で追記する
 - （3.10）会話の入口でオーナーを 1 回だけ照会し、店舗特定済みなら（代理店経路で段階が店名入力待ちのままでも）セッションを読む前に振り分け口へ渡す。新着レポートの DB 読み出しは 4 回（オーナー・セッション・店舗・最新の集計）
+- （3.11）design の Performance の「読み出し 4 回・5 回」は SELECT の数で数える（オーナー・セッション・店舗・最新の集計、推移は範囲を 1 回足す）
+  - DB との往復はそれぞれ 1 回多い。`getOrCreateSession` が、何も書かない `INSERT … ON CONFLICT DO NOTHING` を SELECT の前に送るため
+  - `report-flow.db.test.ts` は SELECT の数と往復の列の両方を固定している
+- （3.11→4.x）`report-flow.db.test.ts` の試験用オーナー（接頭辞 c9）は既定の配信時刻 7 時で、07-12・07-13 の ready の行を持ち、後片付けをしない（既存の慣習）
+  - with-test-db は全パッケージで 1 つの DB を共有するので、4.3・4.4 で全店舗を横断して読む配信の試験は 7 時を使わない（既存の配信の試験は 9・10・11・14 時）
+- （3.11）Go の言語間試験はオーナーを `onboarding_status = 'active'` で書くが、本番で `onboarding_status` を書くのは `markOwnerStoreIdentified`（`store_identified`）だけで、代理店の登録も同じ遷移を通る（本番の穴ではない）。そのため言語間試験のレポートは、webhook ではなく ReportHandler に Go のオーナーを渡して組み立てる
+- （既存の揺らぎ）`ts/packages/db/test/pool-connector.test.ts` の「エラー経路: getOptions() が失敗しても Connector を取り残さず」は、`pnpm -r test` で全パッケージを並行に流すと、有効なタイマーの数の比較（`activeTimeoutCount()`）がまれに 0 対 1 で赤になる。単独では 3 回続けて緑で、本 spec はこのファイルに触れていない（2026-09-16 に 1 回観測）。別 Issue を提案する（最終報告で挙げる）
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

@@ -11,7 +11,8 @@
 # 同じ行を読む（Issue #255 で追加。評価の無い競合を含む行の読み方を配信と詳細画面の両方で確かめる）。
 # 最後に line-webhook のレポートが使う読み出し（@fwlm/db の findLatestDailySummary・
 # listDailySummariesEndingAt）でも同じ行を読む（line-on-demand-report で追加。口コミの帰属 3 項目と、
-# Go の 30 日ローリング削除が残す最古の行を TS の 30 日の窓が返すことを確かめる）。
+# Go の 30 日ローリング削除が残す最古の行を TS の 30 日の窓が返すことを確かめる）。その行から新着口コミの
+# レポートを組み立て、口コミの Google Maps への導線が Go の書いた URL のまま出ることも確かめる。
 #
 # 「言語間の結合は SQL スキーマのみ」（design.md）を、モックではなく実 DB 越しの2プロセス実行で
 # 証明することが本スクリプトの唯一の目的。Places・LINE の外部 API のみをフェイクし、postgres
@@ -66,12 +67,14 @@ echo "=================================================================="
 
 echo "=================================================================="
 echo ">> [cross-runtime 4/5] TS: レポート用の読み出し（findLatestDailySummary・listDailySummariesEndingAt）で、"
-echo "   Go が書いた行を読む（口コミの帰属 3 項目と 30 日の窓）"
+echo "   Go が書いた行を読み、新着口コミのレポートを組み立てる（口コミの帰属 3 項目・30 日の窓・Google Maps への導線）"
 echo "=================================================================="
 # 帰属 3 項目を持つ口コミと持たない口コミを、レポート用の読み出しがどちらもそのままの形で返すこと、
 # Go の削除が残す最古の行（30 日目）を同じ基準日の窓の中で返すことを確かめる（30 日の定数は Go と TS の
 # 二重定義で、Go が 30 日目まで消す食い違いと、範囲の読み出しの窓が Go より狭くなる食い違いをここで
 # 検出する。TS の窓の境界そのものは packages/db の report-reads.db.test.ts が固定する）。
+# あわせて、Go が書いた最新の行から新着口コミのレポートを組み立て、3 項目を持つ口コミだけが Go の書いた URL の
+# まま「Google Maps で見る」の導線つきで出ることを確かめる（line-on-demand-report tasks 3.11）。
 # 依存のビルドは上と同じ理由でフィルタにより再帰的に解決する。
 (cd "$ROOT/ts" && pnpm --filter '@fwlm/line-webhook^...' run build)
 (cd "$ROOT/ts" && CROSS_RUNTIME_GO_SEEDED=1 pnpm --filter @fwlm/line-webhook exec vitest run test/cross-runtime.e2e.test.ts)
