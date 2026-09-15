@@ -11,6 +11,7 @@ import {
   buildCandidateCarouselMessage,
   buildConfirmationMessage,
   buildCompletionMessage,
+  buildInternalErrorRetryMessage,
   buildPlaceAlreadyRegisteredMessage,
   buildStatusGuidanceMessage,
 } from '../../src/line/messages.js';
@@ -169,6 +170,43 @@ describe('buildStatusGuidanceMessage（line-on-demand-report Req 2.5・2.10）',
     const text = guidanceText();
     expect(text).not.toMatch(/\p{Extended_Pictographic}/u);
     expect(text).not.toContain('**');
+  });
+});
+
+describe('buildInternalErrorRetryMessage の店舗名つきの形（line-on-demand-report Req 7.5）', () => {
+  const STORE_NAME = '試験食堂 駅前店';
+
+  function linesOf(message: LineMessage): string[] {
+    if (message.type !== 'text') throw new Error('expected text message');
+    return message.text.split('\n');
+  }
+
+  it('店舗名があれば、店舗名を「」で括ったレポートの失敗を先頭の行に置く', () => {
+    expect(linesOf(buildInternalErrorRetryMessage(undefined, STORE_NAME))[0]).toBe(
+      `「${STORE_NAME}」のレポートを表示できませんでした。`,
+    );
+    expect(linesOf(buildInternalErrorRetryMessage('abcd1234', STORE_NAME))[0]).toBe(
+      `「${STORE_NAME}」のレポートを表示できませんでした。`,
+    );
+  });
+
+  it('先頭の行のほかは汎用の再試行案内と同じで、行数を増やさない（サポートコード・再試行・問い合わせ）', () => {
+    for (const supportCode of [undefined, 'abcd1234']) {
+      const generic = linesOf(buildInternalErrorRetryMessage(supportCode));
+      const scoped = linesOf(buildInternalErrorRetryMessage(supportCode, STORE_NAME));
+      expect(scoped).toHaveLength(generic.length);
+      expect(scoped.slice(1)).toEqual(generic.slice(1));
+    }
+  });
+
+  it('サポートコードは店舗名つきの形でも添える', () => {
+    expect(linesOf(buildInternalErrorRetryMessage('abcd1234', STORE_NAME))).toContain('サポートコード: abcd1234');
+  });
+
+  it('店舗名が無い（または空の）ときは、汎用の再試行案内のまま', () => {
+    expect(buildInternalErrorRetryMessage(undefined, undefined)).toEqual(buildInternalErrorRetryMessage());
+    expect(buildInternalErrorRetryMessage('abcd1234', '')).toEqual(buildInternalErrorRetryMessage('abcd1234'));
+    expect(linesOf(buildInternalErrorRetryMessage())[0]).toBe('申し訳ございません、処理中にエラーが発生しました。');
   });
 });
 
@@ -520,7 +558,6 @@ describe('全ビルダーの文言が毎日の定期配信を約束しない（l
     buildInvalidInviteCodeMessage: () => [messageModule.buildInvalidInviteCodeMessage()],
     buildInviteCodeLockedMessage: () => [messageModule.buildInviteCodeLockedMessage()],
     buildStoreNameInputGuidanceMessage: () => [messageModule.buildStoreNameInputGuidanceMessage()],
-    buildAlreadyCompletedMessage: () => [messageModule.buildAlreadyCompletedMessage()],
     buildStatusGuidanceMessage: () => [messageModule.buildStatusGuidanceMessage()],
     buildCandidateCarouselMessage: () => [messageModule.buildCandidateCarouselMessage(candidates(10))],
     buildConfirmationMessage: () => [messageModule.buildConfirmationMessage(candidate())],
@@ -532,6 +569,8 @@ describe('全ビルダーの文言が毎日の定期配信を約束しない（l
     buildInternalErrorRetryMessage: () => [
       messageModule.buildInternalErrorRetryMessage(),
       messageModule.buildInternalErrorRetryMessage('SUPPORT-0001'),
+      messageModule.buildInternalErrorRetryMessage(undefined, '試験食堂 駅前店'),
+      messageModule.buildInternalErrorRetryMessage('SUPPORT-0001', '試験食堂 駅前店'),
     ],
   };
 
@@ -579,6 +618,10 @@ describe('全ビルダーの文言が毎日の定期配信を約束しない（l
 describe('テキスト案内のスナップショット（文言の差分を目視する材料）', () => {
   it('ステータス案内', () => {
     expect(buildStatusGuidanceMessage()).toMatchSnapshot();
+  });
+
+  it('店舗名つきの再試行案内（サポートコードあり）', () => {
+    expect(buildInternalErrorRetryMessage('abcd1234', '試験食堂 駅前店')).toMatchSnapshot();
   });
 });
 

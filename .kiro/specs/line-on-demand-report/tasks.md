@@ -125,7 +125,7 @@
   - _Requirements: 2.3, 2.5, 2.6, 2.8, 2.9_
   - _Depends: 3.7, 3.8_
 
-- [ ] 3.10 振り分け口を会話と境界へ配線する（統合）
+- [x] 3.10 振り分け口を会話と境界へ配線する（統合）
   - 会話の入口でオーナーを照会し、店舗特定済みなら振り分け口へ、それ以外は既存のオンボーディングへ渡す。completed 段階の固定案内はステータス案内に揃え、段階で完了を判定していた注記を改める
   - エラー境界が店舗名つきの例外を受けたときは店舗名つきの再試行案内を返す（内部の詳細とサポートコード以外を出さない）。合成ルートで振り分け口とレポート応答を配線する
   - Observable: 既存の会話と境界の試験が新しい振る舞いで緑で、店舗名つきの再試行案内がちょうど 1 回返る試験が緑
@@ -349,7 +349,7 @@
   - エラー境界（3.10）が記録する種別は `StoreScopedReportError` になる。元の種別は `cause` から取る
 - （3.7・既存の穴）`scripts/check-log-field-binding.sh` の「実装→正典」の照合は `writeStructuredLog(`・`correlationLog(` を直接呼ぶ箇所しか見ず、ロガーを注入して呼ぶ line-webhook の事象は対象外である（正典から行を消しても緑。既存の `line-webhook.audit_log_failed` も未登録のまま）。本 spec の範囲外なので、別 Issue を提案する（最終報告で挙げる）。storeId を記録に載せる漏れは、型でもガードでもなく試験だけが捕まえる
 - （3.7）`flex-types.ts` で 3.1〜3.4 が足した任意項目は、すべて使われていることを確かめた
-- （3.8→3.10）ステータス案内は `buildStatusGuidanceMessage` になった。旧名の `buildAlreadyCompletedMessage` は別名として残してある。3.10 で conversation.ts をつなぎ替えるとき、次の 3 つを行う
+- （3.8→3.10・3.10 で解消済み）ステータス案内は `buildStatusGuidanceMessage` になった。旧名の `buildAlreadyCompletedMessage` は 3.10 で別名ごと消した（コード・スクリプト・HTML・docs に残っていない）。3.10 で行ったのは次の 3 つ
   - 別名を消す（全ビルダーの表 `INVOKE_EVERY_BUILDER` の余った鍵が型エラーになる）
   - `ts/apps/line-webhook/scripts/setup-rich-menus.ts:219` の旧名のコメントを消す
   - 店舗名つきの再試行案内の呼び出しを、その表へ足す（型は引数の形まで網羅を強制しない）
@@ -362,6 +362,8 @@
   - 既存の `line-webhook.audit_log_failed`: conversation.ts が既に出していたが、未登録だった
 - （3.9）`owners.onboarding_status` の `active` は、書く経路がコードに無い。router と張り替えスクリプトの判定式は `= 'store_identified'` だけなので、将来 `active` を書く経路ができると、そのオーナーはオンボーディングへ落ちて 2.9 に反する（Revalidation Trigger の候補）
 - （3.9→3.10）完了後メニューのリンクと監査記録の処理が、router.ts と conversation.ts の `handleConfirm` で重複している。3.10 で 1 か所に寄せる。router と ReportHandler はリクエストごとに作る（相関 ID のため）
+- （3.10）完了後メニューのリンクと監査記録の処理は、新しい `ts/apps/line-webhook/src/owner/completed-menu.ts` に寄せた（router とオンボーディングの完了の両方が使う）。design.md のファイル構成と依存の向きにこのファイルが無いので、最終検証で追記する
+- （3.10）会話の入口でオーナーを 1 回だけ照会し、店舗特定済みなら（代理店経路で段階が店名入力待ちのままでも）セッションを読む前に振り分け口へ渡す。新着レポートの DB 読み出しは 4 回（オーナー・セッション・店舗・最新の集計）
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

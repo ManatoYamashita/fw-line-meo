@@ -20,20 +20,23 @@
 //   このときメニューの照合はしない（次の操作で照合する）
 // - Reply の後の失敗（リンク・段階の更新・記録）は投げない。応答は済んでおり、投げるとエラー境界が 2 回目の Reply を試みる
 //
-// 記録（ログ）には店舗 ID と LINE ユーザー ID を載せない。リンクの成否の事象と監査記録は、オンボーディング完了時の
-// リンク（onboarding/conversation.ts）と同じものを使う。
+// 記録（ログ）には店舗 ID と LINE ユーザー ID を載せない。リンクとその成否の記録は、オンボーディング完了時の
+// リンク（onboarding/conversation.ts）と同じ関数（owner/completed-menu.ts）で行う。
 //
-// ReportHandler はロガーを作成時に固定する。相関 ID をリクエストごとに記録へ残すため、呼出元はリクエストごとに、
-// そのリクエストのロガーと Messenger で ReportHandler とこの router を作る（どちらも作成は軽い）。
+// ReportHandler はロガーを作成時に固定する。相関 ID をリクエストごとに記録へ残すため、ReportHandler とこの router は
+// リクエストごとに、そのリクエストのロガーと Messenger で作る（どちらも作成は軽い）。そのための作り方が
+// createStoreIdentifiedOwnerRouterFactory で、合成ルート（index.ts）が設定の値で 1 度だけ作り、会話
+// （onboarding/conversation.ts）がイベントごとに呼ぶ。
 
-import type { AuditLogInput, AuditLogger, OwnerRow, Queryable } from '@fwlm/db';
+import type { AuditLogger, OwnerRow, Queryable } from '@fwlm/db';
 import { decodeReportPostback } from '@fwlm/line-report';
 import type { LineMessenger } from '../line/client.js';
 import { buildStatusGuidanceMessage } from '../line/messages.js';
 import type { ConversationLogger, SessionsAccessor } from '../onboarding/conversation.js';
 import { decodePostback } from '../onboarding/stages.js';
-import type { ReportHandler } from '../report/handler.js';
+import { createReportHandler, type ReportHandler, type ReportReadsAccessor } from '../report/handler.js';
 import type { InboundEvent } from '../webhook/dispatch.js';
+import { errorKindOf, linkCompletedMenu } from './completed-menu.js';
 
 export interface StoreIdentifiedOwnerRouterDeps {
   readonly db: Queryable;
@@ -63,11 +66,6 @@ export function isStoreIdentified(owner: OwnerRow | null): owner is OwnerRow {
   return owner !== null && owner.onboarding_status === 'store_identified';
 }
 
-/** 例外の種別だけを取り出す。本文は記録しない。 */
-function errorKindOf(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : 'UnknownError';
-}
-
 /** 再開の postback か。オンボーディングの復号で読む（この復号はレポートの data を受理しない）。 */
 function isResumePostback(event: InboundEvent): boolean {
   return event.kind === 'postback' && decodePostback(event.data)?.kind === 'resume';
@@ -86,54 +84,25 @@ async function attempt(run: () => Promise<void>): Promise<Attempt> {
 }
 
 export function createStoreIdentifiedOwnerRouter(deps: StoreIdentifiedOwnerRouterDeps): StoreIdentifiedOwnerRouter {
-  /** 監査記録の障害は業務処理を巻き戻さず、正典の事象へ警告を残す。 */
-  async function tryAuditLog(input: AuditLogInput): Promise<void> {
-    if (!deps.auditLog) return;
-    try {
-      await deps.auditLog(input);
-    } catch (err) {
-      deps.logger.warn('line-webhook.audit_log_failed', { errorKind: errorKindOf(err) });
-    }
-  }
-
   /**
    * 完了後メニューを張り、markCompleted なら張れた場合に限り段階を completed に揃える。例外を投げない。
+   * リンクとその成否の記録は owner/completed-menu.ts が行う。段階の更新とその失敗の記録は、リンクの後にここで行う。
    *
-   * 記録は業務処理（リンクと段階の更新）の外側で行う。同じ try の中へ入れると、記録の手段が投げたときに、
-   * 成功したリンクに対して失敗が記録される（onboarding/conversation.ts の完了時のリンクと同じ理由）。
+   * 記録は業務処理（段階の更新）の外側で行う。同じ try の中へ入れると、記録の手段が投げたときに、成功した更新に
+   * 対して失敗が記録される（completed-menu.ts のリンクと同じ理由）。
    */
-  async function linkCompletedMenu(lineUserId: string, ownerId: string, markCompleted: boolean): Promise<void> {
-    const link = await attempt(() => deps.messenger.linkRichMenu(lineUserId, deps.lineRichMenuCompletedId));
+  async function reconcileCompletedMenu(lineUserId: string, ownerId: string, markCompleted: boolean): Promise<void> {
+    const linked = await linkCompletedMenu(deps, lineUserId, ownerId);
+    if (!linked || !markCompleted) return;
+
     // ownerId も同じ更新で渡す。await_invite_code のまま（owner_id が NULL）の行でも、
     // ck_session_owner_stage（stage = await_invite_code ⇔ owner_id IS NULL）を満たすため。
-    const stage =
-      link.ok && markCompleted
-        ? await attempt(() => deps.sessions.updateSession(deps.db, lineUserId, { stage: 'completed', ownerId }))
-        : null;
-
+    const stage = await attempt(() =>
+      deps.sessions.updateSession(deps.db, lineUserId, { stage: 'completed', ownerId }),
+    );
+    if (stage.ok) return;
     try {
-      if (link.ok) {
-        deps.logger.info('line-webhook.richmenu_linked');
-        await tryAuditLog({
-          actorType: 'owner',
-          actorId: ownerId,
-          action: 'rich_menu_linked',
-          targetType: 'owner',
-          targetId: ownerId,
-        });
-      } else {
-        deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(link.error) });
-        await tryAuditLog({
-          actorType: 'owner',
-          actorId: ownerId,
-          action: 'rich_menu_link_failed',
-          targetType: 'owner',
-          targetId: ownerId,
-        });
-      }
-      if (stage !== null && !stage.ok) {
-        deps.logger.warn('line-webhook.session_stage_update_failed', { errorKind: errorKindOf(stage.error) });
-      }
+      deps.logger.warn('line-webhook.session_stage_update_failed', { errorKind: errorKindOf(stage.error) });
     } catch {
       // swallowed-exception: intentional — 記録の手段自身の失敗を業務処理へ伝えない。Reply は済んでおり、
       // 投げるとエラー境界が 2 回目の Reply を試みる。記録できないことを理由に、利用者に見える振る舞いを変えない。
@@ -161,7 +130,58 @@ export function createStoreIdentifiedOwnerRouter(deps: StoreIdentifiedOwnerRoute
       if (stageCompleted && event.kind !== 'follow' && !isResumePostback(event)) {
         return;
       }
-      await linkCompletedMenu(event.lineUserId, owner.id, !stageCompleted);
+      await reconcileCompletedMenu(event.lineUserId, owner.id, !stageCompleted);
     },
   };
+}
+
+/** リクエストごとに変わる依存。そのリクエストのロガー（相関 ID つき）と、そのロガーを適用した Messenger。 */
+export interface StoreIdentifiedOwnerRouterScope {
+  readonly logger: ConversationLogger;
+  readonly messenger: LineMessenger;
+}
+
+/** リクエストごとに router を作る。会話（onboarding/conversation.ts）がイベントごとに呼ぶ。 */
+export type StoreIdentifiedOwnerRouterFactory = (scope: StoreIdentifiedOwnerRouterScope) => StoreIdentifiedOwnerRouter;
+
+/** リクエストをまたいで変わらない依存。合成ルートが設定の値で渡す。 */
+export interface StoreIdentifiedOwnerRouterFactoryDeps {
+  readonly db: Queryable;
+  readonly sessions: SessionsAccessor;
+  /** 業務書込の監査記録。顧客識別子ではなく owners.id のみを渡す。 */
+  readonly auditLog?: AuditLogger;
+  /** 完了後リッチメニューの ID（env LINE_RICHMENU_COMPLETED_ID）。 */
+  readonly lineRichMenuCompletedId: string;
+  /** 詳細画面の LIFF URL（env LIFF_STORE_DETAIL_URL）。推移のレポートの導線に使う。 */
+  readonly liffStoreDetailUrl: string;
+  /** レポートの読み出し。省略すると @fwlm/db の関数を使う（試験で偽物に差し替える）。 */
+  readonly reads?: ReportReadsAccessor;
+  /** 現在時刻。省略すると実行時の時刻を使う（試験で固定する）。 */
+  readonly now?: () => Date;
+}
+
+/**
+ * ReportHandler とこの router を、呼ばれるたびに新しく作る作り方を返す。作ったものを使い回さない
+ * （使い回すと、2 つ目以降のリクエストの記録と Reply が、最初に作ったときのロガーと Messenger へ流れる）。
+ */
+export function createStoreIdentifiedOwnerRouterFactory(
+  deps: StoreIdentifiedOwnerRouterFactoryDeps,
+): StoreIdentifiedOwnerRouterFactory {
+  return ({ logger, messenger }) =>
+    createStoreIdentifiedOwnerRouter({
+      db: deps.db,
+      sessions: deps.sessions,
+      messenger,
+      logger,
+      ...(deps.auditLog ? { auditLog: deps.auditLog } : {}),
+      lineRichMenuCompletedId: deps.lineRichMenuCompletedId,
+      reports: createReportHandler({
+        db: deps.db,
+        messenger,
+        liffStoreDetailUrl: deps.liffStoreDetailUrl,
+        logger,
+        ...(deps.reads ? { reads: deps.reads } : {}),
+        ...(deps.now ? { now: deps.now } : {}),
+      }),
+    });
 }

@@ -12,6 +12,7 @@ import type { ConversationHandlers, ConversationLogger } from './onboarding/conv
 import type { LineMessenger } from './line/client.js';
 import type { LineMessengerLogger } from './line/client.js';
 import { buildInternalErrorRetryMessage } from './line/messages.js';
+import { StoreScopedReportError } from './report/errors.js';
 
 // 構造化ログの最小契約（design.md「Monitoring」: LINE はログを提供しないため自前で記録する）。
 // オーナーの自由入力テキストや displayName は本境界では扱わない（渡していない）ため、
@@ -110,19 +111,22 @@ export function createApp(deps: AppDeps): Hono {
             await deps.conversationHandlers.handleEvent(event);
           }
         } catch (err) {
+          // レポートの対象店舗を決めた後の失敗（line-on-demand-report Requirement 7.5）は、店舗名を添えた再試行案内にする。
+          // 記録する種別は元の例外（cause）のもので、包んだ例外の名前ではない。店舗名は案内にだけ使い、記録へ載せない。
+          const storeScoped = err instanceof StoreScopedReportError ? err : null;
+          const retryMessage = buildInternalErrorRetryMessage(supportCode, storeScoped?.storeName);
           requestLogger.error('line-webhook.dispatch_failed', {
-            errorKind: errorKindOf(err),
+            errorKind: errorKindOf(storeScoped !== null && storeScoped.cause !== undefined ? storeScoped.cause : err),
             ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
           });
+          // 再試行案内の Reply はこの 1 回だけである。会話・振り分け口・レポート応答は、Reply を送った後の処理
+          // （メニューのリンク・段階の更新・記録）の失敗を投げず、記録の出力経路（writeStructuredLog）も例外を
+          // 投げない。よって、ここへ届く例外は Reply を送る前のものに限られる（Requirement 7.4）。
           try {
             if (lineLogger) {
-              await deps.messenger.reply(
-                event.replyToken,
-                [buildInternalErrorRetryMessage(supportCode)],
-                lineLogger,
-              );
+              await deps.messenger.reply(event.replyToken, [retryMessage], lineLogger);
             } else {
-              await deps.messenger.reply(event.replyToken, [buildInternalErrorRetryMessage(supportCode)]);
+              await deps.messenger.reply(event.replyToken, [retryMessage]);
             }
           } catch (replyErr) {
             // design.md「reply 失敗は structured log（X-Line-Request-Id 併記）に記録」。

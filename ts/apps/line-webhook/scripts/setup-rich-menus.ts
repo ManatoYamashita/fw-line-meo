@@ -215,9 +215,8 @@ function buildCompletedRichMenu(): RichMenuObject {
         // Requirement 6.3 は「完了後の案内へ切替」を求めるのみで、完了後メニューのタップに
         // 特定の挙動は要求していない（本 stateDiagram では linkRichMenu による切替のみが前提）。
         // message アクションはタップ時にテキストメッセージとして送信されるだけなので、
-        // ConversationHandlers 側は completed 段階の既存 fallback（handleText の
-        // buildAlreadyCompletedMessage）がそのまま応答でき、新規サーバロジックが不要となる
-        // 最小の選択肢として採用する。
+        // 店舗特定済みオーナーのテキストにステータス案内を返す既存の経路（src/owner/router.ts の振り分け口）が
+        // そのまま応答でき、新規サーバロジックが不要となる最小の選択肢として採用する。
         action: {
           type: 'message',
           label: 'ステータス確認',

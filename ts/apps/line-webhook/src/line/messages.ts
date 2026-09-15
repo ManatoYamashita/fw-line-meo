@@ -146,12 +146,6 @@ export function buildStatusGuidanceMessage(): LineMessage {
 }
 
 /**
- * 旧名。会話の completed 段階（onboarding/conversation.ts）がまだこの名前で呼ぶため、ステータス案内と
- * 同じものを返す別名として残す。呼び出し側をステータス案内へ移すとき（line-on-demand-report tasks 3.10）に消す。
- */
-export const buildAlreadyCompletedMessage: () => LineMessage = buildStatusGuidanceMessage;
-
-/**
  * Requirement 3.1: 店舗候補一覧（最大 10 件・店名＋住所）を選択可能な Flex カルーセルで提示する。
  * 入力は 1〜10 件を前提とする契約（PlacesSearchAdapter が pageSize:10 で保証）。
  * 0 件・11 件以上は呼び出し側の契約違反として例外を投げる（design.md「候補一覧（最大10件）」）。
@@ -400,12 +394,20 @@ export function buildCandidateSelectionExpiredMessage(): LineMessage {
  * 捕捉されなかった内部例外の発生時にベストエフォートで送信を試みる文言。
  * どの段階（招待コード／店名検索／確認）で発生した障害かに関わらず共通の汎用文言とする
  * （design.md ConversationHandlers「汎用の再試行案内 reply」）。
+ *
+ * レポートの対象店舗を決めた後の失敗（line-on-demand-report Requirement 7.5）では、storeName に店舗名を渡す。
+ * 先頭の行を「「店舗名」のレポートを表示できませんでした。」に替え、残りの行（サポートコード・再試行・問い合わせ）は
+ * 汎用の文言と同じにする。行を足さないのは、テキスト案内を 3 行ほどに収めるため（design-language §7.16）。
+ * 店舗名は、レポートの案内（report/builders/notices.ts）と同じく省略せずに「」で括る。
+ * 出すのは店舗名とサポートコードだけで、内部の詳細（例外の種別や本文）を受け取る引数を持たない。
  */
-export function buildInternalErrorRetryMessage(supportCode?: string): LineMessage {
+export function buildInternalErrorRetryMessage(supportCode?: string, storeName?: string): LineMessage {
   return {
     type: 'text',
     text:
-      '申し訳ございません、処理中にエラーが発生しました。\n' +
+      (storeName
+        ? `「${storeName}」のレポートを表示できませんでした。\n`
+        : '申し訳ございません、処理中にエラーが発生しました。\n') +
       (supportCode ? `サポートコード: ${supportCode}\n` : '') +
       'お手数ですが、少し時間をおいてもう一度お試しください。\n' +
       '解決しない場合は、運営までお問い合わせください。',

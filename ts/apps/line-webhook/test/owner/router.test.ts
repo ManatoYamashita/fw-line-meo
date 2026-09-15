@@ -22,6 +22,7 @@ import type { SessionsAccessor } from '../../src/onboarding/conversation.js';
 import { decodePostback, encodePostback, type PostbackAction } from '../../src/onboarding/stages.js';
 import {
   createStoreIdentifiedOwnerRouter,
+  createStoreIdentifiedOwnerRouterFactory,
   isStoreIdentified,
   type StoreIdentifiedOwnerRouterDeps,
 } from '../../src/owner/router.js';
@@ -572,5 +573,72 @@ describe('オンボーディングの復号とレポートの復号は、互い�
 
   it.each(onboardingData)('レポートの復号はオンボーディングの data「%s」を受理しない', (data) => {
     expect(decodeReportPostback(data)).toBeNull();
+  });
+});
+
+// --- リクエストごとの作成 ----------------------------------------------------------
+
+// line-on-demand-report tasks 3.10: 合成ルートは、router と ReportHandler をリクエストごとに、そのリクエストの
+// ロガー（相関 ID つき）と Messenger で作る。ReportHandler はロガーを作成時に固定するので、1 度だけ作って使い回すと、
+// 2 つ目以降のリクエストの応答が最初のリクエストのロガーと Messenger へ流れる。
+describe('createStoreIdentifiedOwnerRouterFactory', () => {
+  const STORE_NAME = '試験食堂 駅前店';
+
+  function scope() {
+    const replies: ReplyCall[] = [];
+    const logs: LogCall[] = [];
+    const messenger: LineMessenger = {
+      async reply(replyToken, messages) {
+        replies.push({ replyToken, messages });
+      },
+      async getProfile() {
+        throw new Error('the router must not read the profile');
+      },
+      async linkRichMenu() {
+        throw new Error('a completed session with a report request must not relink');
+      },
+    };
+    const logger = {
+      info: (event: string, fields?: LogFields) => logs.push({ level: 'info', event, fields }),
+      warn: (event: string, fields?: LogFields) => logs.push({ level: 'warn', event, fields }),
+    };
+    return { scope: { logger, messenger }, replies, logs };
+  }
+
+  it('作った router は、渡されたリクエストのロガーと Messenger でレポートに応える', async () => {
+    const factory = createStoreIdentifiedOwnerRouterFactory({
+      db: DB,
+      sessions: {
+        getOrCreateSession: async () => session('completed'),
+        updateSession: async () => {
+          throw new Error('a completed session must not be updated');
+        },
+      },
+      lineRichMenuCompletedId: COMPLETED_MENU_ID,
+      liffStoreDetailUrl: 'https://liff.line.me/test-liff-id',
+      reads: {
+        listReportableStores: async () => [{ id: STORE_ID, name: STORE_NAME }],
+        findLatestDailySummary: async () => null,
+        listDailySummariesEndingAt: async () => [],
+      },
+      now: () => FIXED_NOW,
+    });
+    const report = postbackEvent(encodeReportPostback({ kind: 'comparison', storeId: null, page: 0 }));
+    const first = scope();
+    const second = scope();
+
+    await factory(first.scope).handleEvent(report, owner());
+    await factory(second.scope).handleEvent(report, owner());
+
+    for (const request of [first, second]) {
+      expect(request.replies).toHaveLength(1);
+      expect(request.logs).toEqual([
+        {
+          level: 'info',
+          event: 'line-webhook.report_replied',
+          fields: { reportKind: 'comparison', reportOutcome: 'preparing' },
+        },
+      ]);
+    }
   });
 });
