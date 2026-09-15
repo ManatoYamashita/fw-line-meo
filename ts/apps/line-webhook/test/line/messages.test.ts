@@ -10,12 +10,14 @@ import {
   buildConfirmationMessage,
   buildCompletionMessage,
   buildPlaceAlreadyRegisteredMessage,
-  type FlexCarouselContents,
-  type FlexBubbleContents,
-  type FlexBoxComponent,
-  type FlexButtonComponent,
-  type FlexPostbackAction,
 } from '../../src/line/messages.js';
+import type {
+  FlexCarouselContents,
+  FlexBubbleContents,
+  FlexBoxComponent,
+  FlexButtonComponent,
+  FlexPostbackAction,
+} from '../../src/line/flex-types.js';
 
 // design.md「MessageBuilders」/ research.md 準拠のテスト。
 // Requirement 1.1, 3.1, 4.1, 4.3, 7.4: 純粋関数のみで挨拶・候補カルーセル・確認・完了の

@@ -2,6 +2,7 @@ import type { StoreCandidate } from '@fwlm/db';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
 import { encodePostback } from '../onboarding/stages.js';
 import type { LineMessage } from './client.js';
+import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
 
 // メッセージビルダー（design.md「MessageBuilders」）。
 // Requirement 1.1: 友だち追加時の挨拶＋招待コード入力案内。
@@ -15,80 +16,7 @@ import type { LineMessage } from './client.js';
 // 純粋関数のみ（design.md「MessageBuilders」制約）。I/O・副作用・LineMessenger/DB への
 // 依存は一切持たない。postback data の符号化は onboarding/stages.ts の encodePostback を
 // そのまま再利用し、ここで独自に符号化スキームを再実装しない。
-
-// --- Flex コンテンツの内部型（references/flex-message.md 準拠・no-explicit-any 対応） ---
-// LineMessage['contents'] は unknown のため、ビルダー内部では以下の狭い型で構築し、
-// 呼び出し側（テスト等）が安全にキャストできるよう export しておく。
-
-export interface FlexPostbackAction {
-  readonly type: 'postback';
-  readonly label: string;
-  readonly data: string;
-  readonly displayText: string;
-}
-
-// 外部リンク（LIFF 等）へ遷移する action。postback と異なり data を持たず uri を持つ。
-export interface FlexUriAction {
-  readonly type: 'uri';
-  readonly label: string;
-  readonly uri: string;
-}
-
-export type FlexAction = FlexPostbackAction | FlexUriAction;
-
-export interface FlexTextComponent {
-  readonly type: 'text';
-  readonly text: string;
-  readonly weight?: 'regular' | 'bold';
-  readonly size?: string;
-  readonly color?: string;
-  readonly wrap?: boolean;
-  readonly align?: 'start' | 'center' | 'end';
-  readonly margin?: string;
-}
-
-export interface FlexButtonComponent {
-  readonly type: 'button';
-  readonly style: 'primary' | 'secondary';
-  readonly color?: string;
-  readonly height?: 'sm' | 'md';
-  readonly action: FlexAction;
-}
-
-export type FlexBoxContent = FlexTextComponent | FlexButtonComponent;
-
-export interface FlexBoxComponent {
-  readonly type: 'box';
-  readonly layout: 'horizontal' | 'vertical';
-  readonly spacing?: string;
-  readonly margin?: string;
-  readonly paddingAll?: string;
-  readonly contents: readonly FlexBoxContent[];
-}
-
-// Bubble の各ブロックの装飾（背景色・区切り線）。references/flex-message.md「Bubble Styles」準拠。
-export interface FlexBlockStyle {
-  readonly backgroundColor?: string;
-  readonly separator?: boolean;
-}
-
-export interface FlexBubbleStyles {
-  readonly body?: FlexBlockStyle;
-  readonly footer?: FlexBlockStyle;
-}
-
-export interface FlexBubbleContents {
-  readonly type: 'bubble';
-  readonly size?: string;
-  readonly styles?: FlexBubbleStyles;
-  readonly body: FlexBoxComponent;
-  readonly footer: FlexBoxComponent;
-}
-
-export interface FlexCarouselContents {
-  readonly type: 'carousel';
-  readonly contents: readonly FlexBubbleContents[];
-}
+// Flex の型は line/flex-types.ts に置く（レポートの組立と共有する）。
 
 // PlacesSearchAdapter の契約（design.md: pageSize:10）と一致させる不変条件。
 // LINE の Carousel 上限は 12 だが、本サービスの契約はさらに厳しい 10 件のため、

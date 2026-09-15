@@ -56,7 +56,7 @@
   - _Depends: 2.2, 2.4_
 
 - [ ] 3. line-webhook: 店舗特定済みオーナーの振り分けとレポート応答
-- [ ] 3.1 Flex とクイックリプライの型を 1 か所にまとめる
+- [x] 3.1 Flex とクイックリプライの型を 1 か所にまとめる
   - 既存の案内文の組立が持つ Flex の局所的な型を共有の型へ移し、テキストのメッセージにクイックリプライを持たせられるようにする。`any` を使わない
   - Observable: 既存の案内文のスナップショットが 1 文字も変わらずに緑で、型検査が緑
   - _Requirements: 3.2_
@@ -302,6 +302,12 @@
 - （2.4）Go は URL を加工せずに保存する。LINE の Flex は、画像の url に HTTPS を、uri アクションに http・https・line・tel を求め、1 つでも不適合があるとメッセージ全体を拒否する。3.4 では https の絶対 URL だけを部品に使い、`googleMapsUri` が不適合なら導線が無いものとして内容を出さない（8.7）ことを試験で固定する
 - （2.4）`.kiro/specs/competitive-daily-summary/design.md` の new_reviews の要素の形（4 項目）に、任意の 3 項目を 6.1 で足す。`db/migrations/0004_competitive_daily_summary.sql` の同じコメントは、適用済みの migration なので改めない
 - （2.5）言語間の試験が検出できる 30 日の食い違いは、TS の範囲の読み出しの窓が Go より狭い向きだけである。TS の窓が広い向きと、最新の行の読み出しの窓は、2.2 の DB 試験が持つ。実行装置は `set -e` で最初の赤で止まるので、Go の変異で TS の段の検出力を見るときは段を分けて流す
+- （3.1）境界の明示的な例外として、3.3〜3.6 は `ts/apps/line-webhook/src/line/flex-types.ts` へ次のものを足してよい（/kiro-impl はタスクを順に実行するので衝突しない）。条件は、`@line/bot-sdk` の生成型に実在する任意項目と部品に限ること
+  - 部品は `FlexBoxContent` の union へ足す。union の要素は、鍵の照合（`test/line/flex-types.test.ts`）に自動で入る
+  - 判別子の無い型（スタイルなど）は、試験の照合の列挙へ足す
+  - 足りなくなりそうなもの: separator 部品、icon、box の `backgroundColor`・`cornerRadius`、`gravity`、bubble の header を使う場合の `styles.header`
+- （3.1）`flex-types.ts` には、design から読み取ったビルダー向けの任意項目を先に置いた（bubble の `header`、text の `maxLines`・`flex`・`adjustMode`・uri の action、image 部品、入れ子の box）。3.7 の審査か最終検証で、どこからも使われなかった項目は、その用途を断定するコメントと一緒に落とす
+- （3.1）LINE の型は手書きのまま、鍵の集合を `@line/bot-sdk` の生成型へ照合する。生成型は項目のほぼすべてが省略可能で、別名にすると必須の項目の欠落を検出できないため。値の型（リテラルの union）は照合していない
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録
