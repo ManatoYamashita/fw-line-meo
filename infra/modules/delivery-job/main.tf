@@ -58,7 +58,7 @@ resource "google_cloud_run_v2_job" "delivery" {
           }
         }
 
-        # 平文 env（LINE チャネル ID・LIFF URL・Cloud SQL IAM 接続の3値）
+        # 平文 env（LINE チャネル ID・LIFF URL・Cloud SQL IAM 接続の3値・プロジェクト ID・完了後リッチメニューの ID）
         dynamic "env" {
           for_each = {
             LINE_CHANNEL_ID          = var.line_channel_id
@@ -67,6 +67,8 @@ resource "google_cloud_run_v2_job" "delivery" {
             DB_NAME                  = var.db_name
             DB_IAM_USER              = trimsuffix(google_service_account.job.email, ".gserviceaccount.com")
             GOOGLE_CLOUD_PROJECT     = var.project_id
+            # 完了後リッチメニューの ID（line-webhook と同じ値・用途は variables.tf の line_richmenu_completed_id）
+            LINE_RICHMENU_COMPLETED_ID = var.line_richmenu_completed_id
           }
           content {
             name  = env.key

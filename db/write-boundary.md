@@ -18,7 +18,7 @@
 | `survey_concern_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（気になった点の匿名集計加算・`0008`） |
 | `survey_material_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（素材の厚み＝良かった点の選択数・気になった点の選択数・一言の有無の匿名集計加算・`0006`／`0008`） |
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
-| `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`: TS 配信ジョブによる LINE Push 配信記録・`retry_key` で冪等再送（`0004`） |
+| `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`／`line-on-demand-report`: TS 配信ジョブの通知記録。店舗×日の 1 行に、送った結果だけでなく送らなかった理由（`skipped_*`）も記録する・`retry_key` で冪等再送（`0004`・status の 7 値は `0010`） |
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
 | `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
 | `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
@@ -35,6 +35,7 @@
 
 - **新テーブル追加時は本表へ必ず書込責任層を追記する**（Req 9.4）。追記が無いテーブルは `check_docs.sh` が検出する。
 - 読み取りは両層に許容するが、書き込みは責任層のみ。クロス言語の典型 seam は「Go が `rating_snapshots`/`competitors`/`daily_summaries` を書き、TS が日次サマリー配信（`summary_deliveries` 書込）で `daily_summaries` を read」。
+- `summary_deliveries` は「その店舗のその日に通知を送ったか、送らなかったならなぜか」を 1 行で表す。送らない判定も予約（`UNIQUE (store_id, summary_date)` の `ON CONFLICT DO NOTHING`）してから理由つきで記録するので、同じ日の再実行は同じ店舗を判定し直さない。status の意味は `db/ERD.md` の凡例を正典とし、TS の型 `SummaryDeliveryStatus`（`ts/packages/db/src/types.ts`）はその 7 値と一致させる。
 - 共有定数（`categories`・`survey_aspects`）はコード内に列挙を二重定義せず、seed の code 値を参照する（Req 9.3）。
 - 将来的に PostgreSQL のテーブル単位 GRANT で物理強制も可能（MVP はアプリ規律＋本表＋機械検証で担保）。
 - `audit_logs` の `actor_id` は、`actor_type` が `operator` / `agency` の場合は `dashboard_users.id`、
