@@ -45,14 +45,14 @@ export interface FlexTextComponent {
   readonly maxLines?: number;
   readonly align?: 'start' | 'center' | 'end';
   readonly margin?: string;
-  /** 横に並べる box の中での幅の比（推移の表の列、投稿者の画像の横の名前）。 */
+  /** 横に並べる box の中での幅の比（推移の表の列）。 */
   readonly flex?: number;
   /**
    * 容器の幅を超える文字を自動で縮める。折り返さない文字は幅を超えると省略記号で切られるため、
    * 大きな段を使う表示にはこれを対で添える（docs/design/design-language.md §7.13）。
    */
   readonly adjustMode?: 'shrink-to-fit';
-  /** 文字を押したときの遷移（投稿者名から投稿者のプロフィールへ）。 */
+  /** 文字を押したときの遷移（投稿者名からプロフィールへ、「Google Maps で見る」から口コミへ）。 */
   readonly action?: FlexUriAction;
 }
 
@@ -89,6 +89,8 @@ export interface FlexBoxComponent {
   readonly paddingAll?: string;
   /** 下端の内側余白だけを paddingAll から上書きする（レポートの見出しを直下の本文へ近づける）。 */
   readonly paddingBottom?: string;
+  /** 横に並べる box の中での幅の比（新着口コミの、投稿者の画像の横に置く名前と日時の段）。 */
+  readonly flex?: number;
   readonly contents: readonly FlexBoxContent[];
 }
 

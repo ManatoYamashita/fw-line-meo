@@ -77,7 +77,7 @@
   - _Requirements: 3.2, 3.7, 3.8, 3.9, 3.10, 7.1, 7.2, 8.1, 8.3_
   - _Depends: 2.2, 2.3, 3.1, 3.2_
 
-- [ ] 3.4 (P) 新着口コミレポートを組み立てる
+- [x] 3.4 (P) 新着口コミレポートを組み立てる
   - 新着件数、Google Maps 上の URL を持つ口コミを最大 3 件（投稿者の画像、投稿者名とプロフィールへのリンク、投稿日時、星、本文、Google Maps で見る導線）、残り件数を出す。本文は 300 字で切り最大 4 行で折り返す
   - 抜粋を表示できないとき、前日比が取れて 0 件のとき、前日の集計が無いとき（判定できない旨）を出し分ける。評価で口コミを絞らない
   - 試験はこのビルダー専用のファイルに置く（3.5・3.6 と並行しても衝突しない）
@@ -324,6 +324,14 @@
 - （3.3）1200 店を超えるオーナーは「ほかの店舗」で 1201 店目以降へ進めない。postback の頁が 0〜99 のためで、3.10 の既知の限界である
 - （3.3）`format.ts` には 3.4〜3.6 のための共通部品を先に置いた（`buildReportBubble`・`toReportMessage`・`fitsFlexBubbleLimit`・`FlexBubbleTooLargeError`・`flexBubbleByteLength`・`normalizeReadRow`・`isComparableRow`・`formatPeriod`・`attributionFooter`・`ALT_TEXT_MAX_LENGTH`）。3.4〜3.6 はこれらを使い、`format.ts` を編集しない。3.7 の審査で、使われなかった export を落とす
 - （3.3→3.4・3.6）口コミの投稿日時（`M月D日 HH:mm`・日本時間）と推移の 7 日分の日付の列挙は各ビルダーが持つ。日付の計算は `Date.UTC` と `getUTC*`、日本時間への変換は固定の +9 時間で行い、実行環境の TZ に依存させない
+- （3.4）表示できる口コミの条件は、design の「`googleMapsUri` を持つもの」より狭い。条件は次の 3 つで、狭めた理由は、8.2 の併記を守ることと、LINE が空の text を拒否すること
+  - `googleMapsUri` が https の絶対 URL である
+  - 投稿者名が空でない
+  - 表示件数は min(3, 新着件数)
+- （3.4）URL は `toFlexHttpsUrl` で https の絶対 URL だけを通す。空白・非 ASCII・壊れた `%`・利用者情報・大文字のスキーム・長さの上限（uri 1000・画像 2000）を拒否する。実在の Google の URL の形は通ることを確かめた。7.5 で、実データの口コミが隠れていないかを見る
+- （3.4→3.7）次の 2 点は 3.7 で扱う
+  - 試験のためだけの export（`buildNewReviewsBubble`・`toFlexHttpsUrl`・`formatPublishTimeJst` など）は design のシグネチャの外なので、3.7 の整理で扱う
+  - 極端に長い投稿者名では、本文を落としても 30KB に収まらず `FlexBubbleTooLargeError` が投げられる。3.7 はこの例外を店舗名つきの再試行案内へ写す
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録
