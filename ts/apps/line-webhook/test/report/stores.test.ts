@@ -4,6 +4,7 @@
 // - 集合外の店舗 ID には、その ID が他所に実在するかどうかに関わらず同じ応答を返すこと（非オラクル）
 // - 選択肢が 1 頁 12 店で、次の頁があるときだけ次の頁の番号を持ち、範囲外の頁を 0 頁目として扱うこと
 // - 20 文字を超える店名を 19 文字と「…」に省略し、絵文字や結合文字を途中で割らないこと
+// - 同じ頁で省略したラベルが衝突したときだけ、衝突した店舗を先頭＋「…」＋末尾の形で区別すること
 import { describe, expect, it } from 'vitest';
 import type { ReportableStore } from '@fwlm/db';
 import type { ReportKind, ReportRequest } from '@fwlm/line-report';
@@ -11,6 +12,7 @@ import {
   STORE_CHOICE_PAGE_SIZE,
   STORE_LABEL_MAX_LENGTH,
   abbreviateStoreLabel,
+  labelStoreChoices,
   resolveTargetStore,
   type StoreResolution,
 } from '../../src/report/stores.js';
@@ -421,5 +423,118 @@ describe('abbreviateStoreLabel（3.9）', () => {
     }
     // 省略する側の分岐を実際に通ったことを確かめる（空振りの防止）。
     expect(abbreviated).toBeGreaterThan(0);
+  });
+});
+
+describe('labelStoreChoices（3.9 の「識別できる形」）', () => {
+  // 先頭の 19 文字が同じなので、19 文字＋「…」ではどちらも「試験グループ運営のとても長い名前の焼肉…」になる。
+  const SHIBUYA = '試験グループ運営のとても長い名前の焼肉店 渋谷道玄坂店';
+  const SHINJUKU = '試験グループ運営のとても長い名前の焼肉店 新宿東口店';
+
+  function storesNamed(names: readonly string[]): ReportableStore[] {
+    return names.map((name, i) => ({ id: fakeStoreId(i + 1), name }));
+  }
+
+  function labelsOf(names: readonly string[]): string[] {
+    return labelStoreChoices(storesNamed(names)).map(({ label }) => label);
+  }
+
+  it('入力と同じ順に、入力の要素そのものとラベルの組を返す', () => {
+    const stores = storesNamed(['試験食堂', SHIBUYA, '試験酒場']);
+    const labeled = labelStoreChoices(stores);
+    expect(labeled).toHaveLength(3);
+    labeled.forEach(({ store }, i) => expect(store).toBe(stores[i]));
+  });
+
+  it('衝突しなければ、どのラベルも abbreviateStoreLabel と同じ（19 文字＋「…」のまま）', () => {
+    const names = ['試験食堂', SHIBUYA, 'あいうえおかきくけこさしすせそたちつてとなにぬ', 'A'.repeat(20)];
+    expect(labelsOf(names)).toEqual(names.map((name) => abbreviateStoreLabel(name)));
+  });
+
+  it('前提: 2 つの長い名前は、19 文字＋「…」では同じラベルになる', () => {
+    expect(abbreviateStoreLabel(SHIBUYA)).toBe(abbreviateStoreLabel(SHINJUKU));
+  });
+
+  it('同じ頁で衝突したら、先頭 9 文字＋「…」＋末尾 10 文字にして、末尾の支店名で区別する', () => {
+    expect(labelsOf([SHIBUYA, SHINJUKU])).toEqual(['試験グループ運営の…焼肉店 渋谷道玄坂店', '試験グループ運営の…の焼肉店 新宿東口店']);
+  });
+
+  it('衝突したラベルだけを変え、同じ頁の衝突しない長い名前と短い名前はそのままにする', () => {
+    const other = 'あいうえおかきくけこさしすせそたちつてとなにぬ';
+    expect(labelsOf(['試験食堂', SHIBUYA, other, SHINJUKU])).toEqual([
+      '試験食堂',
+      '試験グループ運営の…焼肉店 渋谷道玄坂店',
+      abbreviateStoreLabel(other),
+      '試験グループ運営の…の焼肉店 新宿東口店',
+    ]);
+  });
+
+  it('3 店以上の衝突も、衝突したすべてを区別する', () => {
+    const third = '試験グループ運営のとても長い名前の焼肉店 横浜西口店';
+    const labels = labelsOf([SHIBUYA, SHINJUKU, third]);
+    expect(new Set(labels).size).toBe(3);
+    expect(labels[2]).toBe('試験グループ運営の…の焼肉店 横浜西口店');
+  });
+
+  it('衝突は同じ頁の中だけで判定する（相手が頁にいなければ 19 文字＋「…」のまま）', () => {
+    expect(labelsOf([SHIBUYA])).toEqual([abbreviateStoreLabel(SHIBUYA)]);
+    expect(labelsOf([SHIBUYA, '試験食堂'])).toEqual([abbreviateStoreLabel(SHIBUYA), '試験食堂']);
+  });
+
+  it('20 文字以内の名前は、長い名前と衝突しても全文のまま残し、長い名前の側だけを変える', () => {
+    // 長い名前の 19 文字＋「…」と、たまたま同じ文字列の短い名前。
+    const short = abbreviateStoreLabel(SHIBUYA);
+    expect([...short].length).toBe(STORE_LABEL_MAX_LENGTH);
+    expect(labelsOf([short, SHIBUYA])).toEqual([short, '試験グループ運営の…焼肉店 渋谷道玄坂店']);
+  });
+
+  it('既知の限界: 名前そのもの（または先頭 9 文字と末尾 10 文字）が同じ店舗は区別できない', () => {
+    // 省略しない同名の店舗は、名前以外に表示できるものが無い。
+    expect(labelsOf(['試験食堂', '試験食堂'])).toEqual(['試験食堂', '試験食堂']);
+    // 長い同名の店舗も、先頭＋「…」＋末尾の形にはなるが同じラベルのままである。
+    expect(labelsOf([SHIBUYA, SHIBUYA])).toEqual(['試験グループ運営の…焼肉店 渋谷道玄坂店', '試験グループ運営の…焼肉店 渋谷道玄坂店']);
+  });
+
+  it('先頭と末尾を書記素の境目で切り、入り切らない絵文字の連結や国旗は丸ごと落とす', () => {
+    const name = (last: string): string => `${'あ'.repeat(8)}${FAMILY}${'う'.repeat(10)}${FLAG_JP}${'い'.repeat(8)}${last}`;
+    expect(labelsOf([name('甲'), name('乙')])).toEqual([
+      `${'あ'.repeat(8)}…${'い'.repeat(8)}甲`,
+      `${'あ'.repeat(8)}…${'い'.repeat(8)}乙`,
+    ]);
+    // 入り切るなら丸ごと残す（先頭 9 のちょうど位置にある BMP の外の漢字・末尾にある国旗）。
+    const fits = (last: string): string => `${'あ'.repeat(8)}${SURROGATE_KANJI}${'う'.repeat(12)}${FLAG_JP}${'い'.repeat(7)}${last}`;
+    expect(labelsOf([fits('甲'), fits('乙')])).toEqual([
+      `${'あ'.repeat(8)}${SURROGATE_KANJI}…${FLAG_JP}${'い'.repeat(7)}甲`,
+      `${'あ'.repeat(8)}${SURROGATE_KANJI}…${FLAG_JP}${'い'.repeat(7)}乙`,
+    ]);
+  });
+
+  it('末尾だけが違う長い名前のどんな組でも、衝突したラベルは区別され、20 コードポイント以内で、名前の先頭と末尾から成る', () => {
+    const pieces = ['あ', 'A', ' ', SURROGATE_KANJI, '\u{1F363}', FAMILY, KA_WITH_COMBINING_DAKUTEN, FLAG_JP];
+    let collided = 0;
+    for (const piece of pieces) {
+      for (let repeat = 0; repeat <= 12; repeat += 1) {
+        const names = ['甲', '乙'].map((last) => `${'あ'.repeat(19)}${piece.repeat(repeat)}${last}`);
+        const labels = labelsOf(names);
+        const [first, second] = names;
+        if (first === undefined || second === undefined) throw new Error('unreachable');
+        if (abbreviateStoreLabel(first) === abbreviateStoreLabel(second)) {
+          collided += 1;
+          expect(new Set(labels).size).toBe(2);
+        }
+        labels.forEach((label, i) => {
+          const source = names[i] ?? '';
+          expect(codePoints(label)).toBeLessThanOrEqual(STORE_LABEL_MAX_LENGTH);
+          expect(LONE_SURROGATE.test(label)).toBe(false);
+          if (label !== source) {
+            const [head, tail] = label.split('…');
+            expect(source.startsWith(head ?? '\0')).toBe(true);
+            expect(source.endsWith(tail ?? '\0')).toBe(true);
+          }
+        });
+      }
+    }
+    // 衝突する側の分岐を実際に通ったことを確かめる（空振りの防止）。
+    expect(collided).toBeGreaterThan(0);
   });
 });

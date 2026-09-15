@@ -12,10 +12,12 @@
 //   同じ invalid_choice を返す（非オラクル）。応答は店舗の集合と頁だけから決まり、指定された ID を含まない
 // - 範囲外の頁（負の数・小数・頁の数以上）は 0 頁目として扱う
 //
-// 選択肢の組立（ラベル・displayText・「ほかの店舗」の postback）は StoreChoiceBuilder の責務である。
+// 選択肢のラベル（省略と、同じ頁で衝突したときの区別）もここで決める。選択肢のメッセージの組立
+// （displayText・postback・「ほかの店舗」）は StoreChoiceBuilder（builders/store-choice.ts）の責務である。
 
 import type { ReportableStore } from '@fwlm/db';
 import type { ReportRequest } from '@fwlm/line-report';
+import { ELLIPSIS, codePointLength, fitText, splitGraphemes } from './format.js';
 
 /** 1 頁に並べる店舗の数。クイックリプライ 13 件のうち 1 件を「ほかの店舗」に使う。 */
 export const STORE_CHOICE_PAGE_SIZE = 12;
@@ -84,43 +86,81 @@ function choicePage(stores: readonly ReportableStore[], requestedPage: number): 
   };
 }
 
-const ELLIPSIS = '…';
-
-// 書記素（利用者が 1 文字と見る単位）に分ける。絵文字の連結・国旗・結合文字を 1 つとして扱う。
-const graphemeSegmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' });
-
-function codePointLength(text: string): number {
-  return [...text].length;
-}
-
 /**
  * 選択肢のラベル用に店名を省略する。20 文字以内ならそのまま返し、超えれば先頭の 19 文字と「…」にする。
  * 選択後の回答と displayText には、省略しない店名を使う（3.9）。
  *
- * 文字はコードポイントで数える。LINE はラベルを書記素で数え（references/message-objects.md）、上限を
- * 超えるラベルが 1 つでもあると Reply の要求そのものが 400 で拒否され、選択肢が 1 件も届かない
- * （references/api-common.md）。書記素の数は、どの版の分け方で数えてもコードポイントの数を超えないので、
- * コードポイントで 20 以内に収めれば LINE の数え方の細部によらず上限を超えない。UTF-16 の単位では
- * 数えない（BMP の外の漢字や絵文字を 2 文字と数えて不要に省略するうえ、境目でサロゲートペアを割る）。
- *
- * 切るときは書記素の境目で切る。絵文字の連結や結合文字を途中で割ると別の文字に見えるので、
- * 残りの枠に入り切らない書記素は丸ごと落とす。
+ * 文字はコードポイントで数え、書記素の境目で切る（format.ts の fitText）。LINE はラベルを書記素で数え
+ * （references/message-objects.md）、上限を超えるラベルが 1 つでもあると Reply の要求そのものが 400 で
+ * 拒否され、選択肢が 1 件も届かない（references/api-common.md）。UTF-16 の単位では数えない（BMP の外の
+ * 漢字や絵文字を 2 文字と数えて不要に省略するうえ、境目でサロゲートペアを割る）。
  */
 export function abbreviateStoreLabel(name: string): string {
-  if (codePointLength(name) <= STORE_LABEL_MAX_LENGTH) {
-    return name;
-  }
+  return fitText(name, STORE_LABEL_MAX_LENGTH);
+}
 
-  const budget = STORE_LABEL_MAX_LENGTH - codePointLength(ELLIPSIS);
-  let kept = '';
-  let used = 0;
-  for (const { segment } of graphemeSegmenter.segment(name)) {
+// 同じ頁でラベルが衝突したときの形。先頭 9 文字＋「…」＋末尾 10 文字で、ラベルの上限の 20 文字に収める。
+// 衝突した店舗は先頭の 19 文字が同じなので、区別に効くのは末尾である（支店名が入ることが多い）。
+// 先頭も短く残すのは、どの系列の店かを読み取れるようにするため。
+const COLLISION_HEAD_LENGTH = 9;
+const COLLISION_TAIL_LENGTH = STORE_LABEL_MAX_LENGTH - COLLISION_HEAD_LENGTH - codePointLength(ELLIPSIS);
+
+/** 選択肢に並べる店舗と、そのラベル。 */
+export interface LabeledStore {
+  /** 入力の配列の要素そのもの。 */
+  readonly store: ReportableStore;
+  readonly label: string;
+}
+
+/**
+ * 同じ頁に並べる店舗の選択肢のラベルを、入力と同じ順で返す（3.9 の「識別できる形」）。
+ *
+ * ラベルは abbreviateStoreLabel で作る。同じ頁で 2 店以上が同じラベルになったときだけ、そのうち省略した
+ * 店舗（名前が 20 文字を超える店舗）のラベルを、先頭 9 文字＋「…」＋末尾 10 文字の形に替える。
+ * 衝突しないラベルは 19 文字＋「…」のままにする。
+ *
+ * 名前が 20 文字以内の店舗は、省略していない全文なので替えない。名前そのものが同じ店舗と、先頭 9 文字と
+ * 末尾 10 文字がどちらも同じ店舗は、この形でも区別できない（名前のほかに表示できるものが無い）。
+ */
+export function labelStoreChoices(stores: readonly ReportableStore[]): LabeledStore[] {
+  const labeled = stores.map((store) => ({ store, label: abbreviateStoreLabel(store.name) }));
+  const counts = new Map<string, number>();
+  for (const { label } of labeled) {
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return labeled.map(({ store, label }) =>
+    (counts.get(label) ?? 0) > 1 && codePointLength(store.name) > STORE_LABEL_MAX_LENGTH
+      ? { store, label: abbreviateKeepingTail(store.name) }
+      : { store, label },
+  );
+}
+
+// 先頭と末尾を書記素の境目で残し、間を「…」にする。入り切らない書記素は丸ごと落とす。
+// name は 20 文字を超えるので、先頭（9 文字以内）と末尾（10 文字以内）は重ならない。
+function abbreviateKeepingTail(name: string): string {
+  const graphemes = splitGraphemes(name);
+
+  let headEnd = 0;
+  let headUsed = 0;
+  for (const segment of graphemes) {
     const size = codePointLength(segment);
-    if (used + size > budget) {
+    if (headUsed + size > COLLISION_HEAD_LENGTH) {
       break;
     }
-    kept += segment;
-    used += size;
+    headUsed += size;
+    headEnd += 1;
   }
-  return `${kept}${ELLIPSIS}`;
+
+  let tailStart = graphemes.length;
+  let tailUsed = 0;
+  while (tailStart > headEnd) {
+    const size = codePointLength(graphemes[tailStart - 1] ?? '');
+    if (tailUsed + size > COLLISION_TAIL_LENGTH) {
+      break;
+    }
+    tailUsed += size;
+    tailStart -= 1;
+  }
+
+  return `${graphemes.slice(0, headEnd).join('')}${ELLIPSIS}${graphemes.slice(tailStart).join('')}`;
 }

@@ -70,7 +70,7 @@
   - _Boundary: line-webhook report/stores_
   - _Depends: 2.1, 2.2_
 
-- [ ] 3.3 レポート共通の表示部品と案内を実装する
+- [x] 3.3 レポート共通の表示部品と案内を実装する
   - データ対象日と対象期間の日本時間の表記、同じバブルの footer に置く帰属表示（改変しない・折り返さない・トークンの色と大きさ）、30KB の検証、正規化済みの行の型を用意する
   - 店舗の選択肢のメッセージ（店名の省略、displayText に全文、再提示の文）と、店舗なし・初回データ準備中・取得失敗の案内を組み立てる
   - Observable: 表示部品と案内の単体試験とスナップショットが緑で、店舗別の案内のすべてに店舗名が入り、帰属表示が 1 行で入る
@@ -316,6 +316,14 @@
   - postback は `encodeReportPostback` で作る。頁は 0〜99 なので、1201 店以上では次の頁を符号化できない。扱いを決め、1200 店を 3.10 の既知の限界として記録する
   - 店舗の選択肢の postback に頁（`p`）を載せるかを決めて固定する（載せれば、無効な選択の後に同じ頁を再提示する）
 - （3.2→3.7・3.11）集合外の店舗の指定では storeId を記録せずに `line-webhook.report_store_hint_ignored` を出す（3.7）。他のオーナーに実在する店舗 ID と、存在しない ID で Reply が同じになることを、3.11 で DB を通して固定する
+- （3.3・未決）`stores.name` は、オンボーディングで選んだ Places の候補の名前である（`createConfirmedStore`）。3.3 は「Google Maps のデータを載せない」として、店舗別の案内（準備中・取得失敗）と店舗の選択肢に帰属表示を付けていない。要件 8.1 の「Google Places由来データを含むすべての通知およびレポート」に店舗名が当たるかは、仕様に明文が無い
+  - 当たるなら、2 つを直す: 案内と選択肢の本文の末尾に「データ提供: Google Maps」の 1 行を足す／design.md の NoticeBuilders と StoreChoiceBuilder に理由を 1 文足す
+  - 既存のオンボーディングの候補の表示（Places の検索結果そのもの）にも帰属表示が無い。これは本 spec の境界外である
+  - 判断はユーザーに仰ぐ（最終報告で挙げる）
+- （3.3）選択肢のラベルの衝突の区別（先頭 9＋「…」＋末尾 10）は一次の衝突だけを解く。区別した形が同じ頁の別のラベルや「ほかの店舗」と一致する二次の衝突は起こりうるが、postback は店舗ごとに異なるので誤選択にはならない（既知の限界）
+- （3.3）1200 店を超えるオーナーは「ほかの店舗」で 1201 店目以降へ進めない。postback の頁が 0〜99 のためで、3.10 の既知の限界である
+- （3.3）`format.ts` には 3.4〜3.6 のための共通部品を先に置いた（`buildReportBubble`・`toReportMessage`・`fitsFlexBubbleLimit`・`FlexBubbleTooLargeError`・`flexBubbleByteLength`・`normalizeReadRow`・`isComparableRow`・`formatPeriod`・`attributionFooter`・`ALT_TEXT_MAX_LENGTH`）。3.4〜3.6 はこれらを使い、`format.ts` を編集しない。3.7 の審査で、使われなかった export を落とす
+- （3.3→3.4・3.6）口コミの投稿日時（`M月D日 HH:mm`・日本時間）と推移の 7 日分の日付の列挙は各ビルダーが持つ。日付の計算は `Date.UTC` と `getUTC*`、日本時間への変換は固定の +9 時間で行い、実行環境の TZ に依存させない
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

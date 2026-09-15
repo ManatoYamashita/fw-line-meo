@@ -87,6 +87,8 @@ export interface FlexBoxComponent {
   readonly spacing?: string;
   readonly margin?: string;
   readonly paddingAll?: string;
+  /** 下端の内側余白だけを paddingAll から上書きする（レポートの見出しを直下の本文へ近づける）。 */
+  readonly paddingBottom?: string;
   readonly contents: readonly FlexBoxContent[];
 }
 
