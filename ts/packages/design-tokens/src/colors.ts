@@ -13,7 +13,8 @@
 //    アクション色と共有してはならない理由は下の宣言に書いた。
 //  - lineColors は Flex Message（非 Web コンテンツ）用のため AA 検証対象外。値は現行
 //    messages.ts / flex.ts と同一に保ち、Web 側の意匠差し替えで LINE の見た目が動かないことを
-//    保証する（LINE アプリ自身の配色の中で成立させるための決定）。
+//    保証する（LINE アプリ自身の配色の中で成立させるための決定）。ただし attribution
+//    （Google Maps の帰属表示）だけは現行色から採らず、Places API ポリシーが許す色から選んでいる。
 
 /** Web 面（survey-web / store-detail / dashboard-web）の意味役割カラートークン。 */
 export interface ColorTokens {
@@ -61,7 +62,7 @@ export interface ColorTokens {
   readonly borderInteractive: string;
 }
 
-/** LINE Flex Message 用カラートークン（現行 7 色の意味役割化・値は現行と同一）。 */
+/** LINE Flex Message 用カラートークン（現行 7 色の意味役割化と、帰属表示の色）。 */
 export interface LineColorTokens {
   /** 見出し。 */
   readonly headline: string;
@@ -77,6 +78,14 @@ export interface LineColorTokens {
   readonly action: string;
   /** 補助的な数値・ラベル（日次サマリーの前日比・競合星差など）。 */
   readonly muted: string;
+  /**
+   * Google Maps の帰属表示（「データ提供: Google Maps」）の文字色。
+   *
+   * Places API ポリシーはテキストの帰属表示の色を白・黒・灰の 3 つの値に限る。caption と muted は
+   * どちらもその外にあり、ポリシーの色へ寄せると帰属以外の補足まで見た目が動くため、役割を分けた
+   * （3 つのどれかであることは test/tokens.test.ts が固定する）。
+   */
+  readonly attribution: string;
 }
 
 export const colors: ColorTokens = {
@@ -124,4 +133,6 @@ export const lineColors: LineColorTokens = {
   successBackground: '#F0FBF4',
   action: '#1DB446',
   muted: '#AAAAAA',
+  // ポリシーが許す灰。白いバブルの上に置くので白は採れず、黒は本文より強く見えるため採らない。
+  attribution: '#5E5E5E',
 };

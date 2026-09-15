@@ -11,13 +11,16 @@
 // 「組み立てた Flex の値が本セットの値と一致する」を assert することであり、両者は対で入れる。
 // スナップショットは -u 一発で意匠を元に戻す変更も静かに受理するため、この役目を負えない。
 //
+// 例外は帰属表示の大きさ（attributionSize）ただ 1 つで、ピクセル値を持つ。値の所有者は LINE では
+// なく Places API ポリシーであり、キーワードでは実 px が分からずポリシーの範囲に入るかを確かめられない。
+//
 // 各キーワードの妥当性の裏は .claude/skills/messaging-api/references/flex-message.md:
 // - box の内部余白は paddingAll（none/xs/sm/md/lg/xl/xxl・ピクセル・パーセント）
 // - text の size は xxs/xs/sm/md/lg/xl/xxl/3xl/4xl/5xl またはピクセル
 // - bubble の size は nano/micro/deca/hecto/kilo/mega/giga
 // - margin は親の spacing を、その子についてだけ上書きする
 
-/** LINE Flex Message 用の寸法トークン（意味役割 → LINE のキーワード）。 */
+/** LINE Flex Message 用の寸法トークン（意味役割 → LINE のキーワード。帰属表示の大きさだけはピクセル値）。 */
 export interface LineLayoutTokens {
   /**
    * バブルの幅の段。値は LINE の既定と同じだが、消費側は明示する。既定に委ねると
@@ -44,8 +47,18 @@ export interface LineLayoutTokens {
   readonly descriptionSize: string;
   /** 説明文よりさらに退く注記。 */
   readonly noteSize: string;
-  /** 帰属表記などの最小段。 */
+  /**
+   * 最小段。Google Maps の帰属表示には使わない（キーワードではポリシーの範囲に入るかを
+   * 確かめられない）。帰属表示は attributionSize を使う。
+   */
   readonly captionSize: string;
+  /**
+   * Google Maps の帰属表示（「データ提供: Google Maps」）の大きさ。本セットで唯一のピクセル値。
+   *
+   * Places API ポリシーはテキストの帰属表示を 12〜16sp に限る。13px は下限に 1 の余裕を持たせた値
+   * である（12〜16 のピクセル値であることは test/tokens.test.ts が固定する）。
+   */
+  readonly attributionSize: string;
   /**
    * 主要操作の高さ。LINE の button が受け取る値は 2 つだけなので、消費側の型
    * （FlexButton.height）が要求する union をトークン側でも保つ。他のフィールドは
@@ -67,5 +80,6 @@ export const lineLayout: LineLayoutTokens = {
   descriptionSize: 'sm',
   noteSize: 'xs',
   captionSize: 'xxs',
+  attributionSize: '13px',
   actionHeight: 'md',
 };

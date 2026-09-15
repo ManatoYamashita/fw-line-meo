@@ -34,7 +34,7 @@
   - _Requirements: 3.4, 3.5, 6.1, 6.7, 7.1, 8.2, 8.6, 8.7_
   - _Boundary: packages/db report-reads, packages/db types_
 
-- [ ] 2.3 (P) LINE 面の帰属表示の書式トークンを足す
+- [x] 2.3 (P) LINE 面の帰属表示の書式トークンを足す
   - 帰属表示の色（#5E5E5E）と大きさ（12〜16sp の範囲の 13px）を LINE 用のトークンとして足す。既存の caption と muted の値は変えない
   - Observable: トークンの試験が、色がポリシーの 3 色のどれかであること、大きさが 12〜16 の範囲のピクセル値であることを固定して緑
   - _Requirements: 1.6, 8.1_
@@ -291,6 +291,13 @@
   - `ts/packages/db/src/report-reads.ts` の「30 日の定数の食い違いは言語間の契約試験で検出する」
   - `ts/packages/db/src/types.ts` の「帰属 3 項目は Go が空でないときだけ書く」
 - （2.2）`daily_summaries` の範囲の読み出しは一意索引の順に出るので、ORDER BY を落としても試験が緑のまま通る。並び順は、索引を使わない計画（`SET LOCAL enable_*scan = off`）でも確かめる
+- （2.3）トークンの試験が守るのは値だけである。3.3 と 4.1 の試験で、帰属表示の text 部品の `size` が `lineLayout.attributionSize`、`color` が `lineColors.attribution` と等しいことを assert し、`captionSize`・`muted` へ差し替える変異で赤になることを確かめる
+- （2.3）`docs/design/design-language.md` の次の 2 か所は、帰属のトークン（現行の実装から採っていない色・Places のポリシーが持つピクセル値）で不正確になった。6.2 で §7.13・§7.16 と一緒に改める
+  - §2.1 の「値は現行の実装と同一に保つことが要件」
+  - §7.12 の、値ではなく役割を共有するという記述
+- （2.3）`ts/apps/delivery-job/src/flex.ts` は、4.5 で撤去するまで帰属を `captionSize`・`muted` で描く（`captionSize` の新しい説明と食い違う過渡状態）
+- （2.3）13px と、ポリシーの 12〜16sp の対応には一次情報が無い。7.5 の実機確認で、端末の文字サイズの設定を変えて帰属表示の見え方を確かめる
+- （2.3）`scripts/check-design-tokens.sh` は、`ts/packages/design-tokens/src` の hex をコメントも含めて許容集合に数える。src のコメントにトークン値でない hex を書かない
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録
