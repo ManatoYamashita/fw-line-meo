@@ -269,7 +269,7 @@
 - tasks.md に env 宣言表を書くのは、出典の実装が入った後にする（`check-spec-env-names.sh` は表の env 名が出典に実在することを要求する）
 - 文言の掃討は `rg --hidden`（`.kiro/` を含める）で行う
 - 新しい worktree では install だけでなく build まで通してから試験を読む
-- （1.1）`summary_deliveries.status` の CHECK は 0009 で 7 値になった。delivery-job の次の注記は Step A のマージから古くなるので、これらのファイルを書き換える 4.4 で改める。注記の結論（予約時に `failed` を仮置きすること、push の結果 3 値と対応すること）は正しいままである
+- （1.1）`summary_deliveries.status` の CHECK は 0010 で 7 値になった。delivery-job の次の注記は Step A のマージから古くなるので、これらのファイルを書き換える 4.4 で改める。注記の結論（予約時に `failed` を仮置きすること、push の結果 3 値と対応すること）は正しいままである
   - `src/deliveries.ts:14-15`
   - `src/index.ts:115-117`
   - `src/line.ts:86-87`

@@ -1,4 +1,4 @@
--- 0009_summary_notification_statuses.sql
+-- 0010_summary_notification_statuses.sql
 -- line-on-demand-report（Issue #256）: 通知記録 summary_deliveries.status に「送らなかった理由」の 3 値を足す。
 --
 -- 背景: 配信ジョブは、毎朝すべての店舗へ日次カードを送る形から、意味のある変化があった日にだけ

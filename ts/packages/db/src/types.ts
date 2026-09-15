@@ -1,6 +1,6 @@
 // db/migrations/0001_four_tier_baseline.sql・0003_line_onboarding.sql・
 // 0004_competitive_daily_summary.sql（summary_deliveries.status の CHECK は
-// 0009_summary_notification_statuses.sql で作り直した）の DDL に厳密一致する列挙・行型。
+// 0010_summary_notification_statuses.sql で作り直した）の DDL に厳密一致する列挙・行型。
 // review-acquisition（機能3）・line-onboarding（LINE基盤）・competitive-daily-summary（機能1）が
 // 触れるテーブルのみを対象とする。
 // pg 既定のパーサに従う: uuid/text = string, numeric = string（精度保持のため文字列）,
@@ -17,13 +17,13 @@ export type OnboardingStatus = 'pending' | 'store_identified' | 'active';
 export type PlaceStatus = 'pending' | 'confirmed';
 
 // --- enum 相当（CHECK 制約と 1:1）---
-// DailySummaryStatus は 0004 の列 CHECK、SummaryDeliveryStatus は 0009 の ck_summary_deliveries_status
+// DailySummaryStatus は 0004 の列 CHECK、SummaryDeliveryStatus は 0010 の ck_summary_deliveries_status
 // （0004 の無名の列 CHECK を 7 値で作り直したもの）と一致させる。
 export type DailySummaryStatus = 'ready' | 'no_competitors' | 'failed';
 
 /**
  * 通知記録（summary_deliveries）の status。店舗×日の 1 行が「通知を送ったか、送らなかったならなぜか」を表す。
- * 先頭の 4 値は 0004 からの値で、意味を変えない。後ろの 3 値は line-on-demand-report（0009）で足した
+ * 先頭の 4 値は 0004 からの値で、意味を変えない。後ろの 3 値は line-on-demand-report（0010）で足した
  * 「送らなかった理由」である。
  */
 export type SummaryDeliveryStatus =

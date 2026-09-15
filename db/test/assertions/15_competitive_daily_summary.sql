@@ -2,7 +2,7 @@
 -- FK 孤児拒否・store×日付 一意制約・status ドメイン CHECK（両テーブル）・delivery_hour 範囲 CHECK（境界含む）を検証する。
 -- 各拒否は DO ブロック + EXCEPTION で捕捉。期待通り拒否されなければ FAIL を RAISE（非ゼロ終了）。
 --
--- summary_deliveries.status は 0009（line-on-demand-report・Issue #256）で 7 値になった。0004 の無名の
+-- summary_deliveries.status は 0010（line-on-demand-report・Issue #256）で 7 値になった。0004 の無名の
 -- 列 CHECK を落とし、明示名 ck_summary_deliveries_status で作り直している。ここでは 7 値すべての受理、
 -- 不正値をその CHECK が拒否すること、status に掛かる CHECK がその 1 本だけであること、その CHECK が
 -- 許す値の集合がちょうど 7 値であることを確かめる。
@@ -51,7 +51,7 @@ BEGIN
     -- summary_deliveries: 正常系 + status ドメイン CHECK 全分岐（7 値・日付を 1 日ずつずらして 1 行ずつ入れる）。
     -- 先頭の 4 値は 0004 からの値で、旧コードが書く。移行の Step A では旧イメージが新しい CHECK の下で
     -- 動くので、この 4 値を受理し続けることが互換の条件である。残りの 3 値は送らなかった理由
-    -- （変化なし・比較不能・メニュー未準備）で、0009 で足した。
+    -- （変化なし・比較不能・メニュー未準備）で、0010 で足した。
     -- 素の INSERT だと、拒否されたときにどの値が落ちたかが FAIL の文に出ないので、値を名指しして落とす。
     FOREACH st IN ARRAY ARRAY[
         'delivered', 'failed', 'skipped_no_summary', 'quota_exceeded',
