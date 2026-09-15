@@ -89,11 +89,16 @@
   存在し件数の表明を保っていること、そして**アプリ側が axe を直接掴んでヘルパを迂回していないこと**を
   見る。後者が現実的な迂回路で、ヘルパを守っても spec が直に axe を回せば区別は最初から存在しない。
 - **E2E の固定値は「役割」で照合する。** 確定店舗の storeId は種（seed.sql）／既定（fixtures）／
-  注入（CI の env）／計測（lighthouserc.json の URL）の 4 箇所に現れ、ずれても CI は緑を返しうる。
-  とくに計測のずれは、存在しない店舗の 1 段落だけの面を測って LCP も a11y も緑にする。
-  `scripts/check-e2e-store-id-consistency.sh` が 4 役割の一致と、既定値の宣言が 1 箇所であることを
-  機械強制する。**同じリテラルの重複そのものは禁じない**（単体テストは隔離された文脈で任意の UUID を
-  選んでよい）。禁じるのは役割どうしの不一致である。
+  注入（CI の env）／計測（lighthouserc.json の URL）の 4 箇所に現れ、ずれると別の面を測ったまま
+  assert が通りうる。とくに計測のずれは、存在しない店舗の 1 段落だけの面を測り、lhci の判定だけなら
+  LCP も a11y も緑にする。`scripts/check-e2e-store-id-consistency.sh` が 4 役割の一致と、既定値の宣言が
+  1 箇所であることを機械強制する。**同じリテラルの重複そのものは禁じない**（単体テストは隔離された
+  文脈で任意の UUID を選んでよい）。禁じるのは役割どうしの不一致である。
+- **性能の計測も「測った面が本体である」ことを確かめてから合否を読む。** storeId が一致していても、
+  seed の投入の失敗や画面の分岐の変更で面は 1 段落へ落ち、lhci はそれでも合格する。lighthouse ジョブと
+  ローカルの実行装置は、lhci の後に `ts/apps/survey-web/perf/verify-lhr.mjs` で結果の件数・URL・LCP 要素
+  （店名）・回答フォームの a11y 監査が評価されたことを確かめる。判定の中身は `perf/lhr-verification.mjs`
+  の 1 箇所に置き、両方の呼び出しの配線は同じガードが機械強制する（Issue #264）。
 
 ### Type Safety / Code Quality / Testing
 - **型検査は CI で必ず走る。** 配線が消えていないことは `scripts/check-typecheck-coverage.sh` が機械強制する
