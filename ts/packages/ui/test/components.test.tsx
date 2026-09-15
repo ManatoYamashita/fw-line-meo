@@ -944,8 +944,10 @@ describe('PageHeader — ページの主見出し（Requirements 5.1）', () => 
     expect(within(actions as HTMLElement).getByRole('button', { name: '登録' })).toBeTruthy();
   });
 
-  it('押しボタンを自前で持たない（操作要素ゼロを契約とする面で使えること）', () => {
-    // 店舗詳細の面は「書込操作の要素を 1 つも含まない」ことを構造契約として固定している。
+  it('押しボタンを自前で持たない（書込要素ゼロを契約とする面で使えること）', () => {
+    // 店舗詳細の面は「書込の手段となる要素を 1 つも描かない」ことを構造契約として固定している。入力は
+    // 許可リスト（競合の検索欄と、期間・指標の選択肢）に限り、状態ごとに件数を固定する（Issue #265 で改定・
+    // 正典は ts/apps/store-detail/test/store-page.test.tsx）。見出しの部品は、どの入力も自前で描かない。
     const { container } = render(<PageHeader title="店舗詳細" description="説明" />);
     expect(container.querySelectorAll('form, button, input, textarea, select')).toHaveLength(0);
   });

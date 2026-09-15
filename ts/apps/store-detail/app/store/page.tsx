@@ -22,12 +22,14 @@
 // （'use client'。survey-web の survey-shell.tsx と同じ「クライアント合成シェル」パターンに倣う）。
 //
 // 構造的な no-write 保証（4.2）: このファイルは <form>・<button>・<textarea>・<select> のいずれも
-// 一切レンダリングしない（純粋な読取専用の表示のみ）。<input> は、期間と指標の選択肢の札
-// （trend-controls.tsx）が描く隠し radio だけを許す。札は表示を切り替えるだけで書込の手段ではなく、
-// Issue #265 で改定した構造契約の許可リストに従う（正典は test/store-page.test.tsx の「構造契約
-// （許可リスト方式）」、判断は docs/design/design-language.md §7.18）。店舗選択は <a> リンクで行う
-// ——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを送信できないため、
-// <button> を導入するより厳格な保証を維持できる。書込系 fetch（POST/PUT/DELETE/PATCH）も
+// 一切レンダリングしない（書込の手段となる要素を描かない）。<input> は次の 2 種類だけを許す。どちらも
+// 取得済みのデータの見え方を切り替えるだけで書込の手段ではなく、Issue #265 で改定した構造契約の許可
+// リストに従う（正典は test/store-page.test.tsx の「構造契約（許可リスト方式）」、判断は
+// docs/design/design-language.md §7.18）。
+//   - 競合の検索欄（competitor-search.tsx）。当日の競合が 2 店以上のときだけ描く。
+//   - 期間と指標の選択肢の札（trend-controls.tsx）が描く隠し radio。推移を描けるときだけ描く。
+// 店舗選択は <a> リンクで行う——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを
+// 送信できないため、<button> を導入するより厳格な保証を維持できる。書込系 fetch（POST/PUT/DELETE/PATCH）も
 // 一切呼び出さない — 発行するのは `/api/detail` への GET のみ（test/store-page.test.tsx で検証）。
 //
 // 意匠（ui-airbnb-surfaces task 3.1）:
@@ -36,10 +38,12 @@
 //   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。唯一の例外は推移グラフの
 //   部品（trend-chart.tsx）で、店舗詳細の面で色を書くのはそこに限る（§7.18・Issue #265）。書いてよい色の
 //   語彙も §7.18 が閉じた集合として定め、test/trend-chart.test.tsx が完全一致で固定する。このファイル
-//   自身と、選択肢の札は色を書かない。
+//   自身と、選択肢の札・検索欄・件数の文言は色を書かない。
 //
-//   使える部品は上記の no-write 保証で決まる。`Button` / `Input` / `Select` / `Textarea` は
-//   この面では**使ってはならない**（他の面では正解でも、ここでは要件 3.1 に真正面から反する）。
+//   使える部品は上記の no-write 保証で決まる。`Button` / `Select` / `Textarea` はこの面では
+//   **使ってはならない**（他の面では正解でも、ここでは書込の手段となり、要件 3.1 に真正面から反する）。
+//   `Input` は、競合の検索欄（competitor-search.tsx）の中でだけ、検索の種類で name を持たない形で使う
+//   （要件 3.1 の 2026-09-13 の訂正にある許可リスト・Issue #265）。ほかの場所で使うと構造契約の検査が赤になる。
 //   PageShell は <div>／Heading は <h1>-<h6>／Spinner は <span>／Alert は <div> しか描かない。
 //
 // 意匠（ui-airbnb-surfaces task 3.2 / 3.3）:
@@ -59,6 +63,9 @@
 //   **緩めても導線は現れない**（「3.3 と両立しない」と書くと歯止めを外せば解決するように読める）。
 //   その代わり、空状態の文言で異常ではなく次回更新を待つ状態だと伝える。空状態の部品は
 //   押しボタンを内包しないので、children を渡さない限り上記の制約と両立する。
+//   競合の検索が 0 件の状態（Issue #265）だけは、解消する操作（検索語を変える・空にする）がある。ただし
+//   その操作は検索欄そのものとして空状態の直前に見えているので、空状態の文言でその方法を伝えるだけにし、
+//   別の導線は置かない（store-detail-trend-dashboard の要件 4.9）。
 //
 //   **導線が生まれる条件**: 口コミ QR の発行 UI（Issue #152 の周辺）か、競合範囲のオーナー設定
 //   （第 2 フェーズ）が入った時点で 2.3 の後件は満たせるようになる。そのとき空状態へ導線を
@@ -69,6 +76,7 @@
 //   **一覧が空であることの案内は 3 つとも同じ部品で描く**（競合 0 件・推移 0 件・新着 0 件）。
 //   task 3.3 のタスク文が名指しするのは前 2 つだが、3 つ目も同じ役割であり、素の段落のまま
 //   残すと同一役割が同じ面の中で 2 通りに描かれて要件 1.2 が壊れる（店舗選択の見出しと同型）。
+//   Issue #265 で足した、競合の検索が 0 件のときの案内も同じ役割なので、同じ部品で描く。
 //   一方、当日サマリーの「準備中」と「取得できませんでした」はここへ含めない。**一覧が空**
 //   なのではなく当日の行そのものが無い／取得に失敗した状態であり、役割が異なる。
 
@@ -117,6 +125,8 @@ import {
   type TrendPeriodDays,
   type TrendWindow,
 } from '../../lib/trend-view';
+import { SEARCH_MIN_COMPETITORS, filterCompetitors } from '../../lib/competitor-filter';
+import { CompetitorSearch } from './competitor-search';
 import { TrendChart } from './trend-chart';
 import { TrendControls } from './trend-controls';
 
@@ -124,6 +134,8 @@ import { TrendControls } from './trend-controls';
 
 const GOOGLE_ATTRIBUTION_TEXT = 'データ提供: Google Maps';
 const NO_COMPETITORS_TEXT = '競合が見つかっていません（自店のみの計測です）';
+const NO_MATCHING_COMPETITORS_TEXT =
+  '該当する競合がいません。店名の一部で探し直すか、検索欄を空にすると一覧に戻ります。';
 const NO_NEW_REVIEWS_TEXT = '新着なし（前回の集計以降、新しいクチコミはありません）';
 const NO_TREND_TEXT = '推移データはまだありません（毎朝の集計後に表示されます）';
 const NO_SUMMARY_TEXT = '本日分のデータはまだ準備中です。しばらくしてから再度お試しください。';
@@ -425,28 +437,62 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
   );
 }
 
+/**
+ * 競合の節（store-detail-trend-dashboard task 4.2・Issue #265）。この節のコメントが指す要件と決定（D8）は、
+ * 特に断らない限り同 spec（.kiro/specs/store-detail-trend-dashboard）の requirements.md と research.md のもの
+ * である。
+ */
 function CompetitorsSection({
   competitors,
 }: {
   readonly competitors: readonly DailySummaryCompetitor[];
 }): React.JSX.Element {
+  // 検索語は、この節の中だけに持つ（決定 D8）。URL にも端末にも残さないので、開き直すと空の検索語に戻る
+  // （要件 4.11）。ほかの節はこの状態を読まないので、検索は順位・グラフ・表・要約を変えない（要件 4.10）。
+  const [query, setQuery] = useState('');
+
+  // 検索欄は、当日の競合が 2 店以上のときだけ出す（要件 4.1・4.2）。出していないときは、見えない検索語で
+  // 一覧を絞り込まないよう、空の検索語として扱う。
+  const searchable = competitors.length >= SEARCH_MIN_COMPETITORS;
+
+  // 行の key は、絞り込む前の並びの位置から作る。絞り込み後の位置を使うと、絞り込むたびに同じ店へ別の key が
+  // 付き、行が作り直される。店名は一意ではない（同じ名前の店が近隣に 2 つありうる）ので、位置を必ず含める。
+  const rows = competitors.map((competitor, position) => ({
+    name: competitor.name,
+    competitor,
+    rowKey: `${competitor.name}-${position}`,
+  }));
+  // 一覧は、店名に検索語を含む店だけを元の並び（rank 順）のまま残す（要件 4.3〜4.6）。総数は評価の無い店も数える。
+  const { visible, total } = filterCompetitors(rows, searchable ? query : '');
+
   return (
     <section className="flex flex-col gap-4">
       <Heading level={2}>競合との比較</Heading>
+      {/* 検索欄と件数の文言は、一覧の Card の外に置く。0 件のときは Card が空状態に置き換わるので、中に置くと
+          検索欄ごと消えてしまう（§7.18）。 */}
+      {searchable ? (
+        <CompetitorSearch query={query} onQueryChange={setQuery} total={total} visibleCount={visible.length} />
+      ) : null}
       {competitors.length === 0 ? (
         <EmptyState>
           <p>{NO_COMPETITORS_TEXT}</p>
+        </EmptyState>
+      ) : visible.length === 0 ? (
+        // 絞り込みの結果が 0 件の案内（要件 4.9）。導線（children の中のリンクや押しボタン）は置かない。
+        // role も付けない。件数の文言（role="status"）が同じ変化を読み上げるので、付けると二重になる。
+        <EmptyState>
+          <p>{NO_MATCHING_COMPETITORS_TEXT}</p>
         </EmptyState>
       ) : (
         <Card>
           <CardContent>
             <ul className="divide-y">
-              {competitors.map((competitor, index) => {
+              {visible.map(({ competitor, rowKey }) => {
                 // 星差は「自店 − 競合」を符号つき小数 1 桁で出す（Flex と同じ関数）。評価の無い店、
                 // または自店に評価が無い日は null で、星差の指標そのものを出さない（Issue #255）。
                 const starDiff = formatStarDiff(competitor.starDiff);
                 return (
-                  <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={`${competitor.name}-${index}`}>
+                  <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={rowKey}>
                     <p className="font-semibold">{competitor.name}</p>
                     <dl className="grid grid-cols-3 gap-3">
                       <Metric label="評価" value={formatRatingLabel(competitor.rating)} />
@@ -465,6 +511,8 @@ function CompetitorsSection({
       )}
       {/* 評価の無い店は順位の比較集合に入らない。一覧には残るので、「近隣N店中」の N と一覧の件数が
           食い違う理由を、該当する店がいるときだけ一覧の下に添える（Flex の注記と同じ文言）。
+          判定は、絞り込んだ結果ではなく当日の全件から行う。注記が説明するのは N と全件の食い違いであり、
+          検索で評価の無い店が一覧から外れても、その食い違いは残るためである。
           カードの内側へ置かないのは、カードの内容の容器に面から余白を足さないため（意匠の検査が
           競合カードを「面が何も足していない容器」の基準に使っている）。 */}
       {hasUnratedCompetitor(competitors) ? <p className="text-sm">{UNRATED_EXCLUDED_NOTE}</p> : null}

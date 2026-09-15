@@ -1486,10 +1486,10 @@ describe('store detail page', () => {
     // 状態は design.md の構造契約表の全行である。見出し・主要領域・リンク・版面を検査する
     // 4 分岐の表（SURFACE_BRANCHES）には足さない。あちらの網羅を変えないためである。
     //
-    // 件数は、design.md の構造契約表の値へ、節への組み込みのタスクごとに上げる（Migration Strategy の
-    // 手順 5）。推移ありの状態の隠し radio（期間と指標の札）は task 4.1 で表の値へ上げた。競合 2 店以上の
-    // 状態の検索欄は、task 4.2 で上げるまで現行の実装どおりの件数で固定している。どちらも、上げる変更を
-    // 先に書いて赤を見てから、実装で緑にする。
+    // 件数は design.md の構造契約表の値であり、節への組み込みのタスクごとに表の値へ上げた（Migration
+    // Strategy の手順 5）。推移ありの状態の隠し radio（期間と指標の札）は task 4.1 で、競合 2 店以上の
+    // 状態の検索欄は task 4.2 で上げた。推移の有無に依らず、競合 2 店以上なら検索欄は 1 件である。
+    // どちらも、上げる変更を先に書いて赤を見てから、実装で緑にした。
     const STRUCTURE_STATES: readonly StructureState[] = [
       {
         name: '読み込み中',
@@ -1534,13 +1534,13 @@ describe('store detail page', () => {
       readyState(
         '正常・推移 0 件・競合 2 店以上',
         { ...mockResult, trend: [], competitors: TWO_COMPETITORS },
-        { searchBox: 0, hiddenRadio: 0 },
+        { searchBox: 1, hiddenRadio: 0 },
       ),
       readyState('正常・推移あり・競合 1 店以下', mockResult, { searchBox: 0, hiddenRadio: 5 }),
       readyState(
         '正常・推移あり・競合 2 店以上',
         { ...mockResult, competitors: TWO_COMPETITORS },
-        { searchBox: 0, hiddenRadio: 5 },
+        { searchBox: 1, hiddenRadio: 5 },
       ),
     ];
 
