@@ -143,8 +143,10 @@
 | `line-webhook.dispatch_failed_before_reply_token` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗のうち、**replyToken が判明する前**に起きたもの。返信は試みていない。前者と分けるのは、運用者が「オーナーに案内が届いたか」を判定できるようにするため |
 | `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
-| `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4） |
-| `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**失敗**。現在は記録そのものを諦めている（`conversation.ts` のコメントが明記） |
+| `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` ／ `ts/apps/line-webhook/src/owner/router.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンクと、店舗特定済みオーナーの振り分け口のメニュー照合（line-on-demand-report）の両方が出す |
+| `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` ／ `ts/apps/line-webhook/src/owner/router.ts` | 補助的処理の**失敗**。現在は記録そのものを諦めている（`conversation.ts` のコメントが明記）。振り分け口の照合では、応答は済んでいて会話の段階を変えない（次の操作で再び張る） |
+| `line-webhook.audit_log_failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/onboarding/conversation.ts` ／ `ts/apps/line-webhook/src/owner/router.ts` | 監査記録（`audit_logs`）の書込の失敗。業務処理は巻き戻さない。項目は `errorKind` だけである |
+| `line-webhook.session_stage_update_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/router.ts` | 振り分け口が完了後メニューを張れた後、会話の段階を completed に揃える更新に失敗した場合。応答は済んでいるので例外にしない。段階が completed でないままなので、次の操作で再び張って揃え直す。項目は `errorKind` だけである |
 | `line-webhook.report_replied` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | レポート要求への応答。Reply を送った後に、応答ごとに 1 件出す。項目は `reportKind` と `reportOutcome` だけである。例外で終わった要求は出さない（`line-webhook.dispatch_failed` が記録する） |
 | `line-webhook.report_store_hint_ignored` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | オーナーの確定店舗の集合の外にある店舗が指定され、選択肢を再提示した場合。指定された店舗 ID は載せない（集合外の値は攻撃者に由来しうる。`store-detail.store_hint_ignored` と同じ考え方）。他のオーナーに実在する ID と存在しない ID で記録を変えない |
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名を持たない |

@@ -117,7 +117,7 @@
   - _Boundary: line-webhook line/messages_
   - _Depends: 3.1_
 
-- [ ] 3.9 店舗特定済みオーナーの振り分け口を実装する
+- [x] 3.9 店舗特定済みオーナーの振り分け口を実装する
   - 店舗特定済みオーナーの postback のうちレポートの data はレポートへ渡し、それ以外の postback・テキスト・スタンプなど・友だち追加にはステータス案内を返す
   - Reply の後、会話の段階が completed でない・友だち追加・再開の postback のいずれかなら完了後メニューを張り、段階が completed でなかったときは張れた場合に限り completed に揃える。成否を既存の事象と監査記録に残す
   - オンボーディングの復号がレポートの data を受理しないこと（レポートの復号がオンボーディングの data を受理しないことの逆向き）を試験で固定する
@@ -357,6 +357,11 @@
   - 完了メッセージの近くの「日次サマリーの同じ操作／導線」のコメント（delivery-job の日次カードを指す）
   - JSDoc の「機能1＝競合日次サマリー」
 - （3.8）完了メッセージの「機能1（競合店舗の日次サマリー）」は、毎日届くと読める名前なので「機能1（競合店との比較などのレポート）」に改めた。「機能1」は line-onboarding Req 4.3 のため残す。禁止語の試験に「日次」を加えた
+- （3.9）次の 2 つの事象を正典へ登録した。design の Monitoring には無いので、6.x か最終検証で design へ追記する。どちらも項目は errorKind だけで、識別子を載せない
+  - 新しい `line-webhook.session_stage_update_failed`: Reply の後の段階の更新の失敗は、投げると使用済みの replyToken で Reply が 2 回になるので、投げずに記録する
+  - 既存の `line-webhook.audit_log_failed`: conversation.ts が既に出していたが、未登録だった
+- （3.9）`owners.onboarding_status` の `active` は、書く経路がコードに無い。router と張り替えスクリプトの判定式は `= 'store_identified'` だけなので、将来 `active` を書く経路ができると、そのオーナーはオンボーディングへ落ちて 2.9 に反する（Revalidation Trigger の候補）
+- （3.9→3.10）完了後メニューのリンクと監査記録の処理が、router.ts と conversation.ts の `handleConfirm` で重複している。3.10 で 1 か所に寄せる。router と ReportHandler はリクエストごとに作る（相関 ID のため）
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録
