@@ -47,7 +47,7 @@
   - _Requirements: 8.2, 8.6, 8.7_
   - _Boundary: go/internal/places, go/internal/summary, go/internal/batch, go/internal/repo_
 
-- [ ] 2.5 口コミの帰属 3 項目と 30 日の窓を言語をまたいで確かめる
+- [x] 2.5 口コミの帰属 3 項目と 30 日の窓を言語をまたいで確かめる
   - 言語間の契約試験の実行装置（`db/test/cross_runtime_steps.sh`）は現在 Go の後に delivery-job と store-detail だけを走らせる。帰属項目を読むのは line-webhook なので、line-webhook の段を足し、Go が書いた行をレポート用の読み出しで読む契約試験を置く。基準日には Go の契約試験が行を書く固定日を渡す
   - Go の契約試験に 3 項目を持つ口コミと持たない口コミ（既存行の形）を書かせ、TS がどちらも読めることを固定する。あわせて、Go の削除が残す最古の行（30 日目）を TS の読み出しが返すことを確かめる（30 日の定数の二重定義の食い違いを検出する。31 日目の不在は 2.2 の DB 試験が持つ）
   - Observable: 実行装置が 5 段（Go・delivery-job・store-detail・line-webhook・能力の不在チェック）を順に流して緑で、出力の段の見出しが `1/5`〜`5/5` になっている
@@ -301,6 +301,7 @@
 - （2.4）新着口コミのレポート（3.4）が、Google Maps 上の URL の無い口コミの内容を出さないことで、Go の `NewReviewExcerpt` と TS の `DailySummaryNewReview` の注記は事実になる。3.4 の審査で確かめる。既存の LIFF と日次カードはこの判定をしない（LIFF は本 spec の境界外）
 - （2.4）Go は URL を加工せずに保存する。LINE の Flex は、画像の url に HTTPS を、uri アクションに http・https・line・tel を求め、1 つでも不適合があるとメッセージ全体を拒否する。3.4 では https の絶対 URL だけを部品に使い、`googleMapsUri` が不適合なら導線が無いものとして内容を出さない（8.7）ことを試験で固定する
 - （2.4）`.kiro/specs/competitive-daily-summary/design.md` の new_reviews の要素の形（4 項目）に、任意の 3 項目を 6.1 で足す。`db/migrations/0004_competitive_daily_summary.sql` の同じコメントは、適用済みの migration なので改めない
+- （2.5）言語間の試験が検出できる 30 日の食い違いは、TS の範囲の読み出しの窓が Go より狭い向きだけである。TS の窓が広い向きと、最新の行の読み出しの窓は、2.2 の DB 試験が持つ。実行装置は `set -e` で最初の赤で止まるので、Go の変異で TS の段の検出力を見るときは段を分けて流す
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

@@ -3,11 +3,13 @@ package batch
 import (
 	"context"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/repo"
 	"github.com/ManatoYamashita/fw-line-meo/go/internal/testdb"
+	"github.com/jackc/pgx/v5"
 )
 
 // TestCrossRuntimeContract_GoWritesReadableSummaries is the Go half of the cross-runtime
@@ -36,6 +38,17 @@ import (
 //     status='no_competitors' and an EMPTY `competitors` array — the R1.3 branch that flex.ts's
 //     buildCompetitorsSection must render as "competitor not found" rather than crashing on an
 //     unexpected shape.
+//
+// line-on-demand-report（tasks 2.5）で、line-webhook のレポート用の読み出し
+// （ts/apps/line-webhook/test/cross-runtime.e2e.test.ts）が読む 2 つの形を足した。
+//   - 口コミの帰属 3 項目（Req 8.2・8.6・8.7）: readyStore の新着口コミを 2 件にし、1 件目は 3 つの URL を
+//     持ち、2 件目は持たない（3 項目を足す前に書かれた行の要素と同じ形）。書かれた生の jsonb の形を
+//     ここでも確かめる
+//   - 30 日の窓（Req 6.7）: readyStore に、基準日の 29 日前（30 日目）と 30 日前（31 日目）の行を Run の
+//     前に書いておく。Run の削除（repo.PurgeOlderThan）が 30 日目を残して 31 日目を消したことをここで
+//     確かめ、TS の段は残った 30 日目の行を同じ基準日の窓の中で読む。30 という値は Go と TS の二重定義
+//     で、Go が 30 日目の行まで消す食い違いはこの段で、TS の範囲の読み出しの窓が Go より狭くなる食い違いは
+//     TS の段で赤になる（TS の窓の境界そのものは ts/packages/db/test/report-reads.db.test.ts が固定する）
 func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	ctx := context.Background()
 	// **ここだけは共有 DB（DATABASE_URL）である。** 直後に TS の配信ジョブが別プロセスとして
@@ -65,6 +78,12 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		// （同一 postgres インスタンスを共有する ts-test-db 実行内でも targetsTotal 等の厳密件数
 		// 比較を汚染しないための既存の流儀を踏襲）。TS 側（cross-runtime.e2e.test.ts）と一致させる。
 		crossRuntimeDeliveryHour = 17
+
+		// 新着口コミの帰属 3 項目の値（line-on-demand-report）。line-webhook の cross-runtime.e2e.test.ts が
+		// 同じ値をそのまま読むことを確かめるので、変更する場合は両ファイルを揃える。
+		crossRuntimeAuthorURI      = "https://www.google.com/maps/contrib/cross-runtime-author/reviews"
+		crossRuntimeAuthorPhotoURI = "https://lh3.googleusercontent.com/a/cross-runtime-photo"
+		crossRuntimeReviewMapsURI  = "https://www.google.com/maps/reviews/data=cross-runtime-review"
 	)
 
 	mustExec := func(sql string, args ...any) {
@@ -164,18 +183,56 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		t.Fatalf("seed yesterday self snapshot: %v", err)
 	}
 
+	// 30 日の窓（line-on-demand-report・Req 6.7）: 基準日の 29 日前（30 日目）と 30 日前（31 日目）の行を、
+	// Run の前に Go の書込（repo.WriteDailySummary）で書いておく。Run の削除は 30 日目を残し、31 日目を消す。
+	// 口コミ総数は、TS の段が行の取り違えを見分けるための値である（TS 側の DAY_30_REVIEW_COUNT と揃える）。
+	day30 := today.AddDate(0, 0, -29) // 2026-06-13
+	day31 := today.AddDate(0, 0, -30) // 2026-06-12
+	for _, seed := range []struct {
+		date        time.Time
+		reviewCount int
+	}{{day30, 80}, {day31, 79}} {
+		if err := repo.WriteDailySummary(ctx, pool, repo.DailySummaryInput{
+			StoreID:     readyStoreID,
+			SummaryDate: seed.date,
+			Status:      "ready",
+			Rank:        intPtr(1),
+			RankTotal:   intPtr(2),
+			Rating:      f64(4.3),
+			ReviewCount: intPtr(seed.reviewCount),
+			Competitors: []repo.SummaryCompetitor{
+				{Name: "競合イチ", Rating: f64(4.0), ReviewCount: 45, StarDiff: f64(0.3)},
+			},
+		}); err != nil {
+			t.Fatalf("seed daily summary on %s: %v", seed.date.Format(time.DateOnly), err)
+		}
+	}
+
 	server := newFakePlacesServer(t)
 	// nocompStore は競合未固定のため extraction が走る。Nearby Search はサーバー全体で共有の
 	// 応答であり、readyStore は既に競合固定済み（Nearby Search を経由しない）ため、
 	// 空リストのままで両立できる（0件ヒット→no_competitors・R1.1-R1.3 の実データ検証）。
 	server.nearbyPlaces = nil
 
+	// 新着口コミは 2 件。1 件目は帰属の URL を 3 つとも持ち、2 件目は持たない（応答にキーそのものが無い）。
+	// 1 件目の 4 項目は既存の TS の段（delivery-job）が new_reviews[0] として読むので変えない。
 	server.details["cross-runtime-ready-self"] = operational(4.5, 95, "クロスランタイム店舗（競合あり）",
 		fakeReview{
-			Rating:            5,
-			PublishTime:       "2026-07-12T01:00:00Z", // yesterday(2026-07-11T00:00:00Z) より後 → 抜粋対象
-			Text:              fakeReviewText{Text: "とても美味しかったです、また来ます"},
-			AuthorAttribution: fakeAuthorAttribution{DisplayName: "テスト太郎"},
+			Rating:      5,
+			PublishTime: "2026-07-12T01:00:00Z", // yesterday(2026-07-11T00:00:00Z) より後 → 抜粋対象
+			Text:        fakeReviewText{Text: "とても美味しかったです、また来ます"},
+			AuthorAttribution: fakeAuthorAttribution{
+				DisplayName: "テスト太郎",
+				URI:         crossRuntimeAuthorURI,
+				PhotoURI:    crossRuntimeAuthorPhotoURI,
+			},
+			GoogleMapsURI: crossRuntimeReviewMapsURI,
+		},
+		fakeReview{
+			Rating:            4,
+			PublishTime:       "2026-07-12T02:00:00Z",
+			Text:              fakeReviewText{Text: "落ち着いて食事ができました"},
+			AuthorAttribution: fakeAuthorAttribution{DisplayName: "テスト花子"},
 		},
 	)
 	server.details["cross-runtime-ready-comp-1"] = operational(4.0, 50, "競合イチ")
@@ -263,6 +320,51 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	}
 	if !comp3RatingNull || !comp3RankNull {
 		t.Errorf("unrated competitor snapshot rating IS NULL=%v rank IS NULL=%v, want true/true", comp3RatingNull, comp3RankNull)
+	}
+
+	// 口コミの帰属 3 項目（line-on-demand-report）: 書かれた生の jsonb を、キーの集合と値で確かめる。
+	// TS の読込は 3 項目を任意項目として寛容に読むので、書込の回帰は TS の段だけでは見逃しうる。
+	// readNewReviewElements・newReviewElement は review_attribution_test.go のもの。
+	gotReviews := readNewReviewElements(t, ctx, pool, readyStoreID, today)
+	wantReviews := []newReviewElement{
+		{
+			authorName:     "テスト太郎",
+			keys:           "authorName,authorPhotoUri,authorUri,googleMapsUri,publishTime,rating,textExcerpt",
+			authorURI:      crossRuntimeAuthorURI,
+			authorPhotoURI: crossRuntimeAuthorPhotoURI,
+			googleMapsURI:  crossRuntimeReviewMapsURI,
+		},
+		{
+			authorName: "テスト花子",
+			keys:       "authorName,publishTime,rating,textExcerpt",
+		},
+	}
+	if len(gotReviews) != len(wantReviews) {
+		t.Fatalf("readyStore new_reviews elements = %d, want %d: %+v", len(gotReviews), len(wantReviews), gotReviews)
+	}
+	for i := range wantReviews {
+		if gotReviews[i] != wantReviews[i] {
+			t.Errorf("readyStore new_reviews[%d] = %+v, want %+v", i, gotReviews[i], wantReviews[i])
+		}
+	}
+
+	// 30 日の窓（line-on-demand-report・Req 6.7）: Run の削除の後に残る readyStore の行は、30 日目と当日だけ。
+	// 31 日目の行は消えている。TS の段は、この 30 日目の行を同じ基準日（2026-07-12）の窓の中で読む。
+	dateRows, err := pool.Query(ctx, `
+		SELECT to_char(summary_date, 'YYYY-MM-DD') FROM daily_summaries
+		WHERE store_id = $1 ORDER BY summary_date
+	`, readyStoreID)
+	if err != nil {
+		t.Fatalf("select readyStore summary dates: %v", err)
+	}
+	keptDates, err := pgx.CollectRows(dateRows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("collect readyStore summary dates: %v", err)
+	}
+	wantDates := []string{day30.Format(time.DateOnly), today.Format(time.DateOnly)}
+	if !slices.Equal(keptDates, wantDates) {
+		t.Errorf("readyStore summary dates after purge = %v, want %v (the 30th day is kept and the 31st day %s is purged)",
+			keptDates, wantDates, day31.Format(time.DateOnly))
 	}
 
 	// --- nocompStore: 0件競合 → status='no_competitors'・competitors=[] の実データ検証（R1.3）---

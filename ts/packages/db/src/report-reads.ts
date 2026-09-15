@@ -11,7 +11,9 @@
 //   限り、行を取りこぼさない
 // - 基準日を引数で受けるのは、試験（Go の言語間試験は固定日で行を書く）で日付を固定できるように
 //   するためである（store-detail の queryStoreDetail と同じ形）。SQL に now() や CURRENT_DATE を持たない
-// - 30 という値は Go と TS の二重定義である。食い違いは言語間の契約試験で検出する
+// - 30 という値は Go と TS の二重定義である。Go の削除が実際に残した最古の行（30 日目）を範囲の読み出しが
+//   返すことは、言語間の契約試験（ts/apps/line-webhook/test/cross-runtime.e2e.test.ts）で確かめる。
+//   30 日目を返して 31 日目を返さないことは、関数ごとに report-reads.db.test.ts で固定する
 //
 // 日付は to_char で文字列にして読む。pg 既定の Date への変換は実行環境の TZ に依存するため使わない。
 // 並べ替えと絞り込みは表の列（ds.summary_date）で書く。出力の列名も summary_date なので、修飾しない
