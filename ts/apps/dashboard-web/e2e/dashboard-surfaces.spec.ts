@@ -1,7 +1,7 @@
-import { test, expect } from '@playwright/test';
-import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
+import { test, expect, type Locator, type Page } from '@playwright/test';
+import { deviceWidthOf, expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { DASHBOARD_SURFACES } from './fixtures/api';
+import { DASHBOARD_SURFACES, DASHBOARD_USERS } from './fixtures/api';
 // 文言の実値は面にもテストにも書かない。**実物の正典を読む**（写すと片方だけが古びる）。
 import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-text';
 
@@ -194,12 +194,293 @@ test('モバイルビューポートの利用者管理の編集パネルで横�
   //
   // **この実測が見るのはページ全体のはみ出しだけである。** 容器の内側は免除されるので、
   // パネルの中身（入力の右端など）が容器の内側で画面外へ溢れても、ここは赤にならない。
-  // パネルの中身の網は、実ブラウザでの観察（dashboard-user-edit tasks 4.2）が受け持つ。
+  // パネルの中身の網は、下の「捲り容器の見えている矩形」の実測が受け持つ。
   await expectNoHorizontalScroll(
     page,
     '利用者管理の編集パネル',
     NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
   );
+});
+
+// --- 携帯端末の幅での編集パネルの配置（dashboard-user-edit Req 6.8, 6.9・Issue #259）----------
+//
+// 上の横スクロールの実測は、捲り容器の**内側**を免除する。免除しなければ表の容器を持つ面が
+// すべて赤になるからだが、その代わり、容器の内側でパネルが見える幅の外へ出ても、どこも赤にならない。
+// 実際、この実測を足す前は、行末の編集を押すと容器が捲れ、保存が画面の左外に出ていた
+// （Pixel 5 で表 462px・見える幅 361px）。Tab で保存へ焦点を載せても見えるのは 3px で（WCAG 2.4.7）、
+// フォームを使うのに横の捲りが要った（WCAG 1.4.10。データ表の例外はフォームには及ばない）。
+//
+// そこで、パネルのカードと、その中の見出し・操作要素が、捲り容器の**見えている矩形**
+// （スクロールポート）の内側にあることを直接測る。見る状態は 3 つ。編集の押下で容器が捲れた状態・
+// 捲り位置 0 の状態・Tab で保存へ焦点を載せた状態である。
+//
+// あわせて、**カードの子孫（要素と文字列）がカードの内側にあること**も測る。カードは溢れを切り取る
+// （`overflow: hidden`）ので、カードが見えていても、中身がカードの縁を越えればその分は読めない。
+// 幅を容器の見えている幅に固定したことで、この経路が生まれた。区切りの無いメールアドレスの見出しは、
+// grid の項目の最小幅（語の全長）までしか縮まず、カードの外へ出ていた（38 字のアドレスで、Pixel 5 では
+// カードの縁を 6px 越え、320px 幅では見えている矩形の外へ 63px 出た）。sticky は捲りに追従するので、
+// 容器を捲っても読めない（tasks 3.5 の独立レビュー）。fixture のメールアドレスが区切りを持たないのは、
+// この経路を通すためである。
+//
+// **axe では代用できない。** axe は捲り容器の外へ出た要素を黙って評価の対象から外す
+// （捲り位置しだいで、保存のコントラストが評価されていなかった）。パネルが見える幅の外へ出ても、
+// 見出しがカードの縁で切れても、a11y 監査は緑のままであることを、配置を壊す変異で実測している
+// （dashboard-user-edit tasks 3.5）。
+
+/** 画面上の左右の端（CSS px・ビューポート基準）。 */
+interface HorizontalExtent {
+  readonly name: string;
+  readonly left: number;
+  readonly right: number;
+}
+
+interface PanelPlacement {
+  readonly scrollLeft: number;
+  readonly clientWidth: number;
+  readonly scrollWidth: number;
+  /** 捲り容器の見えている矩形（スクロールポート）の左右の端。 */
+  readonly scrollport: { readonly left: number; readonly right: number };
+  /**
+   * パネルのカードと、その中の見出し・操作要素。見出しは描かれた文字列の範囲、入力部品は
+   * ラベルの文言、押しボタンは文言で名指す。
+   */
+  readonly parts: readonly HorizontalExtent[];
+  /** カードの縁を越えた子孫（要素の箱と、描かれた文字列の範囲）。 */
+  readonly escapedFromCard: readonly HorizontalExtent[];
+  /** カードの子孫として調べた要素と文字列の件数（空振りの検出用）。 */
+  readonly cardDescendantsChecked: number;
+}
+
+/**
+ * 測る部分の一覧。**完全一致で照合する。**
+ *
+ * 1 件も拾えない、または一部を取りこぼした計測を「すべて内側にある」と読まないための前置きである。
+ * 所属代理店の選択は代理店ロールのときだけ出る。fixture の開く手順が代理店ロールの利用者を開く
+ * （最も横に広い状態）ので、ここにも含まれる。
+ */
+const PANEL_PARTS = [
+  'カード',
+  '見出し',
+  'ロール',
+  '所属代理店',
+  '表示名',
+  '保存',
+  'キャンセル',
+] as const;
+
+/**
+ * カードの子孫がカードの縁を越えたと見なす幅の下限（CSS px）。
+ *
+ * 箱の端と文字列の範囲は小数で得られ、カードの縁と接する子孫（見出しの帯・本文の帯）は縁と同じ値に
+ * なる。丸めの差で縁と接するものを越えたと読まないための幅であり、実際に切れる文字（1 字で数 px）より
+ * 十分に小さい。
+ */
+const CARD_EDGE_TOLERANCE = 0.5;
+
+/**
+ * カードの左右の余白（見えている矩形の左端 → カードの左端、カードの右端 → 見えている矩形の右端）の
+ * 差の上限（CSS px）。
+ *
+ * 包みの幅（`100cqi - 2rem`）は、sticky の左端（`left-4`）と、`@fwlm/ui` の `TableCell` の左右の余白
+ * （`px-4`）の両方と結び付いている。引く値だけがずれると（例: `1.5rem`）、ここでは収まったまま、
+ * 表が容器に収まる広い版面で包みがセルの内容より広くなり、容器が捲れるようになる（tasks 3.5 の
+ * 独立レビューで 768px・1280px 幅に実測）。E2E は Pixel 5 だけで走るので、左右の余白が揃っていることで
+ * このずれを捕まえる。最大まで捲ると、sticky の包みがセルの内容の右端に当たって 1px 未満ずれる
+ * （表の幅が小数のため）ので、その分を許す。
+ */
+const CARD_GAP_TOLERANCE = 1;
+
+/** 利用者一覧の捲り容器（アクセシブル名は一覧のページが与える）。 */
+function userListRegion(page: Page): Locator {
+  return page.getByRole('region', { name: '利用者一覧', exact: true });
+}
+
+/** fixture が開く対象の利用者の編集ボタン。 */
+function editTrigger(page: Page): Locator {
+  return page.getByRole('button', { name: `${DASHBOARD_USERS[1].email} を編集`, exact: true });
+}
+
+/**
+ * 捲り容器と、開いている編集パネルの左右の端を 1 回の評価で読む。
+ *
+ * パネルは編集ボタンの `aria-controls` が指すセルとして引く（押しボタンとパネルの結び付きを
+ * そのまま辿る）。そのセルが捲り容器の中に無ければ、測る対象を取り違えているので例外にする。
+ */
+async function readPanelPlacement(page: Page): Promise<PanelPlacement> {
+  const panelId = await editTrigger(page).getAttribute('aria-controls');
+  expect(panelId, '編集ボタンが開いているパネルを指していません（パネルが開いていません）').not.toBeNull();
+  return userListRegion(page).evaluate(
+    (container, { id, tolerance }) => {
+      const cell = document.getElementById(id);
+      if (cell === null || !container.contains(cell)) {
+        throw new Error(`編集パネル #${id} が利用者一覧の捲り容器の中にありません`);
+      }
+      const card = cell.querySelector('[data-slot="card"]');
+      if (card === null) {
+        throw new Error(`編集パネル #${id} の中にカードがありません`);
+      }
+      const extent = (name: string, rect: DOMRect): HorizontalExtent => ({
+        name,
+        left: rect.left,
+        right: rect.right,
+      });
+      // 描かれた文字列の範囲。要素の箱が縁の内側にあっても、文字列が箱から溢れていれば読めないので、
+      // 見出しと文字列は箱ではなく文字列そのものの範囲で測る。
+      const textRect = (node: Node): DOMRect => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return range.getBoundingClientRect();
+      };
+
+      const parts: HorizontalExtent[] = [extent('カード', card.getBoundingClientRect())];
+      const heading = card.querySelector('h2');
+      if (heading !== null) parts.push(extent('見出し', textRect(heading)));
+      for (const control of Array.from(cell.querySelectorAll('select, input, button'))) {
+        const name =
+          control instanceof HTMLButtonElement
+            ? control.textContent?.trim() ?? ''
+            : (control as HTMLInputElement | HTMLSelectElement).labels?.[0]?.textContent?.trim() ?? '';
+        parts.push(extent(name, control.getBoundingClientRect()));
+      }
+
+      // カードの子孫。大きさの無いもの（閉じた選択の中の選択肢など）は描かれていないので除く。
+      const cardBox = card.getBoundingClientRect();
+      const escapedFromCard: HorizontalExtent[] = [];
+      let cardDescendantsChecked = 0;
+      const inspect = (name: string, rect: DOMRect) => {
+        if (rect.width === 0 && rect.height === 0) return;
+        cardDescendantsChecked += 1;
+        if (rect.left < cardBox.left - tolerance || rect.right > cardBox.right + tolerance) {
+          escapedFromCard.push(extent(name, rect));
+        }
+      };
+      for (const element of Array.from(card.querySelectorAll('*'))) {
+        inspect(`<${element.tagName.toLowerCase()}>`, element.getBoundingClientRect());
+      }
+      const texts = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+      for (let node = texts.nextNode(); node !== null; node = texts.nextNode()) {
+        const text = node.textContent?.trim() ?? '';
+        if (text !== '') inspect(`「${text}」`, textRect(node));
+      }
+
+      // 見えている矩形は、枠線（clientLeft）の内側から clientWidth の幅である。getBoundingClientRect の
+      // 幅は、縦の捲り棒が出る場合にその幅まで含むので使わない。
+      const box = container.getBoundingClientRect();
+      const left = box.left + container.clientLeft;
+      return {
+        scrollLeft: container.scrollLeft,
+        clientWidth: container.clientWidth,
+        scrollWidth: container.scrollWidth,
+        scrollport: { left, right: left + container.clientWidth },
+        parts,
+        escapedFromCard,
+        cardDescendantsChecked,
+      };
+    },
+    { id: panelId!, tolerance: CARD_EDGE_TOLERANCE },
+  );
+}
+
+/** 数値を小数第 2 位で丸めた表記（失敗の文言用。比較は丸める前の値で行う）。 */
+function px(value: number): string {
+  return String(Math.round(value * 100) / 100);
+}
+
+/** 失敗の文言用の表記（`名前 [左端, 右端]`）。 */
+function describeExtent(part: HorizontalExtent): string {
+  return `${part.name} [${px(part.left)}, ${px(part.right)}]`;
+}
+
+/**
+ * パネルの各部が見えている矩形の内側にあり、カードの中身がカードの縁を越えず、カードの左右の余白が
+ * 揃っていること。
+ *
+ * 判定は `expect.soft` にし、1 つの状態で外れても後続の状態を測り続ける。どの状態で外れるかは
+ * 壊れ方で変わる（sticky だけを外すと、捲れた状態でだけ外れる）ので、1 回の実行で全状態の結果を
+ * 読めるようにする。取りこぼしと空振りの判定は、それ以降の判定の前提なので通常の `expect` のまま止める。
+ */
+function expectPanelInsideScrollport(placement: PanelPlacement, state: string): void {
+  expect(
+    placement.parts.map((part) => part.name),
+    `${state}: 測る部分を取りこぼしています（パネルの構成が変わったか、パネルが開いていません）`,
+  ).toEqual([...PANEL_PARTS]);
+  // カードの中の見出しと操作要素 5 つは、少なくとも子孫として調べているはずである。下回るなら
+  // 子孫の走査が空振りしている（件数は literal で持つ）。
+  expect(
+    placement.cardDescendantsChecked,
+    `${state}: カードの子孫をほとんど調べていません（走査が空振りしています）`,
+  ).toBeGreaterThanOrEqual(6);
+
+  const { left, right } = placement.scrollport;
+  const where = `${state}（scrollLeft=${px(placement.scrollLeft)}）`;
+  const outside = placement.parts
+    .filter((part) => part.left < left || part.right > right)
+    .map(describeExtent);
+  expect
+    .soft(outside, `${where}: 捲り容器の見えている矩形 [${px(left)}, ${px(right)}] の外へ出た部分があります`)
+    .toEqual([]);
+
+  const card = placement.parts[0]!;
+  expect
+    .soft(
+      placement.escapedFromCard.map(describeExtent),
+      `${where}: カード [${px(card.left)}, ${px(card.right)}] の縁を越えた中身があります` +
+        '（カードは溢れを切り取るので、越えた分は読めません）',
+    )
+    .toEqual([]);
+
+  const leftGap = card.left - left;
+  const rightGap = right - card.right;
+  expect
+    .soft(
+      Math.abs(leftGap - rightGap),
+      `${where}: カードの左右の余白が揃っていません（左 ${px(leftGap)} / 右 ${px(rightGap)}）。` +
+        '包みの幅から引く値が、sticky の左端やセルの左右の余白とずれています',
+    )
+    .toBeLessThanOrEqual(CARD_GAP_TOLERANCE);
+}
+
+test.describe('モバイルビューポートの利用者管理の編集パネルは捲り容器の見えている矩形に収まる', () => {
+  test.beforeEach(async ({ page }) => {
+    // 携帯端末の幅で走っていることの前置き（広い幅では表が容器に収まり、捲れた状態を作れない）。
+    deviceWidthOf(page);
+    await surfaceByName('利用者管理の編集パネル').open(page);
+  });
+
+  test('編集の押下で捲れた状態と、捲り位置 0 の状態の両方で、カードと操作要素が見えている', async ({
+    page,
+  }) => {
+    const scrolled = await readPanelPlacement(page);
+    // 前提: 表が容器より広く、編集の押下で容器が実際に捲れている。表が容器に収まるようになると
+    // 「捲れた状態」を作れず、この実測は何も測らなくなる。そのときは緑にせず、ここで止める。
+    expect(
+      scrolled.scrollWidth,
+      '表が捲り容器に収まっています（捲れた状態を作れないので、この実測は成り立ちません）',
+    ).toBeGreaterThan(scrolled.clientWidth);
+    expect(scrolled.scrollLeft, '編集の押下で捲り容器が捲れていません').toBeGreaterThan(0);
+    expectPanelInsideScrollport(scrolled, '編集の押下で捲れた状態');
+
+    await userListRegion(page).evaluate((container) => {
+      container.scrollLeft = 0;
+    });
+    const initial = await readPanelPlacement(page);
+    expect(initial.scrollLeft, '捲り位置を 0 へ戻せていません').toBe(0);
+    expectPanelInsideScrollport(initial, '捲り位置 0 の状態');
+  });
+
+  test('Tab で保存へ焦点を載せたとき、保存が見えている', async ({ page }) => {
+    // 編集ボタン（パネルを開いた押しボタン）から、キーボードだけで保存まで進む。行の残りの押しボタンと
+    // パネルの入力を順に通るので、押す回数は構成で変わる。上限を置き、届かなければ止める。
+    const save = userListRegion(page).getByRole('button', { name: '保存', exact: true });
+    await editTrigger(page).focus();
+    for (let presses = 0; presses < 10; presses += 1) {
+      if (await save.evaluate((element) => element === document.activeElement)) break;
+      await page.keyboard.press('Tab');
+    }
+    await expect(save, 'Tab を 10 回押しても保存へ焦点が届いていません').toBeFocused();
+
+    expectPanelInsideScrollport(await readPanelPlacement(page), 'Tab で保存へ焦点を載せた状態');
+  });
 });
 
 // 店舗登録は Issue #186 の**最後の 1 面**であり、task 5.2 が `@fwlm/ui` の `Select` へ移して

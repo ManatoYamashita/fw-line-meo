@@ -415,7 +415,10 @@ function UsersView() {
         // 横方向の捲りは表の **外側** が持つ。この容器は e2e（dashboard-surfaces.spec.ts）が
         // 宣言する「表の捲れる領域 1 件」である。tbody の内側へ挟むと行の隣接関係が壊れ、
         // 編集パネルを対象行の直後へ挿す構成が成立しなくなる。
-        <TableContainer label="利用者一覧">
+        // 容器を幅のコンテナにし、編集パネルの幅を容器の見えている幅から決められるようにする
+        // （下のパネル行・dashboard-user-edit Req 6.8, 6.9）。容器は余白を持たず輪郭も影で描くので、
+        // コンテナの幅は見えている幅と一致する。容器の幅は版面が決め、中身の幅には依存しない。
+        <TableContainer label="利用者一覧" className="@container/user-list">
           <Table>
             <TableHead>
               <TableRow>
@@ -494,18 +497,36 @@ function UsersView() {
                     // （dashboard-user-edit Req 6.3）。重ね表示は使わない（docs/design/design-language.md §7.5）。
                     <TableRow>
                       <TableCell colSpan={COLUMN_COUNT} id={editPanelId(user.id)}>
-                        {/* パネルは開いた時点の値に固定するので、利用者ごとに作り直す（key）。
-                          * 自分の行、または代理店一覧を取得できていないときは、ロールと所属を固定表示にする
-                          * （dashboard-user-edit Req 2.2, 1.14）。保存の後処理には、このパネルを開いた回の
-                          * 開閉の番号を持ち帰らせる。 */}
-                        <DashboardUserEditPanel
-                          key={user.id}
-                          user={user}
-                          agencies={agenciesFailed ? null : agencies}
-                          isSelf={user.id === me?.id}
-                          onSaved={() => handleEditSaved(openSeq)}
-                          onCancel={closeEditPanel}
-                        />
+                        {/* 携帯端末の幅では、長いメールアドレスの列のために表が容器より広くなり、表の全幅に
+                          * またがるこのセルも容器の見えている幅を超える。パネルをそのまま置くと、容器を捲った
+                          * 位置しだいで保存が見えない所へ出て、焦点が載っても見えない（WCAG 2.4.7）うえ、
+                          * フォームに横の捲りが要る（WCAG 1.4.10・dashboard-user-edit Req 6.8, 6.9）。
+                          * そこでパネルを、容器の左端から 1rem に留まる sticky と、容器の見えている幅から
+                          * 左右 1rem ずつを引いた幅で包み、捲り位置によらず見えている幅の中に置く。
+                          * 幅の単位 cqi は、名前ではなく最も近い幅のコンテナ（上の捲り容器）を基準にする。
+                          * この包みと捲り容器の間に別のコンテナを挟むと、基準がずれる。
+                          * 表が容器に収まる広い版面では、この幅はセルの内容幅（セルの左右の余白 1rem を
+                          * 引いた幅）と一致し、容器も捲れないので、見た目は包む前と変わらない。
+                          * 幅を固定したので、区切りの無い語（点だけで区切ったメールアドレスなど）はどこでも
+                          * 折り返せるようにする（overflow-wrap: anywhere）。body の break-word は語の途中で
+                          * 折り返しても最小幅を縮めないので、パネルの見出し（grid の項目）は語の全長より
+                          * 狭くならず、カードの縁を越えて切れる。sticky は捲りに追従するので、捲っても読めない。
+                          * anywhere は最小幅も縮めるので、見出しがカードの中で折り返す。折り返さずに収まる
+                          * 文字列（広い版面）の見た目は変わらない。 */}
+                        <div className="sticky left-4 w-[calc(100cqi-2rem)] wrap-anywhere">
+                          {/* パネルは開いた時点の値に固定するので、利用者ごとに作り直す（key）。
+                            * 自分の行、または代理店一覧を取得できていないときは、ロールと所属を固定表示にする
+                            * （dashboard-user-edit Req 2.2, 1.14）。保存の後処理には、このパネルを開いた回の
+                            * 開閉の番号を持ち帰らせる。 */}
+                          <DashboardUserEditPanel
+                            key={user.id}
+                            user={user}
+                            agencies={agenciesFailed ? null : agencies}
+                            isSelf={user.id === me?.id}
+                            onSaved={() => handleEditSaved(openSeq)}
+                            onCancel={closeEditPanel}
+                          />
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}

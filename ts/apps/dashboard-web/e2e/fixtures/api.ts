@@ -80,7 +80,12 @@ export const DASHBOARD_USERS = [
     role: 'agency',
     operatorId: '11111111-1111-1111-1111-111111111111',
     agencyId: '22222222-2222-2222-2222-222222222222',
-    email: 'agency-member-with-a-long-address@example.co.jp',
+    // **行を折り返せる位置を持たない値にする**（区切りは点だけ。ハイフンの後ろでは折り返せるが、
+    // 点の後ろでは折り返さない）。ハイフンで区切った値だと、見出し・列がたまたま折り返して幅に
+    // 収まり、区切りの無い実在のアドレス（yamada.hanako@… の形）で起きる溢れを見逃す。実際、
+    // ハイフンの値のままでは、編集パネルの見出しがカードの外へ出る退行を E2E が拾えなかった
+    // （dashboard-user-edit tasks 3.5 の独立レビュー）。
+    email: 'agency.member.with.a.long.address@example.co.jp',
     displayName: '代理店ユーザー',
     disabled: true,
     createdAt: '2026-07-20T09:00:00.000Z',
