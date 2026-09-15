@@ -67,6 +67,7 @@
 - **`POST /dashboard-users/:id/update` の body・応答・エラーコードの変更** → `api.ts` の `updateDashboardUser` とパネルのコード→文言の対応表。
 - **`dashboard_users` のロールと所属の制約（`ck_dashboard_role_scope`・`fk_dashboard_agency_operator`）の変更** → `parseRoleScope` と DAL の事前確認。
 - **「有効な運営」の定義の変更**（lifecycle の決裁）→ DAL の残数判定。
+- **`@fwlm/ui` の `TableContainer` の余白・枠・幅の指定の変更** → パネルの幅 `calc(100cqi - 2rem)` と見える幅がずれる。携帯端末の幅の E2E 実測（捲り容器の内側）を再実行すること。
 
 ## Architecture
 
@@ -545,7 +546,13 @@ export interface DashboardUserEditPanelProps {
 - **開閉**:
   - 状態は `openUserId: string | null`。別の行の編集を始めると、前のパネルは閉じる（6.4）。
   - パネル行は Fragment の中で対象行の直後に `<TableRow><TableCell colSpan={COLUMN_COUNT} id=…>` として挿す（6.3）。
-- **焦点**（6.5）: `triggerRef` に押されたボタンを保持する。閉じるときは先に `triggerRef.current?.focus()` を呼び、その後に `openUserId` を null にする。
+- **携帯端末の幅での配置**（6.8, 6.9・2026-09-15 に利用者の判断で追加）:
+  - 長いメールアドレスの列があるので、携帯端末の幅では表が捲り容器より広くなる（Pixel 5 で表 462px・見える幅 361px）。
+    パネル行は表の全幅にまたがるので、そのままでは行末の編集を押して容器が捲れたときに、保存が画面の外に出る。焦点が載っても見えない（WCAG 2.4.7）うえ、フォームに横の捲りが要る（1.4.10。データ表の例外はフォームに及ばない）。
+  - 対処: 捲り容器（`TableContainer`）へ、ページ側から `className` で名前付きのコンテナ（`@container/…`・`container-type: inline-size`）を与える。パネル行のセルの中で、パネルを `position: sticky`（左端から `1rem`）と幅 `calc(100cqi - 2rem)` の容器で包む。こうすると、捲り位置によらず、パネルは捲り容器の見える幅の中に収まる。
+  - `@fwlm/ui` は変えない。`TableContainer` は `className` を受け取り、余白を持たず、輪郭は `ring-1`（影）なので、コンテナの幅と見える幅は一致する。
+  - 広い版面で表が容器に収まるときは、幅は今までと同じ（セルの内容幅）で、sticky も働かない。
+  - コンテナクエリとその単位は Baseline Widely available（2023-02）なので、代替の実装は持たない。
 - **保存の成功**（1.12）: `reloadUsers()` → 焦点を戻す → 閉じる → `successMessage = '利用者情報を更新しました。'` を `<Alert variant="success">`（role=status）で出す。
   - 取り直しに失敗したときは、登録・無効化・有効化と同じく一覧の失敗の通知を出す（表は出さない）。保存は確定しているので成功通知も出し、パネルは閉じる。焦点は、戻り先の編集ボタンが残るとき（取り直しに成功し、要素が DOM にあるとき）だけ戻す。表ごと外れるときは焦点を扱わない（task 3.4 で決定）。
 - **代理店一覧の取得状態**（1.14）:
@@ -569,6 +576,10 @@ export interface DashboardUserEditPanelProps {
 - `dashboard-surfaces.spec.ts` に、横スクロール実測のテストを 1 本足す。
   - 宣言する捲れる領域は `NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS`（= 2）。
   - パネルは表の容器の内側にあるので、領域を増やさない。
+- ページ全体の横スクロールの実測だけでは、捲り容器の内側のはみ出しは見えない。そこで、携帯端末の幅でパネルが捲り容器の見える幅に収まることを実測するテストを足す（2026-09-15 の判断で追加）。
+  - 見る状態は 2 つ。編集の押下で容器が捲れた状態と、捲り位置 0 の状態。
+  - どちらの状態でも、パネルのカードの左右の端・保存・キャンセルが、捲り容器の見えている矩形の内側にあること。
+  - Tab で保存へ焦点を載せたとき、保存が見えている矩形の内側にあること。
 
 ## Error Handling
 
@@ -647,6 +658,9 @@ export interface DashboardUserEditPanelProps {
 - 「利用者管理の編集パネル」の面で、axe の違反が 0 件（WCAG 2.1 A/AA・6.8）。
 - 横スクロールが発生しない（6.9）。
 - 前提 assert により、失敗画面を監査対象と取り違えない。
+- 携帯端末の幅で、捲れた状態と捲り位置 0 の状態の両方について、パネルのカード・保存・キャンセルが捲り容器の見える幅に収まる。Tab で焦点を載せた保存も見える（6.8・WCAG 2.4.7／1.4.10）。
+  - 対照: sticky を外す、または幅の指定を外すと、このテストが赤になる。
+  - 同じ変異で axe は赤にならない。axe は、捲り容器の外へ出た要素を黙って対象外にするからである。この網を axe で代用しない。
 
 ## Requirements Traceability
 
@@ -696,8 +710,8 @@ export interface DashboardUserEditPanelProps {
 | 6.5 焦点を戻す | `triggerRef` |
 | 6.6 失敗時は保持し 1 件だけ表示 | パネルの Alert・ページの通知の整理 |
 | 6.7 二重送信の防止 | `disabled` と `focusableWhenDisabled` |
-| 6.8 支援技術とキーボード・WCAG | ラベルの関連付け・`aria-*`・E2E の axe 監査面 |
-| 6.9 携帯端末の幅 | 項目の容器 `sm:max-w-xs`・`Select` の `w-full`・E2E の横スクロール実測 |
+| 6.8 支援技術とキーボード・WCAG | ラベルの関連付け・`aria-*`・E2E の axe 監査面・携帯端末の幅でパネルを捲り容器の見える幅に留める配置（sticky＋`cqi`）と、その E2E の実測（2.4.7／1.4.10） |
+| 6.9 携帯端末の幅 | 項目の容器 `sm:max-w-xs`・`Select` の `w-full`・E2E の横スクロール実測・捲り容器の内側の実測 |
 | 6.10 日本語 | すべての文言 |
 
 ## Security Considerations
