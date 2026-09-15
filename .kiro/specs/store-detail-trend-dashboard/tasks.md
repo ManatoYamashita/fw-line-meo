@@ -340,7 +340,7 @@
       - 1 回目は差し戻し。要件 3.6 の日付の出どころを区別するテストが無かった。
       - 2 回目で承認。
 
-- [ ] 3.2 (P) 期間と指標の選択肢を、札の並びとして描く
+- [x] 3.2 (P) 期間と指標の選択肢を、札の並びとして描く
   - 期間の群を先に、指標の群を後に置く。
   - 群ごとに見える名前（「期間」「グラフの指標」）を付け、選択肢の群の名前として参照させる。
   - 札は期間と指標の定数から作る。構成は、ラベルの中に横向きの Field を置き、その中に radio と題を置く形。
@@ -355,6 +355,26 @@
   - _Requirements: 2.1, 2.2, 2.6, 2.7, 5.6, 5.7_
   - _Boundary: TrendControls_
   - _Depends: 2.1_
+  - 実施記録（2026-09-15）:
+    - 新しく作ったもの:
+      - `app/store/trend-controls.tsx`
+      - `test/trend-controls.test.tsx`（jsdom・14 件）
+      - 共有ヘルパ `test/pointer-event.ts`（`installPointerEventPolyfill`・冪等）
+    - 構造:
+      - 期間の群を先、「グラフの指標」の群を後に置く。群の見える名前（`FieldTitle`・id は `useId`）を、RadioGroup の aria-labelledby から参照させる。
+      - 札は定数から map で作る。構成は、`FieldLabel`（`has-[>[data-slot=field]]:w-fit`）の中に、横向きの `Field`、その中に `RadioGroupItem` と `FieldTitle` を置く形。並びは `flex flex-wrap`。
+      - 値は unknown で受け、型ガードで絞る。name は渡さない。色のクラスも書かない（§7.18）。
+    - 赤（実装より前）:
+      - モジュールが無い状態では、import の解決に失敗。
+      - null を返す stub では、13 件が失敗。
+    - 変異:
+      - 実装役の 16 通りは、すべて赤。name・aria-labelledby・型ガード・手書きの札・群の並び・w-fit・色・flex-wrap・札の文言・aria-label・制御しない値・手書きの id・札の逆順・sr-only・互換実装の欠落を当てた。
+      - レビュー側の 3 通り（name、aria-labelledby、型ガード）も、すべて赤。
+    - 要件 2.6: 選択の印は、Base UI の Indicator が選択中にだけ描く丸い点である。枠の変化と aria-checked も加わり、色だけに頼らない。
+    - 検証:
+      - store-detail は 260 件緑・34 件スキップ。
+      - lint・型検査・ビルド・ui の 604 件・ガード類: 緑。
+    - 独立レビュー: 1 回目の審査役は途中で止まった。別の審査役で承認。任意の改善として、テストのコメントにある D8 の出典を research.md に直した。
 
 - [ ] 3.3 (P) 競合の検索欄と、件数の文言を描く
   - 構成は、縦に積む Field に、見えるラベル「店名で絞り込む」と、検索の種類の入力欄を置く形。入力欄は自動補完を切り、name を渡さない。
@@ -508,3 +528,9 @@
 - jsdom は、実装していない CSS プロパティ（paint-order など）を style 属性から黙って捨てる。インライン style の許可リストは、`react-dom/server` の `renderToStaticMarkup` の文字列でも照合する。
 - 否定方向の検査（「X が 0 件」）には、走査した件数が 1 以上であることの検査を並べる。null を返す stub で緑になったことがある（3.1）。
 - Bash ツールで複数のガードをループで流すと、途中で終了コード 144 で切られることがある（検査の失敗ではない）。止まった箇所から先を、1 本ずつ流し直して確かめる。
+- 札（TrendControls）をページで扱うときの注意（3.2 で判明）:
+  - 完全一致の `getByText('評価')`・`getByText('順位')`・`getByText('クチコミ')` は、札の題にも当たる。札は `getByRole('radio', { name })` で取る。Base UI の Radio は、囲む `<label>` を aria-labelledby で指すので、この名前は実ブラウザでも同じになる。
+  - Base UI は、矢印キーによる焦点の移動を `queueMicrotask` で後に回す。jsdom で矢印キーを確かめるときは、`await act(async () => fireEvent.keyDown(...))` の形にする。
+  - 札のクリックは、印（radio）を押す経路だけが PointerEvent の互換実装を要る。題を押す経路は、ラベルの標準の働きで動く。
+  - `[data-slot="field-label"]` は、札の label・札の題・群の名前の 3 つが持つ。5.2 で 44px を測るときは `label[data-slot="field-label"]` で選ぶ。
+  - 札の Field は、それぞれ `role="group"` を描く（推移ありで 5 件）。構造契約の操作系の role には入っていない。5.3 の axe では、label の中に group、その中に radio がある入れ子を確かめる。
