@@ -491,6 +491,26 @@ describe('招待コードページ: 意匠の適用', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
+  it('列の折り返しの規則を中身の種類で選んでいる（design-language.md 7.18・Issue #283）', async () => {
+    // 規則を持たない列は、表が容器より広いとき 1 文字の幅まで細る（日本語はどの文字の間でも
+    // 折り返せる）。**並びを完全一致で固定する**のは、1 列だけ指定を落とす改変が
+    // 「ほかの列は正しい」まま素通りするためである。
+    ready('agency');
+    api.getInviteCodes.mockResolvedValue({ ok: true, value: [activeCode, disabledCode] });
+    render(<InviteCodesPage />);
+    const scope = within(await screen.findByRole('main'));
+    await scope.findByText('ACTIVE01');
+
+    const rows = scope.getAllByRole('row').slice(1);
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      expect(
+        Array.from(row.children).map((cell) => cell.getAttribute('data-wrap')),
+        'コードは手で書き写す値なので割らない。状態と作成日時も 1 行に収める',
+      ).toEqual(['none', 'none', 'none', null]);
+    }
+  });
+
   it('一覧を表の部品で描き、行・列・セルの役割を保つ（Req 2.1, 2.2）', async () => {
     ready('agency');
     api.getInviteCodes.mockResolvedValue({ ok: true, value: [activeCode, disabledCode] });
