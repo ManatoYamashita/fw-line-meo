@@ -1,25 +1,32 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { getPool, closePool } from '@fwlm/db';
+import type { Queryable } from '@fwlm/db';
 import { queryDeliveryTargets, queryOwnersDueWithoutSummary } from '../src/targets.js';
 
 // 他テストファイルと DB を共有するため、衝突しない固有 UUID / place_id を使う（delivery-settings.db.test.ts の慣習に準拠）。
+// 配信時刻も他ファイルと分ける（index.e2e は 14 時・cross-runtime は 17 時・report-flow の共有オーナーは 7 時）。
 const OP = 'a0000000-0000-0000-0000-000000000001';
 const AG = 'a0000000-0000-0000-0000-000000000002';
 
-const OW_READY = 'a0000000-0000-0000-0000-000000000011'; // hour=9・当日summary有・未配信 → 対象
+const OW_READY = 'a0000000-0000-0000-0000-000000000011'; // hour=9・当日summary有・前日summary有・未配信 → 対象
 const OW_WRONG_HOUR = 'a0000000-0000-0000-0000-000000000012'; // hour=10 → 除外
 const OW_NO_SUMMARY = 'a0000000-0000-0000-0000-000000000013'; // hour=9・当日summary無 → skip候補
 const OW_ALREADY_DELIVERED = 'a0000000-0000-0000-0000-000000000014'; // hour=9・当日summary有・配信済 → 除外
 const OW_UNCONFIRMED = 'a0000000-0000-0000-0000-000000000015'; // hour=9・place_status=pending → 両方から除外
+const OW_FIRST_DAY = 'a0000000-0000-0000-0000-000000000016'; // hour=9・当日summary有・前日summary無 → 対象（前日は null）
+const OW_UNCONFIRMED_WITH_SUMMARY = 'a0000000-0000-0000-0000-000000000017'; // hour=9・place_status=pending・当日summary有 → 除外
 
 const ST_READY = 'b0000000-0000-0000-0000-000000000011';
 const ST_WRONG_HOUR = 'b0000000-0000-0000-0000-000000000012';
 const ST_NO_SUMMARY = 'b0000000-0000-0000-0000-000000000013';
 const ST_ALREADY_DELIVERED = 'b0000000-0000-0000-0000-000000000014';
 const ST_UNCONFIRMED = 'b0000000-0000-0000-0000-000000000015';
+const ST_FIRST_DAY = 'b0000000-0000-0000-0000-000000000016';
+const ST_UNCONFIRMED_WITH_SUMMARY = 'b0000000-0000-0000-0000-000000000017';
 
 const TARGET_HOUR = 9;
 const TODAY = '2026-07-12';
+const YESTERDAY = '2026-07-11'; // 当日の暦日の 1 日前（前日の行の summary_date）
 
 describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
   beforeAll(async () => {
@@ -38,6 +45,8 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       [OW_NO_SUMMARY, TARGET_HOUR],
       [OW_ALREADY_DELIVERED, TARGET_HOUR],
       [OW_UNCONFIRMED, TARGET_HOUR],
+      [OW_FIRST_DAY, TARGET_HOUR],
+      [OW_UNCONFIRMED_WITH_SUMMARY, TARGET_HOUR],
     ];
     for (const [id, hour] of owners) {
       await pool.query(
@@ -52,6 +61,8 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       [ST_NO_SUMMARY, OW_NO_SUMMARY, 'places/target-no-summary', true],
       [ST_ALREADY_DELIVERED, OW_ALREADY_DELIVERED, 'places/target-already-delivered', true],
       [ST_UNCONFIRMED, OW_UNCONFIRMED, 'places/target-unconfirmed', false],
+      [ST_FIRST_DAY, OW_FIRST_DAY, 'places/target-first-day', true],
+      [ST_UNCONFIRMED_WITH_SUMMARY, OW_UNCONFIRMED_WITH_SUMMARY, 'places/target-unconfirmed-with-summary', false],
     ];
     for (const [id, ownerId, placeId, confirmed] of stores) {
       if (confirmed) {
@@ -68,15 +79,45 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       }
     }
 
-    // 当日 daily_summaries: ready 対象・wrong-hour 対象・already-delivered 対象のみに用意する
-    // （no-summary / unconfirmed は意図的に未挿入）。
-    for (const storeId of [ST_READY, ST_WRONG_HOUR, ST_ALREADY_DELIVERED]) {
+    // 当日 daily_summaries: ready 対象・wrong-hour 対象・already-delivered 対象・first-day 対象・
+    // unconfirmed-with-summary 対象に用意する（no-summary / unconfirmed は意図的に未挿入）。
+    //
+    // unconfirmed-with-summary は、実運用では未確定店舗に日次集計が生成されないため起こらない組み合わせだが、
+    // 「特定済みの店舗だけを対象にする」述語（3.4）が実際に効いていることを試験で示すために置く。
+    // 述語が無ければこの店舗が対象として返ってしまう。
+    for (const storeId of [
+      ST_READY,
+      ST_WRONG_HOUR,
+      ST_ALREADY_DELIVERED,
+      ST_FIRST_DAY,
+      ST_UNCONFIRMED_WITH_SUMMARY,
+    ]) {
       await pool.query(
         `INSERT INTO daily_summaries (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count)
          VALUES ($1, $2, 'ready', 1, 3, '4.5', 100, 0)`,
         [storeId, TODAY],
       );
     }
+
+    // 前日 daily_summaries: ready 対象のみに用意する（first-day 対象は前日の行を持たない店舗を表す）。
+    // 旧 Go が書いた形（評価の無い競合を 0 として書き、母数に数えている）にして、返る前日の行が
+    // 正規化を通っている（母数 6 → 5）ことを試験で見分けられるようにする。
+    await pool.query(
+      `INSERT INTO daily_summaries
+         (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count, competitors)
+       VALUES ($1, $2, 'ready', 2, 6, '4.2', 98, 0, $3::jsonb)`,
+      [
+        ST_READY,
+        YESTERDAY,
+        JSON.stringify([
+          { name: '競合イチ', rating: 4.5, reviewCount: 300, starDiff: -0.3 },
+          { name: '競合ニ', rating: 4.0, reviewCount: 200, starDiff: 0.2 },
+          { name: '競合サン', rating: 3.8, reviewCount: 100, starDiff: 0.4 },
+          { name: '競合ヨン', rating: 3.5, reviewCount: 50, starDiff: 0.7 },
+          { name: '競合ゴ', rating: 0, reviewCount: 0, starDiff: 4.2 },
+        ]),
+      ],
+    );
 
     // already-delivered には summary_deliveries 行も用意し「未配信」条件から外れることを検証する。
     await pool.query(
@@ -101,6 +142,51 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       expect(storeIds).not.toContain(ST_NO_SUMMARY);
       expect(storeIds).not.toContain(ST_ALREADY_DELIVERED);
       expect(storeIds).not.toContain(ST_UNCONFIRMED);
+      // 当日の集計がある未確定店舗も、特定済みでないため対象にならない（3.4）。
+      expect(storeIds).not.toContain(ST_UNCONFIRMED_WITH_SUMMARY);
+    });
+
+    it('店舗名を返す（通知に店舗名を出すため・1.7/3.8）', async () => {
+      const pool = await getPool();
+      const targets = await queryDeliveryTargets(pool, TARGET_HOUR, TODAY);
+      const target = targets.find((t) => t.storeId === ST_READY);
+
+      expect(target?.storeName).toBe(`店舗 ${ST_READY}`);
+    });
+
+    it('前日の行を、正規化を通した形で返す', async () => {
+      const pool = await getPool();
+      const targets = await queryDeliveryTargets(pool, TARGET_HOUR, TODAY);
+      const target = targets.find((t) => t.storeId === ST_READY);
+
+      expect(target?.yesterday).not.toBeNull();
+      expect(target?.yesterday?.status).toBe('ready');
+      expect(target?.yesterday?.rank).toBe(2);
+      // 前日の行は旧 Go の形（評価 0 の競合 1 店を母数に数えた rank_total = 6）で入れてある。
+      // 正規化を通っていれば 5 になる（Issue #255）。
+      expect(target?.yesterday?.rank_total).toBe(5);
+    });
+
+    it('前日の行が無い店舗も対象として返し、前日は null にする', async () => {
+      const pool = await getPool();
+      const targets = await queryDeliveryTargets(pool, TARGET_HOUR, TODAY);
+      const target = targets.find((t) => t.storeId === ST_FIRST_DAY);
+
+      expect(target).toBeDefined();
+      expect(target?.storeName).toBe(`店舗 ${ST_FIRST_DAY}`);
+      expect(target?.yesterday).toBeNull();
+    });
+
+    it('DB の読み出しは対象の件数によらず 1 回である（店舗ごとに引き直さない）', async () => {
+      const pool = await getPool();
+      const db = { query: pool.query.bind(pool) } satisfies Queryable;
+      const querySpy = vi.spyOn(db, 'query');
+
+      const targets = await queryDeliveryTargets(db, TARGET_HOUR, TODAY);
+
+      // 回数の固定が空振りしないよう、対象が複数件あることを先に確かめる（1 件なら N+1 と 1 回が同じになる）。
+      expect(targets.length).toBeGreaterThanOrEqual(2);
+      expect(querySpy).toHaveBeenCalledTimes(1);
     });
 
     it('対象の summary/lineUserId が daily_summaries・owners の実データと一致する', async () => {
