@@ -46,6 +46,7 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableDetailRow,
   TableHead,
   TableHeaderCell,
   TableRow,
@@ -874,6 +875,133 @@ describe('Table — 支援技術上の役割と構造契約（Requirements 5.1, 
       expect(classesOf(node)).not.toMatch(RAW_HEX);
       expect(classesOf(node)).not.toMatch(RAW_PALETTE_COLOR);
     }
+  });
+});
+
+describe('Table — 狭い画面の組版（docs/design/design-language.md 7.18・Issue #283）', () => {
+  it('列見出しは折り返さない（面ごとの指定にしない）', () => {
+    // 列見出しは常に短いラベルであり、日本語ではどの文字の間でも折り返せる。面ごとに指定させると
+    // 必ず書き忘れる列が出るので、部品の既定で持つ。
+    renderTable();
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(classesOf(header)).toContain('whitespace-nowrap');
+    }
+  });
+
+  it('折り返しの規則は選んだときだけ付く（既定では付かない）', () => {
+    // 既定で与えると、押しボタンだけを置くセルや行の直下のパネルにまで当たる。
+    // `white-space` は継承されるので、既定の nowrap はパネルの中の文章まで折り返さなくする。
+    render(
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableCell>既定</TableCell>
+            <TableCell wrap="none">状態</TableCell>
+            <TableCell wrap="prose">店名</TableCell>
+            <TableCell wrap="anywhere">アドレス</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    const [plain, none, prose, anywhere] = screen.getAllByRole('cell');
+    expect(plain?.hasAttribute('data-wrap')).toBe(false);
+    expect(classesOf(plain!)).not.toMatch(/whitespace-|wrap-anywhere|min-w-/);
+
+    expect(none?.getAttribute('data-wrap')).toBe('none');
+    expect(classesOf(none!)).toContain('whitespace-nowrap');
+
+    expect(prose?.getAttribute('data-wrap')).toBe('prose');
+    expect(classesOf(prose!)).toContain('min-w-36');
+    expect(classesOf(prose!)).not.toContain('wrap-anywhere');
+
+    // 区切りの無い長い語は「どこでも折り返してよい」だけでは足りない。最小の幅を持たせないと、
+    // 折り返せる位置が増えたぶん 1 文字まで細る（Issue #276 と同じ経路が裏返しで起きる）。
+    expect(anywhere?.getAttribute('data-wrap')).toBe('anywhere');
+    expect(classesOf(anywhere!)).toContain('wrap-anywhere');
+    expect(classesOf(anywhere!)).toContain('min-w-36');
+  });
+
+  it('行の直下の詳細行は tr 1 段・td 1 つで全列にまたがる', () => {
+    render(
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableCell>行</TableCell>
+          </TableRow>
+          <TableDetailRow colSpan={3} id="detail-1">
+            <p>パネル</p>
+          </TableDetailRow>
+        </TableBody>
+      </Table>,
+    );
+    const rows = screen.getAllByRole('row');
+    expect(rows).toHaveLength(2);
+    const detailCells = rows[1]!.children;
+    expect(detailCells).toHaveLength(1);
+    const cell = detailCells[0]!;
+    expect(cell.tagName).toBe('TD');
+    expect(cell.getAttribute('colspan')).toBe('3');
+    expect(cell.getAttribute('id')).toBe('detail-1');
+    expect(cell.children).toHaveLength(1);
+  });
+
+  it('詳細行の包みは容器の見えている幅に留まり、印刷では外れる', () => {
+    // 表が容器より広いとき、全列にまたがるセルは容器の見えている幅を超える。包みが無いと、
+    // 捲り位置しだいで操作が画面の外へ出る（Issue #259 の実測では保存が画面の左外にあった）。
+    const { container } = render(
+      <Table>
+        <TableBody>
+          <TableDetailRow colSpan={2} id="detail-2">
+            <p>パネル</p>
+          </TableDetailRow>
+        </TableBody>
+      </Table>,
+    );
+    const wrapper = container.querySelector('[data-slot="table-detail"]')!;
+    const classes = classesOf(wrapper);
+    expect(classes).toContain('sticky');
+    expect(classes).toContain('wrap-anywhere');
+    // 印刷では位置と幅を戻す。掲示面の印刷は祖先の display と余白しか戻さないので、
+    // 外さないと紙の上で掲示面がずれる。
+    expect(classes).toContain('print:static');
+    expect(classes).toContain('print:w-auto');
+  });
+
+  it('包みの位置と幅がセルの左右の余白と揃っている（3 つが同じ 1 つの値から出る）', () => {
+    // `left-4` の 4・幅から引く `2rem`・セルの `px-4` の 4 は同じ余白の段から出ている。
+    // どれか 1 つだけを変えると、狭い画面では収まったまま、広い版面で容器が捲れるようになる
+    // （Issue #259 の独立レビューが 768px / 1280px で実測した）。数値の対応をここで固定する。
+    const { container } = render(
+      <Table>
+        <TableBody>
+          <TableDetailRow colSpan={2} id="detail-3">
+            <p>パネル</p>
+          </TableDetailRow>
+        </TableBody>
+      </Table>,
+    );
+    const cellPadding = /(?:^|\s)px-(\d+)(?:\s|$)/.exec(
+      classesOf(container.querySelector('[data-slot="table-cell"]')!),
+    );
+    const wrapperClasses = classesOf(container.querySelector('[data-slot="table-detail"]')!);
+    const stickyLeft = /(?:^|\s)left-(\d+)(?:\s|$)/.exec(wrapperClasses);
+    const width = /w-\[calc\(100cqi-([\d.]+)rem\)\]/.exec(wrapperClasses);
+
+    expect(cellPadding?.[1], 'セルの左右の余白を読めていません').toBeDefined();
+    expect(stickyLeft?.[1], '包みの左端を読めていません').toBe(cellPadding![1]);
+    // 幅から引くのは左右 2 つ分。余白の段は 0.25rem 刻みである。
+    expect(Number(width?.[1]), '包みの幅から引く値が左右の余白 2 つ分と一致しません').toBe(
+      Number(cellPadding![1]) * 0.25 * 2,
+    );
+  });
+
+  it('容器が捲れる手がかりと幅の問い合わせ先を持つ', () => {
+    // どちらも面の側に任せると付け忘れが起きる。手がかりの実描画（まだ捲れる側にだけ出ること）は
+    // dashboard-web の E2E が画素で測る。
+    renderTable();
+    const classes = classesOf(screen.getByTestId('table-container'));
+    expect(classes).toContain('scroll-shadow-x');
+    expect(classes).toContain('@container');
   });
 });
 

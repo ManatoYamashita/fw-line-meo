@@ -1123,3 +1123,124 @@ describe('選択済みの面をアクション色で塗る部品のエラー指�
     ).toBeGreaterThanOrEqual(AA_NON_TEXT_RATIO);
   });
 });
+
+// --- 一覧表の捲れる手がかりの濃淡（docs/design/design-language.md 7.18・Issue #283）------------
+//
+// この濃淡は theme.css のユーティリティが持つ。**部品のソースを走査する上の 4 層は届かない**
+// （色ユーティリティの形でも color-mix の許可リストの対象でもない）。届かないまま置くと、
+// 濃さを上げる改変が、表の文字のコントラストを黙って割りながら CI 全緑で通る。
+//
+// さらに、この濃淡は表の文字の下に敷かれるため、**axe の自動監査からも外れる**
+// （背景に画像を持つ祖先の下では、axe はコントラストの判定を「判定不能」へ回す）。
+// 実ブラウザの監査が受け持てない以上、静的な計算でここを埋める。
+
+/** `@utility <name> { … }` の本文を、入れ子の波括弧を跨いで取り出す。 */
+function extractUtilityBlock(css: string, name: string): string {
+  const header = new RegExp(`@utility\\s+${name}\\s*\\{`).exec(css);
+  if (header === null) {
+    throw new Error(`@utility ${name} が theme.css にありません`);
+  }
+  let depth = 0;
+  for (let index = header.index + header[0].length - 1; index < css.length; index += 1) {
+    const char = css[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return css.slice(header.index + header[0].length, index);
+    }
+  }
+  throw new Error(`@utility ${name} の波括弧が閉じていません`);
+}
+
+/**
+ * `color-mix(in oklab, var(--color-<役割>) <N>%, transparent)` の形の混色を取り出す。
+ *
+ * 混色空間を形の一部として要求する。無彩色を oklch で混ぜると色相が powerless になり、
+ * 描画時に赤へ解決される（PR #56 で実測）。
+ */
+function extractAlphaMixes(css: string): readonly { readonly token: string; readonly alpha: number }[] {
+  return [
+    ...css.matchAll(
+      /color-mix\(\s*in\s+oklab\s*,\s*var\(--color-([a-z-]+)\)\s+(\d+(?:\.\d+)?)%\s*,\s*transparent\s*\)/g,
+    ),
+  ].map((match) => ({ token: match[1]!, alpha: Number(match[2]) / 100 }));
+}
+
+describe('捲れる手がかりの濃淡（7.18 節・Issue #283）', () => {
+  const utility = extractUtilityBlock(themeCss, 'scroll-shadow-x');
+
+  describe('抽出器の自己検証（Issue #60）', () => {
+    it('入れ子の波括弧を跨いで本文だけを取り出す', () => {
+      const css = '@utility x {\n  a: b;\n  @media (x) { c: d; }\n}\n@utility y { e: f; }';
+      expect(extractUtilityBlock(css, 'x').trim()).toBe('a: b;\n  @media (x) { c: d; }');
+      expect(extractUtilityBlock(css, 'y').trim()).toBe('e: f;');
+    });
+
+    it('存在しない名前・閉じていない波括弧は例外にする（静かに空文字を返さない）', () => {
+      expect(() => extractUtilityBlock('@utility x { a: b; }', 'z')).toThrow();
+      expect(() => extractUtilityBlock('@utility x { a: b;', 'x')).toThrow();
+    });
+
+    it('混色は先頭と末尾の位置で漏らさず拾い、形の違うものは拾わない', () => {
+      const css =
+        'a: color-mix(in oklab, var(--color-foreground) 8%, transparent);' +
+        'b: color-mix(in oklch, var(--color-foreground) 8%, transparent);' +
+        'c: color-mix(in oklab, var(--color-card) 12.5%, transparent);';
+      expect(extractAlphaMixes(css)).toEqual([
+        { token: 'foreground', alpha: 0.08 },
+        { token: 'card', alpha: 0.125 },
+      ]);
+      expect(extractAlphaMixes('色指定なし')).toEqual([]);
+    });
+  });
+
+  it('濃淡は本文色だけを薄めて作り、覆いは容器の面の色と一致する', () => {
+    const mixes = extractAlphaMixes(utility);
+    // 空振り防止。混色が 1 つも無ければ、下のコントラストの判定は何も測らない。
+    expect(mixes.length, '濃淡の混色が見つかりません').toBeGreaterThan(0);
+    expect(
+      [...new Set(mixes.map((mix) => mix.token))],
+      '濃淡は本文色だけから作る（別の色を混ぜると、面の側に置く色の閉じた集合が広がる）',
+    ).toEqual(['foreground']);
+    // 覆いは容器の面の色と一致していなければならない。ずれると端に色の帯が見える。
+    expect(
+      utility.includes('var(--color-card)'),
+      '覆いが容器の面の色（card）を使っていません',
+    ).toBe(true);
+    const tableSource = readFileSync(join(componentsDir, 'table.tsx'), 'utf8');
+    expect(
+      tableSource.includes('bg-card') && tableSource.includes('scroll-shadow-x'),
+      '容器の面の色と手がかりが同じ部品に無いと、覆いの色が静かにずれる',
+    ).toBe(true);
+  });
+
+  it('表の文字は、濃淡が最も濃い点に重なっても 4.5:1 以上', () => {
+    const mixes = extractAlphaMixes(utility);
+    const darkest = Math.max(...mixes.map((mix) => mix.alpha));
+    const surface = compositeOver(
+      resolveSemanticColor('foreground'),
+      resolveSemanticColor('card'),
+      darkest,
+    );
+
+    // 表が使う文字色を部品のソースから引く（表へ書き写さない）。
+    const tableTextUtilities = extractColorUtilities(
+      readFileSync(join(componentsDir, 'table.tsx'), 'utf8'),
+    ).filter((utilityName) => utilityName.startsWith('text-'));
+    expect(
+      tableTextUtilities.length,
+      '表の文字色を 1 つも拾えていません（抽出が空振りしています）',
+    ).toBeGreaterThan(0);
+
+    for (const textUtility of tableTextUtilities) {
+      const foreground = resolveSemanticColor(semanticNameOf(textUtility));
+      const ratio = contrastRatio(foreground, surface);
+      expect(
+        ratio,
+        `${textUtility}(${foreground}) が、濃淡の最も濃い点（${surface}・本文色 ` +
+          `${(darkest * 100).toFixed(0)}%）の上で ${ratio.toFixed(3)}:1 しかありません。` +
+          '濃さを上げるなら、表の文字が読めなくなる前に止めること（7.18 節）',
+      ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
+    }
+  });
+});

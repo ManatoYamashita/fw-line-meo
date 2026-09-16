@@ -159,6 +159,48 @@
   --color-ring: var(--ring);
 }
 
+/* --- 一覧表の捲れる手がかり（docs/design/design-language.md 7.18・Issue 283） ---
+ *
+ * 表が容器の見える幅に収まらないとき、まだ捲れる側の端にだけ濃淡を出す。捲り切ると消える。
+ *
+ * 仕組み: 背景を 4 層重ね、覆い 2 層を中身と一緒に動かし（local）、濃淡 2 層を容器に留める
+ * （scroll）。捲り位置が端にあるとき、その側の覆いが濃淡の上に重なって隠す。**溢れていない
+ * 表では両側の覆いが両端に重なるので、濃淡はどちらも出ない。** 判定も状態も JS も持たない。
+ *
+ * 書き方の制約:
+ *  - 背景は個別指定だけで書く。省略形（background）は容器の面の色（bg-card）を消す。
+ *  - 覆いの色は容器の面の色と一致させる（食い違うと、端に色の帯が見える）。
+ *  - 濃淡の幅はセルの左右の余白（px-4 = 1rem）以下にする。行の直下に挿すパネルは容器の
+ *    左端から 1rem の位置に置かれるので、これより広いとカードの下へ潜る。
+ *  - 濃淡は線形にする。放射状にすると、画面より高い表では縦の中央にしか出ない。
+ *  - 濃さは本文色の 8%。合成した灰の上に、表で最も淡い文字（補足色）が載っても AA を保つ。
+ *    9% でも保つが 10% で割る。実値と計算は test/contrast-usage.test.ts が持つ（ここへ写さない）。
+ *  - このファイルに hex を書かない。design-tokens に無い色の混入として検出される。
+ *    Issue の番号も前置なしで書くと hex に見えるので、必ず種別を前に付ける。
+ *
+ * 既知の限界: `background-attachment: local` は Safari 15.4 より前では効かない。そのとき
+ * 覆いが濃淡の上に重なったままになるので、**手がかりが出ないだけで、誤った手がかりは出ない。**
+ */
+@utility scroll-shadow-x {
+  background-image:
+    linear-gradient(to right, var(--color-card) 1rem, transparent),
+    linear-gradient(to left, var(--color-card) 1rem, transparent),
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-foreground) 8%, transparent),
+      transparent
+    ),
+    linear-gradient(
+      to left,
+      color-mix(in oklab, var(--color-foreground) 8%, transparent),
+      transparent
+    );
+  background-position: left center, right center, left center, right center;
+  background-size: 2rem 100%, 2rem 100%, 1rem 100%, 1rem 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
 /* --- Base UI 必須ベーススタイル + グローバル focus-visible 既定 ---
  * research.md「Base UI 必須セットアップ」/ Requirements 5.3。 */
 @layer base {
