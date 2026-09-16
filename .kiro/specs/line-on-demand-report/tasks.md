@@ -148,7 +148,7 @@
   - _Boundary: delivery-job notification_
   - _Depends: 2.3_
 
-- [ ] 4.2 (P) 完了後メニューの準備判定とオーナーの照合を実装する
+- [x] 4.2 (P) 完了後メニューの準備判定とオーナーの照合を実装する
   - LINE クライアントに、リッチメニューの取得、ユーザーのメニューの照会、ユーザーへのリンクを足す。契約の形は `@line/bot-sdk` の生成型で確かめる
   - 設定された完了後メニューがレポート 3 導線を持つかを、対象の有無によらず実行ごとに 1 回だけ判定し、オーナーのメニューが違えば張る。照会の失敗は未準備・張れなかったとして扱い、事象を記録の正典へ登録してから出す
   - Observable: 偽の LINE による単体試験で、準備判定の成立と不成立、オーナーの照合の 3 分岐、照会の失敗、実行内での結果の再利用が緑
@@ -373,6 +373,11 @@
 - （既存の揺らぎ）`ts/packages/db/test/pool-connector.test.ts` の「エラー経路: getOptions() が失敗しても Connector を取り残さず」は、`pnpm -r test` で全パッケージを並行に流すと、有効なタイマーの数の比較（`activeTimeoutCount()`）がまれに 0 対 1 で赤になる。単独では 3 回続けて緑で、本 spec はこのファイルに触れていない（2026-09-16 に 1 回観測）。別 Issue を提案する（最終報告で挙げる）
 - （4.1）「当日の行の前日の順位（再計算値）を使わない」という規律は、`NotificationToday` の型から `rank_prev` を外すことで担保した。コメントの禁止より強い（同種の規律は型で固定する）
 - （4.1→4.5）`FLEX_BUBBLE_MAX_BYTES`（30,000）と `ALT_TEXT_MAX_LENGTH`（400）は、line-webhook の `report/format.ts` と同値の別実装である。アプリをまたぐ import を作らない設計どおりで、旧 `flex.ts` の撤去後も重複したままにする
+- （4.2→4.4・必須）design の ReportMenuGate の記述が実物と食い違っている。4.4 で配線し、design も実装に合わせて改める
+  - ロガーの型: design は `DeliveryJobLogger` と書くが、実在のその型は `isolatedError`・`fatal` しか持たない。門は局所の `ReportMenuLogger`（`info`・`warn`）を受ける。4.4 は `correlationLog` を包むアダプタを渡すか、`DeliveryJobLogger` に 2 つを足す（`warn` は既存の sink が WARNING へ写すので、重大度の追加は要らない）
+  - ユーザーのメニューの照会: design は `string | null` と書くが、実装は 3 値（張られている・個別リンクなし・照会の失敗）。2 値では「404 は張る」と「照会の失敗は張れなかった」を言い分けられない
+  - 4.4 はほかに、`checkReady` の結果を実行サマリーの `reportMenuReady` に出し、`link_failed` と未準備を status `skipped_menu_unavailable` に落とす
+- （4.2）リッチメニューの 3 呼出は再送しない（Push と違い送り直す意味が無く、毎時のジョブを待たせない）。失敗はすべて「送らない」側に倒す
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録

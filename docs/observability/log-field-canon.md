@@ -79,7 +79,7 @@
 | 上限超過で処理を打ち切ったか | `quotaExceededStopped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | プロセスの終了コード | `exitCode` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 終了時に残っていた資源の種別 | `activeResources` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | 配列。閉じ忘れの検知に使う（#151 の再発防止） |
-| 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 移送前の名前は `message`（集約基盤が本文として吸い項目検索から消えるため改名した）。**リテラルのみを載せる**。例外の本文や利用者の入力を入れてはならない。型は `string` であり弾かないため、規律で守る |
+| 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` ／ `ts/apps/delivery-job/src/menu.ts` | 移送前の名前は `message`（集約基盤が本文として吸い項目検索から消えるため改名した）。**リテラルのみを載せる**。例外の本文や利用者の入力を入れてはならない。型は `string` であり弾かないため、規律で守る |
 | 欠落した設定の識別子 | `configKey` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 起動時に必須設定が欠けた場合の識別子。**自由文ではなく有限集合**（環境変数名）であり、例外の本文を載せずに原因を特定できる |
 
 ### 1.7 日次バッチ層に固有の項目
@@ -139,6 +139,9 @@
 | `delivery-job.fatal` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | `delivery-job.isolated_error` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 1 店舗の失敗を他店から隔離したときの記録 |
 | `delivery-job.exit` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 資源の閉じ忘れ検知（#151） |
+| `delivery-job.report_menu_not_ready` | delivery-job | 新規 | `ts/apps/delivery-job/src/menu.ts` | 設定された完了後メニューがレポート 3 導線を持たない、または照会できなかったとき（spec: `.kiro/specs/line-on-demand-report/`）。判定を実行の中で覚えるため、**実行ごとに 1 回だけ出る**。項目は `detail`（リテラル。`rich menu lookup failed` か `report actions missing`）と、例外のときの `errorKind` だけである |
+| `delivery-job.richmenu_linked` | delivery-job | 新規 | `ts/apps/delivery-job/src/menu.ts` | 通知の前にオーナーへ完了後メニューを張れたとき。**成功も記録する**（記録が無いことが成功と未実行のどちらか判定できなくなるため。line-webhook の同名の事象と同じ考え方）。項目は持たない |
+| `delivery-job.richmenu_link_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/menu.ts` | オーナーのメニューを完了後メニューに揃えられなかったとき。照会できなかった場合も張れなかった場合もここへ数える（どちらも通知を送らない）。項目は `detail`（リテラル。`user menu lookup failed` か `link request failed`）と、例外のときの `errorKind` だけである。**LINE ユーザー ID は載せない** |
 | `line-webhook.dispatch_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗。**再試行案内の返信を試みた**場合。移送前はメッセージ文字列で識別していた。レポートの対象店舗を決めた後の失敗（`StoreScopedReportError`・line-on-demand-report）は店舗名つきの再試行案内を返し、`errorKind` は包む前の元の例外（`cause`）の種別を載せる。店舗名は載せない |
 | `line-webhook.dispatch_failed_before_reply_token` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗のうち、**replyToken が判明する前**に起きたもの。返信は試みていない。前者と分けるのは、運用者が「オーナーに案内が届いたか」を判定できるようにするため |
 | `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
