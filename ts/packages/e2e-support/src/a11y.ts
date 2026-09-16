@@ -43,6 +43,27 @@ function formatViolations(violations: readonly Violation[]): string {
 }
 
 /**
+ * 一覧表の捲れる手がかりの濃淡を、監査の間だけ外す（Issue #283）。
+ *
+ * **これは監査を緩める操作ではなく、縮んだ網を戻す操作である。** axe の `color-contrast` は、
+ * 背景に画像（グラデーションを含む）を持つ祖先の下にある文字を「判定不能」へ回す。表の容器へ
+ * 濃淡を入れた結果、それまで評価されていた**表のセルの文字が丸ごと監査の外へ出た**
+ * （実測: 幅 393 の店舗一覧で、合格 24 件のうち表のセル 14 件が判定不能へ移った）。
+ *
+ * 濃淡を外した状態の監査は「文字色そのもの」を評価する。濃淡が最も濃い点に重なったときの
+ * 合成後の比は、`ts/packages/ui/test/contrast-usage.test.ts` が静的に固定している
+ * （docs/design/design-language.md 7.18）。2 つで、実際に描かれる範囲の両端を押さえる。
+ *
+ * **表の中へ新しい文字色を足すときは、静的検証の側にもその組を足すこと。** ここで外して
+ * いる以上、濃淡の上での比は監査からは見えない。
+ */
+async function neutralizeScrollCue(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: '[data-slot="table-container"]{background-image:none !important}',
+  });
+}
+
+/**
  * ページ（または `selector` 配下）へ axe を当て、WCAG A/AA の違反がゼロであることを表明する。
  *
  * `disableRules` は「今は直せないが検出はされている」ものを通すための逃げ道になりうるため、
@@ -52,6 +73,7 @@ export async function expectNoAxeViolations(
   page: Page,
   options: { readonly selector?: string; readonly disableRules?: readonly string[] } = {},
 ): Promise<void> {
+  await neutralizeScrollCue(page);
   let builder = new AxeBuilder({ page }).withTags([...WCAG_AA_TAGS]);
   if (options.selector !== undefined) builder = builder.include(options.selector);
   if (options.disableRules !== undefined && options.disableRules.length > 0) {
