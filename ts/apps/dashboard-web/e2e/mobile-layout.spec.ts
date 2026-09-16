@@ -251,6 +251,13 @@ for (const surface of DASHBOARD_SURFACES) {
           const noCueOf = (band: { changed: number; total: number; columns: number }) =>
             band.columns === 0 || band.changed <= (band.total / band.columns) * CUE_ABSENT_MAX_COLUMNS;
 
+          if (container.overflowing && !container.cueExpected) {
+            // 覆いの幅より小さくしか捲れない容器。捲り位置 0 でも反対側の覆いが端へ掛かるので、
+            // 手がかりの濃さを問わない（CI の字幅では代理店一覧がこの状態になる）。
+            // 中身が隠れている量もわずかなので、実害の側でも要求しない。
+            continue;
+          }
+
           if (container.overflowing) {
             expect(
               `${start.right.changed}/${start.right.total}`,

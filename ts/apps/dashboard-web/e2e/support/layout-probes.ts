@@ -281,6 +281,8 @@ export interface PannableContainer {
   readonly scrollWidth: number;
   /** 実際に溢れているか。溢れていない容器には**手がかりが出ていないこと**を要求する。 */
   readonly overflowing: boolean;
+  /** 手がかりを要求できるだけ溢れているか（覆いの幅より大きく捲れるか）。 */
+  readonly cueExpected: boolean;
   /** 捲り位置 0 で、見えている矩形の外にある操作要素の名前。 */
   readonly hiddenControls: readonly string[];
 }
@@ -295,7 +297,7 @@ export interface PannableContainer {
  * 捲れない容器に出ていないことまで測って初めて、出し分けを確かめたことになる。
  */
 export function markPannableContainers(page: Page): Promise<readonly PannableContainer[]> {
-  return page.evaluate((pannable: readonly string[]) => {
+  return page.evaluate(({ pannable, minOverflow }: { pannable: readonly string[]; minOverflow: number }) => {
     const found: PannableContainer[] = [];
     let index = 0;
     for (const element of Array.from(document.body.querySelectorAll('*'))) {
@@ -327,11 +329,12 @@ export function markPannableContainers(page: Page): Promise<readonly PannableCon
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
         overflowing: element.scrollWidth > element.clientWidth,
+        cueExpected: element.scrollWidth - element.clientWidth >= minOverflow,
         hiddenControls,
       });
     }
     return found;
-  }, PANNABLE_OVERFLOW_X);
+  }, { pannable: PANNABLE_OVERFLOW_X, minOverflow: CUE_MIN_OVERFLOW_PX });
 }
 
 /** 捲り位置。`start` は左端（＝右にまだ中身がある）、`end` は右端。 */
@@ -359,8 +362,28 @@ export interface CueBands {
   readonly clip: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 
-/** 端の帯として見る幅（CSS px）。影の幅（1rem）より少し狭く取り、角の丸みを避ける。 */
+/** 端の帯として見る幅（CSS px）。濃淡の幅（1rem）より少し狭く取り、角の丸みを避ける。 */
 const BAND_WIDTH_CSS = 12;
+
+/**
+ * 文字を消すスタイル。**2 枚とも同じように当てる。**
+ *
+ * 背景を外すと、その上に載る文字の縁取りの描き方（副画素の割り当て）まで変わる環境がある。
+ * Linux の CI では、これだけで中央の帯に 1 万画素を超える差が出た（macOS では 0 だった）。
+ * 差の出所を容器の背景だけに限るため、両方の撮影で文字を透明にする。色は配置を変えないので、
+ * 測る対象の幾何は動かない。
+ */
+const HIDE_TEXT_STYLE = '*{color:transparent !important;text-shadow:none !important}';
+
+/**
+ * 手がかりを要求する下限の溢れ量（CSS px）。
+ *
+ * 覆いは中身と一緒に動き、幅は 2rem である。溢れがそれより小さいと、捲り位置 0 でも
+ * 反対側の覆いが端の帯へ掛かり、濃淡が構造的に薄くなる。**そこまで測ろうとすると、
+ * ほとんど捲れない容器で偽の赤が出る**（CI の Linux の字幅では代理店一覧が 9px だけ溢れ、
+ * これに当たった）。捲る余地がその程度しか無い容器は、手がかりの有無を問わない。
+ */
+const CUE_MIN_OVERFLOW_PX = 32;
 /** 中央として見る範囲の、左右から除く幅（CSS px）。 */
 const CENTER_INSET_CSS = 48;
 /** 画素が「異なる」と見なす差（0〜255）。影の最も濃い点は白との差が約 18 になる。 */
@@ -432,16 +455,15 @@ export async function measureCueBands(
     `捲れる容器の見えている高さが ${clip.height}px しかなく、帯を撮れません（画面の外にあります）`,
   ).toBeGreaterThan(8);
 
-  const shot = { clip: { x: clip.x, y: clip.y, width: clip.width, height: clip.height } } as const;
-  const hidden = `[${CUE_ATTRIBUTE}="${probeId}"]{background-image:none!important}`;
-  const withCue = await page.screenshot({ ...shot, animations: 'disabled', caret: 'hide' });
-  const withoutCue = await page.screenshot({
-    ...shot,
+  const shot = {
+    clip: { x: clip.x, y: clip.y, width: clip.width, height: clip.height },
     animations: 'disabled',
     caret: 'hide',
-    style: hidden,
-  });
-  const withCueAgain = await page.screenshot({ ...shot, animations: 'disabled', caret: 'hide' });
+  } as const;
+  const hidden = `${HIDE_TEXT_STYLE} [${CUE_ATTRIBUTE}="${probeId}"]{background-image:none!important}`;
+  const withCue = await page.screenshot({ ...shot, style: HIDE_TEXT_STYLE });
+  const withoutCue = await page.screenshot({ ...shot, style: hidden });
+  const withCueAgain = await page.screenshot({ ...shot, style: HIDE_TEXT_STYLE });
 
   return page.evaluate(
     async ({
