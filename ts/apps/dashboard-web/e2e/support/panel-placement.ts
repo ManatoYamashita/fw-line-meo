@@ -227,6 +227,22 @@ function describeExtent(part: HorizontalExtent): string {
 }
 
 /**
+ * 見えている矩形の外へ出た部分（Issue #283）。
+ *
+ * **本番の判定と、その検出が空振りしていないことを確かめる対照の、両方がここを通る。** 以前は
+ * 対照（`mobile-layout.spec.ts` の R4 対照）がこの式をテスト側へ書き写していたため、
+ * **本番の判定を絶対に発火しない形へ潰しても、対照を含む 22 本すべてが緑のまま通った**
+ * （PR #284 のレビューで実測）。対照が守るのは計測だけで、判定は守られていなかった。
+ *
+ * 判定そのものを共有するのが、その型の空振りを塞ぐ唯一の形である。R1・R2・R3 の対照は
+ * いずれも本番の計測関数を通しており、R4 だけが例外だった。
+ */
+export function partsOutsideScrollport(placement: PanelPlacement): readonly HorizontalExtent[] {
+  const { left, right } = placement.scrollport;
+  return placement.parts.filter((part) => part.left < left || part.right > right);
+}
+
+/**
  * パネルの各部が見えている矩形の内側にあり、カードの中身がカードの縁を越えず、カードの左右の余白が
  * 揃っていること。
  *
@@ -252,9 +268,7 @@ export function expectPanelInsideScrollport(
 
   const { left, right } = placement.scrollport;
   const where = `${state}（scrollLeft=${px(placement.scrollLeft)}）`;
-  const outside = placement.parts
-    .filter((part) => part.left < left || part.right > right)
-    .map(describeExtent);
+  const outside = partsOutsideScrollport(placement).map(describeExtent);
   expect
     .soft(
       outside,

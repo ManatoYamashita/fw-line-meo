@@ -3,6 +3,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { DASHBOARD_SURFACES, openStoreListAsAgency } from './fixtures/api';
 import {
   CUE_DELTA_THRESHOLD,
+  CUE_MIN_OVERFLOW_PX,
   describeCell,
   expectLayoutWidth,
   markPannableContainers,
@@ -14,6 +15,7 @@ import {
 } from './support/layout-probes';
 import {
   expectPanelInsideScrollport,
+  partsOutsideScrollport,
   readPanelPlacement,
   STORE_QR_PANEL,
   USER_EDIT_PANEL,
@@ -231,6 +233,16 @@ for (const surface of DASHBOARD_SURFACES) {
         }
 
         const stats: unknown[] = [];
+        /**
+         * 手がかりの濃さを問わずに飛ばした容器（下の `continue`）。
+         *
+         * **飛ばした事実を残さないと、飛ばす対象が増えても誰も気づかない。** この spec は
+         * `measuredCells` と `navControls` を面ごとに実数で宣言して「走査が空になったときに
+         * 0 件どうしで緑になる」のを防いでいるが、手がかりの検査だけがその規律の外にあった。
+         * 実測では、閾値を大きくして**全容器を飛ばす状態にしても 17 本すべて緑**だった
+         * （PR #284 のレビュー）。
+         */
+        const skippedForThinOverflow: string[] = [];
         for (const container of containers) {
           const start = await measureCueBands(page, container.probeId, 'start');
           const end = container.overflowing
@@ -255,6 +267,7 @@ for (const surface of DASHBOARD_SURFACES) {
             // 覆いの幅より小さくしか捲れない容器。捲り位置 0 でも反対側の覆いが端へ掛かるので、
             // 手がかりの濃さを問わない（CI の字幅では代理店一覧がこの状態になる）。
             // 中身が隠れている量もわずかなので、実害の側でも要求しない。
+            skippedForThinOverflow.push(container.label);
             continue;
           }
 
@@ -296,8 +309,20 @@ for (const surface of DASHBOARD_SURFACES) {
           }
         }
 
+        // **宣言した容器は、必ず手がかりの検査を通る。** 飛ばす条件は溢れ量なので、折り返しの
+        // 規則を少し緩める変更で主要な表の溢れが 32px を切ると、宣言は「溢れている」まま通り、
+        // 手がかりの検査だけが静かに消える。件数の literal ではなく名前で縛るのは、飛ばす対象が
+        // **字幅（＝環境）で変わる**ためである。CI の Linux では代理店一覧が 9px だけ溢れて
+        // この条件に入り、手元の macOS では入らない。件数を固定すると、環境の差そのもので赤くなる。
+        expect(
+          skippedForThinOverflow.filter((label) => layout.mustOverflow[width].includes(label)),
+          `幅 ${width} で、必ず溢れると宣言した容器が手がかりの検査を飛ばされた` +
+            `（溢れ量が ${CUE_MIN_OVERFLOW_PX}px 未満に縮んでいる。飛ばした容器: ` +
+            `${skippedForThinOverflow.join(', ') || 'なし'}）`,
+        ).toEqual([]);
+
         await testInfo.attach('r3-cue.json', {
-          body: JSON.stringify(stats, null, 1),
+          body: JSON.stringify({ stats, skippedForThinOverflow }, null, 1),
           contentType: 'application/json',
         });
       });
@@ -536,10 +561,11 @@ test.describe('行直下のパネルの検出の空振り対照', () => {
       container.scrollLeft = container.scrollWidth - container.clientWidth;
     });
 
+    // **判定は本番と同じ関数を通す。** 以前はこの式をここへ書き写していたため、本番の判定を
+    // 潰しても対照が緑のまま通った（PR #284 のレビューで実測）。対照が守れていたのは計測だけで、
+    // 判定は誰にも守られていなかった。
     const placement = await readPanelPlacement(page, USER_EDIT_PANEL);
-    const outside = placement.parts.filter(
-      (part) => part.left < placement.scrollport.left || part.right > placement.scrollport.right,
-    );
+    const outside = partsOutsideScrollport(placement);
     expect(
       outside.length,
       '包みの追従を外して捲り切っても、見えている矩形の外へ出た部分が検出されない（検出が空振りしている）',

@@ -383,7 +383,7 @@ const HIDE_TEXT_STYLE = '*{color:transparent !important;text-shadow:none !import
  * ほとんど捲れない容器で偽の赤が出る**（CI の Linux の字幅では代理店一覧が 9px だけ溢れ、
  * これに当たった）。捲る余地がその程度しか無い容器は、手がかりの有無を問わない。
  */
-const CUE_MIN_OVERFLOW_PX = 32;
+export const CUE_MIN_OVERFLOW_PX = 32;
 /** 中央として見る範囲の、左右から除く幅（CSS px）。 */
 const CENTER_INSET_CSS = 48;
 /** 画素が「異なる」と見なす差（0〜255）。影の最も濃い点は白との差が約 18 になる。 */
