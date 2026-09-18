@@ -11,9 +11,10 @@
 //    これより明るい色をアクション面に置くことはできない。
 //  - success は出典に対応色が無い唯一の役割。以前アクション色だった緑を横滑りさせている。
 //    アクション色と共有してはならない理由は下の宣言に書いた。
-//  - lineColors は Flex Message（非 Web コンテンツ）用のため AA 検証対象外。値は現行
-//    messages.ts / flex.ts と同一に保ち、Web 側の意匠差し替えで LINE の見た目が動かないことを
-//    保証する（LINE アプリ自身の配色の中で成立させるための決定）。ただし attribution
+//  - lineColors は Flex Message（非 Web コンテンツ）用のため AA 検証対象外。値は現行の LINE 面の
+//    実装（messages.ts・delivery-job の notification.ts・line-webhook の report/builders）と
+//    同一に保ち、Web 側の意匠差し替えで LINE の見た目が動かないことを保証する
+//    （LINE アプリ自身の配色の中で成立させるための決定）。ただし attribution
 //    （Google Maps の帰属表示）だけは現行色から採らず、Places API ポリシーが許す色から選んでいる。
 
 /** Web 面（survey-web / store-detail / dashboard-web）の意味役割カラートークン。 */

@@ -57,7 +57,10 @@ WCAG 相対輝度によるコントラスト比で、`ts/packages/design-tokens/
 | `borderInteractive` | `#767676` | 4.542 | 原典になし | 記入欄と対話的部品の輪郭。SC 1.4.11 の 3:1 対象 |
 
 LINE Flex Message 用の色集合（`lineColors`）は本表に含めない。非 Web コンテンツであり
-WCAG の検証対象外で、値は現行の実装と同一に保つことが要件だからである。
+WCAG の検証対象外だからである。値は原則として現行の実装と同一に保ち、Web 面の意匠差し替えで
+LINE の見た目が動かないようにする。**例外は Google Maps の帰属表示の色（`attribution`）で、
+現行の実装から採らず、Places API のポリシーが許す色から選んでいる。** 正典は
+`ts/packages/design-tokens/src/colors.ts` にある。
 
 ### 2.2 アルファ合成後の実効コントラスト
 
@@ -345,14 +348,22 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 UI の中に置かれるため、Web 面の意匠差し替えに追随させると周囲と衝突する。寸法の値も LINE 独自の
 キーワードであり、CSS の数値スケールへ写像できない。したがって LINE 用のトークンが共有するのは
 値ではなく役割であり、その正典は `ts/packages/design-tokens/src/line-layout.ts` にある。
+
+**例外は Google Maps の帰属表示の大きさ（`attributionSize`）ただ 1 つで、ピクセル値を持つ。**
+値の所有者が LINE ではなく Places API のポリシーだからである。ポリシーはテキストの帰属表示の
+大きさを sp の範囲で定めており、キーワードでは実 px が分からず、その範囲に入るかを確かめられない。
 由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+由来: [#256](https://github.com/ManatoYamashita/fw-line-meo/issues/256)
 
 ### 7.13 LINE の巨大表示もプロダクト全体で 1 箇所
 
-**日次サマリーの順位数値だけが最大の段を持つ。** §7.3 の LINE 面への写像である。
+**競合店との比較レポートの順位数値だけが最大の段を持つ。** §7.3 の LINE 面への写像である。
 折り返しを持たない文字は容器の幅を超えると省略記号で切り詰められるため、段を上げるときは
 自動縮小の指定を対で添える。上げるだけでは劣化になる。
+置き場は日次カードにあったが、カードの撤去に伴って比較レポートへ移した（Issue #256）。
+プロダクト全体で 1 箇所という規律は変わらない。
 由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
+由来: [#256](https://github.com/ManatoYamashita/fw-line-meo/issues/256)
 
 ### 7.14 バブルの内側余白は 1 つの規則で表す
 
@@ -375,8 +386,15 @@ UI の中に置かれるため、Web 面の意匠差し替えに追随させる�
 1 文 1 行で 3 行以内に収める。`**` による強調を書かない。LINE は Markdown を解さないため記号が
 そのまま表示されるうえ、`scripts/check-markdown-emphasis.sh` は Markdown ファイルしか走査しないので、
 TypeScript の文字列リテラルに書いた記号は機械検出されない。テキスト案内の Flex 化は行わない。
+
+**例外は Google Places 由来のデータを載せるものである。** 変化があった日の通知は 1〜2 文の
+短文だが、テキストメッセージではなく Flex で送る（Issue #256）。Places API のポリシーが
+帰属表示の大きさと色を定めており、テキストメッセージにはその 2 つを指定する手立てが無いためである。
+この例外は「Places 由来のデータを含むかどうか」だけで決まり、案内・催促・エラーの
+テキストメッセージを Flex にしてよいという意味ではない。
 由来: [#42](https://github.com/ManatoYamashita/fw-line-meo/issues/42)
 由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
+由来: [#256](https://github.com/ManatoYamashita/fw-line-meo/issues/256)
 
 ### 7.17 店舗詳細は文章の列ではなく指標のダッシュボードとして組む
 

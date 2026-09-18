@@ -37,7 +37,7 @@ export interface LineLayoutTokens {
   readonly itemGap: string;
   /** 節を閉じる区切り線の前の余白。sectionGap より大きい段であること（margin は親の spacing を上書きする）。 */
   readonly dividerMargin: string;
-  /** 唯一の大声。日次サマリーの順位数値ただ 1 箇所に使う。 */
+  /** 唯一の大声。競合店との比較レポートの順位数値ただ 1 箇所に使う。 */
   readonly displaySize: string;
   /** 祝祭の面の主見出し。オンボーディング完了バブルただ 1 箇所に使う。 */
   readonly titleSize: string;

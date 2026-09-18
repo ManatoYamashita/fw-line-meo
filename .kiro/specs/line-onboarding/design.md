@@ -16,7 +16,7 @@
 
 ### Non-Goals
 
-- 機能1 の配信・配信時刻等の設定 UI（Issue #4）／LIFF（第2フェーズ拡張点）
+- 機能1 の通知・レポート（Issue #4・Issue #256）／LIFF（第2フェーズ拡張点）
 - 代理店ダッシュボードでの店舗登録代行 UI・招待コード発行 UI（Issue #5。コードは運営が SQL で発行）
 - Google OAuth・機能2（第2フェーズ）／店舗特定済み確定後の店舗変更（運営対応）
 - Push 送信基盤（本 spec の応答は全て reply で完結。push は Issue #4 が追加）
@@ -30,13 +30,13 @@
 - 招待コードの**検証**と、それに伴う owner レコードの作成（`agency_invite_codes` の読取・owners への書込）
 - 店舗特定サービス関数（Places 検索・store 作成・place 確定・`onboarding_status` 遷移）— 将来の LIFF／#5 代行と共有する契約
 - 新規 3 テーブルのスキーマ（migration 0003）と `db/write-boundary.md`・`db/ERD.md` への追記
-- リッチメニュー 2 枚（オンボーディング用デフォルト／完了後用）のセットアップと完了時の個別リンク
+- リッチメニュー 2 枚（オンボーディング用デフォルト／完了後用）のセットアップと完了時の個別リンク（完了後メニューの区画と動作は `line-on-demand-report` が持つ・Issue #256）
 
 ### Out of Boundary
 
 - 招待コードの**発行 UI**（運営が SQL で INSERT。UI 化は Issue #5）
 - `owners.onboarding_status` の `store_identified → active` 遷移（後続 spec の領分）
-- 機能1 の配信対象抽出・Flex 配信・push 基盤（Issue #4）
+- 機能1 の対象抽出・通知の組立・push 基盤（Issue #4）
 - dashboard-api / survey-web への一切の変更
 - 客（Customer）に関するデータ・処理（本 spec に登場しない）
 
@@ -191,7 +191,7 @@ stateDiagram-v2
     await_store_name --> await_confirmation : 店名検索 候補提示 選択
     await_confirmation --> await_store_name : 取りやめ または 新店名テキスト
     await_confirmation --> completed : 確定 store作成 状態遷移
-    completed --> completed : 以後の入力は完了案内のみ
+    completed --> completed : 以後の入力はステータス案内かレポート（Issue #256）
 ```
 
 - `await_invite_code` で失敗 5 回 → `locked_until = now() + 10min`。ロック中の入力には待機案内のみ返す（stage は不変）
@@ -247,7 +247,7 @@ sequenceDiagram
 | 3.5 | 公式手段のみで取得 | PlacesSearchAdapter | Places API (New) 限定・FieldMask 固定 |
 | 4.1 | 選択候補の確認提示 | ConversationHandlers, MessageBuilders | セッション候補照合 → 確認 reply |
 | 4.2 | 確定で Place 紐付け＋store_identified 遷移 | StoreIdentificationService, StoresAccessor, OwnersAccessor | confirmStore（単一 TX） |
-| 4.3 | 完了案内（機能1 利用可の旨） | MessageBuilders, LineMessenger | 完了 reply＋richmenu 個別リンク |
+| 4.3 | 完了案内（機能1 利用可の旨・毎日の配信を約束しない） | MessageBuilders, LineMessenger | 完了 reply＋richmenu 個別リンク |
 | 4.4 | 登録済み Place は確定拒否＋問い合わせ案内 | StoreIdentificationService | findStoreByPlaceId＋UNIQUE 違反ハンドリング |
 | 4.5 | 確定取りやめで店名入力へ戻す | OnboardingStages, ConversationHandlers | postback `a=restart` |
 | 4.6 | 特定済みオーナーへ入力要求しない | OnboardingStages, ConversationHandlers | completed stage の案内固定 |
@@ -574,7 +574,7 @@ CREATE TABLE line_webhook_events (
 
 1. OnboardingStages: 全遷移表（1.3, 4.5, 4.6）と `encodePostback`/`decodePostback` の往復・不正 data の null（300 字以内保証）
 2. SignatureVerifier: 正しい署名の受理／改竄 body・ヘッダ欠落の拒否（7.1）
-3. ConversationHandlers（モック deps）: 無効コード 5 回→ロック案内（2.2, 2.3）／候補 0 件・検索 error の案内と stage 不変（3.2, 3.3）／completed への入力に完了案内のみ（4.6）／stage 外入力 fallback（5.3）
+3. ConversationHandlers（モック deps）: 無効コード 5 回→ロック案内（2.2, 2.3）／候補 0 件・検索 error の案内と stage 不変（3.2, 3.3）／completed への入力に店舗特定済みオーナー向けの案内（4.6。Issue #256 以降は `line-on-demand-report` の router が受ける）／stage 外入力 fallback（5.3）
 4. MessageBuilders: 候補 10 件でカルーセル ≤12 バブル・altText 付与・postback data 形式（3.1, 7.4 全文言日本語）
 5. PlacesSearchAdapter（fetch モック）: FieldMask ヘッダ固定・タイムアウト→error・0 件→empty（3.1–3.3, 3.5）
 

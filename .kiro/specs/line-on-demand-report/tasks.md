@@ -202,14 +202,14 @@
   - _Depends: 2.1_
 
 - [ ] 6. 日次配信を前提とする記述の整合
-- [ ] 6.1 (P) 要件・仕様・提案書を改める
+- [x] 6.1 (P) 要件・仕様・提案書を改める
   - ルート要件 3.3.4、提案書の機能B、`competitive-daily-summary` の日次配信の要件（未提供の配信時刻変更手段を含む）と design の Flex 構成契約と LIFF URL 契約、`line-onboarding` の完了後メニューの要件と design を、本 spec に合わせる。store-detail の LIFF URL 契約の注記も改める
   - 提案書はクライアントとの合意の記録（#256）と対にして改める
   - Observable: 各文書から毎朝の配信の約束が消え、`rg --hidden` による掃討で本 spec と食い違う記述が 0 件になっている
   - _Requirements: 9.1_
   - _Boundary: requirements.md, docs/proposal.md, .kiro/specs/competitive-daily-summary, .kiro/specs/line-onboarding, store-detail のコメント_
 
-- [ ] 6.2 (P) steering・README・構成・意匠の文書を改める
+- [x] 6.2 (P) steering・README・構成・意匠の文書を改める
   - steering の製品概要、README、アーキテクチャ文書の機能1の記述を改め、意匠文書の LINE の巨大表示（§7.13）の置き場を比較レポートへ移し、Places 由来の通知を Flex にする例外（§7.16）を書く。E2E の手順書は判定と対なので 4.5 が持つ
   - Observable: 文書のガード（強調・節番号・コンプライアンス記述）が緑で、掃討で毎朝の配信を前提とする記述が 0 件になっている
   - _Requirements: 9.1_
