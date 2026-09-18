@@ -323,6 +323,29 @@ describe('代理店管理ページ: 意匠の適用', () => {
     expect(visited).toBe(2);
   });
 
+  it('列の折り返しの規則を中身の種類で選んでいる（design-language.md 7.18・Issue #283）', async () => {
+    // 規則を持たない列は、表が容器より広いとき 1 文字の幅まで細る（日本語はどの文字の間でも
+    // 折り返せる）。**並びを完全一致で固定する**のは、1 列だけ指定を落とす改変が
+    // 「ほかの列は正しい」まま素通りするためである。
+    ready('operator');
+    api.getAgencies.mockResolvedValue({
+      ok: true,
+      value: [agencyAlpha, { ...agencyAlpha, id: 'a2', name: '代理店ベータ' }],
+    });
+    render(<AdminAgenciesPage />);
+    const scope = within(await screen.findByRole('main'));
+    await scope.findByText('代理店アルファ');
+
+    const rows = scope.getAllByRole('row').slice(1);
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      expect(
+        Array.from(row.children).map((cell) => cell.getAttribute('data-wrap')),
+        '代理店名は自由記述、作成日時は 1 行に収める',
+      ).toEqual(['prose', 'none']);
+    }
+  });
+
   it('一覧を表の部品で描き、行・列・セルの役割を保つ（Req 2.1, 2.2）', async () => {
     ready('operator');
     api.getAgencies.mockResolvedValue({

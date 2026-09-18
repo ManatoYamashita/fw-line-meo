@@ -14,6 +14,7 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableDetailRow,
   TableHead,
   TableHeaderCell,
   TableRow,
@@ -140,15 +141,22 @@ function StoresView() {
               {state.stores.map((store) => (
                 <Fragment key={store.id}>
                   <TableRow>
-                    <TableCell>{store.name}</TableCell>
+                    {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。
+                      * 面の側は語彙を選ぶだけで、幅も折り返しのクラスも書かない。 */}
+                    <TableCell wrap="prose">{store.name}</TableCell>
                     {/* 店舗特定バッジ（Req 4.3） */}
-                    <TableCell>{store.placeStatus === 'confirmed' ? '確定済み' : '未確定'}</TableCell>
+                    <TableCell wrap="none">
+                      {store.placeStatus === 'confirmed' ? '確定済み' : '未確定'}
+                    </TableCell>
                     {/* 競合設定バッジ（Req 4.3・変更手段は提供しない = 表示のみ Req 4.5） */}
-                    <TableCell>
+                    <TableCell wrap="none">
                       {store.competitorConfigured ? '競合設定済み' : '競合未設定'}
                     </TableCell>
-                    {isOperator && <TableCell>{store.agencyName}</TableCell>}
-                    <TableCell>
+                    {isOperator && <TableCell wrap="prose">{store.agencyName}</TableCell>}
+                    {/* 発行の押しボタンと、その代わりに置く理由はどちらも 1 行に収める。
+                      * 折り返しを許すと、全店が未確定のときこの列の最小幅が見出し「QR」まで
+                      * 落ち、理由の文言が 1 文字ずつ縦に並ぶ。 */}
+                    <TableCell wrap="none">
                       {/* 分岐条件は場所の状態のみ。競合設定の状態を条件に含めない（Req 1.5）。 */}
                       {store.placeStatus === 'confirmed' ? (
                         <Button
@@ -174,18 +182,18 @@ function StoresView() {
                   </TableRow>
                   {openStoreId === store.id && (
                     // 対象行の直下へ挿入し、対応関係を視覚的にも DOM 順でも読み取れるようにする。
-                    <TableRow>
-                      <TableCell colSpan={columnCount} id={panelId(store.id)}>
-                        {/* fetchQr は渡さない。インライン関数を渡すと参照が毎描画で変わり、
-                          * パネル側の副作用が再走して取得が繰り返される（Req 2.2, 2.3 が同時に壊れる）。 */}
-                        <StoreQrPanel
-                          key={store.id}
-                          storeId={store.id}
-                          storeName={store.name}
-                          onClose={closePanel}
-                        />
-                      </TableCell>
-                    </TableRow>
+                    // 包み（捲り容器の見えている幅に留める指定）は部品が持つ。折り返しの規則を
+                    // 当てて表が容器より広くなったため、この面もその経路を持つようになった。
+                    <TableDetailRow colSpan={columnCount} id={panelId(store.id)}>
+                      {/* fetchQr は渡さない。インライン関数を渡すと参照が毎描画で変わり、
+                        * パネル側の副作用が再走して取得が繰り返される（Req 2.2, 2.3 が同時に壊れる）。 */}
+                      <StoreQrPanel
+                        key={store.id}
+                        storeId={store.id}
+                        storeName={store.name}
+                        onClose={closePanel}
+                      />
+                    </TableDetailRow>
                   )}
                 </Fragment>
               ))}

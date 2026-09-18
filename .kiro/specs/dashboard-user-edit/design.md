@@ -67,7 +67,7 @@
 - **`POST /dashboard-users/:id/update` の body・応答・エラーコードの変更** → `api.ts` の `updateDashboardUser` とパネルのコード→文言の対応表。
 - **`dashboard_users` のロールと所属の制約（`ck_dashboard_role_scope`・`fk_dashboard_agency_operator`）の変更** → `parseRoleScope` と DAL の事前確認。
 - **「有効な運営」の定義の変更**（lifecycle の決裁）→ DAL の残数判定。
-- **`@fwlm/ui` の `TableContainer` の余白・枠・幅の指定、または `TableCell` の左右の余白（`px-4`）の変更** → パネルの幅 `calc(100cqi - 2rem)` と見える幅・セルの内容幅がずれる（セルの余白が `2rem` の前提より広がると、広い版面で容器が捲れるようになる。狭まる向きは sticky が 1rem へ押し戻すので捲れず、E2E も捕まえない）。携帯端末の幅の E2E 実測（捲り容器の内側・カードの左右の余白）を再実行すること。
+- **`@fwlm/ui` の `TableContainer` の余白・枠・幅の指定、または `TableCell` の左右の余白（`px-4`）の変更** → パネルの幅 `calc(100cqi - 2rem)` と見える幅・セルの内容幅がずれる（セルの余白が `2rem` の前提より広がると、広い版面で容器が捲れるようになる。狭まる向きは sticky が 1rem へ押し戻すので捲れず、E2E も捕まえない）。携帯端末の幅の E2E 実測（捲り容器の内側・カードの左右の余白）を再実行すること。**Issue #283 以後、この 3 つ（包みの位置・幅から引く値・セルの余白）は `table.tsx` の `TableDetailRow` に閉じており、対応は `ts/packages/ui/test/components.test.tsx` の「狭い画面の組版」が数値で照合する。** ただし広い版面のずれは携帯端末の幅の E2E では出ないので、変えたときは広い版面を目視すること。
 
 ## Architecture
 

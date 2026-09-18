@@ -30,6 +30,20 @@ export const ME = {
   displayName: '運営ユーザー',
 } as const;
 
+/**
+ * 代理店ロールの利用者（Issue #283）。
+ *
+ * 帯の案内リンクは運営の 5 本から 3 本へ減るが、**ロールの表示は「運営」より 1 字長い**ので、
+ * 帯の 1 段目は代理店の方が広い。運営だけを測ると包含関係にならないため、この口を持つ。
+ */
+export const AGENCY_ME = {
+  id: '00000000-0000-0000-0000-0000000000bb',
+  role: 'agency',
+  agencyId: '22222222-2222-2222-2222-222222222222',
+  agencyName: LONG_AGENCY_NAME,
+  displayName: '代理店ユーザー',
+} as const;
+
 export const STORES = [
   {
     id: '44444444-4444-4444-4444-444444444444',
@@ -157,14 +171,21 @@ const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
  *
  * QR だけは JSON ではなく PNG を返す（`RESPONSES` の表に載せられない形のため先に分岐する）。
  */
-export async function stubDashboardApi(page: Page): Promise<void> {
+export async function stubDashboardApi(
+  page: Page,
+  options: { readonly me?: unknown } = {},
+): Promise<void> {
+  // ロールの差し替えは `/me` の 1 件だけを覆う。表全体を作り替えると、覆ったつもりで
+  // 他の応答まで変わっていたときに気づけない。
+  const responses: Record<string, unknown> =
+    options.me === undefined ? RESPONSES : { ...RESPONSES, '/me': { user: options.me } };
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (QR_PATH.test(path)) {
       await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
       return;
     }
-    const body = RESPONSES[path];
+    const body = responses[path];
     if (body === undefined) {
       await route.fulfill({
         status: 404,
@@ -218,6 +239,19 @@ export async function openListSurface(
   await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
   await expect(page.getByRole('table')).toBeVisible();
   await expect(page.getByRole('row')).toHaveCount(expectedRows);
+}
+
+/**
+ * 代理店ロールで店舗一覧を開く（Issue #283・帯の 1 段目が最も広い状態）。
+ *
+ * `DASHBOARD_SURFACES` には入れない。あの一覧は「監査と横スクロールの実測が回す面」であり、
+ * ここはロールの差だけを見る補助の口である（面を増やすと、面の数を宣言している側が一斉に動く）。
+ */
+export async function openStoreListAsAgency(page: Page): Promise<void> {
+  await stubDashboardApi(page, { me: AGENCY_ME });
+  await page.goto('/stores');
+  await expect(page.getByRole('heading', { level: 1, name: '店舗一覧' })).toBeVisible();
+  await expect(page.getByRole('table')).toBeVisible();
 }
 
 export interface DashboardSurface {
@@ -276,7 +310,11 @@ export async function openUserEditPanel(page: Page): Promise<void> {
 }
 
 /**
- * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
+ * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す。**
+ *
+ * 自動で拾うのは自動 a11y 監査（`a11y-audit.spec.ts`）と携帯端末の幅の配置の実測
+ * （`mobile-layout.spec.ts`。面ごとの宣言 `LAYOUT` にも足すこと）である。横スクロールの実測
+ * （`dashboard-surfaces.spec.ts`）は面ごとに手書きで、捲れる領域の件数を宣言する。
  */
 export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   {
