@@ -144,9 +144,11 @@ Architecture Integration:
 ### Dependency Direction
 
 - 共有: `@fwlm/line-report` と `@fwlm/design-tokens`（依存なし）→ `@fwlm/db`（`types` → `daily-summary` → `report-reads`）
-- line-webhook: `line/flex-types` → `report/format` → `report/builders/*` → `report/stores` → `report/handler` → `owner/router` → `onboarding/conversation` → `app` → `index`
+- line-webhook: `line/flex-types` → `report/format` → `report/stores` → `report/builders/*` → `report/handler` → `owner/router` → `onboarding/conversation` → `app` → `index`（`report/builders/store-choice` が `report/stores` の頁の型と `report/format` の省略を読むため、stores は builders の左に置く）
+- line-webhook の `owner/completed-menu`: 完了後メニューのリンクとその成否の記録。`line/client` の型と `@fwlm/db`・`@fwlm/observability` の型だけに依存し、`owner/router` と `onboarding/conversation` の両方がここから値を import する（3.10）
 - delivery-job: `notification` → `line` → `menu` → `targets`・`deliveries` → `index`
-- 左から右への import だけを許す。builders は handler を、handler は router を import しない。scripts は `@fwlm/line-report`・`scripts/rich-menu-definitions`・`src/onboarding/stages` だけを import し、`src/index`・`src/app` を import しない
+- 左から右への import だけを許す。builders は handler を、handler は router を import しない。scripts は `@fwlm/line-report`・`@fwlm/db`（`relink-completed-menu` が対象のオーナーを読む。スクリプトの契約の手順 2）・`scripts/rich-menu-definitions`・`src/onboarding/stages` だけを import し、`src/index`・`src/app` を import しない
+- 例外は `owner/router` と `onboarding/conversation` の間だけで、ここは双方向に import し合う。ただし値を import するのは `onboarding/conversation` → `owner/router`（`isStoreIdentified`）の 1 方向だけで、逆向き（`owner/router` → `onboarding/conversation` の `ConversationLogger`・`SessionsAccessor`）は `import type` である。型の import は実行時に消えるので、実行時の循環は無い
 
 ### Technology Stack
 
@@ -176,6 +178,7 @@ ts/packages/db/test/report-reads.db.test.ts
 
 ts/apps/line-webhook/src/
 ├── owner/router.ts                             # 店舗特定済みオーナーの全イベントの振り分けとメニュー照合
+├── owner/completed-menu.ts                     # 完了後メニューのリンクと成否の記録・監査記録の書込（router と会話の共通処理）
 ├── report/
 │   ├── handler.ts                              # 店舗の解決→読み出し→組立→Reply
 │   ├── stores.ts                               # 店舗の解決・選択肢の頁・ラベルの省略（純関数）
@@ -239,20 +242,21 @@ db/migrations/00NN_summary_notification_statuses.sql   # status の CHECK を 7 
   - `src/app.ts` — `StoreScopedReportError` のとき店舗名つきの再試行案内を返す
   - `src/index.ts` — router と ReportHandler を配線する
   - `scripts/setup-rich-menus.ts` — 定義を `rich-menu-definitions.ts` から読む。`--completed-only` を足す。`LIFF_STORE_DETAIL_URL` を必須にする。寸法をメニューごとに持つ
-  - `package.json`・`Dockerfile` — `@fwlm/line-report` の依存、COPY と build、`relink-completed-menu` の起動口
+  - `package.json`・`Dockerfile` — `@fwlm/line-report` の依存と、Dockerfile の COPY・build。`relink-completed-menu` の起動口は `package.json` の script にだけ置く。Dockerfile には入れない（運用者が手元から一度だけ流すスクリプトで、サーバの実行経路に配線しない。既存の `setup-rich-menus` と同じ扱い）
   - 試験: `test/onboarding/conversation.test.ts`・`test/line/messages.test.ts` とスナップショット・`test/app-flow.db.test.ts`・`test/scripts/setup-rich-menus.test.ts`
 - delivery-job
   - `src/index.ts` — 判定・準備判定・照合・記録の編成、実行サマリーの件数、`LINE_RICHMENU_COMPLETED_ID` の追加と `LIFF_URL` の撤去
   - `src/targets.ts` — 店舗名・オーナー・前日の行を返す
   - `src/line.ts` — リッチメニューの取得、ユーザーのメニューの照会、リンクを足す
   - `src/flex.ts`・`test/flex.test.ts`・`test/__snapshots__/flex.test.ts.snap` — 削除（日次カードの廃止）
-  - `package.json`・`Dockerfile`、試験: `test/index.e2e.test.ts`・`test/cross-runtime.e2e.test.ts`・`test/targets.db.test.ts`・`test/deliveries.db.test.ts`
+  - `package.json`・`Dockerfile`、試験: `test/index.e2e.test.ts`・`test/cross-runtime.e2e.test.ts`・`test/targets.db.test.ts`・`test/index.test.ts`・`test/line.test.ts`（`test/deliveries.db.test.ts` は変えない。`src/deliveries.ts` の変更は CHECK が許す値の数を述べたコメントだけで、予約と記録の振る舞いは変わらないため）
   - `scripts/run-e2e-prod-checks.sh` — 本番の読み取り確認の配信の判定（現在は「対象をすべて送信した」を合格にする）を、失敗と上限超過が 0 件、準備判定が true、対象が送信か理由つきの見送りのどちらかに数えられていることへ改める（見送りだけの実行を合格にしつつ、差し替え後もメニュー未準備が続く状態は赤にする。Step B から C の間は意図どおり赤になる）。判定を外から試せるよう、実行サマリーの JSON を渡す注入口（`${VAR+x}` で判定する）と自己試験のケースを足す。判定と対になる `docs/testing/e2e.md` の表と「朝の Flex」の手順も同じ変更で改める
     - 数え上げの式は `delivered + failed + quotaExceeded + skipped + skippedNoChange + skippedNotComparable + skippedMenuUnavailable === targetsTotal`（**失敗と上限超過も数に含める**）とし、失敗 0 件・上限超過 0 件は独立した条件として残す。含めないと「失敗が 1 件あれば合計が足りない」となって失敗の条件が数え上げに吸収され、その条件を壊しても別の条件が赤にするため、壊れたことに気づけない（自己試験の変異で実測した）
 - db パッケージとスキーマ
   - `ts/packages/db/src/types.ts` — `SummaryDeliveryStatus` の 3 値追加、`DailySummaryNewReview` の任意項目 3 つ、`DailySummaryReadRow`
   - `ts/packages/db/src/index.ts` — `report-reads` の再エクスポート
   - `db/test/assertions/15_competitive_daily_summary.sql`・`db/write-boundary.md`・`db/ERD.md` — status の 7 値と通知記録の意味
+- observability: `ts/packages/observability/src/fields.ts`（`LogFields` へ実行サマリーの 4 項目 `skippedNoChange`・`skippedNotComparable`・`skippedMenuUnavailable`・`reportMenuReady` と、レポートの 2 項目 `reportKind`・`reportOutcome` を足す）・`src/sink.ts`（同じ 6 項目を通常項目の一覧 `PLAIN_FIELDS` へ登録する。型へ足して一覧へ足し忘れると網羅の表明が型エラーになる）と `test/sink.test.ts`
 - design-tokens: `src/colors.ts`（`lineColors.attribution`）・`src/line-layout.ts`（`lineLayout.attributionSize`）と試験
 - Go: `go/internal/places/types.go`・`client.go`、`go/internal/summary/compute.go`（`Review`）、`go/internal/batch/run.go`（変換）、`go/internal/repo/summaries.go`（`NewReviewExcerpt`）と各試験、`go/internal/batch/crossruntime_test.go`
 - infra: `infra/modules/delivery-job/main.tf`・`variables.tf`、`infra/envs/prod/main.tf`・`variables.tf`、`infra/README.md`（§10 の書き直しと :204 の成功の証拠）。`LINE_RICHMENU_COMPLETED_ID` の追加（Step A）と `LIFF_URL` の撤去（Step D）は別の PR に分ける
@@ -521,7 +525,7 @@ export function listDailySummariesEndingAt(
 Implementation Notes
 
 - Validation: 30 日目と 31 日目の境界、日付の文字列化、並び順を DB 試験で固定する
-- Risks: 30 日の定数は Go と TS の二重定義になる。既存の cross-runtime 試験に「Go が残す最古の行を TS が読める」ことを足して、両側の食い違いを検出する
+- Risks: 30 日の定数は Go と TS の二重定義になる。言語間の試験に「Go が残す最古の行を TS のレポート用の読み出しが読める」段を足して、両側の食い違いを検出する。既存の段（delivery-job・store-detail）は配信と詳細画面の読込を受け持っており、レポートの読み出しは別の入口なので、`ts/apps/line-webhook/test/cross-runtime.e2e.test.ts` を新設し、`db/test/cross_runtime_steps.sh` を 4 段から 5 段へ増やす（レポートの読み出しが 4 段目、既存の能力の不在チェックが 5 段目へ繰り下がる）
 
 ### line-webhook
 
@@ -942,7 +946,8 @@ Contracts: Batch [x]
 
 ### Monitoring
 
-- 新しい事象と項目を `docs/observability/log-field-canon.md` に登録する: `line-webhook.report_replied`（`reportKind`・`reportOutcome`）、`line-webhook.report_store_hint_ignored`、`delivery-job.report_menu_not_ready`、`delivery-job.richmenu_linked`、`delivery-job.richmenu_link_failed`、実行サマリーの 4 項目
+- 新しい事象と項目を `docs/observability/log-field-canon.md` に登録する: `line-webhook.report_replied`（`reportKind`・`reportOutcome`）、`line-webhook.report_store_hint_ignored`、`line-webhook.session_stage_update_failed`（振り分け口がメニューを張った後、段階を completed に揃える更新に失敗した記録。項目は `errorKind` だけ）、`delivery-job.report_menu_not_ready`、`delivery-job.richmenu_linked`、`delivery-job.richmenu_link_failed`、実行サマリーの 4 項目
+- `line-webhook.audit_log_failed` は既にコードが出している（現行は `onboarding/conversation.ts`、3.10 で `owner/completed-menu.ts` へ移す）が正典に無い。出典の移動とあわせて同じ表へ登録する
 - 新しいアラートポリシーは作らない。Cloud Run の 5xx と Job の失敗の既存の監視で足りる。`reportMenuReady = false` が差し替え後も続くことは、実行サマリーで追う
 
 ## Testing Strategy

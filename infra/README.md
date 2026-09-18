@@ -478,10 +478,38 @@ env を足す変更は必ずイメージより先に、外す変更は必ずイ�
 
 | Step | 何をするか | 手順の在処 |
 |---|---|---|
-| A | `summary_deliveries.status` の migration と、配信ジョブへの `LINE_RICHMENU_COMPLETED_ID` の配線（値は旧メニューの ID のまま） | §3 → §2 |
-| B | コードのマージとデプロイ。設定値は旧メニューを指すので通知は出ない | §7-2 |
+| A | `summary_deliveries.status` の migration と、配信ジョブへの `LINE_RICHMENU_COMPLETED_ID` の配線（値は旧メニューの ID のまま） | §3 → 下の「apply の作法」 |
+| B | コードのマージとデプロイ。設定値は旧メニューを指すので通知は出ない | §7-2。巻き戻しは §7-2 の「1 つ前のイメージへ戻す」 |
 | C | **完了後メニューの差し替え（本節 10-1〜10-5）** | 本節 |
-| D | 配信ジョブの `LIFF_URL` の配線を外す（実機確認の後） | §2 |
+| D | 配信ジョブの `LIFF_URL` の配線を外す（実機確認の後） | 下の「apply の作法」 |
+
+**apply の作法（Step A・C・D に共通・素の `make tf-apply` を打たない）**
+
+`module.guardrails`（Issue #232・ログバケットの分離）は main に入っているが、費用の承認待ちで
+意図的に本番へ当てていない。`-target` を付けない apply は、それを一緒に作ってしまう。
+
+```bash
+# 1. そのコミットの deploy-prod が終わってから行う（保存した plan を当てない）。
+#    in-place の更新は plan を作った時点のイメージの値を送るので、デプロイ前の plan を
+#    当てるとイメージが巻き戻る。
+gh run list --repo ManatoYamashita/fw-line-meo --workflow deploy-prod --limit 3
+
+# 2. plan で差分を読む。属性まで下りて見る（`client` と `client_version` の 7 件は既存のずれ）。
+terraform -chdir=infra/envs/prod plan -target=<アドレス>
+
+# 3. 同じ -target で当てる。
+terraform -chdir=infra/envs/prod apply -target=<アドレス>
+```
+
+Step ごとのアドレス:
+
+| Step | `-target` に渡すアドレス |
+|---|---|
+| A | `module.delivery_job.google_cloud_run_v2_job.delivery` |
+| C | `module.run_services.google_cloud_run_v2_service.svc["line-webhook"]` と `module.delivery_job.google_cloud_run_v2_job.delivery` の **2 つを同じ apply に入れる**（`line_richmenu_completed_id` は両方が読む。片方だけだと 2 つが別々のメニューへ張り合う） |
+| D | `module.delivery_job.google_cloud_run_v2_job.delivery` |
+
+#232 が承認されて `module.guardrails` を本番へ当てた後は、この絞り込みは要らなくなる。
 
 着手前に確かめること:
 
@@ -523,6 +551,9 @@ env を足す変更は必ずイメージより先に、外す変更は必ずイ�
 ### 10-1. 段 1: 完了後メニューだけを作る
 
 ```bash
+# 共有パッケージの dist（/line-report・/db）を先に作る。クリーンな checkout では
+# dist が無く、build:scripts だけでは解決に失敗する。
+pnpm -C ts run build:packages
 cd ts/apps/line-webhook
 pnpm run build:scripts
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
@@ -583,6 +614,9 @@ per-user リンクには触れない。店舗特定済みオーナーは `ts/app
 まず試行だけを流し、対象の件数を見る（LINE へのリンクと削除を行わない。DB は読み出しだけ）:
 
 ```bash
+# 共有パッケージの dist（/line-report・/db）を先に作る。クリーンな checkout では
+# dist が無く、build:scripts だけでは解決に失敗する。
+pnpm -C ts run build:packages
 cd ts/apps/line-webhook
 pnpm run build:scripts
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
