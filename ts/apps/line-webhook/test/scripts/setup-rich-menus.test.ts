@@ -2,8 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setupRichMenus } from '../../scripts/setup-rich-menus.js';
+import { setupCompletedRichMenuOnly, setupRichMenus } from '../../scripts/setup-rich-menus.js';
 import { decodePostback } from '../../src/onboarding/stages.js';
+
+/** 完了後メニューの「詳細を見る」の遷移先（env LIFF_STORE_DETAIL_URL 相当）。 */
+const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/2000000000-c9detail';
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const CREATE_URL = 'https://api.line.me/v2/bot/richmenu';
@@ -55,9 +58,12 @@ function emptyResponse(status: number): Response {
   } as Response;
 }
 
-// Create 呼び出しは2回（オンボーディング用→完了用の順）発生する前提で、
-// 呼ばれた順に異なる richMenuId を払い出すフェイク。
-function createFetchMock(): {
+// Create 呼び出しの順に richMenuId を払い出すフェイク。既定は 2 回（オンボーディング用→完了用）の
+// 前提だが、`--completed-only`（完了後メニューだけを作る動作）では 1 回しか呼ばれないため、
+// 払い出す ID の並びを呼出側から渡せるようにしてある。
+function createFetchMock(
+  richMenuIds: readonly string[] = ['richmenu-onboarding-1', 'richmenu-completed-1'],
+): {
   fetchMock: ReturnType<typeof vi.fn>;
   createCalls: Array<{ url: string; body: Record<string, unknown> }>;
   uploadCalls: Array<{ url: string; contentType: string; body: unknown }>;
@@ -78,7 +84,8 @@ function createFetchMock(): {
       createCount += 1;
       const body = JSON.parse(init?.body as string) as Record<string, unknown>;
       createCalls.push({ url, body });
-      const richMenuId = createCount === 1 ? 'richmenu-onboarding-1' : 'richmenu-completed-1';
+      const richMenuId = richMenuIds[createCount - 1];
+      if (richMenuId === undefined) throw new Error(`払い出す richMenuId が足りない（${createCount} 回目）`);
       return jsonResponse(200, { richMenuId });
     }
 
@@ -109,6 +116,7 @@ describe('setupRichMenus', () => {
       channelId: 'test-channel-id',
       channelSecret: 'test-channel-secret',
       fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       onboardingImage: Buffer.from('onboarding-png-bytes'),
       completedImage: Buffer.from('completed-png-bytes'),
     });
@@ -131,6 +139,7 @@ describe('setupRichMenus', () => {
       channelId: 'id',
       channelSecret: 'secret',
       fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       onboardingImage: Buffer.from('onboarding-bytes'),
       completedImage: Buffer.from('completed-bytes'),
     });
@@ -156,6 +165,7 @@ describe('setupRichMenus', () => {
       channelId: 'id',
       channelSecret: 'secret',
       fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       onboardingImage: Buffer.from('a'),
       completedImage: Buffer.from('b'),
     });
@@ -171,6 +181,7 @@ describe('setupRichMenus', () => {
       channelId: 'id',
       channelSecret: 'secret',
       fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       onboardingImage: Buffer.from('a'),
       completedImage: Buffer.from('b'),
     });
@@ -188,6 +199,7 @@ describe('setupRichMenus', () => {
       channelId: 'id',
       channelSecret: 'secret',
       fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       onboardingImage: Buffer.from('a'),
       completedImage: Buffer.from('b'),
     });
@@ -221,6 +233,7 @@ describe('setupRichMenus', () => {
       channelId: 'id',
       channelSecret: 'secret',
       fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
       onboardingImage,
       completedImage,
     });
@@ -272,7 +285,69 @@ describe('setupRichMenus', () => {
         channelId: 'id',
         channelSecret: 'secret',
         fetch: fetchMock,
+        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
         onboardingImage: Buffer.from('a'),
+        completedImage: Buffer.from('b'),
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+// メニューの差し替え（design.md「Migration Strategy」の Step C）が使う動作。
+describe('setupCompletedRichMenuOnly', () => {
+  it('完了後メニューだけを作り、既定メニューには触れない', async () => {
+    const { fetchMock, createCalls, uploadCalls, defaultCalls } = createFetchMock([
+      'richmenu-completed-2',
+    ]);
+
+    const result = await setupCompletedRichMenuOnly({
+      channelId: 'id',
+      channelSecret: 'secret',
+      fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      completedImage: Buffer.from('completed-bytes'),
+    });
+
+    // 作るのは 1 面だけで、それは完了後メニュー（Full・5 区画）である。
+    expect(createCalls).toHaveLength(1);
+    const body = createCalls[0]!.body;
+    expect(body.size).toEqual({ width: 2500, height: 1686 });
+    expect((body.areas as unknown[]).length).toBe(5);
+
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0]!.url).toBe(
+      'https://api-data.line.me/v2/bot/richmenu/richmenu-completed-2/content',
+    );
+    expect(uploadCalls[0]!.body).toEqual(Buffer.from('completed-bytes'));
+
+    // Requirement 2.6: 既定メニューはオンボーディング用のままでなければならない。
+    // 既定の設定を 1 回でも呼ぶと、店舗特定前のオーナーの面が完了後メニューに置き換わる。
+    expect(defaultCalls).toEqual([]);
+    const requestedUrls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(requestedUrls.filter((url) => url.startsWith(DEFAULT_URL_BASE))).toEqual([]);
+
+    // 運用者が LINE_RICHMENU_COMPLETED_ID と張り替えへ渡す値。
+    expect(result).toEqual({ completedRichMenuId: 'richmenu-completed-2' });
+  });
+
+  it('作成に失敗した場合は例外を投げる（画像を登録しないメニューを残さない）', async () => {
+    const fetchMock = vi.fn(async (rawUrl: Parameters<typeof fetch>[0]) => {
+      const url = String(rawUrl);
+      if (url === TOKEN_URL) {
+        return jsonResponse(200, { access_token: 'stateless-token-1', expires_in: 900 });
+      }
+      if (url === CREATE_URL) {
+        return jsonResponse(500, {});
+      }
+      return emptyResponse(200);
+    });
+
+    await expect(
+      setupCompletedRichMenuOnly({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
         completedImage: Buffer.from('b'),
       }),
     ).rejects.toThrow();
