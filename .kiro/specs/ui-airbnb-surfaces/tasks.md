@@ -1292,7 +1292,7 @@ ts/scripts/with-test-db.sh <script>
 | 項目 | 実際の状態 |
 |---|---|
 | 管理ダッシュボードと店舗詳細の横溢れ | **機械検証済み**。`dashboard-web/e2e/dashboard-surfaces.spec.ts` の 6 件と `store-detail/e2e/store-surface.spec.ts` の 1 件（CI の `e2e-surfaces` ジョブ）。PR #190 が仕様策定後に入れた |
-| 店舗詳細に書込操作の要素が無い | **機械検証済み**。`store-detail/test/store-page.test.tsx` が正常系とエラー画面の両方で `form, button, input, textarea, select` を 0 件に固定 |
+| 店舗詳細に書込操作の要素が無い | **機械検証済み**。`store-detail/test/store-page.test.tsx` が正常系とエラー画面の両方で `form, button, input, textarea, select` を 0 件に固定（2026-09-13 訂正・Issue #265: 検証は 7 状態の許可リスト方式へ置き換えた。`form`・`button`・`textarea`・`select` は 0 件のままで、`input` は検索欄と選択肢の隠し radio だけを状態ごとの件数で許す） |
 | 動き低減下で処理中が文言で伝わる | **穴があった**。既存の検証は検証専用面しか見ておらず、**task 4.2 が本番の下書き画面へ入れた処理中の図形は誰も測っていなかった** |
 
 **3 件目は目視の記録で済ませず、恒久の検証を足して塞いだ。** 段階 5 でローカルの実ブラウザ実走が

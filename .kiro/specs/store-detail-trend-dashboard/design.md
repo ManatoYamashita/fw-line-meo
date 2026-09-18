@@ -266,7 +266,9 @@ graph LR
 
 ##### Service Interface
 ```typescript
-import type { StoreDetailTrendPoint } from './data';
+// 点の型は `./contract` の応答の型から導く（`./data` はサーバー側のモジュールなので、
+// クライアントに同梱されるファイルからは型でも参照しない）。
+import type { StoreDetailResponse } from './contract';
 
 export type TrendMetric = 'rank' | 'rating' | 'reviewCount';
 export type TrendPeriodDays = 7 | 30;
@@ -517,7 +519,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
   - `<figure>` の中に次を置く。
     - 見える `<figcaption>`: 「{指標名}の推移」、「{始点 M/D}〜{終点 M/D}」、順位のときの「上ほど上位」（1.3）、「最新 {値}（{M/D}）」（3.6）
     - SVG: `role="img"`。`aria-label` には `describeMetric` の文（指標・期間・始点と終点の値・最高と最低・現在値と日付）を入れる（5.1）。
-  - 目盛り・日付・最新値の HTML ラベルは `aria-hidden` にする。同じ内容を SVG の名前と表が持っているので、二重に読ませないため。
+  - 目盛りと日付の HTML ラベルは `aria-hidden` にする。最新値の文字は、点の層（`aria-hidden` の SVG）の中にある。同じ内容を SVG の名前と表が持っているので、二重に読ませないためである。
   - SVG の中にも外側のラベルにも、焦点を受け取る要素を置かない（5.2）。
 - **値が無いとき**: `scaleFor` が null なら、グラフの代わりに「この期間は{指標名}の記録がありません」を出す（1.10）。
 - **配置**:
@@ -597,7 +599,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
 | 正常・推移あり・競合 1 店以下 | `input[type=radio][aria-hidden=true][tabindex="-1"]` 5 件 | 同上 |
 | 正常・推移あり・競合 2 店以上 | 上に加えて `input[type=search][data-slot=input]` 1 件 | 同上 |
 
-「0 件を保つもの」は次のとおり。
+「0 件を保つもの」は次のとおり。役割の一覧が見るのは **`role` 属性**であって、読み上げの木の役割ではない（許可する検索欄は、暗黙の役割として `searchbox` を持つ。属性で見るので食い違わない）。
 - `form`・`button`・`textarea`・`select`・`[contenteditable]`
 - `[role=button|textbox|combobox|checkbox|switch|slider|spinbutton]`
 - `[role=searchbox|listbox|option|menu|menuitem|menuitemcheckbox|menuitemradio|tab|treeitem]`（2026-09-14 追記。タスク 1.3 の独立レビューで、自前の `div role="searchbox"` が許可リストの外の入力として要件 7.2 をすり抜けると分かった。`radio` と `radiogroup` は、選択肢の札が描くので含めない）
@@ -692,7 +694,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - グラフの意味論:
   - `getByRole('img', { name })` で説明文が取れる。
   - SVG の中に、焦点を受け取る要素が 0 件（5.2）。
-- 色の語彙: グラフが描く色のユーティリティの集合が、決定 D6 の 7 つと完全一致する（5.3・9.3）。
+- 色の語彙: グラフが描く色のユーティリティの集合が、決定 D6 の 7 つと完全一致する（5.3・9.6）。
 - `style` 属性:
   - 走査の範囲は `TrendChart` の `figure` の子孫に限る。Base UI の隠し radio が `visuallyHidden` のインライン style を持つので、ページや節全体で取ると必ず赤になる。
   - 範囲内の style のプロパティは、`top` / `left` の百分率だけである。

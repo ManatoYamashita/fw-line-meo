@@ -203,6 +203,7 @@
     - 操作系の role（button / textbox / combobox / checkbox / switch / slider / spinbutton）
       - 2026-09-14 追記: searchbox / listbox / option / menu / menuitem / menuitemcheckbox / menuitemradio / tab / treeitem の 9 種を加えた。タスク 1.3 の独立レビューで、自前の `div role="searchbox"` が許可リストの外の入力として要件 7.2 をすり抜けると分かったためである。radio と radiogroup は、選択肢の札が描くので含めない。正典は design.md の「構造契約（改定後）」。
     - `[form]`、`input[name]`
+    - 許可リストの外にある `input`
   - 読み込み中・失敗・選択待ちの 3 分岐は、入力 0 件のまま据え置く。
   - 操作した後にも、次を検査する。
     - fetch の回数と対象
