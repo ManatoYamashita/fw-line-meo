@@ -220,7 +220,10 @@ export async function setupCompletedRichMenuOnly(
 //   pnpm run build:scripts
 //   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... LIFF_STORE_DETAIL_URL=... pnpm run setup-rich-menus
 //   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... LIFF_STORE_DETAIL_URL=... \
-//     pnpm run setup-rich-menus -- --completed-only
+//     pnpm run setup-rich-menus --completed-only
+// 引数の前に `--` を挟まないこと。pnpm 10 は `--` を区切りとして食わず、そのまま argv へ渡すため、
+// 引数を厳密に読むスクリプト（relink-completed-menu.ts）では `unknown argument --` になる。
+// 運用手順は infra/README.md §10。
 const isMainModule = process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {

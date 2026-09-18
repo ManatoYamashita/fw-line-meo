@@ -437,7 +437,9 @@ export function parseRelinkArgs(argv: readonly string[]): RelinkOptions {
 // 実行方法（ts/apps/line-webhook をカレントディレクトリとして）:
 //   pnpm run build:scripts
 //   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... DATABASE_URL=... \
-//     pnpm run relink-completed-menu -- --to <新ID> [--delete-old <旧ID>] [--dry-run]
+//     pnpm run relink-completed-menu --to <新ID> [--delete-old <旧ID>] [--dry-run]
+// 引数の前に `--` を挟まないこと。pnpm 10 は `--` を区切りとして食わずそのまま argv へ渡すため、
+// 上の parseRelinkArgs が `unknown argument --` で落ちる（実測）。運用手順は infra/README.md §10。
 const isMainModule = process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {

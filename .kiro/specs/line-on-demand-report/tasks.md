@@ -215,7 +215,7 @@
   - _Requirements: 9.1_
   - _Boundary: .kiro/steering/product.md, README.md, docs/architecture.md, docs/design/design-language.md_
 
-- [ ] 6.3 差し替えの運用手順を書き直す
+- [x] 6.3 差し替えの運用手順を書き直す
   - `infra/README.md` §10 を、Step A〜D の順序、完了後メニューだけの作成、tf 変数の更新、張り替えスクリプトの 4 分類と削除の条件、パイロットと実演の期間を避けること、実機確認に書き直し、§10-6 の「対象が存在しない」と配信の成功の証拠（:204）を改める
   - 手順が要求する env は env 宣言表で書く（出典は実装済みのスクリプト）
   - Observable: 手順どおりのコマンドが試行だけの動作で通り、`scripts/check-spec-env-names.sh` を含む文書のガードが緑
@@ -392,6 +392,11 @@
 - （5.2→6.3・7.4）完了後メニューの `name` は新旧とも同じ（`line-onboarding-completed-menu`）。張り替えの最中は同名の 2 面が一覧に並ぶので、運用の手順では ID で区別する
 - （5.3）張り替えスクリプトは、不一致か判定不能が残れば `--delete-old` の有無によらず非ゼロで終わる（流し直しの要否を終了コードで伝える）
 - （5.3→最終検証）design の Modified Files は Dockerfile に張り替えスクリプトの起動口を挙げているが、実装は運用者がローカルから流す前提で入れていない（既存のセットアップと同じ）。design の記述を実装に合わせるか、Dockerfile へ足すかを決める
+- （6.3・残件・別 Issue を提案）`scripts/check-spec-env-names.sh` は `.kiro/specs/*.md` しか走査しないので、`infra/README.md` に書いた env 宣言表は機械で検査されていない。表の形はガードが受理する形で、内容も実物と 1 行ずつ照合済みだが、検査は掛かっていない
+  - 閉じ方: 走査の一覧に `infra/README.md` を足し、自己試験のケース（2 桁の番号）を足す
+  - 注意: 方向 2 は出典のファイル単位で網羅を求めるので、「出典＝同上」の行と、張り替えスクリプトが要求する env の並べ方を先に確かめる
+  - ガードの変更は赤化の実測を伴う別種の作業なので、本 spec の外で行う
+- （6.3）`pnpm run <script> -- --flag` は、いまの pnpm では `--` がそのまま引数に渡って落ちる。手順とスクリプトの説明では `--` を書かない
 - （2.1）`scripts/check-test-code-coverage.sh` などの網羅ガードは git の追跡下しか見ない。新しいパッケージは `git add` の後にガードを流す（add 前に確かめるなら、使い捨ての `GIT_INDEX_FILE` で行い、本物の index に触れない）
 
 ## 実施記録
