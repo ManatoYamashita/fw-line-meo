@@ -39,16 +39,24 @@ const CREATE_RICHMENU_URL = 'https://api.line.me/v2/bot/richmenu';
 const UPLOAD_IMAGE_URL_BASE = 'https://api-data.line.me/v2/bot/richmenu';
 const SET_DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
 
-// Half (HD) 2500x843（ratio 2.965 >= 1.45 要件・Issue #195）。
-// 比を Full 系（約 1.48）から Half 系へ移したのは占有高さの問題である。比 1.48 は幅 390pt の端末で
-// 縦 263pt を占め、トーク画面の 1/3 超を 3 行しか無い面が食う。843 なら 131.5pt で収まる。
-// 幅を 2500 まで上げたのは解像度の問題で、原寸 800px は同じ端末で約 1.46 倍に引き伸ばされ文字が眠る。
-// 平面塗りのため 2500x843 でも実測 70-80KB であり、1MB の上限には遠く届かない。
-// **assets/richmenu-*.png の実寸法と必ず一致させること。** areas は全面 1 タップ（bounds が
-// この 2 定数そのもの）なので、食い違いはそのまま「押せる範囲と絵の食い違い」になる。
-// test/scripts/setup-rich-menus.test.ts が実 PNG の IHDR と突き合わせて機械的に強制する。
-const RICH_MENU_WIDTH = 2500;
-const RICH_MENU_HEIGHT = 843;
+// メニューごとの寸法。**assets/richmenu-*.png の実寸法と必ず一致させること。** 区画の bounds は
+// この寸法の中に置かれるので、食い違いはそのまま「押せる範囲と絵の食い違い」になる。
+// test/scripts/setup-rich-menus.test.ts が、メニューごとの正典と実 PNG の IHDR の両方に対して
+// 機械的に強制する。
+//
+// 幅を 2 面とも 2500 にしているのは解像度の問題である（Issue #195）。原寸 800px は幅 390pt の
+// 端末で約 1.46 倍に引き伸ばされ、文字が眠る。平面塗りなので 2500 幅でも実測 70-80KB であり、
+// 1MB の上限には遠く届かない。
+//
+// オンボーディング用は Half (HD) 2500x843（比 2.965 >= 1.45 要件）。再開の 1 タップだけの面で、
+// 幅 390pt の端末での占有高さは 131.5pt に収まる（Issue #195）。
+const ONBOARDING_MENU_SIZE = { width: 2500, height: 843 } as const;
+
+// 完了後メニューは Full (HD) 2500x1686（比 約 1.483 >= 1.45 要件・Issue #256）。上段 3 区画の
+// レポートと下段 2 区画（詳細・ステータス）の 2 段を持つため、Half では区画が縦に潰れる。
+// 占有高さは幅 390pt の端末で約 263pt になるが、これは導線を 5 つ常設することの対価である
+// （design.md「RichMenuDefinitions と RichMenuScripts」）。
+const COMPLETED_MENU_SIZE = { width: 2500, height: 1686 } as const;
 
 interface RichMenuAction {
   type: 'postback' | 'message';
@@ -184,13 +192,18 @@ async function setDefaultRichMenu(
 
 function buildOnboardingRichMenu(): RichMenuObject {
   return {
-    size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
+    size: { width: ONBOARDING_MENU_SIZE.width, height: ONBOARDING_MENU_SIZE.height },
     selected: false,
     name: 'line-onboarding-resume-menu',
     chatBarText: '登録を再開',
     areas: [
       {
-        bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
+        bounds: {
+          x: 0,
+          y: 0,
+          width: ONBOARDING_MENU_SIZE.width,
+          height: ONBOARDING_MENU_SIZE.height,
+        },
         action: {
           type: 'postback',
           label: '登録を再開する',
@@ -203,7 +216,7 @@ function buildOnboardingRichMenu(): RichMenuObject {
 
 function buildCompletedRichMenu(): RichMenuObject {
   return {
-    size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
+    size: { width: COMPLETED_MENU_SIZE.width, height: COMPLETED_MENU_SIZE.height },
     selected: false,
     name: 'line-onboarding-completed-menu',
     // Issue #195: チャットバーの文字・画像の見出し・タップで送信される text の 3 者を揃える。
@@ -211,7 +224,15 @@ function buildCompletedRichMenu(): RichMenuObject {
     chatBarText: 'ステータス確認',
     areas: [
       {
-        bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
+        // 画像は既に 5 区画（上段 3 レポート・下段 2）だが、区画と action の割り当ては
+        // design.md の区画表どおりに作り直す別のタスク（Issue #256 のタスク 5.2）が持つ。
+        // ここでは既存の全面 1 タップを新しい寸法へ合わせるにとどめる。
+        bounds: {
+          x: 0,
+          y: 0,
+          width: COMPLETED_MENU_SIZE.width,
+          height: COMPLETED_MENU_SIZE.height,
+        },
         // Requirement 6.3 は「完了後の案内へ切替」を求めるのみで、完了後メニューのタップに
         // 特定の挙動は要求していない（本 stateDiagram では linkRichMenu による切替のみが前提）。
         // message アクションはタップ時にテキストメッセージとして送信されるだけなので、

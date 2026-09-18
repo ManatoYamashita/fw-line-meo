@@ -15,7 +15,8 @@
 
   制約（外すと絵が実装について嘘をつく。詳細は Issue #195 の決定コメント）:
   - 寸法は 2500x843（LINE の Half (HD)）。scripts/setup-rich-menus.ts の
-    RICH_MENU_WIDTH / RICH_MENU_HEIGHT と一致していなければタップ座標が絵とずれる。
+    ONBOARDING_MENU_SIZE と一致していなければタップ座標が絵とずれる。
+    （完了後メニューは Full 2500x1686 で、寸法の宣言も画像も別である。Issue #256）
   - タップ領域は画面全体でひとつだけ（areas[0] が全面）。ボタンに見える要素を描いてはならない。
   - 配色は design-tokens の lineColors のみ。アクション色の緑 (#1DB446) は使わない
     （design-language.md 7.15: 緑は押せるものだけが持つ）。

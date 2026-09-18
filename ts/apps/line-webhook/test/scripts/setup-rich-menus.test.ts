@@ -15,6 +15,17 @@ const RICH_MENU_IMAGE_MAX_BYTES = 1024 * 1024;
 /** PNG のカラータイプのうちアルファチャネルを持つもの（4=グレースケール+A, 6=truecolor+A）。 */
 const PNG_COLOR_TYPES_WITH_ALPHA = [4, 6];
 
+// メニューごとの寸法の正典（design.md「RichMenuDefinitions と RichMenuScripts」の区画表）。
+// 作成リクエストの発生順（1 回目=オンボーディング用、2 回目=完了後）に並べる。
+// 実装の定数をそのまま読まずに値を書き写しているのは、宣言と実 PNG が同じ向きへ一緒にずれた状態
+// （両方を 2500x843 のまま据え置く等）を試験が受理しないためである。
+const EXPECTED_MENU_SIZES: ReadonlyArray<{ menu: string; width: number; height: number }> = [
+  // オンボーディング用は Half (HD)。再開の 1 タップだけの面なので占有高さを増やさない。
+  { menu: 'onboarding', width: 2500, height: 843 },
+  // 完了後は Full (HD)。上段 3 区画（レポート）＋下段 2 区画（詳細・ステータス）の 2 段を持つ。
+  { menu: 'completed', width: 2500, height: 1686 },
+];
+
 // PNG の IHDR は署名 8 バイト + 長さ 4 + 型 4 の直後に固定位置で並ぶ（幅 4 / 高さ 4 /
 // ビット深度 1 / カラータイプ 1）。ここを読むだけなら外部依存もデコードも要らない。
 function readPngHeader(image: Buffer): { width: number; height: number; colorType: number } {
@@ -193,9 +204,11 @@ describe('setupRichMenus', () => {
 
   // Issue #195: 「宣言した size」と「実際にアップロードする PNG の寸法」が一致していることを、
   // assets/ の実ファイルに対して確かめる。上の範囲判定だけでは、画像と定数のどちらか一方だけを
-  // 変えた状態が素通りする。areas は全面 1 タップ（bounds が RICH_MENU_WIDTH/HEIGHT そのもの）
-  // なので、寸法の食い違いはそのまま「押せる範囲と絵の食い違い」になる。
-  it('宣言した size が assets の実 PNG の寸法と一致し、画像が LINE の仕様を満たす', async () => {
+  // 変えた状態が素通りする。区画の bounds は宣言した寸法の中に置かれるので、寸法の食い違いは
+  // そのまま「押せる範囲と絵の食い違い」になる。
+  // Issue #256: メニューごとに寸法が異なる（オンボーディング用は Half・完了後は Full）ため、
+  // 照合は 2 つのメニューそれぞれの宣言と、そのメニューの PNG の間で行う。
+  it('宣言した size がメニューごとの正典および assets の実 PNG の寸法と一致し、画像が LINE の仕様を満たす', async () => {
     const assetsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets');
     const [onboardingImage, completedImage] = await Promise.all([
       readFile(path.join(assetsDir, 'richmenu-onboarding.png')),
@@ -220,6 +233,8 @@ describe('setupRichMenus', () => {
 
     for (const [index, createCall] of createCalls.entries()) {
       const richMenuId = richMenuIds[index];
+      const expected = EXPECTED_MENU_SIZES[index];
+      expect(expected, `${index} 番目のメニューの寸法の正典が無い`).toBeDefined();
       const upload = uploadCalls.find((call) => call.url.includes(richMenuId!));
       expect(upload, `${richMenuId!} の画像アップロードが見つからない`).toBeDefined();
       expect(upload!.contentType).toBe('image/png');
@@ -228,9 +243,13 @@ describe('setupRichMenus', () => {
       const header = readPngHeader(image);
       const declared = createCall.body.size as { width: number; height: number };
 
-      // 本検査の主眼: 宣言と実物の一致。
+      // 本検査の主眼: 宣言と実物の一致。あわせて、両者が同じ向きへ一緒にずれていないことを
+      // メニューごとの正典に対して固定する。
       expect(declared.width).toBe(header.width);
       expect(declared.height).toBe(header.height);
+      expect({ menu: expected!.menu, width: declared.width, height: declared.height }).toEqual(
+        expected,
+      );
 
       // rich-menu.md「Image Specifications」。透過は下地が白でない面で合成が崩れる。
       expect(image.byteLength).toBeGreaterThan(0);

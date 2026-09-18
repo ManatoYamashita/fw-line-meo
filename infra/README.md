@@ -456,8 +456,10 @@ postback がある」「`api-data.line.me` へ画像を送る」「宣言した 
 
 ### 10-0. 前提
 
-- 画像とコード定数（`RICH_MENU_WIDTH` / `RICH_MENU_HEIGHT`）が一致した状態が `main` にあること。
-  食い違いは `pnpm -C ts --filter @fwlm/line-webhook run test` が赤にする。
+- 画像とコード定数（`ONBOARDING_MENU_SIZE` / `COMPLETED_MENU_SIZE`）がメニューごとに一致した
+  状態が `main` にあること。寸法はメニューごとに異なる（オンボーディング用は Half 2500x843、
+  完了後は Full 2500x1686）。食い違いは
+  `pnpm -C ts --filter @fwlm/line-webhook run test` が赤にする。
 - 画像そのものの仕様（PNG 署名・1MB 以下・アルファ無し）も同じ vitest が実 PNG のバイト列に対して
   見ている。**画像の検査点はここ 1 箇所だけである**（別立ての shell ガードは置かない。同じことを
   二重に見る層は、片方が腐ったときに腐ったと言えない）。
