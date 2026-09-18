@@ -5,9 +5,10 @@
 // 図形は、2 枚の SVG を同じ描画領域に重ねて描く（同 spec の research.md の決定 D2）。
 // - 線の層: viewBox を持ち、縦横の比を保たずに伸縮する。罫線と線を描き、グラフの名前（説明文）を持つ。
 // - 点の層: viewBox を持たない。百分率座標の circle で、印と端点の地色の輪を描く。読み上げからは隠す。
-// 目盛り・日付・最新値は HTML の文字として百分率の位置へ置き、読み上げからは隠す。
+//   最新値の文字も、この層の text として描く（2026-09-16 改定。HTML のラベルでは、30 日の窓で線が字を
+//   貫くことを実測した）。目盛りと日付は HTML の文字として百分率の位置へ置き、読み上げからは隠す。
 //
-// この部品は、店舗詳細の面で色を書く唯一の場所である。そこで、使う色のクラスを決定 D6 の 6 つに固定する。
+// この部品は、店舗詳細の面で色を書く唯一の場所である。そこで、使う色のクラスを決定 D6 の 7 つに固定する。
 // style に書いてよいのは top と left の百分率だけとする。検査の範囲はこの部品の figure の中に限る
 // （Base UI の隠し radio もインライン style を持つので、ページ全体で取ると必ず赤になる）。
 //
@@ -91,7 +92,7 @@ const RANK_7: ChartCase = {
   },
 };
 
-/** 7 日・順位。端点が 1 位で上端に張りつく（最新値の文字を点の下へ回す）。 */
+/** 7 日・順位。端点が 1 位で上端に張りつく（縦 0%。最新値の文字を点の下へ回す）。 */
 const RANK_TOP_7: ChartCase = {
   name: '7日・順位（端点が上端）',
   props: {
@@ -140,12 +141,94 @@ const RANK_END_GAP_7: ChartCase = {
   },
 };
 
+/**
+ * 30 日・順位。9 位まで落ちた後に持ち直し、端点は 8/31 の 2 位。下端 9 位の軸で、端点の縦の位置は
+ * 12.5% である。タスク 5.4 で「字の下を複数の区間が通る」ことを実測した状態がこれに当たる
+ * （30 日の窓は 1 日の間隔が字の幅より狭い）。
+ */
+const RANK_NEAR_TOP_30: ChartCase = {
+  name: '30日・順位（端点が上端寄り・字の下を線が通る）',
+  props: {
+    window: mustWindow(
+      Array.from({ length: 30 }, (_, index) => point(augustDate(2 + index), { rank: Math.min(9, 31 - index) })),
+      30,
+    ),
+    metric: 'rank',
+    rankTotal: 5,
+  },
+};
+
+/** 7 日・順位。端点は 8/31 の 4 位で、下端 5 位の軸では縦 75%（下端寄り）。 */
+const RANK_LOW_END_7: ChartCase = {
+  name: '7日・順位（端点が下端寄り）',
+  props: {
+    window: mustWindow(
+      [2, 2, 2, 2, 2, 3, 4].map((rank, index) => point(augustDate(25 + index), { rank })),
+      7,
+    ),
+    metric: 'rank',
+    rankTotal: 5,
+  },
+};
+
+/**
+ * 7 日・順位。記録は 8/25（9 位）・8/28（1 位）・8/31（2 位）の 3 日だけで、どの 2 日も暦日で連続
+ * しないので線が 1 本も無い（端点が孤立する）。下端 9 位の軸で、端点の縦の位置は 12.5% である。
+ */
+const RANK_ISOLATED_END_7: ChartCase = {
+  name: '7日・順位（端点が孤立し、線が 1 本も無い）',
+  props: {
+    window: mustWindow(
+      [
+        point(augustDate(25), { rank: 9 }),
+        point(augustDate(28), { rank: 1 }),
+        point(augustDate(31), { rank: 2 }),
+      ],
+      7,
+    ),
+    metric: 'rank',
+    rankTotal: 5,
+  },
+};
+
 /** 30 日・クチコミ数。8/2〜8/31 の 30 日すべてに値があり、線は 1 本、印は端点だけ。 */
 const REVIEWS_30: ChartCase = {
   name: '30日・クチコミ数（線 1 本・印は端点だけ）',
   props: {
     window: mustWindow(
       Array.from({ length: 30 }, (_, index) => point(augustDate(2 + index), { reviewCount: 100 + index })),
+      30,
+    ),
+    metric: 'reviewCount',
+    rankTotal: 5,
+  },
+};
+
+/**
+ * 30 日・クチコミ数。7 件から 36 件まで毎日 1 件ずつ増える。軸は 0〜40 件（間隔 10 件）になり、端点
+ * （36 件）の縦の位置は 10% である。上に置く余地はぎりぎり残る（下限は 7.64%）。
+ */
+const REVIEWS_NEAR_TOP_30: ChartCase = {
+  name: '30日・クチコミ数（端点が上端寄り）',
+  props: {
+    window: mustWindow(
+      Array.from({ length: 30 }, (_, index) => point(augustDate(2 + index), { reviewCount: 7 + index })),
+      30,
+    ),
+    metric: 'reviewCount',
+    rankTotal: 5,
+  },
+};
+
+/**
+ * 30 日・クチコミ数。9 件から 38 件まで毎日 1 件ずつ増える。軸は同じ 0〜40 件で、端点（38 件）の
+ * 縦の位置は 5% になる。上に置くと字が描画領域の外へ出るので、点の下へ回す状態である。
+ */
+const REVIEWS_TOP_30: ChartCase = {
+  name: '30日・クチコミ数（端点が上端に張りつく）',
+  props: {
+    window: mustWindow(
+      Array.from({ length: 30 }, (_, index) => point(augustDate(2 + index), { reviewCount: 9 + index })),
       30,
     ),
     metric: 'reviewCount',
@@ -208,7 +291,12 @@ const CHART_CASES: readonly ChartCase[] = [
   RANK_TOP_7,
   RANK_SHORT_7,
   RANK_END_GAP_7,
+  RANK_NEAR_TOP_30,
+  RANK_LOW_END_7,
+  RANK_ISOLATED_END_7,
   REVIEWS_30,
+  REVIEWS_NEAR_TOP_30,
+  REVIEWS_TOP_30,
   RATING_SINGLE_30,
   ...COMBINATIONS,
 ];
@@ -251,11 +339,24 @@ function pointLayer(figure: HTMLElement): SVGSVGElement {
   return layers[0]!;
 }
 
-/** 最新値の文字 = 描画領域（線の層と同じ箱）の中にある、位置を持つ文字。 */
-function latestLabel(figure: HTMLElement): Element {
-  const labels = Array.from(lineLayer(figure).parentElement!.querySelectorAll('[style]'));
-  expect(labels).toHaveLength(1);
-  return labels[0]!;
+/**
+ * 最新値の文字 = 点の層の SVG に描く `<text>`（2026-09-16 改定。HTML では描かない）。
+ */
+function latestValueText(figure: HTMLElement): SVGTextElement {
+  const texts = pointLayer(figure).querySelectorAll<SVGTextElement>('text');
+  expect(texts).toHaveLength(1);
+  return texts[0]!;
+}
+
+/**
+ * 最新値の文字を、点の上と下のどちらに置いたか。基準線の移動（`dy`）の向きで読む。基準線は字面の
+ * 下端なので、上に置くときは負、下に置くときは正になる。
+ */
+function labelPlacement(figure: HTMLElement): 'above' | 'below' {
+  const dy = Number(latestValueText(figure).getAttribute('dy'));
+  expect(Number.isFinite(dy), 'dy が数でない（点の高さから動かす量を SVG の属性で与える）').toBe(true);
+  expect(dy, 'dy が 0 だと、字面が点に重なる').not.toBe(0);
+  return dy < 0 ? 'above' : 'below';
 }
 
 /** 'top: 25%; left: 3%' を [プロパティ, 値] の並びに割る。 */
@@ -291,12 +392,16 @@ function xOf(day: number, periodDays: number): number {
 
 // --- 色の語彙（決定 D6） --------------------------------------------------------------------
 
-/** この部品が書いてよい色のクラス。本文色・区切り線色・カードの地色・補助文字色の 4 色と、塗らない指定。 */
+/**
+ * この部品が書いてよい色のクラス。本文色・区切り線色・カードの地色・補助文字色の 4 色と、塗らない指定。
+ * カードの地色は、端点の輪（塗り）と最新値の文字の縁取り（線）の 2 通りで使う。
+ */
 const CHART_COLOR_CLASSES = [
   'fill-card',
   'fill-current',
   'fill-none',
   'stroke-border',
+  'stroke-card',
   'stroke-current',
   'text-muted-foreground',
 ] as const;
@@ -485,7 +590,7 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
       }
     });
 
-    it('線・罫線・印・端点の輪・目盛りを描く状態で、色のクラスの集合が 6 つと完全一致する（Req 5.3, 5.4）', () => {
+    it('線・罫線・印・端点の輪・最新値の縁取り・目盛りを描く状態で、色のクラスの集合が 7 つと完全一致する（Req 5.3, 5.4）', () => {
       const { container } = renderChart(RANK_7.props);
       const extracted = colorUtilities(container);
       // 抜き出した件数が 1 以上であること（空振り対策）。
@@ -493,7 +598,7 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
       expect(sortedSet(extracted)).toEqual([...CHART_COLOR_CLASSES]);
     });
 
-    it('どの状態でも、6 つの外の色のクラスを書かない（Req 5.3, 5.4）', () => {
+    it('どの状態でも、7 つの外の色のクラスを書かない（Req 5.3, 5.4）', () => {
       const allowed: ReadonlySet<string> = new Set(CHART_COLOR_CLASSES);
       const union = new Set<string>();
       for (const item of ALL_CASES) {
@@ -720,47 +825,114 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
   });
 
   describe('最新値の文字', () => {
-    it('端点の値を、端点と同じ高さの基準で文字にして添え、読み上げからは隠す（Req 1.12）', () => {
+    it('端点の値を、点の層の text として端点と同じ高さに右端ぞろえで描き、読み上げからは隠す（Req 1.12）', () => {
       const cases = [
-        { item: RANK_7, text: '2位', top: 25 },
-        { item: REVIEWS_30, text: '129件', top: (1 / 30) * 100 },
-        { item: RATING_SINGLE_30, text: '4.3', top: 70 },
+        { item: RANK_7, text: '2位', y: 25 },
+        { item: REVIEWS_30, text: '129件', y: (1 / 30) * 100 },
+        { item: RATING_SINGLE_30, text: '4.3', y: 70 },
       ] as const;
-      for (const { item, text, top } of cases) {
+      for (const { item, text, y } of cases) {
         const { figure } = renderChart(item.props);
-        const label = latestLabel(figure);
+        const label = latestValueText(figure);
         expect(label.textContent, item.name).toBe(text);
-        expect(topPercent(label), item.name).toBeCloseTo(top, 1);
+        expect(label.namespaceURI, item.name).toBe('http://www.w3.org/2000/svg');
+        // 高さの基準は端点と同じ百分率。横は描画領域の右端にそろえる（端点が右端より手前でも右端）。
+        expect(percentAttribute(label, 'y'), item.name).toBeCloseTo(y, 1);
+        expect(percentAttribute(label, 'x'), item.name).toBeCloseTo(100, 1);
+        expect(label.getAttribute('text-anchor'), item.name).toBe('end');
+        // 位置は SVG の属性だけで与える（style を持たない）。
+        expect(label.getAttribute('style'), item.name).toBeNull();
         expect(label.closest('[aria-hidden="true"]'), item.name).not.toBeNull();
-        // 最新値は本文色を継承する（補助文字色にしない）。
-        expect(classTokens(label).filter(isColorUtility), item.name).toEqual([]);
+        // 文字の寸法は目盛りと同じ段で、数字の幅もそろえる。
+        expect(classTokens(label), item.name).toEqual(expect.arrayContaining(['text-xs', 'tabular-nums']));
         cleanup();
       }
     });
 
-    it('端点が上端に近いときだけ、文字を点の下に置く（Req 1.12）', () => {
-      // 端点の縦の位置が 25% の順位（上端から離れている）: 文字を点の上へ持ち上げる。
-      const above = renderChart(RANK_7.props);
-      expect(classTokens(latestLabel(above.figure))).toContain('-translate-y-full');
-      cleanup();
-
-      // 端点が 1 位（上端）: 上へ持ち上げると描画領域の外へ出るので、点の下に置く。
-      const below = renderChart(RANK_TOP_7.props);
-      expect(topPercent(latestLabel(below.figure))).toBeCloseTo(0, 1);
-      expect(classTokens(latestLabel(below.figure))).not.toContain('-translate-y-full');
-    });
-
-    it('どの状態でも、最新値の文字を描画領域の右端にそろえ、位置は top の百分率だけで与える（Req 1.12）', () => {
+    it('最新値の文字は HTML では描かない。描画領域の中に style を持つ要素を残さない（Req 1.12）', () => {
+      // 2026-09-16 改定: HTML のラベルでは、30 日の窓で線が字を貫く（字の幅 19.6px > 1 日の間隔 6.6px）。
       for (const item of CHART_CASES) {
         const { figure } = renderChart(item.props);
-        const label = latestLabel(figure);
-        expect(classTokens(label), item.name).toContain('right-0');
-        expect(
-          styleDeclarations(label.getAttribute('style') ?? '').map(([property]) => property),
-          item.name,
-        ).toEqual(['top']);
+        const plot = lineLayer(figure).parentElement!;
+        expect(selfAndDescendants(plot, '[style]'), item.name).toEqual([]);
+        // 目盛りの帯には style を持つ文字が残る（空振り対策）。
+        expect(selfAndDescendants(figure, '[style]').length, item.name).toBeGreaterThan(0);
         cleanup();
       }
+    });
+
+    it('線が後ろを通っても字が読めるよう、地色の縁取りを塗りの下に敷く（Req 1.12・決定 D6）', () => {
+      // 端点の輪（fill-card）と同じ考え方である。paint-order="stroke" が無いと、縁取りが字の上に
+      // 乗って字が細る。縁取りの太さは SVG の属性で与える（クラスは色の語彙の検査と紛れる）。
+      for (const item of CHART_CASES) {
+        const { figure } = renderChart(item.props);
+        const label = latestValueText(figure);
+        expect(classTokens(label), item.name).toEqual(expect.arrayContaining(['fill-current', 'stroke-card']));
+        expect(label.getAttribute('paint-order'), item.name).toBe('stroke');
+        expect(label.getAttribute('stroke-width'), item.name).toBe('3');
+        cleanup();
+
+        // サーバーが描く HTML にも同じ属性が出ること（面はサーバーで描かれる。属性の名前を取り違えると、
+        // 最初の描画だけ縁取りが無い状態になる）。
+        const markup = renderToStaticMarkup(<TrendChart {...item.props} />);
+        expect(markup, item.name).toContain('paint-order="stroke"');
+      }
+    });
+
+    // 置き場所は端点の少し上に固定する（design「TrendChart」の「HTML のラベル」・2026-09-16 改定）。
+    // 線との重なりは、字の後ろに敷く地色の縁取りが引き受けるので、向きで側を選び分けない。
+    //
+    // 余地の計算: 百分率の基準になる高さは、描画領域（h-40 = 160px）から上下の内側の余白（p-2 = 8px）を
+    // 引いた 144px である。点から上端までの余地は「百分率 × 144px + 余白 8px」で、上に置いた字面の
+    // 上端は点から 19px（= 輪の半径 6 + 間隔 4 + 字面の高さ 9）上に来る。したがって、上に置けるのは
+    // 端点が上端から 7.64%（= (19 − 8) ÷ 144）以上離れているときである。
+    it('既定では、文字を端点の少し上に置く（Req 1.12）', () => {
+      const cases = [
+        // 30 日・順位（縦 12.5%）。字の下を複数の区間が通るが、縁取りがあるので上に置いたままでよい。
+        { item: RANK_NEAR_TOP_30, y: 12.5 },
+        // 端点が下端寄り（縦 75%）でも、上端寄り（縦 10%）でも、孤立していても側は変わらない。
+        { item: RANK_LOW_END_7, y: 75 },
+        { item: REVIEWS_NEAR_TOP_30, y: 10 },
+        { item: RANK_ISOLATED_END_7, y: 12.5 },
+        { item: RANK_7, y: 25 },
+        { item: RATING_SINGLE_30, y: 70 },
+      ] as const;
+      for (const { item, y } of cases) {
+        const { figure } = renderChart(item.props);
+        expect(percentAttribute(latestValueText(figure), 'y'), item.name).toBeCloseTo(y, 1);
+        expect(labelPlacement(figure), item.name).toBe('above');
+        cleanup();
+      }
+    });
+
+    it('端点が上端に近く、上に置くと描画領域の外へ出るときは、点の下に置く（Req 1.12）', () => {
+      // 端点は 38 件（0〜40 件の軸で縦 5%）。上の余地は 5% × 144px + 8px = 15.2px で、字面に要る
+      // 19px に足りない。
+      const { figure } = renderChart(REVIEWS_TOP_30.props);
+      expect(percentAttribute(latestValueText(figure), 'y')).toBeCloseTo(5, 1);
+      expect(labelPlacement(figure)).toBe('below');
+      cleanup();
+
+      // 端点が 1 位（縦 0%）で上端に張りつく状態も同じ。
+      const top = renderChart(RANK_TOP_7.props);
+      expect(percentAttribute(latestValueText(top.figure), 'y')).toBeCloseTo(0, 1);
+      expect(labelPlacement(top.figure)).toBe('below');
+    });
+
+    it('どの状態でも、上下の別は基準線の移動だけで与え、移動の量は 2 通りしか無い（Req 1.12）', () => {
+      const seen = new Set<string>();
+      for (const item of CHART_CASES) {
+        const { figure } = renderChart(item.props);
+        const label = latestValueText(figure);
+        const dy = label.getAttribute('dy');
+        expect(dy, item.name).not.toBeNull();
+        // 高さの基準（y）は常に端点の百分率で、上下の別は dy だけが持つ。
+        expect(percentAttribute(label, 'y'), item.name).toBeGreaterThanOrEqual(0);
+        seen.add(dy!);
+        cleanup();
+      }
+      // 上と下の 2 通りだけ（状態ごとに量を変えない）。
+      expect([...seen].map(Number).sort((left, right) => left - right)).toEqual([-10, 19]);
     });
   });
 
@@ -794,10 +966,11 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
       expect(Number(lastPair!.split(',')[0])).toBeCloseTo(xOf(5, 7), 1);
 
       // 最新値の文字は端点の値で、描画領域の右端にそろえる（端点が右端より手前にあっても、右端に置く）。
-      const label = latestLabel(figure);
+      const label = latestValueText(figure);
       expect(label.textContent).toBe('2位');
-      expect(topPercent(label)).toBeCloseTo(25, 1);
-      expect(classTokens(label)).toContain('right-0');
+      expect(percentAttribute(label, 'y')).toBeCloseTo(25, 1);
+      expect(percentAttribute(label, 'x')).toBeCloseTo(100, 1);
+      expect(label.getAttribute('text-anchor')).toBe('end');
     });
   });
 

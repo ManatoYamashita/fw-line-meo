@@ -423,33 +423,44 @@ interface ChartText {
 }
 
 /**
- * グラフの文字（目盛り・日付・現在値）を読む。どれも HTML の文字で、読み上げからは隠してある
- * （aria-hidden。同じ内容をグラフの名前と推移の表が持つため）。種類は部品の組み立てから次のように分ける。
- * - 現在値: 自分自身が aria-hidden を持つ文字
- * - 目盛り: 位置を style の top で与えた文字
- * - 日付: それ以外（横軸の帯の文字）
+ * グラフの文字（目盛り・日付・現在値）を読む。どれも読み上げからは隠してある（aria-hidden。同じ内容を
+ * グラフの名前と推移の表が持つため）。描き方は 2 通りあり、種類は部品の組み立てから次のように分ける。
+ * - 現在値: 点の層（SVG）の中に `text` として描く文字。2026-09-16 の改定で、HTML の文字から移した
+ *   （地色の縁取りを字の下に敷き、線が後ろを通っても読めるようにするため）。
+ * - 目盛り: HTML の帯の中で、位置を style の top で与えた文字
+ * - 日付: HTML の帯の中の、それ以外の文字（横軸の始点と終点）
  */
 function readChartTexts(page: Page): Promise<ChartText[]> {
   return page.locator('figure').evaluate((figure): ChartText[] => {
     const texts: ChartText[] = [];
+    const add = (kind: ChartText['kind'], element: Element): void => {
+      const text = (element.textContent ?? '').trim();
+      if (text === '') return;
+      const box = element.getBoundingClientRect();
+      texts.push({
+        kind,
+        text,
+        fontSize: getComputedStyle(element).fontSize,
+        width: box.width,
+        height: box.height,
+      });
+    };
+
     for (const root of Array.from(figure.querySelectorAll('[aria-hidden="true"]'))) {
-      // 点の層（SVG）は文字を持たない。
+      // 点の層（SVG）。現在値の文字はこの中にある。
+      if (root instanceof SVGElement) {
+        for (const svgText of Array.from(root.querySelectorAll('text'))) {
+          add('現在値', svgText);
+        }
+        continue;
+      }
       if (!(root instanceof HTMLElement)) continue;
       const leaves =
         root.children.length === 0
           ? [root]
           : Array.from(root.querySelectorAll<HTMLElement>('*')).filter((element) => element.children.length === 0);
       for (const leaf of leaves) {
-        const text = (leaf.textContent ?? '').trim();
-        if (text === '') continue;
-        const box = leaf.getBoundingClientRect();
-        texts.push({
-          kind: leaf === root ? '現在値' : leaf.style.top !== '' ? '目盛り' : '日付',
-          text,
-          fontSize: getComputedStyle(leaf).fontSize,
-          width: box.width,
-          height: box.height,
-        });
+        add(leaf.style.top !== '' ? '目盛り' : '日付', leaf);
       }
     }
     return texts;

@@ -93,6 +93,10 @@
     - Chromium（Playwright 1.61。DPR 2.75 と 1）では 8×8 CSS px の真円になった。塗られた画素数は 378 で、理論値 380 と一致する。
     - macOS 15.6 のシステム WebKit（WKWebView）では、`vector-effect: non-scaling-stroke` の有無や `path d="M50 50 L50 50"` にしても、15×13px の楕円になった。WebKit は、長さ 0 の部分経路の丸い端を、viewBox の縦横それぞれの伸縮どおりに歪める。長さのある polyline は太さ 8px を保つので、non-scaling-stroke 自体は効いている。
     - iOS 実機は未確認。iOS の WKWebView も同じ描画系だと推測している。
+    - 2026-09-16 追記（タスク 5.4 の実描画）: **Playwright の WebKit 26.5 では、この当初案が 8×8 CSS px の真円になり、欠陥が再現しない**。Playwright の WebKit は Safari 26 系の別ビルドである。したがって、**決定 D2 の根拠を Playwright の webkit だけで確かめ直すことはできない**。「webkit で再現しないから D2 は不要」と読み替えてはならない。
+      - 同じ描き方は、macOS 15.6 のシステム WebKit では 15×12 CSS px（320px 幅）・21×12 CSS px（393px 幅）の楕円になった。上の 2026-09-13 の実測（190×160 の箱で 15×13）とは、箱の寸法が違うので数値は一致しないが、縦横が食い違う楕円になるという結論は同じである。
+      - このとき、システム WebKit では「長さ 0 の丸い端」と「伸縮する層の中の circle」が同じ寸法（30×24 device px）になる。`non-scaling-stroke` が無視され、どちらも viewBox の伸縮どおりに歪むためである。注入が効いていることは、注入前の絵との差（6974 画素・外接箱は描画領域と一致）で確かめた。
+      - 採用案（viewBox を持たない層の circle）は、3 つのエンジンで真円だった。判定は、被覆率 0.5 のしきい値での外接箱（8.00×8.00 CSS px。ただし Chromium の 393px 幅の端点だけは 22×21 device px ＝ 反射防止の端 1 画素ぶん縦が短い）と、塗られた面積（理論値の +0.46〜+1.1% 以内）、等価直径（7.98〜8.04 CSS px）による。
   - **viewBox を持たない SVG に百分率座標で描いた `<circle r="4">`**: Chromium と WebKit の両方で 8×8 になった。
   - **Chromium の `getBoundingClientRect`**: SVG の図形に対して、線の太さを含まない箱を返す。長さ 0 の line は 0×0 になり、`viewport.ts` の横はみ出し検査の母数から外れる。polyline も端の丸みを含まない（幅 190 に対し、描画は 198）。circle は 8×8 として母数に入る。
   - **Base UI の隠し radio**（`RadioRoot.mjs`）: name を渡さないとき、インライン style `visuallyHidden` を持つ（clip-path・position:fixed・top:0・left:0 など）。data-slot も class も持たない。
@@ -181,6 +185,7 @@
   - 面の側に色を書かないという規律がある（`page.tsx` 冒頭と design-language §7.8 の「面の側に置く色の閉じた集合」）。
   - グラフの線と罫線には色が要る。
 - **Selected Approach**: 使う色は次の 4 つに限る。クラスとしては、塗らない指定の `fill-none` を加えた 6 つになる。
+  - 2026-09-16 追記: カードの地色を、塗り（端点の輪）と線（最新値の文字の縁取り）の両方で使うようになったので、クラスは `stroke-card` を加えた 7 つになる。色そのものは 4 つのままである。
   - 本文色 `stroke-current` / `fill-current`: 本文色を継承する。§2.2 の `text` の行（店舗詳細の順位の巨大表示）と同じ色と比である。
   - 区切り線色 `stroke-border`: 罫線。SC 1.4.11 の対象外。
   - カードの地色 `fill-card`: 端点の地色の輪。カードの地色と同じにする。

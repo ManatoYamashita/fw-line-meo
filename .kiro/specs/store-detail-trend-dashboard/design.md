@@ -532,14 +532,19 @@ export function filterCompetitors<T extends { readonly name: string }>(
     - 印: 半径 4（8px）を `fill-current` で描く。
     - 端点: 下に半径 6 の `fill-card`（カードの地色の輪 2px）を置き、その上に半径 4 を重ねる。
     - viewBox が無いので、縦横の伸縮を受けない。Chromium と WebKit の両方で真円になる（research.md に実測を記録）。長さ 0 の線分を丸い端で描く案は、WebKit では楕円になるため採らない。
-  - 線の太さ・端・角・vector-effect は、**SVG の属性**（`strokeWidth`・`strokeLinecap`・`strokeLinejoin`・`vectorEffect`）で書く。クラスでは書かない。Tailwind 4.3 には端・角・vector-effect のユーティリティが無く、任意値で書くと `data-slot` を持たない要素への任意値の禁止に当たる。`stroke-2` のような太さのクラスは、色の語彙の検査と紛れる。
+    - **最新値の文字**も、この層に `<text x="100%" y="{y}%">` として描く（2026-09-16 改定。理由は下の「HTML のラベル」を見よ）。右端にそろえ、地色の縁取り（`stroke-card` と `paintOrder="stroke"`、太さ 3）を敷いてから本文色で塗る。端点の輪と同じ考え方で、線が後ろを通っても字が読める。
+  - 線の太さ・端・角・vector-effect・縁取りの太さ・塗りの順序は、**SVG の属性**（`strokeWidth`・`strokeLinecap`・`strokeLinejoin`・`vectorEffect`・`paintOrder`）で書く。クラスでは書かない。Tailwind 4.3 には端・角・vector-effect のユーティリティが無く、任意値で書くと `data-slot` を持たない要素への任意値の禁止に当たる。`stroke-2` のような太さのクラスは、色の語彙の検査と紛れる。
   - role="img" と名前は線の層に付ける。点の層は `aria-hidden` にする。
 - **HTML のラベル**:
-  - 目盛りの位置と最新値の位置は、`style` の `top`（と必要なら `left`）の百分率だけで与える。色・寸法・余白は `style` に書かない。
-  - 最新値のラベルは右端に揃え、点の上に置く。点が上端に近い（y < 25）ときは点の下に置く。
-  - 文字は `text-xs` と `tabular-nums` で描く。目盛りと日付は `text-muted-foreground`、最新値は継承した本文色にする。
+  - 目盛りの位置は、`style` の `top` の百分率だけで与える。色・寸法・余白は `style` に書かない。
+  - 文字は `text-xs` と `tabular-nums` で描く。目盛りと日付は `text-muted-foreground` にする。
+  - **最新値の文字は HTML では描かない**（2026-09-16 改定）。タスク 5.4 の実描画で、次を両エンジン（と macOS のシステム WebKit）で実測した。
+    - 置き場所を点の上下で選ぶ規則では、30 日の窓で線が字を貫く。最新値の文字の幅（約 19.6px）は、30 日の窓の 1 日の間隔（6.6px・320px 幅）より広く、字の下を 3 本の区間が通るためである。最後の区間の向きだけを見ても足りない。
+    - 7 日の窓では 1 日の間隔が 32px あり、字の下を通るのは最後の区間だけである。
+  - 代わりに、点の層の SVG に `<text>` として描き、地色の縁取りを敷く。線が後ろを通っても字は読める。置き場所は、端点の少し上に固定する。
+  - 端点が上端に近く、文字が描画領域の外へ出るときは、点の下へ回す。
 - **色の語彙（決定 D6）**:
-  - このファイルが書く色のクラスは、次の 6 つに限る: `stroke-current`・`fill-none`・`stroke-border`・`fill-current`・`fill-card`・`text-muted-foreground`。
+  - このファイルが書く色のクラスは、次の 7 つに限る: `stroke-current`・`fill-none`・`stroke-border`・`fill-current`・`fill-card`・`stroke-card`・`text-muted-foreground`（`stroke-card` は 2026-09-16 に、最新値の文字の縁取りのため加えた）。
   - 検証は、描画結果の class から色のユーティリティを抜き出し、完全一致で照合する。
     - 抜き出す規則: `stroke-`・`fill-` で始まるクラスのすべてと、`text-` で始まるクラスのうち文字サイズの段（`text-xs`〜`text-2xl`）と揃え（`text-left` など）を除いたもの。
     - 抜き出しの規則そのものを、`text-xs` と `text-muted-foreground` を混ぜた fixture で自己検証する。
@@ -687,7 +692,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - グラフの意味論:
   - `getByRole('img', { name })` で説明文が取れる。
   - SVG の中に、焦点を受け取る要素が 0 件（5.2）。
-- 色の語彙: グラフが描く色のユーティリティの集合が、決定 D6 の 6 つと完全一致する（5.3・9.3）。
+- 色の語彙: グラフが描く色のユーティリティの集合が、決定 D6 の 7 つと完全一致する（5.3・9.3）。
 - `style` 属性:
   - 走査の範囲は `TrendChart` の `figure` の子孫に限る。Base UI の隠し radio が `visuallyHidden` のインライン style を持つので、ページや節全体で取ると必ず赤になる。
   - 範囲内の style のプロパティは、`top` / `left` の百分率だけである。
