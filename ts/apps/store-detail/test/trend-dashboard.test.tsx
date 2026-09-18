@@ -164,7 +164,7 @@ const VIEW_30_DAYS_RANK: TrendView = {
   summary: [
     ['順位', '6位 → 2位'],
     ['評価', '3.9 → 4.4'],
-    ['クチコミ増減', '+30件'],
+    ['クチコミ数の増減', '+30件'],
   ],
   chartName: '順位の推移、8月2日から8月31日まで。最初の記録は6位、最後の記録は2位。最高は2位、最低は6位。最新は2位（8月31日）。',
   caption: ['順位の推移（上ほど上位）', '8/2〜8/31', '最新 2位（8/31）'],
@@ -178,7 +178,7 @@ const VIEW_7_DAYS_RANK: TrendView = {
   summary: [
     ['順位', '4位 → 2位'],
     ['評価', '4.1 → 4.4'],
-    ['クチコミ増減', '+18件'],
+    ['クチコミ数の増減', '+18件'],
   ],
   chartName: '順位の推移、8月25日から8月31日まで。最初の記録は4位、最後の記録は2位。最高は2位、最低は4位。最新は2位（8月31日）。',
   caption: ['順位の推移（上ほど上位）', '8/25〜8/31', '最新 2位（8/31）'],
@@ -268,11 +268,11 @@ function expectTrendView(expected: TrendView): void {
 /** 期間と指標の群で、選択状態の札がちょうど 1 つずつあり、それが期待の札であること。 */
 function expectSelected(period: string, metric: string): void {
   const periodGroup = screen.getByRole('radiogroup', { name: '期間' });
-  const metricGroup = screen.getByRole('radiogroup', { name: 'グラフの指標' });
+  const metricGroup = screen.getByRole('radiogroup', { name: 'グラフに表示する項目' });
   expect(within(periodGroup).getByRole('radio', { checked: true }), '期間').toBe(
     within(periodGroup).getByRole('radio', { name: period }),
   );
-  expect(within(metricGroup).getByRole('radio', { checked: true }), 'グラフの指標').toBe(
+  expect(within(metricGroup).getByRole('radio', { checked: true }), 'グラフに表示する項目').toBe(
     within(metricGroup).getByRole('radio', { name: metric }),
   );
 }
@@ -390,11 +390,15 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
     const card = summaryCard(trendSection());
     expect(within(card).queryByRole('figure')).toBeNull();
     expect(within(card).queryAllByRole('img')).toHaveLength(0);
-    expect(within(card).getByText('この期間は順位の記録がありません')).toBeDefined();
+    // 文言は窓の期間（7 日なので 8/25〜8/31）を持ち、空状態の部品で描かれる（2026-09-18 の画面レビュー）。
+    const noRecords = within(card).getByText(
+      'この期間（8/25〜8/31）は順位の記録がありません。ほかの項目や期間に切り替えると表示できることがあります。',
+    );
+    expect(noRecords.closest('[data-slot="empty-state"]')).not.toBeNull();
     expect(definitionPairs(card.querySelector('dl')!)).toEqual([
       ['順位', '—'],
       ['評価', '—'],
-      ['クチコミ増減', '+18件'],
+      ['クチコミ数の増減', '+18件'],
     ]);
     expect(within(trendSection()).getAllByRole('row').slice(1)).toHaveLength(ROWS_7_DAYS.length);
   });
@@ -423,7 +427,7 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
     expect(visited).toBe(cases.length);
   });
 
-  it('選択肢を要約のカードの外に置き、グラフを要約の 3 組の下に、表をカードの下に置く（§7.18）', async () => {
+  it('選択肢を要約のカードの外に置き、グラフを要約の 3 組の上に、表をカードの下に置く（§7.18）', async () => {
     await renderPage(RESPONSE);
 
     const section = trendSection();
@@ -440,13 +444,50 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
       expect(following(trendHeading(), group)).toBe(true);
       expect(following(group, card)).toBe(true);
     }
-    // グラフは要約のカードの中で、3 組（dl）の下に置く。
+    // グラフは要約のカードの中で、3 組（dl）の**上**に置く（2026-09-18 の画面レビュー）。指標の札が効く先は
+    // グラフだけなので、間に指標が効かない 3 組を挟むと、押した結果が画面のずっと下に出る。
+    // 要約は「表の前」という §7.17 の定めのまま、グラフの下・表の上に残る。
     const figure = within(card).getByRole('figure');
-    expect(following(card.querySelector('dl')!, figure)).toBe(true);
+    expect(following(figure, card.querySelector('dl')!)).toBe(true);
     // 表は要約のカードの外、その下に置く。
     const table = within(section).getByRole('table');
     expect(card.contains(table)).toBe(false);
     expect(following(card, table)).toBe(true);
+  });
+
+  // 2026-09-18 の画面レビュー（要件 9.7）で入れた網。
+  //
+  // 指標の札が効く先はグラフだけであり、グラフは role="img" の名前でしか内容を持たない。名前は読み上げ
+  // 領域ではないので、この領域が無いと、順位 → 評価の切替は読み上げ利用者に何も届かない。**この検査を
+  // 外すと、領域を消す改変も、領域ごと差し替える改変も、どのテストからも赤くならない。**
+  it('指標と期間を切り替えると、選択の結果を伝える読み上げ領域の文字だけが変わる（要件 9.7）', async () => {
+    const fetchMock = await renderPage(RESPONSE);
+
+    const section = trendSection();
+    const statuses = within(section).getAllByRole('status');
+    expect(statuses).toHaveLength(1);
+    const status = statuses[0]!;
+
+    // 見えない領域である（同じ内容は figcaption とグラフの名前が見える形で持つので、二重に見せない）。
+    expect(status.getAttribute('class')?.split(/\s+/)).toContain('sr-only');
+    // 通知の強さと範囲は status の役割の既定に任せる（割り込まない・文言の全体を読む）。
+    expect(status.hasAttribute('aria-live')).toBe(false);
+    expect(status.hasAttribute('aria-atomic')).toBe(false);
+    expect(ownText(status)).toBe('順位の推移、直近30日。最新 2位（8/31）。');
+
+    // 指標を切り替えると、**要素は同じまま文字だけが変わる**。要素ごと差し替わると、読み上げは挿入として
+    // 扱われて安定しない。
+    choose('評価');
+    expect(within(section).getByRole('status')).toBe(status);
+    expect(ownText(status)).toBe('評価の推移、直近30日。最新 4.4（8/31）。');
+
+    // 期間を切り替えても同じ要素のまま、期間の部分が追随する。
+    choose('7日');
+    expect(within(section).getByRole('status')).toBe(status);
+    expect(ownText(status)).toBe('評価の推移、直近7日。最新 4.4（8/31）。');
+
+    // 読み上げのための領域であって、取得も描画の面も増やさない。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('開き直すと、前回の選択を復元せず既定の選択で描く（要件 2.9）', async () => {
@@ -498,7 +539,13 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
 const SEARCH_LABEL = '店名で絞り込む';
 
 /** 絞り込みの結果が 0 件のときの案内（design.md「CompetitorsSection」）。 */
-const NO_MATCH_TEXT = '該当する競合がいません。店名の一部で探し直すか、検索欄を空にすると一覧に戻ります。';
+const NO_MATCH_TEXT = '該当する競合がいません。店名の一部で絞り込み直すか、入力を消すと一覧に戻ります。';
+
+/**
+ * 0 件のときの件数の文言。回復方法（＝空状態と同じ文言）が続く（2026-09-18 の画面レビュー）。
+ * 入力欄に留まったままの利用者へ、出口を読み上げで届けるためである。
+ */
+const zeroCount = (total: number): string => `競合${total}店のうち0店を表示。${NO_MATCH_TEXT}`;
 
 /** 評価の無い店の注記（`@fwlm/db/daily-summary` の UNRATED_EXCLUDED_NOTE と同じ文言）。 */
 const UNRATED_NOTE = '評価のない店は順位に含めていません';
@@ -637,7 +684,9 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       expect(screen.queryAllByRole('searchbox'), item.name).toHaveLength(0);
       expect(section.querySelectorAll('input'), item.name).toHaveLength(0);
       expect(screen.queryByText(SEARCH_LABEL), item.name).toBeNull();
-      expect(screen.queryAllByRole('status'), item.name).toHaveLength(0);
+      // 読み上げ領域を競合の節の中で数える。面全体で数えないのは、推移の節が選択の結果を伝える領域を
+      // 1 つ持つからである（2026-09-18 の画面レビュー・下の「指標を切り替えたときに…」で固定している）。
+      expect(within(section).queryAllByRole('status'), item.name).toHaveLength(0);
       expect(section.textContent ?? '', item.name).not.toMatch(/店のうち\d+店を表示/);
       expect(listedNames(), item.name).toEqual(item.names);
       visited += 1;
@@ -668,8 +717,9 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       expect(listedNames(), item.name).toEqual(item.names);
       const status = within(section).getByRole('status');
       expect(ownText(status), item.name).toBe(item.count);
-      // 読み上げ領域は、件数の文言の 1 つだけである。
-      expect(screen.getAllByRole('status'), item.name).toEqual([status]);
+      // 競合の節の読み上げ領域は、件数の文言の 1 つだけである（節の中で数える。面全体では、推移の節が
+      // 選択の結果を伝える領域をもう 1 つ持つ）。
+      expect(within(section).getAllByRole('status'), item.name).toEqual([status]);
 
       // 並び: 見出し → 検索欄 → 件数の文言 → 一覧の Card。検索欄と件数の文言は Card の中に入れない（§7.18）。
       const cards = Array.from(section.querySelectorAll<HTMLElement>('[data-slot="card"]'));
@@ -728,7 +778,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
     typeQuery(NO_MATCH_QUERY);
 
     const section = competitorsSection();
-    expect(countText()).toBe('競合5店のうち0店を表示');
+    expect(countText()).toBe(zeroCount(5));
     // 一覧の Card ごと空状態に置き換わる。
     expect(section.querySelectorAll('[data-slot="card"]')).toHaveLength(0);
     expect(within(section).queryAllByRole('list')).toHaveLength(0);
@@ -740,10 +790,11 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
     // 入力・役割を持つ要素・焦点を受け取る要素が 0 件であること。
     expect(state.querySelectorAll('*').length).toBeGreaterThan(0);
     expect(state.querySelectorAll('a, button, input, [role], [tabindex]')).toHaveLength(0);
-    // 空状態は通知にしない（件数の文言と二重に読み上げられるのを防ぐ）。読み上げ領域は件数の文言の 1 つだけである。
+    // 空状態は通知にしない（件数の文言と二重に読み上げられるのを防ぐ）。競合の節の読み上げ領域は
+    // 件数の文言の 1 つだけである（面全体では、推移の節が選択の結果を伝える領域をもう 1 つ持つ）。
     expect(state.hasAttribute('role')).toBe(false);
     const status = within(section).getByRole('status');
-    expect(screen.getAllByRole('status')).toEqual([status]);
+    expect(within(section).getAllByRole('status')).toEqual([status]);
     // 節の中にリンクは無く、面のリンクの個数と読み上げ名は変わらない。
     expect(within(section).queryAllByRole('link')).toHaveLength(0);
     expect(linkNames()).toEqual(['店舗を切り替える']);
@@ -775,8 +826,11 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       expect(listedNames(), query).not.toContain(UNRATED_COMPETITOR_FROM_GO.name);
       const notes = unratedNotes();
       expect(notes, query).toHaveLength(1);
-      // 注記は、一覧（または空状態）の後の、節の末尾に置いたままである。
-      expect(competitorsSection().lastElementChild, query).toBe(notes[0]);
+      // 注記は、一覧（または空状態）の後の、末尾に置いたままである。節は 2 つの束（見出しと検索欄／
+      // 一覧と注記）に分かれているので（2026-09-18 の画面レビュー）、末尾は後ろの束の末尾で見る。
+      const listGroup = competitorsSection().lastElementChild;
+      expect(listGroup, query).not.toBeNull();
+      expect(listGroup!.lastElementChild, query).toBe(notes[0]);
     }
 
     // 既定の側: 評価の無い店がいない一覧では、どの検索語でも注記を出さない。
@@ -785,7 +839,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
     await renderPage(withCompetitors(FIVE_COMPETITORS.filter((competitor) => competitor.rating !== null)));
     const steps = [
       { query: '店', count: '競合4店のうち2店を表示' },
-      { query: NO_MATCH_QUERY, count: '競合4店のうち0店を表示' },
+      { query: NO_MATCH_QUERY, count: zeroCount(4) },
       { query: '', count: '競合4店のうち4店を表示' },
     ] as const;
     for (const step of steps) {
@@ -807,7 +861,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
 
     const steps = [
       { query: '店', count: '競合5店のうち2店を表示' },
-      { query: NO_MATCH_QUERY, count: '競合5店のうち0店を表示' },
+      { query: NO_MATCH_QUERY, count: zeroCount(5) },
       { query: '', count: '競合5店のうち5店を表示' },
     ] as const;
     for (const step of steps) {
@@ -1054,7 +1108,7 @@ describe('操作の無副作用（store-detail-trend-dashboard task 4.3・Issue 
           },
         },
         { name: '指標「評価」を押す', run: () => choose('評価'), check: () => expectSelected('7日', '評価') },
-        { name: '指標「クチコミ」を押す', run: () => choose('クチコミ'), check: () => expectSelected('7日', 'クチコミ') },
+        { name: '指標「クチコミ数」を押す', run: () => choose('クチコミ数'), check: () => expectSelected('7日', 'クチコミ数') },
         {
           name: '期間の群で矢印キーを押す',
           run: async () => {
@@ -1072,7 +1126,7 @@ describe('操作の無副作用（store-detail-trend-dashboard task 4.3・Issue 
             });
           },
           check: () => {
-            expectSelected('30日', 'クチコミ');
+            expectSelected('30日', 'クチコミ数');
             expect(announcedText(trendHeading())).toBe('直近30日の推移');
           },
         },
@@ -1080,7 +1134,7 @@ describe('操作の無副作用（store-detail-trend-dashboard task 4.3・Issue 
         {
           name: '0 件になる検索語を入れる',
           run: () => typeQuery(NO_MATCH_QUERY),
-          check: () => expect(countText()).toBe('競合5店のうち0店を表示'),
+          check: () => expect(countText()).toBe(zeroCount(5)),
         },
         { name: '検索欄を空にする', run: () => typeQuery(''), check: () => expect(countText()).toBe('競合5店のうち5店を表示') },
         { name: '指標「順位」を押す', run: () => choose('順位'), check: () => expectSelected('30日', '順位') },
@@ -1411,7 +1465,7 @@ describe('表示の一貫性（store-detail-trend-dashboard task 4.3・Issue #26
     expect(view.summary, '要約の 3 組').toEqual([
       ['順位', `${rank.first.value}位 → ${rank.last.value}位`],
       ['評価', `${rating.first.value} → ${rating.last.value}`],
-      ['クチコミ増減', `${reviewCountDiff > 0 ? '+' : ''}${reviewCountDiff}件`],
+      ['クチコミ数の増減', `${reviewCountDiff > 0 ? '+' : ''}${reviewCountDiff}件`],
     ]);
   });
 

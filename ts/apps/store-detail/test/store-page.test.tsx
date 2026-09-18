@@ -1228,6 +1228,33 @@ describe('store detail page', () => {
         '自店の評価',
         '新着クチコミ',
       ]);
+
+      // 競合と推移の節も同じ梯子を持つ（2026-09-18 の画面レビュー）。以前は節の全体が gap-4 の一律で、
+      // **操作の塊の内側（期間群と指標群の間）と、操作の塊とカードの間が同じ 16px** だった。どこまでが
+      // 1 つの塊かが余白から読めないので、上の 24/8 にそろえた。
+      //
+      // 節ごとに、束の数・束の余白・束の先頭の見出しを完全一致で固定する。束を 1 つに戻す改変も、
+      // 余白を戻す改変も、ここで赤になる。
+      const groupedSections = [
+        { name: '競合との比較', headings: ['競合との比較', undefined] },
+        { name: /^直近\d+日の推移$/, headings: ['直近30日の推移'] },
+      ] as const;
+      for (const item of groupedSections) {
+        const section = screen.getByRole('heading', { level: 2, name: item.name }).closest('section')!;
+        expect(classTokens(section), String(item.name)).toEqual(['flex', 'flex-col', 'gap-6']);
+        // 束は面が自分で書く div である（部品が描く要素は data-slot を持つので外す）。
+        const bundles = Array.from(section.children).filter(
+          (child) => child.tagName === 'DIV' && !child.hasAttribute('data-slot'),
+        );
+        expect(bundles.length, String(item.name)).toBeGreaterThan(0);
+        for (const bundle of bundles) {
+          expect(classTokens(bundle), String(item.name)).toEqual(['flex', 'flex-col', 'gap-2']);
+        }
+        expect(
+          bundles.map((bundle) => bundle.querySelector('[data-slot="heading"]')?.textContent),
+          String(item.name),
+        ).toEqual(item.headings);
+      }
     });
 
     it('推移を表の部品へ移し、横方向の捲りを表の外側に置く（Req 2.1, 2.5）', async () => {
@@ -1260,7 +1287,7 @@ describe('store detail page', () => {
       expect(definitionPairs(overview.querySelector('dl')!)).toEqual([
         ['順位', '3位 → 2位'],
         ['評価', '4.4 → 4.5'],
-        ['クチコミ増減', '+5件'],
+        ['クチコミ数の増減', '+5件'],
       ]);
 
       // 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。
@@ -1314,10 +1341,13 @@ describe('store detail page', () => {
       // **集合の完全一致**で押さえるのは、色ユーティリティを後ろへ足す改変を通さないためである。
       // 店舗詳細の面で色を書くのは推移グラフの部品だけであり（§7.18・Issue #265）、その色の語彙は
       // test/trend-chart.test.tsx が完全一致で固定する。グラフは節も一覧も描かないので、この検査の範囲は変えない。
+      // 3 つの節はどれも同じ梯子を持つ（2026-09-18 の画面レビュー）。見出しとその内容を近い間隔（gap-2）で
+      // 束ね、束と束の間をその 2 倍以上（gap-6）空ける。競合と推移の節は、以前は全体が gap-4 の一律で、
+      // 見出し・操作・一覧・注記が等間隔に並んでいた（どこまでが 1 つの束かが読めない）。
       expect(Array.from(container.querySelectorAll('section')).map((element) => classTokens(element))).toEqual([
         ['flex', 'flex-col', 'gap-6'],
-        ['flex', 'flex-col', 'gap-4'],
-        ['flex', 'flex-col', 'gap-4'],
+        ['flex', 'flex-col', 'gap-6'],
+        ['flex', 'flex-col', 'gap-6'],
       ]);
       expect(Array.from(container.querySelectorAll('ul')).map((element) => classTokens(element))).toEqual([
         ['divide-y'],

@@ -30,17 +30,21 @@ const AUDITED_STATE_COUNT = 4;
 
 // 監査の対象に、Issue #265 で足した構造が実際に含まれていることの宣言。
 //
-// 札（TrendControls）の Field は、ラベルの内側に `role="group"` を描き、その中に radio がある
-// （label > group > radio の入れ子）。検索欄（CompetitorSearch）の Field は、名前の無い `role="group"` を
-// 描く。どちらも構造契約の操作系の role には入っておらず、部品テストは role では数えない。つまり
-// **この入れ子が監査の対象から抜け落ちても、他のどの検査も赤くならない。** そのため状態ごとにここで数える。
+// 札（TrendControls）の Field は、ラベルの内側に並べの箱を描き、その中に radio がある
+// （label > 箱 > radio の入れ子）。検索欄（CompetitorSearch）の Field も同じ箱である。どちらも構造契約の
+// 操作系の role には入っておらず、部品テストは role では数えない。つまり **この入れ子が監査の対象から
+// 抜け落ちても、他のどの検査も赤くならない。** そのため状態ごとにここで数える。
+//
+// 箱は 2026-09-18 の画面レビューまで `role="group"` を名乗っていた。名前を持たない group を 6 つ、
+// radiogroup の内側と検索欄の周りへ増やすだけだったので `role="presentation"` で打ち消してある。
+// したがって数える手掛かりは役割ではなく `data-slot` であり、**役割で数えると 0 件になる**。
 //
 // 数は、期間 2 つと指標 3 つの札である。一覧から導かずに数で書く理由は上と同じ。
 const TREND_CHIP_NESTING_COUNT = 5;
-const SEARCH_FIELD_GROUP_COUNT = 1;
+const SEARCH_FIELD_COUNT = 1;
 
-/** 札の入れ子（ラベルの中の group、その中の radio）。 */
-const CHIP_NESTING_SELECTOR = 'label:has([role="group"] [role="radio"])';
+/** 札の入れ子（ラベルの中の並べの箱、その中の radio）。 */
+const CHIP_NESTING_SELECTOR = 'label:has([data-slot="field"] [role="radio"])';
 
 /**
  * 監査した DOM に、期間・指標の札と競合の検索欄の構造が含まれていることを確かめる。
@@ -51,12 +55,16 @@ const CHIP_NESTING_SELECTOR = 'label:has([role="group"] [role="radio"])';
 async function expectAuditedStructures(page: Page, where: string): Promise<void> {
   await expect(
     page.locator(CHIP_NESTING_SELECTOR),
-    `${where}: 札の入れ子（label の中の group、その中の radio）が監査の対象に入っていない`,
+    `${where}: 札の入れ子（label の中の並べの箱、その中の radio）が監査の対象に入っていない`,
   ).toHaveCount(TREND_CHIP_NESTING_COUNT);
   await expect(
-    page.getByRole('group').filter({ has: page.getByRole('searchbox') }),
-    `${where}: 検索欄の group が監査の対象に入っていない`,
-  ).toHaveCount(SEARCH_FIELD_GROUP_COUNT);
+    page.locator('[data-slot="field"]').filter({ has: page.getByRole('searchbox') }),
+    `${where}: 検索欄の並べの箱が監査の対象に入っていない`,
+  ).toHaveCount(SEARCH_FIELD_COUNT);
+  // 名前を持たない group を面へ戻す改変を止める（2026-09-18 の画面レビュー）。axe は名前の無い group を
+  // 違反にしないので、この面では検出できない。上の 2 つで「箱がある」ことを、ここで「役割を名乗らない」
+  // ことを、対にして固定する。
+  await expect(page.getByRole('group'), `${where}: 名前を持たない group が面に戻っている`).toHaveCount(0);
 }
 
 test('4 つの表示状態が WCAG A/AA の自動監査を通る', async ({ page }) => {

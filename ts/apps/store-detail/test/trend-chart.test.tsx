@@ -519,7 +519,17 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
         const { figure } = renderChart(item.props);
         const captions = figure.querySelectorAll('figcaption');
         expect(captions, item.name).toHaveLength(1);
-        expect(Array.from(captions[0]!.children).map((line) => announcedText(line)), item.name).toEqual(lines);
+        const rows = Array.from(captions[0]!.children);
+        expect(rows.map((line) => announcedText(line)), item.name).toEqual(lines);
+        // 段: 題だけが本文の段で、期間と現在値は 1 つ下の段に置く（2026-09-18 の画面レビュー）。
+        // 下げないと、補助の 3 行が指標ラベルの dt（text-sm）より大きくなり、声の大きさが情報の重みと
+        // 逆になる。期間（日付）は §7.18 の役割割当どおり補助文字色で描く。
+        // （題の段落は class を持たない。太字は中の span が持つ。）
+        expect(rows.map((line) => classTokens(line)), item.name).toEqual([
+          [],
+          ['text-sm', 'text-muted-foreground'],
+          ['text-sm'],
+        ]);
         cleanup();
       }
     });
@@ -976,13 +986,29 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
 
   describe('値が無い期間', () => {
     it('期間内に選択中の指標の値が無いときは、グラフの代わりに記録が無い旨を出す（Req 1.10）', () => {
+      // 文言は、指標名に加えて**窓の期間**を持つ（2026-09-18 の画面レビュー）。この分岐は figcaption ごと
+      // 落ちるので、期間を文言へ入れないと「どの期間の話か」が画面から消える。窓は 8/25〜8/31 である。
       const cases = [
-        { metric: 'rating', text: 'この期間は評価の記録がありません' },
-        { metric: 'rank', text: 'この期間は順位の記録がありません' },
+        {
+          metric: 'rating',
+          text: 'この期間（8/25〜8/31）は評価の記録がありません。ほかの項目や期間に切り替えると表示できることがあります。',
+        },
+        {
+          metric: 'rank',
+          text: 'この期間（8/25〜8/31）は順位の記録がありません。ほかの項目や期間に切り替えると表示できることがあります。',
+        },
       ] as const;
       for (const { metric, text } of cases) {
         const { container } = render(<TrendChart window={NO_RATING_WINDOW} metric={metric} rankTotal={5} />);
-        expect(screen.getByText(text)).toBeDefined();
+        const message = screen.getByText(text);
+        // この面の「表示するものが無い」案内は、すべて同じ空状態の部品で描く（同一役割を 2 通りに
+        // 描かない・page.tsx 冒頭の方針）。素の段落へ戻す改変は、ここで赤になる。
+        const state = message.closest('[data-slot="empty-state"]');
+        expect(state, metric).not.toBeNull();
+        // 描画領域と同じ高さの下限を持たせ、指標を切り替えたときの崩れを抑える。
+        expect(classTokens(state!), metric).toContain('min-h-40');
+        // 導線（リンクや押しボタン）は置かない（構造契約と、要件 4.9 と同じ扱い）。
+        expect(state!.querySelectorAll('a, button'), metric).toHaveLength(0);
         expect(container.querySelectorAll('figure, svg'), metric).toHaveLength(0);
         expect(screen.queryByRole('img', { hidden: true }), metric).toBeNull();
         expect(container.querySelectorAll('[style]'), metric).toHaveLength(0);

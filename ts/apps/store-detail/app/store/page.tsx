@@ -119,6 +119,10 @@ import type { StoreDetailResponse, StoreRef, StoreSelectionRequiredBody } from '
 import {
   DEFAULT_METRIC,
   DEFAULT_PERIOD,
+  formatMetricValue,
+  formatShortDate,
+  metricExtent,
+  metricName,
   selectTrendWindow,
   summarizeWindow,
   type TrendMetric,
@@ -134,8 +138,11 @@ import { TrendControls } from './trend-controls';
 
 const GOOGLE_ATTRIBUTION_TEXT = 'データ提供: Google Maps';
 const NO_COMPETITORS_TEXT = '競合が見つかっていません（自店のみの計測です）';
+// 画面に出ていない名前で部品を呼ばない（2026-09-18 の画面レビュー）。可視ラベルは「店名で絞り込む」、
+// 件数の文言も「…を表示」なので、案内の側も「絞り込む」「入力」の語彙にそろえる。
+// この文言は、件数の文言（role="status"）が 0 件のときに読み上げる回復方法でもある。
 const NO_MATCHING_COMPETITORS_TEXT =
-  '該当する競合がいません。店名の一部で探し直すか、検索欄を空にすると一覧に戻ります。';
+  '該当する競合がいません。店名の一部で絞り込み直すか、入力を消すと一覧に戻ります。';
 const NO_NEW_REVIEWS_TEXT = '新着なし（前回の集計以降、新しいクチコミはありません）';
 const NO_TREND_TEXT = '推移データはまだありません（毎朝の集計後に表示されます）';
 const NO_SUMMARY_TEXT = '本日分のデータはまだ準備中です。しばらくしてから再度お試しください。';
@@ -466,56 +473,70 @@ function CompetitorsSection({
   const { visible, total } = filterCompetitors(rows, searchable ? query : '');
 
   return (
-    <section className="flex flex-col gap-4">
-      <Heading level={2}>競合との比較</Heading>
-      {/* 検索欄と件数の文言は、一覧の Card の外に置く。0 件のときは Card が空状態に置き換わるので、中に置くと
-          検索欄ごと消えてしまう（§7.18）。 */}
-      {searchable ? (
-        <CompetitorSearch query={query} onQueryChange={setQuery} total={total} visibleCount={visible.length} />
-      ) : null}
-      {competitors.length === 0 ? (
-        <EmptyState>
-          <p>{NO_COMPETITORS_TEXT}</p>
-        </EmptyState>
-      ) : visible.length === 0 ? (
-        // 絞り込みの結果が 0 件の案内（要件 4.9）。導線（children の中のリンクや押しボタン）は置かない。
-        // role も付けない。件数の文言（role="status"）が同じ変化を読み上げるので、付けると二重になる。
-        <EmptyState>
-          <p>{NO_MATCHING_COMPETITORS_TEXT}</p>
-        </EmptyState>
-      ) : (
-        <Card>
-          <CardContent>
-            <ul className="divide-y">
-              {visible.map(({ competitor, rowKey }) => {
-                // 星差は「自店 − 競合」を符号つき小数 1 桁で出す（Flex と同じ関数）。評価の無い店、
-                // または自店に評価が無い日は null で、星差の指標そのものを出さない（Issue #255）。
-                const starDiff = formatStarDiff(competitor.starDiff);
-                return (
-                  <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={rowKey}>
-                    <p className="font-semibold">{competitor.name}</p>
-                    <dl className="grid grid-cols-3 gap-3">
-                      <Metric label="評価" value={formatRatingLabel(competitor.rating)} />
-                      <Metric
-                        label="クチコミ"
-                        value={competitor.reviewCount !== null ? `${competitor.reviewCount}件` : '—'}
-                      />
-                      {starDiff !== null ? <Metric label="星差" value={starDiff} /> : null}
-                    </dl>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-      {/* 評価の無い店は順位の比較集合に入らない。一覧には残るので、「近隣N店中」の N と一覧の件数が
-          食い違う理由を、該当する店がいるときだけ一覧の下に添える（Flex の注記と同じ文言）。
-          判定は、絞り込んだ結果ではなく当日の全件から行う。注記が説明するのは N と全件の食い違いであり、
-          検索で評価の無い店が一覧から外れても、その食い違いは残るためである。
-          カードの内側へ置かないのは、カードの内容の容器に面から余白を足さないため（意匠の検査が
-          競合カードを「面が何も足していない容器」の基準に使っている）。 */}
-      {hasUnratedCompetitor(competitors) ? <p className="text-sm">{UNRATED_EXCLUDED_NOTE}</p> : null}
+    // 見出しとその内容を近い間隔（gap-2）で束ね、束と束の間をその 2 倍以上（gap-6）空ける。
+    // 2026-09-18 の画面レビューまで、この節は全体が gap-4 の一律で、見出し・操作・一覧・注記が
+    // 等間隔に並んでいた。SummarySection が同じ面で既に 24/8 の梯子を持っており、それにそろえる。
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Heading level={2}>競合との比較</Heading>
+        {/* 検索欄と件数の文言は、一覧の Card の外に置く。0 件のときは Card が空状態に置き換わるので、中に置くと
+            検索欄ごと消えてしまう（§7.18）。 */}
+        {searchable ? (
+          <CompetitorSearch
+            query={query}
+            onQueryChange={setQuery}
+            total={total}
+            visibleCount={visible.length}
+            zeroHint={NO_MATCHING_COMPETITORS_TEXT}
+          />
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-2">
+        {competitors.length === 0 ? (
+          <EmptyState>
+            <p>{NO_COMPETITORS_TEXT}</p>
+          </EmptyState>
+        ) : visible.length === 0 ? (
+          // 絞り込みの結果が 0 件の案内（要件 4.9）。導線（children の中のリンクや押しボタン）は置かない。
+          // role も付けない。件数の文言（role="status"）が同じ文言を読み上げるので、付けると二重になる。
+          <EmptyState>
+            <p>{NO_MATCHING_COMPETITORS_TEXT}</p>
+          </EmptyState>
+        ) : (
+          <Card>
+            <CardContent>
+              <ul className="divide-y">
+                {visible.map(({ competitor, rowKey }) => {
+                  // 星差は「自店 − 競合」を符号つき小数 1 桁で出す（Flex と同じ関数）。評価の無い店、
+                  // または自店に評価が無い日は null で、星差の指標そのものを出さない（Issue #255）。
+                  const starDiff = formatStarDiff(competitor.starDiff);
+                  return (
+                    <li className="grid gap-3 py-4 first:pt-0 last:pb-0" key={rowKey}>
+                      <p className="font-semibold">{competitor.name}</p>
+                      <dl className="grid grid-cols-3 gap-3">
+                        <Metric label="評価" value={formatRatingLabel(competitor.rating)} />
+                        <Metric
+                          label="クチコミ"
+                          value={competitor.reviewCount !== null ? `${competitor.reviewCount}件` : '—'}
+                        />
+                        {starDiff !== null ? <Metric label="星差" value={starDiff} /> : null}
+                      </dl>
+                    </li>
+                  );
+                })}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+        {/* 評価の無い店は順位の比較集合に入らない。一覧には残るので、「近隣N店中」の N と一覧の件数が
+            食い違う理由を、該当する店がいるときだけ一覧の下に添える（Flex の注記と同じ文言）。
+            判定は、絞り込んだ結果ではなく当日の全件から行う。注記が説明するのは N と全件の食い違いであり、
+            検索で評価の無い店が一覧から外れても、その食い違いは残るためである。
+            カードの内側へ置かないのは、カードの内容の容器に面から余白を足さないため（意匠の検査が
+            競合カードを「面が何も足していない容器」の基準に使っている）。注記は一覧を説明するので、
+            一覧と同じ束に入れる。 */}
+        {hasUnratedCompetitor(competitors) ? <p className="text-sm">{UNRATED_EXCLUDED_NOTE}</p> : null}
+      </div>
     </section>
   );
 }
@@ -536,8 +557,11 @@ function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow 
         label="評価"
         value={summary.rating !== null ? `${summary.rating.first} → ${summary.rating.last}` : '—'}
       />
+      {/* 「クチコミ数の増減」。指標の名前を「クチコミ数」に統一したうえで、この組だけが差分であることを
+          「の増減」で示す（2026-09-18 の画面レビュー）。同じカードに実数の推移が並ぶので、実数と差分が
+          似た名前で隣り合わないようにする。 */}
       <Metric
-        label="クチコミ増減"
+        label="クチコミ数の増減"
         value={summary.reviewCountDiff !== null ? formatSignedCount(summary.reviewCountDiff) : '—'}
       />
     </dl>
@@ -568,57 +592,90 @@ function TrendSection({
   const trendWindow = selectTrendWindow(trend, period);
   const title = `直近${period}日の推移`;
 
-  return (
-    <section className="flex flex-col gap-4">
-      <Heading level={2}>{title}</Heading>
-      {/* 日付を解釈できる点が 1 つも無いときは窓が作れない。推移 0 件と同じく既存の案内を出し、
-          選択肢は出さない（要件 2.8）。 */}
-      {trendWindow === null ? (
-        <EmptyState>
-          <p>{NO_TREND_TEXT}</p>
-        </EmptyState>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {/* 選択肢は要約のカードの外に置く。期間は下の表示のすべてに効くので、カードの中に置くと
-              効く範囲がカードの中だけに見える（§7.18）。 */}
-          <TrendControls period={period} onPeriodChange={setPeriod} metric={metric} onMetricChange={setMetric} />
-          <Card>
-            <CardContent className="flex flex-col gap-4">
-              <p className="font-semibold">表示期間の変化</p>
-              <WindowSummaryList trendWindow={trendWindow} />
-              {/* グラフは要約の 3 組の下に置く。現在値（最新の値とその日付）もグラフの部品が描く。 */}
-              <TrendChart window={trendWindow} metric={metric} rankTotal={rankTotal} />
-            </CardContent>
-          </Card>
-          {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・ui-airbnb-surfaces の要件 2.5）。この容器がこの面で
-              唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
-              列見出しの文字列は 1 文字も変えない（ui-airbnb-surfaces の要件 2.2）。scope は部品の既定が与える。
-              行は窓の点をそのまま描く。グラフの各点の値は、同じ日付の行で確かめられる（要件 3.7）。 */}
-          <TableContainer label={title}>
-            <Table className="min-w-sm">
-              <TableHead>
-                <TableRow>
-                  <TableHeaderCell>日付</TableHeaderCell>
-                  <TableHeaderCell>順位</TableHeaderCell>
-                  <TableHeaderCell>評価</TableHeaderCell>
-                  <TableHeaderCell>クチコミ数</TableHeaderCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {trendWindow.points.map((point) => (
-                  <TableRow key={point.capturedOn}>
-                    {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
-                    <TableCell>{point.capturedOn}</TableCell>
-                    <TableCell numeric>{point.rank ?? '—'}</TableCell>
-                    <TableCell numeric>{point.rating ?? '—'}</TableCell>
-                    <TableCell numeric>{point.reviewCount ?? '—'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+  // 日付を解釈できる点が 1 つも無いときは窓が作れない。推移 0 件と同じく既存の案内を出し、
+  // 選択肢は出さない（要件 2.8）。選択肢が無いので、この分岐には状態通知も要らない。
+  if (trendWindow === null) {
+    return (
+      <section className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <Heading level={2}>{title}</Heading>
+          <EmptyState>
+            <p>{NO_TREND_TEXT}</p>
+          </EmptyState>
         </div>
-      )}
+      </section>
+    );
+  }
+
+  // 選択の結果を読み上げへ届ける文言（2026-09-18 の画面レビュー）。
+  //
+  // 指標の札が効く先はグラフだけであり、そのグラフは role="img" の名前でしか内容を持たない。名前は
+  // 読み上げ領域ではないので、順位 → 評価と切り替えても読み上げ利用者には何も起きなかった。記録の無い
+  // 指標へ切り替えたときは、その名前ごと消えていた。期間の札も、DOM 順で制御より前にある見出しと、
+  // 表の容器の名前を書き換える。ここに 1 つだけ、選択が変わるたびに書き換わる領域を置いて引き受ける。
+  //
+  // 空の案内そのものに role を付けないのは、その要素が内容と同時に挿入されるからである（挿入と同時の
+  // 通知は読み上げが安定しない）。この領域は窓がある限り留まるので、書き換えとして通知される。
+  // 既知の限界は検索の件数の文言と同じで、面が初めて描かれる 1 回だけは内容と同時の挿入になる。
+  const latest = metricExtent(trendWindow, metric).last;
+  const trendStatus = `${metricName(metric)}の推移、直近${period}日。${
+    latest === null
+      ? 'この期間は記録がありません。'
+      : `最新 ${formatMetricValue(metric, latest.value)}（${formatShortDate(latest.date)}）。`
+  }`;
+
+  return (
+    // 見出しと、その節の表示を選ぶ操作を近い間隔（gap-2）で束ね、束と結果の間をその 2 倍以上（gap-6）
+    // 空ける。2026-09-18 の画面レビューまでは節も操作の内側も gap-4 の 16px で、期間群と指標群の間隔と、
+    // 操作の塊とカードの間隔が同値だった（どこまでが操作の塊かが読めない）。梯子は SummarySection に
+    // 合わせてある。
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Heading level={2}>{title}</Heading>
+        {/* 選択肢は要約のカードの外に置く。期間は下の表示のすべてに効くので、カードの中に置くと
+            効く範囲がカードの中だけに見える（§7.18）。 */}
+        <TrendControls period={period} onPeriodChange={setPeriod} metric={metric} onMetricChange={setMetric} />
+        <p role="status" className="sr-only">
+          {trendStatus}
+        </p>
+      </div>
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          {/* グラフは選択肢のすぐ下に置く（2026-09-18 の画面レビュー）。指標の札が効く先はグラフだけ
+              なので、間に指標が効かない 3 組を挟むと、押した結果が画面の 2 つ下（320px では約 200px 下）
+              に出ることになる。要約は表の前という §7.17 の定めのまま、グラフの下に残る。 */}
+          <TrendChart window={trendWindow} metric={metric} rankTotal={rankTotal} />
+          <p className="font-semibold">表示期間の変化</p>
+          <WindowSummaryList trendWindow={trendWindow} />
+        </CardContent>
+      </Card>
+      {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・ui-airbnb-surfaces の要件 2.5）。この容器がこの面で
+          唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
+          列見出しの文字列は 1 文字も変えない（ui-airbnb-surfaces の要件 2.2）。scope は部品の既定が与える。
+          行は窓の点をそのまま描く。グラフの各点の値は、同じ日付の行で確かめられる（要件 3.7）。 */}
+      <TableContainer label={title}>
+        <Table className="min-w-sm">
+          <TableHead>
+            <TableRow>
+              <TableHeaderCell>日付</TableHeaderCell>
+              <TableHeaderCell>順位</TableHeaderCell>
+              <TableHeaderCell>評価</TableHeaderCell>
+              <TableHeaderCell>クチコミ数</TableHeaderCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {trendWindow.points.map((point) => (
+              <TableRow key={point.capturedOn}>
+                {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
+                <TableCell>{point.capturedOn}</TableCell>
+                <TableCell numeric>{point.rank ?? '—'}</TableCell>
+                <TableCell numeric>{point.rating ?? '—'}</TableCell>
+                <TableCell numeric>{point.reviewCount ?? '—'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </section>
   );
 }

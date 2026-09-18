@@ -61,7 +61,7 @@ const PERIOD_CHIPS: readonly Chip[] = [
 const METRIC_CHIPS: readonly Chip[] = [
   { label: '順位', value: 'rank' },
   { label: '評価', value: 'rating' },
-  { label: 'クチコミ', value: 'reviewCount' },
+  { label: 'クチコミ数', value: 'reviewCount' },
 ];
 
 type NotificationKey = 'period' | 'metric';
@@ -79,7 +79,7 @@ interface GroupCase {
 /** 群（この並びで描く）。 */
 const GROUPS: readonly GroupCase[] = [
   { name: '期間', chips: PERIOD_CHIPS, defaultValue: DEFAULT_PERIOD, notification: 'period', valueType: 'number' },
-  { name: 'グラフの指標', chips: METRIC_CHIPS, defaultValue: DEFAULT_METRIC, notification: 'metric', valueType: 'string' },
+  { name: 'グラフに表示する項目', chips: METRIC_CHIPS, defaultValue: DEFAULT_METRIC, notification: 'metric', valueType: 'string' },
 ];
 
 const OTHER_NOTIFICATION: Readonly<Record<NotificationKey, NotificationKey>> = { period: 'metric', metric: 'period' };
@@ -249,6 +249,10 @@ describe('TrendControls の札（Issue #265）', () => {
         const { label, field, title } = chipParts(radio);
         expect(label.matches('label[data-slot="field-label"]'), group.name).toBe(true);
         expect(field.matches('[data-slot="field"][data-orientation="horizontal"]'), group.name).toBe(true);
+        // 並べの箱は役割を名乗らない（2026-09-18 の画面レビュー）。部品の既定は role="group" だが、
+        // 制御 1 つだけを囲む名前の無い境界を radiogroup の内側へ 5 つ増やすだけなので打ち消してある。
+        // axe は名前の無い group を違反にしないので、この検査を外すと戻す改変がどこからも赤くならない。
+        expect(field.getAttribute('role'), group.name).toBe('presentation');
         // Field の中身は、radio・その隠し input・題の 3 つだけである。
         expect(
           Array.from(field.children).map((child) => child.getAttribute('data-slot') ?? child.tagName.toLowerCase()),
@@ -440,11 +444,11 @@ describe('TrendControls と定数の結びつき（Issue #265）', () => {
     const { container, notifications } = renderStateful(Reordered);
 
     expectRadioNames(groupNamed('期間'), ['30日', '7日']);
-    expectRadioNames(groupNamed('グラフの指標'), ['クチコミ', '順位']);
+    expectRadioNames(groupNamed('グラフに表示する項目'), ['クチコミ数', '順位']);
     expect(container.querySelectorAll(HIDDEN_RADIO_SELECTOR)).toHaveLength(4);
 
     // 差し替えた部品も、札の値で通知する。
-    fireEvent.click(within(groupNamed('グラフの指標')).getByRole('radio', { name: 'クチコミ' }));
+    fireEvent.click(within(groupNamed('グラフに表示する項目')).getByRole('radio', { name: 'クチコミ数' }));
     expect(notifications.metric).toHaveBeenLastCalledWith('reviewCount');
   });
 
@@ -454,18 +458,18 @@ describe('TrendControls と定数の結びつき（Issue #265）', () => {
 
     fireEvent.click(within(groupNamed('期間')).getByRole('radio', { name: '14日' }));
     // 元の定数に無い指標は札の文言も持たないので、並びの位置で取る。
-    const unknownMetric = within(groupNamed('グラフの指標')).getAllByRole('radio')[TREND_METRICS.length];
+    const unknownMetric = within(groupNamed('グラフに表示する項目')).getAllByRole('radio')[TREND_METRICS.length];
     expect(unknownMetric).toBeDefined();
     fireEvent.click(unknownMetric!);
 
     expect(notifications.period).not.toHaveBeenCalled();
     expect(notifications.metric).not.toHaveBeenCalled();
     expectSoleChecked(groupNamed('期間'), '30日');
-    expectSoleChecked(groupNamed('グラフの指標'), '順位');
+    expectSoleChecked(groupNamed('グラフに表示する項目'), '順位');
 
     // 対照: 同じ描画で、当てはまる値の札は通知が届く（上の「届かない」が空振りでないこと）。
     fireEvent.click(within(groupNamed('期間')).getByRole('radio', { name: '7日' }));
-    fireEvent.click(within(groupNamed('グラフの指標')).getByRole('radio', { name: '評価' }));
+    fireEvent.click(within(groupNamed('グラフに表示する項目')).getByRole('radio', { name: '評価' }));
     expect(notifications.period).toHaveBeenLastCalledWith(7);
     expect(notifications.metric).toHaveBeenLastCalledWith('rating');
   });

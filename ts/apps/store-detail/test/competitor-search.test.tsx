@@ -88,6 +88,13 @@ const NO_MATCH_QUERY = 'nomatchingcompetitornamewhatsoeverzzzzzzzzzzzzzzzz';
 
 function noop(): void {}
 
+/**
+ * 0 件のときに件数の文言へ続く回復方法。**面の実際の文言を書き写さない。** 部品の契約は「渡された文言を
+ * 0 件のときだけ続ける」ことであり、どの文を渡すかは面の側の判断だからである（面との結びつきは
+ * test/trend-dashboard.test.tsx が実物の文言で確かめる）。
+ */
+const ZERO_HINT = '対照の回復方法';
+
 /** 渡した値のまま部品を描く（親の状態を持たない）。 */
 function renderPlain(props: { readonly query?: string; readonly total: number; readonly visibleCount: number }) {
   return render(
@@ -96,6 +103,7 @@ function renderPlain(props: { readonly query?: string; readonly total: number; r
       onQueryChange={noop}
       total={props.total}
       visibleCount={props.visibleCount}
+      zeroHint={ZERO_HINT}
     />,
   );
 }
@@ -119,6 +127,7 @@ function renderWithFilter() {
         }}
         total={total}
         visibleCount={visible.length}
+        zeroHint={ZERO_HINT}
       />
     );
   }
@@ -177,6 +186,9 @@ describe('CompetitorSearch の検索欄（Issue #265）', () => {
     expect(fields).toHaveLength(1);
     const field = fields[0]!;
     expect(field.getAttribute('data-orientation')).toBe('vertical');
+    // Field はレイアウトの箱としてしか使っていないので、部品が固定する role="group" を打ち消す
+    // （2026-09-18 の画面レビュー）。名前を持たない group は、支援技術へ意味の無い境界を増やすだけである。
+    expect(field.getAttribute('role')).toBe('presentation');
     expect(Array.from(field.children).map((child) => child.getAttribute('data-slot'))).toEqual(['field-label', 'input']);
     expect(field.lastElementChild).toBe(searchbox());
   });
@@ -203,8 +215,8 @@ describe('CompetitorSearch の検索欄（Issue #265）', () => {
   it('2 つ描いても、ラベルと入力欄の結びつきが混ざらない（id を手書きしない）', () => {
     const { container } = render(
       <>
-        <CompetitorSearch query="" onQueryChange={noop} total={5} visibleCount={5} />
-        <CompetitorSearch query="" onQueryChange={noop} total={5} visibleCount={5} />
+        <CompetitorSearch query="" onQueryChange={noop} total={5} visibleCount={5} zeroHint={ZERO_HINT} />
+        <CompetitorSearch query="" onQueryChange={noop} total={5} visibleCount={5} zeroHint={ZERO_HINT} />
       </>,
     );
 
@@ -242,10 +254,10 @@ describe('CompetitorSearch の入力（Issue #265）', () => {
   });
 
   it('欄の値は、渡された検索語に従う（部品は検索語を自分で持たない）', () => {
-    const { rerender } = render(<CompetitorSearch query="テスト" onQueryChange={noop} total={5} visibleCount={1} />);
+    const { rerender } = render(<CompetitorSearch query="テスト" onQueryChange={noop} total={5} visibleCount={1} zeroHint={ZERO_HINT} />);
     expect(searchbox().value).toBe('テスト');
 
-    rerender(<CompetitorSearch query="" onQueryChange={noop} total={5} visibleCount={5} />);
+    rerender(<CompetitorSearch query="" onQueryChange={noop} total={5} visibleCount={5} zeroHint={ZERO_HINT} />);
     expect(searchbox().value).toBe('');
   });
 });
@@ -261,11 +273,15 @@ interface CountCase {
 /**
  * 件数の文言の書式。総数と表示数が食い違う行と、表示数が 0 の行を必ず含める（取り違えや固定値の変異を
  * 緑のまま通さないため）。
+ *
+ * 0 件の行だけ、回復方法が続く（2026-09-18 の画面レビュー）。0 件の案内は一覧の側の空状態が持つが、
+ * そちらは役割を持たないので、入力欄に留まったままの利用者には「0店を表示」しか届かなかった。
+ * 0 件以外の行は続かないことも、この表が同時に固定する。
  */
 const COUNT_CASES: readonly CountCase[] = [
   { total: 5, visibleCount: 5, text: '競合5店のうち5店を表示' },
   { total: 5, visibleCount: 2, text: '競合5店のうち2店を表示' },
-  { total: 5, visibleCount: 0, text: '競合5店のうち0店を表示' },
+  { total: 5, visibleCount: 0, text: `競合5店のうち0店を表示。${ZERO_HINT}` },
   { total: 2, visibleCount: 1, text: '競合2店のうち1店を表示' },
 ];
 
@@ -310,13 +326,13 @@ describe('CompetitorSearch の件数の文言（Issue #265）', () => {
     const { rerender } = renderPlain({ total: 5, visibleCount: 5 });
     const status = screen.getByRole('status');
 
-    rerender(<CompetitorSearch query="店" onQueryChange={noop} total={5} visibleCount={2} />);
+    rerender(<CompetitorSearch query="店" onQueryChange={noop} total={5} visibleCount={2} zeroHint={ZERO_HINT} />);
     expect(screen.getByRole('status')).toBe(status);
     expect(ownText(status)).toBe('競合5店のうち2店を表示');
 
-    rerender(<CompetitorSearch query={NO_MATCH_QUERY} onQueryChange={noop} total={5} visibleCount={0} />);
+    rerender(<CompetitorSearch query={NO_MATCH_QUERY} onQueryChange={noop} total={5} visibleCount={0} zeroHint={ZERO_HINT} />);
     expect(screen.getByRole('status')).toBe(status);
-    expect(ownText(status)).toBe('競合5店のうち0店を表示');
+    expect(ownText(status)).toBe(`競合5店のうち0店を表示。${ZERO_HINT}`);
   });
 
   it('打つたびには読み上げず、件数が変わったときだけ文言が変わる（要件 4.8）', () => {
@@ -351,7 +367,7 @@ describe('CompetitorSearch の件数の文言（Issue #265）', () => {
     expect(cleared.mutations).toBeGreaterThan(0);
 
     const none = type(NO_MATCH_QUERY);
-    expect(none.text).toBe('競合5店のうち0店を表示');
+    expect(none.text).toBe(`競合5店のうち0店を表示。${ZERO_HINT}`);
     expect(none.mutations).toBeGreaterThan(0);
 
     observer.disconnect();
@@ -363,7 +379,7 @@ describe('CompetitorSearch の件数の文言（Issue #265）', () => {
     fireEvent.change(searchbox(), { target: { value: NO_MATCH_QUERY } });
     // 対照: 入力は届いていて、0 件になっている（下の「無い」が空振りでないこと）。
     expect(searchbox().value).toBe(NO_MATCH_QUERY);
-    expect(ownText(screen.getByRole('status'))).toBe('競合5店のうち0店を表示');
+    expect(ownText(screen.getByRole('status'))).toBe(`競合5店のうち0店を表示。${ZERO_HINT}`);
 
     // 文字としても、入力欄の値の属性を除くどの属性にも、検索語が現れない。
     expect(document.body.textContent ?? '').not.toContain(NO_MATCH_QUERY);
@@ -429,7 +445,7 @@ describe('CompetitorSearch の色（Issue #265）', () => {
     );
     expect(own.map((element) => `${element.tagName.toLowerCase()}: ${classTokens(element).join(' ')}`)).toEqual([
       'div: flex flex-col gap-2',
-      'p: text-sm',
+      'p: text-sm tabular-nums',
     ]);
   });
 });

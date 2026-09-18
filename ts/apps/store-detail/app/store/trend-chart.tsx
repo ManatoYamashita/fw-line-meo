@@ -39,6 +39,8 @@
 // id は持たせない。手書きの id を参照する記法は、直書きの色と誤検出される。必要になったときは、
 // useId の値だけを使う。
 
+import { EmptyState } from '@fwlm/ui/components/empty-state';
+
 import { buildGeometry, scaleFor, type PlotPoint } from '../../lib/trend-scale';
 import {
   describeMetric,
@@ -129,8 +131,21 @@ export function TrendChart({ window: trendWindow, metric, rankTotal }: TrendChar
   const latest = extent.last;
 
   // 期間内に選択中の指標の値が 1 件も無いときは、グラフの代わりに文言を出す（要件 1.10）。
+  //
+  // 2026-09-18 の画面レビューでの改定が 3 つある。
+  // 1. 素の段落をやめ、空状態の部品で描く。この面の「一覧が空」の案内 4 件はすべてこの部品であり、
+  //    5 件目のここだけが素の段落だった（同一役割を 2 通りに描かないこと・page.tsx 冒頭の方針）。
+  // 2. 描画領域と同じ高さの下限を与える。指標を切り替えただけで figcaption・描画領域・日付軸が消え、
+  //    下にある表が飛び上がっていた。下限を置くと崩れの大半が止まる（figcaption のぶんは残る）。
+  // 3. 期間を文言に入れる。この分岐は figcaption ごと落ちるので、どの期間の話なのかが画面から消えていた。
+  //    合わせて、切り替えれば表示できることがある旨を添える（この面で唯一、0 件を利用者が解消できる状態である）。
   if (geometry === null || latest === null) {
-    return <p>{`この期間は${name}の記録がありません`}</p>;
+    const period = `${formatShortDate(trendWindow.startDate)}〜${formatShortDate(trendWindow.endDate)}`;
+    return (
+      <EmptyState className="min-h-40 justify-center">
+        <p>{`この期間（${period}）は${name}の記録がありません。ほかの項目や期間に切り替えると表示できることがあります。`}</p>
+      </EmptyState>
+    );
   }
 
   const { end } = geometry;
@@ -145,13 +160,27 @@ export function TrendChart({ window: trendWindow, metric, rankTotal }: TrendChar
           {/* 順位は 1 位を上端に置くので、その向きを題に文言で添える（要件 1.3）。 */}
           {metric === 'rank' ? '（上ほど上位）' : null}
         </p>
-        <p>{`${formatShortDate(trendWindow.startDate)}〜${formatShortDate(trendWindow.endDate)}`}</p>
+        {/* 補助の 2 行は本文より 1 段下げる（2026-09-18 の画面レビュー）。段を下げないと、指標ラベルの
+            dt（text-sm）より大きい文字で補助情報が並び、声の大きさが情報の重みと逆になる。
+            日付を補助文字色にするのは §7.18 の役割割当（目盛りと日付は補助文字色）そのものである。 */}
+        <p className="text-sm text-muted-foreground">
+          {`${formatShortDate(trendWindow.startDate)}〜${formatShortDate(trendWindow.endDate)}`}
+        </p>
         {/* 現在値には、その値が記録された日付を添える（要件 3.6）。 */}
-        <p>{`最新 ${formatMetricValue(metric, latest.value)}（${formatShortDate(latest.date)}）`}</p>
+        <p className="text-sm">{`最新 ${formatMetricValue(metric, latest.value)}（${formatShortDate(latest.date)}）`}</p>
       </figcaption>
       <div className="flex gap-2">
-        {/* 縦軸の目盛りの帯（固定幅）。描画領域と同じ高さと上下の余白を持たせる。 */}
-        <div aria-hidden className="h-40 w-10 shrink-0 py-2 text-xs tabular-nums text-muted-foreground">
+        {/*
+          縦軸の目盛りの帯（固定幅）。描画領域と同じ高さと上下の余白を持たせる。
+
+          幅は 2026-09-18 の画面レビューで 40px から 48px へ広げた。等幅数字の 1 桁は text-xs で約 7.2px
+          なので、40px では 5 桁（36px）で余地がほぼ尽き、端末側の文字拡大で溢れる。帯は絶対配置の文字
+          だけを持つため、内容に追随させる（w-fit）ことも、溢れを横スクロールとして観測することもできず、
+          Card の overflow が黙って切る。内容に追随させるには流し込みの幅基準の要素を足すことになるが、
+          それはグラフの文字を数える e2e（store-surface.spec.ts の readChartTexts）が余分な「日付」として
+          拾ってしまう。したがってここは値の是正にとどめ、構造の是正は帯の作り直しとして別に扱う。
+        */}
+        <div aria-hidden className="h-40 w-12 shrink-0 py-2 text-xs tabular-nums text-muted-foreground">
           <div className="relative h-full">
             {geometry.ticks.map((tick) => (
               <span

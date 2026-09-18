@@ -338,7 +338,7 @@ test('検索欄から Tab で期間の群へ移り、矢印キーで 7日 を選
 const TOUCH_TARGET_MIN_PX = 44;
 
 /** 期間と指標の札の名前（期間の群、指標の群の順）。 */
-const CHIP_NAMES = ['7日', '30日', '順位', '評価', 'クチコミ'] as const;
+const CHIP_NAMES = ['7日', '30日', '順位', '評価', 'クチコミ数'] as const;
 
 /**
  * 札を押す位置の、行の上端からの距離（px）。radio と題より上の、行の内側の余白に当たる。
@@ -396,15 +396,15 @@ test('期間と指標の札の行と、検索欄の Field が 44px 以上の高�
     await expect(search, `検索欄のラベルを押しても入力欄へ焦点が移らない（${widthName}）`).toBeFocused();
 
     // 札の行も、radio と題の外側（行の上端の余白）を押して選べることを確かめる。
-    const reviewCountRow = chipRow(page, 'クチコミ');
+    const reviewCountRow = chipRow(page, 'クチコミ数');
     const box = await reviewCountRow.boundingBox();
     if (box === null) {
-      throw new Error(`札「クチコミ」の行が描かれていない（${widthName}）`);
+      throw new Error(`札「クチコミ数」の行が描かれていない（${widthName}）`);
     }
     await reviewCountRow.click({ position: { x: box.width / 2, y: CHIP_EDGE_OFFSET_PX } });
     await expect(
-      page.getByRole('radio', { name: 'クチコミ', exact: true }),
-      `札「クチコミ」の行の上端の余白を押しても選ばれない（${widthName}）`,
+      page.getByRole('radio', { name: 'クチコミ数', exact: true }),
+      `札「クチコミ数」の行の上端の余白を押しても選ばれない（${widthName}）`,
     ).toBeChecked();
   });
 });
@@ -530,7 +530,7 @@ test('主要数値と競合の比較軸を説明リストとして描く', async
   const trend = page
     .getByRole('heading', { level: 2, name: '直近30日の推移' })
     .locator('xpath=ancestor::section[1]');
-  await expect(trend.locator('dl dt')).toHaveText(['順位', '評価', 'クチコミ増減']);
+  await expect(trend.locator('dl dt')).toHaveText(['順位', '評価', 'クチコミ数の増減']);
   await expect(trend.locator('dl dd')).toHaveText(['3位 → 4位', '4.0 → 4.9', '+203件']);
 });
 

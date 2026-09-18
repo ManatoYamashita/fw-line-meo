@@ -6,8 +6,11 @@
 //
 // 並びと名前:
 // - 期間の群を先に、指標の群を後に置く。期間は節の表示のすべてに効き、指標はグラフだけに効くためである。
-// - 群ごとに見える名前（「期間」「グラフの指標」）を置き、RadioGroup の aria-labelledby から参照させる
-//   （要件 5.7）。id は useId の値だけを使う。手書きの id を参照する記法は、直書きの色と誤検出される。
+// - 群ごとに見える名前（「期間」「グラフに表示する項目」）を置き、RadioGroup の aria-labelledby から
+//   参照させる（要件 5.7）。id は useId の値だけを使う。手書きの id を参照する記法は、直書きの色と誤検出される。
+//   後者を「グラフの指標」から改めたのは、「指標」がこのプロダクトで唯一の利用者向けの内部語彙だった
+//   ためである（2026-09-18 の画面レビュー。ほかの出現箇所はすべてコメントと設計文書で、画面には出ない）。
+//   利用者は IT に不慣れな飲食店オーナーである（steering `product.md`）。
 //
 // 札:
 // - 札は TREND_PERIODS / TREND_METRICS から作る。構成は、ラベル（FieldLabel）の中に横向きの Field を置き、
@@ -15,7 +18,11 @@
 // - 札は折り返す 1 行に並べ、幅は内容に従わせる。FieldLabel の既定の全幅は、同じ変種の幅指定で上書きする
 //   （tailwind-merge は、既定の側の同じ変種の幅指定だけを落とす）。FieldLabel は data-slot を持つ部品の
 //   要素なので、面の側の任意値の禁止（test/store-page.test.tsx）にはかからない。
-// - 指標の札の「クチコミ」は、既存の指標の項目名にそろえる。グラフの題の「クチコミ数」より、札の幅も抑えられる。
+// - 札の文言は、グラフの題（lib/trend-view.ts の metricName）と推移の表の列見出しに**逐語で**そろえる。
+//   2026-09-18 の画面レビューまで、クチコミだけが札「クチコミ」・題「クチコミ数」・列見出し「クチコミ数」と
+//   3 通りに割れていた（順位と評価は初めから一致していた）。列見出しの文字列は変更できないので（正典は
+//   ui-airbnb-surfaces の要件 2.2）、そろえる先は「クチコミ数」である。札の幅は 320px でも収まる
+//   （3 枚で 274px < 版面 288px。溢れても flex-wrap が受ける）。
 //
 // 値:
 // - RadioGroup の値の型は any である。値の変化は unknown として受け、isTrendPeriod / isTrendMetric で絞る。
@@ -57,7 +64,7 @@ const CHIP_WIDTH_CLASS = 'has-[>[data-slot=field]]:w-fit';
 const METRIC_CHIP_LABELS: Readonly<Record<TrendMetric, string>> = {
   rank: '順位',
   rating: '評価',
-  reviewCount: 'クチコミ',
+  reviewCount: 'クチコミ数',
 };
 
 function periodChipLabel(period: TrendPeriodDays): string {
@@ -105,7 +112,9 @@ function ChoiceGroup<T extends TrendPeriodDays | TrendMetric>({
       >
         {options.map((option) => (
           <FieldLabel key={option} className={CHIP_WIDTH_CLASS}>
-            <Field orientation="horizontal">
+            {/* Field は札の行の並びを作るためだけに使っている。部品が固定する role="group" は、制御 1 つ
+                だけを囲む名前の無い境界を radiogroup の内側へ増やすので打ち消す（2026-09-18 の画面レビュー）。 */}
+            <Field orientation="horizontal" role="presentation">
               <RadioGroupItem value={option} />
               <FieldTitle>{labelOf(option)}</FieldTitle>
             </Field>
@@ -128,7 +137,7 @@ export function TrendControls({ period, onPeriodChange, metric, onMetricChange }
         onChange={onPeriodChange}
       />
       <ChoiceGroup
-        title="グラフの指標"
+        title="グラフに表示する項目"
         options={TREND_METRICS}
         value={metric}
         labelOf={metricChipLabel}
