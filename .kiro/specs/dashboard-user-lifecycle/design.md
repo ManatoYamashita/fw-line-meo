@@ -66,6 +66,7 @@
 - ロック鍵は operator_id から安定的に導出し、他用途の advisory lock と衝突しない専用ロッククラス（名前空間）に属させる（鍵導出の詳細は実装事項）。
 - 「有効な運営」の定義: `role = 'operator'` かつ `disabled_at IS NULL`（**保留＝未ログイン運営も含む**。初回ログインで復旧可能な正当な回復経路であるため。ユーザー決裁 2026-07-19）。
 - advisory lock を採用（`FOR UPDATE` に対する優位: count 判定が直列実行で自明に正しく、EvalPlanQual 再評価の機微に依存せず、テストが容易。管理操作は低頻度ゆえテナント単位の過剰直列化は無害）。
+- 直列化の対象は dashboard-user-edit（#259）で運営から代理店への降格まで広げた。降格も有効な運営を 1 人減らすため、`updateDashboardUserGuarded` が同じロック（定数は `OPERATOR_GUARD_LOCK_CLASS` へ改名・値は不変）を取り、無効化と降格を互いに直列化する（`.kiro/specs/dashboard-user-edit/design.md` の「並行ガードの拡張」）。
 
 ```mermaid
 sequenceDiagram

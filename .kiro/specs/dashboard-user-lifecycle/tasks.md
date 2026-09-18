@@ -87,7 +87,7 @@
 
 ## Implementation Notes
 <!-- kiro-impl が横断的知見を追記する。既知の前提: 破壊的変更（旧無効化アクセサ撤去・無効化結果型変更・/me への id 追加）は該当テストと同一タスクで更新しビルド緑を保つこと（design「実装順序の制約」）。共有 DB テストの UUID 接頭辞は f8 から。 -->
-- 1.2: advisory lock は `pg_advisory_xact_lock($1::int4, hashtext($2)::int4)`（第1引数=固定クラス `DISABLE_LOCK_CLASS=0x64756c31`・第2引数=hashtext(operator_id)）でテナント直列化。`TransactionCapable`=`Pick<Pool,'connect'>` 相当を pool.ts に追加（pg Pool が構造適合）。guard フィクスチャは f8 別帯（op 9001/9002・user e0000000XXXX）で 1.1 の f8（a1/b2・d0000000000X）と非交差。
+- 1.2: advisory lock は `pg_advisory_xact_lock($1::int4, hashtext($2)::int4)`（第1引数=固定クラス `DISABLE_LOCK_CLASS=0x64756c31`・第2引数=hashtext(operator_id)）でテナント直列化。`TransactionCapable`=`Pick<Pool,'connect'>` 相当を pool.ts に追加（pg Pool が構造適合）。guard フィクスチャは f8 別帯（op 9001/9002・user e0000000XXXX）で 1.1 の f8（a1/b2・d0000000000X）と非交差。（dashboard-user-edit #259 で `OPERATOR_GUARD_LOCK_CLASS` へ改名・値は不変）
 - 1.3: **並行テストは Promise.all のタイミング依存では非決定的**（環境で ~95% 自然直列化し lock 除去でも通ってしまう）。正解は**別接続でテナント advisory ロックを保持し op2 を未コミット無効化→本物ガードがブロック（500ms 有界待機で settled=false）→holder COMMIT→ガードが last_operator を返す**という TX 制御。lock 除去で 100% 失敗する（決定的・突然変異検証済み）。並行フィクスチャは f8 帯 op 9003・user e1000000XXXX。
 - レビュー規律: subagent の突然変異検証は **Edit 逆置換で復元し `git checkout` 禁止**（未コミット差分破棄の事故防止）。コミット前に親が `git diff --name-only`＋テスト再実行で独立確認する。
 - 実行環境: session limit・接続断で implementer subagent が中断する場合あり。その際は親のメインコンテキストで manual mode 実装/remediation＋独立レビュー subagent に切替（1.2/1.3/2.2 で実施）。

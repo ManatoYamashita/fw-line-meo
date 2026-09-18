@@ -1,21 +1,33 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  auditActionsForUserUpdate,
   handleAgenciesList,
   handleAgencyCreate,
   handleDashboardUsersList,
   handleDashboardUserCreate,
   handleDashboardUserDisable,
   handleDashboardUserEnable,
+  handleDashboardUserUpdate,
   type AgenciesListDeps,
   type AgencyCreateDeps,
   type DashboardUsersListDeps,
   type DashboardUserCreateDeps,
   type DashboardUserDisableDeps,
   type DashboardUserEnableDeps,
+  type DashboardUserUpdateDeps,
   type DashboardUserItemJson,
 } from '../src/admin.js';
 import type { AuthDeps } from '../src/auth.js';
-import type { AgencyItem, DashboardUserIdentity, DashboardUserItem, DisableOutcome } from '@fwlm/db';
+import type {
+  AgencyItem,
+  AuditLogAction,
+  AuditLogger,
+  DashboardUserIdentity,
+  DashboardUserItem,
+  DashboardUserUpdateInput,
+  DisableOutcome,
+  UpdateOutcome,
+} from '@fwlm/db';
 import { readJson, type ErrorEnvelope } from './support/json.js';
 
 // 運営（operator）は全管理 API 許可、代理店（agency）は全管理 API 拒否（Req 6.5）。
@@ -56,7 +68,7 @@ function authDeps(user: DashboardUserIdentity | null, disabled = false): AuthDep
   };
 }
 
-// --- 横断ガード（Req 6.5, 7.1）: 全 5 ハンドラで一様に検証する ---
+// --- 横断ガード（Req 6.5, 7.1）: 全ハンドラで一様に検証する ---
 // 各エントリは共有スパイ dep を持つ deps を組み立て、認証結果に応じた封筒を返す。
 
 type Spy = ReturnType<typeof vi.fn>;
@@ -143,6 +155,25 @@ const guardCases: GuardCase[] = [
       const res = handleDashboardUserEnable({ auth: authDeps(user, disabled), enableUser: dep }, {
         authorization,
         id: USER_ID,
+      });
+      return { res, dep };
+    },
+  },
+  {
+    // dashboard-user-edit（Req 4.1, 4.2）: 権限の付与そのものなので、運営以外は依存へ一切到達させない。
+    name: 'POST /dashboard-users/:id/update',
+    invoke: ({ user, disabled = false, authorization }) => {
+      const dep = vi.fn(() =>
+        Promise.resolve<UpdateOutcome>({
+          kind: 'updated',
+          before: userItem(),
+          user: userItem({ displayName: '新しい名前' }),
+        }),
+      );
+      const res = handleDashboardUserUpdate({ auth: authDeps(user, disabled), updateUser: dep }, {
+        authorization,
+        id: USER_ID,
+        body: { displayName: '新しい名前' },
       });
       return { res, dep };
     },
@@ -703,5 +734,575 @@ describe('handleDashboardUserEnable', () => {
     expect(json.user.id).toBe(USER_ID);
     expect(json.user.disabled).toBe(false);
     expect(json.user.createdAt).toBe('2026-07-01T12:34:56.000Z');
+  });
+});
+
+// --- POST /dashboard-users/:id/update（dashboard-user-edit）---
+
+const OTHER_AGENCY_ID = 'a3a3a3a3-3333-4333-8333-333333333333';
+
+function userUpdateDeps(
+  over: Partial<DashboardUserUpdateDeps> = {},
+  user: DashboardUserIdentity | null = OP,
+): DashboardUserUpdateDeps {
+  return {
+    auth: authDeps(user),
+    updateUser: (id) =>
+      Promise.resolve<UpdateOutcome>({ kind: 'updated', before: userItem({ id }), user: userItem({ id }) }),
+    ...over,
+  };
+}
+
+// 更新依存のスパイ。呼び出しの引数（id・operatorId・input）を型つきで読むため、関数型を明示する。
+function updateUserSpy(
+  outcome: UpdateOutcome = { kind: 'updated', before: userItem(), user: userItem() },
+) {
+  return vi.fn<DashboardUserUpdateDeps['updateUser']>(() => Promise.resolve(outcome));
+}
+
+function auditLogSpy() {
+  return vi.fn<AuditLogger>(() => Promise.resolve());
+}
+
+// 入力エラー（400）になる body の形。いずれも依存と監査に到達させない（Req 1.6）。
+const invalidUpdateBodies: { name: string; body: unknown }[] = [
+  { name: 'body が null', body: null },
+  { name: 'body が配列', body: [{ displayName: '担当' }] },
+  { name: 'body が文字列', body: 'displayName' },
+  { name: '空のオブジェクト（変更なし）', body: {} },
+  {
+    name: '読まないキーだけ（変更なし）',
+    body: { operatorId: 'HACKED', email: 'evil@example.com', disabled: true },
+  },
+  { name: 'role が未知の値', body: { role: 'admin' } },
+  { name: 'role が null', body: { role: null } },
+  { name: '代理店ロールで agencyId が無い', body: { role: 'agency' } },
+  { name: '代理店ロールで agencyId が null', body: { role: 'agency', agencyId: null } },
+  { name: '代理店ロールで agencyId が UUID 形式でない', body: { role: 'agency', agencyId: 'not-a-uuid' } },
+  { name: '運営ロールで agencyId を指定する', body: { role: 'operator', agencyId: AGENCY_ID } },
+  { name: 'role 無しで agencyId が null', body: { agencyId: null } },
+  { name: 'role 無しで agencyId が UUID 形式でない', body: { agencyId: 'not-a-uuid' } },
+  { name: 'role 無しで agencyId が数値', body: { agencyId: 42 } },
+  { name: 'displayName が数値', body: { displayName: 42 } },
+  { name: 'displayName がオブジェクト', body: { displayName: { value: '担当' } } },
+  // 以下は、誤った項目を正しい別の変更と組み合わせた形である。誤った項目だけの body は「変更が無い」の
+  // 規則でも 400 になるため、項目ごとの規則を消しても緑のまま通ってしまう。正しい変更を 1 つ添えて、
+  // 誤った項目を黙って無視して残りだけを更新する（例: 所属を外すつもりの要求を捨てて表示名だけを
+  // 変える）実装を検出する。
+  { name: '正しい role と誤った型の displayName', body: { role: 'operator', displayName: false } },
+  { name: '未知の role と正しい displayName', body: { role: 'admin', displayName: '担当' } },
+  { name: 'role が null で正しい displayName', body: { role: null, displayName: '担当' } },
+  { name: 'role 無しで agencyId が null、正しい displayName', body: { agencyId: null, displayName: '担当' } },
+  {
+    name: 'role 無しで agencyId が UUID 形式でない、正しい displayName',
+    body: { agencyId: 'not-a-uuid', displayName: '担当' },
+  },
+  { name: 'role 無しで agencyId が数値、正しい displayName', body: { agencyId: 42, displayName: '担当' } },
+];
+
+// body → 依存へ渡す入力の写像。送らなかった項目はキーごと無い（Req 3.1, 3.4, 1.5）。
+const updateBodyMappings: { name: string; body: Record<string, unknown>; input: DashboardUserUpdateInput }[] = [
+  {
+    name: 'role: operator は運営ロールへの scope',
+    body: { role: 'operator' },
+    input: { assignment: { kind: 'scope', scope: { role: 'operator', agencyId: null } } },
+  },
+  {
+    name: 'role: operator と agencyId: null も運営ロールへの scope',
+    body: { role: 'operator', agencyId: null },
+    input: { assignment: { kind: 'scope', scope: { role: 'operator', agencyId: null } } },
+  },
+  {
+    name: 'role: agency と agencyId は代理店ロールへの scope',
+    body: { role: 'agency', agencyId: AGENCY_ID },
+    input: { assignment: { kind: 'scope', scope: { role: 'agency', agencyId: AGENCY_ID } } },
+  },
+  {
+    name: 'role 無しの agencyId は代理店ロールのまま所属を移す（3.4）',
+    body: { agencyId: OTHER_AGENCY_ID },
+    input: { assignment: { kind: 'agency', agencyId: OTHER_AGENCY_ID } },
+  },
+  {
+    name: 'displayName は前後の空白を取り除く（1.5）',
+    body: { displayName: '  新しい名前  ' },
+    input: { displayName: '新しい名前' },
+  },
+  {
+    name: '空白だけの displayName は未設定（null）にする（1.5）',
+    body: { displayName: ' \t　' },
+    input: { displayName: null },
+  },
+  {
+    name: 'displayName: null は未設定にする（1.5）',
+    body: { displayName: null },
+    input: { displayName: null },
+  },
+  {
+    name: 'ロールの変更と表示名を同時に送る',
+    body: { role: 'agency', agencyId: AGENCY_ID, displayName: '担当' },
+    input: {
+      assignment: { kind: 'scope', scope: { role: 'agency', agencyId: AGENCY_ID } },
+      displayName: '担当',
+    },
+  },
+  {
+    name: '所属の移動と表示名の未設定を同時に送る',
+    body: { agencyId: OTHER_AGENCY_ID, displayName: null },
+    input: { assignment: { kind: 'agency', agencyId: OTHER_AGENCY_ID }, displayName: null },
+  },
+  {
+    name: '読まないキー（operatorId・email・disabled）は無視する',
+    body: { displayName: '担当', operatorId: 'HACKED', email: 'evil@example.com', disabled: true },
+    input: { displayName: '担当' },
+  },
+];
+
+// 自分自身に対して拒否する変更（ロールを代理店にする・所属を移す）。行為者は必ず運営なので、
+// どちらも自分の権限を変える操作である（Req 2.1）。大文字の ID でもすり抜けさせない（Req 4.6）。
+const selfRoleChangeCases = [
+  { idLabel: '小文字の ID', id: USER_ID },
+  { idLabel: '大文字の ID', id: USER_ID.toUpperCase() },
+].flatMap(({ idLabel, id }) =>
+  [
+    { name: '自分を代理店ロールにする', body: { role: 'agency', agencyId: AGENCY_ID } },
+    { name: '自分の所属を移す', body: { agencyId: AGENCY_ID } },
+    {
+      name: '自分を代理店ロールにし、表示名も変える',
+      body: { role: 'agency', agencyId: AGENCY_ID, displayName: '新しい名前' },
+    },
+  ].map((c) => ({ ...c, idLabel, id })),
+);
+
+// DAL の拒否結果 → HTTP の写像。message は内部の詳細を含まない日本語の固定文（Req 4.7）。
+const updateRejections: {
+  kind: Exclude<UpdateOutcome['kind'], 'updated'>;
+  status: number;
+  message: string;
+}[] = [
+  {
+    kind: 'last_operator',
+    status: 409,
+    message: '最後の運営は代理店に変更できないため、先に別の運営を追加してください',
+  },
+  {
+    kind: 'role_changed',
+    status: 409,
+    message: '他の操作でロールが変わったため、所属代理店を変更できませんでした。画面を再読み込みしてください',
+  },
+  { kind: 'agency_not_found', status: 404, message: '所属代理店が見つかりません' },
+  { kind: 'not_found', status: 404, message: '利用者が見つかりません' },
+];
+
+describe('handleDashboardUserUpdate — 入力の検証（Req 1.6, 4.3）', () => {
+  it.each(invalidUpdateBodies)(
+    '$name は 400 validation_failed で updateUser も監査も呼ばない',
+    async ({ body }) => {
+      const updateUser = updateUserSpy();
+      const auditLog = auditLogSpy();
+      const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser, auditLog }), {
+        authorization: 'Bearer tok',
+        id: USER_ID,
+        body,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toStrictEqual({
+        error: { code: 'validation_failed', message: '入力内容が正しくありません' },
+      });
+      expect(updateUser).not.toHaveBeenCalled();
+      expect(auditLog).not.toHaveBeenCalled();
+    },
+  );
+
+  it('UUID 形式でない id は 404 not_found で updateUser を呼ばない（存在の探り当てを許さない）', async () => {
+    const updateUser = updateUserSpy();
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }), {
+      authorization: 'Bearer tok',
+      id: 'not-a-uuid',
+      body: { displayName: '新しい名前' },
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toStrictEqual({
+      error: { code: 'not_found', message: '利用者が見つかりません' },
+    });
+    expect(updateUser).not.toHaveBeenCalled();
+  });
+
+  // 認証・認可を UUID の検証より先に行う。逆順だと、未認証や代理店ロールにも不正な id で 404 を返し、
+  // 管理機能の入力の扱いを運営以外へ見せてしまう（同一の 401/403 で拒否する・Req 4.2）。
+  it.each([
+    { who: '未認証', user: OP, authorization: undefined, status: 401, code: 'unauthenticated' },
+    { who: '代理店ロール', user: AG, authorization: 'Bearer tok', status: 403, code: 'forbidden' },
+  ])(
+    '$who は id が UUID 形式でなくても $status $code（認証・認可が UUID の検証より先）',
+    async ({ user, authorization, status, code }) => {
+      const updateUser = updateUserSpy();
+      const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }, user), {
+        authorization,
+        id: 'not-a-uuid',
+        body: { displayName: '新しい名前' },
+      });
+      expect(res.status).toBe(status);
+      expect((await readJson<ErrorEnvelope>(res)).error.code).toBe(code);
+      expect(updateUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it('UUID 形式でない id は body が不正でも 404（id の検証が body の検証より先）', async () => {
+    const res = await handleDashboardUserUpdate(userUpdateDeps(), {
+      authorization: 'Bearer tok',
+      id: 'not-a-uuid',
+      body: {},
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('自分自身への不正な body は 409 ではなく 400（body の検証が自己判定より先）', async () => {
+    const updateUser = updateUserSpy();
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }, SELF_OP), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+      body: { role: 'agency' },
+    });
+    expect(res.status).toBe(400);
+    expect(updateUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleDashboardUserUpdate — body の写像と依存へ渡す引数（Req 1.5, 3.1, 3.4, 4.1, 4.6）', () => {
+  it.each(updateBodyMappings)('$name', async ({ body, input }) => {
+    const updateUser = updateUserSpy();
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+      body,
+    });
+    expect(res.status).toBe(200);
+    // 送らなかった項目が「undefined の値を持つキー」でもなく、キーごと無いことまで確かめる（toStrictEqual）。
+    expect(updateUser.mock.calls).toStrictEqual([[USER_ID, 'op1', input]]);
+  });
+
+  it('大文字の id は小文字へ正規化し、operatorId は認証ユーザー由来で updateUser を呼ぶ', async () => {
+    const updateUser = updateUserSpy();
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }), {
+      authorization: 'Bearer tok',
+      id: USER_ID.toUpperCase(),
+      // クライアントが operatorId を詐称しても無視され、認証ユーザーの op1 が使われる（Req 4.1）。
+      body: { displayName: '担当', operatorId: 'HACKED' },
+    });
+    expect(res.status).toBe(200);
+    expect(updateUser.mock.calls).toStrictEqual([[USER_ID, 'op1', { displayName: '担当' }]]);
+  });
+});
+
+describe('handleDashboardUserUpdate — 自分自身の変更（Req 2.1, 2.2, 4.6）', () => {
+  it.each(selfRoleChangeCases)(
+    '$idLabel: $name は 409 self_role_change_forbidden で updateUser も監査も呼ばない',
+    async ({ id, body }) => {
+      const updateUser = updateUserSpy();
+      const auditLog = auditLogSpy();
+      const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser, auditLog }, SELF_OP), {
+        authorization: 'Bearer tok',
+        id,
+        body,
+      });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toStrictEqual({
+        error: { code: 'self_role_change_forbidden', message: '自分自身のロールは変更できません' },
+      });
+      // DB 到達前に拒否するので、同じ保存に含まれていた表示名の変更も確定しない（Req 2.6）。
+      expect(updateUser).not.toHaveBeenCalled();
+      expect(auditLog).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { idLabel: '小文字の ID', id: USER_ID },
+    { idLabel: '大文字の ID', id: USER_ID.toUpperCase() },
+  ])('$idLabel: 自分の表示名だけの変更は 200 で、小文字の ID で updateUser を呼ぶ（2.2）', async ({ id }) => {
+    const updateUser = updateUserSpy();
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }, SELF_OP), {
+      authorization: 'Bearer tok',
+      id,
+      body: { displayName: '新しい名前' },
+    });
+    expect(res.status).toBe(200);
+    expect(updateUser.mock.calls).toStrictEqual([[USER_ID, 'op1', { displayName: '新しい名前' }]]);
+  });
+
+  it('自分に運営ロールを送る（変化なし）のは拒否しない（2.2）', async () => {
+    const updateUser = updateUserSpy();
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }, SELF_OP), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+      body: { role: 'operator', agencyId: null, displayName: '新しい名前' },
+    });
+    expect(res.status).toBe(200);
+    expect(updateUser.mock.calls).toStrictEqual([
+      [
+        USER_ID,
+        'op1',
+        {
+          assignment: { kind: 'scope', scope: { role: 'operator', agencyId: null } },
+          displayName: '新しい名前',
+        },
+      ],
+    ]);
+  });
+});
+
+describe('handleDashboardUserUpdate — 結果の写像（Req 2.6, 3.4, 4.3, 4.4, 4.7）', () => {
+  it('依存が updated なら 200 で、更新後の行（before ではない）を返す', async () => {
+    const updateUser = updateUserSpy({
+      kind: 'updated',
+      before: userItem({ displayName: '担当者' }),
+      user: userItem({ displayName: '新しい名前' }),
+    });
+    const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser }), {
+      authorization: 'Bearer tok',
+      id: USER_ID,
+      body: { displayName: '新しい名前' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toStrictEqual({
+      user: {
+        id: USER_ID,
+        role: 'agency',
+        operatorId: 'op1',
+        agencyId: AGENCY_ID,
+        email: 'user@example.com',
+        displayName: '新しい名前',
+        disabled: false,
+        createdAt: '2026-07-01T12:34:56.000Z',
+      },
+    });
+  });
+
+  it.each(updateRejections)(
+    '依存が $kind なら $status で、同じコードの固定文を返し監査を書かない',
+    async ({ kind, status, message }) => {
+      const updateUser = updateUserSpy({ kind });
+      const auditLog = auditLogSpy();
+      const res = await handleDashboardUserUpdate(userUpdateDeps({ updateUser, auditLog }), {
+        authorization: 'Bearer tok',
+        id: USER_ID,
+        body: { role: 'agency', agencyId: AGENCY_ID, displayName: '新しい名前' },
+      });
+      expect(res.status).toBe(status);
+      // 封筒は code と message だけ（内部の詳細を足さない）。
+      expect(await res.json()).toStrictEqual({ error: { code: kind, message } });
+      // 拒否の判定は DAL の結果に由来する（ハンドラは依存を呼んでいる）。
+      expect(updateUser).toHaveBeenCalledTimes(1);
+      expect(auditLog).not.toHaveBeenCalled();
+    },
+  );
+
+  it('依存の例外は捕まえずに再送出し、監査を書かない（既存の書込と同じ扱い）', async () => {
+    const updateUser = vi.fn<DashboardUserUpdateDeps['updateUser']>(() =>
+      Promise.reject(new Error('DB_UNAVAILABLE')),
+    );
+    const auditLog = auditLogSpy();
+    await expect(
+      handleDashboardUserUpdate(userUpdateDeps({ updateUser, auditLog }), {
+        authorization: 'Bearer tok',
+        id: USER_ID,
+        body: { displayName: '新しい名前' },
+      }),
+    ).rejects.toThrow('DB_UNAVAILABLE');
+    expect(auditLog).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleDashboardUserUpdate — 監査（Req 5.1, 5.3, 5.4, 5.5）', () => {
+  // 監査の 1 行の期待形。表示名の値を含むキーは持たない（Req 5.4）。
+  function auditRow(action: AuditLogAction) {
+    return {
+      actorType: 'operator',
+      actorId: 'u1',
+      action,
+      targetType: 'dashboard_user',
+      targetId: USER_ID,
+    };
+  }
+
+  it('昇格は promoted_to_operator の 1 件で、行為者は認証ユーザー・対象は更新した利用者（5.1）', async () => {
+    const auditLog = auditLogSpy();
+    const res = await handleDashboardUserUpdate(
+      userUpdateDeps({
+        updateUser: updateUserSpy({
+          kind: 'updated',
+          before: userItem({ role: 'agency', agencyId: AGENCY_ID }),
+          user: userItem({ role: 'operator', agencyId: null }),
+        }),
+        auditLog,
+      }),
+      { authorization: 'Bearer tok', id: USER_ID, body: { role: 'operator' } },
+    );
+    expect(res.status).toBe(200);
+    expect(auditLog.mock.calls).toStrictEqual([[auditRow('dashboard_user_promoted_to_operator')]]);
+  });
+
+  it('降格は所属の設定を含めて demoted_to_agency の 1 件だけ（5.3）', async () => {
+    const auditLog = auditLogSpy();
+    const res = await handleDashboardUserUpdate(
+      userUpdateDeps({
+        updateUser: updateUserSpy({
+          kind: 'updated',
+          before: userItem({ role: 'operator', agencyId: null }),
+          user: userItem({ role: 'agency', agencyId: AGENCY_ID }),
+        }),
+        auditLog,
+      }),
+      { authorization: 'Bearer tok', id: USER_ID, body: { role: 'agency', agencyId: AGENCY_ID } },
+    );
+    expect(res.status).toBe(200);
+    expect(auditLog.mock.calls).toStrictEqual([[auditRow('dashboard_user_demoted_to_agency')]]);
+  });
+
+  it('ロールと表示名を同時に変えると、ロール → 表示名の順に 2 件（5.3）', async () => {
+    const auditLog = auditLogSpy();
+    await handleDashboardUserUpdate(
+      userUpdateDeps({
+        updateUser: updateUserSpy({
+          kind: 'updated',
+          before: userItem({ role: 'agency', agencyId: AGENCY_ID, displayName: '担当者' }),
+          user: userItem({ role: 'operator', agencyId: null, displayName: '新しい名前' }),
+        }),
+        auditLog,
+      }),
+      {
+        authorization: 'Bearer tok',
+        id: USER_ID,
+        body: { role: 'operator', displayName: '新しい名前' },
+      },
+    );
+    expect(auditLog.mock.calls).toStrictEqual([
+      [auditRow('dashboard_user_promoted_to_operator')],
+      [auditRow('dashboard_user_display_name_updated')],
+    ]);
+  });
+
+  it('表示名の変更は display_name_updated の 1 件で、表示名の値を監査に渡さない（5.4）', async () => {
+    const auditLog = auditLogSpy();
+    await handleDashboardUserUpdate(
+      userUpdateDeps({
+        updateUser: updateUserSpy({
+          kind: 'updated',
+          before: userItem({ displayName: '担当者' }),
+          user: userItem({ displayName: '新しい名前' }),
+        }),
+        auditLog,
+      }),
+      { authorization: 'Bearer tok', id: USER_ID, body: { displayName: '新しい名前' } },
+    );
+    expect(auditLog.mock.calls).toStrictEqual([[auditRow('dashboard_user_display_name_updated')]]);
+    // 新旧どちらの値も、監査へ渡した入力のどこにも現れない。
+    const recorded = JSON.stringify(auditLog.mock.calls);
+    expect(recorded).not.toContain('新しい名前');
+    expect(recorded).not.toContain('担当者');
+  });
+
+  it('変化なし（before と user が同じ）は 200 で監査 0 件（1.13, 5.5）', async () => {
+    const auditLog = auditLogSpy();
+    const res = await handleDashboardUserUpdate(
+      userUpdateDeps({
+        updateUser: updateUserSpy({ kind: 'updated', before: userItem(), user: userItem() }),
+        auditLog,
+      }),
+      { authorization: 'Bearer tok', id: USER_ID, body: { displayName: '担当者' } },
+    );
+    expect(res.status).toBe(200);
+    expect(auditLog).not.toHaveBeenCalled();
+  });
+});
+
+describe('auditActionsForUserUpdate — 前後の差分 → action（Req 5.2〜5.5）', () => {
+  const rules: {
+    name: string;
+    before: Partial<DashboardUserItem>;
+    after: Partial<DashboardUserItem>;
+    actions: AuditLogAction[];
+  }[] = [
+    {
+      name: '代理店 → 運営は昇格の 1 件（所属が外れても所属変更を足さない）',
+      before: { role: 'agency', agencyId: AGENCY_ID },
+      after: { role: 'operator', agencyId: null },
+      actions: ['dashboard_user_promoted_to_operator'],
+    },
+    {
+      name: '運営 → 代理店は所属の設定を含めて降格の 1 件（5.3）',
+      before: { role: 'operator', agencyId: null },
+      after: { role: 'agency', agencyId: AGENCY_ID },
+      actions: ['dashboard_user_demoted_to_agency'],
+    },
+    {
+      name: '代理店のまま所属が変わると所属変更の 1 件',
+      before: { role: 'agency', agencyId: AGENCY_ID },
+      after: { role: 'agency', agencyId: OTHER_AGENCY_ID },
+      actions: ['dashboard_user_agency_updated'],
+    },
+    {
+      name: '表示名が変わると表示名変更の 1 件',
+      before: { displayName: '担当者' },
+      after: { displayName: '新しい名前' },
+      actions: ['dashboard_user_display_name_updated'],
+    },
+    {
+      name: '表示名を未設定にしても表示名変更の 1 件',
+      before: { displayName: '担当者' },
+      after: { displayName: null },
+      actions: ['dashboard_user_display_name_updated'],
+    },
+    {
+      name: '未設定の表示名を設定しても表示名変更の 1 件',
+      before: { displayName: null },
+      after: { displayName: '担当者' },
+      actions: ['dashboard_user_display_name_updated'],
+    },
+    {
+      name: '運営のまま表示名だけが変わると表示名変更の 1 件',
+      before: { role: 'operator', agencyId: null, displayName: '担当者' },
+      after: { role: 'operator', agencyId: null, displayName: '新しい名前' },
+      actions: ['dashboard_user_display_name_updated'],
+    },
+    {
+      name: '昇格と表示名の変更は、昇格 → 表示名の順に 2 件',
+      before: { role: 'agency', agencyId: AGENCY_ID, displayName: '担当者' },
+      after: { role: 'operator', agencyId: null, displayName: '新しい名前' },
+      actions: ['dashboard_user_promoted_to_operator', 'dashboard_user_display_name_updated'],
+    },
+    {
+      name: '降格と表示名の変更は、降格 → 表示名の順に 2 件',
+      before: { role: 'operator', agencyId: null, displayName: '担当者' },
+      after: { role: 'agency', agencyId: AGENCY_ID, displayName: null },
+      actions: ['dashboard_user_demoted_to_agency', 'dashboard_user_display_name_updated'],
+    },
+    {
+      name: '所属の変更と表示名の変更は、所属 → 表示名の順に 2 件',
+      before: { role: 'agency', agencyId: AGENCY_ID, displayName: null },
+      after: { role: 'agency', agencyId: OTHER_AGENCY_ID, displayName: '新しい名前' },
+      actions: ['dashboard_user_agency_updated', 'dashboard_user_display_name_updated'],
+    },
+    {
+      name: '代理店のまま何も変わらなければ 0 件（5.5）',
+      before: {},
+      after: {},
+      actions: [],
+    },
+    {
+      name: '運営のまま何も変わらなければ 0 件（5.5）',
+      before: { role: 'operator', agencyId: null },
+      after: { role: 'operator', agencyId: null },
+      actions: [],
+    },
+    {
+      name: 'ロール・所属・表示名以外（無効化の状態・メール）の違いは記録しない',
+      before: { disabled: false, email: 'before@example.com' },
+      after: { disabled: true, email: 'after@example.com' },
+      actions: [],
+    },
+  ];
+
+  it.each(rules)('$name', ({ before, after, actions }) => {
+    expect(auditActionsForUserUpdate(userItem(before), userItem(after))).toStrictEqual(actions);
   });
 });

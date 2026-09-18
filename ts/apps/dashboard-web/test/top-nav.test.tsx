@@ -175,3 +175,61 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
     expect(screen.getByText('LINE MEO').closest('a')).toBeNull();
   });
 });
+
+// 帯の段組み（docs/design/design-language.md 7.8・Issue #283）。
+//
+// 携帯端末の幅では、ワードマーク・案内 5 件・ロール・ログアウトが 1 段に収まらない。従来は
+// 溢れを案内リストの内部へ閉じて横に捲れるようにしていたが、捲れる手がかりが無いため、
+// 画面の外のリンク（実測で 389〜418px 分）は**存在しないように見えていた**。
+//
+// ここで固定するのは、段組みの切り替えが「広い画面だけの指定」として書かれていることである。
+// 実際に 2 段で描かれ、全リンクが画面の中にあることは dashboard-web の E2E が実測する。
+describe('帯の段組み（7.8 節・Issue #283）', () => {
+  /** 帯そのものと案内リストの class 語。 */
+  function bandTokens(): { nav: string[]; list: string[] } {
+    const nav = screen.getByRole('navigation');
+    const list = nav.querySelector('ul')!;
+    const split = (element: Element) =>
+      (element.getAttribute('class') ?? '').split(/\s+/).filter((token) => token.length > 0);
+    return { nav: split(nav), list: split(list) };
+  }
+
+  it('DOM の順はワードマーク → 案内リンク → ロール → ログアウトで、段組みで入れ替えない', () => {
+    // 見た目に合わせて DOM を並べ替えると、広い画面の帯で読み上げと焦点の順が逆にずれる。
+    ready('operator');
+    render(<TopNav />);
+    const wordmark = screen.getByText('LINE MEO');
+    const firstLink = within(screen.getByRole('navigation')).getAllByRole('link')[0]!;
+    const role = screen.getByText('運営');
+    const logout = screen.getByRole('button', { name: 'ログアウト' });
+    const precedes = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(precedes(wordmark, firstLink)).toBe(true);
+    expect(precedes(firstLink, role)).toBe(true);
+    expect(precedes(role, logout)).toBe(true);
+  });
+
+  it('案内リンクは狭い画面で折り返す（横に捲る指定は広い画面にだけある）', () => {
+    ready('operator');
+    render(<TopNav />);
+    const { list } = bandTokens();
+    expect(list, '案内リンクが折り返しません（狭い画面で 1 行に並べると画面の外へ出ます）').toContain(
+      'flex-wrap',
+    );
+    // 捲りの指定を**集合の一致**で見る。前置きの無い overflow-x-auto を足すと、狭い画面でも
+    // 捲れる領域が戻り、リンクが画面の外に残ったまま緑になる。
+    const overflowTokens = list.filter((token) => /(^|:)overflow-/.test(token));
+    expect(overflowTokens).toEqual(['lg:overflow-x-auto']);
+  });
+
+  it('帯の高さの固定は広い画面にだけある（狭い画面では段数で高さが決まる）', () => {
+    ready('operator');
+    render(<TopNav />);
+    const { nav } = bandTokens();
+    const heightTokens = nav.filter((token) => /(^|:)h-\d+$/.test(token));
+    expect(
+      heightTokens,
+      '狭い画面で高さを固定すると、2 段目が帯の外へはみ出して下の見出しに重なります',
+    ).toEqual(['lg:h-20']);
+  });
+});

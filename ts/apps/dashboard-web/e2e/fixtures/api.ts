@@ -30,6 +30,20 @@ export const ME = {
   displayName: '運営ユーザー',
 } as const;
 
+/**
+ * 代理店ロールの利用者（Issue #283）。
+ *
+ * 帯の案内リンクは運営の 5 本から 3 本へ減るが、**ロールの表示は「運営」より 1 字長い**ので、
+ * 帯の 1 段目は代理店の方が広い。運営だけを測ると包含関係にならないため、この口を持つ。
+ */
+export const AGENCY_ME = {
+  id: '00000000-0000-0000-0000-0000000000bb',
+  role: 'agency',
+  agencyId: '22222222-2222-2222-2222-222222222222',
+  agencyName: LONG_AGENCY_NAME,
+  displayName: '代理店ユーザー',
+} as const;
+
 export const STORES = [
   {
     id: '44444444-4444-4444-4444-444444444444',
@@ -80,7 +94,12 @@ export const DASHBOARD_USERS = [
     role: 'agency',
     operatorId: '11111111-1111-1111-1111-111111111111',
     agencyId: '22222222-2222-2222-2222-222222222222',
-    email: 'agency-member-with-a-long-address@example.co.jp',
+    // **行を折り返せる位置を持たない値にする**（区切りは点だけ。ハイフンの後ろでは折り返せるが、
+    // 点の後ろでは折り返さない）。ハイフンで区切った値だと、見出し・列がたまたま折り返して幅に
+    // 収まり、区切りの無い実在のアドレス（yamada.hanako@… の形）で起きる溢れを見逃す。実際、
+    // ハイフンの値のままでは、編集パネルの見出しがカードの外へ出る退行を E2E が拾えなかった
+    // （dashboard-user-edit tasks 3.5 の独立レビュー）。
+    email: 'agency.member.with.a.long.address@example.co.jp',
     displayName: '代理店ユーザー',
     disabled: true,
     createdAt: '2026-07-20T09:00:00.000Z',
@@ -152,14 +171,21 @@ const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
  *
  * QR だけは JSON ではなく PNG を返す（`RESPONSES` の表に載せられない形のため先に分岐する）。
  */
-export async function stubDashboardApi(page: Page): Promise<void> {
+export async function stubDashboardApi(
+  page: Page,
+  options: { readonly me?: unknown } = {},
+): Promise<void> {
+  // ロールの差し替えは `/me` の 1 件だけを覆う。表全体を作り替えると、覆ったつもりで
+  // 他の応答まで変わっていたときに気づけない。
+  const responses: Record<string, unknown> =
+    options.me === undefined ? RESPONSES : { ...RESPONSES, '/me': { user: options.me } };
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (QR_PATH.test(path)) {
       await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
       return;
     }
-    const body = RESPONSES[path];
+    const body = responses[path];
     if (body === undefined) {
       await route.fulfill({
         status: 404,
@@ -215,6 +241,19 @@ export async function openListSurface(
   await expect(page.getByRole('row')).toHaveCount(expectedRows);
 }
 
+/**
+ * 代理店ロールで店舗一覧を開く（Issue #283・帯の 1 段目が最も広い状態）。
+ *
+ * `DASHBOARD_SURFACES` には入れない。あの一覧は「監査と横スクロールの実測が回す面」であり、
+ * ここはロールの差だけを見る補助の口である（面を増やすと、面の数を宣言している側が一斉に動く）。
+ */
+export async function openStoreListAsAgency(page: Page): Promise<void> {
+  await stubDashboardApi(page, { me: AGENCY_ME });
+  await page.goto('/stores');
+  await expect(page.getByRole('heading', { level: 1, name: '店舗一覧' })).toBeVisible();
+  await expect(page.getByRole('table')).toBeVisible();
+}
+
 export interface DashboardSurface {
   readonly where: string;
   /** 表や主要部品が現れるまでの操作と、本体が描けていることの前提 assert。 */
@@ -242,7 +281,40 @@ export async function openStoreQrPanel(page: Page): Promise<void> {
 }
 
 /**
- * 管理ダッシュボードの検証対象 7 面。**面を足したらここへ足す**（両 spec が自動で拾う）。
+ * 利用者管理から編集パネルを開き、**パネルが実際に描けている**ことを先に固定する（Issue #259）。
+ *
+ * `goto` は持たない。`openStoreQrPanel` と同じく、開く手順は `openListSurface` に一本化し、
+ * ここは同じ面の中でパネルを開くだけである。
+ *
+ * 対象は `DASHBOARD_USERS[1]`（代理店・無効化済み）。代理店ロールなので所属代理店の選択が加わり、
+ * パネルが最も横に広い状態になる。編集ボタンは**完全一致の名前**で押す。部分一致にすると、
+ * 名前が前方で重なる利用者を fixture へ足したときに、別の行のパネルを黙って開きうる。
+ *
+ * 前提 assert はパネルにしか無い要素（level 2 の見出し・保存ボタン）で置く。一覧にもある要素で
+ * 置くと、押下が効かずパネルが開かなかった状態でも前提が通り、一覧だけを監査して緑を返す。
+ * 所属代理店の選択は、上の「最も横に広い状態」の前提を固定する。代理店一覧の取得が失敗すると
+ * パネルはロールと所属を固定表示にするため（dashboard-user-edit Req 1.14）、見出しと保存ボタン
+ * だけでは狭い状態へ変わったことを検出できない。登録フォームにも同名の選択があるので、
+ * パネルの置き場所である表の内側に絞って探す。
+ */
+export async function openUserEditPanel(page: Page): Promise<void> {
+  const target = DASHBOARD_USERS[1];
+  await openListSurface(page, '/admin/users', '利用者管理', 3);
+  await page.getByRole('button', { name: `${target.email} を編集`, exact: true }).click();
+  const table = page.getByRole('table');
+  await expect(
+    table.getByRole('heading', { level: 2, name: `${target.email} の編集`, exact: true }),
+  ).toBeVisible();
+  await expect(table.getByRole('combobox', { name: '所属代理店', exact: true })).toBeVisible();
+  await expect(table.getByRole('button', { name: '保存', exact: true })).toBeVisible();
+}
+
+/**
+ * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す。**
+ *
+ * 自動で拾うのは自動 a11y 監査（`a11y-audit.spec.ts`）と携帯端末の幅の配置の実測
+ * （`mobile-layout.spec.ts`。面ごとの宣言 `LAYOUT` にも足すこと）である。横スクロールの実測
+ * （`dashboard-surfaces.spec.ts`）は面ごとに手書きで、捲れる領域の件数を宣言する。
  */
 export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   {
@@ -296,6 +368,13 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: async (page) => {
       await openListSurface(page, '/admin/users', '利用者管理', 3);
     },
+  },
+  {
+    // 編集パネルは利用者管理の中で開く後続状態である。一覧の URL だけを監査しても、パネルは
+    // 構造的に一度も監査されない（QR パネルと同じ理由で、面として明示する・Issue #259）。
+    where: '利用者管理の編集パネル',
+    knownOverflow: false,
+    open: openUserEditPanel,
   },
   {
     where: '店舗登録',

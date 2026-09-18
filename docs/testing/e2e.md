@@ -12,7 +12,7 @@
 | 本番の実機確認 | QR → 回答 → 下書き → Google 投稿画面、変化を知らせる通知 → LIFF、（任意）オンボーディング | 本書の 4. | 回答が匿名集計に加算される |
 
 自動層は、ts-ci の e2e / e2e-surfaces / lighthouse / cross-runtime が毎 PR で流しているものと同じである。ローカルで流すのは、コミットの前に赤を見るためである。
-ただし、Lighthouse で測った画面が seed の店舗であることの確認は、今はローカルの実行装置だけが行っている。ts-ci の lighthouse ジョブには無い（#264）。
+Lighthouse で測った画面が seed の店舗の回答画面であることの確認も、ts-ci の lighthouse ジョブとローカルの実行装置が同じスクリプト（`ts/apps/survey-web/perf/verify-lhr.mjs`）で行う（#264）。
 
 ## 2. 自動層（ローカル）
 
@@ -25,7 +25,7 @@ bash scripts/run-e2e-local.sh --only survey,lighthouse    # 一部だけ
 |---|---|---|
 | `survey` | 客向け口コミ画面の Playwright。一時 DB ＋ seed ＋ Gemini モック | e2e |
 | `surfaces` | 管理ダッシュボードと店舗詳細の Playwright。IdP をスタブへ差し替えたビルドで、データは fixture が返す | e2e-surfaces |
-| `lighthouse` | 客向け画面の Lighthouse（LCP・accessibility）と、測った画面が seed の店舗であることの確認 | lighthouse |
+| `lighthouse` | 客向け画面の Lighthouse（LCP・accessibility）と、測った画面が seed の店舗の回答画面であることの確認（`perf/verify-lhr.mjs`。CI と同じもの） | lighthouse |
 | `cross-runtime` | Go 日次バッチ → TS 配信の契約検証（実 DB 越し） | cross-runtime |
 
 前提は pnpm、Homebrew の postgres（initdb / pg_ctl / psql）、go、lsof、Chrome である。コンテナランタイムは要らない。
@@ -39,7 +39,11 @@ bash scripts/run-e2e-local.sh --only survey,lighthouse    # 一部だけ
 - Gemini モックの `NODE_OPTIONS` は `survey` の Playwright にだけ渡す
 - DB と鍵を明示して渡す。survey-web の `.env.local` は既存の env を上書きしないので、開発用 DB や実の鍵へは繋がらない
 - シェルに残った `E2E_BASE_URL` などの値を外す（残っていると、サーバーを起動せずにその URL を測る）
-- Lighthouse は「店舗が見つからない 1 段落の画面」でも合格しうるので、LCP 要素が seed の店名であることを確かめる
+- Lighthouse は「店舗が見つからない 1 段落の画面」でも合格しうるので、lhci の後に `perf/verify-lhr.mjs` で測った画面を確かめる。見るのは次の 4 つで、判定の中身は `perf/lhr-verification.mjs` の 1 箇所にある
+  - 結果の件数が lighthouserc.json の回数ちょうどであること
+  - URL が seed の店舗の回答画面であること
+  - LCP 要素が seed の店名であること
+  - 回答フォームの accessibility の監査（`button-name`・`label`）が評価されていること
 
 結果は最後の表で層ごとに読む。Playwright の想定内の失敗（`test.fail`）は ✘ と表示されるが、passed に数えられる。✘ の有無ではなく、層の PASS / FAIL と件数で判断すること。
 検査したコミットが origin/main と違えば WARN が出る。

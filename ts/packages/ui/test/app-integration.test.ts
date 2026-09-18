@@ -42,6 +42,10 @@ const REPRESENTATIVE_UTILITIES: readonly { readonly componentFile: string; reado
   { componentFile: 'card.tsx', utility: 'bg-card' },
   { componentFile: 'textarea.tsx', utility: 'field-sizing-content' },
   { componentFile: 'spinner.tsx', utility: 'animate-spin' },
+  // 一覧表の捲れる手がかり（7.18 節・Issue #283）。theme.css の @utility で定義しており、
+  // **アプリ側からは部品経由でしか使われない**ので、代表クラスの条件（アプリのソースに
+  // 現れない）を満たす。生成されていなければ、手がかりは実画面に一切描かれない。
+  { componentFile: 'table.tsx', utility: 'scroll-shadow-x' },
 ];
 
 /** アプリ自身の layout が使う基本クラス。コンパイル自体が健全であることの対照に使う。 */
@@ -595,6 +599,29 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
         ).toEqual([]);
       },
     );
+
+    // 捲れる手がかりは背景の**重ね方だけ**を宣言する。省略形（background）で書くと、容器の面の色
+    // （bg-card）を巻き込んで消すが、白い面に白い覆いを描いている間は画面の見た目が変わらないため、
+    // 目視でも他のガードでも気づけない（面の色は別の要素の背景に見える）。宣言の集合を固定する。
+    it('捲れる手がかりは背景の重ね方だけを宣言し、面の色を上書きしない（7.18 節）', () => {
+      const declarations = utilityDeclarations(compiled, 'scroll-shadow-x');
+      expect(
+        Object.keys(declarations).sort(),
+        '手がかりの宣言が変わりました。background の省略形を使うと面の色が消えます',
+      ).toEqual([
+        'background-attachment',
+        'background-image',
+        'background-position',
+        'background-repeat',
+        'background-size',
+      ]);
+      // 覆いは中身と一緒に動き、濃淡は容器に留まる。この対応が崩れると、捲り位置によらず
+      // 濃淡が出たまま（または一切出ないまま）になる。
+      expect(
+        declarations['background-attachment']?.replace(/\s+/g, ''),
+        '覆いと濃淡の追従の対応が崩れています',
+      ).toBe('local,local,scroll,scroll');
+    });
 
     // Tailwind の Preflight は `h1,h2,h3,h4,h5,h6 { font-size: inherit; font-weight: inherit }` を
     // 敷くため、theme.css が既定を戻さないと **見出しが本文と同一サイズ・同一ウェイトで描画される**
