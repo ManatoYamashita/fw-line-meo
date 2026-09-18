@@ -35,9 +35,12 @@ import (
 //     whose field-name/type contract with TS's DailySummaryCompetitor/DailySummaryNewReview types
 //     is exactly what this test exists to validate).
 //   - crossRuntimeNoCompetitorsStoreID: zero competitors (Nearby Search returns none), producing
-//     status='no_competitors' and an EMPTY `competitors` array — the R1.3 branch that flex.ts's
-//     buildCompetitorsSection must render as "competitor not found" rather than crashing on an
+//     status='no_competitors' and an EMPTY `competitors` array — the R1.3 branch that the TS side
+//     must read as [] (not null) and treat as "not comparable" rather than crashing on an
 //     unexpected shape.
+//   - unratedStoreID（line-on-demand-report tasks 4.5）: 競合はいるが 1 店も評価を持たない。
+//     rank_total は自店だけの 1 になり、競合は rating・starDiff とも null で書かれる。TS の配信は
+//     この行を「比較可能でない」と読み、新着があっても通知を出さずに理由つきで記録する。
 //
 // line-on-demand-report（tasks 2.5）で、line-webhook のレポート用の読み出し
 // （ts/apps/line-webhook/test/cross-runtime.e2e.test.ts）が読む 2 つの形を足した。
@@ -70,8 +73,14 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		nocompOwnerID = "c7000000-0000-0000-0000-000000000012"
 		nocompStoreID = "c7100000-0000-0000-0000-000000000002"
 
-		readyLineUserID  = "U-cross-runtime-ready"
-		nocompLineUserID = "U-cross-runtime-nocomp"
+		// 競合はいるが 1 店も評価を持たない店舗（line-on-demand-report tasks 4.5）。TS の配信は
+		// 「評価を持つ競合なし」を比較不能として扱い、通知を出さずに理由つきで記録する。
+		unratedOwnerID = "c7000000-0000-0000-0000-000000000013"
+		unratedStoreID = "c7100000-0000-0000-0000-000000000003"
+
+		readyLineUserID   = "U-cross-runtime-ready"
+		nocompLineUserID  = "U-cross-runtime-nocomp"
+		unratedLineUserID = "U-cross-runtime-unrated"
 
 		// クロスランタイム契約テスト専用の配信時刻。task 4.4 の index.e2e.test.ts が hour=14 を、
 		// targets.db.test.ts が hour=9/10 を使うため、本テストは衝突しない hour=17 を使う
@@ -116,8 +125,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			return
 		}
 		cleanupCtx := context.Background()
-		storeIDs := []string{readyStoreID, nocompStoreID}
-		ownerIDs := []string{readyOwnerID, nocompOwnerID}
+		storeIDs := []string{readyStoreID, nocompStoreID, unratedStoreID}
+		ownerIDs := []string{readyOwnerID, nocompOwnerID, unratedOwnerID}
 		cleanupExec := func(sql string, args ...any) {
 			if _, err := pool.Exec(cleanupCtx, sql, args...); err != nil {
 				t.Logf("cross-runtime cleanup: %s failed: %v", sql, err)
@@ -140,6 +149,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		readyOwnerID, agencyID, readyLineUserID, crossRuntimeDeliveryHour)
 	mustExec(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, 'active', $4)`,
 		nocompOwnerID, agencyID, nocompLineUserID, crossRuntimeDeliveryHour)
+	mustExec(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, 'active', $4)`,
+		unratedOwnerID, agencyID, unratedLineUserID, crossRuntimeDeliveryHour)
 
 	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（競合あり）', 35.5, 139.5, $3, 'confirmed')`,
@@ -147,6 +158,9 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（競合なし）', 35.6, 139.6, $3, 'confirmed')`,
 		nocompStoreID, nocompOwnerID, "cross-runtime-nocomp-self")
+	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
+		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（評価を持つ競合なし）', 35.7, 139.7, $3, 'confirmed')`,
+		unratedStoreID, unratedOwnerID, "cross-runtime-unrated-self")
 
 	// readyStore: 競合3件を事前固定（extraction をバイパスし、決定的な place_id を確保する）。
 	// 3件目は Google の評価が無い店（クチコミ 0 件・Issue #255）で、比較集合に入らず jsonb に null で
@@ -171,6 +185,15 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		t.Fatalf("seed competitor 3: %v", err)
 	}
 
+	// unratedStore: 競合 1 件を事前固定する。この競合は Google の評価を持たないので、比較集合は
+	// 自店だけ（rank_total = 1）になる。TS の配信はこの行を「比較可能でない」と読む。
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competitors (store_id, place_id, name, latitude, longitude, active)
+		VALUES ($1, $2, $3, 35.7001, 139.7001, true)
+	`, unratedStoreID, "cross-runtime-unrated-comp-1", "評価なし競合"); err != nil {
+		t.Fatalf("seed unrated competitor: %v", err)
+	}
+
 	now := time.Date(2026, 7, 12, 6, 0, 0, 0, jst)
 	today := jstDateAsUTC(now)
 	yesterday := today.AddDate(0, 0, -1)
@@ -181,6 +204,15 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		PlaceID: "cross-runtime-ready-self", CapturedOn: yesterday, Rating: f64(4.0), ReviewCount: 90, Rank: intPtr(1),
 	}); err != nil {
 		t.Fatalf("seed yesterday self snapshot: %v", err)
+	}
+
+	// unratedStore にも前日の自店スナップショットを置く。これで当日の新着件数が 2 件になり、
+	// TS の配信が「変化が無いから送らない」ではなく「比較可能でないから送らない」を選んだことを、
+	// 記録された理由で見分けられる。
+	if err := repo.WriteSelfSnapshot(ctx, pool, unratedStoreID, repo.SnapshotWrite{
+		PlaceID: "cross-runtime-unrated-self", CapturedOn: yesterday, Rating: f64(4.2), ReviewCount: 18, Rank: intPtr(1),
+	}); err != nil {
+		t.Fatalf("seed unratedStore yesterday self snapshot: %v", err)
 	}
 
 	// 30 日の窓（line-on-demand-report・Req 6.7）: 基準日の 29 日前（30 日目）と 30 日前（31 日目）の行を、
@@ -239,6 +271,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	server.details["cross-runtime-ready-comp-2"] = operational(3.8, 40, "競合ニ")
 	server.details["cross-runtime-ready-comp-3"] = unrated("競合サン")
 	server.details["cross-runtime-nocomp-self"] = operational(3.5, 10, "クロスランタイム店舗（競合なし）")
+	server.details["cross-runtime-unrated-self"] = operational(4.2, 20, "クロスランタイム店舗（評価を持つ競合なし）")
+	server.details["cross-runtime-unrated-comp-1"] = unrated("評価なし競合")
 
 	deps := newDeps(t, pool, server, now)
 
@@ -246,8 +280,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.FetchOK < 2 {
-		t.Errorf("FetchOK = %d, want >= 2 (both cross-runtime stores fetched)", result.FetchOK)
+	if result.FetchOK < 3 {
+		t.Errorf("FetchOK = %d, want >= 3 (all three cross-runtime stores fetched)", result.FetchOK)
 	}
 
 	// --- readyStore: status/rank/JSONB shape の直接検証（Go 側の自己整合性チェック。
@@ -382,6 +416,34 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		t.Errorf("nocompStore competitors = %s, want empty array literal '[]' (TS must read this as [], not null)", nocompCompetitorsJSON)
 	}
 
-	t.Logf("cross-runtime Go half complete: readyStoreID=%s nocompStoreID=%s summary_date=%s delivery_hour=%d",
-		readyStoreID, nocompStoreID, today.Format(time.DateOnly), crossRuntimeDeliveryHour)
+	// --- unratedStore: 競合はいるが 1 店も評価を持たない（line-on-demand-report tasks 4.5）---
+	// 比較集合は自店だけなので rank_total = 1 になり、競合は rating・starDiff とも null で書かれる。
+	// TS の配信はこの行を「比較可能でない」と読み、通知を出さずに理由つきで記録する。
+	var unratedStatus string
+	var unratedRank, unratedRankTotal, unratedNewReviewCount, unratedReviewCountPrev int
+	var unratedCompRatingType string
+	if err := pool.QueryRow(ctx, `
+		SELECT status, rank, rank_total, new_review_count, review_count_prev,
+		       jsonb_typeof(competitors->0->'rating')
+		FROM daily_summaries WHERE store_id = $1 AND summary_date = $2
+	`, unratedStoreID, today).Scan(&unratedStatus, &unratedRank, &unratedRankTotal, &unratedNewReviewCount,
+		&unratedReviewCountPrev, &unratedCompRatingType); err != nil {
+		t.Fatalf("select unratedStore daily_summary: %v", err)
+	}
+	if unratedStatus != "ready" || unratedRank != 1 || unratedRankTotal != 1 {
+		t.Errorf("unratedStore status/rank/total = %s/%d/%d, want ready/1/1 (the unrated competitor is not counted)",
+			unratedStatus, unratedRank, unratedRankTotal)
+	}
+	if unratedCompRatingType != "null" {
+		t.Errorf("unratedStore competitors[0].rating jsonb type = %s, want null", unratedCompRatingType)
+	}
+	// 新着があることまで固定する。TS の段が「変化が無いから送らない」と取り違えていないことを、
+	// 記録された理由（skipped_not_comparable）で見分けられるようにするためである。
+	if unratedNewReviewCount != 2 || unratedReviewCountPrev != 18 {
+		t.Errorf("unratedStore new_review_count/review_count_prev = %d/%d, want 2/18",
+			unratedNewReviewCount, unratedReviewCountPrev)
+	}
+
+	t.Logf("cross-runtime Go half complete: readyStoreID=%s nocompStoreID=%s unratedStoreID=%s summary_date=%s delivery_hour=%d",
+		readyStoreID, nocompStoreID, unratedStoreID, today.Format(time.DateOnly), crossRuntimeDeliveryHour)
 }

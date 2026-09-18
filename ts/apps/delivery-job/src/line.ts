@@ -228,7 +228,7 @@ type PushAttemptOutcome =
 
 /**
  * LINE Messaging API への唯一の呼出口（design.md Boundary: delivery-job/line）。
- * Push は messages の内容に関わらず送信のみを担当し、Flex JSON の組立（flex.ts）や
+ * Push は messages の内容に関わらず送信のみを担当し、通知の Flex の組立（notification.ts）や
  * 配信対象・記録（task 4.3）とは責務を分離する。
  */
 export class LineClient {

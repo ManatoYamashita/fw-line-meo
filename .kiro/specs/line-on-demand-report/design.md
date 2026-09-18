@@ -248,6 +248,7 @@ db/migrations/00NN_summary_notification_statuses.sql   # status の CHECK を 7 
   - `src/flex.ts`・`test/flex.test.ts`・`test/__snapshots__/flex.test.ts.snap` — 削除（日次カードの廃止）
   - `package.json`・`Dockerfile`、試験: `test/index.e2e.test.ts`・`test/cross-runtime.e2e.test.ts`・`test/targets.db.test.ts`・`test/deliveries.db.test.ts`
   - `scripts/run-e2e-prod-checks.sh` — 本番の読み取り確認の配信の判定（現在は「対象をすべて送信した」を合格にする）を、失敗と上限超過が 0 件、準備判定が true、対象が送信か理由つきの見送りのどちらかに数えられていることへ改める（見送りだけの実行を合格にしつつ、差し替え後もメニュー未準備が続く状態は赤にする。Step B から C の間は意図どおり赤になる）。判定を外から試せるよう、実行サマリーの JSON を渡す注入口（`${VAR+x}` で判定する）と自己試験のケースを足す。判定と対になる `docs/testing/e2e.md` の表と「朝の Flex」の手順も同じ変更で改める
+    - 数え上げの式は `delivered + failed + quotaExceeded + skipped + skippedNoChange + skippedNotComparable + skippedMenuUnavailable === targetsTotal`（**失敗と上限超過も数に含める**）とし、失敗 0 件・上限超過 0 件は独立した条件として残す。含めないと「失敗が 1 件あれば合計が足りない」となって失敗の条件が数え上げに吸収され、その条件を壊しても別の条件が赤にするため、壊れたことに気づけない（自己試験の変異で実測した）
 - db パッケージとスキーマ
   - `ts/packages/db/src/types.ts` — `SummaryDeliveryStatus` の 3 値追加、`DailySummaryNewReview` の任意項目 3 つ、`DailySummaryReadRow`
   - `ts/packages/db/src/index.ts` — `report-reads` の再エクスポート
@@ -789,22 +790,36 @@ export interface ReportMenuGate {
   ensureOwner(accessToken: string, lineUserId: string): Promise<OwnerMenuOutcome>;
 }
 
+/** 記録の手段。編成の `DeliveryJobLogger` がこの形を満たす（門は編成へ依存しない）。 */
+export interface ReportMenuLogger {
+  info(event: string, fields?: LogFields): void;
+  warn(event: string, fields?: LogFields): void;
+}
+
 export function createReportMenuGate(deps: {
-  readonly lineClient: LineClient;
+  readonly lineClient: ReportMenuLineClient;
   readonly completedRichMenuId: string;
-  readonly logger: DeliveryJobLogger;
+  readonly logger: ReportMenuLogger;
 }): ReportMenuGate;
+
+/** オーナーのメニューの照会結果。**3 値**である（下の注記を参照）。 */
+export type UserRichMenuLookup =
+  | { readonly kind: 'linked'; readonly richMenuId: string }
+  | { readonly kind: 'not_linked' }
+  | { readonly kind: 'lookup_failed'; readonly httpStatus: number | null };
 
 // LineClient（src/line.ts）への追加
 interface LineClientRichMenuMethods {
   getRichMenuActions(accessToken: string, richMenuId: string): Promise<RichMenuActionLike[] | null>;
-  getUserRichMenuId(accessToken: string, lineUserId: string): Promise<string | null>;
+  getUserRichMenuId(accessToken: string, lineUserId: string): Promise<UserRichMenuLookup>;
   linkUserRichMenu(accessToken: string, lineUserId: string, richMenuId: string): Promise<boolean>;
 }
 ```
 
 Implementation Notes
 
+- 記録の手段は局所の `ReportMenuLogger`（`info`・`warn`）で受ける。編成の `DeliveryJobLogger` がこの 2 つを持つのでそのまま渡せる（4.4 で 2 つを足した。`warn` は既存の sink が `WARNING` へ写すので重大度の追加は要らない）
+- ユーザーのメニューの照会は**3 値**である。2 値（`string | null`）では「個別リンクが無い（404）＝張る」と「照会できなかった＝張れなかった」を言い分けられず、照会の失敗を「張れば直る」と誤って扱う
 - Integration: 差し替えより前にコードが出ると、設定値は旧メニューを指すので準備判定が通らず、通知は `skipped_menu_unavailable` になる。旧来の日次カードへは戻さない
 - Validation: 準備判定の不成立・オーナーの照合の 3 分岐・照会の失敗を、偽の LINE クライアントで試験に固定する
 - Risks: 第2フェーズで `richmenuswitch` のタブを入れると、per-user のメニューがタブの側を指しうる（Revalidation Trigger）

@@ -7,7 +7,7 @@
 // （値の所有者は LINE である）。
 //
 // このためトークンを置くだけでは「守っているつもりの層」が 1 枚増えるだけになる。実効化するのは
-// 消費側の不変条件テスト（delivery-job/test/flex.test.ts・line-webhook/test/line/messages.test.ts）が
+// 消費側の不変条件テスト（delivery-job/test/notification.test.ts・line-webhook/test/line/messages.test.ts）が
 // 「組み立てた Flex の値が本セットの値と一致する」を assert することであり、両者は対で入れる。
 // スナップショットは -u 一発で意匠を元に戻す変更も静かに受理するため、この役目を負えない。
 //

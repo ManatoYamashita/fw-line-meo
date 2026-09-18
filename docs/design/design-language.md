@@ -1,6 +1,6 @@
-| LINE 日次サマリーの意匠の不変条件 | `ts/apps/delivery-job/test/flex.test.ts` | 意匠の不変条件 |
+| LINE の通知の意匠の不変条件 | `ts/apps/delivery-job/test/notification.test.ts` | 帰属表示とバブルの形 |
 | LINE オンボーディングの意匠の不変条件 | `ts/apps/line-webhook/test/line/messages.test.ts` | 意匠の不変条件 |
-| LINE の巨大表示は日次サマリーのカードで 1 件だけである | `ts/apps/delivery-job/test/flex.test.ts` |
+| LINE の巨大表示は比較レポートのバブルで 1 件だけである | `ts/apps/line-webhook/test/report/comparison.test.ts` |
 | LINE のオンボーディング 4 バブルは同じ内側余白を宣言する | `ts/apps/line-webhook/test/line/messages.test.ts` |
 # デザイン言語（fw-line-meo 写像版）
 
@@ -415,8 +415,8 @@ TypeScript の文字列リテラルに書いた記号は機械検出されない
 | 一覧はセル役割と行要素で掴まれるため、カード化できない | `ts/apps/dashboard-web/test/admin-users-page.test.tsx`, `ts/apps/dashboard-web/test/stores-page.test.tsx` |
 | 星は押しボタン役割と押下状態で掴まれる | `ts/apps/survey-web/test/survey-form.test.tsx` |
 | LINE のメッセージ組立は本文要素の添字で検証される | `ts/apps/line-webhook/test/line/messages.test.ts` |
-| Flex の構造はスナップショットが固定する | `ts/apps/delivery-job/test/flex.test.ts` |
-| LINE の巨大表示は日次サマリーのカードで 1 件だけである | `ts/apps/delivery-job/test/flex.test.ts` |
+| Flex の構造はスナップショットが固定する | `ts/apps/line-webhook/test/report/comparison.test.ts`, `ts/apps/line-webhook/test/report/new-reviews.test.ts` |
+| LINE の巨大表示は比較レポートのバブルで 1 件だけである | `ts/apps/line-webhook/test/report/comparison.test.ts` |
 | LINE のオンボーディング 4 バブルは同じ内側余白を宣言する | `ts/apps/line-webhook/test/line/messages.test.ts` |
 | 部品固有のユーティリティをアプリ層に literal で書くと別パッケージのテストが落ちる | `ts/packages/ui/test/app-integration.test.ts` |
 
@@ -521,5 +521,5 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 2.1 / 3 空状態の文字色と余白 | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 空状態の文字色と余白 |
 | 7.11 遷移させる性質の名指し（部品の実描画） | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 性質を名指ししている |
 | 直書き hex と生パレット色クラスの混入 | `scripts/check-design-tokens.sh` | （シェルガード） |
-| LINE 日次サマリーの意匠の不変条件 | `ts/apps/delivery-job/test/flex.test.ts` | 意匠の不変条件 |
+| LINE の通知の意匠の不変条件 | `ts/apps/delivery-job/test/notification.test.ts` | 帰属表示とバブルの形 |
 | LINE オンボーディングの意匠の不変条件 | `ts/apps/line-webhook/test/line/messages.test.ts` | 意匠の不変条件 |

@@ -219,7 +219,7 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
 }
 
 /**
- * Requirement 4.3: 店舗特定完了案内（機能1＝競合日次サマリーが利用可能になる旨）。
+ * Requirement 4.3: 店舗特定完了案内（機能1＝競合店との比較などのレポートが利用可能になる旨）。
  * 長いオンボーディングの完走を祝う装飾 Flex とし、機能1の詳細（store-detail LIFF）への
  * 明確な導線ボタン（URI アクション）を添える（Issue #21・完了演出のリッチ化）。
  * storeDetailUrl は環境依存のため呼び出し側（config 由来）から注入する。
@@ -281,11 +281,11 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           style: 'primary',
           color: lineColors.action,
           // 高さも明示する。既定に委ねると、LINE 側の既定値が変わったとき
-          // 日次サマリーの同じ操作と片方だけ動く。
+          // 同じ導線を持つ別のバブルと片方だけ動く。
           height: lineLayout.actionHeight,
           action: {
             type: 'uri',
-            // 日次サマリーの同じ導線と語彙を揃える（同じ LIFF 画面へ飛ぶ）。
+            // リッチメニューの「詳細を見る」と語彙を揃える（同じ LIFF 画面へ飛ぶ）。
             label: DETAIL_ACTION_LABEL,
             uri: storeDetailUrl,
           },

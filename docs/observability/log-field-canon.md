@@ -77,6 +77,10 @@
 | 対象外として飛ばした件数 | `skipped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 上限超過で送れなかった件数 | `quotaExceeded` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 上限超過で処理を打ち切ったか | `quotaExceededStopped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
+| 変化が無く送らなかった件数 | `skippedNoChange` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 比較可能だが新着も順位変動も無い日（spec: `.kiro/specs/line-on-demand-report/`） |
+| 比較できず送らなかった件数 | `skippedNotComparable` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 当日の集計が比較可能でない日（取得失敗・評価を持つ競合なし・自店未評価） |
+| メニューが使えず送らなかった件数 | `skippedMenuUnavailable` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 完了後メニューが未準備、またはオーナーへ張れなかったとき |
+| 完了後メニューの準備判定の結果 | `reportMenuReady` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 実行ごとに 1 回の判定の結果。**対象が 1 件も無い実行でも出す**（差し替え後に未準備が続くことを実行サマリーで追うため） |
 | プロセスの終了コード | `exitCode` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 終了時に残っていた資源の種別 | `activeResources` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | 配列。閉じ忘れの検知に使う（#151 の再発防止） |
 | 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` ／ `ts/apps/delivery-job/src/menu.ts` | 移送前の名前は `message`（集約基盤が本文として吸い項目検索から消えるため改名した）。**リテラルのみを載せる**。例外の本文や利用者の入力を入れてはならない。型は `string` であり弾かないため、規律で守る |

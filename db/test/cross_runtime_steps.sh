@@ -47,7 +47,7 @@ echo "=================================================================="
 # 選ぶ pnpm のフィルタで、現在は @fwlm/db と @fwlm/design-tokens が該当する。
 #
 # **`@fwlm/db` だけを名指ししていた版はクリーン checkout で落ちる**（Issue #158 (b) で実測）。
-# delivery-job の src/flex.ts は @fwlm/design-tokens も import しており、そちらは
+# delivery-job の src/notification.ts は @fwlm/design-tokens も import しており、そちらは
 # main: ./dist/index.js を持つのに dist が無い。しかも vitest はこれを
 # `Test Files 1 failed (1)` / `Tests  no tests` と報告するため、**「テストが 0 件で終わった」と
 # 読み違えやすい**（実体は import 解決の失敗である）。ローカルで長く通っていたのは、作業ツリーに

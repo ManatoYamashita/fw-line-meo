@@ -10,6 +10,15 @@
 #   5. 日次ジョブの直近の実行               gcloud run jobs executions list（daily-batch・summary-delivery）
 #   6. 直近の配信                           gcloud logging read（delivery-job.run の件数と delivery-job.fatal の有無）
 #
+# 6 の合格の条件は「対象をすべて送信した」ではない。通知は**変化があった日にだけ**送るので、
+# 1 通も送らない実行が正常でありうる。見るのは次の 3 つである（line-on-demand-report tasks 4.5）。
+#   - 失敗（failed）と上限超過（quotaExceeded）が 0 件
+#   - 完了後メニューの準備判定（reportMenuReady）が true
+#   - すべての対象が、送信か理由つきの見送り（当日の集計なし・変化なし・比較不能・メニュー未準備）の
+#     どちらかに数えられている
+# 準備判定を条件に含めるのは、メニューの差し替え（spec の Step C）の後もメニュー未準備が続く状態を
+# 緑にしないためである。Step B から C の間は意図どおり赤になる。
+#
 # 4 を置く理由: ローカルで流した自動層（run-e2e-local.sh）は、本番のコミットの証拠にならないことがある。
 # 2026-09-13 の実施では、ローカルで検査したのが 9ab90f5、本番は 16 コミット先の 1ce6986 だった。
 # 本番のコミットの自動層は、そのコミットに対する CI の結果で確かめる。
@@ -25,6 +34,11 @@
 # env:
 #   PROJECT_ID  GCP プロジェクト ID。必須（既定値を置かない。check-prod-image-drift.sh と同じ理由）
 #   REGION      既定 asia-northeast1
+#   PROD_DELIVERY_RUN_SNAPSHOT
+#               6 の判定を外から試すための注入口。`gcloud logging read --format=json` と同じ形
+#               （`[{ "timestamp": …, "jsonPayload": { … } }]`）の JSON を渡すと、配信のログを
+#               読まずにその値で判定する。**設定されているかどうかで判定する**（空文字も注入と
+#               みなす）。`${VAR:-}` で見ると、空文字を渡した試験が実 API へ落ちる
 #
 # 前提: gcloud（本番プロジェクトの閲覧権限）・gh（リポジトリの閲覧権限）・git・node。
 # 最初の失敗で止めず、全項目を流してから集約する。1 項目でも FAIL なら exit 1。WARN は exit を変えない。
@@ -236,7 +250,7 @@ check_job daily-batch "$DAILY_BATCH_MAX_AGE_H"
 check_job summary-delivery "$SUMMARY_DELIVERY_MAX_AGE_H"
 
 # --- 6. 直近の配信 -----------------------------------------------------------------------
-banner '6. 直近の配信（配信対象があった実行の件数・致命的な失敗の有無）'
+banner '6. 直近の配信（失敗と上限超過が 0 件・準備判定が true・対象がすべて数えられている）'
 # logName で絞らないと、同じ条件でも数分かかる（2026-09-13 実測: 無しで 2 分超・有りで 2 秒）。
 # 件数の要約（delivery-job.run）は info なので stdout、致命的な失敗（delivery-job.fatal）は error なので
 # stderr へ出る（@fwlm/observability の sink が console[level] で書く）。
@@ -246,9 +260,20 @@ run_filter="${run_filter} AND jsonPayload.event=\"delivery-job.run\" AND jsonPay
 fatal_filter="${log_base} AND logName=\"projects/${PROJECT_ID}/logs/run.googleapis.com%2Fstderr\""
 fatal_filter="${fatal_filter} AND jsonPayload.event=\"delivery-job.fatal\""
 
+# 判定を外から試せるよう、実行サマリーの JSON を注入できるようにする。**設定の有無で判定する**
+# （`${VAR:-}` だと空文字が未設定と同義になり、空を渡した試験が実 API へ落ちる）。
+run_read_ok=1
+run_json=''
+if [ -n "${PROD_DELIVERY_RUN_SNAPSHOT+x}" ]; then
+    echo '-- 注入された実行サマリー（PROD_DELIVERY_RUN_SNAPSHOT）で判定します。配信のログは読みません'
+    run_json="$PROD_DELIVERY_RUN_SNAPSHOT"
+elif ! run_json="$(gcloud logging read "$run_filter" --project="$PROJECT_ID" --freshness=1d --limit=1 --quiet \
+    --format='json(timestamp,jsonPayload.currentJstHour,jsonPayload.targetsTotal,jsonPayload.delivered,jsonPayload.failed,jsonPayload.skipped,jsonPayload.quotaExceeded,jsonPayload.skippedNoChange,jsonPayload.skippedNotComparable,jsonPayload.skippedMenuUnavailable,jsonPayload.reportMenuReady)')"; then
+    run_read_ok=0
+fi
+
 # shellcheck disable=SC2016  # node へ渡す JS をそのまま書くため、単一引用符の中で展開させない。
-if ! run_json="$(gcloud logging read "$run_filter" --project="$PROJECT_ID" --freshness=1d --limit=1 --quiet \
-    --format='json(timestamp,jsonPayload.currentJstHour,jsonPayload.targetsTotal,jsonPayload.delivered,jsonPayload.failed,jsonPayload.skipped,jsonPayload.quotaExceeded)')"; then
+if [ "$run_read_ok" -eq 0 ]; then
     echo "ERROR: 配信のログを読めません（roles/logging.viewer 相当の権限が要ります）" >&2
     record '配信の件数' FAIL 'ログを読めない'
 elif ! run_verdict="$(RUN_JSON="$run_json" node -e '
@@ -258,14 +283,35 @@ if (list.length === 0) {
   process.exit(0);
 }
 const p = list[0].jsonPayload || {};
-const keys = ["targetsTotal", "delivered", "failed", "skipped", "quotaExceeded"];
-const absent = keys.filter((k) => typeof p[k] !== "number");
+// 通知は変化があった日にだけ送るので、送信数そのものは合格の条件にならない。見るのは
+// 「失敗と上限超過が 0 件」「準備判定が true」「すべての対象が数えられている」の 3 つである。
+const counts = ["targetsTotal", "delivered", "failed", "skipped", "quotaExceeded",
+  "skippedNoChange", "skippedNotComparable", "skippedMenuUnavailable"];
+const absent = counts.filter((k) => typeof p[k] !== "number");
+if (typeof p.reportMenuReady !== "boolean") {
+  absent.push("reportMenuReady");
+}
 if (absent.length > 0) {
-  console.log(`FAIL|件数の項目が欠けています: ${absent.join(", ")}`);
+  console.log(`FAIL|実行サマリーの項目が欠けています: ${absent.join(", ")}`);
   process.exit(0);
 }
-const ok = p.delivered === p.targetsTotal && p.failed === 0 && p.skipped === 0 && p.quotaExceeded === 0;
-console.log(`${ok ? "PASS" : "FAIL"}|${list[0].timestamp}（${p.currentJstHour} 時の実行）: 対象 ${p.targetsTotal}・送信 ${p.delivered}・失敗 ${p.failed}・スキップ ${p.skipped}・上限超過 ${p.quotaExceeded}`);
+// **数え上げには失敗と上限超過も含める。** 含めないと「1 件でも失敗があれば合計が足りない」と
+// なり、失敗 0 件の条件が数え上げに吸収されて**単独では一度も効かない**（条件を 1 つ壊しても
+// 別の条件が赤にするので、壊れたことに気づけない）。ここでは「どのバケツにも数えられていない
+// 対象が無いこと」だけを見て、失敗と上限超過は独立した条件として残す。
+const accounted = p.delivered + p.failed + p.quotaExceeded + p.skipped
+  + p.skippedNoChange + p.skippedNotComparable + p.skippedMenuUnavailable;
+const ok = p.failed === 0 && p.quotaExceeded === 0 && p.reportMenuReady === true && accounted === p.targetsTotal;
+const detail = `対象 ${p.targetsTotal}・送信 ${p.delivered}・失敗 ${p.failed}・上限超過 ${p.quotaExceeded}`
+  + `・見送り（集計なし ${p.skipped}／変化なし ${p.skippedNoChange}／比較不能 ${p.skippedNotComparable}`
+  + `／メニュー未準備 ${p.skippedMenuUnavailable}）・準備判定 ${p.reportMenuReady}`;
+const why = [];
+if (p.failed !== 0) why.push("失敗あり");
+if (p.quotaExceeded !== 0) why.push("上限超過あり");
+if (p.reportMenuReady !== true) why.push("完了後メニューが未準備");
+if (accounted !== p.targetsTotal) why.push(`数えられていない対象が ${p.targetsTotal - accounted} 件`);
+console.log(`${ok ? "PASS" : "FAIL"}|${list[0].timestamp}（${p.currentJstHour} 時の実行）: ${detail}`
+  + `${ok ? "" : ` → ${why.join("・")}`}`);
 ')"; then
     echo "ERROR: 配信のログを解釈できません" >&2
     record '配信の件数' FAIL 'ログを解釈できない'
