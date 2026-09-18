@@ -165,6 +165,12 @@ const NO_MATCH_QUERY = 'NoCompetitorNameContainsThisVeryLongLatinSearchTermWitho
 const COMPETITOR_TOTAL = DETAIL_RESPONSE.competitors.length;
 
 /**
+ * 絞り込みの結果が 0 件のときの案内。空状態の見える文言であり、件数の文言（role="status"）が
+ * 読み上げる回復方法でもある（2026-09-18 の画面レビュー）。
+ */
+const NO_MATCH_TEXT = '該当する競合がいません。店名の一部で絞り込み直すか、入力を消すと一覧に戻ります。';
+
+/**
  * 既定の表示。fixture の推移は 8/1〜8/30 の連続した 30 日なので、既定の 30 日の窓には 30 行が入る。
  * 7 日の窓は、終点の 8/30 を含めて遡った 7 日（8/24〜8/30）で、7 行が入る。
  */
@@ -213,14 +219,23 @@ async function expectView(page: Page, view: ExpectedView): Promise<void> {
   await expect(page.getByRole('row')).toHaveCount(view.trendRows + 1);
 
   // 件数の文言と一覧: 一覧に残る店の数と文言が一致し、0 件のときだけ空状態の案内が出る。
+  //
+  // 0 件のときは、件数の文言に回復方法が続く（2026-09-18 の画面レビュー）。0 件の案内は一覧の側の
+  // 空状態が持つが、そちらは役割を持たないので、入力欄に留まったままの利用者には「0店を表示」しか
+  // 届かなかった。**0 件以外では続かないことも、この期待値が同時に固定する。**
   const competitors = page
     .getByRole('heading', { level: 2, name: '競合との比較' })
     .locator('xpath=ancestor::section[1]');
+  const count = `競合${COMPETITOR_TOTAL}店のうち${view.visibleCompetitors}店を表示`;
   await expect(competitors.getByRole('status')).toHaveText(
-    `競合${COMPETITOR_TOTAL}店のうち${view.visibleCompetitors}店を表示`,
+    view.visibleCompetitors === 0 ? `${count}。${NO_MATCH_TEXT}` : count,
   );
   await expect(competitors.locator('li')).toHaveCount(view.visibleCompetitors);
-  await expect(competitors.getByText('該当する競合がいません')).toHaveCount(view.visibleCompetitors === 0 ? 1 : 0);
+  // 見える案内は空状態の側にある。**空状態に限って数える**。件数の文言にも同じ文が入るようになったので、
+  // 節の全体から文字で数えると 0 件のとき 2 になり、見える案内が消えても件数の文言だけで 1 に見えてしまう。
+  await expect(competitors.locator('[data-slot="empty-state"]').getByText(NO_MATCH_TEXT)).toHaveCount(
+    view.visibleCompetitors === 0 ? 1 : 0,
+  );
 }
 
 /** 状態の入口を作る。`operate` を省くと、開いたままの既定の表示を確かめる。 */
