@@ -39,15 +39,26 @@ import { STORE_SURFACE_STATES, openStoreSurface } from './fixtures/detail';
 // 選択肢（隠し radio）の 2 種類に限られる（正典は test/store-page.test.tsx の「構造契約（許可リスト方式）」）。
 // これらが捲れる領域を増やしていないことも、この宣言が確かめる（増えれば件数が食い違って赤になる）。
 // つまり店舗詳細の捲れる領域は、この表の 1 件が全部である。
-// 選択肢の操作と検索（store-detail-trend-dashboard・Issue #265）の後も同じであることを、4 つの表示状態 ×
-// 2 つの幅のすべてで確かめる（同 spec の要件 6.3・6.4）。
+//
+// **ただし「1 件」は推移を描けているときの値である**（Issue #286）。推移の点が 1 つも無い応答では表ごと
+// 描かれず、捲れる領域は 0 件になる。状態ごとの値は fixtures/detail.ts の `structure.tableScrollRegions`
+// が持つ。この定数は、既定の応答で 1 度だけ開く下の 3 つの検査のために残す。
 const TABLE_SCROLL_REGIONS = 1;
 
 // 表示状態の一覧（fixtures/detail.ts の STORE_SURFACE_STATES）を 2 つの幅で回った数の宣言
-// （store-detail-trend-dashboard の要件 9.4・Issue #265）。4 つの状態を、Pixel 5 相当と 320px の 2 つの幅で回る。
+// （store-detail-trend-dashboard の要件 9.4・Issue #265。状態を 8 つへ広げた・Issue #286）。
+// 8 つの状態を、Pixel 5 相当と 320px の 2 つの幅で回る。
 // 一覧の長さや幅の数から導かずに数で書く。導くと、状態か幅を 1 つ消したときに宣言も一緒に減り、
 // 検査が緑のまま測る範囲が減ったことを見逃すためである。
-const STATE_WIDTH_VISIT_COUNT = 8;
+const STATE_WIDTH_VISIT_COUNT = 16;
+
+// 回った先で照合が通った捲れる領域の件数の総和（Issue #286）。
+//
+// **上の巡回数の宣言だけでは足りない。** 状態ごとの期待値は fixture が持つので、全状態の宣言を 0 に
+// する改変（容器から横の捲りを失わせ、併せて宣言も 0 にする）は、per-state の照合も巡回数の宣言も
+// 素通りする。総和をここへ数で書くことが、その改変を赤にする。
+// 内訳: 「推移 0 件」を除く 7 状態が 1 件ずつ、それを 2 つの幅で回る。
+const SCROLL_REGION_VISIT_TOTAL = 14;
 
 /** 狭い幅の表示領域。高さは、下の既存の 320px の検査にそろえる。 */
 const NARROW_VIEWPORT = { width: 320, height: 720 } as const;
@@ -80,6 +91,11 @@ async function forEachWidth(page: Page, run: (widthName: string) => Promise<void
 /**
  * 捲れる領域が推移の表の容器であることを確かめる（要件 6.3）。件数は expectNoHorizontalScroll が宣言と照合するので、
  * ここでは中身を見る。領域の名前が推移の節の見出しと同じ文言であり、その領域の中に表があることを求める。
+ *
+ * 領域が 0 件の状態（推移 0 件）では、このループは 1 周も回らない。**中身を見ない形が許されるのは、
+ * 件数そのものを expectNoHorizontalScroll が状態ごとの宣言と照合し、さらに呼び出し側が総和を
+ * 数で固定しているからである**（Issue #286）。件数の網が無ければ、これは「0 件を正しく不在と読む」
+ * 空振りになる。
  */
 async function expectScrollRegionsAreTrendTable(page: Page, where: string): Promise<void> {
   const { scrollRegions } = await readOverflowMetrics(page, 'scroll-container');
@@ -98,22 +114,31 @@ async function expectScrollRegionsAreTrendTable(page: Page, where: string): Prom
   }
 }
 
-test('4 つの表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は推移の表の 1 つだけである', async ({
+test('8 つの表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は状態ごとの宣言と一致する', async ({
   page,
 }) => {
   // 各状態の入口は、操作後の表示と、詳細の取得がちょうど 1 回だったことを自分で確かめてから返る。
   // 検索 0 件の状態は長い英字列を入れるので、長い検索語を入れた状態（要件 6.4）も兼ねる。
+  // 8 状態 × 2 幅なので、既定の制限時間（30 秒）では足りない。
+  test.setTimeout(180_000);
+
   const visited: string[] = [];
+  let scrollRegionTotal = 0;
   await forEachWidth(page, async (widthName) => {
     for (const state of STORE_SURFACE_STATES) {
       const where = `店舗詳細（${state.name}・${widthName}）`;
+      const regions = state.structure.tableScrollRegions;
       await state.open(page);
-      await expectNoHorizontalScroll(page, where, TABLE_SCROLL_REGIONS);
+      await expectNoHorizontalScroll(page, where, regions);
       await expectScrollRegionsAreTrendTable(page, where);
+      scrollRegionTotal += regions;
       visited.push(`${state.name}・${widthName}`);
     }
   });
   expect(visited.length, `回った状態と幅: ${visited.join('、')}`).toBe(STATE_WIDTH_VISIT_COUNT);
+  expect(scrollRegionTotal, '回った先で照合した捲れる領域の総数が宣言と食い違う').toBe(
+    SCROLL_REGION_VISIT_TOTAL,
+  );
 });
 
 // --- キーボード操作と焦点の輪郭（要件 2.7・5.5） ----------------------------------------
