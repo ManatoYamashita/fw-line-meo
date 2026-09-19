@@ -228,7 +228,7 @@
   - Observable: 両方の確認結果が本 tasks.md の末尾の実施記録にある
   - _Requirements: 9.2, 9.3_
 
-- [ ] 7.2 Step A を本番へ当てる
+- [x] 7.2 Step A を本番へ当てる
   - 1 の PR をマージし、migration を本番へ当てて、`to_regclass` と CHECK の定義で適用を確かめてから `tf apply` する。2〜6 のコードはこの後にマージする
   - Observable: 本番の CHECK が 7 値を持ち、summary-delivery ジョブの env に完了後メニューの ID が付いていて、旧イメージのまま次の実行が成功している
   - _Requirements: 1.4, 1.5, 1.10_
@@ -421,3 +421,25 @@
 - **関連（本 spec の範囲外）**
   - #255 の残余の実機確認は #271（OPEN）が追っている。対象は朝の Flex と LIFF
   - Step B の本番反映までは、旧来の朝の Flex が届き続ける。#271 は 2026-09-14 07:00 以降、本 spec と独立に実施できる。本 spec はその実施を先送りしない
+
+### 7.2 Step A を本番へ当てる（2026-09-19）
+
+PR #274 を 2026-09-19T08:52:06Z にマージした（マージコミット `b4d309b`）。本番の識別子は先頭 8 文字までに切っている。
+
+- **migration 0010 の適用**
+  - 当てる前に、`db/migrations/` の全番号の対象を `to_regclass` で本番へ照合した。0001〜0008 の表（`stores`・`owners`・`agencies`・`categories`・`onboarding_sessions`・`daily_summaries`・`rating_snapshots`・`summary_deliveries`・`dashboard_users`・`survey_material_tallies`・`audit_logs`・`survey_concern_tallies`）がすべて実在し、0009（#280）は `ck_audit_logs_action` として適用済みだった。**適用漏れは無い**
+  - 適用前の `summary_deliveries` の CHECK は、名前が `summary_deliveries_status_check`・値が 4 値で、migration が `DROP CONSTRAINT` する名前と一致していた（名前が違えば migration ごと失敗して何も変わらない側へ倒れる設計である）
+  - 適用後は `ck_summary_deliveries_status` の **1 本だけ**で、値はちょうど 7 値（既存 4 値＋`skipped_no_change`・`skipped_not_comparable`・`skipped_menu_unavailable`）
+  - 接続先の取り違えを避けるため、proxy は 15432 で起動し、流す前に `stores` の件数で本番であることを確かめた（確定店舗 3 件・オーナー 4 人）
+- **tf apply**
+  - このマージで動いた deploy-prod（run `35433348497`）の success を待ってから、**保存しない** plan を取った（デプロイ前の plan を当てるとイメージが巻き戻るため）
+  - `-target=module.delivery_job.google_cloud_run_v2_job.delivery`。結果は `Plan: 0 to add, 1 to change, 0 to destroy` で、中身は `+ env`（`LINE_RICHMENU_COMPLETED_ID` = `richmenu-9249702d…`・現行の完了後メニューの ID）と、既知のずれ（`client` = "gcloud" → null・`client_version` = "568.0.0" → null）だけだった。イメージは unchanged
+  - apply 後のジョブを実物で確かめた。env に `LINE_RICHMENU_COMPLETED_ID` が付き、`LIFF_URL` は残っており（Step D で外す）、イメージは `summary-delivery:b4d309b` のまま巻き戻っていない
+- **次の毎時実行**
+  - apply の後、10:00Z（19:00 JST・`summary-delivery-m6nw5`）と 11:00Z（20:00 JST・`summary-delivery-nsvb5`）の 2 回が Completed・成功 1・失敗 0 で終わった
+  - 10:00Z の実行の構造化ログは `delivery-job.run`（`summaryDate` 2026-09-19・対象 0 件・送信 0・見送り 0・失敗 0）と `delivery-job.exit` の 2 行だけで、既存のイメージが env の追加で壊れていないことを示す。対象 0 件は、配信時刻が 7 時の店舗しかいない時間帯として正常である
+
+### 7.2 の実施で分かった、後続タスクに効く本番の事実
+
+- **確定店舗を 2 つ持つオーナーが実在する**（`4c89b0e6`・`store_identified`・LINE ユーザーあり）。7.5 の「複数店舗の選択まで確かめる」は、新しいテナントを作らずにこのオーナーで確かめられる（#252 のとおり本番の店舗とオーナーは消せないため、新規作成はしない）
+- オーナーは 4 人（`4c89b0e6` が確定店舗 2・`340ee8ae` が 1・残り 2 人は `pending` で確定店舗なし）、確定店舗は 3 件である。2026-09-06 の記録（オーナー 1・店舗 2）から増えている
