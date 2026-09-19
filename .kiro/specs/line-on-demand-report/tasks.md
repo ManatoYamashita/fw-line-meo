@@ -449,7 +449,8 @@ PR #274 を 2026-09-19T08:52:06Z にマージした（マージコミット `b4d
 PR #289 を 2026-09-19T11:50:01Z にマージした（マージコミット `99993ea`）。deploy-prod（run `35441370034`）が success。
 
 - **稼働イメージの照合**: `PROJECT_ID=gen-fw-line-meo bash scripts/check-prod-image-drift.sh` が緑で、本番の 7 件（5 サービス・2 ジョブ）がすべて `99993ea` だった
-- **準備判定が false であること**: 定時（毎時 0 分）を待たずに `gcloud run jobs execute summary-delivery --wait` で 1 回手動実行し（`summary-delivery-4twbl`）、構造化ログで実測した。配信時刻が 7 時の店舗しかいない時間帯なので対象 0 件で、LINE へは 1 通も送らず DB にも書かない実行である
+- **準備判定が false であること**: 定時（毎時 0 分）を待たずに `gcloud run jobs execute summary-delivery --wait` で 1 回手動実行し（`summary-delivery-4twbl`・12:02:50Z）、構造化ログで実測した。配信時刻が 7 時の店舗しかいない時間帯なので対象 0 件で、LINE へは 1 通も送らず DB にも書かない実行である
+  - **手動実行に頼らない証拠も揃っている**。同じ日の 12:00:35Z（21:00 JST）の**定時実行**も `reportMenuReady` = false を記録していた（差し替え後の 7.4 の確認で、`delivery-job.run` を時系列で 3 件読んだときに分かった）。すなわち false → true の反転は、定時 false（12:00:35Z）・手動 false（12:02:50Z）・手動 true（12:07:24Z）の 3 点で追える
   - `delivery-job.report_menu_not_ready`（`detail` = `report actions missing`）
   - `delivery-job.run`: `reportMenuReady` = **false**・`targetsTotal` 0・`failed` 0・`skipped*` はすべて 0
   - `delivery-job.exit`: `exitCode` 0
@@ -474,3 +475,11 @@ PR #289 を 2026-09-19T11:50:01Z にマージした（マージコミット `999
 対象 2 件は、本番の `owners.onboarding_status = 'store_identified'`（`4c89b0e6` と `340ee8ae`）と一致する。確認できなかったオーナーが 0 件なので、先頭 8 文字の一覧は無い。
 
 - **準備判定が true に変わったこと**: 差し替えの後にもう 1 回手動実行し（`summary-delivery-l2744`）、`delivery-job.run` の `reportMenuReady` が **true** になり、`delivery-job.report_menu_not_ready` が出なくなったことを実測した。差し替え前（`summary-delivery-4twbl`・false）との対照になっている
+
+#### 7.4 の後の、本番の読み取り確認について（2026-09-19）
+
+差し替えを終えた直後に `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks` を流したところ、6（直近の配信）だけが赤で、ほかはすべて PASS だった。赤の理由は 2 つとも装置の誤りではない。
+
+- **「実行サマリーの項目が欠けています」**: 6 の判定は `jsonPayload.targetsTotal > 0` の実行だけを「直近の配信」として拾う（`scripts/run-e2e-prod-checks.sh` の `run_filter`）。対象 0 件の実行は数えないので、新しいコードで**対象のある実行が 1 回走るまで**は、旧コードが残した最後の行を読み続ける。実際に拾われていたのは 2026-09-18T22:00:24Z（= 2026-09-19 07:00 JST）の行で、`delivered` 3・`targetsTotal` 3・新フィールドなしだった。**旧来の日次カードはこの実行が最後で、3 店舗へ送られている。** 翌朝 7 時の実行で緑になる見込みで、その確認は 7.5 に持つ
+  - tasks 4.5 で足した手順書の記述は「Step B から Step C の間は赤になる／緑に戻るのは差し替えを終えてから」だったが、**差し替えの後も最初の朝まで赤い**ことを書いていなかった。`docs/testing/e2e.md` に書き足した
+- **1 回目の実行の「ログを読めません」**: Cloud Logging API が 500（`Internal error encountered.`）を返した。装置は「roles/logging.viewer 相当の権限が要ります」と表示するが、**原因は権限ではなく一時障害**である（同じ照会を数分後に流すと読めた）。装置のメッセージが原因を 1 つに決めつけているので、切り分けに 1 手かかる（改善の余地。是正するなら、500 と 403 を出し分ける）
