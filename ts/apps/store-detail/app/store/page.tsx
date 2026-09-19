@@ -576,26 +576,37 @@ function CompetitorsSection({
 function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow }): React.JSX.Element {
   const summary = summarizeWindow(trendWindow);
   return (
-    <dl className="grid gap-4 sm:grid-cols-3">
-      <Metric
-        label="順位"
-        value={summary.rank !== null ? `${summary.rank.first.value}位 → ${summary.rank.last.value}位` : '—'}
-        note={summaryPeriodNote(trendWindow, summary.rank)}
-      />
-      <Metric
-        label="評価"
-        value={summary.rating !== null ? `${summary.rating.first.value} → ${summary.rating.last.value}` : '—'}
-        note={summaryPeriodNote(trendWindow, summary.rating)}
-      />
-      {/* 「クチコミ数の増減」。指標の名前を「クチコミ数」に統一したうえで、この組だけが差分であることを
-          「の増減」で示す（2026-09-18 の画面レビュー）。同じカードに実数の推移が並ぶので、実数と差分が
-          似た名前で隣り合わないようにする。 */}
-      <Metric
-        label="クチコミ数の増減"
-        value={summary.reviewCount !== null ? formatSignedCount(summary.reviewCount.diff) : '—'}
-        note={summaryPeriodNote(trendWindow, summary.reviewCount)}
-      />
-    </dl>
+    // 段を切り替える幅は、装置の幅の既定（sm: = 640px）ではなく**この一覧が実際に使える幅**で決める
+    // （Issue #286 項目 2）。装置の幅で切ると、版面とカードの内側の余白を引いた実幅が同じでも、
+    // 入れ子の深さが違う面で結果が食い違う。実測では Pixel 5 相当（393px）で容器は 329px、
+    // 320px の装置では 256px になる。18rem の段はこの 2 つのあいだにあり、狭い側では値を
+    // 折り返してまで 3 列を保たずに 1 列へ落ちる。
+    //
+    // コンテナは dl 自身ではなく外側に置く。**要素は自分自身のコンテナにはなれない**ので、dl へ
+    // 両方を書くと問い合わせ先が祖先にしか無く、条件が一致しないまま 1 列で固まる（緑に見える壊れ方）。
+    // 名前を付けるのは、将来カード側にコンテナが増えたときに問い合わせ先が黙って乗り換わらないためである。
+    <div className="@container/trend-summary">
+      <dl className="grid gap-4 @2xs/trend-summary:grid-cols-3">
+        <Metric
+          label="順位"
+          value={summary.rank !== null ? `${summary.rank.first.value}位 → ${summary.rank.last.value}位` : '—'}
+          note={summaryPeriodNote(trendWindow, summary.rank)}
+        />
+        <Metric
+          label="評価"
+          value={summary.rating !== null ? `${summary.rating.first.value} → ${summary.rating.last.value}` : '—'}
+          note={summaryPeriodNote(trendWindow, summary.rating)}
+        />
+        {/* 「クチコミ数の増減」。指標の名前を「クチコミ数」に統一したうえで、この組だけが差分であることを
+            「の増減」で示す（2026-09-18 の画面レビュー）。同じカードに実数の推移が並ぶので、実数と差分が
+            似た名前で隣り合わないようにする。 */}
+        <Metric
+          label="クチコミ数の増減"
+          value={summary.reviewCount !== null ? formatSignedCount(summary.reviewCount.diff) : '—'}
+          note={summaryPeriodNote(trendWindow, summary.reviewCount)}
+        />
+      </dl>
+    </div>
   );
 }
 

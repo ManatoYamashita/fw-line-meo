@@ -171,27 +171,35 @@ export function TrendChart({ window: trendWindow, metric, rankTotal }: TrendChar
       </figcaption>
       <div className="flex gap-2">
         {/*
-          縦軸の目盛りの帯（固定幅）。描画領域と同じ高さと上下の余白を持たせる。
+          縦軸の目盛りの帯。描画領域と同じ高さと上下の余白を持ち、幅は目盛りの文字に追随する。
 
-          幅は 2026-09-18 の画面レビューで 40px から 48px へ広げた。等幅数字の 1 桁は text-xs で約 7.2px
-          なので、40px では 5 桁（36px）で余地がほぼ尽き、端末側の文字拡大で溢れる。帯は絶対配置の文字
-          だけを持つため、内容に追随させる（w-fit）ことも、溢れを横スクロールとして観測することもできず、
-          Card の overflow が黙って切る。内容に追随させるには流し込みの幅基準の要素を足すことになるが、
-          それはグラフの文字を数える e2e（store-surface.spec.ts の readChartTexts）が余分な「日付」として
-          拾ってしまう。したがってここは値の是正にとどめ、構造の是正は帯の作り直しとして別に扱う。
+          2026-09-19（Issue #286 項目 5）まで固定幅（48px）だった。文字を表示幅で縮めないと決めた以上
+          （§7.19）、文字を入れる箱を固定の幅にすると、端末側の文字拡大で字が切れるだけである。しかも
+          切り取りは横の捲りにならないので（Card の overflow が黙って切る）、面の溢れを測る網にも
+          掛からない。実測では帯 48px に対して最も広い目盛りが 27.1px で、21px が無駄に空いていた。
+
+          **絶対配置をやめ、grid の同じセルへ重ねる。** 重なっても流し込みの要素なので、列の幅が
+          最も広い文字で決まる。縦の位置は `position: relative` の top の百分率で与えるため、値も式も
+          変えていない（百分率の基準は grid 領域の高さで、畳む前の relative な親と同じ 144px である）。
+
+          次の 3 つは荷重である。外すと静かに壊れるので、まとめて動かさないこと。
+          - `items-start`: 外すと文字の箱が領域いっぱいへ伸び、-translate-y-1/2 が半分の高さぶん動かす
+          - `justify-items-end`: 外すと箱が列幅まで広がり、右そろえと「帯の幅 = 最も広い文字の幅」が崩れる
+          - `grid-rows-1`: 外すと行の高さが auto になり、top の百分率の基準が処理系依存になる
         */}
-        <div aria-hidden className="h-40 w-12 shrink-0 py-2 text-xs tabular-nums text-muted-foreground">
-          <div className="relative h-full">
-            {geometry.ticks.map((tick) => (
-              <span
-                key={tick.value}
-                className="absolute right-0 -translate-y-1/2 whitespace-nowrap"
-                style={{ top: formatPercent(tick.y) }}
-              >
-                {formatTickValue(metric, tick.value)}
-              </span>
-            ))}
-          </div>
+        <div
+          aria-hidden
+          className="grid h-40 shrink-0 grid-rows-1 items-start justify-items-end py-2 text-xs tabular-nums text-muted-foreground"
+        >
+          {geometry.ticks.map((tick) => (
+            <span
+              key={tick.value}
+              className="relative col-start-1 row-start-1 -translate-y-1/2 whitespace-nowrap"
+              style={{ top: formatPercent(tick.y) }}
+            >
+              {formatTickValue(metric, tick.value)}
+            </span>
+          ))}
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
           {/* 描画領域（固定高）。内側の余白は、端の点と端点の輪が枠で切れないためのものである。 */}

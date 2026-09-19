@@ -492,6 +492,101 @@ function readChartTexts(page: Page): Promise<ChartText[]> {
   });
 }
 
+/** 目盛りの帯と、その中の文字の実測（Issue #286 項目 5）。 */
+interface TickBand {
+  /** 目盛りの文字をすべて含む最小の要素の幅。これが「帯の幅」である。 */
+  readonly width: number;
+  readonly left: number;
+  readonly right: number;
+  /** 帯の中の文字それぞれの箱。 */
+  readonly labels: readonly { readonly text: string; readonly width: number; readonly left: number; readonly right: number }[];
+}
+
+/**
+ * 目盛りの帯を読む。
+ *
+ * **帯は構造ではなく内容から求める。** 「目盛りの文字（`style.top` を持つ）をすべて含む最小の要素」を
+ * 祖先を辿って決めるので、帯の組み立て方（絶対配置か流し込みか）を変えてもこの読み取りは追随する。
+ * 位置決めの手段そのものを是正の対象にするため、手段に依存しない読み方にしてある。
+ */
+function readTickBand(page: Page): Promise<TickBand | null> {
+  return page.locator('figure').evaluate((figure): TickBand | null => {
+    // 描画領域は、伸縮する viewBox を持つ SVG（線の層）の 2 つ上である。目盛りはその外にある。
+    const lineLayer = figure.querySelector('svg[viewBox]');
+    const plot = lineLayer?.parentElement?.parentElement ?? null;
+    const labels = Array.from(figure.querySelectorAll<HTMLElement>('[style]')).filter(
+      (element) => element.style.top !== '' && (plot === null || !plot.contains(element)),
+    );
+    if (labels.length === 0) return null;
+
+    let band: HTMLElement | null = labels[0]!.parentElement;
+    while (band !== null && !labels.every((label) => band!.contains(label))) {
+      band = band.parentElement;
+    }
+    if (band === null) return null;
+
+    const box = band.getBoundingClientRect();
+    return {
+      width: box.width,
+      left: box.left,
+      right: box.right,
+      labels: labels.map((label) => {
+        const labelBox = label.getBoundingClientRect();
+        return {
+          text: (label.textContent ?? '').trim(),
+          width: labelBox.width,
+          left: labelBox.left,
+          right: labelBox.right,
+        };
+      }),
+    };
+  });
+}
+
+// 目盛りの帯が、内容に追随すること（Issue #286 項目 5）。
+//
+// 帯は絶対配置の文字だけを持つ箱で、幅が固定値だった。**文字を表示幅で縮めないと決めた以上
+// （§7.19）、文字を入れる箱を固定の幅にすると、端末側の文字拡大で字が切れるだけである。**
+// しかも切り取りは横の捲りにならないので（Card の overflow が黙って切る）、面の溢れを測る網にも
+// 掛からない。追随していることを、指標を切り替えて幅が動くことで確かめる。
+test('目盛りの帯の幅が、目盛りの文字に追随する', async ({ page }) => {
+  await openStoreSurface(page);
+
+  const observed: number[] = [];
+  for (const metric of ['順位', '評価', 'クチコミ数']) {
+    await page.getByRole('radio', { name: metric, exact: true }).click();
+    const band = await readTickBand(page);
+    expect(band, `${metric}: 目盛りの帯が読めない`).not.toBeNull();
+    expect(band!.labels.length, `${metric}: 目盛りの文字が 1 つも無い`).toBeGreaterThan(0);
+
+    const widest = Math.max(...band!.labels.map((label) => label.width));
+    expect(
+      Math.abs(band!.width - widest),
+      `${metric}: 帯の幅 ${band!.width.toFixed(1)}px が、最も広い目盛りの文字 ${widest.toFixed(1)}px と食い違う` +
+        `（目盛り: ${band!.labels.map((l) => l.text).join(', ')}）`,
+    ).toBeLessThanOrEqual(0.5);
+
+    // 文字が帯からはみ出していない（帯が内容に追随していれば自明だが、追随の向きを取り違えた
+    // 実装＝内容より狭い帯を赤にする）。
+    expect(Math.min(...band!.labels.map((l) => l.left)), `${metric}: 目盛りが帯の左へはみ出す`).toBeGreaterThanOrEqual(
+      band!.left - 0.5,
+    );
+    expect(Math.max(...band!.labels.map((l) => l.right)), `${metric}: 目盛りが帯の右へはみ出す`).toBeLessThanOrEqual(
+      band!.right + 0.5,
+    );
+
+    observed.push(Math.round(band!.width));
+  }
+
+  // 空振り防止: 指標によって帯の幅が実際に変わること。3 指標の目盛りは桁数が違う（順位は「1位」〜
+  // 「24位」、クチコミ数は 4 桁）ので、追随していれば幅も変わる。固定幅のままなら、上の一致の
+  // 検査が偶然通ったとしてもここで赤になる。
+  expect(
+    new Set(observed).size,
+    `3 つの指標で帯の幅が変わらない（実測: ${observed.join(', ')}px）。内容に追随していない`,
+  ).toBeGreaterThanOrEqual(2);
+});
+
 test('グラフの文字（目盛り・日付・現在値）の算出サイズが、320px と Pixel 5 相当で等しい', async ({ page }) => {
   const measured: Array<{ readonly widthName: string; readonly texts: ChartText[] }> = [];
   await forEachWidth(page, async (widthName) => {
@@ -529,6 +624,92 @@ test('320px 幅でも指標・競合比較・推移要約がクリップされ�
   await expect(page.getByText('クチコミの前日比')).toBeVisible();
   await expect(page.getByText('近隣の競合店舗としては最も名前の長いケース 丸の内本店')).toBeVisible();
   await expect(page.getByText('表示期間の変化')).toBeVisible();
+});
+
+// 「表示期間の変化」の 3 組の段組み（Issue #286 項目 2）。
+//
+// 段を切り替える幅は、装置の幅の既定（`sm:` = 640px）ではなく、**中身が折れる幅**で決める。
+// この一覧が実際に使える幅は「装置の幅 − 版面の余白 − カードの内側の余白」なので、装置の幅で
+// 切ると、同じ装置でも入れ子の深さが違う面で結果が食い違う。
+//
+// 測るのは宣言（クラス）ではなく結果（実際に何行になったか）である。クラスを固定するだけの検査は、
+// 段の名前を替える改変を素通りさせる。
+test('「表示期間の変化」の 3 組が、容器の幅に応じて段を変える', async ({ page }) => {
+  await openStoreSurface(page);
+  const summary = page.locator('dl').filter({ has: page.getByText('クチコミ数の増減', { exact: true }) });
+  await expect(summary).toHaveCount(1);
+
+  /** 指標ラベルの上端の種類数 = 実際の行数。3 列なら 1、1 列なら 3 になる。 */
+  const rowCount = (): Promise<number> =>
+    summary
+      .locator('dt')
+      .evaluateAll((elements) => new Set(elements.map((element) => Math.round(element.getBoundingClientRect().top))).size);
+
+  /** 値が折り返している組の文言。段を詰めすぎると、ここに文言が現れる。 */
+  const wrapped = (): Promise<string[]> =>
+    summary.locator('dd').evaluateAll((elements) =>
+      elements
+        .filter((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top))).size > 1;
+        })
+        .map((element) => (element.textContent ?? '').trim()),
+    );
+
+  // 空振り防止: 3 組そろっていること（組が消えていれば行数の検査は自明に通る）。
+  await expect(summary.locator('dt')).toHaveCount(3);
+
+  // Pixel 5 相当では 3 列に収まる。
+  expect(await rowCount(), 'Pixel 5 相当で 3 組が 1 行に並んでいない').toBe(1);
+  expect(await wrapped(), 'Pixel 5 相当で値が折り返している').toEqual([]);
+
+  // 320px では容器が狭いので 1 列へ落とす。**値を折り返してまで 3 列を保たない。**
+  await page.setViewportSize(NARROW_VIEWPORT);
+  expect(await rowCount(), '320px で 3 組が 1 列に落ちていない').toBe(3);
+  expect(await wrapped(), '320px で値が折り返している').toEqual([]);
+});
+
+// 空状態の案内が、狭い幅で行の長さをそろえて分かれること（Issue #286 項目 3）。
+//
+// 中央寄せの 1 文が最終行だけ極端に短く割れると、文の重心が消えて読みにくい。この面で最も長い
+// 案内（該当する競合がいないときの回復方法）は 320px で 3 行に割れ、**最終行が 4 文字だけ**だった。
+//
+// 行の分け方は共有部品（EmptyState）が持つので、ここで測るのは 3 アプリすべての空状態に効く。
+// 比で測るのは、行数そのものは文言の長さで決まり、揃っているかどうかとは別の話だからである。
+const EMPTY_STATE_LINE_BALANCE = 0.5;
+
+test('空状態の案内が、狭い幅で行の長さをそろえて分かれる', async ({ page }) => {
+  await page.setViewportSize(NARROW_VIEWPORT);
+  await openStoreSurface(page);
+  // どの競合の名前にも含まれない語で絞り込み、一覧を空状態へ落とす（この面で最も長い案内が出る）。
+  await page.getByRole('searchbox', { name: '店名で絞り込む' }).fill('NoCompetitorNameContainsThisTerm');
+
+  const guide = page.locator('[data-slot="empty-state"] p');
+  await expect(guide).toHaveCount(1);
+
+  // 行ごとの幅を読む。getClientRects は折り返しごとに矩形を返すので、上端で重複を畳んで行にする。
+  const widths = await guide.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const byTop = new Map<number, number>();
+    for (const rect of Array.from(range.getClientRects())) {
+      const top = Math.round(rect.top);
+      byTop.set(top, Math.max(byTop.get(top) ?? 0, rect.width));
+    }
+    return Array.from(byTop.values());
+  });
+
+  // 空振り防止: 実際に折り返していること。1 行に収まる文言では、揃っているかを問えない。
+  expect(widths.length, `この幅で折り返していない（行の幅: ${widths.join(', ')}）`).toBeGreaterThanOrEqual(2);
+
+  const shortest = Math.min(...widths);
+  const longest = Math.max(...widths);
+  expect(
+    shortest / longest,
+    `最も短い行と最も長い行の比が ${(shortest / longest).toFixed(2)}（下限 ${EMPTY_STATE_LINE_BALANCE}）。` +
+      `行の幅: ${widths.map((w) => w.toFixed(1)).join(', ')}`,
+  ).toBeGreaterThanOrEqual(EMPTY_STATE_LINE_BALANCE);
 });
 
 test('主要数値と競合の比較軸を説明リストとして描く', async ({ page }) => {
