@@ -64,6 +64,15 @@ const SCROLL_REGION_VISIT_TOTAL = 16;
 const NARROW_VIEWPORT = { width: 320, height: 720 } as const;
 
 /**
+ * 段組みが 3 列へ切り替わる側を測るための幅（Issue #286 項目 2）。
+ *
+ * この一覧が使える容器は「装置の幅 − 版面とカードの内側の余白（実測 64px）」なので、境目（24rem）を
+ * 超えるには装置の幅が 448px 以上いる。480px はその最小の実機相当より少し広く取った値で、容器は
+ * 416px になる。**狭い側だけを測る検査は、段組みの宣言そのものを消す改変を素通りさせる。**
+ */
+const WIDE_VIEWPORT = { width: 480, height: 720 } as const;
+
+/**
  * 実測する 2 つの幅を順に回る。Pixel 5 相当は project の既定の表示領域（devices['Pixel 5']）をそのまま使い、
  * 320px は表示領域を差し替えて測る。面を開き直すのは `run` の責務である（表示領域を変えただけでは、前の幅で
  * 操作した状態が残る）。
@@ -645,9 +654,16 @@ test('「表示期間の変化」の 3 組が、容器の幅に応じて段を�
       .locator('dt')
       .evaluateAll((elements) => new Set(elements.map((element) => Math.round(element.getBoundingClientRect().top))).size);
 
-  /** 値が折り返している組の文言。段を詰めすぎると、ここに文言が現れる。 */
-  const wrapped = (): Promise<string[]> =>
-    summary.locator('dd').evaluateAll((elements) =>
+  /**
+   * 折り返している要素の文言。段を詰めすぎると、ここに文言が現れる。
+   *
+   * **ラベル（dt）と値（dd）の両方を測る。** 値だけを測ると、ラベルの側が折れる詰めすぎを見逃す。
+   * `Metric` は縦積みなので、ラベルが 2 行になった組だけ値が 1 行ぶん下へ落ち、3 列の値の高さが
+   * そろわなくなる —— 読みやすさのために段を詰めたのに、その目的の側が壊れる。上の `rowCount` は
+   * dt の**上端**を数えるので、dt が何行になっても 1 のままであり、この劣化を検出しない。
+   */
+  const wrapped = (selector: 'dt' | 'dd'): Promise<string[]> =>
+    summary.locator(selector).evaluateAll((elements) =>
       elements
         .filter((element) => {
           const range = document.createRange();
@@ -660,14 +676,25 @@ test('「表示期間の変化」の 3 組が、容器の幅に応じて段を�
   // 空振り防止: 3 組そろっていること（組が消えていれば行数の検査は自明に通る）。
   await expect(summary.locator('dt')).toHaveCount(3);
 
-  // Pixel 5 相当では 3 列に収まる。
-  expect(await rowCount(), 'Pixel 5 相当で 3 組が 1 行に並んでいない').toBe(1);
-  expect(await wrapped(), 'Pixel 5 相当で値が折り返している').toEqual([]);
+  // Pixel 5 相当（容器 329px）では 1 列。**3 列に割るとラベル「クチコミ数の増減」が 2 行になり、
+  // その組の値だけが 1 行ぶん下へ落ちるので、詰めない。**
+  expect(await rowCount(), 'Pixel 5 相当で 3 組が 1 列に落ちていない').toBe(3);
+  expect(await wrapped('dd'), 'Pixel 5 相当で値が折り返している').toEqual([]);
+  expect(await wrapped('dt'), 'Pixel 5 相当でラベルが折り返している').toEqual([]);
 
-  // 320px では容器が狭いので 1 列へ落とす。**値を折り返してまで 3 列を保たない。**
+  // 320px（容器 256px）でも 1 列。
   await page.setViewportSize(NARROW_VIEWPORT);
   expect(await rowCount(), '320px で 3 組が 1 列に落ちていない').toBe(3);
-  expect(await wrapped(), '320px で値が折り返している').toEqual([]);
+  expect(await wrapped('dd'), '320px で値が折り返している').toEqual([]);
+  expect(await wrapped('dt'), '320px でラベルが折り返している').toEqual([]);
+
+  // 容器が境目を超える幅では 3 列に並ぶ。**この段を測らないと、段組みの宣言が一度も成立しない
+  // まま緑になる**（どの幅でも 1 列なら、上の 2 つは `grid-cols-3` を消しても通る）。
+  // 3 列の側でも折り返しが無いことを併せて測るので、境目を下げる改変はここで赤になる。
+  await page.setViewportSize(WIDE_VIEWPORT);
+  expect(await rowCount(), `${WIDE_VIEWPORT.width}px で 3 組が 1 行に並んでいない`).toBe(1);
+  expect(await wrapped('dd'), `${WIDE_VIEWPORT.width}px で値が折り返している`).toEqual([]);
+  expect(await wrapped('dt'), `${WIDE_VIEWPORT.width}px でラベルが折り返している`).toEqual([]);
 });
 
 // 空状態の案内が、狭い幅で行の長さをそろえて分かれること（Issue #286 項目 3）。
