@@ -22,6 +22,12 @@
 // 固定の +9 時間で行い、実行環境の TZ に依存させない。
 
 import type { DailySummaryNewReview } from '@fwlm/db';
+import {
+  GOOGLE_MAPS_LINK_TEXT as SHARED_GOOGLE_MAPS_LINK_TEXT,
+  REVIEW_AUTHOR_LINK_LABEL,
+  REVIEW_EXCERPTS_UNAVAILABLE_TEXT,
+  isDisplayableNewReview,
+} from '@fwlm/db/daily-summary';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
 import type { LineMessage } from '../../line/client.js';
 import type {
@@ -52,19 +58,22 @@ export const REVIEW_TEXT_MAX_LENGTH = 300;
 /** 口コミの本文を折り返して表示する最大の行数。 */
 export const REVIEW_TEXT_MAX_LINES = 4;
 
-/** 口コミを Google Maps 上で表示する導線の文言。 */
-export const GOOGLE_MAPS_LINK_TEXT = 'Google Maps で見る';
+/**
+ * 口コミを Google Maps 上で表示する導線の文言。LIFF の詳細画面と同じ語を使う
+ * （`@fwlm/db/daily-summary` が持ち、両方の面が同じ定数を読む）。
+ */
+export const GOOGLE_MAPS_LINK_TEXT = SHARED_GOOGLE_MAPS_LINK_TEXT;
 
 const NO_NEW_REVIEWS_TEXT = '新着口コミはありません。';
 const UNDETERMINABLE_TEXT = '前日のデータが無いため、新着口コミの件数を判定できません。';
-const EXCERPTS_UNAVAILABLE_TEXT = '新着口コミの内容は、ここでは表示できません。';
+const EXCERPTS_UNAVAILABLE_TEXT = REVIEW_EXCERPTS_UNAVAILABLE_TEXT;
 
 /** 取得済みの値に無い欄の表記（8.4）。値を推測して埋めない。 */
 const MISSING_VALUE = '—';
 
 // 投稿者名のリンクの label。Flex の button 以外の部品では表示されないが、40 文字以内でなければならない
-// （references/action-objects.md の Label Specifications）。
-const AUTHOR_LINK_LABEL = '投稿者のプロフィール';
+// （references/action-objects.md の Label Specifications）。LIFF の詳細画面と同じ語を使う。
+const AUTHOR_LINK_LABEL = REVIEW_AUTHOR_LINK_LABEL;
 
 // 投稿者の画像の大きさ。名前の左に置く最小の段で、LINE のキーワードを使う（design.md の Report builders）。
 const AUTHOR_PHOTO_SIZE = 'xxs';
@@ -80,9 +89,14 @@ interface DisplayableReview {
 function selectDisplayable(reviews: readonly DailySummaryNewReview[]): DisplayableReview[] {
   const selected: DisplayableReview[] = [];
   for (const review of reviews) {
-    const googleMapsUri = toFlexHttpsUrl(review.googleMapsUri, URI_ACTION_MAX_LENGTH);
     // 導線（8.7）と投稿者名（8.2）の両方を併記できる口コミだけが、内容を出せる。評価は見ない。
-    if (googleMapsUri !== null && review.authorName.trim() !== '') {
+    // この判定は LIFF の詳細画面と同じものを使う（`@fwlm/db/daily-summary`・Issue #287）。
+    if (!isDisplayableNewReview(review)) {
+      continue;
+    }
+    // LINE 固有の上限（uri アクションの文字数）だけを、共有の判定の上へ重ねる。
+    const googleMapsUri = toFlexHttpsUrl(review.googleMapsUri, URI_ACTION_MAX_LENGTH);
+    if (googleMapsUri !== null) {
       selected.push({ review, googleMapsUri });
     }
   }

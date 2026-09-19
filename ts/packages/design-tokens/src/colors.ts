@@ -61,6 +61,15 @@ export interface ColorTokens {
    * （test/colors.test.ts の不変条件が固定する）。
    */
   readonly borderInteractive: string;
+  /**
+   * Google Maps の帰属表示の文字色（Web 面・Places API ポリシー・Issue #287）。
+   *
+   * ポリシーが許すのは白・#1F1F1F・#5E5E5E の 3 色だけで、本文色（text）はそのどれでもない。
+   * 役割を分けずに本文色を継承させると、ポリシーの外の色で帰属表示が描かれる。白い面の上に置くので
+   * 白は採れず、黒は本文より強く見えるため、灰（#5E5E5E）を採る。LINE 側の lineColors.attribution と
+   * 同値だが、Web は LINE のトークンを参照しない（面ごとに解決先が違うため）。
+   */
+  readonly attribution: string;
 }
 
 /** LINE Flex Message 用カラートークン（現行 7 色の意味役割化と、帰属表示の色）。 */
@@ -124,6 +133,8 @@ export const colors: ColorTokens = {
   // 実効コントラストが落ちるため、3:1 ちょうどの灰では余裕が無い。出典の border-strong は
   // 対白 1.80:1 で 3:1 に届かないため採らない。
   borderInteractive: '#767676',
+  // ポリシーが許す灰（対白 約 6.48:1）。ポリシー自身も 4.5:1 の確保を求めている。
+  attribution: '#5E5E5E',
 };
 
 export const lineColors: LineColorTokens = {

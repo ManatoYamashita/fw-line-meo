@@ -12,7 +12,7 @@
 //    root を選ぶと pg がクライアントへ入る）。値 import の禁止は ts/eslint.config.js の
 //    no-restricted-imports が機械強制する。
 
-import type { DailySummaryCompetitor, DailySummaryStatus } from './types.js';
+import type { DailySummaryCompetitor, DailySummaryNewReview, DailySummaryStatus } from './types.js';
 
 // --- 表示文言（Flex と LIFF で同じものを使う） ------------------------------------------
 
@@ -24,6 +24,15 @@ export const UNRATED_EXCLUDED_NOTE = '評価のない店は順位に含めてい
 
 /** 自店に評価が無い日に、順位の位置へ出す文。 */
 export const SELF_UNRATED_RANK_TEXT = 'まだ Google の評価が無いため、順位は出せません';
+
+/** 口コミを Google Maps 上で表示する導線の文言。 */
+export const GOOGLE_MAPS_LINK_TEXT = 'Google Maps で見る';
+
+/** 投稿者のプロフィールへの導線の読み上げ名。 */
+export const REVIEW_AUTHOR_LINK_LABEL = '投稿者のプロフィール';
+
+/** 新着口コミはあるが、内容を出せる口コミが 1 件も無いときの案内。 */
+export const REVIEW_EXCERPTS_UNAVAILABLE_TEXT = '新着口コミの内容は、ここでは表示できません。';
 
 // --- 正規化 ------------------------------------------------------------------------
 
@@ -183,4 +192,53 @@ export function hasUnratedCompetitor(competitors: readonly DailySummaryCompetito
  */
 export function isUnratedSelf(status: DailySummaryStatus, rating: string | null): boolean {
   return status !== 'failed' && !isRatedColumn(rating);
+}
+
+// --- 口コミの内容を出せるか（Places API のポリシー・Issue #287） -------------------------
+//
+// ポリシーは、口コミを出すなら投稿者を帰属し、**その口コミごとに googleMapsUri で Google Maps 上の
+// 元の口コミへ必ず辿れること**（"must always have access"）を求める。導線を出せない口コミは、
+// 内容そのものを出さない。判定はどの面でも同じでなければならないので、LINE のレポートと LIFF の
+// 詳細画面がここを共有する。
+//
+// 導線の有無で判定するのは、新着口コミの帰属 3 項目を Go が空でないときだけ書くためである
+// （types.ts の DailySummaryNewReview）。足す前に書かれた行の要素は項目を持たない。
+//
+// ここに LINE 固有の長さの上限（uri アクションの 1000 文字など）は含めない。Web には無い制約であり、
+// LINE 側は本判定の上へ自分の検証を重ねる。
+
+// RFC 3986 の文字だけでできた https の URL。空白・非 ASCII・逆斜線を含む値は受け付けない。
+const HTTPS_URL_PATTERN = /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
+// 「%」の後に 16 進の 2 桁が続かない（百分率符号化として壊れている）。
+const BROKEN_PERCENT_ENCODING = /%(?![0-9A-Fa-f]{2})/;
+
+/**
+ * value が https の絶対 URL なら、そのまま返す。使えなければ null を返す。
+ *
+ * スキームの無い `//…`、http、javascript: などは使わない。ホストを持たない値、利用者情報を含む値も
+ * 使わない。値を書き換えて救うことはしない（別の URL へ変わりうる）。
+ */
+export function toHttpsUrl(value: string | undefined): string | null {
+  if (value === undefined || !HTTPS_URL_PATTERN.test(value) || BROKEN_PERCENT_ENCODING.test(value)) {
+    return null;
+  }
+  const parsed = URL.parse(value);
+  if (parsed === null || parsed.protocol !== 'https:' || parsed.hostname === '') {
+    return null;
+  }
+  // 書かれたとおりの位置にホストがあること（`https:///…` のように解釈で補われた形と、利用者情報を除く）。
+  return value.startsWith(`https://${parsed.host}`) ? value : null;
+}
+
+/**
+ * 口コミの内容を出してよいか。Google Maps 上の https の URL と投稿者名の両方を持つものだけが出せる。
+ * 評価では絞らない（低評価を隠す導線は作らない）。
+ */
+export function isDisplayableNewReview(review: DailySummaryNewReview): boolean {
+  return toHttpsUrl(review.googleMapsUri) !== null && review.authorName.trim() !== '';
+}
+
+/** 内容を出せる口コミだけを、入力の順のまま返す。 */
+export function displayableNewReviews(reviews: readonly DailySummaryNewReview[]): DailySummaryNewReview[] {
+  return reviews.filter((review) => isDisplayableNewReview(review));
 }

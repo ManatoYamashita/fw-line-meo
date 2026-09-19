@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { DailySummaryCompetitor } from '../src/types.js';
+import type { DailySummaryCompetitor, DailySummaryNewReview } from '../src/types.js';
 import {
+  GOOGLE_MAPS_LINK_TEXT,
+  REVIEW_AUTHOR_LINK_LABEL,
+  REVIEW_EXCERPTS_UNAVAILABLE_TEXT,
   SELF_UNRATED_RANK_TEXT,
   UNRATED_EXCLUDED_NOTE,
   UNRATED_LABEL,
+  displayableNewReviews,
   formatRatingLabel,
   formatStarDiff,
   hasUnratedCompetitor,
+  isDisplayableNewReview,
   isUnratedSelf,
   normalizeSnapshotRating,
   normalizeSummaryRatings,
+  toHttpsUrl,
   type SummaryRatingFields,
 } from '../src/daily-summary.js';
 
@@ -261,5 +267,89 @@ describe('表示文言', () => {
     expect(UNRATED_LABEL).toBe('評価なし');
     expect(UNRATED_EXCLUDED_NOTE).toBe('評価のない店は順位に含めていません');
     expect(SELF_UNRATED_RANK_TEXT).toBe('まだ Google の評価が無いため、順位は出せません');
+    expect(GOOGLE_MAPS_LINK_TEXT).toBe('Google Maps で見る');
+    expect(REVIEW_AUTHOR_LINK_LABEL).toBe('投稿者のプロフィール');
+    expect(REVIEW_EXCERPTS_UNAVAILABLE_TEXT).toBe('新着口コミの内容は、ここでは表示できません。');
+  });
+});
+
+// Issue #287: 口コミを出すなら、その口コミごとに googleMapsUri で Google Maps 上の元の口コミへ
+// 必ず辿れなければならない（Places API のポリシー "must always have access"）。導線を出せない
+// 口コミは内容そのものを出さない。LINE のレポートと LIFF の詳細画面が同じ判定を共有する。
+
+function review(overrides: Partial<DailySummaryNewReview> = {}): DailySummaryNewReview {
+  return {
+    authorName: '山田太郎',
+    publishTime: '2026-07-11T08:00:00Z',
+    rating: 5,
+    textExcerpt: 'とても美味しかったです',
+    googleMapsUri: 'https://www.google.com/maps/reviews/data=test-1',
+    ...overrides,
+  };
+}
+
+/**
+ * 帰属の項目が欠けた行。Go は空のときに**キーごと書かない**ので、`undefined` を代入した形ではなく
+ * キーを取り除いた形で作る（tsconfig の exactOptionalPropertyTypes もこの区別を要求する）。
+ */
+function reviewWithout(
+  key: 'googleMapsUri' | 'authorUri' | 'authorPhotoUri',
+  overrides: Partial<DailySummaryNewReview> = {},
+): DailySummaryNewReview {
+  const built = { ...review(overrides) };
+  delete built[key];
+  return built;
+}
+
+describe('toHttpsUrl', () => {
+  it('https の絶対 URL はそのまま返す', () => {
+    expect(toHttpsUrl('https://maps.google.com/x?y=1#z')).toBe('https://maps.google.com/x?y=1#z');
+  });
+
+  it.each([
+    ['未設定', undefined],
+    ['空文字', ''],
+    ['http', 'http://maps.google.com/x'],
+    ['スキーム無し', '//maps.google.com/x'],
+    ['javascript', 'javascript:alert(1)'],
+    ['ホスト無し', 'https:///x'],
+    ['空白入り', 'https://maps.google.com/a b'],
+    ['非 ASCII', 'https://maps.google.com/あ'],
+    ['壊れた百分率符号化', 'https://maps.google.com/%zz'],
+    ['利用者情報つき', 'https://user@maps.google.com/x'],
+  ])('%s は使わない', (_name, value) => {
+    expect(toHttpsUrl(value)).toBeNull();
+  });
+});
+
+describe('isDisplayableNewReview / displayableNewReviews', () => {
+  it('Google Maps 上の URL と投稿者名の両方を持つ口コミだけが内容を出せる', () => {
+    expect(isDisplayableNewReview(review())).toBe(true);
+    // 帰属 3 項目を足す前に書かれた行は、キーそのものを持たない。
+    expect(isDisplayableNewReview(reviewWithout('googleMapsUri'))).toBe(false);
+    expect(isDisplayableNewReview(review({ googleMapsUri: 'http://example.com/x' }))).toBe(false);
+    expect(isDisplayableNewReview(review({ authorName: '' }))).toBe(false);
+    expect(isDisplayableNewReview(review({ authorName: '   ' }))).toBe(false);
+  });
+
+  it('評価では絞らない（低評価だけを隠す見せ方はレビューゲーティングに当たる）', () => {
+    for (const rating of [1, 2, 3, 4, 5]) {
+      expect(isDisplayableNewReview(review({ rating })), `★${rating}`).toBe(true);
+    }
+  });
+
+  it('出せる口コミだけを入力の順のまま返す（並べ替えない）', () => {
+    const reviews = [
+      reviewWithout('googleMapsUri', { authorName: '一' }),
+      review({ authorName: '二' }),
+      review({ authorName: '三', rating: 1 }),
+      review({ authorName: '', googleMapsUri: 'https://x.example/1' }),
+    ];
+    expect(displayableNewReviews(reviews).map((r) => r.authorName)).toEqual(['二', '三']);
+  });
+
+  it('1 件も出せないときは空配列を返す（呼出元が件数だけを出す）', () => {
+    expect(displayableNewReviews([reviewWithout('googleMapsUri')])).toEqual([]);
+    expect(displayableNewReviews([])).toEqual([]);
   });
 });

@@ -32,6 +32,9 @@ const AA_TEXT_PAIRS: ReadonlyArray<{
   // 面を暗くしたときに上の文字が AA を割っても気づけない。面の役割はここで前景と対にして固定する。
   { foreground: 'text', background: 'surfaceStrong' },
   { foreground: 'textMuted', background: 'surfaceSoft' },
+  // Google Maps の帰属表示（Issue #287）。Places API のポリシー自身も 4.5:1 の確保を求めており、
+  // ここでの検証はその要求とも重なる。
+  { foreground: 'attribution', background: 'background' },
 ];
 
 /** AA 検証の対象外とする意味役割（装飾・面塗り・非テキスト用途）。 */

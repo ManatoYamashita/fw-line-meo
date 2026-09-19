@@ -87,6 +87,12 @@ function definitionPairs(list: Element): readonly (readonly [string, string])[] 
   });
 }
 
+/**
+ * 新着口コミ 1 行が持つ帰属の導線の本数（Issue #287）。投稿者のプロフィールと、Google Maps 上の
+ * 元の口コミの 2 本である。リンクの件数を固定している検査は、口コミの件数に比例する分をここから数える。
+ */
+const REVIEW_LINKS_PER_ROW = 2;
+
 const SINGLE_STORE: StoreRef[] = [{ storeId: 'store-1', name: 'テスト自由が丘店' }];
 const MULTI_STORES: StoreRef[] = [
   { storeId: 'store-1', name: 'テスト自由が丘店' },
@@ -108,8 +114,18 @@ const mockResult: StoreDetailResponse = {
     ratingPrev: '4.4',
     reviewCountPrev: 115,
     newReviewCount: 2,
+    // 帰属 3 項目（Issue #287）。Go は空でないときだけ書くので、揃っている行と欠けている行の
+    // 両方が本番に存在する。既定は揃っている形（新しい行）にし、欠けた形は個別の試験で作る。
     newReviews: [
-      { authorName: '山田太郎', publishTime: '2026-07-11T08:00:00Z', rating: 5, textExcerpt: 'とても美味しかったです' },
+      {
+        authorName: '山田太郎',
+        publishTime: '2026-07-11T08:00:00Z',
+        rating: 5,
+        textExcerpt: 'とても美味しかったです',
+        authorUri: 'https://www.google.com/maps/contrib/1',
+        authorPhotoUri: 'https://lh3.googleusercontent.com/a/photo-1',
+        googleMapsUri: 'https://www.google.com/maps/reviews/data=review-1',
+      },
     ],
   },
   competitors: [{ name: '競合A', rating: 4.2, reviewCount: 80, starDiff: 0.3 }],
@@ -391,7 +407,8 @@ describe('store detail page', () => {
       const switchLink = screen.getByText('店舗を切り替える');
       expect(switchLink.getAttribute('href')).toBe('/store');
       // 切替リンクは storeId を持たないため、遷移先で再び 409 → 選択画面へ戻る。
-      expect(container.querySelectorAll('a')).toHaveLength(1);
+      // 残る 2 本は新着口コミ 1 件が持つ帰属の導線である（Issue #287）。
+      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + 1);
     });
 
     it('単一店舗の場合は「店舗を切り替える」リンクを出さない', async () => {
@@ -404,7 +421,8 @@ describe('store detail page', () => {
       });
 
       expect(screen.queryByText('店舗を切り替える')).toBeNull();
-      expect(container.querySelectorAll('a')).toHaveLength(0);
+      // 切替リンクは 0 本。残るのは新着口コミ 1 件が持つ帰属の導線だけである（Issue #287）。
+      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW);
     });
 
     it('選択画面にも書込操作を一切含まない（新経路を no-write 保証と同格にする）', async () => {
@@ -509,9 +527,10 @@ describe('store detail page', () => {
           });
         },
         headingName: 'テスト自由が丘店',
-        // 単一店舗なので切替リンクは出ない（上の「単一店舗の場合は「店舗を切り替える」リンクを出さない」が
-        // 0 件を固定している）。
-        linkNames: [],
+        // 単一店舗なので切替リンクは出ない。残る 2 本は新着口コミ 1 件が持つ帰属の導線である
+        // （投稿者のプロフィールと、Google Maps 上の元の口コミ・Issue #287）。口コミを出す面は、
+        // その口コミごとに元の口コミへ辿れなければならないので、リンクは口コミの件数に比例する。
+        linkNames: ['山田太郎さん', 'Google Maps で見る'],
       },
     ];
 
@@ -680,7 +699,8 @@ describe('store detail page', () => {
       // 既存の照合は getByText（直下テキストの一致）だけで、算出される読み上げ名は見ていない。
       const link = screen.getByRole('link', { name: '店舗を切り替える' });
       expect(link.getAttribute('href')).toBe('/store');
-      expect(container.querySelectorAll('a')).toHaveLength(1);
+      // 切替リンク 1 本と、新着口コミ 1 件が持つ帰属の導線（Issue #287）。
+      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + 1);
     });
 
     it('店舗選択待ちには通知の役割を持ち込まない（Req 3.5）', async () => {
@@ -901,8 +921,147 @@ describe('store detail page', () => {
       expect(visited).toBe(cases.length);
     });
 
+    // --- 口コミの帰属（Places API のポリシー・Issue #287）---------------------------------
+    //
+    // ポリシーは、口コミを出すなら投稿者を帰属し（場所が許す限りアバター・名前・プロフィールリンクの
+    // すべてで）、**その口コミごとに googleMapsUri で Google Maps 上の元の口コミへ必ず辿れること**を
+    // 求める。導線を出せない口コミは、内容そのものを出さない。
+    //
+    // 帰属 3 項目は Go が空でないときだけ書くので、揃っている行と欠けている行の両方が本番に存在する。
+    // 欠けた項目ごとに出し方が変わるため、項目ごとに 1 件ずつ形を作って固定する。
+
+    const REVIEW_BASE = BASE_SUMMARY.newReviews[0]!;
+
+    /** 新着口コミの一覧だけを差し替えた応答を作る（件数は口コミの本数に合わせる）。 */
+    function withReviews(...reviews: readonly (typeof REVIEW_BASE)[]): StoreDetailResponse {
+      return withSummary({ newReviewCount: reviews.length, newReviews: reviews });
+    }
+
+    /**
+     * 帰属の項目が欠けた口コミ。Go は空のときに**キーごと書かない**ので、`undefined` を代入した形では
+     * なくキーを取り除いた形で作る（tsconfig の exactOptionalPropertyTypes もこの区別を要求する）。
+     */
+    function reviewWithout(
+      key: 'googleMapsUri' | 'authorUri' | 'authorPhotoUri',
+      overrides: Partial<typeof REVIEW_BASE> = {},
+    ): typeof REVIEW_BASE {
+      const built = { ...REVIEW_BASE, ...overrides };
+      delete built[key];
+      return built;
+    }
+
+    it('内容を出す口コミは、投稿者の帰属と Google Maps への導線を伴う（Issue #287）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      const item = screen.getByText('「とても美味しかったです」').closest('li')!;
+      // 投稿者のアバター。読み上げ名は隣の投稿者名が担うので alt は空にする。
+      const avatar = item.querySelector('img')!;
+      expect(avatar).not.toBeNull();
+      expect(avatar.getAttribute('src')).toBe(REVIEW_BASE.authorPhotoUri);
+      expect(avatar.getAttribute('alt')).toBe('');
+      // 投稿者名はプロフィールへの導線を兼ねる。
+      const author = item.querySelector('a[href^="https://www.google.com/maps/contrib/"]')!;
+      expect(author.getAttribute('href')).toBe(REVIEW_BASE.authorUri);
+      expect(author.textContent).toBe('山田太郎さん');
+      expect(author.getAttribute('aria-label')).toBe('山田太郎さん（投稿者のプロフィール）');
+      // 元の口コミへの導線。URL は保存された値そのもので、書き換えない。
+      const maps = screen.getByRole('link', { name: 'Google Maps で見る' });
+      expect(maps.getAttribute('href')).toBe(REVIEW_BASE.googleMapsUri);
+      expect(maps.closest('li')).toBe(item);
+      expect(item.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW);
+    });
+
+    it('帰属の項目が欠けた口コミは、出せるものだけを出し、導線が無ければ内容ごと伏せる（Issue #287）', async () => {
+      const UNAVAILABLE = '新着口コミの内容は、ここでは表示できません。';
+      const cases = [
+        {
+          name: 'アバター無し',
+          body: withReviews(reviewWithout('authorPhotoUri')),
+          rows: 1,
+          images: 0,
+          links: 2,
+          unavailable: false,
+        },
+        {
+          name: 'プロフィール無し',
+          body: withReviews(reviewWithout('authorUri')),
+          rows: 1,
+          images: 1,
+          links: 1,
+          unavailable: false,
+        },
+        {
+          // 導線が取れていない口コミ。ポリシーは元の口コミへ辿れることを必須にするので、内容を出さない。
+          name: '導線無し',
+          body: withReviews(reviewWithout('googleMapsUri')),
+          rows: 0,
+          images: 0,
+          links: 0,
+          unavailable: true,
+        },
+        {
+          // 投稿者を帰属できない口コミも内容を出さない（ポリシーは投稿者の帰属も必須にする）。
+          name: '投稿者名無し',
+          body: withReviews({ ...REVIEW_BASE, authorName: '' }),
+          rows: 0,
+          images: 0,
+          links: 0,
+          unavailable: true,
+        },
+        {
+          // 混在。出せる 1 件だけを出し、件数は新着そのものの件数（2）を出したままにする。
+          name: '混在',
+          body: withReviews(reviewWithout('googleMapsUri'), { ...REVIEW_BASE, authorName: '鈴木' }),
+          rows: 1,
+          images: 1,
+          links: 2,
+          unavailable: false,
+        },
+      ] as const;
+
+      const visited = await forEachResponse(cases, (item, container) => {
+        // 新着の節は「今日のポジション」の中の小節（h3）で、見出しと本体を束ねる div が範囲である。
+        const reviewsHeading = screen.getByRole('heading', { level: 3, name: '新着クチコミ' });
+        const section = reviewsHeading.parentElement!;
+        expect(section.querySelectorAll('li'), item.name).toHaveLength(item.rows);
+        expect(section.querySelectorAll('img'), item.name).toHaveLength(item.images);
+        expect(section.querySelectorAll('a'), item.name).toHaveLength(item.links);
+        expect(
+          Array.from(container.querySelectorAll('p')).some((p) => announcedText(p) === UNAVAILABLE),
+          item.name,
+        ).toBe(item.unavailable);
+        // 件数は口コミの本数のままで、出せた件数へ置き換えない（新着そのものを過少に見せない）。
+        const count = item.body.summary!.newReviewCount;
+        expect(soleParagraphAnnouncing(container, `${count}件の新着クチコミ`), item.name).toBeDefined();
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('帰属表示は、面の側が色と大きさを書く 1 行だけである（Issue #287・§7.19 の 2 つ目の例外）', async () => {
+      stubFetch({ ok: true, status: 200, body: mockResult });
+      const { container } = render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      // **集合の完全一致で固定する。** 包含では色を上書きするクラスを後ろへ足す改変が通る。
+      // ポリシーが許す色は 3 値に限られ、本文色はそのどれでもない（継承させてはならない）。
+      const attribution = soleParagraphAnnouncing(container, 'データ提供: Google Maps');
+      expect(classTokens(attribution)).toEqual(['text-sm', 'text-attribution']);
+      // 面の側が色を書くのはここと推移グラフだけである。ほかの要素へ色を広げる改変を通さない。
+      const colored = Array.from(container.querySelectorAll('p, span, li, ul, section, footer, div')).filter(
+        (element) => classTokens(element).some((token) => token.startsWith('text-attribution')),
+      );
+      expect(colored).toEqual([attribution]);
+    });
+
     it('競合と新着の一覧を list / listitem として読め、行の文字列を変えない（Req 2.1, 3.2）', async () => {
-      const NEW_REVIEW_ROW = '山田太郎さん ★5「とても美味しかったです」';
+      // 行の末尾に Google Maps 上の元の口コミへの導線が付く（Issue #287）。導線なしでは内容を出せない。
+      const NEW_REVIEW_ROW = '山田太郎さん★5「とても美味しかったです」Google Maps で見る';
       const cases = [
         { name: '新着 1 行・競合 1 行', body: mockResult, lists: 2, items: [NEW_REVIEW_ROW, '競合A評価★4.2クチコミ80件星差+0.3'] },
         { name: '新着 0 件', body: withSummary({ newReviewCount: 0, newReviews: [] }), lists: 1, items: ['競合A評価★4.2クチコミ80件星差+0.3'] },
