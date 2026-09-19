@@ -420,6 +420,21 @@ describe('見出しと footer（6.2・6.6・8.1・8.3）', () => {
 });
 
 describe('日付順の表（6.2・6.3・6.4・6.8）', () => {
+  // 2026-09-19 の実機確認（本番・iPhone）で、見出しの「クチコミ数」が「クチコ…」と切り捨てられた。
+  // 値のセル（valueCell）は wrap を持つので折り返せるのに、見出しのセルだけが持っていなかった。
+  // 列が何の数字なのかを読めなくするので、見出しも値と同じく折り返す。スナップショットだけでは
+  // `-u` で黙って戻せてしまうため、意図をここで明示して固定する。
+  it('列の見出しは値と同じく折り返す（幅に収まらないときに切り捨てない）', () => {
+    const heading = tableOf(report(FOUR_KINDS_DAYS)).contents[0];
+    if (heading === undefined || !isBox(heading)) {
+      throw new Error('見出しの行が box ではない');
+    }
+    const cells = heading.contents.filter((c): c is FlexTextComponent => c.type === 'text');
+    // 件数を先に固定する（0 件や 1 件でも「すべて true」は成り立ってしまうため）。
+    expect(cells).toHaveLength(TABLE_HEADINGS.length);
+    expect(cells.map((c) => c.wrap)).toEqual(TABLE_HEADINGS.map(() => true));
+  });
+
   it('列の見出しの下に、7 日を日付の昇順で 1 行ずつ並べる', () => {
     const bubble = report(FOUR_KINDS_DAYS);
     expect(texts(tableOf(bubble).contents[0])).toEqual(TABLE_HEADINGS);
