@@ -85,6 +85,17 @@ export interface QueryStoreDetailOptions {
 // 方式は ts/apps/delivery-job/src/index.ts の resolveJstNow と同じ固定 +9:00 オフセットとし、
 // tzdata（コンテナに無いことがある）にもサーバーの TZ 環境変数にも依存させない。
 // アプリをまたいだ import は作らない（面ごとにサービスが分かれているため）。
+//
+// **この是正で、0:00〜6:00 JST の表示は「前日の数字」から「準備中」へ変わる。** 日次バッチの
+// 起動は 6:00 JST（infra/modules/batch-job の schedule）なので、その前の時間帯は当日の行が
+// まだ存在しない。基準日が当日になれば当日の行は見つからず、当日サマリーは null になって
+// 「本日分のデータはまだ準備中です」を出す。**これは退行ではなく是正である** —— 前日の数字を
+// 「今日のポジション」と名乗るより、まだ無いと言うほうが正しい。リッチメニューの「今日の
+// ポジション」（line-webhook の jstToday）は既にこの振る舞いなので、面のあいだで揃う。
+//
+// 同じ +9:00 の定数はリポジトリに 4 つある（ここ・delivery-job の resolveJstNow・
+// line-webhook の jstToday・Go の jstDateAsUTC）。値が揃っていることを確かめる機械的なガードは
+// 無いので、5 つ目を足すときは既存の全てと突き合わせること（Issue #299）。
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 function defaultAsOf(): string {
