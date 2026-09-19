@@ -678,6 +678,8 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.18 折り返しの語彙と行の直下の詳細行 | `ts/packages/ui/test/components.test.tsx` | 狭い画面の組版 |
 | 7.18 面ごとの列の語彙（管理ダッシュボード 4 面） | `ts/apps/dashboard-web/test/stores-page.test.tsx` | 列の折り返しの規則を中身の種類で選んでいる |
 | 7.18 実描画（縦並び・手がかり・行の直下のパネル） | `ts/apps/dashboard-web/e2e/mobile-layout.spec.ts` | 一覧表のセルが縦に並んでいない |
+| 7.19 要約が測った期間と公称の窓の食い違い | `ts/apps/store-detail/test/trend-dashboard.test.tsx` | 公称の期間と食い違う組にだけ期間が添う |
+| 7.19 食い違うときだけ添えることの両端 | `ts/apps/store-detail/test/trend-view.test.ts` | 公称の窓と食い違う組にだけ添える期間 |
 | 7.8 帯の段組み | `ts/apps/dashboard-web/test/top-nav.test.tsx` | 帯の段組み（7.8 節 |
 | 7.8 帯の実描画（全リンクに捲らずに届く） | `ts/apps/dashboard-web/e2e/mobile-layout.spec.ts` | 帯の操作要素すべてに捲らずに届く |
 | 選択済みの面をアクション色で塗る部品のエラー指標 | `ts/packages/ui/test/contrast-usage.test.ts` | 選択済みの面をアクション色で塗る部品のエラー指標 |
