@@ -347,7 +347,7 @@
   - 推移で最新が取得失敗の日の `reportOutcome` は、design に定義が無いので `fetch_failed` とした（最新のデータの状態を表す区分）
   - handler はロガーを作成時に固定する。相関 ID を記録に残すなら、3.9・3.10 でリクエストごとに handler を作る
   - エラー境界（3.10）が記録する種別は `StoreScopedReportError` になる。元の種別は `cause` から取る
-- （3.7・既存の穴）`scripts/check-log-field-binding.sh` の「実装→正典」の照合は `writeStructuredLog(`・`correlationLog(` を直接呼ぶ箇所しか見ず、ロガーを注入して呼ぶ line-webhook の事象は対象外である（正典から行を消しても緑。既存の `line-webhook.audit_log_failed` も未登録のまま）。本 spec の範囲外なので、別 Issue を提案する（最終報告で挙げる）。storeId を記録に載せる漏れは、型でもガードでもなく試験だけが捕まえる
+- （3.7・既存の穴 → #288 へ起票）`scripts/check-log-field-binding.sh` の「実装→正典」の照合は `writeStructuredLog(`・`correlationLog(` を直接呼ぶ箇所しか見ず、ロガーを注入して呼ぶ line-webhook の事象は対象外である（正典から行を消しても緑。当時未登録だった `line-webhook.audit_log_failed` は 3.9 で登録した）。最終報告の時点で数えたところ、**正典の 30 事象のうち逆方向で検証されているのは 3 件だけ**で、注入ロガー経由の 18 か所と別名の sink 変数経由の 6 か所が走査の外にあった。本 spec の範囲外なので #288 が追う。storeId を記録に載せる漏れは、型でもガードでもなく試験だけが捕まえる
 - （3.7）`flex-types.ts` で 3.1〜3.4 が足した任意項目は、すべて使われていることを確かめた
 - （3.8→3.10・3.10 で解消済み）ステータス案内は `buildStatusGuidanceMessage` になった。旧名の `buildAlreadyCompletedMessage` は 3.10 で別名ごと消した（コード・スクリプト・HTML・docs に残っていない）。3.10 で行ったのは次の 3 つ
   - 別名を消す（全ビルダーの表 `INVOKE_EVERY_BUILDER` の余った鍵が型エラーになる）
@@ -370,7 +370,7 @@
 - （3.11→4.x）`report-flow.db.test.ts` の試験用オーナー（接頭辞 c9）は既定の配信時刻 7 時で、07-12・07-13 の ready の行を持ち、後片付けをしない（既存の慣習）
   - with-test-db は全パッケージで 1 つの DB を共有するので、4.3・4.4 で全店舗を横断して読む配信の試験は 7 時を使わない（既存の配信の試験は 9・10・11・14 時）
 - （3.11）Go の言語間試験はオーナーを `onboarding_status = 'active'` で書くが、本番で `onboarding_status` を書くのは `markOwnerStoreIdentified`（`store_identified`）だけで、代理店の登録も同じ遷移を通る（本番の穴ではない）。そのため言語間試験のレポートは、webhook ではなく ReportHandler に Go のオーナーを渡して組み立てる
-- （既存の揺らぎ）`ts/packages/db/test/pool-connector.test.ts` の「エラー経路: getOptions() が失敗しても Connector を取り残さず」は、`pnpm -r test` で全パッケージを並行に流すと、有効なタイマーの数の比較（`activeTimeoutCount()`）がまれに 0 対 1 で赤になる。単独では 3 回続けて緑で、本 spec はこのファイルに触れていない（2026-09-16 に 1 回観測）。別 Issue を提案する（最終報告で挙げる）
+- （既存の揺らぎ）`ts/packages/db/test/pool-connector.test.ts` の「エラー経路: getOptions() が失敗しても Connector を取り残さず」は、`pnpm -r test` で全パッケージを並行に流すと、有効なタイマーの数の比較（`activeTimeoutCount()`）がまれに 0 対 1 で赤になる。単独では 3 回続けて緑で、本 spec はこのファイルに触れていない（2026-09-16 に 1 回観測）。最終報告の時点で突き合わせたところ、ファイル・テスト名・assert 行（`:126`）とも既存の **#279** と一致したので、新規には起票せず #279 へ再観測を記録した
 - （4.1）「当日の行の前日の順位（再計算値）を使わない」という規律は、`NotificationToday` の型から `rank_prev` を外すことで担保した。コメントの禁止より強い（同種の規律は型で固定する）
 - （4.1→4.5）`FLEX_BUBBLE_MAX_BYTES`（30,000）と `ALT_TEXT_MAX_LENGTH`（400）は、line-webhook の `report/format.ts` と同値の別実装である。アプリをまたぐ import を作らない設計どおりで、旧 `flex.ts` の撤去後も重複したままにする
 - （4.2→4.4・必須）design の ReportMenuGate の記述が実物と食い違っている。4.4 で配線し、design も実装に合わせて改める
