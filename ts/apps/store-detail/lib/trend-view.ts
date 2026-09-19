@@ -130,10 +130,19 @@ export function selectTrendWindow(
 
 // --- 指標の値と範囲 --------------------------------------------------------------------------
 
-export interface DatedValue {
+/**
+ * 値と、その値を記録した日の対。日付は 'YYYY-MM-DD'（推移の点の capturedOn）。
+ *
+ * 値と日を別々の欄に持たせると、片方だけを書き換える改変を型が止められない。指標の範囲も期間の要約も
+ * 「どの日の値か」を必ず一緒に運ぶ（要件 3.4 の 2026-09-19 訂正・Issue #286 項目 1）。
+ */
+export interface Dated<V> {
   readonly date: string;
-  readonly value: number;
+  readonly value: V;
 }
+
+/** 数値の日付つきの値。順位とクチコミ数、および指標の範囲が使う。 */
+export type DatedValue = Dated<number>;
 
 export interface MetricExtent {
   readonly metric: TrendMetric;
@@ -189,6 +198,16 @@ function datedValue(entry: ValuedPoint | undefined): DatedValue | null {
   return entry === undefined ? null : { date: entry.point.capturedOn, value: entry.value };
 }
 
+/**
+ * 評価の日付つきの値。応答の numeric の文字列をそのまま持つ（推移の表と 1 文字も違わないため）。
+ * 渡すのは valuedPoints(window, 'rating') の要素だけなので rating は必ず非 null だが、型の上で
+ * 落ちる経路を残さない。
+ */
+function datedRating(entry: ValuedPoint | undefined): Dated<string> | null {
+  const rating = entry?.point.rating;
+  return entry === undefined || rating == null ? null : { date: entry.point.capturedOn, value: rating };
+}
+
 /** a が b より良い値か（順位は小さいほど良く、評価とクチコミ数は大きいほど良い）。 */
 function isBetter(metric: TrendMetric, a: number, b: number): boolean {
   return metric === 'rank' ? a < b : a > b;
@@ -225,11 +244,18 @@ export function metricExtent(window: TrendWindow, metric: TrendMetric): MetricEx
 
 // --- 期間要約 --------------------------------------------------------------------------
 
-/** 既存の「表示期間の変化」の 3 組。値が無い組は null（画面は「—」を出す）。 */
+/**
+ * 既存の「表示期間の変化」の 3 組。値が無い組は null（画面は「—」を出す）。
+ *
+ * 各組は値だけでなく、その値を読んだ日を持つ。画面はこの日と公称の窓を比べて、食い違う組にだけ
+ * 期間を添える（summaryPeriodNote）。クチコミ数は増減と、その増減を測った両端の日を 1 つに持つ。
+ */
 export interface WindowSummary {
-  readonly rank: { readonly first: number; readonly last: number } | null;
-  readonly rating: { readonly first: string; readonly last: string } | null;
-  readonly reviewCountDiff: number | null;
+  readonly rank: { readonly first: DatedValue; readonly last: DatedValue } | null;
+  readonly rating: { readonly first: Dated<string>; readonly last: Dated<string> } | null;
+  readonly reviewCount:
+    | { readonly diff: number; readonly first: DatedValue; readonly last: DatedValue }
+    | null;
 }
 
 /**
@@ -243,21 +269,52 @@ export function summarizeWindow(window: TrendWindow): WindowSummary {
   const rating = valuedPoints(window, 'rating');
   const reviewCount = valuedPoints(window, 'reviewCount');
 
-  const rankFirst = rank[0];
-  const rankLast = rank.at(-1);
-  const ratingFirst = rating[0]?.point.rating;
-  const ratingLast = rating.at(-1)?.point.rating;
-  const reviewCountFirst = reviewCount[0];
-  const reviewCountLast = reviewCount.at(-1);
+  const rankFirst = datedValue(rank[0]);
+  const rankLast = datedValue(rank.at(-1));
+  const ratingFirst = datedRating(rating[0]);
+  const ratingLast = datedRating(rating.at(-1));
+  const reviewCountFirst = datedValue(reviewCount[0]);
+  const reviewCountLast = datedValue(reviewCount.at(-1));
 
   return {
-    rank: rankFirst !== undefined && rankLast !== undefined ? { first: rankFirst.value, last: rankLast.value } : null,
-    rating: ratingFirst != null && ratingLast != null ? { first: ratingFirst, last: ratingLast } : null,
-    reviewCountDiff:
-      reviewCountFirst !== undefined && reviewCountLast !== undefined
-        ? reviewCountLast.value - reviewCountFirst.value
+    rank: rankFirst !== null && rankLast !== null ? { first: rankFirst, last: rankLast } : null,
+    rating: ratingFirst !== null && ratingLast !== null ? { first: ratingFirst, last: ratingLast } : null,
+    reviewCount:
+      reviewCountFirst !== null && reviewCountLast !== null
+        ? {
+            diff: reviewCountLast.value - reviewCountFirst.value,
+            first: reviewCountFirst,
+            last: reviewCountLast,
+          }
         : null,
   };
+}
+
+/**
+ * 要約の 1 組に添える「値を読んだ期間」。公称の窓と食い違うときだけ文字列を返し、一致すれば null
+ * （要件 3.4 の 2026-09-19 訂正・正典 §7.19）。
+ *
+ * 比べる相手は窓の公称の始点と終点であって、窓に入っている最初の点ではない。名乗っているのは見出しの
+ * 「直近N日」＝公称の窓だからである。points の先頭と比べると、記録が窓に満たない店でも常に一致して
+ * しまい、この関数は何も返さなくなる。
+ *
+ * 値が 1 件も無い組（引数が null）は、読んだ日そのものが無いので null を返す（画面は「—」のまま）。
+ * 読んだ日が 1 日しか無い組は、同じ日を 2 度書かずにその 1 日だけを返す。
+ */
+export function summaryPeriodNote(
+  window: TrendWindow,
+  ends: { readonly first: { readonly date: string }; readonly last: { readonly date: string } } | null,
+): string | null {
+  if (ends === null) {
+    return null;
+  }
+  const { first, last } = ends;
+  if (first.date === window.startDate && last.date === window.endDate) {
+    return null;
+  }
+  return first.date === last.date
+    ? `記録 ${formatShortDate(first.date)}`
+    : `記録 ${formatShortDate(first.date)}〜${formatShortDate(last.date)}`;
 }
 
 // --- 表示整形 --------------------------------------------------------------------------

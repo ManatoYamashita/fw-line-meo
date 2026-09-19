@@ -4,7 +4,8 @@ import { expectNoAxeViolations } from '@fwlm/e2e-support/a11y';
 import { STORE_SURFACE_STATES, type StoreSurfaceState } from './fixtures/detail';
 
 // 店舗詳細（LIFF 面）の自動 a11y 監査（Issue #53。store-detail-trend-dashboard で、既定の表示だけから
-// 4 つの表示状態へ広げ・Issue #265、応答で入る 4 状態を足して 8 状態にした・Issue #286）。
+// 4 つの表示状態へ広げ・Issue #265、応答で入る 4 状態を足して 8 状態に・Issue #286 項目 6、
+// 記録が窓に満たない状態を足して 9 状態にした・同項目 1）。
 //
 // 横スクロール実測（store-surface.spec.ts）と同じ状態の一覧（fixtures/detail.ts の STORE_SURFACE_STATES）を
 // 使う。各状態の入口は、面を開き、操作し、操作後の表示（選択状態・見出し・行数・件数の文言）と、詳細の
@@ -26,7 +27,7 @@ import { STORE_SURFACE_STATES, type StoreSurfaceState } from './fixtures/detail'
 
 // 監査を当てた状態の数の宣言（要件 9.4）。一覧の長さから導かずに数で書く。導くと、状態を 1 つ消したときに
 // 宣言も一緒に減り、監査が緑のまま測る範囲が減ったことを見逃す。
-const AUDITED_STATE_COUNT = 8;
+const AUDITED_STATE_COUNT = 9;
 
 // 状態ごとの構造の件数を回った先で積み上げ、その総和をここで宣言する（Issue #286）。
 //
@@ -35,9 +36,9 @@ const AUDITED_STATE_COUNT = 8;
 // 0 にする、など）は per-state の照合を素通りする。ここへ総和を数で書くことが、その改変を赤にする
 // 唯一の網である。一覧から導かずに数で書く理由は、AUDITED_STATE_COUNT と同じである。
 //
-// 内訳: 札は「推移 0 件」を除く 7 状態で 5 件ずつ。検索欄は「競合 1 店」「競合 0 店」を除く 6 状態で 1 件ずつ。
-const AUDITED_CHIP_NESTING_TOTAL = 35;
-const AUDITED_SEARCH_FIELD_TOTAL = 6;
+// 内訳: 札は「推移 0 件」を除く 8 状態で 5 件ずつ。検索欄は「競合 1 店」「競合 0 店」を除く 7 状態で 1 件ずつ。
+const AUDITED_CHIP_NESTING_TOTAL = 40;
+const AUDITED_SEARCH_FIELD_TOTAL = 7;
 
 // 監査の対象に、Issue #265 で足した構造が実際に含まれていることの宣言。
 //
@@ -89,8 +90,8 @@ async function expectAuditedStructures(page: Page, state: StoreSurfaceState): Pr
   return { chipNesting, searchField };
 }
 
-test('8 つの表示状態が WCAG A/AA の自動監査を通る', async ({ page }) => {
-  // 8 状態それぞれで、面を開き直し（各状態の入口が goto する）、axe を注入して全規則を回す。
+test('9 つの表示状態が WCAG A/AA の自動監査を通る', async ({ page }) => {
+  // 9 状態それぞれで、面を開き直し（各状態の入口が goto する）、axe を注入して全規則を回す。
   // playwright.config.ts の既定の制限時間は 1 状態を監査していた頃の値なので、状態の数に見合う値を
   // 明示で与える。実行装置は重く、負荷が高いと axe の page.evaluate が延びることも織り込む
   // （tasks.md の Implementation Notes）。

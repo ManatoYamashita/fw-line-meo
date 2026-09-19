@@ -129,6 +129,7 @@ import {
   metricName,
   selectTrendWindow,
   summarizeWindow,
+  summaryPeriodNote,
   type TrendMetric,
   type TrendPeriodDays,
   type TrendWindow,
@@ -301,16 +302,34 @@ function formatReviewCountDiff(current: number | null, previous: number | null):
 function Metric({
   label,
   value,
+  note,
   prominent = false,
 }: {
   readonly label: string;
   readonly value: React.ReactNode;
+  /**
+   * 値に添える補助の 1 行（要約が測った期間）。添えないときは null。
+   *
+   * dd の中へ置くのは、dl の子として dt と dd 以外を並べられないからである（`dl > div` の中も同じ）。
+   * 読み上げからは隠さない。視覚に手掛かりが無いことがこの補助を足す理由なので、隠せば支援技術の側に
+   * 同じ問題がそのまま残る。値との間に空白を 1 つ置くのは、読み上げが「2位記録 8/22」と続けて読むのを
+   * 避けるためである（ブロックで改行しても文字列としては連結される）。色は書かない（§7.19）。
+   */
+  readonly note?: string | null;
   readonly prominent?: boolean;
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <dt className="text-sm">{label}</dt>
-      <dd className={prominent ? 'text-lg font-semibold tabular-nums' : 'font-medium tabular-nums'}>{value}</dd>
+      <dd className={prominent ? 'text-lg font-semibold tabular-nums' : 'font-medium tabular-nums'}>
+        {value}
+        {note != null ? (
+          <>
+            {' '}
+            <span className="block text-sm">{note}</span>
+          </>
+        ) : null}
+      </dd>
     </div>
   );
 }
@@ -548,6 +567,11 @@ function CompetitorsSection({
 /**
  * 「表示期間の変化」の 3 組。指標ごとに、窓の中で値が記録されている最初と最後の日から作り、値が 1 件も
  * 無い組は「—」にする（store-detail-trend-dashboard の要件 3.4・3.5）。
+ *
+ * 読んだ日が公称の窓と食い違う組には、その組が測った期間を添える（要件 3.4 の 2026-09-19 訂正・
+ * 正典 §7.19）。節が名乗るのは公称の窓なので、記録が窓に満たない店では、添えないかぎり 5 日ぶんの
+ * 変化が「直近30日の変化」として読まれる。選んだ指標のグラフには線が窓の一部にしか伸びないという
+ * 手掛かりがあるが、同時に並ぶ残りの 2 組には何も無い。判定は組ごとに独立である。
  */
 function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow }): React.JSX.Element {
   const summary = summarizeWindow(trendWindow);
@@ -555,18 +579,21 @@ function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow 
     <dl className="grid gap-4 sm:grid-cols-3">
       <Metric
         label="順位"
-        value={summary.rank !== null ? `${summary.rank.first}位 → ${summary.rank.last}位` : '—'}
+        value={summary.rank !== null ? `${summary.rank.first.value}位 → ${summary.rank.last.value}位` : '—'}
+        note={summaryPeriodNote(trendWindow, summary.rank)}
       />
       <Metric
         label="評価"
-        value={summary.rating !== null ? `${summary.rating.first} → ${summary.rating.last}` : '—'}
+        value={summary.rating !== null ? `${summary.rating.first.value} → ${summary.rating.last.value}` : '—'}
+        note={summaryPeriodNote(trendWindow, summary.rating)}
       />
       {/* 「クチコミ数の増減」。指標の名前を「クチコミ数」に統一したうえで、この組だけが差分であることを
           「の増減」で示す（2026-09-18 の画面レビュー）。同じカードに実数の推移が並ぶので、実数と差分が
           似た名前で隣り合わないようにする。 */}
       <Metric
         label="クチコミ数の増減"
-        value={summary.reviewCountDiff !== null ? formatSignedCount(summary.reviewCountDiff) : '—'}
+        value={summary.reviewCount !== null ? formatSignedCount(summary.reviewCount.diff) : '—'}
+        note={summaryPeriodNote(trendWindow, summary.reviewCount)}
       />
     </dl>
   );

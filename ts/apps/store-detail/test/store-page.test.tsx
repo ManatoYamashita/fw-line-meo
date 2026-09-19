@@ -1284,10 +1284,13 @@ describe('store detail page', () => {
       expect(container.querySelectorAll('[data-slot="table-container"]')).toHaveLength(1);
 
       const overview = screen.getByText('表示期間の変化').closest('[data-slot="card"]')!;
+      // この応答の推移は 7/10・7/11 の 2 日ぶんで、既定の 30 日の窓（公称の始点は 6/12）とは食い違う。
+      // 3 組ともその期間を添える（要件 3.4 の 2026-09-19 訂正・Issue #286 項目 1）。
+      // 組の数と dt / dd の対応は変わらない（definitionPairs は dl の子ごとに dt と dd を 1 つずつ読む）。
       expect(definitionPairs(overview.querySelector('dl')!)).toEqual([
-        ['順位', '3位 → 2位'],
-        ['評価', '4.4 → 4.5'],
-        ['クチコミ数の増減', '+5件'],
+        ['順位', '3位 → 2位 記録 7/10〜7/11'],
+        ['評価', '4.4 → 4.5 記録 7/10〜7/11'],
+        ['クチコミ数の増減', '+5件 記録 7/10〜7/11'],
       ]);
 
       // 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。

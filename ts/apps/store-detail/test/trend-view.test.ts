@@ -26,6 +26,7 @@ import {
   metricValue,
   selectTrendWindow,
   summarizeWindow,
+  summaryPeriodNote,
   type TrendMetric,
   type TrendPeriodDays,
   type TrendWindow,
@@ -253,9 +254,20 @@ describe('selectTrendWindow: 期間の窓（要件 2.4）', () => {
     const summary = summarizeWindow(window);
     const rank = metricExtent(window, 'rank');
 
-    expect(summary.rank).toEqual({ first: 4, last: 2 });
-    expect(summary.rating).toEqual({ first: '4.1', last: '4.4' });
-    expect(summary.reviewCountDiff).toBe(10);
+    // 日付まで固定する。存在しない日（2026-09-31）を読んでいないことが、値ではなく日で直接言える。
+    expect(summary.rank).toEqual({
+      first: { date: '2026-09-10', value: 4 },
+      last: { date: '2026-09-12', value: 2 },
+    });
+    expect(summary.rating).toEqual({
+      first: { date: '2026-09-10', value: '4.1' },
+      last: { date: '2026-09-12', value: '4.4' },
+    });
+    expect(summary.reviewCount).toEqual({
+      diff: 10,
+      first: { date: '2026-09-10', value: 100 },
+      last: { date: '2026-09-12', value: 110 },
+    });
     // 存在しない日の順位 99 を数えれば、それが最悪になる。
     expect(rank.worst).toEqual({ date: '2026-09-10', value: 4 });
     expect(rank.recordedDays).toBe(2);
@@ -342,9 +354,9 @@ describe('既定の 30 日の窓は、現行の画面と同じ行と要約を与
   /** 窓の要約を、画面と同じ書式の文字列にする（書式そのものは 4.1 で page.tsx が持つ）。 */
   function renderedSummary(trend: readonly StoreDetailTrendPoint[]): readonly [string, string, string] {
     const summary = summarizeWindow(mustWindow(trend, DEFAULT_PERIOD));
-    const rank = summary.rank === null ? '—' : `${summary.rank.first}位 → ${summary.rank.last}位`;
-    const rating = summary.rating === null ? '—' : `${summary.rating.first} → ${summary.rating.last}`;
-    const diff = summary.reviewCountDiff;
+    const rank = summary.rank === null ? '—' : `${summary.rank.first.value}位 → ${summary.rank.last.value}位`;
+    const rating = summary.rating === null ? '—' : `${summary.rating.first.value} → ${summary.rating.last.value}`;
+    const diff = summary.reviewCount === null ? null : summary.reviewCount.diff;
     const reviewCount = diff === null ? '—' : `${diff > 0 ? '+' : ''}${diff}件`;
     return [rank, rating, reviewCount];
   }
@@ -536,9 +548,13 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
     );
 
     expect(summarizeWindow(window)).toEqual({
-      rank: { first: 5, last: 3 },
-      rating: { first: '4.2', last: '4.4' },
-      reviewCountDiff: -5,
+      rank: { first: { date: '2026-09-10', value: 5 }, last: { date: '2026-09-13', value: 3 } },
+      rating: { first: { date: '2026-09-10', value: '4.2' }, last: { date: '2026-09-13', value: '4.4' } },
+      reviewCount: {
+        diff: -5,
+        first: { date: '2026-09-10', value: 130 },
+        last: { date: '2026-09-13', value: 125 },
+      },
     });
   });
 
@@ -554,33 +570,47 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
       7,
     );
 
+    // 3 組が互いに違う日を読んでいる。順位と評価は 9/10〜9/12、クチコミ数は 9/09〜9/12 である。
+    // 組ごとに独立して期間を判定しなければならない理由が、ここに期待値として現れている。
     expect(summarizeWindow(window)).toEqual({
-      rank: { first: 4, last: 2 },
-      rating: { first: '4.2', last: '4.4' },
-      reviewCountDiff: 10,
+      rank: { first: { date: '2026-09-10', value: 4 }, last: { date: '2026-09-12', value: 2 } },
+      rating: { first: { date: '2026-09-10', value: '4.2' }, last: { date: '2026-09-12', value: '4.4' } },
+      reviewCount: {
+        diff: 10,
+        first: { date: '2026-09-09', value: 100 },
+        last: { date: '2026-09-12', value: 110 },
+      },
     });
   });
 
   it('全部 null なら、3 組とも値なし（画面は記号を出す）になる', () => {
     const window = mustWindow([emptyPoint('2026-09-12'), emptyPoint('2026-09-13')], 7);
 
-    expect(summarizeWindow(window)).toEqual({ rank: null, rating: null, reviewCountDiff: null });
+    expect(summarizeWindow(window)).toEqual({ rank: null, rating: null, reviewCount: null });
   });
 
   it('値のある日が 1 日だけなら、始点と終点は同じ値で、増減は 0 になる', () => {
     const window = mustWindow([emptyPoint('2026-09-12'), point('2026-09-13', { rank: 2, rating: '4.5', reviewCount: 88 })], 7);
 
+    // 始点と終点が同じ日になる。画面はこの組に「記録 9/13」と 1 日だけを添える。
     expect(summarizeWindow(window)).toEqual({
-      rank: { first: 2, last: 2 },
-      rating: { first: '4.5', last: '4.5' },
-      reviewCountDiff: 0,
+      rank: { first: { date: '2026-09-13', value: 2 }, last: { date: '2026-09-13', value: 2 } },
+      rating: { first: { date: '2026-09-13', value: '4.5' }, last: { date: '2026-09-13', value: '4.5' } },
+      reviewCount: {
+        diff: 0,
+        first: { date: '2026-09-13', value: 88 },
+        last: { date: '2026-09-13', value: 88 },
+      },
     });
   });
 
   it('評価は表と同じ文字列のまま返す', () => {
     const window = mustWindow([point('2026-09-12', { rating: '4.0' }), point('2026-09-13', { rating: '5.0' })], 7);
 
-    expect(summarizeWindow(window).rating).toEqual({ first: '4.0', last: '5.0' });
+    expect(summarizeWindow(window).rating).toEqual({
+      first: { date: '2026-09-12', value: '4.0' },
+      last: { date: '2026-09-13', value: '5.0' },
+    });
   });
 
   it('評価 0 の日は、要約の始点にも終点にも使わない（要件 8.4）', () => {
@@ -593,7 +623,11 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
       7,
     );
 
-    expect(summarizeWindow(window).rating).toEqual({ first: '4.2', last: '4.2' });
+    // 9/11 と 9/13 の 0.0 を読まないので、始点も終点も 9/12 になる。
+    expect(summarizeWindow(window).rating).toEqual({
+      first: { date: '2026-09-12', value: '4.2' },
+      last: { date: '2026-09-12', value: '4.2' },
+    });
   });
 
   it('窓の外の点は、要約の始点に使わない', () => {
@@ -603,17 +637,111 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
       point('2026-09-13', { rank: 3, rating: '4.2', reviewCount: 104 }),
     ];
 
+    // 始点の日そのものが 9/07 であること（9/06 ではないこと）を、値ではなく日で言う。
     expect(summarizeWindow(mustWindow(trend, 7))).toEqual({
-      rank: { first: 4, last: 3 },
-      rating: { first: '4.1', last: '4.2' },
-      reviewCountDiff: 4,
+      rank: { first: { date: '2026-09-07', value: 4 }, last: { date: '2026-09-13', value: 3 } },
+      rating: { first: { date: '2026-09-07', value: '4.1' }, last: { date: '2026-09-13', value: '4.2' } },
+      reviewCount: {
+        diff: 4,
+        first: { date: '2026-09-07', value: 100 },
+        last: { date: '2026-09-13', value: 104 },
+      },
     });
     // 30 日の窓では同じ点が入り、始点が変わる（期間の切替で要約が追随する）。
     expect(summarizeWindow(mustWindow(trend, 30))).toEqual({
-      rank: { first: 9, last: 3 },
-      rating: { first: '3.1', last: '4.2' },
-      reviewCountDiff: 94,
+      rank: { first: { date: '2026-09-06', value: 9 }, last: { date: '2026-09-13', value: 3 } },
+      rating: { first: { date: '2026-09-06', value: '3.1' }, last: { date: '2026-09-13', value: '4.2' } },
+      reviewCount: {
+        diff: 94,
+        first: { date: '2026-09-06', value: 10 },
+        last: { date: '2026-09-13', value: 104 },
+      },
     });
+  });
+});
+
+describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期間（要件 3.4 の 2026-09-19 訂正）', () => {
+  // 下の窓はいずれも終点が 9/13 で、7 日なら公称の始点は 9/07 になる。
+  // 「添える」側と「添えない」側を必ず対で置く。片側だけだと、常に添える実装も、
+  // 一度も添えない実装も、どちらかの検査を素通りする。
+
+  it('公称の始点と終点の両方に値があれば、何も添えない', () => {
+    const window = mustWindow([point('2026-09-07', { rank: 5 }), point('2026-09-13', { rank: 3 })], 7);
+
+    expect(window.startDate).toBe('2026-09-07');
+    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBeNull();
+  });
+
+  it('始点だけが食い違えば、読んだ期間を添える', () => {
+    const window = mustWindow([point('2026-09-10', { rank: 5 }), point('2026-09-13', { rank: 3 })], 7);
+
+    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/10〜9/13');
+  });
+
+  it('終点だけが食い違えば、読んだ期間を添える', () => {
+    const window = mustWindow(
+      [point('2026-09-07', { rank: 5 }), point('2026-09-12', { rank: 3 }), emptyPoint('2026-09-13')],
+      7,
+    );
+
+    // 終点は「日付を解釈できる最新の記録日」なので、値が無くても 9/13 のままである。
+    expect(window.endDate).toBe('2026-09-13');
+    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/7〜9/12');
+  });
+
+  it('両端とも食い違えば、読んだ期間を添える', () => {
+    const window = mustWindow(
+      [point('2026-09-10', { rank: 5 }), point('2026-09-12', { rank: 3 }), emptyPoint('2026-09-13')],
+      7,
+    );
+
+    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/10〜9/12');
+  });
+
+  it('読んだ日が 1 日しか無ければ、同じ日を 2 度書かずにその 1 日だけを書く', () => {
+    const window = mustWindow([emptyPoint('2026-09-07'), point('2026-09-13', { rank: 2 })], 7);
+
+    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/13');
+  });
+
+  it('値が 1 件も無い組には、読んだ日そのものが無いので添えない', () => {
+    const window = mustWindow([emptyPoint('2026-09-12'), emptyPoint('2026-09-13')], 7);
+
+    expect(summarizeWindow(window).rank).toBeNull();
+    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBeNull();
+  });
+
+  it('同じ窓でも組ごとに結果が違う（判定は組ごとに独立している）', () => {
+    const window = mustWindow(
+      [
+        point('2026-09-07', { rank: null, rating: null, reviewCount: 100 }),
+        point('2026-09-10', { rank: 5, rating: '4.1', reviewCount: 102 }),
+        point('2026-09-13', { rank: 3, rating: '4.4', reviewCount: 110 }),
+      ],
+      7,
+    );
+    const summary = summarizeWindow(window);
+
+    // 順位と評価は 9/10 からしか値が無い。クチコミ数は公称の窓のとおり 9/07〜9/13 を読んでいる。
+    // 3 組をまとめて 1 つの注記にすると、どちらかの組が嘘になる。
+    expect(summaryPeriodNote(window, summary.rank)).toBe('記録 9/10〜9/13');
+    expect(summaryPeriodNote(window, summary.rating)).toBe('記録 9/10〜9/13');
+    expect(summaryPeriodNote(window, summary.reviewCount)).toBeNull();
+  });
+
+  it('期間を切り替えると、同じ推移でも結果が変わる', () => {
+    const trend = [
+      point('2026-09-07', { rank: 5, rating: '4.1', reviewCount: 100 }),
+      point('2026-09-13', { rank: 3, rating: '4.4', reviewCount: 110 }),
+    ];
+    const sevenDays = mustWindow(trend, 7);
+    const thirtyDays = mustWindow(trend, 30);
+
+    // 7 日の窓は公称の始点が 9/07 で、読んだ最初の日と一致する。
+    expect(summaryPeriodNote(sevenDays, summarizeWindow(sevenDays).rank)).toBeNull();
+    // 30 日の窓は公称の始点が 8/15 まで遡るので、同じ推移でも食い違う。
+    expect(thirtyDays.startDate).toBe('2026-08-15');
+    expect(summaryPeriodNote(thirtyDays, summarizeWindow(thirtyDays).rank)).toBe('記録 9/7〜9/13');
   });
 });
 

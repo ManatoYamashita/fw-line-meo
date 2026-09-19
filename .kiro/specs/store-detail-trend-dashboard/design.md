@@ -208,7 +208,7 @@ graph LR
 | 2.5 | 読み込み直さず、取得済みのデータから更新する | TrendSection | React の state | — |
 | 2.8 | 推移が 0 件なら、選択肢を出さず既存の案内を出す | TrendSection | — | — |
 | 3.1, 3.2, 3.3 | 4 つの表示を同じ窓から導き、期間と指標の変更に追随させる | TrendSection, trend-view | `TrendWindow` | 窓→4 表示 |
-| 3.4, 3.5 | 要約は値のある最初と最後の日から作り、値が無ければ記号にする | trend-view | `summarizeWindow` | 窓→要約 |
+| 3.4, 3.5 | 要約は値のある最初と最後の日から作り、値が無ければ記号にする。公称の窓と食い違う組には測った期間を添える（2026-09-19 訂正・Issue #286 項目 1） | trend-view | `summarizeWindow`, `summaryPeriodNote` | 窓→要約 |
 | 3.6 | 現在値に日付を添える | trend-view, TrendChart | `MetricExtent.last` | — |
 | 3.7 | 各点の値を表の同じ日付の行で確かめられる | TrendSection | `TrendWindow.points` | 窓→表 |
 | 3.8 | 他の節は選択によって変わらない | TrendSection（状態を節の中に閉じる） | — | — |
@@ -257,7 +257,7 @@ graph LR
 
 **Responsibilities & Constraints**
 - 窓の終点は、日付を解釈できる最新の記録日とする。窓は終点を含めて遡った暦日 N 日（`dayNumber(capturedOn) > dayNumber(end) − N`）。
-- 窓の始点は**公称の始点**（終点 − N + 1）であり、窓の中で最初に記録された日ではない。記録が N 日に満たない店では、始点から最初の記録までの区間が空白として描かれ、7 日と 30 日の切替で横軸が必ず変わる。要件 1.11・5.1 の「期間の始点」はこの公称の始点を指す。値のある最初の日は、要約（3.4）と説明文の始点の値にだけ使う（2026-09-13 の design 検証で確定）。
+- 窓の始点は**公称の始点**（終点 − N + 1）であり、窓の中で最初に記録された日ではない。記録が N 日に満たない店では、始点から最初の記録までの区間が空白として描かれ、7 日と 30 日の切替で横軸が必ず変わる。要件 1.11・5.1 の「期間の始点」はこの公称の始点を指す。値のある最初の日は、要約（3.4）と説明文の始点の値にだけ使う（2026-09-13 の design 検証で確定）。**公称の窓と食い違うときは、その日そのものを要約の組へ日付としても出す**（2026-09-19 訂正・Issue #286 項目 1）。公称の始点と `points` の先頭を混同した実装は、この日付が消えることで見分けられる。
 - 日付 `YYYY-MM-DD` は `Date.UTC` で日数に直す。解釈できない日付の点は、窓に含めない（4 つの表示すべてから同時に外れる）。
 - 評価（numeric の文字列）は数値に直す。有限でない値と null は「値が無い」として扱い、0 として扱わない（8.4）。
 - React・DOM・`@fwlm/db` の値に依存しない。
@@ -297,10 +297,12 @@ export function selectTrendWindow(
   periodDays: TrendPeriodDays,
 ): TrendWindow | null;
 
-export interface DatedValue {
+/** 値と、その値を記録した日の対（2026-09-19・Issue #286 項目 1 で型引数を持たせた）。 */
+export interface Dated<V> {
   readonly date: string;
-  readonly value: number;
+  readonly value: V;
 }
+export type DatedValue = Dated<number>;
 
 export interface MetricExtent {
   readonly metric: TrendMetric;
@@ -316,13 +318,27 @@ export interface MetricExtent {
 export function metricValue(point: StoreDetailTrendPoint, metric: TrendMetric): number | null;
 export function metricExtent(window: TrendWindow, metric: TrendMetric): MetricExtent;
 
-/** 既存の「表示期間の変化」の 3 組。値が無い組は null（画面は「—」を出す）。 */
+/**
+ * 既存の「表示期間の変化」の 3 組。値が無い組は null（画面は「—」を出す）。
+ * 各組は値と、その値を読んだ日を一緒に持つ（2026-09-19 訂正・Issue #286 項目 1）。
+ */
 export interface WindowSummary {
-  readonly rank: { readonly first: number; readonly last: number } | null;
-  readonly rating: { readonly first: string; readonly last: string } | null;
-  readonly reviewCountDiff: number | null;
+  readonly rank: { readonly first: DatedValue; readonly last: DatedValue } | null;
+  readonly rating: { readonly first: Dated<string>; readonly last: Dated<string> } | null;
+  readonly reviewCount:
+    | { readonly diff: number; readonly first: DatedValue; readonly last: DatedValue }
+    | null;
 }
 export function summarizeWindow(window: TrendWindow): WindowSummary;
+
+/**
+ * 要約の 1 組に添える「値を読んだ期間」。公称の窓と食い違うときだけ文字列を返し、一致すれば null。
+ * 値が 1 件も無い組（引数が null）も null。読んだ日が 1 日だけなら、その 1 日だけを書く。
+ */
+export function summaryPeriodNote(
+  window: TrendWindow,
+  ends: { readonly first: { readonly date: string }; readonly last: { readonly date: string } } | null,
+): string | null;
 
 export function metricName(metric: TrendMetric): string; // '順位' | '評価' | 'クチコミ数'
 export function formatMetricValue(metric: TrendMetric, value: number): string; // '2位' | '4.3' | '123件'
@@ -477,7 +493,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
   - h2・表の名前・行数・Card の枚数・section と ul の数とクラス
   - 要約の `dt` と `dd`
 
-  要約の `dd` が一致するのは、fixture の点に null が無いからである。null がある場合は、値のある最初と最後の日を使う規則（3.4）に従う。
+  要約の `dd` が一致するのは、fixture の点に null が無く、かつ点が窓の全日を埋めているからである。null がある場合は、値のある最初と最後の日を使う規則（3.4）に従う。窓を埋めない場合は、3.4 の 2026-09-19 訂正が定める期間が `dd` に加わる（8.3 の同日の訂正）。
 
 #### TrendControls
 

@@ -156,21 +156,33 @@ const ROWS_7_DAYS: readonly (readonly string[])[] = [
   ['2026-08-31', '2', '4.4', '130'],
 ];
 
-/** 既定（30 日・順位）。 */
+/**
+ * 既定（30 日・順位）。
+ *
+ * この応答の推移は 8/22〜8/31 の 10 日ぶんしか無いので、30 日の窓では公称の始点（8/2）と、値を読んだ
+ * 最初の日（8/22）が食い違う。3 組ともその期間を添える（要件 3.4 の 2026-09-19 訂正・Issue #286 項目 1）。
+ * 7 日の窓（VIEW_7_DAYS_RANK）では 8/25〜8/31 が全日そろうので何も添えない。**この 2 つが「添える」と
+ * 「添えない」の両端であり、期間の切替のテストが 30 日 ⇄ 7 日を往復するので、1 つのテストで両方が固定される。**
+ */
 const VIEW_30_DAYS_RANK: TrendView = {
   heading: '直近30日の推移',
   tableName: '直近30日の推移',
   rows: ROWS_30_DAYS,
   summary: [
-    ['順位', '6位 → 2位'],
-    ['評価', '3.9 → 4.4'],
-    ['クチコミ数の増減', '+30件'],
+    ['順位', '6位 → 2位 記録 8/22〜8/31'],
+    ['評価', '3.9 → 4.4 記録 8/22〜8/31'],
+    ['クチコミ数の増減', '+30件 記録 8/22〜8/31'],
   ],
   chartName: '順位の推移、8月2日から8月31日まで。最初の記録は6位、最後の記録は2位。最高は2位、最低は6位。最新は2位（8月31日）。',
   caption: ['順位の推移（上ほど上位）', '8/2〜8/31', '最新 2位（8/31）'],
 };
 
-/** 「7日」を選んだあと（7 日・順位）。 */
+/**
+ * 「7日」を選んだあと（7 日・順位）。
+ *
+ * 公称の窓（8/25〜8/31）と、値を読んだ日が 3 組とも一致するので、**期間は添えない**。
+ * 常に添える実装は、この期待値で赤になる。
+ */
 const VIEW_7_DAYS_RANK: TrendView = {
   heading: '直近7日の推移',
   tableName: '直近7日の推移',
@@ -1449,7 +1461,7 @@ describe('表示の一貫性（store-detail-trend-dashboard task 4.3・Issue #26
     expect(new Set(dates), '表の行の日付の集合').toEqual(new Set(WINDOW_DATES));
   });
 
-  it('照合 2（要約）: 要約の始点と終点が、表の値のある最初と最後の行と一致する（要件 3.1・3.4）', async () => {
+  it('照合 2（要約）: 要約の始点と終点が表の値のある最初と最後の行と一致し、公称の期間と食い違う組にだけ期間が添う（要件 3.1・3.4）', async () => {
     const view = await readSevenDayConsistencyView();
 
     const rank = valuedEnds(view.rows, COLUMN.rank, '順位');
@@ -1461,10 +1473,23 @@ describe('表示の一貫性（store-detail-trend-dashboard task 4.3・Issue #26
       '2026-09-12',
       '2026-09-13',
     ]);
+    // クチコミ数だけが公称の窓（WINDOW_DATES の両端）と一致する。これが「添えない」側の前提であり、
+    // ここが崩れたまま下の期待値が緑になることを防ぐ。
+    expect([reviewCount.first.date, reviewCount.last.date], 'クチコミ数は公称の窓と一致する').toEqual([
+      WINDOW_DATES[0],
+      WINDOW_DATES.at(-1),
+    ]);
+    // 添える期間も、実装からではなく表の行から導く。
+    const note = (ends: {
+      readonly first: { readonly date: string };
+      readonly last: { readonly date: string };
+    }): string => ` 記録 ${shortDateOf(ends.first.date)}〜${shortDateOf(ends.last.date)}`;
     const reviewCountDiff = Number(reviewCount.last.value) - Number(reviewCount.first.value);
     expect(view.summary, '要約の 3 組').toEqual([
-      ['順位', `${rank.first.value}位 → ${rank.last.value}位`],
-      ['評価', `${rating.first.value} → ${rating.last.value}`],
+      ['順位', `${rank.first.value}位 → ${rank.last.value}位${note(rank)}`],
+      ['評価', `${rating.first.value} → ${rating.last.value}${note(rating)}`],
+      // 公称の窓と一致するので、この組にだけ期間が付かない。1 つの画面の中で組ごとに判定が分かれることの、
+      // 直接の対照である。
       ['クチコミ数の増減', `${reviewCountDiff > 0 ? '+' : ''}${reviewCountDiff}件`],
     ]);
   });
