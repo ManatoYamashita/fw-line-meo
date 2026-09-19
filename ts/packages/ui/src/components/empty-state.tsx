@@ -23,7 +23,11 @@ function EmptyState({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="empty-state"
       className={cn(
-        "flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-muted-foreground",
+        // 行の長さをそろえて分ける（Issue #286 項目 3）。中央寄せの 1 文が最終行だけ極端に短く割れると、
+        // 文の重心が消える（320px で 40 字の案内が 252 / 252 / 55px に割れていた）。
+        // 最終行の孤立語だけを避ける指定ではなく全行をそろえる指定を採るのは、ここが中央寄せの短い
+        // 案内だからである（複数段落を持ちうる長文の受け口は alert.tsx が幅で使い分けている）。
+        "flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-balance text-muted-foreground",
         className
       )}
       {...props}
