@@ -308,7 +308,7 @@ graph TB
 - キー集合を `sm / md / lg / xl / 4xl / full` へ改める（`xl` と `4xl` を追加）
 - 値: `sm: '0.25rem'` / `md: '0.375rem'` / `lg: '0.5rem'` / `xl: '0.75rem'` / `4xl: '2rem'` / `full: '9999px'`
 - `4xl` は Badge が使用する段。詳細は Data Models の注記を参照
-- 実行時の消費者は存在しない（実測: `@fwlm/design-tokens` を import しているのは `delivery-job/src/flex.ts` の `lineColors` のみ）。したがって値の変更による波及はない
+- `radius` に実行時の消費者は存在しない。したがって値の変更による波及はない。`@fwlm/design-tokens` を実行時に import しているのは LINE の Flex を組み立てるコードだけで、読んでいるのは `lineColors` と `lineLayout` である（現在の消費者は `delivery-job/src/notification.ts`、`line-webhook/src/line/messages.ts`・`src/report/format.ts`・`src/report/builders/new-reviews.ts`・`comparison.ts`・`trend.ts`。本 spec の策定時に唯一の消費者だった `delivery-job/src/flex.ts` は `line-on-demand-report` で削除された）
 
 **Contracts**: Service
 

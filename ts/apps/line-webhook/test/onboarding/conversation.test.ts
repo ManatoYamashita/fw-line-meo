@@ -17,11 +17,19 @@ import type {
 import type { SearchOutcome } from '@fwlm/store-identification';
 import { encodePostback } from '../../src/onboarding/stages.js';
 import {
-  buildAlreadyCompletedMessage,
+  buildStatusGuidanceMessage,
   buildConfirmationMessage as buildConfirmationMessageForAssertion,
   buildGreetingMessage,
   buildStoreNameInputGuidanceMessage,
 } from '../../src/line/messages.js';
+import { encodeReportPostback } from '@fwlm/line-report';
+import {
+  createStoreIdentifiedOwnerRouterFactory,
+  type StoreIdentifiedOwnerRouterFactory,
+  type StoreIdentifiedOwnerRouterScope,
+} from '../../src/owner/router.js';
+import { buildPreparingNotice } from '../../src/report/builders/notices.js';
+import type { ReportReadsAccessor } from '../../src/report/handler.js';
 
 // タスク 3.2「招待コード段階の会話ロジック」／タスク 3.3「店名検索〜確定段階の会話ロジック」／
 // タスク 3.4「完了段階・フォールバック・リッチメニュー再開導線」のモック deps テスト。
@@ -88,11 +96,15 @@ function createFakeSessionsAccessor(initial: OnboardingSessionRow): {
   accessor: SessionsAccessor;
   getState(): OnboardingSessionRow;
   updateCalls: { db: Queryable; patch: SessionPatch }[];
+  getCalls: string[];
 } {
   let state = initial;
   const updateCalls: { db: Queryable; patch: SessionPatch }[] = [];
+  // 読み出しの回数。振り分け口へ渡すイベントで、会話がセッションを読まないことを確かめる。
+  const getCalls: string[] = [];
   const accessor: SessionsAccessor = {
-    async getOrCreateSession() {
+    async getOrCreateSession(_db, lineUserId) {
+      getCalls.push(lineUserId);
       return state;
     },
     async updateSession(db, _lineUserId, patch) {
@@ -106,16 +118,20 @@ function createFakeSessionsAccessor(initial: OnboardingSessionRow): {
       };
     },
   };
-  return { accessor, getState: () => state, updateCalls };
+  return { accessor, getState: () => state, updateCalls, getCalls };
 }
 
 function createFakeOwnersAccessor(existingOwner: OwnerRow | null): {
   accessor: OwnersAccessor;
   createOwnerCalls: { db: Queryable; input: unknown }[];
+  findCalls: string[];
 } {
   const createOwnerCalls: { db: Queryable; input: unknown }[] = [];
+  // 照会の回数。会話の入口の 1 回だけであることを確かめる（line-on-demand-report design.md「Performance」）。
+  const findCalls: string[] = [];
   const accessor: OwnersAccessor = {
-    async findOwnerByLineUserId() {
+    async findOwnerByLineUserId(_db, lineUserId) {
+      findCalls.push(lineUserId);
       return existingOwner;
     },
     async createOwner(db, input) {
@@ -123,7 +139,7 @@ function createFakeOwnersAccessor(existingOwner: OwnerRow | null): {
       return baseOwner({ agency_id: input.agencyId, line_user_id: input.lineUserId });
     },
   };
-  return { accessor, createOwnerCalls };
+  return { accessor, createOwnerCalls, findCalls };
 }
 
 function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: string }>): {
@@ -216,6 +232,27 @@ function createFakePool(): { pool: ConnectablePool; queryLog: string[]; releaseC
   };
 }
 
+// 店舗特定済みオーナーの振り分け口（line-on-demand-report）の偽物。作られた回数と、作るときに渡された
+// リクエストのロガーと Messenger、振り分けられたイベントを記録する。振り分け口自身の振る舞いは
+// test/owner/router.test.ts が持つので、ここでは会話が「誰を・何で」渡したかだけを見る。
+function createFakeRouterFactory(): {
+  factory: StoreIdentifiedOwnerRouterFactory;
+  scopes: StoreIdentifiedOwnerRouterScope[];
+  routed: { event: InboundEvent; owner: OwnerRow }[];
+} {
+  const scopes: StoreIdentifiedOwnerRouterScope[] = [];
+  const routed: { event: InboundEvent; owner: OwnerRow }[] = [];
+  const factory: StoreIdentifiedOwnerRouterFactory = (scope) => {
+    scopes.push(scope);
+    return {
+      async handleEvent(event, owner) {
+        routed.push({ event, owner });
+      },
+    };
+  };
+  return { factory, scopes, routed };
+}
+
 function buildDeps(overrides: {
   session: OnboardingSessionRow;
   existingOwner?: OwnerRow | null;
@@ -224,6 +261,8 @@ function buildDeps(overrides: {
   searchOutcome?: SearchOutcome;
   confirmOutcome?: ConfirmOutcome;
   messenger?: ReturnType<typeof createFakeMessenger>;
+  /** 省略すると偽の振り分け口（routerFake）を使う。 */
+  createOwnerRouter?: StoreIdentifiedOwnerRouterFactory;
 }): {
   deps: ConversationDeps;
   sessionsFake: ReturnType<typeof createFakeSessionsAccessor>;
@@ -233,6 +272,7 @@ function buildDeps(overrides: {
   messenger: ReturnType<typeof createFakeMessenger>;
   poolFake: ReturnType<typeof createFakePool>;
   logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
+  routerFake: ReturnType<typeof createFakeRouterFactory>;
 } {
   const sessionsFake = createFakeSessionsAccessor(overrides.session);
   const ownersFake = createFakeOwnersAccessor(overrides.existingOwner ?? null);
@@ -246,6 +286,7 @@ function buildDeps(overrides: {
   const logger = { info: vi.fn(), warn: vi.fn() };
   const poolFake = createFakePool();
   const db: Queryable = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) } as unknown as Queryable;
+  const routerFake = createFakeRouterFactory();
 
   const deps: ConversationDeps = {
     db,
@@ -259,9 +300,10 @@ function buildDeps(overrides: {
     logger,
     lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
     liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+    createOwnerRouter: overrides.createOwnerRouter ?? routerFake.factory,
   };
 
-  return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake, logger };
+  return { deps, sessionsFake, ownersFake, inviteCodesFake, identificationFake, messenger, poolFake, logger, routerFake };
 }
 
 describe('createConversationHandlers', () => {
@@ -957,8 +999,11 @@ describe('createConversationHandlers', () => {
     });
   });
 
-  describe('completed 段階（Req 4.6）', () => {
-    it('text イベント → 固定の完了案内のみ・セッション更新なし', async () => {
+  // 店舗特定済みのオーナーは、段階を読む前に振り分け口へ渡る（下の「店舗特定済みオーナーの振り分け」）。
+  // ここへ来るのは、段階が completed なのにオーナーが店舗特定済みでない不整合のときだけで、
+  // その場合もステータス案内を返し、セッションを変えない（line-on-demand-report tasks 3.10）。
+  describe('completed 段階（Req 4.6）: オーナーが店舗特定済みでない不整合のとき', () => {
+    it('text イベント → ステータス案内のみ・セッション更新なし', async () => {
       const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
       const { deps, sessionsFake, messenger } = buildDeps({ session });
       const handlers = createConversationHandlers(deps);
@@ -973,10 +1018,10 @@ describe('createConversationHandlers', () => {
       expect(sessionsFake.updateCalls).toHaveLength(0);
       expect(messenger.replies).toHaveLength(1);
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect(message).toEqual(buildAlreadyCompletedMessage());
+      expect(message).toEqual(buildStatusGuidanceMessage());
     });
 
-    it('postback イベント（confirm 等の任意の action）→ 固定の完了案内のみ・セッション更新なし', async () => {
+    it('postback イベント（confirm 等の任意の action）→ ステータス案内のみ・セッション更新なし', async () => {
       const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
       const { deps, sessionsFake, messenger } = buildDeps({ session });
       const handlers = createConversationHandlers(deps);
@@ -990,10 +1035,10 @@ describe('createConversationHandlers', () => {
 
       expect(sessionsFake.updateCalls).toHaveLength(0);
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect(message).toEqual(buildAlreadyCompletedMessage());
+      expect(message).toEqual(buildStatusGuidanceMessage());
     });
 
-    it('不正な postback data（decode 不能）でも固定の完了案内のみ・セッション更新なし', async () => {
+    it('不正な postback data（decode 不能）でもステータス案内のみ・セッション更新なし', async () => {
       const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
       const { deps, sessionsFake, messenger } = buildDeps({ session });
       const handlers = createConversationHandlers(deps);
@@ -1007,7 +1052,7 @@ describe('createConversationHandlers', () => {
 
       expect(sessionsFake.updateCalls).toHaveLength(0);
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect(message).toEqual(buildAlreadyCompletedMessage());
+      expect(message).toEqual(buildStatusGuidanceMessage());
     });
   });
 
@@ -1152,7 +1197,7 @@ describe('createConversationHandlers', () => {
       expect(message).toEqual(buildConfirmationMessageForAssertion(candidates[1]!));
     });
 
-    it('completed 段階でのスタンプ等 → 固定の完了案内のみ・セッション更新なし（Req 4.6 と整合）', async () => {
+    it('completed 段階でのスタンプ等 → ステータス案内のみ・セッション更新なし（Req 4.6 と整合）', async () => {
       const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
       const { deps, sessionsFake, messenger } = buildDeps({ session });
       const handlers = createConversationHandlers(deps);
@@ -1165,7 +1210,7 @@ describe('createConversationHandlers', () => {
 
       expect(sessionsFake.updateCalls).toHaveLength(0);
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect(message).toEqual(buildAlreadyCompletedMessage());
+      expect(message).toEqual(buildStatusGuidanceMessage());
     });
   });
 
@@ -1227,7 +1272,7 @@ describe('createConversationHandlers', () => {
       expect(message).toEqual(buildConfirmationMessageForAssertion(candidates[0]!));
     });
 
-    it('completed 段階での resume → 固定の完了案内（他の段階の resume と異なり以後の操作を要求しない）', async () => {
+    it('completed 段階での resume → ステータス案内（他の段階の resume と異なり以後の操作を要求しない）', async () => {
       const session = baseSession({ stage: 'completed', owner_id: 'owner-1' });
       const { deps, sessionsFake, messenger } = buildDeps({ session });
       const handlers = createConversationHandlers(deps);
@@ -1241,7 +1286,206 @@ describe('createConversationHandlers', () => {
 
       expect(sessionsFake.updateCalls).toHaveLength(0);
       const [message] = messenger.replies[0]?.messages ?? [];
-      expect(message).toEqual(buildAlreadyCompletedMessage());
+      expect(message).toEqual(buildStatusGuidanceMessage());
+    });
+  });
+});
+
+// line-on-demand-report tasks 3.10（Requirements 2.6・2.9、design.md「店舗特定済みオーナーの振り分け」「Performance」）。
+// 会話の入口でオーナーを 1 回だけ照会し、店舗特定済み（onboarding_status = 'store_identified'）なら、会話の段階を
+// 読まずに振り分け口へ渡す。代理店が店舗を登録したオーナーは、段階が途中のまま店舗特定済みになるので、段階では
+// 判定しない。それ以外のオーナー（未登録・pending・active）は、既存のオンボーディングへ渡す。
+describe('店舗特定済みオーナーの振り分け（line-on-demand-report Requirements 2.6・2.9）', () => {
+  type Stage = OnboardingSessionRow['stage'];
+  const STAGES: readonly Stage[] = ['await_invite_code', 'await_store_name', 'await_confirmation', 'completed'];
+  const REPLY_TOKEN = 'rt-route';
+  const STORE_ID = '11111111-1111-4111-8111-111111111111';
+  const STORE_NAME = '試験食堂 駅前店';
+
+  const storeIdentified = baseOwner({ onboarding_status: 'store_identified' });
+
+  // ck_session_owner_stage（stage = await_invite_code ⇔ owner_id IS NULL）に合わせる。確認待ちは選択済みの候補を持つ。
+  function sessionAt(stage: Stage): OnboardingSessionRow {
+    if (stage === 'await_invite_code') return baseSession({ stage });
+    return baseSession({
+      stage,
+      owner_id: storeIdentified.id,
+      candidates: storeCandidates(1),
+      selected_index: stage === 'await_confirmation' ? 0 : null,
+    });
+  }
+
+  function text(value: string): InboundEvent {
+    return { kind: 'text', lineUserId: 'U1', replyToken: REPLY_TOKEN, text: value };
+  }
+
+  function postback(data: string): InboundEvent {
+    return { kind: 'postback', lineUserId: 'U1', replyToken: REPLY_TOKEN, data };
+  }
+
+  const REPORT_POSTBACK = postback(encodeReportPostback({ kind: 'new_reviews', storeId: null, page: 0 }));
+
+  // オンボーディングなら、それぞれ検索・招待コードの検証・確定・候補の選択・案内の再送へ進むイベント。
+  const EVENTS: ReadonlyArray<readonly [string, InboundEvent]> = [
+    ['店名に見えるテキスト', text('テスト食堂')],
+    ['招待コードに見えるテキスト', text('ABCD1234')],
+    ['テキスト「ステータス確認」', text('ステータス確認')],
+    ['友だち追加', { kind: 'follow', lineUserId: 'U1', replyToken: REPLY_TOKEN }],
+    ['スタンプなど', { kind: 'unsupported', lineUserId: 'U1', replyToken: REPLY_TOKEN }],
+    ['再開の postback', postback(encodePostback({ kind: 'resume' }))],
+    ['確定の postback', postback(encodePostback({ kind: 'confirm' }))],
+    ['候補の選択の postback', postback(encodePostback({ kind: 'select_candidate', index: 0 }))],
+    ['レポートの postback', REPORT_POSTBACK],
+  ];
+
+  describe.each(STAGES)('会話の段階が %s', (stage) => {
+    it.each(EVENTS)('%s は、オーナーとともに振り分け口へ渡し、オンボーディングの処理をしない', async (_label, event) => {
+      const h = buildDeps({
+        session: sessionAt(stage),
+        existingOwner: storeIdentified,
+        validCodes: { ABCD1234: { agencyId: AGENCY_ID } },
+        searchOutcome: { kind: 'found', candidates: storeCandidates(2) },
+      });
+
+      await createConversationHandlers(h.deps).handleEvent(event);
+
+      expect(h.routerFake.routed).toEqual([{ event, owner: storeIdentified }]);
+      // オンボーディングの案内・検索・招待コードの検証・確定・登録のどれも起きない（2.9）。
+      expect(h.messenger.replies).toEqual([]);
+      expect(h.identificationFake.searchCalls).toEqual([]);
+      expect(h.identificationFake.confirmCalls).toEqual([]);
+      expect(h.inviteCodesFake.findCalls).toEqual([]);
+      expect(h.ownersFake.createOwnerCalls).toEqual([]);
+      // 会話は段階を読まない（段階は振り分け口が 1 回だけ読む）。オーナーの照会は入口の 1 回だけ。
+      expect(h.sessionsFake.getCalls).toEqual([]);
+      expect(h.sessionsFake.updateCalls).toEqual([]);
+      expect(h.ownersFake.findCalls).toEqual(['U1']);
+    });
+  });
+
+  it.each<readonly [string, OwnerRow | null, OnboardingSessionRow]>([
+    ['未登録（オーナーなし）', null, baseSession()],
+    ['招待コードの確認の後（pending）', baseOwner({ onboarding_status: 'pending' }), sessionAt('await_store_name')],
+    ['active（書く経路が無い値）', baseOwner({ onboarding_status: 'active' }), sessionAt('await_store_name')],
+  ])('%s のオーナーは、振り分け口を作らずにオンボーディングへ渡す', async (_label, existingOwner, session) => {
+    const h = buildDeps({ session, existingOwner, searchOutcome: { kind: 'found', candidates: storeCandidates(2) } });
+
+    await createConversationHandlers(h.deps).handleEvent(text('テスト食堂'));
+
+    expect(h.routerFake.scopes).toEqual([]);
+    expect(h.routerFake.routed).toEqual([]);
+    expect(h.messenger.replies).toHaveLength(1);
+    expect(h.ownersFake.findCalls).toEqual(['U1']);
+    if (session.stage === 'await_store_name') {
+      expect(h.identificationFake.searchCalls).toEqual(['テスト食堂']);
+    } else {
+      expect(h.inviteCodesFake.findCalls).toEqual(['テスト食堂']);
+    }
+  });
+
+  it('店舗特定済みでないオーナーの再友だち追加でも、オーナーの照会は入口の 1 回だけで、案内は変わらない', async () => {
+    const h = buildDeps({ session: sessionAt('await_store_name'), existingOwner: baseOwner() });
+
+    await createConversationHandlers(h.deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: REPLY_TOKEN });
+
+    expect(h.ownersFake.findCalls).toEqual(['U1']);
+    expect(h.messenger.replies).toEqual([
+      { replyToken: REPLY_TOKEN, messages: [buildStoreNameInputGuidanceMessage()] },
+    ]);
+    expect(h.routerFake.scopes).toEqual([]);
+  });
+
+  it('振り分け口はイベントごとに、そのリクエストのロガーと Messenger で作る', async () => {
+    const messenger = createFakeMessenger();
+    // 実装本体の Messenger と同じく、リクエストのロガーを適用した別の Messenger を返す。
+    const requestMessengers: LineMessenger[] = [];
+    messenger.withLogger = () => {
+      const scoped: LineMessenger = { ...messenger };
+      requestMessengers.push(scoped);
+      return scoped;
+    };
+    const h = buildDeps({ session: sessionAt('completed'), existingOwner: storeIdentified, messenger });
+    const handlers = createConversationHandlers(h.deps);
+    const firstLogger = { info: vi.fn(), warn: vi.fn() };
+    const secondLogger = { info: vi.fn(), warn: vi.fn() };
+
+    await handlers.handleEvent(text('ステータス確認'), firstLogger, { warn: vi.fn() });
+    await handlers.handleEvent(text('ステータス確認'), secondLogger, { warn: vi.fn() });
+
+    expect(h.routerFake.scopes).toHaveLength(2);
+    expect(h.routerFake.scopes[0]?.logger).toBe(firstLogger);
+    expect(h.routerFake.scopes[1]?.logger).toBe(secondLogger);
+    expect(requestMessengers).toHaveLength(2);
+    expect(h.routerFake.scopes[0]?.messenger).toBe(requestMessengers[0]);
+    expect(h.routerFake.scopes[1]?.messenger).toBe(requestMessengers[1]);
+  });
+
+  describe('実物の振り分け口とレポート応答（偽の読み出し）', () => {
+    function fakeReads(stores: readonly { id: string; name: string }[]) {
+      const reads: ReportReadsAccessor = {
+        listReportableStores: vi.fn(async () => [...stores]),
+        findLatestDailySummary: vi.fn(async () => null),
+        listDailySummariesEndingAt: vi.fn(async () => []),
+      };
+      return reads;
+    }
+
+    function withRealRouter(h: ReturnType<typeof buildDeps>, reads: ReportReadsAccessor) {
+      h.deps.createOwnerRouter = createStoreIdentifiedOwnerRouterFactory({
+        db: h.deps.db,
+        sessions: h.sessionsFake.accessor,
+        lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+        reads,
+        now: () => FIXED_NOW,
+      });
+      const linkRichMenu = vi.fn(async (): Promise<void> => {});
+      h.messenger.linkRichMenu = linkRichMenu;
+      return { linkRichMenu };
+    }
+
+    it('段階が店名入力待ちのまま店舗特定済みのオーナー（代理店経路）のテキストに、ステータス案内を返して完了後メニューを張る', async () => {
+      const h = buildDeps({
+        session: sessionAt('await_store_name'),
+        existingOwner: storeIdentified,
+        searchOutcome: { kind: 'found', candidates: storeCandidates(2) },
+      });
+      const { linkRichMenu } = withRealRouter(h, fakeReads([{ id: STORE_ID, name: STORE_NAME }]));
+
+      await createConversationHandlers(h.deps).handleEvent(text('テスト食堂'));
+
+      expect(h.messenger.replies).toEqual([{ replyToken: REPLY_TOKEN, messages: [buildStatusGuidanceMessage()] }]);
+      expect(h.identificationFake.searchCalls).toEqual([]);
+      expect(linkRichMenu).toHaveBeenCalledTimes(1);
+      expect(linkRichMenu).toHaveBeenCalledWith('U1', RICHMENU_COMPLETED_ID);
+      expect(h.sessionsFake.getState().stage).toBe('completed');
+      // 読み出しはオーナー（会話の入口）とセッション（振り分け口）の 1 回ずつ。
+      expect(h.ownersFake.findCalls).toEqual(['U1']);
+      expect(h.sessionsFake.getCalls).toEqual(['U1']);
+    });
+
+    it('レポートの要求に 1 回だけ Reply し、応答をそのリクエストのロガーへ記録する', async () => {
+      const h = buildDeps({ session: sessionAt('completed'), existingOwner: storeIdentified });
+      const reads = fakeReads([{ id: STORE_ID, name: STORE_NAME }]);
+      const { linkRichMenu } = withRealRouter(h, reads);
+      const requestLogger = { info: vi.fn(), warn: vi.fn() };
+
+      await createConversationHandlers(h.deps).handleEvent(REPORT_POSTBACK, requestLogger);
+
+      expect(h.messenger.replies).toEqual([
+        { replyToken: REPLY_TOKEN, messages: [buildPreparingNotice({ storeName: STORE_NAME })] },
+      ]);
+      expect(requestLogger.info).toHaveBeenCalledWith('line-webhook.report_replied', {
+        reportKind: 'new_reviews',
+        reportOutcome: 'preparing',
+      });
+      expect(h.logger.info).not.toHaveBeenCalled();
+      expect(linkRichMenu).not.toHaveBeenCalled();
+      // 新着のレポートの読み出しは 4 回（オーナー・セッション・店舗・最新の集計）。
+      expect(h.ownersFake.findCalls).toHaveLength(1);
+      expect(h.sessionsFake.getCalls).toHaveLength(1);
+      expect(reads.listReportableStores).toHaveBeenCalledTimes(1);
+      expect(reads.findLatestDailySummary).toHaveBeenCalledTimes(1);
     });
   });
 });

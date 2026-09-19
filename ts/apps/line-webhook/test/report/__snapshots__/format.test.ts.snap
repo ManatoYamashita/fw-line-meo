@@ -1,0 +1,73 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 共通の部品だけで組んだレポートのメッセージ（本文は試験用の 1 行） 1`] = `
+{
+  "altText": "試験食堂 駅前店の試験用のレポート（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "text": "本文の試験用の部品",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "text": "詳細画面への導線の試験用の部品",
+          "type": "text",
+        },
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月8日〜9月14日のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;

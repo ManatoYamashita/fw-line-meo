@@ -399,7 +399,7 @@ variable "services" {
 | Requirements | 5.1, 5.2, 5.3, 5.4 |
 
 **Responsibilities & Constraints**
-- 枠 ×5: `line-channel-secret`（Webhook 署名検証用）/ `line-channel-access-token`（Push/Reply 送信用。機能1 の毎朝配信・機能3 の応答に必須）/ `gemini-api-key` / `places-api-key` / `db-admin-password`（automatic replication）
+- 枠 ×5: `line-channel-secret`（Webhook 署名検証用）/ `line-channel-access-token`（Push/Reply 送信用。機能1 の通知（`line-on-demand-report` 以降は毎朝ではなく変化があった日だけの Push）とレポートの Reply・機能3 の応答に必須）/ `gemini-api-key` / `places-api-key` / `db-admin-password`（automatic replication）
 - 値は `gcloud secrets versions add` による out-of-band 投入（runbook。5.2）
 - **本モジュールが所有するのは secret「枠」と secret id の output のみ**（値も accessor IAM も所有しない）
 - accessor IAM は **secret 単位**の `google_secret_manager_secret_iam_member`（project 単位付与は禁止）。ただし付与先 SA は RunServices / BatchJob が作成するため、モジュール循環を避けるべく **binding の記述は SA を作る側（RunServices / BatchJob）に co-locate する**（secret id は本モジュールの output を変数で受け取る）。付与マップ: webhook SA → line-channel-secret + line-channel-access-token、survey-web SA → gemini-api-key、daily-batch SA → places-api-key。`db-admin-password` はどのランタイム SA にも付与しない（運用者専用）（5.4）

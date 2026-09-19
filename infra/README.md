@@ -201,7 +201,16 @@ gcloud logging read \
   --project=gen-fw-line-meo --limit=20 --format=json
 ```
 
-summary-delivery（毎時 Job）も同様に `gcloud run jobs execute summary-delivery ...`／`resource.labels.job_name="summary-delivery"` で確認できる。「成功」の観察可能な証拠は、この実行サマリーログ 1 行が出力され、かつ `daily_summaries`（Go 書込）／`summary_deliveries`（TS 書込）に該当日の行が増えていること（§3 の Auth Proxy 経由 `psql` で確認）。
+daily-batch の「成功」の観察可能な証拠は、この実行サマリーログ 1 行が出力され、かつ `daily_summaries`（Go 書込）に該当日の行が増えていること（§3 の Auth Proxy 経由 `psql` で確認）。
+
+summary-delivery（毎時 Job）も同様に `gcloud run jobs execute summary-delivery ...`／`resource.labels.job_name="summary-delivery"` で確認できる。**ただし「送った件数」も「`summary_deliveries` に該当日の行が増えたこと」も成功の条件ではない**（Issue #256）。通知は**変化があった日にだけ**送るので、1 通も送らない実行が正常でありうるうえ、送らないと決めた対象も理由つきで同じ表へ行を残すため、行の増加は「送った」ことを意味しない。実行サマリー（`jsonPayload.event="delivery-job.run"`）に対して見るのは次の 4 点である。
+
+- 失敗（`failed`）が 0 件
+- 上限超過（`quotaExceeded`）が 0 件
+- 完了後メニューの準備判定（`reportMenuReady`）が true（差し替え漏れを緑にしないため・§10）
+- すべての対象が数えられている（`delivered` ＋ `failed` ＋ `quotaExceeded` ＋ `skipped` ＋ `skippedNoChange` ＋ `skippedNotComparable` ＋ `skippedMenuUnavailable` ＝ `targetsTotal`）
+
+この判定は `scripts/run-e2e-prod-checks.sh` の 6 が行う（`PROJECT_ID=gen-fw-line-meo make e2e-prod-checks`・読み取りのみ・運用者用）。同じ期間に致命的な失敗（`delivery-job.fatal`）が無いことも併せて見る。手順書は `docs/testing/e2e.md`。
 
 ### 7-4. CI 化する場合
 
@@ -443,146 +452,263 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 
 ---
 
-## 10. リッチメニュー画像の差し替え（Issue #195）
+## 10. 完了後リッチメニューの差し替え（Issue #195 / #256）
 
 **「PNG の差し替えはコード変更ゼロ」は真だが「反映コストゼロ」は偽である。**
 `.claude/skills/messaging-api/references/rich-menu.md` が明記するとおり、LINE は
 アップロード済みの画像を上書きできない（*Cannot replace an image once uploaded — must create
-a new rich menu and re-upload.*）。差し替えは常に**メニューの作り直し**になる。
+a new rich menu and re-upload.*）。区画と action も作った後では変えられない。差し替えは常に
+**新しいメニューの作成と、既存オーナー全員の張り替え**になる。
 
-**CI では一切検証できない。** `setup-rich-menus.test.ts` は fetch をスタブして「areas に resume
-postback がある」「`api-data.line.me` へ画像を送る」「宣言した size が実 PNG の IHDR と一致する」
-までしか見ない。実チャネルへの反映が正しいかは実機でしか分からない。**デモ直前に触らないこと。**
+**Issue #256 以降、これは絵の入れ替えではなく配信の関門である。** 完了後メニューはレポートの
+3 導線（新着口コミ・競合店との比較・直近の推移）を持ち、配信ジョブは設定された完了後メニューが
+その 3 導線を持つことを確かめるまで通知を送らない（見送りの理由 `skipped_menu_unavailable`）。
+差し替えが終わるまで通知は 1 通も出ない。
 
-### 10-0. 前提
+**CI では一切検証できない。** `ts/apps/line-webhook/test/scripts/` の試験が見るのは、区画が
+重ならず面を覆うこと・postback が符号器の出力と一致すること・宣言した寸法が実 PNG の IHDR と
+一致すること・張り替えの 4 分類と削除の条件までである。実チャネルへの反映が正しいかは実機でしか
+分からない。**デモ直前に触らないこと。**
 
-- 画像とコード定数（`RICH_MENU_WIDTH` / `RICH_MENU_HEIGHT`）が一致した状態が `main` にあること。
-  食い違いは `pnpm -C ts --filter @fwlm/line-webhook run test` が赤にする。
-- 画像そのものの仕様（PNG 署名・1MB 以下・アルファ無し）も同じ vitest が実 PNG のバイト列に対して
-  見ている。**画像の検査点はここ 1 箇所だけである**（別立ての shell ガードは置かない。同じことを
-  二重に見る層は、片方が腐ったときに腐ったと言えない）。
-- 焼き元は `ts/apps/line-webhook/assets/source/*.html`。**正典は PNG であり HTML は出所**である
-  （フォント描画が描画機に依存するため、同じ HTML から同じ PNG は出ない）。
+### 10-0. 前提と、差し替えを置く位置
 
-### 10-1. 段 1: メニューの再作成
+差し替えは公開手順の Step C である（`.kiro/specs/line-on-demand-report/design.md`「Migration
+Strategy」）。**順序を入れ替えない。** CI はイメージだけを差し替え、env は Terraform が持つので、
+env を足す変更は必ずイメージより先に、外す変更は必ずイメージより後に出す。
+
+| Step | 何をするか | 手順の在処 |
+|---|---|---|
+| A | `summary_deliveries.status` の migration と、配信ジョブへの `LINE_RICHMENU_COMPLETED_ID` の配線（値は旧メニューの ID のまま） | §3 → 下の「apply の作法」 |
+| B | コードのマージとデプロイ。設定値は旧メニューを指すので通知は出ない | §7-2。巻き戻しは §7-2 の「1 つ前のイメージへ戻す」 |
+| C | **完了後メニューの差し替え（本節 10-1〜10-5）** | 本節 |
+| D | 配信ジョブの `LIFF_URL` の配線を外す（実機確認の後） | 下の「apply の作法」 |
+
+**apply の作法（Step A・C・D に共通・素の `make tf-apply` を打たない）**
+
+`module.guardrails`（Issue #232・ログバケットの分離）は main に入っているが、費用の承認待ちで
+意図的に本番へ当てていない。`-target` を付けない apply は、それを一緒に作ってしまう。
 
 ```bash
+# 1. そのコミットの deploy-prod が終わってから行う（保存した plan を当てない）。
+#    in-place の更新は plan を作った時点のイメージの値を送るので、デプロイ前の plan を
+#    当てるとイメージが巻き戻る。
+gh run list --repo ManatoYamashita/fw-line-meo --workflow deploy-prod --limit 3
+
+# 2. plan で差分を読む。属性まで下りて見る（`client` と `client_version` の 7 件は既存のずれ）。
+terraform -chdir=infra/envs/prod plan -target=<アドレス>
+
+# 3. 同じ -target で当てる。
+terraform -chdir=infra/envs/prod apply -target=<アドレス>
+```
+
+Step ごとのアドレス:
+
+| Step | `-target` に渡すアドレス |
+|---|---|
+| A | `module.delivery_job.google_cloud_run_v2_job.delivery` |
+| C | `module.run_services.google_cloud_run_v2_service.svc["line-webhook"]` と `module.delivery_job.google_cloud_run_v2_job.delivery` の **2 つを同じ apply に入れる**（`line_richmenu_completed_id` は両方が読む。片方だけだと 2 つが別々のメニューへ張り合う） |
+| D | `module.delivery_job.google_cloud_run_v2_job.delivery` |
+
+#232 が承認されて `module.guardrails` を本番へ当てた後は、この絞り込みは要らなくなる。
+
+着手前に確かめること:
+
+- **パイロットと実演の実施期間内には行わない**（Req 9.4）。判断の正典はリリース計画（Issue #256）
+  である。2026-09-13 に置いた計画ではパイロットが 2026-10-26 から始まるので、それより前に
+  差し替えを終える。**計画の日付は動くので、この節の日付ではなく Issue を見ること。**
+- Step B のイメージが本番で動いていること（`PROJECT_ID=gen-fw-line-meo make e2e-prod-checks` の
+  1 が PASS で、デプロイ待ちの WARN も出ていないこと）。
+- 画像とコード定数（`ONBOARDING_MENU_SIZE` / `COMPLETED_MENU_SIZE`・
+  `ts/apps/line-webhook/scripts/rich-menu-definitions.ts`）がメニューごとに一致した状態が `main`
+  にあること。寸法はメニューごとに異なる（オンボーディング用は Half 2500x843、完了後は
+  Full 2500x1686）。食い違いも、画像そのものの仕様（PNG 署名・1MB 以下・アルファ無し）も
+  `pnpm -C ts --filter @fwlm/line-webhook run test` が実 PNG のバイト列に対して赤にする。
+  **画像の検査点はここ 1 箇所だけである**（別立ての shell ガードは置かない。同じことを二重に
+  見る層は、片方が腐ったときに腐ったと言えない）。
+- 焼き元は `ts/apps/line-webhook/assets/source/*.html`。**正典は PNG であり HTML は出所である**
+  （フォント描画が描画機に依存するため、同じ HTML から同じ PNG は出ない）。
+
+手順が要求する env は次のとおり。**シークレットを argv へ置かない**（§8-1・§8-3 と同じ理由）。
+チャネルアクセストークンはスクリプトが env のチャネル ID とシークレットから自分で発行するので、
+トークンを手で作って渡す必要は無い。
+
+| env | 出典 | 本番での値 |
+|---|---|---|
+| `LINE_CHANNEL_ID` | `ts/apps/line-webhook/scripts/setup-rich-menus.ts` | 本番 `line-webhook` の同名 env（§8-0 の方法で確認する） |
+| `LINE_CHANNEL_SECRET` | 同上 | `gcloud secrets versions access latest --secret=line-channel-secret` の出力 |
+| `LIFF_STORE_DETAIL_URL` | 同上 | 本番 `line-webhook` の同名 env（`terraform.tfvars` の `liff_url` と同値・`infra/envs/prod/main.tf`） |
+| `DATABASE_URL` | `ts/apps/line-webhook/scripts/relink-completed-menu.ts` | §3 の Auth Proxy 経由の接続文字列 |
+
+要求する組は段ごとに違う。10-1 のメニュー作成は上の 3 つ（`DATABASE_URL` は読まない）、10-3 の
+張り替えは `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET`・`DATABASE_URL` である。どれか 1 つでも欠けた
+まま実行すると、**LINE も DB も 1 度も呼ばずに** `<NAME> is required` で落ちる
+（`throw new Error('<NAME> is required')` の形で自己申告しているため）。
+
+**pnpm の引数に `--` を挟まない。** pnpm 10 は `--` を区切りとして食わず、そのまま引数として
+スクリプトへ渡す（実測: `pnpm run relink-completed-menu -- --to X` は
+`relink-completed-menu: unknown argument --` で落ちる）。下のコマンドの形で書くこと。
+
+### 10-1. 段 1: 完了後メニューだけを作る
+
+```bash
+# 共有パッケージの dist（/line-report・/db）を先に作る。クリーンな checkout では
+# dist が無く、build:scripts だけでは解決に失敗する。
+pnpm -C ts run build:packages
 cd ts/apps/line-webhook
 pnpm run build:scripts
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
-LINE_CHANNEL_ID='<§8-0 の方法で確認する>' LINE_CHANNEL_SECRET="$SECRET" pnpm run setup-rich-menus
+LINE_CHANNEL_ID='<§8-0 の方法で確認する>' \
+LINE_CHANNEL_SECRET="$SECRET" \
+LIFF_STORE_DETAIL_URL='<§8-0 の方法で確認する>' \
+  pnpm run setup-rich-menus --completed-only
 ```
 
-- **シークレットを argv へ置かない**（§8-1・§8-3 と同じ理由）。env 経由で渡す。
-- 新しい `richMenuId` が 2 つ出力される。スクリプトは `setDefaultRichMenu` まで行うので、
-  この時点で**新しいオンボーディングメニューが既定になる**（新規友だち・未完了ユーザーは
-  ここで新しい絵に切り替わる）。
-- 完了用の `richMenuId` を控える。次の段で使う。
+- **`--completed-only` を必ず付ける。** 付けないとオンボーディング用メニューまで作り直し、
+  `setDefaultRichMenu` で既定を差し替える。既定はオンボーディング用のままでなければならず
+  （Req 2.6）、差し替えで既定に触る理由は無い。
+- 出力は完了用の `richMenuId` が 1 つだけ。次の段で使うので控える。
+- 完了後メニューの `name` は新旧とも `line-onboarding-completed-menu` である。差し替えの最中は
+  同名の 2 面が一覧に並ぶので、**名前ではなく ID で区別する。**
+- `LIFF_STORE_DETAIL_URL` に本番と違う値を渡すと、下段左の「詳細を見る」だけが別の URL を指す
+  メニューができる。作った後では直せないので、ここで値を間違えない。
 
 ### 10-2. 段 2: 完了用 ID を Terraform へ
 
 `infra/envs/prod/terraform.tfvars`（gitignore・main worktree にある）の
-`line_richmenu_completed_id` を段 1 の完了用 ID に差し替えてから:
+`line_richmenu_completed_id` を段 1 の ID に差し替えてから:
 
 ```bash
-make tf-plan    # 自分の差分を確認する
-make tf-apply   # line-webhook の新リビジョンが立つ
+terraform -chdir=infra/envs/prod plan \
+  -target='module.run_services.google_cloud_run_v2_service.svc["line-webhook"]' \
+  -target='module.delivery_job.google_cloud_run_v2_job.delivery'
+
+terraform -chdir=infra/envs/prod apply \
+  -target='module.run_services.google_cloud_run_v2_service.svc["line-webhook"]' \
+  -target='module.delivery_job.google_cloud_run_v2_job.delivery'
 ```
 
-- `line_richmenu_completed_id` は `infra/envs/prod/main.tf` で `LINE_RICHMENU_COMPLETED_ID` env
-  として `line-webhook` に渡る。**新リビジョンが立つまで反映されない。**
-- **`client` / `client_version` の in-place 更新が 7 件出るのは既存ドリフト**であり自分の差分では
+- **2 つのアドレスを同じ apply で指定する。** `LINE_RICHMENU_COMPLETED_ID` は line-webhook
+  （店舗確定の瞬間に個別リンクを張る側）と summary-delivery（通知の前に 3 導線を確かめる側）の
+  両方が読む。片方だけ当てると、2 つが別々のメニューへ張り合う。
+- `make tf-plan` / `make tf-apply` を使わないのは `-target` を渡せないためである。絞るのは
+  承認待ちの `module.guardrails`（Issue #232）を巻き込まないためであり、承認が済んだら素の
+  `make tf-plan` / `make tf-apply` へ戻す。
+- 保存した plan をデプロイと並走させない。in-place の更新は plan の時点のイメージの値を送るので、
+  デプロイ前の plan を後から当てるとイメージが巻き戻る。
+- **`client` / `client_version` の in-place 更新が出るのは既存ドリフト**であり自分の差分では
   ない（デプロイパイプラインが刻み、tf 側は宣言していないため毎回出る）。切り分けは resource 名
-  ではなく attribute まで下りて見ること。
-- **この段を飛ばすと完了済みオーナーへのリンクが失敗し続ける。** 旧 ID のままだと
-  `ts/apps/line-webhook/src/onboarding/conversation.ts` の `linkRichMenu` が失敗する。
-  失敗は握り潰して業務処理を継続する設計のままだが、**Issue #228 以降は記録が残る**
-  （`line-webhook.richmenu_link_failed`）。成功時も `line-webhook.richmenu_linked` が出るため、
-  「記録が無い」が成功と未実行のどちらかを判別できる。
+  ではなく attribute まで下りて見ること。自分の差分は `LINE_RICHMENU_COMPLETED_ID` の値だけである。
+- **この段を飛ばすと、張り替えても通知は出ない。** 配信ジョブが見るのは env の ID であって、
+  実際に張られたメニューではない。line-webhook 側では、以後に店舗を確定したオーナーが旧 ID へ
+  張られる（失敗は握り潰して業務処理を継続する設計だが、Issue #228 以降は記録が残る:
+  `line-webhook.richmenu_link_failed`。成功時は `line-webhook.richmenu_linked`）。
 
-### 10-3. 段 3: 完了済みオーナーの個別リンクを張り替える
+### 10-3. 段 3: 店舗特定済みオーナーを張り替える
 
-**旧メニューを削除する前に必ず行う。** `setDefaultRichMenu` は既定を差し替えるだけで、
-per-user リンクには触れない。完了済みオーナーは `conversation.ts` が `linkRichMenu` で個別に
-張った**旧完了メニューに繋がったまま**である。この状態で旧メニューを消すとリンクが外れ、
-**完了済みなのに既定（「登録を再開」の面）が表示される。**
+**旧メニューを削除する前に必ず行う。** 段 1 は既定メニューに触れず、`setDefaultRichMenu` も
+per-user リンクには触れない。店舗特定済みオーナーは `ts/apps/line-webhook/src/onboarding/conversation.ts`
+が `linkRichMenu` で個別に張った**旧完了メニューに繋がったまま**である。再リンクが起きる経路は
+店舗確定の瞬間だけなので、完了済みのオーナーは二度とそこを通らない。放置すれば、レポートの
+3 導線を持たない古い面が恒久的に出続ける。
 
-再リンクが起きる経路は `handleConfirm`（店舗確定の瞬間）だけなので、完了済みユーザーは
-二度とそこを通らない。放置すると恒久的に誤った面が出続ける。
-
-```bash
-# 対象の line_user_id を取る（§3 の Auth Proxy 経由）
-psql -h 127.0.0.1 -p 15432 -U postgres -d fwlm -t -A   -c "SELECT line_user_id FROM owners WHERE onboarding_status='store_identified';"
-
-# 張り替え前の状態を見る（旧 richMenuId が返るはず）
-curl -sS "https://api.line.me/v2/bot/user/<lineUserId>/richmenu" -K - <<CFG
-header = "Authorization: Bearer ${TOKEN}"
-CFG
-
-# 新しい完了メニューへ張り替える（成功は HTTP 200）
-curl -sS -X POST -o /dev/null -w '%{http_code}\n'   "https://api.line.me/v2/bot/user/<lineUserId>/richmenu/<新 完了 richMenuId>" -K - <<CFG
-header = "Authorization: Bearer ${TOKEN}"
-CFG
-```
-
-対象が多い場合は `POST /v2/bot/richmenu/bulk/link`（1 回 500 ユーザーまで）を使う。
-
-### 10-4. 段 4: 旧リッチメニューの削除
-
-**段 2 の新リビジョンが立ち、段 3 の張り替えが済んでから行う。** 順序を逆にすると、旧 ID を
-参照している間にメニューが消えて穴が開く（段 2 より前なら env が死んだ ID を指し、段 3 より前なら
-完了済みオーナーのリンクが外れて既定の面へ落ちる）。
+まず試行だけを流し、対象の件数を見る（LINE へのリンクと削除を行わない。DB は読み出しだけ）:
 
 ```bash
+# 共有パッケージの dist（/line-report・/db）を先に作る。クリーンな checkout では
+# dist が無く、build:scripts だけでは解決に失敗する。
+pnpm -C ts run build:packages
+cd ts/apps/line-webhook
+pnpm run build:scripts
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
-CHANNEL_ID='<§8-0 の方法で確認する>'
-TOKEN="$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' "$CHANNEL_ID" "$SECRET" \
-  | curl -sS -X POST 'https://api.line.me/oauth2/v3/token' \
-      -H 'Content-Type: application/x-www-form-urlencoded' --data @- \
-  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
-
-# 一覧（API で作ったメニューのみ返る。OA Manager 作成分は出ない）
-curl -sS 'https://api.line.me/v2/bot/richmenu/list' -K - <<CFG
-header = "Authorization: Bearer ${TOKEN}"
-CFG
-
-# 旧 2 件を個別に削除する（新しい 2 件の richMenuId と取り違えないこと）
-curl -sS -X DELETE -o /dev/null -w '%{http_code}\n' \
-  "https://api.line.me/v2/bot/richmenu/<旧 richMenuId>" -K - <<CFG
-header = "Authorization: Bearer ${TOKEN}"
-CFG
+LINE_CHANNEL_ID='<§8-0 の方法で確認する>' \
+LINE_CHANNEL_SECRET="$SECRET" \
+DATABASE_URL='<§3 の Auth Proxy 経由の接続文字列>' \
+  pnpm run relink-completed-menu --to '<段 1 の richMenuId>' --dry-run
 ```
 
-### 10-5. 段 5: 実機で目視する
+試行では、張り替え先の照会（読み取り）と対象の読み出しだけを行い、`張り替え先: <ID>（レポート
+3 導線を確認しました）`・`対象のオーナー: N 件`・`--dry-run のため、リンクと削除は行いません。`
+を出して終わる。
 
-未完了状態と完了状態の 2 面が切り替わることを、実機の LINE で確認する。
-**ここは自動化できない。** デプロイの成功はコードが載ったことしか言わない。
+件数を確かめたら、`--dry-run` を外して本番へ張る（同じシェルで続け、`SECRET` を引き継ぐ）。
+旧 ID（削除の候補）は、段 2 で書き換える前の `terraform.tfvars` の `line_richmenu_completed_id`
+である:
 
-### 10-6. 再リンクの「運用設計」は不要だが、張り替えそのものは要る（2026-09-06 実測）
+```bash
+LINE_CHANNEL_ID='<§8-0 の方法で確認する>' \
+LINE_CHANNEL_SECRET="$SECRET" \
+DATABASE_URL='<§3 の Auth Proxy 経由の接続文字列>' \
+  pnpm run relink-completed-menu --to '<段 1 の richMenuId>' --delete-old '<旧 richMenuId>'
+```
 
-`setDefaultRichMenu` は既定メニューを差し替えるが、**完了済みオーナーは per-user リンクで旧完了
-メニューに繋がったまま残る**（`conversation.ts` が `linkRichMenu` で個別に張っているため）。
-一般には「全員へ再リンクするか旧メニューを残すか」の運用判断が要るが、本番では対象が存在しない。
+本番へ張る実行は次の順に動く（`--dry-run` は 1 と 2 で止まる）。
 
-| 対象 | 実測値 |
-| --- | --- |
-| `owners` 総数 | 1 |
-| うち `onboarding_status = 'store_identified'`（完了） | 1（リポジトリオーナー本人） |
-| `onboarding_sessions` の `stage = 'completed'` | 1 |
-| `onboarding_sessions` の `stage = 'await_invite_code'` | 4 |
+1. `--to` のメニューがレポートの 3 導線を持つことを、誰かに張る前に確かめる。持たなければ
+   **誰にも張らずに**非ゼロで終わる（押しても答えの返らない面を配らないため）。
+2. `owners.onboarding_status = 'store_identified'` の LINE ユーザーを読む（この経路は DB へ書かない）。
+3. 1 人ずつ張り、メニューを照会して 4 つに分ける。
+4. 分類ごとの件数と、確認できなかったユーザーの**先頭 8 文字**を出す（記録に識別子の全体を出さない。
+   運用記録へ貼っても漏れない形にしてある）。
 
-`await_invite_code` の 4 セッションは既定メニュー側にいるため、段 1 の `setDefaultRichMenu` で
-自動的に新しい絵へ移る。**したがって「全員へ再リンクするか旧メニューを残すか」という運用方針の
-判断は要らない。** ただし段 3 の張り替えそのものは省略できない（対象が 1 人でも、やらなければ
-その 1 人に誤った面が恒久的に出る）。2026-09-06 の実施では実際に旧完了メニューへ繋がったままで
-あることを確認し、削除前に張り替えた。
+| 分類 | 何が起きたか | 運用での扱い |
+|---|---|---|
+| 張れた（`verified`） | 照会が新しい `richMenuId` を返した | 完了 |
+| 到達不能（`unreachable`） | 新 ID が返らず、プロフィールの照会が 404（ブロック中・友だち解除・退会済み） | メニューを表示しようがない相手。削除を妨げない。一覧は実施記録へ残す。ブロックが解ければ友だち追加のイベントで張り直される |
+| 不一致（`mismatch`） | 新 ID が返らず、プロフィールは取れた（友だちなのに張れていない） | 原因を調べて流し直す |
+| 判定不能（`error`） | ネットワークや 5xx で判定できなかった | 流し直す |
 
-**この数値は 2026-09-06 時点のものである。** オーナーが増えた後に差し替えるなら、この節を鵜呑みに
-せず件数を引き直すこと（§3 の Auth Proxy 経由で `SELECT onboarding_status, count(*) FROM owners
-GROUP BY 1`）。なお DB の件数は「実際に完了メニューへ繋がっている人数」の上限である（切り替えの成否は
-owners の状態遷移と独立に決まるため）。**Issue #228 以降、切り替えの成否は記録から読める**
-（`line-webhook.richmenu_linked` / `line-webhook.richmenu_link_failed` の件数）。
-個々のオーナーの実状を確かめるなら `GET /v2/bot/user/{userId}/richmenu` を使う。
+**「張った」ことは成功の証拠にならない。** LINE はブロック中・友だち解除・退会済みのユーザーへの
+リンクを 200 で受理して黙って失敗する（`references/rich-menu.md` の Link conditions）。だから
+照会で新しい ID が返ることまで確かめ、返らなかったときはプロフィールの照会で到達不能と不一致を
+見分ける。分類の件数と先頭 8 文字は、そのまま実施記録に残す（Req 9.5 の確認の証拠になる）。
+
+### 10-4. 段 4: 旧メニューの削除は、同じ実行が条件つきで行う
+
+**削除を手で叩かない。** `--delete-old <旧 ID>` を渡した実行が、**不一致と判定不能がともに 0 件の
+ときに限り**旧メニューを削除する。Req 9.5 の「全員分の確認」を、全員が「張れた」か「到達不能」の
+どちらかに確定したことと読むためである。条件を満たさなければ削除せず、非ゼロで終わる
+（`旧メニュー … は削除しません（不一致 N 件・判定不能 M 件）。原因を調べて流し直してください。`）。
+
+- 順序を逆にすると穴が開く。段 2 より前に消せば env が死んだ ID を指し、段 3 より前に消せば
+  店舗特定済みオーナーのリンクが外れて既定（「登録を再開」の面）へ落ちる。
+- 削除を指定しない実行（`--delete-old` なし）でも、確認できなかったオーナーが残れば非ゼロで
+  終わる。**終了コードが 0 でない実行を「だいたい終わった」と読まない。**
+- 旧メニューを消すまでは巻き戻せる。tfvars を旧 ID に戻して段 2 を当て直し、同じスクリプトを
+  `--to <旧 ID>` で流す。消した後は作り直しになる。
+
+### 10-5. 段 5: 実機で確かめる（Req 9.6）
+
+**ここは自動化できない。** デプロイの成功も、張り替えの分類も、コードと LINE の状態しか言わない。
+
+- 確かめるのは、レポートの 3 導線・複数店舗の選択・Reply 応答・既存導線（「詳細を見る」と
+  「ステータス確認」）である。手順は `docs/testing/e2e.md` §4。
+- 検証用のテナントを使い回す。本番のテナントは消す経路が無い（Issue #252）ので、実機確認のために
+  新しい店舗・オーナーを作らない。
+- 併せて `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks` の 6 を読み、完了後メニューの準備判定
+  （`reportMenuReady`）が true に変わったことを見る。差し替えの前は意図どおり FAIL である。
+
+### 10-6. 張り替えの対象は実在する（「対象が存在しない」は古い）
+
+この節は 2026-09-06 の実測に基づいて「本番では対象が存在しない」と書いていた。**その記述は古い。**
+2026-09-13 の本番 E2E の時点で、完了済み（`onboarding_status = 'store_identified'`）の検証用
+オーナーが実在することが確かめられている。本番のテナントは消す経路が無い（Issue #252）ので、
+対象が消えて無くなることもない。したがって**段 3 の張り替えは省略できない。** 対象が 1 人でも、
+やらなければその 1 人に古い面が恒久的に出る。
+
+一方で「全員へ再リンクするか旧メニューを残すか」という運用方針の判断は要らない。旧メニューは
+区画も画像も差し替えられず、レポートの 3 導線を持たないままなので、残す選択肢が無いためである。
+
+**件数は実施の直前に引き直す。** 引き直す道具は 10-3 の `--dry-run` である（`対象のオーナー: N 件`
+を出し、LINE へのリンクと削除を行わない）。DB を直接見るなら §3 の Auth Proxy 経由で:
+
+```sql
+SELECT onboarding_status, count(*) FROM owners GROUP BY 1;
+```
+
+なお DB の件数は「実際に完了メニューへ繋がっている人数」の上限である（切り替えの成否は owners の
+状態遷移と独立に決まるため）。個々のオーナーの実状は張り替えスクリプトの分類が示す。Issue #228
+以降、切り替えの成否は記録からも読める（`line-webhook.richmenu_linked` /
+`line-webhook.richmenu_link_failed` の件数）。
 
 ---
 

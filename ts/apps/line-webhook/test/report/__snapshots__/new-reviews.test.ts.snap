@@ -1,0 +1,495 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 前日の集計なし 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 新着口コミの件数を判定できません（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "color": "#333333",
+          "size": "md",
+          "text": "前日のデータが無いため、新着口コミの件数を判定できません。",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 抜粋を表示できない 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 新着口コミ 2件（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "color": "#333333",
+          "size": "md",
+          "text": "新着口コミ 2件（前日比）",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "新着口コミの内容は、ここでは表示できません。",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 新着あり: 画像なし・リンクなしの投稿者を含み、残りの件数を持つ 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 新着口コミ 5件（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "color": "#333333",
+          "size": "md",
+          "text": "新着口コミ 5件（前日比）",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "contents": [
+            {
+              "contents": [
+                {
+                  "aspectMode": "cover",
+                  "aspectRatio": "1:1",
+                  "flex": 0,
+                  "size": "xxs",
+                  "type": "image",
+                  "url": "https://lh3.googleusercontent.com/a-/TEST-PHOTO-1=s128-c0x00000000-cc-rp-mo",
+                },
+                {
+                  "contents": [
+                    {
+                      "action": {
+                        "label": "投稿者のプロフィール",
+                        "type": "uri",
+                        "uri": "https://www.google.com/maps/contrib/100000000000000000001/reviews",
+                      },
+                      "color": "#333333",
+                      "size": "sm",
+                      "text": "試験投稿者1",
+                      "type": "text",
+                      "weight": "bold",
+                      "wrap": true,
+                    },
+                    {
+                      "color": "#666666",
+                      "size": "xs",
+                      "text": "9月13日 10:05",
+                      "type": "text",
+                    },
+                  ],
+                  "flex": 1,
+                  "layout": "vertical",
+                  "type": "box",
+                },
+              ],
+              "layout": "horizontal",
+              "spacing": "sm",
+              "type": "box",
+            },
+            {
+              "color": "#333333",
+              "size": "sm",
+              "text": "★★★★★",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "maxLines": 4,
+              "size": "sm",
+              "text": "試験の本文1です。料理の提供が早く、席も落ち着いていました。",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "action": {
+                "label": "Google Maps で見る",
+                "type": "uri",
+                "uri": "https://www.google.com/maps/reviews/data=!4m8!14m7!1m6!2m5!1sTEST1!2m1!1s0x0:0x1!3m1!1s2@1:TEST1",
+              },
+              "color": "#1DB446",
+              "size": "sm",
+              "text": "Google Maps で見る",
+              "type": "text",
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "contents": [
+            {
+              "contents": [
+                {
+                  "color": "#333333",
+                  "size": "sm",
+                  "text": "試験投稿者2",
+                  "type": "text",
+                  "weight": "bold",
+                  "wrap": true,
+                },
+                {
+                  "color": "#666666",
+                  "size": "xs",
+                  "text": "9月13日 10:05",
+                  "type": "text",
+                },
+              ],
+              "layout": "vertical",
+              "type": "box",
+            },
+            {
+              "color": "#333333",
+              "size": "sm",
+              "text": "★☆☆☆☆",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "maxLines": 4,
+              "size": "sm",
+              "text": "試験の本文2です。料理の提供が早く、席も落ち着いていました。",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "action": {
+                "label": "Google Maps で見る",
+                "type": "uri",
+                "uri": "https://www.google.com/maps/reviews/data=!4m8!14m7!1m6!2m5!1sTEST2!2m1!1s0x0:0x1!3m1!1s2@1:TEST2",
+              },
+              "color": "#1DB446",
+              "size": "sm",
+              "text": "Google Maps で見る",
+              "type": "text",
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "contents": [
+            {
+              "contents": [
+                {
+                  "aspectMode": "cover",
+                  "aspectRatio": "1:1",
+                  "flex": 0,
+                  "size": "xxs",
+                  "type": "image",
+                  "url": "https://lh3.googleusercontent.com/a-/TEST-PHOTO-4=s128-c0x00000000-cc-rp-mo",
+                },
+                {
+                  "contents": [
+                    {
+                      "action": {
+                        "label": "投稿者のプロフィール",
+                        "type": "uri",
+                        "uri": "https://www.google.com/maps/contrib/100000000000000000004/reviews",
+                      },
+                      "color": "#333333",
+                      "size": "sm",
+                      "text": "試験投稿者4",
+                      "type": "text",
+                      "weight": "bold",
+                      "wrap": true,
+                    },
+                    {
+                      "color": "#666666",
+                      "size": "xs",
+                      "text": "9月13日 10:05",
+                      "type": "text",
+                    },
+                  ],
+                  "flex": 1,
+                  "layout": "vertical",
+                  "type": "box",
+                },
+              ],
+              "layout": "horizontal",
+              "spacing": "sm",
+              "type": "box",
+            },
+            {
+              "color": "#333333",
+              "size": "sm",
+              "text": "★★★☆☆",
+              "type": "text",
+            },
+            {
+              "color": "#333333",
+              "maxLines": 4,
+              "size": "sm",
+              "text": "試験の本文4です。料理の提供が早く、席も落ち着いていました。",
+              "type": "text",
+              "wrap": true,
+            },
+            {
+              "action": {
+                "label": "Google Maps で見る",
+                "type": "uri",
+                "uri": "https://www.google.com/maps/reviews/data=!4m8!14m7!1m6!2m5!1sTEST4!2m1!1s0x0:0x1!3m1!1s2@1:TEST4",
+              },
+              "color": "#1DB446",
+              "size": "sm",
+              "text": "Google Maps で見る",
+              "type": "text",
+            },
+          ],
+          "layout": "vertical",
+          "spacing": "sm",
+          "type": "box",
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "表示していない新着口コミがほかに2件あります。",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;
+
+exports[`スナップショット（Flex Message Simulator へ貼って目視する材料） > 新着なし 1`] = `
+{
+  "altText": "試験食堂 駅前店（9月14日時点）: 新着口コミはありません（データ提供: Google Maps）",
+  "contents": {
+    "body": {
+      "contents": [
+        {
+          "color": "#333333",
+          "size": "md",
+          "text": "新着口コミはありません。",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "md",
+      "type": "box",
+    },
+    "footer": {
+      "contents": [
+        {
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "header": {
+      "contents": [
+        {
+          "size": "md",
+          "text": "試験食堂 駅前店",
+          "type": "text",
+          "weight": "bold",
+          "wrap": true,
+        },
+        {
+          "color": "#666666",
+          "size": "sm",
+          "text": "9月14日時点のデータ",
+          "type": "text",
+          "wrap": true,
+        },
+      ],
+      "layout": "vertical",
+      "paddingAll": "lg",
+      "paddingBottom": "md",
+      "spacing": "sm",
+      "type": "box",
+    },
+    "size": "kilo",
+    "styles": {
+      "footer": {
+        "separator": true,
+      },
+    },
+    "type": "bubble",
+  },
+  "type": "flex",
+}
+`;

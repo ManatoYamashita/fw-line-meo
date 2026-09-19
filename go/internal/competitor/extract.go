@@ -93,7 +93,8 @@ func primaryTypeForCategory(categoryCode *string) string {
 //
 // 戻り値は実際に固定を試みた競合リスト（0〜5件）。0件は Requirement 1.3 の
 // 「競合なし」状態に対応するが、その状態を daily_summaries.status='no_competitors' として
-// メッセージに反映するのは summary/compute・flex.ts（task 3.5 以降）の責務であり、本関数は
+// メッセージに反映するのは summary/compute と TS の表示側（競合店との比較レポート・
+// line-webhook の report/builders/comparison.ts）の責務であり、本関数は
 // repo.FixCompetitors が空リストに対して安全に no-op で成功することのみを保証する
 // （見つかった競合が0件でもエラーにはしない — 1.3 の「競合なし」は異常系ではない）。
 //

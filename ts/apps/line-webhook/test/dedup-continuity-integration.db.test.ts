@@ -14,6 +14,7 @@ import type { StoreCandidate } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
 import { createSignatureVerifier } from '../src/webhook/signature.js';
 import { createConversationHandlers } from '../src/onboarding/conversation.js';
+import { createStoreIdentifiedOwnerRouterFactory } from '../src/owner/router.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import type { LineMessenger } from '../src/line/client.js';
 import type { PlacesSearchAdapter, SearchOutcome } from '@fwlm/store-identification';
@@ -170,6 +171,12 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook 重複防止と継続�
       logger: { info: vi.fn(), warn: vi.fn() },
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
       liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      createOwnerRouter: createStoreIdentifiedOwnerRouterFactory({
+        db: deps.pool,
+        sessions: { getOrCreateSession, updateSession },
+        lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      }),
     });
 
     const appDeps: AppDeps = {

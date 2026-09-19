@@ -79,6 +79,14 @@ export interface LogFields {
   readonly skipped?: number;
   readonly quotaExceeded?: number;
   readonly quotaExceededStopped?: boolean;
+  /** 比較可能だが新着も順位変動も無く、送らなかった件数。 */
+  readonly skippedNoChange?: number;
+  /** 当日の集計が比較可能でなく、送らなかった件数。 */
+  readonly skippedNotComparable?: number;
+  /** 完了後メニューが使えず（未準備・張れなかった）、送らなかった件数。 */
+  readonly skippedMenuUnavailable?: number;
+  /** 完了後メニューの準備判定の結果。**対象が 1 件も無い実行でも出す。** */
+  readonly reportMenuReady?: boolean;
   readonly exitCode?: number;
   /** 終了時に残っていた資源の種別。閉じ忘れの検知に使う。 */
   readonly activeResources?: readonly string[];
@@ -86,4 +94,11 @@ export interface LogFields {
   readonly detail?: string;
   /** 欠落した設定の識別子。自由文ではなく有限集合（環境変数名）である。 */
   readonly configKey?: string;
+
+  // --- LINE Webhook 面（レポート要求） ---
+
+  /** レポートの種類。有限集合の識別子（new_reviews・comparison・trend）。 */
+  readonly reportKind?: string;
+  /** レポート要求への応答の区分。有限集合の識別子（report・store_choice・no_store・preparing・fetch_failed）。 */
+  readonly reportOutcome?: string;
 }

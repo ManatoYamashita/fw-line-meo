@@ -1,7 +1,9 @@
 import type { StoreCandidate } from '@fwlm/db';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
+import { REPORT_LABELS } from '@fwlm/line-report';
 import { encodePostback } from '../onboarding/stages.js';
 import type { LineMessage } from './client.js';
+import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
 
 // メッセージビルダー（design.md「MessageBuilders」）。
 // Requirement 1.1: 友だち追加時の挨拶＋招待コード入力案内。
@@ -11,89 +13,27 @@ import type { LineMessage } from './client.js';
 // Requirement 4.1: 選択済み候補の確認＋確定/やり直しの意思確認を提示する。
 // Requirement 4.3: 店舗特定完了案内（機能1 が利用可能になる旨）。
 // Requirement 7.4: すべての案内文を日本語で提供する（文言をこのモジュールに集約する）。
+// line-on-demand-report Requirement 2.5・2.10: ステータス案内と完了メッセージは、毎日の定期配信を
+//   約束せず、変化があった日に知らせることとメニューから確認できることを案内する。
 //
 // 純粋関数のみ（design.md「MessageBuilders」制約）。I/O・副作用・LineMessenger/DB への
 // 依存は一切持たない。postback data の符号化は onboarding/stages.ts の encodePostback を
 // そのまま再利用し、ここで独自に符号化スキームを再実装しない。
-
-// --- Flex コンテンツの内部型（references/flex-message.md 準拠・no-explicit-any 対応） ---
-// LineMessage['contents'] は unknown のため、ビルダー内部では以下の狭い型で構築し、
-// 呼び出し側（テスト等）が安全にキャストできるよう export しておく。
-
-export interface FlexPostbackAction {
-  readonly type: 'postback';
-  readonly label: string;
-  readonly data: string;
-  readonly displayText: string;
-}
-
-// 外部リンク（LIFF 等）へ遷移する action。postback と異なり data を持たず uri を持つ。
-export interface FlexUriAction {
-  readonly type: 'uri';
-  readonly label: string;
-  readonly uri: string;
-}
-
-export type FlexAction = FlexPostbackAction | FlexUriAction;
-
-export interface FlexTextComponent {
-  readonly type: 'text';
-  readonly text: string;
-  readonly weight?: 'regular' | 'bold';
-  readonly size?: string;
-  readonly color?: string;
-  readonly wrap?: boolean;
-  readonly align?: 'start' | 'center' | 'end';
-  readonly margin?: string;
-}
-
-export interface FlexButtonComponent {
-  readonly type: 'button';
-  readonly style: 'primary' | 'secondary';
-  readonly color?: string;
-  readonly height?: 'sm' | 'md';
-  readonly action: FlexAction;
-}
-
-export type FlexBoxContent = FlexTextComponent | FlexButtonComponent;
-
-export interface FlexBoxComponent {
-  readonly type: 'box';
-  readonly layout: 'horizontal' | 'vertical';
-  readonly spacing?: string;
-  readonly margin?: string;
-  readonly paddingAll?: string;
-  readonly contents: readonly FlexBoxContent[];
-}
-
-// Bubble の各ブロックの装飾（背景色・区切り線）。references/flex-message.md「Bubble Styles」準拠。
-export interface FlexBlockStyle {
-  readonly backgroundColor?: string;
-  readonly separator?: boolean;
-}
-
-export interface FlexBubbleStyles {
-  readonly body?: FlexBlockStyle;
-  readonly footer?: FlexBlockStyle;
-}
-
-export interface FlexBubbleContents {
-  readonly type: 'bubble';
-  readonly size?: string;
-  readonly styles?: FlexBubbleStyles;
-  readonly body: FlexBoxComponent;
-  readonly footer: FlexBoxComponent;
-}
-
-export interface FlexCarouselContents {
-  readonly type: 'carousel';
-  readonly contents: readonly FlexBubbleContents[];
-}
+// Flex の型は line/flex-types.ts に置く（レポートの組立と共有する）。
 
 // PlacesSearchAdapter の契約（design.md: pageSize:10）と一致させる不変条件。
 // LINE の Carousel 上限は 12 だが、本サービスの契約はさらに厳しい 10 件のため、
 // それを超える呼び出しは（LINE の上限内であっても）契約違反として早期に落とす。
 const MAX_CANDIDATES = 10;
+
+// 詳細画面（store-detail LIFF）への導線の文言。完了メッセージのボタンとステータス案内で同じ語を使う。
+const DETAIL_ACTION_LABEL = '詳細を見る';
+
+// ステータス案内で挙げるレポートの導線。メニューのラベル（@fwlm/line-report の REPORT_LABELS）を
+// そのまま引用し、オーナーが案内の語でメニューの区画を探せるようにする。
+const REPORT_MENU_LABELS_QUOTED = [REPORT_LABELS.new_reviews, REPORT_LABELS.comparison, REPORT_LABELS.trend]
+  .map((label) => `「${label}」`)
+  .join('');
 
 function assertCandidatesWithinContract(candidates: readonly StoreCandidate[]): void {
   if (candidates.length === 0) {
@@ -186,17 +126,22 @@ export function buildStoreNameInputGuidanceMessage(): LineMessage {
 }
 
 /**
- * Requirement 4.6: 「店舗特定済み」到達後の入力に対する固定案内。
+ * ステータス案内（line-on-demand-report Requirement 2.5・2.10、design.md「StatusGuidance と AppBoundary」）。
+ * 店舗特定済みオーナーの「ステータス確認」やレポート以外の操作に返す、1 文 1 行・3 行のテキスト。
+ * 店舗の登録が完了していること、メニューから 3 つのレポートと詳細画面を確認できること、
+ * 変化があった日に配信時刻に知らせることを案内する。
+ * Requirement 4.6（「店舗特定済み」到達後の入力に対する固定案内）もこの文言で兼ねる。
  * Requirement 4.3 の完了直後メッセージ（buildCompletionMessage）とは異なる場面
- * （「たった今完了した」ではなく「すでに完了済みであり追加操作は不要」）のための、
- * 意図的に別立てのメッセージ。
+ * （「たった今完了した」ではなく「すでに完了済み」）のための、意図的に別立てのメッセージ。
+ * 配信時刻はオーナーごとの値（owners.delivery_hour）なので、固定の時刻を書かない（Requirement 1.9）。
  */
-export function buildAlreadyCompletedMessage(): LineMessage {
+export function buildStatusGuidanceMessage(): LineMessage {
   return {
     type: 'text',
     text:
-      'オンボーディングはすでに完了しています。\n' +
-      '機能1（競合店舗の日次サマリー）をご利用いただけます。追加の操作は必要ありません。',
+      '店舗の登録は完了しています。\n' +
+      `メニューの${REPORT_MENU_LABELS_QUOTED}でレポートを、「${DETAIL_ACTION_LABEL}」で詳細画面をご確認いただけます。\n` +
+      '新着口コミや順位の変化があった日は、配信時刻にこのトークでお知らせします。',
   };
 }
 
@@ -274,10 +219,12 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
 }
 
 /**
- * Requirement 4.3: 店舗特定完了案内（機能1＝競合日次サマリーが利用可能になる旨）。
+ * Requirement 4.3: 店舗特定完了案内（機能1＝競合店との比較などのレポートが利用可能になる旨）。
  * 長いオンボーディングの完走を祝う装飾 Flex とし、機能1の詳細（store-detail LIFF）への
  * 明確な導線ボタン（URI アクション）を添える（Issue #21・完了演出のリッチ化）。
  * storeDetailUrl は環境依存のため呼び出し側（config 由来）から注入する。
+ * 毎日の定期配信は約束せず、変化があった日に知らせることとメニューから確認できることを案内する
+ * （line-on-demand-report Requirement 2.10）。
  */
 export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
   const contents: FlexBubbleContents = {
@@ -306,7 +253,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
         },
         {
           type: 'text',
-          text: 'お店の登録が完了しました。これで機能1（競合店舗の日次サマリー）がご利用いただけます。',
+          text: 'お店の登録が完了しました。これで機能1（競合店との比較などのレポート）がご利用いただけます。',
           size: lineLayout.descriptionSize,
           color: lineColors.body,
           align: 'center',
@@ -315,7 +262,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
         },
         {
           type: 'text',
-          text: '毎朝、近隣の競合とのポジションをお届けします。トークやメニューからもご確認いただけます。',
+          text: '新着口コミや順位の変化があった日にお知らせします。レポートはメニューからいつでもご確認いただけます。',
           size: lineLayout.noteSize,
           color: lineColors.caption,
           align: 'center',
@@ -334,12 +281,12 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
           style: 'primary',
           color: lineColors.action,
           // 高さも明示する。既定に委ねると、LINE 側の既定値が変わったとき
-          // 日次サマリーの同じ操作と片方だけ動く。
+          // 同じ導線を持つ別のバブルと片方だけ動く。
           height: lineLayout.actionHeight,
           action: {
             type: 'uri',
-            // 日次サマリーの同じ導線と語彙を揃える（同じ LIFF 画面へ飛ぶ）。
-            label: '詳細を見る',
+            // リッチメニューの「詳細を見る」と語彙を揃える（同じ LIFF 画面へ飛ぶ）。
+            label: DETAIL_ACTION_LABEL,
             uri: storeDetailUrl,
           },
         },
@@ -349,7 +296,7 @@ export function buildCompletionMessage(storeDetailUrl: string): LineMessage {
 
   return {
     type: 'flex',
-    altText: '店舗の登録が完了しました。機能1（競合店舗の日次サマリー）がご利用いただけます。',
+    altText: '店舗の登録が完了しました。機能1（競合店との比較などのレポート）がご利用いただけます。',
     contents,
   };
 }
@@ -447,12 +394,20 @@ export function buildCandidateSelectionExpiredMessage(): LineMessage {
  * 捕捉されなかった内部例外の発生時にベストエフォートで送信を試みる文言。
  * どの段階（招待コード／店名検索／確認）で発生した障害かに関わらず共通の汎用文言とする
  * （design.md ConversationHandlers「汎用の再試行案内 reply」）。
+ *
+ * レポートの対象店舗を決めた後の失敗（line-on-demand-report Requirement 7.5）では、storeName に店舗名を渡す。
+ * 先頭の行を「「店舗名」のレポートを表示できませんでした。」に替え、残りの行（サポートコード・再試行・問い合わせ）は
+ * 汎用の文言と同じにする。行を足さないのは、テキスト案内を 3 行ほどに収めるため（design-language §7.16）。
+ * 店舗名は、レポートの案内（report/builders/notices.ts）と同じく省略せずに「」で括る。
+ * 出すのは店舗名とサポートコードだけで、内部の詳細（例外の種別や本文）を受け取る引数を持たない。
  */
-export function buildInternalErrorRetryMessage(supportCode?: string): LineMessage {
+export function buildInternalErrorRetryMessage(supportCode?: string, storeName?: string): LineMessage {
   return {
     type: 'text',
     text:
-      '申し訳ございません、処理中にエラーが発生しました。\n' +
+      (storeName
+        ? `「${storeName}」のレポートを表示できませんでした。\n`
+        : '申し訳ございません、処理中にエラーが発生しました。\n') +
       (supportCode ? `サポートコード: ${supportCode}\n` : '') +
       'お手数ですが、少し時間をおいてもう一度お試しください。\n' +
       '解決しない場合は、運営までお問い合わせください。',

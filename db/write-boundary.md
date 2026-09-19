@@ -11,7 +11,7 @@
 | `operators` | TS リアルタイム応答層 | 運営テナントの登録（ダッシュボード） |
 | `agencies` | TS リアルタイム応答層 | 代理店登録（ダッシュボード） |
 | `dashboard_users` | TS リアルタイム応答層 | 運営/代理店アカウント登録（ダッシュボード） |
-| `owners` | TS リアルタイム応答層 | LINE オンボーディング（Webhook）。`delivery_hour`（`competitive-daily-summary`・`0004`）は日次サマリー配信時刻設定・TS が postback 経由で更新 |
+| `owners` | TS リアルタイム応答層 | LINE オンボーディング（Webhook）。`delivery_hour`（`competitive-daily-summary`・`0004`）は通知を送る時刻。LINE 上で変える手段は提供しない（`line-on-demand-report`・#256）ので、既定の 7 時のまま運用する |
 | `stores` | TS リアルタイム応答層 | 店舗特定オンボーディング（Webhook/LIFF） |
 | `survey_rating_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |

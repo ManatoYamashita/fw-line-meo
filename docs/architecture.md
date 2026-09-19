@@ -34,19 +34,21 @@ Gemini API）。運営保有の **単一 LINE 公式アカウント** に全オ�
 
 | アプリ | Cloud Run 名 | 種別 | 主な技術 | 使う人 | LINE 経由 | 担当機能 | 対応 spec |
 |---|---|---|---|---|:---:|---|---|
-| `@fwlm/line-webhook` | `line-webhook` | Service | Hono / `@line/bot-sdk` | 飲食店オーナー | あり（Webhook） | オンボーディング | [line-onboarding](../.kiro/specs/line-onboarding/design.md) |
+| `@fwlm/line-webhook` | `line-webhook` | Service | Hono / `@line/bot-sdk` | 飲食店オーナー | あり（Webhook） | オンボーディング・機能1 のレポート応答 | [line-onboarding](../.kiro/specs/line-onboarding/design.md)・[line-on-demand-report](../.kiro/specs/line-on-demand-report/design.md) |
 | `@fwlm/store-detail` | `store-detail` | Service | Next.js / `@line/liff` | 飲食店オーナー | あり（LIFF） | 機能1 詳細閲覧（読取専用） | [competitive-daily-summary](../.kiro/specs/competitive-daily-summary/design.md) |
 | `@fwlm/dashboard-web` | `dashboard-web` | Service | Next.js / Firebase | 運営・代理店 | なし | 管理画面 UI | [agency-dashboard](../.kiro/specs/agency-dashboard/design.md) |
 | `@fwlm/dashboard-api` | `dashboard-api` | Service | Hono / firebase-admin / qrcode | 運営・代理店 | なし | 管理 API・QR 発行 | [agency-dashboard](../.kiro/specs/agency-dashboard/design.md) |
 | `@fwlm/survey-web` | `survey-web` | Service | Next.js / `@google/genai` | 来店客（匿名） | なし（QR） | 機能3 口コミ | [review-acquisition](../.kiro/specs/review-acquisition/design.md) |
 | （Go）daily-batch | `daily-batch` | Job（毎朝06:00 JST） | Go / pgx / cloudsqlconn | 無人バッチ | なし | 機能1 データ取得・算出 | [competitive-daily-summary](../.kiro/specs/competitive-daily-summary/design.md) |
-| `@fwlm/delivery-job` | `summary-delivery` | Job（毎時 JST） | TypeScript / `@fwlm/db` | オーナー（配信先） | あり（Push） | 機能1 Flex 配信 | [competitive-daily-summary](../.kiro/specs/competitive-daily-summary/design.md) |
+| `@fwlm/delivery-job` | `summary-delivery` | Job（毎時 JST） | TypeScript / `@fwlm/db` | オーナー（通知先） | あり（Push） | 機能1 変化があった日の通知 | [line-on-demand-report](../.kiro/specs/line-on-demand-report/design.md) |
 
 補足:
 - `summary-delivery`（Cloud Run ジョブ名）のソースはディレクトリ `ts/apps/delivery-job`
   にある。**ジョブ名とディレクトリ名が異なる**点に注意（`scripts/push-images.sh` が対応付け）。
 - 共有パッケージ: `@fwlm/db`（DB アクセサ・スキーマ型・言語間契約）、
-  `@fwlm/store-identification`（店名検索・Place 特定ロジック。LINE とダッシュボードの両経路が利用）。
+  `@fwlm/store-identification`（店名検索・Place 特定ロジック。LINE とダッシュボードの両経路が利用）、
+  `@fwlm/line-report`（レポートの postback の形式と完了後メニューの判定。line-webhook・
+  delivery-job・メニューのスクリプトが同じ定義から読む）。
 - `daily-batch` の Go ソースは `go/cmd/daily-batch`＋`go/internal/*`。
 
 ---
@@ -58,7 +60,7 @@ Gemini API）。運営保有の **単一 LINE 公式アカウント** に全オ�
 | 登場人物 | 使う道具 | 目的 |
 |---|---|---|
 | 運営・代理店 | ブラウザ（`dashboard-web`） | 店舗を登録・管理し、オーナーを迎える準備をする |
-| 飲食店オーナー | LINE（`line-webhook` / `store-detail`） | 自店を登録し、毎朝の競合レポートを受け取る |
+| 飲食店オーナー | LINE（`line-webhook` / `store-detail`） | 自店を登録し、競合レポートをメニューから確認する |
 | 来店客 | QR コード（`survey-web`） | 匿名でアンケートに答え、Google クチコミを投稿する |
 
 ---
@@ -85,9 +87,12 @@ flowchart TD
 
     subgraph P2["フェーズ2: 日常運用 / 機能1（競合レポート）"]
         C1["daily-batch(Go)<br/>毎朝06:00 競合データ取得・算出"]
-        C2["summary-delivery(TS)<br/>毎時 設定時刻に LINE へ Flex 配信"]
-        C3["store-detail(LIFF)<br/>詳細を LINE 内で閲覧（読取専用）"]
-        C1 --> C2 --> C3
+        C2["summary-delivery(TS)<br/>毎時 変化があった店舗へ短文通知"]
+        C3["line-webhook(TS)<br/>メニューの3レポートを Reply"]
+        C4["store-detail(LIFF)<br/>詳細を LINE 内で閲覧（読取専用）"]
+        C1 --> C2
+        C1 --> C3
+        C3 --> C4
     end
 
     subgraph P3["フェーズ3: 口コミ獲得 / 機能3（来店客）"]
@@ -112,16 +117,19 @@ flowchart TD
 オーナーが公式アカウントを友だち追加すると、`line-webhook` が案内を開始する。
 「招待コード入力 → 店名送信 → Places 候補から自店を選択・確認」を LINE トーク内で完結し、
 Place ID が確定して `onboarding_status` が `store_identified` に遷移する。この到達で機能1の
-配信対象になる。使用: `line-webhook`。
+通知とレポートの対象になる。使用: `line-webhook`。
 
 補足: 同じ店舗特定を、オーナー本人の代わりに**代理店がダッシュボードで代行**する経路も
 ある（`dashboard-web /stores/new`）。IT に不慣れなオーナーを想定した二重の入口。
 
 ### フェーズ2: 日常運用（機能1）
-毎朝 `daily-batch`（Go）が競合5店のデータを取得・算出し、`summary-delivery`（TS）が
-オーナーの設定時刻に LINE へ Flex Message を Push する。オーナーが「詳細を見る」を押すと
-`store-detail`（LIFF）が LINE 内で開き、直近の推移を閲覧できる（**書き込み API を持たない
-読取専用**）。
+毎朝 `daily-batch`（Go）が競合5店のデータを取得・算出する。`summary-delivery`（TS）は
+オーナーごとの配信時刻に動き、**新着クチコミか順位の変動があった店舗にだけ** 短文の通知を
+Push する（変化のない日は送らない）。オーナーは完了後リッチメニューの3つの導線
+（新着口コミ・競合店との比較・直近の推移）から、`line-webhook`（TS）の Reply でその場に
+回答を受け取る。「詳細を見る」を押すと `store-detail`（LIFF）が LINE 内で開き、直近30日の
+推移を閲覧できる（**書き込み API を持たない読取専用**）。届け方の正典は
+[line-on-demand-report](../.kiro/specs/line-on-demand-report/design.md)。
 
 ### フェーズ3: 口コミ獲得（機能3）
 代理店・運営がダッシュボードで店舗 QR を発行（Place 確定済みが前提）し、オーナーが

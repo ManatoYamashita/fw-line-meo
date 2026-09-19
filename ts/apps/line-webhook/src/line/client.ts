@@ -9,12 +9,14 @@
 // （Secret Manager 管理）はここでは意図的に未配線（Console 運用・将来用に温存）。
 
 import type { LogFields } from '@fwlm/observability';
+import type { QuickReply } from './flex-types.js';
 
 // LINE メッセージオブジェクトの wire 形状（references/message-objects.md 準拠）。
 // 本タスクでは reply() の輸送に必要な最小限の variant のみを定義する。
 // 具体的な文言・Flex コンテンツの組み立ては別タスク（MessageBuilders）が担う。
+// テキストのクイックリプライは、レポートの店舗の選択肢（line-on-demand-report の Requirement 3.2）が使う。
 export type LineMessage =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; quickReply?: QuickReply }
   | { type: 'flex'; altText: string; contents: unknown };
 
 export interface LineMessenger {

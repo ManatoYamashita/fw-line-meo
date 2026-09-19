@@ -206,10 +206,13 @@ func convertReviews(dtos []reviewDTO) []Review {
 		// パース不能な場合はゼロ値の time.Time を用い、レビュー自体は破棄しない。
 		publishTime, _ := time.Parse(time.RFC3339, r.PublishTime)
 		reviews = append(reviews, Review{
-			AuthorName:  r.AuthorAttribution.DisplayName,
-			PublishTime: publishTime,
-			Rating:      r.Rating,
-			Text:        r.Text.Text,
+			AuthorName:     r.AuthorAttribution.DisplayName,
+			PublishTime:    publishTime,
+			Rating:         r.Rating,
+			Text:           r.Text.Text,
+			AuthorURI:      r.AuthorAttribution.URI,
+			AuthorPhotoURI: r.AuthorAttribution.PhotoURI,
+			GoogleMapsURI:  r.GoogleMapsURI,
 		})
 	}
 	return reviews

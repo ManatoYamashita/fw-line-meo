@@ -26,11 +26,22 @@ type PlaceLite struct {
 // Review はクチコミ1件の表示用抜粋。Place Details (New) の reviews は
 // 最大5件・関連度順固定（newest ソート不可）であり、新着の取りこぼしが起こり得る。
 // 新着「件数」の正は review_count の差分（呼出元 summary/compute の責務）。
+//
+// AuthorURI・AuthorPhotoURI・GoogleMapsURI は口コミの帰属表示に使う（line-on-demand-report
+// Req 8.2・8.6・8.7）。自店のフィールドマスク reviews の応答に含まれるので、取得を増やさずに受け取る。
+// 応答に無い項目は空文字のまま返す（別の値で補わない）。
 type Review struct {
 	AuthorName  string
 	PublishTime time.Time
 	Rating      float64
 	Text        string
+
+	// AuthorURI は投稿者のプロフィールの URL（authorAttribution.uri）。
+	AuthorURI string
+	// AuthorPhotoURI は投稿者のプロフィール画像の URL（authorAttribution.photoUri）。
+	AuthorPhotoURI string
+	// GoogleMapsURI はその口コミを Google Maps で開く URL（Review.googleMapsUri）。
+	GoogleMapsURI string
 }
 
 // SelfMetrics は自店用フィールドマスク（rating,userRatingCount,businessStatus,reviews）の取得結果。
@@ -123,6 +134,7 @@ type reviewDTO struct {
 	PublishTime       string                  `json:"publishTime"` // RFC3339
 	Text              reviewTextDTO           `json:"text"`
 	AuthorAttribution reviewAuthorAttribution `json:"authorAttribution"`
+	GoogleMapsURI     string                  `json:"googleMapsUri"`
 }
 
 type reviewTextDTO struct {
@@ -132,6 +144,8 @@ type reviewTextDTO struct {
 
 type reviewAuthorAttribution struct {
 	DisplayName string `json:"displayName"`
+	URI         string `json:"uri"`
+	PhotoURI    string `json:"photoUri"`
 }
 
 // apiErrorResponse は Google Places API (New) のエラーレスポンス契約。

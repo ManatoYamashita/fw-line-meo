@@ -10,32 +10,40 @@ describe('loadConfig', () => {
     const config = loadConfig({
       LINE_CHANNEL_ID: 'channel-id',
       LINE_CHANNEL_SECRET: 'channel-secret',
-      LIFF_URL: 'https://liff.line.me/test-id',
+      LINE_RICHMENU_COMPLETED_ID: 'richmenu-completed',
     } as NodeJS.ProcessEnv);
 
     expect(config).toEqual({
       lineChannelId: 'channel-id',
       lineChannelSecret: 'channel-secret',
-      liffUrl: 'https://liff.line.me/test-id',
+      completedRichMenuId: 'richmenu-completed',
     });
   });
 
   it('LINE_CHANNEL_ID 欠落は明示エラーで fail-fast する', () => {
     expect(() =>
-      loadConfig({ LINE_CHANNEL_SECRET: 's', LIFF_URL: 'https://liff.line.me/x' } as NodeJS.ProcessEnv),
+      loadConfig({ LINE_CHANNEL_SECRET: 's', LINE_RICHMENU_COMPLETED_ID: 'r' } as NodeJS.ProcessEnv),
     ).toThrow('LINE_CHANNEL_ID is required');
   });
 
   it('LINE_CHANNEL_SECRET 欠落は明示エラーで fail-fast する', () => {
     expect(() =>
-      loadConfig({ LINE_CHANNEL_ID: 'c', LIFF_URL: 'https://liff.line.me/x' } as NodeJS.ProcessEnv),
+      loadConfig({ LINE_CHANNEL_ID: 'c', LINE_RICHMENU_COMPLETED_ID: 'r' } as NodeJS.ProcessEnv),
     ).toThrow('LINE_CHANNEL_SECRET is required');
   });
 
-  it('LIFF_URL 欠落は明示エラーで fail-fast する', () => {
+  it('LINE_RICHMENU_COMPLETED_ID 欠落は明示エラーで fail-fast する', () => {
     expect(() =>
       loadConfig({ LINE_CHANNEL_ID: 'c', LINE_CHANNEL_SECRET: 's' } as NodeJS.ProcessEnv),
-    ).toThrow('LIFF_URL is required');
+    ).toThrow('LINE_RICHMENU_COMPLETED_ID is required');
+  });
+
+  it('LIFF_URL は読まない（旧来の日次カードの「詳細を見る」ボタンのための設定だった）', () => {
+    // 通知はボタンを持たず、誘導先はリッチメニューである。LIFF_URL だけを与えても起動できない
+    // ことを固定し、撤去した設定が黙って戻ってこないようにする。
+    expect(() =>
+      loadConfig({ LINE_CHANNEL_ID: 'c', LINE_CHANNEL_SECRET: 's', LIFF_URL: 'https://liff.line.me/x' } as NodeJS.ProcessEnv),
+    ).toThrow('LINE_RICHMENU_COMPLETED_ID is required');
   });
 });
 
@@ -111,7 +119,7 @@ describe('main — 致命的エラー時は例外を投げずに process.exitCod
   it('config欠落（LINE_CHANNEL_ID 等が未設定）: クラッシュせず process.exitCode=1 で終了する', async () => {
     delete process.env.LINE_CHANNEL_ID;
     delete process.env.LINE_CHANNEL_SECRET;
-    delete process.env.LIFF_URL;
+    delete process.env.LINE_RICHMENU_COMPLETED_ID;
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await expect(main()).resolves.toBeUndefined();
@@ -132,7 +140,7 @@ describe('main — 致命的エラー時は例外を投げずに process.exitCod
   it('LINE token 発行失敗（ネットワークエラー）: クラッシュせず process.exitCode=1 で終了する', async () => {
     process.env.LINE_CHANNEL_ID = 'test-channel-id';
     process.env.LINE_CHANNEL_SECRET = 'test-channel-secret';
-    process.env.LIFF_URL = 'https://liff.line.me/test-id';
+    process.env.LINE_RICHMENU_COMPLETED_ID = 'richmenu-completed';
     // Pool コンストラクタは接続を即座には確立しないため、到達不能な接続文字列でも
     // token 発行より前段では例外にならない（実クエリが走る前に token 発行で先に失敗する）。
     process.env.DATABASE_URL = 'postgres://postgres@127.0.0.1:1/does-not-matter';

@@ -7,9 +7,13 @@
 //   表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示
 //   書込 API を一切持たない（4.2 の構造的担保）
 // design.md「LIFF URL 契約」:
-//   Flex ボタン → https://liff.line.me/{liffId} が本ページを起動する。storeId は LIFF URL に
-//   含めない（認可主体は ID トークンの sub のみ）。本ページは liff.init() → liff.getIDToken() →
+//   完了後リッチメニューの「詳細を見る」→ https://liff.line.me/{liffId} が本ページを起動する。
+//   認可主体は ID トークンの sub のみである。本ページは liff.init() → liff.getIDToken() →
 //   GET /api/detail（Authorization: Bearer）の流れを自ら行う。
+//   Issue #256 以降、推移のレポートの「30日の推移を詳細画面で見る」だけは LIFF URL へ
+//   `?storeId=` を付けて起動する。この値は下の task 5.4 のヒントと同じ扱いで、サーバー側が
+//   必ず sub 由来の認可済み集合の内部でのみ解釈するため、認可主体を変えることはない
+//   （届かなければ、単一店舗は正しく表示され、複数店舗は選択画面に着地する）。
 //
 // task 5.4（Issue #61・多店舗オーナー）:
 //   認可済み店舗が複数あるとサーバーは表示対象を決められず 409 と候補一覧を返す。本ページは
@@ -100,7 +104,7 @@ import {
 } from '@fwlm/ui/components/table';
 
 import type { DailySummaryCompetitor, DailySummaryNewReview } from '@fwlm/db';
-// 評価・星差の整形と文言は Flex（delivery-job）と共有する（Issue #255）。root の `@fwlm/db` からの
+// 評価・星差の整形と文言は LINE のレポート（line-webhook）と共有する（Issue #255）。root の `@fwlm/db` からの
 // 値 import は pg をクライアントへ持ち込むので禁止だが、`@fwlm/db/daily-summary` は値の import を
 // 1 つも持たない純関数だけのサブパスで、ここからの値 import は許される。どちらも
 // ts/eslint.config.js の no-restricted-imports が機械強制する。
@@ -134,7 +138,7 @@ import { CompetitorSearch } from './competitor-search';
 import { TrendChart } from './trend-chart';
 import { TrendControls } from './trend-controls';
 
-// --- 文言（flex.ts / task 4.1 と同一の Google 帰属表示テキストに揃える） --------------------
+// --- 文言（LINE の通知・レポートと同一の Google 帰属表示テキストに揃える） --------------------
 
 const GOOGLE_ATTRIBUTION_TEXT = 'データ提供: Google Maps';
 const NO_COMPETITORS_TEXT = '競合が見つかっていません（自店のみの計測です）';
@@ -252,7 +256,7 @@ async function fetchStoreDetail(idToken: string, storeIdHint: string | null): Pr
   return { ok: false, kind: 'error', message: SERVER_ERROR_MESSAGE, supportCode: supportCodeFromResponse(await res.json()) };
 }
 
-// --- 表示ヘルパー（flex.ts と同一の順位比較・文言規約） ---------------------------------
+// --- 表示ヘルパー（LINE のレポートと同一の順位比較・文言規約） ---------------------------------
 
 function formatRankDiff(rank: number | null, rankPrev: number | null): string | null {
   if (rank === null || rankPrev === null) {
