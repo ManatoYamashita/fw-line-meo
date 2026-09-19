@@ -387,9 +387,14 @@ function NewReviewsList({
  * 帰属することと、その口コミごとに Google Maps 上の元の口コミへ必ず辿れることを求める（Issue #287）。
  * アバターとプロフィールは取得できていない口コミもあるので、あるものだけを出す。
  */
-function NewReviewItem({ review }: { readonly review: DailySummaryNewReview }): React.JSX.Element {
+function NewReviewItem({ review }: { readonly review: DailySummaryNewReview }): React.JSX.Element | null {
   // 一覧に来る時点で導線は検証済みだが、型の上では任意項目のままなので、ここでも値として取り直す。
   const googleMapsUri = toHttpsUrl(review.googleMapsUri);
+  if (googleMapsUri === null) {
+    // 絞り込みとこの部品が食い違ったときに、**導線の無い内容を出す**側へ倒さない。
+    // 導線が無いなら行ごと描かない（ポリシーは元の口コミへ辿れることを必須にしている）。
+    return null;
+  }
   const authorUri = toHttpsUrl(review.authorUri);
   const authorPhotoUri = toHttpsUrl(review.authorPhotoUri);
   const authorLabel = `${review.authorName}さん`;
@@ -414,11 +419,9 @@ function NewReviewItem({ review }: { readonly review: DailySummaryNewReview }): 
         <span className="shrink-0 tabular-nums">★{review.rating}</span>
       </div>
       <p>「{review.textExcerpt}」</p>
-      {googleMapsUri === null ? null : (
-        <p className="text-sm">
-          <a href={googleMapsUri}>{GOOGLE_MAPS_LINK_TEXT}</a>
-        </p>
-      )}
+      <p className="text-sm">
+        <a href={googleMapsUri}>{GOOGLE_MAPS_LINK_TEXT}</a>
+      </p>
     </li>
   );
 }
