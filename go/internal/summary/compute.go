@@ -40,11 +40,18 @@ type MetricsDiff struct {
 // Review はクチコミ1件の表示用抜粋（帰属情報付き）。
 // Place Details (New) の reviews は最大5件・関連度順固定（newest ソート不可）であり、
 // 新着クチコミがこの枠に入らない場合は抜粋として拾えないことがある（取りこぼし。research.md 参照）。
+//
+// AuthorURI・AuthorPhotoURI・GoogleMapsURI は places.Review の同名の項目をそのまま運ぶ（空文字は
+// 「取得できていない」の意味。line-on-demand-report Req 8.2・8.6・8.7）。
 type Review struct {
 	AuthorName  string
 	PublishTime time.Time
 	Rating      float64
 	Text        string
+
+	AuthorURI      string
+	AuthorPhotoURI string
+	GoogleMapsURI  string
 }
 
 // NewReviewInfo は新着クチコミの件数（正）と抜粋（ベストエフォート）。

@@ -15,14 +15,19 @@
 // 運用者がデプロイ時に一度だけ手動実行するワンショットスクリプト（design.md 「RichMenuSetupScript」
 // = Batch）。line-webhook サーバ本体（app.ts/index.ts）の実行経路には一切配線しない。
 //
+// 動作は 2 つある（line-on-demand-report design.md「RichMenuDefinitions と RichMenuScripts」）。
+//   - 既定（引数なし）: 2 面とも作り、オンボーディング用を既定メニューにする（初期構築）
+//   - `--completed-only`: 完了後メニューだけを作って richMenuId を出す。既定メニューには触れない
+//     （メニューの差し替え = Migration Strategy の Step C）
+// メニューの寸法・区画・action の定義は rich-menu-definitions.ts が持つ。
+//
 // LINE Rich Menu API contracts（.claude/skills/messaging-api/references/rich-menu.md,
 // action-objects.md 準拠。記憶ではなくこれらの参照ドキュメントに基づく）:
 //   - Create:        POST https://api.line.me/v2/bot/richmenu
 //   - Upload image:  POST https://api-data.line.me/v2/bot/richmenu/{richMenuId}/content
 //                    （画像アップロードのみ api.line.me ではなく api-data.line.me である点に注意）
 //   - Set default:   POST https://api.line.me/v2/bot/user/all/richmenu/{richMenuId}
-//   - postback action: { type: 'postback', data, label? }
-//   - message action:  { type: 'message', text, label? }
+//   - action の形は rich-menu-definitions.ts（postback / message / uri）
 //
 // トークン発行は client.ts（LineMessenger）の POST https://api.line.me/oauth2/v3/token
 // （client_credentials）と同一パターンだが、client.ts はキャッシュ用の private closure に
@@ -32,55 +37,40 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { encodePostback } from '../src/onboarding/stages.js';
+import {
+  buildCompletedRichMenu,
+  buildOnboardingRichMenu,
+  type RichMenuObject,
+} from './rich-menu-definitions.js';
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const CREATE_RICHMENU_URL = 'https://api.line.me/v2/bot/richmenu';
 const UPLOAD_IMAGE_URL_BASE = 'https://api-data.line.me/v2/bot/richmenu';
 const SET_DEFAULT_URL_BASE = 'https://api.line.me/v2/bot/user/all/richmenu';
 
-// Half (HD) 2500x843（ratio 2.965 >= 1.45 要件・Issue #195）。
-// 比を Full 系（約 1.48）から Half 系へ移したのは占有高さの問題である。比 1.48 は幅 390pt の端末で
-// 縦 263pt を占め、トーク画面の 1/3 超を 3 行しか無い面が食う。843 なら 131.5pt で収まる。
-// 幅を 2500 まで上げたのは解像度の問題で、原寸 800px は同じ端末で約 1.46 倍に引き伸ばされ文字が眠る。
-// 平面塗りのため 2500x843 でも実測 70-80KB であり、1MB の上限には遠く届かない。
-// **assets/richmenu-*.png の実寸法と必ず一致させること。** areas は全面 1 タップ（bounds が
-// この 2 定数そのもの）なので、食い違いはそのまま「押せる範囲と絵の食い違い」になる。
-// test/scripts/setup-rich-menus.test.ts が実 PNG の IHDR と突き合わせて機械的に強制する。
-const RICH_MENU_WIDTH = 2500;
-const RICH_MENU_HEIGHT = 843;
+// メニューの寸法・区画・action の定義は rich-menu-definitions.ts が持つ（作成と張り替えが
+// 同じ定義を読むため）。本スクリプトの責務は、その定義を LINE へ登録する手順だけである。
 
-interface RichMenuAction {
-  type: 'postback' | 'message';
-  label?: string;
-  data?: string;
-  text?: string;
-}
-
-interface RichMenuArea {
-  bounds: { x: number; y: number; width: number; height: number };
-  action: RichMenuAction;
-}
-
-interface RichMenuObject {
-  size: { width: number; height: number };
-  selected: boolean;
-  name: string;
-  chatBarText: string;
-  areas: RichMenuArea[];
-}
-
-export interface SetupRichMenusDeps {
+export interface SetupCompletedRichMenuDeps {
   channelId: string;
   channelSecret: string;
   // グローバル fetch を直接使わず注入する（client.ts/places/search.ts と同じテスト容易性の規律）。
   fetch: typeof fetch;
-  onboardingImage: Buffer;
+  /** 完了後メニューの「詳細を見る」が開く URL（env LIFF_STORE_DETAIL_URL）。 */
+  liffStoreDetailUrl: string;
   completedImage: Buffer;
+}
+
+export interface SetupRichMenusDeps extends SetupCompletedRichMenuDeps {
+  onboardingImage: Buffer;
 }
 
 export interface SetupRichMenusResult {
   onboardingRichMenuId: string;
+  completedRichMenuId: string;
+}
+
+export interface SetupCompletedRichMenuResult {
   completedRichMenuId: string;
 }
 
@@ -182,50 +172,15 @@ async function setDefaultRichMenu(
   }
 }
 
-function buildOnboardingRichMenu(): RichMenuObject {
-  return {
-    size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
-    selected: false,
-    name: 'line-onboarding-resume-menu',
-    chatBarText: '登録を再開',
-    areas: [
-      {
-        bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
-        action: {
-          type: 'postback',
-          label: '登録を再開する',
-          data: encodePostback({ kind: 'resume' }),
-        },
-      },
-    ],
-  };
-}
-
-function buildCompletedRichMenu(): RichMenuObject {
-  return {
-    size: { width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
-    selected: false,
-    name: 'line-onboarding-completed-menu',
-    // Issue #195: チャットバーの文字・画像の見出し・タップで送信される text の 3 者を揃える。
-    // 以前の 'メニュー' は、同 area が送る 'ステータス確認' とも画像の見出しとも食い違っていた。
-    chatBarText: 'ステータス確認',
-    areas: [
-      {
-        bounds: { x: 0, y: 0, width: RICH_MENU_WIDTH, height: RICH_MENU_HEIGHT },
-        // Requirement 6.3 は「完了後の案内へ切替」を求めるのみで、完了後メニューのタップに
-        // 特定の挙動は要求していない（本 stateDiagram では linkRichMenu による切替のみが前提）。
-        // message アクションはタップ時にテキストメッセージとして送信されるだけなので、
-        // ConversationHandlers 側は completed 段階の既存 fallback（handleText の
-        // buildAlreadyCompletedMessage）がそのまま応答でき、新規サーバロジックが不要となる
-        // 最小の選択肢として採用する。
-        action: {
-          type: 'message',
-          label: 'ステータス確認',
-          text: 'ステータス確認',
-        },
-      },
-    ],
-  };
+/** 完了後メニューを 1 面作って画像を登録する（作成手順の共通部分）。 */
+async function createCompletedRichMenu(
+  deps: SetupCompletedRichMenuDeps,
+  accessToken: string,
+): Promise<string> {
+  const richMenu: RichMenuObject = buildCompletedRichMenu(deps.liffStoreDetailUrl);
+  const completedRichMenuId = await createRichMenu(deps, accessToken, richMenu);
+  await uploadRichMenuImage(deps, accessToken, completedRichMenuId, deps.completedImage);
+  return completedRichMenuId;
 }
 
 export async function setupRichMenus(deps: SetupRichMenusDeps): Promise<SetupRichMenusResult> {
@@ -234,8 +189,7 @@ export async function setupRichMenus(deps: SetupRichMenusDeps): Promise<SetupRic
   const onboardingRichMenuId = await createRichMenu(deps, accessToken, buildOnboardingRichMenu());
   await uploadRichMenuImage(deps, accessToken, onboardingRichMenuId, deps.onboardingImage);
 
-  const completedRichMenuId = await createRichMenu(deps, accessToken, buildCompletedRichMenu());
-  await uploadRichMenuImage(deps, accessToken, completedRichMenuId, deps.completedImage);
+  const completedRichMenuId = await createCompletedRichMenu(deps, accessToken);
 
   // Requirement 6.1: オンボーディング用メニューを全ユーザーのデフォルトに設定する。
   // 完了後メニューは per-user リンク専用（confirmStore 完了時に ConversationHandlers が
@@ -245,34 +199,77 @@ export async function setupRichMenus(deps: SetupRichMenusDeps): Promise<SetupRic
   return { onboardingRichMenuId, completedRichMenuId };
 }
 
+/**
+ * 完了後メニューだけを作って画像を登録し、richMenuId を返す（`--completed-only`・
+ * design.md「RichMenuDefinitions と RichMenuScripts」のスクリプトの契約）。
+ *
+ * メニューの差し替え（Migration Strategy の Step C）で使う。**既定メニューには触れない** —
+ * 既定はオンボーディング用のままでなければならず（Requirement 2.6）、ここで既定を差し替えると
+ * 店舗特定前のオーナーの面が壊れる。作った ID は張り替え（relink-completed-menu）へ渡す。
+ */
+export async function setupCompletedRichMenuOnly(
+  deps: SetupCompletedRichMenuDeps,
+): Promise<SetupCompletedRichMenuResult> {
+  const accessToken = await issueAccessToken(deps);
+  const completedRichMenuId = await createCompletedRichMenu(deps, accessToken);
+  return { completedRichMenuId };
+}
+
 // CLI エントリポイント（運用者がデプロイ時に手動実行する）。
 // 実行方法（ts/apps/line-webhook をカレントディレクトリとして）:
-//   pnpm run build:scripts && LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... pnpm run setup-rich-menus
+//   pnpm run build:scripts
+//   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... LIFF_STORE_DETAIL_URL=... pnpm run setup-rich-menus
+//   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... LIFF_STORE_DETAIL_URL=... \
+//     pnpm run setup-rich-menus --completed-only
+// 引数の前に `--` を挟まないこと。pnpm 10 は `--` を区切りとして食わず、そのまま argv へ渡すため、
+// 引数を厳密に読むスクリプト（relink-completed-menu.ts）では `unknown argument --` になる。
+// 運用手順は infra/README.md §10。
 const isMainModule = process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
   void (async () => {
     const channelId = process.env.LINE_CHANNEL_ID;
     const channelSecret = process.env.LINE_CHANNEL_SECRET;
+    const liffStoreDetailUrl = process.env.LIFF_STORE_DETAIL_URL;
     if (!channelId) {
       throw new Error('LINE_CHANNEL_ID is required');
     }
     if (!channelSecret) {
       throw new Error('LINE_CHANNEL_SECRET is required');
     }
+    // 完了後メニューの「詳細を見る」の遷移先。2 つの動作のどちらでも完了後メニューを作るので必須である。
+    if (!liffStoreDetailUrl) {
+      throw new Error('LIFF_STORE_DETAIL_URL is required');
+    }
 
     // assets/ はカレントディレクトリ（ts/apps/line-webhook）基準で解決する
     // （dist-scripts へのコンパイル後の出力階層に依存させないため）。
     const assetsDir = path.resolve(process.cwd(), 'assets');
-    const [onboardingImage, completedImage] = await Promise.all([
-      readFile(path.join(assetsDir, 'richmenu-onboarding.png')),
-      readFile(path.join(assetsDir, 'richmenu-completed.png')),
-    ]);
+    const completedImage = await readFile(path.join(assetsDir, 'richmenu-completed.png'));
 
+    // メニューの差し替え（Migration Strategy の Step C）は完了後メニューだけを作り直す。
+    // 既定メニュー（オンボーディング用）には触れない。
+    if (process.argv.includes('--completed-only')) {
+      const result = await setupCompletedRichMenuOnly({
+        channelId,
+        channelSecret,
+        fetch,
+        liffStoreDetailUrl,
+        completedImage,
+      });
+
+      console.log('完了用リッチメニュー richMenuId:', result.completedRichMenuId);
+      console.log('LINE_RICHMENU_COMPLETED_ID には上記の richMenuId を設定してください。');
+      console.log('既存のオーナーへの張り替えは relink-completed-menu --to <上記の richMenuId> で行います。');
+      return;
+    }
+
+    const onboardingImage = await readFile(path.join(assetsDir, 'richmenu-onboarding.png'));
     const result = await setupRichMenus({
       channelId,
       channelSecret,
       fetch,
+      liffStoreDetailUrl,
       onboardingImage,
       completedImage,
     });

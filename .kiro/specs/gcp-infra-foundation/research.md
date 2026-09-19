@@ -111,7 +111,7 @@
 - **Context**: GO 判定に付帯した 3 つの Critical Issue をユーザー承認のうえ design.md に反映（2026-07-04）。
 - **反映内容**:
   1. **CI デプロイ契約**: CI はイメージ更新（`gcloud run services/jobs update --image`）のみ許可。構成変更は Terraform 専権。`ignore_changes=[image]` の範囲外 drift による冪等性（1.3）崩壊を防ぐ。
-  2. **`line-channel-access-token` を secret 枠に追加**（枠 ×4 → ×5）: 機能1 の毎朝 Push 配信・機能3 の応答に必須のため初期から枠を確保（5.1）。webhook SA に accessor 付与。
+  2. **`line-channel-access-token` を secret 枠に追加**（枠 ×4 → ×5）: 機能1 の Push 配信・機能3 の応答に必須のため初期から枠を確保（5.1）。webhook SA に accessor 付与。（後日の追記: 決定時は毎朝の定期配信を前提にしていたが、`line-on-demand-report` で「変化があった日だけの Push と、オンデマンドの Reply」へ変わった。枠が要るという結論は変わらない）
   3. **GRANT SQL の版管理化**: IAM DB ユーザーへの GRANT を runbook 内の生 SQL ではなく `infra/sql/grants.sql` として版管理（1.2 の精神・再現性）。
 
 ### Decision: タスクグラフ・サニティレビュー反映（モジュール循環の全面除去）

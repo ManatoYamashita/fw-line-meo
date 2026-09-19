@@ -77,9 +77,13 @@
 | 対象外として飛ばした件数 | `skipped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 上限超過で送れなかった件数 | `quotaExceeded` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 上限超過で処理を打ち切ったか | `quotaExceededStopped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
+| 変化が無く送らなかった件数 | `skippedNoChange` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 比較可能だが新着も順位変動も無い日（spec: `.kiro/specs/line-on-demand-report/`） |
+| 比較できず送らなかった件数 | `skippedNotComparable` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 当日の集計が比較可能でない日（取得失敗・評価を持つ競合なし・自店未評価） |
+| メニューが使えず送らなかった件数 | `skippedMenuUnavailable` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 完了後メニューが未準備、またはオーナーへ張れなかったとき |
+| 完了後メニューの準備判定の結果 | `reportMenuReady` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 実行ごとに 1 回の判定の結果。**対象が 1 件も無い実行でも出す**（差し替え後に未準備が続くことを実行サマリーで追うため） |
 | プロセスの終了コード | `exitCode` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 終了時に残っていた資源の種別 | `activeResources` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | 配列。閉じ忘れの検知に使う（#151 の再発防止） |
-| 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 移送前の名前は `message`（集約基盤が本文として吸い項目検索から消えるため改名した）。**リテラルのみを載せる**。例外の本文や利用者の入力を入れてはならない。型は `string` であり弾かないため、規律で守る |
+| 失敗の要約 | `detail` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` ／ `ts/apps/delivery-job/src/menu.ts` | 移送前の名前は `message`（集約基盤が本文として吸い項目検索から消えるため改名した）。**リテラルのみを載せる**。例外の本文や利用者の入力を入れてはならない。型は `string` であり弾かないため、規律で守る |
 | 欠落した設定の識別子 | `configKey` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 起動時に必須設定が欠けた場合の識別子。**自由文ではなく有限集合**（環境変数名）であり、例外の本文を載せずに原因を特定できる |
 
 ### 1.7 日次バッチ層に固有の項目
@@ -107,6 +111,15 @@
 |---|---|---|---|---|---|
 | 代理店の識別子 | `agencyId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 招待コード発行の失敗記録で、どの代理店の操作が失敗したかを特定する。現行は識別子を 1 つも残しておらず対象を判定できない |
 
+### 1.9 LINE Webhook 面に固有の項目
+
+レポート要求（spec: `.kiro/specs/line-on-demand-report/`）の応答の記録に使う。どちらも有限集合の識別子であり、店舗 ID と LINE ユーザー ID の代わりにはならない（載せない）。
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| レポートの種類 | `reportKind` | 該当なし | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | 値は `new_reviews`、`comparison`、`trend` のいずれか（`@fwlm/line-report` の ReportKind） |
+| レポート要求への応答の区分 | `reportOutcome` | 該当なし | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | 値は `report`、`store_choice`、`no_store`、`preparing`、`fetch_failed` のいずれか。`fetch_failed` は最新の日次集計が取得失敗だった応答で、推移のレポート（失敗日を示した表と注記）もここに数える |
+
 ---
 
 ## 2. 事象名
@@ -130,12 +143,19 @@
 | `delivery-job.fatal` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | `delivery-job.isolated_error` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 1 店舗の失敗を他店から隔離したときの記録 |
 | `delivery-job.exit` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 資源の閉じ忘れ検知（#151） |
-| `line-webhook.dispatch_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗。**再試行案内の返信を試みた**場合。移送前はメッセージ文字列で識別していた |
+| `delivery-job.report_menu_not_ready` | delivery-job | 新規 | `ts/apps/delivery-job/src/menu.ts` | 設定された完了後メニューがレポート 3 導線を持たない、または照会できなかったとき（spec: `.kiro/specs/line-on-demand-report/`）。判定を実行の中で覚えるため、**実行ごとに 1 回だけ出る**。項目は `detail`（リテラル。`rich menu lookup failed` か `report actions missing`）と、例外のときの `errorKind` だけである |
+| `delivery-job.richmenu_linked` | delivery-job | 新規 | `ts/apps/delivery-job/src/menu.ts` | 通知の前にオーナーへ完了後メニューを張れたとき。**成功も記録する**（記録が無いことが成功と未実行のどちらか判定できなくなるため。line-webhook の同名の事象と同じ考え方）。項目は持たない |
+| `delivery-job.richmenu_link_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/menu.ts` | オーナーのメニューを完了後メニューに揃えられなかったとき。照会できなかった場合も張れなかった場合もここへ数える（どちらも通知を送らない）。項目は `detail`（リテラル。`user menu lookup failed` か `link request failed`）と、例外のときの `errorKind` だけである。**LINE ユーザー ID は載せない** |
+| `line-webhook.dispatch_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗。**再試行案内の返信を試みた**場合。移送前はメッセージ文字列で識別していた。レポートの対象店舗を決めた後の失敗（`StoreScopedReportError`・line-on-demand-report）は店舗名つきの再試行案内を返し、`errorKind` は包む前の元の例外（`cause`）の種別を載せる。店舗名は載せない |
 | `line-webhook.dispatch_failed_before_reply_token` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗のうち、**replyToken が判明する前**に起きたもの。返信は試みていない。前者と分けるのは、運用者が「オーナーに案内が届いたか」を判定できるようにするため |
 | `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
-| `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4） |
-| `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | 補助的処理の**失敗**。現在は記録そのものを諦めている（`conversation.ts` のコメントが明記） |
+| `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンク（`onboarding/conversation.ts`）と、店舗特定済みオーナーの振り分け口のメニュー照合（`owner/router.ts`・line-on-demand-report）の両方が、この出典の同じ関数を呼んで出す |
+| `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**失敗**。リンクの失敗は例外にせず、記録だけを残す（出典のコメントが明記）。振り分け口の照合では、応答は済んでいて会話の段階を変えない（次の操作で再び張る） |
+| `line-webhook.audit_log_failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 監査記録（`audit_logs`）の書込の失敗。会話の監査記録（オーナーの作成・オンボーディングの完了）も、出典の同じ関数で書く。業務処理は巻き戻さない。項目は `errorKind` だけである |
+| `line-webhook.session_stage_update_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/router.ts` | 振り分け口が完了後メニューを張れた後、会話の段階を completed に揃える更新に失敗した場合。応答は済んでいるので例外にしない。段階が completed でないままなので、次の操作で再び張って揃え直す。項目は `errorKind` だけである |
+| `line-webhook.report_replied` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | レポート要求への応答。Reply を送った後に、応答ごとに 1 件出す。項目は `reportKind` と `reportOutcome` だけである。例外で終わった要求は出さない（`line-webhook.dispatch_failed` が記録する） |
+| `line-webhook.report_store_hint_ignored` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | オーナーの確定店舗の集合の外にある店舗が指定され、選択肢を再提示した場合。指定された店舗 ID は載せない（集合外の値は攻撃者に由来しうる。`store-detail.store_hint_ignored` と同じ考え方）。他のオーナーに実在する ID と存在しない ID で記録を変えない |
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名を持たない |
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/index.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
 

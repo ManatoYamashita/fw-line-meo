@@ -12,3 +12,4 @@ export * from './categories.js';
 export * from './onboarding-sessions.js';
 export * from './webhook-events.js';
 export * from './audit-logs.js';
+export * from './report-reads.js';

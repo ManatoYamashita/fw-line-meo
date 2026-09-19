@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool, findOwnerByLineUserId } from '@fwlm/db';
 import { createConversationHandlers } from '../../src/onboarding/conversation.js';
+import { createStoreIdentifiedOwnerRouterFactory } from '../../src/owner/router.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import {
   getOrCreateSession,
@@ -106,6 +107,12 @@ describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統�
         logger: { info: vi.fn(), warn: vi.fn() },
         lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
         liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+        createOwnerRouter: createStoreIdentifiedOwnerRouterFactory({
+          db: pool,
+          sessions: { getOrCreateSession, updateSession },
+          lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+          liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+        }),
       });
 
       // --- 1. 有効コードでの owner 作成（Req 2.1）＋ CHECK 制約検証（Req 2.4） ---

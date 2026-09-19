@@ -15,6 +15,7 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/observability/package.json packages/observability/
 COPY packages/db/package.json packages/db/
 COPY packages/design-tokens/package.json packages/design-tokens/
+COPY packages/line-report/package.json packages/line-report/
 COPY apps/delivery-job/package.json apps/delivery-job/
 RUN pnpm install --frozen-lockfile
 
@@ -28,6 +29,7 @@ COPY . .
 RUN pnpm -C packages/db run build
 RUN pnpm -C packages/observability run build
 RUN pnpm -C packages/design-tokens run build
+RUN pnpm -C packages/line-report run build
 RUN pnpm -C apps/delivery-job run build
 
 FROM base AS runner
@@ -41,6 +43,7 @@ COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/db ./packages/db
 COPY --from=build /repo/packages/observability ./packages/observability
 COPY --from=build /repo/packages/design-tokens ./packages/design-tokens
+COPY --from=build /repo/packages/line-report ./packages/line-report
 COPY --from=build /repo/apps/delivery-job/node_modules ./apps/delivery-job/node_modules
 COPY --from=build /repo/apps/delivery-job/dist ./apps/delivery-job/dist
 COPY --from=build /repo/apps/delivery-job/package.json ./apps/delivery-job/package.json

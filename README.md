@@ -26,7 +26,7 @@ GCP に一元デプロイされる。
 | `@fwlm/dashboard-api` | `dashboard-api` | 運営・代理店 | 管理 API・QR 発行 |
 | `@fwlm/survey-web` | `survey-web` | 来店客（匿名） | 機能3 口コミアンケート・AI 下書き |
 | （Go）daily-batch | `daily-batch`（Job） | 無人 | 機能1 競合データ取得 |
-| `@fwlm/delivery-job` | `summary-delivery`（Job） | オーナー | 機能1 Flex 配信 |
+| `@fwlm/delivery-job` | `summary-delivery`（Job） | オーナー | 機能1 変化があった日の通知 |
 
 各サービスの技術スタック・対応 spec は [docs/architecture.md](./docs/architecture.md) に一覧。
 
@@ -35,15 +35,16 @@ GCP に一元デプロイされる。
 1. **準備（運営・代理店）** — ダッシュボードで代理店を登録し、招待コードを発行する。
 2. **オーナー登録（LINE）** — オーナーが友だち追加 → 招待コード入力 → 店名検索 → 自店を
    確定。ここで機能1の配信対象になる。
-3. **運用・口コミ（日常）** — 毎朝の競合レポートが LINE に届き、店頭の QR から来店客が
-   匿名で口コミを投稿できる。
+3. **運用・口コミ（日常）** — 競合レポートを LINE のメニューからいつでも確認でき（変化が
+   あった日には短い通知が届く）、店頭の QR から来店客が匿名で口コミを投稿できる。
 
 フロー図と詳細は [docs/architecture.md](./docs/architecture.md#4-オンボーディング-e2e-フロー) を参照。
 
 ## 主要機能（MVP）
 
 - **機能3**: 口コミ用 QR・アンケート（来店客がタップ式回答 → AI が口コミ下書きを生成）
-- **機能1**: 競合ポジショニング日次サマリー（毎朝 LINE に Flex Message 配信）
+- **機能1**: 競合ポジショニング日次サマリー（変化があった日の通知＋リッチメニューからの
+  オンデマンド表示。新着口コミ・競合店との比較・直近の推移）
 - 代理店ダッシュボード（登録＋一覧・RBAC）／段階的オンボーディング（店舗特定まで）
 
 ### 第2フェーズ
@@ -62,7 +63,7 @@ GCP に一元デプロイされる。
 
 ## リポジトリ構成
 
-- `ts/` — TypeScript モノレポ。`apps/`（6アプリ）＋ `packages/`（`db`・`store-identification`）
+- `ts/` — TypeScript モノレポ。`apps/`（6アプリ）＋ `packages/`（`db`・`store-identification`・`line-report`）
 - `go/` — Go 日次バッチ層。`cmd/daily-batch`＋`internal/*`
 - `db/` — スキーマの正本。`migrations/`・[ERD.md](./db/ERD.md)・[write-boundary.md](./db/write-boundary.md)・`test/`
 - `infra/` — Terraform（単一環境 `envs/prod/`）。手順は [infra/README.md](./infra/README.md)

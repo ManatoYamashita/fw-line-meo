@@ -17,6 +17,7 @@ import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
+import { createStoreIdentifiedOwnerRouterFactory } from './owner/router.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -70,6 +71,15 @@ const conversationHandlers = createConversationHandlers({
   auditLog: (input) => createAuditLog(pool, input),
   lineRichMenuCompletedId: config.lineRichMenuCompletedId,
   liffStoreDetailUrl: config.liffStoreDetailUrl,
+  // 店舗特定済みオーナーの振り分け口とレポート応答（line-on-demand-report tasks 3.10）。ここで作るのは作り方だけで、
+  // router と ReportHandler は会話がイベントごとに、そのリクエストのロガー（相関 ID つき）と Messenger で作る。
+  createOwnerRouter: createStoreIdentifiedOwnerRouterFactory({
+    db: pool,
+    sessions: { getOrCreateSession, updateSession },
+    auditLog: (input) => createAuditLog(pool, input),
+    lineRichMenuCompletedId: config.lineRichMenuCompletedId,
+    liffStoreDetailUrl: config.liffStoreDetailUrl,
+  }),
 });
 
 const deps: AppDeps = {

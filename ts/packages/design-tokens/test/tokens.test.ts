@@ -1,7 +1,8 @@
 // デザイントークン公開 API の形状検証（Requirements 1.1, 1.3）。
 // - 単一定義箇所（本パッケージ）から全トークンカテゴリを import できること
 // - 意味役割ごとに 1 トークン（1 つの文字列値）が対応すること
-// - LINE 用セットが現行 Flex Message の 5 色と同一値であること
+// - LINE 用セットの既存の役割が現行 Flex Message と同一値であること
+// - LINE 面の帰属表示の書式が Places API ポリシーの細則の中にあること
 // 注: WCAG AA コントラストの網羅的検証はタスク 1.2 の責務（本テストは形状のみ）。
 import { describe, it, expect } from 'vitest';
 import {
@@ -16,6 +17,18 @@ import {
 
 const HEX_COLOR = /^#[0-9A-F]{6}$/;
 const REM_VALUE = /^\d+(\.\d+)?rem$/;
+
+/**
+ * Google Maps のテキストの帰属表示に許される色（Places API ポリシー・2026-09-13 取得）。
+ * 原文は "White, black (#1F1F1F), or gray (#5E5E5E)"。
+ */
+const ATTRIBUTION_POLICY_COLORS: readonly string[] = ['#FFFFFF', '#1F1F1F', '#5E5E5E'];
+
+/** 同じく帰属表示の大きさの範囲（原文は最小 12sp・最大 16sp。両端を含む）。 */
+const ATTRIBUTION_SIZE_RANGE = { min: 12, max: 16 } as const;
+
+/** LINE Flex の text の size が受け取るピクセル指定（例: 12px）。 */
+const PIXEL_VALUE = /^(\d+)px$/;
 
 describe('colors（Web 意味役割）', () => {
   it('全ての意味役割が 1 つの hex リテラルを持つ', () => {
@@ -59,10 +72,12 @@ describe('colors（Web 意味役割）', () => {
 });
 
 describe('lineColors（LINE Flex Message 用セット）', () => {
-  // 値は LINE Flex の現行描画色と同一（見た目不変が不変条件）。
+  // 帰属表示（attribution）を除く値は LINE Flex の現行描画色と同一（見た目不変が不変条件）。
   // muted は delivery-job（日次サマリー配信）の現行 #aaaaaa を意味役割化したもの。
   // Flex の色指定は大小を区別しないため、大文字表記でも描画結果は現行と同一。
-  it('LINE Flex の現行色を意味役割名で保持し値が現行と同一である', () => {
+  // 帰属表示の色は caption や muted をポリシーの色へ寄せるのではなく、役割ごと足している。
+  // 寄せると帰属以外の補足まで見た目が変わるためである（値の根拠は下の「帰属表示の書式」）。
+  it('既存の役割は現行色と同一の値のまま、帰属表示の色を役割として持つ', () => {
     expect(lineColors).toEqual({
       headline: '#1DB446',
       body: '#333333',
@@ -71,6 +86,7 @@ describe('lineColors（LINE Flex Message 用セット）', () => {
       successBackground: '#F0FBF4',
       action: '#1DB446',
       muted: '#AAAAAA',
+      attribution: '#5E5E5E',
     });
   });
 });
@@ -80,7 +96,8 @@ describe('lineLayout（LINE Flex Message 用の寸法セット）', () => {
   // 本テストが固定するのは「役割 → キーワード」の対応そのもので、
   // 「組み立てた Flex がこの値を実際に使っている」は消費側（delivery-job / line-webhook）の
   // 不変条件テストが assert する。両者は対でないと意味を持たない。
-  it('全ての意味役割が LINE のキーワードを 1 つ持つ', () => {
+  // 帰属表示の大きさ（attributionSize）だけはキーワードではなくピクセル値である（下の「帰属表示の書式」）。
+  it('全ての意味役割が値を 1 つ持ち、帰属表示の大きさだけがピクセル値である', () => {
     expect(lineLayout).toEqual({
       bubbleSize: 'kilo',
       blockPadding: 'lg',
@@ -94,6 +111,7 @@ describe('lineLayout（LINE Flex Message 用の寸法セット）', () => {
       descriptionSize: 'sm',
       noteSize: 'xs',
       captionSize: 'xxs',
+      attributionSize: '13px',
       actionHeight: 'md',
     });
   });
@@ -109,6 +127,33 @@ describe('lineLayout（LINE Flex Message 用の寸法セット）', () => {
     };
     expect(rank(lineLayout.itemGap)).toBeLessThan(rank(lineLayout.sectionGap));
     expect(rank(lineLayout.sectionGap)).toBeLessThan(rank(lineLayout.dividerMargin));
+  });
+});
+
+// Google Maps のテキストの帰属表示の細則（Places API ポリシー・Requirements 1.6, 8.1）。
+// 上の同値検証は値を固定するだけで、差し替えた値が細則の中にあるかは見ない。ここでは
+// 細則そのもの（色は 3 色のどれか・大きさは 12〜16 のピクセル値）を、ソースとは別に持つ
+// 許容範囲で照合する。書体（Roboto）は LINE が指定を許さないため検証の対象にならない
+// （.kiro/specs/line-on-demand-report/design.md「残るリスクと未決事項」）。
+describe('帰属表示の書式（Places API ポリシー・Requirements 1.6, 8.1）', () => {
+  it('色はポリシーが許す 3 色のどれかである', () => {
+    // Flex の色指定は大小を区別しないので、大文字に揃えて照合する。
+    expect(
+      ATTRIBUTION_POLICY_COLORS,
+      `lineColors.attribution(${lineColors.attribution}) はポリシーが許す色ではありません`,
+    ).toContain(lineColors.attribution.toUpperCase());
+  });
+
+  it('大きさは 12〜16 の範囲のピクセル値である', () => {
+    // キーワード（xxs 等）は LINE が実 px を公開していないため、範囲に入ることを確かめられない。
+    const match = PIXEL_VALUE.exec(lineLayout.attributionSize);
+    expect(
+      match,
+      `lineLayout.attributionSize(${lineLayout.attributionSize}) がピクセル値ではありません`,
+    ).not.toBeNull();
+    const px = Number(match?.[1]);
+    expect(px).toBeGreaterThanOrEqual(ATTRIBUTION_SIZE_RANGE.min);
+    expect(px).toBeLessThanOrEqual(ATTRIBUTION_SIZE_RANGE.max);
   });
 });
 

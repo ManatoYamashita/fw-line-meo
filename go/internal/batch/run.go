@@ -450,10 +450,13 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 	newReviewExcerpts := make([]repo.NewReviewExcerpt, 0, len(newReviews.Excerpts))
 	for _, r := range newReviews.Excerpts {
 		newReviewExcerpts = append(newReviewExcerpts, repo.NewReviewExcerpt{
-			AuthorName:  r.AuthorName,
-			PublishTime: r.PublishTime,
-			Rating:      r.Rating,
-			TextExcerpt: r.Text,
+			AuthorName:     r.AuthorName,
+			PublishTime:    r.PublishTime,
+			Rating:         r.Rating,
+			TextExcerpt:    r.Text,
+			AuthorURI:      r.AuthorURI,
+			AuthorPhotoURI: r.AuthorPhotoURI,
+			GoogleMapsURI:  r.GoogleMapsURI,
 		})
 	}
 
@@ -570,10 +573,13 @@ func convertToSummaryReviews(reviews []places.Review) []summary.Review {
 	out := make([]summary.Review, 0, len(reviews))
 	for _, r := range reviews {
 		out = append(out, summary.Review{
-			AuthorName:  r.AuthorName,
-			PublishTime: r.PublishTime,
-			Rating:      r.Rating,
-			Text:        r.Text,
+			AuthorName:     r.AuthorName,
+			PublishTime:    r.PublishTime,
+			Rating:         r.Rating,
+			Text:           r.Text,
+			AuthorURI:      r.AuthorURI,
+			AuthorPhotoURI: r.AuthorPhotoURI,
+			GoogleMapsURI:  r.GoogleMapsURI,
 		})
 	}
 	return out

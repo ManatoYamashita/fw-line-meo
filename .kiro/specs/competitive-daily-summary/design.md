@@ -2,7 +2,9 @@
 
 ## Overview
 
-**Purpose**: 店舗特定を完了した飲食店オーナーへ、毎朝 LINE Flex Message で「近隣同カテゴリ競合の中での自店ポジション（順位・前日比・星・クチコミ数・新着）」を結論ファーストで届ける。オーナーは LINE を開くだけで市場ポジションを把握できる。
+**Purpose**: 店舗特定を完了した飲食店オーナーへ、LINE で「近隣同カテゴリ競合の中での自店ポジション（順位・前日比・星・クチコミ数・新着）」を結論ファーストで届ける。オーナーは LINE を開くだけで市場ポジションを把握できる。
+
+> **届け方の改訂（Issue #256・`line-on-demand-report`）**: 本書が定めた「毎朝 1 通の日次カードを全オーナーへ Push する」届け方は廃止した。現在は、変化があった日だけ短文の通知を送り、詳しい内容はオーナーがリッチメニューから求めたときに Reply で返す。**日次の取得・算出・保存と `daily_summaries` の契約は変わらない。** 本書のうち、届け方に関わる記述（delivery-job の責務・Flex 構成契約・LIFF URL 契約）はこの注記のとおり読み替え、正典は `.kiro/specs/line-on-demand-report/design.md` を参照すること。
 
 **Users**: 飲食店オーナー（受信・詳細閲覧）、運営者（バッチ・配信の可観測性）。
 
@@ -11,12 +13,12 @@
 ### Goals
 - 店舗特定済み店舗への競合5店の自動抽出・固定（半径1km・同一主カテゴリ・近い順）
 - 自店＋競合の星評価・クチコミ総数の日次取得（Places API New・約6コール/日/店）と順位・前日比の算出・記録
-- オーナー設定時刻（時単位・default 7時 JST）での Flex Message 配信と重複配信の排除
+- オーナーごとの配信時刻（時単位・default 7時 JST）での通知と重複送信の排除
 - 「詳細を見る」LIFF 閲覧画面（閲覧のみ・OAuth 不要・直近30日推移）
 - バッチ・配信の実行サマリー記録と失敗検知
 
 ### Non-Goals
-- LINE Webhook・リッチメニュー・オンボーディング本体（Issue #6 LINE 基盤の責務。配信時刻設定 UI の webhook 配線は統合ポイントとして契約のみ定義）
+- LINE Webhook・リッチメニュー・オンボーディング本体（Issue #6 LINE 基盤の責務。配信時刻設定 UI は契約のみ定義したが、Issue #256 で配線しないと決めた）
 - 配信停止（オプトアウト）・競合リストのオーナー調整（第2フェーズ）
 - クチコミ返信・GBP 投稿・Google OAuth（第2フェーズ）
 - 30日を超える時系列の保持・長期トレンド分析（Places ToS 制約。第2フェーズで法務確認の上で再検討）
@@ -26,14 +28,14 @@
 
 ### This Spec Owns
 - **Go バッチ層の全体**（`go/` ツリー新設）: 競合抽出・Places 日次取得・順位/前日比算出・`competitors`/`rating_snapshots`/`daily_summaries` への書込・30日保持パージ
-- **TS 配信ジョブ**（`ts/apps/delivery-job`）: `daily_summaries` からの Flex 組立・LINE Push・`summary_deliveries` への書込
+- **TS 配信ジョブ**（`ts/apps/delivery-job`）: `daily_summaries` からの通知の組立・LINE Push・`summary_deliveries` への書込（送る条件と本文は `line-on-demand-report` が定める）
 - **TS 詳細閲覧アプリ**（`ts/apps/store-detail`）: LIFF ID トークン検証・自店/競合の閲覧表示
 - **データ**: `daily_summaries`（authoritative: Go）・`summary_deliveries`（authoritative: TS）・`owners.delivery_hour`（authoritative: TS）・migration `0004`
-- **契約**: 言語間契約 = `daily_summaries` スキーマ／配信時刻変更の postback データ契約と更新関数（`packages/db` に追加）／LIFF 詳細画面の URL 契約
+- **契約**: 言語間契約 = `daily_summaries` スキーマ／LIFF 詳細画面の URL 契約（配信時刻変更の postback データ契約と更新関数は `packages/db` に置いたが、LINE から時刻を変える経路は提供しないと決めた・Issue #256）
 - **運用ポリシー**: Places コンテンツの 30日ローリング保持、Google 帰属表示（Flex・LIFF）
 
 ### Out of Boundary
-- webhook アプリ・リッチメニューへの一切の変更（設定 UI の配線は #6 完了後の統合タスクとして分離）
+- webhook アプリ・リッチメニューへの一切の変更（レポートの応答とメニューの改訂は `line-on-demand-report` が持つ）
 - `owners`/`stores` の行作成・オンボーディング状態遷移（TS 既存境界だが本 spec は読むだけ。例外: `delivery_hour` カラム追加と更新関数の提供）
 - LINE Login チャネル・LIFF アプリの作成そのもの（runbook 手順として文書化。**Messaging API チャネルと同一プロバイダー必須**）
 - guardrails のアラートポリシー実装（既存モジュール所有。本 spec はログ/メトリクスの排出面のみ所有）
@@ -89,9 +91,9 @@ graph TB
 
 **Architecture Integration**:
 - Selected pattern: **バッチ・パイプライン（計算層と配信層のテーブル契約分離）**。Go が配信素材を `daily_summaries` に確定し、TS が読み取って配信・表示する。言語間の結合は SQL スキーマのみ
-- Domain boundaries: Go=外部データ取得・計算・記録／TS=LINE 面（Flex 組立・Push・LIFF）。write-boundary.md の単一所有規律を新テーブルにも適用
+- Domain boundaries: Go=外部データ取得・計算・記録／TS=LINE 面（通知とレポートの組立・Push/Reply・LIFF）。write-boundary.md の単一所有規律を新テーブルにも適用
 - Existing patterns preserved: pnpm workspace（apps/packages）、`packages/db` の Pool/行型パターン、infra モジュールの SA co-locate パターン、migration 連番
-- New components rationale: `daily_summaries`（言語間契約・research.md Decision 参照）、`delivery-job`（毎時の時刻別配信は 06:00 バッチと責務が異なる）、`store-detail`（客向け survey-web と分離されたオーナー向け LIFF）
+- New components rationale: `daily_summaries`（言語間契約・research.md Decision 参照）、`delivery-job`（毎時の時刻別の通知は 06:00 バッチと責務が異なる）、`store-detail`（客向け survey-web と分離されたオーナー向け LIFF）
 - Steering compliance: スクレイピング禁止（Places のみ）・オーナー窓口は LINE・外部ライブラリ最小（Places は REST 直、LINE は公式 SDK）
 
 ### Technology Stack
@@ -99,7 +101,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Batch | Go 1.24+（新設）・pgx v5・標準 net/http | 競合抽出・日次取得・順位/前日比算出・記録 | Places 公式 Go クライアントは beta のため REST 直（research.md） |
-| Delivery | Node.js 22 / TypeScript strict・@line/bot-sdk（最新安定） | Flex 組立・Push・配信記録 | 署名検証等は不要（送信のみ）。Stateless channel access token を都度発行 |
+| Delivery | Node.js 22 / TypeScript strict・@line/bot-sdk（最新安定） | 通知の判定と組立・Push・配信記録 | 署名検証等は不要（送信のみ）。Stateless channel access token を都度発行 |
 | Detail View | Next.js（survey-web と同系）・LIFF SDK | 詳細閲覧画面（読取専用） | 認可は ID トークンのサーバー検証（`sub`） |
 | Data | Cloud SQL PostgreSQL 16・migration 0004 | 新テーブル2枚＋カラム1本 | `make db-migrate/db-test/db-verify-docs` に追随 |
 | Infra | Terraform 既存モジュール群＋`delivery-job` モジュール新設 | 毎時 Scheduler・TS Job・SA・accessor | `batch-job` モジュールのパターンを踏襲 |
@@ -127,9 +129,10 @@ go/
 ts/apps/delivery-job/               # Cloud Run Job（毎時起動）
 ├── package.json / tsconfig.json
 └── src/
-    ├── index.ts                    # 当該時刻の配信対象抽出 → 配信ループ → 実行サマリーログ
-    ├── targets.ts                  # 配信対象クエリ（delivery_hour・当日 summary 有・未配信）
-    ├── flex.ts                     # Flex Message 組立（結論ファースト4段・altText・Google 帰属）
+    ├── index.ts                    # 当該時刻の対象抽出 → 通知の判定と送信 → 実行サマリーログ
+    ├── targets.ts                  # 対象クエリ（delivery_hour・当日 summary 有・未記録）
+    ├── notification.ts             # 短文通知の判定と Flex 組立（altText・Google 帰属。Issue #256）
+    ├── menu.ts                     # 完了後メニューの準備判定とオーナーの照合（Issue #256）
     ├── line.ts                     # Push クライアント（Stateless token・X-Line-Retry-Key・再送規則）
     └── deliveries.ts               # summary_deliveries の確保・結果記録
 
@@ -147,7 +150,7 @@ infra/modules/delivery-job/         # TS Job・毎時 Scheduler・SA・line toke
 ```
 
 ### Modified Files
-- `ts/packages/db/src/…` — 新テーブルの行型追加・`updateDeliveryHour(lineUserId, hour)` 追加（webhook 配線用の公開関数）
+- `ts/packages/db/src/…` — 新テーブルの行型追加・`updateDeliveryHour(lineUserId, hour)` 追加（当初は webhook 配線用に公開した関数。Issue #256 で配線しないと決めたため呼び出し元を持たない）
 - `ts/packages/db/src/daily-summary.ts`（Issue #255 で追加）— 評価なしの正規化と、星評価・星差の表示整形。値の import を持たない純関数だけで構成し、`package.json` の exports のサブパス `@fwlm/db/daily-summary` からだけ公開する（store-detail のクライアントにも同梱されるため）
 - `ts/eslint.config.js`（Issue #255 で追加）— クライアントからの root `@fwlm/db` の値 import と、`daily-summary.ts` への値 import を no-restricted-imports で禁じる
 - `db/write-boundary.md` / `db/ERD.md` — 新テーブルの書込責任言語（daily_summaries=Go、summary_deliveries=TS）と ER 追記。`make db-verify-docs` を通すこと
@@ -185,7 +188,7 @@ sequenceDiagram
 - 店舗単位のエラー隔離: 1店舗の失敗は他店舗に波及させない（失敗店舗はサマリー status で表現）
 - 自店の Place Details が NOT_FOUND の場合は当該店舗を failed とし運用ログに記録。競合の NOT_FOUND / CLOSED_PERMANENTLY は `competitors.active=false` 化し当日の比較集合から除外（R1.5）
 
-### 毎時配信（HH:00 JST）
+### 毎時の通知（HH:00 JST）
 
 ```mermaid
 sequenceDiagram
@@ -197,7 +200,7 @@ sequenceDiagram
     DJ->>DB: delivery_hour が現在時かつ当日 summary 有かつ未配信の対象を抽出
     loop 対象オーナーごと
         DJ->>DB: summary_deliveries 行を retry_key 付きで確保 一意制約
-        DJ->>DJ: Flex 組立 30KB検証 altText付与
+        DJ->>DJ: 通知の判定と組立 30KB検証 altText付与
         DJ->>LN: push with X-Line-Retry-Key
         LN-->>DJ: 200 or 409 or error
         DJ->>DB: 結果と X-Line-Request-Id を記録
@@ -215,7 +218,7 @@ sequenceDiagram
 |-------------|---------|------------|------------|-------|
 | 1.1 | 特定完了時の競合自動抽出・固定 | competitor/extract, places/client, repo/competitors | Nearby Search 契約 | 日次バッチ（自己修復型抽出。research.md Decision 参照） |
 | 1.2 | 5店未満は見つかった分のみ | competitor/extract | 同上 | 同上 |
-| 1.3 | 0店は自店のみ配信＋明示 | summary/compute, flex.ts | daily_summaries.status='no_competitors' | 日次→配信 |
+| 1.3 | 0店は自店のみ記録＋明示 | summary/compute, report/builders/comparison.ts | daily_summaries.status='no_competitors' | 日次→レポート |
 | 1.4 | MVP では再抽出・調整なし | （能力を提供しない＝コード無し） | — | — |
 | 1.5 | 取得不能競合の除外・履歴保持 | batch/run, repo/competitors | active=false・ソフト無効 | 日次バッチ |
 | 2.1 | 日次1回の指標取得 | batch/run, places/client | Place Details 契約 | 日次バッチ |
@@ -227,21 +230,21 @@ sequenceDiagram
 | 2.7 | 約6コール/日/店 | places/client, batch/run | フィールドマスク2種・競合固定 | 日次バッチ |
 | 2.8 | 評価なしを 0 で代替せず記録 | places/client, repo/snapshots, repo/summaries | rating は nullable（jsonb は null） | 日次バッチ |
 | 2.9 | 評価なしを比較集合から除く・自店が評価なしなら順位なし | summary/compute, batch/run | rank・rank_total は NULL 許容 | 日次バッチ |
-| 3.1 | 特定済み全オーナーへ日次 Flex 配信 | targets.ts, flex.ts, line.ts | Push API 契約 | 毎時配信 |
+| 3.1 | 変化があった日だけ店舗ごとの短文通知 | targets.ts, notification.ts, menu.ts, line.ts | Push API 契約 | 毎時の通知 |
 | 3.2 | デフォルト 7:00 | owners.delivery_hour DEFAULT 7 | migration 0004 | — |
-| 3.3 | LINE 上で配信時刻変更 | packages/db updateDeliveryHour＋postback 契約 | 統合ポイント（#6 配線） | — |
-| 3.4 | 結論ファースト4段構成 | flex.ts | Flex 契約（本書 Data Contracts） | 毎時配信 |
-| 3.5 | 新着は自店のみ・件数＋可能なら内容 | summary/compute（差分）, flex.ts | daily_summaries.new_reviews | 日次→配信 |
-| 3.6 | 新着なしは「新着なし」表示 | flex.ts | 同上 | 毎時配信 |
-| 3.7 | 前日データ無しは前日比省略 | summary/compute | rank_prev/rating_prev NULL 許容 | 日次→配信 |
-| 3.8 | 配信の部分失敗継続・記録 | index.ts, deliveries.ts | summary_deliveries | 毎時配信 |
-| 3.9 | 同日重複配信禁止 | deliveries.ts, line.ts | 一意制約＋Retry-Key | 毎時配信 |
+| 3.3 | LINE 上での配信時刻変更は提供しない | （能力を提供しない。packages/db updateDeliveryHour は呼び出し元を持たない） | — | — |
+| 3.4 | 結論ファーストの比較レポート | report/builders/comparison.ts | Flex 契約（本書 Data Contracts） | レポート要求 |
+| 3.5 | 新着は自店のみ・件数＋可能なら内容 | summary/compute（差分）, report/builders/new-reviews.ts | daily_summaries.new_reviews | 日次→レポート |
+| 3.6 | 新着なしは「新着なし」表示 | report/builders/new-reviews.ts | 同上 | レポート要求 |
+| 3.7 | 前日データ無しは前日比省略 | summary/compute | rank_prev/rating_prev NULL 許容 | 日次→レポート |
+| 3.8 | 通知の部分失敗継続・記録 | index.ts, deliveries.ts | summary_deliveries | 毎時の通知 |
+| 3.9 | 同日重複送信禁止 | deliveries.ts, line.ts | 一意制約＋Retry-Key | 毎時の通知 |
 | 3.10 | オプトアウト無し | （能力を提供しない） | — | — |
-| 3.11 | 日本語 | flex.ts（文言リソース） | — | — |
-| 3.12 | 星差の定義と表示形式 | packages/db daily-summary, flex.ts | formatStarDiff | 毎時配信 |
-| 3.13 | 評価なしの競合の表示と注記 | packages/db daily-summary, flex.ts | formatRatingLabel・UNRATED_EXCLUDED_NOTE | 毎時配信 |
-| 3.14 | 自店が評価なしの日の表示 | packages/db daily-summary, flex.ts | isUnratedSelf・SELF_UNRATED_RANK_TEXT | 毎時配信 |
-| 4.1 | 詳細を見る→LINE 内閲覧 | store-detail 一式 | LIFF URL 契約・detail API | 詳細閲覧 |
+| 3.11 | 日本語 | notification.ts・report/builders（文言リソース） | — | — |
+| 3.12 | 星差の定義と表示形式 | packages/db daily-summary, report/builders/comparison.ts | formatStarDiff | レポート要求 |
+| 3.13 | 評価なしの競合の表示と注記 | packages/db daily-summary, report/builders/comparison.ts | formatRatingLabel・UNRATED_EXCLUDED_NOTE | レポート要求 |
+| 3.14 | 自店が評価なしの日の表示 | packages/db daily-summary, report/builders/comparison.ts | isUnratedSelf・SELF_UNRATED_RANK_TEXT | レポート要求 |
+| 4.1 | 詳細を見る（完了後メニュー）→LINE 内閲覧 | store-detail 一式 | LIFF URL 契約・detail API | 詳細閲覧 |
 | 4.2 | 閲覧のみ・OAuth 不要 | store-detail（書込 API を持たない） | — | — |
 | 4.3 | 競合0店は自店のみ表示 | data.ts, page.tsx | — | 詳細閲覧 |
 | 4.4 | 日本語 | store-detail | — | — |
@@ -258,7 +261,7 @@ sequenceDiagram
 | summary/compute | Go/ドメイン | 順位・前日比・新着差分・素材組立（純関数） | 1.3, 2.4, 2.9, 3.5, 3.7 | なし（入力は値） | Service |
 | batch/run | Go/ランタイム | オーケストレーション・エラー隔離・パージ | 1.5, 2.1, 2.5–2.9, 5.1–5.2 | 全 Go コンポーネント | Batch |
 | repo/* | Go/データ | 書込境界の実装（competitors, snapshots, summaries） | 2.3, 2.6, 2.8 | pgx (P0) | State |
-| delivery-job | TS/配信 | 時刻別対象抽出・Flex 組立・Push・記録 | 3.1–3.14 | packages/db (P0), LINE API (External, P0) | Batch, API(外部) |
+| delivery-job | TS/配信 | 時刻別対象抽出・通知の判定と組立・Push・記録 | 3.1–3.14 | packages/db (P0), LINE API (External, P0) | Batch, API(外部) |
 | store-detail | TS/閲覧 | LIFF 認可＋読取専用詳細画面 | 4.1–4.8 | packages/db (P0), LINE Login verify (External, P0) | API |
 | packages/db 拡張 | TS/データ | 新行型・updateDeliveryHour・評価なしの正規化と表示整形（`@fwlm/db/daily-summary`） | 3.2, 3.3, 3.12–3.14, 4.8 | 既存 Pool | Service |
 | migration 0004 | DB | スキーマ追加＋境界文書更新 | 2.3, 3.2, 3.9 | 0001/0002 | State |
@@ -333,21 +336,21 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 
 | Field | Detail |
 |-------|--------|
-| Intent | 毎時起動し当該時刻のオーナーへ Flex を Push、結果を記録 |
+| Intent | 毎時起動し当該時刻のオーナーのうち変化があった店舗へ短文通知を Push、結果を記録 |
 | Requirements | 3.1–3.14, 5.1, 5.2 |
 
 **Responsibilities & Constraints**
 - 対象抽出: `owners.delivery_hour = 現在JST時` AND 当日 `daily_summaries` 存在 AND `summary_deliveries` 未存在
-- Flex 組立は `daily_summaries` のみを入力とする（rating_snapshots は読まない — 素材はバッチが確定済み）
-- Google 帰属: バブル末尾に「データ提供: Google Maps」テキスト＋クチコミ抜粋に投稿者名を表示
-- altText: 「【今朝のポジション】近隣N店中X位（前日比↑）」形式・400字以内。自店が評価なしの日は「【今朝のポジション】まだ Google の評価が無いため、順位は出せません。」で始める（R3.14）
-- 対象抽出で読んだ行は、Flex 組立の前に `@fwlm/db/daily-summary` の `normalizeSummaryRatings` で正規化する（「評価なしの店舗の扱い」節）
+- 通知の判定と組立は `daily_summaries`（当日と前日）のみを入力とする（rating_snapshots は読まない — 素材はバッチが確定済み）
+- Google 帰属: バブル末尾に「データ提供: Google Maps」テキストを表示（クチコミの抜粋は通知には載せず、新着のレポートが投稿者名と Google Maps 上の導線とともに表示する）
+- altText: 店舗名と発生した変化を述べる形式・400字以内（文面の正典は `line-on-demand-report` design.md「NotificationBuilder」）
+- 対象抽出で読んだ行は、通知の判定の前に `@fwlm/db/daily-summary` の `normalizeSummaryRatings` で正規化する（「評価なしの店舗の扱い」節）
 
 ##### Batch / Job Contract
 - Trigger: Cloud Scheduler（毎時 HH:00 JST・新設）→ Cloud Run Job `summary-delivery`
 - Idempotency & recovery: 配信前に `summary_deliveries` 行を retry_key（UUID）付き INSERT（一意制約違反＝処理済みでスキップ）。Push は常に `X-Line-Retry-Key` 付与。500/タイムアウトのみ同一キーで再送、409 は成功扱い。`X-Line-Request-Id` を行に記録
 - 認証: Stateless channel access token をジョブ開始時に発行（有効約15分・長時間実行時は再発行）
-- 失敗分類: 400（無効 userId）= failed 記録・継続／429（月次クォータ）= 残対象を quota_exceeded で記録し終了／summary 欠損 = skipped_no_summary 記録
+- 失敗分類: 400（無効 userId）= failed 記録・継続／429（月次クォータ）= 残対象を quota_exceeded で記録し終了／summary 欠損 = skipped_no_summary 記録。送らなかった日は理由つきの見送りとして記録する（`skipped_no_change`・`skipped_not_comparable`・`skipped_menu_unavailable`・Issue #256）
 
 ### TS / store-detail
 
@@ -358,7 +361,7 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 
 **Responsibilities & Constraints**
 - 認可: `liff.getIDToken()` → サーバーで `POST /oauth2/v2.1/verify` → `sub`（=userId）→ `owners.line_user_id` 突合 → **その sub が所有する confirmed 店舗の集合（認可済み集合）のみ返却**。**getProfile の userId を認可に使わない**
-- 表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示。星評価・星差・評価なしの表示は Flex と同じ関数と文言（`@fwlm/db/daily-summary`）で行う（R4.8）
+- 表示: 当日サマリー・自店/競合の星評価とクチコミ総数・直近30日の自店順位/評価推移・Google 帰属表示。星評価・星差・評価なしの表示は LINE のレポートと同じ関数と文言（`@fwlm/db/daily-summary`）で行う（R4.8）
 - 読込（`lib/data.ts`）は当日サマリーと推移を `normalizeSummaryRatings`・`normalizeSnapshotRating` で正規化してから返す
 - 書込 API を一切持たない（4.2 の構造的担保）
 - **設定値の注入経路（2種を混同しないこと）**: サーバー側の `LIFF_CHANNEL_ID`（`/api/detail` の IDトークン検証 client_id）は Cloud Run のランタイム env で注入する。一方 **クライアント側の `NEXT_PUBLIC_LIFF_ID`（`liff.init` の liffId）は Next.js が `next build` 時にクライアントバンドルへインライン化する値であり、ランタイム env では一切反映されない — 必ず Dockerfile の build-arg（`ARG NEXT_PUBLIC_LIFF_ID`）でビルド時に渡す**。terraform の `liff_id` 変数はランタイム env として設定しても LIFF 起動には効かず、イメージビルド時に同値を build-arg として渡して初めて機能する（2026-07-14 に本番で発覚・修正。tasks.md Implementation Notes 参照）。
@@ -368,17 +371,17 @@ func NewReviews(countDelta int, reviews []Review, lastBatchDate time.Time) NewRe
 |--------|----------|---------|----------|--------|
 | GET | /api/detail | Authorization: Bearer {LIFF ID token}<br>`?storeId={storeId}`（任意・**認可済み集合内でのみ有効なヒント**） | 200: 詳細 JSON（30日推移含む）＋ `storeName`（表示中の店舗名）＋ `stores[]`（認可済み集合の `{storeId, name}` 一覧） | 401（検証失敗）, **409（認可済み集合が2件以上で表示対象を決められない＝`STORE_SELECTION_REQUIRED`。本文に `stores[]` を含む）**, 404（owner 不在・confirmed 店舗0件）, 500 |
 
-- LIFF URL 契約: Flex ボタン → `https://liff.line.me/{liffId}`（storeId をパスに含めない — 認可主体は ID トークンの sub であり、URL パラメータを信頼しない）。アプリ内遷移の `/store?storeId=` は**認可済み集合の内部での絞り込みヒント**であり、認可主体を変えない（下記「クライアント入力の不変条件」参照）
+- LIFF URL 契約: 完了後リッチメニューの「詳細を見る」→ `https://liff.line.me/{liffId}`（storeId をパスに含めない — 認可主体は ID トークンの sub であり、URL パラメータを信頼しない）。**推移のレポートの「30日の推移を詳細画面で見る」だけは `?storeId=` を付ける**（Issue #256）。この付与は `/store?storeId=` と同じ**認可済み集合の内部での絞り込みヒント**であり、認可主体を変えない（下記「クライアント入力の不変条件」参照）
 - **クライアント入力の不変条件（Security-critical・Issue #61 で再定義）**: 認可主体（誰か）は ID トークンの `sub` のみが決める。クライアント由来の識別子は、`sub` から導いた**認可済み集合の内部での絞り込み**にのみ使用でき、集合の境界を広げる入力としては使えない。**集合外の値（他オーナーの実在 storeId・不正 UUID・空文字を含む）は無視し、未指定時と完全に同一の応答を返す**（404 等で区別しない ＝ 非オラクル）。この性質は「応答が `sub` のみの関数である」ことと同値であり、テストで deep-equal として直接証明する。
   - 構造的担保: 集合の生成（`listOwnerConfirmedStores(pool, sub)`）と集合内の選択（`selectAuthorizedStore(stores, hint)`）を分離する。後者は `Queryable` を受け取らない純関数であり、**型シグネチャ上、入力配列の要素しか返せない**。ヒントが SQL に一切到達しないため、不正 UUID による pg `22P02`（→500）も構造的に起きない。
 - **多店舗オーナーの解決（Issue #61 で解消済み）**: `four-tier-data-model` は オーナー:店舗 = 1:N を確定仕様とする。`sub` だけでは「詳細を見る」がどの店舗を指すか一意に決まらないため、認可済み集合が2件以上のときはサーバーが**店舗を推測せず候補一覧（`stores[]`）を 409 で返し**、画面がリンクによる選択を提示する。候補の生成元は常にサーバー側の `sub` であり、クライアントが候補を持ち込むことはできない。
-  - 第2フェーズの拡張余地: 多店舗オーナーは「詳細を見る」から選択画面を1枚挟むため、要件 4 の「1タップ」が1回分後退する。delivery-job が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば1タップへ復帰できる（Open Questions 参照）。ただしトークンの無い入口（リッチメニュー・古い配信・再訪問）が残るため、選択画面は将来も必須である。
+  - 第2フェーズの拡張余地: 多店舗オーナーは「詳細を見る」から選択画面を1枚挟むため、要件 4 の「1タップ」が1回分後退する。line-webhook が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば1タップへ復帰できる（Open Questions 参照）。ただしトークンの無い入口（リッチメニューの「詳細を見る」・再訪問）が残るため、選択画面は将来も必須である。
 
 ### TS / packages/db 拡張（配信時刻設定の契約）
 
 | Field | Detail |
 |-------|--------|
-| Intent | 新テーブル行型の提供と、webhook（#6）から呼ばれる設定更新関数 |
+| Intent | 新テーブル行型の提供と、設定更新関数（LINE から呼ぶ配線は提供しないと決めた・Issue #256） |
 | Requirements | 3.2, 3.3, 3.12–3.14, 4.8 |
 
 ##### Service Interface
@@ -388,7 +391,7 @@ export function updateDeliveryHour(
   pool: Pool, lineUserId: string, hour: number
 ): Promise<Result<void, 'INVALID_HOUR' | 'OWNER_NOT_FOUND'>>;
 ```
-- **Postback データ契約**（webhook 配線用・#6 統合ポイント）: `action=set_delivery_hour&hour={0-23}`。配線タスクは LINE 基盤完成後に実行（本 spec は関数と契約のみ提供）
+- **Postback データ契約**（当初は webhook 配線用の統合ポイントとして定義した）: `action=set_delivery_hour&hour={0-23}`。**この配線は行わない。** LINE から配信時刻を変更する手段は提供しないと決めた（Issue #256・`line-on-demand-report` Requirement 1.9）ため、`updateDeliveryHour` は呼び出し元を持たない
 
 ## Data Models
 
@@ -414,7 +417,7 @@ CREATE TABLE daily_summaries (
   rating_prev      numeric(2,1),
   review_count_prev integer,
   new_review_count integer NOT NULL DEFAULT 0,
-  new_reviews      jsonb NOT NULL DEFAULT '[]',  -- [{authorName, publishTime, rating, textExcerpt}] 帰属表示用
+  new_reviews      jsonb NOT NULL DEFAULT '[]',  -- [{authorName, publishTime, rating, textExcerpt, authorUri?, authorPhotoUri?, googleMapsUri?}] 帰属表示用（後ろ 3 つは任意・Issue #256）
   competitors      jsonb NOT NULL DEFAULT '[]',  -- [{name, rating, reviewCount, starDiff}] 表示順は rank 順（評価なしは末尾・rating/starDiff は null）
   created_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (store_id, summary_date)
@@ -446,7 +449,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - **Consistency**: 店舗単位でトランザクション（snapshots＋summary を同一 Tx で確定）。言語間は結果整合（配信は素材確定後の毎時ジョブ）
 
 ### Data Contracts & Integration
-- **Flex Message 構成契約**（R3.4 の順序を固定）: ①ヘッダ=順位＋前日比矢印（自店が評価なしの日は順位の代わりにその旨・R3.14）②自店 星/クチコミ総数 ③新着クチコミ（件数＋抜粋 or「新着なし」）④競合一覧（星差。評価なしの店舗は「評価なし」で末尾に置き、順位に含めていない旨を添える・R3.13）＋「詳細を見る」ボタン＋Google 帰属。Bubble 30KB 以内・組立後にサイズ検証
+- **Flex Message 構成契約**（Issue #256 で改訂）: 日次カード 1 枚に 4 段を積む構成は廃止した。現在は、通知が店舗名・変化・メニューへの誘導・Google 帰属の短文で、①順位＋自店 星/クチコミ総数＋競合一覧（星差。評価なしの店舗は「評価なし」で末尾に置き、順位に含めていない旨を添える・R3.13）は比較のレポート、②新着クチコミ（件数＋抜粋 or「新着なし」）は新着のレポート、③日ごとの変化は推移のレポートが持つ。各バブルは 30KB 以内・組立後にサイズ検証。段の正典は `line-on-demand-report` design.md の各 Builder
 - **競合一覧の上限**: daily_summaries.competitors は最大5要素（抽出時固定の上限に一致）
 
 ### 評価なしの店舗の扱い（Issue #255）
@@ -456,7 +459,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 - **表示順**: 評価のある競合を順位の順に並べ、その後ろに評価なしの競合を置く
 - **前日比**: 前日の自店が評価なしなら `rating_prev`・`rank_prev` は NULL。前日のスナップショットは rating が無くても review_count があれば読み、新着件数（review_count の差分）を失わない
 - **読込側の正規化**: 表示の前に `@fwlm/db/daily-summary` の `normalizeSummaryRatings`（当日サマリー）・`normalizeSnapshotRating`（推移）を通す。rating が 0 以下の値も評価なしとして読み（評価の定義域の外）、評価 0 の競合を最下位に数えていた行は、自店に評価があれば `rank_total` からその件数を引いて母数を戻す（評価 0 の店舗は常に最下位なので自店の順位は変わらない）。null で書かれた行は引かない
-- **表示の共有**: 星評価の文字列（`formatRatingLabel`）・星差（`formatStarDiff`）・評価なしの判定（`hasUnratedCompetitor`・`isUnratedSelf`）・文言（評価なし／注記／自店が評価なしの日の文）は `@fwlm/db/daily-summary` の 1 箇所に置き、Flex と LIFF が同じものを使う。このモジュールは値の import を持たない純関数だけで構成し、サブパスからだけ公開する（root の `@fwlm/db` は pg を含むため）。クライアントからの root の値 import と、このモジュールへの値 import は `ts/eslint.config.js` の no-restricted-imports が禁じる
+- **表示の共有**: 星評価の文字列（`formatRatingLabel`）・星差（`formatStarDiff`）・評価なしの判定（`hasUnratedCompetitor`・`isUnratedSelf`）・文言（評価なし／注記／自店が評価なしの日の文）は `@fwlm/db/daily-summary` の 1 箇所に置き、LINE のレポートと LIFF が同じものを使う。このモジュールは値の import を持たない純関数だけで構成し、サブパスからだけ公開する（root の `@fwlm/db` は pg を含むため）。クライアントからの root の値 import と、このモジュールへの値 import は `ts/eslint.config.js` の no-restricted-imports が禁じる
 
 ## Error Handling
 
@@ -483,7 +486,7 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 1. `summary.RankAll`: 星同率→クチコミ数降順の決着、自店単独（total=1）、競合 active 除外後の母数、評価なしの競合を比較集合から除く・自店が評価なしなら順位なし・全競合が評価なしなら 1 店中 1 位 — 2.4, 2.9, 1.3, 1.5
 2. `summary.Diff`/`NewReviews`: 前日なし（Prev=nil）、review_count 差分と publishTime 差分の不一致ケース（取りこぼし）— 3.7, 3.5
 3. `competitor/extract`: 自店 place_id 除外・6件→5件採用・0件時の no_competitors — 1.1–1.3
-4. `flex.ts`: 4段構成の順序・「新着なし」文言・altText 400字・30KB 超過検出・Google 帰属の存在 — 3.4, 3.6, 3.11
+4. `notification.ts`（通知の判定と短文の組立・altText 400字・30KB 超過検出・Google 帰属の存在）と line-webhook の `report/builders`（比較の段の順序・「新着なし」文言）— 3.4, 3.6, 3.11
 5. `targets.ts` 抽出条件・`deliveries.ts` 一意制約競合時のスキップ・`line.ts` 再送規則（409=成功/400=失敗/500=再送）— 3.1, 3.8, 3.9
 6. `@fwlm/db/daily-summary`: 評価 0（旧 Go）と null（新 Go）の正規化・母数の補正と二重補正の不在・星差の整形（`-0.0` を出さない）・評価なしの表示 — 2.8, 2.9, 3.12–3.14, 4.8
 
@@ -517,8 +520,8 @@ ALTER TABLE owners ADD COLUMN delivery_hour smallint NOT NULL DEFAULT 7
 ## Open Questions / Risks
 - Places Service Specific Terms の「30日キャッシュ」条文の原文確認（実装前 Follow-up。確認までは30日保持を上限として実装）
 - LIFF 用 LINE Login チャネルの作成タイミング（**Messaging API チャネルと同一プロバイダー必須**）— #6 と共同の runbook 手順として調整
-- 配信時刻設定 UI の webhook 配線は #6 完了後の統合タスク（本 spec は契約と関数のみ提供）
+- ~~配信時刻設定 UI の webhook 配線は #6 完了後の統合タスク~~ → **配線しないと決めた**（Issue #256。LINE から配信時刻を変更する手段は提供しない）
 - ~~**複数店舗オーナーの LIFF 詳細画面が一意に解決できない**~~ → **解決済み（Issue #61・task 5.4）**。サーバーが認可済み集合を候補一覧として 409 で返し、画面がリンク選択を提示する方式で解消した。詳細は Components and Interfaces / TS store-detail の「クライアント入力の不変条件」「多店舗オーナーの解決」を参照。残る派生課題は以下2件。
-- **多店舗オーナーの「1タップ」が1回分後退している**（要件 4 Objective の但し書き参照）。delivery-job が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば復帰できるが、HMAC 鍵を delivery-job と store-detail の両方へ配布する必要があり（Secret Manager + terraform 2箇所）、かつトークンの無い入口が残るため選択画面は将来も必須。第2フェーズで費用対効果を再評価すること。
-- **Flex カードに店舗名が無く、多店舗オーナーは同時刻に届く N 通を見た目で区別できない**（`delivery-job/src/flex.ts` の `buildDailySummaryFlex` の入力 `DailySummaryRow` に店舗名が無い）。Issue #61 の選択画面では店舗名が出るため実用性は回復しているが、配信カード側は未対応。**Issue #73** として起票済み。
+- **多店舗オーナーの「1タップ」が1回分後退している**（要件 4 Objective の但し書き参照）。line-webhook が店舗ごとの署名付き短命トークンを LIFF URL へ付与すれば復帰できるが、HMAC 鍵を line-webhook と store-detail の両方へ配布する必要があり（Secret Manager + terraform 2箇所）、かつトークンの無い入口が残るため選択画面は将来も必須。第2フェーズで費用対効果を再評価すること。なお推移のレポートは署名の無い `?storeId=` のヒントを付けており、これは認可済み集合の内側でしか解釈されない（Issue #256）。
+- ~~**Flex カードに店舗名が無く、多店舗オーナーは同時刻に届く N 通を見た目で区別できない**~~ → **解消済み（Issue #256）**。日次カードを撤去し、通知とレポートのすべてが対象店舗名を表示するようになった（`line-on-demand-report` Requirement 3.8）。**Issue #73** はその中で解消する。
 - **store-detail の型レベルセキュリティガードが実際には検査されていない**（`tsconfig.json` の `exclude` に `"test"` があるため、`test/liff-auth.test.ts` の型代入は typecheck でも `next build` でも走らない）。実効ガードは arity チェックと振る舞いテスト。**Issue #72** として起票済み。

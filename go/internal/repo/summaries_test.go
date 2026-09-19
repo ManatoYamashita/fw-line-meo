@@ -161,6 +161,125 @@ func TestPurgeOlderThan_30DayBoundary(t *testing.T) {
 	}
 }
 
+// line-on-demand-report（Req 8.2・8.6・8.7）: new_reviews の要素は、口コミの帰属 3 項目（authorUri・
+// authorPhotoUri・googleMapsUri）を空でないときだけ、項目ごとに独立して持つ。新着口コミのレポート（TS）は
+// 項目の有無で「Google Maps への導線を取得できているか」を判定し、導線の無い口コミは内容を表示しないので、空文字や
+// null のキーを書くとその判定が崩れる。TS の型は 3 項目を任意項目として寛容に読むため、表示の試験では
+// 書込の後退が見えない。書かれた生の jsonb を、キーの集合と値で直接確かめる。
+func TestWriteDailySummary_NewReviewAttributionKeysOnlyWhenNonEmpty(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	storeID := seedStore(t, ctx, pool, "U-summary-review-attribution", "place-self-review-attribution")
+
+	today := dateOnly(t, "2026-07-12")
+	publishTime := time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+	rank, total, rating, reviews := 1, 1, 4.5, 12
+	if err := WriteDailySummary(ctx, pool, DailySummaryInput{
+		StoreID: storeID, SummaryDate: today, Status: "no_competitors",
+		Rank: &rank, RankTotal: &total, Rating: &rating, ReviewCount: &reviews,
+		NewReviewCount: 4,
+		NewReviews: []NewReviewExcerpt{
+			{
+				AuthorName: "テスト太郎", PublishTime: publishTime, Rating: 5, TextExcerpt: "美味しかったです",
+				AuthorURI:      "https://www.google.com/maps/contrib/test-author-1/reviews",
+				AuthorPhotoURI: "https://lh3.googleusercontent.com/a/test-photo-1",
+				GoogleMapsURI:  "https://www.google.com/maps/reviews/data=test-review-1",
+			},
+			// Google Maps の URL だけを持つ口コミ（投稿者の URL が無くても、この項目は書く）。
+			{
+				AuthorName: "テスト花子", PublishTime: publishTime, Rating: 4, TextExcerpt: "また来ます",
+				GoogleMapsURI: "https://www.google.com/maps/reviews/data=test-review-2",
+			},
+			// 3 項目とも持たない口コミ（本 spec より前に書かれた行の要素と同じ形になる）。
+			{AuthorName: "テスト次郎", PublishTime: publishTime, Rating: 3, TextExcerpt: "普通でした"},
+			// 投稿者の URL だけを持つ口コミ（Google Maps の URL が無くても、この項目は書く）。
+			// 花子の行と対にして、3 項目が互いに連動せず独立して書かれることを固定する。
+			{
+				AuthorName: "テスト三郎", PublishTime: publishTime, Rating: 2, TextExcerpt: "席の間隔が広めでした",
+				AuthorURI: "https://www.google.com/maps/contrib/test-author-4/reviews",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteDailySummary: %v", err)
+	}
+
+	got := readNewReviewElements(t, ctx, pool, storeID, today)
+	if len(got) != 4 {
+		t.Fatalf("new_reviews elements = %d, want 4", len(got))
+	}
+
+	want := []newReviewElement{
+		{
+			authorName:     "テスト太郎",
+			keys:           "authorName,authorPhotoUri,authorUri,googleMapsUri,publishTime,rating,textExcerpt",
+			authorURI:      "https://www.google.com/maps/contrib/test-author-1/reviews",
+			authorPhotoURI: "https://lh3.googleusercontent.com/a/test-photo-1",
+			googleMapsURI:  "https://www.google.com/maps/reviews/data=test-review-1",
+		},
+		{
+			authorName:    "テスト花子",
+			keys:          "authorName,googleMapsUri,publishTime,rating,textExcerpt",
+			googleMapsURI: "https://www.google.com/maps/reviews/data=test-review-2",
+		},
+		{
+			authorName: "テスト次郎",
+			keys:       "authorName,publishTime,rating,textExcerpt",
+		},
+		{
+			authorName: "テスト三郎",
+			keys:       "authorName,authorUri,publishTime,rating,textExcerpt",
+			authorURI:  "https://www.google.com/maps/contrib/test-author-4/reviews",
+		},
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("new_reviews[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// newReviewElement は new_reviews の 1 要素を生の jsonb から読んだ形。keys はキーを辞書順（バイト順）に
+// 「,」で連ねたもの。3 項目の値は、キーが無ければ空文字として読む（有無は keys で区別する）。
+type newReviewElement struct {
+	authorName     string
+	keys           string
+	authorURI      string
+	authorPhotoURI string
+	googleMapsURI  string
+}
+
+// readNewReviewElements は daily_summaries.new_reviews を要素の順に読む。Go の構造体へ Unmarshal すると
+// 「キーが無い」と「空文字」の区別が消えるので、キーの集合は SQL の jsonb_object_keys で取る。
+func readNewReviewElements(t *testing.T, ctx context.Context, db DBTX, storeID string, summaryDate time.Time) []newReviewElement {
+	t.Helper()
+	rows, err := db.Query(ctx, `
+		SELECT e->>'authorName',
+		       (SELECT string_agg(k, ',' ORDER BY k COLLATE "C") FROM jsonb_object_keys(e) AS k),
+		       coalesce(e->>'authorUri', ''), coalesce(e->>'authorPhotoUri', ''), coalesce(e->>'googleMapsUri', '')
+		FROM daily_summaries AS ds
+		CROSS JOIN LATERAL jsonb_array_elements(ds.new_reviews) WITH ORDINALITY AS elements(e, position)
+		WHERE ds.store_id = $1 AND ds.summary_date = $2
+		ORDER BY elements.position
+	`, storeID, summaryDate)
+	if err != nil {
+		t.Fatalf("select new_reviews elements: %v", err)
+	}
+	defer rows.Close()
+
+	var got []newReviewElement
+	for rows.Next() {
+		var e newReviewElement
+		if err := rows.Scan(&e.authorName, &e.keys, &e.authorURI, &e.authorPhotoURI, &e.googleMapsURI); err != nil {
+			t.Fatalf("scan new_reviews element: %v", err)
+		}
+		got = append(got, e)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate new_reviews elements: %v", err)
+	}
+	return got
+}
+
 // Issue #255: 評価の無い競合は rating・starDiff を JSON の null として書く（キーを省かない）。
 // TS 側の DailySummaryCompetitor は `number | null` のキーの存在を前提にし、0 を書くと「★0」に化ける。
 // 自店が評価なしの日は rating・rank・rank_total を NULL で書く（取得失敗ではないので status は ready）。

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createLineMessenger } from '../../src/line/client.js';
+import { createLineMessenger, type LineMessage } from '../../src/line/client.js';
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const REPLY_URL = 'https://api.line.me/v2/bot/message/reply';
@@ -200,6 +200,33 @@ describe('createLineMessenger', () => {
           { type: 'flex', altText: '候補一覧', contents: { type: 'bubble' } },
         ],
       });
+    });
+
+    it('テキストに付けたクイックリプライを加工せずにそのまま送る（line-on-demand-report Req 3.2）', async () => {
+      const fetchMock = routingFetchMock(() => emptyResponse(200));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+      const message: LineMessage = {
+        type: 'text',
+        text: 'テスト用の案内',
+        quickReply: {
+          items: [
+            { type: 'action', action: { type: 'postback', label: 'テスト食堂', data: 'data-1', displayText: 'テスト食堂' } },
+          ],
+        },
+      };
+
+      await messenger.reply('reply-token-qr', [message]);
+
+      const replyCall = fetchMock.mock.calls.find(([url]) => url === REPLY_URL);
+      expect(replyCall).toBeDefined();
+      const [, init] = replyCall as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body).toEqual({ replyToken: 'reply-token-qr', messages: [message] });
     });
 
     it('非2xxレスポンスでも例外を投げず、logger.warn を呼ぶ（再配信側で救済されるため）', async () => {

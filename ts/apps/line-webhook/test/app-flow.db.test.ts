@@ -26,7 +26,11 @@ import {
   buildCandidateCarouselMessage,
   buildConfirmationMessage,
   buildCompletionMessage,
+  buildStatusGuidanceMessage,
 } from '../src/line/messages.js';
+import { encodeReportPostback } from '@fwlm/line-report';
+import { createStoreIdentifiedOwnerRouterFactory } from '../src/owner/router.js';
+import { buildPreparingNotice } from '../src/report/builders/notices.js';
 
 // アプリレベルのフローテスト（タスク 4.2）。
 // 実 postgres（ts-test-db）＋実 HTTP（app.request）＋実署名検証を貫通させ、
@@ -195,6 +199,14 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       auditLog: (input) => createAuditLog(deps.pool, input),
       lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
       liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      // index.ts と同じ振り分け口の作り方（リクエストごとに router と ReportHandler を作る）。
+      createOwnerRouter: createStoreIdentifiedOwnerRouterFactory({
+        db: deps.pool,
+        sessions: { getOrCreateSession, updateSession },
+        auditLog: (input) => createAuditLog(deps.pool, input),
+        lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      }),
     });
 
     const appDeps: AppDeps = {
@@ -320,6 +332,69 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(messenger.linkRichMenu).toHaveBeenCalledWith(userId, RICHMENU_COMPLETED_ID);
 
       expect(messenger.reply).toHaveBeenCalledTimes(5);
+    },
+  );
+
+  // line-on-demand-report tasks 3.10（Requirements 2.6・2.9）: 代理店が店舗を登録したオーナーは、会話の段階が
+  // 途中（店名入力待ち）のまま店舗特定済みになる。段階ではなく onboarding_status で振り分けるので、
+  // オンボーディングの案内（店名の検索）ではなく、店舗特定済みオーナー向けの案内とレポートを返す。
+  it(
+    '代理店経路のオーナー（段階が店名入力待ちのまま確定店舗を持つ）: テキストにはステータス案内を返して完了後メニューを張り、' +
+      'レポートの postback にはレポート応答を 1 回返す（line-on-demand-report Req 2.6, 2.9）',
+    async () => {
+      const pool = await getPool();
+      const userId = 'Uf0-agency-path-user';
+      const storeCandidate = candidate({ placeId: 'ChIJ_f0_agency_0', name: '試験食堂 代理店登録店' });
+      // オンボーディングへ落ちれば、店名に見えるテキストでこの検索が呼ばれる。
+      const places = createFakePlaces({ kind: 'found', candidates: [storeCandidate] });
+      const messenger = createFakeMessenger();
+      const app = buildApp({ messenger, places, pool });
+
+      // 代理店による登録を再現する: オーナーと店名入力待ちの段階を作り、confirmStore で確定店舗を作る
+      // （確定店舗の作成とオーナーの store_identified への遷移は、confirmStore の同じトランザクションで行われる）。
+      const owner = await createOwner(pool, { agencyId: AG, lineUserId: userId });
+      await getOrCreateSession(pool, userId);
+      await updateSession(pool, userId, { stage: 'await_store_name', ownerId: owner.id });
+      const confirmed = await createStoreIdentificationService({ pool, places }).confirmStore(owner.id, storeCandidate);
+      expect(confirmed.kind).toBe('confirmed');
+      expect((await findOwnerByLineUserId(pool, userId))?.onboarding_status).toBe('store_identified');
+      expect((await getOrCreateSession(pool, userId)).stage).toBe('await_store_name');
+
+      // 1. 店名に見えるテキスト → ステータス案内。検索しない。完了後メニューを張り、段階を completed に揃える。
+      const statusBody = textBody(userId, 'reply-f0-agency-1', 'f0-evt-agency-text', '試験食堂');
+      const statusRes = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(statusBody, CHANNEL_SECRET) },
+        body: statusBody,
+      });
+      expect(statusRes.status).toBe(200);
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenNthCalledWith(1, 'reply-f0-agency-1', [buildStatusGuidanceMessage()]);
+      expect(places.searchCandidates).not.toHaveBeenCalled();
+      expect(messenger.linkRichMenu).toHaveBeenCalledTimes(1);
+      expect(messenger.linkRichMenu).toHaveBeenCalledWith(userId, RICHMENU_COMPLETED_ID);
+      expect((await getOrCreateSession(pool, userId)).stage).toBe('completed');
+      const audits = await pool.query<{ action: string }>(
+        `SELECT action FROM audit_logs WHERE actor_id = $1 AND action = 'rich_menu_linked'`,
+        [owner.id],
+      );
+      expect(audits.rowCount).toBe(1);
+
+      // 2. レポートの postback → 日次集計がまだ無いので、店舗名つきの準備中の案内を 1 回返す。段階は completed なので張り直さない。
+      const reportData = encodeReportPostback({ kind: 'new_reviews', storeId: null, page: 0 });
+      const reportBody = postbackBody(userId, 'reply-f0-agency-2', 'f0-evt-agency-report', reportData);
+      const reportRes = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(reportBody, CHANNEL_SECRET) },
+        body: reportBody,
+      });
+      expect(reportRes.status).toBe(200);
+      expect(messenger.reply).toHaveBeenCalledTimes(2);
+      expect(messenger.reply).toHaveBeenNthCalledWith(2, 'reply-f0-agency-2', [
+        buildPreparingNotice({ storeName: storeCandidate.name }),
+      ]);
+      expect(messenger.linkRichMenu).toHaveBeenCalledTimes(1);
+      expect(places.searchCandidates).not.toHaveBeenCalled();
     },
   );
 

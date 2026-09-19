@@ -11,8 +11,8 @@
 // （行の上書きはしない — Go 側 summaries.go の ON CONFLICT DO UPDATE とは異なり、ここでは
 // DO NOTHING が正しい: 予約は早い者勝ちで、2 回目の予約試行が 1 回目の結果を壊してはならない）。
 //
-// summary_deliveries.status は CHECK 制約で 'delivered' | 'failed' | 'skipped_no_summary' |
-// 'quota_exceeded' の 4 値のみを許容し、「予約済みだが結果未確定」を表す専用値は存在しない。
+// summary_deliveries.status の CHECK 制約は 7 値（送った結果の 3 値と、送らなかった理由の 4 値）を
+// 許容するが、「予約済みだが結果未確定」を表す専用値は無い。
 // そのため予約 INSERT は暫定的に status='failed'（+ プレースホルダの error_detail）を書き込み、
 // Push 実行後に recordDeliveryResult が必ず最終値へ上書きする。万一プロセスがクラッシュし
 // recordDeliveryResult が呼ばれないまま終了した場合でも、行は「失敗」として正直に残り

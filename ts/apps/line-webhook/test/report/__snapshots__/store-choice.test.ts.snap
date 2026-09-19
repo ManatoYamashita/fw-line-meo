@@ -1,0 +1,209 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`スナップショット（LINE へ送る JSON の記録） > 次の頁がある選択肢 1`] = `
+{
+  "quickReply": {
+    "items": [
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000001",
+          "displayText": "試験店舗0001",
+          "label": "試験店舗0001",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000002",
+          "displayText": "試験店舗0002",
+          "label": "試験店舗0002",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000003",
+          "displayText": "試験店舗0003",
+          "label": "試験店舗0003",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000004",
+          "displayText": "試験店舗0004",
+          "label": "試験店舗0004",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000005",
+          "displayText": "試験店舗0005",
+          "label": "試験店舗0005",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000006",
+          "displayText": "試験店舗0006",
+          "label": "試験店舗0006",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000007",
+          "displayText": "試験店舗0007",
+          "label": "試験店舗0007",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000008",
+          "displayText": "試験店舗0008",
+          "label": "試験店舗0008",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000009",
+          "displayText": "試験店舗0009",
+          "label": "試験店舗0009",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000010",
+          "displayText": "試験店舗0010",
+          "label": "試験店舗0010",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000011",
+          "displayText": "試験店舗0011",
+          "label": "試験店舗0011",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&s=00000000-0000-4000-8000-000000000012",
+          "displayText": "試験店舗0012",
+          "label": "試験店舗0012",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=tr&p=1",
+          "displayText": "ほかの店舗",
+          "label": "ほかの店舗",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+    ],
+  },
+  "text": "どの店舗の直近の推移を表示しますか？
+下の店舗名から選んでください。",
+  "type": "text",
+}
+`;
+
+exports[`スナップショット（LINE へ送る JSON の記録） > 無効な選択の再提示 1`] = `
+{
+  "quickReply": {
+    "items": [
+      {
+        "action": {
+          "data": "a=rpt&k=cmp&s=00000000-0000-4000-8000-000000000001",
+          "displayText": "試験食堂 駅前店",
+          "label": "試験食堂 駅前店",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=cmp&s=00000000-0000-4000-8000-000000000002",
+          "displayText": "試験グループ運営のとても長い名前の焼肉店 渋谷道玄坂店",
+          "label": "試験グループ運営の…焼肉店 渋谷道玄坂店",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=cmp&s=00000000-0000-4000-8000-000000000003",
+          "displayText": "試験グループ運営のとても長い名前の焼肉店 新宿東口店",
+          "label": "試験グループ運営の…の焼肉店 新宿東口店",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+    ],
+  },
+  "text": "その店舗は選べません。
+どの店舗の競合店との比較を表示しますか？
+下の店舗名から選んでください。",
+  "type": "text",
+}
+`;
+
+exports[`スナップショット（LINE へ送る JSON の記録） > 複数店舗の選択肢 1`] = `
+{
+  "quickReply": {
+    "items": [
+      {
+        "action": {
+          "data": "a=rpt&k=nr&s=00000000-0000-4000-8000-000000000001",
+          "displayText": "試験食堂 駅前店",
+          "label": "試験食堂 駅前店",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=nr&s=00000000-0000-4000-8000-000000000002",
+          "displayText": "試験グループ運営のとても長い名前の焼肉店 渋谷道玄坂店",
+          "label": "試験グループ運営の…焼肉店 渋谷道玄坂店",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+      {
+        "action": {
+          "data": "a=rpt&k=nr&s=00000000-0000-4000-8000-000000000003",
+          "displayText": "試験グループ運営のとても長い名前の焼肉店 新宿東口店",
+          "label": "試験グループ運営の…の焼肉店 新宿東口店",
+          "type": "postback",
+        },
+        "type": "action",
+      },
+    ],
+  },
+  "text": "どの店舗の新着口コミを表示しますか？
+下の店舗名から選んでください。",
+  "type": "text",
+}
+`;

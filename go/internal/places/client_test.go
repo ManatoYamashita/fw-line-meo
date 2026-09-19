@@ -158,6 +158,79 @@ func TestFetchSelfMetrics_UsesSelfFieldMaskAndDecodesReviews(t *testing.T) {
 	}
 }
 
+// line-on-demand-report（Req 8.2・8.6・8.7）: 口コミの帰属表示には、投稿者のプロフィールの URL と画像の
+// URL、その口コミを Google Maps で開く URL が要る。3 項目は自店の既存のフィールドマスク `reviews` の応答に
+// 含まれているので、マスクも呼び出し回数も変えずに受け取る。Places API (New) の応答は proto3 の JSON で、
+// 値の無いフィールドはキーごと省かれる。欠けた口コミは空文字のまま返す（別の値で補わない）。
+func TestFetchSelfMetrics_DecodesReviewAttributionWithoutWideningFieldMask(t *testing.T) {
+	var gotFieldMask string
+	var callCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&callCount, 1)
+		gotFieldMask = r.Header.Get("X-Goog-FieldMask")
+		w.Header().Set("Content-Type", "application/json")
+		// 実物と同じ形を生の JSON で返す（キー名を DTO のタグから作らないため）。2 件目は帰属の URL を
+		// 持たない口コミで、応答にキーそのものが無い。
+		_, _ = w.Write([]byte(`{
+			"rating": 4.5,
+			"userRatingCount": 120,
+			"businessStatus": "OPERATIONAL",
+			"reviews": [
+				{
+					"rating": 5,
+					"publishTime": "2026-07-11T09:00:00Z",
+					"text": {"text": "美味しかったです", "languageCode": "ja"},
+					"authorAttribution": {
+						"displayName": "テスト太郎",
+						"uri": "https://www.google.com/maps/contrib/test-author-1/reviews",
+						"photoUri": "https://lh3.googleusercontent.com/a/test-photo-1"
+					},
+					"googleMapsUri": "https://www.google.com/maps/reviews/data=test-review-1"
+				},
+				{
+					"rating": 4,
+					"publishTime": "2026-07-10T09:00:00Z",
+					"text": {"text": "また来ます", "languageCode": "ja"},
+					"authorAttribution": {"displayName": "テスト花子"}
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-api-key", WithBaseURL(server.URL), fastBackoff())
+
+	metrics, err := client.FetchSelfMetrics(context.Background(), "self-place-id")
+	if err != nil {
+		t.Fatalf("FetchSelfMetrics returned error: %v", err)
+	}
+
+	// マスクは定数ではなく文字列で固定する（定数との比較は、定数ごと広げても緑のまま残る）。
+	if gotFieldMask != "rating,userRatingCount,businessStatus,reviews" {
+		t.Errorf("field mask = %q, want the unchanged self mask %q", gotFieldMask, "rating,userRatingCount,businessStatus,reviews")
+	}
+	if got := atomic.LoadInt32(&callCount); got != 1 {
+		t.Errorf("call count = %d, want 1 (the attribution must not cost an extra call)", got)
+	}
+
+	if len(metrics.Reviews) != 2 {
+		t.Fatalf("len(Reviews) = %d, want 2", len(metrics.Reviews))
+	}
+	withAttribution := metrics.Reviews[0]
+	if withAttribution.AuthorName != "テスト太郎" ||
+		withAttribution.AuthorURI != "https://www.google.com/maps/contrib/test-author-1/reviews" ||
+		withAttribution.AuthorPhotoURI != "https://lh3.googleusercontent.com/a/test-photo-1" ||
+		withAttribution.GoogleMapsURI != "https://www.google.com/maps/reviews/data=test-review-1" {
+		t.Errorf("Reviews[0] = %+v, want the author's name, profile URL, photo URL and the review's Google Maps URL", withAttribution)
+	}
+	withoutAttribution := metrics.Reviews[1]
+	if withoutAttribution.AuthorName != "テスト花子" ||
+		withoutAttribution.AuthorURI != "" || withoutAttribution.AuthorPhotoURI != "" || withoutAttribution.GoogleMapsURI != "" {
+		t.Errorf("Reviews[1] = %+v, want the author's name and empty attribution URLs (absent in the response)", withoutAttribution)
+	}
+}
+
 func TestFetchCompetitorMetrics_UsesCompetitorFieldMaskDistinctFromSelf(t *testing.T) {
 	var gotFieldMask string
 

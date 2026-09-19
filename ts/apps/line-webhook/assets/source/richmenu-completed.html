@@ -1,6 +1,6 @@
 <!doctype html><meta charset="utf-8">
 <!--
-  リッチメニュー画像「completed」の焼き元（Issue #195）。
+  リッチメニュー画像「completed」の焼き元（Issue #195 で新設・Issue #256 で 2 段 5 区画へ作り直し）。
 
   正典は隣の ../richmenu-completed.png であり、本ファイルはその出所（provenance）である。
   再現の保証ではない: フォントの描画は描画機に依存し、macOS のヒラギノと Linux の Noto では
@@ -10,32 +10,52 @@
   焼き出し（カレントディレクトリ = ts/apps/line-webhook/assets）:
     CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     "$CHROME" --headless --disable-gpu --no-sandbox --no-first-run --disable-extensions \
-      --hide-scrollbars --force-device-scale-factor=1 --window-size=2500,843 \
+      --hide-scrollbars --force-device-scale-factor=1 --window-size=2500,1686 \
       --screenshot="richmenu-completed.png" "file://$PWD/source/richmenu-completed.html"
 
-  制約（外すと絵が実装について嘘をつく。詳細は Issue #195 の決定コメント）:
-  - 寸法は 2500x843（LINE の Half (HD)）。scripts/setup-rich-menus.ts の
-    RICH_MENU_WIDTH / RICH_MENU_HEIGHT と一致していなければタップ座標が絵とずれる。
-  - タップ領域は画面全体でひとつだけ（areas[0] が全面）。ボタンに見える要素を描いてはならない。
-  - 配色は design-tokens の lineColors のみ。アクション色の緑 (#1DB446) は使わない
-    （design-language.md 7.15: 緑は押せるものだけが持つ）。
-  - 文言はタップして実際に返るものと一致させる。完了面のタップが返すのは
-    buildAlreadyCompletedMessage() の固定文であり、順位も競合も返らない。
+  制約（外すと絵が実装について嘘をつく）:
+  - 寸法は 2500x1686（LINE の Full (HD)）。scripts/setup-rich-menus.ts の完了後メニューの
+    寸法の宣言と一致していなければタップ座標が絵とずれる。
+    test/scripts/setup-rich-menus.test.ts が実 PNG の IHDR と突き合わせて機械的に強制する。
+  - 区画の割りは design.md「RichMenuDefinitions と RichMenuScripts」の区画表そのものである。
+    上段 3 区画（0,0,833,843 ／ 833,0,834,843 ／ 1667,0,833,843）と
+    下段 2 区画（0,843,1250,843 ／ 1250,843,1250,843）。罫線はこの境界の上にだけ引く。
+    区画の割り当て（action）を絵に合わせるのはメニュー定義側の担当である。
+  - 文言は要件 2.1・2.2 の 5 つの導線の語をそのまま用いる（@fwlm/line-report の REPORT_LABELS と、
+    既存の「詳細を見る」「ステータス確認」）。タップして返るものと絵の文言を食い違わせない。
+  - 配色は design-tokens の lineColors のみ（body #333333 / description #666666 / muted #AAAAAA）。
+    アクション色の緑 (#1DB446) は使わない。5 区画はすべて押せるため、一部だけを緑にすると
+    押せる区画と押せない区画があるように読まれ、全体を緑にすると面が色で埋まる
+    （design-language.md 7.15: 緑は押せるものだけが持つ）。押せることは区画の割りが示す。
+  - 絵文字と装飾図形を置かない（design-language.md 7.16）。階層は文字の段と区切り線だけで表す。
+  - 店舗に固有の内容（店名・数値・日付）を焼き込まない。メニューは全オーナー共通である。
 -->
 <style>
-  html,body{margin:0;padding:0;width:2500px;height:843px;overflow:hidden}
-  body{position:relative;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;padding-bottom:96px;box-sizing:border-box;
-    background:#F0FBF4;
+  html,body{margin:0;padding:0;width:2500px;height:1686px;overflow:hidden}
+  body{position:relative;
+    background:#FFFFFF;
     font-family:-apple-system,"Hiragino Kaku Gothic ProN","Hiragino Sans",Meiryo,sans-serif;
-    color:#333333;-webkit-font-smoothing:antialiased}
-  .title{font-size:150px;font-weight:700;letter-spacing:.02em;line-height:1.15}
-  .sub{margin-top:40px;font-size:76px;font-weight:400;color:#666666;letter-spacing:.01em}
-  .foot{position:absolute;left:0;right:0;bottom:52px;
-    display:flex;flex-direction:column;align-items:center}
-  .rule{width:700px;height:5px;background:#AAAAAA;margin-bottom:30px}
-  .hint{font-size:62px;color:#888888;letter-spacing:.01em}
+    -webkit-font-smoothing:antialiased}
+
+  /* 区画。left/top/width/height は design の区画表の bounds と同じ値を書く。 */
+  .cell{position:absolute;display:flex;align-items:center;justify-content:center;
+    text-align:center;white-space:nowrap;letter-spacing:.01em}
+  /* 上段 = 3 つのレポート。面の主役なので大きい段を持つ。 */
+  .report{font-size:72px;font-weight:700;color:#333333}
+  /* 下段 = 詳細画面とステータス。上段に次ぐ段として退かせる。 */
+  .secondary{font-size:66px;font-weight:400;color:#666666}
+
+  /* 区切り線。区画の境界の上に中心を置く（境界の値から線幅の半分を引いた位置に描く）。 */
+  .divider{position:absolute;background:#AAAAAA}
 </style>
-<div class="title">ステータス確認</div>
-<div class="sub">登録は完了しています</div>
-<div class="foot"><div class="rule"></div><div class="hint">画面のどこでもタップできます</div></div>
+
+<div class="cell report" style="left:0;top:0;width:833px;height:843px">新着口コミをみる</div>
+<div class="cell report" style="left:833px;top:0;width:834px;height:843px">競合店との比較をみる</div>
+<div class="cell report" style="left:1667px;top:0;width:833px;height:843px">直近の推移を見る</div>
+<div class="cell secondary" style="left:0;top:843px;width:1250px;height:843px">詳細を見る</div>
+<div class="cell secondary" style="left:1250px;top:843px;width:1250px;height:843px">ステータス確認</div>
+
+<div class="divider" style="left:830px;top:0;width:5px;height:843px"></div>
+<div class="divider" style="left:1664px;top:0;width:5px;height:843px"></div>
+<div class="divider" style="left:0;top:840px;width:2500px;height:5px"></div>
+<div class="divider" style="left:1247px;top:845px;width:5px;height:841px"></div>

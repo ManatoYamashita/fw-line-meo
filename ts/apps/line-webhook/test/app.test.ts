@@ -3,8 +3,9 @@ import { createApp, type AppDeps, type AppLogger } from '../src/app.js';
 import type { Sink } from '@fwlm/observability';
 import type { SignatureVerifier } from '../src/webhook/signature.js';
 import type { ConversationHandlers } from '../src/onboarding/conversation.js';
-import type { LineMessenger } from '../src/line/client.js';
+import type { LineMessage, LineMessenger } from '../src/line/client.js';
 import { buildInternalErrorRetryMessage } from '../src/line/messages.js';
+import { StoreScopedReportError } from '../src/report/errors.js';
 
 // createApp(deps) の配線・エラー境界（タスク 4.1）のテスト。
 // 実依存（pool/fetch/LINE client 等）は一切使わず、すべてフェイク/スパイで検証する
@@ -499,5 +500,142 @@ describe('line-webhook app', () => {
       expect(res2.status).toBe(200);
       expect(conversationHandlers.handleEvent).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// line-on-demand-report tasks 3.10（Requirements 7.4・7.5）: レポートの店舗を決めた後の失敗（StoreScopedReportError）には、
+// 店舗名を添えた再試行案内をちょうど 1 回返す。店舗を決める前の失敗は汎用の再試行案内のまま。
+// 案内に出してよいのは店舗名とサポートコードだけで、内部の詳細（元の例外の種別・本文）を出さない。
+describe('エラー境界: 店舗名つきの再試行案内（line-on-demand-report Requirements 7.4・7.5）', () => {
+  const STORE_NAME = '試験食堂 駅前店';
+  // 元の例外の本文。案内にも記録にも現れてはならない。
+  const INTERNAL_DETAIL = 'relation "daily_summaries" does not exist (10.0.0.1:5432)';
+  const TRACE_ID = '0123456789abcdef0123456789abcdef';
+  const SUPPORT_CODE = '01234567';
+
+  function storeScopedFailure(cause: unknown = new TypeError(INTERNAL_DETAIL)): ConversationHandlers {
+    return fakeConversationHandlers(async () => {
+      throw new StoreScopedReportError(STORE_NAME, { cause });
+    });
+  }
+
+  function textsOf(messages: readonly LineMessage[]): string[] {
+    return messages.map((message) => (message.type === 'text' ? message.text : JSON.stringify(message)));
+  }
+
+  async function post(app: ReturnType<typeof createApp>, replyToken: string, headers: Record<string, string> = {}) {
+    return app.request('/webhook', {
+      method: 'POST',
+      headers: { 'x-line-signature': 'valid-signature', ...headers },
+      body: followEventBody({ replyToken }),
+    });
+  }
+
+  it('店舗名を添えた再試行案内をちょうど 1 回返し、汎用の再試行案内は返さない', async () => {
+    const messenger = fakeMessenger();
+    const app = createApp(baseDeps({ conversationHandlers: storeScopedFailure(), messenger }));
+
+    const res = await post(app, 'reply-store-scoped');
+
+    expect(res.status).toBe(200);
+    expect(messenger.reply).toHaveBeenCalledTimes(1);
+    expect(messenger.reply).toHaveBeenCalledWith('reply-store-scoped', [
+      buildInternalErrorRetryMessage(undefined, STORE_NAME),
+    ]);
+    const [, messages] = vi.mocked(messenger.reply).mock.calls[0] ?? [];
+    expect(messages).not.toEqual([buildInternalErrorRetryMessage()]);
+    expect(textsOf(messages ?? []).join('\n')).toContain(`「${STORE_NAME}」`);
+  });
+
+  it('案内に出すのは店舗名とサポートコードだけで、内部の詳細を出さない', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
+    try {
+      const messenger = fakeMessenger();
+      const app = createApp(baseDeps({ conversationHandlers: storeScopedFailure(), messenger }));
+
+      await post(app, 'reply-store-scoped-code', { 'x-cloud-trace-context': `${TRACE_ID}/1;o=1` });
+
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenCalledWith('reply-store-scoped-code', [
+        buildInternalErrorRetryMessage(SUPPORT_CODE, STORE_NAME),
+      ]);
+      const [, messages] = vi.mocked(messenger.reply).mock.calls[0] ?? [];
+      const text = textsOf(messages ?? []).join('\n');
+      expect(text).toContain(`「${STORE_NAME}」`);
+      expect(text).toContain(SUPPORT_CODE);
+      for (const leaked of [INTERNAL_DETAIL, 'TypeError', 'StoreScopedReportError', new StoreScopedReportError(STORE_NAME).message]) {
+        expect(text, leaked).not.toContain(leaked);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('記録は既存の dispatch_failed に元の例外の種別だけを載せ、店舗名と本文を載せない', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
+    try {
+      const structuredLog = fakeStructuredLog();
+      const app = createApp(baseDeps({ conversationHandlers: storeScopedFailure(), structuredLog }));
+
+      await post(app, 'reply-store-scoped-log', { 'x-cloud-trace-context': `${TRACE_ID}/1;o=1` });
+
+      expect(structuredLog).toHaveBeenCalledTimes(1);
+      expect(structuredLog).toHaveBeenCalledWith('error', 'line-webhook.dispatch_failed', {
+        errorKind: 'TypeError',
+        correlationId: `projects/test-project/traces/${TRACE_ID}`,
+      });
+      const recorded = JSON.stringify(vi.mocked(structuredLog).mock.calls);
+      expect(recorded).not.toContain(STORE_NAME);
+      expect(recorded).not.toContain(INTERNAL_DETAIL);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('元の例外が無ければ、記録する種別は StoreScopedReportError のまま', async () => {
+    const logger = fakeLogger();
+    const app = createApp(
+      baseDeps({
+        conversationHandlers: fakeConversationHandlers(async () => {
+          throw new StoreScopedReportError(STORE_NAME);
+        }),
+        logger,
+      }),
+    );
+
+    await post(app, 'reply-store-scoped-no-cause');
+
+    expect(logger.error).toHaveBeenCalledWith('line-webhook.dispatch_failed', { errorKind: 'StoreScopedReportError' });
+  });
+
+  it('店舗を決める前の例外（店舗名の無い例外）には、汎用の再試行案内をちょうど 1 回返す', async () => {
+    const messenger = fakeMessenger();
+    const app = createApp(
+      baseDeps({
+        conversationHandlers: fakeConversationHandlers(async () => {
+          throw new Error(`failed for ${STORE_NAME}`);
+        }),
+        messenger,
+      }),
+    );
+
+    await post(app, 'reply-before-resolution');
+
+    expect(messenger.reply).toHaveBeenCalledTimes(1);
+    expect(messenger.reply).toHaveBeenCalledWith('reply-before-resolution', [buildInternalErrorRetryMessage()]);
+  });
+
+  it('店舗名つきの再試行案内の Reply が失敗しても、試みるのは 1 回だけで、失敗を記録する', async () => {
+    const messenger = fakeMessenger(async () => {
+      throw new Error('LINE reply API unavailable');
+    });
+    const logger = fakeLogger();
+    const app = createApp(baseDeps({ conversationHandlers: storeScopedFailure(), messenger, logger }));
+
+    const res = await post(app, 'reply-store-scoped-reply-fails');
+
+    expect(res.status).toBe(200);
+    expect(messenger.reply).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith('line-webhook.retry_reply_failed', { errorKind: 'Error' });
   });
 });

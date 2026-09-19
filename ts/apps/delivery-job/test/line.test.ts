@@ -331,3 +331,163 @@ describe('LineClient.pushMessage — 500/タイムアウトの再送', () => {
     expect(server.requests[0]!.headers['x-line-retry-key']).toBe(RETRY_KEY);
   });
 });
+
+// --- リッチメニュー（tasks 4.2） ------------------------------------------------------
+//
+// 契約の形は @line/bot-sdk の生成型で確かめている:
+//   - GET /v2/bot/richmenu/{richMenuId} → RichMenuResponse（areas[].action は Action で省略可）
+//   - GET /v2/bot/user/{userId}/richmenu → RichMenuIdResponse（richMenuId: string）
+//   - POST /v2/bot/user/{userId}/richmenu/{richMenuId} → MessageAPIResponseBase
+// 照会できなかった場合（非 2xx・ネットワーク断・壊れた本文）は、呼出元が「未準備・張れなかった」
+// として扱えるよう、例外ではなく値で返す。
+
+const MENU_ID = 'richmenu-0123456789abcdef0123456789abcdef';
+const OWNER_ID = 'Ufake00000000000000000000000000aa';
+
+describe('LineClient.getRichMenuActions', () => {
+  it('区画の action を type と data だけの形にして返す', async () => {
+    const server = await useServer((record, res) => {
+      expect(record.method).toBe('GET');
+      expect(record.url).toBe(`/v2/bot/richmenu/${MENU_ID}`);
+      expect(record.headers['authorization']).toBe('Bearer menu-access-token');
+      respondJson(res, 200, {
+        richMenuId: MENU_ID,
+        size: { width: 2500, height: 1686 },
+        selected: true,
+        name: 'completed',
+        chatBarText: 'メニュー',
+        areas: [
+          { bounds: { x: 0, y: 0, width: 833, height: 843 }, action: { type: 'postback', data: 'a=rpt&k=nr' } },
+          { bounds: { x: 833, y: 0, width: 833, height: 843 }, action: { type: 'uri', uri: 'https://example.test/' } },
+          { bounds: { x: 0, y: 843, width: 833, height: 843 } },
+        ],
+      });
+    });
+
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getRichMenuActions('menu-access-token', MENU_ID)).resolves.toEqual([
+      { type: 'postback', data: 'a=rpt&k=nr' },
+      { type: 'uri' },
+    ]);
+  });
+
+  it('メニューが無い（404）ときは null を返す', async () => {
+    const server = await useServer((_record, res) => respondJson(res, 404, { message: 'rich menu not found' }));
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getRichMenuActions('menu-access-token', MENU_ID)).resolves.toBeNull();
+  });
+
+  it('5xx のときは null を返す', async () => {
+    const server = await useServer((_record, res) => respondJson(res, 500, { message: 'internal error' }));
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getRichMenuActions('menu-access-token', MENU_ID)).resolves.toBeNull();
+  });
+
+  it('本文が壊れているときは null を返す', async () => {
+    const server = await useServer((_record, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('not json');
+    });
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getRichMenuActions('menu-access-token', MENU_ID)).resolves.toBeNull();
+  });
+
+  it('ネットワーク断のときは例外にせず null を返す', async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new TypeError('fetch failed');
+    };
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: 'https://api.invalid', fetchImpl });
+
+    await expect(client.getRichMenuActions('menu-access-token', MENU_ID)).resolves.toBeNull();
+  });
+});
+
+describe('LineClient.getUserRichMenuId', () => {
+  it('個別のメニューがあるときは linked で ID を返す', async () => {
+    const server = await useServer((record, res) => {
+      expect(record.method).toBe('GET');
+      expect(record.url).toBe(`/v2/bot/user/${OWNER_ID}/richmenu`);
+      expect(record.headers['authorization']).toBe('Bearer menu-access-token');
+      respondJson(res, 200, { richMenuId: MENU_ID });
+    });
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getUserRichMenuId('menu-access-token', OWNER_ID)).resolves.toEqual({
+      kind: 'linked',
+      richMenuId: MENU_ID,
+    });
+  });
+
+  it('個別のメニューが無い（404）ときは not_linked を返す', async () => {
+    const server = await useServer((_record, res) => respondJson(res, 404, { message: 'no rich menu linked' }));
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getUserRichMenuId('menu-access-token', OWNER_ID)).resolves.toEqual({ kind: 'not_linked' });
+  });
+
+  it('5xx のときは lookup_failed に状態コードを添えて返す', async () => {
+    const server = await useServer((_record, res) => respondJson(res, 503, { message: 'unavailable' }));
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getUserRichMenuId('menu-access-token', OWNER_ID)).resolves.toEqual({
+      kind: 'lookup_failed',
+      httpStatus: 503,
+    });
+  });
+
+  it('本文が richMenuId を持たないときは lookup_failed を返す', async () => {
+    const server = await useServer((_record, res) => respondJson(res, 200, { richMenuId: 42 }));
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.getUserRichMenuId('menu-access-token', OWNER_ID)).resolves.toEqual({
+      kind: 'lookup_failed',
+      httpStatus: 200,
+    });
+  });
+
+  it('ネットワーク断のときは例外にせず lookup_failed を返す', async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new TypeError('fetch failed');
+    };
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: 'https://api.invalid', fetchImpl });
+
+    await expect(client.getUserRichMenuId('menu-access-token', OWNER_ID)).resolves.toEqual({
+      kind: 'lookup_failed',
+      httpStatus: null,
+    });
+  });
+});
+
+describe('LineClient.linkUserRichMenu', () => {
+  it('張れたときは true を返す', async () => {
+    const server = await useServer((record, res) => {
+      expect(record.method).toBe('POST');
+      expect(record.url).toBe(`/v2/bot/user/${OWNER_ID}/richmenu/${MENU_ID}`);
+      expect(record.headers['authorization']).toBe('Bearer menu-access-token');
+      respondJson(res, 200, {});
+    });
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.linkUserRichMenu('menu-access-token', OWNER_ID, MENU_ID)).resolves.toBe(true);
+  });
+
+  it('張れなかったときは例外にせず false を返す', async () => {
+    const server = await useServer((_record, res) => respondJson(res, 400, { message: 'invalid user id' }));
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: server.url });
+
+    await expect(client.linkUserRichMenu('menu-access-token', OWNER_ID, MENU_ID)).resolves.toBe(false);
+  });
+
+  it('ネットワーク断のときは例外にせず false を返す', async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new TypeError('fetch failed');
+    };
+    const client = new LineClient(CREDENTIALS, { apiBaseUrl: 'https://api.invalid', fetchImpl });
+
+    await expect(client.linkUserRichMenu('menu-access-token', OWNER_ID, MENU_ID)).resolves.toBe(false);
+  });
+});

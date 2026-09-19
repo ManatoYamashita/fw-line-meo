@@ -10,11 +10,13 @@
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "lint": "eslint src test scripts",
     "test": "vitest run --passWithNoTests",
-    "setup-rich-menus": "node dist-scripts/scripts/setup-rich-menus.js"
+    "setup-rich-menus": "node dist-scripts/scripts/setup-rich-menus.js",
+    "relink-completed-menu": "node dist-scripts/scripts/relink-completed-menu.js"
   },
   "dependencies": {
     "@fwlm/db": "workspace:*",
     "@fwlm/design-tokens": "workspace:*",
+    "@fwlm/line-report": "workspace:*",
     "@fwlm/observability": "workspace:*",
     "@fwlm/store-identification": "workspace:*",
     "@hono/node-server": "^1",

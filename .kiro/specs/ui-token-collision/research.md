@@ -7,7 +7,7 @@
 - **Key Findings**:
   1. **「差分コンパイル」で越境衝突だけを誤検出ゼロで検出できる**ことを実測で確認した。素の Tailwind とプロジェクトの theme.css を同一ツールチェーンでコンパイルし、各ユーティリティが読む**テーマ変数名**を比較すると、`max-w-*` 等の越境衝突だけが差分として現れ、意図した同名上書き（`--text-*` / `--radius-*` / `--font-*` / `--shadow-*`）は一切差分にならない。
   2. **`--radius-sm/md/lg` の上書きを外すと、角丸階層が要件どおりに復活する**（sm 0.25 / md 0.375 / lg 0.5 / xl 0.75rem・全段が相異なる）。`:root { --radius: var(--radius-md) }` と Button の `rounded-[min(var(--radius-md),10px)]` は上書きを外しても `--radius-md` が生成 CSS に出力されるため壊れない（実測確認済み）。
-  3. **`design-tokens` の `spacing` / `radius` には実行時の消費者が 1 つも無い。** LINE Flex（`delivery-job/src/flex.ts`）が消費しているのは `lineColors` のみで、余白は LINE 独自のキーワード（`'md'` / `'sm'`）を使っており `cornerRadius` の指定も無い。要件 2.3 により `spacing` の定義は維持するが、本 spec 完了後の**唯一の機械的な錨は同期ガードそのもの**になる。
+  3. **`design-tokens` の `spacing` / `radius` には実行時の消費者が 1 つも無い。** LINE Flex（`delivery-job/src/flex.ts`）が消費しているのは `lineColors` のみで、余白は LINE 独自のキーワード（`'md'` / `'sm'`）を使っており `cornerRadius` の指定も無い。要件 2.3 により `spacing` の定義は維持するが、本 spec 完了後の**唯一の機械的な錨は同期ガードそのもの**になる。（後日の追記: `delivery-job/src/flex.ts` は `line-on-demand-report` で削除された。消費者の顔ぶれは §6 の追記のとおり変わったが、`spacing` / `radius` に実行時の消費者が無いという結論は変わっていない）
 
 ## Research Log
 
@@ -86,6 +86,7 @@
   - `spacing` / `radius` / `typography` / `shadow` の各シンボルは **`design-tokens` 自身の `tokens.test.ts` 以外から参照されていない**。
   - LINE Flex は余白を独自キーワード（`spacing: 'md'` / `margin: 'md'`）で指定しており、rem 値を消費しない。`cornerRadius` の指定も現状無い。
 - **Implications**: 要件 2.3 により `spacing` は維持するが、**その正しさを担保する唯一の機構は本 spec が新設する同期ガードになる**。design.md にこの事実を明記し、将来 Flex 側で `cornerRadius` を使う際の接続点として `radius` を残す。
+- **後日の追記（`line-on-demand-report` の着地時）**: 上の Findings は 2026-08-02 の実測であり、その時点では正しい。その後 `apps/delivery-job/src/flex.ts` は削除され、LINE の Flex を組み立てるコードは `delivery-job/src/notification.ts` と `line-webhook/src/line/messages.ts`・`src/report/format.ts`・`src/report/builders/new-reviews.ts`・`comparison.ts`・`trend.ts` になった。これらが読むのは `lineColors` と `lineLayout`（Issue #42 で追加された LINE 用の寸法トークン）であり、`spacing` / `radius` / `typography` / `shadow` を読む実行時の消費者は今も 1 つも無い。したがって Implications はそのまま有効である。
 
 ### 7. 既存の検証資産と CI
 

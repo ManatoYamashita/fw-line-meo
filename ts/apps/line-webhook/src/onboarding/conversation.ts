@@ -1,5 +1,4 @@
 import type {
-  AuditLogInput,
   AuditLogger,
   OnboardingSessionRow,
   OwnerRow,
@@ -16,8 +15,9 @@ import type {
   TransactionClient,
 } from '@fwlm/store-identification';
 import { decodePostback } from './stages.js';
+import { linkCompletedMenu, tryAuditLog } from '../owner/completed-menu.js';
+import { isStoreIdentified, type StoreIdentifiedOwnerRouterFactory } from '../owner/router.js';
 import {
-  buildAlreadyCompletedMessage,
   buildCandidateCarouselMessage,
   buildCandidateSelectionExpiredMessage,
   buildCompletionMessage,
@@ -27,6 +27,7 @@ import {
   buildInviteCodeLockedMessage,
   buildPlaceAlreadyRegisteredMessage,
   buildSearchFailedMessage,
+  buildStatusGuidanceMessage,
   buildStoreNameInputGuidanceMessage,
   buildStoreNotFoundMessage,
 } from '../line/messages.js';
@@ -34,8 +35,14 @@ import {
 // オンボーディング会話ロジック（design.md「ConversationHandlers」）。
 // タスク 3.2 は follow 処理（Req 1.1, 1.2）と招待コード段階（Req 2.1-2.5）を実装した。
 // タスク 3.3 は店名検索〜確定段階（Req 3.1-3.4, 4.1, 4.2, 4.4, 4.5）を追記した。
-// 本タスク（3.4）は completed 段階の固定案内・段階別 fallback・resume postback・
-// 完了時のリッチメニュー個別リンク（Req 4.3, 4.6, 5.2, 5.3, 6.2, 6.3）を追記する。
+// タスク 3.4 は completed 段階の固定案内・段階別 fallback・resume postback・
+// 完了時のリッチメニュー個別リンク（Req 4.3, 4.6, 5.2, 5.3, 6.2, 6.3）を追記した。
+//
+// line-on-demand-report tasks 3.10（Requirements 2.6・2.9）: 店舗の登録が完了したかは、会話の段階ではなく
+// owners.onboarding_status で判定する。handleEvent の入口でオーナーを 1 回だけ照会し、店舗特定済みなら、段階を
+// 読まずに振り分け口（owner/router.ts）へ渡す。代理店が店舗を登録したオーナーは、段階が途中（例: 店名入力待ち）の
+// まま店舗特定済みになるので、段階で判定するとオンボーディングの案内（招待コード・店名の入力）を返してしまう。
+// 以下の状態機械は、店舗特定済みでないオーナーだけを扱う。
 //
 // ConversationDeps の設計上の適応（design.md の簡略化を実アクセサに合わせて調整）:
 // design.md の Service Interface スケッチは `updateSession(lineUserId, patch)` のように
@@ -65,13 +72,6 @@ export interface OwnersAccessor {
 
 export interface InviteCodesAccessor {
   findActiveInviteCode(db: Queryable, code: string): Promise<{ agencyId: string } | null>;
-}
-
-/**
- * 例外の**種別**だけを取り出す。本文は記録しない（要件 2.5）。
- */
-function errorKindOf(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : 'UnknownError';
 }
 
 /** 補助的処理の成否を記録する契約。事象名で識別する。 */
@@ -104,6 +104,12 @@ export interface ConversationDeps {
   // Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
   // config.ts の LIFF_STORE_DETAIL_URL から配線する。
   liffStoreDetailUrl: string;
+  /**
+   * 店舗特定済みオーナーの振り分け口を作る（line-on-demand-report tasks 3.10）。イベントごとに、そのリクエストの
+   * ロガーと Messenger を渡して呼ぶ（振り分け口とレポート応答は、作成時のロガーで記録するため）。
+   * 合成ルート（index.ts）が owner/router.ts の createStoreIdentifiedOwnerRouterFactory で配線する。
+   */
+  createOwnerRouter: StoreIdentifiedOwnerRouterFactory;
 }
 
 export interface ConversationHandlers {
@@ -133,9 +139,19 @@ export function createConversationHandlers(deps: ConversationDeps): Conversation
               logger: logger ?? deps.logger,
               messenger: lineLogger ? withLineMessengerLogger(deps.messenger, lineLogger) : deps.messenger,
             };
+
+      // line-on-demand-report Requirements 2.6・2.9: 店舗特定済みかは onboarding_status で決め、段階は見ない。
+      // 照会はイベントにつき、ここの 1 回だけにする（友だち追加の処理もこの結果を使う）。店舗特定済みなら、段階の
+      // 読み出しも含めて振り分け口に任せる（段階を 2 回読まない。design.md「Performance」）。
+      const owner = await requestDeps.owners.findOwnerByLineUserId(requestDeps.db, event.lineUserId);
+      if (isStoreIdentified(owner)) {
+        const router = requestDeps.createOwnerRouter({ logger: requestDeps.logger, messenger: requestDeps.messenger });
+        return router.handleEvent(event, owner);
+      }
+
       switch (event.kind) {
         case 'follow':
-          return handleFollow(requestDeps, event);
+          return handleFollow(requestDeps, event, owner);
         case 'text':
           return handleText(requestDeps, event);
         case 'postback':
@@ -152,7 +168,8 @@ export function createConversationHandlers(deps: ConversationDeps): Conversation
  * セッションは一切更新せず、現在の段階で必要な操作の案内を再送するのみ。
  * 未知ユーザーの場合は getOrCreateSession が await_invite_code の新規セッションを返すため、
  * テキスト入力での未知ユーザーと同様に招待コード入力案内（buildGreetingMessage）へ倒れる。
- * completed 段階は buildStageGuidanceMessage 経由で固定の完了案内となる（Req 4.6 と整合）。
+ * completed 段階は buildStageGuidanceMessage 経由でステータス案内となる（Req 4.6 と整合。店舗特定済みの
+ * オーナーは入口で振り分け口へ渡るので、ここで completed を見るのは段階とオーナーの状態が食い違うときだけ）。
  */
 async function handleUnsupported(
   deps: ConversationDeps,
@@ -165,11 +182,10 @@ async function handleUnsupported(
 async function handleFollow(
   deps: ConversationDeps,
   event: Extract<InboundEvent, { kind: 'follow' }>,
+  // handleEvent の入口で照会したオーナー（店舗特定済みでない。未登録なら null）。ここで照会し直さない。
+  existingOwner: OwnerRow | null,
 ): Promise<void> {
-  const [session, existingOwner] = await Promise.all([
-    deps.sessions.getOrCreateSession(deps.db, event.lineUserId),
-    deps.owners.findOwnerByLineUserId(deps.db, event.lineUserId),
-  ]);
+  const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
   if (!existingOwner || session.stage === 'await_invite_code') {
     // Req 1.1: 未登録ユーザーの友だち追加 → 挨拶＋招待コード入力案内。stage は据え置き（await_invite_code）。
@@ -207,7 +223,8 @@ function buildStageGuidanceMessage(session: OnboardingSessionRow): LineMessage {
       return buildConfirmationMessage(candidate);
     }
     case 'completed':
-      return buildAlreadyCompletedMessage();
+      // 店舗特定済みのオーナーは入口で振り分け口へ渡るので、ここへ来るのは段階とオーナーの状態が食い違うときだけ。
+      return buildStatusGuidanceMessage();
   }
 }
 
@@ -218,9 +235,11 @@ async function handleText(
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
   if (session.stage === 'completed') {
-    // Req 4.6: completed 段階への入力は、内容を問わず固定案内のみを返す。
+    // Req 4.6: completed 段階への入力は、内容を問わずステータス案内のみを返す。
     // セッション更新・再検索・その他の処理は一切行わない。
-    await deps.messenger.reply(event.replyToken, [buildAlreadyCompletedMessage()]);
+    // 店舗の登録の完了はこの段階では判定しない（handleEvent の入口の onboarding_status で判定し、店舗特定済みの
+    // オーナーは振り分け口へ渡す）。ここへ来るのは、段階が completed なのにオーナーが店舗特定済みでないときだけ。
+    await deps.messenger.reply(event.replyToken, [buildStatusGuidanceMessage()]);
     return;
   }
 
@@ -384,10 +403,12 @@ async function handlePostback(
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
   if (session.stage === 'completed') {
-    // Req 4.6: completed 段階では postback の種類（resume 導線含む）を問わず固定案内のみ返す。
+    // Req 4.6: completed 段階では postback の種類（resume 導線含む）を問わずステータス案内のみ返す。
     // セッション更新・その他の処理は一切行わない。data の decode すら行う必要がない
     // （decode 結果に関わらず結論は変わらないため）。
-    await deps.messenger.reply(event.replyToken, [buildAlreadyCompletedMessage()]);
+    // 店舗特定済みのオーナー（レポートの postback を含む）は入口で振り分け口へ渡るので、ここへ来るのは、段階が
+    // completed なのにオーナーが店舗特定済みでないときだけ（handleText の completed と同じ）。
+    await deps.messenger.reply(event.replyToken, [buildStatusGuidanceMessage()]);
     return;
   }
 
@@ -488,60 +509,10 @@ async function handleConfirm(
   // トランザクションで commit 済みであり、この呼び出しはそれに付随するベストエフォートな
   // UX 補助動作（LINE 側のリッチメニュー割り当て）に過ぎない。ここで失敗しても
   // 巻き戻すべきトランザクションは存在せず、また reply は既に送信済みのため、
-  // handleEvent 全体を失敗させることなく握りつぶす
-  // （design.md「LineMessenger」の reply 失敗時の扱いと同じ「例外にしない」方針）。
-  // **成功も失敗も記録する**（Issue #228 タスク 4）。失敗だけを記録すると「記録が無い」が
-  // 成功と未実行のどちらを意味するか判定できず、Issue 151 と同型の無音になる。DB の行は成否の
-  // 証拠にならない（infra/README.md が「実際に切り替わったか」を意味しないと記録している）。
-  //
-  // **記録は業務処理の外側で行う。** 同じ try の中へ入れると、記録の手段が投げたときに
-  // catch が走り、**成功した切り替えに対して失敗が記録される**（成功事象を足した理由が
-  // 自壊する）。さらに記録が catch の中で投げれば handleEvent を抜け、オーナーへ不要な
-  // 再試行案内が出る（要件 3.3 違反）。成否を先に確定させ、記録は別の try で包む。
-  let linked = false;
-  let linkError: unknown;
-  try {
-    await deps.messenger.linkRichMenu(event.lineUserId, deps.lineRichMenuCompletedId);
-    linked = true;
-  } catch (err) {
-    // 業務処理は継続する（巻き戻すトランザクションは無く、reply も送信済み）。
-    linkError = err;
-  }
-
-  try {
-    if (linked) {
-      deps.logger.info('line-webhook.richmenu_linked');
-      await tryAuditLog(deps, {
-        actorType: 'owner',
-        actorId: session.owner_id,
-        action: 'rich_menu_linked',
-        targetType: 'owner',
-        targetId: session.owner_id,
-      });
-    } else {
-      deps.logger.warn('line-webhook.richmenu_link_failed', { errorKind: errorKindOf(linkError) });
-      await tryAuditLog(deps, {
-        actorType: 'owner',
-        actorId: session.owner_id,
-        action: 'rich_menu_link_failed',
-        targetType: 'owner',
-        targetId: session.owner_id,
-      });
-    }
-  } catch {
-    // swallowed-exception: intentional — 記録経路自身の失敗を業務処理へ伝播させない。
-    // 記録できないことを理由に、利用者に見える振る舞いを変えない（要件 3.2 / 3.3）。
-  }
-}
-
-/** 監査記録の障害は業務フローを巻き戻さず、正典イベントへ警告を残す。 */
-async function tryAuditLog(deps: ConversationDeps, input: AuditLogInput): Promise<void> {
-  if (!deps.auditLog) return;
-  try {
-    await deps.auditLog(input);
-  } catch (err) {
-    deps.logger.warn('line-webhook.audit_log_failed', { errorKind: errorKindOf(err) });
-  }
+  // handleEvent 全体を失敗させない（design.md「LineMessenger」の reply 失敗時の扱いと同じ「例外にしない」方針）。
+  // リンクと成否の記録（成功も失敗も記録し、記録は業務処理の外側で行う）は、店舗特定済みオーナーの振り分け口の
+  // メニュー照合と同じ関数（owner/completed-menu.ts）で行う。この関数は例外を投げない。
+  await linkCompletedMenu(deps, event.lineUserId, session.owner_id);
 }
 
 /** Req 4.5: 確認段階での取りやめ。店名入力からやり直せる状態に戻す。 */

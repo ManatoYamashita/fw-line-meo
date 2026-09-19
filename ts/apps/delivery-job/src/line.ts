@@ -1,6 +1,7 @@
 // LINE Push クライアント（Task 4.2）。
 //
-// 責務は「Stateless channel access token の発行」と「Push 1 件の送信・分類・再送」のみ。
+// 責務は「Stateless channel access token の発行」と「Push 1 件の送信・分類・再送」、および
+// リッチメニューの照会とオーナーへのリンク（line-on-demand-report tasks 4.2）のみ。
 // 対象抽出・summary_deliveries への書込（retry_key 発行含む）・オーケストレーションは対象外
 // （task 4.3/4.4 の責務）。retry_key は summary_deliveries 行が source of truth であり、
 // 本モジュールは呼出元から常に受け取る（内部で UUID を生成しない）。
@@ -18,11 +19,18 @@
 //     429 は "You have reached your monthly limit."（月次クォータ超過）と
 //     "The API rate limit has been exceeded."（レート制限）をメッセージ本文で判別する
 //     （ステータスコードのみでは区別できない）。
+//   - .claude/skills/messaging-api/references/rich-menu.md「Rich Menu CRUD」「Per-user Rich Menu」:
+//     取得は `GET /v2/bot/richmenu/{richMenuId}`、オーナーのメニューの照会は
+//     `GET /v2/bot/user/{userId}/richmenu`、リンクは `POST /v2/bot/user/{userId}/richmenu/{richMenuId}`。
+//     応答の形は @line/bot-sdk の生成型（RichMenuResponse・RichMenuIdResponse・RichMenuArea）で確かめた。
 //   - .claude/skills/messaging-api/references/channel-token.md「Stateless Channel Access Token」:
 //     `POST https://api.line.me/oauth2/v3/token` に grant_type=client_credentials・client_id・
 //     client_secret を渡す方式（Method 1）。JWT 方式（Method 2）は鍵管理基盤が別途必要なため
 //     本タスクでは採用しない（CONCERNS 参照）。
 
+import type { RichMenuActionLike } from '@fwlm/line-report';
+
+const DEFAULT_API_BASE_URL = 'https://api.line.me';
 const DEFAULT_TOKEN_ENDPOINT = 'https://api.line.me/oauth2/v3/token';
 const DEFAULT_PUSH_ENDPOINT = 'https://api.line.me/v2/bot/message/push';
 
@@ -90,7 +98,21 @@ export type LinePushResult = LinePushSuccess | LinePushFailed | LinePushQuotaExc
 
 // --- クライアント本体 ----------------------------------------------------------------
 
+/**
+ * オーナーに紐づくリッチメニューの照会結果。
+ *
+ * 「個別のリンクが無い（404）」と「照会できなかった」を分ける。設計（design.md「ReportMenuGate」）は
+ * 前者を張り直す対象として扱い、tasks は後者を「張れなかった」として扱うと定めており、真偽 2 値では
+ * この 2 つを言い分けられないためである。
+ */
+export type UserRichMenuLookup =
+  | { readonly kind: 'linked'; readonly richMenuId: string }
+  | { readonly kind: 'not_linked' }
+  | { readonly kind: 'lookup_failed'; readonly httpStatus: number | null };
+
 export interface LineClientOptions {
+  /** テスト用に LINE API の基点 URL を差し替える（リッチメニュー系の呼出が使う）。 */
+  readonly apiBaseUrl?: string;
   /** テスト用にトークン発行エンドポイントを差し替える。 */
   readonly tokenEndpoint?: string;
   /** テスト用に Push エンドポイントを差し替える。 */
@@ -154,6 +176,50 @@ function extractErrorMessage(rawBody: string): string {
   return rawBody;
 }
 
+/** JSON の本文を素の object として読む。JSON でない・object でない本文は null を返す。 */
+function parseJsonObject(rawBody: string): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    // swallowed-exception: intentional — 壊れた本文は「照会できなかった」として呼出元へ返す
+    // （例外にすると、実行の途中で 1 店舗の照会が全体を止めうる）。
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * リッチメニューの応答（RichMenuResponse）から、区画の action を判定に要る項目だけの形で取り出す。
+ * 生成型の areas[].action は省略可であり、bounds だけの区画もありうるので、action を持たない区画は飛ばす。
+ */
+function parseRichMenuActions(rawBody: string): RichMenuActionLike[] | null {
+  const parsed = parseJsonObject(rawBody);
+  if (parsed === null || !Array.isArray(parsed['areas'])) {
+    return null;
+  }
+  const actions: RichMenuActionLike[] = [];
+  for (const area of parsed['areas']) {
+    if (typeof area !== 'object' || area === null) {
+      continue;
+    }
+    const action: unknown = (area as Record<string, unknown>)['action'];
+    if (typeof action !== 'object' || action === null) {
+      continue;
+    }
+    const type: unknown = (action as Record<string, unknown>)['type'];
+    if (typeof type !== 'string') {
+      continue;
+    }
+    const data: unknown = (action as Record<string, unknown>)['data'];
+    actions.push(typeof data === 'string' ? { type, data } : { type });
+  }
+  return actions;
+}
+
 type PushAttemptOutcome =
   | { readonly kind: 'success'; readonly duplicate: boolean; readonly requestId: string | null }
   | { readonly kind: 'retryable'; readonly requestId: string | null; readonly httpStatus: number | null; readonly message: string }
@@ -162,12 +228,13 @@ type PushAttemptOutcome =
 
 /**
  * LINE Messaging API への唯一の呼出口（design.md Boundary: delivery-job/line）。
- * Push は messages の内容に関わらず送信のみを担当し、Flex JSON の組立（flex.ts）や
+ * Push は messages の内容に関わらず送信のみを担当し、通知の Flex の組立（notification.ts）や
  * 配信対象・記録（task 4.3）とは責務を分離する。
  */
 export class LineClient {
   private readonly channelId: string;
   private readonly channelSecret: string;
+  private readonly apiBaseUrl: string;
   private readonly tokenEndpoint: string;
   private readonly pushEndpoint: string;
   private readonly fetchImpl: typeof fetch;
@@ -180,6 +247,7 @@ export class LineClient {
   constructor(credentials: LineCredentials, options: LineClientOptions = {}) {
     this.channelId = credentials.channelId;
     this.channelSecret = credentials.channelSecret;
+    this.apiBaseUrl = options.apiBaseUrl ?? DEFAULT_API_BASE_URL;
     this.tokenEndpoint = options.tokenEndpoint ?? DEFAULT_TOKEN_ENDPOINT;
     this.pushEndpoint = options.pushEndpoint ?? DEFAULT_PUSH_ENDPOINT;
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -278,6 +346,85 @@ export class LineClient {
 
       await this.sleep(backoffDelayMs(this.backoffBaseMs, this.backoffMaxMs, attempt));
     }
+  }
+
+  /**
+   * 設定された完了後メニューの区画の action を取り出す（`GET /v2/bot/richmenu/{richMenuId}`）。
+   * 照会できなかった場合（メニューが無い 404・5xx・ネットワーク断・壊れた本文）は null を返す。
+   * 呼出元（menu.ts）は null を「未準備」として扱う。
+   */
+  async getRichMenuActions(accessToken: string, richMenuId: string): Promise<RichMenuActionLike[] | null> {
+    const url = `${this.apiBaseUrl}/v2/bot/richmenu/${encodeURIComponent(richMenuId)}`;
+    const outcome = await this.requestRichMenu('GET', url, accessToken);
+    if (outcome === null || outcome.httpStatus !== 200) {
+      return null;
+    }
+    return parseRichMenuActions(outcome.body);
+  }
+
+  /**
+   * オーナーに紐づくリッチメニューを照会する（`GET /v2/bot/user/{userId}/richmenu`）。
+   * 個別のリンクが無い 404 は not_linked、それ以外の失敗は lookup_failed として区別する。
+   */
+  async getUserRichMenuId(accessToken: string, lineUserId: string): Promise<UserRichMenuLookup> {
+    const url = `${this.apiBaseUrl}/v2/bot/user/${encodeURIComponent(lineUserId)}/richmenu`;
+    const outcome = await this.requestRichMenu('GET', url, accessToken);
+    if (outcome === null) {
+      return { kind: 'lookup_failed', httpStatus: null };
+    }
+    if (outcome.httpStatus === 404) {
+      return { kind: 'not_linked' };
+    }
+    if (outcome.httpStatus !== 200) {
+      return { kind: 'lookup_failed', httpStatus: outcome.httpStatus };
+    }
+    const parsed = parseJsonObject(outcome.body);
+    const richMenuId: unknown = parsed === null ? undefined : parsed['richMenuId'];
+    if (typeof richMenuId !== 'string' || richMenuId.length === 0) {
+      return { kind: 'lookup_failed', httpStatus: outcome.httpStatus };
+    }
+    return { kind: 'linked', richMenuId };
+  }
+
+  /**
+   * オーナーへリッチメニューを張る（`POST /v2/bot/user/{userId}/richmenu/{richMenuId}`）。既存のリンクは
+   * 置き換わる。張れたときだけ true を返し、失敗は例外にしない（呼出元が「張れなかった」として記録する）。
+   */
+  async linkUserRichMenu(accessToken: string, lineUserId: string, richMenuId: string): Promise<boolean> {
+    const url = `${this.apiBaseUrl}/v2/bot/user/${encodeURIComponent(lineUserId)}/richmenu/${encodeURIComponent(richMenuId)}`;
+    const outcome = await this.requestRichMenu('POST', url, accessToken);
+    return outcome !== null && outcome.httpStatus >= 200 && outcome.httpStatus < 300;
+  }
+
+  /**
+   * リッチメニュー系の呼出を 1 回だけ行う。**再送しない** — 失敗は「未準備・張れなかった」として
+   * その実行の中で確定させる方が、毎時のジョブでは待たせずに済む（Push と違い、送り直しの必要が無い）。
+   * ネットワーク断・タイムアウトは null を返す。
+   */
+  private async requestRichMenu(
+    method: 'GET' | 'POST',
+    url: string,
+    accessToken: string,
+  ): Promise<{ readonly httpStatus: number; readonly body: string } | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method,
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+      });
+    } catch {
+      // swallowed-exception: intentional — タイムアウト・ネットワーク断は「照会できなかった」という
+      // 観測可能な結果（null）へ変換して返す。呼出元（menu.ts）が事象として記録する。
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    return { httpStatus: response.status, body: await response.text() };
   }
 
   /** Push を 1 回だけ試行し、結果を分類する（再送要否の判断は呼出元 pushMessage が行う）。 */
