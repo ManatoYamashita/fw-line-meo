@@ -1,7 +1,7 @@
 // Google Maps の帰属表示（Places API のポリシー・line-on-demand-report Requirements 1.6, 8.1）。
 //
 // Places のデータを Google Map なしで出す面は、種類を問わず帰属表示を要する。出す面はレポートだけでは
-// なく、オンボーディングの候補カルーセルと確認バブル（確定前の検索結果）と、変化の通知も含む（#287）。
+// なく、オンボーディングの候補カルーセルと確認バブル（確定前の検索結果）と、変化の通知も含む（Issue #287）。
 // レポート固有の関心ではないので、LINE 面の基本部品として line/ に置く。
 //
 // 帰属を付けない面: 確定後の店舗名（stores.name）だけを出すテキストの案内。オーナーが自ら店名で検索し、
@@ -27,7 +27,7 @@ export const ATTRIBUTION_TEXT = 'データ提供: Google Maps';
  * - adjustMode（shrink-to-fit）のような大きさを変える指定を持たない。縮めると 12sp を下回りうる
  * - 書体は満たしている。ポリシーは「Roboto（読み込みは任意）」とし、フォールバックとして
  *   「product 内で既に使っている任意の sans serif か `Sans-Serif`」を明示的に許す。LINE Flex は書体を
- *   指定するプロパティを持たないが、既定の書体がそのフォールバックに当たる（#287 で原文を当たり直して確認）
+ *   指定するプロパティを持たないが、既定の書体がそのフォールバックに当たる（Issue #287 で原文を当たり直して確認）
  */
 export function buildAttributionText(): FlexTextComponent {
   return {

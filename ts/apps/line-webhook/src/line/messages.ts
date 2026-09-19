@@ -2,6 +2,7 @@ import type { StoreCandidate } from '@fwlm/db';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
 import { REPORT_LABELS } from '@fwlm/line-report';
 import { encodePostback } from '../onboarding/stages.js';
+import { attributionFooter, withAttributionAltText } from './attribution.js';
 import type { LineMessage } from './client.js';
 import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
 
@@ -15,6 +16,11 @@ import type { FlexBubbleContents, FlexCarouselContents } from './flex-types.js';
 // Requirement 7.4: すべての案内文を日本語で提供する（文言をこのモジュールに集約する）。
 // line-on-demand-report Requirement 2.5・2.10: ステータス案内と完了メッセージは、毎日の定期配信を
 //   約束せず、変化があった日に知らせることとメニューから確認できることを案内する。
+// line-on-demand-report Requirement 8.1（Issue #287）: Places のデータを載せる面は帰属表示を持つ。
+//   本モジュールで対象になるのは、確定前の検索結果（店名と住所）を出す候補カルーセルと確認バブルの
+//   2 つだけである。確定後の店舗名（stores.name）はオーナーが自ら選んで確定した自店の識別情報として
+//   扱い、帰属表示を付けない（report/builders/notices.ts のコメントに同じ整理がある）。
+//   どのビルダーが帰属表示を要るかの宣言と、その総和は test/line/messages.test.ts が固定する。
 //
 // 純粋関数のみ（design.md「MessageBuilders」制約）。I/O・副作用・LineMessenger/DB への
 // 依存は一切持たない。postback data の符号化は onboarding/stages.ts の encodePostback を
@@ -60,23 +66,21 @@ function buildCandidateBubble(candidate: StoreCandidate, index: number): FlexBub
         { type: 'text', text: candidate.address, size: lineLayout.descriptionSize, color: lineColors.caption, wrap: true },
       ],
     },
-    footer: {
-      type: 'box',
-      layout: 'vertical',
-      paddingAll: lineLayout.blockPadding,
-      contents: [
-        {
-          type: 'button',
-          style: 'primary',
-          action: {
-            type: 'postback',
-            label: 'この店舗を選ぶ',
-            data: encodePostback({ kind: 'select_candidate', index }),
-            displayText: `${index + 1}番目の候補を選択`,
-          },
+    // 候補の店名と住所は Places の検索結果そのものなので、帰属表示を持たせる（8.1・Issue #287）。
+    // カルーセルのバブルは LINE の画面上でそれぞれ独立して見えるため、ポリシーの言う「同じ容器」は
+    // バブル 1 つであり、帰属表示はカルーセルに 1 つではなくバブルごとに 1 つ置く。
+    footer: attributionFooter([
+      {
+        type: 'button',
+        style: 'primary',
+        action: {
+          type: 'postback',
+          label: 'この店舗を選ぶ',
+          data: encodePostback({ kind: 'select_candidate', index }),
+          displayText: `${index + 1}番目の候補を選択`,
         },
-      ],
-    },
+      },
+    ]),
   };
 }
 
@@ -160,7 +164,9 @@ export function buildCandidateCarouselMessage(candidates: readonly StoreCandidat
 
   return {
     type: 'flex',
-    altText: `店舗候補が${candidates.length}件見つかりました。トークから該当する店舗を選択してください。`,
+    altText: withAttributionAltText(
+      `店舗候補が${candidates.length}件見つかりました。トークから該当する店舗を選択してください。`,
+    ),
     contents,
   };
 }
@@ -181,39 +187,42 @@ export function buildConfirmationMessage(candidate: StoreCandidate): LineMessage
         { type: 'text', text: candidate.address, size: lineLayout.descriptionSize, color: lineColors.caption, wrap: true },
       ],
     },
-    footer: {
-      type: 'box',
-      layout: 'horizontal',
-      spacing: lineLayout.itemGap,
-      paddingAll: lineLayout.blockPadding,
-      contents: [
-        {
-          type: 'button',
-          style: 'primary',
-          action: {
-            type: 'postback',
-            label: '確定する',
-            data: encodePostback({ kind: 'confirm' }),
-            displayText: '確定する',
+    // 候補の店名と住所は Places の検索結果そのものなので、帰属表示を持たせる（8.1・Issue #287）。
+    // 2 つのボタンは横並びのままにし、それを 1 つの部品として帰属表示の上へ積む。
+    footer: attributionFooter([
+      {
+        type: 'box',
+        layout: 'horizontal',
+        spacing: lineLayout.itemGap,
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            action: {
+              type: 'postback',
+              label: '確定する',
+              data: encodePostback({ kind: 'confirm' }),
+              displayText: '確定する',
+            },
           },
-        },
-        {
-          type: 'button',
-          style: 'secondary',
-          action: {
-            type: 'postback',
-            label: 'やり直す',
-            data: encodePostback({ kind: 'restart' }),
-            displayText: 'やり直す',
+          {
+            type: 'button',
+            style: 'secondary',
+            action: {
+              type: 'postback',
+              label: 'やり直す',
+              data: encodePostback({ kind: 'restart' }),
+              displayText: 'やり直す',
+            },
           },
-        },
-      ],
-    },
+        ],
+      },
+    ]),
   };
 
   return {
     type: 'flex',
-    altText: `「${candidate.name}」でよろしいですか？内容をご確認のうえ確定してください。`,
+    altText: withAttributionAltText(`「${candidate.name}」でよろしいですか？内容をご確認のうえ確定してください。`),
     contents,
   };
 }

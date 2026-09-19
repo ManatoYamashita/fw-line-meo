@@ -2,7 +2,7 @@
 
 exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 候補カルーセル（1 件） 1`] = `
 {
-  "altText": "店舗候補が1件見つかりました。トークから該当する店舗を選択してください。",
+  "altText": "店舗候補が1件見つかりました。トークから該当する店舗を選択してください。（データ提供: Google Maps）",
   "contents": {
     "contents": [
       {
@@ -40,9 +40,18 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
               "style": "primary",
               "type": "button",
             },
+            {
+              "align": "center",
+              "color": "#5E5E5E",
+              "size": "13px",
+              "text": "データ提供: Google Maps",
+              "type": "text",
+              "wrap": false,
+            },
           ],
           "layout": "vertical",
           "paddingAll": "lg",
+          "spacing": "sm",
           "type": "box",
         },
         "size": "kilo",
@@ -177,7 +186,7 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
 
 exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼って目視する材料） > 確認 1`] = `
 {
-  "altText": "「テスト食堂」でよろしいですか？内容をご確認のうえ確定してください。",
+  "altText": "「テスト食堂」でよろしいですか？内容をご確認のうえ確定してください。（データ提供: Google Maps）",
   "contents": {
     "body": {
       "contents": [
@@ -210,27 +219,42 @@ exports[`Flex JSON のスナップショット（Flex Message Simulator へ貼�
     "footer": {
       "contents": [
         {
-          "action": {
-            "data": "a=confirm",
-            "displayText": "確定する",
-            "label": "確定する",
-            "type": "postback",
-          },
-          "style": "primary",
-          "type": "button",
+          "contents": [
+            {
+              "action": {
+                "data": "a=confirm",
+                "displayText": "確定する",
+                "label": "確定する",
+                "type": "postback",
+              },
+              "style": "primary",
+              "type": "button",
+            },
+            {
+              "action": {
+                "data": "a=restart",
+                "displayText": "やり直す",
+                "label": "やり直す",
+                "type": "postback",
+              },
+              "style": "secondary",
+              "type": "button",
+            },
+          ],
+          "layout": "horizontal",
+          "spacing": "sm",
+          "type": "box",
         },
         {
-          "action": {
-            "data": "a=restart",
-            "displayText": "やり直す",
-            "label": "やり直す",
-            "type": "postback",
-          },
-          "style": "secondary",
-          "type": "button",
+          "align": "center",
+          "color": "#5E5E5E",
+          "size": "13px",
+          "text": "データ提供: Google Maps",
+          "type": "text",
+          "wrap": false,
         },
       ],
-      "layout": "horizontal",
+      "layout": "vertical",
       "paddingAll": "lg",
       "spacing": "sm",
       "type": "box",
