@@ -1,6 +1,6 @@
 # ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -51,7 +51,7 @@ erDiagram
 | survey_material_tallies | id (uuid) | (store_id, period_month, aspect_count, concern_count, has_comment) unique | store_id → stores | 素材の厚み（良かった点の選択数×気になった点の選択数×一言の有無）の匿名集計カウンタ |
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
 | daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
-| summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 配信記録（店舗×日付で一意の「配信事実」・`retry_key` で冪等再送・TS 書込） |
+| summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 通知記録（店舗×日付で一意。その日に通知を送ったか、送らなかったならなぜかを 1 行で表す・`retry_key` で冪等再送・TS 書込） |
 | agency_invite_codes | id (uuid) | code (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
 | onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
 | line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
@@ -69,6 +69,17 @@ erDiagram
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
 - `daily_summaries`（Go 書込）と `summary_deliveries`（TS 書込）は `competitive-daily-summary` spec で追加。両テーブルとも `stores` に対する `(store_id, summary_date)` 一意制約を持ち、日次バッチ（Go）→ 配信ジョブ（TS）のパイプラインで `daily_summaries` を TS が read → `summary_deliveries` へ結果を書込む、というクロス言語 seam を構成する（`db/write-boundary.md` 参照）。
+- `summary_deliveries.status`（CHECK は `ck_summary_deliveries_status`・`0010` で `0004` の無名の列 CHECK を作り直した）: 通知記録は送った結果だけでなく、送らなかった理由も記録する。送らない判定も予約してから記録するので、同じ日の再実行は同じ店舗を判定し直さない。先頭の 4 値は `0004` からの値で意味を変えない。後ろの 3 値は `line-on-demand-report`（`0010`）で足した。TS の型 `SummaryDeliveryStatus` はこの 7 値と一致させる。
+
+  | 値 | 意味 |
+  |---|---|
+  | `delivered` | 通知を push し、LINE が受理した |
+  | `failed` | push に失敗した、または予約した後に結果を記録できなかった |
+  | `skipped_no_summary` | 当日の集計が無い |
+  | `quota_exceeded` | 月間の上限に達して送れなかった |
+  | `skipped_no_change` | 比較可能だが、新着も順位変動も無い（前日の集計が無い場合を含む） |
+  | `skipped_not_comparable` | 当日の集計が比較可能でない（取得失敗・評価を持つ競合なし・自店が未評価） |
+  | `skipped_menu_unavailable` | 完了後メニューが準備されていない、またはオーナーへ張れなかった |
 - `owners.delivery_hour`（`competitive-daily-summary`・`0004`）: 日次サマリー配信時刻（時単位・デフォルト 7・0-23）。`owners` は既存 TS 境界のため書込責任は変わらず TS。
 - `onboarding_sessions`: `stage='await_invite_code' ⇔ owner_id IS NULL`（`ck_session_owner_stage`）。owner 誕生前の LINE ユーザー状態も本表が唯一保持する。
 - `agency_invite_codes`: `code` は代理店ごとに共有・使い回し可能（`disabled_at` が無効化するまで複数オーナーが同一コードで登録できる。Req 2.5）。
