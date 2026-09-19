@@ -155,6 +155,14 @@ const SINGLE_COMPETITOR_RESPONSE: DetailResponse = {
 /** 競合 0 件の応答。検索欄が消えたうえで、一覧そのものが空状態の案内に置き換わる。 */
 const NO_COMPETITOR_RESPONSE: DetailResponse = { ...DETAIL_RESPONSE, competitors: [] };
 
+/**
+ * 記録が窓に満たない応答（Issue #286 項目 1）。推移を 8/1〜8/5 の 5 日ぶんにする。
+ *
+ * 終点は 8/5 なので、既定の 30 日の窓の公称の始点は 7/7 まで遡り、値を読んだ最初の日（8/1）と
+ * 食い違う。登録から日の浅い店がこの状態にあたる。**この面で、要約の組に期間が添う唯一の状態である。**
+ */
+const SHORT_HISTORY_RESPONSE: DetailResponse = { ...DETAIL_RESPONSE, trend: trendPoints(5) };
+
 // --- 面を開く手順 ----------------------------------------------------------------------
 //
 // 横スクロール実測（store-surface.spec.ts）と自動 a11y 監査（a11y-audit.spec.ts）の双方が
@@ -283,6 +291,12 @@ interface ExpectedView {
   readonly trendTables: number;
   /** 推移の表のデータ行の数（列見出しの行を除く）。 */
   readonly trendRows: number;
+  /**
+   * 期間の要約の組に添えた期間の文言（Issue #286 項目 1）。公称の窓と食い違う組にだけ出るので、
+   * 記録が窓を埋めている状態では空になる。既定の応答は 8/1〜8/30 の連続した 30 日で、30 日の窓とも
+   * 7 日の窓とも食い違わない。**出る側の状態は「記録が窓に満たない」1 つだけである。**
+   */
+  readonly summaryNotes: readonly string[];
   /** 競合の一覧に残る店の数。 */
   readonly visibleCompetitors: number;
   /** 競合の節の読み上げ領域（role="status"）の文言。検索欄が無い状態では空。 */
@@ -336,6 +350,8 @@ const DEFAULT_VIEW: ExpectedView = {
   trendEmptyTexts: [],
   trendTables: 1,
   trendRows: 30,
+  // 8/1〜8/30 が 30 日の窓をちょうど埋めるので、どの組にも期間が添わない。
+  summaryNotes: [],
   visibleCompetitors: COMPETITOR_TOTAL,
   competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
   competitorEmptyTexts: [],
@@ -398,6 +414,9 @@ async function expectView(page: Page, view: ExpectedView): Promise<void> {
   await expect(trend.locator('[data-slot="empty-state"]').locator('p')).toHaveText([...view.trendEmptyTexts]);
   await expect(trend.getByRole('table')).toHaveCount(view.trendTables);
   await expect(trend.getByRole('row')).toHaveCount(view.trendRows === 0 ? 0 : view.trendRows + 1);
+  // 要約の組に添えた期間（Issue #286 項目 1）。値は素のテキストノードで、注記だけが span なので、
+  // この locator は注記だけを拾う。値を span で包む改変が入れば、ここが余分な要素を数えて赤になる。
+  await expect(trend.locator('dl dd > span')).toHaveText([...view.summaryNotes]);
 
   // 競合の節: 件数の文言と一覧に残る店の数、空状態の案内。
   //
@@ -444,16 +463,16 @@ function surfaceState(
 }
 
 /**
- * 横スクロールの実測と自動 a11y 監査を当てる、8 つの表示状態（要件 9.4・Issue #286）。回った状態の数と、
+ * 横スクロールの実測と自動 a11y 監査を当てる、9 つの表示状態（要件 9.4・Issue #286）。回った状態の数と、
  * 状態ごとの構造の件数の総和は、使う側の spec が宣言と完全一致で固定する。
  *
- * 前の 4 つは操作で入る状態、後の 4 つは応答で入る状態である。後の 4 つは 2026-09-19 まで
+ * 前の 4 つは操作で入る状態、後の 5 つは応答で入る状態である。応答で入る状態は 2026-09-19 まで
  * 自動監査が一度も当たっていなかった（Issue #286 の項目 6）。**画面レビューの指摘 M1・M2 は、
- * そのうち「グラフ 0 件」の中に住んでいた指摘である。**
+ * そのうち「グラフ 0 件」の中に住んでいた指摘である。** 9 つ目（記録が窓に満たない）は項目 1 で足した。
  *
- * 既存の 4 状態は差分（spread）で書き、新しい 4 状態は全項目を書く。後者は差分が多く、spread だと
+ * 最初の 4 状態は差分（spread）で書き、応答で入る 5 状態は全項目を書く。後者は差分が多く、spread だと
  * 何を既定から継いだのかが読めなくなるためである。なお spread で書いた状態は、`ExpectedView` に
- * 項目を足したとき既定の値を黙って継ぐ。項目を足すときは 4 状態の値を個別に見直すこと。
+ * 項目を足したとき既定の値を黙って継ぐ。項目を足すときは、その 4 状態の値を個別に見直すこと。
  */
 export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
   surfaceState('既定', { view: DEFAULT_VIEW, structure: DEFAULT_STRUCTURE }),
@@ -511,6 +530,8 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       // 表は残る（順位の列が「—」になるだけで、行は窓の点の数だけある）。
       trendTables: 1,
       trendRows: 7,
+      // 順位は組そのものが記号になり、評価とクチコミ数は 7 日の窓（8/24〜8/30）を埋めている。
+      summaryNotes: [],
       visibleCompetitors: COMPETITOR_TOTAL,
       competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
       competitorEmptyTexts: [],
@@ -533,6 +554,8 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       trendEmptyTexts: [NO_TREND_TEXT],
       trendTables: 0,
       trendRows: 0,
+      // 窓が無いので要約の組そのものが描かれない。
+      summaryNotes: [],
       visibleCompetitors: COMPETITOR_TOTAL,
       competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
       competitorEmptyTexts: [],
@@ -551,6 +574,7 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       trendEmptyTexts: [],
       trendTables: 1,
       trendRows: 30,
+      summaryNotes: [],
       // 一覧は描かれるが、検索欄の下限（2 店）を下回るので検索欄と件数の文言が消える。
       // **一覧を描きながら検索欄が無いのは、この状態だけの組み合わせである。**
       visibleCompetitors: 1,
@@ -570,10 +594,33 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       trendEmptyTexts: [],
       trendTables: 1,
       trendRows: 30,
+      summaryNotes: [],
       visibleCompetitors: 0,
       competitorStatusTexts: [],
       competitorEmptyTexts: [NO_COMPETITORS_TEXT],
     },
     structure: { chipNesting: 5, searchField: 0, tableScrollRegions: 1 },
+  }),
+  // --- ここから、記録が窓に満たない状態（Issue #286 項目 1） ---
+  surfaceState('記録が窓に満たない', {
+    response: SHORT_HISTORY_RESPONSE,
+    view: {
+      checkedChips: ['30日', '順位'],
+      chipCount: 5,
+      // 公称の窓は 7/7〜8/5。横軸はこの範囲に固定され、線は 8/1 からしか伸びない。
+      chartNames: ['順位の推移、7月7日から8月5日まで。'],
+      trendHeading: '直近30日の推移',
+      trendStatusTexts: ['順位の推移、直近30日。最新 3位（8/5）。'],
+      trendEmptyTexts: [],
+      trendTables: 1,
+      trendRows: 5,
+      // **この面で唯一、要約の組に期間が添う状態である。** 3 組とも 8/1〜8/5 しか読んでいないので
+      // 3 つ出る。組ごとに独立して判定しても、この応答では 3 組が同じ日になる。
+      summaryNotes: ['記録 8/1〜8/5', '記録 8/1〜8/5', '記録 8/1〜8/5'],
+      visibleCompetitors: COMPETITOR_TOTAL,
+      competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
+      competitorEmptyTexts: [],
+    },
+    structure: DEFAULT_STRUCTURE,
   }),
 ];

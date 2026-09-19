@@ -47,18 +47,18 @@ const TABLE_SCROLL_REGIONS = 1;
 
 // 表示状態の一覧（fixtures/detail.ts の STORE_SURFACE_STATES）を 2 つの幅で回った数の宣言
 // （store-detail-trend-dashboard の要件 9.4・Issue #265。状態を 8 つへ広げた・Issue #286）。
-// 8 つの状態を、Pixel 5 相当と 320px の 2 つの幅で回る。
+// 9 つの状態を、Pixel 5 相当と 320px の 2 つの幅で回る。
 // 一覧の長さや幅の数から導かずに数で書く。導くと、状態か幅を 1 つ消したときに宣言も一緒に減り、
 // 検査が緑のまま測る範囲が減ったことを見逃すためである。
-const STATE_WIDTH_VISIT_COUNT = 16;
+const STATE_WIDTH_VISIT_COUNT = 18;
 
 // 回った先で照合が通った捲れる領域の件数の総和（Issue #286）。
 //
 // **上の巡回数の宣言だけでは足りない。** 状態ごとの期待値は fixture が持つので、全状態の宣言を 0 に
 // する改変（容器から横の捲りを失わせ、併せて宣言も 0 にする）は、per-state の照合も巡回数の宣言も
 // 素通りする。総和をここへ数で書くことが、その改変を赤にする。
-// 内訳: 「推移 0 件」を除く 7 状態が 1 件ずつ、それを 2 つの幅で回る。
-const SCROLL_REGION_VISIT_TOTAL = 14;
+// 内訳: 「推移 0 件」を除く 8 状態が 1 件ずつ、それを 2 つの幅で回る。
+const SCROLL_REGION_VISIT_TOTAL = 16;
 
 /** 狭い幅の表示領域。高さは、下の既存の 320px の検査にそろえる。 */
 const NARROW_VIEWPORT = { width: 320, height: 720 } as const;
@@ -114,12 +114,12 @@ async function expectScrollRegionsAreTrendTable(page: Page, where: string): Prom
   }
 }
 
-test('8 つの表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は状態ごとの宣言と一致する', async ({
+test('9 つの表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は状態ごとの宣言と一致する', async ({
   page,
 }) => {
   // 各状態の入口は、操作後の表示と、詳細の取得がちょうど 1 回だったことを自分で確かめてから返る。
   // 検索 0 件の状態は長い英字列を入れるので、長い検索語を入れた状態（要件 6.4）も兼ねる。
-  // 8 状態 × 2 幅なので、既定の制限時間（30 秒）では足りない。
+  // 9 状態 × 2 幅なので、既定の制限時間（30 秒）では足りない。
   test.setTimeout(180_000);
 
   const visited: string[] = [];
