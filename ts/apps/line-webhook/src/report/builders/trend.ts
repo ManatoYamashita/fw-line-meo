@@ -331,6 +331,10 @@ function buildHeadingRow(): FlexBoxComponent {
         size: lineLayout.noteSize,
         color: lineColors.description,
         flex: 1,
+        // 値のセル（valueCell）と同じく折り返す。付けないと、列の幅に収まらない見出しが省略記号で
+        // 切り捨てられる（2026-09-19 の実機確認で「クチコミ数」が「クチコ…」になった）。値だけが
+        // 折り返せて見出しが切れる状態は、列が何の数字かを読めなくする。
+        wrap: true,
         ...(index === 0 ? {} : { align: 'end' }),
       }),
     ),

@@ -24,6 +24,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "日付",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -32,6 +33,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "順位",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -40,6 +42,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "評価",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -48,6 +51,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "クチコミ数",
                   "type": "text",
+                  "wrap": true,
                 },
               ],
               "layout": "horizontal",
@@ -406,6 +410,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "日付",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -414,6 +419,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "順位",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -422,6 +428,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "評価",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -430,6 +437,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "クチコミ数",
                   "type": "text",
+                  "wrap": true,
                 },
               ],
               "layout": "horizontal",
@@ -713,6 +721,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "日付",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -721,6 +730,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "順位",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -729,6 +739,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "評価",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -737,6 +748,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "クチコミ数",
                   "type": "text",
+                  "wrap": true,
                 },
               ],
               "layout": "horizontal",
@@ -1058,6 +1070,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "日付",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -1066,6 +1079,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "順位",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -1074,6 +1088,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "評価",
                   "type": "text",
+                  "wrap": true,
                 },
                 {
                   "align": "end",
@@ -1082,6 +1097,7 @@ exports[`スナップショット（Flex Message Simulator へ貼って目視す
                   "size": "xs",
                   "text": "クチコミ数",
                   "type": "text",
+                  "wrap": true,
                 },
               ],
               "layout": "horizontal",
