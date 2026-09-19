@@ -234,13 +234,13 @@
   - _Requirements: 1.4, 1.5, 1.10_
   - _Depends: 1.1, 1.2, 7.1_
 
-- [ ] 7.3 コードを本番へ出す（Step B）
+- [x] 7.3 コードを本番へ出す（Step B）
   - 2〜6 をマージし、稼働イメージの digest を照合する。差し替え前は、設定された完了後メニューがレポート導線を持たないので、配信ジョブが通知を出さないことを確かめる
   - Observable: 実行サマリーの準備判定が毎回 false で、ジョブの失敗が 0 件であり、ステータス案内が新しい文言で返る
   - _Requirements: 1.10_
   - _Depends: 7.2_
 
-- [ ] 7.4 完了後メニューを差し替える（Step C）
+- [x] 7.4 完了後メニューを差し替える（Step C）
   - パイロットと実演の期間でないことを確かめてから、完了後メニューを作り、tf 変数を新 ID にして `tf apply` し、張り替えスクリプトを流して分類を記録する。不一致と判定不能が 0 件なら旧メニューを削除する
   - Observable: 張り替えの分類（件数と先頭 8 文字）と旧メニューの削除が実施記録にあり、次の毎時の実行サマリーの準備判定が true になっている
   - _Requirements: 2.1, 2.2, 2.8, 9.4, 9.5_
@@ -433,7 +433,7 @@ PR #274 を 2026-09-19T08:52:06Z にマージした（マージコミット `b4d
   - 接続先の取り違えを避けるため、proxy は 15432 で起動し、流す前に `stores` の件数で本番であることを確かめた（確定店舗 3 件・オーナー 4 人）
 - **tf apply**
   - このマージで動いた deploy-prod（run `35433348497`）の success を待ってから、**保存しない** plan を取った（デプロイ前の plan を当てるとイメージが巻き戻るため）
-  - `-target=module.delivery_job.google_cloud_run_v2_job.delivery`。結果は `Plan: 0 to add, 1 to change, 0 to destroy` で、中身は `+ env`（`LINE_RICHMENU_COMPLETED_ID` = `richmenu-9249702d…`・現行の完了後メニューの ID）と、既知のずれ（`client` = "gcloud" → null・`client_version` = "568.0.0" → null）だけだった。イメージは unchanged
+  - `-target=module.delivery_job.google_cloud_run_v2_job.delivery`。結果は `Plan: 0 to add, 1 to change, 0 to destroy` で、中身は `+ env`（`LINE_RICHMENU_COMPLETED_ID` = `richmenu-9249702d…`・**この時点の**完了後メニューの ID。7.4 で新しいメニューへ差し替え、旧メニューは削除した）と、既知のずれ（`client` = "gcloud" → null・`client_version` = "568.0.0" → null）だけだった。イメージは unchanged
   - apply 後のジョブを実物で確かめた。env に `LINE_RICHMENU_COMPLETED_ID` が付き、`LIFF_URL` は残っており（Step D で外す）、イメージは `summary-delivery:b4d309b` のまま巻き戻っていない
 - **次の毎時実行**
   - apply の後、10:00Z（19:00 JST・`summary-delivery-m6nw5`）と 11:00Z（20:00 JST・`summary-delivery-nsvb5`）の 2 回が Completed・成功 1・失敗 0 で終わった
@@ -443,3 +443,34 @@ PR #274 を 2026-09-19T08:52:06Z にマージした（マージコミット `b4d
 
 - **確定店舗を 2 つ持つオーナーが実在する**（`4c89b0e6`・`store_identified`・LINE ユーザーあり）。7.5 の「複数店舗の選択まで確かめる」は、新しいテナントを作らずにこのオーナーで確かめられる（#252 のとおり本番の店舗とオーナーは消せないため、新規作成はしない）
 - オーナーは 4 人（`4c89b0e6` が確定店舗 2・`340ee8ae` が 1・残り 2 人は `pending` で確定店舗なし）、確定店舗は 3 件である。2026-09-06 の記録（オーナー 1・店舗 2）から増えている
+
+### 7.3 コードを本番へ出す（Step B・2026-09-19）
+
+PR #289 を 2026-09-19T11:50:01Z にマージした（マージコミット `99993ea`）。deploy-prod（run `35441370034`）が success。
+
+- **稼働イメージの照合**: `PROJECT_ID=gen-fw-line-meo bash scripts/check-prod-image-drift.sh` が緑で、本番の 7 件（5 サービス・2 ジョブ）がすべて `99993ea` だった
+- **準備判定が false であること**: 定時（毎時 0 分）を待たずに `gcloud run jobs execute summary-delivery --wait` で 1 回手動実行し（`summary-delivery-4twbl`）、構造化ログで実測した。配信時刻が 7 時の店舗しかいない時間帯なので対象 0 件で、LINE へは 1 通も送らず DB にも書かない実行である
+  - `delivery-job.report_menu_not_ready`（`detail` = `report actions missing`）
+  - `delivery-job.run`: `reportMenuReady` = **false**・`targetsTotal` 0・`failed` 0・`skipped*` はすべて 0
+  - `delivery-job.exit`: `exitCode` 0
+  - `reportMenuReady` は Step B で足したフィールドなので、この行が出ること自体が新しいコードの稼働の証拠でもある
+- **ステータス案内の新しい文言**: 実機でしか確かめられないので 7.5 でまとめて行う
+
+### 7.4 完了後メニューを差し替える（Step C・2026-09-19）
+
+着手前に Req 9.4 の確認を行った。パイロットは 2026-10-26 開始（#256 のリリース計画）で期間内でない。実演の予定が無いことを運用者に確認した。
+
+- **段 1**: `pnpm run setup-rich-menus --completed-only` で完了後メニューだけを作った。新 ID は `richmenu-7be27c9d…`、差し替え前の ID は `richmenu-9249702d…` である（名前は新旧とも同じなので ID で区別する）
+- **段 2**: `terraform.tfvars` の `line_richmenu_completed_id` を新 ID にし、**`module.run_services...svc["line-webhook"]` と `module.delivery_job...delivery` の 2 つを同じ apply** で当てた（`-target` で絞り、承認待ちの `module.guardrails`（#232）を巻き込まない）。plan は `2 to change` で、中身は env の値の入れ替えと既知のずれだけ。apply 後に実物を読み、両方が新 ID を持ち、イメージが `99993ea` のまま巻き戻っていないことを確かめた
+- **段 3・段 4**: `relink-completed-menu` を試行（`--dry-run`）で流し、張り替え先がレポート 3 導線を持つことと対象 2 件を確かめてから、`--delete-old` 付きで本番へ張った。結果は次のとおりで、**不一致と判定不能がともに 0 件**だったので、同じ実行が旧メニューを削除した（終了コード 0）
+
+| 分類 | 件数 |
+|---|---|
+| 張れた（`verified`） | 2 |
+| 到達不能（`unreachable`） | 0 |
+| 不一致（`mismatch`） | 0 |
+| 判定不能（`error`） | 0 |
+
+対象 2 件は、本番の `owners.onboarding_status = 'store_identified'`（`4c89b0e6` と `340ee8ae`）と一致する。確認できなかったオーナーが 0 件なので、先頭 8 文字の一覧は無い。
+
+- **準備判定が true に変わったこと**: 差し替えの後にもう 1 回手動実行し（`summary-delivery-l2744`）、`delivery-job.run` の `reportMenuReady` が **true** になり、`delivery-job.report_menu_not_ready` が出なくなったことを実測した。差し替え前（`summary-delivery-4twbl`・false）との対照になっている
