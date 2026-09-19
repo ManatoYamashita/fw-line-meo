@@ -152,6 +152,8 @@ describe('招待コードページ（operator ロール）', () => {
     render(<InviteCodesPage />);
     const scope = within(await screen.findByRole('main'));
     const select = await scope.findByLabelText('代理店');
+    // 選択肢が届くまで待つ（理由は下の selectAgencyAlpha のコメント）。
+    await scope.findByRole('option', { name: '代理店アルファ' });
     // 代理店未選択の間は一覧取得を行わない。
     expect(api.getInviteCodes).not.toHaveBeenCalled();
     fireEvent.change(select, { target: { value: 'a1' } });
@@ -173,7 +175,10 @@ describe('招待コードページ（operator ロール）', () => {
     api.disableInviteCode.mockResolvedValue({ ok: true, value: { ...activeCode, disabled: true } });
     render(<InviteCodesPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('代理店'), { target: { value: 'a1' } });
+    const select = await scope.findByLabelText('代理店');
+    // 選択肢が届くまで待つ（理由は下の selectAgencyAlpha のコメント）。
+    await scope.findByRole('option', { name: '代理店アルファ' });
+    fireEvent.change(select, { target: { value: 'a1' } });
     await scope.findByText('ACTIVE01');
 
     fireEvent.click(scope.getByRole('button', { name: '発行' }));
@@ -315,7 +320,9 @@ describe('招待コードページ: 着手前から在った契約（意匠の�
     // 現状は必須ではない（属性を増やさないことも「標準の選択要素と同一の属性を保つ」に含まれる）。
     expect(select.required).toBe(false);
 
-    // 選択肢の並び（先頭は未選択を表す空値の案内）。
+    // 選択肢の並び（先頭は未選択を表す空値の案内）。**先に代理店の選択肢が届くのを待つ**
+    // （選択欄は取得の前から描かれているので、待たずに読むと案内の 1 件だけを正解と読む）。
+    await scope.findByRole('option', { name: '代理店アルファ' });
     expect(
       Array.from(select.options).map((option) => [option.value, option.textContent]),
     ).toEqual([
@@ -334,7 +341,17 @@ describe('招待コードページ: 着手前から在った契約（意匠の�
 
 /** 代理店を選ぶ（operator は選択して初めて一覧の分岐に入る）。 */
 async function selectAgencyAlpha(): Promise<void> {
-  fireEvent.change(await screen.findByLabelText('代理店'), { target: { value: 'a1' } });
+  const select = await screen.findByLabelText('代理店');
+  // **選択肢が届くまで待つ。** 選択欄そのものは代理店の一覧を取得する前から描かれているので、
+  // 取得が解決する前に change を投げると、その値を持つ option がまだ無く、**select の値は
+  // 変わらないまま先へ進む**（DOM の select は存在しない値を受け付けない）。代理店未選択の
+  // 状態が続くので、後続の findBy は目的の分岐ではなく「代理店を選択すると…」の空状態を
+  // 見続けることになる。
+  //
+  // この取り違えは手元では起きない（取得のモックが即座に解決する）。負荷の高い CI でだけ
+  // 現れる形で 2026-09-20 に顕在化したので、**赤の実測は CI の失敗ログが唯一の証拠である**。
+  await screen.findByRole('option', { name: '代理店アルファ' });
+  fireEvent.change(select, { target: { value: 'a1' } });
 }
 
 interface SurfaceBranch {
@@ -736,6 +753,8 @@ describe('招待コードページ: 意匠の適用', () => {
 
     // 完了条件: 値の直接変更で操作でき、必須属性を要素から読める。
     expect(select.required).toBe(false);
+    // 選択肢が届くまで待つ（理由は下の selectAgencyAlpha のコメント）。
+    await within(main).findByRole('option', { name: '代理店アルファ' });
     fireEvent.change(select, { target: { value: 'a1' } });
     expect(select.value).toBe('a1');
     expect(await within(main).findByText('ACTIVE01')).toBeTruthy();

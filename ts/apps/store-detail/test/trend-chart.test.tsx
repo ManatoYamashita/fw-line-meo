@@ -416,10 +416,15 @@ const TEXT_ALIGNMENTS: ReadonlySet<string> = new Set([
   'text-start',
   'text-end',
 ]);
+/**
+ * `text-` で始まるが色ではないクラス: 行の分け方（Issue #286 項目 3 で空状態の部品が持つようになった）。
+ * 段と揃えに続く第 3 の分類であり、色の語彙を緩めるための除外ではない。
+ */
+const TEXT_WRAPPING: ReadonlySet<string> = new Set(['text-wrap', 'text-nowrap', 'text-balance', 'text-pretty']);
 
 /**
- * 色のユーティリティか。`stroke-`・`fill-` で始まるものはすべて、`text-` で始まるものは文字サイズの段と
- * 揃えを除いたものを、色として数える（design の「色の語彙」の抜き出しの規則）。
+ * 色のユーティリティか。`stroke-`・`fill-` で始まるものはすべて、`text-` で始まるものは文字サイズの段・
+ * 揃え・行の分け方を除いたものを、色として数える（design の「色の語彙」の抜き出しの規則）。
  * `hover:` などの前置の変種は外してから判定し、抜き出す値は前置を含めたトークンのままにする
  * （変種つきの色を、変種なしの同名と同じものとして数えないため）。
  */
@@ -428,7 +433,12 @@ function isColorUtility(token: string): boolean {
   if (utility.startsWith('stroke-') || utility.startsWith('fill-')) {
     return true;
   }
-  return utility.startsWith('text-') && !TEXT_SIZE_STEPS.has(utility) && !TEXT_ALIGNMENTS.has(utility);
+  return (
+    utility.startsWith('text-') &&
+    !TEXT_SIZE_STEPS.has(utility) &&
+    !TEXT_ALIGNMENTS.has(utility) &&
+    !TEXT_WRAPPING.has(utility)
+  );
 }
 
 /** 起点とその子孫の class から、色のユーティリティをすべて抜き出す（重複を含む）。 */
@@ -581,12 +591,13 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
   });
 
   describe('色の語彙（決定 D6）', () => {
-    it('抜き出しの規則は、文字サイズの段と揃えを除き、色だけを前置の変種ごと抜き出す（自己検証）', () => {
+    it('抜き出しの規則は、文字サイズの段・揃え・行の分け方を除き、色だけを前置の変種ごと抜き出す（自己検証）', () => {
       const fixture = document.createElement('div');
       fixture.innerHTML = [
         '<div class="text-xs tabular-nums text-muted-foreground">',
         '  <span class="absolute text-right text-2xl">1</span>',
         '  <p class="sm:text-lg hover:text-foreground">2</p>',
+        '  <p class="text-balance text-pretty text-nowrap">3</p>',
         '  <svg class="size-full overflow-visible"><line class="stroke-border"></line><circle class="fill-card"></circle></svg>',
         '</div>',
       ].join('');
@@ -595,7 +606,17 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
 
       const extracted = colorUtilities(fixture);
       expect(sortedSet(extracted)).toEqual(['fill-card', 'hover:text-foreground', 'stroke-border', 'text-muted-foreground']);
-      for (const excluded of ['text-xs', 'text-right', 'text-2xl', 'sm:text-lg', 'tabular-nums', 'size-full']) {
+      for (const excluded of [
+        'text-xs',
+        'text-right',
+        'text-2xl',
+        'sm:text-lg',
+        'tabular-nums',
+        'size-full',
+        'text-balance',
+        'text-pretty',
+        'text-nowrap',
+      ]) {
         expect(extracted).not.toContain(excluded);
       }
     });
