@@ -65,7 +65,18 @@ export default tseslint.config(
     // 以前は lib/contract.ts と page.tsx のコメントで「import type に限ること」と注意するだけだった。
     // `next build` が混入で落ちるかは Turbopack の実装に依存し、このリポジトリからは確かめられない
     // ため、build より前に走る lint で止める。route.ts はサーバー側なので対象外。
-    files: ['apps/store-detail/app/**/*.{ts,tsx}', 'apps/store-detail/lib/contract.ts'],
+    //
+    // lib の推移の窓・縦軸・競合の絞り込みの 3 モジュール（Issue #265）は、クライアントの部品が値として
+    // import する純関数なので、同じくクライアントに同梱される。lib/*.ts をまとめて指定しないのは、
+    // lib/data.ts と lib/liff-auth.ts がサーバー側のモジュール（値として使うのは route.ts だけ）だから
+    // である。lib へクライアントが使うモジュールを足すときは、ここへ加えるまで値 import が網を抜ける。
+    files: [
+      'apps/store-detail/app/**/*.{ts,tsx}',
+      'apps/store-detail/lib/contract.ts',
+      'apps/store-detail/lib/trend-view.ts',
+      'apps/store-detail/lib/trend-scale.ts',
+      'apps/store-detail/lib/competitor-filter.ts',
+    ],
     ignores: ['apps/store-detail/app/**/route.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
