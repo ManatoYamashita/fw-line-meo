@@ -14,65 +14,23 @@
 import type { DailySummaryReadRow } from '@fwlm/db';
 import { normalizeSummaryRatings, type NormalizedSummaryRatings } from '@fwlm/db/daily-summary';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
+import {
+  ATTRIBUTION_TEXT,
+  attributionFooter,
+  buildAttributionText,
+  withAttributionAltText,
+} from '../line/attribution.js';
 import type { LineMessage } from '../line/client.js';
-import type { FlexBoxComponent, FlexBoxContent, FlexBubbleContents, FlexTextComponent } from '../line/flex-types.js';
+import type { FlexBoxComponent, FlexBoxContent, FlexBubbleContents } from '../line/flex-types.js';
+import { ALT_TEXT_MAX_LENGTH, ELLIPSIS, codePointLength, fitText, splitGraphemes } from '../line/text.js';
 
-// --- 文字数 ------------------------------------------------------------------------
-
-/** 省略したことを示す記号。 */
-export const ELLIPSIS = '…';
-
-// 書記素（利用者が 1 文字と見る単位）に分ける。絵文字の連結・国旗・結合文字を 1 つとして扱う。
-const graphemeSegmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' });
-
-/** コードポイントの数。UTF-16 の単位では数えない（BMP の外の漢字や絵文字を 2 と数えてしまう）。 */
-export function codePointLength(text: string): number {
-  return [...text].length;
-}
-
-/** UTF-16 の単位の数。LINE は altText などの長さをこの単位で数える（references/message-objects.md）。 */
-function utf16Length(text: string): number {
-  return text.length;
-}
-
-/** 書記素の列に分ける。 */
-export function splitGraphemes(text: string): string[] {
-  return Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
-}
-
-/**
- * text を max 以内に収める。収まればそのまま返し、収まらなければ先頭から書記素の境目で切って「…」を付ける
- * （「…」を含めて max 以内）。
- *
- * 数え方は measure で渡し、既定はコードポイントの数である。LINE はラベルと displayText を書記素で数え
- * （references/message-objects.md の Text Character Counting）、書記素の数はどの版の分け方で数えても
- * コードポイントの数を超えないので、コードポイントで収めれば LINE の数え方の細部によらず上限を超えない。
- * どちらの数え方も、つないだ文字列の長さは部分の長さの和になるので、書記素ごとに足し上げてよい。
- *
- * 絵文字の連結や結合文字を途中で割ると別の文字に見えるので、残りの枠に入り切らない書記素は丸ごと落とす。
- */
-export function fitText(text: string, max: number, measure: (text: string) => number = codePointLength): string {
-  const ellipsisLength = measure(ELLIPSIS);
-  if (!Number.isInteger(max) || max < ellipsisLength) {
-    throw new Error(`fitText: max must be an integer of at least ${ellipsisLength}`);
-  }
-  if (measure(text) <= max) {
-    return text;
-  }
-
-  const budget = max - ellipsisLength;
-  let kept = '';
-  let used = 0;
-  for (const segment of splitGraphemes(text)) {
-    const size = measure(segment);
-    if (used + size > budget) {
-      break;
-    }
-    kept += segment;
-    used += size;
-  }
-  return `${kept}${ELLIPSIS}`;
-}
+// --- LINE 面の基本部品の再公開 --------------------------------------------------------
+//
+// 文字数の数え方（line/text.ts）と帰属表示（line/attribution.ts）は、レポートだけでなく
+// オンボーディングの案内も使うため LINE 面の基本部品として line/ にある。レポートのビルダーは
+// 表示部品を本モジュールから 1 か所で取るので、ここでそのまま再公開する。
+export { ALT_TEXT_MAX_LENGTH, ELLIPSIS, codePointLength, fitText, splitGraphemes };
+export { ATTRIBUTION_TEXT, attributionFooter, buildAttributionText };
 
 // --- 行 ----------------------------------------------------------------------------
 
@@ -195,44 +153,6 @@ export function buildReportHeader(ctx: ReportContext, span: ReportDataSpan): Fle
   };
 }
 
-/** Google Maps の帰属表示の文言。Places API のポリシーは「Google Maps」の改変・改行・翻訳を禁じる（8.1）。 */
-export const ATTRIBUTION_TEXT = 'データ提供: Google Maps';
-
-/**
- * 帰属表示の text 部品（8.1）。
- *
- * - 大きさは lineLayout.attributionSize（ポリシーが定める 12〜16sp の範囲のピクセル値）、色は
- *   lineColors.attribution（ポリシーが定める 3 色の 1 つ）を使う。caption と muted はどちらもポリシーの外にある
- * - 折り返さない（1 行で表示する）。kilo のバブル（幅約 300px）に対して 13px の約 20 文字は十分に短い。
- *   ほかの部品と横に並べると幅が縮んで省略記号で切られうるので、footer の中で 1 行を占めさせる（attributionFooter）
- * - adjustMode（shrink-to-fit）のような大きさを変える指定を持たない。縮めると 12sp を下回りうる
- * - 書体（Roboto）は LINE が指定を許さないため満たせない（design.md「残るリスクと未決事項」）
- */
-export function buildAttributionText(): FlexTextComponent {
-  return {
-    type: 'text',
-    text: ATTRIBUTION_TEXT,
-    size: lineLayout.attributionSize,
-    color: lineColors.attribution,
-    wrap: false,
-    align: 'center',
-  };
-}
-
-/**
- * 帰属表示を末尾に置いた footer。帰属表示は、ポリシーの言う「同じ容器の上端か下端」として、同じバブルの
- * footer の最後に 1 つだけ置く。contents（推移の詳細画面への導線など）は帰属表示の上に順に並べる。
- */
-export function attributionFooter(contents: readonly FlexBoxContent[] = []): FlexBoxComponent {
-  return {
-    type: 'box',
-    layout: 'vertical',
-    spacing: lineLayout.itemGap,
-    paddingAll: lineLayout.blockPadding,
-    contents: [...contents, buildAttributionText()],
-  };
-}
-
 // --- URL ---------------------------------------------------------------------------
 //
 // LINE は、部品の URL が 1 つでも不適合だとメッセージ全体を拒否する（画像の url は https、uri アクションは
@@ -343,18 +263,12 @@ export class FlexBubbleTooLargeError extends Error {
   }
 }
 
-/** altText の上限（UTF-16 の単位。references/flex-message.md の Limits）。 */
-export const ALT_TEXT_MAX_LENGTH = 400;
-
-const ALT_TEXT_ATTRIBUTION = `（${ATTRIBUTION_TEXT}）`;
-
 /**
  * 組み立てたバブルを、Reply で送る Flex のメッセージにする。
  *
  * - バブルの大きさを検証し、上限を超えたら FlexBubbleTooLargeError を投げる。上限に届かない構成にするのは
  *   各ビルダーの責務である（design.md の Error Handling）
- * - altText には、渡した本文の末尾に帰属表示を付ける。altText はトークの一覧や通知でバブルの代わりに出るので、
- *   バブルと同じく帰属表示を持たせる。本文が長ければ書記素の境目で切り、帰属表示は切らない
+ * - altText には、渡した本文の末尾に帰属表示を付ける（line/attribution.ts の withAttributionAltText）
  * - 本文が空なら例外にする（何のメッセージか分からない altText を送らない）
  */
 export function toReportMessage(altText: string, bubble: FlexBubbleContents): LineMessage {
@@ -365,6 +279,5 @@ export function toReportMessage(altText: string, bubble: FlexBubbleContents): Li
   if (sizeBytes > FLEX_BUBBLE_MAX_BYTES) {
     throw new FlexBubbleTooLargeError(sizeBytes, FLEX_BUBBLE_MAX_BYTES);
   }
-  const body = fitText(altText, ALT_TEXT_MAX_LENGTH - utf16Length(ALT_TEXT_ATTRIBUTION), utf16Length);
-  return { type: 'flex', altText: `${body}${ALT_TEXT_ATTRIBUTION}`, contents: bubble };
+  return { type: 'flex', altText: withAttributionAltText(altText), contents: bubble };
 }

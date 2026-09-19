@@ -133,8 +133,9 @@ describe('lineLayout（LINE Flex Message 用の寸法セット）', () => {
 // Google Maps のテキストの帰属表示の細則（Places API ポリシー・Requirements 1.6, 8.1）。
 // 上の同値検証は値を固定するだけで、差し替えた値が細則の中にあるかは見ない。ここでは
 // 細則そのもの（色は 3 色のどれか・大きさは 12〜16 のピクセル値）を、ソースとは別に持つ
-// 許容範囲で照合する。書体（Roboto）は LINE が指定を許さないため検証の対象にならない
-// （.kiro/specs/line-on-demand-report/design.md「残るリスクと未決事項」）。
+// 許容範囲で照合する。書体（Roboto）はトークンを持たないため、ここでは検証しない。ポリシーは
+// 「Roboto（読み込みは任意）」とし、フォールバックに「product 内で既に使っている任意の sans serif か
+// `Sans-Serif`」を明示的に許すので、書体を指定しないこと自体は逸脱にならない（Issue #287）。
 describe('帰属表示の書式（Places API ポリシー・Requirements 1.6, 8.1）', () => {
   it('色はポリシーが許す 3 色のどれかである', () => {
     // Flex の色指定は大小を区別しないので、大文字に揃えて照合する。

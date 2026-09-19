@@ -314,7 +314,7 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
 
 - Discovery Scope: Extension（軽量ディスカバリ）。外部依存（LINE Messaging API・Google Places）は既に統合済みで、新しいライブラリは入れない。規約適合と移行手順の 2 点だけ一次情報を取り直した
 - Key Findings:
-  - Places のテキストの帰属表示には細則がある（文字の改変・改行・翻訳の禁止、Roboto 400、12〜16sp、色は白・#1F1F1F・#5E5E5E、同じ容器の上端か下端）。既存の日次カードは `xxs`（12sp 未満）と `#AAAAAA` で満たしていない。LINE では書体を指定できない
+  - Places のテキストの帰属表示には細則がある（文字の改変・改行・翻訳の禁止、Roboto 400、12〜16sp、色は白・#1F1F1F・#5E5E5E、同じ容器の上端か下端）。既存の日次カードは `xxs`（12sp 未満）と `#AAAAAA` で満たしていない。LINE では書体を指定できない（書体は任意であり逸脱にならない。下の「訂正（2026-09-20・#287）」を参照）
   - 代理店がダッシュボードから店舗を登録する経路では、LINE の会話が未完了のままオーナーの店舗が確定し、完了後メニューへのリンクが一度も張られない。通知の前に照合して張る仕組みが要る
   - #255 の PR #266 が、正規化と表示整形を `@fwlm/db/daily-summary` に置いた。本 spec はこれをそのまま使える
 
@@ -329,7 +329,7 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
   - "Font family: Roboto. Font weight: 400. Font size: Minimum font size: 12sp Maximum font size: 16sp"、色は "White, black (#1F1F1F), or gray (#5E5E5E)"、配置は "near the top or bottom of the content, and within the same visual container"
   - 口コミ本文の切り詰め、帰属リンクをタップ可能にすべきかは原文に記述が無い
   - LINE Flex の Text は `size` にピクセル値を取れる。書体を指定するプロパティは無い。テキストメッセージ（`type: text`）は大きさも色も指定できない
-- Implications: 通知もレポートも Flex の footer にテキストの帰属表示を置き、大きさを 12〜16 の範囲のピクセル値に、色を #5E5E5E に固定する。書体は既知の逸脱として残す。通知をテキストメッセージにすると大きさと色まで逸脱するため、通知も Flex にする
+- Implications: 通知もレポートも Flex の footer にテキストの帰属表示を置き、大きさを 12〜16 の範囲のピクセル値に、色を #5E5E5E に固定する。書体は既知の逸脱として残す（この判断は誤りだった。下の「訂正」を参照）。通知をテキストメッセージにすると大きさと色まで逸脱するため、通知も Flex にする
 
 #### 口コミの帰属情報の取得元
 
@@ -395,8 +395,18 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
 - Context: ポリシーは「可能な限りロゴ」、場所が限られればテキストを認める
 - Selected Approach: 本 spec はテキスト「データ提供: Google Maps」を採り、大きさ 13px・色 #5E5E5E・折り返しなし・同じバブルの footer に置く
 - Rationale: 既存の LINE 面と LIFF もテキストで揃っており、ロゴへ切り替えるなら画像の配信元（公開 HTTPS）とロゴの使用条件の確認を 3 面まとめて行うべきである
-- Trade-offs: 書体（Roboto）を指定できない逸脱が残る
+- Trade-offs: 書体（Roboto）を指定できない逸脱が残る（この逸脱は存在しなかった。下の「訂正」を参照）
 - Follow-up: ロゴへの切り替えと、LIFF の帰属表示の細則適合を、横断の別 Issue で判断する
+
+#### 訂正（2026-09-20・#287）: 書体の逸脱は存在しなかった
+
+- Context: #287 でオンボーディングの候補カルーセルの帰属を塞ぐにあたり、原文（同じ URL・2026-09-20 取得）を当たり直した
+- Findings: 上の Findings は**テキスト帰属の書式の表から 2 行を落として引用していた**。原文の表は 7 行あり、落ちていたのは次の 2 行である
+  - `Font family: "Roboto. Loading the font is optional."`
+  - `Fallback font family: "Any sans serif body font already used in your product or 'Sans-Serif'"`
+- Implications: **原文は sans-serif のフォールバックを明示的に許している。** LINE Flex の既定の書体は sans-serif であり、書体を指定するプロパティが無いことは逸脱にならない。テキストの帰属表示は、書体を含めて細則を全て満たしている
+- Decision: ロゴ画像への切り替えは行わない。公開 HTTPS の配信元もロゴの使用条件の確認も要らない
+- Lesson: 表から引用するときは行を落とさない。落ちた 2 行が「満たせない」という誤った前提を作り、design.md・`report/format.ts`・`design-tokens/test/tokens.test.ts` の 3 箇所へ 1 週間伝播した
 
 #### Decision: 通知の前にメニューを照合する
 
