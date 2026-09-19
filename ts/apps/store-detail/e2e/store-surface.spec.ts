@@ -796,3 +796,54 @@ test('今日のポジションは見出しと内容を近接させ、各グル�
   expect(spacing.renderedInnerGaps).toEqual([8, 8, 8]);
   expect(spacing.renderedOuterGaps).toEqual([24, 24]);
 });
+
+// --- Google の帰属と、口コミの導線（Issue #287）----------------------------------------
+//
+// 帰属表示の色と大きさは、Places API のポリシーが値で定める（許す色は 3 値・12〜16sp）。
+// jsdom は Tailwind の生成 CSS を持たないので、**実際に描かれた色は実ブラウザでしか測れない**。
+// 単体試験はクラス名の集合までしか固定できず、クラスが実色へ解決されているかは見ていない。
+
+/** ポリシーが許すテキスト帰属の色（原文の "White, black (#1F1F1F), or gray (#5E5E5E)"）。 */
+const ATTRIBUTION_POLICY_COLORS = ['rgb(255, 255, 255)', 'rgb(31, 31, 31)', 'rgb(94, 94, 94)'];
+
+/** 同じくポリシーが許す大きさの範囲（最小 12sp・最大 16sp。両端を含む）。 */
+const ATTRIBUTION_SIZE_RANGE = { min: 12, max: 16 };
+
+test('帰属表示の実描画の色と大きさが、Places のポリシーが定める値の中にある', async ({ page }) => {
+  await openStoreSurface(page);
+
+  const attribution = page.getByText('データ提供: Google Maps');
+  await expect(attribution).toHaveCount(1);
+
+  const style = await attribution.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return { color: computed.color, fontSize: Number.parseFloat(computed.fontSize) };
+  });
+
+  expect(ATTRIBUTION_POLICY_COLORS, `実描画の色は ${style.color}`).toContain(style.color);
+  expect(style.fontSize).toBeGreaterThanOrEqual(ATTRIBUTION_SIZE_RANGE.min);
+  expect(style.fontSize).toBeLessThanOrEqual(ATTRIBUTION_SIZE_RANGE.max);
+});
+
+test('新着クチコミの各行から、Google Maps 上の元の口コミへ辿れる', async ({ page }) => {
+  await openStoreSurface(page);
+
+  const reviews = page
+    .getByRole('heading', { level: 3, name: '新着クチコミ' })
+    .locator('xpath=following-sibling::*[1]')
+    .locator('li');
+  // 既定の応答は帰属の揃った口コミ 2 件である（件数を導出せず、fixture の形をここで固定する）。
+  await expect(reviews).toHaveCount(2);
+
+  const count = await reviews.count();
+  for (let index = 0; index < count; index += 1) {
+    const row = reviews.nth(index);
+    // その口コミごとに元の口コミへ辿れること（ポリシーの "must always have access"）。
+    const maps = row.getByRole('link', { name: 'Google Maps で見る' });
+    await expect(maps).toHaveCount(1);
+    await expect(maps).toHaveAttribute('href', /^https:\/\/www\.google\.com\/maps\/reviews\//);
+    // 投稿者の帰属は、場所が許す限りアバター・名前・プロフィールリンクのすべてで行う。
+    await expect(row.locator('img')).toHaveCount(1);
+    await expect(row.locator('a[href^="https://www.google.com/maps/contrib/"]')).toHaveCount(1);
+  }
+});

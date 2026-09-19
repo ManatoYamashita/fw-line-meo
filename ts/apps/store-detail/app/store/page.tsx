@@ -39,10 +39,12 @@
 // 意匠（ui-airbnb-surfaces task 3.1）:
 //   版面・主見出し・処理中・通知を共通部品から描く。判断の正典は docs/design/design-language.md
 //   （版面は §7.9、見出しの階層は §6、余白は §3）であり、ここでは結論も数値も転記せず参照する。
-//   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。唯一の例外は推移グラフの
-//   部品（trend-chart.tsx）で、店舗詳細の面で色を書くのはそこに限る（§7.19・Issue #265）。書いてよい色の
-//   語彙も §7.19 が閉じた集合として定め、test/trend-chart.test.tsx が完全一致で固定する。このファイル
-//   自身と、選択肢の札・検索欄・件数の文言は色を書かない。
+//   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。例外は 2 つだけである
+//   （§7.19）。1 つ目は推移グラフの部品（trend-chart.tsx・Issue #265）で、書いてよい色の語彙も §7.19 が
+//   閉じた集合として定め、test/trend-chart.test.tsx が完全一致で固定する。2 つ目は Google Maps の
+//   帰属表示の文字色（Issue #287）で、Places API のポリシーが許す色が 3 値に限られ、本文色はその
+//   どれでもないため、継承させるとポリシーの外へ出る。どちらも test/store-page.test.tsx が
+//   クラスの集合を完全一致で固定する。選択肢の札・検索欄・件数の文言は色を書かない。
 //
 //   使える部品は上記の no-write 保証で決まる。`Button` / `Select` / `Textarea` はこの面では
 //   **使ってはならない**（他の面では正解でも、ここでは書込の手段となり、要件 3.1 に真正面から反する）。
@@ -109,12 +111,17 @@ import type { DailySummaryCompetitor, DailySummaryNewReview } from '@fwlm/db';
 // 1 つも持たない純関数だけのサブパスで、ここからの値 import は許される。どちらも
 // ts/eslint.config.js の no-restricted-imports が機械強制する。
 import {
+  GOOGLE_MAPS_LINK_TEXT,
+  REVIEW_AUTHOR_LINK_LABEL,
+  REVIEW_EXCERPTS_UNAVAILABLE_TEXT,
   SELF_UNRATED_RANK_TEXT,
   UNRATED_EXCLUDED_NOTE,
+  displayableNewReviews,
   formatRatingLabel,
   formatStarDiff,
   hasUnratedCompetitor,
   isUnratedSelf,
+  toHttpsUrl,
 } from '@fwlm/db/daily-summary';
 // lib/data.ts / lib/contract.ts が定義する実際のレスポンス形状を型としてのみ取り込む
 // （import type は実行時コードを一切バンドルしない — pg 等 Node 専用依存をクライアントへ持ち込まない）。
@@ -349,6 +356,9 @@ function NewReviewsList({
       </EmptyState>
     );
   }
+  // 内容を出せるのは、Google Maps 上の元の口コミへ辿れて、投稿者名も併記できるものだけである
+  // （Places API のポリシー・Issue #287）。判定は LINE のレポートと同じものを使う。
+  const displayable = displayableNewReviews(reviews);
   return (
     <Card>
       <CardContent className="flex flex-col gap-4">
@@ -356,20 +366,63 @@ function NewReviewsList({
           <span className="text-2xl font-bold tabular-nums">{count}</span>
           <span>件の新着クチコミ</span>
         </p>
-        {/* 一覧の意味論（list / listitem）を保つ。カードの並びへ置き換えない（正典 7.2 節と同じ規律）。 */}
-        <ul className="divide-y">
-          {reviews.map((review, index) => (
-            <li className="grid gap-1 py-4 first:pt-0 last:pb-0" key={`${review.authorName}-${review.publishTime}-${index}`}>
-              <div className="flex items-start justify-between gap-4">
-                <span className="font-semibold">{review.authorName}さん </span>
-                <span className="shrink-0 tabular-nums">★{review.rating}</span>
-              </div>
-              <p>「{review.textExcerpt}」</p>
-            </li>
-          ))}
-        </ul>
+        {displayable.length === 0 ? (
+          // 件数は出せるが内容は出せない状態。件数まで伏せると「新着なし」と区別が付かなくなる。
+          <p>{REVIEW_EXCERPTS_UNAVAILABLE_TEXT}</p>
+        ) : (
+          /* 一覧の意味論（list / listitem）を保つ。カードの並びへ置き換えない（正典 7.2 節と同じ規律）。 */
+          <ul className="divide-y">
+            {displayable.map((review, index) => (
+              <NewReviewItem key={`${review.authorName}-${review.publishTime}-${index}`} review={review} />
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * 新着口コミ 1 件。ポリシーは、場所が許す限りアバター・名前・プロフィールリンクのすべてで投稿者を
+ * 帰属することと、その口コミごとに Google Maps 上の元の口コミへ必ず辿れることを求める（Issue #287）。
+ * アバターとプロフィールは取得できていない口コミもあるので、あるものだけを出す。
+ */
+function NewReviewItem({ review }: { readonly review: DailySummaryNewReview }): React.JSX.Element | null {
+  // 一覧に来る時点で導線は検証済みだが、型の上では任意項目のままなので、ここでも値として取り直す。
+  const googleMapsUri = toHttpsUrl(review.googleMapsUri);
+  if (googleMapsUri === null) {
+    // 絞り込みとこの部品が食い違ったときに、**導線の無い内容を出す**側へ倒さない。
+    // 導線が無いなら行ごと描かない（ポリシーは元の口コミへ辿れることを必須にしている）。
+    return null;
+  }
+  const authorUri = toHttpsUrl(review.authorUri);
+  const authorPhotoUri = toHttpsUrl(review.authorPhotoUri);
+  const authorLabel = `${review.authorName}さん`;
+  return (
+    <li className="grid gap-1 py-4 first:pt-0 last:pb-0">
+      <div className="flex items-start justify-between gap-4">
+        <span className="flex items-center gap-2">
+          {authorPhotoUri === null ? null : (
+            // next/image を使わないのは意図的。最適化の実体はサーバ側でのフェッチと変換であり、
+            // 外部（Google）が配信する画像をこの面のために作り直す理由がない（dashboard-web の
+            // 口コミ QR と同じ判断）。読み上げ名は隣の投稿者名が担うので alt は空にする。
+            <img alt="" className="size-6 shrink-0 rounded-full" height={24} src={authorPhotoUri} width={24} />
+          )}
+          {authorUri === null ? (
+            <span className="font-semibold">{authorLabel}</span>
+          ) : (
+            <a aria-label={`${authorLabel}（${REVIEW_AUTHOR_LINK_LABEL}）`} className="font-semibold" href={authorUri}>
+              {authorLabel}
+            </a>
+          )}
+        </span>
+        <span className="shrink-0 tabular-nums">★{review.rating}</span>
+      </div>
+      <p>「{review.textExcerpt}」</p>
+      <p className="text-sm">
+        <a href={googleMapsUri}>{GOOGLE_MAPS_LINK_TEXT}</a>
+      </p>
+    </li>
   );
 }
 
@@ -873,7 +926,10 @@ export default function StorePage(): React.JSX.Element {
       <CompetitorsSection competitors={data.competitors} />
       <TrendSection trend={data.trend} rankTotal={data.summary?.rankTotal ?? null} />
       <footer>
-        <p className="text-sm">{GOOGLE_ATTRIBUTION_TEXT}</p>
+        {/* 帰属表示の色だけは面の側が書く（§7.19 の 2 つ目の例外・Issue #287）。ポリシーが許す色は
+            白・黒・灰の 3 値に限られ、本文色はそのどれでもないため、継承させるとポリシーの外へ出る。
+            大きさ（text-sm ＝ 14px）もポリシーの 12〜16sp の範囲に収める。 */}
+        <p className="text-sm text-attribution">{GOOGLE_ATTRIBUTION_TEXT}</p>
       </footer>
     </PageShell>
   );

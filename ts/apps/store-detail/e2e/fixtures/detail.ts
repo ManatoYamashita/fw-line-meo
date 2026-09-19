@@ -28,12 +28,20 @@ interface CompetitorRow {
   readonly starDiff: number | null;
 }
 
-/** 新着クチコミ 1 件。 */
+/**
+ * 新着クチコミ 1 件。
+ *
+ * 後ろの 3 つは Places の帰属情報で、Go が空でないときだけ書く（Issue #287）。面は
+ * googleMapsUri と authorName が揃った口コミだけ内容を出すので、既定の応答は揃った形にする。
+ */
 interface NewReview {
   readonly authorName: string;
   readonly publishTime: string;
   readonly rating: number;
   readonly textExcerpt: string;
+  readonly authorUri?: string;
+  readonly authorPhotoUri?: string;
+  readonly googleMapsUri?: string;
 }
 
 /** 詳細 API の応答の形。 */
@@ -100,12 +108,20 @@ export const DETAIL_RESPONSE: DetailResponse = {
         publishTime: '2026-08-30T09:12:00Z',
         rating: 5,
         textExcerpt: '焙煎の香りが素晴らしく、席の間隔も広くて落ち着いて過ごせました。',
+        authorUri: 'https://www.google.com/maps/contrib/100000000000000000001',
+        // 画像は取りに行かせない（外部への通信を e2e に持ち込まない）。読み込めない URL でも、
+        // 面が img を描くこと・その分の幅を取ることは測れる。
+        authorPhotoUri: 'https://lh3.googleusercontent.com/a/e2e-avatar-1',
+        googleMapsUri: 'https://www.google.com/maps/reviews/data=e2e-review-1',
       },
       {
         authorName: '山田',
         publishTime: '2026-08-30T11:40:00Z',
         rating: 3,
         textExcerpt: '混雑していて席を確保するまで時間がかかりました。',
+        authorUri: 'https://www.google.com/maps/contrib/100000000000000000002',
+        authorPhotoUri: 'https://lh3.googleusercontent.com/a/e2e-avatar-2',
+        googleMapsUri: 'https://www.google.com/maps/reviews/data=e2e-review-2',
       },
     ],
   },

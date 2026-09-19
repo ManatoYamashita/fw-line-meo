@@ -323,6 +323,9 @@ const COLOR_ROLE_TO_CSS_VARIABLE: Readonly<Record<keyof ColorTokens, string>> = 
   // それぞれ別の役割を指せるようにする。この 2 つが同じ変数へ潰れると、識別用だけを濃くする
   // ことが構造的に不可能になる（design.md「意味論変数割当」State Management）。
   borderInteractive: '--color-border-interactive',
+  // Google Maps の帰属表示の文字色。本文色とは別の変数として宣言する（Issue #287）。同じ変数へ潰すと、
+  // 本文色を動かした瞬間に帰属表示がポリシーの許す 3 色の外へ出る。
+  attribution: '--color-attribution',
 };
 
 describe('theme-sync: 意味役割 ↔ @theme 変数の厳密一致（Requirements 1.1, 1.3）', () => {
