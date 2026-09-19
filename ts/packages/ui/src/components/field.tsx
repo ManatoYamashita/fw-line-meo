@@ -109,6 +109,16 @@ function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
 // 内側余白を増やす手も取れるが、それは制御を包まない構成の見た目まで動かす。ここでは
 // **最小高の下限だけ**を与え、内容が要求値を超える構成は現状どおり内容に従わせる。
 // 実測では枠線 1 + 余白 10 + 内容 20 + 余白 10 + 枠線 1 = 42px で 2px 不足していた。
+//
+// 2026-09-19（Issue #286 項目 4）: ラベルを制御の上へ積む構成には、上の「行で満たす」が成り立って
+// いなかった。Field の縦積みはラベルと制御のあいだに間隔を挟み、**その帯はラベルにも制御にも
+// 属さないので、押しても何も起きない**。行の外接矩形は要求寸法を満たすが、連続した 1 つの的では
+// ないので、高さを足し合わせて満たしたとは言えなかった（要件 4.7 の後半が求めているのは、
+// その領域を指したときに部品が反応することである）。
+//
+// ラベルの下側へ内側余白を足し、同じ量の負の外側余白で視覚位置を戻す。**見た目は 1px も動かない。**
+// 足すのは「次の兄弟が入力部品のとき」だけなので、説明文やエラー文言との間隔には効かない。
+// 制御を包む構成は行そのものが的なので、この指定は当たらない（`:has(+ …)` が一致しない）。
 function FieldLabel({
   className,
   ...props
@@ -119,6 +129,9 @@ function FieldLabel({
       className={cn(
         "group/field-label peer/field-label flex w-fit gap-2 leading-snug group-data-[disabled=true]/field:opacity-50 has-data-checked:border-primary has-data-checked:bg-primary/5 has-[>[data-slot=field]]:rounded-lg has-[>[data-slot=field]]:border *:data-[slot=field]:p-2.5 dark:has-data-checked:border-primary/20 dark:has-data-checked:bg-primary/10",
         "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:min-h-11 has-[>[data-slot=field]]:flex-col has-[>[data-slot=field]]:justify-center",
+        "has-[+[data-slot=input]]:pb-2 has-[+[data-slot=input]]:-mb-2",
+        "has-[+[data-slot=select]]:pb-2 has-[+[data-slot=select]]:-mb-2",
+        "has-[+[data-slot=textarea]]:pb-2 has-[+[data-slot=textarea]]:-mb-2",
         className
       )}
       {...props}
