@@ -74,14 +74,32 @@ export interface StoreDetailResult {
 }
 
 export interface QueryStoreDetailOptions {
-  /** 30日窓・当日サマリーの基準日（'YYYY-MM-DD'）。省略時は現在日付（UTC 基準）。
+  /** 30日窓・当日サマリーの基準日（'YYYY-MM-DD'）。省略時は現在の JST 暦日（Issue #268）。
    *  DB テストで境界（30日目 vs 31日目）を実行時刻に依存せず厳密に固定するための注入口。 */
   readonly asOf?: string;
 }
 
+// 基準日は JST の暦日で決める（Issue #268）。日次バッチ（Go）が summary_date / captured_on を
+// JST の暦日で書くため（go/internal/batch/run.go の jstDateAsUTC）、読み取り側が UTC の日付を
+// 使うと 0:00〜9:00 JST のあいだは当日の行が取得範囲から外れ、前日分を「今日」として表示する。
+// 方式は ts/apps/delivery-job/src/index.ts の resolveJstNow と同じ固定 +9:00 オフセットとし、
+// tzdata（コンテナに無いことがある）にもサーバーの TZ 環境変数にも依存させない。
+// アプリをまたいだ import は作らない（面ごとにサービスが分かれているため）。
+//
+// **この是正で、0:00〜6:00 JST の表示は「前日の数字」から「準備中」へ変わる。** 日次バッチの
+// 起動は 6:00 JST（infra/modules/batch-job の schedule）なので、その前の時間帯は当日の行が
+// まだ存在しない。基準日が当日になれば当日の行は見つからず、当日サマリーは null になって
+// 「本日分のデータはまだ準備中です」を出す。**これは退行ではなく是正である** —— 前日の数字を
+// 「今日のポジション」と名乗るより、まだ無いと言うほうが正しい。リッチメニューの「今日の
+// ポジション」（line-webhook の jstToday）は既にこの振る舞いなので、面のあいだで揃う。
+//
+// 同じ +9:00 の定数はリポジトリに 4 つある（ここ・delivery-job の resolveJstNow・
+// line-webhook の jstToday・Go の jstDateAsUTC）。値が揃っていることを確かめる機械的なガードは
+// 無いので、5 つ目を足すときは既存の全てと突き合わせること（Issue #299）。
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
 function defaultAsOf(): string {
-  const iso = new Date().toISOString();
-  return iso.slice(0, 10);
+  return new Date(Date.now() + JST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 // --- 内部クエリ行型（DB 列名そのまま。SELECT で明示的に列指定し、date 列は to_char で
