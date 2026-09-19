@@ -119,6 +119,10 @@ function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
 // ラベルの下側へ内側余白を足し、同じ量の負の外側余白で視覚位置を戻す。**見た目は 1px も動かない。**
 // 足すのは「次の兄弟が入力部品のとき」だけなので、説明文やエラー文言との間隔には効かない。
 // 制御を包む構成は行そのものが的なので、この指定は当たらない（`:has(+ …)` が一致しない）。
+//
+// 指す先は**隣接する兄弟が実際に持つ data-slot** である。Select は矢印を重ねるために
+// `data-slot="select-wrapper"` の箱を外側へ出し、`data-slot="select"` はその子になるので、
+// ラベルの隣に来るのは wrapper の側である。子を指すと一致せず、帯が残ったまま緑になる。
 function FieldLabel({
   className,
   ...props
@@ -130,7 +134,7 @@ function FieldLabel({
         "group/field-label peer/field-label flex w-fit gap-2 leading-snug group-data-[disabled=true]/field:opacity-50 has-data-checked:border-primary has-data-checked:bg-primary/5 has-[>[data-slot=field]]:rounded-lg has-[>[data-slot=field]]:border *:data-[slot=field]:p-2.5 dark:has-data-checked:border-primary/20 dark:has-data-checked:bg-primary/10",
         "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:min-h-11 has-[>[data-slot=field]]:flex-col has-[>[data-slot=field]]:justify-center",
         "has-[+[data-slot=input]]:pb-2 has-[+[data-slot=input]]:-mb-2",
-        "has-[+[data-slot=select]]:pb-2 has-[+[data-slot=select]]:-mb-2",
+        "has-[+[data-slot=select-wrapper]]:pb-2 has-[+[data-slot=select-wrapper]]:-mb-2",
         "has-[+[data-slot=textarea]]:pb-2 has-[+[data-slot=textarea]]:-mb-2",
         className
       )}

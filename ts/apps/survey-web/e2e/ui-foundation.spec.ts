@@ -1540,51 +1540,67 @@ test('ラベル領域の指定で対応する部品が反応する', async ({ pa
 // その 2 点のあいだも label の内側なので問題にならないが、**ラベルを制御の上へ積む構成では、2 つの
 // あいだに、どちらにも属さない余白が挟まる**。そこを押しても何も起きなければ、ラベルの行と入力欄は
 // 連続した 1 つの的ではなく、高さを足し合わせて要求寸法を満たしたとは言えない。
-test('ラベルを積む行の内側に、反応しない帯が無い', async ({ page }) => {
-  await openComponentCatalog(page);
+// **部品ごとに回す。** ラベルの隣に実際に来る要素の data-slot は部品によって違い、Select は矢印を
+// 重ねるための箱（`select-wrapper`）を外側へ出すので、`select` を指す規則はこの構成に一度も当たらない。
+// input だけで測ると、その食い違いは緑のまま通る（Issue #286 項目 4 の是正で実際に取り違えた）。
+//
+// 対象は、上の「行が要求寸法を満たす」検査が合算で数えている縦積みの構成（LABEL_STACKED_SLOTS）と
+// そろえる。合算で数えている行が増えたら、その行の内側もここで測る。
+const STACKED_LABEL_ROWS = [
+  { label: 'ラベル付き入力', control: '#labelled-input', focusedSlot: 'input' },
+  { label: '表示順の指定', control: '#ui-check-select', focusedSlot: 'select' },
+] as const satisfies readonly { label: string; control: string; focusedSlot: OperableSlot }[];
 
-  const label = page.locator('[data-slot="field-label"]').filter({ hasText: 'ラベル付き入力' });
-  const input = page.locator('#labelled-input');
-  // 座標で押すので、先に表示領域へ入れる。boundingBox も mouse.click も表示領域を基準にした値を
-  // 使うため、画面外のまま測ると押せない座標を指すことになる（その点にある要素が「なし」になる）。
-  await input.scrollIntoViewIfNeeded();
-  const labelBox = await label.boundingBox();
-  const inputBox = await input.boundingBox();
-  expect(labelBox, 'ラベルの矩形が取れない').not.toBeNull();
-  expect(inputBox, '入力欄の矩形が取れない').not.toBeNull();
+for (const row of STACKED_LABEL_ROWS) {
+  test(`ラベルを積む行の内側に、反応しない帯が無い（${row.label}）`, async ({ page }) => {
+    await openComponentCatalog(page);
 
-  // ラベルの「文字」の下端。箱ではなく文字そのものを測るのは、この検査が対象にするのが
-  // 見た目の余白だからである。箱を広げてこの検査を通す是正をしても、見た目の余白はここで守られる。
-  const textBottom = await label.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    return range.getBoundingClientRect().bottom;
+    const label = page.locator('[data-slot="field-label"]').filter({ hasText: row.label });
+    const control = page.locator(row.control);
+    // 座標で押すので、先に表示領域へ入れる。boundingBox も mouse.click も表示領域を基準にした値を
+    // 使うため、画面外のまま測ると押せない座標を指すことになる（その点にある要素が「なし」になる）。
+    await control.scrollIntoViewIfNeeded();
+    const labelBox = await label.boundingBox();
+    const controlBox = await control.boundingBox();
+    expect(labelBox, 'ラベルの矩形が取れない').not.toBeNull();
+    expect(controlBox, '制御の矩形が取れない').not.toBeNull();
+
+    // ラベルの「文字」の下端。箱ではなく文字そのものを測るのは、この検査が対象にするのが
+    // 見た目の余白だからである。箱を広げてこの検査を通す是正をしても、見た目の余白はここで守られる。
+    const textBottom = await label.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getBoundingClientRect().bottom;
+    });
+
+    // 空振り防止: 文字と制御のあいだに視覚の余白が実在すること。余白が無ければ、この検査は
+    // 「反応しない帯が無い」を自明に満たしてしまう（測る対象が消えたことを緑と読まない）。
+    expect(
+      controlBox!.y - textBottom,
+      'ラベルの文字と制御のあいだに余白が無い（この検査が測る対象が存在しない）',
+    ).toBeGreaterThan(2);
+
+    // 制御の上端のすぐ上を指す。縦積みでは、ここが行の内側でありながら、ラベルにも制御にも
+    // 属さない帯である。
+    const point = { x: controlBox!.x + controlBox!.width / 2, y: controlBox!.y - 1 };
+    // 失敗したときに原因を追えるよう、その点にある要素を先に読む（帯が誰のものかが分かれば、
+    // ラベルが届いていないのか、別の要素が覆っているのかを見分けられる）。
+    const probe = await page.evaluate(({ x, y }) => {
+      const element = document.elementFromPoint(x, y);
+      return element === null ? 'なし' : `${element.tagName.toLowerCase()}[data-slot=${element.getAttribute('data-slot') ?? '-'}]`;
+    }, point);
+    await page.mouse.click(point.x, point.y);
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-slot') ?? null);
+    // select は指定で開きうるので、後続の検査へ開いたまま渡さない。
+    await page.keyboard.press('Escape');
+    expect(
+      focused,
+      `ラベルと制御のあいだを指しても制御が反応しない（行の高さを合算で数えられない）。` +
+        `ラベルの箱 ${labelBox!.y}〜${labelBox!.y + labelBox!.height}、文字の下端 ${textBottom}、` +
+        `制御の上端 ${controlBox!.y}、指した点 y=${point.y}、その点にある要素 ${probe}`,
+    ).toBe(row.focusedSlot);
   });
-
-  // 空振り防止: 文字と入力欄のあいだに視覚の余白が実在すること。余白が無ければ、この検査は
-  // 「反応しない帯が無い」を自明に満たしてしまう（測る対象が消えたことを緑と読まない）。
-  expect(
-    inputBox!.y - textBottom,
-    'ラベルの文字と入力欄のあいだに余白が無い（この検査が測る対象が存在しない）',
-  ).toBeGreaterThan(2);
-
-  // 入力欄の上端のすぐ上を指す。縦積みでは、ここが行の内側でありながら、ラベルにも入力欄にも
-  // 属さない帯である。
-  const point = { x: inputBox!.x + inputBox!.width / 2, y: inputBox!.y - 1 };
-  // 失敗したときに原因を追えるよう、その点にある要素を先に読む（帯が誰のものかが分かれば、
-  // ラベルが届いていないのか、別の要素が覆っているのかを見分けられる）。
-  const probe = await page.evaluate(({ x, y }) => {
-    const element = document.elementFromPoint(x, y);
-    return element === null ? 'なし' : `${element.tagName.toLowerCase()}[data-slot=${element.getAttribute('data-slot') ?? '-'}]`;
-  }, point);
-  await page.mouse.click(point.x, point.y);
-  expect(
-    await page.evaluate(() => document.activeElement?.getAttribute('data-slot') ?? null),
-    `ラベルと入力欄のあいだを指しても入力欄が反応しない（行の高さを合算で数えられない）。` +
-      `ラベルの箱 ${labelBox!.y}〜${labelBox!.y + labelBox!.height}、文字の下端 ${textBottom}、` +
-      `入力欄の上端 ${inputBox!.y}、指した点 y=${point.y}、その点にある要素 ${probe}`,
-  ).toBe('input');
-});
+}
 
 // ---------------------------------------------------------------------------
 // 非テキストコントラスト（WCAG 2.1 SC 1.4.11）の実描画検証。
