@@ -206,7 +206,9 @@ export const ATTRIBUTION_TEXT = 'データ提供: Google Maps';
  * - 折り返さない（1 行で表示する）。kilo のバブル（幅約 300px）に対して 13px の約 20 文字は十分に短い。
  *   ほかの部品と横に並べると幅が縮んで省略記号で切られうるので、footer の中で 1 行を占めさせる（attributionFooter）
  * - adjustMode（shrink-to-fit）のような大きさを変える指定を持たない。縮めると 12sp を下回りうる
- * - 書体（Roboto）は LINE が指定を許さないため満たせない（design.md「残るリスクと未決事項」）
+ * - 書体は満たしている。ポリシーは「Roboto（読み込みは任意）」とし、フォールバックとして
+ *   「product 内で既に使っている任意の sans serif か `Sans-Serif`」を明示的に許す。LINE Flex は書体を
+ *   指定するプロパティを持たないが、既定の書体がそのフォールバックに当たる（#287 で原文を当たり直して確認）
  */
 export function buildAttributionText(): FlexTextComponent {
   return {
