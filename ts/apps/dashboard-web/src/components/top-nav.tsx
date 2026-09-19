@@ -32,8 +32,8 @@ function roleLabel(role: DashboardRole): string {
 }
 
 // 共通トップナビ（日本語 UI・Req 7.3）。ログアウト導線を常設し、管理メニューは operator ロールのみ表示する。
-// 帯の高さ・現在地の示し方・ワードマークの色は docs/design/design-language.md（7.4 / 7.8 / 10 節）が正典で、
-// ここでは結論も数値も転記せず参照する。
+// 帯の段組み・高さ・現在地の示し方・ワードマークの色は docs/design/design-language.md（7.4 / 7.8 / 10 節）が
+// 正典で、ここでは結論も数値も転記せず参照する。
 export function TopNav() {
   const { status, me, signOut } = useAuth();
   const pathname = usePathname();
@@ -47,12 +47,20 @@ export function TopNav() {
   const items = NAV_ITEMS.filter((item) => !item.operatorOnly || isOperator);
 
   return (
-    <nav aria-label="メインナビゲーション" className="flex h-20 items-center gap-6 border-b border-border px-6">
+    // 狭い画面（lg 未満）は 2 段に組む。1 段目にワードマークとロール・ログアウト、2 段目に案内リンクを
+    // 折り返して**全部見せる**。広い画面は 1 段のまま高さを固定する（7.8 節）。DOM の順は段組みで
+    // 変えない（ブランド → 行き先 → 身元と退出）。左右の余白は版面の外枠と揃える。
+    <nav
+      aria-label="メインナビゲーション"
+      className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-border px-4 pt-2 lg:flex lg:h-20 lg:gap-6 lg:px-6 lg:pt-0"
+    >
       {/* ワードマーク。装飾専用色の使い所をここへ限る判断は 7.4 節、大きい文字としてのみ用いる根拠は
           10 節にある。リンクにも見出しにもしない（リンクの個数を固定した構造契約・Req 3.3）。 */}
       <span className="text-2xl font-bold text-brand">LINE MEO</span>
-      {/* 幅が足りないときの溢れはリストの内部へ閉じ、ページ全体を横に溢れさせない（Req 4.6）。 */}
-      <ul className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto">
+      {/* 2 段目。狭い画面では折り返して全リンクを見せる（捲れる手がかりの無い帯では、画面の外の
+          リンクは存在しないように見える・Issue #283）。広い画面では 1 行に並べ、万一の溢れだけを
+          リストの内部へ閉じてページ全体を横に溢れさせない（Req 4.6）。 */}
+      <ul className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-6 gap-y-2 pb-2 lg:min-w-0 lg:flex-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0">
         {items.map((item) => (
           <li key={item.href}>
             {/* 現在地の判定は経路の完全一致で行う。前方一致にすると /stores/new で /stores も
@@ -67,10 +75,15 @@ export function TopNav() {
           </li>
         ))}
       </ul>
-      <Badge variant="secondary">{roleLabel(me.role)}</Badge>
-      <Button type="button" variant="ghost" onClick={() => void signOut()}>
-        ログアウト
-      </Button>
+      {/* ロールとログアウトは 1 段目の右へ寄せる。包みを置くのは、配置の指定を部品へ渡さない
+          ためである。間隔は、ログアウトの押しボタンが外側へ広げる操作領域（見えない 8px）が
+          ロールの表示を覆わない下限にしてある。 */}
+      <div className="col-start-2 row-start-1 flex items-center gap-2 lg:gap-6">
+        <Badge variant="secondary">{roleLabel(me.role)}</Badge>
+        <Button type="button" variant="ghost" onClick={() => void signOut()}>
+          ログアウト
+        </Button>
+      </div>
     </nav>
   );
 }

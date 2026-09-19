@@ -1,7 +1,12 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { deviceWidthOf, expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { DASHBOARD_SURFACES, DASHBOARD_USERS } from './fixtures/api';
+import { DASHBOARD_SURFACES } from './fixtures/api';
+import {
+  expectPanelInsideScrollport,
+  readPanelPlacement,
+  USER_EDIT_PANEL,
+} from './support/panel-placement';
 // 文言の実値は面にもテストにも書かない。**実物の正典を読む**（写すと片方だけが古びる）。
 import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-text';
 
@@ -15,10 +20,9 @@ import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-tex
 // 前提: `E2E_STUB_IDP=1` と `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199` を与えて
 // ビルドしたものに対して走らせる（playwright.config.ts の説明）。
 //
-// 捲れる領域の宣言件数は面ごとに異なる。帯を描く 7 面は帯の案内リストで 1 件（task 2.1）、
-// 店舗一覧・招待コード・代理店管理・利用者管理はさらに表の容器で 1 件（task 2.3 / 2.4 / 2.5）、
-// 帯も表も持たないログイン画面は 0 件である。**店舗登録は表を持たない**ので帯の 1 件だけである
-// （候補一覧は押しボタンの並びであって表ではない）。
+// 捲れる領域の宣言件数は面ごとに異なる。表を持つ 5 面は表の容器で 1 件（task 2.3 / 2.4 / 2.5）、
+// 表を持たない面（ログイン・店舗登録）は 0 件である（店舗登録の候補一覧は押しボタンの並びであって
+// 表ではない）。**帯はどの面でも 0 件である**（Issue #283 で 2 段へ改めた・下の宣言を参照）。
 // 宣言と実測が食い違えば赤くなり、宣言の更新が強制される。**それが件数宣言の本来の働きである。**
 // （task 2.3 / 2.4 / 2.5 では実際にそう起きた: 宣言 1 に対して実測 2 で赤くなり、下の宣言を書き足した。）
 
@@ -37,15 +41,17 @@ function surfaceByName(where: string) {
 
 // --- 溢れていない面 --------------------------------------------------------------------
 
-// 帯（components/top-nav.tsx）の案内リストは捲れる領域である（ui-airbnb-surfaces task 2.1）。
-// 携帯端末幅にワードマーク・案内 5 件・ロール・ログアウトは収まらず、要件 3.3 がリンクと
-// 押しボタンの個数を固定しているためハンバーガーへ畳むこともできない。溢れをリストの内部へ
-// 閉じてページ全体を溢れさせない形（要件 2.5 と同型）が唯一の解であり、**意図的な 1 件**である。
+// 帯（components/top-nav.tsx）は捲れる領域を持たない（Issue #283）。
 //
-// 宣言を 1 にしても網は生きている。`expectNoHorizontalScroll` は捲れる領域そのものの右端を
-// 端末幅と比べるため、帯が面を押し広げれば依然として赤くなる。免除されるのは領域の**内側**だけである。
-// 帯を描かない面（ログイン）は 0 のままであり、その差自体が「帯の有無」を測っている。
-const NAV_SCROLL_REGIONS = 1;
+// task 2.1 の時点では、携帯端末幅にワードマーク・案内 5 件・ロール・ログアウトが 1 段で収まらず、
+// 溢れを案内リストの内部へ閉じる形を「唯一の解」として選んでいた。**それは誤りだった。**
+// リストの中の捲りには手がかりが無く、画面の外の案内リンク（実測で幅 393 のとき 389px・
+// 320 のとき 418px 分）は利用者にとって存在しないのと同じだった。狭い画面で 2 段に組み、
+// リンクを折り返して全部見せる形へ改めた（docs/design/design-language.md 7.8 節）。
+//
+// 宣言を 0 にすることが、捲りが戻ってきたときに赤くなる網である。帯のリンクが画面の中にあることの
+// 実測は mobile-layout.spec.ts の R2 が受け持つ（帯の有無も、そちらが操作要素の数で測る）。
+const NAV_SCROLL_REGIONS = 0;
 
 // 一覧を `@fwlm/ui` の `TableContainer` へ移した面は、表 1 つにつき捲れる領域が 1 件増える
 // （ui-airbnb-surfaces task 2.3）。要件 2.5 が「一覧の内部だけを横にたどれる状態にし、
@@ -57,7 +63,7 @@ const TABLE_SCROLL_REGIONS = 1;
 
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('店舗一覧').open(page);
-  // 帯 1 件 + 表 1 件。
+  // 表の容器 1 件（帯は捲れる領域を持たない）。
   await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
@@ -117,6 +123,34 @@ test.describe('店頭掲示の印刷', () => {
     await expect(page.getByRole('table'), '掲示面を持たない面の一覧が紙に出ません').toBeVisible();
   });
 
+  // 行の直下のパネルは、画面では捲り容器の見えている幅に留めるために、容器の左端から 1rem の
+  // 位置へ sticky で置き、幅も見えている幅から左右 1rem を引いてある（`TableDetailRow`）。
+  // **紙の上ではこの包みを外さなければならない。** 印刷の規則が戻すのは祖先の display と余白・枠・
+  // 背景だけで、位置と幅には触れないためである。外さないと掲示面が紙の左から 1rem ずれ、幅も
+  // 2rem 狭くなる（実測: 幅 393 で left 16 / width 361 ＝ 版面は left 0 / width 393）。
+  test('印刷時は掲示面が版面の左端から始まり、幅も版面と一致する', async ({ page }) => {
+    await surfaceByName('店舗一覧の QR パネル').open(page);
+    await page.emulateMedia({ media: 'print' });
+
+    const geometry = await page.evaluate(() => {
+      const region = document.querySelector('[data-print-region]')!.getBoundingClientRect();
+      const body = document.body.getBoundingClientRect();
+      return {
+        left: Math.round((region.left - body.left) * 100) / 100,
+        widthGap: Math.round((body.width - region.width) * 100) / 100,
+      };
+    });
+
+    expect(
+      geometry.left,
+      '掲示面が紙の左端からずれています（行の直下のパネルの包みが印刷でも効いています）',
+    ).toBeLessThanOrEqual(1);
+    expect(
+      geometry.widthGap,
+      '掲示面の幅が版面より狭くなっています（包みの幅指定が印刷でも効いています）',
+    ).toBeLessThanOrEqual(1);
+  });
+
   // `visibility: hidden` で隠すと箱が残り、紙は一覧の高さぶん生成されて 2 枚目以降が白紙になる
   // （実測: 店舗 40 件で body 3014px・A4 で 3 ページ）。**畳めていることを高さで測る。**
   test('掲示面のある面では外側が箱ごと畳まれる（白紙のページを後続させない）', async ({ page }) => {
@@ -150,7 +184,7 @@ test.describe('店頭掲示の印刷', () => {
 
 test('モバイルビューポートの QR パネルで横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('店舗一覧の QR パネル').open(page);
-  // 同じ面の後続状態なので、捲れる領域は帯 1 件 + 表 1 件のまま。**掲示面は領域を増やさない**
+  // 同じ面の後続状態なので、捲れる領域は表の容器 1 件のまま。**掲示面は領域を増やさない**
   // （QR 画像は `max-w-full` で端末幅に収まり、文言は折り返す）。増えればここが赤くなる。
   await expectNoHorizontalScroll(
     page,
@@ -161,7 +195,7 @@ test('モバイルビューポートの QR パネルで横スクロールが発�
 
 test('モバイルビューポートの代理店管理で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('代理店管理').open(page);
-  // 帯 1 件 + 表 1 件（task 2.4 で `TableContainer` へ移った）。
+  // 表の容器 1 件（task 2.4 で `TableContainer` へ移った）。
   await expectNoHorizontalScroll(page, '代理店管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
@@ -172,7 +206,7 @@ test('モバイルビューポートの代理店管理で横スクロールが�
 // 宣言の更新を要求した。
 test('モバイルビューポートの招待コードで横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('招待コード').open(page);
-  // 帯 1 件 + 表 1 件。
+  // 表の容器 1 件。
   await expectNoHorizontalScroll(page, '招待コード', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
@@ -182,14 +216,14 @@ test('モバイルビューポートの招待コードで横スクロールが�
 // 「利用者管理: 溢れが解消している（Expected: > 394 / Received: 393）」と赤を出し、宣言の更新を要求した。
 test('モバイルビューポートの利用者管理で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('利用者管理').open(page);
-  // 帯 1 件 + 表 1 件。
+  // 表の容器 1 件。
   await expectNoHorizontalScroll(page, '利用者管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
 // 編集パネルを開いた状態（dashboard-user-edit Req 6.9・Issue #259）。
 test('モバイルビューポートの利用者管理の編集パネルで横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('利用者管理の編集パネル').open(page);
-  // 同じ面の後続状態なので、捲れる領域は帯 1 件 + 表 1 件のまま。パネルは表の捲れる容器の内側へ
+  // 同じ面の後続状態なので、捲れる領域は表の容器 1 件のまま。パネルは表の捲れる容器の内側へ
   // 挿入されるので、領域を増やさない。増えればここが赤くなる。
   //
   // **この実測が見るのはページ全体のはみ出しだけである。** 容器の内側は免除されるので、
@@ -227,219 +261,6 @@ test('モバイルビューポートの利用者管理の編集パネルで横�
 // 見出しがカードの縁で切れても、a11y 監査は緑のままであることを、配置を壊す変異で実測している
 // （dashboard-user-edit tasks 3.5）。
 
-/** 画面上の左右の端（CSS px・ビューポート基準）。 */
-interface HorizontalExtent {
-  readonly name: string;
-  readonly left: number;
-  readonly right: number;
-}
-
-interface PanelPlacement {
-  readonly scrollLeft: number;
-  readonly clientWidth: number;
-  readonly scrollWidth: number;
-  /** 捲り容器の見えている矩形（スクロールポート）の左右の端。 */
-  readonly scrollport: { readonly left: number; readonly right: number };
-  /**
-   * パネルのカードと、その中の見出し・操作要素。見出しは描かれた文字列の範囲、入力部品は
-   * ラベルの文言、押しボタンは文言で名指す。
-   */
-  readonly parts: readonly HorizontalExtent[];
-  /** カードの縁を越えた子孫（要素の箱と、描かれた文字列の範囲）。 */
-  readonly escapedFromCard: readonly HorizontalExtent[];
-  /** カードの子孫として調べた要素と文字列の件数（空振りの検出用）。 */
-  readonly cardDescendantsChecked: number;
-}
-
-/**
- * 測る部分の一覧。**完全一致で照合する。**
- *
- * 1 件も拾えない、または一部を取りこぼした計測を「すべて内側にある」と読まないための前置きである。
- * 所属代理店の選択は代理店ロールのときだけ出る。fixture の開く手順が代理店ロールの利用者を開く
- * （最も横に広い状態）ので、ここにも含まれる。
- */
-const PANEL_PARTS = [
-  'カード',
-  '見出し',
-  'ロール',
-  '所属代理店',
-  '表示名',
-  '保存',
-  'キャンセル',
-] as const;
-
-/**
- * カードの子孫がカードの縁を越えたと見なす幅の下限（CSS px）。
- *
- * 箱の端と文字列の範囲は小数で得られ、カードの縁と接する子孫（見出しの帯・本文の帯）は縁と同じ値に
- * なる。丸めの差で縁と接するものを越えたと読まないための幅であり、実際に切れる文字（1 字で数 px）より
- * 十分に小さい。
- */
-const CARD_EDGE_TOLERANCE = 0.5;
-
-/**
- * カードの左右の余白（見えている矩形の左端 → カードの左端、カードの右端 → 見えている矩形の右端）の
- * 差の上限（CSS px）。
- *
- * 包みの幅（`100cqi - 2rem`）は、sticky の左端（`left-4`）と、`@fwlm/ui` の `TableCell` の左右の余白
- * （`px-4`）の両方と結び付いている。引く値だけがずれると（例: `1.5rem`）、ここでは収まったまま、
- * 表が容器に収まる広い版面で包みがセルの内容より広くなり、容器が捲れるようになる（tasks 3.5 の
- * 独立レビューで 768px・1280px 幅に実測）。E2E は Pixel 5 だけで走るので、左右の余白が揃っていることで
- * このずれを捕まえる。最大まで捲ると、sticky の包みがセルの内容の右端に当たって 1px 未満ずれる
- * （表の幅が小数のため）ので、その分を許す。
- */
-const CARD_GAP_TOLERANCE = 1;
-
-/** 利用者一覧の捲り容器（アクセシブル名は一覧のページが与える）。 */
-function userListRegion(page: Page): Locator {
-  return page.getByRole('region', { name: '利用者一覧', exact: true });
-}
-
-/** fixture が開く対象の利用者の編集ボタン。 */
-function editTrigger(page: Page): Locator {
-  return page.getByRole('button', { name: `${DASHBOARD_USERS[1].email} を編集`, exact: true });
-}
-
-/**
- * 捲り容器と、開いている編集パネルの左右の端を 1 回の評価で読む。
- *
- * パネルは編集ボタンの `aria-controls` が指すセルとして引く（押しボタンとパネルの結び付きを
- * そのまま辿る）。そのセルが捲り容器の中に無ければ、測る対象を取り違えているので例外にする。
- */
-async function readPanelPlacement(page: Page): Promise<PanelPlacement> {
-  const panelId = await editTrigger(page).getAttribute('aria-controls');
-  expect(panelId, '編集ボタンが開いているパネルを指していません（パネルが開いていません）').not.toBeNull();
-  return userListRegion(page).evaluate(
-    (container, { id, tolerance }) => {
-      const cell = document.getElementById(id);
-      if (cell === null || !container.contains(cell)) {
-        throw new Error(`編集パネル #${id} が利用者一覧の捲り容器の中にありません`);
-      }
-      const card = cell.querySelector('[data-slot="card"]');
-      if (card === null) {
-        throw new Error(`編集パネル #${id} の中にカードがありません`);
-      }
-      const extent = (name: string, rect: DOMRect): HorizontalExtent => ({
-        name,
-        left: rect.left,
-        right: rect.right,
-      });
-      // 描かれた文字列の範囲。要素の箱が縁の内側にあっても、文字列が箱から溢れていれば読めないので、
-      // 見出しと文字列は箱ではなく文字列そのものの範囲で測る。
-      const textRect = (node: Node): DOMRect => {
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        return range.getBoundingClientRect();
-      };
-
-      const parts: HorizontalExtent[] = [extent('カード', card.getBoundingClientRect())];
-      const heading = card.querySelector('h2');
-      if (heading !== null) parts.push(extent('見出し', textRect(heading)));
-      for (const control of Array.from(cell.querySelectorAll('select, input, button'))) {
-        const name =
-          control instanceof HTMLButtonElement
-            ? control.textContent?.trim() ?? ''
-            : (control as HTMLInputElement | HTMLSelectElement).labels?.[0]?.textContent?.trim() ?? '';
-        parts.push(extent(name, control.getBoundingClientRect()));
-      }
-
-      // カードの子孫。大きさの無いもの（閉じた選択の中の選択肢など）は描かれていないので除く。
-      const cardBox = card.getBoundingClientRect();
-      const escapedFromCard: HorizontalExtent[] = [];
-      let cardDescendantsChecked = 0;
-      const inspect = (name: string, rect: DOMRect) => {
-        if (rect.width === 0 && rect.height === 0) return;
-        cardDescendantsChecked += 1;
-        if (rect.left < cardBox.left - tolerance || rect.right > cardBox.right + tolerance) {
-          escapedFromCard.push(extent(name, rect));
-        }
-      };
-      for (const element of Array.from(card.querySelectorAll('*'))) {
-        inspect(`<${element.tagName.toLowerCase()}>`, element.getBoundingClientRect());
-      }
-      const texts = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
-      for (let node = texts.nextNode(); node !== null; node = texts.nextNode()) {
-        const text = node.textContent?.trim() ?? '';
-        if (text !== '') inspect(`「${text}」`, textRect(node));
-      }
-
-      // 見えている矩形は、枠線（clientLeft）の内側から clientWidth の幅である。getBoundingClientRect の
-      // 幅は、縦の捲り棒が出る場合にその幅まで含むので使わない。
-      const box = container.getBoundingClientRect();
-      const left = box.left + container.clientLeft;
-      return {
-        scrollLeft: container.scrollLeft,
-        clientWidth: container.clientWidth,
-        scrollWidth: container.scrollWidth,
-        scrollport: { left, right: left + container.clientWidth },
-        parts,
-        escapedFromCard,
-        cardDescendantsChecked,
-      };
-    },
-    { id: panelId!, tolerance: CARD_EDGE_TOLERANCE },
-  );
-}
-
-/** 数値を小数第 2 位で丸めた表記（失敗の文言用。比較は丸める前の値で行う）。 */
-function px(value: number): string {
-  return String(Math.round(value * 100) / 100);
-}
-
-/** 失敗の文言用の表記（`名前 [左端, 右端]`）。 */
-function describeExtent(part: HorizontalExtent): string {
-  return `${part.name} [${px(part.left)}, ${px(part.right)}]`;
-}
-
-/**
- * パネルの各部が見えている矩形の内側にあり、カードの中身がカードの縁を越えず、カードの左右の余白が
- * 揃っていること。
- *
- * 判定は `expect.soft` にし、1 つの状態で外れても後続の状態を測り続ける。どの状態で外れるかは
- * 壊れ方で変わる（sticky だけを外すと、捲れた状態でだけ外れる）ので、1 回の実行で全状態の結果を
- * 読めるようにする。取りこぼしと空振りの判定は、それ以降の判定の前提なので通常の `expect` のまま止める。
- */
-function expectPanelInsideScrollport(placement: PanelPlacement, state: string): void {
-  expect(
-    placement.parts.map((part) => part.name),
-    `${state}: 測る部分を取りこぼしています（パネルの構成が変わったか、パネルが開いていません）`,
-  ).toEqual([...PANEL_PARTS]);
-  // カードの中の見出しと操作要素 5 つは、少なくとも子孫として調べているはずである。下回るなら
-  // 子孫の走査が空振りしている（件数は literal で持つ）。
-  expect(
-    placement.cardDescendantsChecked,
-    `${state}: カードの子孫をほとんど調べていません（走査が空振りしています）`,
-  ).toBeGreaterThanOrEqual(6);
-
-  const { left, right } = placement.scrollport;
-  const where = `${state}（scrollLeft=${px(placement.scrollLeft)}）`;
-  const outside = placement.parts
-    .filter((part) => part.left < left || part.right > right)
-    .map(describeExtent);
-  expect
-    .soft(outside, `${where}: 捲り容器の見えている矩形 [${px(left)}, ${px(right)}] の外へ出た部分があります`)
-    .toEqual([]);
-
-  const card = placement.parts[0]!;
-  expect
-    .soft(
-      placement.escapedFromCard.map(describeExtent),
-      `${where}: カード [${px(card.left)}, ${px(card.right)}] の縁を越えた中身があります` +
-        '（カードは溢れを切り取るので、越えた分は読めません）',
-    )
-    .toEqual([]);
-
-  const leftGap = card.left - left;
-  const rightGap = right - card.right;
-  expect
-    .soft(
-      Math.abs(leftGap - rightGap),
-      `${where}: カードの左右の余白が揃っていません（左 ${px(leftGap)} / 右 ${px(rightGap)}）。` +
-        '包みの幅から引く値が、sticky の左端やセルの左右の余白とずれています',
-    )
-    .toBeLessThanOrEqual(CARD_GAP_TOLERANCE);
-}
-
 test.describe('モバイルビューポートの利用者管理の編集パネルは捲り容器の見えている矩形に収まる', () => {
   test.beforeEach(async ({ page }) => {
     // 携帯端末の幅で走っていることの前置き（広い幅では表が容器に収まり、捲れた状態を作れない）。
@@ -450,7 +271,7 @@ test.describe('モバイルビューポートの利用者管理の編集パネ�
   test('編集の押下で捲れた状態と、捲り位置 0 の状態の両方で、カードと操作要素が見えている', async ({
     page,
   }) => {
-    const scrolled = await readPanelPlacement(page);
+    const scrolled = await readPanelPlacement(page, USER_EDIT_PANEL);
     // 前提: 表が容器より広く、編集の押下で容器が実際に捲れている。表が容器に収まるようになると
     // 「捲れた状態」を作れず、この実測は何も測らなくなる。そのときは緑にせず、ここで止める。
     expect(
@@ -458,28 +279,32 @@ test.describe('モバイルビューポートの利用者管理の編集パネ�
       '表が捲り容器に収まっています（捲れた状態を作れないので、この実測は成り立ちません）',
     ).toBeGreaterThan(scrolled.clientWidth);
     expect(scrolled.scrollLeft, '編集の押下で捲り容器が捲れていません').toBeGreaterThan(0);
-    expectPanelInsideScrollport(scrolled, '編集の押下で捲れた状態');
+    expectPanelInsideScrollport(scrolled, '編集の押下で捲れた状態', USER_EDIT_PANEL);
 
-    await userListRegion(page).evaluate((container) => {
+    await USER_EDIT_PANEL.region(page).evaluate((container) => {
       container.scrollLeft = 0;
     });
-    const initial = await readPanelPlacement(page);
+    const initial = await readPanelPlacement(page, USER_EDIT_PANEL);
     expect(initial.scrollLeft, '捲り位置を 0 へ戻せていません').toBe(0);
-    expectPanelInsideScrollport(initial, '捲り位置 0 の状態');
+    expectPanelInsideScrollport(initial, '捲り位置 0 の状態', USER_EDIT_PANEL);
   });
 
   test('Tab で保存へ焦点を載せたとき、保存が見えている', async ({ page }) => {
     // 編集ボタン（パネルを開いた押しボタン）から、キーボードだけで保存まで進む。行の残りの押しボタンと
     // パネルの入力を順に通るので、押す回数は構成で変わる。上限を置き、届かなければ止める。
-    const save = userListRegion(page).getByRole('button', { name: '保存', exact: true });
-    await editTrigger(page).focus();
+    const save = USER_EDIT_PANEL.region(page).getByRole('button', { name: '保存', exact: true });
+    await USER_EDIT_PANEL.trigger(page).focus();
     for (let presses = 0; presses < 10; presses += 1) {
       if (await save.evaluate((element) => element === document.activeElement)) break;
       await page.keyboard.press('Tab');
     }
     await expect(save, 'Tab を 10 回押しても保存へ焦点が届いていません').toBeFocused();
 
-    expectPanelInsideScrollport(await readPanelPlacement(page), 'Tab で保存へ焦点を載せた状態');
+    expectPanelInsideScrollport(
+      await readPanelPlacement(page, USER_EDIT_PANEL),
+      'Tab で保存へ焦点を載せた状態',
+      USER_EDIT_PANEL,
+    );
   });
 });
 
@@ -487,13 +312,12 @@ test.describe('モバイルビューポートの利用者管理の編集パネ�
 // 是正した。是正前は素の `<select>` が最長の選択肢の幅まで伸びて 472px（端末幅 393px）だった。
 //
 // **この面には表が無い。** 候補一覧は押しボタンの並びであって `TableContainer` を通らないので、
-// 捲れる領域は帯の 1 件だけである。task 2.3 / 2.4 / 2.5 と件数が違うのはそのためであり、
-// 書き写しの誤りではない。
+// 捲れる領域は 0 件である。表を持つ面と件数が違うのはそのためであり、書き写しの誤りではない。
 //
 // 是正を検出したのは「既知の溢れ」の 2 枚の網の**両方**である（下の「畳んだ理由」を参照）。
 test('モバイルビューポートの店舗登録で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('店舗登録').open(page);
-  // 帯 1 件のみ（表を持たない）。
+  // 0 件（表も捲れる帯も持たない）。
   await expectNoHorizontalScroll(page, '店舗登録', NAV_SCROLL_REGIONS);
 });
 
@@ -529,3 +353,39 @@ test('モバイルビューポートのログイン画面で横スクロール�
 // 起きる。供給源が無ければ発火する。どちらにせよ「既知の失敗を宣言するときは、失敗の**理由**を
 // 固定する第 2 の網を対で置く」という規律は変わらない（理由を固定する網だけが、
 // 何が直ったのかを名指しできる）。
+
+// --- 幅 320 でのページ全体のはみ出し（Issue #283）--------------------------------------
+//
+// 上の実測は project の既定（Pixel 5・幅 393）だけで走る。実機には 320px 幅の端末があり、
+// 帯を 2 段に組んだことで 1 段目の収まりは**幅に依存する**ようになった（ワードマーク・ロール・
+// ログアウトが 1 行に並ぶ）。幅 393 で収まっていることは 320 で収まっていることを含まない。
+//
+// 面ごとの捲れる領域の件数は上の宣言をそのまま使う。件数の正典を 2 箇所に持たないためであり、
+// 幅を変えても領域の数は変わらない（変わるなら、それ自体が見つけるべき退行である）。
+test.describe('幅 320 でもページ全体が横へはみ出さない', () => {
+  test.use({ viewport: { width: 320, height: 720 } });
+
+  const REGIONS: Readonly<Record<string, number>> = {
+    店舗一覧: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    '店舗一覧の QR パネル': NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    代理店管理: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    ログイン: 0,
+    招待コード: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    利用者管理: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    '利用者管理の編集パネル': NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    店舗登録: NAV_SCROLL_REGIONS,
+  };
+
+  test('宣言が検証面の一覧と一致する', () => {
+    expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(REGIONS));
+    // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
+    expect(Object.keys(REGIONS)).toHaveLength(8);
+  });
+
+  for (const surface of DASHBOARD_SURFACES) {
+    test(`幅 320 の${surface.where}で横スクロールが発生しない`, async ({ page }) => {
+      await surface.open(page);
+      await expectNoHorizontalScroll(page, `${surface.where}（320px）`, REGIONS[surface.where]!);
+    });
+  }
+});

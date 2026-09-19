@@ -32,6 +32,47 @@ interface Violation {
   readonly nodes: readonly { readonly target: readonly unknown[] }[];
 }
 
+/**
+ * axe の 1 件の「判定不能」（報告と理由の判別に必要な最小形）。
+ *
+ * 理由は節点ごとの各 check の `data.messageKey` に入る。規則の単位では区別できないので、
+ * 節点まで降りて読む。
+ */
+interface Incomplete {
+  readonly id: string;
+  readonly nodes: readonly {
+    readonly target: readonly unknown[];
+    readonly any?: readonly { readonly data?: { readonly messageKey?: string } | null }[];
+    readonly all?: readonly { readonly data?: { readonly messageKey?: string } | null }[];
+    readonly none?: readonly { readonly data?: { readonly messageKey?: string } | null }[];
+  }[];
+}
+
+/**
+ * 「背景の色を決められなかった」を意味する axe の理由（axe-core 4.13.0 の原文で確認）。
+ *
+ *   bgImage    — background color could not be determined due to a background image
+ *   bgGradient — background color could not be determined due to a background gradient
+ *
+ * **背景以外の理由（要素の重なり・前景の不透明度など）は入れない。** それらはこの仕掛けとは
+ * 無関係の現象で、巻き込むと「関係ない理由で赤い網」になり、いずれ外される。
+ */
+const BACKGROUND_UNDECIDABLE_KEYS: ReadonlySet<string> = new Set(['bgImage', 'bgGradient']);
+
+/** 背景の画像・グラデーションを理由に判定を降ろされた節点を、規則名つきで列挙する。 */
+function undecidableByBackground(incomplete: readonly Incomplete[]): readonly string[] {
+  const found: string[] = [];
+  for (const entry of incomplete) {
+    for (const node of entry.nodes) {
+      const checks = [...(node.any ?? []), ...(node.all ?? []), ...(node.none ?? [])];
+      if (checks.some((check) => BACKGROUND_UNDECIDABLE_KEYS.has(check?.data?.messageKey ?? ''))) {
+        found.push(`${entry.id}: ${node.target.join(' ')}`);
+      }
+    }
+  }
+  return found;
+}
+
 /** 違反を人が追える形へ整形する。要素セレクタまで出さないと、どこを直せばよいか分からない。 */
 function formatViolations(violations: readonly Violation[]): string {
   return violations
@@ -40,6 +81,31 @@ function formatViolations(violations: readonly Violation[]): string {
       return `  [${v.impact ?? 'unknown'}] ${v.id}: ${v.help}\n${targets}`;
     })
     .join('\n');
+}
+
+/**
+ * 一覧表の捲れる手がかりの濃淡を、監査の間だけ外す（Issue #283）。
+ *
+ * **これは監査を緩める操作ではなく、縮んだ網を戻す操作である。** axe の `color-contrast` は、
+ * 背景に画像（グラデーションを含む）を持つ祖先の下にある文字を「判定不能」へ回す。表の容器へ
+ * 濃淡を入れた結果、それまで評価されていた**表のセルの文字が丸ごと監査の外へ出た**
+ * （実測: 幅 393 の店舗一覧で、合格 24 件のうち表のセル 14 件が判定不能へ移った）。
+ *
+ * 濃淡を外した状態の監査は「文字色そのもの」を評価する。濃淡が最も濃い点に重なったときの
+ * 合成後の比は、`ts/packages/ui/test/contrast-usage.test.ts` が静的に固定している
+ * （docs/design/design-language.md 7.18）。2 つで、実際に描かれる範囲の両端を押さえる。
+ *
+ * **表の中へ新しい文字色を足すときは、静的検証の側にもその組を足すこと。** ここで外して
+ * いる以上、濃淡の上での比は監査からは見えない。
+ *
+ * **この関数が効いていることは、下の「判定から外れた節点」の表明だけが守っている。** 外す側と
+ * 製品側をつないでいるのは上の属性名の文字列 1 つだけなので、それが無いと改名・移動・注入の失敗が
+ * すべて無言で通る（Issue #283 のレビューで実測: 属性名を差し替えても 8 面すべて緑だった）。
+ */
+async function neutralizeScrollCue(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: '[data-slot="table-container"]{background-image:none !important}',
+  });
 }
 
 /**
@@ -52,6 +118,7 @@ export async function expectNoAxeViolations(
   page: Page,
   options: { readonly selector?: string; readonly disableRules?: readonly string[] } = {},
 ): Promise<void> {
+  await neutralizeScrollCue(page);
   let builder = new AxeBuilder({ page }).withTags([...WCAG_AA_TAGS]);
   if (options.selector !== undefined) builder = builder.include(options.selector);
   if (options.disableRules !== undefined && options.disableRules.length > 0) {
@@ -76,4 +143,20 @@ export async function expectNoAxeViolations(
     results.passes.length + results.incomplete.length + violations.length,
     'axe の規則が 1 件も評価されていない（監査が空振りしている）',
   ).toBeGreaterThan(0);
+
+  // 上の 2 つは、**網が縮む壊れ方に対して構造的に反応しない**（Issue #283）。
+  // 判定を降ろされた節点は違反にも合格にも数えられないので違反 0 件は変わらず、直前の合計は
+  // 規則の単位で数えているため、節点が合格から判定不能へ移っても値が動かない。実測では、
+  // 幅 393 の店舗一覧でコントラストの判定対象 24 節点のうち 14、利用者管理では 36 のうち 15 が
+  // 判定不能へ移った状態で、このファイルの表明が 1 つも反応しなかった。
+  //
+  // したがって **neutralizeScrollCue が効いていることは、ここでしか確かめられない。** 外す側と
+  // 製品側をつないでいるのは属性名の文字列 1 つだけで、改名・移動・注入の失敗のいずれでも黙って
+  // 何もしなくなる。結果（判定から外れた節点があるか）を見ることで、原因が何であれ赤くする。
+  expect(
+    undecidableByBackground(results.incomplete as unknown as readonly Incomplete[]),
+    '背景の画像・グラデーションのために、コントラストの判定から外れた要素があります。' +
+      '違反 0 件のまま監査の網だけが縮んだ状態です（表の捲れる手がかりを外す neutralizeScrollCue が' +
+      '効いていない、または新しい背景が監査対象の上に載っています）',
+  ).toEqual([]);
 }

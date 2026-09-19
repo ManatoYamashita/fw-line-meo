@@ -16,6 +16,7 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableDetailRow,
   TableHead,
   TableHeaderCell,
   TableRow,
@@ -415,10 +416,8 @@ function UsersView() {
         // 横方向の捲りは表の **外側** が持つ。この容器は e2e（dashboard-surfaces.spec.ts）が
         // 宣言する「表の捲れる領域 1 件」である。tbody の内側へ挟むと行の隣接関係が壊れ、
         // 編集パネルを対象行の直後へ挿す構成が成立しなくなる。
-        // 容器を幅のコンテナにし、編集パネルの幅を容器の見えている幅から決められるようにする
-        // （下のパネル行・dashboard-user-edit Req 6.8, 6.9）。容器は余白を持たず輪郭も影で描くので、
-        // コンテナの幅は見えている幅と一致する。容器の幅は版面が決め、中身の幅には依存しない。
-        <TableContainer label="利用者一覧" className="@container/user-list">
+        // 幅のコンテナ（編集パネルの幅の基準）も捲れる手がかりも部品が持つ（Issue #283）。
+        <TableContainer label="利用者一覧">
           <Table>
             <TableHead>
               <TableRow>
@@ -434,18 +433,22 @@ function UsersView() {
               {list.users.map((user) => (
                 <Fragment key={user.id}>
                   <TableRow>
-                    <TableCell>{roleLabel(user.role)}</TableCell>
+                    {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。
+                      * 面の側は語彙を選ぶだけで、幅も折り返しのクラスも書かない。 */}
+                    <TableCell wrap="none">{roleLabel(user.role)}</TableCell>
                     {/* 表示名が未設定の利用者は、他の不在の列と同じ「—」で未設定と分かるようにする
                       * （dashboard-user-edit Req 6.1）。 */}
-                    <TableCell>{user.displayName ?? '—'}</TableCell>
-                    <TableCell>{user.email ?? '—'}</TableCell>
+                    <TableCell wrap="prose">{user.displayName ?? '—'}</TableCell>
+                    {/* アドレスは区切りを持たない長い語になりうる。どこでも折り返せるようにしないと、
+                      * この列だけが幅を取り、ほかの列が 1 文字まで細る（Issue #276）。 */}
+                    <TableCell wrap="anywhere">{user.email ?? '—'}</TableCell>
                     {/* 運営ロールは所属代理店を持たない（agencyId=null）。 */}
-                    <TableCell>
+                    <TableCell wrap="prose">
                       {user.agencyId === null ? '—' : agencyNameById.get(user.agencyId) ?? user.agencyId}
                     </TableCell>
                     {/* 有効/無効の状態（Req 6.4）。招待コードの同じ列と同じく素の語のまま置く。
                       * 装飾で包むと同一役割が面をまたいで 2 通りに描かれ、Req 1.2 が壊れる。 */}
-                    <TableCell>{user.disabled ? '無効' : '有効'}</TableCell>
+                    <TableCell wrap="none">{user.disabled ? '無効' : '有効'}</TableCell>
                     <TableCell>
                       {/* 押しボタンが 2 つ並ぶ行があるので、間隔を容器が持つ（編集パネルの押しボタンの並びと
                         * 同じ段）。狭い幅では折り返し、列を押し広げない。 */}
@@ -495,40 +498,23 @@ function UsersView() {
                   {openUserId === user.id && (
                     // 対象行の直下へ挿入し、対応関係を視覚的にも DOM 順でも読み取れるようにする
                     // （dashboard-user-edit Req 6.3）。重ね表示は使わない（docs/design/design-language.md §7.5）。
-                    <TableRow>
-                      <TableCell colSpan={COLUMN_COUNT} id={editPanelId(user.id)}>
-                        {/* 携帯端末の幅では、長いメールアドレスの列のために表が容器より広くなり、表の全幅に
-                          * またがるこのセルも容器の見えている幅を超える。パネルをそのまま置くと、容器を捲った
-                          * 位置しだいで保存が見えない所へ出て、焦点が載っても見えない（WCAG 2.4.7）うえ、
-                          * フォームに横の捲りが要る（WCAG 1.4.10・dashboard-user-edit Req 6.8, 6.9）。
-                          * そこでパネルを、容器の左端から 1rem に留まる sticky と、容器の見えている幅から
-                          * 左右 1rem ずつを引いた幅で包み、捲り位置によらず見えている幅の中に置く。
-                          * 幅の単位 cqi は、名前ではなく最も近い幅のコンテナ（上の捲り容器）を基準にする。
-                          * この包みと捲り容器の間に別のコンテナを挟むと、基準がずれる。
-                          * 表が容器に収まる広い版面では、この幅はセルの内容幅（セルの左右の余白 1rem を
-                          * 引いた幅）と一致し、容器も捲れないので、見た目は包む前と変わらない。
-                          * 幅を固定したので、区切りの無い語（点だけで区切ったメールアドレスなど）はどこでも
-                          * 折り返せるようにする（overflow-wrap: anywhere）。body の break-word は語の途中で
-                          * 折り返しても最小幅を縮めないので、パネルの見出し（grid の項目）は語の全長より
-                          * 狭くならず、カードの縁を越えて切れる。sticky は捲りに追従するので、捲っても読めない。
-                          * anywhere は最小幅も縮めるので、見出しがカードの中で折り返す。折り返さずに収まる
-                          * 文字列（広い版面）の見た目は変わらない。 */}
-                        <div className="sticky left-4 w-[calc(100cqi-2rem)] wrap-anywhere">
-                          {/* パネルは開いた時点の値に固定するので、利用者ごとに作り直す（key）。
-                            * 自分の行、または代理店一覧を取得できていないときは、ロールと所属を固定表示にする
-                            * （dashboard-user-edit Req 2.2, 1.14）。保存の後処理には、このパネルを開いた回の
-                            * 開閉の番号を持ち帰らせる。 */}
-                          <DashboardUserEditPanel
-                            key={user.id}
-                            user={user}
-                            agencies={agenciesFailed ? null : agencies}
-                            isSelf={user.id === me?.id}
-                            onSaved={() => handleEditSaved(openSeq)}
-                            onCancel={closeEditPanel}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                    // 包み（捲り容器の見えている幅に留める指定）は表の部品が持つ。位置と幅は
+                    // セルの左右の余白と結び付いており、3 つを 1 つのファイルに閉じてある
+                    // （dashboard-user-edit Req 6.8, 6.9 / Issue #283）。
+                    <TableDetailRow colSpan={COLUMN_COUNT} id={editPanelId(user.id)}>
+                      {/* パネルは開いた時点の値に固定するので、利用者ごとに作り直す（key）。
+                        * 自分の行、または代理店一覧を取得できていないときは、ロールと所属を固定表示にする
+                        * （dashboard-user-edit Req 2.2, 1.14）。保存の後処理には、このパネルを開いた回の
+                        * 開閉の番号を持ち帰らせる。 */}
+                      <DashboardUserEditPanel
+                        key={user.id}
+                        user={user}
+                        agencies={agenciesFailed ? null : agencies}
+                        isSelf={user.id === me?.id}
+                        onSaved={() => handleEditSaved(openSeq)}
+                        onCancel={closeEditPanel}
+                      />
+                    </TableDetailRow>
                   )}
                 </Fragment>
               ))}

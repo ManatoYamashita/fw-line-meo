@@ -232,10 +232,12 @@ function InviteCodesView() {
                 <TableBody>
                   {list.codes.map((code) => (
                     <TableRow key={code.id}>
-                      <TableCell>{code.code}</TableCell>
+                      {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。
+                        * コードは手で書き写す値なので、区切りの位置で割らずに 1 行で出す。 */}
+                      <TableCell wrap="none">{code.code}</TableCell>
                       {/* 有効/無効バッジ（Req 5.1） */}
-                      <TableCell>{code.disabled ? '無効' : '有効'}</TableCell>
-                      <TableCell>{code.createdAt}</TableCell>
+                      <TableCell wrap="none">{code.disabled ? '無効' : '有効'}</TableCell>
+                      <TableCell wrap="none">{code.createdAt}</TableCell>
                       <TableCell>
                         {/* 無効化は有効な行にのみ提供する（Req 5.3。API は冪等） */}
                         {!code.disabled && (

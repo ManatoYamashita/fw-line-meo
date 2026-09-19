@@ -523,7 +523,7 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
         expect(rows.map((line) => announcedText(line)), item.name).toEqual(lines);
         // 段: 題だけが本文の段で、期間と現在値は 1 つ下の段に置く（2026-09-18 の画面レビュー）。
         // 下げないと、補助の 3 行が指標ラベルの dt（text-sm）より大きくなり、声の大きさが情報の重みと
-        // 逆になる。期間（日付）は §7.18 の役割割当どおり補助文字色で描く。
+        // 逆になる。期間（日付）は §7.19 の役割割当どおり補助文字色で描く。
         // （題の段落は class を持たない。太字は中の span が持つ。）
         expect(rows.map((line) => classTokens(line)), item.name).toEqual([
           [],

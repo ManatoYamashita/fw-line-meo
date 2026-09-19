@@ -2,7 +2,7 @@
 // store-detail-trend-dashboard task 3.2（Issue #265）: 期間と指標の選択肢の部品（app/store/trend-controls.tsx）を
 // 検証する。
 //
-// 選択肢は、期間の群と指標の群の 2 つの RadioGroup で描く（docs/design/design-language.md §7.18）。
+// 選択肢は、期間の群と指標の群の 2 つの RadioGroup で描く（docs/design/design-language.md §7.19）。
 // - 期間の群を先に、指標の群を後に置く。群には見える名前を付け、選択肢の群の名前として参照させる（要件 5.7）。
 // - 札は TREND_PERIODS / TREND_METRICS から作る。構成は、ラベルの中に横向きの Field を置き、その中に
 //   radio と題を置く形である。
@@ -10,7 +10,7 @@
 //   捨てられ、「押しても変わらない札」になる。そこで、札ごとにクリックして確かめる。
 // - radio に name を渡さない。隠し input が name を持つと、構造契約（store-page.test.tsx）の「name を持つ
 //   input」の検査に当たる（要件 7.2）。
-// - 札に色を書かない。色は部品の側がトークンから解決する（§7.18）。
+// - 札に色を書かない。色は部品の側がトークンから解決する（§7.19）。
 //
 // Base UI の Radio は、印のクリックを隠し input へ PointerEvent で転送する。jsdom 25 は PointerEvent を
 // 持たないので、test/pointer-event.ts の互換実装を入れてから描く。
@@ -239,7 +239,7 @@ describe('TrendControls の札（Issue #265）', () => {
     }
   });
 
-  it('札は「ラベル > 横向きの Field > radio ＋題」で組み、群の直下に並べる（§7.18）', () => {
+  it('札は「ラベル > 横向きの Field > radio ＋題」で組み、群の直下に並べる（§7.19）', () => {
     renderStateful();
 
     for (const group of GROUPS) {
@@ -271,7 +271,7 @@ describe('TrendControls の札（Issue #265）', () => {
     }
   });
 
-  it('面が足すクラスは、札の幅と群の並び方だけで、色を書かない（§7.18）', () => {
+  it('面が足すクラスは、札の幅と群の並び方だけで、色を書かない（§7.19）', () => {
     const { container } = renderStateful();
 
     // 部品の既定のクラスを、面が何も渡していない同じ部品の描画から取る。部品の内部クラスをテストへ

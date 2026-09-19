@@ -696,6 +696,26 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     );
   });
 
+  it('列の折り返しの規則を中身の種類で選んでいる（design-language.md 7.18・Issue #283）', async () => {
+    // 規則を持たない列は、表が容器より広いとき 1 文字の幅まで細る（日本語はどの文字の間でも
+    // 折り返せる）。**並びを完全一致で固定する**のは、1 列だけ指定を落とす改変が
+    // 「ほかの列は正しい」まま素通りするためである。
+    ready('operator');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed, storePending] });
+    render(<StoresPage />);
+    const scope = within(await screen.findByRole('main'));
+    await scope.findByText('鳥貴族 渋谷店');
+
+    const rows = scope.getAllByRole('row').slice(1);
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      expect(
+        Array.from(row.children).map((cell) => cell.getAttribute('data-wrap')),
+        '店名と担当代理店は自由記述、状態と QR の列は折り返さない',
+      ).toEqual(['prose', 'none', 'none', 'prose', 'none']);
+    }
+  });
+
   it('横方向の捲りは表の外側の容器が担い、キーボードで到達できる（Req 2.5, 4.1）', async () => {
     ready('operator');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });

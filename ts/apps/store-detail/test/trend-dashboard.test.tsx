@@ -5,7 +5,7 @@
 //
 // 推移の節は、期間と指標の状態を節の中だけに持つ。期間の要約・グラフ・現在値・推移の表の 4 つと、節の見出し・
 // 表の名前は、1 回だけ切り出した期間の窓から導く（同 spec の research.md の決定 D1・D8、
-// docs/design/design-language.md §7.18）。
+// docs/design/design-language.md §7.19）。
 // - 期間を切り替えると窓が変わり、見出し・表の名前・行・要約・グラフ・現在値がそろって追随する（要件 3.2）。
 // - 指標を切り替えると、グラフと現在値だけが変わり、要約と表は変わらない（要件 3.3）。
 // - どちらの切替も、ほかの節の表示を変えない（要件 3.8）。取得済みのデータから描き直し、取得をやり直さない（要件 2.5）。
@@ -13,7 +13,7 @@
 // - 窓が作れないとき（推移が 0 件、または日付を解釈できる点が 0 件）は、選択肢を出さずに既存の案内を出す（要件 2.8）。
 //
 // 競合の節は、検索語の状態を節の中だけに持つ（同 spec の research.md の決定 D8）。
-// - 検索欄は、当日の競合が 2 店以上のときだけ、一覧の Card の外に出す（要件 4.1・4.2、§7.18）。
+// - 検索欄は、当日の競合が 2 店以上のときだけ、一覧の Card の外に出す（要件 4.1・4.2、§7.19）。
 // - 一覧は、店名に検索語を含む競合だけを元の順で描く。0 件なら、導線の無い空状態に置き換える（要件 4.3・4.9）。
 // - 評価の無い店の注記は、絞り込みの結果ではなく全件から判定する。
 // - 検索は、近隣順位とその母数・グラフ・推移の表・期間の要約を変えない（要件 4.10）。
@@ -427,7 +427,7 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
     expect(visited).toBe(cases.length);
   });
 
-  it('選択肢を要約のカードの外に置き、グラフを要約の 3 組の上に、表をカードの下に置く（§7.18）', async () => {
+  it('選択肢を要約のカードの外に置き、グラフを要約の 3 組の上に、表をカードの下に置く（§7.19）', async () => {
     await renderPage(RESPONSE);
 
     const section = trendSection();
@@ -696,7 +696,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
     expect(visited).toBe(cases.length);
   });
 
-  it('当日の競合が 2 店以上なら、一覧の Card の外に、見えるラベル付きの検索欄と件数の文言を出す（要件 4.1・4.7・5.7、§7.18）', async () => {
+  it('当日の競合が 2 店以上なら、一覧の Card の外に、見えるラベル付きの検索欄と件数の文言を出す（要件 4.1・4.7・5.7、§7.19）', async () => {
     const cases = [
       {
         name: '競合 2 店',
@@ -721,7 +721,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       // 選択の結果を伝える領域をもう 1 つ持つ）。
       expect(within(section).getAllByRole('status'), item.name).toEqual([status]);
 
-      // 並び: 見出し → 検索欄 → 件数の文言 → 一覧の Card。検索欄と件数の文言は Card の中に入れない（§7.18）。
+      // 並び: 見出し → 検索欄 → 件数の文言 → 一覧の Card。検索欄と件数の文言は Card の中に入れない（§7.19）。
       const cards = Array.from(section.querySelectorAll<HTMLElement>('[data-slot="card"]'));
       expect(cards, item.name).toHaveLength(1);
       const card = cards[0]!;

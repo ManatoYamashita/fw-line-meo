@@ -172,8 +172,9 @@ function AgenciesView() {
             <TableBody>
               {list.agencies.map((agency) => (
                 <TableRow key={agency.id}>
-                  <TableCell>{agency.name}</TableCell>
-                  <TableCell>{agency.createdAt}</TableCell>
+                  {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。 */}
+                  <TableCell wrap="prose">{agency.name}</TableCell>
+                  <TableCell wrap="none">{agency.createdAt}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -1,7 +1,7 @@
 // 推移グラフ（store-detail-trend-dashboard task 3.1・Issue #265）。
 //
 // 選択中の指標について、期間の窓の推移を 1 系列の線グラフとして描く。判断の正典は
-// docs/design/design-language.md §7.18 であり、ここでは結論も数値も転記せず参照する。審議の記録は
+// docs/design/design-language.md §7.19 であり、ここでは結論も数値も転記せず参照する。審議の記録は
 // 同 spec の research.md の決定 D2（描き方）・D5（ホバー層を持たない）・D6（色の語彙）にある。
 //
 // 意味論:
@@ -162,7 +162,7 @@ export function TrendChart({ window: trendWindow, metric, rankTotal }: TrendChar
         </p>
         {/* 補助の 2 行は本文より 1 段下げる（2026-09-18 の画面レビュー）。段を下げないと、指標ラベルの
             dt（text-sm）より大きい文字で補助情報が並び、声の大きさが情報の重みと逆になる。
-            日付を補助文字色にするのは §7.18 の役割割当（目盛りと日付は補助文字色）そのものである。 */}
+            日付を補助文字色にするのは §7.19 の役割割当（目盛りと日付は補助文字色）そのものである。 */}
         <p className="text-sm text-muted-foreground">
           {`${formatShortDate(trendWindow.startDate)}〜${formatShortDate(trendWindow.endDate)}`}
         </p>

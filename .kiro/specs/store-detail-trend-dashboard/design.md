@@ -33,7 +33,7 @@
 - 店舗詳細画面の競合の節での振る舞い: 検索語の状態、照合の規則、件数の文言、0 件の案内
 - 3 つの純関数モジュール（`lib/trend-view.ts`・`lib/trend-scale.ts`・`lib/competitor-filter.ts`）の契約
 - 店舗詳細の構造契約（改定後の許可リスト）と、それを固定する検証
-- 改定の文書化: ui-airbnb-surfaces の要件 3.1・3.3 の訂正、ui-airbnb-foundation D6 の注記、design-language §7.18 の新設と §2.2・§7.17・§8 の更新
+- 改定の文書化: ui-airbnb-surfaces の要件 3.1・3.3 の訂正、ui-airbnb-foundation D6 の注記、design-language §7.19 の新設と §2.2・§7.17・§8 の更新
 
 ### Out of Boundary
 - `/api/detail` の応答の形と、その読取クエリ（`lib/data.ts`・`app/api/detail/route.ts`）
@@ -55,7 +55,7 @@
 - `/api/detail` の推移の形（`capturedOn`・`rank`・`rating`・`reviewCount`）、または保持の窓（30 日）が変わるとき
 - 当日の競合の上限（現行は最大 5 店）が変わり、一覧の見せ方の前提が崩れるとき
 - `@fwlm/ui` の `RadioGroup`・`Input`・`Field` が描く要素（隠し input の属性・role）が変わるとき。構造契約の許可リストへ直接効く。
-- design-language §7.5（overlay 系を使わない）または §7.18 の判断が改まるとき
+- design-language §7.5（overlay 系を使わない）または §7.19 の判断が改まるとき
 - 店舗詳細へ、入力を受け付ける要素・リンク・要求経路のいずれかを足すとき
 - #256（LINE の届け方の見直し）が、LIFF の開き方や「詳細を見る」の導線を変えるとき
 
@@ -154,7 +154,7 @@ ts/apps/store-detail/
 - `ts/apps/store-detail/e2e/fixtures/detail.ts`・`store-surface.spec.ts`・`a11y-audit.spec.ts`: 下の Testing Strategy のとおり。`store-surface.spec.ts` 冒頭のコメント（記入欄・押しボタン・選択を描かない）も直す。
 - `ts/eslint.config.js`: クライアントに同梱されるファイルの一覧（root の `@fwlm/db` の値 import を禁じる規則）へ、`apps/store-detail/lib/{trend-view,trend-scale,competitor-filter}.ts` を加える。
 - `docs/design/design-language.md`
-  - §7.18 を新設する（判断の内容は下の「正典の更新」）。
+  - §7.19 を新設する（判断の内容は下の「正典の更新」）。
   - §7.17 の「30 日推移の表」を、期間に依らない言い方へ直す。
   - §8 の 1 行目を改定後の契約へ書き換える。
   - §2.2 の `text` と `textMuted` の行の出典欄へ、推移グラフでの用途を追記する。
@@ -758,7 +758,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
 
 ## Migration Strategy（着地の順序）
 - データの移行は無い。着地は次の順に進める。
-  1. 正典と要件の訂正（§7.18 ほか。要件 9.1）
+  1. 正典と要件の訂正（§7.19 ほか。要件 9.1）
   2. 構造契約の検証を、許可リスト方式へ置き換える。件数はまず現行の実装どおり（隠し radio 0・検索欄 0）で固定して緑にする。検査が機能することは、変異の注入で赤を見て確かめる。
   3. 純関数
   4. 部品
@@ -767,7 +767,7 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - #268（PR #269）は、この spec とは独立にマージできる。この spec の窓は、取得済みの最新の記録日だけで決まる。
 
 ## 正典の更新（要件 7.8・9.1）
-- **design-language §7.18**「店舗詳細の推移はグラフと表を同じ期間から描く」を新設する。散文には数値を書かず、既存の表と節を参照する。書く判断は次の 5 つ。
+- **design-language §7.19**「店舗詳細の推移はグラフと表を同じ期間から描く」を新設する。散文には数値を書かず、既存の表と節を参照する。書く判断は次の 5 つ。
   1. グラフ・要約・表・現在値は 1 つの窓から導く。
   2. 1 系列で描き、系列の色を増やさない。面の側に置く色は §7.8 の閉じた集合に倣い、本文色・区切り線色・カードの地色・補助文字色の 4 つに限る。店舗詳細の面で色を書くのは、グラフの部品だけとする（検索欄・件数の文言・選択肢の札には色を書かない）。
   3. 操作は表示を変えるだけで、書込・再取得・保存をしない。

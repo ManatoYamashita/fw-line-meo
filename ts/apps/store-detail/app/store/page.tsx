@@ -25,7 +25,7 @@
 // 一切レンダリングしない（書込の手段となる要素を描かない）。<input> は次の 2 種類だけを許す。どちらも
 // 取得済みのデータの見え方を切り替えるだけで書込の手段ではなく、Issue #265 で改定した構造契約の許可
 // リストに従う（正典は test/store-page.test.tsx の「構造契約（許可リスト方式）」、判断は
-// docs/design/design-language.md §7.18）。
+// docs/design/design-language.md §7.19）。
 //   - 競合の検索欄（competitor-search.tsx）。当日の競合が 2 店以上のときだけ描く。
 //   - 期間と指標の選択肢の札（trend-controls.tsx）が描く隠し radio。推移を描けるときだけ描く。
 // 店舗選択は <a> リンクで行う——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを
@@ -36,8 +36,8 @@
 //   版面・主見出し・処理中・通知を共通部品から描く。判断の正典は docs/design/design-language.md
 //   （版面は §7.9、見出しの階層は §6、余白は §3）であり、ここでは結論も数値も転記せず参照する。
 //   **面の側に色を書かない**（色は部品側が theme.css のトークンから解決する）。唯一の例外は推移グラフの
-//   部品（trend-chart.tsx）で、店舗詳細の面で色を書くのはそこに限る（§7.18・Issue #265）。書いてよい色の
-//   語彙も §7.18 が閉じた集合として定め、test/trend-chart.test.tsx が完全一致で固定する。このファイル
+//   部品（trend-chart.tsx）で、店舗詳細の面で色を書くのはそこに限る（§7.19・Issue #265）。書いてよい色の
+//   語彙も §7.19 が閉じた集合として定め、test/trend-chart.test.tsx が完全一致で固定する。このファイル
 //   自身と、選択肢の札・検索欄・件数の文言は色を書かない。
 //
 //   使える部品は上記の no-write 保証で決まる。`Button` / `Select` / `Textarea` はこの面では
@@ -480,7 +480,7 @@ function CompetitorsSection({
       <div className="flex flex-col gap-2">
         <Heading level={2}>競合との比較</Heading>
         {/* 検索欄と件数の文言は、一覧の Card の外に置く。0 件のときは Card が空状態に置き換わるので、中に置くと
-            検索欄ごと消えてしまう（§7.18）。 */}
+            検索欄ごと消えてしまう（§7.19）。 */}
         {searchable ? (
           <CompetitorSearch
             query={query}
@@ -587,7 +587,7 @@ function TrendSection({
   const [metric, setMetric] = useState<TrendMetric>(DEFAULT_METRIC);
 
   // 要約・グラフ・現在値・表と、節の見出し・表の名前は、ここで 1 回だけ切り出した窓から導く
-  // （決定 D1・docs/design/design-language.md §7.18）。切り替えると、どれもこの窓に揃って追随する
+  // （決定 D1・docs/design/design-language.md §7.19）。切り替えると、どれもこの窓に揃って追随する
   // （要件 3.1〜3.3）。入力は最大 30 点なので、描画のたびに導き直し、メモ化しない。
   const trendWindow = selectTrendWindow(trend, period);
   const title = `直近${period}日の推移`;
@@ -633,7 +633,7 @@ function TrendSection({
       <div className="flex flex-col gap-2">
         <Heading level={2}>{title}</Heading>
         {/* 選択肢は要約のカードの外に置く。期間は下の表示のすべてに効くので、カードの中に置くと
-            効く範囲がカードの中だけに見える（§7.18）。 */}
+            効く範囲がカードの中だけに見える（§7.19）。 */}
         <TrendControls period={period} onPeriodChange={setPeriod} metric={metric} onMetricChange={setMetric} />
         <p role="status" className="sr-only">
           {trendStatus}
