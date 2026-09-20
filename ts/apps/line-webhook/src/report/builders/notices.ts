@@ -7,8 +7,9 @@
 //
 // 帰属表示は付けない。店舗名は createConfirmedStore が Places の候補名をそのまま保存した値だが、
 // オーナーが自ら店名で検索し候補から選んで確定した自店の識別情報として扱い、帰属は Places の指標
-// （評価・順位・口コミ）を出す Flex に置く（design.md「残るリスクと未決事項」の判断）。確定前の
-// 検索結果を出す面（オンボーディングの候補）に帰属が欠けている件は Issue #287 が追う。
+// （評価・順位・口コミ）を出す Flex に置く（design.md「残るリスクと未決事項」の判断）。
+// この整理が当てはまるのは**確定後**の店舗名だけである。確定前の検索結果を出す面
+// （オンボーディングの候補カルーセルと確認バブル）は帰属を持つ（Issue #287・line/messages.ts）。
 
 import type { LineMessage } from '../../line/client.js';
 import { formatDataDate, type ReportContext } from '../format.js';

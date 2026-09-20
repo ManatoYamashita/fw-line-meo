@@ -396,7 +396,7 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
 - Selected Approach: 本 spec はテキスト「データ提供: Google Maps」を採り、大きさ 13px・色 #5E5E5E・折り返しなし・同じバブルの footer に置く
 - Rationale: 既存の LINE 面と LIFF もテキストで揃っており、ロゴへ切り替えるなら画像の配信元（公開 HTTPS）とロゴの使用条件の確認を 3 面まとめて行うべきである
 - Trade-offs: 書体（Roboto）を指定できない逸脱が残る（この逸脱は存在しなかった。下の「訂正」を参照）
-- Follow-up: ロゴへの切り替えと、LIFF の帰属表示の細則適合を、横断の別 Issue で判断する
+- Follow-up: ロゴへの切り替えと、LIFF の帰属表示の細則適合を、横断の別 Issue で判断する（#287 で決着。下の「訂正」と design.md の「残るリスクと未決事項」）
 
 #### 訂正（2026-09-20・#287）: 書体の逸脱は存在しなかった
 
@@ -406,7 +406,8 @@ Option C を第一候補とする。決め手は、第2フェーズと同じ委�
   - `Fallback font family: "Any sans serif body font already used in your product or 'Sans-Serif'"`
 - Implications: **原文は sans-serif のフォールバックを明示的に許している。** LINE Flex の既定の書体は sans-serif であり、書体を指定するプロパティが無いことは逸脱にならない。テキストの帰属表示は、書体を含めて細則を全て満たしている
 - Decision: ロゴ画像への切り替えは行わない。公開 HTTPS の配信元もロゴの使用条件の確認も要らない
-- Lesson: 表から引用するときは行を落とさない。落ちた 2 行が「満たせない」という誤った前提を作り、design.md・`report/format.ts`・`design-tokens/test/tokens.test.ts` の 3 箇所へ 1 週間伝播した
+- 併せて塞いだもの（#287 の残りの項目）: 確定前の検索結果を出す面（オンボーディングの候補カルーセル・確認バブル）の帰属欠落（PR #300）と、LIFF の口コミの導線欠落・帰属の色の逸脱（PR #301）。どちらも本 spec の境界外にあった既存の状態である
+- Lesson: 表から引用するときは行を落とさない。落ちた 2 行が「満たせない」という誤った前提を作り、design.md・`report/format.ts`・`design-tokens/test/tokens.test.ts` の 3 箇所へ 1 週間伝播した。この教訓は CLAUDE.md の「外部ポリシーは一次情報で判断する」へ反映した
 
 #### Decision: 通知の前にメニューを照合する
 
