@@ -19,8 +19,12 @@ const (
 	placeDetailsPathPrefix = "/v1/places/"
 
 	// フィールドマスクは2種のみ（design.md: SKU 分離・research.md コスト最適化）。
+	//
+	// 自店へ googleMapsLinks.reviewsUri を足した（Issue #303）。自店はすでに reviews を要求していて
+	// Enterprise + Atmosphere の SKU に入っているので、この 1 項目で段は上がらない。
+	// **競合のマスクは広げない**（競合は reviews を持たず 1 段下の SKU に収まる。design.md の分離）。
 	nearbyFieldMask     = "places.id,places.displayName,places.location,places.primaryType"
-	selfFieldMask       = "rating,userRatingCount,businessStatus,reviews"
+	selfFieldMask       = "rating,userRatingCount,businessStatus,reviews,googleMapsLinks.reviewsUri"
 	competitorFieldMask = "rating,userRatingCount,businessStatus,displayName"
 
 	rankPreferenceDistance = "DISTANCE"
@@ -161,6 +165,7 @@ func (c *Client) FetchSelfMetrics(ctx context.Context, placeID string) (SelfMetr
 		UserRatingCount: parsed.UserRatingCount,
 		BusinessStatus:  parsed.BusinessStatus,
 		Reviews:         convertReviews(parsed.Reviews),
+		ReviewsURI:      parsed.GoogleMapsLinks.ReviewsURI,
 	}, nil
 }
 

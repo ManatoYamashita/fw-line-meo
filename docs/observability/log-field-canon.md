@@ -97,6 +97,7 @@
 | 自店指標の取得に成功した件数 | 該当なし | `fetch_ok` | 既存 | `go/cmd/daily-batch/main.go` | 同上。steering `tech.md` が非ゼロ終了の判定式として参照 |
 | 自店指標の取得に失敗した件数 | 該当なし | `fetch_failed` | 既存 | `go/cmd/daily-batch/main.go` | 同上 |
 | 書き込んだサマリーの件数 | 該当なし | `summaries_written` | 既存 | `go/cmd/daily-batch/main.go` | 同上 |
+| 新着はあるが抜粋を出せなかった店舗の件数 | 該当なし | `new_reviews_without_excerpts` | 新規 | `go/cmd/daily-batch/main.go` | Issue #303。Places は口コミを関連度順に最大 5 件しか返さず新着順にできないため、口コミ数の多い店では常にこの状態になる。集計は成功し件数も正しくエラーも出ないので、この項目が無いと状態が続いていることを観測できない。0 でない日が続くのは既知の状態であり、非ゼロ終了もアラートもさせない |
 | 掃除したスナップショットの件数 | 該当なし | `snapshots_purged` | 既存 | `go/cmd/daily-batch/main.go` | |
 | 掃除したサマリーの件数 | 該当なし | `summaries_purged` | 既存 | `go/cmd/daily-batch/main.go` | |
 | 掃除した合計件数 | 該当なし | `purged` | 既存 | `go/cmd/daily-batch/main.go` | |

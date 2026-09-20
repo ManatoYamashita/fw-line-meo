@@ -60,12 +60,18 @@ func main() {
 	// 取得成功/失敗数・summary 生成数・パージ行数）を構造化ログで1行出力」（R5.2）。
 	// フィールド名は Monitoring 節（「両ジョブとも終了時に固定フィールドの構造化ログ1行
 	// （stores_total / fetch_ok / fetch_failed / summaries_written / ... / purged）」）に揃える。
+	// new_reviews_without_excerpts は Issue #303 で足した。「新着の件数は 1 以上なのに、内容を出せる
+	// 抜粋が 0 件」だった店舗数である。Places が口コミを関連度順に最大 5 件しか返さないため、口コミ数の
+	// 多い店では常にこの状態になる。**集計は成功し件数も正しくエラーも出ない**ので、この項目が無いと
+	// 状態が続いていることを誰も観測できない（本番で 30 日間気づかれなかった）。
+	// 0 でない日が続くのは既知の状態であり、非 0 終了もアラートもさせない。
 	logger.Info("daily-batch execution summary",
 		"stores_total", result.StoresTotal,
 		"extract_ran", result.ExtractRan,
 		"fetch_ok", result.FetchOK,
 		"fetch_failed", result.FetchFailed,
 		"summaries_written", result.SummariesWritten,
+		"new_reviews_without_excerpts", result.NewReviewsWithoutExcerpts,
 		"snapshots_purged", result.SnapshotsPurged,
 		"summaries_purged", result.SummariesPurged,
 		"purged", result.RowsPurged(),

@@ -41,6 +41,23 @@ BEGIN
           AND new_review_count = 0 AND new_reviews = '[]'::jsonb AND competitors = '[]'::jsonb;
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: daily_summaries defaults not applied'; END IF;
 
+    -- daily_summaries: google_maps_reviews_uri は既定で NULL（0011・Issue #303）。
+    -- **空文字を既定にしない。** 空文字は「URL が無い」と区別できず、読み手が空の href を描く側へ倒れる。
+    PERFORM 1 FROM daily_summaries
+        WHERE store_id = s AND summary_date = DATE '2026-06-02'
+          AND google_maps_reviews_uri IS NULL;
+    IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: daily_summaries.google_maps_reviews_uri default is not NULL'; END IF;
+
+    -- 値を入れれば保持し、NULL へ戻せる（NOT NULL 制約を後から足す改変を通さない）。
+    UPDATE daily_summaries SET google_maps_reviews_uri = 'https://www.google.com/maps/place//data=x'
+        WHERE store_id = s AND summary_date = DATE '2026-06-02';
+    PERFORM 1 FROM daily_summaries
+        WHERE store_id = s AND summary_date = DATE '2026-06-02'
+          AND google_maps_reviews_uri = 'https://www.google.com/maps/place//data=x';
+    IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: daily_summaries.google_maps_reviews_uri did not keep the value'; END IF;
+    UPDATE daily_summaries SET google_maps_reviews_uri = NULL
+        WHERE store_id = s AND summary_date = DATE '2026-06-02';
+
     -- daily_summaries: store×summary_date 一意
     BEGIN INSERT INTO daily_summaries(store_id, summary_date, status)
             VALUES (s, DATE '2026-06-01', 'ready');

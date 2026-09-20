@@ -60,6 +60,10 @@ type DailySummaryInput struct {
 	NewReviewCount int
 	NewReviews     []NewReviewExcerpt
 	Competitors    []SummaryCompetitor
+
+	// GoogleMapsReviewsURI はその店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。
+	// 空文字のときは NULL を書く（空文字の href を読み手に描かせないため。0011 のヘッダを参照）。
+	GoogleMapsReviewsURI string
 }
 
 // WriteDailySummary は店舗×日付の daily_summaries 行を確定する。R2.6（同日再実行で
@@ -84,35 +88,45 @@ func WriteDailySummary(ctx context.Context, db DBTX, in DailySummaryInput) error
 		return fmt.Errorf("repo: marshal competitors store_id=%s: %w", in.StoreID, err)
 	}
 
+	// 空文字は NULL として書く（列は NULL 許容。0011 のヘッダに理由がある）。
+	var reviewsURI any
+	if in.GoogleMapsReviewsURI != "" {
+		reviewsURI = in.GoogleMapsReviewsURI
+	}
+
 	_, err = db.Exec(ctx, `
 		INSERT INTO daily_summaries (
 			store_id, summary_date, status,
 			rank, rank_total, rank_prev,
 			rating, review_count, rating_prev, review_count_prev,
-			new_review_count, new_reviews, competitors
+			new_review_count, new_reviews, competitors,
+			google_maps_reviews_uri
 		) VALUES (
 			$1, $2, $3,
 			$4, $5, $6,
 			$7, $8, $9, $10,
-			$11, $12, $13
+			$11, $12, $13,
+			$14
 		)
 		ON CONFLICT (store_id, summary_date) DO UPDATE SET
-			status             = EXCLUDED.status,
-			rank               = EXCLUDED.rank,
-			rank_total         = EXCLUDED.rank_total,
-			rank_prev          = EXCLUDED.rank_prev,
-			rating             = EXCLUDED.rating,
-			review_count       = EXCLUDED.review_count,
-			rating_prev        = EXCLUDED.rating_prev,
-			review_count_prev  = EXCLUDED.review_count_prev,
-			new_review_count   = EXCLUDED.new_review_count,
-			new_reviews        = EXCLUDED.new_reviews,
-			competitors        = EXCLUDED.competitors
+			status                  = EXCLUDED.status,
+			rank                    = EXCLUDED.rank,
+			rank_total              = EXCLUDED.rank_total,
+			rank_prev               = EXCLUDED.rank_prev,
+			rating                  = EXCLUDED.rating,
+			review_count            = EXCLUDED.review_count,
+			rating_prev             = EXCLUDED.rating_prev,
+			review_count_prev       = EXCLUDED.review_count_prev,
+			new_review_count        = EXCLUDED.new_review_count,
+			new_reviews             = EXCLUDED.new_reviews,
+			competitors             = EXCLUDED.competitors,
+			google_maps_reviews_uri = EXCLUDED.google_maps_reviews_uri
 	`,
 		in.StoreID, in.SummaryDate, in.Status,
 		in.Rank, in.RankTotal, in.RankPrev,
 		in.Rating, in.ReviewCount, in.RatingPrev, in.ReviewCountPrev,
 		in.NewReviewCount, newReviewsJSON, competitorsJSON,
+		reviewsURI,
 	)
 	if err != nil {
 		return fmt.Errorf("repo: write daily summary store_id=%s summary_date=%s: %w", in.StoreID, in.SummaryDate.Format(time.DateOnly), err)

@@ -122,16 +122,31 @@ type fakeReview struct {
 	GoogleMapsURI     string                `json:"googleMapsUri,omitempty"`
 }
 
+// fakeGoogleMapsLinks は Place.googleMapsLinks（Issue #303）。地図の連携を持たない店は応答に
+// キーそのものが無いので、fakeDetailsResponse 側でポインタ＋omitempty にして欠落を再現する。
+type fakeGoogleMapsLinks struct {
+	ReviewsURI string `json:"reviewsUri,omitempty"`
+}
+
 // fakeDetailsResponse は Place Details (New) の応答の形。Places API (New) は proto3 の JSON なので、
 // クチコミ 0 件の店の応答には rating も userRatingCount も含まれない（Issue #255）。rating を
 // ポインタ＋omitempty にして、その「フィールドが無い」形を再現できるようにする。
+// googleMapsLinks も同じ理由でポインタ＋omitempty にする（Issue #303）。
 type fakeDetailsResponse struct {
-	Rating          *float64        `json:"rating,omitempty"`
-	UserRatingCount int             `json:"userRatingCount,omitempty"`
-	BusinessStatus  string          `json:"businessStatus"`
-	DisplayName     fakeDisplayName `json:"displayName"`
-	Reviews         []fakeReview    `json:"reviews"`
+	Rating          *float64             `json:"rating,omitempty"`
+	UserRatingCount int                  `json:"userRatingCount,omitempty"`
+	BusinessStatus  string               `json:"businessStatus"`
+	DisplayName     fakeDisplayName      `json:"displayName"`
+	Reviews         []fakeReview         `json:"reviews"`
+	GoogleMapsLinks *fakeGoogleMapsLinks `json:"googleMapsLinks,omitempty"`
 }
+
+// withReviewsURI は応答へ口コミ一覧の URL を足す（Issue #303）。付けない応答は欠落した形のままになる。
+func withReviewsURI(resp fakeDetailsResponse, uri string) fakeDetailsResponse {
+	resp.GoogleMapsLinks = &fakeGoogleMapsLinks{ReviewsURI: uri}
+	return resp
+}
+
 type fakeErrorBody struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
