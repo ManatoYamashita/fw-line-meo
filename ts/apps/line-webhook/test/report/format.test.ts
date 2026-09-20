@@ -78,6 +78,7 @@ function rawRow(overrides: Partial<DailySummaryReadRow> = {}): DailySummaryReadR
       { name: '試験競合B', rating: 4.0, reviewCount: 80, starDiff: 0.2 },
       { name: '試験競合C', rating: 3.8, reviewCount: 40, starDiff: 0.4 },
     ],
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }

@@ -96,6 +96,7 @@ function readyRow(date: string, overrides: Partial<DailySummaryReadRow> = {}): D
       competitor('試験競合B', 4.0, 80, 0.2),
       competitor('試験競合C', 0, 0, 4.2),
     ],
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }
@@ -114,6 +115,7 @@ function failedRow(date: string): DailySummaryReadRow {
     new_review_count: 0,
     new_reviews: [],
     competitors: [],
+    google_maps_reviews_uri: null,
   };
 }
 

@@ -87,6 +87,7 @@ function rawRow(date: string, overrides: Partial<DailySummaryReadRow> = {}): Dai
     new_review_count: 1,
     new_reviews: [],
     competitors: RATED_COMPETITORS,
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }

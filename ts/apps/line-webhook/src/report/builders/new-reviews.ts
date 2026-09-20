@@ -9,6 +9,11 @@
 // - 新着が 1 件以上: 新着件数、表示できる口コミを最大 3 件、表示していない残りの件数（4.2–4.4）。
 //   表示できる口コミが 1 件も無ければ、件数と表示できない旨を出す（4.5）
 //
+// 内容を読めていない新着が残る日は、その店舗の口コミ一覧を Google Maps で開く導線を添える（4.4・4.5・
+// Issue #303）。Places API は口コミを関連度順に最大 5 件しか返さず、新着順へ並べ替える手段を持たない。
+// 本番では 30 日間、22 件の新着に対し抜粋が 1 件も取れず、このレポートは件数だけを出して行き止まっていた。
+// 一覧の側は新着順に並べ替えられるので、そこが唯一の行き先である。URL を取得できていない日は導線ごと置かない。
+//
 // 表示できる口コミは、Google Maps 上の URL（https の絶対 URL）と投稿者名を持つものである（8.2・8.7）。
 // そうでない口コミは内容を出さず、件数にだけ数える。口コミは評価で絞らず、並べ替えもしない。
 // 低評価の口コミだけを隠す見せ方はレビューゲーティングに当たるため、日次集計に入っている順のまま出す。
@@ -26,6 +31,7 @@ import {
   GOOGLE_MAPS_LINK_TEXT as SHARED_GOOGLE_MAPS_LINK_TEXT,
   REVIEW_AUTHOR_LINK_LABEL,
   REVIEW_EXCERPTS_UNAVAILABLE_TEXT,
+  STORE_REVIEWS_LINK_TEXT as SHARED_STORE_REVIEWS_LINK_TEXT,
   isDisplayableNewReview,
 } from '@fwlm/db/daily-summary';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
@@ -63,6 +69,11 @@ export const REVIEW_TEXT_MAX_LINES = 4;
  * （`@fwlm/db/daily-summary` が持ち、両方の面が同じ定数を読む）。
  */
 export const GOOGLE_MAPS_LINK_TEXT = SHARED_GOOGLE_MAPS_LINK_TEXT;
+
+/**
+ * その店舗の口コミ一覧を Google Maps で開く導線の文言（Issue #303）。LIFF の詳細画面と同じ語を使う。
+ */
+export const STORE_REVIEWS_LINK_TEXT = SHARED_STORE_REVIEWS_LINK_TEXT;
 
 const NO_NEW_REVIEWS_TEXT = '新着口コミはありません。';
 const UNDETERMINABLE_TEXT = '前日のデータが無いため、新着口コミの件数を判定できません。';
@@ -257,6 +268,25 @@ function buildReviewBlock({ review, googleMapsUri }: DisplayableReview, withText
   return { type: 'box', layout: 'vertical', spacing: lineLayout.itemGap, contents };
 }
 
+/**
+ * その店舗の口コミ一覧を Google Maps で開く導線（Issue #303）。URL を取得できていない日は null を返し、
+ * 呼出元は導線ごと置かない（空の uri を持つ部品を LINE へ送らない。migration 0011 のヘッダと同じ判断）。
+ */
+function buildStoreReviewsLink(row: NormalizedReadRow): FlexTextComponent | null {
+  const uri = toFlexHttpsUrl(row.google_maps_reviews_uri, URI_ACTION_MAX_LENGTH);
+  if (uri === null) {
+    return null;
+  }
+  return {
+    type: 'text',
+    text: STORE_REVIEWS_LINK_TEXT,
+    size: lineLayout.descriptionSize,
+    color: lineColors.action,
+    wrap: true,
+    action: { type: 'uri', label: STORE_REVIEWS_LINK_TEXT, uri },
+  };
+}
+
 function buildBody(row: NormalizedReadRow, withTexts: boolean): FlexBoxContent[] {
   if (row.review_count_prev === null) {
     return [statusText(UNDETERMINABLE_TEXT)];
@@ -276,16 +306,26 @@ function buildBody(row: NormalizedReadRow, withTexts: boolean): FlexBoxContent[]
     color: lineColors.body,
     wrap: true,
   };
-  if (shown.length === 0) {
-    return [countLine, noteText(EXCERPTS_UNAVAILABLE_TEXT)];
-  }
 
   // 残りには、内容を出せない口コミ（Google Maps 上の URL が無いもの）も数える。
   const remaining = count - shown.length;
+
+  // 内容を読めていない新着が 1 件でも残るなら、店舗の口コミ一覧への導線を置く（4.4・4.5・Issue #303）。
+  // Places は口コミを関連度順に最大 5 件しか返さないので、口コミ数の多い店では shown が常に空になり、
+  // 件数だけを見せられて行き止まる。一覧の側は新着順に並べ替えられるので、そこが唯一の行き先である。
+  // 全件を出せた日は各口コミが自分の導線を持っているため、重ねて置かない。
+  const storeReviewsLink = remaining > 0 ? buildStoreReviewsLink(row) : null;
+  const storeReviewsLinkParts = storeReviewsLink === null ? [] : [storeReviewsLink];
+
+  if (shown.length === 0) {
+    return [countLine, noteText(EXCERPTS_UNAVAILABLE_TEXT), ...storeReviewsLinkParts];
+  }
+
   return [
     countLine,
     ...shown.map((item) => buildReviewBlock(item, withTexts)),
     ...(remaining > 0 ? [noteText(`表示していない新着口コミがほかに${remaining}件あります。`)] : []),
+    ...storeReviewsLinkParts,
   ];
 }
 

@@ -28,11 +28,12 @@ export interface ReportableStore {
   readonly name: string;
 }
 
-// DailySummaryReadRow の 12 項目と 1:1。
+// DailySummaryReadRow の 13 項目と 1:1。
 const READ_COLUMNS = `to_char(ds.summary_date, 'YYYY-MM-DD') AS summary_date,
        ds.status, ds.rank, ds.rank_total, ds.rank_prev,
        ds.rating, ds.review_count, ds.rating_prev, ds.review_count_prev,
-       ds.new_review_count, ds.new_reviews, ds.competitors`;
+       ds.new_review_count, ds.new_reviews, ds.competitors,
+       ds.google_maps_reviews_uri`;
 
 /**
  * オーナー本人の確定店舗を作成順（作成時刻が同じなら id の順）に返す。無ければ空の配列。

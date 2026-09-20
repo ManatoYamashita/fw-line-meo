@@ -235,6 +235,7 @@ sequenceDiagram
 | 3.3 | LINE 上での配信時刻変更は提供しない | （能力を提供しない。packages/db updateDeliveryHour は呼び出し元を持たない） | — | — |
 | 3.4 | 結論ファーストの比較レポート | report/builders/comparison.ts | Flex 契約（本書 Data Contracts） | レポート要求 |
 | 3.5 | 新着は自店のみ・件数＋可能なら内容 | summary/compute（差分）, report/builders/new-reviews.ts | daily_summaries.new_reviews | 日次→レポート |
+| 4.9, 4.10 | 読めていない新着が残る日のクチコミ一覧への導線（詳細画面） | store-detail の NewReviewsList, lib/data.ts | daily_summaries.google_maps_reviews_uri | 詳細画面の読込 |
 | 3.6 | 新着なしは「新着なし」表示 | report/builders/new-reviews.ts | 同上 | レポート要求 |
 | 3.7 | 前日データ無しは前日比省略 | summary/compute | rank_prev/rating_prev NULL 許容 | 日次→レポート |
 | 3.8 | 通知の部分失敗継続・記録 | index.ts, deliveries.ts | summary_deliveries | 毎時の通知 |
@@ -419,6 +420,7 @@ CREATE TABLE daily_summaries (
   new_review_count integer NOT NULL DEFAULT 0,
   new_reviews      jsonb NOT NULL DEFAULT '[]',  -- [{authorName, publishTime, rating, textExcerpt, authorUri?, authorPhotoUri?, googleMapsUri?}] 帰属表示用（後ろ 3 つは任意・Issue #256）
   competitors      jsonb NOT NULL DEFAULT '[]',  -- [{name, rating, reviewCount, starDiff}] 表示順は rank 順（評価なしは末尾・rating/starDiff は null）
+  google_maps_reviews_uri text,                  -- 店舗のクチコミ一覧を Google Maps で開く URL（Places の googleMapsLinks.reviewsUri）。取得できない日は NULL（Issue #303・migration 0011）
   created_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (store_id, summary_date)
 );

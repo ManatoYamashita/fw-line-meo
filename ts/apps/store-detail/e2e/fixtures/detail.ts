@@ -61,6 +61,7 @@ interface DetailResponse {
     readonly reviewCountPrev: number | null;
     readonly newReviewCount: number;
     readonly newReviews: readonly NewReview[];
+    readonly googleMapsReviewsUri: string | null;
   };
   readonly competitors: readonly CompetitorRow[];
   readonly trend: readonly TrendPoint[];
@@ -124,6 +125,10 @@ export const DETAIL_RESPONSE: DetailResponse = {
         googleMapsUri: 'https://www.google.com/maps/reviews/data=e2e-review-2',
       },
     ],
+    // 店舗の口コミ一覧の URL（Issue #303）。新着 2 件を 2 件とも出せているので、この面に一覧への
+    // 導線は現れない（URL を持っているだけでは増えない）。値を持つ形で置くのは、本番の行と同じ
+    // 形にしておくためである。
+    googleMapsReviewsUri: 'https://www.google.com/maps/place//data=e2e-store-reviews',
   },
   // 星差は「自店 − 競合」（自店 4.3 に対して 4.5 の店は -0.2）。
   competitors: [

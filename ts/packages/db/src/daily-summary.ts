@@ -34,6 +34,15 @@ export const REVIEW_AUTHOR_LINK_LABEL = '投稿者のプロフィール';
 /** 新着口コミはあるが、内容を出せる口コミが 1 件も無いときの案内。 */
 export const REVIEW_EXCERPTS_UNAVAILABLE_TEXT = '新着口コミの内容は、ここでは表示できません。';
 
+/**
+ * その店舗の口コミ一覧を Google Maps で開く導線の文言（Issue #303）。
+ *
+ * 1 件ごとの導線（GOOGLE_MAPS_LINK_TEXT）と語を分ける。指す先が違い、同じ面に両方が並びうるためである。
+ * **「新着の口コミを見る」とは書かない。** 開くのは店舗の口コミ一覧であって、新着で絞られた一覧ではない
+ * （一覧の側で新着順に並べ替えられる、というだけである）。取得済みのデータに無いことを言わない（Req 8.4）。
+ */
+export const STORE_REVIEWS_LINK_TEXT = 'Google Maps で口コミをすべて見る';
+
 // --- 正規化 ------------------------------------------------------------------------
 
 /** 正規化の対象になる、日次サマリーの評価・順位まわりの列。 */
@@ -217,9 +226,13 @@ const BROKEN_PERCENT_ENCODING = /%(?![0-9A-Fa-f]{2})/;
  *
  * スキームの無い `//…`、http、javascript: などは使わない。ホストを持たない値、利用者情報を含む値も
  * 使わない。値を書き換えて救うことはしない（別の URL へ変わりうる）。
+ *
+ * null も受ける。「取得できていない」は jsonb の項目では undefined（キーごと無い）、列では NULL として
+ * 届き、どちらも同じ扱いだからである（Issue #303 の google_maps_reviews_uri）。呼出元で `?? undefined`
+ * に潰すと、その一手間を忘れた面だけが空の href を描く側へ倒れる。
  */
-export function toHttpsUrl(value: string | undefined): string | null {
-  if (value === undefined || !HTTPS_URL_PATTERN.test(value) || BROKEN_PERCENT_ENCODING.test(value)) {
+export function toHttpsUrl(value: string | null | undefined): string | null {
+  if (value === undefined || value === null || !HTTPS_URL_PATTERN.test(value) || BROKEN_PERCENT_ENCODING.test(value)) {
     return null;
   }
   const parsed = URL.parse(value);

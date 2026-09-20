@@ -64,6 +64,7 @@ function rawRow(overrides: Partial<DailySummaryReadRow> = {}): DailySummaryReadR
       competitor('試験競合C', 3.8, 40, 0.4),
       competitor('試験競合D', null, 0, null),
     ],
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }

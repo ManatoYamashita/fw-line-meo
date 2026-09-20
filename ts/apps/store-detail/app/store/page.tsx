@@ -61,10 +61,12 @@
 //   **節の見出しは容器の外に置く。** 面の中で規則を 1 つに保つためであり、こうしておくと
 //   0 件のときに空状態の部品が容器をそのまま置き換えられる（見出しは分岐の外に残る）。
 //
-//   **要件 2.3 の「次に取れる操作への導線」はこの面では提示しない。理由は歯止めではなく、
+//   **要件 2.3 の「次に取れる操作への導線」は、この面の空状態には提示しない。理由は歯止めではなく、
 //   提示すべき操作そのものが存在しないことである。** 競合の範囲設定は第 2 フェーズ、推移は
-//   翌朝の日次バッチが埋め、新着を増やす口コミ QR には発行 UI が無い（Issue #152）。この面が持つ
-//   リンクは店舗切り替えの 2 種類だけで、0 件の状態を解消する行き先は無い。
+//   翌朝の日次バッチが埋め、新着を増やす口コミ QR の発行はオーナーの面ではなく代理店の管理画面
+//   （dashboard-web の店舗一覧の QR パネル）にある。**0 件の状態をオーナー自身が解消する行き先は無い。**
+//   この面のリンクは、店舗切り替えと、口コミを出すときに Places のポリシーが必須にする帰属の導線
+//   （Issue #287・Issue #303）だけである。後者は 0 件の状態には現れない（出す口コミが無い）。
 //   要件 3.1（書込要素 0 件）と 3.3（個数固定）は、その不在を構造として保証しているにすぎず、
 //   **緩めても導線は現れない**（「3.3 と両立しない」と書くと歯止めを外せば解決するように読める）。
 //   その代わり、空状態の文言で異常ではなく次回更新を待つ状態だと伝える。空状態の部品は
@@ -73,7 +75,7 @@
 //   その操作は検索欄そのものとして空状態の直前に見えているので、空状態の文言でその方法を伝えるだけにし、
 //   別の導線は置かない（store-detail-trend-dashboard の要件 4.9）。
 //
-//   **導線が生まれる条件**: 口コミ QR の発行 UI（Issue #152 の周辺）か、競合範囲のオーナー設定
+//   **導線が生まれる条件**: 口コミ QR をオーナー自身が発行・再表示できる経路か、競合範囲のオーナー設定
 //   （第 2 フェーズ）が入った時点で 2.3 の後件は満たせるようになる。そのとき空状態へ導線を
 //   足す判断をやり直し、リンクの個数を固定している検査の宣言も更新すること。
 //   文言は「推移データはまだありません（毎朝の集計後に表示されます）」「新着なし（前回の集計以降、
@@ -115,6 +117,7 @@ import {
   REVIEW_AUTHOR_LINK_LABEL,
   REVIEW_EXCERPTS_UNAVAILABLE_TEXT,
   SELF_UNRATED_RANK_TEXT,
+  STORE_REVIEWS_LINK_TEXT,
   UNRATED_EXCLUDED_NOTE,
   displayableNewReviews,
   formatRatingLabel,
@@ -344,12 +347,15 @@ function Metric({
 function NewReviewsList({
   count,
   reviews,
+  reviewsUri,
 }: {
   readonly count: number;
   readonly reviews: readonly DailySummaryNewReview[];
+  readonly reviewsUri: string | null;
 }): React.JSX.Element {
   if (count <= 0) {
     // 空状態の部品へ移す。**導線（children）は渡さない**（冒頭の要件 2.3 の注記を参照）。
+    // 新着が 0 件の日は「読めていない新着」も無いので、口コミ一覧への導線もここには置かない。
     return (
       <EmptyState>
         <p>{NO_NEW_REVIEWS_TEXT}</p>
@@ -359,6 +365,9 @@ function NewReviewsList({
   // 内容を出せるのは、Google Maps 上の元の口コミへ辿れて、投稿者名も併記できるものだけである
   // （Places API のポリシー・Issue #287）。判定は LINE のレポートと同じものを使う。
   const displayable = displayableNewReviews(reviews);
+  // 内容を読めていない新着が 1 件でも残るなら、店舗の口コミ一覧への導線を出す（Issue #303）。
+  // 全件の内容を出せた日は、各行が自分の導線を持っているので重ねて置かない。
+  const storeReviewsUri = count - displayable.length > 0 ? toHttpsUrl(reviewsUri) : null;
   return (
     <Card>
       <CardContent className="flex flex-col gap-4">
@@ -376,6 +385,11 @@ function NewReviewsList({
               <NewReviewItem key={`${review.authorName}-${review.publishTime}-${index}`} review={review} />
             ))}
           </ul>
+        )}
+        {storeReviewsUri === null ? null : (
+          <p className="text-sm">
+            <a href={storeReviewsUri}>{STORE_REVIEWS_LINK_TEXT}</a>
+          </p>
         )}
       </CardContent>
     </Card>
@@ -514,7 +528,11 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
       </div>
       <div className="flex flex-col gap-2">
         <Heading level={3}>新着クチコミ</Heading>
-        <NewReviewsList count={summary.newReviewCount} reviews={summary.newReviews} />
+        <NewReviewsList
+          count={summary.newReviewCount}
+          reviews={summary.newReviews}
+          reviewsUri={summary.googleMapsReviewsUri}
+        />
       </div>
     </section>
   );

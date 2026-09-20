@@ -177,6 +177,8 @@ export interface DailySummaryRow {
   new_review_count: number;
   new_reviews: DailySummaryNewReview[];
   competitors: DailySummaryCompetitor[];
+  /** その店舗の口コミ一覧を Google Maps で開く URL。取得できない日は NULL（Issue #303）。 */
+  google_maps_reviews_uri: string | null;
   created_at: Date;
 }
 
@@ -201,6 +203,14 @@ export interface DailySummaryReadRow {
   readonly new_review_count: number;
   readonly new_reviews: readonly DailySummaryNewReview[];
   readonly competitors: readonly DailySummaryCompetitor[];
+  /**
+   * その店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。取得できない日は null。
+   *
+   * Places API は口コミを関連度順に最大 5 件しか返さず、新着順へ並べ替える手段を持たない。そのため
+   * 口コミ数の多い店では新着の内容がここに届かない（本番では 30 日間 22 件の新着に対し抜粋 0 件だった）。
+   * 内容を出せない新着があるとき、この URL が唯一の行き先になる（一覧の側なら新着順に読める）。
+   */
+  readonly google_maps_reviews_uri: string | null;
 }
 
 // 配信記録（TS 書込・店舗×日付で一意・retry_key で冪等再送）。

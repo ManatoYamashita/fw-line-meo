@@ -132,6 +132,7 @@ function summaryOn(summaryDate: string, overrides: Partial<DailySummaryReadRow> 
       { name: '比較試験屋', rating: 4.2, reviewCount: 88, starDiff: -0.1 },
       { name: '比較試験庵', rating: 3.9, reviewCount: 45, starDiff: 0.2 },
     ],
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }
