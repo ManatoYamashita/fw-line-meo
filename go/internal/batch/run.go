@@ -89,6 +89,17 @@ type Summary struct {
 	// SnapshotsPurged / SummariesPurged は30日超パージで削除された行数。
 	SnapshotsPurged int64
 	SummariesPurged int64
+	// NewReviewsWithoutExcerpts は「新着の件数が 1 以上なのに、内容を出せる抜粋が 0 件」だった店舗数
+	// （Issue #303）。
+	//
+	// Places API は口コミを関連度順に最大 5 件しか返さず、新着順へ並べ替える手段を持たない。そのため
+	// 口コミ数の多い店では、前日より後に投稿された口コミが上位 5 件へ入らず抜粋が常に空になる。
+	// 本番では 30 日間にわたり新着 22 件に対し抜粋 0 件だったが、集計は status='ready' で完了し
+	// 件数も正しく、エラーも出ないため**どの検査にも掛からなかった**。
+	//
+	// この項目は、その状態が続いていることを実行サマリーの 1 行で見えるようにする。
+	// 0 でない日が続くのは現時点では異常ではなく既知の状態であり、非 0 終了もアラートもさせない。
+	NewReviewsWithoutExcerpts int
 }
 
 // RowsPurged は snapshots・summaries 双方のパージ行数の合計（design.md の「パージ行数」1項目に対応）。
@@ -146,6 +157,9 @@ func Run(ctx context.Context, deps Deps) (Summary, error) {
 		}
 		if r.summaryWritten {
 			result.SummariesWritten++
+		}
+		if r.newReviewsWithoutExcerpts {
+			result.NewReviewsWithoutExcerpts++
 		}
 	}
 
@@ -222,6 +236,8 @@ type storeResult struct {
 	storeID        string
 	fetchOK        bool
 	summaryWritten bool
+	// newReviewsWithoutExcerpts は「新着の件数が 1 以上なのに抜粋が 0 件」だったか（Issue #303）。
+	newReviewsWithoutExcerpts bool
 }
 
 // competitorOutcome は1競合分の取得成功結果（repo.Competitor と当日取得した指標の組）。
@@ -413,6 +429,11 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 	}
 	newReviews := summary.NewReviews(countDelta, convertToSummaryReviews(selfMetrics.Reviews), yesterday)
 
+	// 「新着はあるのに内容が 1 件も取れない」状態を数える（Issue #303）。Places が口コミを関連度順に
+	// 最大 5 件しか返さないため、口コミ数の多い店では常にこの状態になる。件数と抜粋の食い違いは
+	// エラーにならず status も ready のままなので、実行サマリーへ出して見えるようにする。
+	result.newReviewsWithoutExcerpts = newReviews.Count > 0 && len(newReviews.Excerpts) == 0
+
 	status := "ready"
 	if len(successful) == 0 {
 		status = "no_competitors"
@@ -536,6 +557,9 @@ func processStore(ctx context.Context, deps Deps, store repo.Store, today, yeste
 		NewReviewCount: newReviews.Count,
 		NewReviews:     newReviewExcerpts,
 		Competitors:    summaryCompetitors,
+
+		// 口コミ一覧を Google Maps で開く URL（Issue #303）。取れなければ空文字のままで、repo が NULL を書く。
+		GoogleMapsReviewsURI: selfMetrics.ReviewsURI,
 	}); err != nil {
 		logger.Error("batch: write daily summary failed", "error", err.Error())
 		return result

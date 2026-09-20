@@ -93,6 +93,10 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		crossRuntimeAuthorURI      = "https://www.google.com/maps/contrib/cross-runtime-author/reviews"
 		crossRuntimeAuthorPhotoURI = "https://lh3.googleusercontent.com/a/cross-runtime-photo"
 		crossRuntimeReviewMapsURI  = "https://www.google.com/maps/reviews/data=cross-runtime-review"
+
+		// 店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。TS 側が同じ値を読むので、
+		// 変更する場合は両ファイルを揃える。
+		crossRuntimeStoreReviewsURI = "https://www.google.com/maps/place//data=cross-runtime-reviews"
 	)
 
 	mustExec := func(sql string, args ...any) {
@@ -248,7 +252,7 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 
 	// 新着口コミは 2 件。1 件目は帰属の URL を 3 つとも持ち、2 件目は持たない（応答にキーそのものが無い）。
 	// 1 件目の 4 項目は既存の TS の段（delivery-job）が new_reviews[0] として読むので変えない。
-	server.details["cross-runtime-ready-self"] = operational(4.5, 95, "クロスランタイム店舗（競合あり）",
+	server.details["cross-runtime-ready-self"] = withReviewsURI(operational(4.5, 95, "クロスランタイム店舗（競合あり）",
 		fakeReview{
 			Rating:      5,
 			PublishTime: "2026-07-12T01:00:00Z", // yesterday(2026-07-11T00:00:00Z) より後 → 抜粋対象
@@ -266,10 +270,11 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			Text:              fakeReviewText{Text: "落ち着いて食事ができました"},
 			AuthorAttribution: fakeAuthorAttribution{DisplayName: "テスト花子"},
 		},
-	)
+	), crossRuntimeStoreReviewsURI)
 	server.details["cross-runtime-ready-comp-1"] = operational(4.0, 50, "競合イチ")
 	server.details["cross-runtime-ready-comp-2"] = operational(3.8, 40, "競合ニ")
 	server.details["cross-runtime-ready-comp-3"] = unrated("競合サン")
+	// 口コミ一覧の URL を持たない店。TS 側は導線ごと置かない（Issue #303）。
 	server.details["cross-runtime-nocomp-self"] = operational(3.5, 10, "クロスランタイム店舗（競合なし）")
 	server.details["cross-runtime-unrated-self"] = operational(4.2, 20, "クロスランタイム店舗（評価を持つ競合なし）")
 	server.details["cross-runtime-unrated-comp-1"] = unrated("評価なし競合")
@@ -290,13 +295,20 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	var rank, rankTotal, rankPrev, reviewCount, reviewCountPrev, newReviewCount int
 	var rating, ratingPrev float64
 	var newReviewsJSON, competitorsJSON []byte
+	var storeReviewsURI *string
 	if err := pool.QueryRow(ctx, `
 		SELECT status, rank, rank_total, rank_prev, rating, review_count, rating_prev, review_count_prev,
-		       new_review_count, new_reviews, competitors
+		       new_review_count, new_reviews, competitors, google_maps_reviews_uri
 		FROM daily_summaries WHERE store_id = $1 AND summary_date = $2
 	`, readyStoreID, today).Scan(&status, &rank, &rankTotal, &rankPrev, &rating, &reviewCount, &ratingPrev, &reviewCountPrev,
-		&newReviewCount, &newReviewsJSON, &competitorsJSON); err != nil {
+		&newReviewCount, &newReviewsJSON, &competitorsJSON, &storeReviewsURI); err != nil {
 		t.Fatalf("select readyStore daily_summary: %v", err)
+	}
+
+	// 店舗の口コミ一覧の URL（Issue #303）。TS 側（line-webhook の cross-runtime.e2e.test.ts）が
+	// 同じ値を読み、内容を出せないときの導線に使う。
+	if storeReviewsURI == nil || *storeReviewsURI != crossRuntimeStoreReviewsURI {
+		t.Errorf("google_maps_reviews_uri = %v, want %q", storeReviewsURI, crossRuntimeStoreReviewsURI)
 	}
 
 	if status != "ready" {

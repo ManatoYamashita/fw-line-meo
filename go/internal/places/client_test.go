@@ -158,9 +158,13 @@ func TestFetchSelfMetrics_UsesSelfFieldMaskAndDecodesReviews(t *testing.T) {
 	}
 }
 
+// 自店のフィールドマスクの期待値。**定数 selfFieldMask を参照しない。**
+// 参照にすると、定数ごと広げる改変が緑のまま通る（この試験が塞いでいるのはその経路である）。
+const wantSelfFieldMask = "rating,userRatingCount,businessStatus,reviews,googleMapsLinks.reviewsUri"
+
 // line-on-demand-report（Req 8.2・8.6・8.7）: 口コミの帰属表示には、投稿者のプロフィールの URL と画像の
 // URL、その口コミを Google Maps で開く URL が要る。3 項目は自店の既存のフィールドマスク `reviews` の応答に
-// 含まれているので、マスクも呼び出し回数も変えずに受け取る。Places API (New) の応答は proto3 の JSON で、
+// 含まれているので、呼び出し回数を変えずに受け取る。Places API (New) の応答は proto3 の JSON で、
 // 値の無いフィールドはキーごと省かれる。欠けた口コミは空文字のまま返す（別の値で補わない）。
 func TestFetchSelfMetrics_DecodesReviewAttributionWithoutWideningFieldMask(t *testing.T) {
 	var gotFieldMask string
@@ -207,8 +211,10 @@ func TestFetchSelfMetrics_DecodesReviewAttributionWithoutWideningFieldMask(t *te
 	}
 
 	// マスクは定数ではなく文字列で固定する（定数との比較は、定数ごと広げても緑のまま残る）。
-	if gotFieldMask != "rating,userRatingCount,businessStatus,reviews" {
-		t.Errorf("field mask = %q, want the unchanged self mask %q", gotFieldMask, "rating,userRatingCount,businessStatus,reviews")
+	// マスクを広げるのは意図のある行為に限る、というのがこの文字列の役目である。実際 Issue #303 で
+	// googleMapsLinks.reviewsUri を足したとき、この検査が先に赤くなってから期待値を更新した。
+	if gotFieldMask != wantSelfFieldMask {
+		t.Errorf("field mask = %q, want the self mask %q", gotFieldMask, wantSelfFieldMask)
 	}
 	if got := atomic.LoadInt32(&callCount); got != 1 {
 		t.Errorf("call count = %d, want 1 (the attribution must not cost an extra call)", got)
@@ -228,6 +234,83 @@ func TestFetchSelfMetrics_DecodesReviewAttributionWithoutWideningFieldMask(t *te
 	if withoutAttribution.AuthorName != "テスト花子" ||
 		withoutAttribution.AuthorURI != "" || withoutAttribution.AuthorPhotoURI != "" || withoutAttribution.GoogleMapsURI != "" {
 		t.Errorf("Reviews[1] = %+v, want the author's name and empty attribution URLs (absent in the response)", withoutAttribution)
+	}
+}
+
+// Issue #303: 店舗の口コミ一覧を Google Maps で開く URL（googleMapsLinks.reviewsUri）を、自店の取得で
+// 受け取る。Places API は口コミを関連度順に最大 5 件しか返さず新着順にできないので、内容を出せないときの
+// 行き先として使う。応答にキーが無い店（地図の連携を持たない場合）は空文字のまま返す。
+func TestFetchSelfMetrics_DecodesReviewsURIAndLeavesItEmptyWhenAbsent(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "googleMapsLinks を持つ",
+			// 実物と同じ形を生の JSON で返す（キー名を DTO のタグから作らないため）。フィールドマスクは
+			// reviewsUri だけを要求するが、応答にほかの項目が混ざっても読み飛ばすことを併せて固定する。
+			body: `{
+				"rating": 4.5,
+				"userRatingCount": 120,
+				"businessStatus": "OPERATIONAL",
+				"googleMapsLinks": {
+					"placeUri": "https://maps.google.com/?cid=1",
+					"reviewsUri": "https://www.google.com/maps/place//data=test-reviews-uri"
+				}
+			}`,
+			want: "https://www.google.com/maps/place//data=test-reviews-uri",
+		},
+		{
+			name: "googleMapsLinks のキーが無い",
+			body: `{
+				"rating": 4.5,
+				"userRatingCount": 120,
+				"businessStatus": "OPERATIONAL"
+			}`,
+			want: "",
+		},
+		{
+			name: "googleMapsLinks はあるが reviewsUri のキーが無い",
+			body: `{
+				"rating": 4.5,
+				"userRatingCount": 120,
+				"businessStatus": "OPERATIONAL",
+				"googleMapsLinks": {"placeUri": "https://maps.google.com/?cid=1"}
+			}`,
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotFieldMask string
+			var callCount int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&callCount, 1)
+				gotFieldMask = r.Header.Get("X-Goog-FieldMask")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			client := NewClient("test-api-key", WithBaseURL(server.URL), fastBackoff())
+			metrics, err := client.FetchSelfMetrics(context.Background(), "self-place-id")
+			if err != nil {
+				t.Fatalf("FetchSelfMetrics returned error: %v", err)
+			}
+
+			if metrics.ReviewsURI != tc.want {
+				t.Errorf("ReviewsURI = %q, want %q", metrics.ReviewsURI, tc.want)
+			}
+			// 取得を増やさない（口コミ一覧の URL は自店の 1 回の取得に同梱される）。
+			if got := atomic.LoadInt32(&callCount); got != 1 {
+				t.Errorf("call count = %d, want 1 (the reviews URL must not cost an extra call)", got)
+			}
+			if gotFieldMask != wantSelfFieldMask {
+				t.Errorf("field mask = %q, want %q", gotFieldMask, wantSelfFieldMask)
+			}
+		})
 	}
 }
 

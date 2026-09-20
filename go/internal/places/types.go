@@ -44,7 +44,8 @@ type Review struct {
 	GoogleMapsURI string
 }
 
-// SelfMetrics は自店用フィールドマスク（rating,userRatingCount,businessStatus,reviews）の取得結果。
+// SelfMetrics は自店用フィールドマスク（rating,userRatingCount,businessStatus,reviews,
+// googleMapsLinks.reviewsUri）の取得結果。
 //
 // Rating は Google の星評価（1.0〜5.0）。クチコミ 0 件の店は応答に rating を持たないので nil になる
 // （Issue #255）。0 などの数値で代替しない（取得時点の生値を加工しない・design.md Postconditions）。
@@ -53,6 +54,16 @@ type SelfMetrics struct {
 	UserRatingCount int
 	BusinessStatus  string
 	Reviews         []Review
+
+	// ReviewsURI はその店舗の口コミ一覧を Google Maps で開く URL（googleMapsLinks.reviewsUri）。
+	//
+	// Places API は口コミを関連度順に最大 5 件しか返さず、新着順へ並べ替える手段を持たない
+	// （Issue #303 で本番実測: 口コミ 2291 件の店で、返る中で最も新しいものが約 3 か月前）。
+	// そのため「新着口コミの内容」は口コミ数の多い店では構造的に取れない。この URL は、
+	// 内容を出せないときにオーナーが新着順で読める先として使う。
+	//
+	// 応答に無ければ空文字のまま返す（別の値で補わない。Review の帰属 URL と同じ流儀）。
+	ReviewsURI string
 }
 
 // CompetitorMetrics は競合用フィールドマスク（rating,userRatingCount,businessStatus,displayName）の取得結果。
@@ -122,11 +133,19 @@ type nearbyPlaceDTO struct {
 // float64 で受けるとゼロ値 0 に化け、評価の無い店が「★0」として最下位に数えられる（Issue #255）
 // ので、ポインタで受けて欠落を nil のまま保つ。userRatingCount の欠落は 0 件の意味どおり 0 でよい。
 type placeDetailsResponse struct {
-	Rating          *float64       `json:"rating"`
-	UserRatingCount int            `json:"userRatingCount"`
-	BusinessStatus  string         `json:"businessStatus"`
-	DisplayName     displayNameDTO `json:"displayName"`
-	Reviews         []reviewDTO    `json:"reviews"`
+	Rating          *float64           `json:"rating"`
+	UserRatingCount int                `json:"userRatingCount"`
+	BusinessStatus  string             `json:"businessStatus"`
+	DisplayName     displayNameDTO     `json:"displayName"`
+	Reviews         []reviewDTO        `json:"reviews"`
+	GoogleMapsLinks googleMapsLinksDTO `json:"googleMapsLinks"`
+}
+
+// googleMapsLinksDTO は Place.googleMapsLinks。自店のフィールドマスクが reviewsUri だけを要求するので、
+// ほかの項目（placeUri・writeAReviewUri・photosUri・directionsUri）は受け取らない。
+// 応答に無ければゼロ値の空文字のままにする（Issue #303）。
+type googleMapsLinksDTO struct {
+	ReviewsURI string `json:"reviewsUri"`
 }
 
 type reviewDTO struct {
