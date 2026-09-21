@@ -193,6 +193,9 @@ function setup(options: SetupOptions = {}) {
       links.push({ lineUserId, richMenuId });
       if (options.linkError) throw options.linkError;
     },
+    async startLoading() {
+      throw new Error('the router must not call startLoading（Issue #307・app.ts の onEvent ラッパーの責務）');
+    },
   };
 
   const reports: ReportHandler = {
@@ -596,6 +599,9 @@ describe('createStoreIdentifiedOwnerRouterFactory', () => {
       },
       async linkRichMenu() {
         throw new Error('a completed session with a report request must not relink');
+      },
+      async startLoading() {
+        throw new Error('the router must not call startLoading（Issue #307・app.ts の onEvent ラッパーの責務）');
       },
     };
     const logger = {

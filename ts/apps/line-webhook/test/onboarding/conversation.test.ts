@@ -198,6 +198,10 @@ function createFakeMessenger(): LineMessenger & { replies: { replyToken: string;
     async linkRichMenu() {
       // 未使用（タスク 3.4 の対象）。
     },
+    async startLoading() {
+      // 未使用（Issue #307・呼出元は app.ts の onEvent ラッパーであり、conversation.ts 自身は
+      // 呼ばない）。
+    },
   };
 }
 

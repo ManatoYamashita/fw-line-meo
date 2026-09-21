@@ -21,8 +21,14 @@ function fakeConversationHandlers(
   return { handleEvent: vi.fn(impl) };
 }
 
-function fakeMessenger(impl?: LineMessenger['reply']): Pick<LineMessenger, 'reply'> {
-  return { reply: vi.fn(impl ?? (async () => {})) };
+function fakeMessenger(
+  impl?: LineMessenger['reply'],
+  startLoadingImpl?: LineMessenger['startLoading'],
+): Pick<LineMessenger, 'reply' | 'startLoading'> {
+  return {
+    reply: vi.fn(impl ?? (async () => {})),
+    startLoading: vi.fn(startLoadingImpl ?? (async () => {})),
+  };
 }
 
 function fakeLogger(): AppLogger {
@@ -637,5 +643,110 @@ describe('エラー境界: 店舗名つきの再試行案内（line-on-demand-re
     expect(res.status).toBe(200);
     expect(messenger.reply).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledWith('line-webhook.retry_reply_failed', { errorKind: 'Error' });
+  });
+});
+
+describe('処理中の入力中アニメーション（Issue #307）', () => {
+  it('本処理（handleEvent）より先に、そのイベントの lineUserId で開始する', async () => {
+    const timeline: string[] = [];
+    const conversationHandlers = fakeConversationHandlers(async () => {
+      timeline.push('handleEvent');
+    });
+    const messenger = fakeMessenger(undefined, async (lineUserId, loadingSeconds) => {
+      // 実際の HTTP 往復と同じく非同期の余地を持たせる。ここに await が無いと、
+      // fire-and-forget（await せず呼ぶだけ）へ倒す改変でも push が同期的に先に起きてしまい、
+      // このテストが「await している」ことを検出できなくなる（実際に変異で確かめた）。
+      await Promise.resolve();
+      timeline.push(`startLoading:${lineUserId}:${loadingSeconds}`);
+    });
+    const app = createApp(baseDeps({ conversationHandlers, messenger }));
+
+    await app.request('/webhook', {
+      method: 'POST',
+      headers: { 'x-line-signature': 'valid-signature' },
+      body: followEventBody(),
+    });
+
+    // followEventBody の既定は source.userId = 'U1'。秒数は app.ts の LOADING_SECONDS と一致させる
+    // （独自の値を発明せず LINE の既定 20 をそのまま使う、という設計判断を固定する）。
+    expect(timeline).toEqual(['startLoading:U1:20', 'handleEvent']);
+  });
+
+  it('失敗しても本処理は止まらず、reply は通常どおり届き、dispatch_failed は出ない', async () => {
+    const conversationHandlers = fakeConversationHandlers();
+    const messenger = fakeMessenger(undefined, async () => {
+      throw new Error('LINE chat/loading/start unavailable');
+    });
+    const logger = fakeLogger();
+    const app = createApp(baseDeps({ conversationHandlers, messenger, logger }));
+
+    const res = await app.request('/webhook', {
+      method: 'POST',
+      headers: { 'x-line-signature': 'valid-signature' },
+      body: followEventBody({ replyToken: 'reply-loading-fails' }),
+    });
+
+    expect(res.status).toBe(200);
+    // startLoading の失敗は「イベント処理の失敗」ではない。会話ハンドラは呼ばれ、
+    // 汎用の再試行案内（dispatch_failed 経路）は一切発火しない。
+    expect(conversationHandlers.handleEvent).toHaveBeenCalledTimes(1);
+    expect(messenger.reply).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalledWith('line-webhook.dispatch_failed', expect.anything());
+  });
+
+  it('失敗は line-webhook.start_loading_failed として種別だけを記録する', async () => {
+    const structuredLog = fakeStructuredLog();
+    const app = createApp(
+      baseDeps({
+        conversationHandlers: fakeConversationHandlers(),
+        messenger: fakeMessenger(undefined, async () => {
+          throw new TypeError('boom');
+        }),
+        structuredLog,
+      }),
+    );
+
+    await app.request('/webhook', {
+      method: 'POST',
+      headers: { 'x-line-signature': 'valid-signature' },
+      body: followEventBody(),
+    });
+
+    expect(structuredLog).toHaveBeenCalledWith('warn', 'line-webhook.start_loading_failed', {
+      errorKind: 'TypeError',
+    });
+  });
+
+  it('1 リクエストに複数イベントがあれば、イベントごとに自身の lineUserId で個別に開始する', async () => {
+    const calls: string[] = [];
+    const messenger = fakeMessenger(undefined, async (lineUserId) => {
+      calls.push(lineUserId);
+    });
+    const app = createApp(baseDeps({ conversationHandlers: fakeConversationHandlers(), messenger }));
+
+    await app.request('/webhook', {
+      method: 'POST',
+      headers: { 'x-line-signature': 'valid-signature' },
+      body: twoEventsBody(),
+    });
+
+    // twoEventsBody の既定は 1 件目 U1・2 件目 U2。
+    expect(calls).toEqual(['U1', 'U2']);
+  });
+
+  it('署名検証で弾かれたリクエストでは呼ばれない（本文を一切処理しない契約を保つ）', async () => {
+    const messenger = fakeMessenger();
+    const app = createApp(
+      baseDeps({ signatureVerifier: fakeSignatureVerifier(false), messenger }),
+    );
+
+    const res = await app.request('/webhook', {
+      method: 'POST',
+      headers: { 'x-line-signature': 'invalid' },
+      body: followEventBody(),
+    });
+
+    expect(res.status).toBe(401);
+    expect(messenger.startLoading).not.toHaveBeenCalled();
   });
 });

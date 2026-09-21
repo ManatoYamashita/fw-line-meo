@@ -348,4 +348,69 @@ describe('createLineMessenger', () => {
       await expect(messenger.linkRichMenu('Uabc123', 'richmenu-1')).rejects.toThrow();
     });
   });
+
+  describe('startLoading（Issue #307）', () => {
+    it('chatId・loadingSeconds を JSON body に、正しいエンドポイントへ POST する', async () => {
+      const fetchMock = routingFetchMock(() => emptyResponse(200));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await messenger.startLoading('Uabc123', 20);
+
+      const loadingCall = fetchMock.mock.calls.find(([url]) => (url as string).includes('/chat/loading/start'));
+      expect(loadingCall).toBeDefined();
+      const [url, init] = loadingCall as [string, RequestInit];
+      expect(url).toBe('https://api.line.me/v2/bot/chat/loading/start');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body as string)).toEqual({ chatId: 'Uabc123', loadingSeconds: 20 });
+      const headers = init.headers as Record<string, string>;
+      expect(headers.Authorization).toBe('Bearer stateless-token-1');
+      expect(headers['Content-Type']).toBe('application/json');
+    });
+
+    it('非2xxレスポンスのとき例外を投げる', async () => {
+      const fetchMock = routingFetchMock(() => jsonResponse(400, {}));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await expect(messenger.startLoading('Uabc123', 20)).rejects.toThrow();
+    });
+
+    it('2秒以内にレスポンスが無いとき AbortController でタイムアウトし例外を投げる（reply 経路を巻き込んで待たせない）', async () => {
+      const fetchMock = routingFetchMock((url, init) => {
+        if (!url.includes('/chat/loading/start')) {
+          return emptyResponse(200);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          });
+        });
+      });
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      const pending = messenger.startLoading('Uabc123', 20);
+      // startLoading は（places-search.ts と違い）失敗を型付き結果へ畳まず素通しで reject する
+      // ため、advanceTimersByTimeAsync が abort を発火させた瞬間はまだ誰も pending を watch
+      // していない。先に握っておかないと、実際の検証（下の expect）より前に Node が
+      // 「unhandled rejection」と判定する（vitest がテストの合否とは別にエラー扱いにする）。
+      pending.catch(() => {});
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await expect(pending).rejects.toThrow();
+    });
+  });
 });
