@@ -150,6 +150,7 @@
 | `line-webhook.dispatch_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗。**再試行案内の返信を試みた**場合。移送前はメッセージ文字列で識別していた。レポートの対象店舗を決めた後の失敗（`StoreScopedReportError`・line-on-demand-report）は店舗名つきの再試行案内を返し、`errorKind` は包む前の元の例外（`cause`）の種別を載せる。店舗名は載せない |
 | `line-webhook.dispatch_failed_before_reply_token` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗のうち、**replyToken が判明する前**に起きたもの。返信は試みていない。前者と分けるのは、運用者が「オーナーに案内が届いたか」を判定できるようにするため |
 | `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
+| `line-webhook.start_loading_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 処理中の入力中アニメーション（`chat/loading/start`・Issue #307）の開始に失敗した場合。補助的な UX であり本処理は止めない。**成功は記録しない**（毎イベント発火するため richmenu 系の成功記録とは頻度が桁違いであり、記録の欠落が業務上の不整合につながる性質でもない）。項目は `errorKind` だけである |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
 | `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンク（`onboarding/conversation.ts`）と、店舗特定済みオーナーの振り分け口のメニュー照合（`owner/router.ts`・line-on-demand-report）の両方が、この出典の同じ関数を呼んで出す |
 | `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**失敗**。リンクの失敗は例外にせず、記録だけを残す（出典のコメントが明記）。振り分け口の照合では、応答は済んでいて会話の段階を変えない（次の操作で再び張る） |

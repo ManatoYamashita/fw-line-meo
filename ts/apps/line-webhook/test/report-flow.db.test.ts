@@ -280,6 +280,7 @@ function createFakeMessenger(): LineMessenger {
     reply: vi.fn(async (): Promise<void> => {}),
     getProfile: vi.fn(async () => null),
     linkRichMenu: vi.fn(async (): Promise<void> => {}),
+    startLoading: vi.fn(async (): Promise<void> => {}),
   };
 }
 

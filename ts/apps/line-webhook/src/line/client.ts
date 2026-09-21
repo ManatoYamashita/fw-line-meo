@@ -23,6 +23,13 @@ export interface LineMessenger {
   reply(replyToken: string, messages: readonly LineMessage[], logger?: LineMessengerLogger): Promise<void>;
   getProfile(lineUserId: string): Promise<{ displayName: string } | null>;
   linkRichMenu(lineUserId: string, richMenuId: string): Promise<void>;
+  /**
+   * 処理中であることを示す入力中アニメーションを表示する（Issue #307）。1:1 チャット限定。
+   * `loadingSeconds` は 5〜60。ボットが新しいメッセージを送るか、この秒数が経つと自動的に消える。
+   * 呼出元は表示の開始を待ってから本処理へ進むこと（表示は「表示中に届いた新規メッセージ」でしか
+   * 自動的に消えないため、reply の方が先に届く並びだと表示が消えずに残る）。
+   */
+  startLoading(lineUserId: string, loadingSeconds: number): Promise<void>;
   /** リクエスト単位のログ出力先を適用する。テスト用の偽実装では省略可能。 */
   withLogger?(logger: LineMessengerLogger): LineMessenger;
 }
@@ -52,6 +59,12 @@ const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const REPLY_URL = 'https://api.line.me/v2/bot/message/reply';
 const PROFILE_URL_BASE = 'https://api.line.me/v2/bot/profile';
 const USER_URL_BASE = 'https://api.line.me/v2/bot/user';
+const LOADING_START_URL = 'https://api.line.me/v2/bot/chat/loading/start';
+
+// startLoading はベストエフォートの補助表示であり、reply 経路（5秒応答目標）を巻き込んで
+// 遅らせてはならない。places-search.ts と同じ AbortController の規律で上限を切る
+// （固定・注入不可。呼出元が個別に調整する理由が無い）。
+const LOADING_START_TIMEOUT_MS = 2000;
 
 // stateless token の実効寿命は ~900秒（channel-token.md）。期限直前の利用による失敗を避けるため、
 // 実際の expires_in からこのマージン分を差し引いた時点でキャッシュを無効化する。
@@ -178,11 +191,37 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
       }
     },
 
+    async startLoading(lineUserId: string, loadingSeconds: number): Promise<void> {
+      const accessToken = await getAccessToken();
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), LOADING_START_TIMEOUT_MS);
+
+      try {
+        const response = await deps.fetch(LOADING_START_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ chatId: lineUserId, loadingSeconds }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`LineMessenger: startLoading failed with status ${response.status}`);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+
     withLogger(logger: LineMessengerLogger): LineMessenger {
       return {
         reply: (replyToken, messages) => messenger.reply(replyToken, messages, logger),
         getProfile: (lineUserId) => messenger.getProfile(lineUserId),
         linkRichMenu: (lineUserId, richMenuId) => messenger.linkRichMenu(lineUserId, richMenuId),
+        startLoading: (lineUserId, loadingSeconds) => messenger.startLoading(lineUserId, loadingSeconds),
         withLogger: (nextLogger) => withLineMessengerLogger(messenger, nextLogger),
       };
     },

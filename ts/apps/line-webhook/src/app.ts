@@ -27,9 +27,10 @@ export interface AppDeps {
   // ts/packages/db の recordWebhookEventOnce を pool 束縛した関数（実配線はタスク 4.2）。
   recordWebhookEventOnce: (webhookEventId: string) => Promise<boolean>;
   conversationHandlers: ConversationHandlers;
-  // エラー境界（Requirement 7.5）が汎用の再試行案内 reply を試みるためだけに必要なため、
-  // LineMessenger 全体ではなく reply のみを要求する（狭い契約 = 誤用の余地を減らす）。
-  messenger: Pick<LineMessenger, 'reply'>;
+  // エラー境界（Requirement 7.5）が汎用の再試行案内 reply を試みるためと、処理中の入力中
+  // アニメーション（Issue #307）を出すためだけに必要なため、LineMessenger 全体ではなく
+  // この 2 つだけを要求する（狭い契約 = 誤用の余地を減らす）。
+  messenger: Pick<LineMessenger, 'reply' | 'startLoading'>;
   logger: AppLogger;
   // 構造化ログ（1 行 JSON）の sink。**AppLogger とは別経路である。**
   // AppLogger は標準エラー出力へそのまま出す非構造化ログで、
@@ -51,6 +52,12 @@ const SIGNATURE_HEADER = 'x-line-signature';
 // design.md「Error Handling」「Monitoring」: 内部障害の structured log には
 // X-Line-Request-Id を併記する（LINE はログを提供しないため、追跡キーを自前で残す）。
 const REQUEST_ID_HEADER = 'x-line-request-id';
+
+// 処理中の入力中アニメーション（Issue #307）の表示秒数。実際の消滅は reply 送信時であり
+// （LINE 側は「表示中に届いた新規メッセージ」で自動的に消す）、この値はそれが届かなかった
+// ときの上限にすぎない。LINE の既定値（20）をそのまま採用する———reply が届く限り実際に
+// 使われることはほぼ無い値なので、独自の値を発明する理由が無い。
+const LOADING_SECONDS = 20;
 
 // Hono アプリのファクトリ（実起動なしで app.request でテスト可能）。
 // 本タスク（4.1）: 署名検証（1.4）＋イベントディスパッチャ（2.1）＋会話ハンドラ（3.x）を
@@ -102,6 +109,23 @@ export function createApp(deps: AppDeps): Hono {
     const dispatcher = createEventDispatcher({
       recordWebhookEventOnce: deps.recordWebhookEventOnce,
       onEvent: async (event: InboundEvent) => {
+        // 処理中であることを示す入力中アニメーション（Issue #307）。本処理の一部ではなく
+        // 補助的な UX なので、失敗しても本処理（下の try）は止めない。別の try で捕捉し、
+        // 記録だけを残す（owner/completed-menu.ts の linkRichMenu と同じ規律）。
+        //
+        // 本処理より前に **await** する。fire-and-forget にすると、本処理が速く終わって
+        // reply が先に届いた後から loading-start 要求が遅れて届く順序が起こりうる。LINE 側は
+        // 「表示中に届いた新規メッセージ」でしか表示を自動的に消さないため、その並びでは
+        // reply の後から表示が始まり、loadingSeconds 秒間消えずに残ってしまう。
+        try {
+          await deps.messenger.startLoading(event.lineUserId, LOADING_SECONDS);
+        } catch (err) {
+          requestLog('warn', 'line-webhook.start_loading_failed', {
+            errorKind: errorKindOf(err),
+            ...(requestId !== undefined ? { lineRequestId: requestId } : {}),
+          });
+        }
+
         try {
           if (conversationLogger && lineLogger) {
             await deps.conversationHandlers.handleEvent(event, conversationLogger, lineLogger);
