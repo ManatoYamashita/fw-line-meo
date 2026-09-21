@@ -82,6 +82,8 @@ function summaryOn(summaryDate: string, overrides: Partial<DailySummaryReadRow> 
     new_review_count: 0,
     new_reviews: [],
     competitors: [],
+    // 既定は「URL を取得できていない日」（Issue #303）。値を持つ日は overrides で明示する。
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }
@@ -102,6 +104,9 @@ const LATEST_ROW = summaryOn(AS_OF, {
     { name: '検証競合1', rating: 4.5, reviewCount: 80, starDiff: -0.2 },
     { name: '検証競合2', rating: 0, reviewCount: 0, starDiff: 4.3 },
   ],
+  // 値を持つ日（Issue #303）。取得できない日（null）は FAILED_LATEST_ROW が受け持つので、
+  // 読み出しが列を運ぶことと落とさないことの両方が、この 2 行で固定される。
+  google_maps_reviews_uri: 'https://www.google.com/maps/place//data=example-reviews',
 });
 
 // ST_STATUSES の最新の行（取得失敗の日。順位と自店の値は持たない）。
@@ -136,8 +141,9 @@ async function insertSummary(storeId: string, row: DailySummaryReadRow): Promise
   await pool.query(
     `INSERT INTO daily_summaries
        (store_id, summary_date, status, rank, rank_total, rank_prev, rating, review_count,
-        rating_prev, review_count_prev, new_review_count, new_reviews, competitors)
-     VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb)`,
+        rating_prev, review_count_prev, new_review_count, new_reviews, competitors,
+        google_maps_reviews_uri)
+     VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14)`,
     [
       storeId,
       row.summary_date,
@@ -152,6 +158,7 @@ async function insertSummary(storeId: string, row: DailySummaryReadRow): Promise
       row.new_review_count,
       JSON.stringify(row.new_reviews),
       JSON.stringify(row.competitors),
+      row.google_maps_reviews_uri,
     ],
   );
 }

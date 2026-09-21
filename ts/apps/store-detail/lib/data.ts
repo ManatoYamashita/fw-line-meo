@@ -58,6 +58,13 @@ export interface StoreDetailSummary {
   readonly reviewCountPrev: number | null;
   readonly newReviewCount: number;
   readonly newReviews: readonly DailySummaryNewReview[];
+  /**
+   * その店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。取得できない日は null。
+   *
+   * 内容を読めていない新着が残るとき、画面はこの URL を唯一の行き先として出す。Places API は口コミを
+   * 関連度順に最大 5 件しか返さないので、口コミ数の多い店では抜粋が構造的に空になる。
+   */
+  readonly googleMapsReviewsUri: string | null;
 }
 
 export interface StoreDetailResult {
@@ -118,6 +125,7 @@ interface SummaryQueryRow {
   new_review_count: number;
   new_reviews: DailySummaryNewReview[];
   competitors: DailySummaryCompetitor[];
+  google_maps_reviews_uri: string | null;
 }
 
 interface TrendQueryRow {
@@ -144,7 +152,8 @@ export async function queryStoreDetail(
       `SELECT to_char(summary_date, 'YYYY-MM-DD') AS summary_date,
               status, rank, rank_total, rank_prev,
               rating, review_count, rating_prev, review_count_prev,
-              new_review_count, new_reviews, competitors
+              new_review_count, new_reviews, competitors,
+              google_maps_reviews_uri
          FROM daily_summaries
         WHERE store_id = $1 AND summary_date = $2::date`,
       [storeId, asOf],
@@ -181,6 +190,7 @@ export async function queryStoreDetail(
         reviewCountPrev: summaryRow.review_count_prev,
         newReviewCount: summaryRow.new_review_count,
         newReviews: summaryRow.new_reviews,
+        googleMapsReviewsUri: summaryRow.google_maps_reviews_uri,
       }
     : null;
 

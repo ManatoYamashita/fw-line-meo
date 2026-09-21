@@ -20,6 +20,7 @@ import {
   MAX_DISPLAYED_REVIEWS,
   REVIEW_TEXT_MAX_LENGTH,
   REVIEW_TEXT_MAX_LINES,
+  STORE_REVIEWS_LINK_TEXT,
   buildNewReviewsBubble,
   buildNewReviewsReport,
   displayableReviews,
@@ -104,6 +105,9 @@ function rawRow(overrides: Partial<DailySummaryReadRow> = {}): DailySummaryReadR
       { name: '試験競合B', rating: 4.0, reviewCount: 80, starDiff: 0.2 },
       { name: '試験競合C', rating: 3.8, reviewCount: 40, starDiff: 0.4 },
     ],
+    // 既定は「口コミ一覧の URL を取得できていない日」（Issue #303）。導線の試験だけが明示で値を与える。
+    // 既定を値ありにすると、導線を無条件に置く実装が全試験で緑のまま通る。
+    google_maps_reviews_uri: null,
     ...overrides,
   };
 }
@@ -497,6 +501,145 @@ describe('新着なし・判定できない・抜粋を表示できない（4.5�
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// --- 店舗の口コミ一覧への導線（Issue #303）-------------------------------------------------
+//
+// Places API は口コミを関連度順に最大 5 件しか返さず、新着順へ並べ替える手段を持たない。そのため
+// 口コミ数の多い店では、前日より後に投稿された口コミが上位 5 件へ入らない。本番では 30 日間、
+// 22 件の新着に対し抜粋が 1 件も取れず、このレポートは件数だけを出して行き止まっていた。
+// 内容を読めていない新着が残る日は、店舗の口コミ一覧（そこでは新着順に読める）への導線を添える。
+
+const STORE_REVIEWS_URI = 'https://www.google.com/maps/place//data=!4m4!3m3!1s0x0:0x1!9m1!1b1';
+
+describe('店舗の口コミ一覧への導線（4.4・4.5・Issue #303）', () => {
+  it('抜粋が 1 件も出せない日に、口コミ一覧への導線を件数と案内の後ろへ置く', () => {
+    const bubble = bubbleOf(
+      buildNewReviewsReport(
+        STORE,
+        row({ new_review_count: 3, new_reviews: [], google_maps_reviews_uri: STORE_REVIEWS_URI }),
+      ),
+    );
+    expect(texts(bubble.body)).toEqual([
+      '新着口コミ 3件（前日比）',
+      UNAVAILABLE_TEXT,
+      STORE_REVIEWS_LINK_TEXT,
+    ]);
+    // 行き先は保存された値そのもの。書き換えて救わない。
+    const link = textWith(bubble.body, STORE_REVIEWS_LINK_TEXT);
+    expect(link.action).toEqual({ type: 'uri', label: STORE_REVIEWS_LINK_TEXT, uri: STORE_REVIEWS_URI });
+    expect(link.color).toBe(lineColors.action);
+  });
+
+  it('1 件ごとの導線とは別の語を使う（同じ本文に両方が並ぶため）', () => {
+    expect(STORE_REVIEWS_LINK_TEXT).toBe('Google Maps で口コミをすべて見る');
+    expect(STORE_REVIEWS_LINK_TEXT).not.toBe(GOOGLE_MAPS_LINK_TEXT);
+    // 一覧は新着で絞られていない。取得済みのデータに無いことを言わない（8.4）。
+    expect(STORE_REVIEWS_LINK_TEXT).not.toContain('新着');
+  });
+
+  it('内容を読めていない新着の有無で、出る日と出ない日が決まる', () => {
+    const cases = [
+      {
+        name: '抜粋が 0 件（本番の常態）',
+        overrides: { new_review_count: 2, new_reviews: [legacyReview(1)] },
+        shown: true,
+      },
+      {
+        name: '一部だけ出せた（残りがある）',
+        overrides: { new_review_count: 5, new_reviews: [review(1), review(2)] },
+        shown: true,
+      },
+      {
+        // 上限の 3 件を出し切ってもなお残る日。
+        name: '上限まで出してなお残る',
+        overrides: { new_review_count: 9, new_reviews: [review(1), review(2), review(3), review(4)] },
+        shown: true,
+      },
+      {
+        // 全件の内容を出せた日。各口コミが自分の導線を持つので重ねて置かない。
+        name: '全件出せた',
+        overrides: { new_review_count: 2, new_reviews: [review(1), review(2)] },
+        shown: false,
+      },
+      {
+        name: '新着が 0 件',
+        overrides: { new_review_count: 0, new_reviews: [] },
+        shown: false,
+      },
+      {
+        // 前日の集計が無い日は件数そのものを判定しない（4.8）。判定できない旨だけを出す。
+        name: '前日の集計が無い',
+        overrides: { review_count_prev: null, new_review_count: 3, new_reviews: [] },
+        shown: false,
+      },
+    ] as const;
+
+    // 出る側・出ない側の両方を必ず通る。片側だけの表は、その向きしか検査しない。
+    expect(cases.filter((item) => item.shown)).toHaveLength(3);
+    expect(cases.filter((item) => !item.shown)).toHaveLength(3);
+
+    for (const item of cases) {
+      const bubble = bubbleOf(
+        buildNewReviewsReport(STORE, row({ ...item.overrides, google_maps_reviews_uri: STORE_REVIEWS_URI })),
+      );
+      expect(texts(bubble.body).includes(STORE_REVIEWS_LINK_TEXT), item.name).toBe(item.shown);
+      expect(urlsIn(bubble).includes(STORE_REVIEWS_URI), item.name).toBe(item.shown);
+    }
+  });
+
+  it('使えない URL の日は導線ごと置かない（空の uri を LINE へ送らない）', () => {
+    const cases = [
+      { name: '列が NULL', uri: null },
+      { name: 'https でない', uri: 'http://www.google.com/maps/place//data=x' },
+      { name: 'スキームが無い', uri: '//www.google.com/maps/place//data=x' },
+      { name: 'javascript:', uri: 'javascript:alert(1)' },
+      { name: 'ホストが無い', uri: 'https:///maps/place//data=x' },
+      { name: '空文字', uri: '' },
+      // uri アクションの上限（1000 文字）を 1 文字超える値。LINE は 1 つでも不適合だと全体を拒否する。
+      { name: '上限を 1 文字超える', uri: `https://www.google.com/maps/place//data=${'x'.repeat(1000 - 40 + 1)}` },
+    ] as const;
+
+    for (const item of cases) {
+      const bubble = bubbleOf(
+        buildNewReviewsReport(
+          STORE,
+          row({ new_review_count: 3, new_reviews: [], google_maps_reviews_uri: item.uri }),
+        ),
+      );
+      // 件数と案内は残る（行き先が無いことは、件数を伏せる理由にならない）。
+      expect(texts(bubble.body), item.name).toEqual(['新着口コミ 3件（前日比）', UNAVAILABLE_TEXT]);
+      expect(urlsIn(bubble), item.name).toEqual([]);
+    }
+
+    // 上限ちょうどの値は通る（境界の向きを取り違えていないことの対照）。
+    const atLimit = `https://www.google.com/maps/place//data=${'x'.repeat(1000 - 40)}`;
+    expect(atLimit).toHaveLength(1000);
+    const bubble = bubbleOf(
+      buildNewReviewsReport(STORE, row({ new_review_count: 3, new_reviews: [], google_maps_reviews_uri: atLimit })),
+    );
+    expect(urlsIn(bubble)).toEqual([atLimit]);
+  });
+
+  it('altText は導線の有無で変わらない（読み上げは件数だけを伝える）', () => {
+    const withLink = flexOf(
+      buildNewReviewsReport(
+        STORE,
+        row({ new_review_count: 3, new_reviews: [], google_maps_reviews_uri: STORE_REVIEWS_URI }),
+      ),
+    );
+    const withoutLink = flexOf(buildNewReviewsReport(STORE, row({ new_review_count: 3, new_reviews: [] })));
+    expect(withLink.altText).toBe(withoutLink.altText);
+  });
+
+  it('本文を落として組み直す 30KB 超の経路でも導線は残る', () => {
+    const row3 = row({
+      new_review_count: 3,
+      new_reviews: [],
+      google_maps_reviews_uri: STORE_REVIEWS_URI,
+    });
+    expect(texts(buildNewReviewsBubble(STORE, row3, { withTexts: false }).body)).toContain(STORE_REVIEWS_LINK_TEXT);
   });
 });
 

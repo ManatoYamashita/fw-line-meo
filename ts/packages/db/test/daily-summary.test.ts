@@ -5,6 +5,7 @@ import {
   REVIEW_AUTHOR_LINK_LABEL,
   REVIEW_EXCERPTS_UNAVAILABLE_TEXT,
   SELF_UNRATED_RANK_TEXT,
+  STORE_REVIEWS_LINK_TEXT,
   UNRATED_EXCLUDED_NOTE,
   UNRATED_LABEL,
   displayableNewReviews,
@@ -270,6 +271,15 @@ describe('表示文言', () => {
     expect(GOOGLE_MAPS_LINK_TEXT).toBe('Google Maps で見る');
     expect(REVIEW_AUTHOR_LINK_LABEL).toBe('投稿者のプロフィール');
     expect(REVIEW_EXCERPTS_UNAVAILABLE_TEXT).toBe('新着口コミの内容は、ここでは表示できません。');
+    expect(STORE_REVIEWS_LINK_TEXT).toBe('Google Maps で口コミをすべて見る');
+  });
+
+  it('店舗の口コミ一覧の導線は、1 件ごとの導線と別の語で、「新着」を名乗らない（Issue #303）', () => {
+    // 同じ本文に両方が並びうる。同じ語だと、どちらへ行くのかが読み手に分からない。
+    expect(STORE_REVIEWS_LINK_TEXT).not.toBe(GOOGLE_MAPS_LINK_TEXT);
+    // 開くのは店舗の口コミ一覧であって、新着で絞られた一覧ではない。取得済みのデータに無いことを
+    // 言わない（line-on-demand-report の Req 8.4）。
+    expect(STORE_REVIEWS_LINK_TEXT).not.toContain('新着');
   });
 });
 
@@ -308,6 +318,9 @@ describe('toHttpsUrl', () => {
 
   it.each([
     ['未設定', undefined],
+    // 列の値が無い形（Issue #303 の google_maps_reviews_uri）。呼出元に `?? undefined` を
+    // 強いると、その一手間を忘れた面だけが空の href を描く側へ倒れる。
+    ['NULL', null],
     ['空文字', ''],
     ['http', 'http://maps.google.com/x'],
     ['スキーム無し', '//maps.google.com/x'],

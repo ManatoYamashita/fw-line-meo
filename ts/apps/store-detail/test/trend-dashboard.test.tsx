@@ -106,6 +106,8 @@ const SUMMARY: NonNullable<StoreDetailResponse['summary']> = {
   reviewCountPrev: 127,
   newReviewCount: 0,
   newReviews: [],
+  // 新着 0 件の日。口コミ一覧の URL を持っていても導線は現れない（読めていない新着が無い・Issue #303）。
+  googleMapsReviewsUri: 'https://www.google.com/maps/place//data=trend-fixture-reviews',
 };
 
 const RESPONSE: StoreDetailResponse = {

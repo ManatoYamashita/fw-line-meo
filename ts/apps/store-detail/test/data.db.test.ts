@@ -41,6 +41,9 @@ const CUTOFF_EXCLUDED = '2026-07-31'; // cutoff ちょうど → 除外（Go の
 const BOUNDARY_INCLUDED = '2026-08-01'; // cutoff+1日（= asOf-29日）→ 含まれる最古の日
 const TODAY_INCLUDED = '2026-08-30'; // asOf 当日 → 含まれる
 
+/** 店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。Go が加工せずに書いた値を想定する。 */
+const STORE_REVIEWS_URI = 'https://www.google.com/maps/place//data=!4m4!3m3!1s0x0:0x1!9m1!1b1';
+
 describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => {
   beforeAll(async () => {
     const pool = await getPool();
@@ -93,9 +96,10 @@ describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => 
     // ので、実物と違う形の fixture は黙って「評価なし」に化けてしまう。
     await pool.query(
       `INSERT INTO daily_summaries
-         (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count, competitors)
-       VALUES ($1, $2, 'ready', 3, 6, '4.3', 80, 2, $3::jsonb)`,
-      [ST_WITH_COMPETITORS, AS_OF, JSON.stringify(FIVE_COMPETITORS)],
+         (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count, competitors,
+          google_maps_reviews_uri)
+       VALUES ($1, $2, 'ready', 3, 6, '4.3', 80, 2, $3::jsonb, $4)`,
+      [ST_WITH_COMPETITORS, AS_OF, JSON.stringify(FIVE_COMPETITORS), STORE_REVIEWS_URI],
     );
     // ST_NO_SUMMARY_TODAY: 意図的に daily_summaries を挿入しない（当日未生成のケース）。
 
@@ -216,7 +220,18 @@ describe.skipIf(!process.env.DATABASE_URL)('data: queryStoreDetail (DB)', () => 
         rating: '4.3',
         reviewCount: 80,
         newReviewCount: 2,
+        // 店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。SELECT の列から落ちると画面の
+        // 導線が丸ごと消えるが、画面側の試験は fixture を自前で組むので気づけない。ここで固定する。
+        googleMapsReviewsUri: STORE_REVIEWS_URI,
       });
+    });
+
+    it('口コミ一覧の URL を持たない行は null で返す（空文字へ丸めない・Issue #303）', async () => {
+      const pool = await getPool();
+      const result = await queryStoreDetail(pool, ST_NO_COMPETITORS, { asOf: AS_OF });
+
+      // 空文字は「URL が無い」と区別できず、読み手が空の href を描く側へ倒れる。
+      expect(result.summary?.googleMapsReviewsUri).toBeNull();
     });
   });
 

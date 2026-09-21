@@ -93,6 +93,20 @@ function definitionPairs(list: Element): readonly (readonly [string, string])[] 
  */
 const REVIEW_LINKS_PER_ROW = 2;
 
+/**
+ * 店舗の口コミ一覧への導線の文言（Issue #303）。実装の定数ではなく文字列で固定する。定数を参照すると、
+ * 文言を変える改変が両側で同時に動いて緑のまま通る。
+ */
+const STORE_REVIEWS_LINK_TEXT = 'Google Maps で口コミをすべて見る';
+
+/**
+ * 既定の応答（mockResult）で出る、店舗の口コミ一覧への導線の本数（Issue #303）。
+ *
+ * mockResult は新着 2 件のうち内容を出せるのが 1 件なので、読めていない新着が 1 件残り、導線が 1 本出る。
+ * 本番はこの状態が常態である（Places は口コミを関連度順に最大 5 件しか返さず、新着順で取る手段が無い）。
+ */
+const STORE_REVIEWS_LINKS = 1;
+
 const SINGLE_STORE: StoreRef[] = [{ storeId: 'store-1', name: 'テスト自由が丘店' }];
 const MULTI_STORES: StoreRef[] = [
   { storeId: 'store-1', name: 'テスト自由が丘店' },
@@ -127,6 +141,9 @@ const mockResult: StoreDetailResponse = {
         googleMapsUri: 'https://www.google.com/maps/reviews/data=review-1',
       },
     ],
+    // 新着 2 件のうち内容を出せるのは 1 件。読めていない新着が 1 件残るので、店舗の口コミ一覧への
+    // 導線が出る（Issue #303）。本番はこの状態が常態である（Places は関連度順に最大 5 件しか返さない）。
+    googleMapsReviewsUri: 'https://www.google.com/maps/place//data=store-1-reviews',
   },
   competitors: [{ name: '競合A', rating: 4.2, reviewCount: 80, starDiff: 0.3 }],
   trend: [
@@ -407,8 +424,8 @@ describe('store detail page', () => {
       const switchLink = screen.getByText('店舗を切り替える');
       expect(switchLink.getAttribute('href')).toBe('/store');
       // 切替リンクは storeId を持たないため、遷移先で再び 409 → 選択画面へ戻る。
-      // 残る 2 本は新着口コミ 1 件が持つ帰属の導線である（Issue #287）。
-      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + 1);
+      // 残りは新着口コミ 1 件が持つ帰属の導線（Issue #287）と、店舗の口コミ一覧への導線（Issue #303）。
+      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + 1);
     });
 
     it('単一店舗の場合は「店舗を切り替える」リンクを出さない', async () => {
@@ -421,8 +438,9 @@ describe('store detail page', () => {
       });
 
       expect(screen.queryByText('店舗を切り替える')).toBeNull();
-      // 切替リンクは 0 本。残るのは新着口コミ 1 件が持つ帰属の導線だけである（Issue #287）。
-      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW);
+      // 切替リンクは 0 本。残るのは新着口コミ 1 件が持つ帰属の導線（Issue #287）と、
+      // 読めていない新着が残るときの口コミ一覧への導線（Issue #303）である。
+      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS);
     });
 
     it('選択画面にも書込操作を一切含まない（新経路を no-write 保証と同格にする）', async () => {
@@ -527,10 +545,12 @@ describe('store detail page', () => {
           });
         },
         headingName: 'テスト自由が丘店',
-        // 単一店舗なので切替リンクは出ない。残る 2 本は新着口コミ 1 件が持つ帰属の導線である
+        // 単一店舗なので切替リンクは出ない。最初の 2 本は新着口コミ 1 件が持つ帰属の導線である
         // （投稿者のプロフィールと、Google Maps 上の元の口コミ・Issue #287）。口コミを出す面は、
         // その口コミごとに元の口コミへ辿れなければならないので、リンクは口コミの件数に比例する。
-        linkNames: ['山田太郎さん', 'Google Maps で見る'],
+        // 3 本目は店舗の口コミ一覧への導線（Issue #303）。この固定値は新着 2 件のうち 1 件しか
+        // 内容を出せない状態に対応する。全件を出せる日には出ない（末尾の専用の試験が両向きを固定する）。
+        linkNames: ['山田太郎さん', 'Google Maps で見る', 'Google Maps で口コミをすべて見る'],
       },
     ];
 
@@ -699,8 +719,9 @@ describe('store detail page', () => {
       // 既存の照合は getByText（直下テキストの一致）だけで、算出される読み上げ名は見ていない。
       const link = screen.getByRole('link', { name: '店舗を切り替える' });
       expect(link.getAttribute('href')).toBe('/store');
-      // 切替リンク 1 本と、新着口コミ 1 件が持つ帰属の導線（Issue #287）。
-      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + 1);
+      // 切替リンク 1 本と、新着口コミ 1 件が持つ帰属の導線（Issue #287）、
+      // 店舗の口コミ一覧への導線（Issue #303）。
+      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + 1);
     });
 
     it('店舗選択待ちには通知の役割を持ち込まない（Req 3.5）', async () => {
@@ -977,6 +998,8 @@ describe('store detail page', () => {
 
     it('帰属の項目が欠けた口コミは、出せるものだけを出し、導線が無ければ内容ごと伏せる（Issue #287）', async () => {
       const UNAVAILABLE = '新着口コミの内容は、ここでは表示できません。';
+      // storeLink は、店舗の口コミ一覧への導線が出るか（Issue #303）。**内容を読めていない新着が
+      // 残る状態と 1:1 で対応する。** links はその 1 本も含めた節全体の本数である。
       const cases = [
         {
           name: 'アバター無し',
@@ -985,6 +1008,8 @@ describe('store detail page', () => {
           images: 0,
           links: 2,
           unavailable: false,
+          // 新着 1 件をそのまま出せているので、読めていない新着は残らない。
+          storeLink: false,
         },
         {
           name: 'プロフィール無し',
@@ -993,15 +1018,18 @@ describe('store detail page', () => {
           images: 1,
           links: 1,
           unavailable: false,
+          storeLink: false,
         },
         {
           // 導線が取れていない口コミ。ポリシーは元の口コミへ辿れることを必須にするので、内容を出さない。
+          // 内容を出せない以上、オーナーの行き先は店舗の口コミ一覧しかない（Issue #303）。
           name: '導線無し',
           body: withReviews(reviewWithout('googleMapsUri')),
           rows: 0,
           images: 0,
-          links: 0,
+          links: 1,
           unavailable: true,
+          storeLink: true,
         },
         {
           // 投稿者を帰属できない口コミも内容を出さない（ポリシーは投稿者の帰属も必須にする）。
@@ -1009,19 +1037,27 @@ describe('store detail page', () => {
           body: withReviews({ ...REVIEW_BASE, authorName: '' }),
           rows: 0,
           images: 0,
-          links: 0,
+          links: 1,
           unavailable: true,
+          storeLink: true,
         },
         {
           // 混在。出せる 1 件だけを出し、件数は新着そのものの件数（2）を出したままにする。
+          // 出せなかった 1 件のぶん、口コミ一覧への導線が付く。
           name: '混在',
           body: withReviews(reviewWithout('googleMapsUri'), { ...REVIEW_BASE, authorName: '鈴木' }),
           rows: 1,
           images: 1,
-          links: 2,
+          links: 3,
           unavailable: false,
+          storeLink: true,
         },
       ] as const;
+
+      // 状態ごとの宣言だけでは、「導線を無条件に置く／一切置かない」へ倒す改変が、表の側を実測へ
+      // 合わせるだけで全状態緑になる。総和を検査の側へ直書きして、表の書き換えを 1 か所では
+      // 済ませられなくする。
+      expect(cases.filter((item) => item.storeLink)).toHaveLength(3);
 
       const visited = await forEachResponse(cases, (item, container) => {
         // 新着の節は「今日のポジション」の中の小節（h3）で、見出しと本体を束ねる div が範囲である。
@@ -1034,9 +1070,68 @@ describe('store detail page', () => {
           Array.from(container.querySelectorAll('p')).some((p) => announcedText(p) === UNAVAILABLE),
           item.name,
         ).toBe(item.unavailable);
+        // 口コミ一覧への導線（Issue #303）。読み上げ名と行き先まで固定する。
+        const storeLinks = screen.queryAllByRole('link', { name: STORE_REVIEWS_LINK_TEXT });
+        expect(storeLinks, item.name).toHaveLength(item.storeLink ? 1 : 0);
+        if (item.storeLink) {
+          expect(storeLinks[0]!.getAttribute('href'), item.name).toBe(BASE_SUMMARY.googleMapsReviewsUri);
+        }
         // 件数は口コミの本数のままで、出せた件数へ置き換えない（新着そのものを過少に見せない）。
         const count = item.body.summary!.newReviewCount;
         expect(soleParagraphAnnouncing(container, `${count}件の新着クチコミ`), item.name).toBeDefined();
+      });
+      expect(visited).toBe(cases.length);
+    });
+
+    it('口コミ一覧への導線は、読めていない新着が残る日にだけ出る（Issue #303）', async () => {
+      const REVIEWS_URI = BASE_SUMMARY.googleMapsReviewsUri!;
+      // 新着の件数・出せる口コミ・URL の有無を変えて、導線の出方を両向きで固定する。
+      const cases = [
+        {
+          name: '全件の内容を出せた日',
+          // 新着 1 件を 1 件とも出せている。各行が自分の導線を持つので、重ねて置かない。
+          body: withSummary({ newReviewCount: 1, newReviews: [REVIEW_BASE] }),
+          storeLink: false,
+        },
+        {
+          name: '1 件も内容を出せない日（本番の常態）',
+          body: withSummary({ newReviewCount: 3, newReviews: [] }),
+          storeLink: true,
+        },
+        {
+          name: '新着が 0 件の日',
+          // 読めていない新着が無い。空状態へ導線を持ち込まない（面の冒頭の注記）。
+          body: withSummary({ newReviewCount: 0, newReviews: [] }),
+          storeLink: false,
+        },
+        {
+          name: 'URL を取得できていない日',
+          // 行き先が無いなら導線ごと置かない（空の href を描かない）。
+          body: withSummary({ newReviewCount: 3, newReviews: [], googleMapsReviewsUri: null }),
+          storeLink: false,
+        },
+        {
+          name: 'URL が https の絶対 URL でない日',
+          // 値を書き換えて救わない。使えない値は無いものとして扱う。
+          body: withSummary({
+            newReviewCount: 3,
+            newReviews: [],
+            googleMapsReviewsUri: 'javascript:alert(1)',
+          }),
+          storeLink: false,
+        },
+      ] as const;
+
+      // 出る側・出ない側の両方を必ず通る（片側だけの表は、その向きしか検査しない）。
+      expect(cases.filter((item) => item.storeLink)).toHaveLength(1);
+      expect(cases.filter((item) => !item.storeLink)).toHaveLength(4);
+
+      const visited = await forEachResponse(cases, (item) => {
+        const links = screen.queryAllByRole('link', { name: STORE_REVIEWS_LINK_TEXT });
+        expect(links, item.name).toHaveLength(item.storeLink ? 1 : 0);
+        if (item.storeLink) {
+          expect(links[0]!.getAttribute('href'), item.name).toBe(REVIEWS_URI);
+        }
       });
       expect(visited).toBe(cases.length);
     });

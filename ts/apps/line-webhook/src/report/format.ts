@@ -176,10 +176,14 @@ const BROKEN_PERCENT_ENCODING = /%(?![0-9A-Fa-f]{2})/;
  *
  * スキームの無い `//…`、http、javascript: などは使わない。ホストを持たない値、利用者情報を含む値、
  * 上限（maxLength）を超える値も使わない。値を書き換えて救うことはしない（別の URL へ変わりうる）。
+ *
+ * null も受ける。「取得できていない」は jsonb の項目では undefined、列では NULL として届き、どちらも
+ * 同じ扱いだからである（`@fwlm/db/daily-summary` の toHttpsUrl と揃える・Issue #303）。
  */
-export function toFlexHttpsUrl(value: string | undefined, maxLength: number): string | null {
+export function toFlexHttpsUrl(value: string | null | undefined, maxLength: number): string | null {
   if (
     value === undefined ||
+    value === null ||
     value.length > maxLength ||
     !HTTPS_URL_PATTERN.test(value) ||
     BROKEN_PERCENT_ENCODING.test(value)

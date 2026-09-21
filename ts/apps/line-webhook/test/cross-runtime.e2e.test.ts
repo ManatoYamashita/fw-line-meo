@@ -35,7 +35,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { closePool, findLatestDailySummary, getPool, listDailySummariesEndingAt } from '@fwlm/db';
 import type { DailySummaryNewReview } from '@fwlm/db';
 import type { LineMessenger } from '../src/line/client.js';
-import { GOOGLE_MAPS_LINK_TEXT } from '../src/report/builders/new-reviews.js';
+import { GOOGLE_MAPS_LINK_TEXT, STORE_REVIEWS_LINK_TEXT } from '../src/report/builders/new-reviews.js';
 import { ATTRIBUTION_TEXT } from '../src/report/format.js';
 import { createReportHandler } from '../src/report/handler.js';
 
@@ -51,6 +51,11 @@ const DAY_30 = '2026-06-13';
 const DAY_30_REVIEW_COUNT = 80;
 /** 日本時間 2026-07-12 12:00。レポート応答の読み出しの基準日が AS_OF になる。 */
 const NOON_OF_AS_OF_JST = new Date('2026-07-12T03:00:00Z');
+/**
+ * Go が readyStore の行へ書く、店舗の口コミ一覧を Google Maps で開く URL（Issue #303）。
+ * go/internal/batch/crossruntime_test.go の crossRuntimeStoreReviewsURI と同じ値である。
+ */
+const STORE_REVIEWS_URI = 'https://www.google.com/maps/place//data=cross-runtime-reviews';
 
 // 帰属 3 項目を持つ新着口コミ。型の注釈で、DailySummaryNewReview が 3 項目を持つことも固定する
 // （型から項目が消えると、ここが型検査で落ちる）。
@@ -90,6 +95,9 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
 
       expect(row.summary_date).toBe(AS_OF);
       expect(row.status).toBe('ready');
+      // 店舗の口コミ一覧の URL（Issue #303）。Go が Places の googleMapsLinks.reviewsUri を加工せずに
+      // 書いた値を、TS の読み出しがそのまま返す。
+      expect(row.google_maps_reviews_uri).toBe(STORE_REVIEWS_URI);
       // 前日 90 件 → 当日 95 件。抜粋は前日の集計基準より後に投稿された 2 件。
       expect(row.new_review_count).toBe(5);
       expect(row.new_reviews).toHaveLength(2);
@@ -155,16 +163,20 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
 
       // 本文: Go が数えた新着 5 件、3 項目を持つ口コミ 1 件の内容、表示していない残り 4 件
       // （3 項目を持たない口コミも、Go が抜粋しなかった 3 件も、件数にだけ数える）。
+      // 末尾は店舗の口コミ一覧への導線（Issue #303）— 内容を読めていない新着が 4 件残るためである。
       const bodyTexts = textsOf(bubble.body);
       expect(bodyTexts[0]).toBe('新着口コミ 5件（前日比）');
       expect(bodyTexts).toContain(ATTRIBUTED_REVIEW.authorName);
       expect(bodyTexts).toContain(ATTRIBUTED_REVIEW.textExcerpt);
-      expect(bodyTexts.at(-1)).toBe('表示していない新着口コミがほかに4件あります。');
+      expect(bodyTexts.at(-2)).toBe('表示していない新着口コミがほかに4件あります。');
+      expect(bodyTexts.at(-1)).toBe(STORE_REVIEWS_LINK_TEXT);
 
-      // 導線は Go が受け取った URL のまま。口コミを Google Maps で開く導線と、投稿者のプロフィールへの導線。
+      // 導線は Go が受け取った URL のまま。口コミを Google Maps で開く導線と、投稿者のプロフィールへの導線、
+      // そして店舗の口コミ一覧への導線。**これが Go の書込から LINE の部品までを一本で結ぶ唯一の試験である。**
       expect(uriActionsOf(bubble.body)).toEqual([
         { label: '投稿者のプロフィール', uri: ATTRIBUTED_REVIEW.authorUri },
         { label: GOOGLE_MAPS_LINK_TEXT, uri: ATTRIBUTED_REVIEW.googleMapsUri },
+        { label: STORE_REVIEWS_LINK_TEXT, uri: STORE_REVIEWS_URI },
       ]);
       expect(imageUrlsOf(bubble.body)).toEqual([ATTRIBUTED_REVIEW.authorPhotoUri]);
 

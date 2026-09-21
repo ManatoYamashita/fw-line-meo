@@ -363,6 +363,7 @@ flowchart TD
 | 3.8 | すべての通知と回答に店舗名 | 各 builder, NotificationPolicy, AppBoundary | `ReportContext.storeName` | — |
 | 3.9, 3.10 | 長い店名の省略、上限を超える店舗数の頁送り | StoreSelection, StoreChoiceBuilder | `abbreviateStoreLabel`, `StoreChoicePage` | — |
 | 4.1, 4.2, 4.3, 4.4, 4.5 | 新着件数・最大 3 件・残り件数・抜粋なし | NewReviewsBuilder, ReportReads | `buildNewReviewsReport`, `displayableReviews` | レポート要求 |
+| 4.9, 4.10 | 読めていない新着が残る日のクチコミ一覧への導線・URL が無い日は置かない | NewReviewsBuilder, ReportReads | `buildNewReviewsReport`, `google_maps_reviews_uri` | レポート要求 |
 | 4.6, 4.7, 4.8 | 新着なし・前日比の新着・判定できない | NewReviewsBuilder | `review_count_prev` の有無 | — |
 | 5.1, 5.2, 5.8 | 比較レポートと書式 | ComparisonBuilder | `buildComparisonReport`, `formatStarDiff` | レポート要求 |
 | 5.3, 5.4, 5.5, 5.6, 5.7 | 評価なし・未評価を除く母数・自店未評価・競合なし・末尾と注記 | ComparisonBuilder, #255 の正規化 | `normalizeSummaryRatings`, `isUnratedSelf`, `hasUnratedCompetitor` | — |
@@ -502,6 +503,8 @@ export interface DailySummaryReadRow {
   readonly new_review_count: number;
   readonly new_reviews: readonly DailySummaryNewReview[];
   readonly competitors: readonly DailySummaryCompetitor[];
+  /** その店舗のクチコミ一覧を Google Maps で開く URL。取得できない日は null（Issue #303・Req 4.9/4.10）。 */
+  readonly google_maps_reviews_uri: string | null;
 }
 
 export function listReportableStores(db: Queryable, ownerId: string): Promise<ReportableStore[]>;
@@ -679,7 +682,7 @@ export function abbreviateStoreLabel(name: string): string;
 
 | Builder | 本文の構成 | 関連 |
 |---|---|---|
-| NewReviewsBuilder | 新着件数。表示できる口コミ（`googleMapsUri` を持つもの）を最大 3 件: 投稿者の画像（`authorPhotoUri` があれば 1:1 の小さな画像）、投稿者名（`authorUri` があればプロフィールへのリンク）、投稿日時（`M月D日 HH:mm`・JST）、★、本文、「Google Maps で見る」（口コミの `googleMapsUri`）。残り件数。抜粋が無いときは件数と表示できない旨。前日比が取れて 0 件なら「新着口コミはありません」。前日の集計が無いとき（`review_count_prev` が null）は判定できない旨 | 4.1–4.8, 8.2, 8.6, 8.7 |
+| NewReviewsBuilder | 新着件数。表示できる口コミ（`googleMapsUri` を持つもの）を最大 3 件: 投稿者の画像（`authorPhotoUri` があれば 1:1 の小さな画像）、投稿者名（`authorUri` があればプロフィールへのリンク）、投稿日時（`M月D日 HH:mm`・JST）、★、本文、「Google Maps で見る」（口コミの `googleMapsUri`）。残り件数。抜粋が無いときは件数と表示できない旨。**内容を読めていない新着が残る日（残り件数が 1 以上）は、末尾に「Google Maps で口コミをすべて見る」（行の `google_maps_reviews_uri`）を置く。全件を出せた日と URL の無い日は置かない**。前日比が取れて 0 件なら「新着口コミはありません」。前日の集計が無いとき（`review_count_prev` が null）は判定できない旨 | 4.1–4.10, 8.2, 8.6, 8.7 |
 | ComparisonBuilder | 比較可能なら「近隣 N 店中 R 位」（LINE 面の巨大表示）。自店の評価と口コミ総数。競合: 評価ありを順位の順、評価なしを末尾に、名称・評価・口コミ総数・星差。評価なしがいれば注記。自店が未評価なら順位と星差を出さず `SELF_UNRATED_RANK_TEXT`。評価を持つ競合が無ければ競合比較に使えるデータが無い旨 | 5.1–5.8 |
 | TrendBuilder | 期間の要約 1 行（両端が比較可能なら順位の始点→終点、評価の始点→終点、口コミ数の差分）。7 行の表（日付・順位・評価・口コミ数）。行が無い日は「データなし」、取得失敗の日は「取得失敗」、比較不能の日の順位は「—」。有効な日が 2 日未満なら不足の注記。最新が取得失敗なら注記。footer に「30日の推移を詳細画面で見る」（LIFF URL に `?storeId=` を付ける） | 6.1–6.8 |
 | StoreChoiceBuilder | 「どの店舗の〇〇を表示しますか」のテキストと、店舗ごとのクイックリプライ（postback・ラベルは省略した店舗名・displayText は店舗名）、次の頁があれば「ほかの店舗」。`invalid_choice` のときは「その店舗は選べません」を先頭に置く | 3.2, 3.6, 3.9, 3.10 |
