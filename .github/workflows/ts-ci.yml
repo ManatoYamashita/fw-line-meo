@@ -45,6 +45,12 @@ jobs:
         # 共有経路を通らない書き出しを検出する。一本化しても後から直接の書き出しを足せば
         # 品質は再び実行面ごとに割れる。割れていく力を構造で止める。
         run: bash scripts/check-log-sink-usage.sh
+      - name: '既定ログ sink の必須除外ガード（Issue #232）'
+        # Logging が作成した _Default sink を Terraform の管理下へ置くとき、filter を宣言し
+        # 忘れると既存の必須ログ除外が apply で消える。破れたときの症状は赤ではなく
+        # **監査ログの二重保存（_Required 400 日無料 + _Default 30 日課金）** であり、
+        # plan の属性まで読まない限り誰も気づかない（PR #245 が実際にこの形で通っていた）。
+        run: bash scripts/check-log-sink-default-filter.sh
       - name: 'JST 固定オフセット整合ガード（Issue #299）'
         # JST の暦日・時刻を決める固定 +09:00 は TS の複数面と Go に分散している。
         # 値と整形方式に加え、実装候補と宣言を両方向で照合し、6つ目の列挙漏れも検出する。
