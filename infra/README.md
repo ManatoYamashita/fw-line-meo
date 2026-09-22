@@ -833,6 +833,13 @@ Cloud Logging の監査バケットは「直近の補助証跡」として扱う
 | `fwlm-app-error` | 90日 | event 名で分類したエラー・警告・無視イベント | 当該バケット |
 | `fwlm-app-info` | 30日 | その他の Cloud Run アプリイベント | ログベース指標（24か月） |
 
+`_Default` sink は Logging が作成したものを import して管理下へ置くが、**その既定 filter
+（`cloudaudit.*` / `externalaudit.*` の 6 種を除外する式）を宣言で保つこと**。filter を書かない
+宣言は「空 = 全件」として送られ、`_Required` が 400 日無料で保持している監査ログが `_Default`
+（30 日・課金）へも二重に入る。exclusions を足すことと既定 filter を保つことは別の操作である。
+2026-09-22 の apply 直前の plan で、この欠落（`filter -> null`）を実際に検出した（本番の該当ログは
+7 日で 882 件）。機械強制は `scripts/check-log-sink-default-filter.sh`（ts-ci）。
+
 振り分けは `severity` ではなく `jsonPayload.event` で行う。アプリの水準値が集約基盤の
 `severity` と一致することに依存すると、イベントは出ているのに別バケットへ入らない「静かな0」を
 作るためである。#231 のDB監査行そのものは Cloud Logging へコピーせず、ログ側は補助イベントだけを
