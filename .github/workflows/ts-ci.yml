@@ -51,6 +51,11 @@ jobs:
         # **監査ログの二重保存（_Required 400 日無料 + _Default 30 日課金）** であり、
         # plan の属性まで読まない限り誰も気づかない（PR #245 が実際にこの形で通っていた）。
         run: bash scripts/check-log-sink-default-filter.sh
+      - name: 'JST 固定オフセット整合ガード（Issue #299）'
+        # JST の暦日・時刻を決める固定 +09:00 は TS の複数面と Go に分散している。
+        # 値と整形方式に加え、実装候補と宣言を両方向で照合し、6つ目の列挙漏れも検出する。
+        # SQL の Asia/Tokyo 月境界も同じ棚卸しへ載せる（read-only・依存インストール不要）。
+        run: bash scripts/check-jst-offset-consistency.sh
       - name: 'E2E スタブ隔離ガード（Issue #53・IdP 差し替えが出荷経路へ漏れないこと）'
         # 管理ダッシュボードと店舗詳細を実ブラウザで測るため、外部 IdP の SDK をビルド時に
         # スタブへ差し替える口がある（E2E_STUB_IDP=1 のときだけ有効）。漏れたときの症状は
