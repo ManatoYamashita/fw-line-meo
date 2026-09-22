@@ -117,25 +117,12 @@ resource "google_logging_project_sink" "app_info" {
   unique_writer_identity = true
 }
 
-# 同一プロジェクト内のカスタムバケットでも sink writer へ Logs Bucket Writer が必要。
-# writer_identity は sink ごとに分離し、他 sink のサービスアカウントを再利用しない。
-resource "google_project_iam_member" "audit_bucket_writer" {
-  project = var.project_id
-  role    = "roles/logging.bucketWriter"
-  member  = google_logging_project_sink.audit.writer_identity
-}
-
-resource "google_project_iam_member" "app_error_bucket_writer" {
-  project = var.project_id
-  role    = "roles/logging.bucketWriter"
-  member  = google_logging_project_sink.app_error.writer_identity
-}
-
-resource "google_project_iam_member" "app_info_bucket_writer" {
-  project = var.project_id
-  role    = "roles/logging.bucketWriter"
-  member  = google_logging_project_sink.app_info.writer_identity
-}
+# **同一プロジェクトのログバケットへ流す sink に writer identity は存在しない。**
+# 2026-09-22 の本番 apply で実測: 3 sink とも `writerIdentity` を持たず、
+# `google_project_iam_member` の member が空文字になって
+# `invalid value "" for member` で失敗した（バケットと sink 自体は作成済み）。
+# Logs Bucket Writer の付与が要るのは、宛先が別プロジェクトのバケットである場合だけである。
+# 「同一プロジェクトでも必要」という前提で書いた 3 つの IAM 資源は、成立しないので持たない。
 
 resource "google_logging_project_sink" "default" {
   project     = var.project_id
