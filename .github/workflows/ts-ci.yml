@@ -56,6 +56,12 @@ jobs:
         # 値と整形方式に加え、実装候補と宣言を両方向で照合し、6つ目の列挙漏れも検出する。
         # SQL の Asia/Tokyo 月境界も同じ棚卸しへ載せる（read-only・依存インストール不要）。
         run: bash scripts/check-jst-offset-consistency.sh
+      - name: 'ログ振り分けの実行面カバレッジガード（Issue #232）'
+        # 振り分けの述語がデプロイ正典の種別（service / job）を覆っていることを検証する。
+        # 初版は cloud_run_revision だけを書いており、本番の構造化ログの大半を占める
+        # Cloud Run ジョブの記録がどのカスタムバケットにも入らなかった。破れたときの症状は
+        # 赤ではなく **「新しいバケットが静かに空」** で、着弾を実測しないと気づけない。
+        run: bash scripts/check-log-routing-resource-coverage.sh
       - name: 'E2E スタブ隔離ガード（Issue #53・IdP 差し替えが出荷経路へ漏れないこと）'
         # 管理ダッシュボードと店舗詳細を実ブラウザで測るため、外部 IdP の SDK をビルド時に
         # スタブへ差し替える口がある（E2E_STUB_IDP=1 のときだけ有効）。漏れたときの症状は
