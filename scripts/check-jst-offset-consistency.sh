@@ -40,7 +40,9 @@ IMPLEMENTATIONS=(
 )
 
 # 新しい JST 実装を足したのに上の表へ載せなかった状態を検出するための候補パターン。
-# ファイル単位で照合する。Go の既存コメントにある LoadLocation も同じ宣言済みファイルへ収まる。
+# ファイル単位で照合し、宣言済みファイルにも候補が 1 件だけ在ることを要求する。同じファイルへ
+# 2 つ目の定数や時刻変換を足した場合も、既存ファイル名に隠れて素通りさせない。行頭 `//` の
+# コメントは実装ではないため候補数から除く（Go の既存コメントにある LoadLocation が該当する）。
 CANDIDATE_ERE="const[[:space:]]+[A-Za-z0-9_]*([Jj][Ss][Tt]|[Tt][Oo][Kk][Yy][Oo])[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*[0-9]|new[[:space:]]+Date[(].*[+][[:space:]]*[0-9_]+[[:space:]]*[*][[:space:]]*60|time[.]FixedZone[[:space:]]*[(][[:space:]]*['\"]JST['\"]|time[.]LoadLocation[[:space:]]*[(][[:space:]]*['\"]Asia/Tokyo['\"]|AT[[:space:]]+TIME[[:space:]]+ZONE[[:space:]]+['\"]Asia/Tokyo['\"]|timeZone[[:space:]]*:[[:space:]]*['\"]Asia/Tokyo['\"]|TZ=Asia/Tokyo"
 
 line_count() {
@@ -72,6 +74,20 @@ read_literal_count() { # $1=file, $2=literal
   fi
   # grep -c は無一致でも 0 を出すが exit 1。1 は正常な「0 件」として扱う。
   [ "$rc" -eq 0 ] || literal_count=0
+  return 0
+}
+
+candidate_match_count=0
+read_candidate_match_count() { # $1=file
+  local file="$1"
+  local code_matches=''
+  if ! read_regex_matches "$file" "$CANDIDATE_ERE"; then
+    return 1
+  fi
+  # 実装候補を説明するだけの行頭 // コメントは数えない。awk は全入力を読み切るため、
+  # pipefail 下でも上流を SIGPIPE にしない。
+  code_matches="$(printf '%s\n' "$regex_matches" | awk '!/^[[:space:]]*\/\//')"
+  candidate_match_count="$(printf '%s\n' "$code_matches" | line_count)"
   return 0
 }
 
@@ -188,15 +204,11 @@ read_go_offset_seconds() { # $1=file
 
 file_is_candidate() { # $1=file
   local file="$1"
-  local rc=0
-  if grep -Eq -- "$CANDIDATE_ERE" "$file"; then
-    return 0
-  else
-    rc=$?
-  fi
-  if [ "$rc" -ge 2 ]; then
-    echo "ERROR: ${file} の JST 実装候補を走査できません（grep exit=${rc}）。" >&2
+  if ! read_candidate_match_count "$file"; then
     return 2
+  fi
+  if [ "$candidate_match_count" -gt 0 ]; then
+    return 0
   fi
   return 1
 }
@@ -245,6 +257,10 @@ for entry in "${IMPLEMENTATIONS[@]}"; do
     if [ "$candidate_rc" -eq 1 ]; then
       echo "ERROR: 宣言された ${path} から JST 実装候補を検出できません。実装または候補パターンが変わっています。" >&2
     fi
+    fail=1
+  elif [ "$candidate_match_count" -ne 1 ]; then
+    echo "ERROR: 宣言された ${path} に JST 実装候補が ${candidate_match_count} 件あります。1 ファイル 1 候補であるべきです。" >&2
+    echo "       → 同じファイルでは既存の固定値を再利用し、独立した実装なら別ファイルとして IMPLEMENTATIONS へ登録してください。" >&2
     fail=1
   fi
 

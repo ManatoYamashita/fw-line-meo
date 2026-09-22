@@ -28,7 +28,7 @@
 ## Key Technical Decisions
 
 - **書き込み境界（最重要運用規律）**: 同一 Cloud SQL を 2 言語から触るため、**どの言語がどのテーブルを書くか** を厳格に定義する。新テーブル追加時は必ず書込責任言語を明記。共有定数（カテゴリ定義等）の同期も二重化リスクとして管理する。
-- **JST の固定オフセットは値・整形方式・棚卸しを機械強制する（Issue #299）**: 「今日」の暦日を Go が書き、TypeScript の複数面が読むため、片側だけが UTC や別オフセットへずれると当日の行が取得範囲から外れる（Issue #268 で実発生）。アプリをまたぐ共有 import は作らず、`scripts/check-jst-offset-consistency.sh` が固定オフセットをすべて `+09:00`（32,400 秒）へ固定し、UTC getter / UTC 0時への再構成まで用途別に検証する。新しい `JST_OFFSET_*`、`time.FixedZone("JST", ...)`、`Asia/Tokyo` の時刻変換は同ガードの `IMPLEMENTATIONS` へ登録し、整形方式の検査を追加すること。SQL の `AT TIME ZONE 'Asia/Tokyo'` も同じ棚卸しへ載せる。
+- **JST の固定オフセットは値・整形方式・棚卸しを機械強制する（Issue #299）**: 「今日」の暦日を Go が書き、TypeScript の複数面が読むため、片側だけが UTC や別オフセットへずれると当日の行が取得範囲から外れる（Issue #268 で実発生）。アプリをまたぐ共有 import は作らず、`scripts/check-jst-offset-consistency.sh` が固定オフセットをすべて `+09:00`（32,400 秒）へ固定し、UTC getter / UTC 0時への再構成まで用途別に検証する。新しい `JST_OFFSET_*`、`time.FixedZone("JST", ...)`、`Asia/Tokyo` の時刻変換は同ガードの `IMPLEMENTATIONS` へ登録し、整形方式の検査を追加すること。宣言済みファイル内では既存の固定値を再利用し、独立した実装は別ファイルとして登録する。SQL の `AT TIME ZONE 'Asia/Tokyo'` も同じ棚卸しへ載せる。
 - **4階層データモデルを初期から確定**: `運営 → 代理店(Agency) → オーナー(Owner) → 来店客(Customer)※匿名`。後からの階層挿入は不可。スキーマ変更時もこの4階層を壊さない。
 - **RBAC によるロール分離**: 運営（全店閲覧）と代理店（担当店のみ）は同一ダッシュボードにログインし権限分離。
 - **MINI App 不採用**: 審査が重く初期不要。客向けは通常 Web、LINE 内入力は LIFF に限定。

@@ -51,6 +51,7 @@ package batch
 
 import "time"
 
+// time.LoadLocation("Asia/Tokyo") は tzdata を要するため使わない。
 var jst = time.FixedZone("JST", 9*60*60)
 
 func jstDateAsUTC(t time.Time) time.Time {
@@ -75,6 +76,15 @@ jst_tree
 fx_run check-jst-offset-consistency
 expect_green
 expect_output_matches '固定オフセット 5 実装 / SQL zone 1 実装 / 候補 6 ファイル'
+t_end
+
+t_begin 'check-jst-offset-consistency: 宣言済みファイル内の2つ目の固定値も赤'
+jst_tree
+sed -i.bak '/const JST_OFFSET_MS = 9 \* 60 \* 60 \* 1000;/a\
+const SECONDARY_JST_OFFSET_MS = 8 * 60 * 60 * 1000;' "${FX}/ts/apps/store-detail/lib/data.ts"
+rm -f "${FX}/ts/apps/store-detail/lib/data.ts.bak"
+fx_run check-jst-offset-consistency
+expect_red '宣言された ts/apps/store-detail/lib/data.ts に JST 実装候補が 2 件あります'
 t_end
 
 t_begin 'check-jst-offset-consistency: TypeScript のミリ秒オフセットが +08:00 なら赤'
