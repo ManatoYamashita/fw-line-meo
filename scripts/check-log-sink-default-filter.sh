@@ -42,6 +42,20 @@ MANAGED_SINK_NAME='_Default'
 
 failed=0
 
+# **後置 `|| true` で grep の失敗を潰さない。** 無一致（exit 1）と評価不能（exit 2 以上）が
+# 同じ 0 件に化け、パターンが壊れた瞬間に検査が素通りする（`scripts/check-grep-exit-codes.sh`
+# が機械強制しており、本スクリプトの初版が実際に捕まった）。
+# 呼出元で判定するため、**副シェルの中で fail を立てない**（親へ戻らない）。
+grep_count() {
+  gc_rc=0
+  gc_out="$(grep -c "$@")" || gc_rc=$?
+  if [ "$gc_rc" -gt 1 ]; then
+    return 2
+  fi
+  printf '%s' "$gc_out"
+  return 0
+}
+
 fail() {
   echo "ERROR: $1" >&2
   failed=1
@@ -52,7 +66,10 @@ if [ ! -d "$INFRA_DIR" ]; then
   exit 1
 fi
 
-required_count="$(printf '%s\n' "$REQUIRED_LOG_IDS" | grep -c '[^[:space:]]' || true)"
+required_count="$(printf '%s\n' "$REQUIRED_LOG_IDS" | grep_count '[^[:space:]]')" || {
+  echo "ERROR: 必須ログ ID の表を評価できません（grep が異常終了）。" >&2
+  exit 1
+}
 if [ "$required_count" -eq 0 ]; then
   echo "ERROR: 必須ログ ID の表が空です。除外の欠落を検出できません。" >&2
   exit 1
@@ -118,12 +135,12 @@ while IFS= read -r tf_file; do
     # **属性はブロック直下（terraform fmt が保証する 2 スペース）だけを読む。** 深い位置まで
     # 拾うと、`exclusions { filter = ... }` の中身を sink 自身の filter と取り違え、
     # filter を消した状態を「宣言はあるが中身が足りない」と誤って報告する（実測）。
-    sink_name="$(printf '%s\n' "$block" | sed -n 's/^  name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    sink_name="$(printf '%s\n' "$block" | sed -n 's/^  name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1,1p')"
     [ "$sink_name" = "$MANAGED_SINK_NAME" ] || continue
     managed_found=$((managed_found + 1))
     rel="${tf_file#$ROOT/}"
 
-    filter_rhs="$(printf '%s\n' "$block" | sed -n 's/^  filter[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' | head -1)"
+    filter_rhs="$(printf '%s\n' "$block" | sed -n 's/^  filter[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' | sed -n '1,1p')"
     if [ -z "$filter_rhs" ]; then
       fail "${rel}: sink \"${MANAGED_SINK_NAME}\" が filter を宣言していません。"
       echo "       → filter を書かないと Terraform は空（全件）を送り、Logging が既定で持つ" >&2
@@ -150,7 +167,11 @@ while IFS= read -r tf_file; do
     missing=''
     while IFS= read -r log_id; do
       [ -n "$log_id" ] || continue
-      if ! printf '%s\n' "$resolved" | grep -F -q "$log_id"; then
+      hits="$(printf '%s\n' "$resolved" | grep_count -F -- "$log_id")" || {
+        fail "${rel}: 必須ログ ID の照合を評価できません（grep が異常終了）: ${log_id}"
+        continue
+      }
+      if [ "$hits" -eq 0 ]; then
         missing="${missing}${log_id} "
       fi
     done <<EOF

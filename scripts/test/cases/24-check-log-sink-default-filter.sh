@@ -141,3 +141,22 @@ lsdf_write 'filter = local.default_sink_required_exclusions'
 fx_run check-log-sink-default-filter
 expect_red '必須ログ ID の表が空です'
 t_end
+
+# grep が評価不能（exit 2）のとき、無一致（exit 1）と同一視して緑を返してはならない。
+# **落とすのは照合の grep だけ**にする。必須 ID の件数を数える側まで落とすと、
+# どちらの分岐へ到達したのかが判別できなくなる。
+t_begin 'check-log-sink-default-filter: 照合の grep が評価不能なら赤（無一致と混同しない）'
+fx_guard check-log-sink-default-filter
+lsdf_write 'filter = local.default_sink_required_exclusions'
+lsdf_real_grep="$(PATH="$FX_BASE_PATH" command -v grep)"
+cat > "${STUB_DIR}/grep" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  *-F*) echo "grep-stub: simulated read error" >&2; exit 2 ;;
+esac
+exec "${lsdf_real_grep}" "\$@"
+STUB
+chmod +x "${STUB_DIR}/grep"
+fx_run check-log-sink-default-filter
+expect_red '照合を評価できません'
+t_end
