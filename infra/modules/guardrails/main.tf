@@ -24,17 +24,28 @@
 # ------------------------------------------------------------------------------
 
 locals {
+  # **アプリの記録を出す resource.type を 1 箇所だけで定義する。**
+  #
+  # 初版はサービス（`cloud_run_revision`）しか書いておらず、Cloud Run の**ジョブ**
+  # （daily-batch / summary-delivery）の記録がどのカスタムバケットにも入らなかった。
+  # 2026-09-22 の本番実測では、構造化ログ 13 行のうち 12 行が `cloud_run_job` だった。
+  # #227 が「二度実害を出した」として挙げる #151 は、そのジョブの失敗が無音だった事故である。
+  #
+  # 述語を各フィルタへ書き写さない。書き写した瞬間、実行面を足したときに片方だけ直す余地が
+  # 生まれる（#151 と同型）。機械強制は scripts/check-log-routing-resource-coverage.sh。
+  log_resource_types = "(resource.type = \"cloud_run_revision\" OR resource.type = \"cloud_run_job\")"
+
   # #231 のDB監査行と対応するアプリイベント。`audit.` は将来の補助イベント用で、
   # rich menu の成否は現在の line-webhook 実イベントをそのまま収容する。
   audit_log_filter = <<-EOT
-    resource.type = "cloud_run_revision" AND (
+    ${local.log_resource_types} AND (
       jsonPayload.event =~ "^audit\\." OR
       jsonPayload.event =~ "^line-webhook\\.richmenu_(linked|link_failed)$"
     )
   EOT
 
   app_error_log_filter = <<-EOT
-    resource.type = "cloud_run_revision" AND
+    ${local.log_resource_types} AND
     jsonPayload.event =~ ".*(_failed|_error|_ignored|_warning|_warn)$" AND
     NOT (${local.audit_log_filter})
   EOT
@@ -113,7 +124,7 @@ resource "google_logging_project_sink" "app_info" {
   project                = var.project_id
   name                   = "fwlm-app-info"
   destination            = "logging.googleapis.com/projects/${var.project_id}/locations/${var.logging_bucket_location}/buckets/${google_logging_project_bucket_config.app_info.bucket_id}"
-  filter                 = "resource.type = \"cloud_run_revision\" AND NOT (${local.audit_log_filter}) AND NOT (${local.app_error_log_filter})"
+  filter                 = "${local.log_resource_types} AND NOT (${local.audit_log_filter}) AND NOT (${local.app_error_log_filter})"
   unique_writer_identity = true
 }
 
@@ -144,7 +155,7 @@ resource "google_logging_project_sink" "default" {
 
   exclusions {
     name   = "fwlm-app-info-routed"
-    filter = "resource.type = \"cloud_run_revision\" AND NOT (${local.audit_log_filter}) AND NOT (${local.app_error_log_filter})"
+    filter = "${local.log_resource_types} AND NOT (${local.audit_log_filter}) AND NOT (${local.app_error_log_filter})"
   }
 
   lifecycle {
