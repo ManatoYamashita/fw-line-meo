@@ -100,9 +100,9 @@ export interface QueryStoreDetailOptions {
 // 「今日のポジション」と名乗るより、まだ無いと言うほうが正しい。リッチメニューの「今日の
 // ポジション」（line-webhook の jstToday）は既にこの振る舞いなので、面のあいだで揃う。
 //
-// 同じ +9:00 の定数はリポジトリに 4 つある（ここ・delivery-job の resolveJstNow・
-// line-webhook の jstToday・Go の jstDateAsUTC）。値が揃っていることを確かめる機械的なガードは
-// 無いので、5 つ目を足すときは既存の全てと突き合わせること（Issue #299）。
+// 同じ +9:00 の固定値はリポジトリに 5 つある（ここ・delivery-job の resolveJstNow・
+// line-webhook の jstToday と投稿時刻表示・Go の jstDateAsUTC）。値・整形方式・列挙の網羅は
+// scripts/check-jst-offset-consistency.sh が両方向で機械検証する（Issue #299）。
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 function defaultAsOf(): string {
