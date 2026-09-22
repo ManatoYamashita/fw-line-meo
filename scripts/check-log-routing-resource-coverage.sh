@@ -196,8 +196,14 @@ while IFS= read -r tf_file; do
       [ -n "$rhs" ] || continue
       routing_filters=$((routing_filters + 1))
       resolved="$(resolve_locals "$rhs" "$(dirname "$tf_file")")"
+      # **HCL の逃がし（`\"`）を外してから照合する。** 素のままだと `"cloud_run_job"` は
+      # `\"cloud_run_job\"` の部分文字列にならず、覆っているのに 0 件と読む（実測）。
+      resolved="$(printf '%s' "$resolved" | sed 's/\\"/"/g')"
 
-      predicates="$(printf '%s\n' "$resolved" | grep -c 'resource\.type' || true)"
+      predicates="$(printf '%s\n' "$resolved" | grep_count -- 'resource\.type')" || {
+        fail "${rel}: 述語の有無を評価できません（grep が異常終了）: ${rhs}"
+        continue
+      }
       if [ "${predicates:-0}" -eq 0 ]; then
         fail "${rel}: sink \"${sink_name}\" のフィルタに resource.type の述語がありません: ${rhs}"
         continue

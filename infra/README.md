@@ -844,6 +844,13 @@ Cloud Logging の監査バケットは「直近の補助証跡」として扱う
 apply で実測）。`roles/logging.bucketWriter` の付与が要るのは宛先が別プロジェクトのバケットの
 ときだけで、同一プロジェクトでの付与を宣言すると member が空文字になり apply が失敗する。
 
+振り分けの述語は **Cloud Run のサービスとジョブの両方**を覆う（`cloud_run_revision` と
+`cloud_run_job`）。初版はサービスだけを書いており、本番の構造化ログ 13 行のうち 12 行を占める
+ジョブ（`daily-batch` / `summary-delivery`）の記録が、どのカスタムバケットにも入らなかった
+（2026-09-22 実測）。#227 が挙げる #151 の実害は、まさにそのジョブの失敗が無音だった事故である。
+述語は `local.log_resource_types` の 1 箇所だけが持ち、各フィルタへ書き写さない。機械強制は
+`scripts/check-log-routing-resource-coverage.sh`（デプロイ正典の service / job と両方向で照合）。
+
 振り分けは `severity` ではなく `jsonPayload.event` で行う。アプリの水準値が集約基盤の
 `severity` と一致することに依存すると、イベントは出ているのに別バケットへ入らない「静かな0」を
 作るためである。#231 のDB監査行そのものは Cloud Logging へコピーせず、ログ側は補助イベントだけを
