@@ -45,6 +45,12 @@ jobs:
         # 共有経路を通らない書き出しを検出する。一本化しても後から直接の書き出しを足せば
         # 品質は再び実行面ごとに割れる。割れていく力を構造で止める。
         run: bash scripts/check-log-sink-usage.sh
+      - name: '既定ログ sink の必須除外ガード（Issue #232）'
+        # Logging が作成した _Default sink を Terraform の管理下へ置くとき、filter を宣言し
+        # 忘れると既存の必須ログ除外が apply で消える。破れたときの症状は赤ではなく
+        # **監査ログの二重保存（_Required 400 日無料 + _Default 30 日課金）** であり、
+        # plan の属性まで読まない限り誰も気づかない（PR #245 が実際にこの形で通っていた）。
+        run: bash scripts/check-log-sink-default-filter.sh
       - name: 'E2E スタブ隔離ガード（Issue #53・IdP 差し替えが出荷経路へ漏れないこと）'
         # 管理ダッシュボードと店舗詳細を実ブラウザで測るため、外部 IdP の SDK をビルド時に
         # スタブへ差し替える口がある（E2E_STUB_IDP=1 のときだけ有効）。漏れたときの症状は

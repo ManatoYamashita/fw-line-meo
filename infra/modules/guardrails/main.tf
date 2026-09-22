@@ -38,6 +38,23 @@ locals {
     jsonPayload.event =~ ".*(_failed|_error|_ignored|_warning|_warn)$" AND
     NOT (${local.audit_log_filter})
   EOT
+
+  # _Default sink が Google 既定として持つ必須ログの除外。
+  #
+  # この sink は Logging が作成したものを import して管理下へ置く。filter を宣言しないと
+  # Terraform は「空 = 全件」を送り、_Required が 400 日無料で保持している監査ログが
+  # _Default（30 日・課金対象）へも二重に入る。exclusions を足すことと、既定の filter を
+  # 保つことは別の操作である。本番実測（2026-09-22）で _Default が持っていた値をそのまま置く。
+  default_sink_required_exclusions = join(" AND ", [
+    for log_id in [
+      "cloudaudit.googleapis.com/activity",
+      "externalaudit.googleapis.com/activity",
+      "cloudaudit.googleapis.com/system_event",
+      "externalaudit.googleapis.com/system_event",
+      "cloudaudit.googleapis.com/access_transparency",
+      "externalaudit.googleapis.com/access_transparency",
+    ] : "NOT LOG_ID(\"${log_id}\")"
+  ])
 }
 
 resource "google_logging_project_bucket_config" "audit" {
@@ -124,6 +141,9 @@ resource "google_logging_project_sink" "default" {
   project     = var.project_id
   name        = "_Default"
   destination = "logging.googleapis.com/projects/${var.project_id}/locations/${var.logging_bucket_location}/buckets/_Default"
+
+  # 既定の除外を保つ（local の説明を参照）。機械強制は scripts/check-log-sink-default-filter.sh。
+  filter = local.default_sink_required_exclusions
 
   exclusions {
     name   = "fwlm-audit-routed"
