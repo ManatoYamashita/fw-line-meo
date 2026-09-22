@@ -840,6 +840,10 @@ Cloud Logging の監査バケットは「直近の補助証跡」として扱う
 2026-09-22 の apply 直前の plan で、この欠落（`filter -> null`）を実際に検出した（本番の該当ログは
 7 日で 882 件）。機械強制は `scripts/check-log-sink-default-filter.sh`（ts-ci）。
 
+同一プロジェクトのログバケットへ流す sink には **writer identity が存在しない**（2026-09-22 の
+apply で実測）。`roles/logging.bucketWriter` の付与が要るのは宛先が別プロジェクトのバケットの
+ときだけで、同一プロジェクトでの付与を宣言すると member が空文字になり apply が失敗する。
+
 振り分けは `severity` ではなく `jsonPayload.event` で行う。アプリの水準値が集約基盤の
 `severity` と一致することに依存すると、イベントは出ているのに別バケットへ入らない「静かな0」を
 作るためである。#231 のDB監査行そのものは Cloud Logging へコピーせず、ログ側は補助イベントだけを
