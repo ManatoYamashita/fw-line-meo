@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata = {
-  title: 'アンケート',
+  title: 'Firstweb 集客AIアシスタント QR口コミ支援',
   description: '来店アンケート',
 };
 

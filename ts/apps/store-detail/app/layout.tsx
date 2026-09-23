@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata = {
-  title: '店舗詳細',
+  title: 'Firstweb 集客AIアシスタント 店舗詳細',
   description: '競合ポジション詳細閲覧',
 };
 
