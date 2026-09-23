@@ -72,6 +72,8 @@
 | Direct WIF | principalSet へ直接 IAM 付与 | SA・キー・impersonation 全部不要 | federated token 非対応 API では使えない | 採用（デプロイ操作は全て対応） |
 | WIF + SA impersonation | deployer SA を経由 | 非対応 API もカバー | SA が増え attack surface 拡大 | 不採用（必要になった時点で追加） |
 
+**改訂（2026-09-23・Issue #316）**: deploy-prod だけ「WIF + SA impersonation」へ移した。Direct WIF の連携トークンは寿命が元の GitHub OIDC トークンに縛られ（実測: 固定すると auth の 5 分 25 秒後に docker push が unauthorized、7 分後に `gcloud run services list` が UNAUTHENTICATED）、gcloud は呼び出しのたびに OIDC エンドポイントへ往復する。その一過性障害でデプロイ成功後の検証段が赤くなっていた（直近 40 実行で 3 件）。デプロイ SA `gha-deployer` を偽装して得る SA のアクセストークンは寿命 1 時間（実測 `expires_in=3591`・7 分後も有効）で、1 度だけ取得して使い回せる。SA キーは発行しない（Req 6.2 は維持）。drift 検証の各ワークフローは Direct WIF のまま。
+
 ## Design Decisions
 
 ### Decision: ランタイム DB 認証は IAM データベース認証（パスワードレス）

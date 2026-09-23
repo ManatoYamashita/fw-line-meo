@@ -36,3 +36,9 @@ variable "metadata_viewer_secret_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "deployer_account_id" {
+  type        = string
+  description = "deploy-prod が偽装するデプロイ SA の account_id（Issue #316）。deploy.yml の service_account はこの値から組み立てる。ずれると auth ステップが偽装に失敗して赤になる（黙って別経路へ落ちない）。"
+  default     = "gha-deployer"
+}

@@ -3,8 +3,9 @@
 # main への push で ts-ci が緑になった後、7イメージ
 # （daily-batch / summary-delivery / store-detail / dashboard-api / dashboard-web / survey-web /
 # line-webhook）を
-# build → Artifact Registry へ push → Cloud Run へ image-only 反映する。gcp-auth-smoke.yml の
-# Direct WIF 雛形を踏襲（service_account 入力なし・SA JSON キー不使用）。
+# build → Artifact Registry へ push → Cloud Run へ image-only 反映する。認証は WIF 経由でデプロイ SA
+# （infra/modules/cicd-wif の google_service_account.deployer）を偽装する。SA JSON キーは使わない。
+# Direct WIF（gcp-auth-smoke.yml の雛形）から移したのは Issue #316 のため（auth ステップの注記を参照）。
 #
 # CI デプロイ契約（gcp-auth-smoke.yml と同一・厳守）:
 #   - イメージ更新のみ（gcloud run services/jobs update --image）。
@@ -57,16 +58,54 @@ jobs:
         id: meta
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      # auth の出力 auth_token（STS の連携トークン）を CLOUDSDK_AUTH_ACCESS_TOKEN で gcloud へ固定しては
-      # ならない。連携トークンの寿命は元の GitHub OIDC トークンに縛られ、約 5 分で失効する（PR #317 で
-      # 固定したところ、auth の 5 分 25 秒後に docker push が unauthorized で落ちた・Issue #316）。
-      - name: Authenticate to Google Cloud (Direct WIF, no SA key)
+      # 認証は WIF 経由でデプロイ SA を偽装し、IAM Credentials が発行する SA のアクセストークン（寿命 1 時間）を
+      # 1 度だけ取得して全ステップで使う（Issue #316）。
+      #
+      # Direct WIF のままでは、gcloud は呼び出しのたびに GitHub の OIDC エンドポイントへ subject token を
+      # 取りに行く。デプロイ成功後の検証段（10 回超の gcloud 呼び出し）がその一過性障害に当たり、直近
+      # 40 実行で 3 件が赤くなっていた。Direct WIF の連携トークン（出力 auth_token）を固定する形は使えない。
+      # 寿命が元の OIDC トークンに縛られて約 5 分で失効するためである（PR #317 で固定したところ、auth の
+      # 5 分 25 秒後に docker push が unauthorized で落ちた）。SA のアクセストークンは OIDC と独立に 1 時間
+      # 有効で、ジョブは 7 分前後で終わる。
+      #
+      # service_account の account_id は infra/modules/cicd-wif の deployer_account_id と一致させること。
+      # ずれると偽装に失敗してこのステップが赤になる（黙って別経路へ落ちない）。
+      - name: 'Authenticate to Google Cloud（WIF でデプロイ SA を偽装・SA キー不使用・Issue #316）'
+        id: auth
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: gha-deployer@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: access_token
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
+
+      # token_format: access_token は出力 access_token を作るだけで、gcloud は auth が書いた構成ファイル
+      # （CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE）を使い続ける。CLOUDSDK_AUTH_ACCESS_TOKEN で渡すと、gcloud は
+      # これを構成ファイルより先に使う（googlecloudsdk/core/credentials/store.py の _Load の分岐順）。
+      - name: 'gcloud の認証をデプロイ SA のアクセストークンへ固定（Issue #316）'
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "ERROR: auth ステップの出力 access_token が空です。" >&2
+            exit 1
+          fi
+          echo "CLOUDSDK_AUTH_ACCESS_TOKEN=${ACCESS_TOKEN}" >> "$GITHUB_ENV"
+
+      # 固定が効いていることの自己検証。環境変数の名前を誤ると gcloud は黙って構成ファイルへ戻り、
+      # ジョブは緑のまま是正前の挙動に戻る。値は出力しない（比較だけを行う）。
+      - name: 'gcloud が固定したトークンを使っていることを検証（Issue #316）'
+        run: |
+          set -euo pipefail
+          current="$(gcloud auth print-access-token)"
+          if [ "$current" != "$CLOUDSDK_AUTH_ACCESS_TOKEN" ]; then
+            echo "ERROR: gcloud が CLOUDSDK_AUTH_ACCESS_TOKEN 以外の資格情報を使っています。" >&2
+            exit 1
+          fi
+          echo "OK: gcloud はデプロイ SA のアクセストークンを使います（以後 OIDC へ往復しません）。"
 
       - name: Build & push 7 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
         env:
