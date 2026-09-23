@@ -772,7 +772,7 @@ function TrendSection({
           行は窓の点をそのまま描く。グラフの各点の値は、同じ日付の行で確かめられる（要件 3.7）。 */}
       <TableContainer label={title}>
         <Table density="responsive">
-          <TableHead>
+          <TableHead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:border-b [&_th]:border-border [&_th]:bg-background">
             <TableRow>
               <TableHeaderCell>日付</TableHeaderCell>
               <TableHeaderCell>順位</TableHeaderCell>

@@ -1523,7 +1523,20 @@ describe('store detail page', () => {
       expect(table.getAttribute('data-density')).toBe('responsive');
       expect(classTokens(table)).toContain('@sm:min-w-sm');
       expect(classTokens(table)).toContain('@max-sm:[&_td]:px-2');
+      expect(classTokens(table)).toContain('@max-sm:[&_td]:py-3');
+      expect(classTokens(table)).toContain('@max-sm:[&_th]:py-2');
       expect(classTokens(table)).not.toContain('min-w-sm');
+      const tableHead = table.querySelector('[data-slot="table-head"]')!;
+      expect(classTokens(tableHead)).toEqual(
+        expect.arrayContaining([
+          '[&_th]:sticky',
+          '[&_th]:top-0',
+          '[&_th]:z-10',
+          '[&_th]:border-b',
+          '[&_th]:border-border',
+          '[&_th]:bg-background',
+        ]),
+      );
       for (const cell of screen.getAllByRole('columnheader')) {
         expect(cell.getAttribute('data-slot'), cell.textContent ?? '').toBe('table-header-cell');
       }

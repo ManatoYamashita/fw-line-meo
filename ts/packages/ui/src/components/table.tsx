@@ -98,7 +98,7 @@ function Table({
       className={cn(
         "w-full text-sm text-card-foreground",
         density === "responsive" &&
-          "@max-sm:[&_td]:px-2 @max-sm:[&_th]:px-2 @sm:min-w-sm",
+          "@max-sm:[&_td]:px-2 @max-sm:[&_th]:px-2 @max-sm:[&_td]:py-3 @max-sm:[&_th]:py-2 @sm:min-w-sm",
         className
       )}
       {...props}
