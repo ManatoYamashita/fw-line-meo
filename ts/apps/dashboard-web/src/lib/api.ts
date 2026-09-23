@@ -7,6 +7,7 @@ import type {
   OwnerListItem,
   StoreCandidate,
   StoreListItem,
+  StoreSuspensionState,
 } from './types';
 
 // dashboard-api（Hono）呼び出しの型付き窓口。Bearer 付与・エラー封筒の解釈を一箇所に集約する。
@@ -152,6 +153,39 @@ export async function getStores(
   );
   if (!result.ok) return result;
   return { ok: true, value: result.value.stores };
+}
+
+// POST /stores/:id/suspend・/resume の共通窓口（store-suspension tasks 5.2）。本文は送らない。
+// 200 で { store: { id, suspendedAt } }。既に同じ状態でも 200（冪等・Req 1.5）。
+// 範囲外・不存在・不正な id はどれも同じ本文の 404(not_found)（Req 1.4）。code はそのまま返し、
+// 利用者向けの文言への写像は表示層が持つ。
+async function postStoreSuspension(
+  id: string,
+  action: 'suspend' | 'resume',
+  options: ApiClientOptions,
+): Promise<ApiResult<StoreSuspensionState>> {
+  const result = await apiFetch<{ store: StoreSuspensionState }>(
+    `/stores/${encodeURIComponent(id)}/${action}`,
+    { ...options, method: 'POST' },
+  );
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.store };
+}
+
+// POST /stores/:id/suspend: 店舗を停止する（運営は任意の店舗・代理店は担当店舗だけ）。
+export async function suspendStore(
+  input: { id: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreSuspensionState>> {
+  return postStoreSuspension(input.id, 'suspend', options);
+}
+
+// POST /stores/:id/resume: 停止中の店舗を利用中へ戻す（範囲は停止と同じ）。
+export async function resumeStore(
+  input: { id: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreSuspensionState>> {
+  return postStoreSuspension(input.id, 'resume', options);
 }
 
 // GET /owners: 登録対象オーナー一覧。agency は無指定で自代理店、operator は agencyId 指定が必須（未指定は API が 400）。

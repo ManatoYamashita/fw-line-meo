@@ -20,6 +20,14 @@ export interface StoreListItem {
   agencyId: string;
   agencyName: string;
   createdAt: string;
+  // 停止時刻（ISO 8601）。null は利用中、値ありは停止中（store-suspension design「StoreSuspensionControl」）。
+  suspendedAt: string | null;
+}
+
+// POST /stores/:id/suspend・/resume の 200 応答内 store（store-suspension tasks 5.2）。
+export interface StoreSuspensionState {
+  id: string;
+  suspendedAt: string | null;
 }
 
 // GET /owners の 1 件（登録対象オーナー選択用）。
