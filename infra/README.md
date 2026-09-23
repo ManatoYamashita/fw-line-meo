@@ -457,6 +457,21 @@ DNS は Cloudflare で持つ（ホームページ・ポリシーは Cloudflare W
 gcloud domains list-user-verified   # firstweb-works.com が並べば、今の gcloud アカウントで割り当てを作れる
 ```
 
+**Terraform は gcloud のアカウントではなく ADC で呼ぶ。** 2026-09-23 の初回の apply は、gcloud が `manapuraza@…`（確認済み）でも ADC が `gen.gourmet1234@…`（未確認）だったため、`Caller is not authorized to administer the domain api.firstweb-works.com` で落ちた（割り当ては失敗状態のまま state に tainted で残り、次の apply で作り直された）。ADC の主体は次で確かめる:
+
+```bash
+curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)" | grep email
+```
+
+食い違うときは、確認済みアカウントのトークンでその apply だけを行う（権限の付与を増やさない）:
+
+```bash
+GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済みのアカウント>)" \
+  terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback
+```
+
+割り当ての作成・削除だけがドメインの権限を要する。作った後の plan（読み取り）は ADC のままで通る。
+
 #### 9-2-b. OAuth コールバックを独自ドメインへ移す（Issue #282）
 
 OAuth ブランド検証のページ（developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification・2026-09-15 確認）は `The Authorized domains section also needs to include the redirect URIs or JavaScript origins authorized in your "Web application" OAuth client types.` と定める。**コールバックが `run.app` のままでは、承認済みドメインに入れられず関門 B を通らない。**
