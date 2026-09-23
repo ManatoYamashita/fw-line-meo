@@ -15,6 +15,10 @@ const OW_ALREADY_DELIVERED = 'a0000000-0000-0000-0000-000000000014'; // hour=9�
 const OW_UNCONFIRMED = 'a0000000-0000-0000-0000-000000000015'; // hour=9・place_status=pending → 両方から除外
 const OW_FIRST_DAY = 'a0000000-0000-0000-0000-000000000016'; // hour=9・当日summary有・前日summary無 → 対象（前日は null）
 const OW_UNCONFIRMED_WITH_SUMMARY = 'a0000000-0000-0000-0000-000000000017'; // hour=9・place_status=pending・当日summary有 → 除外
+// 店舗の利用停止（Issue #252・store-suspension 4.1–4.4）。停止中の 2 店と、停止中の店舗と同じ条件で利用中の対照 1 店。
+const OW_SUSPENDED_WITH_SUMMARY = 'a0000000-0000-0000-0000-000000000018'; // hour=9・当日summary有・未配信・停止中 → 除外
+const OW_ACTIVE_CONTROL = 'a0000000-0000-0000-0000-000000000019'; // 上と同じ条件で利用中 → 対象
+const OW_SUSPENDED_NO_SUMMARY = 'a0000000-0000-0000-0000-00000000001a'; // hour=9・当日summary無・停止中 → skip候補からも除外
 
 const ST_READY = 'b0000000-0000-0000-0000-000000000011';
 const ST_WRONG_HOUR = 'b0000000-0000-0000-0000-000000000012';
@@ -23,6 +27,9 @@ const ST_ALREADY_DELIVERED = 'b0000000-0000-0000-0000-000000000014';
 const ST_UNCONFIRMED = 'b0000000-0000-0000-0000-000000000015';
 const ST_FIRST_DAY = 'b0000000-0000-0000-0000-000000000016';
 const ST_UNCONFIRMED_WITH_SUMMARY = 'b0000000-0000-0000-0000-000000000017';
+const ST_SUSPENDED_WITH_SUMMARY = 'b0000000-0000-0000-0000-000000000018';
+const ST_ACTIVE_CONTROL = 'b0000000-0000-0000-0000-000000000019';
+const ST_SUSPENDED_NO_SUMMARY = 'b0000000-0000-0000-0000-00000000001a';
 
 const TARGET_HOUR = 9;
 const TODAY = '2026-07-12';
@@ -47,6 +54,9 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       [OW_UNCONFIRMED, TARGET_HOUR],
       [OW_FIRST_DAY, TARGET_HOUR],
       [OW_UNCONFIRMED_WITH_SUMMARY, TARGET_HOUR],
+      [OW_SUSPENDED_WITH_SUMMARY, TARGET_HOUR],
+      [OW_ACTIVE_CONTROL, TARGET_HOUR],
+      [OW_SUSPENDED_NO_SUMMARY, TARGET_HOUR],
     ];
     for (const [id, hour] of owners) {
       await pool.query(
@@ -63,6 +73,9 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       [ST_UNCONFIRMED, OW_UNCONFIRMED, 'places/target-unconfirmed', false],
       [ST_FIRST_DAY, OW_FIRST_DAY, 'places/target-first-day', true],
       [ST_UNCONFIRMED_WITH_SUMMARY, OW_UNCONFIRMED_WITH_SUMMARY, 'places/target-unconfirmed-with-summary', false],
+      [ST_SUSPENDED_WITH_SUMMARY, OW_SUSPENDED_WITH_SUMMARY, 'places/target-suspended-with-summary', true],
+      [ST_ACTIVE_CONTROL, OW_ACTIVE_CONTROL, 'places/target-active-control', true],
+      [ST_SUSPENDED_NO_SUMMARY, OW_SUSPENDED_NO_SUMMARY, 'places/target-suspended-no-summary', true],
     ];
     for (const [id, ownerId, placeId, confirmed] of stores) {
       if (confirmed) {
@@ -91,6 +104,8 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       ST_ALREADY_DELIVERED,
       ST_FIRST_DAY,
       ST_UNCONFIRMED_WITH_SUMMARY,
+      ST_SUSPENDED_WITH_SUMMARY,
+      ST_ACTIVE_CONTROL,
     ]) {
       await pool.query(
         `INSERT INTO daily_summaries (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count)
@@ -118,6 +133,15 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
         ]),
       ],
     );
+
+    // 停止中の 2 店は、停止時刻を SQL で直接立てる（データ層の停止操作に依存しない）。
+    //
+    // 停止中で当日の集計を持つ店舗は、日次サマリーの作成後から配信時刻までの間に停止された店舗を表す（4.2）。
+    // 停止中の店舗は日次取得の対象から外れるため通常は当日の集計を持たないが、この店舗を置かないと
+    // queryDeliveryTargets の停止の述語を消しても結果が変わらず、試験が空振りする。
+    await pool.query('UPDATE stores SET suspended_at = now() WHERE id = ANY($1::uuid[])', [
+      [ST_SUSPENDED_WITH_SUMMARY, ST_SUSPENDED_NO_SUMMARY],
+    ]);
 
     // already-delivered には summary_deliveries 行も用意し「未配信」条件から外れることを検証する。
     await pool.query(
@@ -201,6 +225,28 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       expect(target?.summary.store_id).toBe(ST_READY);
     });
 
+    it('当日の集計があり配信時刻に達した未記録の店舗でも、停止中なら対象にせず、同じ条件の利用中の店舗は対象にする（4.1・4.2）', async () => {
+      const pool = await getPool();
+      const targets = await queryDeliveryTargets(pool, TARGET_HOUR, TODAY);
+      const storeIds = targets.map((t) => t.storeId);
+
+      expect(storeIds).not.toContain(ST_SUSPENDED_WITH_SUMMARY);
+      // 対照: 停止中でないことだけが異なる店舗は対象になる（除外の理由が停止であることを示す）。
+      expect(storeIds).toContain(ST_ACTIVE_CONTROL);
+    });
+
+    it('再開された店舗は、当日の集計があれば通常どおり対象にする（4.4）', async () => {
+      const pool = await getPool();
+      await pool.query('UPDATE stores SET suspended_at = NULL WHERE id = $1', [ST_SUSPENDED_WITH_SUMMARY]);
+      try {
+        const targets = await queryDeliveryTargets(pool, TARGET_HOUR, TODAY);
+        expect(targets.map((t) => t.storeId)).toContain(ST_SUSPENDED_WITH_SUMMARY);
+      } finally {
+        // 後続の試験が停止中の前提で読むため、停止状態へ戻す。
+        await pool.query('UPDATE stores SET suspended_at = now() WHERE id = $1', [ST_SUSPENDED_WITH_SUMMARY]);
+      }
+    });
+
     it('異なる配信時刻を指定すると wrong-hour 対象が返る', async () => {
       const pool = await getPool();
       const targets = await queryDeliveryTargets(pool, TARGET_HOUR + 1, TODAY);
@@ -226,6 +272,16 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB)', () => {
       expect(storeIds).not.toContain(ST_ALREADY_DELIVERED);
       // 未確定店舗（place_status=pending）は「特定済み」ではないため skip 候補にもならない。
       expect(storeIds).not.toContain(ST_UNCONFIRMED);
+    });
+
+    it('当日の集計が無く配信時刻に達した店舗でも、停止中なら見送り記録の対象にしない（4.3）', async () => {
+      const pool = await getPool();
+      const skipCandidates = await queryOwnersDueWithoutSummary(pool, TARGET_HOUR, TODAY);
+      const storeIds = skipCandidates.map((c) => c.storeId);
+
+      expect(storeIds).not.toContain(ST_SUSPENDED_NO_SUMMARY);
+      // 対照: 停止中でないことだけが異なる店舗（ST_NO_SUMMARY）は見送り記録の対象になる。
+      expect(storeIds).toContain(ST_NO_SUMMARY);
     });
 
     it('lineUserId が owners の実データと一致する', async () => {
