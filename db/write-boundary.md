@@ -12,7 +12,7 @@
 | `agencies` | TS リアルタイム応答層 | 代理店登録（ダッシュボード） |
 | `dashboard_users` | TS リアルタイム応答層 | 運営/代理店アカウント登録（ダッシュボード） |
 | `owners` | TS リアルタイム応答層 | LINE オンボーディング（Webhook）。`delivery_hour`（`competitive-daily-summary`・`0004`）は通知を送る時刻。LINE 上で変える手段は提供しない（`line-on-demand-report`・#256）ので、既定の 7 時のまま運用する |
-| `stores` | TS リアルタイム応答層 | 店舗特定オンボーディング（Webhook/LIFF） |
+| `stores` | TS リアルタイム応答層 | 店舗特定オンボーディング（Webhook/LIFF）。`suspended_at`（`store-suspension`・`0012`・Issue #252）は利用停止の時刻（NULL = 利用中）で、書くのは dashboard-api の停止・再開の操作（運営・代理店）だけ。LINE 応答・客向け Web・Go 日次バッチは読むだけで書かない |
 | `survey_rating_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_concern_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（気になった点の匿名集計加算・`0008`） |

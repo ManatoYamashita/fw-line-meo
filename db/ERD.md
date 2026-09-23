@@ -68,6 +68,7 @@ erDiagram
 - 共有定数 `categories`・`survey_aspects` は seed（`0002`）が唯一の定義（SoT）。
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
+- `stores.suspended_at`（`store-suspension`・`0012`・Issue #252）: 店舗の利用停止の時刻（`timestamptz`・任意・既定値なし）。`NULL` = 利用中、値あり = 停止中。停止中の店舗は日次取得（Go）・日次配信（TS）・アンケート・店舗詳細・QR 発行の対象から外れる。取得と配信は同じこの列を読んで対象を決める。`place_status` とは独立で `ck_place_confirmed` に触れず、停止・再開は店舗の身元・オーナー／代理店との関係・匿名集計・日次データを変えない。書込は dashboard-api の停止・再開の操作（運営は全店・代理店は担当店舗）だけで、監査 action は `store_suspended` / `store_resumed`。
 - `daily_summaries`（Go 書込）と `summary_deliveries`（TS 書込）は `competitive-daily-summary` spec で追加。両テーブルとも `stores` に対する `(store_id, summary_date)` 一意制約を持ち、日次バッチ（Go）→ 配信ジョブ（TS）のパイプラインで `daily_summaries` を TS が read → `summary_deliveries` へ結果を書込む、というクロス言語 seam を構成する（`db/write-boundary.md` 参照）。
 - `summary_deliveries.status`（CHECK は `ck_summary_deliveries_status`・`0010` で `0004` の無名の列 CHECK を作り直した）: 通知記録は送った結果だけでなく、送らなかった理由も記録する。送らない判定も予約してから記録するので、同じ日の再実行は同じ店舗を判定し直さない。先頭の 4 値は `0004` からの値で意味を変えない。後ろの 3 値は `line-on-demand-report`（`0010`）で足した。TS の型 `SummaryDeliveryStatus` はこの 7 値と一致させる。
 
@@ -86,3 +87,4 @@ erDiagram
 - `audit_logs`: 正本はDB。`actor_type` は `operator` / `agency` / `owner` のENUMのみで、顧客を監査主体にできない。
   ダッシュボード操作の `actor_id` は `dashboard_users.id`、LINE オンボーディング操作の `actor_id` は `owners.id`。
   `target_type` / `target_id` も業務エンティティの UUID を記録し、`line_user_id` や認証 subject は保持しない。
+  `action` の CHECK は `ck_audit_logs_action`（`0009` で命名、`0012` で店舗の停止・再開の 2 値を足して 18 値）。値の集合は TS の `AUDIT_LOG_ACTIONS`（`ts/packages/db/src/audit-logs.ts`）と一致させる。
