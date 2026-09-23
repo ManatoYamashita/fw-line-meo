@@ -21,6 +21,8 @@
 --     survey_rating_tallies, survey_aspect_tallies, survey_concern_tallies, survey_material_tallies,
 --     oauth_tokens,
 --     agency_invite_codes, onboarding_sessions, line_webhook_events
+--     （ただし stores.suspended_at を書けるのは dashboard_api だけ。line_webhook / survey_web の
+--     stores の INSERT・UPDATE は suspended_at を除く列単位の付与・store-suspension）
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots, daily_summaries
 --     （daily_summaries は competitive-daily-summary 0004・INSERT/UPDATE は同日再実行の
 --     ON CONFLICT DO UPDATE、DELETE は 30日超パージ。go/internal/repo/summaries.go 参照）
@@ -64,6 +66,24 @@ GRANT INSERT, UPDATE, DELETE ON
   survey_rating_tallies, survey_aspect_tallies, survey_concern_tallies, survey_material_tallies,
   oauth_tokens, agency_invite_codes, onboarding_sessions, line_webhook_events
   TO :"line_webhook", :"survey", :"dashboard";
+
+-- stores の停止時刻（suspended_at・store-suspension・Issue #252）を書けるのは dashboard だけにする。
+-- line_webhook と survey はオーナー・客の面を持つため、この列を書けるとオーナー自身による配信停止の
+-- 手段をどこに足しても DB が受け付けてしまう（store-suspension Requirement 8.1, 8.3）。
+-- 上の一律付与から stores の INSERT・UPDATE をテーブル単位で剥がし、suspended_at を除く列を列挙して
+-- 与え直す。**テーブル単位の REVOKE を必ず先に行う。** テーブル単位の権限が残っていると、列を列挙から
+-- 外しても全列を書けたままになる（PostgreSQL の仕様）。DELETE と SELECT はテーブル単位のまま残す。
+-- stores に列を足したら、ここの列挙へも足すこと（db/test/check_store_suspension_privileges.sh が
+-- 足し忘れを赤にする）。
+-- 本番へ再適用するときは、既存の権限を付与したのと同じ DB ユーザーで流すこと。REVOKE は自分が付与した
+-- 権限しか剥がせず、剥がせなくても WARNING で終わり ON_ERROR_STOP では止まらない
+-- （手順は .kiro/specs/store-suspension/design.md の ProductionVerification）。
+REVOKE INSERT, UPDATE ON stores FROM :"line_webhook", :"survey";
+GRANT
+  INSERT (id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at),
+  UPDATE (id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at)
+  ON stores
+  TO :"line_webhook", :"survey";
 
 -- 監査記録は TS 層が追記する。証跡の改変を防ぐため UPDATE/DELETE は付与しない。
 GRANT INSERT ON audit_logs TO :"line_webhook", :"dashboard";
