@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
@@ -53,17 +54,30 @@ export default function LoginPage() {
       </Alert>
       {/* 状態確定前は押せない。焦点の到達を止めてよい操作なので、通知手段はブラウザ標準の
           無効属性である（Req 3.5）。 */}
+      {/* 見た目は Sign in with Google の規定（Light）に従う（docs/design/design-language.md の 7.9 節と
+          2.1 節）。G ロゴは規定外の背景に置けないため、アクション色では塗らない。ロゴは装飾なので
+          読み上げない（読み上げ名は文言だけ）。 */}
       <Button
         type="button"
-        className="w-full"
+        className={GOOGLE_SIGN_IN_CLASS}
         onClick={() => void signIn()}
         disabled={status === 'loading'}
       >
+        <Image src={GOOGLE_LOGO_SRC} alt="" width={20} height={20} unoptimized />
         Google でログイン
       </Button>
     </PageShell>
   );
 }
+
+// 公式素材（signin-assets.zip の Web・Light・文字なし）から、ボタンの枠の内側だけを切り出した G ロゴ。
+const GOOGLE_LOGO_SRC = '/google-g-logo.png';
+
+// 塗り・枠・文字は Google の規定値のトークンで描き、hover でも塗りを変えない（規定に hover の色が無いため）。
+// 既定の変種の色（アクション色）は、このクラスが上書きして消す。outline 変種は使わない — 開閉状態や
+// 暗色用の色クラスが残り、条件が揃うと G ロゴが規定外の色の上に載る。ロゴと文字の間は規定の 10px。
+const GOOGLE_SIGN_IN_CLASS =
+  'w-full gap-2.5 border-google-sign-in-border bg-google-sign-in-fill text-google-sign-in-foreground hover:bg-google-sign-in-fill hover:text-google-sign-in-foreground';
 
 // ワードマーク。文字列は帯（top-nav）と同一で、装飾専用色の使い所を帯とログインの 2 箇所に
 // 限る判断は 7.4 節、大きい文字としてのみ用いる根拠は 2.2 節と 10 節にある。
