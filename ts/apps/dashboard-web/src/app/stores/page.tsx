@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
@@ -25,6 +25,7 @@ import { TopNav } from '../../components/top-nav';
 import { useAuth } from '../../lib/auth-context';
 import { getStores } from '../../lib/api';
 import type { StoreListItem } from '../../lib/types';
+import { StoreSuspensionControl } from './store-suspension-control';
 
 // 店舗一覧の取得状態。ローディング/エラー/取得済みを判別共用体で表す（7.4: 失敗時にデータを偽装しない）。
 type LoadState =
@@ -32,12 +33,12 @@ type LoadState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; stores: StoreListItem[] };
 
-// 全ロール共通の列数（店名・店舗特定・競合設定・QR）。operator のみ担当代理店列が加わる。
+// 全ロール共通の列数（店名・店舗特定・競合設定・利用状況・QR）。operator のみ担当代理店列が加わる。
 // パネル行の colSpan はここからロールに応じて算出する。ロール差分を各所へ散らさないための
 // 単一の起点であり、下の見出しセルの並びとは別に列数を持つ点は残っている
 // （operator / agency 双方の colSpan をテストで固定してドリフトを検出する。さらに
 // 「桁数と列見出しの実数が一致する」ことも照合して、2 つの起点を検証側で結び付けてある）。
-const BASE_COLUMN_COUNT = 4;
+const BASE_COLUMN_COUNT = 5;
 
 // 発行操作から開閉先のパネルを指すための id（aria-controls 用）。
 function panelId(storeId: string): string {
@@ -60,6 +61,19 @@ function StoresView() {
   // 直近に押された発行操作。パネルを閉じると焦点の載っていた要素ごと消えるため、
   // 焦点を呼び出し元へ戻す（戻さないと body へ落ち、焦点位置が視覚的に判別できなくなる）。
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  // 停止・再開の後の読み直しに失敗したときの文言。表は古い表示のまま残し、失敗だけを別に示す。
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  // 読み直しの要求の通し番号。続けて操作されたとき、先に出した要求の応答が後から届いて
+  // 新しい表示を古い一覧で上書きしないよう、最後の要求の応答だけを採る。
+  const refreshSeq = useRef(0);
+  // 画面を離れた後に届いた応答で state を書かないための印（初回取得の active と同じ役割）。
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   function openPanel(event: MouseEvent<HTMLButtonElement>, storeId: string) {
     triggerRef.current = event.currentTarget;
@@ -71,6 +85,32 @@ function StoresView() {
     triggerRef.current?.focus();
     setOpenStoreId(null);
   }
+
+  // 停止・再開の後の読み直し（store-suspension Requirement 2.4）。
+  //
+  // **表を読み込み中の表示へ置き換えない。** 置き換えると行ごと外れ、押した操作部品の焦点と
+  // 成功を告げるライブリージョンが失われる（焦点は文書の先頭へ落ち、通知は読み上げられない）。
+  // 取得の間は表を描いたまま待ち、応答が来たら行の中身だけを差し替える。行は店舗 ID を key に
+  // 持つので、同じ店舗の行と操作部品は同じ要素のまま残る。
+  const refreshStores = useCallback(async () => {
+    const seq = ++refreshSeq.current;
+    const result = await getStores({});
+    if (!mounted.current || seq !== refreshSeq.current) return;
+    if (!result.ok) {
+      setRefreshError(result.message);
+      return;
+    }
+    setRefreshError(null);
+    setState({ kind: 'ready', stores: result.value });
+    // 停止された店舗の QR パネルは閉じる。停止前に発行した画像と保存の導線を残すと、
+    // 停止中の店舗の QR を店頭へ出せてしまう（Requirement 5.6）。押した焦点は利用状況の列の
+    // 操作部品にあり、パネルの中には無いので、焦点は動かさずに外すだけにする。
+    setOpenStoreId((current) => {
+      if (current === null) return current;
+      const opened = result.value.find((store) => store.id === current);
+      return opened !== undefined && opened.suspendedAt === null ? current : null;
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -109,6 +149,12 @@ function StoresView() {
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       )}
+      {refreshError !== null && state.kind === 'ready' && (
+        // 読み直しの失敗。表は外さず、その上に示す（危険の変種は自ら role="alert" を持つ）。
+        <Alert variant="destructive">
+          <AlertDescription>{refreshError}</AlertDescription>
+        </Alert>
+      )}
       {state.kind === 'ready' && state.stores.length === 0 && (
         // 空状態の部品は押しボタンを内包しない。次に取れる操作への導線（Req 2.3）は
         // 呼び出し側が children として渡す。要素はリンクのまま、見た目だけを借りる
@@ -133,6 +179,8 @@ function StoresView() {
                 <TableHeaderCell>競合設定</TableHeaderCell>
                 {/* operator は全店舗を担当代理店が識別できる形で見る（Req 4.2） */}
                 {isOperator && <TableHeaderCell>担当代理店</TableHeaderCell>}
+                {/* 利用中・停止中の表示と、停止・再開の操作（store-suspension Req 2.1–2.3） */}
+                <TableHeaderCell>利用状況</TableHeaderCell>
                 {/* 店頭設置用 QR の発行導線（store-qr-issuance-ui Req 1.1） */}
                 <TableHeaderCell>QR</TableHeaderCell>
               </TableRow>
@@ -146,6 +194,7 @@ function StoresView() {
                     <TableCell wrap="prose">{store.name}</TableCell>
                     {/* 店舗特定バッジ（Req 4.3） */}
                     <TableCell wrap="none">
+                      {/* serviceable-predicate: display-only（店舗特定の状態を文字で示すだけで、発行や取得の可否を決めない） */}
                       {store.placeStatus === 'confirmed' ? '確定済み' : '未確定'}
                     </TableCell>
                     {/* 競合設定バッジ（Req 4.3・変更手段は提供しない = 表示のみ Req 4.5） */}
@@ -153,12 +202,27 @@ function StoresView() {
                       {store.competitorConfigured ? '競合設定済み' : '競合未設定'}
                     </TableCell>
                     {isOperator && <TableCell wrap="prose">{store.agencyName}</TableCell>}
+                    {/* 利用状況は札と押しボタンを 1 行に並べ、その下に結果の文言を出す。札と押しボタンは
+                      * 部品側で折り返さないので、この列は自由記述の規則にして結果の文言だけを折り返させる
+                      * （折り返さない規則にすると失敗の文言が 1 行に伸び、表の幅を押し広げる）。
+                      *
+                      * 結果を告げるライブリージョンは行ごとに部品が持つ。1 つに集約しないのは、成功の文言が
+                      * 押した行の直下に見える通知を兼ねるためで、1 回の操作で文言が変わる領域は 1 つだけである
+                      * （空の領域は何も読み上げない）。 */}
+                    <TableCell wrap="prose">
+                      <StoreSuspensionControl store={store} onChanged={refreshStores} />
+                    </TableCell>
                     {/* 発行の押しボタンと、その代わりに置く理由はどちらも 1 行に収める。
                       * 折り返しを許すと、全店が未確定のときこの列の最小幅が見出し「QR」まで
                       * 落ち、理由の文言が 1 文字ずつ縦に並ぶ。 */}
                     <TableCell wrap="none">
-                      {/* 分岐条件は場所の状態のみ。競合設定の状態を条件に含めない（Req 1.5）。 */}
-                      {store.placeStatus === 'confirmed' ? (
+                      {/* 停止中の店舗には発行の操作を出さない（store-suspension Req 5.6）。停止を先に
+                        * 判定するのは、場所が未確定でも先に要るのは再開だからである。
+                        * それ以外の分岐条件は場所の状態のみ。競合設定の状態を条件に含めない（Req 1.5）。 */}
+                      {store.suspendedAt !== null ? (
+                        // 確定前の案内とは別の文言にする（design.md「StoresPage の変更」）。色は同じ補足色。
+                        <span className="text-muted-foreground">停止中のため発行できません</span>
+                      ) : store.placeStatus === 'confirmed' ? (
                         <Button
                           variant="outline"
                           size="sm"

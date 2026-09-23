@@ -80,6 +80,15 @@ const ERROR_TEXT_BY_CODE = new Map<string, QrErrorText>([
       description: 'QR の発行には店舗の場所の確定が先に必要です。',
     },
   ],
+  // 停止中の店舗は QR を発行しない（store-suspension Requirement 5.5）。通信の問題ではないので
+  // 一般障害の文言へ落とさず、再開すれば発行できることを示す。
+  [
+    'STORE_SUSPENDED',
+    {
+      title: '停止中のため発行できません',
+      description: 'この店舗は停止中です。QR を発行するには、店舗一覧から利用を再開してください。',
+    },
+  ],
 ]);
 
 // 通信障害・内部障害・空応答・未知の code。成功したかのような表示は行わない。

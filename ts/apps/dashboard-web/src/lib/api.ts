@@ -462,7 +462,7 @@ const QR_SIZE = 1024;
 
 /**
  * GET /stores/:storeId/qr.png: 店舗のアンケート QR を PNG バイト列として取得する。
- * 401 UNAUTHENTICATED / 403 FORBIDDEN / 404 NOT_FOUND / 409 PLACE_NOT_CONFIRMED は
+ * 401 UNAUTHENTICATED / 403 FORBIDDEN / 404 NOT_FOUND / 409 PLACE_NOT_CONFIRMED / 409 STORE_SUSPENDED は
  * code をそのまま返す。利用者向けの文言への写像は呼び出し側（表示層）が持つ。
  */
 export async function getStoreQr(

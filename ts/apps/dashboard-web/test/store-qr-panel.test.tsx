@@ -271,6 +271,20 @@ describe('StoreQrPanel: 失敗表現と再試行', () => {
     expect(alertText()).toContain('確定');
   });
 
+  it('停止中の店舗は停止中のため発行できない旨を示す（store-suspension 5.5）', async () => {
+    const fetchQr = vi
+      .fn()
+      .mockResolvedValue(errorResult('STORE_SUSPENDED', '停止中の店舗の QR は発行できません'));
+    render(
+      <StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} onClose={vi.fn()} fetchQr={fetchQr} />,
+    );
+
+    await screen.findByRole('alert');
+    expect(alertText()).toContain('停止中');
+    // 一般障害の文言（通信状況の確認と再試行を促す）へ落とさない。停止中は通信の問題ではない。
+    expect(alertText()).not.toContain('通信状況');
+  });
+
   it.each([
     ['network'],
     ['http_500'],

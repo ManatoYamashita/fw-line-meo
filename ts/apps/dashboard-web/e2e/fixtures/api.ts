@@ -55,6 +55,7 @@ export const STORES = [
     agencyId: '22222222-2222-2222-2222-222222222222',
     agencyName: LONG_AGENCY_NAME,
     createdAt: '2026-08-01T09:00:00.000Z',
+    suspendedAt: null,
   },
   {
     id: '44444444-4444-4444-4444-444444444445',
@@ -66,6 +67,7 @@ export const STORES = [
     agencyId: '22222222-2222-2222-2222-222222222222',
     agencyName: LONG_AGENCY_NAME,
     createdAt: '2026-08-02T09:00:00.000Z',
+    suspendedAt: null,
   },
 ] as const;
 
