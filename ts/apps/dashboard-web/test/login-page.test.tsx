@@ -150,4 +150,39 @@ describe('LoginPage', () => {
       cleanup();
     }
   });
+
+  // 「Google でログイン」ボタンは Sign in with Google の規定（Light）で描く（Issue #146・design-language 7.9 節）。
+  // G ロゴを規定外の背景（アクション色の塗り）へ置くことは規定が禁じている。
+  it('主操作は Google の規定色で塗り、アクション色を使わない', () => {
+    useAuthMock.mockReturnValue({ status: 'signedOut', me: null, signIn: vi.fn(), signOut: vi.fn() });
+    render(<LoginPage />);
+    const tokens = screen.getByRole('button', { name: 'Google でログイン' }).className.split(/\s+/);
+    for (const required of [
+      'bg-google-sign-in-fill',
+      'border-google-sign-in-border',
+      'text-google-sign-in-foreground',
+    ]) {
+      expect(tokens, required).toContain(required);
+    }
+    // 塗り・文字の色を与えるクラスは規定のトークンだけ（hover を含む）。アクション色や outline の hover 色が
+    // 残ると、G ロゴがその色の上に載る。
+    const colorTokens = tokens.filter((t) => /(^|:)(bg|text)-(?!sm$|xs$|base$|lg$|xl$|2xl$|clip-)/.test(t));
+    expect(colorTokens.every((t) => /google-sign-in-/.test(t)), colorTokens.join(' ')).toBe(true);
+  });
+
+  it('G ロゴは公式素材を 20px で置き、装飾として読み上げない', () => {
+    useAuthMock.mockReturnValue({ status: 'signedOut', me: null, signIn: vi.fn(), signOut: vi.fn() });
+    render(<LoginPage />);
+    const button = screen.getByRole('button', { name: 'Google でログイン' });
+    const images = button.querySelectorAll('img');
+    expect(images).toHaveLength(1);
+    const logo = images[0]!;
+    expect(logo.getAttribute('src')).toBe('/google-g-logo.png');
+    expect(logo.getAttribute('alt')).toBe('');
+    expect(logo.getAttribute('width')).toBe('20');
+    expect(logo.getAttribute('height')).toBe('20');
+    // ロゴは文字より前（左）に置く（規定の並び）。
+    expect(button.firstElementChild).toBe(logo);
+  });
 });
+

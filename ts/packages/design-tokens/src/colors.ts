@@ -70,6 +70,18 @@ export interface ColorTokens {
    * 同値だが、Web は LINE のトークンを参照しない（面ごとに解決先が違うため）。
    */
   readonly attribution: string;
+  /**
+   * 「Google でログイン」ボタンの塗り・枠・文字（dashboard-web のログイン画面・Issue #146）。
+   *
+   * 値の決め手は意匠ではなく Google の Sign in with Google branding guidelines にある。許される配色は
+   * Light（塗り #FFFFFF・枠 #747775・文字 #1F1F1F）・Dark・Neutral の 3 つだけで、G ロゴを規定外の
+   * 背景へ置くことは禁じられている。アクション色（primary）の塗りにロゴを載せると違反になるため、
+   * 役割を分けて Light を採る。塗りは background と同値だが、background を変えたときにボタンまで
+   * 動かないよう別の役割にした（3 値が規定どおりであることは test/tokens.test.ts が固定する）。
+   */
+  readonly googleSignInFill: string;
+  readonly googleSignInBorder: string;
+  readonly googleSignInForeground: string;
 }
 
 /** LINE Flex Message 用カラートークン（現行 7 色の意味役割化と、帰属表示の色）。 */
@@ -135,6 +147,10 @@ export const colors: ColorTokens = {
   borderInteractive: '#767676',
   // ポリシーが許す灰（対白 約 6.48:1）。ポリシー自身も 4.5:1 の確保を求めている。
   attribution: '#5E5E5E',
+  // Sign in with Google branding guidelines の Light テーマ（2026-09-23 確認）。
+  googleSignInFill: '#FFFFFF',
+  googleSignInBorder: '#747775',
+  googleSignInForeground: '#1F1F1F',
 };
 
 export const lineColors: LineColorTokens = {

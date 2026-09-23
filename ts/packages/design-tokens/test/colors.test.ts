@@ -35,6 +35,8 @@ const AA_TEXT_PAIRS: ReadonlyArray<{
   // Google Maps の帰属表示（Issue #287）。Places API のポリシー自身も 4.5:1 の確保を求めており、
   // ここでの検証はその要求とも重なる。
   { foreground: 'attribution', background: 'background' },
+  // 「Google でログイン」ボタンの文字（配色は Google の規定で固定・tokens.test.ts）。
+  { foreground: 'googleSignInForeground', background: 'googleSignInFill' },
 ];
 
 /** AA 検証の対象外とする意味役割（装飾・面塗り・非テキスト用途）。 */
@@ -46,6 +48,8 @@ const NON_TEXT_ROLES: readonly (keyof typeof colors)[] = [
   // 知らないため、比の assert は使用箇所側のガード（ui/test/contrast-usage.test.ts）が担う。
   // ここで 3:1 を二重に主張すると、片方の変更が他方へ伝わらない二重管理になる（design.md D7）。
   'borderInteractive',
+  // 「Google でログイン」ボタンの枠（Google の規定値・非テキスト）。
+  'googleSignInBorder',
 ];
 
 describe('コントラスト計算ヘルパ（既知値による自己検証）', () => {
