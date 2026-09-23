@@ -477,7 +477,7 @@ Responsibilities & Constraints
 - SELECT だけを発行する。書き込みはしない（line-webhook は `daily_summaries` を読むだけ）
 - 日付は `to_char(summary_date, 'YYYY-MM-DD')` で読み、実行環境の TZ に依存させない
 - 30 日の窓は、呼出元が渡す基準日（日本時間の日付 `asOf`）から SQL 側で切る: `summary_date > ($asOf::date - 30)`。Go の 30 日ローリング削除（`go/internal/repo/summaries.go:112-119`）と同じ境界にし、削除が遅れても 30 日を超える行を返さない（6.7）。基準日を引数にするのは、store-detail の `queryStoreDetail` と同じく、試験（Go の言語間試験は固定日で行を書く）で日付を固定できるようにするためである。ReportHandler は日本時間の今日を渡す
-- 店舗は `stores.owner_id = $ownerId AND place_status = 'confirmed'` を `created_at, id` の順に返す。#252 の停止状態が先に入った場合は、この 1 か所に停止を除く述語を足す（3.5）
+- 店舗は `stores.owner_id = $ownerId AND place_status = 'confirmed'` を `created_at, id` の順に返す。停止中の店舗はこの 1 か所で除く（`suspended_at IS NULL`・3.5。`store-suspension`・Issue #252 で実装済み）
 
 Contracts: Service [x]
 
@@ -838,7 +838,7 @@ Contracts: Batch [x]
 ##### Batch / Job Contract
 
 - Trigger: 既存の Cloud Scheduler（毎時・JST）。`delivery_hour` の条件は変えない（1.9）
-- Input / validation: 当日の行があり未記録の店舗を、店舗名・オーナーの LINE ユーザー・前日の行（`summary_date = 当日 - 1` の LEFT JOIN）とともに抽出し、当日と前日を正規化する。#252 の停止状態が先に入った場合は、抽出の述語に停止を除く条件を足す（3.5）
+- Input / validation: 当日の行があり未記録の店舗を、店舗名・オーナーの LINE ユーザー・前日の行（`summary_date = 当日 - 1` の LEFT JOIN）とともに抽出し、当日と前日を正規化する。停止中の店舗は抽出の述語で除く（`suspended_at IS NULL`・3.5。`store-suspension`・Issue #252 で実装済み）
 - Output / destination: 通知の push と `summary_deliveries` の 1 行
 - Idempotency & recovery: 予約（`UNIQUE (store_id, summary_date)` の `ON CONFLICT DO NOTHING`）→判定→記録の既存の 2 段を保つ。送らない判定も予約してから記録するので、同じ日の再実行は同じ店舗を判定し直さない（1.8）
 - 実行サマリー（`delivery-job.run`）に `skippedNoChange`・`skippedNotComparable`・`skippedMenuUnavailable`・`reportMenuReady` を足す。設定から `LIFF_URL` を外し、`LINE_RICHMENU_COMPLETED_ID` を必須にする。env の配線はイメージより先に足し、`LIFF_URL` の配線はイメージより後に外す（「Migration Strategy」の Step A と Step D）

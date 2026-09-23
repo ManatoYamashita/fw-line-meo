@@ -19,7 +19,7 @@
 
 ### Non-Goals
 - LINE Webhook・リッチメニュー・オンボーディング本体（Issue #6 LINE 基盤の責務。配信時刻設定 UI は契約のみ定義したが、Issue #256 で配線しないと決めた）
-- 配信停止（オプトアウト）・競合リストのオーナー調整（第2フェーズ）
+- オーナー自身による配信停止（オプトアウト）・競合リストのオーナー調整（第2フェーズ）。運営・代理店による店舗の利用停止は `store-suspension` が提供する（2026-09-23・Issue #252）
 - クチコミ返信・GBP 投稿・Google OAuth（第2フェーズ）
 - 30日を超える時系列の保持・長期トレンド分析（Places ToS 制約。第2フェーズで法務確認の上で再検討）
 - unfollow（ブロック）検知によるオーナー無効化（webhook イベント処理＝LINE 基盤の責務）
@@ -240,7 +240,7 @@ sequenceDiagram
 | 3.7 | 前日データ無しは前日比省略 | summary/compute | rank_prev/rating_prev NULL 許容 | 日次→レポート |
 | 3.8 | 通知の部分失敗継続・記録 | index.ts, deliveries.ts | summary_deliveries | 毎時の通知 |
 | 3.9 | 同日重複送信禁止 | deliveries.ts, line.ts | 一意制約＋Retry-Key | 毎時の通知 |
-| 3.10 | オプトアウト無し | （能力を提供しない） | — | — |
+| 3.10 | オーナー自身の配信停止は無し（運営・代理店の停止は `store-suspension`） | （能力を提供しない） | — | — |
 | 3.11 | 日本語 | notification.ts・report/builders（文言リソース） | — | — |
 | 3.12 | 星差の定義と表示形式 | packages/db daily-summary, report/builders/comparison.ts | formatStarDiff | レポート要求 |
 | 3.13 | 評価なしの競合の表示と注記 | packages/db daily-summary, report/builders/comparison.ts | formatRatingLabel・UNRATED_EXCLUDED_NOTE | レポート要求 |
