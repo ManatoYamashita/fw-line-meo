@@ -29,3 +29,8 @@ output "summary_delivery_job_name" {
   description = "配信ジョブ名（手動発火・アラート参照用）。"
   value       = module.delivery_job.job_name
 }
+
+output "deployer_service_account_email" {
+  description = "deploy-prod が WIF 経由で偽装するデプロイ SA（Issue #316）。"
+  value       = module.cicd_wif.deployer_service_account_email
+}

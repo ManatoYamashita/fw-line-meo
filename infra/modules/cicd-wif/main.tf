@@ -53,6 +53,52 @@ resource "google_service_account_iam_member" "act_as" {
   member             = local.principal_set
 }
 
+# deploy-prod 専用のデプロイ SA（Issue #316）
+#
+# Direct WIF の連携トークンは寿命が元の GitHub OIDC トークンに縛られ、約 5 分で失効する
+# （PR #317 で実測: auth の 5 分 25 秒後に docker push が unauthorized）。そのため Direct WIF の
+# ままでは「1 度だけ取得して使い回す」ことができず、gcloud は呼び出しのたびに OIDC エンドポイントへ
+# 往復する。deploy-prod はデプロイ成功後の検証段でその一過性障害に当たり、赤くなっていた。
+#
+# この SA を WIF 経由で偽装し、IAM Credentials の generateAccessToken で発行する SA のアクセストークン
+# （寿命 1 時間・OIDC と独立）を deploy-prod の全ステップで使う。**SA キーは発行しない**（Req 6.2 は
+# そのまま守られる。偽装の権限は principalSet にしか与えない）。
+#
+# gcp-infra-foundation の research.md は「WIF + SA impersonation」を「必要になった時点で追加」として
+# 不採用にしていた。本 SA はその「必要になった時点」である。
+#
+# principalSet への直付与（上の deployer / act_as）は残す。drift 検証の各ワークフローは Direct WIF の
+# まま読み取りに使っており、deploy-prod を移しても取り除けるのは書き込み系だけである。縮小は別 Issue。
+resource "google_service_account" "deployer" {
+  project      = var.project_id
+  account_id   = var.deployer_account_id
+  display_name = "GitHub Actions deploy-prod"
+  description  = "deploy-prod が WIF 経由で偽装するデプロイ SA（Issue #316）。キーは発行しない。"
+}
+
+resource "google_project_iam_member" "deployer_sa" {
+  for_each = toset(["roles/run.developer", "roles/artifactregistry.writer"])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_service_account_iam_member" "deployer_sa_act_as" {
+  for_each = toset(var.runtime_service_account_emails)
+
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${each.value}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# 偽装できるのはこのリポジトリの principalSet だけ（attribute_condition と同じ単一リポジトリ限定）。
+resource "google_service_account_iam_member" "deployer_wif_user" {
+  service_account_id = google_service_account.deployer.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = local.principal_set
+}
+
 # シークレット実値の投入漏れを CI が定期検証するためのメタデータ読み取り（Issue #63）
 #
 # 付与するのは roles/secretmanager.viewer のみ。この事前定義ロールは secretmanager.secrets.get /

@@ -7,3 +7,8 @@ output "pool_name" {
   description = "Workload Identity Pool のフルリソース名。"
   value       = google_iam_workload_identity_pool.github.name
 }
+
+output "deployer_service_account_email" {
+  description = "deploy-prod が偽装するデプロイ SA の email（Issue #316）。"
+  value       = google_service_account.deployer.email
+}
