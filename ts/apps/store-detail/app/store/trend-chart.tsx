@@ -182,14 +182,14 @@ export function TrendChart({ window: trendWindow, metric, rankTotal }: TrendChar
           最も広い文字で決まる。縦の位置は `position: relative` の top の百分率で与えるため、値も式も
           変えていない（百分率の基準は grid 領域の高さで、畳む前の relative な親と同じ 144px である）。
 
-          次の 3 つは荷重である。外すと静かに壊れるので、まとめて動かさないこと。
-          - `items-start`: 外すと文字の箱が領域いっぱいへ伸び、-translate-y-1/2 が半分の高さぶん動かす
-          - `justify-items-end`: 外すと箱が列幅まで広がり、右そろえと「帯の幅 = 最も広い文字の幅」が崩れる
-          - `grid-rows-1`: 外すと行の高さが auto になり、top の百分率の基準が処理系依存になる
+          `items-start` と `justify-items-end` は荷重である。前者を外すと目盛りの縦位置がずれ、後者を
+          外すと各 span が列幅まで伸びて文字が左へ寄る。e2e は要素の箱ではなく、文字そのものの描画矩形
+          の中心と右端を測って守る。以前ここで荷重と宣言していた `grid-rows-1` は `items-start` と役割が
+          重複し、単独で外しても幾何が変わらなかったため撤去した。
         */}
         <div
           aria-hidden
-          className="grid h-40 shrink-0 grid-rows-1 items-start justify-items-end py-2 text-xs tabular-nums text-muted-foreground"
+          className="grid h-40 shrink-0 items-start justify-items-end py-2 text-xs tabular-nums text-muted-foreground"
         >
           {geometry.ticks.map((tick) => (
             <span

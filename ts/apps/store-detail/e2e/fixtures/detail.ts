@@ -81,7 +81,8 @@ function trendPoints(count: number): TrendPoint[] {
       rank: 3 + (i % 4),
       rating: (4.0 + (i % 10) / 10).toFixed(1),
       // 4 桁台。桁数が増えるほど表は横へ広がるため、現実に起こりうる上限側を置く。
-      reviewCount: 1200 + i * 7,
+      // 最終日は 2274 件になる。iPhone 幅で末尾の 1 桁が欠けた Issue #286 の報告値を、そのまま網に置く。
+      reviewCount: 2071 + i * 7,
     });
   }
   return points;
@@ -184,6 +185,25 @@ const NO_COMPETITOR_RESPONSE: DetailResponse = { ...DETAIL_RESPONSE, competitors
  */
 const SHORT_HISTORY_RESPONSE: DetailResponse = { ...DETAIL_RESPONSE, trend: trendPoints(5) };
 
+/**
+ * 指標ごとに要約期間が違う応答。7 日の窓のうち、順位と評価だけ最初の 3 日を欠落させる。
+ * クチコミ数は 7 日を埋めるため、期間注記は前 2 組だけに現れる。
+ */
+const DIVERGENT_SUMMARY_RESPONSE: DetailResponse = {
+  ...DETAIL_RESPONSE,
+  trend: trendPoints(7).map((point, index) =>
+    index < 3 ? { ...point, rank: null, rating: null } : point,
+  ),
+};
+
+/** 順位だけ最終日の 1 件にした応答。「記録 8/7」という単日の書式を実ブラウザで描く。 */
+const SINGLE_DAY_SUMMARY_RESPONSE: DetailResponse = {
+  ...DETAIL_RESPONSE,
+  trend: trendPoints(7).map((point, index) =>
+    index < 6 ? { ...point, rank: null } : point,
+  ),
+};
+
 // --- 面を開く手順 ----------------------------------------------------------------------
 //
 // 横スクロール実測（store-surface.spec.ts）と自動 a11y 監査（a11y-audit.spec.ts）の双方が
@@ -199,7 +219,7 @@ const DETAIL_API_GLOB = `**${DETAIL_API_PATH}*`;
 /**
  * 詳細データを固定 fixture で供給する。DB も LINE の検証エンドポイントも起こさない。
  *
- * **先に unroute してから route を登録する**（Issue #286）。監査は 1 つの page で 9 つの状態を
+ * **先に unroute してから route を登録する**（Issue #286）。監査は 1 つの page で 11 の状態を
  * 回すので、状態ごとに route を足すと登録が積み上がる。「後から登録した経路が先に当たる」という
  * 挙動に寄りかからず、明示で外してから入れる。なお、古い経路が勝った場合は供給した応答と
  * 描画が食い違うので、各状態の expectView（推移の表の有無・競合の件数）が赤になる。
@@ -268,7 +288,7 @@ interface SurfaceStructure {
   /** 検索欄の並べの箱の数。競合が 2 店に満たないときは 0。 */
   readonly searchField: number;
   /**
-   * 捲れる領域（推移の表の容器）の数。
+   * 実際に横へ捲れる領域（推移の表の容器）の数。
    *
    * `trendTables` から導かない。**表が残ったまま容器が横の捲りを失う事故**こそがこの宣言の
    * 守備範囲であり、表の有無から導くとその事故に反応しなくなる。
@@ -315,7 +335,7 @@ interface ExpectedView {
   /**
    * 期間の要約の組に添えた期間の文言（Issue #286 項目 1）。公称の窓と食い違う組にだけ出るので、
    * 記録が窓を埋めている状態では空になる。既定の応答は 8/1〜8/30 の連続した 30 日で、30 日の窓とも
-   * 7 日の窓とも食い違わない。**出る側の状態は「記録が窓に満たない」1 つだけである。**
+   * 7 日の窓とも食い違わない。出る側には短い履歴・指標ごとの欠落・単日記録を置く。
    */
   readonly summaryNotes: readonly string[];
   /** 競合の一覧に残る店の数。 */
@@ -378,7 +398,7 @@ const DEFAULT_VIEW: ExpectedView = {
   competitorEmptyTexts: [],
 };
 
-/** 推移を描けている状態の構造（札 5・検索欄 1・捲れる領域 1）。 */
+/** 推移を描けている通常幅の構造（札 5・検索欄 1・横捲りを担える表の容器 1）。 */
 const DEFAULT_STRUCTURE: SurfaceStructure = { chipNesting: 5, searchField: 1, tableScrollRegions: 1 };
 
 /**
@@ -484,14 +504,14 @@ function surfaceState(
 }
 
 /**
- * 横スクロールの実測と自動 a11y 監査を当てる、9 つの表示状態（要件 9.4・Issue #286）。回った状態の数と、
+ * 横スクロールの実測と自動 a11y 監査を当てる、11 の表示状態（要件 9.4・Issue #286）。回った状態の数と、
  * 状態ごとの構造の件数の総和は、使う側の spec が宣言と完全一致で固定する。
  *
- * 前の 4 つは操作で入る状態、後の 5 つは応答で入る状態である。応答で入る状態は 2026-09-19 まで
+ * 前の 4 つは操作で入る状態、後の 7 つは応答で入る状態である。応答で入る状態は 2026-09-19 まで
  * 自動監査が一度も当たっていなかった（Issue #286 の項目 6）。**画面レビューの指摘 M1・M2 は、
- * そのうち「グラフ 0 件」の中に住んでいた指摘である。** 9 つ目（記録が窓に満たない）は項目 1 で足した。
+ * そのうち「グラフ 0 件」の中に住んでいた指摘である。** 最後の 3 状態は期間注記の表示網である。
  *
- * 最初の 4 状態は差分（spread）で書き、応答で入る 5 状態は全項目を書く。後者は差分が多く、spread だと
+ * 最初の 4 状態は差分（spread）で書き、応答で入る 7 状態は全項目を書く。後者は差分が多く、spread だと
  * 何を既定から継いだのかが読めなくなるためである。なお spread で書いた状態は、`ExpectedView` に
  * 項目を足したとき既定の値を黙って継ぐ。項目を足すときは、その 4 状態の値を個別に見直すこと。
  */
@@ -535,7 +555,7 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       await page.getByRole('searchbox', { name: '店名で絞り込む' }).fill(NO_MATCH_QUERY);
     },
   }),
-  // --- ここから、応答で入る 4 状態（Issue #286） ---
+  // --- ここから、応答で入る 7 状態（Issue #286） ---
   surfaceState('グラフ 0 件', {
     response: GRAPH_EMPTY_RESPONSE,
     view: {
@@ -581,7 +601,7 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
       competitorEmptyTexts: [],
     },
-    // 表が無いので捲れる領域も無い。**この面で唯一、捲れる領域が 0 件になる状態である。**
+    // 表が無いので捲れる領域も無い。
     structure: { chipNesting: 0, searchField: 1, tableScrollRegions: 0 },
   }),
   surfaceState('競合 1 店', {
@@ -643,5 +663,47 @@ export const STORE_SURFACE_STATES: readonly StoreSurfaceState[] = [
       competitorEmptyTexts: [],
     },
     structure: DEFAULT_STRUCTURE,
+  }),
+  surfaceState('指標ごとに要約期間が違う', {
+    response: DIVERGENT_SUMMARY_RESPONSE,
+    view: {
+      checkedChips: ['7日', '順位'],
+      chipCount: 5,
+      chartNames: ['順位の推移、8月1日から8月7日まで。'],
+      trendHeading: '直近7日の推移',
+      trendStatusTexts: ['順位の推移、直近7日。最新 5位（8/7）。'],
+      trendEmptyTexts: [],
+      trendTables: 1,
+      trendRows: 7,
+      summaryNotes: ['記録 8/4〜8/7', '記録 8/4〜8/7'],
+      visibleCompetitors: COMPETITOR_TOTAL,
+      competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
+      competitorEmptyTexts: [],
+    },
+    structure: DEFAULT_STRUCTURE,
+    operate: async (page) => {
+      await page.getByRole('radio', { name: '7日', exact: true }).click();
+    },
+  }),
+  surfaceState('要約の記録が 1 日だけ', {
+    response: SINGLE_DAY_SUMMARY_RESPONSE,
+    view: {
+      checkedChips: ['7日', '順位'],
+      chipCount: 5,
+      chartNames: ['順位の推移、8月1日から8月7日まで。'],
+      trendHeading: '直近7日の推移',
+      trendStatusTexts: ['順位の推移、直近7日。最新 5位（8/7）。'],
+      trendEmptyTexts: [],
+      trendTables: 1,
+      trendRows: 7,
+      summaryNotes: ['記録 8/7'],
+      visibleCompetitors: COMPETITOR_TOTAL,
+      competitorStatusTexts: [competitorCountText(COMPETITOR_TOTAL)],
+      competitorEmptyTexts: [],
+    },
+    structure: DEFAULT_STRUCTURE,
+    operate: async (page) => {
+      await page.getByRole('radio', { name: '7日', exact: true }).click();
+    },
   }),
 ];

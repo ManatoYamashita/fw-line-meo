@@ -247,15 +247,30 @@ export function metricExtent(window: TrendWindow, metric: TrendMetric): MetricEx
 /**
  * 既存の「表示期間の変化」の 3 組。値が無い組は null（画面は「—」を出す）。
  *
- * 各組は値だけでなく、その値を読んだ日を持つ。画面はこの日と公称の窓を比べて、食い違う組にだけ
- * 期間を添える（summaryPeriodNote）。クチコミ数は増減と、その増減を測った両端の日を 1 つに持つ。
+ * 各組は値だけでなく、その値を読んだ日と、必要なら画面へ添える期間を持つ。期間はこの要約を作るときに
+ * 公称の窓と比べて確定するため、呼び出し側が別の窓と組み合わせる余地はない。クチコミ数は増減と、
+ * その増減を測った両端の日を 1 つに持つ。
  */
+interface SummaryPeriod {
+  readonly periodNote: string | null;
+}
+
 export interface WindowSummary {
-  readonly rank: { readonly first: DatedValue; readonly last: DatedValue } | null;
-  readonly rating: { readonly first: Dated<string>; readonly last: Dated<string> } | null;
+  readonly rank: (SummaryPeriod & { readonly first: DatedValue; readonly last: DatedValue }) | null;
+  readonly rating: (SummaryPeriod & { readonly first: Dated<string>; readonly last: Dated<string> }) | null;
   readonly reviewCount:
-    | { readonly diff: number; readonly first: DatedValue; readonly last: DatedValue }
+    | (SummaryPeriod & { readonly diff: number; readonly first: DatedValue; readonly last: DatedValue })
     | null;
+}
+
+/** 公称の窓と実際に値を読んだ期間が食い違うときだけ、画面へ添える短い期間を作る。 */
+function periodNote(window: TrendWindow, firstDate: string, lastDate: string): string | null {
+  if (firstDate === window.startDate && lastDate === window.endDate) {
+    return null;
+  }
+  return firstDate === lastDate
+    ? `記録 ${formatShortDate(firstDate)}`
+    : `記録 ${formatShortDate(firstDate)}〜${formatShortDate(lastDate)}`;
 }
 
 /**
@@ -277,44 +292,24 @@ export function summarizeWindow(window: TrendWindow): WindowSummary {
   const reviewCountLast = datedValue(reviewCount.at(-1));
 
   return {
-    rank: rankFirst !== null && rankLast !== null ? { first: rankFirst, last: rankLast } : null,
-    rating: ratingFirst !== null && ratingLast !== null ? { first: ratingFirst, last: ratingLast } : null,
+    rank:
+      rankFirst !== null && rankLast !== null
+        ? { first: rankFirst, last: rankLast, periodNote: periodNote(window, rankFirst.date, rankLast.date) }
+        : null,
+    rating:
+      ratingFirst !== null && ratingLast !== null
+        ? { first: ratingFirst, last: ratingLast, periodNote: periodNote(window, ratingFirst.date, ratingLast.date) }
+        : null,
     reviewCount:
       reviewCountFirst !== null && reviewCountLast !== null
         ? {
             diff: reviewCountLast.value - reviewCountFirst.value,
             first: reviewCountFirst,
             last: reviewCountLast,
+            periodNote: periodNote(window, reviewCountFirst.date, reviewCountLast.date),
           }
         : null,
   };
-}
-
-/**
- * 要約の 1 組に添える「値を読んだ期間」。公称の窓と食い違うときだけ文字列を返し、一致すれば null
- * （要件 3.4 の 2026-09-19 訂正・正典 §7.19）。
- *
- * 比べる相手は窓の公称の始点と終点であって、窓に入っている最初の点ではない。名乗っているのは見出しの
- * 「直近N日」＝公称の窓だからである。points の先頭と比べると、記録が窓に満たない店でも常に一致して
- * しまい、この関数は何も返さなくなる。
- *
- * 値が 1 件も無い組（引数が null）は、読んだ日そのものが無いので null を返す（画面は「—」のまま）。
- * 読んだ日が 1 日しか無い組は、同じ日を 2 度書かずにその 1 日だけを返す。
- */
-export function summaryPeriodNote(
-  window: TrendWindow,
-  ends: { readonly first: { readonly date: string }; readonly last: { readonly date: string } } | null,
-): string | null {
-  if (ends === null) {
-    return null;
-  }
-  const { first, last } = ends;
-  if (first.date === window.startDate && last.date === window.endDate) {
-    return null;
-  }
-  return first.date === last.date
-    ? `記録 ${formatShortDate(first.date)}`
-    : `記録 ${formatShortDate(first.date)}〜${formatShortDate(last.date)}`;
 }
 
 // --- 表示整形 --------------------------------------------------------------------------

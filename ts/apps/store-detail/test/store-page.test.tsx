@@ -1520,7 +1520,10 @@ describe('store detail page', () => {
 
       const table = screen.getByRole('table');
       expect(table.getAttribute('data-slot')).toBe('table');
-      expect(classTokens(table)).toContain('min-w-sm');
+      expect(table.getAttribute('data-density')).toBe('responsive');
+      expect(classTokens(table)).toContain('@sm:min-w-sm');
+      expect(classTokens(table)).toContain('@max-sm:[&_td]:px-2');
+      expect(classTokens(table)).not.toContain('min-w-sm');
       for (const cell of screen.getAllByRole('columnheader')) {
         expect(cell.getAttribute('data-slot'), cell.textContent ?? '').toBe('table-header-cell');
       }

@@ -748,7 +748,7 @@ describe('招待コードページ: 意匠の適用', () => {
 
     // ラベルも共通部品を通す（面ごとに文字寸法が食い違わないようにする）。
     expect(main.querySelector('label[for="agency-select"]')?.getAttribute('data-slot')).toBe(
-      'label',
+      'field-label',
     );
 
     // 完了条件: 値の直接変更で操作でき、必須属性を要素から読める。

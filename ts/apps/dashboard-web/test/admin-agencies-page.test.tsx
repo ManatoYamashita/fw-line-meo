@@ -500,7 +500,7 @@ describe('代理店管理ページ: 意匠の適用', () => {
     expect(input.tagName).toBe('INPUT');
     expect(input.getAttribute('data-slot')).toBe('input');
     expect(input.getAttribute('type')).toBe('text');
-    expect(main.querySelector('label[for="agency-name"]')?.getAttribute('data-slot')).toBe('label');
+    expect(main.querySelector('label[for="agency-name"]')?.getAttribute('data-slot')).toBe('field-label');
 
     const create = scope.getByRole('button', { name: '代理店作成' });
     expect(create.getAttribute('data-slot')).toBe('button');

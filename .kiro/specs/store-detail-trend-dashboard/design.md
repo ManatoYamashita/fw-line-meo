@@ -17,7 +17,7 @@
 - グラフ・期間要約・推移の表・現在値の 4 つを、同じ期間の窓から導く（要件 3）。
 - 既定の選択状態（30 日・順位）では、既存の見出し・表・一覧を現行と同じに保つ（要件 8.3）。
 - 入力は検索欄と選択肢の 2 種類に限り、操作が要求・保存・URL を一切変えないことを検査で固定する（要件 7）。
-- 320px と Pixel 5 相当の幅で、ページ全体に横スクロールを出さない。これを 4 つの表示状態すべてで検証する（要件 6・9.4）。
+- 320px と Pixel 5 相当の幅で、ページ全体に横スクロールを出さない。これを 11 の表示状態すべてで検証する（要件 6・9.4）。
 
 ### Non-Goals
 - 競合の推移をグラフへ重ねること（取得経路の変更を要する。第 2 フェーズ）
@@ -139,8 +139,8 @@ ts/apps/store-detail/
 │   └── store-page.test.tsx        # 変更: 構造契約を許可リストへ書き換える
 └── e2e/
     ├── fixtures/detail.ts     # 変更: 表示状態の一覧 STORE_SURFACE_STATES と要求の計数
-    ├── store-surface.spec.ts  # 変更: 4 状態 × 2 幅の横スクロール、キーボード操作、文字寸法の不変
-    └── a11y-audit.spec.ts     # 変更: 4 状態すべてを監査し、状態の数を完全一致で固定する
+    ├── store-surface.spec.ts  # 変更: 11 状態 × 2 幅の横スクロール、キーボード操作、文字寸法の不変
+    └── a11y-audit.spec.ts     # 変更: 11 状態すべてを監査し、状態の数を完全一致で固定する
 ```
 
 ### Modified Files
@@ -208,7 +208,7 @@ graph LR
 | 2.5 | 読み込み直さず、取得済みのデータから更新する | TrendSection | React の state | — |
 | 2.8 | 推移が 0 件なら、選択肢を出さず既存の案内を出す | TrendSection | — | — |
 | 3.1, 3.2, 3.3 | 4 つの表示を同じ窓から導き、期間と指標の変更に追随させる | TrendSection, trend-view | `TrendWindow` | 窓→4 表示 |
-| 3.4, 3.5 | 要約は値のある最初と最後の日から作り、値が無ければ記号にする。公称の窓と食い違う組には測った期間を添える（2026-09-19 訂正・Issue #286 項目 1） | trend-view | `summarizeWindow`, `summaryPeriodNote` | 窓→要約 |
+| 3.4, 3.5 | 要約は値のある最初と最後の日から作り、値が無ければ記号にする。公称の窓と食い違う組には測った期間を、要約と同じ返り値で添える | trend-view | `summarizeWindow` | 窓→要約 |
 | 3.6 | 現在値に日付を添える | trend-view, TrendChart | `MetricExtent.last` | — |
 | 3.7 | 各点の値を表の同じ日付の行で確かめられる | TrendSection | `TrendWindow.points` | 窓→表 |
 | 3.8 | 他の節は選択によって変わらない | TrendSection（状態を節の中に閉じる） | — | — |
@@ -220,7 +220,7 @@ graph LR
 | 5.1, 5.2 | グラフの説明を名前にし、焦点を受け取る要素を置かない | TrendChart | `describeMetric` | — |
 | 5.3, 5.4 | 色だけに頼らず、コントラストは §2.2 の既存行を使う | TrendChart | 色の語彙（決定 D6） | — |
 | 5.5, 5.6, 5.7 | 焦点の輪郭が切れない、44px、見える名前 | TrendControls, CompetitorSearch | Field 構成 | — |
-| 6.1, 6.2, 6.3, 6.4, 6.5 | 2 幅 × 4 状態で横に溢れない、捲れる領域は 1、文字寸法は一定 | TrendChart, TrendControls, CompetitorSearch | HTML の文字・百分率配置 | — |
+| 6.1, 6.2, 6.3, 6.4, 6.5 | 2 幅 × 11 状態で横に溢れず、通常文字では表を全列表示し、200% 文字では表だけを捲れる。文字寸法は一定 | TrendChart, TrendControls, CompetitorSearch, Table | HTML の文字・百分率配置 | — |
 | 7.1, 7.2, 7.4 | 許可リストの構造契約（状態ごとの件数） | 構造契約の検証 | 許可リスト | — |
 | 7.3, 7.5, 7.6 | 無副作用（要求・保存・URL）、リンク、要求経路 | 構造契約の検証 | — | — |
 | 7.7 | 失われたら CI が失敗する | 構造契約の検証、e2e | — | — |
@@ -230,7 +230,7 @@ graph LR
 | 8.4 | 評価なしを 0 として描かない | trend-view, trend-scale | `metricValue` | — |
 | 9.1 | 正典へ判断を先に書く | 正典の更新 | — | — |
 | 9.2, 9.3, 9.6 | 変異で赤くなることを実証し、走査が 0 件なら赤にする | 検証 | — | — |
-| 9.4 | 4 状態で a11y と横スクロールを検証する | e2e | `STORE_SURFACE_STATES` | — |
+| 9.4 | 11 状態で a11y と横スクロールを検証する | e2e | `STORE_SURFACE_STATES` | — |
 | 9.5, 9.7 | 実描画で確かめ、interface-review を記録する | 実施記録 | — | — |
 
 ## Components and Interfaces
@@ -323,22 +323,13 @@ export function metricExtent(window: TrendWindow, metric: TrendMetric): MetricEx
  * 各組は値と、その値を読んだ日を一緒に持つ（2026-09-19 訂正・Issue #286 項目 1）。
  */
 export interface WindowSummary {
-  readonly rank: { readonly first: DatedValue; readonly last: DatedValue } | null;
-  readonly rating: { readonly first: Dated<string>; readonly last: Dated<string> } | null;
+  readonly rank: { readonly first: DatedValue; readonly last: DatedValue; readonly periodNote: string | null } | null;
+  readonly rating: { readonly first: Dated<string>; readonly last: Dated<string>; readonly periodNote: string | null } | null;
   readonly reviewCount:
-    | { readonly diff: number; readonly first: DatedValue; readonly last: DatedValue }
+    | { readonly diff: number; readonly first: DatedValue; readonly last: DatedValue; readonly periodNote: string | null }
     | null;
 }
 export function summarizeWindow(window: TrendWindow): WindowSummary;
-
-/**
- * 要約の 1 組に添える「値を読んだ期間」。公称の窓と食い違うときだけ文字列を返し、一致すれば null。
- * 値が 1 件も無い組（引数が null）も null。読んだ日が 1 日だけなら、その 1 日だけを書く。
- */
-export function summaryPeriodNote(
-  window: TrendWindow,
-  ends: { readonly first: { readonly date: string }; readonly last: { readonly date: string } } | null,
-): string | null;
 
 export function metricName(metric: TrendMetric): string; // '順位' | '評価' | 'クチコミ数'
 export function formatMetricValue(metric: TrendMetric, value: number): string; // '2位' | '4.3' | '123件'
@@ -727,23 +718,30 @@ export function filterCompetitors<T extends { readonly name: string }>(
 - name の検査が単独で効くことを示す変異は、件数が 5 になった後で行う。RadioGroup に name を渡し、件数は 5 のまま、name を持つ input の検査だけが赤になることを確かめる。
 
 ### E2E（Playwright・Pixel 5 と 320px）
-- `fixtures/detail.ts` に `STORE_SURFACE_STATES` を置く。内容は次の 4 つである。
+- `fixtures/detail.ts` に `STORE_SURFACE_STATES` を置く。内容は次の 11 状態である。
   - 既定
   - 指標＝評価
   - 期間＝7 日
   - 検索 0 件（長い英字列を入力する）
+  - グラフ 0 件
+  - 推移 0 件
+  - 競合 1 店
+  - 競合 0 店
+  - 記録が窓に満たない
+  - 指標ごとに要約期間が違う
+  - 要約の記録が 1 日だけ
 - 各状態の `open` の流れ:
   1. `openStoreSurface` を呼ぶ。
   2. 操作する。
   3. **操作後の状態を assert する**（選択状態・h2・行数・件数の文言）。操作が効かないまま既定の状態を検査して緑になる、という空振りを防ぐため。
   4. 最後に、`/api/detail` への要求がちょうど 1 回だったことを assert する。
 - `store-surface.spec.ts`
-  - 4 状態 × 2 幅で `expectNoHorizontalScroll` を当てる（捲れる領域は 1）。
+  - 11 状態 × 2 幅で `expectNoHorizontalScroll` を当てる。横捲りを担える容器の構造件数は表ありで 1 とし、通常文字では `scrollWidth = clientWidth`、200% 文字では `scrollWidth > clientWidth` になることを分けて実測する。
   - キーボード: Tab で期間の群に入り、矢印キーで「7日」を選ぶ。h2 が追随し、焦点の輪郭が実際に描かれて切れていないことを実測する（2.7・5.5）。
-  - 目盛りの文字の算出サイズが、320px と 393px で等しい（6.5）。
+  - 目盛りの文字の算出サイズが、320px と 393px で等しい（6.5）。文字そのものの中心 y と右端を実測し、`items-start`・`justify-items-end` の荷重を固定する。`grid-rows-1` は `items-start` と役割が重複していたため撤去する。
 - 操作領域: 期間と指標の札（`FieldLabel` の行）と、検索欄の Field（ラベル行と入力の合計）の高さが 44px 以上であることを実測する（5.6）。
 - 点の切り取り: 点は `circle` なので、bounding box が 8×8 として `expectNoHorizontalScroll` の母数に入る。一方、Chromium は SVG の線について太さを含まない箱を返すので、線のはみ出しはこの検査では捕まらない。そのため、描画領域に内側余白を取ることを設計で担保する（6.1）。
-- `a11y-audit.spec.ts`: 4 状態を回して `expectNoAxeViolations` を当て、回った状態の数を `toBe(4)` で固定する（9.4）。
+- `a11y-audit.spec.ts`: 11 状態を回して `expectNoAxeViolations` を当て、回った状態の数を `toBe(11)` で固定する（9.4）。
 - WebKit での実描画（9.5）: e2e は Chromium（Pixel 5）だけなので、iOS の LINE 内ブラウザと同じ WebKit で描画して確かめ、記録を残す。確かめる項目は次の 3 つ。
   - 点が真円であること
   - 端点の輪が見えること

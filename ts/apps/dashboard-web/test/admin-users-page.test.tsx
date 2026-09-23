@@ -800,7 +800,7 @@ describe('利用者管理ページ: 意匠の適用', () => {
     for (const id of ['user-role', 'user-agency', 'user-email', 'user-display-name']) {
       const label = main.querySelector(`label[for="${id}"]`);
       expect(label, id).not.toBeNull();
-      expect(label!.getAttribute('data-slot'), id).toBe('label');
+      expect(label!.getAttribute('data-slot'), id).toBe('field-label');
       labelled += 1;
     }
     expect(labelled).toBe(4);
@@ -892,10 +892,11 @@ describe('利用者管理ページ: 意匠の適用', () => {
       expect(label!.closest('p'), id).toBeNull();
       const field = label!.parentElement!;
       expect(field.tagName, id).toBe('DIV');
+      expect(field.getAttribute('data-slot'), id).toBe('field');
       const tokens = field.className.split(/\s+/).filter((token) => token.length > 0);
-      // **包含では足りない**。幅を与えるクラスの集合を完全一致で見る。
+      // Field 自身の w-full と子の幅の規則は共通部品の契約。面が選ぶ広い幅での上限だけを固定する。
       expect(
-        tokens.filter((token) => /(^|:)(?:max-|min-)?w-/.test(token)),
+        tokens.filter((token) => token.startsWith('sm:') && /(?:max-|min-)?w-/.test(token)),
         id,
       ).toEqual(['sm:max-w-xs']);
       visited += 1;

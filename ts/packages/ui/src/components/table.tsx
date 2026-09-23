@@ -80,11 +80,27 @@ function TableContainer({ className, label, ...props }: TableContainerProps) {
   )
 }
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+type TableDensity = "default" | "responsive"
+
+/**
+ * `responsive` は、容器が狭いときだけセルの横余白を詰める。列や文字を削らずに収め、
+ * それでも収まらない文字拡大時には TableContainer の横捲りへ退避する。
+ */
+function Table({
+  className,
+  density = "default",
+  ...props
+}: React.ComponentProps<"table"> & { density?: TableDensity }) {
   return (
     <table
       data-slot="table"
-      className={cn("w-full text-sm text-card-foreground", className)}
+      data-density={density}
+      className={cn(
+        "w-full text-sm text-card-foreground",
+        density === "responsive" &&
+          "@max-sm:[&_td]:px-2 @max-sm:[&_th]:px-2 @sm:min-w-sm",
+        className
+      )}
       {...props}
     />
   )
@@ -244,7 +260,7 @@ function TableDetailRow({
   )
 }
 
-export type { TableCellWrap, TableContainerProps }
+export type { TableCellWrap, TableContainerProps, TableDensity }
 export {
   Table,
   TableContainer,

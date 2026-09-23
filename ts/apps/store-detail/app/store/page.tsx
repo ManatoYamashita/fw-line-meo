@@ -139,7 +139,6 @@ import {
   metricName,
   selectTrendWindow,
   summarizeWindow,
-  summaryPeriodNote,
   type TrendMetric,
   type TrendPeriodDays,
   type TrendWindow,
@@ -666,12 +665,12 @@ function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow 
         <Metric
           label="順位"
           value={summary.rank !== null ? `${summary.rank.first.value}位 → ${summary.rank.last.value}位` : '—'}
-          note={summaryPeriodNote(trendWindow, summary.rank)}
+          note={summary.rank?.periodNote ?? null}
         />
         <Metric
           label="評価"
           value={summary.rating !== null ? `${summary.rating.first.value} → ${summary.rating.last.value}` : '—'}
-          note={summaryPeriodNote(trendWindow, summary.rating)}
+          note={summary.rating?.periodNote ?? null}
         />
         {/* 「クチコミ数の増減」。指標の名前を「クチコミ数」に統一したうえで、この組だけが差分であることを
             「の増減」で示す（2026-09-18 の画面レビュー）。同じカードに実数の推移が並ぶので、実数と差分が
@@ -679,7 +678,7 @@ function WindowSummaryList({ trendWindow }: { readonly trendWindow: TrendWindow 
         <Metric
           label="クチコミ数の増減"
           value={summary.reviewCount !== null ? formatSignedCount(summary.reviewCount.diff) : '—'}
-          note={summaryPeriodNote(trendWindow, summary.reviewCount)}
+          note={summary.reviewCount?.periodNote ?? null}
         />
       </dl>
     </div>
@@ -767,12 +766,12 @@ function TrendSection({
           <WindowSummaryList trendWindow={trendWindow} />
         </CardContent>
       </Card>
-      {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・ui-airbnb-surfaces の要件 2.5）。この容器がこの面で
-          唯一の捲れる領域であり、e2e（store-surface.spec.ts）の宣言と対になっている。
+      {/* 横方向の捲りは表の **外側** が持つ（正典 7.2 節・ui-airbnb-surfaces の要件 2.5）。通常の携帯幅では
+          列を詰めて全桁を見せ、文字拡大などでなお収まらない場合だけ、この容器を唯一の捲れる領域にする。
           列見出しの文字列は 1 文字も変えない（ui-airbnb-surfaces の要件 2.2）。scope は部品の既定が与える。
           行は窓の点をそのまま描く。グラフの各点の値は、同じ日付の行で確かめられる（要件 3.7）。 */}
       <TableContainer label={title}>
-        <Table className="min-w-sm">
+        <Table density="responsive">
           <TableHead>
             <TableRow>
               <TableHeaderCell>日付</TableHeaderCell>
@@ -785,7 +784,7 @@ function TrendSection({
             {trendWindow.points.map((point) => (
               <TableRow key={point.capturedOn}>
                 {/* 数値の列だけ右寄せ＋等幅数字にする（正典 7.2 節）。日付の列は既定のまま。 */}
-                <TableCell>{point.capturedOn}</TableCell>
+                <TableCell wrap="none">{point.capturedOn}</TableCell>
                 <TableCell numeric>{point.rank ?? '—'}</TableCell>
                 <TableCell numeric>{point.rating ?? '—'}</TableCell>
                 <TableCell numeric>{point.reviewCount ?? '—'}</TableCell>
