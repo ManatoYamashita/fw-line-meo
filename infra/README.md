@@ -418,8 +418,8 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 | 提出物 | 要件 | 2026-09-23 時点（状態の正典は Issue #146） |
 |---|---|---|
 | 独自ドメイン | 自己所有・Search Console で所有権検証済み | **`firstweb-works.com` を取得済み**（お名前.com・2026-09-22 登録。9-2-a） |
-| ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | 未（DNS を Cloudflare へ移した後） |
-| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 未（`api.firstweb-works.com` へ移す・Issue #282） |
+| ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT） |
+| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 割り当て済み（2026-09-23・`api.firstweb-works.com` → line-webhook）。redirect URI の差し替えは Phase2 と対（Issue #282） |
 | 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 実装済み（ManatoYamashita/fw-website）・独自ドメインでの公開待ち |
 | プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 同上 |
 | スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 下書き済み（fw-website `docs/google-review.md`） |
