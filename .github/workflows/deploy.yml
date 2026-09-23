@@ -58,12 +58,47 @@ jobs:
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud (Direct WIF, no SA key)
+        id: auth
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
+
+      # auth が書く external account 構成ファイル（CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE）のままだと、
+      # gcloud は **呼び出しのたびに** GitHub の OIDC エンドポイントから subject token を取り直す。
+      # 1 ジョブで 20 回を超える gcloud 呼び出しがそれぞれ OIDC の一過性障害に晒され、デプロイ成功後の
+      # 検証段だけが赤くなる事故が直近 40 実行で 3 件起きた（Issue #316）。
+      #
+      # auth が 1 度だけ取得した STS の連携トークン（出力 auth_token・有効期間 1 時間。ジョブは 7 分前後）を
+      # CLOUDSDK_AUTH_ACCESS_TOKEN で渡すと、gcloud はこれを credential_file_override より先に使う
+      # （googlecloudsdk/core/credentials/store.py の _Load の分岐順）。以後 OIDC への往復は起きない。
+      #
+      # token_format: 'access_token' では代替できない。auth@v3 はその経路で service_account 入力を
+      # 必須とし（Direct WIF では throw する）、出力しても gcloud へは渡らないためである。
+      - name: 'gcloud の認証を 1 度だけ取得したトークンへ固定（Issue #316）'
+        env:
+          AUTH_TOKEN: ${{ steps.auth.outputs.auth_token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$AUTH_TOKEN" ]; then
+            echo "ERROR: auth ステップの出力 auth_token が空です。" >&2
+            exit 1
+          fi
+          echo "CLOUDSDK_AUTH_ACCESS_TOKEN=${AUTH_TOKEN}" >> "$GITHUB_ENV"
+
+      # 固定が効いていることの自己検証。環境変数の名前を誤ると gcloud は黙って構成ファイルへ戻り、
+      # ジョブは緑のまま是正前の挙動に戻る。値は出力しない（比較だけを行う）。
+      - name: 'gcloud が固定したトークンを使っていることを検証（Issue #316）'
+        run: |
+          set -euo pipefail
+          current="$(gcloud auth print-access-token)"
+          if [ "$current" != "$CLOUDSDK_AUTH_ACCESS_TOKEN" ]; then
+            echo "ERROR: gcloud が CLOUDSDK_AUTH_ACCESS_TOKEN 以外の資格情報を使っています。" >&2
+            exit 1
+          fi
+          echo "OK: gcloud は auth ステップで取得したトークンを使います（以後 OIDC へ往復しません）。"
 
       - name: Build & push 7 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
         env:
@@ -118,8 +153,16 @@ jobs:
         # placeholder のまま放置される事故（Issue #33）を再発させないため、検出したら fail する。
         run: |
           set -euo pipefail
+          # 一覧は代入で受ける。`for svc in $(gcloud ...)` の形では一覧の取得失敗が set -e に届かず、
+          # 0 件を検査して exit 0 を返す（Issue #316 でスタブにより実測。認証の一過性障害がちょうど
+          # ここに当たると、赤ではなく「検査していない緑」になる）。
+          services="$(gcloud run services list --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(metadata.name)')"
+          if [ -z "$services" ]; then
+            echo "ERROR: Cloud Run サービスの一覧が 0 件です。検査対象が無いまま緑にはしません。" >&2
+            exit 1
+          fi
           bad=0
-          for svc in $(gcloud run services list --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(metadata.name)'); do
+          for svc in $services; do
             rev="$(gcloud run services describe "$svc" --region=asia-northeast1 --project="${PROJECT_ID}" --format='value(status.latestReadyRevisionName)')"
             if [ -z "$rev" ]; then
               echo "ERROR: ${svc} に Ready なリビジョンがありません。" >&2
