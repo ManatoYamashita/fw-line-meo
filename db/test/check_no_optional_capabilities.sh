@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# 「能力の不在」検証（task 7.1・Requirements 1.4, 3.10）。
+# 「能力の不在」検証（competitive-daily-summary task 7.1・Requirements 1.4, 3.10／
+# store-suspension task 6.1・Requirements 6.4, 8.1, 8.3, 8.4, 8.5）。
 #
 # 通常の assertion SQL（db/test/assertions/*.sql）は「存在すべきものが存在すること」を検証する。
 # 本スクリプトはその裏返しで「MVP では意図的に提供しない能力が、コード上もスキーマ上も
 # 存在しないこと」を機械的に検証する:
 #   - Requirement 1.4: 固定した競合リストの再抽出・追加・削除の手段を MVP では提供しない
-#   - Requirement 3.10: 配信停止（オプトアウト）手段を MVP では提供しない
+#   - Requirement 3.10（2026-09-23・Issue #252 で改訂）: オーナー自身が配信を停止する手段を
+#     提供しない。運営・代理店による店舗の利用停止は store-suspension が定める
+#   - store-suspension Requirement 8.1: オーナー自身が配信や店舗の利用を停止する手段を、LINE 上にも
+#     Web 上にも提供しない。同 8.4: 運営・代理店による停止（stores.suspended_at を dashboard-api
+#     から書く）は、オーナー自身による配信停止と区別して許容する
 #
 # 「無いことの証明」は原理的に悉皆的ではあり得ない（未知の実装経路を全て網羅できない）ため、
 # 本スクリプトは design.md/requirements.md の記述から具体的に導ける2系統のチェックに絞る:
-#   (A) スキーマ: owners テーブルにオプトアウト相当の列が存在しないこと（列 allowlist の裏返し）。
+#   (A) スキーマ: owners・stores テーブルにオプトアウト相当の列が存在しないこと（列 allowlist の裏返し）。
+#       stores.suspended_at は照合語に当たらない（運営・代理店による停止であり、オーナーの
+#       オプトアウトを表す語ではない）。
 #       db/test/assertions/30_compliance.sql の「allowlist で増加を検出する」思想を踏襲するが、
 #       あちらは「未知テーブル/列の混入＝匿名性リスク」の検出、本チェックは
 #       「特定の機能（オプトアウト）に対応する列が一切無いこと」の検出という異なる目的のため
@@ -38,6 +45,17 @@
 #      「走査の前提が崩れている」である。
 #   4. パイプの下流に consumer を置かない（`--exclude` と case の接尾辞照合へ畳んだ）。
 #
+# --- store-suspension（Issue #252・task 6.1）での改訂 ----------------------------------
+# 停止（stores.suspended_at と、それを書く setStoreSuspension）を実装した状態で**改訂前の**本検査を
+# 流すと、全項目が PASS した（store-suspension Requirement 8.5 の記録。出力は同 spec の tasks.md
+# の実施記録と PR 本文にある）。改訂前は (A1) が owners しか照合せず、(B2) が survey-web を走査せず、
+# 停止を書く識別子をどの面が参照するかを一切見ていなかったためである。改訂で次を足した:
+#   - (A1) の照合先に stores を加える（店舗へ「配信しない」旗を足す形のオプトアウトを検出する）
+#   - (B2) の走査面に ts/apps/survey-web/src を加える
+#   - (B4) を新設し、オーナー・客向けの面が停止を書く識別子を参照しないことを検査する
+# 名前を変えて足された書込の経路は、DB の列単位の権限（db/test/check_store_suspension_privileges.sh）
+# が別の層で検出する（同 8.3）。本検査はコード上の形を見る側である。
+#
 # 使い方: DATABASE_URL を設定して実行する（with-test-db.sh 等が export した接続情報を利用する想定）。
 #   db/test/check_no_optional_capabilities.sh
 # CI では scripts/run-db-test-suites.sh の RUN 表から呼ばれる（追加の env は不要）。
@@ -58,27 +76,31 @@ fail() {
 # これが無いと、空の DB に対して (A1)(A2) が「該当 0 件」で緑を返す。CI で本チェックが
 # `apply migrations` より前へ動かされた場合も、ここで鳴る。
 echo ">> [absence-check] (A0) 検査対象スキーマが適用済みであること（走査の前提）"
-owners_exists="$(psql "$DATABASE_URL" -tA -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.owners') IS NOT NULL;")"
-if [ "$owners_exists" != 't' ]; then
-    fail "owners テーブルがありません。migrations 未適用の DB では (A1)(A2) が「該当 0 件」で緑を返します（走査の前提が崩れています）"
+# (A1) の照合先はどちらも存在を要求する。片方が消える（リネームされる）と、そのテーブルの照合が
+# 「該当 0 件」で緑へ倒れるためである。
+schema_ready="$(psql "$DATABASE_URL" -tA -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.owners') IS NOT NULL AND to_regclass('public.stores') IS NOT NULL;")"
+if [ "$schema_ready" != 't' ]; then
+    fail "owners または stores のテーブルがありません。migrations 未適用の DB では (A1)(A2) が「該当 0 件」で緑を返します（走査の前提が崩れています）"
 fi
-echo "PASS (A0): owners テーブルが存在する（スキーマ適用済み）"
+echo "PASS (A0): owners と stores のテーブルが存在する（スキーマ適用済み）"
 
-echo ">> [absence-check] (A1) owners テーブルにオプトアウト相当の列が存在しないこと（R3.10）"
-FORBIDDEN_OWNER_COLUMNS_SQL="
-SELECT string_agg(column_name, ', ')
+echo ">> [absence-check] (A1) owners・stores テーブルにオプトアウト相当の列が存在しないこと（R3.10・store-suspension 8.1, 8.3）"
+# 照合先へ stores を足したのは store-suspension で店舗単位の停止が入ったためである。オーナーの
+# オプトアウトは owners の旗としてだけでなく、店舗ごとの「配信しない」旗としても足しうる。
+FORBIDDEN_OPTOUT_COLUMNS_SQL="
+SELECT string_agg(table_name || '.' || column_name, ', ' ORDER BY table_name, column_name)
 FROM information_schema.columns
-WHERE table_schema = 'public' AND table_name = 'owners'
+WHERE table_schema = 'public' AND table_name IN ('owners', 'stores')
   AND column_name IN (
     'delivery_enabled','opted_out','opt_out','delivery_disabled',
     'unsubscribed','delivery_stopped','notifications_enabled','subscription_status'
   );
 "
-bad_columns="$(psql "$DATABASE_URL" -tA -v ON_ERROR_STOP=1 -c "$FORBIDDEN_OWNER_COLUMNS_SQL")"
+bad_columns="$(psql "$DATABASE_URL" -tA -v ON_ERROR_STOP=1 -c "$FORBIDDEN_OPTOUT_COLUMNS_SQL")"
 if [ -n "$bad_columns" ]; then
-    fail "owners にオプトアウト相当の列が見つかりました: ${bad_columns}（R3.10 違反の疑い）"
+    fail "オプトアウト相当の列が見つかりました: ${bad_columns}（R3.10・store-suspension 8.1 違反の疑い）"
 fi
-echo "PASS (A1): owners にオプトアウト相当の列は存在しない"
+echo "PASS (A1): owners・stores にオプトアウト相当の列は存在しない"
 
 echo ">> [absence-check] (A2) 競合の調整・上書きを目的とした専用テーブルが存在しないこと（R1.4）"
 FORBIDDEN_TABLES_SQL="
@@ -147,14 +169,17 @@ FORBIDDEN_IDENTIFIER_PATTERN='optOut|opt_out|unsubscribe|disableDelivery|updateD
 # 持った時点で「除外の広さ」を別途担保する必要が出る。したがって「オプトアウト導線が実際に
 # 生えうる層」に絞って列挙する。line-webhook を含めるのは、配信停止の postback / リッチメニュー
 # 導線が最も生えそうな場所がそこだから（#158 (a) で追加。追加時点のヒットは 0 件）。
-# dashboard-web / dashboard-api / survey-web / packages 配下が未走査である事実は Issue #158 に
-# 記録してある。広げるときは誤検出の除外設計とセットで行うこと。
+# survey-web を含めるのは store-suspension 8.1（Web 上にも提供しない）による（Issue #252 で追加。
+# 追加時点のヒットは 0 件）。dashboard-web / dashboard-api は運営・代理店の面なので走査しない。
+# packages 配下（@fwlm/db 以外）が未走査である事実は Issue #158 に記録してある。広げるときは
+# 誤検出の除外設計とセットで行うこと。
 TS_SCAN_DIRS=(
     'ts/packages/db/src'
     'ts/apps/delivery-job/src'
     'ts/apps/store-detail/app'
     'ts/apps/store-detail/lib'
     'ts/apps/line-webhook/src'
+    'ts/apps/survey-web/src'
 )
 ts_scan_paths=()
 for scan_dir in ${TS_SCAN_DIRS[@]+"${TS_SCAN_DIRS[@]}"}; do
@@ -198,4 +223,52 @@ if [ -n "$unexpected_routes" ]; then
 fi
 echo "PASS (B3): store-detail の API ルートは読取専用の /api/detail のみ（route.ts ${route_count} 件）"
 
-echo "OK: 能力の不在（競合リスト再抽出・調整手段／配信オプトアウト手段のいずれも存在しない）を確認しました（R1.4, R3.10）"
+echo ">> [absence-check] (B4) オーナー・客向けの面が店舗の停止を書く識別子を参照しないこと（store-suspension 6.4, 8.1, 8.4）"
+# 店舗の停止を書いてよいのは運営・代理店の面（dashboard-api）だけである。オーナー・客向けの面が
+# 停止を書くと、それはオーナー自身（または客）が配信・利用を止める手段になる（8.1）。LINE 応答の
+# follow / unfollow から停止を切り替えるのもこの形である（6.4・ブロックで自動停止しない）。
+# 書込を行う DAL（@fwlm/db の setStoreSuspension）と dashboard-api は走査しない（8.4）。
+#
+# 照合は大小を区別しない（SQL の `SET SUSPENDED_AT = ...` を取り逃さないため）。suspended_at は
+# 読む（`IS NULL`・`===`/`!==`/`==` の比較）のは正当なので、代入の形（`=` の直後が `=` でない）
+# だけを書込として数える。試験（各アプリの test/）は SQL で停止時刻を直接立てるので、走査面を
+# 各アプリの実装ディレクトリに限る。
+SUSPENSION_WRITE_PATTERN='setStoreSuspension|suspendStore|resumeStore|suspended_at[[:space:]]*=([^=]|$)'
+OWNER_FACING_SCAN_DIRS=(
+    'ts/apps/line-webhook/src'
+    'ts/apps/store-detail/app'
+    'ts/apps/store-detail/lib'
+    'ts/apps/survey-web/src'
+)
+owner_scan_paths=()
+owner_file_count=0
+for scan_dir in ${OWNER_FACING_SCAN_DIRS[@]+"${OWNER_FACING_SCAN_DIRS[@]}"}; do
+    [ -d "${ROOT}/${scan_dir}" ] || fail "走査面 ${scan_dir} がありません（走査の前提が崩れています）"
+    # **走査したファイル数 0 は「違反 0 件」ではない。** 実装がディレクトリごと移っただけで、
+    # 空のディレクトリを見て緑を返す状態を残さない。ディレクトリ単位で数える。
+    dir_file_count=0
+    dir_files="$(find "${ROOT}/${scan_dir}" -type f)"
+    while IFS= read -r scanned_file; do
+        [ -n "$scanned_file" ] || continue
+        dir_file_count=$((dir_file_count + 1))
+    done <<EOF
+$dir_files
+EOF
+    if [ "$dir_file_count" -eq 0 ]; then
+        fail "走査面 ${scan_dir} にファイルが 1 件もありません（走査の前提が崩れています）"
+    fi
+    owner_file_count=$((owner_file_count + dir_file_count))
+    owner_scan_paths=(${owner_scan_paths[@]+"${owner_scan_paths[@]}"} "${ROOT}/${scan_dir}")
+done
+
+owner_rc=0
+owner_hits="$(grep -rEni "$SUSPENSION_WRITE_PATTERN" ${owner_scan_paths[@]+"${owner_scan_paths[@]}"})" || owner_rc=$?
+if [ "$owner_rc" -gt 1 ]; then
+    fail "オーナー・客向けの面を走査できません（grep exit=${owner_rc}）。無一致と評価不能を取り違えないため赤にします"
+fi
+if [ -n "$owner_hits" ]; then
+    fail "オーナー・客向けの面に店舗の停止を書く識別子が見つかりました（停止を書けるのは運営・代理店の面だけ・store-suspension 8.1 違反の疑い）: ${owner_hits}"
+fi
+echo "PASS (B4): オーナー・客向けの面に店舗の停止を書く識別子は存在しない（走査 ${#OWNER_FACING_SCAN_DIRS[@]} ディレクトリ・${owner_file_count} ファイル）"
+
+echo "OK: 能力の不在（競合リスト再抽出・調整手段／オーナー自身による配信停止の手段のいずれも存在しない）を確認しました（R1.4, R3.10・store-suspension 8.1）"

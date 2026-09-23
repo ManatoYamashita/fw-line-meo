@@ -524,4 +524,75 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(owner?.onboarding_status).toBe('pending');
     },
   );
+
+  // store-suspension Requirement 6.4: ブロック（unfollow）とブロック解除（follow）は店舗の停止状態を変えない。
+  // ブロックで自動停止すると、オーナー自身が配信を止める手段になる（competitive-daily-summary Requirement 3.10 と
+  // store-suspension Requirement 8.1 が禁じる）。停止中の店舗が再友だち追加で再開されることも、利用中の店舗が
+  // ブロックで停止されることも無いことを、実 DB の停止時刻で確かめる。停止時刻は SQL で直接立てる（書込は
+  // dashboard-api の経路だけが持つため、この試験から停止の API は呼ばない）。
+  it(
+    'ブロック（unfollow）とブロック解除（follow）を受けても、停止中の店舗は停止時刻ごと停止のまま、' +
+      '利用中の店舗は利用中のまま残り、停止・再開の監査も残らない（store-suspension Req 6.4）',
+    async () => {
+      const pool = await getPool();
+      const userId = 'Uf0-suspension-follow-user';
+      const suspendedStoreId = 'f0000000-0000-0000-0000-0000000064a1';
+      const activeStoreId = 'f0000000-0000-0000-0000-0000000064a2';
+      const suspendedAt = new Date('2026-09-01T00:00:00.000Z');
+      const messenger = createFakeMessenger();
+      const places = createFakePlaces({ kind: 'empty' });
+      const app = buildApp({ messenger, places, pool });
+
+      const owner = await createOwner(pool, { agencyId: AG, lineUserId: userId });
+      await pool.query(`UPDATE owners SET onboarding_status = 'store_identified' WHERE id = $1`, [owner.id]);
+      await pool.query(
+        `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at)
+         VALUES ($1, $3, '試験食堂 停止中', 'ChIJ_f0_suspension_0', 'confirmed', $4),
+                ($2, $3, '試験食堂 利用中', 'ChIJ_f0_suspension_1', 'confirmed', NULL)`,
+        [suspendedStoreId, activeStoreId, owner.id, suspendedAt],
+      );
+      await getOrCreateSession(pool, userId);
+      await updateSession(pool, userId, { stage: 'completed', ownerId: owner.id });
+
+      // LINE の unfollow は replyToken を持たない（ブロック後は応答できない）。
+      const unfollowBody = JSON.stringify({
+        destination: 'Uxxxxbotxxxx',
+        events: [{ type: 'unfollow', source: { type: 'user', userId }, webhookEventId: 'f0-evt-suspension-unfollow' }],
+      });
+      const unfollowRes = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(unfollowBody, CHANNEL_SECRET) },
+        body: unfollowBody,
+      });
+      expect(unfollowRes.status).toBe(200);
+      expect(messenger.reply).not.toHaveBeenCalled();
+
+      const refollowBody = followBody(userId, 'reply-f0-suspension-follow', 'f0-evt-suspension-follow');
+      const refollowRes = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(refollowBody, CHANNEL_SECRET) },
+        body: refollowBody,
+      });
+      expect(refollowRes.status).toBe(200);
+      // follow が店舗特定済みオーナーの経路を実際に通ったこと（停止状態を見ずに素通りしたのではない）の確認。
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenCalledWith('reply-f0-suspension-follow', [buildStatusGuidanceMessage()]);
+
+      const stores = await pool.query<{ id: string; suspended_at: Date | null }>(
+        'SELECT id, suspended_at FROM stores WHERE owner_id = $1 ORDER BY id',
+        [owner.id],
+      );
+      expect(stores.rows).toHaveLength(2);
+      const byId = new Map(stores.rows.map((row) => [row.id, row.suspended_at]));
+      expect(byId.get(suspendedStoreId)?.getTime()).toBe(suspendedAt.getTime());
+      expect(byId.get(activeStoreId)).toBeNull();
+
+      const suspensionAudits = await pool.query(
+        `SELECT 1 FROM audit_logs
+          WHERE target_id = ANY($1::uuid[]) AND action IN ('store_suspended', 'store_resumed')`,
+        [[suspendedStoreId, activeStoreId]],
+      );
+      expect(suspensionAudits.rowCount).toBe(0);
+    },
+  );
 });
