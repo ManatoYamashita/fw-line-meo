@@ -51,6 +51,7 @@ function draftsDeps(generator: DraftGenerator): DraftsDeps {
     tokens,
     generator,
     rateLimiter: createRateLimiter({ limit: 1000, windowMs: 60_000 }),
+    findStore: async (id) => findStoreForSurvey(await getPool(), id),
     clientKey: () => 'itest',
     log: () => {},
   };
@@ -216,5 +217,58 @@ describe.skipIf(!process.env.DATABASE_URL)('survey-web integration (DB)', () => 
     expect(await materialCount(0, false, 1)).toBe(1);
     // 気になった点を選んだ回答を「素材が薄い回答」に数えない
     expect(await materialCount(0, false)).toBe(bareBefore);
+  });
+  // Issue #252: 実 DB の suspended_at を立てると、回答も再生成も拒否され集計は動かない。
+  // 戻すと通常どおり受け付ける（Requirement 5.2・5.4）。既存の集計は停止で消えない（5.3）。
+  it('停止中の店舗は回答・再生成とも 404 で集計も生成も起きず、再開後は受け付ける', async () => {
+    const pool = await getPool();
+    const pageToken = tokens.signPage(STORE);
+    // 停止前に発行された sessionToken（有効期限内）を持つ客を想定する
+    const before = await handleResponses(
+      post('http://x/api/responses', { pageToken, storeId: STORE, star: 2, aspectCodes: [] }),
+      responsesDeps(failGen()),
+    );
+    const { sessionToken } = await before.json();
+    expect(await ratingCount(2)).toBe(1);
+
+    await pool.query('UPDATE stores SET suspended_at = now() WHERE id = $1', [STORE]);
+    try {
+      let generated = 0;
+      const countingGen: DraftGenerator = {
+        generate: () => {
+          generated += 1;
+          return Promise.resolve(ok('呼ばれてはいけない'));
+        },
+      };
+      const res = await handleResponses(
+        post('http://x/api/responses', { pageToken, storeId: STORE, star: 2, aspectCodes: [] }),
+        responsesDeps(countingGen),
+      );
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe('STORE_NOT_AVAILABLE');
+
+      const regen = await handleDrafts(
+        post('http://x/api/drafts', { sessionToken }),
+        draftsDeps(countingGen),
+      );
+      expect(regen.status).toBe(404);
+      expect((await regen.json()).error.code).toBe('STORE_NOT_AVAILABLE');
+
+      expect(generated).toBe(0);
+      // 加算されない。既存の集計も消えない
+      expect(await ratingCount(2)).toBe(1);
+    } finally {
+      await pool.query('UPDATE stores SET suspended_at = NULL WHERE id = $1', [STORE]);
+    }
+
+    const resumed = await handleResponses(
+      post('http://x/api/responses', { pageToken, storeId: STORE, star: 2, aspectCodes: [] }),
+      responsesDeps(okGen()),
+    );
+    expect(resumed.status).toBe(200);
+    expect(await ratingCount(2)).toBe(2);
+    const regen = await handleDrafts(post('http://x/api/drafts', { sessionToken }), draftsDeps(okGen()));
+    expect(regen.status).toBe(200);
+    expect((await regen.json()).generation).toBe('ok');
   });
 });
