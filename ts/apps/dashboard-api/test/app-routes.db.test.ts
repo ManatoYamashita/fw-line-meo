@@ -119,7 +119,7 @@ function buildApp(): ReturnType<typeof createApp> {
     });
 
   const deps: AppDeps = {
-    corsOrigin: config.corsOrigin,
+    corsOrigin: DASH_ORIGIN,
     qr: {
       auth: authDeps,
       findStore: async (id) => findStoreWithAgency(await getPool(), id),
@@ -336,11 +336,14 @@ async function insertOp2Agency(): Promise<void> {
   ]);
 }
 
+// CORS の許可オリジン（loadConfig へ渡す値と、試験で送る Origin の両方に使う）。
+const DASH_ORIGIN = 'https://dash.example';
+
 describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB)', () => {
   beforeAll(async () => {
     config = loadConfig({
       SURVEY_BASE_URL: 'https://survey.example',
-      DASHBOARD_WEB_ORIGIN: 'https://dash.example',
+      DASHBOARD_WEB_ORIGIN: DASH_ORIGIN,
       PLACES_API_KEY: 'test-places-key',
     });
     const pool = await getPool();
@@ -609,8 +612,8 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
 
   it('CORS: 許可オリジンには ACAO を返し、許可外オリジンには返さない', async () => {
     const app = buildApp();
-    const allowed = await app.request('/me', { headers: h(OP_TOKEN, config.corsOrigin) });
-    expect(allowed.headers.get('Access-Control-Allow-Origin')).toBe(config.corsOrigin);
+    const allowed = await app.request('/me', { headers: h(OP_TOKEN, DASH_ORIGIN) });
+    expect(allowed.headers.get('Access-Control-Allow-Origin')).toBe(DASH_ORIGIN);
 
     const denied = await app.request('/me', { headers: h(OP_TOKEN, 'https://evil.example') });
     expect(denied.headers.get('Access-Control-Allow-Origin')).toBeNull();
@@ -621,13 +624,13 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     const res = await app.request('/me', {
       method: 'OPTIONS',
       headers: {
-        Origin: config.corsOrigin,
+        Origin: DASH_ORIGIN,
         'Access-Control-Request-Method': 'GET',
         'Access-Control-Request-Headers': 'authorization',
       },
     });
     expect(res.status).toBe(204);
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(config.corsOrigin);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(DASH_ORIGIN);
     const methods = res.headers.get('Access-Control-Allow-Methods') ?? '';
     expect(methods).toContain('GET');
     expect(methods).toContain('POST');
