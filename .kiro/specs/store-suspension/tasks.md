@@ -96,7 +96,7 @@
   - _Depends: 2.1_
 
 - [ ] 5. 管理画面: 状態表示と操作
-- [ ] 5.1 (P) 確認ダイアログの共通部品を作る
+- [x] 5.1 (P) 確認ダイアログの共通部品を作る
   - 既存依存の AlertDialog を design tokens で包み、題名・説明・確定・キャンセルを持つ部品にする。焦点はダイアログ内に閉じ込め、閉じると起点へ戻る
   - 部品を UI パッケージの公開面へ加え、UI パッケージのビルド（dist）が通る。管理画面から import できる状態になる
   - 部品の試験で、開閉・確定・キャンセル・焦点の戻りが緑になり、直書き色のガードが緑になる
@@ -179,3 +179,4 @@
 - 1.4: information_schema.columns は接続ユーザーの権限で絞られる。権限検査の列の走査元は pg_attribute にする。stores に列を足したら infra/sql/grants.sql の列挙にも足す（check_store_suspension_privileges.sh が赤で知らせる）
 - 2.1: setStoreSuspension は CTE の FOR UPDATE で後着に最新の停止時刻を返す。@fwlm/db の試験の UUID 接頭辞 a5 は store-suspension が使用中
 - 3.5: 下書きの再生成は署名済みトークンだけで動いていた。署名後に変わりうる状態（停止）はトークンに頼らず毎回店舗を読み直す
+- 5.1: @fwlm/ui は dist を持たずソースのまま配る。部品を足すと design-language.md の部品表・角丸表と contrast-usage.test.ts の分類が追記を要求する。Base UI のダイアログは aria-modal を付けず背景へ aria-hidden を付ける
