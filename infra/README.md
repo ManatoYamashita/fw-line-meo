@@ -49,6 +49,14 @@
    - その LINE Login チャネル配下に LIFF アプリを追加し、エンドポイント URL に store-detail の Cloud Run URL（`terraform output service_names` の `store-detail` から解決）を設定する
    - 取得した LINE Login チャネル ID・LIFF アプリ ID・LIFF URL をそれぞれ `terraform.tfvars` の `liff_channel_id`・`liff_id`・`liff_url` に設定し `make tf-apply` する（#6 LINE 基盤チームと共同で実施・design.md「Open Questions / Risks」参照。line-onboarding は既にマージ済みのため、Messaging API チャネル自体は準備済み）
 
+10. **人のアカウントの IAM**（Terraform は SA とワークロードの権限だけを持つ）。現在の付与は次の表が正典で、足すとき・外すときは同じ PR でこの表を更新する。確かめ方: `gcloud projects get-iam-policy gen-fw-line-meo --flatten=bindings --filter="bindings.members:user" --format="value(bindings.role,bindings.members)"`
+
+    | アカウント | ロール | 理由 | 期限 |
+    |---|---|---|---|
+    | `gen.gourmet1234@gmail.com` | `roles/owner` | Terraform の ADC（§9-2-a） | 恒久 |
+    | `manapuraza@gmail.com` | `roles/owner` | 運用・gcloud・Search Console の所有権確認（§9-2-a） | 恒久 |
+    | `firstweb.sato@gmail.com` | `roles/oauthconfig.editor`・`roles/browser` | 同意画面のユーザーサポートメールに自分のアドレスを選ぶため、同意画面をこのアカウントで設定する（選べるのは設定者自身のアドレスか、その人が管理する Google グループだけ）。Editor は本番リソースまで変更できるので使わない | 同意画面の設定が済んだら外す（2026-09-23 付与・Issue #146） |
+
 ---
 
 ## 2. Terraform 適用手順
