@@ -50,6 +50,9 @@ ENV NODE_ENV=production
 # standalone は依存を内包した server.js を出力（node_modules 不要）。
 COPY --from=build /repo/apps/dashboard-web/.next/standalone ./
 COPY --from=build /repo/apps/dashboard-web/.next/static ./apps/dashboard-web/.next/static
+# public/ も standalone に含まれない（Next.js の standalone 出力は public と .next/static を
+# 利用者がコピーする前提）。ここを落とすと、ログインボタンの G ロゴが本番だけ 404 になる（Issue #146 で実測）。
+COPY --from=build /repo/apps/dashboard-web/public ./apps/dashboard-web/public
 EXPOSE 8080
 ENV PORT=8080
 ENV HOSTNAME=0.0.0.0
