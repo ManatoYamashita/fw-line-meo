@@ -62,8 +62,9 @@ variable "survey_base_url" {
 
 variable "dashboard_web_origin" {
   description = <<-EOT
-    dashboard-web の Cloud Run オリジン（CORS 許可元・dashboard-api の DASHBOARD_WEB_ORIGIN 用）。
-    dashboard-web の初回デプロイ後にその Cloud Run URL（またはカスタムドメイン）を設定する。
+    dashboard-web の配信元オリジン（CORS 許可元・dashboard-api の DASHBOARD_WEB_ORIGIN 用）。
+    通常は 1 つ。独自ドメインへの移行期間だけ、カンマ区切りで新旧 2 つを完全一致で許可する
+    （infra/README.md §9-2-c・Issue #146）。末尾スラッシュやパスを付けると起動時に弾かれる。
   EOT
   type        = string
   default     = ""

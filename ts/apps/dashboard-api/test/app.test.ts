@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createApp, clampSize, type AppDeps } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, parseCorsOrigins } from '../src/config.js';
 import type { QrDeps } from '../src/qr.js';
 
 // 最小の QR deps（health とルート配線の確認用。RBAC 詳細は qr.test / 6.2 が担う）。
@@ -132,5 +132,46 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ SURVEY_BASE_URL: 'https://survey.example', DASHBOARD_WEB_ORIGIN: 'https://dash.example' }),
     ).toThrow(/PLACES_API_KEY/);
+  });
+});
+
+// 独自ドメインへの移行期間だけ、新旧 2 つのオリジンを許可する（Issue #146）。
+describe('DASHBOARD_WEB_ORIGIN の複数指定', () => {
+  it('1 つなら文字列のまま返す（従来どおり）', () => {
+    expect(parseCorsOrigins('https://dash.example')).toBe('https://dash.example');
+  });
+
+  it('カンマ区切りなら前後の空白を除いて配列で返す', () => {
+    expect(parseCorsOrigins('https://new.example, https://old.example')).toEqual([
+      'https://new.example',
+      'https://old.example',
+    ]);
+  });
+
+  it('空・空白だけは欠落として扱う', () => {
+    expect(() => parseCorsOrigins(' , ')).toThrow(/DASHBOARD_WEB_ORIGIN is required/);
+  });
+
+  it.each(['https://dash.example/', 'https://dash.example/app', 'dash.example', 'https://a.example,nope'])(
+    'オリジンでない値 %s は起動時に弾く（完全一致の CORS で黙って全拒否になるのを防ぐ）',
+    (raw) => {
+      expect(() => parseCorsOrigins(raw)).toThrow(/オリジンでない値/);
+    },
+  );
+
+  it('2 つ指定すると両方に ACAO を返し、それ以外には返さない', async () => {
+    const app = createApp({ ...fakeAppDeps(), corsOrigin: ['https://new.example', 'https://old.example'] });
+    const preflight = (origin: string) =>
+      app.request('/me', {
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' },
+      });
+    expect((await preflight('https://new.example')).headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://new.example',
+    );
+    expect((await preflight('https://old.example')).headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://old.example',
+    );
+    expect((await preflight('https://evil.example')).headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 });

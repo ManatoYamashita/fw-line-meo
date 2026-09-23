@@ -505,6 +505,27 @@ curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status"
    - OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI を**同じ値**に差し替える（1 文字でも違えば `redirect_uri_mismatch`）
    - 同意画面の承認済みドメインに `firstweb-works.com` を登録する（ホームページ・ポリシーと同じ top private domain なので 1 つで足りる）
 
+#### 9-2-c. ダッシュボードも独自ドメインへ移す（Issue #146）
+
+**同意画面（ブランド）はプロジェクトに 1 つで、ダッシュボードの Google ログインと GBP 連携が共有する**（2026-09-23 実測: 本番環境・外部で公開済み）。ブランド検証は承認済みドメインのすべてについて所有権の確認を求めるので、ダッシュボードが `*.run.app` と `*.firebaseapp.com` に残る限り通らない。そこでダッシュボードも `dashboard.firstweb-works.com` へ移す（別プロジェクトへの分離は採らなかった。GBP API の利用申請はプロジェクト単位のため）。
+
+| 対象 | 変更 | 管理 |
+|---|---|---|
+| Cloud Run の割り当て | `dashboard.firstweb-works.com` → dashboard-web | `custom-domain.tf`（9-2-b と同じ手順・CNAME はプロキシ OFF） |
+| Firebase Auth の `authDomain` | `gen-fw-line-meo.firebaseapp.com` → `dashboard.firstweb-works.com` | GitHub 変数 `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`（build-arg） |
+| `/__/auth/` の中継 | dashboard-web が `https://gen-fw-line-meo.firebaseapp.com/__/auth/` へ透過的に rewrite する（Firebase「redirect best practices」の Option 3。302 は不可） | `ts/apps/dashboard-web/next.config.ts` |
+| Identity Platform の承認済みドメイン | `dashboard.firstweb-works.com` を追加 | 手作業（§1 の 4）・`identitytoolkit` admin v2 `config` の `authorizedDomains` |
+| OAuth クライアント「Identity Platform - dashboard-web」 | JavaScript 生成元 `https://dashboard.firstweb-works.com`・リダイレクト URI `https://dashboard.firstweb-works.com/__/auth/handler` を追加 | 手作業（§1 の 4） |
+| dashboard-api の CORS | `dashboard_web_origin` をカンマ区切りで新旧 2 つに（移行期間だけ） | tfvars |
+
+**順序**: 割り当てと中継と追加（上の 5 行）を済ませてから `authDomain` を切り替える。切り替えた後で、新しい URL でログインできることを人が確かめる。確かめた後で、ブランド検証のために次を外す。
+
+- OAuth クライアントの `firebaseapp.com` と `run.app` の生成元・リダイレクト URI
+- 同意画面の承認済みドメインの `dashboard-web-….run.app` と `gen-fw-line-meo.firebaseapp.com`
+- CORS の旧オリジン
+
+**外した後は run.app のダッシュボードではログインできない。** 利用者には新しい URL を案内する。
+
 ### 9-3. 進捗の追跡
 
 この節は**手順の正典**であり、状態の正典ではない。承認・却下・提出の事実は Issue #146 のコメントへ実測の証拠つきで残すこと（9-1 の判定コマンドの出力、クォータ画面のスクリーンショット、申請日と受領メールの日付）。
