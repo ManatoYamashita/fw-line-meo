@@ -19,6 +19,10 @@
 //   - 競合比較できない店舗（競合なし・評価を持つ競合なし）へ通知が出ず、理由つきで記録されること
 //   - 評価なしの競合を含む行で、判定が**正規化後の順位母数**を使うこと（競合の件数ではない）
 //
+// store-suspension（tasks 7.1・Requirements 4.3, 4.5）で、停止中の店舗を足した。Go の段はこの店舗の
+// 取得も集計も行わない。配信の段は、同じ店舗を対象にも見送りの候補にもせず、通知記録を 1 行も残さない
+// ことを確かめる（集計が無い店舗なので、見送りの候補の述語が停止を見ていなければ skipped_no_summary が残る）。
+//
 // 実行方法: db/test/cross_runtime_steps.sh が
 //   1. Go 側テスト（go test ./internal/batch/... -run TestCrossRuntimeContract）を先に実行し、
 //   2. 直後に本ファイルを CROSS_RUNTIME_GO_SEEDED=1 付きで実行する
@@ -46,6 +50,9 @@ const UNRATED_STORE_ID = 'c7100000-0000-0000-0000-000000000003';
 const READY_LINE_USER_ID = 'U-cross-runtime-ready';
 const NOCOMP_LINE_USER_ID = 'U-cross-runtime-nocomp';
 const UNRATED_LINE_USER_ID = 'U-cross-runtime-unrated';
+// 停止中の店舗（store-suspension tasks 7.1）。
+const SUSPENDED_STORE_ID = 'c7100000-0000-0000-0000-000000000004';
+const SUSPENDED_LINE_USER_ID = 'U-cross-runtime-suspended';
 const CROSS_RUNTIME_DELIVERY_HOUR = 17;
 const TODAY = '2026-07-12';
 // resolveJstNow(NOW) === { hour: 17, date: '2026-07-12' }（UTC 8時 = JST 17時）。
@@ -291,8 +298,11 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
       expect(summary.currentJstHour).toBe(CROSS_RUNTIME_DELIVERY_HOUR);
       expect(summary.summaryDate).toBe(TODAY);
       expect(summary.reportMenuReady).toBe(true);
-      // この配信時刻を使うのは Go 側が seed した 3 店舗だけである（他の試験ファイルは 7・9・10・11・14）。
+      // この配信時刻を使うのは Go 側が seed した 4 店舗だけである（他の試験ファイルは 7・9・10・11・14）。
+      // そのうち停止中の 1 店舗は対象にも見送りの候補にもならないので、対象は 3 件である。
       expect(summary.targetsTotal).toBe(3);
+      // 当日の集計が無い店舗は停止中の 1 店舗だけであり、それを見送りとして数えない（store-suspension 4.3）。
+      expect(summary.skipped).toBe(0);
       expect(summary.delivered).toBe(1); // readyStore だけが変化のあった店舗
       expect(summary.failed).toBe(0);
       // 競合なし（nocompStore）と、評価を持つ競合なし（unratedStore）。どちらも比較できない。
@@ -361,6 +371,26 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
 
       // 送ったのは 1 通だけ（比較できない 2 店へは 1 度も送っていない）。
       expect(pushedTo).toHaveLength(1);
+
+      // --- 停止中の店舗（store-suspension 4.3, 4.5）: Go が取得の対象から外したのと同じ停止状態を配信も
+      // 参照し、送信も見送りも記録しない。前提（確定済み・停止中・同じ配信時刻のオーナー・当日の集計なし）を
+      // 先に確かめ、不在の表明が空振りしないようにする。
+      const suspendedStoreRes = await pool.query<{ suspended: boolean; delivery_hour: number; has_summary: boolean }>(
+        `SELECT s.suspended_at IS NOT NULL AS suspended, o.delivery_hour,
+                EXISTS (SELECT 1 FROM daily_summaries ds WHERE ds.store_id = s.id) AS has_summary
+           FROM stores s JOIN owners o ON o.id = s.owner_id
+          WHERE s.id = $1 AND s.place_status = 'confirmed'`,
+        [SUSPENDED_STORE_ID],
+      );
+      expect(suspendedStoreRes.rows).toEqual([
+        { suspended: true, delivery_hour: CROSS_RUNTIME_DELIVERY_HOUR, has_summary: false },
+      ]);
+      const suspendedDeliveryRes = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM summary_deliveries WHERE store_id = $1`,
+        [SUSPENDED_STORE_ID],
+      );
+      expect(suspendedDeliveryRes.rows[0]?.n).toBe(0);
+      expect(pushedTo).not.toContain(SUSPENDED_LINE_USER_ID);
     });
   },
 );
