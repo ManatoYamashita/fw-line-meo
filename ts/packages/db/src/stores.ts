@@ -10,6 +10,8 @@ export interface SurveyStore {
   name: string;
   placeId: string | null;
   placeStatus: PlaceStatus;
+  /** 停止時刻（Issue #252）。null は利用中、値があれば停止中。 */
+  suspendedAt: Date | null;
 }
 
 // QR RBAC 判定用に owner 経由の agency を同梱した店舗情報。
@@ -32,7 +34,8 @@ export async function findStoreForSurvey(
     name: string;
     place_id: string | null;
     place_status: PlaceStatus;
-  }>('SELECT id, name, place_id, place_status FROM stores WHERE id = $1', [id]);
+    suspended_at: Date | null;
+  }>('SELECT id, name, place_id, place_status, suspended_at FROM stores WHERE id = $1', [id]);
   const row = res.rows[0];
   if (!row) return null;
   return {
@@ -40,6 +43,7 @@ export async function findStoreForSurvey(
     name: row.name,
     placeId: row.place_id,
     placeStatus: row.place_status,
+    suspendedAt: row.suspended_at,
   };
 }
 
@@ -54,10 +58,11 @@ export async function findStoreWithAgency(
     name: string;
     place_id: string | null;
     place_status: PlaceStatus;
+    suspended_at: Date | null;
     owner_id: string;
     agency_id: string;
   }>(
-    `SELECT s.id, s.name, s.place_id, s.place_status, s.owner_id, o.agency_id
+    `SELECT s.id, s.name, s.place_id, s.place_status, s.suspended_at, s.owner_id, o.agency_id
        FROM stores s
        JOIN owners o ON o.id = s.owner_id
       WHERE s.id = $1`,
@@ -70,6 +75,7 @@ export async function findStoreWithAgency(
     name: row.name,
     placeId: row.place_id,
     placeStatus: row.place_status,
+    suspendedAt: row.suspended_at,
     ownerId: row.owner_id,
     agencyId: row.agency_id,
   };
@@ -127,6 +133,7 @@ interface StoreListRow {
   id: string;
   name: string;
   place_status: PlaceStatus;
+  suspended_at: Date | null;
   competitor_configured: boolean;
   owner_id: string;
   owner_display_name: string | null;
@@ -150,6 +157,7 @@ export async function listStoresWithStatus(
     `SELECT s.id,
             s.name,
             s.place_status,
+            s.suspended_at,
             EXISTS (
               SELECT 1 FROM competitors c WHERE c.store_id = s.id AND c.active
             ) AS competitor_configured,
@@ -169,6 +177,7 @@ export async function listStoresWithStatus(
     id: row.id,
     name: row.name,
     placeStatus: row.place_status,
+    suspendedAt: row.suspended_at,
     competitorConfigured: row.competitor_configured,
     ownerId: row.owner_id,
     ownerDisplayName: row.owner_display_name,
@@ -189,4 +198,69 @@ export async function setStoreCategory(
   categoryCode: string,
 ): Promise<void> {
   await db.query('UPDATE stores SET category_code = $1 WHERE id = $2', [categoryCode, storeId]);
+}
+
+export type SuspensionDirection = 'suspend' | 'resume';
+
+export interface SetStoreSuspensionInput {
+  storeId: string;
+  direction: SuspensionDirection;
+  /** null は運営（全店舗）。値があればその代理店の店舗に限る。 */
+  agencyId: string | null;
+}
+
+export type SetStoreSuspensionOutcome =
+  | { kind: 'changed'; store: { id: string; suspendedAt: Date | null } }
+  | { kind: 'unchanged'; store: { id: string; suspendedAt: Date | null } }
+  | { kind: 'not_found' };
+
+/**
+ * 店舗の停止状態を範囲つきで切り替える（store-suspension spec・Issue #252）。
+ *
+ * 範囲の判定と状態の更新を 1 文で行う。範囲は agencyId が null なら全店舗（運営）、値があれば
+ * owners 経由でその代理店の店舗に限る（Req 1.1, 1.2）。範囲外と不存在はどちらも行が選ばれず
+ * `not_found` になり、応答から区別できない（Req 1.4）。既に目的の状態にある店舗は行を変えず
+ * `unchanged` を返す（Req 1.5）。更新するのは `suspended_at` だけで、他の列・他のテーブルには
+ * 触れない（Req 1.7, 5.3）。
+ *
+ * 同時実行: `target` が対象行を FOR UPDATE で押さえ、後着はロック解放後の最新版を読み直す。
+ * 更新側の条件も最新版で再評価されるため、同じ店舗への同時の停止は 1 回だけ `changed` になり、
+ * 後着は先着が書いた現在の停止時刻を持つ `unchanged` になる。
+ *
+ * storeId の UUID 形式の検証は呼び出し側が行う（形式外の値は uuid への変換で失敗する）。
+ */
+export async function setStoreSuspension(
+  db: Queryable,
+  input: SetStoreSuspensionInput,
+): Promise<SetStoreSuspensionOutcome> {
+  const suspend = input.direction === 'suspend';
+  const res = await db.query<{ id: string; changed: boolean; suspended_at: Date | null }>(
+    `WITH target AS (
+       SELECT s.id, s.suspended_at
+         FROM stores s
+         JOIN owners o ON o.id = s.owner_id
+        WHERE s.id = $1::uuid
+          AND ($3::uuid IS NULL OR o.agency_id = $3::uuid)
+          FOR UPDATE OF s
+     ), updated AS (
+       UPDATE stores s
+          SET suspended_at = CASE WHEN $2::boolean THEN now() ELSE NULL END
+         FROM target t
+        WHERE s.id = t.id
+          AND (s.suspended_at IS NULL) = $2::boolean
+       RETURNING s.id, s.suspended_at
+     )
+     SELECT t.id,
+            (u.id IS NOT NULL) AS changed,
+            CASE WHEN u.id IS NOT NULL THEN u.suspended_at ELSE t.suspended_at END AS suspended_at
+       FROM target t
+       LEFT JOIN updated u ON u.id = t.id`,
+    [input.storeId, suspend, input.agencyId],
+  );
+  const row = res.rows[0];
+  if (!row) return { kind: 'not_found' };
+  return {
+    kind: row.changed ? 'changed' : 'unchanged',
+    store: { id: row.id, suspendedAt: row.suspended_at },
+  };
 }

@@ -72,6 +72,7 @@ TEST_DIR="${ROOT}/db/test"
 RUN_SCRIPTS=(
     'check_docs.sh'
     'check_no_optional_capabilities.sh'
+    'check_store_suspension_privileges.sh'
 )
 
 # SKIP 形式: `<ファイル名>|<Issue>|<理由>`。**理由と追跡先の無い SKIP を作らない。**
@@ -191,6 +192,11 @@ for sh_path in "${TEST_DIR}"/*.sh; do
             # export 済みであり、env 無指定の `env bash` がそのまま子へ渡す（#158 (a)）。
             # **節そのものは省かない。** 上のコメントどおりここが env の唯一の情報源なので、
             # 「env が要らないことを確認した」と「書き忘れた」を読み手が区別できる形にしておく。
+            ;;
+        check_store_suspension_privileges.sh)
+            # 追加の env は要らない（DATABASE_URL は export 済み）。ロールを作って infra/sql/grants.sql を
+            # 当てるので、接続ユーザーに CREATEROLE が要る。無ければスクリプト自身が赤にする。
+            # 作ったロールは終了時にスクリプトが片付けるので、後続の TS 統合テストの DB を汚さない。
             ;;
     esac
 

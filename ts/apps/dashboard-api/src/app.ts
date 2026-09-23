@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { handleQr, type QrDeps } from './qr.js';
 import { handleMe, type MeDeps } from './me.js';
 import { handleStoresList, type StoresListDeps } from './stores-list.js';
+import { handleStoreSuspension, type StoreSuspensionDeps } from './store-suspension.js';
 import { handleOwnersList, type OwnersListDeps } from './owners-list.js';
 import { handleCategories, type CategoriesDeps } from './categories.js';
 import {
@@ -52,6 +53,8 @@ export interface AppDeps {
     search: StoreSearchDeps;
     register: StoreRegistrationDeps;
   };
+  // 店舗の停止・再開（store-suspension）。1 つの依存を両ルートで共有する。
+  storeSuspension: StoreSuspensionDeps;
   inviteCodes: {
     list: InviteCodesListDeps;
     issue: InviteCodeIssueDeps;
@@ -182,6 +185,25 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       log: c.get('correlationLog'),
     });
   });
+
+  // --- 店舗の停止・再開（body 不要。対象は :id・範囲は認証ユーザーの役割から決める）。 ---
+  // 状態を変える操作なので POST のサブパスで表し、CORS の許可メソッドは GET/POST のまま変えない。
+
+  app.post('/stores/:id/suspend', (c) =>
+    handleStoreSuspension(deps.storeSuspension, {
+      authorization: authHeader(c),
+      id: c.req.param('id'),
+      direction: 'suspend',
+    }),
+  );
+
+  app.post('/stores/:id/resume', (c) =>
+    handleStoreSuspension(deps.storeSuspension, {
+      authorization: authHeader(c),
+      id: c.req.param('id'),
+      direction: 'resume',
+    }),
+  );
 
   // --- 招待コード。 ---
 

@@ -2,17 +2,21 @@ import type { DraftGenerator } from '../../../lib/draft/generator';
 import { pickVariation } from '../../../lib/draft/prompt';
 import type { RateLimiter } from '../../../lib/rate-limit';
 import type { SessionTokenService } from '../../../lib/session-token';
+import type { SurveyStoreView } from '../responses/handler';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
 import { logFactualityResidual, logGenerationFailure, type SurveyLogger } from '../../../lib/structured-log';
 
 // 再生成 API の中核ロジック（依存注入でテスト可能）。
 // 集計には一切触れず、attempt は生成成功時のみ +1、上限到達で 409。
+// 店舗が不存在・未確定・停止中なら 404（Issue #252）。sessionToken は停止前に発行されていても
+// 有効期限内なら検証を通るため、トークンだけで判断せず毎回店舗の状態を読む。
 
 export interface DraftsDeps {
   tokens: SessionTokenService;
   generator: DraftGenerator;
   rateLimiter: RateLimiter;
+  findStore: (id: string) => Promise<SurveyStoreView | null>;
   clientKey: (req: Request) => string;
   log: SurveyLogger;
   supportCode?: string;
@@ -43,6 +47,12 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
   }
 
   const { storeId, material, attempt } = verified.value;
+
+  // 店舗（存在＋place 確定＋利用中のみ）。読むのは署名済みトークンの storeId。
+  const store = await deps.findStore(storeId);
+  if (!store || store.placeStatus !== 'confirmed' || store.suspendedAt !== null) {
+    return error(deps, 404, 'STORE_NOT_AVAILABLE', 'このアンケートは現在利用できません');
+  }
 
   // 上限到達（再生成は最大 REGEN_MAX 回）
   if (attempt >= REGEN_MAX) {

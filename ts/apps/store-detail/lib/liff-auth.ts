@@ -140,11 +140,16 @@ export async function verifyLiffIdToken(
 export type StoreResolutionError =
   /** sub に一致する owner が存在しない。 */
   | 'OWNER_NOT_FOUND'
-  /** owner は存在するが、place_status='confirmed' の店舗が 1 件も無い（オンボーディング未完了）。 */
+  /**
+   * owner は存在するが、place_status='confirmed' かつ利用中（suspended_at が NULL）の店舗が
+   * 1 件も無い（オンボーディング未完了、または全店が停止中）。全店が停止中のオーナーを店舗の
+   * 無いオーナーと区別しないのは store-suspension Requirement 6.3 による。
+   */
   | 'STORE_NOT_IDENTIFIED';
 
 /**
- * 検証済み `sub` が所有する confirmed 店舗の集合（＝認可済み集合）を返す。
+ * 検証済み `sub` が所有する confirmed 店舗の集合（＝認可済み集合）を返す。停止中の店舗
+ * （`suspended_at IS NOT NULL`）は閲覧対象に含めない（store-suspension Requirement 6.1）。
  *
  * Security-critical: この関数のシグネチャは `(pool, sub: string)` の 2 引数のみを受け付ける。
  * `storeId`・`ownerId` 等、クライアント制御可能な識別子を受け取るパラメータは存在しない。
@@ -169,7 +174,7 @@ export async function listOwnerConfirmedStores(
   const storeRes = await pool.query<StoreRow>(
     `SELECT id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at
        FROM stores
-      WHERE owner_id = $1 AND place_status = 'confirmed'
+      WHERE owner_id = $1 AND place_status = 'confirmed' AND suspended_at IS NULL
       ORDER BY created_at ASC, id ASC`,
     [ownerRow.id],
   );

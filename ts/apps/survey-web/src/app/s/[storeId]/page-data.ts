@@ -8,6 +8,8 @@ export interface StoreForPage {
   name: string;
   placeId: string | null;
   placeStatus: 'pending' | 'confirmed';
+  /** 利用停止の時刻（Issue #252）。null なら利用中。 */
+  suspendedAt: Date | null;
 }
 
 export interface SurveyPageDeps {
@@ -28,13 +30,16 @@ export type SurveyPageData =
       googleReviewUrl: string;
     };
 
-/** 店舗が存在し place 確定済みなら回答可能データを、そうでなければ unavailable を返す。 */
+/**
+ * 店舗が存在し place 確定済みかつ利用中なら回答可能データを、そうでなければ unavailable を返す。
+ * 停止中（Issue #252）は店舗を特定できない場合と同じ表示にし、停止中であることを客へ示さない。
+ */
 export async function loadSurveyPageData(
   deps: SurveyPageDeps,
   storeId: string,
 ): Promise<SurveyPageData> {
   const store = await deps.findStore(storeId);
-  if (!store || store.placeStatus !== 'confirmed' || !store.placeId) {
+  if (!store || store.placeStatus !== 'confirmed' || store.suspendedAt !== null || !store.placeId) {
     return { kind: 'unavailable' };
   }
   const aspects = await deps.listAspects();

@@ -1,6 +1,6 @@
 // レポート用の読み出し（line-on-demand-report）。
 //
-// line-webhook の 3 つのレポート（新着口コミ・競合店との比較・直近の推移）が使う、オーナーの確定店舗と
+// line-webhook の 3 つのレポート（新着口コミ・競合店との比較・直近の推移）が使う、オーナーの確定店舗（停止中を除く）と
 // 日次集計の読み出しを 1 か所に置く。SELECT だけを発行し、書き込みはしない（daily_summaries を書くのは
 // Go だけで、line-webhook は読むだけである）。各関数の問い合わせは 1 回である。
 //
@@ -22,7 +22,7 @@
 import type { Queryable } from './pool.js';
 import type { DailySummaryReadRow } from './types.js';
 
-/** レポートの対象にできる店舗（オーナー本人の確定店舗）。 */
+/** レポートの対象にできる店舗（オーナー本人の、停止中でない確定店舗）。 */
 export interface ReportableStore {
   readonly id: string;
   readonly name: string;
@@ -36,10 +36,14 @@ const READ_COLUMNS = `to_char(ds.summary_date, 'YYYY-MM-DD') AS summary_date,
        ds.google_maps_reviews_uri`;
 
 /**
- * オーナー本人の確定店舗を作成順（作成時刻が同じなら id の順）に返す。無ければ空の配列。
+ * オーナー本人の確定店舗のうち停止中でないものを、作成順（作成時刻が同じなら id の順）に返す。
+ * 無ければ空の配列。
  *
  * 前提: ownerId は署名検証済みの LINE ユーザーから導いたオーナー ID に限る。
- * 店舗の利用停止状態（Issue #252）が先に入った場合は、この 1 か所に停止中を除く述語を足す。
+ * 停止中の店舗（suspended_at が入っている店舗・Issue #252）はこの 1 か所で除く（store-suspension
+ * Requirements 6.2, 6.3）。line-webhook の選択肢・選択の postback の検証・0 店舗の案内は、すべてこの
+ * 戻り値の内側で決まる（src/report/stores.ts の resolveTargetStore）。したがって停止中の店舗は選択肢に
+ * 出ず、それを指す postback は現在の選択肢の再提示に落ち、全店停止のオーナーには店舗が無いときの案内が返る。
  */
 export async function listReportableStores(db: Queryable, ownerId: string): Promise<ReportableStore[]> {
   const res = await db.query<ReportableStore>(
@@ -47,6 +51,7 @@ export async function listReportableStores(db: Queryable, ownerId: string): Prom
        FROM stores
       WHERE owner_id = $1
         AND place_status = 'confirmed'
+        AND suspended_at IS NULL
       ORDER BY created_at, id`,
     [ownerId],
   );

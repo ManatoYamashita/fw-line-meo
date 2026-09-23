@@ -291,6 +291,7 @@ export interface StoreListItem {
   id: string;
   name: string;
   placeStatus: PlaceStatus;
+  suspendedAt: Date | null; // 停止時刻（Issue #252）。null は利用中
   competitorConfigured: boolean; // EXISTS competitors WHERE store_id=... AND active
   ownerId: string;
   ownerDisplayName: string | null;

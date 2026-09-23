@@ -21,7 +21,7 @@ function baseDeps(over: Partial<ResponsesDeps> = {}): ResponsesDeps {
     generator: okGenerator(),
     rateLimiter: { check: () => true },
     findStore: () =>
-      Promise.resolve({ id: STORE, name: 'テスト店', placeId: 'ChIJ', placeStatus: 'confirmed' }),
+      Promise.resolve({ id: STORE, name: 'テスト店', placeId: 'ChIJ', placeStatus: 'confirmed', suspendedAt: null }),
     listAspects: () =>
       Promise.resolve([
         { code: 'taste', label: '味' },
@@ -255,10 +255,63 @@ describe('handleResponses', () => {
     const res = await handleResponses(
       req(validBody()),
       baseDeps({
-        findStore: () => Promise.resolve({ id: STORE, name: '店', placeId: null, placeStatus: 'pending' }),
+        findStore: () => Promise.resolve({ id: STORE, name: '店', placeId: null, placeStatus: 'pending', suspendedAt: null }),
       }),
     );
     expect(res.status).toBe(404);
+  });
+
+  // Issue #252: 停止中の店舗への回答は受け付けず、集計にも下書き生成にも用いない（Requirement 5.2）。
+  // 星の高低で扱いを変えない（レビューゲーティング禁止）ため、全ての星で同じ応答になることも見る。
+  it.each([1, 2, 3, 4, 5])(
+    '停止中の店舗への回答（星 %i）は 404 STORE_NOT_AVAILABLE で、集計も生成も呼ばない',
+    async (star) => {
+      const incrementTallies = vi.fn(() => Promise.resolve());
+      const generate = vi.fn(() => Promise.resolve(ok('呼ばれてはいけない')));
+      const listAspects = vi.fn(() => Promise.resolve([{ code: 'taste', label: '味' }]));
+      const res = await handleResponses(
+        req(validBody({ star })),
+        baseDeps({
+          incrementTallies,
+          generator: { generate },
+          listAspects,
+          findStore: () =>
+            Promise.resolve({
+              id: STORE,
+              name: 'テスト店',
+              placeId: 'ChIJ',
+              placeStatus: 'confirmed',
+              suspendedAt: new Date('2026-09-01T00:00:00Z'),
+            }),
+        }),
+      );
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error.code).toBe('STORE_NOT_AVAILABLE');
+      expect(json.error.message).toBe('このアンケートは現在利用できません');
+      expect(json.sessionToken).toBeUndefined();
+      expect(incrementTallies).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+      expect(listAspects).not.toHaveBeenCalled();
+    },
+  );
+
+  it('再開された店舗（suspendedAt が null に戻った）への回答は通常どおり受け付ける（Requirement 5.4）', async () => {
+    let suspendedAt: Date | null = new Date('2026-09-01T00:00:00Z');
+    const incrementTallies = vi.fn(() => Promise.resolve());
+    const d = baseDeps({
+      incrementTallies,
+      findStore: () =>
+        Promise.resolve({ id: STORE, name: 'テスト店', placeId: 'ChIJ', placeStatus: 'confirmed', suspendedAt }),
+    });
+    expect((await handleResponses(req(validBody()), d)).status).toBe(404);
+    expect(incrementTallies).not.toHaveBeenCalled();
+
+    suspendedAt = null;
+    const res = await handleResponses(req(validBody()), d);
+    expect(res.status).toBe(200);
+    expect((await res.json()).generation).toBe('ok');
+    expect(incrementTallies).toHaveBeenCalledTimes(1);
   });
 
   it('星欠落は 400 VALIDATION（生成しない）', async () => {

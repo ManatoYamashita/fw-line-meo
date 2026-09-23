@@ -15,6 +15,7 @@ function store(over: Partial<StoreWithAgency> = {}): StoreWithAgency {
     name: 'テスト店',
     placeId: 'ChIJ',
     placeStatus: 'confirmed',
+    suspendedAt: null,
     ownerId: 'ow1',
     agencyId: 'ag1',
     ...over,
@@ -88,6 +89,48 @@ describe('handleQr', () => {
       req(),
     );
     expect(res.status).toBe(403); // 409 ではない
+  });
+
+  it('停止中の店舗は 409 STORE_SUSPENDED（Req 5.5）', async () => {
+    const renderQr = vi.fn(() => Promise.resolve(Buffer.from([0x89, 0x50, 0x4e, 0x47])));
+    const res = await handleQr(
+      deps({ renderQr, findStore: () => Promise.resolve(store({ suspendedAt: new Date('2026-09-20T00:00:00Z') })) }),
+      req(),
+    );
+    expect(res.status).toBe(409);
+    const body = await readJson<ErrorEnvelope>(res);
+    expect(body.error.code).toBe('STORE_SUSPENDED');
+    expect(body.error.message).toBe('停止中の店舗の QR は発行できません');
+    expect(renderQr).not.toHaveBeenCalled();
+  });
+
+  it('停止中かつ place 未確定は STORE_SUSPENDED（停止の判定が確定の判定より先）', async () => {
+    const res = await handleQr(
+      deps({
+        findStore: () =>
+          Promise.resolve(
+            store({ placeStatus: 'pending', placeId: null, suspendedAt: new Date('2026-09-20T00:00:00Z') }),
+          ),
+      }),
+      req(),
+    );
+    expect(res.status).toBe(409);
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('STORE_SUSPENDED');
+  });
+
+  it('agency 他店は停止中でも 403（範囲の判定が停止の判定より先・情報漏洩防止）', async () => {
+    const res = await handleQr(
+      deps({ findStore: () => Promise.resolve(store({ suspendedAt: new Date('2026-09-20T00:00:00Z') })) }, AG_OTHER),
+      req(),
+    );
+    expect(res.status).toBe(403);
+    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('FORBIDDEN');
+  });
+
+  it('再開後（suspendedAt が null）の確定店舗は 200 image/png（Req 5.7）', async () => {
+    const res = await handleQr(deps({ findStore: () => Promise.resolve(store({ suspendedAt: null })) }), req());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/png');
   });
 
   it('operator は確定店舗の QR を 200 image/png で返す', async () => {

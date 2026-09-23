@@ -7,6 +7,8 @@
 //   - 日付は 'YYYY-MM-DD' の文字列で返す（pg の Date への変換と実行環境の TZ に依存しない）
 //   - 範囲の読み出しは、終点を含む N 暦日を日付の昇順で返す
 //   - 店舗はオーナー本人の確定店舗だけを、作成順（同時刻は id の順）に返す
+//   - 停止中の店舗（suspended_at が入っている店舗・Issue #252）は、確定店舗でも返さない
+//     （store-suspension Requirements 6.2, 6.3）
 //   - 返す行は正規化の前の生の値である（正規化は呼出元が normalizeSummaryRatings で行う）
 //   - 新着口コミの帰属 3 項目は、持つ要素ではその値を返し、持たない既存の要素では項目そのものが無い
 //
@@ -37,6 +39,17 @@ const ST_TIE_HIGH = 'c8000000-0000-0000-0000-000000000120';
 const ST_PENDING = 'c8000000-0000-0000-0000-000000000130';
 const ST_OTHER_OWNER = 'c8000000-0000-0000-0000-000000000140';
 const ST_PENDING_ONLY = 'c8000000-0000-0000-0000-000000000150';
+
+// --- 停止中の店舗の除外の検証用（store-suspension Requirements 6.2, 6.3）---
+// どの店舗も確定店舗なので、停止の述語が無ければ結果に出る。述語を消したときに試験が空振りしないようにするため。
+const OWNER_PARTLY_SUSPENDED = 'c8000000-0000-0000-0000-000000000015'; // 利用中 1 店と停止中 1 店
+const OWNER_ALL_SUSPENDED = 'c8000000-0000-0000-0000-000000000016'; // 確定店舗がすべて停止中
+const OWNER_RESUMED = 'c8000000-0000-0000-0000-000000000017'; // 停止した後に再開する店舗
+const ST_ACTIVE = 'c8000000-0000-0000-0000-000000000160';
+const ST_SUSPENDED = 'c8000000-0000-0000-0000-000000000161';
+const ST_ALL_SUSPENDED_A = 'c8000000-0000-0000-0000-000000000162';
+const ST_ALL_SUSPENDED_B = 'c8000000-0000-0000-0000-000000000163';
+const ST_RESUMED = 'c8000000-0000-0000-0000-000000000164';
 
 // --- 日次集計の読み出しの検証用 ---
 const OWNER_SUMMARY = 'c8000000-0000-0000-0000-000000000014';
@@ -136,6 +149,14 @@ async function insertStore(
   );
 }
 
+// 停止時刻は SQL で直接立てる（停止の操作の経路（setStoreSuspension）の試験は store-suspension.db.test.ts が持つ）。
+async function setSuspendedAt(storeId: string, suspendedAt: string | null): Promise<void> {
+  const pool = await getPool();
+  const res = await pool.query('UPDATE stores SET suspended_at = $2::timestamptz WHERE id = $1', [storeId, suspendedAt]);
+  // 対象の行が無ければ停止を立てられておらず、除外の試験が空振りする。
+  expect(res.rowCount).toBe(1);
+}
+
 async function insertSummary(storeId: string, row: DailySummaryReadRow): Promise<void> {
   const pool = await getPool();
   await pool.query(
@@ -210,6 +231,9 @@ describe.skipIf(!process.env.DATABASE_URL)('report-reads (DB)', () => {
       [OWNER_OTHER, 'store_identified'],
       [OWNER_PENDING_ONLY, 'pending'],
       [OWNER_SUMMARY, 'store_identified'],
+      [OWNER_PARTLY_SUSPENDED, 'store_identified'],
+      [OWNER_ALL_SUSPENDED, 'store_identified'],
+      [OWNER_RESUMED, 'store_identified'],
     ] as const) {
       await pool.query(
         'INSERT INTO owners (id, agency_id, line_user_id, onboarding_status) VALUES ($1, $2, $3, $4)',
@@ -225,6 +249,17 @@ describe.skipIf(!process.env.DATABASE_URL)('report-reads (DB)', () => {
     await insertStore(ST_MIDDLE, OWNER_MULTI, 'レポート検証店 中間', true, '2026-01-02T00:00:00Z');
     await insertStore(ST_OTHER_OWNER, OWNER_OTHER, 'レポート検証店 別オーナー', true, '2026-01-01T12:00:00Z');
     await insertStore(ST_PENDING_ONLY, OWNER_PENDING_ONLY, 'レポート検証店 未確定のみ', false, '2026-01-01T00:00:00Z');
+
+    // 停止中の店舗は利用中の店舗より古くする（作成順の先頭に来る位置でも除外されることを見る）。
+    await insertStore(ST_SUSPENDED, OWNER_PARTLY_SUSPENDED, 'レポート検証店 停止中', true, '2026-01-01T00:00:00Z');
+    await insertStore(ST_ACTIVE, OWNER_PARTLY_SUSPENDED, 'レポート検証店 利用中', true, '2026-01-02T00:00:00Z');
+    await insertStore(ST_ALL_SUSPENDED_A, OWNER_ALL_SUSPENDED, 'レポート検証店 全停止A', true, '2026-01-01T00:00:00Z');
+    await insertStore(ST_ALL_SUSPENDED_B, OWNER_ALL_SUSPENDED, 'レポート検証店 全停止B', true, '2026-01-02T00:00:00Z');
+    await insertStore(ST_RESUMED, OWNER_RESUMED, 'レポート検証店 再開', true, '2026-01-01T00:00:00Z');
+    await setSuspendedAt(ST_SUSPENDED, '2026-09-01T00:00:00Z');
+    await setSuspendedAt(ST_ALL_SUSPENDED_A, '2026-09-01T00:00:00Z');
+    await setSuspendedAt(ST_ALL_SUSPENDED_B, '2026-09-02T00:00:00Z');
+    await setSuspendedAt(ST_RESUMED, '2026-09-01T00:00:00Z');
 
     await insertStore(ST_TREND, OWNER_SUMMARY, 'レポート検証店 推移', true, '2026-01-01T00:00:00Z');
     await insertStore(ST_WINDOW, OWNER_SUMMARY, 'レポート検証店 窓', true, '2026-01-02T00:00:00Z');
@@ -280,6 +315,48 @@ describe.skipIf(!process.env.DATABASE_URL)('report-reads (DB)', () => {
     it('確定店舗を持たないオーナーには空の配列を返す（未確定の店舗は数えない）', async () => {
       const pool = await getPool();
       expect(await listReportableStores(pool, OWNER_PENDING_ONLY)).toStrictEqual([]);
+    });
+  });
+
+  // store-suspension Requirements 6.2, 6.3。選択の postback の検証と 0 店舗の案内は、line-webhook の
+  // resolveTargetStore（src/report/stores.ts）がこの関数の戻り値の内側だけで決める純関数である。
+  // したがって、停止中の店舗がこの集合に入らないことが、選択肢・選択の検証・0 店舗の案内の 3 つを決める。
+  describe('listReportableStores は停止中の店舗を返さない', () => {
+    it('停止中の店舗は選択肢に出ず、利用中の店舗だけを返す（6.2）', async () => {
+      const pool = await getPool();
+      expect(await listReportableStores(pool, OWNER_PARTLY_SUSPENDED)).toStrictEqual([
+        { id: ST_ACTIVE, name: 'レポート検証店 利用中' },
+      ]);
+    });
+
+    it('停止中の店舗を指す選択は集合のどの要素とも一致せず、現在の選択肢（利用中の店舗）が残る（6.2）', async () => {
+      const pool = await getPool();
+      const stores = await listReportableStores(pool, OWNER_PARTLY_SUSPENDED);
+
+      // resolveTargetStore と同じ厳密な一致で探す。一致しなければ invalid_choice として現在の選択肢を
+      // 再提示する（line-on-demand-report Req 3.6）。再提示する選択肢が残っていることも併せて見る。
+      expect(stores.find((store) => store.id === ST_SUSPENDED)).toBeUndefined();
+      expect(stores.map((store) => store.id)).toStrictEqual([ST_ACTIVE]);
+    });
+
+    it('確定店舗がすべて停止中のオーナーには、店舗が無いオーナーと同じ空の配列を返す（6.3）', async () => {
+      const pool = await getPool();
+      const allSuspended = await listReportableStores(pool, OWNER_ALL_SUSPENDED);
+
+      // 0 店舗の案内（resolveTargetStore の none）は空の配列だけで決まる。店舗が無いオーナーの戻り値と
+      // 同じであることを直接比べる。
+      expect(allSuspended).toStrictEqual(await listReportableStores(pool, OWNER_PENDING_ONLY));
+      expect(allSuspended).toStrictEqual([]);
+    });
+
+    it('停止を解いた店舗は、ふたたび返す', async () => {
+      const pool = await getPool();
+      expect(await listReportableStores(pool, OWNER_RESUMED)).toStrictEqual([]);
+
+      await setSuspendedAt(ST_RESUMED, null);
+      expect(await listReportableStores(pool, OWNER_RESUMED)).toStrictEqual([
+        { id: ST_RESUMED, name: 'レポート検証店 再開' },
+      ]);
     });
   });
 

@@ -55,6 +55,7 @@ export const STORES = [
     agencyId: '22222222-2222-2222-2222-222222222222',
     agencyName: LONG_AGENCY_NAME,
     createdAt: '2026-08-01T09:00:00.000Z',
+    suspendedAt: null,
   },
   {
     id: '44444444-4444-4444-4444-444444444445',
@@ -66,6 +67,7 @@ export const STORES = [
     agencyId: '22222222-2222-2222-2222-222222222222',
     agencyName: LONG_AGENCY_NAME,
     createdAt: '2026-08-02T09:00:00.000Z',
+    suspendedAt: null,
   },
 ] as const;
 
@@ -163,6 +165,12 @@ const ONE_PIXEL_PNG = Buffer.from(
 /** QR エンドポイントのパス（クエリは除いた形で照合する）。 */
 const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
 
+/** 停止・再開のエンドポイント（store-suspension Issue #252）。捕獲は店舗 ID と操作。 */
+const SUSPENSION_PATH = /^\/stores\/([^/]+)\/(suspend|resume)$/;
+
+/** 停止の操作で置く停止時刻。値そのものは画面に出ないので、固定値でよい。 */
+const SUSPENDED_AT = '2026-09-23T09:00:00.000Z';
+
 /**
  * dashboard-api への呼び出しを固定 fixture で置き換える。
  *
@@ -170,6 +178,12 @@ const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
  * ネットワークエラーになり、原因が「fixture の取りこぼし」だと読み取れなくなる。
  *
  * QR だけは JSON ではなく PNG を返す（`RESPONSES` の表に載せられない形のため先に分岐する）。
+ *
+ * **停止・再開だけは状態を持つ**（store-suspension Issue #252）。POST で店舗の停止時刻を書き換え、
+ * 以後の `/stores` はその状態を返す。応答を固定値にすると、画面が読み直した一覧に停止が現れず、
+ * 「停止すると表示が変わる」ことを測れない（押下の後に画面が推測で表示を書き換える退行も、
+ * 読み直しを省く退行も、固定値の一覧では区別が付かない）。状態は呼び出しごと（＝ページごと）に
+ * 持ち、テストの間で漏れない。
  */
 export async function stubDashboardApi(
   page: Page,
@@ -179,13 +193,43 @@ export async function stubDashboardApi(
   // 他の応答まで変わっていたときに気づけない。
   const responses: Record<string, unknown> =
     options.me === undefined ? RESPONSES : { ...RESPONSES, '/me': { user: options.me } };
+  // 店舗 ID → 停止時刻。初期値は STORES の値で、停止・再開の POST だけが書き換える。
+  const suspendedAt = new Map<string, string | null>(
+    STORES.map((store) => [store.id, store.suspendedAt]),
+  );
   await page.route(`${API_ORIGIN}/**`, async (route) => {
-    const path = new URL(route.request().url()).pathname;
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
     if (QR_PATH.test(path)) {
       await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
       return;
     }
-    const body = responses[path];
+    const suspension = SUSPENSION_PATH.exec(path);
+    if (suspension !== null && request.method() === 'POST') {
+      const id = decodeURIComponent(suspension[1]!);
+      if (!suspendedAt.has(id)) {
+        // 範囲外・不存在は同じ 404（Requirement 1.4）。fixture の取りこぼしとは別の封筒にする。
+        await route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'not_found', message: '店舗が見つかりません' } }),
+        });
+        return;
+      }
+      // 既に同じ状態でも 200 で現在の状態を返す（冪等・Requirement 1.5）。停止時刻は最初の停止を保つ。
+      const next = suspension[2] === 'suspend' ? (suspendedAt.get(id) ?? SUSPENDED_AT) : null;
+      suspendedAt.set(id, next);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ store: { id, suspendedAt: next } }),
+      });
+      return;
+    }
+    const body =
+      path === '/stores' && request.method() === 'GET'
+        ? { stores: STORES.map((store) => ({ ...store, suspendedAt: suspendedAt.get(store.id) })) }
+        : responses[path];
     if (body === undefined) {
       await route.fulfill({
         status: 404,
@@ -308,6 +352,52 @@ export async function openUserEditPanel(page: Page): Promise<void> {
   await expect(table.getByRole('combobox', { name: '所属代理店', exact: true })).toBeVisible();
   await expect(table.getByRole('button', { name: '保存', exact: true })).toBeVisible();
 }
+
+/**
+ * 店舗一覧から停止の確認ダイアログを開き、**ダイアログが実際に描けている**ことを先に固定する
+ * （store-suspension Issue #252・Requirement 1.6）。
+ *
+ * `goto` は持たない。開く手順は `openListSurface` に一本化し、ここは同じ面の中でダイアログを
+ * 開くだけである（`openStoreQrPanel` と同じ所有権の規律）。
+ *
+ * 前提 assert はダイアログにしか無い要素（alertdialog の役割と名前・確定の押しボタン）で置く。
+ * 一覧にもある要素で置くと、押下が効かずダイアログが開かなかった状態でも前提が通り、一覧だけを
+ * 監査して緑を返す。停止の押しボタンは**完全一致の名前**で押す（店名が前方で重なる店舗を
+ * fixture へ足したときに、別の行のダイアログを黙って開かないため）。
+ */
+export async function openStoreSuspendDialog(page: Page): Promise<void> {
+  const target = STORES[0];
+  await openListSurface(page, '/stores', '店舗一覧', 3);
+  await page.getByRole('button', { name: `${target.name} を停止`, exact: true }).click();
+  const dialog = page.getByRole('alertdialog', { name: `${target.name} を停止しますか？` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '停止する', exact: true })).toBeVisible();
+}
+
+/**
+ * 自動 a11y 監査だけが回す、一覧の上に重なる後続状態（store-suspension Issue #252）。
+ *
+ * **`DASHBOARD_SURFACES` へは入れない。** あの一覧は横スクロールと携帯端末の幅の配置の実測も
+ * 回しており、それらは「帯の操作要素に捲らずに届く」「一覧表のセルが縦に並んでいない」といった
+ * 下の面そのものの性質を測る。モーダルが開いた状態では下の面は覆われて操作できないのが正しく、
+ * 同じ宣言で測ると設計どおりの状態を退行として扱うことになる。下の面の配置は、ダイアログを
+ * 開く前の「店舗一覧」で測られている。
+ *
+ * それでも**監査からは外さない。** 同じ URL の後続状態は、面の一覧に明示しない限り構造的に
+ * 一度も監査されない（QR パネル・編集パネルと同じ罠）。
+ */
+export interface OverlaySurface extends Pick<DashboardSurface, 'where' | 'open'> {
+  /** 重なった部品だけに絞って監査するときのセレクタ（下の一覧を含めずに部品の規則数を数える）。 */
+  readonly selector: string;
+}
+
+export const OVERLAY_SURFACES: readonly OverlaySurface[] = [
+  {
+    where: '店舗一覧の停止の確認ダイアログ',
+    open: openStoreSuspendDialog,
+    selector: '[role="alertdialog"]',
+  },
+];
 
 /**
  * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す。**

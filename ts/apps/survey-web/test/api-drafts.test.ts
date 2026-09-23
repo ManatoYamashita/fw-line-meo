@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { SurveyStoreView } from '../src/app/api/responses/handler';
 import { handleDrafts, type DraftsDeps } from '../src/app/api/drafts/handler';
 import { createSessionTokenService } from '../src/lib/session-token';
 import { ok, err } from '../src/lib/result';
@@ -18,6 +19,8 @@ function baseDeps(tokens: ReturnType<typeof createSessionTokenService>, over: Pa
     tokens,
     generator: okGenerator(),
     rateLimiter: { check: () => true },
+    findStore: () =>
+      Promise.resolve({ id: STORE, name: '店', placeId: 'ChIJ', placeStatus: 'confirmed', suspendedAt: null }),
     clientKey: () => 'ip1',
     log: () => {},
     ...over,
@@ -142,6 +145,89 @@ describe('handleDrafts', () => {
 
     expect(log).toHaveBeenCalledWith('info', 'generation_safety_blocked', {
       errorKind: 'SAFETY_BLOCKED',
+    });
+  });
+  // Issue #252: 再生成も停止中の店舗では受け付けない（Requirement 5.2）。sessionToken は停止前に
+  // 発行されていても有効期限内なら通るため、トークンだけで判断せず店舗の状態を読む。
+  describe('店舗の状態（store-suspension）', () => {
+    const SUSPENDED: SurveyStoreView = {
+      id: STORE,
+      name: '店',
+      placeId: 'ChIJ',
+      placeStatus: 'confirmed',
+      suspendedAt: new Date('2026-09-01T00:00:00Z'),
+    };
+
+    it('停止中の店舗は 404 STORE_NOT_AVAILABLE で、生成もトークン発行もしない', async () => {
+      const tokens = createSessionTokenService(KEY);
+      const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+      const generate = vi.fn(() => Promise.resolve(ok('呼ばれてはいけない')));
+      const findStore = vi.fn(() => Promise.resolve(SUSPENDED));
+      const res = await handleDrafts(
+        req({ sessionToken }),
+        baseDeps(tokens, { generator: { generate }, findStore }),
+      );
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error.code).toBe('STORE_NOT_AVAILABLE');
+      expect(json.error.message).toBe('このアンケートは現在利用できません');
+      expect(json.sessionToken).toBeUndefined();
+      expect(generate).not.toHaveBeenCalled();
+      // 読む店舗はトークンに署名された storeId（リクエスト本文の値ではない）
+      expect(findStore).toHaveBeenCalledWith(STORE);
+    });
+
+    it('店舗不在は 404 STORE_NOT_AVAILABLE（生成しない）', async () => {
+      const tokens = createSessionTokenService(KEY);
+      const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+      const generate = vi.fn(() => Promise.resolve(ok('x')));
+      const res = await handleDrafts(
+        req({ sessionToken }),
+        baseDeps(tokens, { generator: { generate }, findStore: () => Promise.resolve(null) }),
+      );
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe('STORE_NOT_AVAILABLE');
+      expect(generate).not.toHaveBeenCalled();
+    });
+
+    it('place 未確定は 404 STORE_NOT_AVAILABLE（生成しない）', async () => {
+      const tokens = createSessionTokenService(KEY);
+      const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+      const generate = vi.fn(() => Promise.resolve(ok('x')));
+      const res = await handleDrafts(
+        req({ sessionToken }),
+        baseDeps(tokens, {
+          generator: { generate },
+          findStore: () =>
+            Promise.resolve({ id: STORE, name: '店', placeId: null, placeStatus: 'pending', suspendedAt: null }),
+        }),
+      );
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe('STORE_NOT_AVAILABLE');
+      expect(generate).not.toHaveBeenCalled();
+    });
+
+    it('トークン検証に失敗したら店舗を読まない', async () => {
+      const tokens = createSessionTokenService(KEY);
+      const findStore = vi.fn(() => Promise.resolve(SUSPENDED));
+      const res = await handleDrafts(req({ sessionToken: 'bogus' }), baseDeps(tokens, { findStore }));
+      expect(res.status).toBe(400);
+      expect(findStore).not.toHaveBeenCalled();
+    });
+
+    it('再開された店舗（suspendedAt が null に戻った）は通常どおり再生成する（Requirement 5.4）', async () => {
+      const tokens = createSessionTokenService(KEY);
+      const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+      let store: SurveyStoreView = SUSPENDED;
+      const d = baseDeps(tokens, { findStore: () => Promise.resolve(store) });
+      expect((await handleDrafts(req({ sessionToken }), d)).status).toBe(404);
+
+      store = { ...SUSPENDED, suspendedAt: null };
+      const res = await handleDrafts(req({ sessionToken }), d);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.generation).toBe('ok');
+      expect(json.regenerationsLeft).toBe(2);
     });
   });
 });

@@ -1,7 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { deviceWidthOf, expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { DASHBOARD_SURFACES } from './fixtures/api';
+import { DASHBOARD_SURFACES, STORES } from './fixtures/api';
 import {
   expectPanelInsideScrollport,
   readPanelPlacement,
@@ -65,6 +65,108 @@ test('モバイルビューポートの店舗一覧で横スクロールが発�
   await surfaceByName('店舗一覧').open(page);
   // 表の容器 1 件（帯は捲れる領域を持たない）。
   await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+// --- 店舗の停止と再開（store-suspension Issue #252） -----------------------------------
+//
+// 停止は確認を経てだけ成立し（Requirement 1.6）、成功すると画面を再読み込みせずに一覧の表示が
+// 停止中へ変わり（2.4）、停止中の行は一覧に残って再開の操作を持ち（2.2）、QR 発行の操作が
+// 消える（5.6）。再開すると利用中と停止の操作・QR 発行の操作が戻る（2.3）。
+//
+// API は fixtures が状態つきで差し替える（停止の POST が以後の `/stores` を書き換える）。画面が
+// 読み直した一覧に停止が現れることまでを測り、押下の後に画面が推測で表示を書き換える形とは
+// 区別しない（それは単体テスト stores-page.test.tsx の責務である）。
+
+/** 停止・再開の POST を数える。押していない操作が送られていないことを確かめるために使う。 */
+function countSuspensionPosts(page: Page): { readonly paths: string[] } {
+  const seen = { paths: [] as string[] };
+  page.on('request', (request) => {
+    if (request.method() !== 'POST') return;
+    const path = new URL(request.url()).pathname;
+    if (/\/(suspend|resume)$/.test(path)) seen.paths.push(path);
+  });
+  return seen;
+}
+
+test.describe('店舗一覧の停止と再開', () => {
+  const target = STORES[0];
+  const other = STORES[1];
+
+  test('確認をキャンセルすると停止は送られず、利用中のまま残る', async ({ page }) => {
+    const posts = countSuspensionPosts(page);
+    await surfaceByName('店舗一覧').open(page);
+    const row = page.getByRole('row').filter({ hasText: target.name });
+
+    await row.getByRole('button', { name: `${target.name} を停止`, exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: `${target.name} を停止しますか？` });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'キャンセル', exact: true }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText('利用中', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: `${target.name} の QR 発行` })).toBeVisible();
+    expect(posts.paths, 'キャンセルしたのに停止・再開が送られた').toEqual([]);
+  });
+
+  test('停止 → 確認 → 停止中の表示と QR 発行の消失 → 再開で元に戻る', async ({ page }) => {
+    const posts = countSuspensionPosts(page);
+    await surfaceByName('店舗一覧').open(page);
+    // 文書の再読み込みが起きていないことの印（Requirement 2.4）。再読み込みされれば消える。
+    await page.evaluate(() => {
+      (window as unknown as { __e2eSameDocument?: boolean }).__e2eSameDocument = true;
+    });
+    const row = page.getByRole('row').filter({ hasText: target.name });
+    const otherRow = page.getByRole('row').filter({ hasText: other.name });
+    const qrButton = row.getByRole('button', { name: `${target.name} の QR 発行` });
+
+    // 前提: 利用中で、停止の操作と QR 発行の操作がある（2.3）。
+    await expect(row.getByText('利用中', { exact: true })).toBeVisible();
+    await expect(qrButton).toBeVisible();
+
+    // 停止は確認を求め、止まるものを示す（1.6）。
+    await row.getByRole('button', { name: `${target.name} を停止`, exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: `${target.name} を停止しますか？` });
+    await expect(dialog).toBeVisible();
+    for (const stopped of ['日次の取得', '変化通知', 'アンケート', 'QR の発行', '詳細画面']) {
+      await expect(dialog, `確認に「${stopped}」が止まることが示されていない`).toContainText(stopped);
+    }
+    expect(posts.paths, '確認の前に停止が送られた').toEqual([]);
+    await dialog.getByRole('button', { name: '停止する', exact: true }).click();
+
+    // 停止中の表示へ変わり、行は一覧に残って再開の操作を持つ（2.2・2.4）。QR 発行は消える（5.6）。
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText('停止中', { exact: true })).toBeVisible();
+    const resumeButton = row.getByRole('button', { name: `${target.name} を再開`, exact: true });
+    await expect(resumeButton).toBeVisible();
+    await expect(qrButton).toHaveCount(0);
+    await expect(row.getByText('停止中のため発行できません')).toBeVisible();
+    await expect(row.getByRole('status')).toHaveText(`${target.name} を停止しました。`);
+    // 焦点は押した位置（同じ押しボタン）へ戻る。文書の先頭へ落ちると、続けて再開できない。
+    await expect(resumeButton).toBeFocused();
+    // 他の店舗は巻き込まない。
+    await expect(otherRow.getByText('利用中', { exact: true })).toBeVisible();
+    await expect(page.getByRole('row')).toHaveCount(3);
+
+    // 再開は確認なしで実行され、元の表示へ戻る（2.3・2.4）。
+    await resumeButton.click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(row.getByText('利用中', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: `${target.name} を停止`, exact: true })).toBeVisible();
+    await expect(qrButton).toBeVisible();
+    await expect(row.getByText('停止中のため発行できません')).toHaveCount(0);
+    await expect(row.getByRole('status')).toHaveText(`${target.name} を再開しました。`);
+
+    expect(posts.paths).toEqual([
+      `/stores/${target.id}/suspend`,
+      `/stores/${target.id}/resume`,
+    ]);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __e2eSameDocument?: boolean }).__e2eSameDocument === true,
+      ),
+      '停止・再開の途中で文書が再読み込みされた（Requirement 2.4）',
+    ).toBe(true);
+  });
 });
 
 // --- 店頭掲示の印刷（Issue #179・Requirement 7） --------------------------------------

@@ -173,7 +173,7 @@ CSS では数値スケールで指定し、上の表は LINE Flex Message など
 | `md` | `0.375rem` | `rounded-md` | `button.tsx` | 対応段なし |
 | `lg` | `0.5rem` | `rounded-lg` | `alert.tsx`, `button.tsx`, `field.tsx`, `input.tsx`, `select.tsx`, `textarea.tsx` | sm（8px・一致） |
 | `xl` | `0.75rem` | `rounded-xl` | （なし） | 対応段なし |
-| `2xl` | `1rem` | `rounded-2xl` | `card.tsx`, `table.tsx` | md（14px・2px の差を受容） |
+| `2xl` | `1rem` | `rounded-2xl` | `alert-dialog.tsx`, `card.tsx`, `table.tsx` | md（14px・2px の差を受容） |
 | `4xl` | `2rem` | `rounded-4xl` | `badge.tsx` | xl（32px・一致） |
 | `full` | `9999px` | `rounded-full` | `radio-group.tsx` | full（一致） |
 
@@ -681,6 +681,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 | ファイル | export | 役割 |
 |---|---|---|
 | `alert.tsx` | `Alert`, `AlertAction`, `AlertDescription`, `AlertTitle` | 通知（既定・成功・危険） |
+| `alert-dialog.tsx` | `AlertDialog`, `AlertDialogAction`, `AlertDialogCancel`, `AlertDialogContent`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogHeader`, `AlertDialogTitle`, `AlertDialogTrigger` | 確認ダイアログ（応答を求める。背景の押下では閉じない・既定の焦点はキャンセル） |
 | `badge.tsx` | `Badge`, `badgeVariants` | 状態ラベル |
 | `button.tsx` | `Button`, `buttonVariants` | 押しボタン |
 | `card.tsx` | `Card`, `CardAction`, `CardContent`, `CardDescription`, `CardFooter`, `CardHeader`, `CardTitle` | 情報の容器 |

@@ -23,6 +23,7 @@ import {
   updateDashboardUserGuarded,
   findDashboardUserByEmailInOperator,
   createAuditLog,
+  setStoreSuspension,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -160,6 +161,10 @@ function buildApp(): ReturnType<typeof createApp> {
         registerStore,
         auditLog: async (input) => createAuditLog(await getPool(), input),
       },
+    },
+    storeSuspension: {
+      auth: authDeps,
+      setSuspension: async (input) => setStoreSuspension(await getPool(), input),
     },
     inviteCodes: {
       list: {

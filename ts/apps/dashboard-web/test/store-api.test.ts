@@ -18,6 +18,8 @@ import {
   getCategories,
   searchStores,
   registerStore,
+  suspendStore,
+  resumeStore,
 } from '../src/lib/api';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -40,6 +42,7 @@ describe('店舗系 API クライアント', () => {
         agencyId: 'a1',
         agencyName: '代理店A',
         createdAt: '2026-01-01T00:00:00Z',
+        suspendedAt: null,
       },
     ];
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { stores }));
@@ -141,5 +144,38 @@ describe('店舗系 API クライアント', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe('place_already_registered');
+  });
+
+  // 停止・再開（store-suspension tasks 5.2 / design.md「StoreSuspensionControl」）。
+  it('suspendStore は POST /stores/:id/suspend を送り、{ store } をアンラップする', async () => {
+    const store = { id: 's/1', suspendedAt: '2026-09-23T01:00:00.000Z' };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { store }));
+    const result = await suspendStore({ id: 's/1' }, { getToken: async () => 't', fetchImpl });
+    expect(result).toEqual({ ok: true, value: store });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(String(url).endsWith('/stores/s%2F1/suspend')).toBe(true);
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+  });
+
+  it('resumeStore は POST /stores/:id/resume を送り、{ store } をアンラップする', async () => {
+    const store = { id: 's1', suspendedAt: null };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { store }));
+    const result = await resumeStore({ id: 's1' }, { getToken: async () => 't', fetchImpl });
+    expect(result).toEqual({ ok: true, value: store });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(String(url).endsWith('/stores/s1/resume')).toBe(true);
+    expect(init.method).toBe('POST');
+  });
+
+  it('停止・再開の 404 は code をそのまま返す（文言への写像は表示層が持つ）', async () => {
+    // Response の本文は 1 度しか読めないので、呼ぶたびに作り直す。
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(404, { error: { code: 'not_found', message: '店舗が見つかりません' } }),
+    );
+    const suspended = await suspendStore({ id: 's1' }, { getToken: async () => 't', fetchImpl });
+    const resumed = await resumeStore({ id: 's1' }, { getToken: async () => 't', fetchImpl });
+    expect(suspended).toEqual({ ok: false, code: 'not_found', message: '店舗が見つかりません' });
+    expect(resumed).toEqual({ ok: false, code: 'not_found', message: '店舗が見つかりません' });
   });
 });

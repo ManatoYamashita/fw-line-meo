@@ -41,6 +41,11 @@ import (
 //   - unratedStoreID（line-on-demand-report tasks 4.5）: 競合はいるが 1 店も評価を持たない。
 //     rank_total は自店だけの 1 になり、競合は rating・starDiff とも null で書かれる。TS の配信は
 //     この行を「比較可能でない」と読み、新着があっても通知を出さずに理由つきで記録する。
+//   - suspendedStoreID（store-suspension tasks 7.1・Requirements 3.1, 3.3, 3.4, 4.3, 4.5）: 確定済みだが
+//     停止中の店舗。競合の固定・前日の自店スナップショット・Places の応答をすべて揃え、停止の述語が
+//     無ければ当日の集計が作られる状態にしたうえで、Run の後に当日のスナップショットも集計も無く、
+//     対象店舗数に数えられないことを確かめる。TS の配信の段は、同じ店舗に通知記録（送信も見送りも）が
+//     無いことを確かめる。取得と配信が同じ `stores.suspended_at` を参照していることを 2 言語で固定する。
 //
 // line-on-demand-report（tasks 2.5）で、line-webhook のレポート用の読み出し
 // （ts/apps/line-webhook/test/cross-runtime.e2e.test.ts）が読む 2 つの形を足した。
@@ -78,9 +83,15 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		unratedOwnerID = "c7000000-0000-0000-0000-000000000013"
 		unratedStoreID = "c7100000-0000-0000-0000-000000000003"
 
-		readyLineUserID   = "U-cross-runtime-ready"
-		nocompLineUserID  = "U-cross-runtime-nocomp"
-		unratedLineUserID = "U-cross-runtime-unrated"
+		// 停止中の店舗（store-suspension tasks 7.1）。delivery-job の cross-runtime.e2e.test.ts が
+		// 同じ識別子で通知記録の不在を確かめるので、変更する場合は両ファイルを揃える。
+		suspendedOwnerID = "c7000000-0000-0000-0000-000000000014"
+		suspendedStoreID = "c7100000-0000-0000-0000-000000000004"
+
+		readyLineUserID     = "U-cross-runtime-ready"
+		nocompLineUserID    = "U-cross-runtime-nocomp"
+		unratedLineUserID   = "U-cross-runtime-unrated"
+		suspendedLineUserID = "U-cross-runtime-suspended"
 
 		// クロスランタイム契約テスト専用の配信時刻。task 4.4 の index.e2e.test.ts が hour=14 を、
 		// targets.db.test.ts が hour=9/10 を使うため、本テストは衝突しない hour=17 を使う
@@ -129,8 +140,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			return
 		}
 		cleanupCtx := context.Background()
-		storeIDs := []string{readyStoreID, nocompStoreID, unratedStoreID}
-		ownerIDs := []string{readyOwnerID, nocompOwnerID, unratedOwnerID}
+		storeIDs := []string{readyStoreID, nocompStoreID, unratedStoreID, suspendedStoreID}
+		ownerIDs := []string{readyOwnerID, nocompOwnerID, unratedOwnerID, suspendedOwnerID}
 		cleanupExec := func(sql string, args ...any) {
 			if _, err := pool.Exec(cleanupCtx, sql, args...); err != nil {
 				t.Logf("cross-runtime cleanup: %s failed: %v", sql, err)
@@ -155,6 +166,10 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		nocompOwnerID, agencyID, nocompLineUserID, crossRuntimeDeliveryHour)
 	mustExec(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, 'active', $4)`,
 		unratedOwnerID, agencyID, unratedLineUserID, crossRuntimeDeliveryHour)
+	// 停止中の店舗のオーナーも同じ配信時刻にする。TS の段で、停止の述語が無ければ見送りの記録
+	// （skipped_no_summary）が残る状態にするためである。
+	mustExec(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, 'active', $4)`,
+		suspendedOwnerID, agencyID, suspendedLineUserID, crossRuntimeDeliveryHour)
 
 	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（競合あり）', 35.5, 139.5, $3, 'confirmed')`,
@@ -165,6 +180,11 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（評価を持つ競合なし）', 35.7, 139.7, $3, 'confirmed')`,
 		unratedStoreID, unratedOwnerID, "cross-runtime-unrated-self")
+	// 停止中の店舗（store-suspension tasks 7.1）。停止時刻は固定日の前日にする（停止の操作は
+	// dashboard-api の責務なので、ここでは列を直接立てる）。
+	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status, suspended_at)
+		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（停止中）', 35.8, 139.8, $3, 'confirmed', '2026-07-11T12:00:00+09:00')`,
+		suspendedStoreID, suspendedOwnerID, "cross-runtime-suspended-self")
 
 	// readyStore: 競合3件を事前固定（extraction をバイパスし、決定的な place_id を確保する）。
 	// 3件目は Google の評価が無い店（クチコミ 0 件・Issue #255）で、比較集合に入らず jsonb に null で
@@ -198,6 +218,15 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		t.Fatalf("seed unrated competitor: %v", err)
 	}
 
+	// suspendedStore: 競合 1 件を事前固定する。停止の述語が無ければ、この競合と自店を取得して当日の
+	// 集計が作られる（比較可能な行になる）。述語があれば取得も集計も行わない。
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competitors (store_id, place_id, name, latitude, longitude, active)
+		VALUES ($1, $2, $3, 35.8001, 139.8001, true)
+	`, suspendedStoreID, "cross-runtime-suspended-comp-1", "停止店の競合"); err != nil {
+		t.Fatalf("seed suspended competitor: %v", err)
+	}
+
 	now := time.Date(2026, 7, 12, 6, 0, 0, 0, jst)
 	today := jstDateAsUTC(now)
 	yesterday := today.AddDate(0, 0, -1)
@@ -217,6 +246,14 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		PlaceID: "cross-runtime-unrated-self", CapturedOn: yesterday, Rating: f64(4.2), ReviewCount: 18, Rank: intPtr(1),
 	}); err != nil {
 		t.Fatalf("seed unratedStore yesterday self snapshot: %v", err)
+	}
+
+	// suspendedStore にも前日の自店スナップショットを置く（停止前に取得していた店舗の形）。停止の述語が
+	// 無ければ当日の集計は前日比と新着を持ち、TS の段で変化の通知まで出る状態になる。
+	if err := repo.WriteSelfSnapshot(ctx, pool, suspendedStoreID, repo.SnapshotWrite{
+		PlaceID: "cross-runtime-suspended-self", CapturedOn: yesterday, Rating: f64(4.1), ReviewCount: 40, Rank: intPtr(1),
+	}); err != nil {
+		t.Fatalf("seed suspendedStore yesterday self snapshot: %v", err)
 	}
 
 	// 30 日の窓（line-on-demand-report・Req 6.7）: 基準日の 29 日前（30 日目）と 30 日前（31 日目）の行を、
@@ -278,6 +315,10 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	server.details["cross-runtime-nocomp-self"] = operational(3.5, 10, "クロスランタイム店舗（競合なし）")
 	server.details["cross-runtime-unrated-self"] = operational(4.2, 20, "クロスランタイム店舗（評価を持つ競合なし）")
 	server.details["cross-runtime-unrated-comp-1"] = unrated("評価なし競合")
+	// 停止中の店舗にも正常な応答を用意する。応答が無いことで取得が失敗して集計が作られない、という
+	// 別の理由で緑にならないようにするためである。
+	server.details["cross-runtime-suspended-self"] = operational(4.3, 44, "クロスランタイム店舗（停止中）")
+	server.details["cross-runtime-suspended-comp-1"] = operational(3.9, 30, "停止店の競合")
 
 	deps := newDeps(t, pool, server, now)
 
@@ -456,6 +497,28 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			unratedNewReviewCount, unratedReviewCountPrev)
 	}
 
-	t.Logf("cross-runtime Go half complete: readyStoreID=%s nocompStoreID=%s unratedStoreID=%s summary_date=%s delivery_hour=%d",
-		readyStoreID, nocompStoreID, unratedStoreID, today.Format(time.DateOnly), crossRuntimeDeliveryHour)
+	// --- suspendedStore: 停止中の店舗は取得も集計も行わず、対象店舗数に数えない（store-suspension 3.1, 3.3, 3.4）---
+	// 前提の確認: 確定済みかつ停止中として残っていること（ここが崩れると以下の不在の表明が空振りする）。
+	if n := countRows(t, ctx, pool, `SELECT count(*) FROM stores WHERE id = $1 AND place_status = 'confirmed' AND suspended_at IS NOT NULL`,
+		suspendedStoreID); n != 1 {
+		t.Fatalf("suspendedStore confirmed & suspended rows = %d, want 1", n)
+	}
+	if n := countRows(t, ctx, pool, `SELECT count(*) FROM rating_snapshots WHERE store_id = $1 AND captured_on = $2`,
+		suspendedStoreID, today); n != 0 {
+		t.Errorf("suspendedStore rating_snapshots on %s = %d, want 0 (a suspended store must not be fetched)", today.Format(time.DateOnly), n)
+	}
+	if n := countRows(t, ctx, pool, `SELECT count(*) FROM daily_summaries WHERE store_id = $1`, suspendedStoreID); n != 0 {
+		t.Errorf("suspendedStore daily_summaries = %d, want 0 (no summary is created while suspended)", n)
+	}
+	// 対象店舗数は、確定済みで停止中でない店舗の数に等しく、停止中の店舗の分だけ確定済みの店舗の総数より
+	// 小さい。共有 DB に他の行があっても成り立つ形で表明する。
+	confirmedTotal := countRows(t, ctx, pool, `SELECT count(*) FROM stores WHERE place_status = 'confirmed'`)
+	suspendedConfirmed := countRows(t, ctx, pool, `SELECT count(*) FROM stores WHERE place_status = 'confirmed' AND suspended_at IS NOT NULL`)
+	if result.StoresTotal != confirmedTotal-suspendedConfirmed {
+		t.Errorf("StoresTotal = %d, want %d (confirmed %d - suspended %d; the suspended store must not be counted)",
+			result.StoresTotal, confirmedTotal-suspendedConfirmed, confirmedTotal, suspendedConfirmed)
+	}
+
+	t.Logf("cross-runtime Go half complete: readyStoreID=%s nocompStoreID=%s unratedStoreID=%s suspendedStoreID=%s summary_date=%s delivery_hour=%d",
+		readyStoreID, nocompStoreID, unratedStoreID, suspendedStoreID, today.Format(time.DateOnly), crossRuntimeDeliveryHour)
 }

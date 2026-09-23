@@ -1,3 +1,4 @@
+import { getPool, findStoreForSurvey } from '@fwlm/db';
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
@@ -20,6 +21,7 @@ async function buildDeps(): Promise<DraftsDeps> {
       onResidual: (aspectCodes) => logFactualityResidual(writeStructuredLog, aspectCodes),
     }),
     rateLimiter: createRateLimiter({ limit: 20, windowMs: 60_000 }),
+    findStore: async (id) => findStoreForSurvey(await getPool(), id),
     clientKey: (req) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown',
     log: writeStructuredLog,
   };

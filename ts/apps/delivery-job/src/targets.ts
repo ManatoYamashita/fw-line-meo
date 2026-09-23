@@ -108,7 +108,11 @@ function assertValidHour(currentJSTHour: number): void {
  * ゲーティングは `stores.place_status = 'confirmed'` の店舗のみ（design.md 日次バッチ節の
  * ゲーティング方針と同一の「特定済み」定義を踏襲。未確定店舗には daily_summaries が生成されない
  * ため実質的にはこの条件が無くても除外されるが、意図を明示するため条件に含める。3.4）。
- * 店舗の利用停止状態（Issue #252）が先に入った場合は、この述語の並びに停止中を除く条件を足す（3.5）。
+ *
+ * 停止中の店舗（`stores.suspended_at` が非 NULL・Issue #252）は対象にしない（store-suspension 4.1）。
+ * 停止中の店舗は日次取得の対象から外れるため通常は当日の集計を持たないが、集計の作成後から配信時刻までの
+ * 間に停止された店舗は当日の行を持ちうるので、この述語で外す（4.2）。再開すれば（`suspended_at` が
+ * NULL に戻れば）通常どおり対象になる（4.4）。
  *
  * `summaryDate` は 'YYYY-MM-DD' 形式（PostgreSQL の date 列と比較可能な文字列）。
  */
@@ -139,6 +143,7 @@ export async function queryDeliveryTargets(
       WHERE ds.summary_date = $1
         AND o.delivery_hour = $2
         AND s.place_status = 'confirmed'
+        AND s.suspended_at IS NULL
         AND sd.id IS NULL`,
     [summaryDate, currentJSTHour],
   );
@@ -161,6 +166,10 @@ export async function queryDeliveryTargets(
  * 配信時刻は該当するが当日 `daily_summaries` が存在しない（06:00 バッチ失敗等）オーナー・店舗を
  * 検出する。`summary_deliveries` が既に存在する（＝前回実行で skipped_no_summary 等が記録済み）
  * 対象は除外し、同一日に重複して skip 候補として返さない（R3.9 と同じ重複防止の考え方）。
+ *
+ * 停止中の店舗（`stores.suspended_at` が非 NULL・Issue #252）は skip 候補にもしない。停止中の店舗には
+ * 送信の記録も、いかなる理由の見送りの記録も残さない（store-suspension 4.3）。停止中の店舗は日次取得の
+ * 対象から外れて当日の集計を持たないため、この述語が無いと毎日 skipped_no_summary が記録される。
  */
 export async function queryOwnersDueWithoutSummary(
   pool: Queryable,
@@ -179,6 +188,7 @@ export async function queryOwnersDueWithoutSummary(
          ON sd.store_id = s.id AND sd.summary_date = $1
       WHERE o.delivery_hour = $2
         AND s.place_status = 'confirmed'
+        AND s.suspended_at IS NULL
         AND ds.id IS NULL
         AND sd.id IS NULL`,
     [summaryDate, currentJSTHour],

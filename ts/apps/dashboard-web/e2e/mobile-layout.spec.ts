@@ -88,13 +88,13 @@ interface SurfaceLayout {
 const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
   店舗一覧: {
     navControls: 6,
-    measuredCells: 15,
+    measuredCells: 18,
     panelCells: 0,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   '店舗一覧の QR パネル': {
     navControls: 6,
-    measuredCells: 15,
+    measuredCells: 18,
     panelCells: 1,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },

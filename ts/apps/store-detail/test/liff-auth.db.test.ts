@@ -28,12 +28,18 @@ const OWNER_UNCONFIRMED = 'd5000000-0000-0000-0000-000000000012'; // confirmed �
 const OWNER_NO_STORE = 'd5000000-0000-0000-0000-000000000013'; // 店舗そのものが無い
 const OWNER_MULTI = 'd5000000-0000-0000-0000-000000000014'; // confirmed 店舗 2 件（1:N の実例）
 const OWNER_SAME_TX = 'd5000000-0000-0000-0000-000000000015'; // 2 店舗を単一 INSERT で登録（created_at 同値）
+const OWNER_PART_SUSPENDED = 'd5000000-0000-0000-0000-000000000016'; // confirmed 2 件のうち 1 件が停止中
+const OWNER_ALL_SUSPENDED = 'd5000000-0000-0000-0000-000000000017'; // confirmed 店舗がすべて停止中
+const OWNER_RESUME = 'd5000000-0000-0000-0000-000000000018'; // 停止 → 再開を行き来する店舗を持つ
 
 const SUB_SINGLE = `U-${OWNER_SINGLE}`;
 const SUB_UNCONFIRMED = `U-${OWNER_UNCONFIRMED}`;
 const SUB_NO_STORE = `U-${OWNER_NO_STORE}`;
 const SUB_MULTI = `U-${OWNER_MULTI}`;
 const SUB_SAME_TX = `U-${OWNER_SAME_TX}`;
+const SUB_PART_SUSPENDED = `U-${OWNER_PART_SUSPENDED}`;
+const SUB_ALL_SUSPENDED = `U-${OWNER_ALL_SUSPENDED}`;
+const SUB_RESUME = `U-${OWNER_RESUME}`;
 const SUB_UNKNOWN = 'U-unknown-does-not-exist';
 
 const ST_CONFIRMED = 'd6000000-0000-0000-0000-000000000001';
@@ -44,6 +50,13 @@ const ST_MULTI_B = 'd6000000-0000-0000-0000-000000000004';
 // 意図的に「id が大きい方を先に」INSERT し、返却順が挿入順ではなく id 昇順であることを見る。
 const ST_SAME_TX_LOW = 'd6000000-0000-0000-0000-000000000005';
 const ST_SAME_TX_HIGH = 'd6000000-0000-0000-0000-000000000006';
+// 停止中の店舗（store-suspension Requirement 6.1・6.3）。停止時刻は SQL で直接立て、
+// データ層の停止操作には依存しない。
+const ST_PART_ACTIVE = 'd6000000-0000-0000-0000-000000000007';
+const ST_PART_SUSPENDED = 'd6000000-0000-0000-0000-000000000008';
+const ST_ALL_SUSPENDED_A = 'd6000000-0000-0000-0000-000000000009';
+const ST_ALL_SUSPENDED_B = 'd6000000-0000-0000-0000-00000000000a';
+const ST_RESUME = 'd6000000-0000-0000-0000-00000000000b';
 
 describe.skipIf(!process.env.DATABASE_URL)('liff-auth: listOwnerConfirmedStores / selectAuthorizedStore / authorizeStoreDetailRequest (DB)', () => {
   beforeAll(async () => {
@@ -61,6 +74,9 @@ describe.skipIf(!process.env.DATABASE_URL)('liff-auth: listOwnerConfirmedStores 
       [OWNER_NO_STORE, SUB_NO_STORE],
       [OWNER_MULTI, SUB_MULTI],
       [OWNER_SAME_TX, SUB_SAME_TX],
+      [OWNER_PART_SUSPENDED, SUB_PART_SUSPENDED],
+      [OWNER_ALL_SUSPENDED, SUB_ALL_SUSPENDED],
+      [OWNER_RESUME, SUB_RESUME],
     ] as const) {
       await pool.query(
         'INSERT INTO owners (id, agency_id, line_user_id, onboarding_status) VALUES ($1, $2, $3, $4)',
@@ -92,6 +108,20 @@ describe.skipIf(!process.env.DATABASE_URL)('liff-auth: listOwnerConfirmedStores 
               ($2, $3, '同一Tx登録の店舗LOW',  'places/liff-sametx-low',  'confirmed')`,
       [ST_SAME_TX_HIGH, ST_SAME_TX_LOW, OWNER_SAME_TX],
     );
+
+    for (const [id, ownerId, name, placeId, suspended] of [
+      [ST_PART_ACTIVE, OWNER_PART_SUSPENDED, '一部停止オーナーの利用中店舗', 'places/liff-part-active', false],
+      [ST_PART_SUSPENDED, OWNER_PART_SUSPENDED, '一部停止オーナーの停止中店舗', 'places/liff-part-suspended', true],
+      [ST_ALL_SUSPENDED_A, OWNER_ALL_SUSPENDED, '全店停止オーナーの店舗A', 'places/liff-all-suspended-a', true],
+      [ST_ALL_SUSPENDED_B, OWNER_ALL_SUSPENDED, '全店停止オーナーの店舗B', 'places/liff-all-suspended-b', true],
+      [ST_RESUME, OWNER_RESUME, '停止と再開を行き来する店舗', 'places/liff-resume', true],
+    ] as const) {
+      await pool.query(
+        `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at)
+         VALUES ($1, $2, $3, $4, 'confirmed', CASE WHEN $5::boolean THEN now() ELSE NULL END)`,
+        [id, ownerId, name, placeId, suspended],
+      );
+    }
   });
 
   afterAll(async () => {
@@ -185,6 +215,51 @@ describe.skipIf(!process.env.DATABASE_URL)('liff-auth: listOwnerConfirmedStores 
       expect(selectAuthorizedStore(single.value, ST_MULTI_A)).toBeNull();
       // 自分の集合内であれば当然選べる。
       expect(selectAuthorizedStore(multi.value, ST_MULTI_B)?.id).toBe(ST_MULTI_B);
+    });
+  });
+
+  describe('listOwnerConfirmedStores: 停止中の店舗（store-suspension Requirement 6.1・6.3）', () => {
+    it('停止中の店舗は閲覧対象の集合に現れず、同じオーナーの利用中の店舗は現れる', async () => {
+      const pool = await getPool();
+      const result = await listOwnerConfirmedStores(pool, SUB_PART_SUSPENDED);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        return;
+      }
+      expect(result.value.map((store) => store.id)).toEqual([ST_PART_ACTIVE]);
+      // 集合外になった停止中の店舗は、ヒントとして渡されても選ばれない。
+      expect(selectAuthorizedStore(result.value, ST_PART_SUSPENDED)).toBeNull();
+    });
+
+    it('全店が停止中のオーナーは、店舗が無いオーナーと同じ応答になる', async () => {
+      const pool = await getPool();
+      const allSuspended = await listOwnerConfirmedStores(pool, SUB_ALL_SUSPENDED);
+      const noStore = await listOwnerConfirmedStores(pool, SUB_NO_STORE);
+
+      expect(allSuspended).toEqual({ ok: false, error: 'STORE_NOT_IDENTIFIED' });
+      expect(allSuspended).toEqual(noStore);
+    });
+
+    it('再開した店舗は閲覧対象へ戻り、再び停止すると外れる', async () => {
+      const pool = await getPool();
+      expect(await listOwnerConfirmedStores(pool, SUB_RESUME)).toEqual({
+        ok: false,
+        error: 'STORE_NOT_IDENTIFIED',
+      });
+
+      await pool.query('UPDATE stores SET suspended_at = NULL WHERE id = $1', [ST_RESUME]);
+      const resumed = await listOwnerConfirmedStores(pool, SUB_RESUME);
+      expect(resumed.ok).toBe(true);
+      if (resumed.ok) {
+        expect(resumed.value.map((store) => store.id)).toEqual([ST_RESUME]);
+      }
+
+      await pool.query('UPDATE stores SET suspended_at = now() WHERE id = $1', [ST_RESUME]);
+      expect(await listOwnerConfirmedStores(pool, SUB_RESUME)).toEqual({
+        ok: false,
+        error: 'STORE_NOT_IDENTIFIED',
+      });
     });
   });
 

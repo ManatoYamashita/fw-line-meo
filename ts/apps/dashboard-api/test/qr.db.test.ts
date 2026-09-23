@@ -14,6 +14,7 @@ const OW2 = 'ffffffff-0000-0000-0000-000000000005';
 const S1 = 'ffffffff-0000-0000-0000-000000000006'; // AG1・confirmed
 const S2 = 'ffffffff-0000-0000-0000-000000000007'; // AG2・confirmed
 const S_PENDING = 'ffffffff-0000-0000-0000-000000000008'; // AG1・pending
+const S_SUSP = 'ffffffff-0000-0000-0000-000000000009'; // AG1・confirmed（停止・再開を SQL で切り替える）
 
 // QR 経路のみを検証する最小 deps 型（他業務 deps は本テストで未使用のため corsOrigin と qr のみ）。
 type QrOnlyDeps = Pick<AppDeps, 'corsOrigin' | 'qr'>;
@@ -62,8 +63,9 @@ describe.skipIf(!process.env.DATABASE_URL)('QR RBAC integration (DB)', () => {
       `INSERT INTO stores (id, owner_id, name, place_id, place_status) VALUES
         ($1, $2, '店1', 'ChIJ1', 'confirmed'),
         ($3, $4, '店2', 'ChIJ2', 'confirmed'),
-        ($5, $2, '未確定店', NULL, 'pending')`,
-      [S1, OW1, S2, OW2, S_PENDING],
+        ($5, $2, '未確定店', NULL, 'pending'),
+        ($6, $2, '停止検証店', 'ChIJ9', 'confirmed')`,
+      [S1, OW1, S2, OW2, S_PENDING, S_SUSP],
     );
     await pool.query(
       `INSERT INTO dashboard_users (role, operator_id, agency_id, auth_subject) VALUES
@@ -105,5 +107,19 @@ describe.skipIf(!process.env.DATABASE_URL)('QR RBAC integration (DB)', () => {
 
   it('存在しない store は 404', async () => {
     expect((await qr(buildApp(), 'ffffffff-0000-0000-0000-0000000000ff', 'rbac-op-uid')).status).toBe(404);
+  });
+
+  it('停止中の店舗は 409 STORE_SUSPENDED、再開後は 200 image/png（Req 5.5・5.7）', async () => {
+    const pool = await getPool();
+    const app = buildApp();
+    await pool.query('UPDATE stores SET suspended_at = now() WHERE id = $1', [S_SUSP]);
+    const suspended = await qr(app, S_SUSP, 'rbac-op-uid');
+    expect(suspended.status).toBe(409);
+    expect(((await suspended.json()) as { error: { code: string } }).error.code).toBe('STORE_SUSPENDED');
+
+    await pool.query('UPDATE stores SET suspended_at = NULL WHERE id = $1', [S_SUSP]);
+    const resumed = await qr(app, S_SUSP, 'rbac-op-uid');
+    expect(resumed.status).toBe(200);
+    expect(resumed.headers.get('Content-Type')).toBe('image/png');
   });
 });

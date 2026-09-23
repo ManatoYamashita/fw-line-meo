@@ -55,6 +55,7 @@ describe.skipIf(!process.env.DATABASE_URL)('read accessors (DB)', () => {
         name: '確定店舗',
         placeId: 'ChIJ_test_place',
         placeStatus: 'confirmed',
+        suspendedAt: null,
       });
     });
 

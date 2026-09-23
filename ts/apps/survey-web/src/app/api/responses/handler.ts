@@ -21,6 +21,8 @@ export interface SurveyStoreView {
   name: string;
   placeId: string | null;
   placeStatus: PlaceStatus;
+  /** 利用停止の時刻（Issue #252）。null なら利用中。 */
+  suspendedAt: Date | null;
 }
 
 export interface AspectView {
@@ -71,9 +73,9 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
     return error(deps, 429, 'RATE_LIMITED', '時間をおいて再度お試しください');
   }
 
-  // 店舗（存在＋place 確定のみ）
+  // 店舗（存在＋place 確定＋利用中のみ）。停止中（Issue #252）は集計にも生成にも用いない。
   const store = await deps.findStore(storeId);
-  if (!store || store.placeStatus !== 'confirmed') {
+  if (!store || store.placeStatus !== 'confirmed' || store.suspendedAt !== null) {
     return error(deps, 404, 'STORE_NOT_AVAILABLE', 'このアンケートは現在利用できません');
   }
 

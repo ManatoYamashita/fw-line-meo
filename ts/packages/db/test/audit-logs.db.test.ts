@@ -135,9 +135,9 @@ describe.skipIf(!process.env.DATABASE_URL)('audit_logs accessors (DB)', () => {
     expect(checked.length).toBeGreaterThan(0);
     // 並びを揃えて比べ、食い違った値が差分として読めるようにする。
     expect([...checked].sort()).toEqual([...AUDIT_LOG_ACTIONS].sort());
-    // 16 = 0007 の 12 値 + #259 の 4 値。action を足すときは、CHECK を作り直す migration・
-    // AUDIT_LOG_ACTIONS・この件数を同時に変える。重複が無いことも併せて確かめる。
-    expect(checked).toHaveLength(16);
+    // 18 = 0007 の 12 値 + #259 の 4 値 + #252 の 2 値（0012）。action を足すときは、CHECK を
+    // 作り直す migration・AUDIT_LOG_ACTIONS・この件数を同時に変える。重複が無いことも併せて確かめる。
+    expect(checked).toHaveLength(18);
     expect(new Set(checked).size).toBe(checked.length);
   });
 });
