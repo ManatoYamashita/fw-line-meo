@@ -415,34 +415,95 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 
 `business.manage` は sensitive スコープのため Google の OAuth 検証が必要で、**審査は最大 10 日**。ここで揃える提出物は**デモ動画を除いて GBP に依存しない**。関門 A が事業側で詰まっている間に、ここを空にしておくと承認後の待ち時間が最小になる。
 
-| 提出物 | 要件 | 2026-08-21 時点（状態の正典は Issue #146） |
+| 提出物 | 要件 | 2026-09-23 時点（状態の正典は Issue #146） |
 |---|---|---|
-| 独自ドメイン | 自己所有・Search Console で所有権検証済み | **未取得**（9-2-a） |
-| ドメイン所有権の検証 | API Console プロジェクトに **Owner または Editor** として紐づく Google アカウントで Search Console の所有権検証を通す | 未（ドメイン待ち） |
-| 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 未（ドメイン待ち） |
-| プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 未（ドメイン待ち） |
-| スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 未着手（ドメイン非依存・**今日から書ける**） |
-| ブランディング | アプリ名・ロゴ・デベロッパー連絡先が実体と一致していること | 未着手（ドメイン非依存） |
+| 独自ドメイン | 自己所有・Search Console で所有権検証済み | **`firstweb-works.com` を取得済み**（お名前.com・2026-09-22 登録。9-2-a） |
+| ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT） |
+| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 割り当て済み（2026-09-23・`api.firstweb-works.com` → line-webhook）。redirect URI の差し替えは Phase2 と対（Issue #282） |
+| 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 実装済み（ManatoYamashita/fw-website）・独自ドメインでの公開待ち |
+| プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 同上 |
+| スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 下書き済み（fw-website `docs/google-review.md`） |
+| ブランディング | アプリ名・ロゴ・デベロッパー連絡先が実体と一致していること | 下書き済み（同上） |
 | デモ動画 | YouTube へ Unlisted で上げる。**英語**で OAuth 同意フローを流し、同意画面にアプリ名が正しく出ること・**ブラウザのアドレスバーに OAuth クライアント ID が見えること**を映し、要求スコープが実際に何を可能にするかを実演する | **関門 A 承認後**（実 API 呼び出しの実演が要るため、唯一 GBP を待つ提出物） |
 
 **Testing のまま放置しないこと。** 「未確認アプリ」警告に加え、テストユーザーの承認自体が **7 日で失効**する。IT に不慣れなオーナーへ毎週の再連携を強いることになり、本サービスの存在意義に反する。**検証結果の有効期間も 7 日**で、その間に Published へ切り替えないと再検証がいる。承認が出たら速やかに公開すること。
 
-#### 9-2-a. 独自ドメインの確保
+#### 9-2-a. 独自ドメインと所有権の検証
 
-**現状の公開面は Cloud Run の `*.run.app` だけで、独自ドメインを保有していない**（2026-08-21 実測。`gcloud run services list` が返す 5 サービスはすべて `https://<name>-vdqjgfvkma-an.a.run.app`）。
+**運営のドメインは `firstweb-works.com`**（お名前.com で 2026-09-22 に登録・更新期限 2027-09-22）。それまでの公開面は Cloud Run の `*.run.app` だけだった。
 
-**`*.run.app` は承認済みドメインに使えない。** Google は「public suffix 上で登録可能なドメイン成分」＝ top private domain の所有権検証を要求するが、`run.app` は Google が管理する public suffix であり、その配下のホスト名を自分のドメインとして Search Console で検証することはできない（`github.io` や `herokuapp.com` と同型の制約）。したがって**関門 B は独自ドメインの取得から始まる**。
+**`*.run.app` は承認済みドメインに使えない。** Google は「public suffix 上で登録可能なドメイン成分」＝ top private domain の所有権検証を要求するが、`run.app` は Google が管理する public suffix であり、その配下のホスト名を自分のドメインとして Search Console で検証することはできない（`github.io` や `herokuapp.com` と同型の制約）。
 
-この順序で詰まる:
+DNS は Cloudflare で持つ（ホームページ・ポリシーは Cloudflare Workers の fw-website が配信する。公開の手順は fw-website `docs/google-review.md`）。この順序で進める:
 
-1. ドメインを取得する（運営が所有する top private domain）
-2. API Console プロジェクトに **Owner または Editor** として紐づく Google アカウントで Search Console の所有権検証を通す（公式は検証方式を指定していない）
-3. そのドメインでホームページとプライバシーポリシーを公開する（同一ドメイン）
-4. OAuth 同意画面の承認済みドメインへ登録し、プライバシーポリシー URL をホームページ側のリンクと一致させる
+1. お名前.com のネームサーバーを、Cloudflare が zone に割り当てた 2 つへ書き換える
+2. **Project Owner** のアカウントで Search Console に **Domain property** を作り、DNS の TXT レコードで検証する
+3. fw-website を apex に載せ、ホームページとプライバシーポリシーを公開する（同一ドメイン）
+4. OAuth コールバックを `api.firstweb-works.com` へ移す（9-2-b）
+5. OAuth 同意画面の承認済みドメインへ `firstweb-works.com` を登録し、プライバシーポリシー URL をホームページ側のリンクと一致させる
 
-1〜3 は GBP と無関係に進む。**関門 A の事業ゲートを待つ理由にはならない。**
+1〜4 は GBP と無関係に進む。**関門 A の事業ゲートを待つ理由にはならない。**
 
-**権限要件を上乗せしないこと。** 出典は Google の sensitive scope 検証ページ（2026-08-22 確認）。所有権検証の要件は逐語で `Use a Google Account that's associated with your API Console project as an Owner or an Editor.` であり、Search Console の検証方式（Domain property / URL-prefix property）は指定されていない。「Project Owner でなければ通せない」「DNS レベルの検証でなければならない」はいずれも公式要件ではなく、本 PR のレビューで差し戻した誤りである（過去に一度この誤りを持ち込んでいる）。
+**検証は Project Owner が DNS の Domain property で行う。** 公式要件は 2 ページにまたがり、厳しい側に揃える。
+
+- Google Cloud Help「Domain Verification」（support.google.com/cloud/answer/13804266・2026-09-23 確認）: `You must verify the Domain Property (DNS-level), rather than a 'URL prefix' or 'Site,' property.` と `The domain verification must be performed by a Google account that is currently a Project Owner of your Google Cloud Project.`
+- sensitive scope 検証のページ: `Use a Google Account that's associated with your API Console project as an Owner or an Editor.`
+
+この節は 2026-08-22 版で後者だけを根拠に「Owner または Editor で足り、検証方式の指定は無い」と書いていた。**それは前者のページを見落とした誤りである**（Issue #146 の 2026-09-15 のコメントで指摘）。前者を満たせば後者も満たすので、Project Owner による Domain property の検証だけを行う。
+
+検証するアカウントは gcloud で使うアカウントと揃える。Cloud Run のドメインマッピング（9-2-b）は、**所有者として確認済みのアカウントでしか作れない**（公式: `You must verify domain ownership the first time you use that domain in the Google Cloud project`）。確かめ方:
+
+```bash
+gcloud domains list-user-verified   # firstweb-works.com が並べば、今の gcloud アカウントで割り当てを作れる
+```
+
+**Terraform は gcloud のアカウントではなく ADC で呼ぶ。** 2026-09-23 の初回の apply は、gcloud が `manapuraza@…`（確認済み）でも ADC が `gen.gourmet1234@…`（未確認）だったため、`Caller is not authorized to administer the domain api.firstweb-works.com` で落ちた（割り当ては失敗状態のまま state に tainted で残り、次の apply で作り直された）。ADC の主体は次で確かめる:
+
+```bash
+curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)" | grep email
+```
+
+食い違うときは、確認済みアカウントのトークンでその apply だけを行う（権限の付与を増やさない）:
+
+```bash
+GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済みのアカウント>)" \
+  terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback
+```
+
+割り当ての作成・削除だけがドメインの権限を要する。作った後の plan（読み取り）は ADC のままで通る。
+
+#### 9-2-b. OAuth コールバックを独自ドメインへ移す（Issue #282）
+
+OAuth ブランド検証のページ（developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification・2026-09-15 確認）は `The Authorized domains section also needs to include the redirect URIs or JavaScript origins authorized in your "Web application" OAuth client types.` と定める。**コールバックが `run.app` のままでは、承認済みドメインに入れられず関門 B を通らない。**
+
+`api.firstweb-works.com` を line-webhook に割り当てる。宣言は `infra/envs/prod/custom-domain.tf`（Cloud Run のドメインマッピング）。
+
+**ドメインマッピングを選んだ理由と、その代償。** 公式は `Cloud Run domain mappings are in the preview launch stage. Due to latency issues, they are not production-ready` と明記する（asia-northeast1 は対応リージョン）。ここを通るのはオーナー 1 人につき 1 回の OAuth コールバックだけなので、遅延は実害にならない。常時費用のかかるロードバランサ（公式推奨）は選ばなかった。**LINE の Webhook など、応答時間が効く経路をこのドメインへ載せないこと。** 載せる必要が出たらロードバランサへ移す。
+
+手順（9-2-a の検証が済んでから）:
+
+```bash
+# 1. 割り当てだけを作る（素の apply は承認待ちの module.guardrails を巻き込む・§10「apply の作法」）
+terraform -chdir=infra/envs/prod plan  -target=google_cloud_run_domain_mapping.gbp_oauth_callback
+terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback
+
+# 2. 求められる DNS レコードと状態を読む（サブドメインは CNAME ghs.googlehosted.com.）。
+#    gcloud の domain-mappings は beta コンポーネントを要するので、state から読む。
+terraform -chdir=infra/envs/prod state show google_cloud_run_domain_mapping.gbp_oauth_callback
+```
+
+3. Cloudflare の DNS に `api` の CNAME を `ghs.googlehosted.com` で作る。**プロキシは OFF（DNS only）にする。** ON だと Google が証明書の発行時にドメインへ到達できず、割り当てが `CertificatePending` のまま止まる。
+4. 証明書の発行を待つ（数十分〜）。`terraform apply -refresh-only -target=…` の後に 2 を読み直し、`status` の `Ready` が `True` になれば終わり。
+5. 到達を確かめる。line-webhook の `/health` が run.app と同じ応答を返せば、TLS と割り当ての両方が通っている（`/gbp/oauth/callback` は Phase2 のコードがデプロイされるまで 404 でよい）。
+
+```bash
+curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status":"ok"} 200
+```
+
+6. Phase2 の設定を差し替える（Issue #8 の実装と対。`infra/README.md` の Phase2 側 §10）:
+   - tfvars の `gbp_oauth_redirect_url` を `https://api.firstweb-works.com/gbp/oauth/callback` にして apply する
+   - OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI を**同じ値**に差し替える（1 文字でも違えば `redirect_uri_mismatch`）
+   - 同意画面の承認済みドメインに `firstweb-works.com` を登録する（ホームページ・ポリシーと同じ top private domain なので 1 つで足りる）
 
 ### 9-3. 進捗の追跡
 
