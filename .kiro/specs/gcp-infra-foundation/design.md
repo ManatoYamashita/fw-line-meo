@@ -420,6 +420,7 @@ variable "services" {
 **Responsibilities & Constraints**
 - `google_iam_workload_identity_pool` + `_provider`（GitHub OIDC issuer）。attribute mapping `attribute.repository = assertion.repository`、`attribute_condition = "assertion.repository == '<owner>/<repo>' "`（変数 `github_repository` から注入。6.3）
 - **Direct WIF**: deployer SA を作らない（6.2）。principalSet へ付与するロール: `roles/run.developer`・`roles/artifactregistry.writer`・各ランタイム SA への `roles/iam.serviceAccountUser`（デプロイ時の SA 指定に必要）
+  - **改訂（2026-09-23・Issue #316）**: deploy-prod はデプロイ SA `gha-deployer` を WIF 経由で偽装する形へ移した（同じ 3 種のロールを SA にも付与し、principalSet には SA への `roles/iam.workloadIdentityUser` を付与）。Direct WIF の連携トークンは GitHub OIDC トークンと同じ約 5 分で失効し、使い回せないためである。SA キーは発行しない（6.2 は維持）。経緯と実測は research.md の同日の改訂を参照
 - 検証ワークフロー `.github/workflows/gcp-auth-smoke.yml`: `google-github-actions/auth@v2`（`workload_identity_provider` のみ・`service_account` 入力なし）→ `gcloud run services list` 成功まで（6.1 の観察可能な証明）。push 起動ではなく `workflow_dispatch`（手動）
 - **CI デプロイ契約（構成所有権の seam）**: CI に許可される変更は**イメージの更新のみ**（`gcloud run services update <service> --image=...` / Job は `gcloud run jobs update --image=...`）。env・リソース制限・スケーリング等の構成変更は Terraform 専権とし、CI から `gcloud run deploy` によるフル構成デプロイを行わない。これを破ると `ignore_changes = [image]` の範囲外で drift が生じ、`tf-plan` 差分ゼロ（1.3）が恒常的に破れる。本契約は runbook と後続アプリ spec のワークフロー雛形の両方に明記する
 - per-app のビルド・デプロイワークフローは Out of Boundary（各アプリ spec がこのワークフローを雛形に追加する）
