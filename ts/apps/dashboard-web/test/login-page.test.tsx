@@ -68,7 +68,7 @@ describe('LoginPage', () => {
   });
 
   // 題と assert をずらさない。ここは画面全体の読み上げに案内文が含まれることを見る包含判定であり、
-  // 文言そのものの完全一致は下の「通知の部品として読み上げ領域 1 つに載る」が toBe で固定する。
+  // 文言そのものの完全一致は下の「主見出しの説明文として置き」が toBe で固定する。
   it('通常分岐の案内文が画面の読み上げに含まれる（Req 3.2）', () => {
     useAuthMock.mockReturnValue({ status: 'signedOut', me: null, signIn: vi.fn(), signOut: vi.fn() });
     const { container } = render(<LoginPage />);
@@ -120,16 +120,32 @@ describe('LoginPage', () => {
     expect(widthTokens).toEqual(['w-full']);
   });
 
-  it('通常分岐の案内は通知の部品として読み上げ領域 1 つに載る（Req 1.1）', () => {
+  // 案内文は画面の説明であって、状態の変化を知らせる通知ではない（design-language 7.9 節・9 節）。
+  // 通知の部品で描くと、枠のある箱が入力欄のように見えるうえ、変化しない文言が読み上げ領域に載る。
+  it('通常分岐の案内は主見出しの説明文として置き、通知にも読み上げ領域にも載せない（Req 1.1）', () => {
     useAuthMock.mockReturnValue({ status: 'signedOut', me: null, signIn: vi.fn(), signOut: vi.fn() });
-    render(<LoginPage />);
-    const regions = screen.getAllByRole('status');
-    expect(regions).toHaveLength(1);
-    expect(announcedText(regions[0]!)).toBe(
+    const { container } = render(<LoginPage />);
+    const description = container.querySelector('[data-slot="page-header-description"]');
+    expect(description).not.toBeNull();
+    expect(announcedText(description!)).toBe(
       '運営・代理店向けダッシュボードです。Google アカウントでログインしてください。',
     );
-    // 案内は緊急ではない。読み上げを中断させる役割（alert）はこの分岐に出さない。
+    expect(description!.closest('[data-slot="alert"]')).toBeNull();
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
+  });
+
+  it('どの分岐でも主見出しは見出し周りの部品が描き、第 1 見出しは「ログイン」の 1 つだけである（Req 1.1）', () => {
+    for (const status of ['signedOut', 'loading', 'unregistered'] as const) {
+      useAuthMock.mockReturnValue({ status, me: null, signIn: vi.fn(), signOut: vi.fn() });
+      const { container } = render(<LoginPage />);
+      const headings = screen.getAllByRole('heading', { level: 1 });
+      expect(headings, status).toHaveLength(1);
+      expect(headings[0]!.textContent, status).toBe('ログイン');
+      expect(headings[0]!.closest('[data-slot="page-header"]'), status).not.toBeNull();
+      expect(container.querySelectorAll('[data-slot="page-header"]'), status).toHaveLength(1);
+      cleanup();
+    }
   });
 
   it('どの分岐でもワードマークを装飾専用色の大きい文字として置き、操作の個数を増やさない（Req 1.1, 3.3）', () => {

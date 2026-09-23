@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
-import { Heading } from '@fwlm/ui/components/heading';
+import { PageHeader } from '@fwlm/ui/components/page-header';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { useAuth } from '../../lib/auth-context';
 
@@ -15,6 +15,8 @@ import { useAuth } from '../../lib/auth-context';
 // 版面（本文系の狭い側）と主操作を全幅にする判断は docs/design/design-language.md の 7.9 節が、
 // ワードマークの色は 7.4 節と 2.2 節が正典であり、ここでは結論も数値も転記せず参照する。
 // 版面の部品は既定で main を描くため、素の main を **置換** する（入れ子にしない）。
+// 主見出しと案内文は見出し周りの部品（PageHeader）が描く。案内文は状態の変化を知らせる通知ではなく
+// 画面の説明なので、通知の部品にも読み上げ領域にも載せない（9 節の部品表）。
 export default function LoginPage() {
   const { status, signIn } = useAuth();
   const router = useRouter();
@@ -29,7 +31,7 @@ export default function LoginPage() {
     return (
       <PageShell width="sm" className="flex flex-col gap-6">
         <Wordmark />
-        <Heading level={1}>ログイン</Heading>
+        <PageHeader title="ログイン" />
         {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
             領域が二重になるため、文言は説明の受け口へ置くだけにする。 */}
         <Alert variant="destructive">
@@ -45,13 +47,10 @@ export default function LoginPage() {
   return (
     <PageShell width="sm" className="flex flex-col gap-6">
       <Wordmark />
-      <Heading level={1}>ログイン</Heading>
-      {/* 通常の案内は緊急ではないため、読み上げを中断しない既定の変種（role="status"）を使う。 */}
-      <Alert>
-        <AlertDescription>
-          運営・代理店向けダッシュボードです。Google アカウントでログインしてください。
-        </AlertDescription>
-      </Alert>
+      <PageHeader
+        title="ログイン"
+        description="運営・代理店向けダッシュボードです。Google アカウントでログインしてください。"
+      />
       {/* 状態確定前は押せない。焦点の到達を止めてよい操作なので、通知手段はブラウザ標準の
           無効属性である（Req 3.5）。 */}
       {/* 見た目は Sign in with Google の規定（Light）に従う（docs/design/design-language.md の 7.9 節と
