@@ -5,7 +5,8 @@ import (
 	"fmt"
 )
 
-// Store は日次バッチが処理する対象店舗の最小情報（design.md: 対象 = place_status='confirmed'）。
+// Store は日次バッチが処理する対象店舗の最小情報（design.md: 対象 = place_status='confirmed' かつ
+// 停止中でない（suspended_at IS NULL）店舗。store-suspension Requirements 3.1–3.5）。
 // PlaceID は confirmed 店舗では常に非 NULL（0001: ck_place_confirmed）。
 type Store struct {
 	ID           string
@@ -16,13 +17,16 @@ type Store struct {
 	Longitude    *float64
 }
 
-// ConfirmedStores は place_status='confirmed' の全店舗を返す（design.md 日次バッチ Flow:
-// 「確定済み店舗と競合リストを読取」の対象抽出）。
+// ConfirmedStores は place_status='confirmed' かつ停止中でない全店舗（利用中の確定店舗）を返す
+// （design.md 日次バッチ Flow:「確定済み店舗と競合リストを読取」の対象抽出）。
+// 停止中の店舗は自店・競合の取得も集計の作成も行わず、対象店舗数にも数えない。再開すると次の実行から
+// 対象へ戻る（store-suspension Requirements 3.1, 3.3–3.5）。
 func ConfirmedStores(ctx context.Context, db DBTX) ([]Store, error) {
 	rows, err := db.Query(ctx, `
 		SELECT id, owner_id, place_id, category_code, latitude, longitude
 		FROM stores
 		WHERE place_status = 'confirmed'
+		  AND suspended_at IS NULL
 		ORDER BY id
 	`)
 	if err != nil {
@@ -44,14 +48,16 @@ func ConfirmedStores(ctx context.Context, db DBTX) ([]Store, error) {
 	return stores, nil
 }
 
-// StoresWithoutFixedCompetitors は確定済みかつ competitors 行が1つも無い店舗を返す
+// StoresWithoutFixedCompetitors は確定済みで停止中でなく、competitors 行が1つも無い店舗を返す
 // （research.md Decision「競合抽出は日次バッチ内で自己修復型」: 毎朝バッチ冒頭で
-// 「place 確定済みかつ競合未固定」の店舗を検出する対象抽出）。
+// 「place 確定済みかつ競合未固定」の店舗を検出する対象抽出）。停止中の店舗は競合の抽出・固定も
+// 行わない（store-suspension Requirement 3.2）。
 func StoresWithoutFixedCompetitors(ctx context.Context, db DBTX) ([]Store, error) {
 	rows, err := db.Query(ctx, `
 		SELECT s.id, s.owner_id, s.place_id, s.category_code, s.latitude, s.longitude
 		FROM stores s
 		WHERE s.place_status = 'confirmed'
+		  AND s.suspended_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM competitors c WHERE c.store_id = s.id)
 		ORDER BY s.id
 	`)

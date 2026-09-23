@@ -76,7 +76,8 @@ type Deps struct {
 // （対象店舗数・抽出実行数・取得成功/失敗数・summary 生成数・パージ行数）を構造化ログで1行出力」）。
 // ログ出力そのものは cmd/daily-batch/main.go が行う（本パッケージは値の集計のみを担う）。
 type Summary struct {
-	// StoresTotal は対象（place_status='confirmed'）の全店舗数。
+	// StoresTotal は対象（place_status='confirmed' かつ停止中でない＝利用中の確定店舗）の店舗数。
+	// 停止中の店舗は数えない（store-suspension Requirement 3.4）。
 	StoresTotal int
 	// ExtractRan は「競合未固定」のため今回抽出を実行した店舗数（成功・失敗を問わず実行数）。
 	ExtractRan int
@@ -111,7 +112,7 @@ func (s Summary) RowsPurged() int64 {
 //
 // 手順（design.md「日次バッチ（06:00 JST）」System Flow に対応）:
 //  1. 起動ジッター（0–JitterMaxSeconds 秒）
-//  2. 確定済み店舗・競合未固定店舗を読取
+//  2. 利用中の確定店舗・競合未固定店舗を読取（停止中の店舗は含まない）
 //  3. 競合未固定店舗をまず抽出・固定（逐次・自己修復型 — research.md Decision）
 //  4. 店舗単位ワーカープールで自店＋競合の指標取得・順位算出・記録（店舗単位のエラー隔離）
 //  5. 30日超の snapshots/summaries をパージ
