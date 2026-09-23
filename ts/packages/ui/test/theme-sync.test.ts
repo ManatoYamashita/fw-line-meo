@@ -326,6 +326,9 @@ const COLOR_ROLE_TO_CSS_VARIABLE: Readonly<Record<keyof ColorTokens, string>> = 
   // Google Maps の帰属表示の文字色。本文色とは別の変数として宣言する（Issue #287）。同じ変数へ潰すと、
   // 本文色を動かした瞬間に帰属表示がポリシーの許す 3 色の外へ出る。
   attribution: '--color-attribution',
+  googleSignInFill: '--color-google-sign-in-fill',
+  googleSignInBorder: '--color-google-sign-in-border',
+  googleSignInForeground: '--color-google-sign-in-foreground',
 };
 
 describe('theme-sync: 意味役割 ↔ @theme 変数の厳密一致（Requirements 1.1, 1.3）', () => {

@@ -44,6 +44,11 @@
    * このファイルのコメントに Issue 番号を `#` 付きで書かないこと。3 桁以上は hex の短縮形と表記が
    * 完全に衝突し、theme-sync の「定義の無い色の混入」検査が拾う。 */
   --color-attribution: #5E5E5E;
+  /* 「Google でログイン」ボタン（Sign in with Google branding guidelines の Light テーマ）。
+   * G ロゴは規定外の背景に置けないため、アクション色ではなくこの 3 色で描く。 */
+  --color-google-sign-in-fill: #FFFFFF;
+  --color-google-sign-in-border: #747775;
+  --color-google-sign-in-foreground: #1F1F1F;
 
   /* Typography（design-tokens typography） */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN",

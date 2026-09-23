@@ -49,6 +49,9 @@ describe('colors（Web 意味役割）', () => {
       'border',
       'borderInteractive',
       'attribution',
+      'googleSignInFill',
+      'googleSignInBorder',
+      'googleSignInForeground',
     ] as const;
     expect(Object.keys(colors).sort()).toEqual([...roles].sort());
     for (const role of roles) {
@@ -199,5 +202,19 @@ describe('spacing / radius / shadow', () => {
     for (const key of keys) {
       expect(shadow[key]).toContain('px');
     }
+  });
+});
+
+// 「Google でログイン」ボタンの配色は外部の規定で決まる（Issue #146）。
+// Sign in with Google branding guidelines（https://developers.google.com/identity/branding-guidelines ・
+// 2026-09-23 確認）の Light テーマは「Fill: #FFFFFF / Stroke: #747775 | 1px | inside / Font: #1F1F1F」。
+// 意匠の調整で値を動かすと、G ロゴが規定外の背景に載る。
+describe('Google ログインボタンの配色', () => {
+  it('Light テーマの 3 値と一致する', () => {
+    expect({
+      fill: colors.googleSignInFill.toUpperCase(),
+      border: colors.googleSignInBorder.toUpperCase(),
+      foreground: colors.googleSignInForeground.toUpperCase(),
+    }).toEqual({ fill: '#FFFFFF', border: '#747775', foreground: '#1F1F1F' });
   });
 });
