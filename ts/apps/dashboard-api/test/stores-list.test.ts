@@ -105,6 +105,7 @@ describe('handleStoresList', () => {
           id: '44444444-4444-4444-4444-444444444444',
           name: 'テスト店',
           placeStatus: 'confirmed',
+          suspendedAt: null,
           competitorConfigured: true,
           ownerId: 'ow1',
           ownerDisplayName: 'オーナー太郎',
@@ -114,5 +115,20 @@ describe('handleStoresList', () => {
         },
       ],
     });
+  });
+
+  it('停止中の店舗は suspendedAt を ISO 文字列で返し、利用中の店舗は null を返す（Req 2.1）', async () => {
+    const listStores = () =>
+      Promise.resolve([
+        item({ id: 'aaaaaaaa-0000-0000-0000-000000000001', suspendedAt: new Date('2026-09-20T01:02:03.000Z') }),
+        item({ id: 'aaaaaaaa-0000-0000-0000-000000000002', suspendedAt: null }),
+      ]);
+    const res = await handleStoresList(deps({ listStores }), req());
+    expect(res.status).toBe(200);
+    const body = await readJson<{ stores: Array<{ id: string; suspendedAt: string | null }> }>(res);
+    expect(body.stores.map((s) => [s.id, s.suspendedAt])).toEqual([
+      ['aaaaaaaa-0000-0000-0000-000000000001', '2026-09-20T01:02:03.000Z'],
+      ['aaaaaaaa-0000-0000-0000-000000000002', null],
+    ]);
   });
 });

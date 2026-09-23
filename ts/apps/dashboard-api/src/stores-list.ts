@@ -25,6 +25,7 @@ export interface StoreListItemJson {
   id: string;
   name: string;
   placeStatus: PlaceStatus;
+  suspendedAt: string | null; // ISO 8601。利用中は null
   competitorConfigured: boolean;
   ownerId: string;
   ownerDisplayName: string | null;
@@ -70,6 +71,7 @@ function toJson(item: StoreListItem): StoreListItemJson {
     id: item.id,
     name: item.name,
     placeStatus: item.placeStatus,
+    suspendedAt: item.suspendedAt === null ? null : item.suspendedAt.toISOString(),
     competitorConfigured: item.competitorConfigured,
     ownerId: item.ownerId,
     ownerDisplayName: item.ownerDisplayName,

@@ -3,7 +3,7 @@ import { authenticate, canAccessStore, type AuthDeps } from './auth.js';
 import { jsonError } from './http.js';
 
 // QR エンドポイントの中核ロジック（依存注入でテスト可能）。
-// 認証 → 店舗取得 → RBAC → place 確定 → QR PNG の順に評価する。
+// 認証 → 店舗取得 → RBAC → 停止中でない → place 確定 → QR PNG の順に評価する。
 // qrcode / firebase-admin / DB はすべて注入面に隔離する。
 
 export interface QrDeps {
@@ -41,12 +41,20 @@ export async function handleQr(deps: QrDeps, req: QrRequest): Promise<Response> 
     return jsonError(403, 'FORBIDDEN', 'この店舗へのアクセス権がありません');
   }
 
-  // 4. place 確定（未確定は QR を発行しない）
+  // 4. 停止中でない（停止中の店舗は QR を発行しない・Issue #252 / Req 5.5）。
+  //    範囲の判定の後に置くので、範囲外の店舗の停止状態は漏れない。
+  //    確定の判定より先に置くので、停止中の店舗には確定の有無に依らず停止の理由を返す。
+  //    再開して suspendedAt が null に戻れば、以降の判定どおり発行できる（Req 5.7）。
+  if (store.suspendedAt !== null) {
+    return jsonError(409, 'STORE_SUSPENDED', '停止中の店舗の QR は発行できません');
+  }
+
+  // 5. place 確定（未確定は QR を発行しない）
   if (store.placeStatus !== 'confirmed') {
     return jsonError(409, 'PLACE_NOT_CONFIRMED', '店舗の場所が未確定です。先に確定してください');
   }
 
-  // 5. QR PNG 生成（中身は {SURVEY_BASE_URL}/s/{storeId} の URL のみ）
+  // 6. QR PNG 生成（中身は {SURVEY_BASE_URL}/s/{storeId} の URL のみ）
   const url = `${deps.surveyBaseUrl}/s/${store.id}`;
   const png = await deps.renderQr(url, req.size);
   return new Response(new Uint8Array(png), {
