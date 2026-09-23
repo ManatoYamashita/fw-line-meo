@@ -4,10 +4,9 @@ import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
-import { Field, FieldGroup } from '@fwlm/ui/components/field';
+import { Field, FieldGroup, FieldLabel } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
-import { Label } from '@fwlm/ui/components/label';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import {
@@ -107,25 +106,23 @@ function AgenciesView() {
 
       {/* 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。 */}
       <FieldGroup>
-        <Field className="contents">
-          <div className="flex flex-col gap-2 sm:max-w-xs">
-            <Label htmlFor="agency-name">代理店名</Label>
-            <Input
-              id="agency-name"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            {/* 無効の通知手段は変えない（素の無効属性のまま。焦点の到達を要求する箇所とは別枠）。 */}
-            <Button
-              type="button"
-              className="self-start"
-              onClick={() => void handleCreate()}
-              disabled={submitting}
-            >
-              代理店作成
-            </Button>
-          </div>
+        <Field className="sm:max-w-xs">
+          <FieldLabel htmlFor="agency-name">代理店名</FieldLabel>
+          <Input
+            id="agency-name"
+            type="text"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+          {/* 無効の通知手段は変えない（素の無効属性のまま。焦点の到達を要求する箇所とは別枠）。 */}
+          <Button
+            type="button"
+            className="self-start"
+            onClick={() => void handleCreate()}
+            disabled={submitting}
+          >
+            代理店作成
+          </Button>
         </Field>
       </FieldGroup>
 

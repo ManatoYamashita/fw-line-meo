@@ -599,7 +599,7 @@ describe('店舗登録ウィザード: 検索の帯と候補一覧（task 5.1・
     const main = await advanceToStep('search');
     const scope = within(main);
     expect(scope.getByLabelText('店名').getAttribute('data-slot')).toBe('input');
-    expect(scope.getByText('店名').getAttribute('data-slot')).toBe('label');
+    expect(scope.getByText('店名').getAttribute('data-slot')).toBe('field-label');
     expect(scope.getByRole('button', { name: '検索' }).getAttribute('data-slot')).toBe('button');
   });
 
@@ -748,7 +748,7 @@ describe('店舗登録ウィザード: 段階表示とフォーム（task 5.2・
       expect(select.parentElement?.getAttribute('data-slot'), label).toBe('select-wrapper');
       expect(select.closest('p'), label).toBeNull();
       // ラベルも共通部品から来る。
-      expect(scope.getByText(label).getAttribute('data-slot'), label).toBe('label');
+      expect(scope.getByText(label).getAttribute('data-slot'), label).toBe('field-label');
     }
 
     await assertSelect('代理店');

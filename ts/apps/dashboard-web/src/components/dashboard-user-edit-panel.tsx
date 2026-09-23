@@ -5,10 +5,9 @@ import { useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Card, CardContent, CardHeader } from '@fwlm/ui/components/card';
-import { Field, FieldDescription, FieldGroup } from '@fwlm/ui/components/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
-import { Label } from '@fwlm/ui/components/label';
 import { Select } from '@fwlm/ui/components/select';
 
 import {
@@ -283,70 +282,64 @@ export function DashboardUserEditPanel({
             <>
               {/* 容器と幅の段は登録フォームと同じにする（段落ではなく汎用の容器・広い版面でだけ
                 * 幅を絞る）。値は既存の 4 面が採った段と同一である。 */}
-              <Field className="contents">
-                <div className="flex flex-col gap-2 sm:max-w-xs">
-                  <Label htmlFor={ids.role}>ロール</Label>
-                  <Select
-                    id={ids.role}
-                    name="role"
-                    value={role}
-                    onChange={(event) => setRole(event.target.value as DashboardRole)}
-                    aria-describedby={roleHint === null ? undefined : ids.roleHint}
-                  >
-                    <option value="operator">運営</option>
-                    <option value="agency">代理店</option>
-                  </Select>
-                  {roleHint !== null && (
-                    <FieldDescription id={ids.roleHint}>{roleHint}</FieldDescription>
-                  )}
-                </div>
+              <Field className="sm:max-w-xs">
+                <FieldLabel htmlFor={ids.role}>ロール</FieldLabel>
+                <Select
+                  id={ids.role}
+                  name="role"
+                  value={role}
+                  onChange={(event) => setRole(event.target.value as DashboardRole)}
+                  aria-describedby={roleHint === null ? undefined : ids.roleHint}
+                >
+                  <option value="operator">運営</option>
+                  <option value="agency">代理店</option>
+                </Select>
+                {roleHint !== null && (
+                  <FieldDescription id={ids.roleHint}>{roleHint}</FieldDescription>
+                )}
               </Field>
 
               {/* 代理店ロールを選んでいるときだけ所属を必須で選ばせる（運営は所属を持たない）。 */}
               {role === 'agency' && (
-                <Field className="contents">
-                  <div className="flex flex-col gap-2 sm:max-w-xs">
-                    <Label htmlFor={ids.agency}>所属代理店</Label>
-                    <Select
-                      id={ids.agency}
-                      name="agencyId"
-                      required
-                      value={agencyId}
-                      onChange={(event) => setAgencyId(event.target.value)}
-                      aria-invalid={agencyInvalid ? true : undefined}
-                      aria-describedby={agencyInvalid ? ids.error : undefined}
-                    >
-                      <option value="">代理店を選択してください</option>
-                      {currentAgencyId !== null && (
-                        <option value={currentAgencyId}>{currentAgencyId}</option>
-                      )}
-                      {assignmentOptions.map((agency) => (
-                        <option key={agency.id} value={agency.id}>
-                          {agency.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
+                <Field className="sm:max-w-xs">
+                  <FieldLabel htmlFor={ids.agency}>所属代理店</FieldLabel>
+                  <Select
+                    id={ids.agency}
+                    name="agencyId"
+                    required
+                    value={agencyId}
+                    onChange={(event) => setAgencyId(event.target.value)}
+                    aria-invalid={agencyInvalid ? true : undefined}
+                    aria-describedby={agencyInvalid ? ids.error : undefined}
+                  >
+                    <option value="">代理店を選択してください</option>
+                    {currentAgencyId !== null && (
+                      <option value={currentAgencyId}>{currentAgencyId}</option>
+                    )}
+                    {assignmentOptions.map((agency) => (
+                      <option key={agency.id} value={agency.id}>
+                        {agency.name}
+                      </option>
+                    ))}
+                  </Select>
                 </Field>
               )}
             </>
           )}
 
-          <Field className="contents">
-            <div className="flex flex-col gap-2 sm:max-w-xs">
-              <Label htmlFor={ids.displayName}>表示名</Label>
-              {/* 他人の表示名を編集する欄なので、ブラウザに操作者自身の名前を自動入力させない。
-                * 固定表示の理由は、焦点が最初に届くこの欄へ結び付ける（固定の値は焦点を受けない）。 */}
-              <Input
-                id={ids.displayName}
-                name="displayName"
-                type="text"
-                autoComplete="off"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                aria-describedby={lockedReason === null ? undefined : ids.lockedReason}
-              />
-            </div>
+          <Field className="sm:max-w-xs">
+            <FieldLabel htmlFor={ids.displayName}>表示名</FieldLabel>
+            {/* 他人の表示名を編集する欄なので、ブラウザに操作者自身の名前を自動入力させない。
+              * 固定表示の理由は、焦点が最初に届くこの欄へ結び付ける（固定の値は焦点を受けない）。 */}
+            <Input
+              id={ids.displayName}
+              name="displayName"
+              type="text"
+              autoComplete="off"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              aria-describedby={lockedReason === null ? undefined : ids.lockedReason}
+            />
           </Field>
 
           {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねない。 */}

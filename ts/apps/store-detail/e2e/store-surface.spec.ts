@@ -12,7 +12,7 @@ import { STORE_SURFACE_STATES, openStoreSurface } from './fixtures/detail';
 //
 // 推移の選択肢と競合の検索欄を足したあと（store-detail-trend-dashboard・Issue #265）は、次も実測する
 // （同 spec のタスク 5.2）。
-// - 4 つの表示状態 × 2 つの幅（Pixel 5 相当と 320px）の横スクロール（要件 6.1〜6.4・9.4）
+// - 11 の表示状態 × 2 つの幅（Pixel 5 相当と 320px）の横スクロール（要件 6.1〜6.4・9.4）
 // - 検索欄から期間の群へのキーボード操作と、焦点の輪郭（要件 2.7・5.5）
 // - 札の行と検索欄の Field の高さ（要件 5.6）
 // - グラフの文字の寸法が幅によって変わらないこと（要件 6.5）
@@ -22,43 +22,34 @@ import { STORE_SURFACE_STATES, openStoreSurface } from './fixtures/detail';
 //
 // 前提: `E2E_STUB_IDP=1` を立ててビルドしたものに対して走らせる（playwright.config.ts の説明）。
 
-// 推移表を `@fwlm/ui` の `TableContainer` へ移したので、捲れる領域が 1 件ある
-// （ui-airbnb-surfaces task 3.3）。要件 2.5 が「一覧の内部だけを横にたどれる状態にし、
-// ページ全体を横に溢れさせない」と定めており、これは事故ではなく設計どおりの 1 件である。
-// 容器は表の外側にあり、内側を免除しても容器自身の右端は依然として端末幅と比べられる。
-//
-// **この 1 は実測である。** task 3.3 の着手前は 0 で緑、推移を容器へ移した直後に
-// 「捲れる領域の実測件数 1 が宣言 0 と食い違う（実測: table-container(直近30日の推移)）」で
-// 赤くなることを確かめてから、この宣言を更新した。それが件数宣言の本来の働きであり、
-// PR #190 がこのファイルへ 0 を書いたときに「task 3.3 の時点で更新が強制される」と
-// 予告していた更新そのものである。
+// 推移表は `@fwlm/ui` の `TableContainer` を保ちつつ、通常の携帯幅では responsive density で全列を
+// 収める（Issue #286）。溢れの検査は overflow-x を持つ容器を、その時点の scrollWidth に関係なく
+// 「横捲りを担える領域」として 1 件に数える。実際に通常時は溢れず、200% 文字で溢れることは、
+// 下の専用テストが scrollWidth と clientWidth の実測で分ける。
 //
 // この面は帯を持たない（管理ダッシュボードの `NAV_SCROLL_REGIONS` に相当するものが無い）。
 // 書込の手段となる要素（フォーム・押しボタン・複数行入力・選択欄）を描画しないため（4.2 の no-write 契約）、
 // textarea 由来の領域も無い。Issue #265 で改定した構造契約により、入力は競合の検索欄と、期間・指標の
 // 選択肢（隠し radio）の 2 種類に限られる（正典は test/store-page.test.tsx の「構造契約（許可リスト方式）」）。
 // これらが捲れる領域を増やしていないことも、この宣言が確かめる（増えれば件数が食い違って赤になる）。
-// つまり店舗詳細の捲れる領域は、この表の 1 件が全部である。
-//
-// **ただし「1 件」は推移を描けているときの値である**（Issue #286）。推移の点が 1 つも無い応答では表ごと
-// 描かれず、捲れる領域は 0 件になる。状態ごとの値は fixtures/detail.ts の `structure.tableScrollRegions`
-// が持つ。この定数は、既定の応答で 1 度だけ開く下の 3 つの検査のために残す。
+// 容器の値は状態ごとに fixtures/detail.ts の `structure.tableScrollRegions` が持つ。この定数は、
+// 既定の応答で 1 度だけ開く下の検査のために残す。
 const TABLE_SCROLL_REGIONS = 1;
 
 // 表示状態の一覧（fixtures/detail.ts の STORE_SURFACE_STATES）を 2 つの幅で回った数の宣言
 // （store-detail-trend-dashboard の要件 9.4・Issue #265。状態を 8 つへ広げた・Issue #286）。
-// 9 つの状態を、Pixel 5 相当と 320px の 2 つの幅で回る。
+// 11 の状態を、Pixel 5 相当と 320px の 2 つの幅で回る。
 // 一覧の長さや幅の数から導かずに数で書く。導くと、状態か幅を 1 つ消したときに宣言も一緒に減り、
 // 検査が緑のまま測る範囲が減ったことを見逃すためである。
-const STATE_WIDTH_VISIT_COUNT = 18;
+const STATE_WIDTH_VISIT_COUNT = 22;
 
 // 回った先で照合が通った捲れる領域の件数の総和（Issue #286）。
 //
 // **上の巡回数の宣言だけでは足りない。** 状態ごとの期待値は fixture が持つので、全状態の宣言を 0 に
 // する改変（容器から横の捲りを失わせ、併せて宣言も 0 にする）は、per-state の照合も巡回数の宣言も
 // 素通りする。総和をここへ数で書くことが、その改変を赤にする。
-// 内訳: 「推移 0 件」を除く 8 状態が 1 件ずつ、それを 2 つの幅で回る。
-const SCROLL_REGION_VISIT_TOTAL = 16;
+// 内訳: 「推移 0 件」を除く 10 状態が容器 1 件を持ち、それを 2 つの幅で回る。
+const SCROLL_REGION_VISIT_TOTAL = 20;
 
 /** 狭い幅の表示領域。高さは、下の既存の 320px の検査にそろえる。 */
 const NARROW_VIEWPORT = { width: 320, height: 720 } as const;
@@ -123,12 +114,12 @@ async function expectScrollRegionsAreTrendTable(page: Page, where: string): Prom
   }
 }
 
-test('9 つの表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は状態ごとの宣言と一致する', async ({
+test('11 の表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は状態ごとの宣言と一致する', async ({
   page,
 }) => {
   // 各状態の入口は、操作後の表示と、詳細の取得がちょうど 1 回だったことを自分で確かめてから返る。
   // 検索 0 件の状態は長い英字列を入れるので、長い検索語を入れた状態（要件 6.4）も兼ねる。
-  // 9 状態 × 2 幅なので、既定の制限時間（30 秒）では足りない。
+  // 11 状態 × 2 幅なので、既定の制限時間（30 秒）では足りない。
   test.setTimeout(180_000);
 
   const visited: string[] = [];
@@ -507,8 +498,21 @@ interface TickBand {
   readonly width: number;
   readonly left: number;
   readonly right: number;
+  readonly top: number;
+  readonly height: number;
+  readonly paddingTop: number;
+  readonly paddingBottom: number;
   /** 帯の中の文字それぞれの箱。 */
-  readonly labels: readonly { readonly text: string; readonly width: number; readonly left: number; readonly right: number }[];
+  readonly labels: readonly {
+    readonly text: string;
+    readonly width: number;
+    readonly left: number;
+    readonly right: number;
+    readonly textWidth: number;
+    readonly textRight: number;
+    readonly centerY: number;
+    readonly declaredTopPercent: number;
+  }[];
 }
 
 /**
@@ -535,17 +539,29 @@ function readTickBand(page: Page): Promise<TickBand | null> {
     if (band === null) return null;
 
     const box = band.getBoundingClientRect();
+    const style = getComputedStyle(band);
     return {
       width: box.width,
       left: box.left,
       right: box.right,
+      top: box.top,
+      height: box.height,
+      paddingTop: Number.parseFloat(style.paddingTop),
+      paddingBottom: Number.parseFloat(style.paddingBottom),
       labels: labels.map((label) => {
         const labelBox = label.getBoundingClientRect();
+        const textRange = document.createRange();
+        textRange.selectNodeContents(label);
+        const textBox = textRange.getBoundingClientRect();
         return {
           text: (label.textContent ?? '').trim(),
           width: labelBox.width,
           left: labelBox.left,
           right: labelBox.right,
+          textWidth: textBox.width,
+          textRight: textBox.right,
+          centerY: textBox.top + textBox.height / 2,
+          declaredTopPercent: Number.parseFloat(label.style.top),
         };
       }),
     };
@@ -568,7 +584,7 @@ test('目盛りの帯の幅が、目盛りの文字に追随する', async ({ pa
     expect(band, `${metric}: 目盛りの帯が読めない`).not.toBeNull();
     expect(band!.labels.length, `${metric}: 目盛りの文字が 1 つも無い`).toBeGreaterThan(0);
 
-    const widest = Math.max(...band!.labels.map((label) => label.width));
+    const widest = Math.max(...band!.labels.map((label) => label.textWidth));
     expect(
       Math.abs(band!.width - widest),
       `${metric}: 帯の幅 ${band!.width.toFixed(1)}px が、最も広い目盛りの文字 ${widest.toFixed(1)}px と食い違う` +
@@ -583,6 +599,21 @@ test('目盛りの帯の幅が、目盛りの文字に追随する', async ({ pa
     expect(Math.max(...band!.labels.map((l) => l.right)), `${metric}: 目盛りが帯の右へはみ出す`).toBeLessThanOrEqual(
       band!.right + 0.5,
     );
+
+    // 指定した百分率が、帯の内側（描画領域と同じ 144px）の実測位置に対応すること。
+    const innerHeight = band!.height - band!.paddingTop - band!.paddingBottom;
+    for (const label of band!.labels) {
+      const expectedCenter = band!.top + band!.paddingTop + (innerHeight * label.declaredTopPercent) / 100;
+      expect(
+        Math.abs(label.centerY - expectedCenter),
+        `${metric} ${label.text}: 目盛りの中心 ${label.centerY.toFixed(1)}px が ` +
+          `${label.declaredTopPercent}% の位置 ${expectedCenter.toFixed(1)}px と食い違う`,
+      ).toBeLessThanOrEqual(0.75);
+      expect(
+        Math.abs(label.textRight - band!.right),
+        `${metric} ${label.text}: 目盛りの文字が帯の右端へそろっていない`,
+      ).toBeLessThanOrEqual(0.5);
+    }
 
     observed.push(Math.round(band!.width));
   }
@@ -633,6 +664,64 @@ test('320px 幅でも指標・競合比較・推移要約がクリップされ�
   await expect(page.getByText('クチコミの前日比')).toBeVisible();
   await expect(page.getByText('近隣の競合店舗としては最も名前の長いケース 丸の内本店')).toBeVisible();
   await expect(page.getByText('表示期間の変化')).toBeVisible();
+});
+
+test('320px 幅で推移表のクチコミ数 2274 の末尾まで見え、200% 文字では表だけを横にたどれる', async ({
+  page,
+}) => {
+  await page.setViewportSize(NARROW_VIEWPORT);
+  await openStoreSurface(page);
+
+  const reviewCount = page.getByRole('cell', { name: '2274', exact: true });
+  await expect(reviewCount).toBeVisible();
+  const normal = await reviewCount.evaluate((cell) => {
+    const container = cell.closest<HTMLElement>('[data-slot="table-container"]');
+    if (container === null) return null;
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    const text = range.getBoundingClientRect();
+    const viewport = container.getBoundingClientRect();
+    return {
+      textRight: text.right,
+      viewportRight: viewport.right,
+      scrollLeft: container.scrollLeft,
+      scrollWidth: container.scrollWidth,
+      clientWidth: container.clientWidth,
+    };
+  });
+  expect(normal, '推移表の容器を読めない').not.toBeNull();
+  expect(normal!.scrollLeft, '末尾の桁を見るために表が最初から横へずれている').toBe(0);
+  expect(
+    normal!.textRight,
+    `クチコミ数 2274 の字面の右端 ${normal!.textRight}px が表の見える右端 ${normal!.viewportRight}px を越える`,
+  ).toBeLessThanOrEqual(normal!.viewportRight + 0.5);
+  expect(
+    normal!.scrollWidth,
+    `通常文字で推移表が横へ溢れている（scrollWidth ${normal!.scrollWidth}px / clientWidth ${normal!.clientWidth}px）`,
+  ).toBeLessThanOrEqual(normal!.clientWidth + 1);
+  await expectNoHorizontalScroll(page, '店舗詳細（320px・通常文字）', 1);
+
+  // 文字を 200% にしてもページ全体は溢れず、収まらない表だけが横捲りへ退避する。
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '32px';
+  });
+  await expect
+    .poll(() =>
+      page
+        .locator('[data-slot="table-container"]')
+        .evaluate((container) => container.scrollWidth > container.clientWidth + 1),
+    )
+    .toBe(true);
+  const enlarged = await page.locator('[data-slot="table-container"]').evaluate((container) => ({
+    scrollWidth: container.scrollWidth,
+    clientWidth: container.clientWidth,
+  }));
+  expect(
+    enlarged.scrollWidth,
+    `200% 文字でも推移表が横捲りへ退避していない（scrollWidth ${enlarged.scrollWidth}px / clientWidth ${enlarged.clientWidth}px）`,
+  ).toBeGreaterThan(enlarged.clientWidth + 1);
+  await expectNoHorizontalScroll(page, '店舗詳細（320px・200%文字）', 1);
+  await expectScrollRegionsAreTrendTable(page, '店舗詳細（320px・200%文字）');
 });
 
 // 「表示期間の変化」の 3 組の段組み（Issue #286 項目 2）。

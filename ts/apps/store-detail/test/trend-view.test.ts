@@ -26,7 +26,6 @@ import {
   metricValue,
   selectTrendWindow,
   summarizeWindow,
-  summaryPeriodNote,
   type TrendMetric,
   type TrendPeriodDays,
   type TrendWindow,
@@ -258,15 +257,18 @@ describe('selectTrendWindow: 期間の窓（要件 2.4）', () => {
     expect(summary.rank).toEqual({
       first: { date: '2026-09-10', value: 4 },
       last: { date: '2026-09-12', value: 2 },
+      periodNote: '記録 9/10〜9/12',
     });
     expect(summary.rating).toEqual({
       first: { date: '2026-09-10', value: '4.1' },
       last: { date: '2026-09-12', value: '4.4' },
+      periodNote: '記録 9/10〜9/12',
     });
     expect(summary.reviewCount).toEqual({
       diff: 10,
       first: { date: '2026-09-10', value: 100 },
       last: { date: '2026-09-12', value: 110 },
+      periodNote: '記録 9/10〜9/12',
     });
     // 存在しない日の順位 99 を数えれば、それが最悪になる。
     expect(rank.worst).toEqual({ date: '2026-09-10', value: 4 });
@@ -548,12 +550,21 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
     );
 
     expect(summarizeWindow(window)).toEqual({
-      rank: { first: { date: '2026-09-10', value: 5 }, last: { date: '2026-09-13', value: 3 } },
-      rating: { first: { date: '2026-09-10', value: '4.2' }, last: { date: '2026-09-13', value: '4.4' } },
+      rank: {
+        first: { date: '2026-09-10', value: 5 },
+        last: { date: '2026-09-13', value: 3 },
+        periodNote: '記録 9/10〜9/13',
+      },
+      rating: {
+        first: { date: '2026-09-10', value: '4.2' },
+        last: { date: '2026-09-13', value: '4.4' },
+        periodNote: '記録 9/10〜9/13',
+      },
       reviewCount: {
         diff: -5,
         first: { date: '2026-09-10', value: 130 },
         last: { date: '2026-09-13', value: 125 },
+        periodNote: '記録 9/10〜9/13',
       },
     });
   });
@@ -573,12 +584,21 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
     // 3 組が互いに違う日を読んでいる。順位と評価は 9/10〜9/12、クチコミ数は 9/09〜9/12 である。
     // 組ごとに独立して期間を判定しなければならない理由が、ここに期待値として現れている。
     expect(summarizeWindow(window)).toEqual({
-      rank: { first: { date: '2026-09-10', value: 4 }, last: { date: '2026-09-12', value: 2 } },
-      rating: { first: { date: '2026-09-10', value: '4.2' }, last: { date: '2026-09-12', value: '4.4' } },
+      rank: {
+        first: { date: '2026-09-10', value: 4 },
+        last: { date: '2026-09-12', value: 2 },
+        periodNote: '記録 9/10〜9/12',
+      },
+      rating: {
+        first: { date: '2026-09-10', value: '4.2' },
+        last: { date: '2026-09-12', value: '4.4' },
+        periodNote: '記録 9/10〜9/12',
+      },
       reviewCount: {
         diff: 10,
         first: { date: '2026-09-09', value: 100 },
         last: { date: '2026-09-12', value: 110 },
+        periodNote: '記録 9/9〜9/12',
       },
     });
   });
@@ -594,12 +614,21 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
 
     // 始点と終点が同じ日になる。画面はこの組に「記録 9/13」と 1 日だけを添える。
     expect(summarizeWindow(window)).toEqual({
-      rank: { first: { date: '2026-09-13', value: 2 }, last: { date: '2026-09-13', value: 2 } },
-      rating: { first: { date: '2026-09-13', value: '4.5' }, last: { date: '2026-09-13', value: '4.5' } },
+      rank: {
+        first: { date: '2026-09-13', value: 2 },
+        last: { date: '2026-09-13', value: 2 },
+        periodNote: '記録 9/13',
+      },
+      rating: {
+        first: { date: '2026-09-13', value: '4.5' },
+        last: { date: '2026-09-13', value: '4.5' },
+        periodNote: '記録 9/13',
+      },
       reviewCount: {
         diff: 0,
         first: { date: '2026-09-13', value: 88 },
         last: { date: '2026-09-13', value: 88 },
+        periodNote: '記録 9/13',
       },
     });
   });
@@ -610,6 +639,7 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
     expect(summarizeWindow(window).rating).toEqual({
       first: { date: '2026-09-12', value: '4.0' },
       last: { date: '2026-09-13', value: '5.0' },
+      periodNote: '記録 9/12〜9/13',
     });
   });
 
@@ -627,6 +657,7 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
     expect(summarizeWindow(window).rating).toEqual({
       first: { date: '2026-09-12', value: '4.2' },
       last: { date: '2026-09-12', value: '4.2' },
+      periodNote: '記録 9/12',
     });
   });
 
@@ -639,28 +670,42 @@ describe('summarizeWindow: 「表示期間の変化」の 3 組（要件 3.4・3
 
     // 始点の日そのものが 9/07 であること（9/06 ではないこと）を、値ではなく日で言う。
     expect(summarizeWindow(mustWindow(trend, 7))).toEqual({
-      rank: { first: { date: '2026-09-07', value: 4 }, last: { date: '2026-09-13', value: 3 } },
-      rating: { first: { date: '2026-09-07', value: '4.1' }, last: { date: '2026-09-13', value: '4.2' } },
+      rank: { first: { date: '2026-09-07', value: 4 }, last: { date: '2026-09-13', value: 3 }, periodNote: null },
+      rating: {
+        first: { date: '2026-09-07', value: '4.1' },
+        last: { date: '2026-09-13', value: '4.2' },
+        periodNote: null,
+      },
       reviewCount: {
         diff: 4,
         first: { date: '2026-09-07', value: 100 },
         last: { date: '2026-09-13', value: 104 },
+        periodNote: null,
       },
     });
     // 30 日の窓では同じ点が入り、始点が変わる（期間の切替で要約が追随する）。
     expect(summarizeWindow(mustWindow(trend, 30))).toEqual({
-      rank: { first: { date: '2026-09-06', value: 9 }, last: { date: '2026-09-13', value: 3 } },
-      rating: { first: { date: '2026-09-06', value: '3.1' }, last: { date: '2026-09-13', value: '4.2' } },
+      rank: {
+        first: { date: '2026-09-06', value: 9 },
+        last: { date: '2026-09-13', value: 3 },
+        periodNote: '記録 9/6〜9/13',
+      },
+      rating: {
+        first: { date: '2026-09-06', value: '3.1' },
+        last: { date: '2026-09-13', value: '4.2' },
+        periodNote: '記録 9/6〜9/13',
+      },
       reviewCount: {
         diff: 94,
         first: { date: '2026-09-06', value: 10 },
         last: { date: '2026-09-13', value: 104 },
+        periodNote: '記録 9/6〜9/13',
       },
     });
   });
 });
 
-describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期間（要件 3.4 の 2026-09-19 訂正）', () => {
+describe('summarizeWindow の periodNote: 公称の窓と食い違う組にだけ添える期間', () => {
   // 下の窓はいずれも終点が 9/13 で、7 日なら公称の始点は 9/07 になる。
   // 「添える」側と「添えない」側を必ず対で置く。片側だけだと、常に添える実装も、
   // 一度も添えない実装も、どちらかの検査を素通りする。
@@ -669,13 +714,13 @@ describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期
     const window = mustWindow([point('2026-09-07', { rank: 5 }), point('2026-09-13', { rank: 3 })], 7);
 
     expect(window.startDate).toBe('2026-09-07');
-    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBeNull();
+    expect(summarizeWindow(window).rank?.periodNote).toBeNull();
   });
 
   it('始点だけが食い違えば、読んだ期間を添える', () => {
     const window = mustWindow([point('2026-09-10', { rank: 5 }), point('2026-09-13', { rank: 3 })], 7);
 
-    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/10〜9/13');
+    expect(summarizeWindow(window).rank?.periodNote).toBe('記録 9/10〜9/13');
   });
 
   it('終点だけが食い違えば、読んだ期間を添える', () => {
@@ -686,7 +731,7 @@ describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期
 
     // 終点は「日付を解釈できる最新の記録日」なので、値が無くても 9/13 のままである。
     expect(window.endDate).toBe('2026-09-13');
-    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/7〜9/12');
+    expect(summarizeWindow(window).rank?.periodNote).toBe('記録 9/7〜9/12');
   });
 
   it('両端とも食い違えば、読んだ期間を添える', () => {
@@ -695,20 +740,19 @@ describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期
       7,
     );
 
-    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/10〜9/12');
+    expect(summarizeWindow(window).rank?.periodNote).toBe('記録 9/10〜9/12');
   });
 
   it('読んだ日が 1 日しか無ければ、同じ日を 2 度書かずにその 1 日だけを書く', () => {
     const window = mustWindow([emptyPoint('2026-09-07'), point('2026-09-13', { rank: 2 })], 7);
 
-    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBe('記録 9/13');
+    expect(summarizeWindow(window).rank?.periodNote).toBe('記録 9/13');
   });
 
   it('値が 1 件も無い組には、読んだ日そのものが無いので添えない', () => {
     const window = mustWindow([emptyPoint('2026-09-12'), emptyPoint('2026-09-13')], 7);
 
     expect(summarizeWindow(window).rank).toBeNull();
-    expect(summaryPeriodNote(window, summarizeWindow(window).rank)).toBeNull();
   });
 
   it('同じ窓でも組ごとに結果が違う（判定は組ごとに独立している）', () => {
@@ -724,9 +768,9 @@ describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期
 
     // 順位と評価は 9/10 からしか値が無い。クチコミ数は公称の窓のとおり 9/07〜9/13 を読んでいる。
     // 3 組をまとめて 1 つの注記にすると、どちらかの組が嘘になる。
-    expect(summaryPeriodNote(window, summary.rank)).toBe('記録 9/10〜9/13');
-    expect(summaryPeriodNote(window, summary.rating)).toBe('記録 9/10〜9/13');
-    expect(summaryPeriodNote(window, summary.reviewCount)).toBeNull();
+    expect(summary.rank?.periodNote).toBe('記録 9/10〜9/13');
+    expect(summary.rating?.periodNote).toBe('記録 9/10〜9/13');
+    expect(summary.reviewCount?.periodNote).toBeNull();
   });
 
   it('期間を切り替えると、同じ推移でも結果が変わる', () => {
@@ -738,10 +782,10 @@ describe('summaryPeriodNote: 公称の窓と食い違う組にだけ添える期
     const thirtyDays = mustWindow(trend, 30);
 
     // 7 日の窓は公称の始点が 9/07 で、読んだ最初の日と一致する。
-    expect(summaryPeriodNote(sevenDays, summarizeWindow(sevenDays).rank)).toBeNull();
+    expect(summarizeWindow(sevenDays).rank?.periodNote).toBeNull();
     // 30 日の窓は公称の始点が 8/15 まで遡るので、同じ推移でも食い違う。
     expect(thirtyDays.startDate).toBe('2026-08-15');
-    expect(summaryPeriodNote(thirtyDays, summarizeWindow(thirtyDays).rank)).toBe('記録 9/7〜9/13');
+    expect(summarizeWindow(thirtyDays).rank?.periodNote).toBe('記録 9/7〜9/13');
   });
 });
 

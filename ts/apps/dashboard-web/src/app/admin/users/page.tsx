@@ -4,10 +4,9 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
-import { Field, FieldGroup } from '@fwlm/ui/components/field';
+import { Field, FieldGroup, FieldLabel } from '@fwlm/ui/components/field';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
-import { Label } from '@fwlm/ui/components/label';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { Select } from '@fwlm/ui/components/select';
 import { Spinner } from '@fwlm/ui/components/spinner';
@@ -293,68 +292,60 @@ function UsersView() {
           * サーバ描画とクライアント描画の木が食い違う。
           * 幅の制約は広い版面でだけ効かせる（携帯端末幅の実測を動かさないため）。値は
           * task 2.4 が招待コード・代理店管理で採った段と同一である（Req 1.2）。 */}
-        <Field className="contents">
-          <div className="flex flex-col gap-2 sm:max-w-xs">
-            <Label htmlFor="user-role">ロール</Label>
-            {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
-              * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
-            <Select
-              id="user-role"
-              value={role}
-              onChange={(event) => setRole(event.target.value as DashboardRole)}
-            >
-              <option value="operator">運営</option>
-              <option value="agency">代理店</option>
-            </Select>
-          </div>
+        <Field className="sm:max-w-xs">
+          <FieldLabel htmlFor="user-role">ロール</FieldLabel>
+          {/* 標準の選択要素のラッパである。id・value・onChange はいずれも選択要素へ透過し、
+            * ラベルとの関連付けもプログラムによる値の変更もそのまま働く（Req 3.4）。 */}
+          <Select
+            id="user-role"
+            value={role}
+            onChange={(event) => setRole(event.target.value as DashboardRole)}
+          >
+            <option value="operator">運営</option>
+            <option value="agency">代理店</option>
+          </Select>
         </Field>
 
         {/* 代理店ロールのときのみ所属代理店を必須で入力させる。運営ロールでは代理店欄を出さない（Req 6.3） */}
         {role === 'agency' && (
-          <Field className="contents">
-            <div className="flex flex-col gap-2 sm:max-w-xs">
-              <Label htmlFor="user-agency">所属代理店</Label>
-              {/* 必須属性は包む要素ではなく選択要素そのものへ載る（部品が props を透過するため）。 */}
-              <Select
-                id="user-agency"
-                required
-                value={agencyId}
-                onChange={(event) => setAgencyId(event.target.value)}
-              >
-                <option value="">代理店を選択してください</option>
-                {agencies.map((agency) => (
-                  <option key={agency.id} value={agency.id}>
-                    {agency.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+          <Field className="sm:max-w-xs">
+            <FieldLabel htmlFor="user-agency">所属代理店</FieldLabel>
+            {/* 必須属性は包む要素ではなく選択要素そのものへ載る（部品が props を透過するため）。 */}
+            <Select
+              id="user-agency"
+              required
+              value={agencyId}
+              onChange={(event) => setAgencyId(event.target.value)}
+            >
+              <option value="">代理店を選択してください</option>
+              {agencies.map((agency) => (
+                <option key={agency.id} value={agency.id}>
+                  {agency.name}
+                </option>
+              ))}
+            </Select>
           </Field>
         )}
 
-        <Field className="contents">
-          <div className="flex flex-col gap-2 sm:max-w-xs">
-            <Label htmlFor="user-email">メールアドレス</Label>
-            <Input
-              id="user-email"
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </div>
+        <Field className="sm:max-w-xs">
+          <FieldLabel htmlFor="user-email">メールアドレス</FieldLabel>
+          <Input
+            id="user-email"
+            type="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
         </Field>
 
-        <Field className="contents">
-          <div className="flex flex-col gap-2 sm:max-w-xs">
-            <Label htmlFor="user-display-name">表示名</Label>
-            <Input
-              id="user-display-name"
-              type="text"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
-          </div>
+        <Field className="sm:max-w-xs">
+          <FieldLabel htmlFor="user-display-name">表示名</FieldLabel>
+          <Input
+            id="user-display-name"
+            type="text"
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
         </Field>
 
         {/* 版面は縦の flex なので、そのまま置くと押しボタンが行幅いっぱいに伸びる。

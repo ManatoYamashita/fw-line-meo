@@ -326,6 +326,48 @@ test('モバイルビューポートのログイン画面で横スクロール�
   await expectNoHorizontalScroll(page, 'ログイン', 0);
 });
 
+// Issue #286: 縦積みの Field は FieldLabel と制御を直接隣接させる。FieldLabel が下側へ広げた
+// 操作領域によって、見た目の間隔も押せることを管理面の実物で測る。
+const STACKED_FIELD_VISIT_TOTAL = 14;
+
+test('管理面の縦積み Field は、ラベルと制御の間に反応しない帯を残さない', async ({ page }) => {
+  test.setTimeout(120_000);
+  let visited = 0;
+
+  // ログイン面を途中に挟むと、認証を外す fixture が後続にも残る。Field を実際に持つ 5 面だけを、
+  // 認証済みの入口から開く（一覧に存在しない面名は surfaceByName が即時に失敗させる）。
+  for (const where of ['代理店管理', '招待コード', '利用者管理', '利用者管理の編集パネル', '店舗登録']) {
+    const surface = surfaceByName(where);
+    await surface.open(page);
+    const labels = page.locator(
+      'label[data-slot="field-label"]:has(+ [data-slot="input"], + [data-slot="select-wrapper"], + [data-slot="textarea"])',
+    );
+    const count = await labels.count();
+    for (let index = 0; index < count; index += 1) {
+      const label = labels.nth(index);
+      const control = label.locator(
+        'xpath=following-sibling::*[1][@data-slot="input" or @data-slot="select-wrapper" or @data-slot="textarea"]',
+      );
+      await control.scrollIntoViewIfNeeded();
+      const box = await control.boundingBox();
+      expect(box, `${surface.where}: ${await label.textContent()} の制御を実測できない`).not.toBeNull();
+
+      const point = { x: box!.x + box!.width / 2, y: box!.y - 1 };
+      await page.mouse.click(point.x, point.y);
+      const focusedId = await page.evaluate(() => document.activeElement?.id ?? null);
+      const targetId = await label.getAttribute('for');
+      await page.keyboard.press('Escape');
+      expect(
+        focusedId,
+        `${surface.where}: ${await label.textContent()} と制御の間を押しても、関連付けた制御へ焦点が移らない`,
+      ).toBe(targetId);
+      visited += 1;
+    }
+  }
+
+  expect(visited, '管理面で実測した縦積み Field の総数が宣言と食い違う').toBe(STACKED_FIELD_VISIT_TOTAL);
+});
+
 // --- 「既知の溢れ」の節を畳んだ理由（Issue #186 の完了）--------------------------------
 //
 // task 2.5 の時点で `KNOWN_OVERFLOW_SURFACES` に残っていたのは店舗登録 1 面だけだった。

@@ -262,10 +262,11 @@ describe('DashboardUserEditPanel: 構成と初期値', () => {
       expect(label!.closest('p'), id).toBeNull();
       const field = label!.parentElement!;
       expect(field.tagName, id).toBe('DIV');
+      expect(field.getAttribute('data-slot'), id).toBe('field');
       const tokens = field.className.split(/\s+/).filter((token) => token.length > 0);
-      // 包含では足りない。幅を与えるクラスの集合を完全一致で見る（admin-users-page.test.tsx と同じ式）。
+      // Field 自身の幅は共通部品が持つ。面が選ぶ広い幅での上限は既存の 4 面と同じ段にする。
       expect(
-        tokens.filter((token) => /(^|:)(?:max-|min-)?w-/.test(token)),
+        tokens.filter((token) => token.startsWith('sm:') && /(?:max-|min-)?w-/.test(token)),
         id,
       ).toEqual(['sm:max-w-xs']);
       visited += 1;
