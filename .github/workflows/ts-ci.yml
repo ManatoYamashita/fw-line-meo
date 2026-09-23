@@ -197,6 +197,13 @@ jobs:
         # 実行装置がワークフローから参照されていること・db/test の shell が RUN/SKIP へ
         # 宣言されていることを機械検証する（read-only・DB へ一切接続しないので install 前に置ける）。
         run: bash scripts/check-db-test-ci-coverage.sh
+      - name: '確定の判定と停止の判定の件数照合ガード（Issue #252）'
+        # 停止中の店舗は取得・配信・アンケート・詳細・レポート・QR のすべてから外れる（store-suspension）。
+        # 確定店舗を選ぶ判定は Go と TS の 11 箇所に散っており、新しい読み出しを足すときに停止の判定を
+        # 付け忘れると、停止中の店舗へ配信や取得が黙って続く。ファイルごとに「印の無い確定の判定」の数と
+        # 「停止の判定」の数を照合し、足りないファイルを赤にする。表示だけの判定の除外印は総数と置き場所を
+        # ガード本体に宣言してあり、食い違いも赤にする。read-only の git ls-files + awk のみ。
+        run: bash scripts/check-store-serviceable-predicate.sh
       - name: 'typecheck カバレッジガード（Issue #51）'
         # 「typecheck が定義されているのに CI から呼ばれない」「workspace に定義が無く
         # pnpm -r が黙ってスキップする」の両方を機械検出する（同じく read-only grep 検証）。

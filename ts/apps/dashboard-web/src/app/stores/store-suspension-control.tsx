@@ -97,7 +97,7 @@ export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionCont
     try {
       await onChanged();
     } catch {
-      // 読み直しの失敗は一覧の側が示す。この部品は要求の結果だけを告げる。
+      // swallowed-exception: intentional — 読み直しの失敗は一覧の側が示す。この部品は要求の結果だけを告げる。
     }
 
     // 読み直しの後に告げる。表示が新しい状態へ変わってから結果を読み上げ、両者を食い違わせない。
