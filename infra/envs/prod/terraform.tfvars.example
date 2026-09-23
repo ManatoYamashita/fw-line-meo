@@ -23,7 +23,7 @@ places_quota_caps = {
 # survey_base_url = "https://survey-web-xxxxxxxxxx-an.a.run.app"
 
 # agency-dashboard（代理店ダッシュボード）の env。
-# dashboard_web_origin は dashboard-web 初回デプロイ後の Cloud Run URL（CORS 許可元）を設定。
+# dashboard_web_origin は dashboard-web の配信元（CORS 許可元）。カンマ区切りで複数可（独自ドメインへの移行期間だけ・infra/README.md §9-2-c）。
 # dashboard_web_origin = "https://dashboard-web-xxxxxxxxxx-an.a.run.app"
 
 # competitive-daily-summary（機能1）の env。delivery-job（毎時配信）・store-detail（LIFF詳細閲覧）が要求する。

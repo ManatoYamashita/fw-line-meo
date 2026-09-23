@@ -42,8 +42,8 @@ import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation
 // 実起動なしで app.request からテスト可能な Hono アプリのファクトリ。
 // 純粋ハンドラ（2.1–2.5）を実依存（index.ts で注入）と結線する統合層（3.1）。
 export interface AppDeps {
-  // CORS で許可する単一オリジン（config.corsOrigin＝DASHBOARD_WEB_ORIGIN）。
-  corsOrigin: string;
+  // CORS で許可するオリジン（config.corsOrigin＝DASHBOARD_WEB_ORIGIN）。移行期間だけ複数（Issue #146）。
+  corsOrigin: string | readonly string[];
   qr: QrDeps;
   me: MeDeps;
   stores: StoresListDeps;
@@ -139,7 +139,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
   app.use(
     '*',
     cors({
-      origin: deps.corsOrigin,
+      origin: typeof deps.corsOrigin === 'string' ? deps.corsOrigin : [...deps.corsOrigin],
       allowMethods: ['GET', 'POST'],
       allowHeaders: ['Authorization', 'Content-Type'],
     }),

@@ -27,3 +27,21 @@ resource "google_cloud_run_domain_mapping" "gbp_oauth_callback" {
     route_name = module.run_services.service_names["line-webhook"]
   }
 }
+
+# ダッシュボード（Issue #146）。同意画面はダッシュボードの Google ログインと GBP 連携で共有され、
+# ブランド検証は承認済みドメインのすべてについて所有権の確認を求める。run.app と firebaseapp.com は
+# どちらも確認できないため、ダッシュボードも独自ドメインへ移す。Firebase Auth の authDomain も
+# このドメインにし、/__/auth/ は dashboard-web が firebaseapp.com へ中継する（next.config.ts）。
+# 通るのは人の操作だけなので、Preview の遅延は実害にならない（上の判断と同じ）。
+resource "google_cloud_run_domain_mapping" "dashboard" {
+  location = var.region
+  name     = "dashboard.firstweb-works.com"
+
+  metadata {
+    namespace = var.project_id
+  }
+
+  spec {
+    route_name = module.run_services.service_names["dashboard-web"]
+  }
+}
