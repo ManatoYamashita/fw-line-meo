@@ -157,7 +157,7 @@
   - _Depends: 5.3_
 
 - [ ] 8. 本番での適用と効果の確認（運用者が実施し、結果を本書へ記録する）
-- [ ] 8.1 実装 PR のマージ前に、migration と列単位の権限を本番へ適用して照会する
+- [x] 8.1 実装 PR のマージ前に、migration と列単位の権限を本番へ適用して照会する
   - main へのマージは自動デプロイを起動し、migration を当てる工程はワークフローに無い。停止時刻を読むイメージが列より先に出ないよう、マージの前に当てる（0012 と列単位の権限は旧コードと互換）
   - 適用の直前に、main と open PR の migration の番号を確かめ、`0012` が他と衝突しないことを確認する。適用は migration と権限定義がレビューで確定した後に行い、当てた後は中身もファイル名も番号も変えない（改番が要る事態になったら、本番の状態を先に記録してから対応を決める）
   - 権限定義を流す前に、店舗の現行の付与者を照会して接続ユーザーと一致することを確かめる。適用の出力に REVOKE の警告が出たら失敗として扱う
@@ -165,6 +165,14 @@
   - 照会で書けない側が書ける結果なら、マージと停止の操作へ進まず付与者を合わせてやり直す。照会が期待どおりになってから実装 PR をマージする
   - _Requirements: 9.3_
   - _Depends: 1.3, 1.4_
+  - 実施記録（2026-09-23 23:24 JST・運用者の指示で実施）:
+    - 接続: cloud-sql-proxy（`127.0.0.1:15432`・5432 は手元の postgres と衝突するため避けた）経由で `fwlm` へ postgres として接続した。接続先が本番であることは stores 3 件・owners 4 件で確かめた
+    - 事前照合: `0001`〜`0011` の対象（表・列・CHECK・seed）がすべて本番に在り、`stores.suspended_at` は未作成だった。open PR は #333 だけで `0012` の番号衝突は無い。適用したファイルは PR #333 の head と差分が無い
+    - 付与者: stores の既存の付与はすべて grantor が `postgres` で、接続ユーザー（`postgres`）と一致した
+    - 適用: `0012_store_suspension.sql` は `BEGIN / ALTER TABLE / COMMENT / ALTER TABLE / COMMIT` で rc=0。`infra/sql/grants.sql` は `REVOKE 1・GRANT 7` で rc=0、WARNING は 0 件
+    - 照会（9.3）: `stores.suspended_at` は `timestamp with time zone`・NULL 可・既定値なしで、停止中の店舗は 0 件。`audit_logs` の CHECK は `ck_audit_logs_action` の 1 本で、18 値に `store_suspended` と `store_resumed` を含む
+    - 列権限（`has_column_privilege`・`suspended_at`）: `sa-line-webhook` と `sa-survey-web` は INSERT・UPDATE とも false。この 2 つは残り 9 列の INSERT・UPDATE がすべて true で、テーブル単位の権限は DELETE と SELECT だけになった。`sa-dashboard-api` は INSERT・UPDATE とも true。`sa-daily-batch`・`sa-summary-delivery`・`sa-store-detail` はどちらも false
+    - 判定: 照会はすべて期待どおりだったので、実装 PR #333 のマージへ進む
 
 - [ ] 8.2 マージ後のデプロイ完了を確かめ、本番で 1 店舗を停止し、翌朝の取得と通知から外れたことを実測する
   - マージ後、デプロイの成否と本番の稼働イメージがマージしたコミットであることを確かめてから停止する
