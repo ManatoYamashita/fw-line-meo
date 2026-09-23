@@ -9,6 +9,7 @@ import {
   linkAuthSubjectByEmail,
   listStoresWithStatus,
   setStoreCategory,
+  setStoreSuspension,
   findAgencyName,
   findDashboardUserDisplayName,
   listOwnersByAgency,
@@ -147,6 +148,13 @@ const app = createApp({
       registerStore,
       auditLog: async (input) => createAuditLog(await getPool(), input),
     },
+  },
+  storeSuspension: {
+    auth: authDeps,
+    // 範囲の判定と状態の更新を 1 文で行う DAL。範囲外・不存在はどちらも not_found。
+    setSuspension: async (input) => setStoreSuspension(await getPool(), input),
+    // store_suspended / store_resumed は migration 0012 の CHECK が受け付ける。本番では 0012 をこのコードより先に当てる。
+    auditLog: async (input) => createAuditLog(await getPool(), input),
   },
   inviteCodes: {
     list: {

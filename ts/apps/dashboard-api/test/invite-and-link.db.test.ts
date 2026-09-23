@@ -22,6 +22,7 @@ import {
   enableDashboardUser,
   updateDashboardUserGuarded,
   findDashboardUserByEmailInOperator,
+  setStoreSuspension,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -175,6 +176,10 @@ function buildApp(): ReturnType<typeof createApp> {
           (await listCategories(await getPool())).some((cat) => cat.code === code),
         registerStore,
       },
+    },
+    storeSuspension: {
+      auth: authDeps,
+      setSuspension: async (input) => setStoreSuspension(await getPool(), input),
     },
     inviteCodes: {
       list: {

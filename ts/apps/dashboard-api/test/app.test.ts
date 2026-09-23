@@ -54,6 +54,7 @@ function fakeAppDeps(): AppDeps {
         registerStore: notCalled,
       },
     },
+    storeSuspension: { auth, setSuspension: notCalled },
     inviteCodes: {
       list: { auth, listInviteCodes: notCalled },
       issue: { auth, issueCode: notCalled },
@@ -85,6 +86,15 @@ describe('dashboard-api app', () => {
   it('QR ルートが配線され認証なしは 401 を返す', async () => {
     const res = await app().request('/stores/44444444-4444-4444-4444-444444444444/qr.png');
     expect(res.status).toBe(401);
+  });
+
+  it('停止・再開のルートが POST で配線され認証なしは 401 を返す', async () => {
+    for (const action of ['suspend', 'resume']) {
+      const res = await app().request(`/stores/44444444-4444-4444-4444-444444444444/${action}`, {
+        method: 'POST',
+      });
+      expect(res.status, action).toBe(401);
+    }
   });
 });
 

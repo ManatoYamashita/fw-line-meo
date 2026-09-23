@@ -25,6 +25,7 @@ import {
   findDashboardUserByEmailInOperator,
   findDashboardUserDisplayName,
   createAuditLog,
+  setStoreSuspension,
 } from '@fwlm/db';
 import {
   createPlacesSearchAdapter,
@@ -149,6 +150,11 @@ function buildApp(): ReturnType<typeof createApp> {
           (await listCategories(await getPool())).some((cat) => cat.code === code),
         registerStore,
       },
+    },
+    storeSuspension: {
+      auth: authDeps,
+      setSuspension: async (input) => setStoreSuspension(await getPool(), input),
+      auditLog: async (input) => createAuditLog(await getPool(), input),
     },
     inviteCodes: {
       list: {
@@ -422,6 +428,8 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       [`/invite-codes/${DUMMY_UUID}/disable`, { method: 'POST' }],
       [`/dashboard-users/${DUMMY_UUID}/disable`, { method: 'POST' }],
       [`/dashboard-users/${DUMMY_UUID}/enable`, { method: 'POST' }],
+      [`/stores/${DUMMY_UUID}/suspend`, { method: 'POST' }],
+      [`/stores/${DUMMY_UUID}/resume`, { method: 'POST' }],
       [
         `/dashboard-users/${DUMMY_UUID}/update`,
         { method: 'POST', body: JSON.stringify({ displayName: 'x' }) },
