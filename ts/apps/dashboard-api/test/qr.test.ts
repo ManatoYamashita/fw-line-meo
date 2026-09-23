@@ -15,6 +15,7 @@ function store(over: Partial<StoreWithAgency> = {}): StoreWithAgency {
     name: 'テスト店',
     placeId: 'ChIJ',
     placeStatus: 'confirmed',
+    suspendedAt: null,
     ownerId: 'ow1',
     agencyId: 'ag1',
     ...over,

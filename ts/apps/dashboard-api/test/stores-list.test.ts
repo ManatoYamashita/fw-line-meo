@@ -13,6 +13,7 @@ function item(over: Partial<StoreListItem> = {}): StoreListItem {
     id: '44444444-4444-4444-4444-444444444444',
     name: 'テスト店',
     placeStatus: 'confirmed',
+    suspendedAt: null,
     competitorConfigured: true,
     ownerId: 'ow1',
     ownerDisplayName: 'オーナー太郎',
