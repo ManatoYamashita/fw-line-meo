@@ -55,7 +55,8 @@
     |---|---|---|---|
     | `gen.gourmet1234@gmail.com` | `roles/owner` | Terraform の ADC（§9-2-a） | 恒久 |
     | `manapuraza@gmail.com` | `roles/owner` | 運用・gcloud・Search Console の所有権確認（§9-2-a） | 恒久 |
-    | `firstweb.sato@gmail.com` | `roles/oauthconfig.editor`・`roles/browser` | 同意画面のユーザーサポートメールに自分のアドレスを選ぶため、同意画面をこのアカウントで設定する（選べるのは設定者自身のアドレスか、その人が管理する Google グループだけ）。Editor は本番リソースまで変更できるので使わない | 同意画面の設定が済んだら外す（2026-09-23 付与・Issue #146） |
+
+    同意画面の設定は `manapuraza@` が行う（ユーザーサポートメールは設定者自身のアドレスか、その人が管理する Google グループしか選べない）。2026-09-23 に `firstweb.sato@gmail.com` へ `roles/oauthconfig.editor`・`roles/browser` を付けたが、本人が作業しないことになったため同日中に外した。
 
 ---
 
