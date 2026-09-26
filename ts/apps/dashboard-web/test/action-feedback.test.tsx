@@ -47,6 +47,15 @@ describe('AppToaster / action feedback', () => {
     const notificationRegion = screen.getByLabelText(/操作結果の通知/);
     const toaster = notificationRegion.querySelector<HTMLElement>('[data-sonner-toaster]');
     expect(toaster?.classList.contains('app-toaster')).toBe(true);
-    expect(toaster?.style.getPropertyValue('--error-text')).toBe('var(--destructive)');
+    // 右側に出す（design-language 7.5。上下は画面の幅で決まり、test/app-toaster.test.tsx が固定する）。
+    expect(toaster?.getAttribute('data-x-position')).toBe('right');
+    // 面は白・枠は中立の罫線・文字は本文色で、状態を問わず同じ。状態は右上のにじみと
+    // アイコンの意味色（globals.css）と文言で示す。文字を意味色で塗らないのは、にじみの上に
+    // 文字が重なっても対比が変わらないようにするため。
+    for (const type of ['success', 'info', 'warning', 'error'] as const) {
+      expect(toaster?.style.getPropertyValue(`--${type}-bg`), type).toBe('var(--card)');
+      expect(toaster?.style.getPropertyValue(`--${type}-border`), type).toBe('var(--border)');
+      expect(toaster?.style.getPropertyValue(`--${type}-text`), type).toBe('var(--foreground)');
+    }
   });
 });

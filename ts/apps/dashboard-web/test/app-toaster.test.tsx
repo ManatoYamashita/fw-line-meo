@@ -35,16 +35,16 @@ afterEach(() => {
 });
 
 describe('AppToaster の置き場', () => {
-  it('狭い画面では下部中央に置く（帯の操作要素を覆わない）', () => {
+  it('狭い画面では右下に置く（帯の操作要素を覆わない）', () => {
     stubMatchMedia(false);
     render(<AppToaster />);
-    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'bottom-center' }));
+    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'bottom-right' }));
   });
 
-  it('帯が 1 段になる広い画面では上部中央に置く', () => {
+  it('帯が 1 段になる広い画面では右上に置く', () => {
     const queries = stubMatchMedia(true);
     render(<AppToaster />);
-    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'top-center' }));
+    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'top-right' }));
     // 帯の段組みの境目（lg = 1024px）と同じ問い合わせを使う。
     expect(queries).toContain(WIDE_SCREEN_QUERY);
     expect(WIDE_SCREEN_QUERY).toBe('(min-width: 1024px)');
