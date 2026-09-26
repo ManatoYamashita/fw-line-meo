@@ -150,27 +150,26 @@ describe('LoginPage', () => {
     }
   });
 
-  it('どの分岐でもワードマークを装飾専用色の大きい文字として置き、操作の個数を増やさない（Req 1.1, 3.3）', () => {
+  it('どの分岐でもワードマークの面の役割を装飾専用色の大きい文字として置き、操作の個数を増やさない（Req 1.1, 3.3）', () => {
     for (const status of ['signedOut', 'unregistered'] as const) {
       useAuthMock.mockReturnValue({ status, me: null, signIn: vi.fn(), signOut: vi.fn() });
       render(<LoginPage />);
       // 文字列は帯（top-nav）と同一。§7.4 はブランド色の使い所を帯とログインの 2 箇所に限る。
       const wordmark = screen.getByText('Firstweb 集客AIアシスタント');
-      const tokens = wordmark.className.split(/\s+/).filter((token) => token.length > 0);
-      // **包含では足りない。** 別の文字色を後ろへ足せば、装飾専用色は宣言に残ったまま実描画では
-      // 負ける。文字寸法と文字色を与えるクラスの集合そのものを完全一致で固定する。
-      // 装飾専用色は白背景に対して通常文字の閾値へ届かないため、大きい文字としてのみ用いる（§2.2 / §10）。
-      // 狭い画面の 20px（text-xl）でも太字なので WCAG の大きい文字（14pt の太字＝約 18.66px 以上）に入る。
+      // **包含では足りない。** 別の文字色を後ろへ足せば、宣言した色は残ったまま実描画では負ける。
+      // 文字寸法と文字色を与えるクラスの集合そのものを完全一致で固定する。
+      // アプリ名は補足の色の小さい文字で添える。装飾専用色は小さい文字に使えない（§2.2 / §10）。
+      const textOf = (el: HTMLElement) => el.className.split(/\s+/).filter((t) => /(^|:)text-/.test(t)).sort();
+      expect(textOf(wordmark), status).toEqual(['text-muted-foreground', 'text-xs']);
+      // 面の役割を装飾専用色の大きい文字で置く（§7.4 はブランド色を 1 画面 1〜2 箇所に限る）。
+      // 装飾専用色は白背景に対して通常文字の閾値へ届かないため、大きい文字としてのみ用いる。
+      // 20px（text-xl）の太字は WCAG の大きい文字（14pt の太字＝約 18.66px 以上）に入る。
       // 太字を外すと大きい文字でなくなるので、太さも併せて固定する。
-      const textTokens = tokens.filter((token) => /(^|:)text-/.test(token));
-      expect([...textTokens].sort(), status).toEqual(['lg:text-2xl', 'text-brand', 'text-xl']);
-      expect(tokens, status).toContain('font-bold');
-      // 面の役割は補足の色で添え、ブランド色は使わない（§7.4 はブランド色を 1 画面 1〜2 箇所に限る）。
       const surface = screen.getByText('管理用ダッシュボード');
-      expect(surface.className.split(/\s+/).filter((t) => /(^|:)text-/.test(t)).sort(), status).toEqual([
-        'text-muted-foreground',
-        'text-sm',
-      ]);
+      expect(textOf(surface), status).toEqual(['text-brand', 'text-xl']);
+      expect(surface.className.split(/\s+/), status).toContain('font-bold');
+      // 上の段がアプリ名、下の段が面の役割（読み上げの順も同じ）。
+      expect(wordmark.compareDocumentPosition(surface) & Node.DOCUMENT_POSITION_FOLLOWING, status).toBeTruthy();
       // アイコンは名前と同じことを言う装飾なので読み上げない。
       const icons = wordmark.closest('[data-slot="wordmark"]')!.querySelectorAll('img');
       expect(icons, status).toHaveLength(1);

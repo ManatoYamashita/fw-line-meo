@@ -9,11 +9,14 @@ export const SURFACE_NAME = '管理用ダッシュボード';
 // ワードマーク（帯とログインの 2 箇所で共有する）。
 //
 // 装飾専用色の使い所をここへ限る判断は docs/design/design-language.md の 7.4 節、大きい文字としてのみ
-// 用いる根拠は 2.2 節と 10 節にある。ブランド色を載せるのはアプリ名だけで、面の役割は補足の色で添える。
+// 用いる根拠は 2.2 節と 10 節にある。
 // リンクにも見出しにもしない（リンクと押しボタンの個数を固定した構造契約・Req 3.3）。
 //
-// 狭い画面では面の役割が次の行へ回る。アプリ名は「Firstweb」の後と「集客AI」の後でだけ折れる
-// （語の途中で割らない）。アイコンは名前と同じことを言う装飾なので読み上げない。
+// 2 段に組む。上の段はアプリ名を補足の色の小さい文字で、下の段は面の役割を装飾専用色の大きい文字で置く。
+// アプリ名は 3 アプリで共通なので、この画面で目に入れたいのは面の役割のほうである。アプリ名を大きく
+// すると帯の横幅を取りすぎ、案内リンクと近づいた。装飾専用色は大きい文字にしか使えないため、
+// 小さくしたアプリ名には載せない。アプリ名は「集客AI」の後でだけ折れる（語の途中で割らない）。
+// アイコンは名前と同じことを言う装飾なので読み上げない。
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span data-slot="wordmark" className={cn('flex min-w-0 items-center gap-2', className)}>
@@ -28,13 +31,13 @@ export function Wordmark({ className }: { className?: string }) {
         loading="eager"
         className="size-8 shrink-0"
       />
-      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 leading-tight">
-        <span className="text-xl font-bold break-keep text-brand lg:text-2xl">
+      <span className="flex min-w-0 flex-col leading-tight">
+        <span className="text-xs break-keep text-muted-foreground">
           Firstweb 集客AI
           <wbr />
           アシスタント
-        </span>{' '}
-        <span className="text-sm text-muted-foreground">{SURFACE_NAME}</span>
+        </span>
+        <span className="text-xl font-bold text-brand">{SURFACE_NAME}</span>
       </span>
     </span>
   );
