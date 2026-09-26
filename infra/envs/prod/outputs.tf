@@ -34,3 +34,8 @@ output "deployer_service_account_email" {
   description = "deploy-prod が WIF 経由で偽装するデプロイ SA（Issue #316）。"
   value       = module.cicd_wif.deployer_service_account_email
 }
+
+output "survey_web_lb_ip" {
+  description = "survey-web のロードバランサの外部 IP。Cloudflare の `review` の A レコードに設定する（Issue #338）。"
+  value       = google_compute_global_address.survey_web.address
+}
