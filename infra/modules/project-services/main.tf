@@ -20,6 +20,7 @@ locals {
     "firebase.googleapis.com",         # Firebase プロジェクト（Identity Platform 前提）
     "places.googleapis.com",           # Places API (New)（競合データ取得）
     "cloudbuild.googleapis.com",       # Cloud Build（イメージビルド・push、task 6.3）
+    "compute.googleapis.com",          # 外部 HTTPS ロードバランサ（survey-web の独自ドメイン・Issue #338）
   ]
 }
 

@@ -535,6 +535,50 @@ curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status"
 
 **外した後は run.app のダッシュボードではログインできない。** 利用者には新しい URL を案内する。
 
+#### 9-2-d. 客向けアンケート Web を独自ドメインへ移す（Issue #338）
+
+**これは関門 B の対象ではない。** survey-web は Google OAuth を使わないので、ブランド検証の承認済みドメインに入れる必要が無い。移す理由は 2 つある。QR を読んだ来店客に `run.app` を見せないこと。そして、**印刷した QR の URL は後から変えられない**ので、QR を大量に配る前にドメインを決めてしまうこと。
+
+**ドメインは `review.firstweb-works.com`**（2026-09-26 決定）。宣言は `infra/envs/prod/load-balancer.tf` にある。
+
+**ドメインマッピングではなく外部 HTTPS ロードバランサを使う。** 9-2-b のとおり、ドメインマッピングは応答時間が効く経路に載せない。survey-web は来店客が下書きの生成を待つ画面である。Firebase Hosting の rewrite も比べたが、60 秒の時間上限があり、`X-Forwarded-For` の付き方を一次情報で確かめられなかったので採らなかった（比較は Issue #338）。費用は転送ルール $0.025/時（5 本まで同額）で、月 約 $18。
+
+**run.app は閉じない。** 切り替え前に発行した QR は run.app を指している。survey-web の ingress を絞ると、それらが開けなくなる。
+
+**流量制限の鍵を先に直す（Issue #344）。** survey-web は `X-Forwarded-For` の先頭を鍵にしていて、客が偽れる（2026-09-26 実測）。ロードバランサを前段に置くと要素の並びも変わる。**`SURVEY_BASE_URL` を切り替える前に、#344 の修正を入れておくこと。**
+
+手順:
+
+```bash
+# 1. Compute API とロードバランサ一式を作る（素の apply は承認待ちの module.guardrails を巻き込む・§10「apply の作法」）
+terraform -chdir=infra/envs/prod plan  -target=module.project_services -target=google_compute_global_forwarding_rule.survey_web_https -target=google_compute_global_forwarding_rule.survey_web_http
+terraform -chdir=infra/envs/prod apply -target=module.project_services -target=google_compute_global_forwarding_rule.survey_web_https -target=google_compute_global_forwarding_rule.survey_web_http
+
+# plan に module.run_services の変更が出たら apply しない。NEG がサービス名を参照するので
+# -target は module.run_services を巻き込み、溜まっていた env などの差分まで一緒に当たる。
+
+# 2. DNS に向ける IP を読む
+terraform -chdir=infra/envs/prod output -raw survey_web_lb_ip
+```
+
+3. Cloudflare の DNS に `review` の A レコードを作り、2 の IP へ向ける。**プロキシは OFF（DNS only）にする。** ON だと Google がドメインへ到達できず、証明書が `PROVISIONING` のまま止まる。
+4. 証明書の発行を待つ（数十分〜）。`ACTIVE` になれば終わり。
+
+```bash
+gcloud compute ssl-certificates describe survey-web-cert --global --format='value(managed.status,managed.domainStatus)'
+```
+
+5. 到達を確かめる。ロードバランサ経由でも run.app と同じ応答が返れば、TLS と経路の両方が通っている。http:// は https:// へ 301 で送られる。
+
+```bash
+curl -s -w ' %{http_code}\n' https://review.firstweb-works.com/health
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://review.firstweb-works.com/health
+```
+
+6. #344 の修正がデプロイ済みであることを確かめる。
+7. tfvars の `survey_base_url` を `https://review.firstweb-works.com` にして apply する（dashboard-api の `SURVEY_BASE_URL`。env は tf 側で入る。deploy はイメージしか変えない）。
+8. 新しく発行した QR が新しいドメインを指すこと、**切り替え前に発行した QR（run.app）が引き続き開けること**を、それぞれ実機で確かめる。
+
 ### 9-3. 進捗の追跡
 
 この節は**手順の正典**であり、状態の正典ではない。承認・却下・提出の事実は Issue #146 のコメントへ実測の証拠つきで残すこと（9-1 の判定コマンドの出力、クォータ画面のスクリーンショット、申請日と受領メールの日付）。
