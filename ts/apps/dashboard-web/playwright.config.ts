@@ -1,3 +1,4 @@
+import { chromiumLaunchOptions } from '@fwlm/e2e-support/browser';
 import { defineConfig, devices } from '@playwright/test';
 
 // 管理ダッシュボードの実描画 E2E（Issue #53）。
@@ -22,6 +23,7 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3110',
+    ...chromiumLaunchOptions(),
   },
   projects: [{ name: 'mobile-chromium', use: { ...devices['Pixel 5'] } }],
   webServer: process.env.E2E_BASE_URL
