@@ -26,44 +26,52 @@
   }
 }
 
-/* 操作結果の Toast の状態の示し方（design-language 7.5）。面は白のまま、右上の角だけに
- * 成功は緑・失敗は赤の薄い放射状のにじみを置き、アイコンを意味色で描く。
+/* 操作結果の Toast の状態の示し方（design-language 7.5）。面は白のまま、左上の角から左辺に沿って
+ * 成功は緑・失敗は赤の放射状のにじみを置き、アイコンを意味色で描く。
  *
  * **にじみは Toast の背景でも疑似要素でもなく、アイコンに添えた本物の要素（app-toaster.tsx の
  * withAccent）で描く。** 文字の祖先の背景にグラデーションを敷くと axe は「判定不能（bgGradient）」、
  * 疑似要素に塗りを持たせると「判定不能（pseudoContent）」へ対比の判定を降ろし、違反 0 件のまま
  * Toast の文字の監査が消える（どちらも実測）。本物の要素は文字の位置に重ならなければ判定に
- * 加わらないので、Toast の右側ににじみと同じ幅の余白を取り、文字とにじみを重ねない。
- * にじみは Toast（z-index を持つ重なりの単位）を基準に右上へ置き、z-index: -1 で白い面の上・
- * 中身の下に描く。 */
+ * 加わらない。
+ *
+ * **にじみは文字の手前までに収める。** 幅 4rem・高さは Toast いっぱいで、アイコンはその内側に
+ * 収まる。文字の始まりがにじみの右端より右に来るよう、Toast の左の内側余白を広げる
+ * （並びは 枠 1px → 余白 → アイコン → 隙間 → 文字 で、余白 2.5rem では文字の始まりがにじみの
+ * 右端より 1px 手前になり、重なった。2.75rem で 3px 空く）。重なりの有無は e2e の
+ * dashboard-surfaces が実寸で測る。
+ * にじみは Toast（z-index を持つ重なりの単位）を基準に左上へ置き、z-index: -1 で白い面の上・
+ * 中身の下に描く。
+ * 放射の半径はにじみの箱の幅と高さに合わせる（ellipse 100% 100%）。半径を箱より大きく取ると、
+ * 右端でまだ色が残り、縦の硬い境目が見える（実測）。 */
 .app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='success'],
 .app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='error'] {
-  padding-inline-end: 3rem;
+  padding-inline-start: 2.75rem;
 }
 
 .app-toaster[data-sonner-toaster] [data-slot='toast-accent'] {
   position: absolute;
-  inset: 0 0 auto auto;
+  inset: 0 auto 0 0;
   z-index: -1;
-  width: 3rem;
-  height: 3rem;
-  border-start-end-radius: var(--border-radius);
+  width: 4rem;
+  border-start-start-radius: var(--border-radius);
+  border-end-start-radius: var(--border-radius);
   pointer-events: none;
 }
 
 .app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='success'] [data-slot='toast-accent'] {
   background: radial-gradient(
-    circle at top right,
-    color-mix(in oklab, var(--success) 20%, transparent),
-    transparent 70%
+    ellipse 100% 100% at top left,
+    color-mix(in oklab, var(--success) 30%, transparent),
+    transparent
   );
 }
 
 .app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='error'] [data-slot='toast-accent'] {
   background: radial-gradient(
-    circle at top right,
-    color-mix(in oklab, var(--destructive) 20%, transparent),
-    transparent 70%
+    ellipse 100% 100% at top left,
+    color-mix(in oklab, var(--destructive) 30%, transparent),
+    transparent
   );
 }
 
