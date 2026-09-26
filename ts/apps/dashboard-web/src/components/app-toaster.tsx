@@ -1,7 +1,7 @@
 'use client';
 
 import { Toaster } from 'sonner';
-import type { CSSProperties, ReactNode } from 'react';
+import { useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 
 // 面は状態を問わず白・枠は中立の罫線・文字は本文色にそろえる（design-language 7.5）。
 // 状態は右上のにじみとアイコンの意味色（globals.css）と文言で示す。文字を意味色で塗らないのは、
@@ -51,14 +51,42 @@ const ERROR_ICON = (
 
 const TOAST_ICONS = { success: withAccent(SUCCESS_ICON), error: withAccent(ERROR_ICON) };
 
+// 帯が 1 段になる広い画面（lg 以上・docs/design/design-language.md の 7.8 節）の問い合わせ。
+// 帯の段組みの境目と同じ値を使う。
+export const WIDE_SCREEN_QUERY = '(min-width: 1024px)';
+
+function subscribeWideScreen(onChange: () => void): () => void {
+  const media = window.matchMedia(WIDE_SCREEN_QUERY);
+  media.addEventListener('change', onChange);
+  return () => media.removeEventListener('change', onChange);
+}
+
+/**
+ * Toast の置き場。**右側に置き、狭い画面では下に出す**（design-language 7.5）。
+ *
+ * 狭い画面の帯は 3 段で、上に出した Toast がロール・ログアウト・案内リンクに重なり、表示中は
+ * それらを押せなかった（2026-09-26 に E2E の R2 で実測）。広い画面の帯は 1 段で高さも固定なので、
+ * 右上に置く。サーバー側の描画は狭い側（右下）で出し、広い画面ではマウント後に右上へ移る。
+ * 600px 以下では Sonner が Toast を表示幅いっぱいに広げる（左右の位置は見た目に現れない）。
+ */
+export function useToasterPosition(): 'top-right' | 'bottom-right' {
+  const wide = useSyncExternalStore(
+    subscribeWideScreen,
+    () => window.matchMedia(WIDE_SCREEN_QUERY).matches,
+    () => false,
+  );
+  return wide ? 'top-right' : 'bottom-right';
+}
+
 // 操作結果の通知は管理ダッシュボード全体で 1 箇所だけ描く。
 // closeButton を常設し、自動で消える前にも利用者自身で閉じられるようにする。
 export function AppToaster() {
+  const position = useToasterPosition();
   return (
     <Toaster
       className="app-toaster"
       theme="light"
-      position="top-right"
+      position={position}
       richColors
       closeButton
       expand
