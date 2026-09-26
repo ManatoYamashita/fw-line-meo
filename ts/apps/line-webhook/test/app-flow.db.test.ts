@@ -151,6 +151,7 @@ function createFakePlaces(outcome: SearchOutcome): PlacesSearchAdapter {
 function createFakeMessenger(profiles: Record<string, string | undefined> = {}): LineMessenger {
   return {
     reply: vi.fn(async (): Promise<void> => {}),
+    push: vi.fn(async (): Promise<void> => {}),
     getProfile: vi.fn(async (lineUserId: string) => {
       const displayName = profiles[lineUserId];
       return displayName ? { displayName } : null;

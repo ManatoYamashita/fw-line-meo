@@ -121,6 +121,18 @@
 | レポートの種類 | `reportKind` | 該当なし | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | 値は `new_reviews`、`comparison`、`trend` のいずれか（`@fwlm/line-report` の ReportKind） |
 | レポート要求への応答の区分 | `reportOutcome` | 該当なし | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | 値は `report`、`store_choice`、`no_store`、`preparing`、`fetch_failed` のいずれか。`fetch_failed` は最新の日次集計が取得失敗だった応答で、推移のレポート（失敗日を示した表と注記）もここに数える |
 
+### 1.10 GBP 連携に固有の項目
+
+GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。下書き本文・オーナーの入力・クチコミ本文・トークン・認可コード・暗号鍵は載せない（`ts/apps/line-webhook/src/gbp/logger.ts` の冒頭の不変条件）。例外は既存の `errorKind`（例外のクラス名）で載せ、message は載せない。店舗の識別子は既存の `storeId`、HTTP ステータスは既存の `status`、閉じた語彙の失敗理由は既存の `reason` を使う。
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| GBP の会話フロー | `gbpFlow` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | 値は `connect`、`post`、`reply` のいずれか（`@fwlm/db` の GbpFlow） |
+| GBP の会話の段階 | `gbpStage` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | `@fwlm/db` の GbpStage の値 |
+| OAuth callback の結果の種別 | `gbpCallbackResult` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | `OauthCallbackResult['kind']` の値 |
+| GBP の失敗の種別 | `gbpErrorKind` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | `GbpApiError`・`GenerationError`・`TokenStoreError` の `kind`。例外のクラス名（`errorKind`）とは別物 |
+| オーナーの識別子 | `ownerId` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | `owners.id`（内部の UUID）。通知先と所有検証の主体を辿るために載せる。LINE ユーザー ID は載せない |
+
 ---
 
 ## 2. 事象名

@@ -13,6 +13,7 @@ import type { LineMessenger } from './line/client.js';
 import type { LineMessengerLogger } from './line/client.js';
 import { buildInternalErrorRetryMessage } from './line/messages.js';
 import { StoreScopedReportError } from './report/errors.js';
+import type { GbpOauthCallbackRoute } from './gbp/callback.js';
 
 // 構造化ログの最小契約（design.md「Monitoring」: LINE はログを提供しないため自前で記録する）。
 // オーナーの自由入力テキストや displayName は本境界では扱わない（渡していない）ため、
@@ -38,6 +39,10 @@ export interface AppDeps {
   // （webhook_signature_failures・Issue #230）が読むのはこちらだけなので、
   // 指標が数える事象はこの sink へ出す。
   structuredLog: Sink;
+  // GBP OAuth callback（gbp-post-review-reply spec task 3.2）。結果別の HTML 生成と
+  // LINE Push は gbp/callback.ts が所有し、本境界は HTTP の受け渡しのみを行う。
+  // 既定 OFF（Issue #323）。GBP の env が無ければ undefined で、経路そのものを登録しない。
+  gbpOauthCallback?: GbpOauthCallbackRoute;
 }
 
 /**
@@ -69,6 +74,28 @@ export function createApp(deps: AppDeps): Hono {
   // `/healthz` にしないこと。Cloud Run は z で終わる一部のパスを予約しており、本番では
   // コンテナへ届く前に 404 が返る（Issue #219・scripts/check-cloud-run-reserved-paths.sh）。
   app.get('/health', (c) => c.json({ status: 'ok' }));
+
+  // Google 認可のリダイレクト先（design.md「CallbackRoute（app.ts）」・Req 1.4, 1.5, 1.6）。
+  // LINE の署名検証は適用しない（Google → ユーザーのブラウザ経由で来る一般公開の GET であり、
+  // 正当性は URL の state を DB 裏付けのワンタイム値として照合することで担保する）。
+  // GBP が OFF（Issue #323）のときは経路を登録しない。ほかの未知の経路と同じく 404 を返す。
+  const gbpOauthCallback = deps.gbpOauthCallback;
+  if (gbpOauthCallback !== undefined) {
+    app.get('/gbp/oauth/callback', async (c) => {
+      const { status, html } = await gbpOauthCallback({
+        code: c.req.query('code'),
+        state: c.req.query('state'),
+        error: c.req.query('error'),
+      });
+
+      // この URL には認可コードと state が載る。中間キャッシュへの保存と、
+      // 外部リソース要求時の Referer 経由の流出を封じる（Req 2.1）。
+      return c.html(html, status, {
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+      });
+    });
+  }
 
   app.post('/webhook', async (c) => {
     const requestId = c.req.header(REQUEST_ID_HEADER);

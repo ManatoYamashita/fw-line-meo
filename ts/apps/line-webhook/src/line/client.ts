@@ -21,6 +21,12 @@ export type LineMessage =
 
 export interface LineMessenger {
   reply(replyToken: string, messages: readonly LineMessage[], logger?: LineMessengerLogger): Promise<void>;
+  /**
+   * webhook の応答以外の契機（OAuth callback 等・gbp-post-review-reply Req 1.4/1.5/1.6）で
+   * オーナーへ通知する。reply と異なり課金対象のため、reply で足りる場面では使わない。
+   * 非2xx は reply と同じくログのみに留める（呼び出し元のフローを例外で中断させない）。
+   */
+  push(lineUserId: string, messages: readonly LineMessage[]): Promise<void>;
   getProfile(lineUserId: string): Promise<{ displayName: string } | null>;
   linkRichMenu(lineUserId: string, richMenuId: string): Promise<void>;
   /**
@@ -57,6 +63,7 @@ export interface LineMessengerDeps {
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const REPLY_URL = 'https://api.line.me/v2/bot/message/reply';
+const PUSH_URL = 'https://api.line.me/v2/bot/message/push';
 const PROFILE_URL_BASE = 'https://api.line.me/v2/bot/profile';
 const USER_URL_BASE = 'https://api.line.me/v2/bot/user';
 const LOADING_START_URL = 'https://api.line.me/v2/bot/chat/loading/start';
@@ -147,6 +154,25 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
       }
     },
 
+    async push(lineUserId: string, messages: readonly LineMessage[]): Promise<void> {
+      const accessToken = await getAccessToken();
+
+      const response = await deps.fetch(PUSH_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ to: lineUserId, messages }),
+      });
+
+      if (!response.ok) {
+        // ブロック済みユーザー・月次クォータ超過等。呼び出し元（OAuth callback）の応答を
+        // 妨げないためログのみに留める。userId・本文はログに載せない。
+        deps.logger.warn('line push failed', { status: response.status });
+      }
+    },
+
     async getProfile(lineUserId: string): Promise<{ displayName: string } | null> {
       const accessToken = await getAccessToken();
 
@@ -219,6 +245,7 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     withLogger(logger: LineMessengerLogger): LineMessenger {
       return {
         reply: (replyToken, messages) => messenger.reply(replyToken, messages, logger),
+        push: (lineUserId, messages) => messenger.push(lineUserId, messages),
         getProfile: (lineUserId) => messenger.getProfile(lineUserId),
         linkRichMenu: (lineUserId, richMenuId) => messenger.linkRichMenu(lineUserId, richMenuId),
         startLoading: (lineUserId, loadingSeconds) => messenger.startLoading(lineUserId, loadingSeconds),
