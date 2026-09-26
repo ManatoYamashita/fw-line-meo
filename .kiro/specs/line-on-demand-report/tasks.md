@@ -222,7 +222,7 @@
   - _Requirements: 9.1, 9.4, 9.5, 9.6_
   - _Depends: 4.5, 5.2, 5.3_
 
-- [ ] 7. 本番への適用
+- [x] 7. 本番への適用
 - [x] 7.1 リリースの関門を確かめる
   - #255 が本番の確認を経て閉じていること（Go が評価なしを NULL で書いた行が本番にあること）、#256 に 2026-09-13 の方針と改訂が記録されていることを確かめる
   - Observable: 両方の確認結果が本 tasks.md の末尾の実施記録にある
@@ -254,7 +254,7 @@
   - _Requirements: 2.3, 2.4, 3.2, 7.3, 8.6, 9.6_
   - _Depends: 7.4_
 
-- [ ] 7.6 旧い env を片付ける（Step D）
+- [x] 7.6 旧い env を片付ける（Step D）
   - 新しいイメージで実機確認まで済んでから、配信ジョブの `LIFF_URL` の配線を外す PR をマージして `tf apply` する（先に外すと旧イメージへ戻せなくなる）
   - Observable: summary-delivery ジョブの env に `LIFF_URL` が無く、次の実行が成功している
   - _Requirements: 1.10_
@@ -534,3 +534,10 @@ PR #289 を 2026-09-19T11:50:01Z にマージした（マージコミット `999
 > 5 件前後の店でしか抜粋は発生せず、本番にその条件を満たす店は 1 店（総数 3 件）しかない。
 > #292 はこの前提で判断をやり直すこと。**代わりに、読めていない新着が残る日はクチコミ一覧への導線を
 > 出すようにした**（AC 4.9・4.10）。実機で確かめるのはその導線である。
+
+### 7.6 旧い env を片付ける（Step D・2026-09-26）
+
+- 配線を外す PR は #346（merge `acaba9fe`）。変更は infra だけで、delivery-job のコードは既に `LIFF_URL` を読まない（`ts/apps/delivery-job/test/index.test.ts` が固定）
+- merge で走るデプロイが止んだ隙間に、保存した plan を `-target=module.delivery_job.google_cloud_run_v2_job.delivery` で当てた（07:11Z・この時点の main は `7baa04c`）。ジョブの差分は `- env LIFF_URL` と既知のずれ（`client` / `client_version`）だけで、イメージは unchanged
+- **plan には `google_project_service.enabled["compute.googleapis.com"]` の作成も混ざり、一緒に当たった。** 依存の `module.project_services` に、同じ日に merge された #338（survey-web のロードバランサ）の Compute API の有効化が入っていたためである。#338 の手順 1 を先回りして当てた形になった（#338 の担当セッションへ連絡済み・ロードバランサ本体は同セッションが後で当てた）。**`-target` の plan は、対象の依存先に他の人の未適用の変更が入っていないかを、属性ではなくリソースの一覧で確かめること**
+- Observable: apply 後のジョブの env は `CLOUDSQL_CONNECTION_NAME`・`DB_IAM_USER`・`DB_NAME`・`GOOGLE_CLOUD_PROJECT`・`LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET`・`LINE_RICHMENU_COMPLETED_ID` の 7 つで、`LIFF_URL` は無い。次の定時実行 `summary-delivery-xkjvf`（08:00:38Z）は成功し、`delivery-job.run` の `reportMenuReady` は true だった
