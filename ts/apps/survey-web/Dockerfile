@@ -37,10 +37,11 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # standalone は依存を内包した server.js を出力（node_modules 不要）。
-# survey-web は public/ ディレクトリを持たないため static のみコピーする（存在しない
-# パスの COPY はビルドエラーになる）。
 COPY --from=build /repo/apps/survey-web/.next/standalone ./
 COPY --from=build /repo/apps/survey-web/.next/static ./apps/survey-web/.next/static
+# public/ も standalone に含まれない（Next.js の standalone 出力は public と .next/static を
+# 利用者がコピーする前提）。ここを落とすと、OGP 画像（public/ogp.*）が本番だけ 404 になる。
+COPY --from=build /repo/apps/survey-web/public ./apps/survey-web/public
 EXPOSE 8080
 ENV PORT=8080
 ENV HOSTNAME=0.0.0.0
