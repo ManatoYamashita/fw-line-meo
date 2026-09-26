@@ -291,6 +291,34 @@ export async function openLoginStorageFailureToast(page: Page): Promise<void> {
   await expect(page.getByText(/端末の空き容量を確認/)).toBeVisible();
   await expect(page.getByText(/IndexedDB|IO error|writable file/i)).toHaveCount(0);
   await expect(signInButton).toBeEnabled();
+  await waitForToastSettled(page);
+}
+
+/**
+ * Toast が現れ終わるのを待つ。**現れる途中で監査させない。**
+ *
+ * Toast は不透明度を上げながら現れる。その途中で axe にコントラストを測らせると、半透明の文字色と
+ * 白の合成色で比が割れ、測った瞬間によって赤になったり緑になったりする（2026-09-26 に実測: 危険色の
+ * 途中が 3.84:1、成功色の途中が 3.23:1）。アニメーションと遷移がすべて終わるのを待ち、さらに
+ * 計算後の不透明度が 1 になったことを確かめる（遷移の始まる前のフレームで待つと空振りするため）。
+ */
+async function waitForToastSettled(page: Page): Promise<void> {
+  const toasts = page.locator('[data-sonner-toast]');
+  await expect(toasts.first()).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        toasts.evaluateAll(async (elements) => {
+          await Promise.all(
+            elements.flatMap((element) =>
+              element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)),
+            ),
+          );
+          return elements.every((element) => getComputedStyle(element).opacity === '1');
+        }),
+      { message: 'Toast が現れ終わらない（不透明度が 1 にならない）' },
+    )
+    .toBe(true);
 }
 
 /**
@@ -347,9 +375,29 @@ export interface DashboardSurface {
  * エラー表示になった状態を監査対象と取り違える。**失敗画面には違反が出ようがない。**
  */
 export async function openStoreQrPanel(page: Page): Promise<void> {
+  await openStoreQrPanelWithToast(page);
+  // 発行の成功を知らせる Toast は、パネルの配置を測る検査の対象ではない。狭い画面では下部中央に出て
+  // 一覧表に重なり、6 秒で消え始めるので、撮影や当たり判定の途中で見た目が変わる。閉じてから測る。
+  // Toast そのものの監査は ACTION_RESULT_SURFACES の「QR 発行の成功通知」が受け持つ。
+  await dismissToasts(page);
+}
+
+/** QR パネルを開き、発行の成功の Toast が現れ終わった状態で止める（Toast の監査用）。 */
+export async function openStoreQrPanelWithToast(page: Page): Promise<void> {
   await openListSurface(page, '/stores', '店舗一覧', 3);
   await page.getByRole('button', { name: new RegExp(`${STORES[0].name} の QR 発行`) }).click();
   await expect(page.locator('[data-print-region]')).toBeVisible();
+  // 発行の成功は Toast でも知らせる（Issue #342）。現れる途中で監査・撮影させない。
+  await waitForToastSettled(page);
+}
+
+/** 表示中の Toast をすべて閉じ、消えたことを確かめる。 */
+async function dismissToasts(page: Page): Promise<void> {
+  const closeButtons = page.getByRole('button', { name: '通知を閉じる' });
+  for (let i = await closeButtons.count(); i > 0; i -= 1) {
+    await closeButtons.first().click();
+  }
+  await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
 }
 
 /**
@@ -433,10 +481,37 @@ export const OVERLAY_SURFACES: readonly OverlaySurface[] = [
  * Toast はモーダルではなく下の面を操作不能にしないため、`OVERLAY_SURFACES` とは分ける。
  * ただし URL だけを開く通常面では現れない後続状態なので、明示しなければ監査から漏れる。
  */
+/**
+ * 通知（Toast）の表示の動きが終わるまで待つ（Issue #359）。
+ *
+ * Toast は不透明度を 0 から 1 へ 400ms かけて上げる。**表示された直後に色の対比を測ると、
+ * 白に混ざった途中の色を測る。** axe は不透明度を合成した色で判定するため、最終の色
+ * （--destructive・白地で 6 を超える）では満たす対比が、途中では 2.48〜4.27 に落ちて赤になった
+ * （ローカルで 40 回中 18 回。CI の main でも同じ形で落ちていた）。
+ *
+ * 不透明度が 1 に届いたことを先に待ち、そのうえで要素の中の動きがすべて終わるのを待つ。
+ * 前者だけだと、不透明度以外の動き（位置・高さ）が残ったまま測ることがある。
+ */
+export async function waitForToastsSettled(page: Page): Promise<void> {
+  const toasts = page.locator('[data-sonner-toast]');
+  await expect(toasts.first()).toBeVisible();
+  await expect(toasts.first()).toHaveCSS('opacity', '1');
+  await toasts.evaluateAll(async (elements) => {
+    await Promise.all(
+      elements.flatMap((element) => element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    );
+  });
+}
+
 export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
   {
     where: 'ログインの保存領域エラー通知',
     open: openLoginStorageFailureToast,
+    selector: '[data-sonner-toast]',
+  },
+  {
+    where: 'QR 発行の成功通知',
+    open: openStoreQrPanelWithToast,
     selector: '[data-sonner-toast]',
   },
 ];

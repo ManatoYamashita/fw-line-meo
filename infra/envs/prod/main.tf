@@ -81,6 +81,10 @@ module "run_services" {
       }
       env = {
         GEMINI_MODEL = var.gemini_model
+        # 流量制限の鍵を X-Forwarded-For から取るとき、末尾がこの IP なら 1 つ手前を送信元とみなす
+        # （Issue #344・ts/apps/survey-web/src/lib/client-key.ts）。未設定だとロードバランサ経由の客全員が
+        # 1 つの鍵を分け合うので、この env はイメージより先に入れる（infra/README.md §9-2-d）。
+        SURVEY_TRUSTED_PROXY_IPS = google_compute_global_address.survey_web.address
       }
     }
     "dashboard-api" = {
