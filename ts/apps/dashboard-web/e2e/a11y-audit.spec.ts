@@ -1,7 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { expectNoAxeViolations } from '@fwlm/e2e-support/a11y';
 
-import { ACTION_RESULT_SURFACES, DASHBOARD_SURFACES, OVERLAY_SURFACES } from './fixtures/api';
+import {
+  ACTION_RESULT_SURFACES,
+  DASHBOARD_SURFACES,
+  OVERLAY_SURFACES,
+  waitForToastsSettled,
+} from './fixtures/api';
 
 // 管理ダッシュボード 8 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを、
 // Issue #259 で利用者の編集パネルを追加）と、一覧の上に重なる後続状態の監査（Issue #252 で
@@ -41,9 +46,11 @@ for (const surface of OVERLAY_SURFACES) {
 
 // 操作結果の通知状態（Issue #342）。面全体に加えて Toast 自体へ絞った監査も当て、通知の
 // 前提 assert と合わせて「失敗状態が出ていない空振り」を成功として扱わない。
+// 監査の前に表示の動きが終わるのを待つ。途中で測ると白に混ざった色を測る（Issue #359）。
 for (const surface of ACTION_RESULT_SURFACES) {
   test(`${surface.where}が WCAG A/AA の自動監査を通る`, async ({ page }) => {
     await surface.open(page);
+    await waitForToastsSettled(page);
     await expectNoAxeViolations(page);
     await expectNoAxeViolations(page, { selector: surface.selector });
   });
