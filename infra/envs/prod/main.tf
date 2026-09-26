@@ -144,7 +144,6 @@ module "delivery_job" {
   db_name                = module.database.database_name
   line_channel_secret_id = module.secrets.secret_ids["line-channel-secret"]
   line_channel_id        = var.line_channel_id
-  liff_url               = var.liff_url
   # line-on-demand-report: 通知の前に完了後リッチメニューを照合するための ID。line-webhook の
   # LINE_RICHMENU_COMPLETED_ID と同じ値を渡す（env はそれを読むイメージより先に配線する・Step A）。
   line_richmenu_completed_id = var.line_richmenu_completed_id

@@ -56,16 +56,6 @@ variable "line_channel_id" {
   default     = ""
 }
 
-variable "liff_url" {
-  description = <<-EOT
-    「詳細を見る」ボタンの遷移先 LIFF URL（env LIFF_URL・design.md「LIFF URL 契約」）。
-    LIFF チャネル自体の作成は task 6.2 / #6 LINE 基盤と共同の runbook 手順（design.md Open Questions）
-    のため、既定は空文字列。store-detail の LIFF チャネル発行後に terraform.tfvars で設定する。
-  EOT
-  type        = string
-  default     = ""
-}
-
 variable "line_richmenu_completed_id" {
   description = <<-EOT
     完了後リッチメニューの richMenuId（env LINE_RICHMENU_COMPLETED_ID・line-on-demand-report の

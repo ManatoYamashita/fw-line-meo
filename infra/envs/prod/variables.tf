@@ -93,7 +93,9 @@ variable "line_richmenu_completed_id" {
 
 variable "liff_url" {
   description = <<-EOT
-    delivery-job の LIFF_URL env（「詳細を見る」ボタンの遷移先）。
+    store-detail の LIFF アプリ URL。line-webhook の LIFF_STORE_DETAIL_URL（完了メッセージと完了後
+    リッチメニューの「詳細を見る」）へ配線する。delivery-job への LIFF_URL の配線は、通知がボタンを
+    持たなくなったため外した（line-on-demand-report の Step D・Issue #256）。
     LIFF チャネル作成（task 6.2・#6 LINE 基盤と共同の runbook 手順）後にその ID を用いて設定する。
   EOT
   type        = string
@@ -115,7 +117,7 @@ variable "liff_channel_id" {
 variable "liff_id" {
   description = <<-EOT
     store-detail の NEXT_PUBLIC_LIFF_ID env（`liff.init({ liffId })` に渡す LIFF アプリ ID・
-    ts/apps/store-detail/app/store/page.tsx）。delivery-job の `liff_url`
+    ts/apps/store-detail/app/store/page.tsx）。変数 `liff_url`
     （`https://liff.line.me/{liffId}` の {liffId} 部分）と同一の値を指す。
     LIFF チャネル作成後に設定する。既定は空文字列＝未設定。
   EOT

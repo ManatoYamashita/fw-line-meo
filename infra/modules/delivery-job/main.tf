@@ -58,11 +58,12 @@ resource "google_cloud_run_v2_job" "delivery" {
           }
         }
 
-        # 平文 env（LINE チャネル ID・LIFF URL・Cloud SQL IAM 接続の3値・プロジェクト ID・完了後リッチメニューの ID）
+        # 平文 env（LINE チャネル ID・Cloud SQL IAM 接続の3値・プロジェクト ID・完了後リッチメニューの ID）。
+        # LIFF_URL は旧来の日次カードの「詳細を見る」ボタンのための値で、通知がボタンを持たなくなった
+        # ため外した（line-on-demand-report の Step D・Issue #256）。
         dynamic "env" {
           for_each = {
             LINE_CHANNEL_ID          = var.line_channel_id
-            LIFF_URL                 = var.liff_url
             CLOUDSQL_CONNECTION_NAME = var.db_connection_name
             DB_NAME                  = var.db_name
             DB_IAM_USER              = trimsuffix(google_service_account.job.email, ".gserviceaccount.com")
