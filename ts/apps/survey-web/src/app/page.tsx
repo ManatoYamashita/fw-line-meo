@@ -90,22 +90,16 @@ export default function Home() {
             </a>
           </div>
 
-          <div className="min-w-0 rounded-2xl bg-muted p-6 sm:p-8">
-            <p className="mb-6 text-sm font-medium text-muted-foreground">お客様の感想が、お店に届くしくみ</p>
-            <div className="space-y-4">
-              <div className="rounded-lg bg-background p-6">
-                <p className="mb-2 text-sm text-muted-foreground">お客様は、スマートフォンで</p>
-                <p className="text-lg font-semibold">感想を選んで、言葉にする。</p>
-                <p className="mt-3 text-sm text-text-body">アンケート → AIの下書き → ご自身で投稿</p>
-              </div>
-              <p aria-hidden="true" className="text-center text-xl">↓</p>
-              <div className="rounded-lg bg-background p-6">
-                <p className="mb-2 text-sm text-muted-foreground">お店は、いつものLINEで</p>
-                <p className="text-lg font-semibold">日々の変化を、確かめる。</p>
-                <p className="mt-3 text-sm text-text-body">自店の評価・口コミ件数・近隣店との比較</p>
-              </div>
-            </div>
-          </div>
+          <Image
+            src="/ogp.webp"
+            alt="Firstweb 集客AIアシスタントのQR口コミ支援。スマートフォンで星評価や感想を選ぶアンケート画面"
+            width={1200}
+            height={630}
+            sizes="(min-width: 1280px) 600px, (min-width: 768px) calc((100vw - 80px) / 2), calc(100vw - 32px)"
+            loading="eager"
+            fetchPriority="high"
+            className="h-auto w-full min-w-0 rounded-2xl border border-border"
+          />
         </section>
 
         <section className="rounded-2xl border border-border p-6 sm:p-8">
@@ -128,6 +122,43 @@ export default function Home() {
               </li>
             ))}
           </ol>
+          <div className="mt-12 grid items-start gap-8 md:grid-cols-2">
+            <figure className="min-w-0 space-y-6 rounded-2xl bg-muted p-4 sm:p-8">
+              <figcaption className="space-y-2">
+                <h3>アンケート回答画面</h3>
+                <p className="text-sm text-muted-foreground">星評価と感想を選び、一言を添えられます。</p>
+              </figcaption>
+              <Image
+                src="/screenshots/survey.png"
+                alt="サンプル食堂の回答画面。星評価、良かった点、気になった点、一言の入力欄と送信ボタン"
+                width={780}
+                height={1548}
+                sizes="(min-width: 960px) 384px, (min-width: 768px) calc((100vw - 192px) / 2), (min-width: 464px) 384px, calc(100vw - 64px)"
+                className="mx-auto h-auto w-full max-w-sm rounded-lg border border-border"
+              />
+              <a href="/screenshots/survey.png" className="inline-flex min-h-11 items-center underline underline-offset-4">
+                回答画面を拡大して見る
+              </a>
+            </figure>
+            <figure className="min-w-0 space-y-6 rounded-2xl bg-muted p-4 sm:p-8">
+              <figcaption className="space-y-2">
+                <h3>口コミ下書き画面</h3>
+                <p className="text-sm text-muted-foreground">文章を確認・編集して、コピーして投稿へ進めます。</p>
+              </figcaption>
+              <Image
+                src="/screenshots/draft.png"
+                alt="サンプル食堂の下書き画面。編集できる口コミの文章、コピーと再生成のボタン、Googleの投稿画面へのリンク"
+                width={780}
+                height={1252}
+                sizes="(min-width: 960px) 384px, (min-width: 768px) calc((100vw - 192px) / 2), (min-width: 464px) 384px, calc(100vw - 64px)"
+                className="mx-auto h-auto w-full max-w-sm rounded-lg border border-border"
+              />
+              <a href="/screenshots/draft.png" className="inline-flex min-h-11 items-center underline underline-offset-4">
+                下書き画面を拡大して見る
+              </a>
+            </figure>
+          </div>
+          <p className="mt-4 text-sm text-muted-foreground">実際の製品画面です。店舗名・回答・下書きにはサンプルデータを使用しています。</p>
           <div className="mt-8 space-y-2 border-t border-border pt-6 text-sm text-muted-foreground">
             <p>良かった点も、気になった点も、そのままお聞かせください。評価にかかわらず、同じ手順で投稿へ進めます。</p>
             <p>Googleへの投稿にはGoogleアカウントが必要です。口コミが自動で投稿されることはありません。</p>
