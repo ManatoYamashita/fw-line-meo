@@ -49,7 +49,7 @@ describe('AppToaster / action feedback', () => {
     expect(toaster?.classList.contains('app-toaster')).toBe(true);
     // 右側に出す（design-language 7.5。上下は画面の幅で決まり、test/app-toaster.test.tsx が固定する）。
     expect(toaster?.getAttribute('data-x-position')).toBe('right');
-    // 面は白・枠は中立の罫線・文字は本文色で、状態を問わず同じ。状態は右上のにじみと
+    // 面は白・枠は中立の罫線・文字は本文色で、状態を問わず同じ。状態は左上のにじみと
     // アイコンの意味色（globals.css）と文言で示す。文字を意味色で塗らないのは、にじみの上に
     // 文字が重なっても対比が変わらないようにするため。
     for (const type of ['success', 'info', 'warning', 'error'] as const) {
