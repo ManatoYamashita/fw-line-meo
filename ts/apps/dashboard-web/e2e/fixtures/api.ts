@@ -433,6 +433,28 @@ export const OVERLAY_SURFACES: readonly OverlaySurface[] = [
  * Toast はモーダルではなく下の面を操作不能にしないため、`OVERLAY_SURFACES` とは分ける。
  * ただし URL だけを開く通常面では現れない後続状態なので、明示しなければ監査から漏れる。
  */
+/**
+ * 通知（Toast）の表示の動きが終わるまで待つ（Issue #359）。
+ *
+ * Toast は不透明度を 0 から 1 へ 400ms かけて上げる。**表示された直後に色の対比を測ると、
+ * 白に混ざった途中の色を測る。** axe は不透明度を合成した色で判定するため、最終の色
+ * （--destructive・白地で 6 を超える）では満たす対比が、途中では 2.48〜4.27 に落ちて赤になった
+ * （ローカルで 40 回中 18 回。CI の main でも同じ形で落ちていた）。
+ *
+ * 不透明度が 1 に届いたことを先に待ち、そのうえで要素の中の動きがすべて終わるのを待つ。
+ * 前者だけだと、不透明度以外の動き（位置・高さ）が残ったまま測ることがある。
+ */
+export async function waitForToastsSettled(page: Page): Promise<void> {
+  const toasts = page.locator('[data-sonner-toast]');
+  await expect(toasts.first()).toBeVisible();
+  await expect(toasts.first()).toHaveCSS('opacity', '1');
+  await toasts.evaluateAll(async (elements) => {
+    await Promise.all(
+      elements.flatMap((element) => element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    );
+  });
+}
+
 export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
   {
     where: 'ログインの保存領域エラー通知',
