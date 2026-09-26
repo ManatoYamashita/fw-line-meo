@@ -778,6 +778,7 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | `.kiro/specs/ui-airbnb-foundation/design.md` | 判断の審議（D1〜D8）・Known Gaps・Revalidation Triggers |
 | `.kiro/steering/design-tokens.md` | 忘れると壊れる規律だけを抜いた常時参照用の要約 |
 | `docs/architecture.md` | サービス構成とフローの俯瞰 |
+| `docs/design/public-landing-page.md` | QR口コミ支援の公開トップの役割・認証境界・実描画レビュー |
 
 ### 各行を守っているガード
 
