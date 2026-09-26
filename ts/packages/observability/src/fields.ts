@@ -101,4 +101,17 @@ export interface LogFields {
   readonly reportKind?: string;
   /** レポート要求への応答の区分。有限集合の識別子（report・store_choice・no_store・preparing・fetch_failed）。 */
   readonly reportOutcome?: string;
+
+  // --- LINE Webhook 面（GBP 連携・gbp-post-review-reply） ---
+
+  /** GBP の会話フロー（connect・post・reply）。 */
+  readonly gbpFlow?: string;
+  /** GBP の会話の段階。 */
+  readonly gbpStage?: string;
+  /** OAuth callback の結果の種別。 */
+  readonly gbpCallbackResult?: string;
+  /** GBP の失敗の種別（API・生成・トークンの kind）。例外のクラス名（errorKind）とは別物。 */
+  readonly gbpErrorKind?: string;
+  /** オーナーの識別子（owners.id・内部の UUID）。LINE ユーザー ID ではない。 */
+  readonly ownerId?: string;
 }

@@ -226,8 +226,8 @@ export function createGoogleOauthCodeClient(
       try {
         await newClient().revokeToken(token);
       } catch {
-        // ベストエフォート。失敗しても呼び出し側の判断（連携不成立）は変わらない。
-        // 原エラーはトークンを含みうるため保持もログもしない。
+        // swallowed-exception: intentional — ベストエフォート。失敗しても呼び出し側の判断（連携不成立）は
+        // 変わらない。原エラーはトークンを含みうるため保持もログもしない。
       }
     },
   };
@@ -314,7 +314,8 @@ export function createGbpOauthService(deps: GbpOauthDeps): GbpOauthService {
     try {
       await deps.oauthClient.revokeToken(token);
     } catch {
-      // 既定実装は throw しないが、注入実装が throw しても連携不成立の判断は変えない。
+      // swallowed-exception: intentional — 既定実装は throw しないが、注入実装が throw しても連携不成立の
+      // 判断は変えない。例外はトークンを含みうるので、保持もログもしない。
     }
   }
 

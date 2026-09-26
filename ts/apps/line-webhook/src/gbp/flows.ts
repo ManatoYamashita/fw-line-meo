@@ -492,7 +492,8 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
     try {
       await deps.oauth.revokeToken(accessToken);
     } catch {
-      // 既定実装は throw しないが、注入実装が throw しても解除の結論は変えない。
+      // swallowed-exception: intentional — revoke はベストエフォートで、失敗しても解除の結論は変えない。
+      // 既定実装は throw しない。例外は平文トークンを含みうるので、保持もログもしない。
     }
   }
 

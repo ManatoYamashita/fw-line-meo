@@ -22,6 +22,7 @@
 //   pg のエラーは接続文字列を含みうる。載せてよいのは `name` だけ（`errorName`）。
 
 import type { GbpFlow, GbpStage } from '@fwlm/db';
+import { writeStructuredLog } from '@fwlm/observability';
 
 /**
  * ログへ載せてよい項目の全集合。**ここに無い値は記録できない。**
@@ -72,32 +73,26 @@ export function errorNameOf(error: unknown): string {
 }
 
 /**
- * Cloud Logging が解釈できる 1 行 JSON を書き出す。
- * 取り出しは allowlist（上のコメントの理由による）。
+ * 共有の出力口（@fwlm/observability の writeStructuredLog）へ書き出す。取り出しは allowlist
+ * （上のコメントの理由による）。GBP の項目名を共有の語彙へ写す（docs/observability/log-field-canon.md の 1.10）:
+ * errorName（Error.name）は共有の errorKind（例外のクラス名）へ、GBP の失敗の種別は gbpErrorKind へ。
  */
 export function writeGbpLog(
   level: 'warn' | 'error',
   message: string,
   meta?: GbpLogMeta,
 ): void {
-  const line = JSON.stringify({
-    level,
-    event: message,
-    ...(meta?.flow !== undefined ? { flow: meta.flow } : {}),
-    ...(meta?.stage !== undefined ? { stage: meta.stage } : {}),
-    ...(meta?.kind !== undefined ? { kind: meta.kind } : {}),
+  writeStructuredLog(level, message, {
+    ...(meta?.flow !== undefined ? { gbpFlow: meta.flow } : {}),
+    ...(meta?.stage !== undefined ? { gbpStage: meta.stage } : {}),
+    ...(meta?.kind !== undefined ? { gbpCallbackResult: meta.kind } : {}),
     ...(meta?.ownerId !== undefined ? { ownerId: meta.ownerId } : {}),
     ...(meta?.storeId !== undefined ? { storeId: meta.storeId } : {}),
-    ...(meta?.errorKind !== undefined ? { errorKind: meta.errorKind } : {}),
-    ...(meta?.errorName !== undefined ? { errorName: meta.errorName } : {}),
+    ...(meta?.errorKind !== undefined ? { gbpErrorKind: meta.errorKind } : {}),
+    ...(meta?.errorName !== undefined ? { errorKind: meta.errorName } : {}),
     ...(meta?.status !== undefined ? { status: meta.status } : {}),
     ...(meta?.reason !== undefined ? { reason: meta.reason } : {}),
   });
-  if (level === 'error') {
-    console.error(line);
-  } else {
-    console.warn(line);
-  }
 }
 
 /** index.ts から注入する既定の実体。 */
