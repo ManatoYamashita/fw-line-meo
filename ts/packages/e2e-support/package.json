@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./a11y": "./src/a11y.ts",
+    "./browser": "./src/browser.ts",
     "./viewport": "./src/viewport.ts"
   },
   "scripts": {

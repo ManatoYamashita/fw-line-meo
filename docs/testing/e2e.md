@@ -30,6 +30,12 @@ bash scripts/run-e2e-local.sh --only survey,lighthouse    # 一部だけ
 
 前提は pnpm、Homebrew の postgres（initdb / pg_ctl / psql）、go、lsof、Chrome である。コンテナランタイムは要らない。
 
+Playwright は既定で付属の Chromium を使う。インストール済みの Chromium 系ブラウザ（Aside、Google Chrome など）で流したいときは、`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` に実行ファイルのパスを渡す。付属 Chromium のダウンロードは要らなくなる。CI（`CI` が立っている環境）ではこの変数を無視し、常に付属 Chromium を使う。判定は `@fwlm/e2e-support/browser` の 1 箇所にあり、3 面の `playwright.config.ts` が共有している。
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside make e2e
+```
+
 手で流すと踏む罠は、実行装置の側で扱っている。
 
 - node 24 未満なら nvm の v24 へ切り替える（`ts/package.json` の engines。版が違うとバンドル容量が CI とずれる）
