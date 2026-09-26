@@ -77,9 +77,27 @@ resource "google_compute_ssl_policy" "survey_web" {
   depends_on = [module.project_services]
 }
 
+# ホスト名で振り分ける（Issue #368）。どのホストにも当たらない要求（IP 直打ち・run.app の Host を
+# 付けた要求など）は、これまでどおり survey-web へ送る。
 resource "google_compute_url_map" "survey_web" {
   name            = "survey-web-https"
   default_service = google_compute_backend_service.survey_web.id
+
+  dynamic "host_rule" {
+    for_each = local.lb_extra_hosts
+    content {
+      hosts        = [host_rule.value]
+      path_matcher = host_rule.key
+    }
+  }
+
+  dynamic "path_matcher" {
+    for_each = local.lb_extra_hosts
+    content {
+      name            = path_matcher.key
+      default_service = google_compute_backend_service.extra[path_matcher.key].id
+    }
+  }
 }
 
 resource "google_compute_target_https_proxy" "survey_web" {
@@ -119,4 +137,98 @@ resource "google_compute_global_forwarding_rule" "survey_web_http" {
   ip_address            = google_compute_global_address.survey_web.id
   port_range            = "80"
   target                = google_compute_target_http_proxy.survey_web_redirect.id
+}
+
+# ---------------------------------------------------------------------------------------------
+# api. と dashboard. の載せ替え（Issue #368）
+#
+# Cloud Run のドメインマッピング（custom-domain.tf）は Preview で、公式は遅延の問題を理由に本番向け
+# ではないとする。ロードバランサは上で既に持っていて、転送ルールは 5 本まで同額なので、載せ替えても
+# 費用は増えない。キーは run-services のサービスキーで、値はそのサービスへ割り当てるホスト名。
+#
+# 証明書は Certificate Manager の DNS 認証で発行する。上の google_compute_managed_ssl_certificate は
+# DNS がロードバランサを向いてからしか発行されないので、そのまま DNS を切り替えると、証明書が
+# できるまで TLS で繋がらない時間が生まれる。DNS 認証なら、DNS を向ける前に発行できる。
+# review. もこの方式へ揃える（HTTPS プロキシは証明書の一覧と証明書マップのどちらか一方しか持てない）。
+#
+# この段では足すだけで、HTTPS プロキシはまだ上の証明書を使う。切り替えの順は infra/README.md §9-2-e。
+# ---------------------------------------------------------------------------------------------
+
+locals {
+  lb_extra_hosts = {
+    "line-webhook"  = "api.firstweb-works.com"
+    "dashboard-web" = "dashboard.firstweb-works.com"
+  }
+  # 証明書マップに載せるホスト名の全部。キーは Certificate Manager のリソース名に使う。
+  lb_cert_hosts = {
+    "review"    = local.survey_web_domain
+    "api"       = "api.firstweb-works.com"
+    "dashboard" = "dashboard.firstweb-works.com"
+  }
+}
+
+resource "google_compute_region_network_endpoint_group" "extra" {
+  for_each = local.lb_extra_hosts
+
+  name                  = "${each.key}-neg"
+  region                = var.region
+  network_endpoint_type = "SERVERLESS"
+
+  cloud_run {
+    service = module.run_services.service_names[each.key]
+  }
+
+  depends_on = [module.project_services]
+}
+
+resource "google_compute_backend_service" "extra" {
+  for_each = local.lb_extra_hosts
+
+  name                  = "${each.key}-backend"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  protocol              = "HTTPS"
+
+  backend {
+    group = google_compute_region_network_endpoint_group.extra[each.key].id
+  }
+
+  # survey-web と同じく、要求のログは Cloud Run 側に任せる。
+  log_config {
+    enable = false
+  }
+}
+
+resource "google_certificate_manager_dns_authorization" "lb" {
+  for_each = local.lb_cert_hosts
+
+  name   = "${each.key}-dns-auth"
+  domain = each.value
+
+  depends_on = [module.project_services]
+}
+
+resource "google_certificate_manager_certificate" "lb" {
+  for_each = local.lb_cert_hosts
+
+  name = "${each.key}-cert"
+
+  managed {
+    domains            = [each.value]
+    dns_authorizations = [google_certificate_manager_dns_authorization.lb[each.key].id]
+  }
+}
+
+resource "google_certificate_manager_certificate_map" "lb" {
+  name = "firstweb-works-lb"
+
+  depends_on = [module.project_services]
+}
+
+resource "google_certificate_manager_certificate_map_entry" "lb" {
+  for_each = local.lb_cert_hosts
+
+  name         = "${each.key}-entry"
+  map          = google_certificate_manager_certificate_map.lb.name
+  hostname     = each.value
+  certificates = [google_certificate_manager_certificate.lb[each.key].id]
 }

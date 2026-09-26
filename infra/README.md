@@ -590,6 +590,45 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://review.firstweb-
 7. tfvars の `survey_base_url` を `https://review.firstweb-works.com` にして apply する（dashboard-api の `SURVEY_BASE_URL`。env は tf 側で入る。deploy はイメージしか変えない）。
 8. 新しく発行した QR が新しいドメインを指すこと、**切り替え前に発行した QR（run.app）が引き続き開けること**を、それぞれ実機で確かめる。
 
+#### 9-2-e. api. と dashboard. をロードバランサへ載せ替える（Issue #368）
+
+9-2-b と 9-2-c で作ったドメインマッピングは Preview で、公式は遅延の問題を理由に本番向けではないとする。9-2-d のロードバランサは既にあり、転送ルールは 5 本まで同額なので、載せ替えても費用は増えない。宣言は `infra/envs/prod/load-balancer.tf` の後半にある。
+
+**止めずに切り替える。** 9-2-d の Google マネージド証明書は、DNS がロードバランサを向いてからしか発行されない。そのまま DNS を切り替えると、証明書ができるまで `dashboard.` に TLS で繋がらない。そこで **Certificate Manager の DNS 認証**で、DNS を向ける前に証明書を発行する。`review.` もこの方式へ揃える（HTTPS プロキシは、証明書の一覧と証明書マップのどちらか一方しか持てない）。
+
+**段 1: 足すだけ（本番への影響は無い）**
+
+```bash
+terraform -chdir=infra/envs/prod plan  -target=module.project_services -target=google_compute_url_map.survey_web -target=google_certificate_manager_certificate_map_entry.lb
+terraform -chdir=infra/envs/prod apply -target=module.project_services -target=google_compute_url_map.survey_web -target=google_certificate_manager_certificate_map_entry.lb
+terraform -chdir=infra/envs/prod output -json lb_dns_authorization_records
+```
+
+- plan の差分は、作成（証明書まわり・NEG・バックエンド）と、URL マップへのホスト名の振り分けの追加だけになる。Cloud Run のサービスに出るのは `client` と `client_version` の null 化だけ（9-2-d と同じ読み方）
+- ホスト名に当たらない要求（`review.` を含む）は、これまでどおり survey-web へ届く
+
+**段 2: DNS 認証の CNAME を Cloudflare に足す**
+
+上の output の 3 件（`review`・`api`・`dashboard`）を、そのまま CNAME として足す。**プロキシは OFF（DNS only）にする。** 3 つの証明書が `ACTIVE` になるのを待つ。
+
+```bash
+gcloud certificate-manager certificates list --format='table(name,managed.state,managed.domains)'
+```
+
+**段 3: 切り替える**（Issue #368 の PR2）
+
+1. HTTPS プロキシを証明書マップへ切り替える（`certificate_map` を指し、`ssl_certificates` を外す）。`review.` が途切れないことを確かめる
+2. **DNS を変えずに**、ロードバランサ経由の経路を確かめる
+
+```bash
+curl -s -w ' %{http_code}\n' --resolve api.firstweb-works.com:443:136.68.86.235 https://api.firstweb-works.com/health
+curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:443:136.68.86.235 https://dashboard.firstweb-works.com/login
+```
+
+3. Cloudflare の `api` と `dashboard` を、CNAME（`ghs.googlehosted.com`）から A レコード（ロードバランサの IP）へ変える。プロキシは OFF
+4. `dashboard.` の Google ログインが通ることを人が確かめる（`/__/auth/` は dashboard-web が中継する）
+5. ドメインマッピング（`custom-domain.tf`）と、9-2-d の古い証明書を消す
+
 ### 9-3. 進捗の追跡
 
 この節は**手順の正典**であり、状態の正典ではない。承認・却下・提出の事実は Issue #146 のコメントへ実測の証拠つきで残すこと（9-1 の判定コマンドの出力、クォータ画面のスクリーンショット、申請日と受領メールの日付）。

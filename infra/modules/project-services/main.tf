@@ -5,22 +5,23 @@
 # 依存 API の巻き込み無効化を防ぐ。
 locals {
   services = [
-    "run.googleapis.com",              # Cloud Run（services / jobs）
-    "sqladmin.googleapis.com",         # Cloud SQL 管理
-    "secretmanager.googleapis.com",    # Secret Manager
-    "identitytoolkit.googleapis.com",  # Identity Platform / Firebase Auth
-    "cloudscheduler.googleapis.com",   # Cloud Scheduler（日次バッチ起動）
-    "artifactregistry.googleapis.com", # Artifact Registry
-    "iam.googleapis.com",              # IAM
-    "iamcredentials.googleapis.com",   # 短命トークン発行（WIF）
-    "sts.googleapis.com",              # Security Token Service（WIF 交換）
-    "billingbudgets.googleapis.com",   # Budget（Req 7.1）
-    "cloudquotas.googleapis.com",      # Cloud Quotas（Places API cap・Req 7.2）
-    "monitoring.googleapis.com",       # Monitoring（バッチ失敗アラート）
-    "firebase.googleapis.com",         # Firebase プロジェクト（Identity Platform 前提）
-    "places.googleapis.com",           # Places API (New)（競合データ取得）
-    "cloudbuild.googleapis.com",       # Cloud Build（イメージビルド・push、task 6.3）
-    "compute.googleapis.com",          # 外部 HTTPS ロードバランサ（survey-web の独自ドメイン・Issue #338）
+    "run.googleapis.com",                # Cloud Run（services / jobs）
+    "sqladmin.googleapis.com",           # Cloud SQL 管理
+    "secretmanager.googleapis.com",      # Secret Manager
+    "identitytoolkit.googleapis.com",    # Identity Platform / Firebase Auth
+    "cloudscheduler.googleapis.com",     # Cloud Scheduler（日次バッチ起動）
+    "artifactregistry.googleapis.com",   # Artifact Registry
+    "iam.googleapis.com",                # IAM
+    "iamcredentials.googleapis.com",     # 短命トークン発行（WIF）
+    "sts.googleapis.com",                # Security Token Service（WIF 交換）
+    "billingbudgets.googleapis.com",     # Budget（Req 7.1）
+    "cloudquotas.googleapis.com",        # Cloud Quotas（Places API cap・Req 7.2）
+    "monitoring.googleapis.com",         # Monitoring（バッチ失敗アラート）
+    "firebase.googleapis.com",           # Firebase プロジェクト（Identity Platform 前提）
+    "places.googleapis.com",             # Places API (New)（競合データ取得）
+    "cloudbuild.googleapis.com",         # Cloud Build（イメージビルド・push、task 6.3）
+    "compute.googleapis.com",            # 外部 HTTPS ロードバランサ（survey-web の独自ドメイン・Issue #338）
+    "certificatemanager.googleapis.com", # ロードバランサの証明書を DNS 認証で発行する（Issue #368）
   ]
 }
 
