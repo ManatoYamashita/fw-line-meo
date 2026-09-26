@@ -17,9 +17,11 @@
 # X-Forwarded-For の形がロードバランサ経由と run.app 直とで変わる。流量制限の鍵を読む位置は
 # 実測してから決める（Issue #338・#344）。
 #
-# 前提: DNS は Cloudflare で `review` の A レコードを下の survey_web_lb_ip へ向ける。証明書の
-# 発行が終わるまでプロキシは OFF にする（ON だと Google が証明書を発行できない）。手順は
-# infra/README.md §9-2-d。
+# 前提: DNS は Cloudflare で `review`・`api`・`dashboard` の A レコードを survey_web_lb_ip へ向ける。
+# **プロキシは OFF のまま保つ。** ON にすると Cloudflare が前段に入り、アプリに届く X-Forwarded-For の
+# 並びが変わって、survey-web の流量制限の鍵（Issue #344）がずれる。証明書は Certificate Manager の
+# DNS 認証（`_acme-challenge` の CNAME）で発行するので、A レコードの向き先とは関係なく発行される。
+# 手順は infra/README.md §9-2-d・§9-2-e。
 
 locals {
   survey_web_domain = "review.firstweb-works.com"
@@ -58,15 +60,6 @@ resource "google_compute_backend_service" "survey_web" {
   }
 }
 
-resource "google_compute_managed_ssl_certificate" "survey_web" {
-  name = "survey-web-cert"
-
-  managed {
-    domains = [local.survey_web_domain]
-  }
-
-  depends_on = [module.project_services]
-}
 
 # ロードバランサの既定は TLS 1.0 から受け付ける。1.2 未満を拒む。
 resource "google_compute_ssl_policy" "survey_web" {
@@ -100,11 +93,15 @@ resource "google_compute_url_map" "survey_web" {
   }
 }
 
+# 証明書は Certificate Manager の証明書マップから、ホスト名ごとに選ばれる（Issue #368）。
+# 初めは google_compute_managed_ssl_certificate（review. の 1 枚）を ssl_certificates で持っていたが、
+# それは DNS がロードバランサを向いてからしか発行されないため、api. と dashboard. を止めずに
+# 載せ替えられなかった。プロキシは ssl_certificates と certificate_map のどちらか一方しか持てない。
 resource "google_compute_target_https_proxy" "survey_web" {
-  name             = "survey-web-https"
-  url_map          = google_compute_url_map.survey_web.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.survey_web.id]
-  ssl_policy       = google_compute_ssl_policy.survey_web.id
+  name            = "survey-web-https"
+  url_map         = google_compute_url_map.survey_web.id
+  certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.lb.id}"
+  ssl_policy      = google_compute_ssl_policy.survey_web.id
 }
 
 resource "google_compute_global_forwarding_rule" "survey_web_https" {
@@ -146,12 +143,12 @@ resource "google_compute_global_forwarding_rule" "survey_web_http" {
 # ではないとする。ロードバランサは上で既に持っていて、転送ルールは 5 本まで同額なので、載せ替えても
 # 費用は増えない。キーは run-services のサービスキーで、値はそのサービスへ割り当てるホスト名。
 #
-# 証明書は Certificate Manager の DNS 認証で発行する。上の google_compute_managed_ssl_certificate は
+# 証明書は Certificate Manager の DNS 認証で発行する。Google マネージド証明書（google_compute_managed_ssl_certificate）は
 # DNS がロードバランサを向いてからしか発行されないので、そのまま DNS を切り替えると、証明書が
 # できるまで TLS で繋がらない時間が生まれる。DNS 認証なら、DNS を向ける前に発行できる。
 # review. もこの方式へ揃える（HTTPS プロキシは証明書の一覧と証明書マップのどちらか一方しか持てない）。
 #
-# この段では足すだけで、HTTPS プロキシはまだ上の証明書を使う。切り替えの順は infra/README.md §9-2-e。
+# HTTPS プロキシ（上の google_compute_target_https_proxy）は、下の証明書マップを使う。切り替えの順は infra/README.md §9-2-e。
 # ---------------------------------------------------------------------------------------------
 
 locals {
