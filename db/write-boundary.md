@@ -1,4 +1,4 @@
-# 書き込み境界（Write Boundary）: four-tier-data-model / competitive-daily-summary / review-acquisition
+# 書き込み境界（Write Boundary）: four-tier-data-model / competitive-daily-summary / review-acquisition / gbp-post-review-reply
 
 同一 Cloud SQL を 2 言語（TypeScript リアルタイム応答層 / Go 日次バッチ層）から触るため、**各テーブルの書き込み責任を厳密に 1 つの層へ割り当てる**。読み取りは原則両層に許容。共有定数はマイグレーション seed を単一情報源（SoT）とし、実行時はどちらの層も書き込まない。
 
@@ -23,6 +23,8 @@
 | `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
 | `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
 | `audit_logs` | TS リアルタイム応答層 | 運営・代理店・オーナーによる業務書込操作の追記型監査記録。`customer` は主体にしない |
+| `gbp_locations` | TS リアルタイム応答層 | `gbp-post-review-reply`: OAuth 連携成立時の GBP 身元（account/location・placeId 突合結果）保存・解除時削除（`0013`） |
+| `gbp_sessions` | TS リアルタイム応答層 | `gbp-post-review-reply`: GBP 会話フロー（connect/post/reply）の期限付きセッション状態（Webhook・`0013`） |
 | `competitors` | Go 日次バッチ層 | Places API による競合探索・churn 更新 |
 | `rating_snapshots` | Go 日次バッチ層 | Places API による毎朝の評価/順位スナップショット |
 | `daily_summaries` | Go 日次バッチ層 | `competitive-daily-summary`: Go 日次バッチによる順位/前日比算出・確定「配信素材」生成（`0004`） |

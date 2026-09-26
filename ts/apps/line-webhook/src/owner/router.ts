@@ -5,7 +5,11 @@
 // - postback のうちレポートの data は、レポートへ渡す（2.3）
 // - それ以外の postback（再開・候補の選択・確定・やり直し・古い形・壊れた形）、テキスト（「ステータス確認」を含む）、
 //   スタンプなど、友だち追加には、ステータス案内を返す（2.5）。オンボーディングの案内は返さない（2.9）
-// 第2フェーズは、ここへ postback の分岐を 1 つ足して GBP の会話へ渡す。既存の分岐と応答は変えない（2.7）。
+// 第2フェーズ（gbp-post-review-reply・Issue #323）は、ここで GBP の会話へ渡す。既存の分岐と応答は変えない（2.7）。
+// - GBP の postback（data が g_ で始まる）は GBP の会話へ渡す
+// - テキストは、GBP の手続きが進行中のとき（gbp_sessions に有効な行があるとき）だけ GBP の会話が引き受ける
+// - GBP の会話が引き受けなかったもの（not_handled・GBP の障害を握った場合を含む）は、下の既存の分岐へ落ちる
+// - GBP が既定 OFF（gbp が無い）ときは、この分岐を一切通らない。gbp_sessions も読まない
 //
 // Reply の後、次のいずれかに当たれば完了後メニューを張る（2.6・2.8）。
 // 1. 会話の段階が completed でない。代理店が店舗を登録したオーナーは、段階が途中のまま店舗特定済みになる
@@ -34,6 +38,8 @@ import type { LineMessenger } from '../line/client.js';
 import { buildStatusGuidanceMessage } from '../line/messages.js';
 import type { ConversationLogger, SessionsAccessor } from '../onboarding/conversation.js';
 import { decodePostback } from '../onboarding/stages.js';
+import type { GbpFlowHandlers } from '../gbp/flows.js';
+import { isGbpPostbackData } from '../gbp/postback.js';
 import { createReportHandler, type ReportHandler, type ReportReadsAccessor } from '../report/handler.js';
 import type { InboundEvent } from '../webhook/dispatch.js';
 import { errorKindOf, linkCompletedMenu } from './completed-menu.js';
@@ -48,6 +54,8 @@ export interface StoreIdentifiedOwnerRouterDeps {
   readonly auditLog?: AuditLogger;
   /** 完了後リッチメニューの ID（env LINE_RICHMENU_COMPLETED_ID）。オンボーディング完了時のリンクと同じものを張る。 */
   readonly lineRichMenuCompletedId: string;
+  /** GBP の会話（gbp-post-review-reply）。既定 OFF のときは無い（Issue #323）。 */
+  readonly gbp?: GbpFlowHandlers;
 }
 
 export interface StoreIdentifiedOwnerRouter {
@@ -72,6 +80,32 @@ function isResumePostback(event: InboundEvent): boolean {
 }
 
 /** Reply の後の処理の成否。例外を値にして持ち、記録を業務処理の外側で行う。 */
+/**
+ * GBP の会話へ渡す。引き受けて Reply まで済ませたときだけ true を返す。GBP の postback でもテキストでもない
+ * イベント（友だち追加・スタンプ・レポートの postback など）は渡さない。
+ */
+async function delegateToGbp(gbp: GbpFlowHandlers, event: InboundEvent, ownerId: string): Promise<boolean> {
+  if (event.kind === 'postback' && isGbpPostbackData(event.data)) {
+    const outcome = await gbp.handleGbpPostback({
+      ownerId,
+      lineUserId: event.lineUserId,
+      replyToken: event.replyToken,
+      data: event.data,
+    });
+    return outcome === 'handled';
+  }
+  if (event.kind === 'text') {
+    const outcome = await gbp.handleGbpText({
+      ownerId,
+      lineUserId: event.lineUserId,
+      replyToken: event.replyToken,
+      text: event.text,
+    });
+    return outcome === 'handled';
+  }
+  return false;
+}
+
 type Attempt = { readonly ok: true } | { readonly ok: false; readonly error: unknown };
 
 async function attempt(run: () => Promise<void>): Promise<Attempt> {
@@ -119,11 +153,14 @@ export function createStoreIdentifiedOwnerRouter(deps: StoreIdentifiedOwnerRoute
       // 段階は Reply の前に読む。Reply の後に読むと、読み出しの失敗を Reply の後に投げることになる。
       const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
-      const request = event.kind === 'postback' ? decodeReportPostback(event.data) : null;
-      if (request !== null) {
-        await deps.reports.handle({ replyToken: event.replyToken, ownerId: owner.id, request });
-      } else {
-        await deps.messenger.reply(event.replyToken, [buildStatusGuidanceMessage()]);
+      const handledByGbp = deps.gbp !== undefined && (await delegateToGbp(deps.gbp, event, owner.id));
+      if (!handledByGbp) {
+        const request = event.kind === 'postback' ? decodeReportPostback(event.data) : null;
+        if (request !== null) {
+          await deps.reports.handle({ replyToken: event.replyToken, ownerId: owner.id, request });
+        } else {
+          await deps.messenger.reply(event.replyToken, [buildStatusGuidanceMessage()]);
+        }
       }
 
       const stageCompleted = session.stage === 'completed';
@@ -158,6 +195,8 @@ export interface StoreIdentifiedOwnerRouterFactoryDeps {
   readonly reads?: ReportReadsAccessor;
   /** 現在時刻。省略すると実行時の時刻を使う（試験で固定する）。 */
   readonly now?: () => Date;
+  /** GBP の会話（gbp-post-review-reply）。既定 OFF のときは渡さない（Issue #323）。 */
+  readonly gbp?: GbpFlowHandlers;
 }
 
 /**
@@ -175,6 +214,7 @@ export function createStoreIdentifiedOwnerRouterFactory(
       logger,
       ...(deps.auditLog ? { auditLog: deps.auditLog } : {}),
       lineRichMenuCompletedId: deps.lineRichMenuCompletedId,
+      ...(deps.gbp ? { gbp: deps.gbp } : {}),
       reports: createReportHandler({
         db: deps.db,
         messenger,

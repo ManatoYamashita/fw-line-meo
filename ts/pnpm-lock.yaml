@@ -124,6 +124,9 @@ importers:
       '@fwlm/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@fwlm/gemini':
+        specifier: workspace:*
+        version: link:../../packages/gemini
       '@fwlm/line-report':
         specifier: workspace:*
         version: link:../../packages/line-report
@@ -139,6 +142,9 @@ importers:
       '@line/bot-sdk':
         specifier: ^11
         version: 11.2.0
+      google-auth-library:
+        specifier: ^10
+        version: 10.9.0
       hono:
         specifier: ^4
         version: 4.12.28
@@ -273,6 +279,12 @@ importers:
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
+
+  packages/gemini:
+    dependencies:
+      '@google/genai':
+        specifier: ^1
+        version: 1.52.0
 
   packages/line-report: {}
 

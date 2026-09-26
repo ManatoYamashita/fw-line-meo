@@ -29,6 +29,8 @@ import {
 import { StoreScopedReportError } from '../../src/report/errors.js';
 import type { ReportHandleInput, ReportHandler } from '../../src/report/handler.js';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
+import type { GbpFlowHandlers } from '../../src/gbp/flows.js';
+import { encodeGbpPostback } from '../../src/gbp/postback.js';
 
 type Stage = OnboardingSessionRow['stage'];
 
@@ -147,6 +149,8 @@ interface SetupOptions {
   readonly auditError?: Error;
   /** false なら監査記録の手段を渡さない（任意の依存）。 */
   readonly withAudit?: boolean;
+  /** GBP の会話（gbp-post-review-reply）。省略すると GBP は既定 OFF（Issue #323）。 */
+  readonly gbp?: GbpFlowHandlers;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -184,6 +188,9 @@ function setup(options: SetupOptions = {}) {
       timeline.push('reply');
       if (options.replyError) throw options.replyError;
       replies.push({ replyToken, messages });
+    },
+    async push() {
+      throw new Error('the router must not push');
     },
     async getProfile() {
       throw new Error('the router must not read the profile');
@@ -226,6 +233,7 @@ function setup(options: SetupOptions = {}) {
           },
         }),
     lineRichMenuCompletedId: COMPLETED_MENU_ID,
+    ...(options.gbp ? { gbp: options.gbp } : {}),
   };
 
   const router = createStoreIdentifiedOwnerRouter(deps);
@@ -594,6 +602,9 @@ describe('createStoreIdentifiedOwnerRouterFactory', () => {
       async reply(replyToken, messages) {
         replies.push({ replyToken, messages });
       },
+      async push() {
+        throw new Error('the router must not push');
+      },
       async getProfile() {
         throw new Error('the router must not read the profile');
       },
@@ -648,3 +659,96 @@ describe('createStoreIdentifiedOwnerRouterFactory', () => {
     }
   });
 });
+
+// GBP の会話への委譲（gbp-post-review-reply・Issue #323・#256 design.md の 2.7）。
+// 店舗特定済みのオーナーの入力はすべてこの振り分け口に来るので、GBP への委譲はここで行う。
+// - GBP の postback は GBP の会話へ渡し、引き受けたらステータス案内もレポートも返さない
+// - テキストは GBP の会話に問い合わせ、引き受けなかったら（手続きが進行中でない）従来どおりステータス案内を返す
+// - GBP が既定 OFF のときは一切問い合わせない（gbp_sessions を読まない）
+describe('GBP の会話への委譲', () => {
+  function fakeGbp(outcome: { postback?: 'handled' | 'not_handled'; text?: 'handled' | 'not_handled' } = {}) {
+    return {
+      handleGbpPostback: vi.fn(async () => outcome.postback ?? ('handled' as const)),
+      handleGbpText: vi.fn(async () => outcome.text ?? ('handled' as const)),
+    } satisfies GbpFlowHandlers;
+  }
+  const gbpPostback = (): InboundEvent => ({
+    kind: 'postback',
+    lineUserId: LINE_USER_ID,
+    replyToken: REPLY_TOKEN,
+    data: encodeGbpPostback({ action: 'g_status' }),
+  });
+  const text = (value: string): InboundEvent => ({
+    kind: 'text',
+    lineUserId: LINE_USER_ID,
+    replyToken: REPLY_TOKEN,
+    text: value,
+  });
+
+  it('GBP の postback を GBP の会話へ渡し、引き受けたらステータス案内もレポートも返さない', async () => {
+    const gbp = fakeGbp();
+    const h = setup({ gbp });
+    await h.handle(gbpPostback());
+    expect(gbp.handleGbpPostback).toHaveBeenCalledWith({
+      ownerId: OWNER_ID,
+      lineUserId: LINE_USER_ID,
+      replyToken: REPLY_TOKEN,
+      data: encodeGbpPostback({ action: 'g_status' }),
+    });
+    expect(h.replies).toEqual([]);
+    expect(h.reportInputs).toEqual([]);
+  });
+
+  it('GBP の会話が postback を引き受けなかったら（障害を握った場合を含む）ステータス案内へ落ちる', async () => {
+    const h = setup({ gbp: fakeGbp({ postback: 'not_handled' }) });
+    await h.handle(gbpPostback());
+    expectStatusGuidanceOnly(h);
+  });
+
+  it('テキストは GBP の会話に問い合わせ、引き受けたらステータス案内を返さない', async () => {
+    const gbp = fakeGbp({ text: 'handled' });
+    const h = setup({ gbp });
+    await h.handle(text('新メニューの告知'));
+    expect(gbp.handleGbpText).toHaveBeenCalledWith({
+      ownerId: OWNER_ID,
+      lineUserId: LINE_USER_ID,
+      replyToken: REPLY_TOKEN,
+      text: '新メニューの告知',
+    });
+    expect(h.replies).toEqual([]);
+  });
+
+  it('テキストを GBP の会話が引き受けなければ（手続きが進行中でない）従来どおりステータス案内を返す', async () => {
+    const h = setup({ gbp: fakeGbp({ text: 'not_handled' }) });
+    await h.handle(text('ステータス確認'));
+    expectStatusGuidanceOnly(h);
+  });
+
+  it('レポートの postback は GBP の会話へ渡さず、レポートへ渡す', async () => {
+    const gbp = fakeGbp();
+    const h = setup({ gbp });
+    await h.handle({
+      kind: 'postback',
+      lineUserId: LINE_USER_ID,
+      replyToken: REPLY_TOKEN,
+      data: encodeReportPostback({ kind: 'new_reviews', storeId: null, page: 0 }),
+    });
+    expect(gbp.handleGbpPostback).not.toHaveBeenCalled();
+    expect(gbp.handleGbpText).not.toHaveBeenCalled();
+    expect(h.reportInputs).toHaveLength(1);
+  });
+
+  it('GBP が既定 OFF なら GBP の postback もステータス案内として扱う（GBP には一切触れない）', async () => {
+    const h = setup();
+    await h.handle(gbpPostback());
+    expectStatusGuidanceOnly(h);
+  });
+
+  it('GBP の会話が引き受けても、段階が completed でなければ完了後メニューを張る（既存の照合は変えない）', async () => {
+    const h = setup({ gbp: fakeGbp(), stage: 'await_store_name' });
+    await h.handle(gbpPostback());
+    expect(h.replies).toEqual([]);
+    expectLinkedOnce(h);
+  });
+});
+
