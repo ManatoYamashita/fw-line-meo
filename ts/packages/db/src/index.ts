@@ -13,3 +13,6 @@ export * from './onboarding-sessions.js';
 export * from './webhook-events.js';
 export * from './audit-logs.js';
 export * from './report-reads.js';
+export * from './oauth-tokens.js';
+export * from './gbp-locations.js';
+export * from './gbp-sessions.js';

@@ -545,7 +545,12 @@ curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status"
 
 **run.app は閉じない。** 切り替え前に発行した QR は run.app を指している。survey-web の ingress を絞ると、それらが開けなくなる。
 
-**流量制限の鍵を先に直す（Issue #344）。** survey-web は `X-Forwarded-For` の先頭を鍵にしていて、客が偽れる（2026-09-26 実測）。ロードバランサを前段に置くと要素の並びも変わる。**`SURVEY_BASE_URL` を切り替える前に、#344 の修正を入れておくこと。**
+**流量制限の鍵を先に直す（Issue #344）。** survey-web は `X-Forwarded-For` の先頭を鍵にしていて、客が偽れた（2026-09-26 実測）。ロードバランサを前段に置くと、要素の並びも変わる。**`SURVEY_BASE_URL` を切り替える前に、#344 の修正を入れておくこと。** 本番で実測した並びは次のとおり。
+
+| 経路 | アプリに届く `X-Forwarded-For` |
+|---|---|
+| run.app 直 | `<客の送った値…>, <送信元 IP>` |
+| ロードバランサ経由 | `<客の送った値…>, <送信元 IP>, <ロードバランサの IP>` |
 
 手順:
 
@@ -577,7 +582,11 @@ curl -s -w ' %{http_code}\n' https://review.firstweb-works.com/health
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://review.firstweb-works.com/health
 ```
 
-6. #344 の修正がデプロイ済みであることを確かめる。
+6. #344 の修正を入れる。**env を先に、イメージを後に**入れる。
+   - survey-web の env `SURVEY_TRUSTED_PROXY_IPS`（ロードバランサの外部 IP）を tf で先に apply する。古いイメージはこの env を読まないので、入れても何も変わらない
+   - その後に、鍵を後ろ側から取るコード（`ts/apps/survey-web/src/lib/client-key.ts`）をデプロイする
+   - 逆の順だと、ロードバランサ経由の客全員が、ロードバランサの IP という 1 つの鍵を分け合う
+   - 確かめ方: 先頭に毎回違う偽の値を入れて `/api/review-link-opened`（1 分 10 回）へ空のトークンで 14 回送り、両方の経路で 11 回目から 429 になること
 7. tfvars の `survey_base_url` を `https://review.firstweb-works.com` にして apply する（dashboard-api の `SURVEY_BASE_URL`。env は tf 側で入る。deploy はイメージしか変えない）。
 8. 新しく発行した QR が新しいドメインを指すこと、**切り替え前に発行した QR（run.app）が引き続き開けること**を、それぞれ実機で確かめる。
 

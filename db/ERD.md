@@ -1,4 +1,4 @@
-# ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition
+# ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition / gbp-post-review-reply
 
 fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
@@ -30,6 +30,9 @@ erDiagram
     audit_logs }o..|| operators : "actor (dashboard user)"
     audit_logs }o..|| agencies : "actor (dashboard user)"
     audit_logs }o..|| owners : "actor"
+    stores ||--o| gbp_locations : "GBP identity of"
+    owners ||--o| gbp_sessions : "gbp conversation of"
+    stores ||--o{ gbp_sessions : "target of"
 ```
 
 ## エンティティ一覧（PK / 自然キー / 主な FK）
@@ -56,6 +59,8 @@ erDiagram
 | onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
 | line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
 | audit_logs | id (uuid) | — | 多相 actor/target（ID は UUID、参照先は `actor_type` / `target_type` で解釈） | 運営・代理店・オーナーの書込操作の追記型監査記録（`customer` は存在しない） |
+| gbp_locations | id (uuid) | store_id (unique) | store_id → stores | GBP 上の身元（account/location リソース名・突合時点の place_id・投稿可否。店舗 1:1・TS 書込） |
+| gbp_sessions | id (uuid) | owner_id (unique) | owner_id → owners, store_id → stores | GBP 会話セッション（flow×stage・payload・draft・期限付き。owner 単位に高々 1 つ・TS 書込） |
 
 ## 凡例・補足
 
@@ -88,3 +93,4 @@ erDiagram
   ダッシュボード操作の `actor_id` は `dashboard_users.id`、LINE オンボーディング操作の `actor_id` は `owners.id`。
   `target_type` / `target_id` も業務エンティティの UUID を記録し、`line_user_id` や認証 subject は保持しない。
   `action` の CHECK は `ck_audit_logs_action`（`0009` で命名、`0012` で店舗の停止・再開の 2 値を足して 18 値）。値の集合は TS の `AUDIT_LOG_ACTIONS`（`ts/packages/db/src/audit-logs.ts`）と一致させる。
+- `gbp_locations`・`gbp_sessions`（`gbp-post-review-reply`・`0013`・いずれも TS 書込）: 連携の単位は店舗（`gbp_locations.store_id` unique・1 店舗の連携/解除が他店舗へ非影響）。`gbp_locations` の行は対応する `oauth_tokens` 行なしに存在しない（連携成立時に同時作成・解除時に同時削除。アプリ規律で担保）。`gbp_sessions` は owner 単位に高々 1 つ（`owner_id` unique）の期限付き一時状態のみを保持し、`store_id` は店舗選択前（await_store）は NULL。両テーブルとも親削除で CASCADE（一時状態・従属身元のため RESTRICT にしない）。

@@ -6,18 +6,30 @@ import {
   getOrCreateSession,
   updateSession,
   findOwnerByLineUserId,
+  findOwnerById,
   createOwner,
   findActiveInviteCode,
   createAuditLog,
 } from '@fwlm/db';
 import { createApp, type AppDeps } from './app.js';
-import { loadConfig } from './config.js';
+import { loadConfig, type GbpConfig } from './config.js';
 import { createSignatureVerifier } from './webhook/signature.js';
 import { createPlacesSearchAdapter } from '@fwlm/store-identification';
 import { createLineMessenger } from './line/client.js';
 import { createStoreIdentificationService } from '@fwlm/store-identification';
 import { createConversationHandlers } from './onboarding/conversation.js';
 import { createStoreIdentifiedOwnerRouterFactory } from './owner/router.js';
+import { createGbpClient } from './gbp/client.js';
+import { createGoogleRefreshGrantClient, createTokenStore } from './gbp/token-store.js';
+import {
+  createDefaultGbpOauthAccessors,
+  createGbpOauthService,
+  createGoogleOauthCodeClient,
+} from './gbp/oauth.js';
+import { createGbpOauthCallbackRoute } from './gbp/callback.js';
+import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flows.js';
+import { createDefaultGbpPrompts } from './gbp/prompts.js';
+import { createDefaultGbpLogger } from './gbp/logger.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -50,6 +62,63 @@ const storeIdentificationService = createStoreIdentificationService({
   places: placesAdapter,
 });
 
+// GBP 連携（gbp-post-review-reply）。**既定 OFF**（Issue #323）。GBP の env が無ければ何も組み立てず、
+// 会話から GBP への委譲も OAuth callback の経路も登録しない。GBP の会話は gbp_sessions を読むので、
+// migration 0013 と grants が本番に当たる前に組み立てると、GBP を使わないオーナーの操作まで失敗しうる。
+// 組み立てるのは、会話ハンドラが委譲先として受け取るので conversationHandlers より先である。
+const gbp = config.gbp === null ? null : await buildGbp(config.gbp);
+writeStructuredLog('info', gbp === null ? 'line-webhook.gbp_disabled' : 'line-webhook.gbp_enabled');
+
+async function buildGbp(gbpConfig: GbpConfig) {
+  const tokenStore = createTokenStore({
+    cipherKeyBase64: gbpConfig.tokenCipherKey,
+    refreshClient: createGoogleRefreshGrantClient({
+      clientId: gbpConfig.oauthClientId,
+      clientSecret: gbpConfig.oauthClientSecret,
+    }),
+  });
+  const gbpClient = createGbpClient({ tokenStore, fetch });
+  const oauth = createGbpOauthService({
+    db: pool,
+    pool,
+    oauthClient: createGoogleOauthCodeClient({
+      clientId: gbpConfig.oauthClientId,
+      clientSecret: gbpConfig.oauthClientSecret,
+      redirectUrl: gbpConfig.oauthRedirectUrl,
+    }),
+    gbpClient,
+    tokenStore,
+    ...createDefaultGbpOauthAccessors(),
+    now: () => new Date(),
+  });
+  // 投稿・返信の下書き生成。pool は Queryable（db）と ConnectablePool（pool）の両方に構造的に適合する
+  // （conversationHandlers と同じ前提）。
+  // 生成器は GEMINI_API_KEY を環境変数から自動で読む（gbpConfig.geminiApiKey は起動時の存在確認のため）。
+  const prompts = await createDefaultGbpPrompts();
+  // GBP ドメイン共通のロガー。meta は allowlist なので本文・トークンは型として渡せない。
+  const logger = createDefaultGbpLogger();
+  const flowHandlers = createGbpFlowHandlers({
+    db: pool,
+    pool,
+    oauth,
+    tokenStore,
+    ...createDefaultGbpFlowAccessors(),
+    prompts,
+    gbpClient,
+    messenger: lineMessenger,
+    logger,
+    now: () => new Date(),
+  });
+  const oauthCallback = createGbpOauthCallbackRoute({
+    db: pool,
+    oauth,
+    messenger: lineMessenger,
+    owners: { findOwnerById },
+    logger,
+  });
+  return { flowHandlers, oauthCallback };
+}
+
 const conversationHandlers = createConversationHandlers({
   db: pool,
   pool,
@@ -79,6 +148,8 @@ const conversationHandlers = createConversationHandlers({
     auditLog: (input) => createAuditLog(pool, input),
     lineRichMenuCompletedId: config.lineRichMenuCompletedId,
     liffStoreDetailUrl: config.liffStoreDetailUrl,
+    // GBP の会話へは振り分け口が渡す（店舗特定済みのオーナーだけが GBP を使う）。OFF のときは渡さない。
+    ...(gbp ? { gbp: gbp.flowHandlers } : {}),
   }),
 });
 
@@ -90,6 +161,8 @@ const deps: AppDeps = {
   recordWebhookEventOnce: (webhookEventId) => dbRecordWebhookEventOnce(pool, webhookEventId),
   conversationHandlers,
   messenger: lineMessenger,
+  // GBP が OFF のときは経路そのものを登録しない（項目を持たなければ createApp は登録を飛ばす）。
+  ...(gbp ? { gbpOauthCallback: gbp.oauthCallback } : {}),
   logger: {
     // LINE はログを提供しないため自前で記録する。出力は共有経路が担う。
     error: (event, fields) => {

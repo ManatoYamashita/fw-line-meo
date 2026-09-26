@@ -26,6 +26,63 @@
   }
 }
 
+/* 操作結果の Toast の状態の示し方（design-language 7.5）。面は白のまま、右上の角だけに
+ * 成功は緑・失敗は赤の薄い放射状のにじみを置き、アイコンを意味色で描く。
+ *
+ * **にじみは Toast の背景でも疑似要素でもなく、アイコンに添えた本物の要素（app-toaster.tsx の
+ * withAccent）で描く。** 文字の祖先の背景にグラデーションを敷くと axe は「判定不能（bgGradient）」、
+ * 疑似要素に塗りを持たせると「判定不能（pseudoContent）」へ対比の判定を降ろし、違反 0 件のまま
+ * Toast の文字の監査が消える（どちらも実測）。本物の要素は文字の位置に重ならなければ判定に
+ * 加わらないので、Toast の右側ににじみと同じ幅の余白を取り、文字とにじみを重ねない。
+ * にじみは Toast（z-index を持つ重なりの単位）を基準に右上へ置き、z-index: -1 で白い面の上・
+ * 中身の下に描く。 */
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='success'],
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='error'] {
+  padding-inline-end: 3rem;
+}
+
+.app-toaster[data-sonner-toaster] [data-slot='toast-accent'] {
+  position: absolute;
+  inset: 0 0 auto auto;
+  z-index: -1;
+  width: 3rem;
+  height: 3rem;
+  border-start-end-radius: var(--border-radius);
+  pointer-events: none;
+}
+
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='success'] [data-slot='toast-accent'] {
+  background: radial-gradient(
+    circle at top right,
+    color-mix(in oklab, var(--success) 20%, transparent),
+    transparent 70%
+  );
+}
+
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='error'] [data-slot='toast-accent'] {
+  background: radial-gradient(
+    circle at top right,
+    color-mix(in oklab, var(--destructive) 20%, transparent),
+    transparent 70%
+  );
+}
+
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='success'] [data-icon],
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='error'] [data-icon] {
+  /* Sonner はアイコンの箱に position: relative を与える（処理中の回転表示を重ねるため）。これが
+   * 残るとにじみの基準がアイコンになり、Toast の外の左側へ描かれる（実測）。成功・失敗の Toast は
+   * 処理中の表示を持たないので、基準を Toast へ戻す。 */
+  position: static;
+}
+
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='success'] [data-icon] {
+  color: var(--success);
+}
+
+.app-toaster[data-sonner-toaster] [data-sonner-toast][data-type='error'] [data-icon] {
+  color: var(--destructive);
+}
+
 /* Sonner は 600px 以下で左右の offset に加えて Toaster 自身を width: 100% にするため、
  * 固定幅の面が右へ offset 分だけはみ出す。左右余白を Toaster の幅から引き、Toast はその
  * 内側いっぱいに置く。クラスを付けた管理ダッシュボードの通知だけに作用させる。 */

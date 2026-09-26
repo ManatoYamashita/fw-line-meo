@@ -74,6 +74,11 @@ const PLAIN_FIELDS = [
   'configKey',
   'reportKind',
   'reportOutcome',
+  'gbpFlow',
+  'gbpStage',
+  'gbpCallbackResult',
+  'gbpErrorKind',
+  'ownerId',
 ] as const satisfies readonly PlainField[];
 
 // 一覧が通常項目を網羅していることの表明。項目を型へ足して一覧へ足し忘れると、

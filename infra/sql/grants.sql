@@ -20,7 +20,8 @@
 --     operators, agencies, dashboard_users, owners, stores,
 --     survey_rating_tallies, survey_aspect_tallies, survey_concern_tallies, survey_material_tallies,
 --     oauth_tokens,
---     agency_invite_codes, onboarding_sessions, line_webhook_events
+--     agency_invite_codes, onboarding_sessions, line_webhook_events,
+--     gbp_locations, gbp_sessions（gbp-post-review-reply 0013・GBP 連携の身元と会話セッション）
 --     （ただし stores.suspended_at を書けるのは dashboard_api だけ。line_webhook / survey_web の
 --     stores の INSERT・UPDATE は suspended_at を除く列単位の付与・store-suspension）
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots, daily_summaries
@@ -64,7 +65,8 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public
 GRANT INSERT, UPDATE, DELETE ON
   operators, agencies, dashboard_users, owners, stores,
   survey_rating_tallies, survey_aspect_tallies, survey_concern_tallies, survey_material_tallies,
-  oauth_tokens, agency_invite_codes, onboarding_sessions, line_webhook_events
+  oauth_tokens, agency_invite_codes, onboarding_sessions, line_webhook_events,
+  gbp_locations, gbp_sessions
   TO :"line_webhook", :"survey", :"dashboard";
 
 -- stores の停止時刻（suspended_at・store-suspension・Issue #252）を書けるのは dashboard だけにする。
