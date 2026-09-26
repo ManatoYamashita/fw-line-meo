@@ -1,7 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { deviceWidthOf, expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
-import { DASHBOARD_SURFACES, STORES } from './fixtures/api';
+import {
+  DASHBOARD_SURFACES,
+  STORES,
+  openLoginStorageFailureToast,
+  openStoreQrPanelWithToast,
+} from './fixtures/api';
 import {
   expectPanelInsideScrollport,
   readPanelPlacement,
@@ -530,6 +535,55 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
     test(`幅 320 の${surface.where}で横スクロールが発生しない`, async ({ page }) => {
       await surface.open(page);
       await expectNoHorizontalScroll(page, `${surface.where}（320px）`, REGIONS[surface.where]!);
+    });
+  }
+});
+
+// 操作結果の Toast のにじみ（design-language 7.5）。にじみは左上の角に置き、左辺に沿って文字の手前まで
+// 広げる。**文字とは重ねない** —— 重なると axe は文字の背景を「判定不能（bgGradient）」にし、
+// Toast の文字の監査が黙って消える。成功（QR の発行）と失敗（ログインの保存領域）の両方で測る。
+test.describe('操作結果の Toast のにじみは左上の角にあり、文字と重ならない', () => {
+  const cases = [
+    ['成功（QR の発行）', openStoreQrPanelWithToast],
+    ['失敗（ログインの保存領域）', openLoginStorageFailureToast],
+  ] as const;
+  for (const [label, open] of cases) {
+    test(label, async ({ page }) => {
+      await open(page);
+      const toast = page.locator('[data-sonner-toast]').first();
+      const geometry = await toast.evaluate((el) => {
+        const rect = (node: Element | null) => node?.getBoundingClientRect().toJSON() ?? null;
+        // 絶対配置の基準は枠の内側（padding box）なので、枠線の内側の矩形と比べる。
+        const outer = el.getBoundingClientRect();
+        const inner = {
+          left: outer.left + el.clientLeft,
+          top: outer.top + el.clientTop,
+          height: el.clientHeight,
+        };
+        return {
+          toast: inner,
+          accent: rect(el.querySelector('[data-slot="toast-accent"]')),
+          texts: [...el.querySelectorAll('[data-title], [data-description]')].map((node) => rect(node)),
+        };
+      });
+      expect(geometry.accent, 'にじみの要素が無い').not.toBeNull();
+      const { toast: box, accent } = geometry as {
+        toast: { left: number; top: number; height: number };
+        accent: DOMRect;
+        texts: DOMRect[];
+      };
+      // 枠の内側の左上の角に接している（サブピクセルは許容）。
+      expect(Math.abs(accent.left - box.left), 'にじみが左端に接していない').toBeLessThanOrEqual(1);
+      expect(Math.abs(accent.top - box.top), 'にじみが上端に接していない').toBeLessThanOrEqual(1);
+      // 左辺に沿って枠の内側の高さいっぱいに広がる（面積を確保する）。
+      expect(Math.abs(accent.height - box.height), 'にじみが Toast の高さに届いていない').toBeLessThanOrEqual(1);
+      // 文字は 1 つ以上あり、どれもにじみの右端より右から始まる。
+      expect(geometry.texts.length, '文字の要素を読めない').toBeGreaterThan(0);
+      for (const text of geometry.texts as DOMRect[]) {
+        expect(text.left, `文字（左端 ${text.left}px）がにじみ（右端 ${accent.right}px）に重なる`).toBeGreaterThanOrEqual(
+          accent.right,
+        );
+      }
     });
   }
 });

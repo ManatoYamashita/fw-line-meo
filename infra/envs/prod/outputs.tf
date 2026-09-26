@@ -39,3 +39,14 @@ output "survey_web_lb_ip" {
   description = "survey-web のロードバランサの外部 IP。Cloudflare の `review` の A レコードに設定する（Issue #338）。"
   value       = google_compute_global_address.survey_web.address
 }
+
+output "lb_dns_authorization_records" {
+  description = "Certificate Manager の DNS 認証で Cloudflare に足す CNAME（Issue #368）。キーは証明書マップのホスト名のキー。"
+  value = {
+    for k, a in google_certificate_manager_dns_authorization.lb : k => {
+      name = a.dns_resource_record[0].name
+      type = a.dns_resource_record[0].type
+      data = a.dns_resource_record[0].data
+    }
+  }
+}
