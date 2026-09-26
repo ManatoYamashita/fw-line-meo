@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { PageHeader } from '@fwlm/ui/components/page-header';
 import { PageShell } from '@fwlm/ui/components/page-shell';
+import { Spinner } from '@fwlm/ui/components/spinner';
 import { useAuth } from '../../lib/auth-context';
 import { Wordmark } from '../../components/wordmark';
 
@@ -19,8 +20,10 @@ import { Wordmark } from '../../components/wordmark';
 // 主見出しと案内文は見出し周りの部品（PageHeader）が描く。案内文は状態の変化を知らせる通知ではなく
 // 画面の説明なので、通知の部品にも読み上げ領域にも載せない（9 節の部品表）。
 export default function LoginPage() {
-  const { status, signIn } = useAuth();
+  const { status, isSigningIn, signIn } = useAuth();
   const router = useRouter();
+  // 認証ポップアップから /me 確定、遷移開始までを 1 つの処理中状態として示す。
+  const busy = status === 'loading' || status === 'ready' || isSigningIn;
 
   useEffect(() => {
     if (status === 'ready') {
@@ -52,19 +55,30 @@ export default function LoginPage() {
         title="ログイン"
         description="運営・代理店向けダッシュボードです。Google アカウントでログインしてください。"
       />
-      {/* 状態確定前は押せない。焦点の到達を止めてよい操作なので、通知手段はブラウザ標準の
-          無効属性である（Req 3.5）。 */}
+      {/* 処理中も焦点を保ったまま重複押下を止める。ポップアップから戻った直後に焦点が文書先頭へ
+          落ちると、操作が受け付けられたか判別しにくいためである。 */}
       {/* 見た目は Sign in with Google の規定（Light）に従う（docs/design/design-language.md の 7.9 節と
           2.1 節）。G ロゴは規定外の背景に置けないため、アクション色では塗らない。ロゴは装飾なので
           読み上げない（読み上げ名は文言だけ）。 */}
       <Button
         type="button"
-        className={GOOGLE_SIGN_IN_CLASS}
+        className={`${GOOGLE_SIGN_IN_CLASS} data-[disabled]:opacity-50`}
         onClick={() => void signIn()}
-        disabled={status === 'loading'}
+        disabled={busy}
+        focusableWhenDisabled
+        aria-busy={busy}
       >
-        <Image src={GOOGLE_LOGO_SRC} alt="" width={20} height={20} unoptimized />
-        Google でログイン
+        {busy ? (
+          <>
+            <Spinner aria-hidden />
+            Google でログイン
+          </>
+        ) : (
+          <>
+            <Image src={GOOGLE_LOGO_SRC} alt="" width={20} height={20} unoptimized />
+            Google でログイン
+          </>
+        )}
       </Button>
     </PageShell>
   );

@@ -9,7 +9,9 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@fwlm/ui/compon
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { Select } from '@fwlm/ui/components/select';
+import { Spinner } from '@fwlm/ui/components/spinner';
 
+import { notifyActionError, notifyActionInfo } from '../lib/action-feedback';
 import {
   updateDashboardUser,
   type ApiResult,
@@ -218,11 +220,13 @@ export function DashboardUserEditPanel({
     const assignmentLocked = assignmentOptions === null;
     if (!assignmentLocked && role === 'agency' && agencyId === '') {
       setError({ kind: 'agency_required' });
+      notifyActionError({ title: '変更を保存できません', description: AGENCY_REQUIRED_TEXT });
       return;
     }
     const changes = changesFrom(opened, { role, agencyId, displayName }, assignmentLocked);
     // 変更が 1 つも無ければ送らない（空の変更はサーバが 400 にする）。取りやめと同じく閉じる（1.13）。
     if (Object.keys(changes).length === 0) {
+      notifyActionInfo({ title: '変更はありません。' });
       onCancel();
       return;
     }
@@ -236,12 +240,14 @@ export function DashboardUserEditPanel({
       // 押せないまま固着させず、再試行できる一般障害として扱う。
       setSubmitting(false);
       setError({ kind: 'rejected', code: 'unexpected' });
+      notifyActionError({ title: '変更を保存できませんでした', description: GENERIC_ERROR_TEXT });
       return;
     }
     if (!result.ok) {
       // 入力はそのまま保持する（6.6）。code だけを持ち、文言は対応表から引く。
       setSubmitting(false);
       setError({ kind: 'rejected', code: result.code });
+      notifyActionError({ title: '変更を保存できませんでした', description: errorTextFor(result.code) });
       return;
     }
     // 呼び出し側の後処理（一覧の取り直し → 焦点 → 閉じる）が終わるまで保存を押せないままにし、
@@ -361,7 +367,9 @@ export function DashboardUserEditPanel({
               focusableWhenDisabled
               className="data-[disabled]:opacity-50"
               onClick={() => void handleSave()}
+              aria-busy={submitting}
             >
+              {submitting && <Spinner aria-hidden />}
               保存
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={onCancel}>

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader } from '@fwlm/ui/components/card';
 import { Heading } from '@fwlm/ui/components/heading';
 import { Spinner } from '@fwlm/ui/components/spinner';
 
+import { notifyActionError, notifyActionSuccess } from '../lib/action-feedback';
 import { getStoreQr, type ApiResult, type BinaryPayload } from '../lib/api';
 import { qrFileName } from '../lib/qr-filename';
 import {
@@ -121,17 +122,24 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
       if (cancelled) return;
       if (!result.ok) {
         setState({ kind: 'error', code: result.code });
+        const copy = errorTextFor(result.code);
+        notifyActionError({ title: copy.title, description: copy.description });
         return;
       }
       const blob = new Blob([result.value.bytes], { type: result.value.contentType });
       createdUrl = URL.createObjectURL(blob);
       setState({ kind: 'ready', imageUrl: createdUrl });
+      notifyActionSuccess({ title: `${storeName} の QR を発行しました。` });
     }).catch(() => {
       // 取得そのものは api client が try/catch するため通常は到達しない。到達するのは
       // Blob 生成や object URL 生成が失敗した場合で、握り潰すと loading のまま固着し、
       // 再試行の操作も出せなくなる（脱出不能になる）。失敗として扱い再試行可能にする。
       if (cancelled) return;
       setState({ kind: 'error', code: 'unexpected' });
+      notifyActionError({
+        title: GENERIC_ERROR_TEXT.title,
+        description: GENERIC_ERROR_TEXT.description,
+      });
     });
 
     return () => {
@@ -259,6 +267,9 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
               download={qrFileName(storeName, storeId)}
               className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
               aria-label={`${storeName} の QR 画像を保存`}
+              onClick={() =>
+                notifyActionSuccess({ title: `${storeName} の QR 画像の保存を開始しました。` })
+              }
             >
               画像を保存
             </a>
@@ -272,7 +283,10 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
             <Button
               variant="outline"
               size="sm"
-              onClick={() => window.print()}
+              onClick={() => {
+                notifyActionSuccess({ title: `${storeName} の印刷画面を開きます。` });
+                window.print();
+              }}
               aria-label={`${storeName} の掲示物を印刷`}
             >
               掲示物を印刷

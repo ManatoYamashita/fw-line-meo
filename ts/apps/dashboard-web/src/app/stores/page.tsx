@@ -22,6 +22,7 @@ import {
 import { AuthGuard } from '../../components/auth-guard';
 import { StoreQrPanel } from '../../components/store-qr-panel';
 import { TopNav } from '../../components/top-nav';
+import { notifyActionWarning } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
 import { getStores } from '../../lib/api';
 import type { StoreListItem } from '../../lib/types';
@@ -32,6 +33,9 @@ type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; stores: StoreListItem[] };
+
+const STORE_LIST_ERROR_TEXT =
+  '店舗一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。';
 
 // 全ロール共通の列数（店名・店舗特定・競合設定・利用状況・QR）。operator のみ担当代理店列が加わる。
 // パネル行の colSpan はここからロールに応じて算出する。ロール差分を各所へ散らさないための
@@ -97,7 +101,11 @@ function StoresView() {
     const result = await getStores({});
     if (!mounted.current || seq !== refreshSeq.current) return;
     if (!result.ok) {
-      setRefreshError(result.message);
+      setRefreshError(STORE_LIST_ERROR_TEXT);
+      notifyActionWarning({
+        title: '最新の店舗一覧を表示できません',
+        description: '操作結果を確認するため、画面を再読み込みしてください。',
+      });
       return;
     }
     setRefreshError(null);
@@ -121,7 +129,7 @@ function StoresView() {
       if (result.ok) {
         setState({ kind: 'ready', stores: result.value });
       } else {
-        setState({ kind: 'error', message: result.message });
+        setState({ kind: 'error', message: STORE_LIST_ERROR_TEXT });
       }
     })();
     return () => {

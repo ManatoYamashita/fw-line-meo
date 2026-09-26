@@ -215,7 +215,9 @@ describe('店舗一覧ページ: 着手前に無検証だった契約', () => {
     render(<StoresPage />);
     const scope = within(await screen.findByRole('main'));
     const alert = await scope.findByRole('alert');
-    expect(announcedText(alert)).toBe('取得に失敗しました');
+    expect(announcedText(alert)).toBe(
+      '店舗一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+    );
     expect(scope.queryByRole('table')).toBeNull();
   });
 
@@ -813,7 +815,9 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     render(<StoresPage />);
     const main = await screen.findByRole('main');
     // 外枠の到達は取得の完了ではない（invite-codes-page.test.tsx の同じ箇所に理由がある）。
-    await within(main).findByText('取得に失敗しました');
+    await within(main).findByText(
+      '店舗一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+    );
 
     const alerts = within(main).getAllByRole('alert');
     expect(alerts).toHaveLength(1);
@@ -822,9 +826,11 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     // 危険の変種は自ら role="alert" を持つ。文言の側へ役割を重ねると領域が二重になる。
     expect(alert.querySelectorAll('[role="alert"]')).toHaveLength(0);
     expect(alert.querySelector('[data-slot="alert-description"]')?.textContent).toBe(
-      '取得に失敗しました',
+      '店舗一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
     );
-    expect(announcedText(alert)).toBe('取得に失敗しました');
+    expect(announcedText(alert)).toBe(
+      '店舗一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+    );
     // 失敗のとき処理中の表示は残さない（読み上げ領域を 1 つに保つ）。
     expect(within(main).queryAllByRole('status')).toHaveLength(0);
   });
@@ -1029,7 +1035,7 @@ describe('店舗一覧ページ: 利用状況', () => {
     fireEvent.click(await screen.findByRole('button', { name: '停止する' }));
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('取得に失敗しました');
+    expect(alert.textContent).toContain('店舗一覧を読み込めませんでした');
     // 表は外さない。古い表示のまま残し、画面は推測で状態を書き換えない。
     expect(screen.getByRole('table')).toBeTruthy();
     expect(within(statusCellOf('鳥貴族 渋谷店')).getByText('利用中')).toBeTruthy();

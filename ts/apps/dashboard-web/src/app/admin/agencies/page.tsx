@@ -20,6 +20,11 @@ import {
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
 import { TopNav } from '../../../components/top-nav';
+import {
+  notifyActionError,
+  notifyActionSuccess,
+  notifyActionWarning,
+} from '../../../lib/action-feedback';
 import { useAuth } from '../../../lib/auth-context';
 import { createAgency, getAgencies } from '../../../lib/api';
 import type { AgencyItem } from '../../../lib/types';
@@ -29,6 +34,9 @@ type ListState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; agencies: AgencyItem[] };
+
+const LIST_ERROR_TEXT =
+  '代理店一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。';
 
 function AgenciesView() {
   const { me } = useAuth();
@@ -48,7 +56,7 @@ function AgenciesView() {
       const result = await getAgencies();
       if (!active) return;
       if (result.ok) setList({ kind: 'ready', agencies: result.value });
-      else setList({ kind: 'error', message: result.message });
+      else setList({ kind: 'error', message: LIST_ERROR_TEXT });
     })();
     return () => {
       active = false;
@@ -71,11 +79,12 @@ function AgenciesView() {
   }
 
   // 一覧を取り直す（作成後の反映に使う・Req 6.1）。
-  async function reload() {
+  async function reload(): Promise<boolean> {
     setList({ kind: 'loading' });
     const result = await getAgencies();
     if (result.ok) setList({ kind: 'ready', agencies: result.value });
-    else setList({ kind: 'error', message: result.message });
+    else setList({ kind: 'error', message: LIST_ERROR_TEXT });
+    return result.ok;
   }
 
   // 代理店作成（Req 6.1）。空名はクライアント側で弾き、サーバー 400 も日本語に写す。
@@ -83,7 +92,9 @@ function AgenciesView() {
     setFormError(null);
     const trimmed = name.trim();
     if (trimmed === '') {
-      setFormError('代理店名を入力してください。');
+      const message = '代理店名を入力してください。';
+      setFormError(message);
+      notifyActionError({ title: '代理店を作成できません', description: message });
       return;
     }
     setSubmitting(true);
@@ -91,11 +102,23 @@ function AgenciesView() {
     setSubmitting(false);
     if (result.ok) {
       setName('');
-      await reload();
+      const reloaded = await reload();
+      if (reloaded) {
+        notifyActionSuccess({ title: '代理店を作成しました。' });
+      } else {
+        notifyActionWarning({
+          title: '代理店を作成しました',
+          description: '最新の一覧を表示できません。画面を再読み込みしてください。',
+        });
+      }
     } else if (result.code === 'validation_failed') {
-      setFormError('代理店名を入力してください。');
+      const message = '代理店名を確認してください。';
+      setFormError(message);
+      notifyActionError({ title: '代理店を作成できません', description: message });
     } else {
+      const message = '通信状況を確認して、時間をおいてもう一度お試しください。';
       setFormError('代理店の作成に失敗しました。時間をおいて再試行してください。');
+      notifyActionError({ title: '代理店を作成できませんでした', description: message });
     }
   }
 
@@ -120,7 +143,9 @@ function AgenciesView() {
             className="self-start"
             onClick={() => void handleCreate()}
             disabled={submitting}
+            aria-busy={submitting}
           >
+            {submitting && <Spinner aria-hidden />}
             代理店作成
           </Button>
         </Field>

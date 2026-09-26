@@ -49,12 +49,12 @@ describe('LoginPage', () => {
     expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
-  it('主操作は押下で signIn を呼び、状態確定前だけ標準の無効属性で止まる（Req 3.5）', () => {
+  it('主操作は押下で signIn を呼び、処理中も焦点を残して重複押下を止める（Req 3.5）', () => {
     const signIn = vi.fn();
     useAuthMock.mockReturnValue({ status: 'signedOut', me: null, signIn, signOut: vi.fn() });
     render(<LoginPage />);
     const button = screen.getByRole('button', { name: 'Google でログイン' });
-    // 焦点の到達を止めてよい操作なので、通知手段はブラウザ標準の無効属性である（Req 3.5）。
+    // 通常時は無効ではない。
     expect(button.hasAttribute('disabled')).toBe(false);
     fireEvent.click(button);
     expect(signIn).toHaveBeenCalledTimes(1);
@@ -62,9 +62,11 @@ describe('LoginPage', () => {
     cleanup();
     useAuthMock.mockReturnValue({ status: 'loading', me: null, signIn, signOut: vi.fn() });
     render(<LoginPage />);
-    expect(
-      screen.getByRole('button', { name: 'Google でログイン' }).hasAttribute('disabled'),
-    ).toBe(true);
+    const pendingButton = screen.getByRole('button', { name: 'Google でログイン' });
+    expect(pendingButton.hasAttribute('disabled')).toBe(false);
+    expect(pendingButton.getAttribute('aria-disabled')).toBe('true');
+    expect(pendingButton.getAttribute('aria-busy')).toBe('true');
+    expect(pendingButton.querySelector('[data-slot="spinner"]')).not.toBeNull();
   });
 
   // 題と assert をずらさない。ここは画面全体の読み上げに案内文が含まれることを見る包含判定であり、
@@ -217,4 +219,3 @@ describe('LoginPage', () => {
     expect(button.firstElementChild).toBe(logo);
   });
 });
-

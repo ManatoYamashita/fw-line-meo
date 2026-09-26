@@ -16,7 +16,8 @@
     "firebase": "^12",
     "next": "^16",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "sonner": "^2.0.8"
   },
   "devDependencies": {
     "@fwlm/e2e-support": "workspace:*",

@@ -23,6 +23,11 @@ import {
 import { AuthGuard } from '../../../components/auth-guard';
 import { DashboardUserEditPanel } from '../../../components/dashboard-user-edit-panel';
 import { TopNav } from '../../../components/top-nav';
+import {
+  notifyActionError,
+  notifyActionSuccess,
+  notifyActionWarning,
+} from '../../../lib/action-feedback';
 import { useAuth } from '../../../lib/auth-context';
 import {
   createDashboardUser,
@@ -65,6 +70,8 @@ function userLabel(user: DashboardUserItem): string {
 
 // 利用者の属性の保存が確定したときの成功通知（dashboard-user-edit Req 1.12）。
 const USER_UPDATED_TEXT = '利用者情報を更新しました。';
+const USER_LIST_ERROR_TEXT =
+  '利用者一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。';
 
 function UsersView() {
   const { me } = useAuth();
@@ -85,6 +92,10 @@ function UsersView() {
   const [displayName, setDisplayName] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingUserAction, setPendingUserAction] = useState<{
+    readonly id: string;
+    readonly kind: 'disable' | 'enable';
+  } | null>(null);
   // 無効化操作のエラー（登録フォームのエラーとは別枠・Req 7.4）。
   const [actionError, setActionError] = useState<string | null>(null);
   // 編集の保存が確定したことの通知（dashboard-user-edit Req 1.12）。次の操作（編集の開始・登録・
@@ -120,7 +131,7 @@ function UsersView() {
       if (agenciesResult.ok) setAgencies(agenciesResult.value);
       else setAgenciesFailed(true);
       if (usersResult.ok) setList({ kind: 'ready', users: usersResult.value });
-      else setList({ kind: 'error', message: usersResult.message });
+      else setList({ kind: 'error', message: USER_LIST_ERROR_TEXT });
     })();
     return () => {
       active = false;
@@ -154,7 +165,7 @@ function UsersView() {
   async function reloadUsers(): Promise<boolean> {
     const result = await getDashboardUsers();
     if (result.ok) setList({ kind: 'ready', users: result.value });
-    else setList({ kind: 'error', message: result.message });
+    else setList({ kind: 'error', message: USER_LIST_ERROR_TEXT });
     return result.ok;
   }
 
@@ -164,11 +175,15 @@ function UsersView() {
     setSuccessMessage(null);
     const trimmedEmail = email.trim();
     if (trimmedEmail === '') {
-      setFormError('メールアドレスを入力してください。');
+      const message = 'メールアドレスを入力してください。';
+      setFormError(message);
+      notifyActionError({ title: '利用者を登録できません', description: message });
       return;
     }
     if (role === 'agency' && agencyId === '') {
-      setFormError('所属代理店を選択してください。');
+      const message = '所属代理店を選択してください。';
+      setFormError(message);
+      notifyActionError({ title: '利用者を登録できません', description: message });
       return;
     }
     const trimmedDisplayName = displayName.trim();
@@ -185,48 +200,102 @@ function UsersView() {
       setEmail('');
       setDisplayName('');
       setAgencyId('');
-      await reloadUsers();
+      const reloaded = await reloadUsers();
+      if (reloaded) {
+        notifyActionSuccess({ title: '利用者を登録しました。' });
+      } else {
+        notifyActionWarning({
+          title: '利用者を登録しました',
+          description: '最新の一覧を表示できません。画面を再読み込みしてください。',
+        });
+      }
     } else if (result.code === 'email_conflict_disabled') {
       // 自運営配下の無効化済み利用者との衝突は、新規登録ではなく有効化で復旧する（Req 3.2）。
       setFormError(
         'このメールアドレスは無効化済みの利用者です。利用者一覧から有効化してください。',
       );
+      notifyActionError({
+        title: '利用者を登録できません',
+        description: 'このメールアドレスは無効化済みです。利用者一覧から有効化してください。',
+      });
     } else if (result.code === 'email_conflict') {
       setFormError('既に登録済みのメールアドレスです。');
+      notifyActionError({
+        title: '利用者を登録できません',
+        description: '既に登録済みのメールアドレスです。',
+      });
     } else if (result.code === 'validation_failed') {
       setFormError('入力内容を確認してください（ロールと所属代理店・メールアドレスの形式）。');
+      notifyActionError({
+        title: '利用者を登録できません',
+        description: 'ロール、所属代理店、メールアドレスを確認してください。',
+      });
     } else {
       setFormError('利用者の登録に失敗しました。時間をおいて再試行してください。');
+      notifyActionError({
+        title: '利用者を登録できませんでした',
+        description: '通信状況を確認して、時間をおいてもう一度お試しください。',
+      });
     }
   }
 
   // 無効化（Req 6.4）。成功時は一覧を取り直して当該行を無効表示にする。
   // ガード拒否（自己無効化・最後の運営）は成功と誤認させない専用文言で表示し、対象状態は変えない（Req 2.6）。
   async function handleDisable(id: string) {
+    if (pendingUserAction !== null) return;
     setActionError(null);
     setSuccessMessage(null);
+    setPendingUserAction({ id, kind: 'disable' });
     const result = await disableDashboardUser({ id });
     if (result.ok) {
-      await reloadUsers();
+      const reloaded = await reloadUsers();
+      if (reloaded) {
+        notifyActionSuccess({ title: '利用者を無効化しました。' });
+      } else {
+        notifyActionWarning({
+          title: '利用者を無効化しました',
+          description: '最新の一覧を表示できません。画面を再読み込みしてください。',
+        });
+      }
     } else if (result.code === 'self_disable_forbidden') {
-      setActionError('自分自身は無効化できません。');
+      const message = '自分自身は無効化できません。';
+      setActionError(message);
+      notifyActionError({ title: '無効化できません', description: message });
     } else if (result.code === 'last_operator') {
-      setActionError('最後の運営は無効化できません。先に別の運営を追加してください。');
+      const message = '最後の運営は無効化できません。先に別の運営を追加してください。';
+      setActionError(message);
+      notifyActionError({ title: '無効化できません', description: message });
     } else {
+      const message = '時間をおいてもう一度お試しください。';
       setActionError('無効化に失敗しました。時間をおいて再試行してください。');
+      notifyActionError({ title: '無効化できませんでした', description: message });
     }
+    setPendingUserAction(null);
   }
 
   // 再有効化（Req 1.6）。成功時は一覧を取り直して当該行を有効表示にする。
   async function handleEnable(id: string) {
+    if (pendingUserAction !== null) return;
     setActionError(null);
     setSuccessMessage(null);
+    setPendingUserAction({ id, kind: 'enable' });
     const result = await enableDashboardUser({ id });
     if (result.ok) {
-      await reloadUsers();
+      const reloaded = await reloadUsers();
+      if (reloaded) {
+        notifyActionSuccess({ title: '利用者を有効化しました。' });
+      } else {
+        notifyActionWarning({
+          title: '利用者を有効化しました',
+          description: '最新の一覧を表示できません。画面を再読み込みしてください。',
+        });
+      }
     } else {
+      const message = '時間をおいてもう一度お試しください。';
       setActionError('有効化に失敗しました。時間をおいて再試行してください。');
+      notifyActionError({ title: '有効化できませんでした', description: message });
     }
+    setPendingUserAction(null);
   }
 
   // 開いている利用者を差し替える（開く・閉じる・別の行へ切り替える）。番号は、開いているパネルが
@@ -279,6 +348,7 @@ function UsersView() {
     // 保存そのものは確定しているので、取り直しの成否や開いているパネルによらず通知する。隠すと、
     // 利用者が同じ保存を重ねて試みる。
     setSuccessMessage(USER_UPDATED_TEXT);
+    notifyActionSuccess({ title: USER_UPDATED_TEXT });
   }
 
   return (
@@ -356,7 +426,9 @@ function UsersView() {
           className="self-start"
           onClick={() => void handleCreate()}
           disabled={submitting}
+          aria-busy={submitting}
         >
+          {submitting && <Spinner aria-hidden />}
           利用者登録
         </Button>
       </FieldGroup>
@@ -373,9 +445,8 @@ function UsersView() {
           <AlertDescription>{actionError}</AlertDescription>
         </Alert>
       )}
-      {/* 保存の成功（dashboard-user-edit Req 1.12）。失敗ではないので、成功の変種が自ら持つ role="status"
-        * （区切りのよい時点で読み上げる）で伝え、進行中の読み上げを中断させない。一時的な Toast は使わない
-        * （docs/design/design-language.md §7.5）。 */}
+      {/* 保存の成功（dashboard-user-edit Req 1.12）。履歴として残す Alert に加え、操作直後の結果は
+        * Toast でも伝える（docs/design/design-language.md §7.5）。 */}
       {successMessage !== null && (
         <Alert variant="success">
           <AlertDescription>{successMessage}</AlertDescription>
@@ -467,8 +538,17 @@ function UsersView() {
                             type="button"
                             variant="outline"
                             size="sm"
+                            disabled={pendingUserAction !== null}
+                            focusableWhenDisabled
+                            className="data-[disabled]:opacity-50"
                             onClick={() => void handleEnable(user.id)}
+                            aria-busy={
+                              pendingUserAction?.id === user.id &&
+                              pendingUserAction.kind === 'enable'
+                            }
                           >
+                            {pendingUserAction?.id === user.id &&
+                              pendingUserAction.kind === 'enable' && <Spinner aria-hidden />}
                             有効化
                           </Button>
                         )}
@@ -478,8 +558,17 @@ function UsersView() {
                             type="button"
                             variant="outline"
                             size="sm"
+                            disabled={pendingUserAction !== null}
+                            focusableWhenDisabled
+                            className="data-[disabled]:opacity-50"
                             onClick={() => void handleDisable(user.id)}
+                            aria-busy={
+                              pendingUserAction?.id === user.id &&
+                              pendingUserAction.kind === 'disable'
+                            }
                           >
+                            {pendingUserAction?.id === user.id &&
+                              pendingUserAction.kind === 'disable' && <Spinner aria-hidden />}
                             無効化
                           </Button>
                         )}

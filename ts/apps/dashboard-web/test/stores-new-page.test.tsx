@@ -403,7 +403,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     expect(visited).toBe(cases.length);
   });
 
-  it('確定の失敗はサーバの文言をそのまま提示する（Req 3.2）', async () => {
+  it('確定の失敗はサーバの内部文言を出さず、利用者向けの案内を提示する（Req 3.2）', async () => {
     stubHappyPath();
     api.registerStore.mockResolvedValue({
       ok: false,
@@ -413,10 +413,15 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     render(<StoreRegisterPage />);
     const main = await advanceToStep('basic');
     fireEvent.click(within(main).getByRole('button', { name: '登録を確定' }));
-    expect(await within(main).findByText('一時的な障害です。')).toBeTruthy();
+    expect(
+      await within(main).findByText(
+        '店舗を登録できませんでした。時間をおいてもう一度お試しください。',
+      ),
+    ).toBeTruthy();
+    expect(within(main).queryByText('一時的な障害です。')).toBeNull();
   });
 
-  it('オーナー取得に失敗すると取得側の文言をそのまま提示する（Req 3.2）', async () => {
+  it('オーナー取得に失敗すると内部文言を出さず、再読み込みを案内する（Req 3.2）', async () => {
     api.getOwners.mockResolvedValue({
       ok: false,
       code: 'internal',
@@ -424,7 +429,12 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     });
     render(<StoreRegisterPage />);
     const scope = within(await screen.findByRole('main'));
-    expect(await scope.findByText('オーナー取得に失敗しました。')).toBeTruthy();
+    expect(
+      await scope.findByText(
+        'オーナー情報を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+      ),
+    ).toBeTruthy();
+    expect(scope.queryByText('オーナー取得に失敗しました。')).toBeNull();
     // 失敗時は処理中の文言を出さない（両方が同時に出ると状態が読めない）。
     expect(scope.queryByText('読み込み中...')).toBeNull();
   });
@@ -786,7 +796,7 @@ describe('店舗登録ウィザード: 段階表示とフォーム（task 5.2・
     const branches = [
       {
         name: 'オーナー取得の失敗',
-        text: 'オーナー取得に失敗しました。',
+        text: 'オーナー情報を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
         arrange: () => {
           api.getOwners.mockResolvedValue({
             ok: false,
@@ -856,7 +866,7 @@ describe('店舗登録ウィザード: 段階表示とフォーム（task 5.2・
       },
       {
         name: '確定のその他の失敗',
-        text: '一時的な障害です。',
+        text: '店舗を登録できませんでした。時間をおいてもう一度お試しください。',
         arrange: () => {
           stubHappyPath();
           api.registerStore.mockResolvedValue({
