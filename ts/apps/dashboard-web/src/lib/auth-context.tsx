@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await firebaseSignOut(auth);
       } catch {
         // swallowed-exception: intentional — セッション破棄に失敗しても管理情報は描画せず、
-        // 利用者向け案内へ進む。認証SDKの内部エラーは画面にもconsoleにも露出させない。
+        // 利用者向け案内へ進む。認証SDKの内部エラーは画面にも開発者向け出力にも露出させない。
       }
       if (!active) return;
       signInAttempt.current = false;
