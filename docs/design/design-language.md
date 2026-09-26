@@ -237,6 +237,13 @@ CSS では数値スケールで指定し、上の表は LINE Flex Message など
 system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif
 ```
 
+**改行は文節の境目で行う。** 既定の改行は字の単位で折るので、「ログインし／てください」のように
+語の途中で行が割れる。ルート要素の既定に `word-break: auto-phrase` を置き、日本語は文節の境目で
+折り返す（`theme.css` の `@layer base`）。`word-break` は継承されるので、面の側にも部品の側にも書かない。
+効くのは `lang="ja"` の文書だけで（Web 3 面の layout はすべて `<html lang="ja">`）、非対応のブラウザは
+宣言を無視して従来の改行のまま描く。文節の判定は機械学習に拠り、意図しない位置で折ることがある。
+そのときは文言の側で `<wbr>`（折ってよい位置）を足して直し、面の側で `word-break` を上書きしない。
+
 ---
 
 ## 7. 面適用で共有する設計判断
@@ -775,6 +782,7 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | フォーカス輪郭の隣接コントラスト | `ts/packages/ui/test/contrast-usage.test.ts` | フォーカス指標の色の隣接コントラスト |
 | 名前付き余白キーの不在と角丸の段の重複 | `ts/packages/ui/test/token-scales.test.ts` | 角丸の段差とトークン対応 |
 | 見出しの実コンパイル結果の一致 | `ts/packages/ui/test/app-integration.test.ts` | 見出しのサイズ階層 |
+| 6 節 改行は文節の境目で行う | `ts/packages/ui/test/app-integration.test.ts` | 文節での改行 |
 | 色の役割分離とコントラストの下限 | `ts/packages/design-tokens/test/colors.test.ts` | 成功と危険の識別 |
 | 7.1 星の色（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 星の色を分岐の両端 |
 | 7.10 主操作の寸法区分（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 主操作の寸法区分 |

@@ -777,6 +777,20 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
       );
     });
 
+    // 日本語を文節の途中で改行しない（design-language 6 節「改行」）。word-break は継承されるので、
+    // ルート要素 1 箇所の既定で全面へ効かせる。効くのは lang="ja" の文書だけで、非対応のブラウザは
+    // 既定の改行のまま描く（段階的な拡張）。
+    it('ルート要素の既定に文節での改行（word-break: auto-phrase）が base レイヤで生成される', () => {
+      const phraseRules = rulesInLayer(compiled, 'base', 'html').filter(
+        (rule) => declarationsOf(rule)['word-break'] !== undefined,
+      );
+      expect(
+        phraseRules.length,
+        'base レイヤの html 規則に word-break がありません（theme.css の宣言が失われています）',
+      ).toBe(1);
+      expect(declarationsOf(phraseRules[0]!)['word-break']).toBe('auto-phrase');
+    });
+
     it('.outline-none が生成されない（base の既定を打ち消す部品が存在しない証明）', () => {
       // これが本 Issue の根本原因を直接封じる検証。Tailwind は「使われたユーティリティ」しか
       // 生成しないため、`.outline-none` が生成 CSS に出ない＝ @source が走査する @fwlm/ui にも

@@ -282,6 +282,16 @@
     isolation: isolate;
   }
 
+  /* 日本語を文節の途中で改行しない（docs/design/design-language.md 6 節「改行」）。
+   * 既定の改行は字の単位で折るため、「ログインし／てください」のように語の途中で割れる。
+   * word-break は継承されるので、ルート要素に 1 回だけ置いて全面へ効かせる。
+   * 効くのは lang="ja" の文書だけで（3 面の layout は <html lang="ja">）、非対応のブラウザは
+   * この宣言を無視して従来の改行のまま描く。折り返さない規則（whitespace-nowrap）の要素には
+   * 影響しない。 */
+  html {
+    word-break: auto-phrase;
+  }
+
   /* iOS 26+ Safari での Portal 位置ずれを防ぐ。 */
   body {
     position: relative;
