@@ -16,6 +16,15 @@ import { expect, type Page } from '@playwright/test';
 /** CI が seed した確定店舗の storeId を env で受け取る（既定はプレースホルダ）。 */
 export const STORE_ID = process.env.E2E_STORE_ID ?? '44444444-4444-4444-4444-444444444444';
 
+/** 公開LPの本文と案内が認証への転送なしで描画されていることを固定する。 */
+export async function openLandingPage(page: Page): Promise<void> {
+  const response = await page.goto('/');
+  expect(response?.status()).toBe(200);
+  expect(response?.request().redirectedFrom()).toBeNull();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('飲食店の口コミづくりを、もっと手軽に。');
+  await expect(page.getByRole('link', { name: '使い方を見る', exact: true })).toBeVisible();
+}
+
 /**
  * 部品カタログ面（/ui-check）を開く。
  *

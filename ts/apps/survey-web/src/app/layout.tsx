@@ -1,11 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { PUBLIC_SITE_URL } from '../lib/public-site';
 import './globals.css';
-
-// OGP の画像 URL を絶対 URL にする基準。未設定だと Next.js は localhost を基準にし、
-// クローラが画像を取得できない。Cloud Run の URL はプロジェクトごとに決まった値で、
-// 独自ドメインへ移った後もこの URL は同じサービスを返し続ける。
-const PUBLIC_ORIGIN = 'https://survey-web-vdqjgfvkma-an.a.run.app';
 
 const TITLE = 'Firstweb 集客AIアシスタント QR口コミ支援';
 const DESCRIPTION = '来店アンケート';
@@ -16,9 +12,11 @@ const DESCRIPTION = '来店アンケート';
 const OGP_ALT = 'Firstweb 集客AIアシスタント QR口コミ支援の案内画像。星評価と良かった点・気になった点を選ぶアンケート画面';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(PUBLIC_ORIGIN),
+  metadataBase: new URL(PUBLIC_SITE_URL),
   title: TITLE,
   description: DESCRIPTION,
+  // 店舗別の回答画面は検索対象にしない。公開LPだけpage.tsxでindexを許可する。
+  robots: { index: false, follow: false },
   openGraph: {
     type: 'website',
     locale: 'ja_JP',

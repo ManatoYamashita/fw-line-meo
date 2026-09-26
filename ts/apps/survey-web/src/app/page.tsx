@@ -1,21 +1,25 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import { PageShell } from '@fwlm/ui/components/page-shell';
+import { PUBLIC_SITE_URL, SITE_NAME } from '../lib/public-site';
 
+const title = '飲食店のGoogle口コミ・QRアンケート支援 | Firstweb 集客AIアシスタント';
 const description =
-  'Firstweb 集客AIアシスタントは、飲食店の口コミづくりと日々の状況確認をサポート。お客様はQRコードからアンケートに答え、AIが整えた下書きを確認して、ご自身でGoogleに投稿できます。';
+  '飲食店のGoogle口コミづくりを、QRアンケートとAIの下書きでサポート。お客様はLINEログイン不要で回答し、内容を確認・編集してご自身で投稿できます。店舗オーナーはLINEで自店と近隣店の状況を確認。運営はFirstweb、開発は新卒グルメ。';
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://review.firstweb-works.com/'),
+  metadataBase: new URL(PUBLIC_SITE_URL),
+  title,
   description,
-  alternates: { canonical: 'https://review.firstweb-works.com/' },
+  alternates: { canonical: PUBLIC_SITE_URL },
+  robots: { index: true, follow: true },
   openGraph: {
     type: 'website',
     locale: 'ja_JP',
-    siteName: 'Firstweb 集客AIアシスタント',
-    title: 'Firstweb 集客AIアシスタント QR口コミ支援',
+    siteName: SITE_NAME,
+    title,
     description,
-    url: 'https://review.firstweb-works.com/',
+    url: PUBLIC_SITE_URL,
     images: [
       { url: '/ogp.jpg', width: 1200, height: 630, type: 'image/jpeg', alt: 'Firstweb 集客AIアシスタント QR口コミ支援' },
       { url: '/ogp.webp', width: 1200, height: 630, type: 'image/webp', alt: 'Firstweb 集客AIアシスタント QR口コミ支援' },
@@ -23,10 +27,50 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Firstweb 集客AIアシスタント QR口コミ支援',
+    title,
     description,
     images: ['/ogp.jpg'],
   },
+};
+
+// 表示内容に一致する事実だけを記載する。未公表の料金・評価・実績は追加しない。
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebSite',
+      '@id': `${PUBLIC_SITE_URL}#website`,
+      url: PUBLIC_SITE_URL,
+      name: SITE_NAME,
+      inLanguage: 'ja',
+      publisher: { '@type': 'Organization', name: 'Firstweb', url: 'https://firstweb-works.com/' },
+    },
+    {
+      '@type': 'WebPage',
+      '@id': `${PUBLIC_SITE_URL}#webpage`,
+      url: PUBLIC_SITE_URL,
+      name: title,
+      description,
+      inLanguage: 'ja',
+      isPartOf: { '@id': `${PUBLIC_SITE_URL}#website` },
+      mainEntity: { '@id': `${PUBLIC_SITE_URL}#application` },
+      primaryImageOfPage: { '@type': 'ImageObject', url: `${PUBLIC_SITE_URL}ogp.jpg`, width: 1200, height: 630 },
+    },
+    {
+      '@type': 'SoftwareApplication',
+      '@id': `${PUBLIC_SITE_URL}#application`,
+      name: `${SITE_NAME} QR口コミ支援`,
+      url: PUBLIC_SITE_URL,
+      description,
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Web',
+      inLanguage: 'ja',
+      image: `${PUBLIC_SITE_URL}ogp.jpg`,
+      screenshot: [`${PUBLIC_SITE_URL}screenshots/survey.png`, `${PUBLIC_SITE_URL}screenshots/draft.png`],
+      publisher: { '@type': 'Organization', name: 'Firstweb', url: 'https://firstweb-works.com/' },
+      creator: { '@type': 'Organization', name: '新卒グルメ' },
+    },
+  ],
 };
 
 const steps = [
@@ -51,6 +95,10 @@ const steps = [
 export default function Home() {
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }}
+      />
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-background focus:p-4 focus:underline"
@@ -79,14 +127,17 @@ export default function Home() {
           <div className="min-w-0 space-y-6">
             <p className="text-sm font-medium text-muted-foreground">飲食店のための、口コミ・集客サポート</p>
             <h1 className="text-balance leading-relaxed">
-              お客様の声を、<br />お店の次の一歩に。
+              飲食店の口コミづくりを、<br />もっと手軽に。
             </h1>
             <p className="max-w-xl text-pretty text-text-body">
               来店の感想を、もっと伝えやすく。<br />
-              Firstweb 集客AIアシスタントは、アンケートからの口コミづくりと、LINEでのお店の状況確認をサポートします。
+              Firstweb 集客AIアシスタントは、QRアンケートからのGoogle口コミづくりと、LINEでのお店の状況確認をサポートします。
             </p>
-            <a href="#how-it-works" className="inline-flex min-h-11 items-center gap-3 font-semibold underline underline-offset-8">
-              使い方を見る<span aria-hidden="true">↓</span>
+            <a href="#how-it-works" className="group inline-flex min-h-11 items-center gap-2 font-semibold">
+              <span className="underline decoration-from-font underline-offset-4 group-hover:decoration-2">使い方を見る</span>
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5 shrink-0">
+                <path d="M12 5v14m-6-6 6 6 6-6" />
+              </svg>
             </a>
           </div>
 
@@ -173,8 +224,11 @@ export default function Home() {
           </div>
           <div className="flex min-w-0 flex-col justify-center gap-4">
             <p className="text-text-body">サービスの導入やご利用については、Firstwebへご相談ください。</p>
-            <a href="https://firstweb-works.com/contact/" className="inline-flex min-h-11 items-center gap-3 self-start font-semibold underline underline-offset-8">
-              導入について相談する<span aria-hidden="true">↗</span>
+            <a href="https://firstweb-works.com/contact/" className="group inline-flex min-h-11 items-center gap-2 self-start font-semibold">
+              <span className="underline decoration-from-font underline-offset-4 group-hover:decoration-2">導入について相談する</span>
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5 shrink-0">
+                <path d="M7 17 17 7M7 7h10v10" />
+              </svg>
             </a>
             <p className="text-sm text-muted-foreground">Firstwebの公式サイトへ移動します。</p>
           </div>
@@ -183,7 +237,10 @@ export default function Home() {
 
       <footer className="border-t border-border">
         <PageShell as="div" width="lg" className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4 text-sm text-muted-foreground">
-          <p>運営：Firstweb</p>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <p>運営: Firstweb</p>
+            <p>開発: 新卒グルメ</p>
+          </div>
           <nav aria-label="運営情報" className="flex flex-wrap gap-x-6 gap-y-2">
             <a href="https://firstweb-works.com/" className="inline-flex min-h-11 items-center underline underline-offset-4">運営サイト</a>
             <a href="https://firstweb-works.com/privacy/" className="inline-flex min-h-11 items-center underline underline-offset-4">プライバシーポリシー</a>

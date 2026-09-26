@@ -102,3 +102,54 @@ JavaScriptや独自の拡大モーダルを必要としない。
 2つの拡大リンクで780px幅の原寸画像を開けることを確認した。
 文字200%・キーボード・axeの既存検証も成功。6領域のレビューに追加の指摘はなく、
 上記の未検証範囲は引き続き未検証である。
+
+## リンク・開発者表記・SEOの整備（2026-09-26）
+
+- CTAは文字だけに下線を付け、矢印は装飾SVGとして分離する。リンク全体の下線は
+  flexの文字と矢印の双方へ伝播し、矢印の下に短い線が出ていた。44pxの操作領域と
+  既存のフォーカス輪郭は維持する。
+- 運営は「Firstweb」、開発は「新卒グルメ」。フッターとJSON-LDの情報を揃える。
+- 主見出し・title・descriptionで対象と機能（飲食店、Google口コミ、QRアンケート）を伝える。
+  WebSite・WebPage・SoftwareApplicationのJSON-LDは初期HTMLに出し、表示内容と一致する
+  事実だけを記載する。料金や評価を創作してリッチリザルトの要件を埋めない。
+- 公開URLの正典は `src/lib/public-site.ts`。canonical、OGP、サイトマップ、構造化データに使う。
+  旧run.appのURLでもトップのcanonicalは公開ドメインを指す。既存QRのURLは維持する。
+- layoutはnoindexを既定とし、公開LPのみindexを許可する。canonicalをlayoutへ置かない。
+  新しい公開ページは検索可否を明示し、公開対象だけを `sitemap.ts` へ追加する。
+- `/robots.txt` はサイトマップを案内し、APIとヘルスチェックのクロールを除外する。
+  `/s/` と `/ui-check` はnoindexを読み取れるよう、robots.txtでは遮断しない。
+- 実際の更新日時を追跡していないサイトマップへ、実行時刻をlastmodとして書かない。
+- E2Eの画面遷移と描画前提は `e2e/fixtures/surfaces.ts` に集約する。LPのテストでも
+  `check-e2e-goto-ownership.sh` と `check-a11y-audit-preconditions.sh` を通す。
+
+参照：[Google SEOスターターガイド](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)、
+[noindexの仕様](https://developers.google.com/search/docs/crawling-indexing/block-indexing)、
+インストール済みNext.js 16.2.10のmetadata / robots / sitemap / JSON-LDドキュメント。
+
+### 追加レビュー
+
+範囲は公開LP全体と検索メタデータの継承。6領域のレビュー境界・未検証範囲は上記と同じ。
+
+| 重要度 | 領域 | 場所 | 修正前 | 修正後 | 理由 |
+| --- | --- | --- | --- | --- | --- |
+| LOW | Typography / UI | `src/app/page.tsx` の2つのCTA | リンク全体に下線、文字矢印 | 文字に下線、装飾SVG | アイコンの下に不自然な短い線が出る |
+
+AccessibilityはTab巡回・44pxの対象・axe、LayoutとTypographyは320〜1280pxと文字200%、
+Writingは運営・開発・機能説明、Colorsは既存トークンと実描画のaxe、UIは両CTAの通常・hover・focusを確認。
+修正後のスクリーンショットと計算済みtext-decorationを照合し、文字だけに下線があることを確認した。
+判定は **Approve**。検索順位・検索結果への反映・実機読み上げを保証する判定ではない。
+
+### SEOの検証
+
+- 追加した2件のSEO E2Eは、修正前のビルドでtitle不一致・robots.txtの404により失敗することを確認。
+- JavaScript無効の実ブラウザで、title・description・robots・OGP・canonical・JSON-LD・運営開発表記を確認。
+  Next.jsがOGPのorigin末尾のスラッシュを正規化するため、URLはパースして比較する。
+- サイトマップのHTTP 200・XML形式・公開URLのみの掲載、検証面と実際のアンケート画面のnoindex、
+  LPのcanonicalが他の画面へ継承されないことを確認。
+- ローカル本番ビルドのLighthouse 13（モバイル、単回）：SEO 100、Accessibility 100、
+  Best Practices 100、Performance 98。これはローカルのラボ計測であり、本番の実利用計測ではない。
+- survey-webの単体テスト378件成功、DB専用7件は単体実行時にスキップ。
+  lint・型検査・本番ビルド・デザイントークン・差分検査を実施。
+
+検索結果への掲載・順位はデプロイ直後のHTTP確認と分けて扱う。Search Consoleのサイトマップ送信・
+URL検査はアカウント側の作業であり、この実装だけで実施済みとは記録しない。

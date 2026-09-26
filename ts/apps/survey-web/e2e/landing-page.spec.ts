@@ -1,15 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { expectNoAxeViolations } from '@fwlm/e2e-support/a11y';
 import { expectNoHorizontalScroll, readOverflowMetrics } from '@fwlm/e2e-support/viewport';
+import { openComponentCatalog, openLandingPage } from './fixtures/surfaces';
 
 test('認証もJavaScriptもなくサービス概要とQRの案内を読める', async ({ browser, baseURL }) => {
-  const context = await browser.newContext({ javaScriptEnabled: false });
+  const context = await browser.newContext({ javaScriptEnabled: false, baseURL });
   const page = await context.newPage();
   try {
-    const response = await page.goto(`${baseURL}/`);
-    expect(response?.status()).toBe(200);
-    expect(response?.request().redirectedFrom()).toBeNull();
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('お客様の声を、お店の次の一歩に。');
+    await openLandingPage(page);
     await expect(page.getByRole('heading', { name: 'アンケートに回答したいお客様へ' })).toBeVisible();
     await expect(page.getByText('アンケートへの回答に、会員登録やLINEログインは必要ありません。')).toBeVisible();
     await expect(page.getByText('Googleへの投稿にはGoogleアカウントが必要です。口コミが自動で投稿されることはありません。')).toBeVisible();
@@ -27,8 +25,7 @@ test('認証もJavaScriptもなくサービス概要とQRの案内を読める',
 });
 
 test('公開LPの全リンクをキーボードでたどれ、フォーカスが見える', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await openLandingPage(page);
   const links = page.getByRole('link');
   const count = await links.count();
   expect(count).toBeGreaterThan(0);
@@ -47,7 +44,7 @@ test('公開LPの全リンクをキーボードでたどれ、フォーカスが
     expect(outline.color).not.toBe('rgba(0, 0, 0, 0)');
   }
 
-  await page.goto('/');
+  await openLandingPage(page);
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: '本文へスキップ' })).toBeFocused();
   await page.keyboard.press('Enter');
@@ -57,8 +54,7 @@ test('公開LPの全リンクをキーボードでたどれ、フォーカスが
 test('320px幅からデスクトップ、文字200%でも本文とリンクが欠けない', async ({ page }) => {
   for (const width of [320, 390, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await openLandingPage(page);
 
     for (const fontSize of ['100%', '200%']) {
       await page.evaluate((value) => { document.documentElement.style.fontSize = value; }, fontSize);
@@ -86,7 +82,52 @@ test('320px幅からデスクトップ、文字200%でも本文とリンクが�
 });
 
 test('公開LPがWCAG A/AAの自動監査を通る', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('お客様の声を、お店の次の一歩に。');
+  await openLandingPage(page);
   await expectNoAxeViolations(page);
+});
+
+test('検索用情報と運営・開発の情報がJavaScriptなしのHTMLに含まれる', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, baseURL });
+  const page = await context.newPage();
+  try {
+    await openLandingPage(page);
+    await expect(page).toHaveTitle('飲食店のGoogle口コミ・QRアンケート支援 | Firstweb 集客AIアシスタント');
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /飲食店.*Google口コミ/);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'index, follow');
+    const ogUrl = await page.locator('meta[property="og:url"]').getAttribute('content');
+    expect(new URL(ogUrl!).href).toBe('https://review.firstweb-works.com/');
+    await expect(page.locator('meta[property="og:image"]').first()).toHaveAttribute('content', 'https://review.firstweb-works.com/ogp.jpg');
+    await expect(page.getByText('運営: Firstweb', { exact: true })).toBeVisible();
+    await expect(page.getByText('開発: 新卒グルメ', { exact: true })).toBeVisible();
+    const schema = JSON.parse((await page.locator('script[type="application/ld+json"]').textContent())!);
+    expect(schema['@context']).toBe('https://schema.org');
+    expect(schema['@graph']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ '@type': 'WebSite', url: 'https://review.firstweb-works.com/' }),
+      expect.objectContaining({
+        '@type': 'SoftwareApplication',
+        publisher: expect.objectContaining({ name: 'Firstweb' }),
+        creator: expect.objectContaining({ name: '新卒グルメ' }),
+      }),
+    ]));
+  } finally {
+    await context.close();
+  }
+});
+
+test('クローラは公開LPを発見でき、検証面は検索対象にならない', async ({ request, page }) => {
+  const robots = await request.get('/robots.txt');
+  expect(robots.status()).toBe(200);
+  const rules = await robots.text();
+  expect(rules).toContain('Allow: /');
+  expect(rules).toContain('Sitemap: https://review.firstweb-works.com/sitemap.xml');
+  // noindexを読むためのクロールまで禁止しない。
+  expect(rules).not.toMatch(/Disallow: \/(?:s\/|ui-check)/);
+  const sitemap = await request.get('/sitemap.xml');
+  expect(sitemap.status()).toBe(200);
+  expect(sitemap.headers()['content-type']).toContain('xml');
+  const locations = [...(await sitemap.text()).matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
+  expect(locations).toEqual(['https://review.firstweb-works.com/']);
+  await openComponentCatalog(page);
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
+  await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
 });
