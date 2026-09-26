@@ -789,6 +789,9 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
         'base レイヤの html 規則に word-break がありません（theme.css の宣言が失われています）',
       ).toBe(1);
       expect(declarationsOf(phraseRules[0]!)['word-break']).toBe('auto-phrase');
+      // 縮めた箱に文節が入りきらないときだけ文節の途中で折る非常時の折り返し。これが無いと、
+      // 長い文節が箱の外へ描かれる（design-language 6 節）。
+      expect(declarationsOf(phraseRules[0]!)['overflow-wrap']).toBe('anywhere');
     });
 
     it('.outline-none が生成されない（base の既定を打ち消す部品が存在しない証明）', () => {

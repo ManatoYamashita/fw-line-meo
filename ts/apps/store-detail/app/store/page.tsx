@@ -413,8 +413,8 @@ function NewReviewItem({ review }: { readonly review: DailySummaryNewReview }): 
   const authorLabel = `${review.authorName}さん`;
   return (
     <li className="grid gap-1 py-4 first:pt-0 last:pb-0">
-      <div className="flex items-start justify-between gap-4">
-        <span className="flex items-center gap-2">
+      <div className="flex min-w-0 items-start justify-between gap-4">
+        <span className="flex min-w-0 items-center gap-2">
           {authorPhotoUri === null ? null : (
             // next/image を使わないのは意図的。最適化の実体はサーバ側でのフェッチと変換であり、
             // 外部（Google）が配信する画像をこの面のために作り直す理由がない（dashboard-web の
@@ -422,9 +422,9 @@ function NewReviewItem({ review }: { readonly review: DailySummaryNewReview }): 
             <img alt="" className="size-6 shrink-0 rounded-full" height={24} src={authorPhotoUri} width={24} />
           )}
           {authorUri === null ? (
-            <span className="font-semibold">{authorLabel}</span>
+            <span className="min-w-0 font-semibold">{authorLabel}</span>
           ) : (
-            <a aria-label={`${authorLabel}（${REVIEW_AUTHOR_LINK_LABEL}）`} className="font-semibold" href={authorUri}>
+            <a aria-label={`${authorLabel}（${REVIEW_AUTHOR_LINK_LABEL}）`} className="min-w-0 font-semibold" href={authorUri}>
               {authorLabel}
             </a>
           )}
