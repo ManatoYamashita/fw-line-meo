@@ -35,6 +35,9 @@ async function openReviewLinkAndCaptureNotice(page: Page) {
 test('客が回答し下書きをコピーして Google 投稿画面リンクへ到達する', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await openSurveySurface(page);
+  // LPだけを検索対象にし、店舗ごとの回答画面を重複ページとして登録させない。
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
+  await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
 
   await page.getByRole('button', { name: '星5' }).click();
   await page.getByRole('button', { name: '送信する' }).click();

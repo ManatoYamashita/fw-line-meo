@@ -1209,36 +1209,50 @@ test.describe('動き低減設定が有効な環境', () => {
     await page.getByRole('button', { name: '星5' }).click();
     await page.getByRole('button', { name: '送信する' }).click();
     await expect(page.getByLabel('口コミ下書き')).toBeVisible();
-    await page.getByRole('button', { name: /別の文章を生成/ }).click();
-
-    const measured = await page.evaluate(() => {
-      const region = document.querySelector('[role="status"]');
-      if (region === null) return null;
-      const spinner = region.querySelector('[data-slot="spinner"]');
-      const icon = spinner === null ? null : spinner.querySelector('svg');
-      // 文言は「直下のテキストノード」であることが要る。図形の読み上げ名へ畳むと
-      // 部品内部の読み上げ専用要素へ落ち、動きの低減が要求されていない環境で見えなくなる。
-      const range = document.createRange();
-      const own: string[] = [];
-      let width = 0;
-      for (const paragraph of Array.from(region.querySelectorAll('p'))) {
-        for (const node of Array.from(paragraph.childNodes)) {
-          const text = (node.textContent ?? '').trim();
-          if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
-            own.push(text);
-            range.selectNodeContents(node);
-            width = Math.max(width, range.getBoundingClientRect().width);
-          }
-        }
-      }
-      return {
-        ownText: own.join(''),
-        width,
-        spinnerPresent: spinner !== null,
-        spinnerHidden: spinner === null ? null : spinner.getAttribute('aria-hidden'),
-        animationDuration: icon === null ? null : getComputedStyle(icon).animationDuration,
-      };
+    // 応答が速いと描画計測前に生成が終わるため、測定中は再生成リクエストを保留する。
+    // 固定時間のsleepでは端末負荷に依存するので、計測完了を合図に解放する。
+    let releaseGeneration!: () => void;
+    const generationPending = new Promise<void>((resolve) => { releaseGeneration = resolve; });
+    await page.route('**/api/drafts', async (route) => {
+      await generationPending;
+      await route.continue();
     });
+    const measured = await (async () => {
+      try {
+        await page.getByRole('button', { name: /別の文章を生成/ }).click();
+        await expect(page.locator('[role="status"] [data-slot="spinner"]')).toBeVisible();
+        return await page.evaluate(() => {
+          const region = document.querySelector('[role="status"]');
+          if (region === null) return null;
+          const spinner = region.querySelector('[data-slot="spinner"]');
+          const icon = spinner === null ? null : spinner.querySelector('svg');
+          // 文言は「直下のテキストノード」であることが要る。図形の読み上げ名へ畳むと
+          // 部品内部の読み上げ専用要素へ落ち、動きの低減が要求されていない環境で見えなくなる。
+          const range = document.createRange();
+          const own: string[] = [];
+          let width = 0;
+          for (const paragraph of Array.from(region.querySelectorAll('p'))) {
+            for (const node of Array.from(paragraph.childNodes)) {
+              const text = (node.textContent ?? '').trim();
+              if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
+                own.push(text);
+                range.selectNodeContents(node);
+                width = Math.max(width, range.getBoundingClientRect().width);
+              }
+            }
+          }
+          return {
+            ownText: own.join(''),
+            width,
+            spinnerPresent: spinner !== null,
+            spinnerHidden: spinner === null ? null : spinner.getAttribute('aria-hidden'),
+            animationDuration: icon === null ? null : getComputedStyle(icon).animationDuration,
+          };
+        });
+      } finally {
+        releaseGeneration();
+      }
+    })();
 
     // 空振り防止: 領域と図形を実際に掴めていること。掴めていないと以下はすべて空の比較になる。
     expect(measured, '本番の下書き画面に読み上げ領域が無い').not.toBeNull();
