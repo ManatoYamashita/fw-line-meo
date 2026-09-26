@@ -554,8 +554,10 @@ curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status"
 terraform -chdir=infra/envs/prod plan  -target=module.project_services -target=google_compute_global_forwarding_rule.survey_web_https -target=google_compute_global_forwarding_rule.survey_web_http
 terraform -chdir=infra/envs/prod apply -target=module.project_services -target=google_compute_global_forwarding_rule.survey_web_https -target=google_compute_global_forwarding_rule.survey_web_http
 
-# plan に module.run_services の変更が出たら apply しない。NEG がサービス名を参照するので
-# -target は module.run_services を巻き込み、溜まっていた env などの差分まで一緒に当たる。
+# NEG がサービス名を参照するので、-target は module.run_services を巻き込む。plan に出る
+# サービスの変更が `client = "gcloud" -> null` と `client_version` だけなら無害（CI の gcloud が
+# 書く管理情報で、リビジョンは作られない。2026-09-26 の plan で 5 サービスとも実測）。
+# それ以外の差分（env・scaling など）が出たら apply しない。溜まっていた差分まで一緒に当たる。
 
 # 2. DNS に向ける IP を読む
 terraform -chdir=infra/envs/prod output -raw survey_web_lb_ip
