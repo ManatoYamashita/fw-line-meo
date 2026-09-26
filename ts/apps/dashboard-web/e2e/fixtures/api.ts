@@ -266,6 +266,34 @@ export async function startSignedOut(page: Page): Promise<void> {
 }
 
 /**
+ * ログイン時に端末の保存領域エラーが起きた状態を開く（Issue #342）。
+ *
+ * 内部エラー文が漏れず、利用者が次に取る行動を示した Toast が出ることを前提 assert にする。
+ * ボタンが再び操作可能になることも固定し、失敗後に処理中のまま固まる退行を緑にしない。
+ */
+export async function openLoginStorageFailureToast(page: Page): Promise<void> {
+  await startSignedOut(page);
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('e2e-auth-sign-in-error', 'storage');
+    } catch {
+      // 保存領域が使えない文脈（about:blank 等）では何もしない。
+    }
+  });
+  await stubDashboardApi(page);
+  await page.goto('/login');
+
+  const signInButton = page.getByRole('button', { name: 'Google でログイン' });
+  await expect(signInButton).toBeEnabled();
+  await signInButton.click();
+
+  await expect(page.getByText('ログイン情報を保存できませんでした')).toBeVisible();
+  await expect(page.getByText(/端末の空き容量を確認/)).toBeVisible();
+  await expect(page.getByText(/IndexedDB|IO error|writable file/i)).toHaveCount(0);
+  await expect(signInButton).toBeEnabled();
+}
+
+/**
  * 一覧面を開き、**表が実際に描かれている**ことを先に固定する。
  *
  * これが無いと、認証の差し替えが効かず「読み込み中...」だけの画面になったときに、後続の
@@ -396,6 +424,20 @@ export const OVERLAY_SURFACES: readonly OverlaySurface[] = [
     where: '店舗一覧の停止の確認ダイアログ',
     open: openStoreSuspendDialog,
     selector: '[role="alertdialog"]',
+  },
+];
+
+/**
+ * 自動 a11y 監査だけが回す、操作結果の通知状態（Issue #342）。
+ *
+ * Toast はモーダルではなく下の面を操作不能にしないため、`OVERLAY_SURFACES` とは分ける。
+ * ただし URL だけを開く通常面では現れない後続状態なので、明示しなければ監査から漏れる。
+ */
+export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
+  {
+    where: 'ログインの保存領域エラー通知',
+    open: openLoginStorageFailureToast,
+    selector: '[data-sonner-toast]',
   },
 ];
 

@@ -20,6 +20,11 @@ import {
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../components/auth-guard';
 import { TopNav } from '../../components/top-nav';
+import {
+  notifyActionError,
+  notifyActionSuccess,
+  notifyActionWarning,
+} from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
 import { disableInviteCode, getAgencies, getInviteCodes, issueInviteCode } from '../../lib/api';
 import type { AgencyItem, InviteCodeItem } from '../../lib/types';
@@ -35,6 +40,9 @@ type ListState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; codes: InviteCodeItem[] };
 
+const LIST_ERROR_TEXT =
+  '招待コードを読み込めませんでした。通信状況を確認して、もう一度お試しください。';
+
 function InviteCodesView() {
   const { me } = useAuth();
   const isOperator = me?.role === 'operator';
@@ -48,6 +56,9 @@ function InviteCodesView() {
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
   // 発行・無効化の操作エラー（一覧の取得エラーとは別枠で提示。Req 7.4）。
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    { readonly kind: 'issue' } | { readonly kind: 'disable'; readonly id: string } | null
+  >(null);
 
   // 現在のスコープ agencyId。operator は選択値（未選択は undefined）、agency は常に undefined（=自代理店）。
   const scopeAgencyId = isOperator && selectedAgencyId !== '' ? selectedAgencyId : undefined;
@@ -62,7 +73,7 @@ function InviteCodesView() {
       const result = await getAgencies();
       if (!active) return;
       if (result.ok) setAgencies(result.value);
-      else setList({ kind: 'error', message: result.message });
+      else setList({ kind: 'error', message: LIST_ERROR_TEXT });
     })();
     return () => {
       active = false;
@@ -77,7 +88,7 @@ function InviteCodesView() {
       const result = await getInviteCodes({});
       if (!active) return;
       if (result.ok) setList({ kind: 'ready', codes: result.value });
-      else setList({ kind: 'error', message: result.message });
+      else setList({ kind: 'error', message: LIST_ERROR_TEXT });
     })();
     return () => {
       active = false;
@@ -85,11 +96,12 @@ function InviteCodesView() {
   }, [isOperator]);
 
   // スコープの招待コードを取り直す（発行・無効化後の再取得にも使う）。
-  async function reload(agencyId: string | undefined) {
+  async function reload(agencyId: string | undefined): Promise<boolean> {
     setList({ kind: 'loading' });
     const result = await getInviteCodes(agencyId === undefined ? {} : { agencyId });
     if (result.ok) setList({ kind: 'ready', codes: result.value });
-    else setList({ kind: 'error', message: result.message });
+    else setList({ kind: 'error', message: LIST_ERROR_TEXT });
+    return result.ok;
   }
 
   // operator: 代理店を選び直したら、その代理店のコード一覧を取得する（Req 5.4）。
@@ -106,26 +118,52 @@ function InviteCodesView() {
 
   // 発行（Req 5.2）。成功時は新コードを案内表示し一覧を取り直す。
   async function handleIssue() {
+    if (pendingAction !== null) return;
     setActionError(null);
     setIssuedCode(null);
+    setPendingAction({ kind: 'issue' });
     const result = await issueInviteCode(scopeAgencyId === undefined ? {} : { agencyId: scopeAgencyId });
     if (result.ok) {
       setIssuedCode(result.value.code);
-      await reload(scopeAgencyId);
+      const reloaded = await reload(scopeAgencyId);
+      if (reloaded) {
+        notifyActionSuccess({ title: '招待コードを発行しました。' });
+      } else {
+        notifyActionWarning({
+          title: '招待コードを発行しました',
+          description: '最新の一覧を表示できません。画面を再読み込みしてください。',
+        });
+      }
     } else {
+      const message = '時間をおいてもう一度お試しください。';
       setActionError('発行に失敗しました。時間をおいて再試行してください。');
+      notifyActionError({ title: '招待コードを発行できませんでした', description: message });
     }
+    setPendingAction(null);
   }
 
   // 無効化（Req 5.3）。成功時は一覧を取り直して当該行を無効表示にする。
   async function handleDisable(id: string) {
+    if (pendingAction !== null) return;
     setActionError(null);
+    setPendingAction({ kind: 'disable', id });
     const result = await disableInviteCode(scopeAgencyId === undefined ? { id } : { id, agencyId: scopeAgencyId });
     if (result.ok) {
-      await reload(scopeAgencyId);
+      const reloaded = await reload(scopeAgencyId);
+      if (reloaded) {
+        notifyActionSuccess({ title: '招待コードを無効化しました。' });
+      } else {
+        notifyActionWarning({
+          title: '招待コードを無効化しました',
+          description: '最新の一覧を表示できません。画面を再読み込みしてください。',
+        });
+      }
     } else {
+      const message = '時間をおいてもう一度お試しください。';
       setActionError('無効化に失敗しました。時間をおいて再試行してください。');
+      notifyActionError({ title: '招待コードを無効化できませんでした', description: message });
     }
+    setPendingAction(null);
   }
 
   return (
@@ -170,7 +208,15 @@ function InviteCodesView() {
         <>
           {/* 版面は縦の flex なので、そのまま置くと押しボタンが行幅いっぱいに伸びる。
             * 主操作を全幅にするのはログイン画面の判断（正典 7.9）であってこの面の判断ではない。 */}
-          <Button type="button" className="self-start" onClick={() => void handleIssue()}>
+          <Button
+            type="button"
+            className="self-start data-[disabled]:opacity-50"
+            disabled={pendingAction !== null}
+            focusableWhenDisabled
+            onClick={() => void handleIssue()}
+            aria-busy={pendingAction?.kind === 'issue'}
+          >
+            {pendingAction?.kind === 'issue' && <Spinner aria-hidden />}
             発行
           </Button>
 
@@ -242,8 +288,17 @@ function InviteCodesView() {
                             type="button"
                             variant="outline"
                             size="sm"
+                            disabled={pendingAction !== null}
+                            focusableWhenDisabled
+                            className="data-[disabled]:opacity-50"
                             onClick={() => void handleDisable(code.id)}
+                            aria-busy={
+                              pendingAction?.kind === 'disable' && pendingAction.id === code.id
+                            }
                           >
+                            {pendingAction?.kind === 'disable' && pendingAction.id === code.id && (
+                              <Spinner aria-hidden />
+                            )}
                             無効化
                           </Button>
                         )}

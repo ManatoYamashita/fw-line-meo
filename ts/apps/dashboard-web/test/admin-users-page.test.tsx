@@ -354,7 +354,11 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
     api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
     render(<AdminUsersPage />);
     const scope = within(await screen.findByRole('main'));
-    expect(await scope.findByText('取得に失敗しました')).toBeTruthy();
+    expect(
+      await scope.findByText(
+        '利用者一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+      ),
+    ).toBeTruthy();
     // 表も 0 件案内も出さない（空の一覧を「0 件」と偽らない）。
     expect(scope.queryByRole('table')).toBeNull();
     expect(scope.queryByText('利用者はまだいません。登録してください。')).toBeNull();
@@ -491,7 +495,10 @@ const SURFACE_BRANCHES: readonly SurfaceBranch[] = [
       });
       api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
     },
-    settle: () => screen.findByText('取得に失敗しました'),
+    settle: () =>
+      screen.findByText(
+        '利用者一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+      ),
   },
   {
     name: 'operator/0 件',
@@ -669,7 +676,7 @@ describe('利用者管理ページ: 意匠の適用', () => {
           api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
         },
         act: async () => {},
-        text: '取得に失敗しました',
+        text: '利用者一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
       },
       {
         name: '登録の失敗（未入力）',
@@ -1625,12 +1632,16 @@ describe('利用者管理ページ: 保存の結果の通知', () => {
     fireEvent.click(save);
 
     // 一覧の失敗は既存の通知のまま出し、表を出さない（データを偽装しない）。
-    await within(main).findByText('取得に失敗しました');
+    await within(main).findByText(
+      '利用者一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+    );
     expect(within(main).queryByRole('table')).toBeNull();
     // 危険の通知は一覧の失敗の 1 件だけで、パネルの警告と重ならない。
     const alerts = within(main).getAllByRole('alert');
     expect(alerts).toHaveLength(1);
-    expect(announcedText(alerts[0]!)).toBe('取得に失敗しました');
+    expect(announcedText(alerts[0]!)).toBe(
+      '利用者一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+    );
     // 保存は確定しているので、成功通知も出す（隠すと、利用者が同じ保存を重ねて試みる）。
     const notices = within(main).getAllByRole('status');
     expect(notices).toHaveLength(1);

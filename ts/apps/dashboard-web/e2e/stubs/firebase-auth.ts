@@ -17,6 +17,9 @@ export const E2E_FIREBASE_AUTH_STUB_MARKER = 'e2e-firebase-auth-stub-4d7b13';
 /** ログイン画面そのものを測れるようにするための切替口。既定はログイン済み。 */
 const SIGNED_OUT_KEY = 'e2e-auth-signed-out';
 
+/** ログイン失敗の利用者向け表示を実ブラウザで測るための切替口。 */
+const SIGN_IN_ERROR_KEY = 'e2e-auth-sign-in-error';
+
 interface StubUser {
   readonly uid: string;
   getIdToken(): Promise<string>;
@@ -68,6 +71,12 @@ export function onAuthStateChanged(
 export class GoogleAuthProvider {}
 
 export async function signInWithPopup(_auth: StubAuth, _provider: GoogleAuthProvider): Promise<void> {
+  if (globalThis.localStorage?.getItem(SIGN_IN_ERROR_KEY) === 'storage') {
+    throw {
+      code: 'auth/internal-error',
+      message: 'IndexedDB: IO error: unable to create writable file',
+    };
+  }
   auth.currentUser = stubUser;
   notify();
 }

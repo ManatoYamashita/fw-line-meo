@@ -39,6 +39,7 @@ import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
 import { Spinner } from '@fwlm/ui/components/spinner';
+import { notifyActionError, notifyActionSuccess } from '../../lib/action-feedback';
 import { resumeStore, suspendStore, type ApiResult } from '../../lib/api';
 import type { StoreSuspensionState } from '../../lib/types';
 
@@ -54,12 +55,13 @@ const ACTION_LABEL: Record<Action, string> = { suspend: '停止', resume: '再�
 
 // 失敗の文言（design.md「Error Categories and Responses」）。
 // 不存在・範囲外は同じ 404 に写されるので、どちらの場合も「見つからない」とだけ伝える（Req 1.4）。
-// 認証・権限の失敗はサーバの文言をそのまま出す（既存の画面と同じ扱い）。
+// 認証・権限の失敗も固定の利用者向け文言へ写し、サーバの内部文言は表示しない。
 // それ以外（監査の失敗・DB 障害・通信不能）は、要求が届いて成立したかどうかを画面から判別できない。
 // 成功したかのようにも失敗したかのようにも言い切らず、読み直した一覧を確かめるよう促す（1.8）。
-function failureMessage(action: Action, result: { code: string; message: string }): string {
+function failureMessage(action: Action, result: { code: string }): string {
   if (result.code === 'not_found') return '店舗が見つかりません。一覧を更新しました。';
-  if (result.code === 'unauthenticated' || result.code === 'forbidden') return result.message;
+  if (result.code === 'unauthenticated') return 'ログインの有効期限が切れています。再度ログインしてください。';
+  if (result.code === 'forbidden') return 'この店舗を変更する権限がありません。';
   return `${ACTION_LABEL[action]}できたか確認できませんでした。一覧の表示を確認してください。`;
 }
 
@@ -102,9 +104,16 @@ export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionCont
 
     // 読み直しの後に告げる。表示が新しい状態へ変わってから結果を読み上げ、両者を食い違わせない。
     if (result.ok) {
-      setSuccessMessage(`${store.name} を${ACTION_LABEL[target]}しました。`);
+      const message = `${store.name} を${ACTION_LABEL[target]}しました。`;
+      setSuccessMessage(message);
+      notifyActionSuccess({ title: message });
     } else {
-      setErrorMessage(failureMessage(target, result));
+      const message = failureMessage(target, result);
+      setErrorMessage(message);
+      notifyActionError({
+        title: `${store.name} を${ACTION_LABEL[target]}できませんでした`,
+        description: message,
+      });
     }
     inFlight.current = false;
     setPending(false);

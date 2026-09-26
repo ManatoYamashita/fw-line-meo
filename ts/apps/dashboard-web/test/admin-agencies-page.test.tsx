@@ -166,7 +166,11 @@ describe('代理店管理ページ: 着手前から在った契約（意匠の�
     });
     render(<AdminAgenciesPage />);
     const scope = within(await screen.findByRole('main'));
-    expect(await scope.findByText('取得に失敗しました')).toBeTruthy();
+    expect(
+      await scope.findByText(
+        '代理店一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
+      ),
+    ).toBeTruthy();
     // 表も 0 件案内も出さない（空の一覧を「0 件」と偽らない）。
     expect(scope.queryByRole('table')).toBeNull();
     expect(scope.queryByText('代理店はまだありません。作成してください。')).toBeNull();
@@ -426,7 +430,7 @@ describe('代理店管理ページ: 意匠の適用', () => {
           });
         },
         act: async () => {},
-        text: '取得に失敗しました',
+        text: '代理店一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。',
       },
       {
         name: '空名の送信',

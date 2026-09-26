@@ -283,7 +283,11 @@ describe('招待コードページ: 着手前から在った契約（意匠の�
     });
     render(<InviteCodesPage />);
     const scope = within(await screen.findByRole('main'));
-    expect(await scope.findByText('取得に失敗しました')).toBeTruthy();
+    expect(
+      await scope.findByText(
+        '招待コードを読み込めませんでした。通信状況を確認して、もう一度お試しください。',
+      ),
+    ).toBeTruthy();
     // 表も 0 件案内も出さない（空の一覧を「0 件」と偽らない）。
     expect(scope.queryByRole('table')).toBeNull();
     expect(
@@ -619,7 +623,9 @@ describe('招待コードページ: 意匠の適用', () => {
     // **外枠の到達を取得の完了と読み違えない。** 版面の部品は読み込み中でも即座に描かれるので、
     // `main` を待っても取得は終わっていない。実データの到達そのものを待たないと、以下の同期取得は
     // 読み込み中の画面を測り、負荷の高い環境でだけ落ちる（CI run 34003887862 で顕在化）。
-    await within(main).findByText('取得に失敗しました');
+    await within(main).findByText(
+      '招待コードを読み込めませんでした。通信状況を確認して、もう一度お試しください。',
+    );
 
     const alerts = within(main).getAllByRole('alert');
     expect(alerts).toHaveLength(1);
@@ -628,9 +634,11 @@ describe('招待コードページ: 意匠の適用', () => {
     // 危険の変種は自ら role="alert" を持つ。文言の側へ役割を重ねると領域が二重になる。
     expect(alert.querySelectorAll('[role="alert"]')).toHaveLength(0);
     expect(alert.querySelector('[data-slot="alert-description"]')?.textContent).toBe(
-      '取得に失敗しました',
+      '招待コードを読み込めませんでした。通信状況を確認して、もう一度お試しください。',
     );
-    expect(announcedText(alert)).toBe('取得に失敗しました');
+    expect(announcedText(alert)).toBe(
+      '招待コードを読み込めませんでした。通信状況を確認して、もう一度お試しください。',
+    );
     // 失敗のとき処理中の表示は残さない（読み上げ領域を 1 つに保つ）。
     expect(within(main).queryAllByRole('status')).toHaveLength(0);
   });

@@ -13,6 +13,7 @@ import { Select } from '@fwlm/ui/components/select';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import { AuthGuard } from '../../../components/auth-guard';
 import { TopNav } from '../../../components/top-nav';
+import { notifyActionError, notifyActionInfo, notifyActionSuccess } from '../../../lib/action-feedback';
 import { useAuth } from '../../../lib/auth-context';
 import { getAgencies, getCategories, getOwners, registerStore, searchStores } from '../../../lib/api';
 import type { AgencyItem, Category, OwnerListItem, StoreCandidate } from '../../../lib/types';
@@ -49,7 +50,10 @@ type SubmitState =
   | { kind: 'success' }
   | { kind: 'conflict' }
   | { kind: 'forbidden' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error' };
+
+const OWNER_LOAD_ERROR_TEXT =
+  'オーナー情報を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。';
 
 /**
  * 5 段階の進行。現在地を支援技術と視覚の両方へ、**同じ判定から**提示する。
@@ -120,7 +124,7 @@ function RegisterWizard() {
       const result = await getAgencies();
       if (!active) return;
       if (result.ok) setAgencies(result.value);
-      else setLoadError(result.message);
+      else setLoadError(OWNER_LOAD_ERROR_TEXT);
     })();
     return () => {
       active = false;
@@ -136,7 +140,7 @@ function RegisterWizard() {
       if (!active) return;
       setOwnersLoaded(true);
       if (result.ok) setOwners(result.value);
-      else setLoadError(result.message);
+      else setLoadError(OWNER_LOAD_ERROR_TEXT);
     })();
     return () => {
       active = false;
@@ -169,7 +173,7 @@ function RegisterWizard() {
       const result = await getOwners({ agencyId });
       setOwnersLoaded(true);
       if (result.ok) setOwners(result.value);
-      else setLoadError(result.message);
+      else setLoadError(OWNER_LOAD_ERROR_TEXT);
     })();
   }
 
@@ -182,8 +186,22 @@ function RegisterWizard() {
       // 候補は最大10件（サーバー保証だが UI 側でも切り詰める）。
       const candidates = result.value.slice(0, 10);
       setSearch(candidates.length === 0 ? { kind: 'empty' } : { kind: 'found', candidates });
+      if (candidates.length === 0) {
+        notifyActionInfo({
+          title: '店舗が見つかりませんでした',
+          description: '店名の表記を変えて、もう一度検索してください。',
+        });
+      } else {
+        notifyActionSuccess({
+          title: `${candidates.length}件の店舗候補が見つかりました。`,
+        });
+      }
     } else {
       setSearch({ kind: 'error' });
+      notifyActionError({
+        title: '店舗を検索できませんでした',
+        description: '通信状況を確認して、時間をおいてもう一度お試しください。',
+      });
     }
   }
 
@@ -198,17 +216,32 @@ function RegisterWizard() {
     if (result.ok) {
       setSubmit({ kind: 'success' });
       setStep('done');
+      notifyActionSuccess({ title: '店舗を登録しました。' });
     } else if (result.code === 'place_already_registered') {
       setSubmit({ kind: 'conflict' });
+      notifyActionError({
+        title: '店舗を登録できません',
+        description: 'この店舗は既に登録されています。',
+      });
     } else if (result.code === 'forbidden') {
       setSubmit({ kind: 'forbidden' });
+      notifyActionError({
+        title: '店舗を登録できません',
+        description: 'この操作を行う権限がありません。運営までお問い合わせください。',
+      });
     } else {
-      setSubmit({ kind: 'error', message: result.message });
+      setSubmit({ kind: 'error' });
+      notifyActionError({
+        title: '店舗を登録できませんでした',
+        description: '通信状況を確認して、時間をおいてもう一度お試しください。',
+      });
     }
   }
 
   const hasOwners = owners !== null && owners.length > 0;
   const noOwners = ownersLoaded && owners !== null && owners.length === 0;
+  const ownersLoading =
+    !ownersLoaded && loadError === null && (!isOperator || selectedAgencyId !== '');
 
   return (
     // ウィザードのフォームが主体であり一覧ではないので、版面は本文系（狭い側）を使う。
@@ -299,7 +332,7 @@ function RegisterWizard() {
             </>
           )}
 
-          {!isOperator && !ownersLoaded && loadError === null && (
+          {ownersLoading && (
             // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
             // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま
             // 残す（Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
@@ -337,7 +370,9 @@ function RegisterWizard() {
                 className="self-start sm:self-auto"
                 disabled={query.trim() === '' || search.kind === 'searching'}
                 onClick={() => void handleSearch()}
+                aria-busy={search.kind === 'searching'}
               >
+                {search.kind === 'searching' && <Spinner aria-hidden />}
                 検索
               </Button>
             </CardContent>
@@ -444,7 +479,9 @@ function RegisterWizard() {
             className="self-start"
             disabled={submit.kind === 'submitting'}
             onClick={() => void handleConfirm()}
+            aria-busy={submit.kind === 'submitting'}
           >
+            {submit.kind === 'submitting' && <Spinner aria-hidden />}
             登録を確定
           </Button>
 
@@ -462,7 +499,9 @@ function RegisterWizard() {
           )}
           {submit.kind === 'error' && (
             <Alert variant="destructive">
-              <AlertDescription>{submit.message}</AlertDescription>
+              <AlertDescription>
+                店舗を登録できませんでした。時間をおいてもう一度お試しください。
+              </AlertDescription>
             </Alert>
           )}
         </section>

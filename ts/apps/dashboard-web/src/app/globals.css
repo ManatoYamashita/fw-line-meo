@@ -26,6 +26,19 @@
   }
 }
 
+/* Sonner は 600px 以下で左右の offset に加えて Toaster 自身を width: 100% にするため、
+ * 固定幅の面が右へ offset 分だけはみ出す。左右余白を Toaster の幅から引き、Toast はその
+ * 内側いっぱいに置く。クラスを付けた管理ダッシュボードの通知だけに作用させる。 */
+@media (max-width: 600px) {
+  .app-toaster[data-sonner-toaster] {
+    width: calc(100% - var(--mobile-offset-left) - var(--mobile-offset-right));
+  }
+
+  .app-toaster[data-sonner-toaster] [data-sonner-toast] {
+    width: 100%;
+  }
+}
+
 /* 店頭掲示の印刷（Issue #179・store-qr-issuance-ui Requirement 7）。
  *
  * 掲示物として刷るのは `data-print-region` を持つ領域だけで、帯・表・操作要素・不可の例は

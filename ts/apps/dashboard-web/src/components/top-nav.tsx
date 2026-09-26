@@ -1,10 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
+import { Spinner } from '@fwlm/ui/components/spinner';
 import type { DashboardRole } from '../lib/api';
+import { notifyActionError, notifyActionSuccess } from '../lib/action-feedback';
 import { useAuth } from '../lib/auth-context';
 import { Wordmark } from './wordmark';
 
@@ -38,6 +41,22 @@ function roleLabel(role: DashboardRole): string {
 export function TopNav() {
   const { status, me, signOut } = useAuth();
   const pathname = usePathname();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+      notifyActionSuccess({ title: 'ログアウトしました。' });
+    } catch {
+      notifyActionError({
+        title: 'ログアウトできませんでした',
+        description: '通信状況を確認して、もう一度お試しください。',
+      });
+      setSigningOut(false);
+    }
+  }
 
   // 未認証・未登録・読み込み中はナビを出さない（管理導線を露出しない）。
   if (status !== 'ready' || me === null) {
@@ -82,7 +101,16 @@ export function TopNav() {
           ロールの表示を覆わない下限にしてある。 */}
       <div className="col-span-2 row-start-2 flex items-center justify-end gap-2 lg:gap-6">
         <Badge variant="secondary">{roleLabel(me.role)}</Badge>
-        <Button type="button" variant="ghost" onClick={() => void signOut()}>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={signingOut}
+          focusableWhenDisabled
+          className="data-[disabled]:opacity-50"
+          onClick={() => void handleSignOut()}
+          aria-busy={signingOut}
+        >
+          {signingOut && <Spinner aria-hidden />}
           ログアウト
         </Button>
       </div>
