@@ -569,7 +569,7 @@ terraform -chdir=infra/envs/prod output -raw survey_web_lb_ip
 ```
 
 3. Cloudflare の DNS に `review` の A レコードを作り、2 の IP へ向ける。**プロキシは OFF（DNS only）にする。** ON だと Google がドメインへ到達できず、証明書が `PROVISIONING` のまま止まる。
-4. 証明書の発行を待つ（数十分〜）。`ACTIVE` になれば終わり。
+4. 証明書の発行を待つ（数十分〜）。`ACTIVE` になれば終わり。**2026-09-26 に、この証明書は Certificate Manager の DNS 認証へ移した（§9-2-e・Issue #368）。** 下のコマンドは移す前の記録として残す。今の証明書の状態は §9-2-e の段 2 のコマンドで見る。
 
 ```bash
 gcloud compute ssl-certificates describe survey-web-cert --global --format='value(managed.status,managed.domainStatus)'
@@ -617,15 +617,22 @@ gcloud certificate-manager certificates list --format='table(name,managed.state,
 
 **段 3: 切り替える**（Issue #368 の PR2）
 
-1. HTTPS プロキシを証明書マップへ切り替える（`certificate_map` を指し、`ssl_certificates` を外す）。`review.` が途切れないことを確かめる
-2. **DNS を変えずに**、ロードバランサ経由の経路を確かめる
+1. HTTPS プロキシを証明書マップへ切り替え、9-2-d の古い証明書を消す。**apply は 2 回に分ける。** 宣言を消した証明書とプロキシの間には依存が無いので、1 回で当てると、まだプロキシが使っている証明書を先に消そうとして失敗しうる。`review.` が途切れないことを確かめる
+
+```bash
+terraform -chdir=infra/envs/prod apply -target=google_compute_target_https_proxy.survey_web
+terraform -chdir=infra/envs/prod apply -target=google_compute_managed_ssl_certificate.survey_web   # 宣言から消した証明書の削除だけが出る
+```
+
+2. **DNS を変えずに**、ロードバランサ経由の経路を確かめる。`/__/auth/handler` は、Firebase Auth の中継（dashboard-web の rewrite）が生きていることの確認
 
 ```bash
 curl -s -w ' %{http_code}\n' --resolve api.firstweb-works.com:443:136.68.86.235 https://api.firstweb-works.com/health
 curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:443:136.68.86.235 https://dashboard.firstweb-works.com/login
+curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:443:136.68.86.235 https://dashboard.firstweb-works.com/__/auth/handler
 ```
 
-3. Cloudflare の `api` と `dashboard` を、CNAME（`ghs.googlehosted.com`）から A レコード（ロードバランサの IP）へ変える。プロキシは OFF
+3. Cloudflare の `api` と `dashboard` を、CNAME（`ghs.googlehosted.com`）から A レコード（ロードバランサの IP）へ変える。**プロキシは OFF のまま保つ**（ON にすると Cloudflare が前段に入り、`X-Forwarded-For` の並びが変わって流量制限の鍵がずれる・§9-2-d）
 4. `dashboard.` の Google ログインが通ることを人が確かめる（`/__/auth/` は dashboard-web が中継する）
 5. ドメインマッピング（`custom-domain.tf`）と、9-2-d の古い証明書を消す
 
