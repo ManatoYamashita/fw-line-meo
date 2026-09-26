@@ -6,6 +6,7 @@ import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
 import type { DashboardRole } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
+import { Wordmark } from './wordmark';
 
 // 帯に並べる案内リンク。読み上げ名と順序は素の要素で書いていたときの描画と同一で、
 // 管理メニュー（代理店管理・利用者管理）だけを operatorOnly で分ける。
@@ -47,20 +48,21 @@ export function TopNav() {
   const items = NAV_ITEMS.filter((item) => !item.operatorOnly || isOperator);
 
   return (
-    // 狭い画面（lg 未満）は 2 段に組む。1 段目にワードマークとロール・ログアウト、2 段目に案内リンクを
-    // 折り返して**全部見せる**。広い画面は 1 段のまま高さを固定する（7.8 節）。DOM の順は段組みで
-    // 変えない（ブランド → 行き先 → 身元と退出）。左右の余白は版面の外枠と揃える。
+    // 狭い画面（lg 未満）は 3 段に組む。1 段目はワードマークだけ（全幅）、2 段目の右にロールとログアウト、
+    // 3 段目に案内リンクを折り返して**全部見せる**。ワードマークをロール・ログアウトと同じ段に置くと、
+    // アプリ名が長いため 320px の幅でロールの表示に重なった。広い画面は 1 段のまま高さを固定する（7.8 節）。
+    // DOM の順は段組みで変えない（ブランド → 行き先 → 身元と退出）。左右の余白は版面の外枠と揃える。
     <nav
       aria-label="メインナビゲーション"
       className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-border px-4 pt-2 lg:flex lg:h-20 lg:gap-6 lg:px-6 lg:pt-0"
     >
       {/* ワードマーク。装飾専用色の使い所をここへ限る判断は 7.4 節、大きい文字としてのみ用いる根拠は
           10 節にある。リンクにも見出しにもしない（リンクの個数を固定した構造契約・Req 3.3）。 */}
-      <span className="text-2xl font-bold text-brand">LINE MEO</span>
-      {/* 2 段目。狭い画面では折り返して全リンクを見せる（捲れる手がかりの無い帯では、画面の外の
+      <Wordmark className="col-span-2 row-start-1" />
+      {/* 狭い画面の 3 段目。折り返して全リンクを見せる（捲れる手がかりの無い帯では、画面の外の
           リンクは存在しないように見える・Issue #283）。広い画面では 1 行に並べ、万一の溢れだけを
           リストの内部へ閉じてページ全体を横に溢れさせない（Req 4.6）。 */}
-      <ul className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-6 gap-y-2 pb-2 lg:min-w-0 lg:flex-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0">
+      <ul className="col-span-2 row-start-3 flex flex-wrap items-center gap-x-6 gap-y-2 pb-2 lg:min-w-0 lg:flex-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0">
         {items.map((item) => (
           <li key={item.href}>
             {/* 現在地の判定は経路の完全一致で行う。前方一致にすると /stores/new で /stores も
@@ -75,10 +77,10 @@ export function TopNav() {
           </li>
         ))}
       </ul>
-      {/* ロールとログアウトは 1 段目の右へ寄せる。包みを置くのは、配置の指定を部品へ渡さない
+      {/* ロールとログアウトは狭い画面では 2 段目の右へ寄せる。包みを置くのは、配置の指定を部品へ渡さない
           ためである。間隔は、ログアウトの押しボタンが外側へ広げる操作領域（見えない 8px）が
           ロールの表示を覆わない下限にしてある。 */}
-      <div className="col-start-2 row-start-1 flex items-center gap-2 lg:gap-6">
+      <div className="col-span-2 row-start-2 flex items-center justify-end gap-2 lg:gap-6">
         <Badge variant="secondary">{roleLabel(me.role)}</Badge>
         <Button type="button" variant="ghost" onClick={() => void signOut()}>
           ログアウト

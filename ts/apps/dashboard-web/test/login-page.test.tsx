@@ -153,13 +153,29 @@ describe('LoginPage', () => {
       useAuthMock.mockReturnValue({ status, me: null, signIn: vi.fn(), signOut: vi.fn() });
       render(<LoginPage />);
       // 文字列は帯（top-nav）と同一。§7.4 はブランド色の使い所を帯とログインの 2 箇所に限る。
-      const wordmark = screen.getByText('LINE MEO');
+      const wordmark = screen.getByText('Firstweb 集客AIアシスタント');
       const tokens = wordmark.className.split(/\s+/).filter((token) => token.length > 0);
       // **包含では足りない。** 別の文字色を後ろへ足せば、装飾専用色は宣言に残ったまま実描画では
       // 負ける。文字寸法と文字色を与えるクラスの集合そのものを完全一致で固定する。
       // 装飾専用色は白背景に対して通常文字の閾値へ届かないため、大きい文字としてのみ用いる（§2.2 / §10）。
+      // 狭い画面の 20px（text-xl）でも太字なので WCAG の大きい文字（14pt の太字＝約 18.66px 以上）に入る。
+      // 太字を外すと大きい文字でなくなるので、太さも併せて固定する。
       const textTokens = tokens.filter((token) => /(^|:)text-/.test(token));
-      expect(textTokens, status).toEqual(['text-2xl', 'text-brand']);
+      expect([...textTokens].sort(), status).toEqual(['lg:text-2xl', 'text-brand', 'text-xl']);
+      expect(tokens, status).toContain('font-bold');
+      // 面の役割は補足の色で添え、ブランド色は使わない（§7.4 はブランド色を 1 画面 1〜2 箇所に限る）。
+      const surface = screen.getByText('管理用ダッシュボード');
+      expect(surface.className.split(/\s+/).filter((t) => /(^|:)text-/.test(t)).sort(), status).toEqual([
+        'text-muted-foreground',
+        'text-sm',
+      ]);
+      // アイコンは名前と同じことを言う装飾なので読み上げない。
+      const icons = wordmark.closest('[data-slot="wordmark"]')!.querySelectorAll('img');
+      expect(icons, status).toHaveLength(1);
+      expect(icons[0]!.getAttribute('alt'), status).toBe('');
+      expect(icons[0]!.getAttribute('src'), status).toBe('/brand-icon.png');
+      // 最初から見える位置にあるので遅延読み込みにしない。
+      expect(icons[0]!.getAttribute('loading'), status).toBe('eager');
       // リンクにも押しボタンにもしない（個数を固定した構造契約・Req 3.3）。
       expect(wordmark.closest('a'), status).toBeNull();
       expect(wordmark.closest('button'), status).toBeNull();
