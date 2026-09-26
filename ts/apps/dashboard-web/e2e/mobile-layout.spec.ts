@@ -217,6 +217,20 @@ for (const surface of DASHBOARD_SURFACES) {
           report.texts.filter((text) => !text.inside).map((text) => text.text),
           '帯の中で切れている文字がある（ワードマーク・ロールの表示）',
         ).toEqual([]);
+        // 交差の検査が空振りしていないこと。帯のある面では、操作要素に加えてワードマークの文字 2 つと
+        // アイコン・ロールの表示を数える。帯の無い面（ログイン）では調べる項目が 0 件であるのが正しい。
+        if (report.navs === 0) {
+          expect(report.overlapItems, '帯が無いのに交差を調べた項目がある').toBe(0);
+        } else {
+          expect(report.overlapItems, '交差を調べた項目が少なすぎる（走査が空振りしている）').toBeGreaterThanOrEqual(
+            layout.navControls + 3,
+          );
+        }
+        expect(
+          report.overlaps,
+          `幅 ${width} で、帯の中の要素どうしが重なっている（長いワードマークがロールやログアウトに載ると、` +
+            '「届く」「帯の中にある」の検査は緑のまま読めなくなる）',
+        ).toEqual([]);
       });
 
       test(`[R3] ${surface.where}（幅 ${width}）: 溢れた捲り容器の端に捲れる手がかりがある`, async ({

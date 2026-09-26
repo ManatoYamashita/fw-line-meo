@@ -164,7 +164,7 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
     expect(screen.getAllByRole('navigation')).toHaveLength(1);
     expect(navLinks()).toHaveLength(5);
     // ワードマークをリンクにするとリンクの個数が増え、個数を固定した構造契約が壊れる（Req 3.3）。
-    expect(screen.getByText('LINE MEO').closest('a')).toBeNull();
+    expect(screen.getByText('Firstweb 集客AIアシスタント').closest('a')).toBeNull();
 
     cleanup();
 
@@ -172,7 +172,7 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
     render(<TopNav />);
     expect(screen.getAllByRole('navigation')).toHaveLength(1);
     expect(navLinks()).toHaveLength(3);
-    expect(screen.getByText('LINE MEO').closest('a')).toBeNull();
+    expect(screen.getByText('Firstweb 集客AIアシスタント').closest('a')).toBeNull();
   });
 });
 
@@ -198,7 +198,7 @@ describe('帯の段組み（7.8 節・Issue #283）', () => {
     // 見た目に合わせて DOM を並べ替えると、広い画面の帯で読み上げと焦点の順が逆にずれる。
     ready('operator');
     render(<TopNav />);
-    const wordmark = screen.getByText('LINE MEO');
+    const wordmark = screen.getByText('Firstweb 集客AIアシスタント');
     const firstLink = within(screen.getByRole('navigation')).getAllByRole('link')[0]!;
     const role = screen.getByText('運営');
     const logout = screen.getByRole('button', { name: 'ログアウト' });
@@ -220,6 +220,21 @@ describe('帯の段組み（7.8 節・Issue #283）', () => {
     // 捲れる領域が戻り、リンクが画面の外に残ったまま緑になる。
     const overflowTokens = list.filter((token) => /(^|:)overflow-/.test(token));
     expect(overflowTokens).toEqual(['lg:overflow-x-auto']);
+  });
+
+  it('狭い画面ではワードマークだけで 1 段目を占め、ロールとログアウトは 2 段目、案内リンクは 3 段目に置く', () => {
+    // アプリ名が長いので、ワードマークをロール・ログアウトと同じ段に置くと 320px の幅で重なる
+    // （2026-09-23 に実際に起きた。重なりそのものは E2E の R2 が実測する）。
+    ready('operator');
+    render(<TopNav />);
+    const nav = screen.getByRole('navigation');
+    const split = (element: Element) => (element.getAttribute('class') ?? '').split(/\s+/);
+    const place = (element: Element) => split(element).filter((t) => /^(col|row)-/.test(t)).sort();
+    const wordmark = nav.querySelector('[data-slot="wordmark"]')!;
+    const identity = screen.getByRole('button', { name: 'ログアウト' }).parentElement!;
+    expect(place(wordmark)).toEqual(['col-span-2', 'row-start-1']);
+    expect(place(identity)).toEqual(['col-span-2', 'row-start-2']);
+    expect(place(nav.querySelector('ul')!)).toEqual(['col-span-2', 'row-start-3']);
   });
 
   it('帯の高さの固定は広い画面にだけある（狭い画面では段数で高さが決まる）', () => {

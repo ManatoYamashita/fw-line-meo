@@ -8,6 +8,7 @@ import { Button } from '@fwlm/ui/components/button';
 import { Heading } from '@fwlm/ui/components/heading';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { useAuth } from '../../lib/auth-context';
+import { Wordmark } from '../../components/wordmark';
 
 // Google ログイン画面（signInWithPopup）。未登録/無効時は利用資格がない旨を案内する。
 // 認証済み（ready）になったら店舗一覧へ遷移する。管理データは一切描画しない（Req 1.1, 1.3, 7.3）。
@@ -78,10 +79,3 @@ const GOOGLE_LOGO_SRC = '/google-g-logo.png';
 // 暗色用の色クラスが残り、条件が揃うと G ロゴが規定外の色の上に載る。ロゴと文字の間は規定の 10px。
 const GOOGLE_SIGN_IN_CLASS =
   'w-full gap-2.5 border-google-sign-in-border bg-google-sign-in-fill text-google-sign-in-foreground hover:bg-google-sign-in-fill hover:text-google-sign-in-foreground';
-
-// ワードマーク。文字列は帯（top-nav）と同一で、装飾専用色の使い所を帯とログインの 2 箇所に
-// 限る判断は 7.4 節、大きい文字としてのみ用いる根拠は 2.2 節と 10 節にある。
-// リンクにも見出しにもしない（リンクと押しボタンの個数を固定した構造契約・Req 3.3）。
-function Wordmark() {
-  return <span className="text-2xl font-bold text-brand">LINE MEO</span>;
-}

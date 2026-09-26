@@ -174,6 +174,14 @@ export interface NavReachReport {
   readonly controls: readonly NavControlReach[];
   /** 操作要素ではない文字（ワードマーク・ロール）。1 段目の収まりを見る。 */
   readonly texts: readonly { readonly text: string; readonly inside: boolean }[];
+  /**
+   * 帯の中で互いの箱が交わっている項目の組（文字・操作要素・画像）。
+   * 「帯の中にある」「捲らずに届く」だけでは、長いワードマークがロールの表示に重なっても緑になる
+   * （2026-09-23 に幅 320 で実際に起きた）。
+   */
+  readonly overlaps: readonly string[];
+  /** 交差を調べた項目の数（0 件なら検査は空振りしている）。 */
+  readonly overlapItems: number;
 }
 
 /**
@@ -264,7 +272,42 @@ export function readNavReach(page: Page, deviceWidth: number): Promise<NavReachR
       }
     }
 
-    return { navs: navs.length, controls, texts };
+    // 交差の検査。文字は行ごとの矩形（折り返した文字は行の数だけ矩形を持つ）、操作要素と画像は
+    // 要素の矩形で比べる。操作要素の中の文字はその操作要素に含めて数える（自分自身との交差を除く）。
+    const items: { label: string; owner: Element; rects: DOMRect[] }[] = [];
+    for (const nav of navs) {
+      for (const element of Array.from(nav.querySelectorAll('a[href], button, img'))) {
+        items.push({
+          label: element.tagName === 'IMG' ? 'img' : (element.textContent ?? '').trim(),
+          owner: element,
+          rects: [element.getBoundingClientRect()],
+        });
+      }
+      const walker = document.createTreeWalker(nav, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const text = (node.textContent ?? '').trim();
+        const parent = node.parentElement;
+        if (text === '' || parent === null || parent.closest('a[href], button') !== null) continue;
+        const nodeRange = document.createRange();
+        nodeRange.selectNodeContents(node);
+        items.push({ label: text, owner: node as unknown as Element, rects: Array.from(nodeRange.getClientRects()) });
+      }
+    }
+    const overlaps: string[] = [];
+    const intersects = (a: DOMRect, b: DOMRect) =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i]!;
+        const b = items[j]!;
+        if (a.owner === b.owner) continue;
+        if (a.rects.some((ra) => b.rects.some((rb) => intersects(ra, rb)))) {
+          overlaps.push(`${a.label} × ${b.label}`);
+        }
+      }
+    }
+    return { navs: navs.length, controls, texts, overlaps, overlapItems: items.length };
   }, deviceWidth);
 }
 

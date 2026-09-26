@@ -3,7 +3,7 @@ import './globals.css';
 import { AuthProvider } from '../lib/auth-context';
 
 export const metadata = {
-  title: 'ダッシュボード',
+  title: 'Firstweb 集客AIアシスタント 管理用ダッシュボード',
   description: '運営・代理店向け管理ダッシュボード',
 };
 
