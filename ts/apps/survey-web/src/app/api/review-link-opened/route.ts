@@ -2,6 +2,7 @@ import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { writeStructuredLog } from '../../../lib/structured-log';
 import { handleReviewLinkOpened, type ReviewLinkDeps } from './handler';
+import { withXffShape } from './xff-shape-probe';
 import { correlationIdFromHeaders, withCorrelation } from '@fwlm/observability';
 
 export const runtime = 'nodejs';
@@ -25,10 +26,11 @@ function buildDeps(): ReviewLinkDeps {
 export async function POST(req: Request): Promise<Response> {
   try {
     deps ??= buildDeps();
-    return await handleReviewLinkOpened(req, {
+    const res = await handleReviewLinkOpened(req, {
       ...deps,
       log: withCorrelation(deps.log, correlationIdFromHeaders(req.headers)),
     });
+    return withXffShape(req, res);
   } catch {
     // 応答は誰も読まない（sendBeacon の投げっぱなし）ので、エラー封筒もサポートコードも付けない。
     return new Response(null, { status: 500 });
