@@ -437,6 +437,12 @@ const EXEMPT_UTILITIES: ReadonlyArray<{ readonly utility: string; readonly reaso
     reason: 'card.tsx の外枠。情報を持たない純装飾のため SC 1.4.11 の対象外。',
   },
   {
+    utility: 'bg-foreground/10',
+    reason:
+      'skeleton.tsx の取得中の形の面塗り。aria-hidden で情報を持たない純装飾であり、' +
+      '読み込み中であることの伝達は呼び出し側の role="status" の可視文言が担う。',
+  },
+  {
     utility: 'bg-input/50',
     reason:
       'input / textarea の disabled 時の面塗り。WCAG 1.4.3 は無効化された部品を' +

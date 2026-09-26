@@ -170,10 +170,10 @@ CSS では数値スケールで指定し、上の表は LINE Flex Message など
 | 段 | 値 | クラス | 使用部品 | 出典の段 |
 |---|---|---|---|---|
 | `sm` | `0.25rem` | `rounded-sm` | （なし） | xs（4px・一致） |
-| `md` | `0.375rem` | `rounded-md` | `button.tsx` | 対応段なし |
+| `md` | `0.375rem` | `rounded-md` | `button.tsx`, `skeleton.tsx` | 対応段なし |
 | `lg` | `0.5rem` | `rounded-lg` | `alert.tsx`, `button.tsx`, `field.tsx`, `input.tsx`, `select.tsx`, `textarea.tsx` | sm（8px・一致） |
 | `xl` | `0.75rem` | `rounded-xl` | （なし） | 対応段なし |
-| `2xl` | `1rem` | `rounded-2xl` | `alert-dialog.tsx`, `card.tsx`, `table.tsx` | md（14px・2px の差を受容） |
+| `2xl` | `1rem` | `rounded-2xl` | `alert-dialog.tsx`, `card.tsx`, `skeleton.tsx`, `table.tsx` | md（14px・2px の差を受容） |
 | `4xl` | `2rem` | `rounded-4xl` | `badge.tsx` | xl（32px・一致） |
 | `full` | `9999px` | `rounded-full` | `radio-group.tsx` | full（一致） |
 
@@ -743,6 +743,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 | `radio-group.tsx` | `RadioGroup`, `RadioGroupItem` | 単一選択 |
 | `select.tsx` | `Select` | 選択。ブラウザ標準の選択要素のラッパ |
 | `separator.tsx` | `Separator` | 区切り線 |
+| `skeleton.tsx` | `Skeleton`, `TableSkeleton` | 取得中の形。aria-hidden で読み上げず、呼び出し側が可視の文言を role="status" で併置する。表の形は表の要素も捲れる容器も持たない |
 | `spinner.tsx` | `Spinner` | 処理中の表示 |
 | `table.tsx` | `Table`, `TableBody`, `TableCell`, `TableContainer`, `TableDetailRow`, `TableHead`, `TableHeaderCell`, `TableRow` | 一覧表。容器がカード化と、キーボードで焦点を得られる横溢れの捲りと、捲れる側の端の濃淡を担う。セルは折り返しの規則を語彙から選び、詳細行は行の直下のパネルを見えている幅に留める（§7.18） |
 | `textarea.tsx` | `Textarea` | 複数行入力 |

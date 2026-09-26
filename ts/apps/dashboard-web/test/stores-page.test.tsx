@@ -790,7 +790,7 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     expect(within(main).queryAllByRole('button')).toHaveLength(0);
   });
 
-  it('処理中は文言を可視のまま残し、回転する図形を装飾として添える（Req 1.1, 4.5）', () => {
+  it('処理中は文言を可視のまま残し、表の形を装飾として添える（Req 1.1, 4.5）', () => {
     ready('agency');
     api.getStores.mockReturnValue(new Promise(() => {}));
     render(<StoresPage />);
@@ -804,9 +804,15 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     expect(ownText(region)).toBe('読み込み中...');
     // 図形側に aria-hidden が付いていないと読み上げ領域が二重になり、この値も二重になる。
     expect(announcedText(region)).toBe('読み込み中...');
-    const spinner = region.querySelector('[data-slot="spinner"]');
-    expect(spinner).not.toBeNull();
-    expect(spinner!.getAttribute('aria-hidden')).toBe('true');
+    // 取得中の形は読み上げ領域の外に置き、形自身は支援技術から外す。
+    const skeleton = main.querySelector('[data-slot="table-skeleton"]');
+    expect(skeleton).not.toBeNull();
+    expect(region.contains(skeleton)).toBe(false);
+    expect(skeleton!.getAttribute('aria-hidden')).toBe('true');
+    // 形は表の要素も捲れる容器も持たない（取得前から表や捲れる領域として数えられないため）。
+    expect(main.querySelector('table')).toBeNull();
+    expect(main.querySelector('[data-slot="table-container"]')).toBeNull();
+    expect(skeleton!.querySelector('[tabindex]')).toBeNull();
   });
 
   it('取得の失敗は危険の通知の部品として読み上げ領域 1 つに載る（Req 1.1, 3.5）', async () => {
