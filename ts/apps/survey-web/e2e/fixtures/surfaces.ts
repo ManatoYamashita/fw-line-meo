@@ -18,7 +18,8 @@ export const STORE_ID = process.env.E2E_STORE_ID ?? '44444444-4444-4444-4444-444
 
 /** 公開LPの本文と案内が認証への転送なしで描画されていることを固定する。 */
 export async function openLandingPage(page: Page): Promise<void> {
-  const response = await page.goto('/');
+  // 遅延画像の通信完了ではなく、初期HTMLと本文の描画を開始条件にする。
+  const response = await page.goto('/', { waitUntil: 'domcontentloaded' });
   expect(response?.status()).toBe(200);
   expect(response?.request().redirectedFrom()).toBeNull();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('飲食店の口コミづくりを、もっと手軽に。');

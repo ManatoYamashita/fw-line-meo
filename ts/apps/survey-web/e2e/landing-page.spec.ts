@@ -52,9 +52,10 @@ test('公開LPの全リンクをキーボードでたどれ、フォーカスが
 });
 
 test('320px幅からデスクトップ、文字200%でも本文とリンクが欠けない', async ({ page }) => {
+  await openLandingPage(page);
   for (const width of [320, 390, 768, 1280]) {
+    await page.evaluate(() => { document.documentElement.style.fontSize = '100%'; });
     await page.setViewportSize({ width, height: 900 });
-    await openLandingPage(page);
 
     for (const fontSize of ['100%', '200%']) {
       await page.evaluate((value) => { document.documentElement.style.fontSize = value; }, fontSize);
