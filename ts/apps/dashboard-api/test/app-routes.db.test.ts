@@ -35,6 +35,9 @@ const DU_DISABLED_LOGIN_TOKEN = 'f5-disabled-login-uid'; // 無効化済み運�
 const DISABLED_EXISTING_EMAIL = 'f5-disabled-existing@example.com'; // 自運営の無効化済み利用者のメール
 const CROSSOP_EMAIL = 'f5-crossop@example.com'; // 他運営(OP2)配下の利用者のメール
 
+// 無効化の成功経路の対象（OP1・agency(AG1)・保留）。テストの中で作って消す（Issue #275）。
+const DISABLE_TARGET = 'f5000000-0000-0000-0000-0000000000d1';
+
 // 認可前置の 403 を確認するための整形式ダミー UUID（存在しない id・operator ガードで先に弾かれる）。
 const DUMMY_UUID = 'f5000000-0000-0000-0000-0000000000ff';
 
@@ -369,6 +372,38 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       DU_DISABLED,
     ]);
     expect(check.rows[0]?.disabled_at).toBeNull();
+  });
+
+  // 合成根の disableUser(id, operatorId) の取り違えを捕まえる成功経路（Issue #275）。
+  // 取り違えると DAL が対象を見つけられず 404 になり、行も監査も変わらない。
+  it('operator の POST /dashboard-users/:id/disable は有効な利用者を 200 で無効化し、監査行を 1 行書く（Req 2.4）', async () => {
+    const app = buildApp();
+    await insertPendingAgencyUser(DISABLE_TARGET, 'f5-disable-target@example.com', '無効化対象');
+    try {
+      const actorId = await operatorSelfId();
+      const auditBefore = await auditRowsFor(DISABLE_TARGET);
+
+      const res = await app.request(`/dashboard-users/${DISABLE_TARGET}/disable`, {
+        method: 'POST',
+        headers: h(OP_TOKEN),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user: { id: string; disabled: boolean } };
+      expect(body.user).toMatchObject({ id: DISABLE_TARGET, disabled: true });
+      expect((await userRow(DISABLE_TARGET))?.disabled).toBe(true);
+
+      const auditAfter = await auditRowsFor(DISABLE_TARGET);
+      expect(auditAfter.slice(auditBefore.length)).toEqual([
+        {
+          actor_type: 'operator',
+          actor_id: actorId,
+          action: 'dashboard_user_disabled',
+          target_type: 'dashboard_user',
+        },
+      ]);
+    } finally {
+      await (await getPool()).query('DELETE FROM dashboard_users WHERE id = $1', [DISABLE_TARGET]);
+    }
   });
 
   it('GET /me は運営自身の id を返す（Req 2.2 の前提・自己行識別）', async () => {
