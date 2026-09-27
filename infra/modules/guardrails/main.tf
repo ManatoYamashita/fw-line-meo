@@ -585,7 +585,10 @@ resource "google_monitoring_alert_policy" "generation_failure" {
     content   = "客が口コミ下書きを受け取れていません（error_kind=$${metric.label.error_kind} / status=$${metric.label.status}）。402 は前払いクレジットの枯渇、401 / 403 は鍵の失効か権限、404 はモデルの廃止、INVALID_OUTPUT は出力検証の不一致を疑ってください。影響の範囲は AI Studio の使用量で確かめます。手順は Issue #394 を参照。"
   }
 
-  # 1 時間なら、失敗が続く間はインシデントが 1 本にまとまり、直ってから 1 時間強で閉じる。
+  # 閉じるのは通常、条件が外れたときである。ログベース指標は事象の直後の数分間に値 0 の点を
+  # 書くので、失敗が止まると 0 件と評価されて閉じる（2026-09-27 の合成ログ 1 件では、開いて
+  # 4 分 49 秒で閉じた・Issue #394）。散発的な失敗は 1 件ごとに別のインシデントと通知になる。
+  # auto_close が効くのは、開いたまま系列が途絶えた場合だけで、既定の 7 日を 1 時間に縮める。
   alert_strategy {
     auto_close = "3600s"
   }
