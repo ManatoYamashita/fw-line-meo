@@ -1,40 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import QRCode from 'qrcode';
-import {
-  getPool,
-  closePool,
-  findByAuthSubject,
-  findStoreWithAgency,
-  linkAuthSubjectByEmail,
-  listStoresWithStatus,
-  setStoreCategory,
-  listOwnersByAgency,
-  findOwnerWithAgency,
-  listCategories,
-  listAgencies,
-  createAgency,
-  listInviteCodes,
-  createInviteCode,
-  disableInviteCode,
-  listDashboardUsers,
-  createPendingDashboardUser,
-  disableDashboardUserGuarded,
-  enableDashboardUser,
-  updateDashboardUserGuarded,
-  findDashboardUserByEmailInOperator,
-  createAuditLog,
-  setStoreSuspension,
-} from '@fwlm/db';
-import {
-  createPlacesSearchAdapter,
-  createStoreIdentificationService,
-  type ConfirmOutcome,
-} from '@fwlm/store-identification';
-import { createApp, type AppDeps } from '../src/app.js';
+import { getPool, closePool } from '@fwlm/db';
+import { createApp } from '../src/app.js';
+import type { TokenVerifier } from '../src/auth.js';
+import { buildAppDeps } from '../src/composition.js';
 import { loadConfig, type DashboardApiConfig } from '../src/config.js';
-import type { VerifiedToken } from '../src/auth.js';
-import { generateInviteCode, createUniqueInviteCode } from '../src/invite-code-gen.js';
-import type { RegisterStoreInput } from '../src/store-registration.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db ＋実 @fwlm/store-identification で、配線済み dashboard-api の
 // 「店舗登録」を app.request 経由で END-TO-END 検証する（6.1）。app-routes.db.test.ts（3.1）が
@@ -84,135 +53,14 @@ function candidate(placeId: string, name: string): Candidate {
 
 let config: DashboardApiConfig;
 
+// firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
+const verifier: TokenVerifier = {
+  verifyIdToken: (t) => Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
+};
+
 function buildApp(): ReturnType<typeof createApp> {
-  // firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
-  const authDeps = {
-    verifier: {
-      verifyIdToken: (t: string): Promise<VerifiedToken> =>
-        Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
-    },
-    findUser: async (uid: string) => findByAuthSubject(await getPool(), uid),
-    linkByEmail: async (email: string, uid: string) =>
-      linkAuthSubjectByEmail(await getPool(), email, uid),
-  };
-
-  const places = createPlacesSearchAdapter({ apiKey: config.placesApiKey, fetch });
-  const service = createStoreIdentificationService({
-    pool: { connect: async () => (await getPool()).connect() },
-    places,
-  });
-
-  // index.ts の実 registerStore 合成を忠実に複製する（凍結 confirmStore TX ＋ best-effort setStoreCategory）。
-  const registerStore = async (input: RegisterStoreInput): Promise<ConfirmOutcome> => {
-    const outcome = await service.confirmStore(input.ownerId, input.candidate);
-    if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
-      await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
-    }
-    return outcome;
-  };
-
-  const issueCode = (agencyId: string) =>
-    createUniqueInviteCode({
-      generate: generateInviteCode,
-      create: async (code: string) => createInviteCode(await getPool(), { agencyId, code }),
-    });
-
-  const findAgencyName = async (agencyId: string): Promise<string | null> => {
-    const res = await (
-      await getPool()
-    ).query<{ name: string }>('SELECT name FROM agencies WHERE id = $1', [agencyId]);
-    return res.rows[0]?.name ?? null;
-  };
-  const findDisplayName = async (userId: string): Promise<string | null> => {
-    const res = await (
-      await getPool()
-    ).query<{ display_name: string | null }>(
-      'SELECT display_name FROM dashboard_users WHERE id = $1',
-      [userId],
-    );
-    return res.rows[0]?.display_name ?? null;
-  };
-
-  const deps: AppDeps = {
-    corsOrigin: config.corsOrigin,
-    qr: {
-      auth: authDeps,
-      findStore: async (id) => findStoreWithAgency(await getPool(), id),
-      renderQr: (text, size) => QRCode.toBuffer(text, { width: size }),
-      surveyBaseUrl: config.surveyBaseUrl,
-    },
-    me: { auth: authDeps, findAgencyName, findDisplayName },
-    stores: {
-      auth: authDeps,
-      listStores: async (filter) => listStoresWithStatus(await getPool(), filter),
-    },
-    owners: {
-      auth: authDeps,
-      listOwners: async (agencyId) => listOwnersByAgency(await getPool(), agencyId),
-    },
-    categories: { auth: authDeps, listCategories: async () => listCategories(await getPool()) },
-    storeRegistration: {
-      search: { auth: authDeps, searchCandidates: (query) => service.searchCandidates(query) },
-      register: {
-        auth: authDeps,
-        findOwner: async (ownerId) => findOwnerWithAgency(await getPool(), ownerId),
-        isValidCategory: async (code) =>
-          (await listCategories(await getPool())).some((cat) => cat.code === code),
-        registerStore,
-        auditLog: async (input) => createAuditLog(await getPool(), input),
-      },
-    },
-    storeSuspension: {
-      auth: authDeps,
-      setSuspension: async (input) => setStoreSuspension(await getPool(), input),
-    },
-    inviteCodes: {
-      list: {
-        auth: authDeps,
-        listInviteCodes: async (agencyId) => listInviteCodes(await getPool(), agencyId),
-      },
-      issue: { auth: authDeps, issueCode },
-      disable: {
-        auth: authDeps,
-        disableCode: async (id, agencyId) => disableInviteCode(await getPool(), id, agencyId),
-      },
-    },
-    admin: {
-      agenciesList: {
-        auth: authDeps,
-        listAgencies: async (operatorId) => listAgencies(await getPool(), operatorId),
-      },
-      agencyCreate: {
-        auth: authDeps,
-        createAgency: async (input) => createAgency(await getPool(), input),
-      },
-      usersList: {
-        auth: authDeps,
-        listUsers: async (operatorId) => listDashboardUsers(await getPool(), operatorId),
-      },
-      userCreate: {
-        auth: authDeps,
-        createUser: async (input) => createPendingDashboardUser(await getPool(), input),
-        findUserByEmailInOperator: async (operatorId, email) =>
-          findDashboardUserByEmailInOperator(await getPool(), email, operatorId),
-      },
-      userDisable: {
-        auth: authDeps,
-        disableUser: async (id, operatorId) =>
-          disableDashboardUserGuarded(await getPool(), id, operatorId),
-      },
-      userEnable: {
-        auth: authDeps,
-        enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
-      },
-      userUpdate: {
-        auth: authDeps,
-        updateUser: async (id, operatorId, input) =>
-          updateDashboardUserGuarded(await getPool(), id, operatorId, input),
-      },
-    },
-  };
-  return createApp(deps);
+  // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
+  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
 }
 
 async function post(

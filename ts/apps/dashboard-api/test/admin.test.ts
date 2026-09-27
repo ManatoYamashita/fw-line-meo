@@ -56,6 +56,9 @@ function userItem(over: Partial<DashboardUserItem> = {}): DashboardUserItem {
   };
 }
 
+// 認可マトリクスは監査を観測しないので、書き込まない監査で満たす。
+const noAudit = (): Promise<void> => Promise.resolve();
+
 // authenticate 依存のモック（invite-codes.test.ts と同型）。user=null で未登録、disabled で無効化。
 function authDeps(user: DashboardUserIdentity | null, disabled = false): AuthDeps {
   return {
@@ -98,7 +101,7 @@ const guardCases: GuardCase[] = [
       const dep = vi.fn((input: { operatorId: string; name: string }) =>
         Promise.resolve(agencyItem({ operatorId: input.operatorId, name: input.name })),
       );
-      const res = handleAgencyCreate({ auth: authDeps(user, disabled), createAgency: dep }, {
+      const res = handleAgencyCreate({ auth: authDeps(user, disabled), createAgency: dep, auditLog: noAudit }, {
         authorization,
         body: { name: '新規代理店' },
       });
@@ -124,6 +127,7 @@ const guardCases: GuardCase[] = [
           auth: authDeps(user, disabled),
           createUser: dep,
           findUserByEmailInOperator: () => Promise.resolve(null),
+          auditLog: noAudit,
         },
         {
           authorization,
@@ -139,7 +143,7 @@ const guardCases: GuardCase[] = [
       const dep = vi.fn(() =>
         Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ disabled: true }) }),
       );
-      const res = handleDashboardUserDisable({ auth: authDeps(user, disabled), disableUser: dep }, {
+      const res = handleDashboardUserDisable({ auth: authDeps(user, disabled), disableUser: dep, auditLog: noAudit }, {
         authorization,
         id: USER_ID,
       });
@@ -152,7 +156,7 @@ const guardCases: GuardCase[] = [
       const dep = vi.fn(() =>
         Promise.resolve<DashboardUserItem | null>(userItem({ disabled: false })),
       );
-      const res = handleDashboardUserEnable({ auth: authDeps(user, disabled), enableUser: dep }, {
+      const res = handleDashboardUserEnable({ auth: authDeps(user, disabled), enableUser: dep, auditLog: noAudit }, {
         authorization,
         id: USER_ID,
       });
@@ -170,7 +174,7 @@ const guardCases: GuardCase[] = [
           user: userItem({ displayName: '新しい名前' }),
         }),
       );
-      const res = handleDashboardUserUpdate({ auth: authDeps(user, disabled), updateUser: dep }, {
+      const res = handleDashboardUserUpdate({ auth: authDeps(user, disabled), updateUser: dep, auditLog: noAudit }, {
         authorization,
         id: USER_ID,
         body: { displayName: '新しい名前' },
@@ -249,6 +253,7 @@ function agencyCreateDeps(over: Partial<AgencyCreateDeps> = {}, user: DashboardU
   return {
     auth: authDeps(user),
     createAgency: (input) => Promise.resolve(agencyItem({ operatorId: input.operatorId, name: input.name })),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }
@@ -351,6 +356,7 @@ function userCreateDeps(over: Partial<DashboardUserCreateDeps> = {}, user: Dashb
       ),
     // 既定は「自運営配下に該当メールなし（＝越境 or 不在扱い）」。衝突分岐を検証するテストで差し替える。
     findUserByEmailInOperator: () => Promise.resolve(null),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }
@@ -578,6 +584,7 @@ function userDisableDeps(over: Partial<DashboardUserDisableDeps> = {}, user: Das
     auth: authDeps(user),
     disableUser: (id) =>
       Promise.resolve<DisableOutcome>({ kind: 'disabled', user: userItem({ id, disabled: true }) }),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }
@@ -690,6 +697,7 @@ function userEnableDeps(over: Partial<DashboardUserEnableDeps> = {}, user: Dashb
     auth: authDeps(user),
     enableUser: (id) =>
       Promise.resolve<DashboardUserItem | null>(userItem({ id, disabled: false })),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }
@@ -749,6 +757,7 @@ function userUpdateDeps(
     auth: authDeps(user),
     updateUser: (id) =>
       Promise.resolve<UpdateOutcome>({ kind: 'updated', before: userItem({ id }), user: userItem({ id }) }),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }

@@ -1,17 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import {
-  getPool,
-  closePool,
-  findByAuthSubject,
-  linkAuthSubjectByEmail,
-  setStoreSuspension,
-  createAuditLog,
-} from '@fwlm/db';
-import { createApp, type AppDeps } from '../src/app.js';
+import { getPool, closePool } from '@fwlm/db';
+import { createApp } from '../src/app.js';
+import type { TokenVerifier } from '../src/auth.js';
+import { buildAppDeps } from '../src/composition.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で停止・再開のルートを app.request 経由で検証する
 // （store-suspension Req 1.1–1.5, 7.1–7.3）。firebase-admin のみモック（Bearer 文字列＝uid とみなす）。
-// 監査は実物の createAuditLog を配線し、migration 0012 の CHECK が新しい action を受け付けることも観測する。
+// 配線は本番と同じ合成根（src/composition.ts）を使うので監査も実物の createAuditLog であり、migration 0012 の CHECK が新しい action を受け付けることも観測する。
 // DATABASE_URL 無しは skip。共有 DB のため UUID prefix は d7（他のファイルと非交差）。
 
 const OP1 = 'd7000000-0000-0000-0000-000000000001';
@@ -29,26 +24,22 @@ const MISSING = 'd7000000-0000-0000-0000-0000000000ff';
 const OP_TOKEN = 'd7-op-uid';
 const AG1_TOKEN = 'd7-ag1-uid';
 
-// 停止・再開の経路だけを検証する最小 deps（他の業務 deps はこのテストで一度も呼ばれない）。
-type SuspensionOnlyDeps = Pick<AppDeps, 'corsOrigin' | 'storeSuspension'>;
+
+// 合成根へ渡す設定（loadConfig を通さず、使う 3 項目だけを与える）。
+const config = {
+  placesApiKey: 'test-places-key',
+  corsOrigin: 'https://dash.example',
+  surveyBaseUrl: 'https://survey.example',
+};
+
+// firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
+const verifier: TokenVerifier = {
+  verifyIdToken: (t) => Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
+};
 
 function buildApp(): ReturnType<typeof createApp> {
-  const deps: SuspensionOnlyDeps = {
-    corsOrigin: 'https://dash.example',
-    storeSuspension: {
-      auth: {
-        verifier: {
-          verifyIdToken: (t) =>
-            Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
-        },
-        findUser: async (uid) => findByAuthSubject(await getPool(), uid),
-        linkByEmail: async (email, uid) => linkAuthSubjectByEmail(await getPool(), email, uid),
-      },
-      setSuspension: async (input) => setStoreSuspension(await getPool(), input),
-      auditLog: async (input) => createAuditLog(await getPool(), input),
-    },
-  };
-  return createApp(deps as AppDeps);
+  // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
+  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
 }
 
 async function post(path: string, bearer: string): Promise<Response> {

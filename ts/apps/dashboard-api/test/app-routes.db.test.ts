@@ -1,46 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import QRCode from 'qrcode';
-import {
-  getPool,
-  closePool,
-  findByAuthSubject,
-  findStoreWithAgency,
-  linkAuthSubjectByEmail,
-  listStoresWithStatus,
-  setStoreCategory,
-  listOwnersByAgency,
-  findOwnerWithAgency,
-  listCategories,
-  listAgencies,
-  createAgency,
-  findAgencyName,
-  listInviteCodes,
-  createInviteCode,
-  disableInviteCode,
-  listDashboardUsers,
-  createPendingDashboardUser,
-  disableDashboardUserGuarded,
-  enableDashboardUser,
-  updateDashboardUserGuarded,
-  findDashboardUserByEmailInOperator,
-  findDashboardUserDisplayName,
-  createAuditLog,
-  setStoreSuspension,
-} from '@fwlm/db';
-import {
-  createPlacesSearchAdapter,
-  createStoreIdentificationService,
-  type ConfirmOutcome,
-} from '@fwlm/store-identification';
-import { createApp, type AppDeps } from '../src/app.js';
+import { getPool, closePool, findStoreWithAgency } from '@fwlm/db';
+import { createApp } from '../src/app.js';
+import type { TokenVerifier } from '../src/auth.js';
+import { buildAppDeps } from '../src/composition.js';
 import { loadConfig, type DashboardApiConfig } from '../src/config.js';
-import type { VerifiedToken } from '../src/auth.js';
-import { generateInviteCode, createUniqueInviteCode } from '../src/invite-code-gen.js';
-import type { RegisterStoreInput } from '../src/store-registration.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で dashboard-api の全ルート配線・認可マトリクス・CORS を
 // app.request 経由で検証する（3.1）。firebase-admin のみモック（Bearer 文字列＝uid とみなす）。
-// index.ts の実 DI を（verifier だけ差し替えて）忠実に複製し、配線の整合を機械検証する。
+// 配線は複製せず、本番と同じ合成根（src/composition.ts の buildAppDeps）を verifier だけ差し替えて使う。
+// そのため合成根での引数の取り違え・監査の配線漏れも、このファイルの成功系のアサートが捕まえる（Issue #275）。
 // DATABASE_URL 無しは skip。共有 DB のため UUID prefix は f5（f2/f3/f4 は他所で使用済み）。
 
 const OP1 = 'f5000000-0000-0000-0000-000000000001';
@@ -67,6 +35,9 @@ const DU_DISABLED_LOGIN_TOKEN = 'f5-disabled-login-uid'; // 無効化済み運�
 const DISABLED_EXISTING_EMAIL = 'f5-disabled-existing@example.com'; // 自運営の無効化済み利用者のメール
 const CROSSOP_EMAIL = 'f5-crossop@example.com'; // 他運営(OP2)配下の利用者のメール
 
+// 無効化の成功経路の対象（OP1・agency(AG1)・保留）。テストの中で作って消す（Issue #275）。
+const DISABLE_TARGET = 'f5000000-0000-0000-0000-0000000000d1';
+
 // 認可前置の 403 を確認するための整形式ダミー UUID（存在しない id・operator ガードで先に弾かれる）。
 const DUMMY_UUID = 'f5000000-0000-0000-0000-0000000000ff';
 
@@ -87,124 +58,14 @@ const EDIT_DEMOTED_TOKEN = 'f5-edit-demoted-uid';
 
 let config: DashboardApiConfig;
 
+// firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
+const verifier: TokenVerifier = {
+  verifyIdToken: (t) => Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
+};
+
 function buildApp(): ReturnType<typeof createApp> {
-  // firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
-  const authDeps = {
-    verifier: {
-      verifyIdToken: (t: string): Promise<VerifiedToken> =>
-        Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
-    },
-    findUser: async (uid: string) => findByAuthSubject(await getPool(), uid),
-    linkByEmail: async (email: string, uid: string) =>
-      linkAuthSubjectByEmail(await getPool(), email, uid),
-  };
-
-  const places = createPlacesSearchAdapter({ apiKey: config.placesApiKey, fetch });
-  const service = createStoreIdentificationService({
-    pool: { connect: async () => (await getPool()).connect() },
-    places,
-  });
-
-  const registerStore = async (input: RegisterStoreInput): Promise<ConfirmOutcome> => {
-    const outcome = await service.confirmStore(input.ownerId, input.candidate);
-    if (outcome.kind === 'confirmed' && input.categoryCode !== null) {
-      await setStoreCategory(await getPool(), outcome.storeId, input.categoryCode);
-    }
-    return outcome;
-  };
-
-  const issueCode = (agencyId: string) =>
-    createUniqueInviteCode({
-      generate: generateInviteCode,
-      create: async (code: string) => createInviteCode(await getPool(), { agencyId, code }),
-    });
-
-  const deps: AppDeps = {
-    corsOrigin: DASH_ORIGIN,
-    qr: {
-      auth: authDeps,
-      findStore: async (id) => findStoreWithAgency(await getPool(), id),
-      renderQr: (text, size) => QRCode.toBuffer(text, { width: size }),
-      surveyBaseUrl: config.surveyBaseUrl,
-    },
-    me: {
-      auth: authDeps,
-      findAgencyName: async (agencyId) => findAgencyName(await getPool(), agencyId),
-      findDisplayName: async (userId) => findDashboardUserDisplayName(await getPool(), userId),
-    },
-    stores: {
-      auth: authDeps,
-      listStores: async (filter) => listStoresWithStatus(await getPool(), filter),
-    },
-    owners: {
-      auth: authDeps,
-      listOwners: async (agencyId) => listOwnersByAgency(await getPool(), agencyId),
-    },
-    categories: { auth: authDeps, listCategories: async () => listCategories(await getPool()) },
-    storeRegistration: {
-      search: { auth: authDeps, searchCandidates: (query) => service.searchCandidates(query) },
-      register: {
-        auth: authDeps,
-        findOwner: async (ownerId) => findOwnerWithAgency(await getPool(), ownerId),
-        isValidCategory: async (code) =>
-          (await listCategories(await getPool())).some((cat) => cat.code === code),
-        registerStore,
-      },
-    },
-    storeSuspension: {
-      auth: authDeps,
-      setSuspension: async (input) => setStoreSuspension(await getPool(), input),
-      auditLog: async (input) => createAuditLog(await getPool(), input),
-    },
-    inviteCodes: {
-      list: {
-        auth: authDeps,
-        listInviteCodes: async (agencyId) => listInviteCodes(await getPool(), agencyId),
-      },
-      issue: { auth: authDeps, issueCode },
-      disable: {
-        auth: authDeps,
-        disableCode: async (id, agencyId) => disableInviteCode(await getPool(), id, agencyId),
-      },
-    },
-    admin: {
-      agenciesList: {
-        auth: authDeps,
-        listAgencies: async (operatorId) => listAgencies(await getPool(), operatorId),
-      },
-      agencyCreate: {
-        auth: authDeps,
-        createAgency: async (input) => createAgency(await getPool(), input),
-      },
-      usersList: {
-        auth: authDeps,
-        listUsers: async (operatorId) => listDashboardUsers(await getPool(), operatorId),
-      },
-      userCreate: {
-        auth: authDeps,
-        createUser: async (input) => createPendingDashboardUser(await getPool(), input),
-        findUserByEmailInOperator: async (operatorId, email) =>
-          findDashboardUserByEmailInOperator(await getPool(), email, operatorId),
-      },
-      userDisable: {
-        auth: authDeps,
-        disableUser: async (id, operatorId) =>
-          disableDashboardUserGuarded(await getPool(), id, operatorId),
-      },
-      userEnable: {
-        auth: authDeps,
-        enableUser: async (id, operatorId) => enableDashboardUser(await getPool(), id, operatorId),
-      },
-      userUpdate: {
-        auth: authDeps,
-        updateUser: async (id, operatorId, input) =>
-          updateDashboardUserGuarded(await getPool(), id, operatorId, input),
-        // 監査は実物を配線する。モックでは 0009 の CHECK が新しい action を受け付けるかを観測できない。
-        auditLog: async (input) => createAuditLog(await getPool(), input),
-      },
-    },
-  };
-  return createApp(deps);
+  // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
+  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
 }
 
 function h(bearer?: string, origin?: string): Record<string, string> {
@@ -513,6 +374,38 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     expect(check.rows[0]?.disabled_at).toBeNull();
   });
 
+  // 合成根の disableUser(id, operatorId) の取り違えを捕まえる成功経路（Issue #275）。
+  // 取り違えると DAL が対象を見つけられず 404 になり、行も監査も変わらない。
+  it('operator の POST /dashboard-users/:id/disable は有効な利用者を 200 で無効化し、監査行を 1 行書く（Req 2.4）', async () => {
+    const app = buildApp();
+    await insertPendingAgencyUser(DISABLE_TARGET, 'f5-disable-target@example.com', '無効化対象');
+    try {
+      const actorId = await operatorSelfId();
+      const auditBefore = await auditRowsFor(DISABLE_TARGET);
+
+      const res = await app.request(`/dashboard-users/${DISABLE_TARGET}/disable`, {
+        method: 'POST',
+        headers: h(OP_TOKEN),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { user: { id: string; disabled: boolean } };
+      expect(body.user).toMatchObject({ id: DISABLE_TARGET, disabled: true });
+      expect((await userRow(DISABLE_TARGET))?.disabled).toBe(true);
+
+      const auditAfter = await auditRowsFor(DISABLE_TARGET);
+      expect(auditAfter.slice(auditBefore.length)).toEqual([
+        {
+          actor_type: 'operator',
+          actor_id: actorId,
+          action: 'dashboard_user_disabled',
+          target_type: 'dashboard_user',
+        },
+      ]);
+    } finally {
+      await (await getPool()).query('DELETE FROM dashboard_users WHERE id = $1', [DISABLE_TARGET]);
+    }
+  });
+
   it('GET /me は運営自身の id を返す（Req 2.2 の前提・自己行識別）', async () => {
     const app = buildApp();
     const res = await app.request('/me', { headers: h(OP_TOKEN) });
@@ -565,7 +458,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string } };
     // 自運営スコープの findDashboardUserByEmailInOperator が無効行を検出し復旧を案内する。
-    // index.ts / buildApp の DI 引数順（email↔operatorId）が転置すると自運営でも null 化し、
+    // 合成根（src/composition.ts）の DI 引数順（email↔operatorId）が転置すると自運営でも null 化し、
     // 汎用 email_conflict へ化ける（あるいは uuid 型不一致で 500）。本アサートがそれを決定的に捕捉する。
     expect(body.error.code).toBe('email_conflict_disabled');
   });

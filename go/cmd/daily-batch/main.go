@@ -65,7 +65,31 @@ func main() {
 	// 多い店では常にこの状態になる。**集計は成功し件数も正しくエラーも出ない**ので、この項目が無いと
 	// 状態が続いていることを誰も観測できない（本番で 30 日間気づかれなかった）。
 	// 0 でない日が続くのは既知の状態であり、非 0 終了もアラートもさせない。
+	logExecutionSummary(logger, result)
+
+	// 全体失敗の当日検知（R5.1）: 対象店舗が存在するにもかかわらず1店舗も自店指標を
+	// 取得できなかった場合は、個々の店舗障害ではなくシステム的な異常（Places API 全断・
+	// キー失効等）を疑い、Job を非0終了させて guardrails に検知させる。1店舗のみの失敗は
+	// 「店舗単位のエラー隔離」の対象であり、この基準には該当しない（意図的に exit 0 のまま）。
+	if result.StoresTotal > 0 && result.FetchOK == 0 && result.FetchFailed > 0 {
+		logger.Error("daily-batch: all target stores failed self-metrics fetch; treating as total failure")
+		os.Exit(1)
+	}
+}
+
+// summaryEvent は実行サマリー行の事象名である（Issue #139）。
+//
+// ログベース指標 places_fetch_ok_runs / places_fetch_eligible_runs（infra/modules/guardrails）が
+// この名前で行を数え、scripts/check-external-api-liveness.sh が Places の生死を判定する。
+// delivery-job の delivery-job.run と対にしてある。msg の文言で数えないのは、文言は人が読むために
+// 変わりうるからで、名前を変えると指標が静かに 0 になる（scripts/check-monitoring-coverage.sh が
+// この文字列の存在を照合する）。
+const summaryEvent = "daily-batch.run"
+
+// logExecutionSummary は実行サマリーを構造化ログで 1 行出す。
+func logExecutionSummary(logger *slog.Logger, result batch.Summary) {
 	logger.Info("daily-batch execution summary",
+		"event", summaryEvent,
 		"stores_total", result.StoresTotal,
 		"extract_ran", result.ExtractRan,
 		"fetch_ok", result.FetchOK,
@@ -76,15 +100,6 @@ func main() {
 		"summaries_purged", result.SummariesPurged,
 		"purged", result.RowsPurged(),
 	)
-
-	// 全体失敗の当日検知（R5.1）: 対象店舗が存在するにもかかわらず1店舗も自店指標を
-	// 取得できなかった場合は、個々の店舗障害ではなくシステム的な異常（Places API 全断・
-	// キー失効等）を疑い、Job を非0終了させて guardrails に検知させる。1店舗のみの失敗は
-	// 「店舗単位のエラー隔離」の対象であり、この基準には該当しない（意図的に exit 0 のまま）。
-	if result.StoresTotal > 0 && result.FetchOK == 0 && result.FetchFailed > 0 {
-		logger.Error("daily-batch: all target stores failed self-metrics fetch; treating as total failure")
-		os.Exit(1)
-	}
 }
 
 // buildPool は config.Config から実行時の DB プールを構築する。

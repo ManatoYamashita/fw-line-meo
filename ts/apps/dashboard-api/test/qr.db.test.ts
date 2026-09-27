@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import QRCode from 'qrcode';
-import { getPool, closePool, findByAuthSubject, findStoreWithAgency, linkAuthSubjectByEmail } from '@fwlm/db';
-import { createApp, type AppDeps } from '../src/app.js';
+import { getPool, closePool } from '@fwlm/db';
+import { createApp } from '../src/app.js';
+import type { TokenVerifier } from '../src/auth.js';
+import { buildAppDeps } from '../src/composition.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で QR RBAC マトリクスを app.request 経由で検証。
 // firebase-admin のみモック（Bearer トークン文字列＝uid とみなす）。DATABASE_URL 無しは skip。
@@ -16,29 +17,22 @@ const S2 = 'ffffffff-0000-0000-0000-000000000007'; // AG2・confirmed
 const S_PENDING = 'ffffffff-0000-0000-0000-000000000008'; // AG1・pending
 const S_SUSP = 'ffffffff-0000-0000-0000-000000000009'; // AG1・confirmed（停止・再開を SQL で切り替える）
 
-// QR 経路のみを検証する最小 deps 型（他業務 deps は本テストで未使用のため corsOrigin と qr のみ）。
-type QrOnlyDeps = Pick<AppDeps, 'corsOrigin' | 'qr'>;
+
+// 合成根へ渡す設定（loadConfig を通さず、使う 3 項目だけを与える）。
+const config = {
+  placesApiKey: 'test-places-key',
+  corsOrigin: 'https://dash.example',
+  surveyBaseUrl: 'https://survey.example',
+};
+
+// firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
+const verifier: TokenVerifier = {
+  verifyIdToken: (t) => Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
+};
 
 function buildApp(): ReturnType<typeof createApp> {
-  // CORS ミドルウェアのため corsOrigin は必須。
-  const deps: QrOnlyDeps = {
-    corsOrigin: 'https://dash.example',
-    qr: {
-      auth: {
-        verifier: {
-          verifyIdToken: (t) =>
-            Promise.resolve({ uid: t, email: null, emailVerified: false, signInProvider: null }),
-        },
-        findUser: async (uid) => findByAuthSubject(await getPool(), uid),
-        linkByEmail: async (email, uid) => linkAuthSubjectByEmail(await getPool(), email, uid),
-      },
-      findStore: async (id) => findStoreWithAgency(await getPool(), id),
-      renderQr: (text, size) => QRCode.toBuffer(text, { width: size }),
-      surveyBaseUrl: 'https://survey.example',
-    },
-  };
-  // QR 経路以外の deps はこのテストで一度も呼ばれないため、意図的に部分適用する。
-  return createApp(deps as AppDeps);
+  // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
+  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
 }
 
 async function qr(app: ReturnType<typeof createApp>, storeId: string, bearer?: string): Promise<Response> {

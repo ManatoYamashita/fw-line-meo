@@ -25,7 +25,8 @@ export interface StoreSuspensionDeps {
   auth: AuthDeps;
   // setStoreSuspension（@fwlm/db）を部分適用した切り替え。
   setSuspension: (input: SetStoreSuspensionInput) => Promise<SetStoreSuspensionOutcome>;
-  auditLog?: AuditLogger;
+  // 必須（Issue #275）。省略可能だと合成根で配線を落としても型検査が通る。
+  auditLog: AuditLogger;
 }
 
 export interface StoreSuspensionRequest {
@@ -75,7 +76,7 @@ export async function handleStoreSuspension(
   //    対象 ID は要求の表記ではなく DB が返した正規表記を使う。監査の失敗は捕捉しない
   //    （既存の無効化系と同じ扱い。5xx になるが停止・再開そのものは成立している）。
   if (outcome.kind === 'changed') {
-    await deps.auditLog?.({
+    await deps.auditLog({
       actorType: user.role,
       actorId: user.id,
       action: AUDIT_ACTION[req.direction],
