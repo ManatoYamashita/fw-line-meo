@@ -83,7 +83,8 @@ export interface StoreRegistrationDeps {
   isValidCategory: (code: string) => Promise<boolean>;
   // 確定登録（confirmed 登録＋owner の store_identified 遷移＋categoryCode 設定）。
   registerStore: (input: RegisterStoreInput, log?: Sink) => Promise<ConfirmOutcome>;
-  auditLog?: AuditLogger;
+  // 必須（Issue #275）。省略可能だと合成根で配線を落としても型検査が通る。
+  auditLog: AuditLogger;
 }
 
 export interface StoreRegisterRequest {
@@ -145,7 +146,7 @@ export async function handleStoreRegister(
     : await deps.registerStore(input, req.log);
   switch (outcome.kind) {
     case 'confirmed':
-      await deps.auditLog?.({
+      await deps.auditLog({
         actorType: auth.user.role,
         actorId: auth.user.id,
         action: 'store_registered',

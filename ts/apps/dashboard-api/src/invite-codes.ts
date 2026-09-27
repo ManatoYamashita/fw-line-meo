@@ -53,7 +53,8 @@ export interface InviteCodeIssueDeps {
   // createUniqueInviteCode（invite-code-gen）＋ createInviteCode（@fwlm/db）を合成した発行。
   // 衝突リトライ（最大 3 回）を使い切ったら投げる契約（本ハンドラが 500 internal に写像）。
   issueCode: (agencyId: string, log?: Sink) => Promise<InviteCodeItem>;
-  auditLog?: AuditLogger;
+  // 必須（Issue #275）。省略可能だと合成根で配線を落としても型検査が通る。
+  auditLog: AuditLogger;
 }
 
 export interface InviteCodeIssueRequest {
@@ -90,7 +91,7 @@ export async function handleInviteCodeIssue(
   } catch {
     return jsonError(500, 'internal', '招待コードの発行に失敗しました。時間をおいて再試行してください');
   }
-  await deps.auditLog?.({
+  await deps.auditLog({
     actorType: auth.user.role,
     actorId: auth.user.id,
     action: 'invite_code_issued',
@@ -107,7 +108,8 @@ export interface InviteCodeDisableDeps {
   // disableInviteCode（@fwlm/db）委譲。agency_id をスコープ列に含む UPDATE で、
   // 不在・越権はいずれも null（本ハンドラが 404 に写像・存在の秘匿）。既無効は現状値を返し冪等。
   disableCode: (id: string, agencyId: string) => Promise<InviteCodeItem | null>;
-  auditLog?: AuditLogger;
+  // 必須（Issue #275）。省略可能だと合成根で配線を落としても型検査が通る。
+  auditLog: AuditLogger;
 }
 
 export interface InviteCodeDisableRequest {
@@ -147,7 +149,7 @@ export async function handleInviteCodeDisable(
   if (item === null) {
     return jsonError(404, 'not_found', '招待コードが見つかりません');
   }
-  await deps.auditLog?.({
+  await deps.auditLog({
     actorType: auth.user.role,
     actorId: auth.user.id,
     action: 'invite_code_disabled',
