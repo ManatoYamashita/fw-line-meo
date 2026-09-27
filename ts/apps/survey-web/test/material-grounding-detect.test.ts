@@ -171,6 +171,9 @@ describe('素材に無い固有名詞・数値・日付を検出する', () => {
     expect(kindsOf('定食屋 あおばの定食は美味しかったです。', { storeName: '定食屋 あおば' })).toEqual([]);
     // 対照: 同じ下書きでも、店名が手がかりを持たなければ拾う（除去が「常に 0」へ化けていないことの確認）。
     expect(kindsOf('BAR 3丁目で飲みました。', PLAIN)).toEqual(['number:digits', 'properNoun:latin']);
+    // 日付の軸は一言の手がかりでしか除外しないので、店名の中の時刻は店名の除去でしか外れない。
+    expect(kindsOf('24時間食堂 あおばで食べました。', { storeName: '24時間食堂 あおば' })).toEqual([]);
+    expect(kindsOf('24時間食堂 あおばで食べました。', PLAIN)).toEqual(['dateTime:timeOfDay']);
   });
 
   it('客が一言に書いた事実は数えない（一言が無ければ拾う）', () => {

@@ -77,7 +77,8 @@ export function detectUngroundedClaims(
   const comment = source.comment?.normalize('NFKC');
   const sourceText = `${storeName}\n${comment ?? ''}`;
   const sourceLower = sourceText.toLowerCase();
-  // 店名は素材そのもの。店名の中の数字・英字・駅名・品名を創作と数えないよう、先に取り除く。
+  // 店名は素材そのもの。先に取り除く。数値・固有名詞は下で素材と照合するが、日付・時刻は一言の手がかり
+  // でしか除外しないので、店名の中の時刻（「24時間食堂」）はここで外さないと創作として数えてしまう。
   // 空白で置き換えるのは、前後の文字が繋がって別の語に化けないようにするため。
   let text = draft.normalize('NFKC');
   if (storeName.trim() !== '') text = text.split(storeName).join(' ');
