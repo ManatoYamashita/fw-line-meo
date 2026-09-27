@@ -120,28 +120,32 @@ grep_optional() {
 # `log('warn', 'event', ...)` / writeStructuredLog・correlationLog の Sink 形式を扱う。
 # optional call の log?.(...) と optional property の logger?.warn(...) も扱う。
 extract_ts_events() {
-  local file
+  local file conditional_events
   file="$1"
   {
     # Sink 関数（名前付き logger / log / requestLog を含む）の level, event 形式。
-    grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[a-zA-Z0-9_.-]+" "$file" \
+    grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[^']+'" "$file" \
       | sed -E "s/.*,[[:space:]]*'//; s/'$//"
 
     # 共有 Sink の引数に条件式を使う呼び出し（line-webhook の起動状態）。
-    grep_optional "(writeStructuredLog|correlationLog)\\([[:space:]]*'(info|warn|error|debug)'[,]([^)]*)\\?[^)]*'[a-zA-Z0-9_.-]+'[[:space:]]*:[[:space:]]*'[a-zA-Z0-9_.-]+'" "$file" \
-      | grep -oE "'[a-zA-Z0-9_.-]+'" \
-      | tr -d "'"
+    conditional_events="$(grep_optional "(writeStructuredLog|correlationLog)\\([[:space:]]*'(info|warn|error|debug)'[,]([^)]*)\\?[^)]*'[^']+'[[:space:]]*:[[:space:]]*'[^']+'" "$file")"
+    if [ -n "$conditional_events" ]; then
+      printf '%s\n' "$conditional_events" | grep -oE "'[^']+'" | sed '1d' | tr -d "'"
+    fi
 
     # 注入されたオブジェクト logger と、withCorrelation の戻り値を log と呼ぶ Sink。
-    grep_optional "\\.(info|warn|error|debug)[[:space:]]*(\\?)?\\([[:space:]]*'[a-zA-Z0-9_.-]+" "$file" \
+    grep_optional "\\.(info|warn|error|debug)[[:space:]]*(\\?)?\\([[:space:]]*'[^']+'" "$file" \
       | sed -E "s/.*\\('//; s/'$//"
-    grep_optional "(^|[^a-zA-Z0-9_])log[[:space:]]*(\\?)?\\([[:space:]]*'[a-zA-Z0-9_.-]+" "$file" \
-      | sed -E "s/.*\\('//; s/'$//"
+    # event を第一引数に取る log 関数も扱う。level, event 形式は上の Sink 抽出が受け持つ。
+    grep_optional "(^|[^a-zA-Z0-9_.])log[[:space:]]*(\\?)?\\([[:space:]]*'[^']+'" "$file" \
+      | sed -E "s/.*\\('//; s/'$//" \
+      | awk '$0 !~ /^(info|warn|error|debug)$/'
 
     # 変数を経由して Sink に渡す実行サマリーの literal（delivery-job.run）。
-    grep_optional "event[[:space:]]*:[[:space:]]*'[a-zA-Z0-9_.-]+" "$file" \
+    grep_optional "event[[:space:]]*:[[:space:]]*'[^']+'" "$file" \
       | sed -E "s/.*:[[:space:]]*'//; s/'$//"
-  } | grep -E '^[a-z][a-zA-Z0-9_-]*(\.[a-zA-Z0-9_.-]+|_[a-zA-Z0-9_-]+)$' | sort -u || true
+  # Sink の event は文字列なので、空白などを含む値も形式フィルターで捨てず正典と照合する。
+  } | sort -u
 }
 
 # Go の日次バッチは slog の `"event", value` 属性で事象を出す。
@@ -315,7 +319,7 @@ ts_source_files=''
 go_source_files=''
 if [ -d "${ROOT}/ts/apps" ] && [ -d "${ROOT}/ts/packages" ]; then
   ts_source_files="$(find "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
-    -type d \( -name node_modules -o -name dist -o -name .next -o -name test -o -name e2e -o -name perf -o -name eval \) -prune -o \
+    -type d \( -name node_modules -o -name dist -o -name .next -o -name test -o -name e2e -o -name perf -o -name eval -o -name scripts \) -prune -o \
     -type f \( -name '*.ts' -o -name '*.tsx' \) -print | sort)"
 fi
 if [ -d "${ROOT}/go" ]; then

@@ -245,6 +245,22 @@ fx_run check-log-field-binding
 expect_red '正典に登録されていません'
 t_end
 
+t_begin 'check-log-field-binding: 空白入りの未登録 event 値も逆方向で赤'
+fx_guard check-log-field-binding
+lfb_fixture
+# event 値が識別子形式でなくても、抽出後に捨てず正典との不一致として検出する。
+fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
+export function run(deps: { logger: { warn(event: string): void } }): void {
+  writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+  deps.logger.warn('demo unregistered');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo unregistered」を出しますが、正典に登録されていません'
+t_end
+
 t_begin 'check-log-field-binding: 正典の出典ファイルが走査対象外なら赤'
 fx_guard check-log-field-binding
 lfb_fixture
