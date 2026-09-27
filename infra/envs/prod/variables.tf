@@ -81,6 +81,16 @@ variable "gbp_oauth_redirect_url" {
   default     = ""
 }
 
+variable "gbp_oauth_client_id" {
+  description = <<-EOT
+    line-webhook の GBP_OAUTH_CLIENT_ID env（OAuth クライアント ID・非秘匿）。
+    Google Cloud Console で作成した Web アプリケーションの ID を設定する。
+    GBP を有効化するときは client secret・redirect URL・暗号化鍵と同時に設定する。
+  EOT
+  type        = string
+  default     = ""
+}
+
 # --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---
 
 variable "line_channel_id" {

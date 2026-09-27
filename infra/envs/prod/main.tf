@@ -61,8 +61,11 @@ module "run_services" {
       public         = true
       needs_cloudsql = true
       secret_env = {
-        LINE_CHANNEL_SECRET = module.secrets.secret_ids["line-channel-secret"]
-        PLACES_API_KEY      = module.secrets.secret_ids["places-api-key"]
+        LINE_CHANNEL_SECRET     = module.secrets.secret_ids["line-channel-secret"]
+        PLACES_API_KEY          = module.secrets.secret_ids["places-api-key"]
+        GEMINI_API_KEY          = module.secrets.secret_ids["gemini-api-key"]
+        GBP_OAUTH_CLIENT_SECRET = module.secrets.secret_ids["gbp-oauth-client-secret"]
+        GBP_TOKEN_CIPHER_KEY    = module.secrets.secret_ids["gbp-token-cipher-key"]
       }
       env = {
         LINE_CHANNEL_ID            = var.line_channel_id
@@ -71,6 +74,7 @@ module "run_services" {
         # store-detail の LIFF アプリ URL（liff_url）と同一値を line-webhook にも配線する。
         LIFF_STORE_DETAIL_URL = var.liff_url
         # GBP OAuth コールバック URL。GBP を有効にするときに他の GBP 設定と一緒に設定する。
+        GBP_OAUTH_CLIENT_ID    = var.gbp_oauth_client_id
         GBP_OAUTH_REDIRECT_URL = var.gbp_oauth_redirect_url
       }
     }
