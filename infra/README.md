@@ -428,7 +428,7 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 |---|---|---|
 | 独自ドメイン | 自己所有・Search Console で所有権検証済み | **`firstweb-works.com` を取得済み**（お名前.com・2026-09-22 登録。9-2-a） |
 | ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT） |
-| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 割り当て済み（2026-09-23・`api.firstweb-works.com` → line-webhook）。redirect URI の差し替えは Phase2 と対（Issue #282） |
+| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 割り当て済み（2026-09-23・`api.firstweb-works.com` → line-webhook。2026-09-27 からは外部ロードバランサ経由・9-2-e）。redirect URI の差し替えは Phase2 と対（Issue #282） |
 | 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 実装済み（ManatoYamashita/fw-website）・独自ドメインでの公開待ち |
 | プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 同上 |
 | スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 下書き済み（fw-website `docs/google-review.md`） |
@@ -483,6 +483,8 @@ GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済
 
 #### 9-2-b. OAuth コールバックを独自ドメインへ移す（Issue #282）
 
+> **2026-09-27 以降、`api.firstweb-works.com` は外部ロードバランサで配っている（9-2-e・Issue #368）。この節のドメインマッピング（`custom-domain.tf`）は削除した。** 以下は、ドメインマッピングで割り当てた当時の手順の記録として残す。今の構成を変えるときは 9-2-d・9-2-e を見ること。
+
 OAuth ブランド検証のページ（developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification・2026-09-15 確認）は `The Authorized domains section also needs to include the redirect URIs or JavaScript origins authorized in your "Web application" OAuth client types.` と定める。**コールバックが `run.app` のままでは、承認済みドメインに入れられず関門 B を通らない。**
 
 `api.firstweb-works.com` を line-webhook に割り当てる。宣言は `infra/envs/prod/custom-domain.tf`（Cloud Run のドメインマッピング）。
@@ -516,11 +518,13 @@ curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status"
 
 #### 9-2-c. ダッシュボードも独自ドメインへ移す（Issue #146）
 
+> **2026-09-27 以降、`dashboard.firstweb-works.com` は外部ロードバランサで配っている（9-2-e・Issue #368）。** 下の表の「Cloud Run の割り当て」（ドメインマッピング）は削除した。それ以外の行（authDomain・`/__/auth/` の中継・承認済みドメイン・OAuth クライアント・CORS）は今も有効である。ログインも同日にポップアップ方式からリダイレクト方式へ移した（Issue #375）。
+
 **同意画面（ブランド）はプロジェクトに 1 つで、ダッシュボードの Google ログインと GBP 連携が共有する**（2026-09-23 実測: 本番環境・外部で公開済み）。ブランド検証は承認済みドメインのすべてについて所有権の確認を求めるので、ダッシュボードが `*.run.app` と `*.firebaseapp.com` に残る限り通らない。そこでダッシュボードも `dashboard.firstweb-works.com` へ移す（別プロジェクトへの分離は採らなかった。GBP API の利用申請はプロジェクト単位のため）。
 
 | 対象 | 変更 | 管理 |
 |---|---|---|
-| Cloud Run の割り当て | `dashboard.firstweb-works.com` → dashboard-web | `custom-domain.tf`（9-2-b と同じ手順・CNAME はプロキシ OFF） |
+| Cloud Run の割り当て | `dashboard.firstweb-works.com` → dashboard-web | 当時は `custom-domain.tf` のドメインマッピング。**2026-09-27 に外部ロードバランサへ移して削除した**（9-2-e） |
 | Firebase Auth の `authDomain` | `gen-fw-line-meo.firebaseapp.com` → `dashboard.firstweb-works.com` | GitHub 変数 `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`（build-arg） |
 | `/__/auth/` の中継 | dashboard-web が `https://gen-fw-line-meo.firebaseapp.com/__/auth/` へ透過的に rewrite する（Firebase「redirect best practices」の Option 3。302 は不可） | `ts/apps/dashboard-web/next.config.ts` |
 | Identity Platform の承認済みドメイン | `dashboard.firstweb-works.com` を追加 | 手作業（§1 の 4）・`identitytoolkit` admin v2 `config` の `authorizedDomains` |
@@ -647,8 +651,16 @@ curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:
 
 3. Cloudflare の `api` と `dashboard` を、CNAME（`ghs.googlehosted.com`）から A レコード（ロードバランサの IP）へ変える。**プロキシは OFF のまま保つ**（ON にすると Cloudflare が前段に入り、`X-Forwarded-For` の並びが変わって流量制限の鍵がずれる・§9-2-d）
 4. `dashboard.` の Google ログインが通ることを人が確かめる（`/__/auth/` は dashboard-web が中継する）
-5. ドメインマッピング（`custom-domain.tf`）を消す（9-2-d の古い証明書は 1 で消し終えている）
+5. ドメインマッピング（`custom-domain.tf`）を消す（9-2-d の古い証明書は 1 で消し終えている）。**削除にもドメインの権限が要る**（9-2-a）。ADC が確認済みのアカウントでなければ、確認済みアカウントのトークンで当てる
+
+```bash
+GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済みのアカウント>)" \
+  terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback -target=google_cloud_run_domain_mapping.dashboard
+```
+
 6. Cloudflare の `api`・`dashboard` のコメント（「現在はドメインマッピング・移行中」）を、外部 LB の説明へ書き直す
+
+**段 3 は 2026-09-27 に完了した。** DNS を A レコードへ変えた後、ユーザーが実機で `dashboard.` の Google ログインを確かめ（Issue #375 のリダイレクト方式でも再確認）、ドメインマッピング 2 件を消した。
 
 ### 9-3. 進捗の追跡
 
