@@ -261,6 +261,32 @@ fx_run check-log-field-binding
 expect_red '事象名「demo unregistered」を出しますが、正典に登録されていません'
 t_end
 
+t_begin 'check-log-field-binding: logger の補間付きテンプレート event は fail-closed'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/dynamic-logger.ts <<'EOF'
+export function run(logger: { error(event: string): void }, operation: string): void {
+  logger.error(`demo: ${operation} failed`);
+}
+EOF
+fx_run check-log-field-binding
+expect_red '補間付きテンプレートで動的に構成されており'
+t_end
+
+t_begin 'check-log-field-binding: Sink の補間付きテンプレート event も fail-closed'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/dynamic-sink.ts <<'EOF'
+import type { Sink } from '@fwlm/observability';
+
+export function run(log: Sink, operation: string): void {
+  log('error', `demo: ${operation} failed`);
+}
+EOF
+fx_run check-log-field-binding
+expect_red '補間付きテンプレートで動的に構成されており'
+t_end
+
 t_begin 'check-log-field-binding: 正典の出典ファイルが走査対象外なら赤'
 fx_guard check-log-field-binding
 lfb_fixture

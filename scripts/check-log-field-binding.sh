@@ -115,6 +115,21 @@ grep_optional() {
   return 0
 }
 
+# 補間で構成する事象名は正典と照合できないため、TypeScript 側は fail-closed にする。
+reject_dynamic_ts_events() {
+  local file dynamic_calls
+  file="$1"
+  dynamic_calls="$(grep_optional '(^|[^a-zA-Z0-9_])logger(\?\.|\.)(info|warn|error|debug)[[:space:]]*(\?\.)?\([[:space:]]*`[^`]*[$][{][^`]*`' "$file")"
+  if [ -z "$dynamic_calls" ]; then
+    dynamic_calls="$(grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?\\.)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*\`[^\`]*[$][{][^\`]*\`" "$file")"
+  fi
+  if [ -n "$dynamic_calls" ]; then
+    echo "ERROR: ${file#$ROOT/} のログ事象が補間付きテンプレートで動的に構成されており、正典と照合できません。" >&2
+    echo "       → 事象名を文字列リテラルで指定するか、抽出器で値の集合を解決してください。" >&2
+    exit 1
+  fi
+}
+
 # TypeScript の実行時ログ呼び出しから事象名を抽出する。
 # `logger.info('event', ...)` / 注入された logger メソッドと、
 # `log('warn', 'event', ...)` / writeStructuredLog・correlationLog の Sink 形式を扱う。
@@ -122,6 +137,7 @@ grep_optional() {
 extract_ts_events() {
   local file conditional_events
   file="$1"
+  reject_dynamic_ts_events "$file"
   {
     # Sink 関数（名前付き logger / log / requestLog を含む）の level, event 形式。
     grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?\\.)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[^']+'" "$file" \

@@ -182,6 +182,8 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `gbp oauth callback: owner not found; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が見つからず、push 通知を省略した場合 |
 | `gbp oauth callback: push notification failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback 後の push 通知に失敗した場合 |
 | `gbp oauth callback: unexpected failure while handling callback` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の想定外例外 |
+| `gbp: handleGbpPostback failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP postback 処理の想定外例外 |
+| `gbp: handleGbpText failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP テキスト処理の想定外例外 |
 | `gbp: operation failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP API 操作の失敗。項目 `gbpFlow` で対象フローを識別する |
 | `gbp: createLocalPost threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | 投稿作成クライアントが想定外の例外を投げた場合 |
 | `gbp: listReviews threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | クチコミ取得クライアントが想定外の例外を投げた場合 |
