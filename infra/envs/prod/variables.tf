@@ -70,6 +70,17 @@ variable "dashboard_web_origin" {
   default     = ""
 }
 
+variable "gbp_oauth_redirect_url" {
+  description = <<-EOT
+    line-webhook の GBP_OAUTH_REDIRECT_URL env（OAuth リダイレクト URL・非秘匿）。
+    OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI と完全一致させる。
+    GBP の設定は全項目一括で有効化するため、OAuth クライアント ID・シークレット・暗号化鍵と
+    Gemini API キーを揃えるまでは空文字列にする（infra/README.md §9-2-b）。
+  EOT
+  type        = string
+  default     = ""
+}
+
 # --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---
 
 variable "line_channel_id" {

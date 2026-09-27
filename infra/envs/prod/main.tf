@@ -70,6 +70,8 @@ module "run_services" {
         # Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
         # store-detail の LIFF アプリ URL（liff_url）と同一値を line-webhook にも配線する。
         LIFF_STORE_DETAIL_URL = var.liff_url
+        # GBP OAuth コールバック URL。GBP を有効にするときに他の GBP 設定と一緒に設定する。
+        GBP_OAUTH_REDIRECT_URL = var.gbp_oauth_redirect_url
       }
     }
     "survey-web" = {

@@ -429,7 +429,7 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 |---|---|---|
 | 独自ドメイン | 自己所有・Search Console で所有権検証済み | **`firstweb-works.com` を取得済み**（お名前.com・2026-09-22 登録。9-2-a） |
 | ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT） |
-| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 割り当て済み（2026-09-23・`api.firstweb-works.com` → line-webhook。2026-09-27 からは外部ロードバランサ経由・9-2-e）。redirect URI の差し替えは Phase2 と対（Issue #282） |
+| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 経路は開通済み（`api.firstweb-works.com` → 外部ロードバランサ → line-webhook）。OAuth クライアント・同意画面・Terraform env の切り替えは GBP 設定の一括有効化時に行う（Issue #282） |
 | 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 実装済み（ManatoYamashita/fw-website）・独自ドメインでの公開待ち |
 | プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 同上 |
 | スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 下書き済み（fw-website `docs/google-review.md`） |
@@ -484,13 +484,19 @@ GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済
 
 #### 9-2-b. OAuth コールバックを独自ドメインへ移す（Issue #282）
 
-> **2026-09-27 以降、`api.firstweb-works.com` は外部ロードバランサで配っている（9-2-e・Issue #368）。この節のドメインマッピング（`custom-domain.tf`）は削除した。** 以下は、ドメインマッピングで割り当てた当時の手順の記録として残す。今の構成を変えるときは 9-2-d・9-2-e を見ること。
+> **現行経路（2026-09-27〜）**: `api.firstweb-works.com` は外部ロードバランサから line-webhook へ転送する（9-2-e・Issue #368）。現在の宣言は `infra/envs/prod/load-balancer.tf` にある。Cloud Run ドメインマッピングを使った旧手順は、下記に経緯として残す。
 
 OAuth ブランド検証のページ（developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification・2026-09-15 確認）は `The Authorized domains section also needs to include the redirect URIs or JavaScript origins authorized in your "Web application" OAuth client types.` と定める。**コールバックが `run.app` のままでは、承認済みドメインに入れられず関門 B を通らない。**
 
-`api.firstweb-works.com` を line-webhook に割り当てる。宣言は `infra/envs/prod/custom-domain.tf`（Cloud Run のドメインマッピング）。
+コールバック URI は `https://api.firstweb-works.com/gbp/oauth/callback` に統一する。Terraform の `gbp_oauth_redirect_url` が line-webhook の `GBP_OAUTH_REDIRECT_URL` に入り、OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI にも同じ値を設定する。同意画面の承認済みドメインには `firstweb-works.com` を登録する。Google は OAuth クライアントのリダイレクト URI のドメインを承認済みドメインへ含め、Search Console で所有権を確認するよう求めている（[ブランド検証の公式要件](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)）。
 
-**ドメインマッピングを選んだ理由と、その代償。** 公式は `Cloud Run domain mappings are in the preview launch stage. Due to latency issues, they are not production-ready` と明記する（asia-northeast1 は対応リージョン）。ここを通るのはオーナー 1 人につき 1 回の OAuth コールバックだけなので、遅延は実害にならない。常時費用のかかるロードバランサ（公式推奨）は選ばなかった。**LINE の Webhook など、応答時間が効く経路をこのドメインへ載せないこと。** 載せる必要が出たらロードバランサへ移す。
+**本番設定は GBP の全項目を揃えてから一括で切り替える。** line-webhook は GBP の OAuth クライアント ID・シークレット・リダイレクト URL・トークン暗号化鍵に加え、下書き生成に使う Gemini API キーを受け取って GBP を有効にする。URL だけを非空にすると一部設定として起動時に失敗するため、`gbp_oauth_redirect_url` は他の GBP 設定・Secret Manager の値と同じ apply で設定する。未設定時は空文字列で GBP は既定 OFF のままになる（Issue #323）。
+
+現時点で経路だけを確認する場合は `/health` を使う。GBP 既定 OFF の間、`/gbp/oauth/callback` はアプリケーション側で 404 になる。全設定の有効化後に、OAuth クライアントと Terraform env の URI が一字一句一致すること、および callback が line-webhook に届くことを確認する。
+
+当時（2026-09-23）は `api.firstweb-works.com` を Cloud Run ドメインマッピングで line-webhook に割り当て、`infra/envs/prod/custom-domain.tf` に宣言していた。2026-09-27 にドメインマッピングを削除し、現在は外部ロードバランサへ移行済みである（9-2-e）。
+
+**当時ドメインマッピングを選んだ理由と、その代償。** 公式は `Cloud Run domain mappings are in the preview launch stage. Due to latency issues, they are not production-ready` と明記している（当時 asia-northeast1 は対応リージョン）。当時は OAuth コールバック専用として使い、LINE Webhook のような応答時間が効く経路をこのドメインへ載せない方針だった。後に外部ロードバランサへ移行した理由と手順は 9-2-e を参照。
 
 手順（9-2-a の検証が済んでから）:
 
@@ -512,10 +518,11 @@ terraform -chdir=infra/envs/prod state show google_cloud_run_domain_mapping.gbp_
 curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status":"ok"} 200
 ```
 
-6. Phase2 の設定を差し替える（Issue #8 の実装と対。`infra/README.md` の Phase2 側 §10）:
-   - tfvars の `gbp_oauth_redirect_url` を `https://api.firstweb-works.com/gbp/oauth/callback` にして apply する
-   - OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI を**同じ値**に差し替える（1 文字でも違えば `redirect_uri_mismatch`）
+6. Phase2 の OAuth 設定を GBP 機能の有効化と同時に反映する（OAuth クライアント・secret 投入・稼働確認は Issue #8 の実装 runbook を参照。以前この README の §10 と案内していたが、§10 は別手順に置き換わっている）:
+   - tfvars の `gbp_oauth_redirect_url` を `https://api.firstweb-works.com/gbp/oauth/callback` にする
+   - OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI を**同じ値**にする（1 文字でも違えば `redirect_uri_mismatch`）
    - 同意画面の承認済みドメインに `firstweb-works.com` を登録する（ホームページ・ポリシーと同じ top private domain なので 1 つで足りる）
+   - OAuth クライアント ID・クライアントシークレット・トークン暗号化鍵・Gemini API キーも準備し、GBP の全設定を一括で反映する。URL だけを先に非空にして apply しない
 
 #### 9-2-c. ダッシュボードも独自ドメインへ移す（Issue #146）
 
