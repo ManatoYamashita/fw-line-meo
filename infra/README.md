@@ -959,6 +959,8 @@ SELECT onboarding_status, count(*) FROM owners GROUP BY 1;
 | `google_monitoring_alert_policy.customer_latency` | 客向け 2 面（`store-detail` / `survey-web`） | p95 遅延 > 2000ms が 5 分継続 |
 | `google_monitoring_alert_policy.webhook_signature_failure` | `line-webhook` | 署名検証失敗 > 5 件 / 5 分 |
 | `google_logging_metric.webhook_signature_failures` | 同上（上のアラートの入力） | — |
+| `google_monitoring_alert_policy.generation_failure` | `survey-web` の口コミ下書き生成（Issue #394） | 生成失敗 > 0 件 / 5 分 |
+| `google_logging_metric.generation_failures` | 同上（上のアラートの入力・ラベルは `error_kind` / `status`） | — |
 | `google_logging_metric.survey_funnel` | `survey-web`（Issue #137） | — |
 
 通知先はすべて `google_monitoring_notification_channel.email`（`var.alert_email`）である。
