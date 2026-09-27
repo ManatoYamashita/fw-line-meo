@@ -40,7 +40,7 @@ Playwright は既定で付属の Chromium を使う。**ローカルでも付属
 | Google Chrome | 159 秒・182 秒 | 2 回で計 3 件赤 | R3 の「描画が安定していない」（同じ状態の 2 枚に差がある） |
 | Aside | 3384 秒（56 分） | 1 件赤 | 1 件が 17 分止まって時間切れ。終了処理で止まる（下記） |
 
-**Aside は使わない**（#381）。Aside は Playwright が渡す `--disable-breakpad` を受けても `chrome_crashpad_handler` を 2 本起動する。これと、そこから起動される AsideUpdater の crash handler が Aside の標準エラー出力を継ぎ、本体の終了後も居残る。Playwright はブラウザの標準入出力が全部閉じるまで終了を待つので、`browser.close()` のたびに止まる。単独の起動・終了で 8〜50 秒かかり（付属 Chromium は 10ms 前後、Google Chrome は 40ms 前後）、居残りには上限が無い。ワーカーの終了で止まれば 5 分後に強制終了され、テストが全件緑でも exit 1 になる。実行中のワーカーで止まった実例では 55 分間 1 件も進まず、居残ったプロセスを止めた 1 秒後に再開した。`--disable-crashpad-for-testing` と `CHROME_HEADLESS=1` では止まらないことを確かめてある。
+**Aside は使わない**（#381）。Aside は Playwright が渡す `--disable-breakpad` を受けても `chrome_crashpad_handler` を 2 本起動する。これと、そこから起動される AsideUpdater の crash handler が Aside の標準エラー出力を継ぎ、本体の終了後も居残る。Playwright はブラウザの標準入出力が全部閉じるまで終了を待つので、`browser.close()` のたびに止まる。単独の起動・終了で 8〜50 秒かかり（付属 Chromium は 10ms 前後、Google Chrome は 40ms 前後）、居残りには上限が無い。ワーカーの終了で止まれば 5 分後に強制終了され、テストが全件緑でも exit 1 になる。実行中のワーカーで止まった実例では 55 分間 1 件も進まず、居残ったプロセスを止めた 1 秒後に再開した。居残りを消す手として `--disable-crash-reporter`・`--disable-crashpad-for-testing`・`--disable-crashpad-forwarding`・環境変数 `CHROME_HEADLESS=1` の 4 つを 5 回ずつ試したが、**どれを付けても終了処理で止まった**（効く手は見つかっていない・#386）。同じ手を試し直さない。
 
 Google Chrome の R3 の赤は、#378 で Aside に起きたものと症状が同じである（原因は切り分けていない）。#378 では、GPU で描かせると同じ状態を描き直すたびに濃淡や罫線の色が 1/255 揺れ、画素差で測る検査（dashboard-web の `mobile-layout.spec.ts` の R3）が散発的に落ちた（GPU で描かせた Aside で 11〜18%）。Aside は `--disable-gpu` で揺れが止まったが、Chrome では付けても赤が残る。**画素の一致を前提にする検査がローカルでだけ落ちるときは、まず変数を外して付属 Chromium で流し直す**（`env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH make e2e`）。
 
