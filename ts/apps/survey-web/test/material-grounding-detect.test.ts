@@ -171,9 +171,9 @@ describe('素材に無い固有名詞・数値・日付を検出する', () => {
     expect(kindsOf('定食屋 あおばの定食は美味しかったです。', { storeName: '定食屋 あおば' })).toEqual([]);
     // 対照: 同じ下書きでも、店名が手がかりを持たなければ拾う（除去が「常に 0」へ化けていないことの確認）。
     expect(kindsOf('BAR 3丁目で飲みました。', PLAIN)).toEqual(['number:digits', 'properNoun:latin']);
-    // 日付の軸は一言の手がかりでしか除外しないので、店名の中の時刻は店名の除去でしか外れない。
-    expect(kindsOf('24時間食堂 あおばで食べました。', { storeName: '24時間食堂 あおば' })).toEqual([]);
-    expect(kindsOf('24時間食堂 あおばで食べました。', PLAIN)).toEqual(['dateTime:timeOfDay']);
+    // 日付の軸は一言の手がかりでしか除外しないので、店名の中の日付の語は店名の除去でしか外れない。
+    expect(kindsOf('クリスマス食堂 あおばで食べました。', { storeName: 'クリスマス食堂 あおば' })).toEqual([]);
+    expect(kindsOf('クリスマス食堂 あおばで食べました。', PLAIN)).toEqual(['dateTime:calendar']);
   });
 
   it('客が一言に書いた事実は数えない（一言が無ければ拾う）', () => {
@@ -199,6 +199,14 @@ describe('素材に無い固有名詞・数値・日付を検出する', () => {
 
   it('日付・時刻の数字は数値の軸で二重に数えない', () => {
     expect(kindsOf('9月12日の12時頃に入りました。').filter((k) => k.startsWith('number'))).toEqual([]);
+  });
+
+  it('日付の軸が拾わない期間の数字は、数値の軸で数える（どちらの軸からも落とさない）', () => {
+    // 「日」「時」の前の数字を一律に日付の軸へ回すと、日付の軸が拾わない期間がどこにも数えられない。
+    expect(kindsOf('3日間通いました。')).toEqual(['number:digits']);
+    expect(kindsOf('3日前に食べました。')).toEqual(['number:digits']);
+    // 「2時間」は待ち時間であって時刻ではない。
+    expect(kindsOf('2時間待ちました。')).toEqual(['number:digits']);
   });
 
   it('自己照合の対照: 下書き自身を素材として渡すと、どの軸も 0 件になる', () => {

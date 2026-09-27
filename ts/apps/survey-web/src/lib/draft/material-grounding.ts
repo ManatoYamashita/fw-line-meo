@@ -56,8 +56,6 @@ export const STAR_NARRATION = /評価は\s*[1-5１-５]|[1-5１-５]\s*段階|�
 
 // 算用数字（桁区切りと小数を含む）と、証拠として残す直後の単位（ひらがな・句読点の手前まで 2 文字）。
 const NUMBER = /(\d+(?:,\d{3})*(?:\.\d+)?)([^\s\d、。,.!?！？「」()（）ぁ-ん]{0,2})/g;
-// 直後がこれらの数字は日付・時刻であり、dateTime の軸の範囲である。
-const DATE_UNIT = /^[時月日曜]/;
 const LATIN = /[A-Za-z][A-Za-z'&-]*/g;
 
 /**
@@ -78,7 +76,7 @@ export function detectUngroundedClaims(
   const sourceText = `${storeName}\n${comment ?? ''}`;
   const sourceLower = sourceText.toLowerCase();
   // 店名は素材そのもの。先に取り除く。数値・固有名詞は下で素材と照合するが、日付・時刻は一言の手がかり
-  // でしか除外しないので、店名の中の時刻（「24時間食堂」）はここで外さないと創作として数えてしまう。
+  // でしか除外しないので、店名の中の日付の語（「クリスマス食堂」）はここで外さないと創作として数えてしまう。
   // 空白で置き換えるのは、前後の文字が繋がって別の語に化けないようにするため。
   let text = draft.normalize('NFKC');
   if (storeName.trim() !== '') text = text.split(storeName).join(' ');
@@ -97,10 +95,13 @@ export function detectUngroundedClaims(
 
   // 数値: 値で照合する（一言「40分ほど」から下書き「40分」は拾わない・「1,000」と「1000」は同じ値）。
   const sourceNumbers = new Set([...sourceText.matchAll(NUMBER)].map((m) => numericValue(m[1]!)));
-  const numberText = text.replace(new RegExp(STAR_NARRATION.source, 'g'), ' ');
+  // 星の読み上げ（別の軸）と、日付の軸のパターンに当たった範囲を伏せてから数える。伏せるのは実際に当たった
+  // 範囲だけにする（「日」「時」の前の数字を一律に外すと、日付の軸が拾わない「3日間」がどこにも数えられない）。
+  let numberText = text.replace(new RegExp(STAR_NARRATION.source, 'g'), ' ');
+  for (const patterns of Object.values(lexicon.dateTime.patterns)) {
+    for (const pattern of patterns) numberText = numberText.replace(new RegExp(pattern.source, 'g'), ' ');
+  }
   for (const m of numberText.matchAll(NUMBER)) {
-    const unit = m[2] ?? '';
-    if (DATE_UNIT.test(unit)) continue;
     if (sourceNumbers.has(numericValue(m[1]!))) continue;
     push('number', 'digits', m[0]);
   }
