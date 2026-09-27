@@ -229,6 +229,48 @@ fx_run check-log-field-binding
 expect_red '正典に登録されていません'
 t_end
 
+t_begin 'check-log-field-binding: 注入 logger 経由の未登録事象も逆方向で赤'
+fx_guard check-log-field-binding
+lfb_fixture
+# 直呼びの既知事象を残して旧ガードの「抽出 0 件」防止を通し、注入 logger の未登録事象だけを追加する。
+fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
+export function run(deps: { logger: { warn(event: string): void } }): void {
+  writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+  deps.logger.warn('demo.unregistered');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: 正典の出典ファイルが走査対象外なら赤'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 店舗の識別子 | `storeId` | `store_id` | 既存 | `ts/packages/observability/src/fields.ts` ／ `go/internal/demo/log.go` | 変更禁止 |
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 出力時は別名へ写す |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | 既存 | `ts/apps/demo/test/log.ts` | |
+EOF
+fx_write ts/apps/demo/test/log.ts <<'EOF'
+writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+EOF
+fx_run check-log-field-binding
+expect_red '逆方向の事象走査対象に含まれていません'
+t_end
+
 t_begin 'check-log-field-binding: 実装の事象名を 1 件も拾えなければ赤（空振り防止）'
 fx_guard check-log-field-binding
 lfb_fixture
