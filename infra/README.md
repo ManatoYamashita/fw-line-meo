@@ -611,6 +611,8 @@ terraform -chdir=infra/envs/prod output -json lb_dns_authorization_records
 
 上の output の 3 件（`review`・`api`・`dashboard`）を、そのまま CNAME として足す。**プロキシは OFF（DNS only）にする。** 3 つの証明書が `ACTIVE` になるのを待つ。
 
+段 1 の直後の認証の試みは、CNAME がまだ無いので `CNAME_MISMATCH` で `FAILED` になる。これは想定どおりで、CNAME を足せば自動で試し直される（2026-09-26 は、足してから約 30 分で 3 つとも `ACTIVE`）。
+
 ```bash
 gcloud certificate-manager certificates list --format='table(name,managed.state,managed.domains)'
 ```
@@ -618,6 +620,17 @@ gcloud certificate-manager certificates list --format='table(name,managed.state,
 **段 3: 切り替える**（Issue #368 の PR2）
 
 1. HTTPS プロキシを証明書マップへ切り替え、9-2-d の古い証明書を消す。**apply は 2 回に分ける。** 宣言を消した証明書とプロキシの間には依存が無いので、1 回で当てると、まだプロキシが使っている証明書を先に消そうとして失敗しうる。`review.` が途切れないことを確かめる
+
+   **プロキシの切り替えは、tf の 1 回の apply では当たらない（2026-09-26 に実測）。** プロバイダが、証明書マップを付ける前に証明書の一覧を空にしようとし、API が `Error 412: Certificate Map or at least 1 SSL certificate must be specified` で拒否する（変更は丸ごと弾かれ、本番は変わらない）。実際には、次の順で `gcloud` から当ててから、tf で揃えた。
+
+   ```bash
+   gcloud compute target-https-proxies update survey-web-https --global --certificate-map=firstweb-works-lb   # 古い証明書は付けたまま
+   gcloud compute target-https-proxies update survey-web-https --global --clear-ssl-certificates
+   ```
+
+   - `gcloud` は完了の確認で手元が止まることがある。サーバー側の状態は `gcloud compute operations list --global --filter="targetLink~survey-web-https"` で見る
+   - `gcloud` は `certificate_map` を `https://certificatemanager.googleapis.com/v1/…` の形で書く。tf の宣言は `//certificatemanager.googleapis.com/…` なので、plan に書き方だけの差分が出る。同じマップを指していることを確かめ、tf で当て直して揃える（証明書の一覧はもう空なので、今度は拒否されない）
+   - 配られている証明書は、期限の日時で見分けられる: `echo | openssl s_client -connect <LB の IP>:443 -servername <ホスト名> | openssl x509 -noout -enddate`
 
 ```bash
 terraform -chdir=infra/envs/prod apply -target=google_compute_target_https_proxy.survey_web
@@ -634,7 +647,8 @@ curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:
 
 3. Cloudflare の `api` と `dashboard` を、CNAME（`ghs.googlehosted.com`）から A レコード（ロードバランサの IP）へ変える。**プロキシは OFF のまま保つ**（ON にすると Cloudflare が前段に入り、`X-Forwarded-For` の並びが変わって流量制限の鍵がずれる・§9-2-d）
 4. `dashboard.` の Google ログインが通ることを人が確かめる（`/__/auth/` は dashboard-web が中継する）
-5. ドメインマッピング（`custom-domain.tf`）と、9-2-d の古い証明書を消す
+5. ドメインマッピング（`custom-domain.tf`）を消す（9-2-d の古い証明書は 1 で消し終えている）
+6. Cloudflare の `api`・`dashboard` のコメント（「現在はドメインマッピング・移行中」）を、外部 LB の説明へ書き直す
 
 ### 9-3. 進捗の追跡
 
