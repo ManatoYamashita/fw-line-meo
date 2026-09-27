@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises';
+
 import { test, expect, type Page } from '@playwright/test';
 
 import { DASHBOARD_SURFACES, openStoreListAsAgency } from './fixtures/api';
@@ -272,7 +274,10 @@ for (const surface of DASHBOARD_SURFACES) {
           // 落ちたときに「どこが動いたか」を追えるよう、3 枚を添付し、差の外接矩形を文言に出す（Issue #378）。
           if (start.selfDiff !== null) {
             for (const [name, body] of Object.entries(start.shots)) {
-              await testInfo.attach(`r3-unstable-${container.label}-${name}.png`, { body, contentType: 'image/png' });
+              // body で添付すると list reporter ではファイルが残らない。出力先へ書いてから添付する。
+              const path = testInfo.outputPath(`r3-unstable-${container.label}-${name}.png`);
+              await writeFile(path, body);
+              await testInfo.attach(`r3-unstable-${container.label}-${name}.png`, { path, contentType: 'image/png' });
             }
           }
           expect(
