@@ -28,7 +28,7 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 重大度 | `severity` | `severity` | 新規 | `ts/packages/observability/src/sink.ts` ／ `go/internal/logging/logging.go` | 集約基盤が重大度として解釈する特別項目。標準ライブラリが既定で出す `level` という名前では解釈されない（移送前の本番実測）。値は集約基盤の列挙に従い `DEBUG` / `INFO` / `WARNING` / `ERROR` を用いる。**警告は `WARNING` であって `WARN` ではない**（標準ライブラリは `WARN` を返すため写し替えが要る） |
-| 事象名 | `event` | `event`（実行サマリー行のみ） | 既存 | `ts/packages/observability/src/sink.ts` ／ `go/cmd/daily-batch/main.go` | 日次バッチ層は原則 `msg` 文字列で識別する。**実行サマリー行だけは `event` = `daily-batch.run` を持つ**（Issue #139）。ログベース指標が外部 API の生死判定のためにこの行を数えるので、人が読む `msg` の文言ではなく変わらない名前で識別する。それ以外の行への付与は必要になった時点で別課題 |
+| 事象名 | `event` | `event` | 既存 | `ts/packages/observability/src/sink.ts` ／ `go/cmd/daily-batch/main.go` | 日次バッチ層は原則 `msg` 文字列で識別する。**実行サマリー行だけは `event` = `daily-batch.run` を持つ**（Issue #139）。ログベース指標が外部 API の生死判定のためにこの行を数えるので、人が読む `msg` の文言ではなく変わらない名前で識別する。それ以外の行への付与は必要になった時点で別課題 |
 | 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | **出力時は集約基盤が解釈する `logging.googleapis.com/trace` へ写す**（同一値の記録が 1 本に束ねられる）。**値の供給は #229**。本 spec では常に未設定であり、未設定なら項目ごと出力しない |
 
 ### 1.2 面をまたいで使う項目
@@ -137,7 +137,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 
 ## 2. 事象名
 
-事象名は面ごとに固有であり、応答層と日次バッチ層で対応づく性質のものではない。**日次バッチ層は事象名を持たない**（`msg` 文字列で識別する。本 spec の範囲外）。
+事象名は面ごとに固有であり、応答層と日次バッチ層で対応づく性質のものではない。**日次バッチ層は実行サマリー行（`daily-batch.run`・Issue #139）だけが事象名を持つ**。それ以外の行は `msg` 文字列で識別する（本 spec の範囲外）。
 
 | 事象名 | 実行面 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|
@@ -152,7 +152,9 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `store-detail.pool_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.query_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.store_hint_ignored` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
-| `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している |
+| `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している。**変更禁止**: トークン発行が通った実行でしか出ないため、本番の集計指標がこの文字列で LINE の資格情報の生死を数える（`infra/modules/guardrails/main.tf` の `line_token_issued_runs`・Issue #139） |
+| `delivery-job.token_issue_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | LINE のトークン発行に失敗したとき（Issue #139）。直後に `delivery-job.fatal` も出るが、そちらは対象抽出（DB）の失敗と同じ事象名なので LINE の失敗だけを数えられない。**変更禁止**: 本番の集計指標がこの文字列で絞り込む（`line_token_issue_failures`）。項目は `errorKind` と、状態コードがあれば `status` だけである |
+| `daily-batch.run` | daily-batch | 新規 | `go/cmd/daily-batch/main.go` | 日次バッチの実行サマリー行（Issue #139）。**変更禁止**: 本番の集計指標がこの文字列と `fetch_ok` / `stores_total` で Places の生死を数える（`places_fetch_ok_runs` / `places_fetch_eligible_runs`） |
 | `delivery-job.fatal` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | `delivery-job.isolated_error` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 1 店舗の失敗を他店から隔離したときの記録 |
 | `delivery-job.exit` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 資源の閉じ忘れ検知（#151） |
