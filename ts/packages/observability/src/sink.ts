@@ -52,6 +52,8 @@ const PLAIN_FIELDS = [
   'errorKind',
   'status',
   'agencyId',
+  'auditAction',
+  'auditTargetId',
   'lineRequestId',
   'violatedAspects',
   'reason',

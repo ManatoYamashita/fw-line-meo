@@ -41,6 +41,13 @@ export interface LogFields {
   /** 代理店の識別子。どの代理店の操作が失敗したかを特定する。 */
   readonly agencyId?: string;
 
+  // --- ダッシュボード API（監査記録の失敗・Issue #250） ---
+
+  /** 書けなかった監査記録の action。有限集合の識別子（AUDIT_LOG_ACTIONS）。 */
+  readonly auditAction?: string;
+  /** 書けなかった監査記録の対象の識別子（UUID）。欠けた記録を人手で補う手がかりに使う。 */
+  readonly auditTargetId?: string;
+
   // --- 外部プラットフォーム由来の識別子 ---
 
   /**

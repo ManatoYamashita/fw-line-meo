@@ -2,6 +2,7 @@ import type { AuditLogger, DashboardUserIdentity, InviteCodeItem } from '@fwlm/d
 import { authenticate, type AuthDeps } from './auth.js';
 import { resolveAgencyScope } from './scope.js';
 import { jsonError } from './http.js';
+import { recordAudit } from './audit.js';
 import type { Sink } from '@fwlm/observability';
 
 // GET /invite-codes・POST /invite-codes・POST /invite-codes/:id/disable の中核ロジック
@@ -91,7 +92,8 @@ export async function handleInviteCodeIssue(
   } catch {
     return jsonError(500, 'internal', '招待コードの発行に失敗しました。時間をおいて再試行してください');
   }
-  await deps.auditLog({
+  // 監査の失敗は警告を残して握る。エラーを返すと、押し直した利用者が 2 件目のコードを作る（Issue #250）。
+  await recordAudit(deps.auditLog, req.log, {
     actorType: auth.user.role,
     actorId: auth.user.id,
     action: 'invite_code_issued',
@@ -118,6 +120,7 @@ export interface InviteCodeDisableRequest {
   id: string;
   // ルート層でパースした JSON body（{ agencyId?: string }。operator は必須・agency は省略＝自代理店）。
   body: unknown;
+  log?: Sink;
 }
 
 // UUID 形式でない id は DB を叩かず 404 扱い（存在の探り当てを許さない・store-registration と同じ規律）。
@@ -149,7 +152,7 @@ export async function handleInviteCodeDisable(
   if (item === null) {
     return jsonError(404, 'not_found', '招待コードが見つかりません');
   }
-  await deps.auditLog({
+  await recordAudit(deps.auditLog, req.log, {
     actorType: auth.user.role,
     actorId: auth.user.id,
     action: 'invite_code_disabled',

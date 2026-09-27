@@ -226,18 +226,27 @@ EOF
 #
 # 正典は「名前の唯一の基準」である。実装が正典に無い事象名を出せてしまうと、その主張が
 # 前方に対して成立しない（後から足された名前が規約の外で増えていく）。
-# 抽出源は共有経路の呼び出しに限る。散文から拾うと誤検知が支配的になる。
+# 抽出源は記録の呼び出しに限る。散文から拾うと誤検知が支配的になる。
+#
+# 呼び出し形は 3 つある（Issue #250 で 2 → 3 に拡張）:
+#   1. 共有 sink の直呼び・相関 ID 付きの sink: `writeStructuredLog('<level>', '<名前>'` / `correlationLog(…`
+#   2. Sink を引数で受けた局所呼び出し: `log('<level>', '<名前>'`（dashboard-api の合成根など）
+#   3. 面ごとの logger: `logger.<level>('<名前>'`（line-webhook・delivery-job など）
+# 2 と 3 を見ていなかった間、`line-webhook.audit_log_failed` は正典に無くても緑だった。
+# 省略可能な呼び出し（`log?.(` / `logger?.warn(`）も同じ形として拾う（拾わないと、握った失敗を
+# 警告で残す経路ほど検査から外れる。#250 の実装で実測）。
+# 名前が次の行へ折り返された呼び出しは拾えない（行単位の抽出の限界）。現行の実装には無い。
 emitted_events=0
-# 相関 ID を付与した sink は `correlationLog` という名前で呼び出すため、
-# 共有 sink の直呼びと同じく検査対象へ含める。
-call_sites="$(grep -rlE '(writeStructuredLog|correlationLog)\(' "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
+SINK_CALL="(writeStructuredLog|correlationLog|(^|[^a-zA-Z0-9_.\$])log)(\\?\\.)?\\('(info|warn|error)', *'[a-zA-Z0-9_.-]+'"
+LOGGER_CALL="logger(\\?)?\\.(info|warn|error)(\\?\\.)?\\('[a-zA-Z0-9_.-]+'"
+call_sites="$(grep -rlE "${SINK_CALL}|${LOGGER_CALL}" "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
   --include='*.ts' --include='*.tsx' \
   --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
   --exclude-dir=test --exclude-dir=e2e --exclude-dir=perf --exclude-dir=eval 2>/dev/null || true)"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  used="$(grep -oE "(writeStructuredLog|correlationLog)\('[a-z]+', *'[a-zA-Z0-9_.-]+'" "$f" \
-    | sed -E "s/.*, *'//; s/'$//" | sort -u || true)"
+  used="$(grep -oE "${SINK_CALL}|${LOGGER_CALL}" "$f" \
+    | sed -E "s/'\$//; s/.*'//" | sort -u || true)"
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
     emitted_events=$((emitted_events + 1))
@@ -263,7 +272,7 @@ if [ "$checked" -eq 0 ]; then
 fi
 if [ "$emitted_events" -eq 0 ]; then
   echo "ERROR: 実装から事象名を 1 件も抽出できませんでした。ガードが空振りしています。" >&2
-  echo "       → writeStructuredLog の呼び出し形式が前提と異なります。" >&2
+  echo "       → writeStructuredLog / log / logger.<level> の呼び出し形式が前提と異なります。" >&2
   exit 1
 fi
 if [ "$declared_count" -eq 0 ]; then

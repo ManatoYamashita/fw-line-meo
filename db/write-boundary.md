@@ -43,3 +43,15 @@
 - `audit_logs` の `actor_id` は、`actor_type` が `operator` / `agency` の場合は `dashboard_users.id`、
   `owner` の場合は `owners.id`。多相参照のため単一の FK は張らず、actor type は ENUM で 3 種に限定する。
   顧客操作は記録対象外で、`line_user_id` や認証 subject を監査列へコピーしない。
+- `audit_logs` の書込は業務の書込を確定した**後**に行い、**失敗しても業務の書込を巻き戻さず、応答も
+  業務の結果どおりに返す**（Issue #250 で案 A に決定）。失敗は警告として構造化ログへ残す
+  （dashboard-api は `dashboard-api.audit_log_failed`・`ts/apps/dashboard-api/src/audit.ts`、line-webhook は
+  `line-webhook.audit_log_failed`・`ts/apps/line-webhook/src/owner/completed-menu.ts`）。
+  - 理由: 業務の書込は別の接続で確定済みなので、エラーを返すと「書込は成功・監査は欠ける・応答はエラー」になり、
+    押し直した利用者が代理店や招待コードを重複して作る（`agencies` に名前の一意制約は無く、招待コードは発行のたびに
+    別のコードになる）。2 つの実行面の規則も揃う。
+  - 払うもの: その操作の監査記録が欠ける。欠けた記録を人手で補えるよう、dashboard-api の警告は action と対象の
+    識別子を持つ。警告は Cloud Logging の保持期間（30 日）で消える。
+  - 採らなかった案: 業務の書込と同じトランザクションで書く（案 B）。監査の欠落は起きないが、DAL の書込関数が
+    トランザクションを受け取る形へ変わり、line-webhook と共有する `confirmStore` や衝突で再試行する招待コードの
+    発行まで作り直しになる。監査の表の障害（例: migration の未適用）で管理操作が全部止まる。

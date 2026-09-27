@@ -240,3 +240,63 @@ EOF
 fx_run check-log-field-binding
 expect_red '実装から事象名を 1 件も抽出できませんでした'
 t_end
+
+# ---------------------------------------------------------------------------
+# Issue #250: 逆方向の抽出が `writeStructuredLog(` / `correlationLog(` の 2 形しか見ておらず、
+# 面ごとの logger（`deps.logger.warn('<事象名>', …)`）と Sink を受けた局所呼び出し
+# （`log('warn', '<事象名>', …)`）で出す事象名が、正典に無くても緑だった。
+
+t_begin 'check-log-field-binding: logger.<level> で出す未登録の事象名を赤にする'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/logger.ts <<'EOF'
+export function onFailure(deps: { logger: { warn: (e: string, f?: object) => void } }): void {
+  deps.logger.warn('demo.logger_unregistered', { errorKind: 'Error' });
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.logger_unregistered」を出しますが、正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: Sink の局所呼び出しで出す未登録の事象名を赤にする'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/sink-local.ts <<'EOF'
+import type { Sink } from '@fwlm/observability';
+
+export function onFailure(log: Sink): void {
+  log('error', 'demo.sink_unregistered', { storeId: 'store-1' });
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.sink_unregistered」を出しますが、正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: logger.<level> の登録済みの事象名は数えて緑'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/logger.ts <<'EOF'
+export function onStart(deps: { logger: { info: (e: string) => void } }): void {
+  deps.logger.info('demo.started');
+}
+EOF
+fx_run check-log-field-binding
+expect_green
+expect_output_matches '実装の事象名 2 件'
+t_end
+
+t_begin 'check-log-field-binding: 省略可能な呼び出し（log?.( / logger?.warn()で出す未登録の事象名も赤にする'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/optional.ts <<'EOF'
+import type { Sink } from '@fwlm/observability';
+
+export function onFailure(log: Sink | undefined, logger?: { warn: (e: string) => void }): void {
+  log?.('warn', 'demo.optional_sink_unregistered');
+  logger?.warn('demo.optional_logger_unregistered');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.optional_sink_unregistered」を出しますが'
+expect_red '事象名「demo.optional_logger_unregistered」を出しますが'
+t_end
