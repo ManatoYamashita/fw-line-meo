@@ -124,7 +124,7 @@ extract_ts_events() {
   file="$1"
   {
     # Sink 関数（名前付き logger / log / requestLog を含む）の level, event 形式。
-    grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[^']+'" "$file" \
+    grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?\\.)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[^']+'" "$file" \
       | sed -E "s/.*,[[:space:]]*'//; s/'$//"
 
     # 共有 Sink の引数に条件式を使う呼び出し（line-webhook の起動状態）。
@@ -134,10 +134,10 @@ extract_ts_events() {
     fi
 
     # 注入されたオブジェクト logger と、withCorrelation の戻り値を log と呼ぶ Sink。
-    grep_optional "\\.(info|warn|error|debug)[[:space:]]*(\\?)?\\([[:space:]]*'[^']+'" "$file" \
+    grep_optional "\\.(info|warn|error|debug)[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \
       | sed -E "s/.*\\('//; s/'$//"
     # event を第一引数に取る log 関数も扱う。level, event 形式は上の Sink 抽出が受け持つ。
-    grep_optional "(^|[^a-zA-Z0-9_.])log[[:space:]]*(\\?)?\\([[:space:]]*'[^']+'" "$file" \
+    grep_optional "(^|[^a-zA-Z0-9_.])log[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \
       | sed -E "s/.*\\('//; s/'$//" \
       | awk '$0 !~ /^(info|warn|error|debug)$/'
 

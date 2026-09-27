@@ -333,9 +333,26 @@ t_end
 t_begin 'check-log-field-binding: logger.<level> の登録済みの事象名は数えて緑'
 fx_guard check-log-field-binding
 lfb_fixture
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 店舗の識別子 | `storeId` | `store_id` | 既存 | `ts/packages/observability/src/fields.ts` ／ `go/internal/demo/log.go` | 変更禁止 |
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 出力時は別名へ写す |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | 既存 | `ts/apps/demo/src/log.ts` | |
+| `demo.logger_started` | demo | 既存 | `ts/apps/demo/src/logger.ts` | |
+EOF
 fx_write ts/apps/demo/src/logger.ts <<'EOF'
 export function onStart(deps: { logger: { info: (e: string) => void } }): void {
-  deps.logger.info('demo.started');
+  deps.logger.info('demo.logger_started');
 }
 EOF
 fx_run check-log-field-binding
