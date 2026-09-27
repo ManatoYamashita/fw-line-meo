@@ -6,7 +6,8 @@ import type { ReactNode } from 'react';
 // firebase の認証状態変化を手動で駆動するため、onAuthStateChanged のコールバックを捕捉する。
 let authCallback: ((user: unknown) => void | Promise<void>) | null = null;
 const signOutMock = vi.fn().mockResolvedValue(undefined);
-const signInWithPopupMock = vi.fn().mockResolvedValue({});
+const signInWithRedirectMock = vi.fn().mockResolvedValue(undefined);
+const getRedirectResultMock = vi.fn().mockResolvedValue(null);
 const notifyActionErrorMock = vi.fn();
 const notifyActionSuccessMock = vi.fn();
 
@@ -23,7 +24,8 @@ vi.mock('firebase/auth', () => ({
       authCallback = null;
     };
   },
-  signInWithPopup: (...args: unknown[]) => signInWithPopupMock(...args),
+  signInWithRedirect: (...args: unknown[]) => signInWithRedirectMock(...args),
+  getRedirectResult: (...args: unknown[]) => getRedirectResultMock(...args),
   signOut: (...args: unknown[]) => signOutMock(...args),
   GoogleAuthProvider: class {},
 }));
@@ -58,7 +60,9 @@ function signedInUser() {
 beforeEach(() => {
   authCallback = null;
   signOutMock.mockClear();
-  signInWithPopupMock.mockReset().mockResolvedValue({});
+  signInWithRedirectMock.mockReset().mockResolvedValue(undefined);
+  getRedirectResultMock.mockReset().mockResolvedValue(null);
+  window.sessionStorage.clear();
   notifyActionErrorMock.mockReset();
   notifyActionSuccessMock.mockReset();
   getMeMock.mockReset();
@@ -119,13 +123,9 @@ describe('AuthProvider / useAuth', () => {
     expect(screen.getByTestId('status').textContent).toBe('signedOut');
   });
 
-  it('signInWithPopup の待機中は処理中を保ち、重複したログイン要求を送らない', async () => {
-    let resolvePopup!: () => void;
-    signInWithPopupMock.mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolvePopup = resolve;
-      }),
-    );
+  it('ログインを押すと同じタブで Google へ移り、移るまで処理中を保ち、重複した要求を送らない', async () => {
+    // 本物はページごと移るので解決しない。移るまでの間を模す。
+    signInWithRedirectMock.mockReturnValue(new Promise<void>(() => {}));
     render(
       <AuthProvider>
         <Probe />
@@ -135,17 +135,16 @@ describe('AuthProvider / useAuth', () => {
     fireEvent.click(screen.getByTestId('login'));
     fireEvent.click(screen.getByTestId('login'));
     expect(screen.getByTestId('signing-in').textContent).toBe('true');
-    expect(signInWithPopupMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => resolvePopup());
-    // ポップアップが解決しても /me が確定するまでは処理中を保つ。
-    expect(screen.getByTestId('signing-in').textContent).toBe('true');
+    expect(signInWithRedirectMock).toHaveBeenCalledTimes(1);
+    // 戻ってきたときに「押したログインの戻り」と分かるよう、タブに印を残す。
+    expect(window.sessionStorage.getItem('fwlm-sign-in-pending')).toBe('1');
   });
 
-  it('ポップアップを利用者が閉じた場合は失敗を通知せず処理中を解除する', async () => {
-    signInWithPopupMock.mockRejectedValue({
-      code: 'auth/popup-closed-by-user',
-      message: 'The popup has been closed by the user.',
+  it('Google から戻ってきて /me が成功すると成功を通知し、印を消す', async () => {
+    window.sessionStorage.setItem('fwlm-sign-in-pending', '1');
+    getMeMock.mockResolvedValue({
+      ok: true,
+      value: { role: 'operator', agencyId: null, agencyName: null, displayName: '運営太郎' },
     });
     render(
       <AuthProvider>
@@ -153,14 +152,90 @@ describe('AuthProvider / useAuth', () => {
       </AuthProvider>,
     );
 
-    fireEvent.click(screen.getByTestId('login'));
-    await waitFor(() => expect(screen.getByTestId('signing-in').textContent).toBe('false'));
+    // 戻ってきた直後は /me が確定するまで処理中を表示する。
+    expect(screen.getByTestId('signing-in').textContent).toBe('true');
+    await act(async () => {
+      await authCallback!(signedInUser());
+    });
+    expect(notifyActionSuccessMock).toHaveBeenCalledWith({ title: 'ログインしました。' });
+    expect(screen.getByTestId('signing-in').textContent).toBe('false');
+    expect(window.sessionStorage.getItem('fwlm-sign-in-pending')).toBeNull();
+  });
+
+  it('印が無い読み込み（初回のセッション復元）では成功を通知しない', async () => {
+    getMeMock.mockResolvedValue({
+      ok: true,
+      value: { role: 'operator', agencyId: null, agencyName: null, displayName: '運営太郎' },
+    });
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    expect(screen.getByTestId('signing-in').textContent).toBe('false');
+    await act(async () => {
+      await authCallback!(signedInUser());
+    });
+    expect(screen.getByTestId('status').textContent).toBe('ready');
+    expect(notifyActionSuccessMock).not.toHaveBeenCalled();
+  });
+
+  it('Google の画面から「戻る」で帰ってきた（ユーザー無し）場合は、失敗を通知せず処理中と印を解く', async () => {
+    window.sessionStorage.setItem('fwlm-sign-in-pending', '1');
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    expect(screen.getByTestId('signing-in').textContent).toBe('true');
+    await act(async () => {
+      await authCallback!(null);
+    });
+    expect(screen.getByTestId('signing-in').textContent).toBe('false');
+    expect(screen.getByTestId('status').textContent).toBe('signedOut');
+    expect(window.sessionStorage.getItem('fwlm-sign-in-pending')).toBeNull();
     expect(notifyActionErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('戻ってきた後の失敗（getRedirectResult）は内部文言を出さずに通知し、処理中と印を解く', async () => {
+    window.sessionStorage.setItem('fwlm-sign-in-pending', '1');
+    getRedirectResultMock.mockRejectedValue({
+      code: 'auth/network-request-failed',
+      message: 'Firebase: Error (auth/network-request-failed).',
+    });
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(notifyActionErrorMock).toHaveBeenCalledTimes(1));
+    const copy = notifyActionErrorMock.mock.calls[0]?.[0] as { title: string; description: string };
+    expect(copy.title).toBe('ログインできませんでした');
+    expect(JSON.stringify(copy)).not.toContain('auth/network-request-failed');
+    expect(screen.getByTestId('signing-in').textContent).toBe('false');
+    expect(window.sessionStorage.getItem('fwlm-sign-in-pending')).toBeNull();
+  });
+
+  it('利用者が取り消した戻り（auth/redirect-cancelled-by-user）は失敗として通知しない', async () => {
+    getRedirectResultMock.mockRejectedValue({ code: 'auth/redirect-cancelled-by-user', message: 'cancelled' });
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(getRedirectResultMock).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(notifyActionErrorMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('signing-in').textContent).toBe('false');
   });
 
   it('保存領域の失敗は内部エラーを出さず、空き容量と再起動を案内する', async () => {
     const internalMessage = 'IO error: /private/000471.ldb: Unable to create writable file';
-    signInWithPopupMock.mockRejectedValue({ code: 'auth/internal-error', message: internalMessage });
+    signInWithRedirectMock.mockRejectedValue({ code: 'auth/internal-error', message: internalMessage });
     render(
       <AuthProvider>
         <Probe />

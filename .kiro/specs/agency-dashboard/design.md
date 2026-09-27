@@ -112,7 +112,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Frontend | Next.js ^16 / React ^19（`ts/apps/dashboard-web`・新規） | 運営・代理店向け UI。standalone 出力 | survey-web と同規約 |
-| Frontend Auth | firebase（JS SDK）**新規依存** | `signInWithPopup` + GoogleAuthProvider、`getIdToken()` | redirect 方式は不採用（3rd party storage 分離問題） |
+| Frontend Auth | firebase（JS SDK）**新規依存** | `signInWithRedirect` + `getRedirectResult` + GoogleAuthProvider、`getIdToken()` | 当初はポップアップ方式で、redirect 方式は 3rd party storage 分離問題のため不採用だった。authDomain を面と同じドメイン（dashboard.firstweb-works.com）へ移し `/__/auth/` を中継する構成（Issue #146）でその問題が無くなり、ポップアップが前に出ないブラウザで利用者が待たされたため、2026-09-27 に redirect 方式へ移した |
 | Backend | Hono ^4 / @hono/node-server（`ts/apps/dashboard-api`・拡張） | 業務 API 全部＋既存 QR | `hono/cors`（同梱）を新規使用 |
 | Backend Auth | firebase-admin ^13（既存） | `verifyIdToken`＋検証済みクレーム（email / email_verified / sign_in_provider） | 初回ログイン時リンクに使用 |
 | Shared | `@fwlm/store-identification`（新規パッケージ） | Places 検索＋店舗確定 TX（line-webhook から移設） | FieldMask 変更禁止 |
@@ -157,7 +157,7 @@ ts/apps/dashboard-web/
     └── app/
         ├── layout.tsx           # 全体レイアウト＋AuthProvider
         ├── page.tsx             # ルート（未認証→/login・認証済→/stores へ）
-        ├── login/page.tsx       # Google ログイン（signInWithPopup）・未登録/無効時の案内
+        ├── login/page.tsx       # Google ログイン（signInWithRedirect）・未登録/無効時の案内
         ├── stores/page.tsx      # 店舗一覧（ステータス・0件導線）
         ├── stores/new/page.tsx  # 店舗登録ウィザード（オーナー選択→検索→確認→基本情報→確定）
         ├── invite-codes/page.tsx# 招待コード一覧・発行・無効化
@@ -208,7 +208,7 @@ sequenceDiagram
     participant D as PostgreSQL
 
     U->>W: /login で Google ログイン
-    W->>F: signInWithPopup GoogleAuthProvider
+    W->>F: signInWithRedirect GoogleAuthProvider（同じタブで Google へ移り、戻ってくる）
     F-->>W: ID トークン
     W->>A: GET /me Bearer トークン
     A->>F: verifyIdToken
@@ -498,7 +498,7 @@ export function listCategories(db: Queryable): Promise<{ code: string; label: st
 | Requirements | 1.1, 1.2, 1.3, 1.4, 7.4 |
 
 **Responsibilities & Constraints**
-- `signInWithPopup(GoogleAuthProvider)` のみ。redirect 方式は使わない（ブラウザのサードパーティストレージ分離問題）。
+- `signInWithRedirect(GoogleAuthProvider)` を使い、戻りの失敗は `getRedirectResult` で受け取る（2026-09-27 に popup 方式から移行）。redirect 方式を避けていた理由（ブラウザのサードパーティストレージ分離）は、authDomain を面と同じドメインへ移し `/__/auth/` を中継する構成（Issue #146・`next.config.ts`）で無くなった。popup 方式は、ブラウザによっては Google の画面を前に出さない新しいタブで開き、利用者がボタンの回り続ける理由に気づけなかった。「押したログインの戻り」と「初回のセッション復元」は、押したときにタブの sessionStorage へ残す印で区別する。
 - ログイン後に `GET /me` を呼び、`unregistered`/`disabled` は Firebase から即 `signOut` して案内表示（管理情報は一切描画しない）。
 - トークンは Firebase SDK 管理（自動更新）。localStorage への独自保存はしない。
 - `api.ts` はエラー封筒を判別共用体で返す: `type ApiResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string }`。

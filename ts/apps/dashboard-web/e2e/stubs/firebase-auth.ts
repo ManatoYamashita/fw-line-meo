@@ -2,14 +2,14 @@
 //
 // 実ブラウザでこの面を開くと 2 段で止まる。build-arg 未注入なら `getAuth()` が
 // `auth/invalid-api-key` を投げて状態が `loading` から動かず、注入済みでも未ログインなら
-// `onAuthStateChanged(null)` → `/login` へ送られ、唯一の操作が Google の実ポップアップを開く。
+// `onAuthStateChanged(null)` → `/login` へ送られ、唯一の操作が Google の実画面へ移る（リダイレクト方式）。
 // どちらの経路でも管理データは 1 行も描画されず、横スクロールを測る対象が存在しない。
 //
 // このモジュールは `next.config.ts` の `resolveAlias` により、**サーバー側 env
 // `E2E_STUB_IDP=1` が立っているビルドでだけ** `firebase/auth` の代わりに束ねられる。
 // env が無ければ差し替えは起きず本物が使われる（fail-closed）。面のソースは 1 行も変えていない。
 //
-// 公開する 5 つは `src/lib/firebase.ts` と `src/lib/auth-context.tsx` が呼ぶ全量である。
+// 公開する 6 つは `src/lib/firebase.ts` と `src/lib/auth-context.tsx` が呼ぶ全量である。
 
 /** スタブが束ねられたことを実測するための印。ID トークンとしてそのまま流す。 */
 export const E2E_FIREBASE_AUTH_STUB_MARKER = 'e2e-firebase-auth-stub-4d7b13';
@@ -70,7 +70,9 @@ export function onAuthStateChanged(
 
 export class GoogleAuthProvider {}
 
-export async function signInWithPopup(_auth: StubAuth, _provider: GoogleAuthProvider): Promise<void> {
+// 本物はページごと Google へ移って戻ってくるが、スタブはその往復を省き、その場でログイン済みにする。
+// 面から見ると「押した → 戻ってきて onAuthStateChanged にユーザーが届いた」と同じ順になる。
+export async function signInWithRedirect(_auth: StubAuth, _provider: GoogleAuthProvider): Promise<void> {
   if (globalThis.localStorage?.getItem(SIGN_IN_ERROR_KEY) === 'storage') {
     throw {
       code: 'auth/internal-error',
@@ -79,6 +81,11 @@ export async function signInWithPopup(_auth: StubAuth, _provider: GoogleAuthProv
   }
   auth.currentUser = stubUser;
   notify();
+}
+
+// 往復を省いているので、戻りの結果は常に無い（本物でも、戻りでない読み込みでは null が返る）。
+export async function getRedirectResult(_auth: StubAuth): Promise<null> {
+  return null;
 }
 
 export async function signOut(_auth: StubAuth): Promise<void> {
