@@ -1310,6 +1310,11 @@ const MOTION_CLASSIFICATIONS: readonly MotionClassification[] = [
     note: 'Spinner の無限回転。動き低減設定下で最も止めるべき対象',
   },
   {
+    utility: 'animate-pulse',
+    kind: 'progress',
+    note: 'Skeleton の明滅。無限に繰り返すので Spinner と同じく抑制の対象',
+  },
+  {
     utility: 'transition-colors',
     kind: 'progress',
     note: 'Button / Badge / Input / Textarea / Checkbox の色遷移。'

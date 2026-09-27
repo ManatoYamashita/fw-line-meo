@@ -8,7 +8,7 @@ import { cn } from '@fwlm/ui/lib/utils';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
 import { Heading } from '@fwlm/ui/components/heading';
 import { PageShell } from '@fwlm/ui/components/page-shell';
-import { Spinner } from '@fwlm/ui/components/spinner';
+import { TableSkeleton } from '@fwlm/ui/components/skeleton';
 import {
   Table,
   TableBody,
@@ -47,6 +47,20 @@ const BASE_COLUMN_COUNT = 5;
 // 発行操作から開閉先のパネルを指すための id（aria-controls 用）。
 function panelId(storeId: string): string {
   return `qr-panel-${storeId}`;
+}
+
+// 取得中の表示。形は aria-hidden で支援技術から外し、読み上げは role="status" の文言 1 つに
+// 一本化する。文言は可視のまま残す。動き低減設定下では明滅が止まり、形だけでは
+// 「読み込み中」と「空」を見分けられないためである（Req 4.5）。
+function StoresSkeleton({ columnCount }: { columnCount: number }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p role="status" className="text-sm text-muted-foreground">
+        読み込み中...
+      </p>
+      <TableSkeleton columns={columnCount} />
+    </div>
+  );
 }
 
 // 店舗一覧本体。AuthGuard 配下でのみ描画されるため me は非 null 前提だが、防御的に optional 参照する。
@@ -142,13 +156,7 @@ function StoresView() {
     <PageShell width="lg" className="flex flex-col gap-6">
       <Heading level={1}>店舗一覧</Heading>
       {state.kind === 'loading' && (
-        // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
-        // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
-        // （Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
-        <p role="status" className="flex items-center gap-2">
-          <Spinner aria-hidden />
-          読み込み中...
-        </p>
+        <StoresSkeleton columnCount={columnCount} />
       )}
       {state.kind === 'error' && (
         // 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねると
@@ -231,8 +239,9 @@ function StoresView() {
                         // 確定前の案内とは別の文言にする（design.md「StoresPage の変更」）。色は同じ補足色。
                         <span className="text-muted-foreground">停止中のため発行できません</span>
                       ) : store.placeStatus === 'confirmed' ? (
+                        // 一覧の中で唯一の前進の操作なので主操作の塗りにする。行ごとに並ぶため
+                        // 寸法は小さいまま据え置き、塗りで目を引かせる。
                         <Button
-                          variant="outline"
                           size="sm"
                           onClick={(event) => openPanel(event, store.id)}
                           aria-expanded={openStoreId === store.id}
