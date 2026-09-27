@@ -502,3 +502,87 @@ resource "google_monitoring_alert_policy" "webhook_signature_failure" {
 
   notification_channels = [google_monitoring_notification_channel.email.id]
 }
+
+# ------------------------------------------------------------------------------
+# 外部 API の生死を実トラフィックで観測する指標（Issue #139・#125 の残件）
+#
+# #125 の実疎通（人手・14 日ごと）は「人間が思い出す儀式」に依存している。places と
+# line-messaging は定期ジョブが毎日・毎時叩いているので、その成否を数えれば記憶に頼らず
+# 生死を知れる。gemini は客の操作契機でしか叩かれず「0 件＝正常」があり得るため、この手段では
+# 覆えない（#125 の手動実疎通が唯一の手段として存続する）。
+#
+# **アラートを持たない。** 判定は scripts/check-external-api-liveness.sh（定期ワークフロー
+# external-api-liveness）が timeSeries を読んで行う。アラートポリシーで判定しない理由は 2 つ:
+#   - ログベースのカウンタは 0 を書かず「データが無い」になる。日次ジョブの欠測を条件にすると
+#     絶対条件の上限 23.5 時間に当たり、毎日次の実行の直前に鳴る
+#   - 判定には「成功した」「実行して全部失敗した」「実行していない」「材料が無い（対象 0 件）」の
+#     4 状態が要る。成功回数だけを閾値で見ると、対象 0 件でも緑、実行していなくても同じ赤になる
+# CI には #230 で roles/monitoring.viewer が付いており、指標の値を読むのに新しい IAM は要らない。
+# ログ本文は読まない（logging 系のロールは付けない・#230 と同じ線）。
+#
+# 各指標は判定の片側だけを数える。成功（fetch_ok > 0 / トークン発行が通った実行）と、それを
+# 判定する母数（対象が 1 件以上あった実行 / トークン発行に失敗した実行）を分けて持つ。
+# ------------------------------------------------------------------------------
+resource "google_logging_metric" "places_fetch_ok_runs" {
+  # monitoring-coverage: ci-read (#139) scripts/check-external-api-liveness.sh
+  project     = var.project_id
+  name        = "places_fetch_ok_runs"
+  description = "daily-batch が Places から 1 店舗以上の自店指標を取得できた実行の数（Issue #139）。"
+  filter      = "resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"${var.batch_job_name}\" AND jsonPayload.event = \"daily-batch.run\" AND jsonPayload.fetch_ok > 0"
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_logging_metric" "places_fetch_eligible_runs" {
+  # monitoring-coverage: ci-read (#139) scripts/check-external-api-liveness.sh
+  #
+  # 対象店舗が 1 件以上あった実行の数。0 件の実行では Places を 1 回も叩かないので、キーが
+  # 死んでいても exit 0 になる（steering tech.md の #125 の項）。これを母数に取ることで、
+  # 対象 0 件を「成功」とも「失敗」とも読まず「材料が無い」として扱える。
+  project     = var.project_id
+  name        = "places_fetch_eligible_runs"
+  description = "daily-batch の対象店舗が 1 件以上あった実行の数（Issue #139）。"
+  filter      = "resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"${var.batch_job_name}\" AND jsonPayload.event = \"daily-batch.run\" AND jsonPayload.stores_total > 0"
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_logging_metric" "line_token_issued_runs" {
+  # monitoring-coverage: ci-read (#139) scripts/check-external-api-liveness.sh
+  #
+  # delivery-job.run はトークン発行が通った実行でしか出ない（失敗すると delivery-job.fatal で
+  # 終わる）。トークン発行は LINE がチャネル ID とシークレットを検証する行為で、配信対象の有無に
+  # 依存せず毎時必ず走る。配信件数（delivered）は 1 日 24 回中 1 回しか 0 を超えないので数えない。
+  project     = var.project_id
+  name        = "line_token_issued_runs"
+  description = "summary-delivery が LINE のトークン発行に成功した実行の数（Issue #139）。"
+  filter      = "resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"${var.delivery_job_name}\" AND jsonPayload.event = \"delivery-job.run\""
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_logging_metric" "line_token_issue_failures" {
+  # monitoring-coverage: ci-read (#139) scripts/check-external-api-liveness.sh
+  project     = var.project_id
+  name        = "line_token_issue_failures"
+  description = "summary-delivery が LINE のトークン発行に失敗した回数（Issue #139）。"
+  filter      = "resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"${var.delivery_job_name}\" AND jsonPayload.event = \"delivery-job.token_issue_failed\""
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}

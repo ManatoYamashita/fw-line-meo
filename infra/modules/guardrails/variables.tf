@@ -81,3 +81,13 @@ variable "app_info_log_retention_days" {
   type        = number
   default     = 30
 }
+
+variable "batch_job_name" {
+  description = "外部 API の生死判定（Issue #139）で Places の成否を数える日次バッチの Cloud Run ジョブ名（batch-job output）。"
+  type        = string
+}
+
+variable "delivery_job_name" {
+  description = "外部 API の生死判定（Issue #139）で LINE のトークン発行の成否を数える配信ジョブの Cloud Run ジョブ名（delivery-job output）。"
+  type        = string
+}
