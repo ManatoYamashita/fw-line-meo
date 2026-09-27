@@ -146,7 +146,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `survey_page_viewed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 本番の集計指標がこの文字列で絞り込む（`infra/modules/guardrails/main.tf` の `survey_funnel`） |
 | `survey_response_submitted` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 同上 |
 | `survey_review_link_opened` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 同上。投稿導線の押下（Issue #137）。token を検証できた押下だけを記録する |
-| `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62） |
+| `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62）。**変更禁止**: 本番の集計指標がこの文字列で生成失敗を数え、1 件でも出ればアラートが鳴る（`infra/modules/guardrails/main.tf` の `generation_failures`・Issue #394）。ラベルに写すのは `errorKind` と `status` だけである |
 | `generation_safety_blocked` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `factuality_residual` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `tally_failed` | survey-web | 既存 | `ts/apps/survey-web/src/app/api/responses/handler.ts` | 集計の失敗は客へ転嫁しない（要件 5.4 の思想）。記録だけ残す |

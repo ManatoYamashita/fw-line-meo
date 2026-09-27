@@ -504,12 +504,104 @@ resource "google_monitoring_alert_policy" "webhook_signature_failure" {
 }
 
 # ------------------------------------------------------------------------------
+# 口コミ下書きの生成失敗（Issue #394）
+#
+# 2026-09-28、本番の Gemini キーが 402（前払いクレジットの枯渇）を返していたのに、どの監視も
+# 鳴らなかった。/api/responses と /api/drafts は生成に失敗しても HTTP 200 で
+# { generation: 'failed' } を返す（客の投稿導線を殺さない意図した設計）ので、5xx 率には
+# 現れない。失敗の痕跡は survey-web の構造化ログ generation_failed だけである。
+#
+# 閾値は「5 分の窓で 1 件以上」とする。失敗率にしない理由:
+#   - 分母が小さすぎる。2026-08-29〜09-28 の survey_response_submitted は 9 件で、
+#     1 件の失敗が 100% になる。率の閾値は件数の閾値と同じ振る舞いをし、式だけが複雑になる
+#   - /api/drafts の作り直しは送信数に含まれず、分母として整合しない
+# 一時的な失敗で鳴る心配は小さい。generator は 429 / 5xx / ネットワーク断を 1 回だけ再試行
+# するので、記録された時点で 2 回続けて失敗している。また、トラフィックが 0 件なら失敗も
+# 0 件になる。これは #139 が gemini を外した「成功 0 件＝正常もありうる」の逆向きで、
+# 1 件でも出れば、それは客が下書きを受け取れなかったという事実である。
+#
+# 見直しの目安: 送信数が 1 日あたり数十件に届いたら、失敗率の条件への移行を検討する。
+# ------------------------------------------------------------------------------
+resource "google_logging_metric" "generation_failures" {
+  project     = var.project_id
+  name        = "generation_failures"
+  description = "survey-web の口コミ下書きの生成失敗件数（Issue #394）。"
+  # severity では絞らない（webhook_signature_failures のコメントを参照）。安全判定による
+  # 不生成は generation_safety_blocked という別の事象名で出るので、この式には一致しない。
+  filter = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${var.survey_service_name}\" AND jsonPayload.event = \"generation_failed\""
+
+  # 障害の種類を見分ける 2 つだけを載せる。店舗 ID は載せない（検知に要らない）。
+  # status は API_ERROR で HTTP ステータスが取れたときにだけ出るので、それ以外は空になる。
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+
+    labels {
+      key         = "error_kind"
+      value_type  = "STRING"
+      description = "失敗の種別（jsonPayload.errorKind）。API_ERROR / INVALID_OUTPUT。"
+    }
+    labels {
+      key         = "status"
+      value_type  = "STRING"
+      description = "Gemini API の HTTP ステータス（jsonPayload.status）。"
+    }
+  }
+
+  label_extractors = {
+    error_kind = "EXTRACT(jsonPayload.errorKind)"
+    status     = "EXTRACT(jsonPayload.status)"
+  }
+}
+
+resource "google_monitoring_alert_policy" "generation_failure" {
+  project      = var.project_id
+  display_name = "survey-web draft generation failures"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "draft generation failed at least once"
+
+    condition_threshold {
+      filter          = "metric.type = \"logging.googleapis.com/user/${google_logging_metric.generation_failures.name}\" AND resource.type = \"cloud_run_revision\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+
+      # evaluation_missing_data は設定しない（webhook_signature_failure と同じ理由）。
+      # 種別と status ごとに系列を分け、通知本文でどの失敗かを読めるようにする。
+      aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["metric.label.error_kind", "metric.label.status"]
+      }
+    }
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "客が口コミ下書きを受け取れていません（error_kind=$${metric.label.error_kind} / status=$${metric.label.status}）。402 は前払いクレジットの枯渇、401 / 403 は鍵の失効か権限、404 はモデルの廃止、INVALID_OUTPUT は出力検証の不一致を疑ってください。影響の範囲は AI Studio の使用量で確かめます。手順は Issue #394 を参照。"
+  }
+
+  # 1 時間なら、失敗が続く間はインシデントが 1 本にまとまり、直ってから 1 時間強で閉じる。
+  alert_strategy {
+    auto_close = "3600s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.email.id]
+}
+
+# ------------------------------------------------------------------------------
 # 外部 API の生死を実トラフィックで観測する指標（Issue #139・#125 の残件）
 #
 # #125 の実疎通（人手・14 日ごと）は「人間が思い出す儀式」に依存している。places と
 # line-messaging は定期ジョブが毎日・毎時叩いているので、その成否を数えれば記憶に頼らず
 # 生死を知れる。gemini は客の操作契機でしか叩かれず「0 件＝正常」があり得るため、この手段では
 # 覆えない（#125 の手動実疎通が唯一の手段として存続する）。
+# これは成功回数で生死を見る場合の話である。客に影響が出たこと（失敗が 1 件以上）は、
+# 上の generation_failure が別に監視している（Issue #394）。
 #
 # **アラートを持たない。** 判定は scripts/check-external-api-liveness.sh（定期ワークフロー
 # external-api-liveness）が timeSeries を読んで行う。アラートポリシーで判定しない理由は 2 つ:
