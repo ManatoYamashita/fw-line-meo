@@ -269,7 +269,23 @@ for (const surface of DASHBOARD_SURFACES) {
             `${container.hiddenControls.join(', ') || 'なし'}）`;
 
           // 決定性。同じ状態で 2 回撮った画像が違うなら、比較の土台が成り立っていない。
-          expect(start.maxSelfDelta, `${where}: 描画が安定していない（同じ状態の 2 枚に差がある）`).toBe(0);
+          // 落ちたときに「どこが動いたか」を追えるよう、3 枚を添付し、差の外接矩形を文言に出す（Issue #378）。
+          if (start.selfDiff !== null) {
+            for (const [name, body] of Object.entries(start.shots)) {
+              await testInfo.attach(`r3-unstable-${container.label}-${name}.png`, { body, contentType: 'image/png' });
+            }
+          }
+          expect(
+            start.maxSelfDelta,
+            `${where}: 描画が安定していない（同じ状態の 2 枚に差がある。` +
+              (start.selfDiff === null
+                ? ''
+                : `差 ${start.selfDiff.changed} 画素・切り取り内の外接矩形 ` +
+                  `x=${start.selfDiff.box.x} y=${start.selfDiff.box.y} ` +
+                  `${start.selfDiff.box.width}×${start.selfDiff.box.height}px・` +
+                  `切り取り ${start.clip.width}×${start.clip.height}px`) +
+              '）',
+          ).toBe(0);
 
           const cueOf = (band: { changed: number; total: number }) =>
             band.total > 0 && band.changed >= band.total * CUE_MIN_CHANGED_RATIO;
@@ -336,7 +352,8 @@ for (const surface of DASHBOARD_SURFACES) {
         ).toEqual([]);
 
         await testInfo.attach('r3-cue.json', {
-          body: JSON.stringify({ stats, skippedForThinOverflow }, null, 1),
+          // 画像の生データ（shots）は JSON へ書かない。差の出所を見るときだけ上で PNG として添付する。
+          body: JSON.stringify({ stats, skippedForThinOverflow }, (key, value) => (key === 'shots' ? undefined : value), 1),
           contentType: 'application/json',
         });
       });
