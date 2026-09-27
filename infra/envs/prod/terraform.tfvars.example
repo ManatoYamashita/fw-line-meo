@@ -36,3 +36,9 @@ places_quota_caps = {
 # liff_url        = "https://liff.line.me/1234567890-abcdefgh"
 # liff_channel_id = "1234567891"
 # liff_id         = "1234567890-abcdefgh"
+
+# GBP 連携（第2フェーズ）の OAuth 設定。
+# OAuth クライアントの承認済み URI と完全一致させる。GBP の全設定を揃えるまでは空のままにする。
+# GBP OAuth の値は #282 の一括設定手順（infra/README.md §9-2-b）に従い揃えてから設定する。
+# gbp_oauth_client_id = "<OAuth client ID>"
+# gbp_oauth_redirect_url = "https://api.firstweb-works.com/gbp/oauth/callback"
