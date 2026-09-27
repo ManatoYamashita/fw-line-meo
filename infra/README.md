@@ -521,11 +521,12 @@ curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status"
 ```
 
 6. GBP の OAuth と secret を準備する。OAuth クライアントと Secret Manager の値は先行して準備できる。**line-webhook を GBP 有効状態で apply する前に、Issue #146 の GBP API 利用承認と #354 の利用導線を完了すること。** 現行コードでは4つの `GBP_*` env が全て揃うと機能が有効になる。
-   - Google Auth Platform の OAuth クライアントを Web アプリケーションとして作成する
+   - Google Auth Platform の OAuth クライアントを Web アプリケーションとして作成する。dashboard ログイン用の `Identity Platform - dashboard-web`（Identity Platform の自動生成）とは別に、GBP 専用のクライアント（本番は `gbp-oauth-line-webhook`）を作る。client ID の先頭はプロジェクト番号なので、前方一致ではクライアントを判別できない
+   - 作成ダイアログのコピーボタンは aria-label に client secret を含む。自動操作でダイアログの DOM を読まない。client ID は詳細画面の URL から取り、secret は「Add secret」→ コピー → `printf '%s' "$(pbpaste)" | gcloud secrets versions add gbp-oauth-client-secret --data-file=- --project=gen-fw-line-meo` → `pbcopy </dev/null` の順で、画面にも端末にも値を出さずに渡す
    - 承認済みリダイレクト URI は `https://api.firstweb-works.com/gbp/oauth/callback` と完全一致させる
    - 同意画面の承認済みドメインは `firstweb-works.com`。ホームページ等と同じ登録済み top private domain なので、重複登録はしない
    - `gbp-oauth-client-secret` と `gbp-token-cipher-key` の枠を Terraform で作成した後、値は §1 項目 5 の手順で Secret Manager へ投入する。OAuth secret はクライアントの値、cipher key は `openssl rand -base64 32` で生成する。値を Terraform state や tfvars に保存しない
-   - tfvars に `gbp_oauth_client_id` と `gbp_oauth_redirect_url` を設定する。Secret Manager に GBP OAuth secret・cipher key・既存の Gemini API key があることを確認してから、GBP の全項目を一括で apply する。URL だけを先に非空にしない
+   - tfvars に `gbp_oauth_client_id` と `gbp_oauth_redirect_url` を設定する。Secret Manager に GBP OAuth secret・cipher key・既存の Gemini API key があることを確認してから、GBP の全項目を一括で apply する。URL だけを先に非空にしない。同じ PR で `infra/external-api-smoke.tsv` の `gbp-oauth-client-secret` 行を api 行（PENDING）へ切り替え、apply 後に §8 の実疎通を記録する
    - apply 後、`https://api.firstweb-works.com/health` が 200 であることを確かめ、アプリ側 callback の到達確認は OAuth 認可を一度実行して callback が成功応答することで行う
 
 #### 9-2-c. ダッシュボードも独自ドメインへ移す（Issue #146）
