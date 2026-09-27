@@ -323,7 +323,9 @@ export function buildGbpStatusMessage(entries: readonly GbpStatusEntry[]): LineM
           type: 'box',
           layout: 'vertical',
           spacing: 'sm',
-          contents: entry.linked ? [disconnectButton(entry.storeId)] : [CONNECT_BUTTON],
+          contents: entry.linked
+            ? [POST_BUTTON, REPLY_BUTTON, disconnectButton(entry.storeId)]
+            : [CONNECT_BUTTON],
         },
       }),
     ),

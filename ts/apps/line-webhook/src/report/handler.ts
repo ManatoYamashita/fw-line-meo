@@ -82,6 +82,8 @@ export interface ReportHandlerDeps {
   readonly reads?: ReportReadsAccessor;
   /** 現在時刻。省略すると実行時の時刻を使う。読み出しの基準日（日本時間の今日）を決める。 */
   readonly now?: () => Date;
+  /** GBP フローが組み立て済みのとき、新着口コミに返信開始アクションを表示する。 */
+  readonly gbpReplyEnabled?: boolean;
 }
 
 export interface ReportHandleInput {
@@ -143,7 +145,12 @@ export function createReportHandler(deps: ReportHandlerDeps): ReportHandler {
       case 'new_reviews':
         return latestFailed
           ? { message: buildFetchFailedNotice(ctx, latest.summary_date), outcome: 'fetch_failed' }
-          : { message: buildNewReviewsReport(ctx, normalizeReadRow(latest)), outcome: 'report' };
+          : {
+              message: buildNewReviewsReport(ctx, normalizeReadRow(latest), {
+                gbpReplyEnabled: deps.gbpReplyEnabled ?? false,
+              }),
+              outcome: 'report',
+            };
       case 'comparison':
         return latestFailed
           ? { message: buildFetchFailedNotice(ctx, latest.summary_date), outcome: 'fetch_failed' }
