@@ -203,6 +203,9 @@ module "guardrails" {
   survey_service_name = module.run_services.service_names["survey-web"]
   # Issue #230: 署名検証失敗の指標（ログベース）の対象サービス。
   webhook_service_name = module.run_services.service_names["line-webhook"]
+  # Issue #139: 外部 API の生死判定の指標が数えるジョブ。
+  batch_job_name    = module.batch_job.job_name
+  delivery_job_name = module.delivery_job.job_name
 
   # Issue #230: p95 遅延を監視する客向け面。**リテラルで渡す**（module.run_services の
   # output は computed であり、for_each の集合要素にすると新サービス追加時に plan ごと

@@ -401,7 +401,21 @@ export async function runDeliveryJob(params: RunDeliveryJobParams): Promise<RunS
 
   // design.md「認証: Stateless channel access token をジョブ開始時に発行」。
   // 失敗はジョブ全体の致命的エラー（呼出元 main() が非0終了させる）。
-  const token = await params.lineClient.issueAccessToken();
+  //
+  // 失敗は致命的エラーとは別の事象名でも記録する（Issue #139）。main() の delivery-job.fatal は
+  // 対象抽出クエリ（DB）の失敗とも同じ事象名であり、「LINE の資格情報が通らない」をそこから
+  // 数えられないため。この事象と delivery-job.run（トークン発行が通った実行でしか出ない）の
+  // 件数が、scripts/check-external-api-liveness.sh の line-messaging の生死判定の材料になる。
+  let token: Awaited<ReturnType<LineClient['issueAccessToken']>>;
+  try {
+    token = await params.lineClient.issueAccessToken();
+  } catch (err) {
+    logger.warn('delivery-job.token_issue_failed', {
+      errorKind: errorKindOf(err),
+      ...(hasHttpStatus(err) && err.httpStatus !== null ? { status: err.httpStatus } : {}),
+    });
+    throw err;
+  }
 
   // 準備判定は**実行の冒頭で 1 回**。対象を読む前に行うので、対象が 0 件でも結果が出る。
   const gate = createReportMenuGate({
