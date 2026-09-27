@@ -89,6 +89,11 @@ variable "gbp_oauth_client_id" {
   EOT
   type        = string
   default     = ""
+
+  validation {
+    condition     = (var.gbp_oauth_client_id == "") == (var.gbp_oauth_redirect_url == "")
+    error_message = "gbp_oauth_client_id と gbp_oauth_redirect_url は両方設定するか、両方空にしてください（片方だけでは GBP の env が一部設定になり line-webhook が起動しません）。"
+  }
 }
 
 # --- line-onboarding（LINE Webhook 基盤）が追加する env（gcp-infra への additive 拡張） ---

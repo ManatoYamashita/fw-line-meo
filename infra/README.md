@@ -494,7 +494,7 @@ OAuth ブランド検証のページ（developers.google.com/identity/protocols/
 
 コールバック URI は `https://api.firstweb-works.com/gbp/oauth/callback` に統一する。Terraform の `gbp_oauth_redirect_url` が line-webhook の `GBP_OAUTH_REDIRECT_URL` に入り、OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI にも同じ値を設定する。同意画面の承認済みドメインには `firstweb-works.com` を登録する。Google は OAuth クライアントのリダイレクト URI のドメインを承認済みドメインへ含め、Search Console で所有権を確認するよう求めている（[ブランド検証の公式要件](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)）。
 
-**本番設定は GBP の全項目を揃えてから一括で切り替える。** line-webhook は GBP の OAuth クライアント ID・シークレット・リダイレクト URL・トークン暗号化鍵に加え、下書き生成に使う Gemini API キーを受け取って GBP を有効にする。URL だけを非空にすると一部設定として起動時に失敗するため、`gbp_oauth_redirect_url` は他の GBP 設定・Secret Manager の値と同じ apply で設定する。未設定時は空文字列で GBP は既定 OFF のままになる（Issue #323）。
+**本番設定は GBP の全項目を揃えてから一括で切り替える。** line-webhook は GBP の OAuth クライアント ID・シークレット・リダイレクト URL・トークン暗号化鍵に加え、下書き生成に使う Gemini API キーを受け取って GBP を有効にする。URL だけを非空にすると一部設定として起動時に失敗するため、`gbp_oauth_redirect_url` は他の GBP 設定・Secret Manager の値と同じ apply で設定する。Terraform 側は `gbp_oauth_client_id` と `gbp_oauth_redirect_url` が両方非空のときだけ GBP の env（secret 3 つを含む）を配線し、片方だけの設定は変数の validation で plan 時に止める。secret の version を先に投入しておいても、ID と URL が空のあいだは line-webhook に配線されない。未設定時は空文字列で GBP は既定 OFF のままになる（Issue #323）。
 
 現時点で経路だけを確認する場合は `/health` を使う。GBP 既定 OFF の間、`/gbp/oauth/callback` はアプリケーション側で 404 になる。全設定の有効化後に、OAuth クライアントと Terraform env の URI が一字一句一致すること、および callback が line-webhook に届くことを確認する。
 

@@ -47,6 +47,12 @@ module "secrets" {
 }
 
 # --- 実行系（database/secrets の output を消費） ---
+# GBP（Issue #282）は client ID と redirect URL の両方が非空のときだけ有効にする。
+# 片方だけの設定は variables.tf の validation で plan 時に止める。
+locals {
+  gbp_enabled = var.gbp_oauth_client_id != "" && var.gbp_oauth_redirect_url != ""
+}
+
 module "run_services" {
   source             = "../../modules/run-services"
   project_id         = var.project_id
@@ -60,23 +66,33 @@ module "run_services" {
     "line-webhook" = {
       public         = true
       needs_cloudsql = true
-      secret_env = {
-        LINE_CHANNEL_SECRET     = module.secrets.secret_ids["line-channel-secret"]
-        PLACES_API_KEY          = module.secrets.secret_ids["places-api-key"]
-        GEMINI_API_KEY          = module.secrets.secret_ids["gemini-api-key"]
-        GBP_OAUTH_CLIENT_SECRET = module.secrets.secret_ids["gbp-oauth-client-secret"]
-        GBP_TOKEN_CIPHER_KEY    = module.secrets.secret_ids["gbp-token-cipher-key"]
-      }
-      env = {
-        LINE_CHANNEL_ID            = var.line_channel_id
-        LINE_RICHMENU_COMPLETED_ID = var.line_richmenu_completed_id
-        # Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
-        # store-detail の LIFF アプリ URL（liff_url）と同一値を line-webhook にも配線する。
-        LIFF_STORE_DETAIL_URL = var.liff_url
-        # GBP OAuth コールバック URL。GBP を有効にするときに他の GBP 設定と一緒に設定する。
-        GBP_OAUTH_CLIENT_ID    = var.gbp_oauth_client_id
-        GBP_OAUTH_REDIRECT_URL = var.gbp_oauth_redirect_url
-      }
+      # GBP の env は client ID と redirect URL が揃ったときだけ、secret と一緒に配線する。
+      # line-webhook は GBP の env が一部だけあると起動時に落ちる（config.ts の loadGbpConfig）。
+      # secret は version が投入済みでも、ID と URL が空のまま配線すると一部設定になる。
+      secret_env = merge(
+        {
+          LINE_CHANNEL_SECRET = module.secrets.secret_ids["line-channel-secret"]
+          PLACES_API_KEY      = module.secrets.secret_ids["places-api-key"]
+        },
+        local.gbp_enabled ? {
+          GEMINI_API_KEY          = module.secrets.secret_ids["gemini-api-key"]
+          GBP_OAUTH_CLIENT_SECRET = module.secrets.secret_ids["gbp-oauth-client-secret"]
+          GBP_TOKEN_CIPHER_KEY    = module.secrets.secret_ids["gbp-token-cipher-key"]
+        } : {},
+      )
+      env = merge(
+        {
+          LINE_CHANNEL_ID            = var.line_channel_id
+          LINE_RICHMENU_COMPLETED_ID = var.line_richmenu_completed_id
+          # Issue #21: 完了メッセージの「店舗の詳細を見る」導線ボタン（store-detail LIFF）の URL。
+          # store-detail の LIFF アプリ URL（liff_url）と同一値を line-webhook にも配線する。
+          LIFF_STORE_DETAIL_URL = var.liff_url
+        },
+        local.gbp_enabled ? {
+          GBP_OAUTH_CLIENT_ID    = var.gbp_oauth_client_id
+          GBP_OAUTH_REDIRECT_URL = var.gbp_oauth_redirect_url
+        } : {},
+      )
     }
     "survey-web" = {
       public         = true
