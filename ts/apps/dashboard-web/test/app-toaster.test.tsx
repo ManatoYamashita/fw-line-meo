@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// 操作結果の Toast の置き場（2026-09-26・狭い画面で帯の操作要素を覆った不具合の是正）。
-// 狭い画面では下部中央、帯が 1 段になる広い画面（lg 以上）では上部中央に置く。
+// 操作結果の Toast の置き場。画面の幅にかかわらず常に右下に置く（design-language 7.5）。
+// 幅で右上・右下を切り替えていた版は、利用者からは画面によって通知の場所が変わって見えた（2026-09-27）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 
@@ -12,18 +12,13 @@ vi.mock('sonner', () => ({
   },
 }));
 
-import { AppToaster, WIDE_SCREEN_QUERY } from '../src/components/app-toaster';
+import { AppToaster, TOASTER_POSITION } from '../src/components/app-toaster';
 
-function stubMatchMedia(wide: boolean) {
+function stubMatchMedia(matches: boolean) {
   const queries: string[] = [];
   vi.stubGlobal('matchMedia', (query: string) => {
     queries.push(query);
-    return {
-      matches: wide,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    };
+    return { matches, media: query, addEventListener: () => {}, removeEventListener: () => {} };
   });
   return queries;
 }
@@ -35,18 +30,18 @@ afterEach(() => {
 });
 
 describe('AppToaster の置き場', () => {
-  it('狭い画面では右下に置く（帯の操作要素を覆わない）', () => {
-    stubMatchMedia(false);
-    render(<AppToaster />);
-    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'bottom-right' }));
+  it('右下に置く（狭い画面の 3 段の帯の操作要素を覆わない）', () => {
+    expect(TOASTER_POSITION).toBe('bottom-right');
   });
 
-  it('帯が 1 段になる広い画面では右上に置く', () => {
-    const queries = stubMatchMedia(true);
+  it.each([
+    ['狭い画面', false],
+    ['広い画面', true],
+  ])('%sでも同じ右下に置き、画面の幅を問い合わせない', (_label, wide) => {
+    const queries = stubMatchMedia(wide);
     render(<AppToaster />);
-    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'top-right' }));
-    // 帯の段組みの境目（lg = 1024px）と同じ問い合わせを使う。
-    expect(queries).toContain(WIDE_SCREEN_QUERY);
-    expect(WIDE_SCREEN_QUERY).toBe('(min-width: 1024px)');
+    expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'bottom-right' }));
+    // 幅で切り替える作りに戻すと、描き始めと描き終わりで場所が変わる。問い合わせ自体が無いことを固定する。
+    expect(queries).toEqual([]);
   });
 });

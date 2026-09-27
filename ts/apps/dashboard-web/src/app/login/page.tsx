@@ -11,7 +11,7 @@ import { Spinner } from '@fwlm/ui/components/spinner';
 import { useAuth } from '../../lib/auth-context';
 import { Wordmark } from '../../components/wordmark';
 
-// Google ログイン画面（signInWithPopup）。未登録/無効時は利用資格がない旨を案内する。
+// Google ログイン画面（signInWithRedirect）。未登録/無効時は利用資格がない旨を案内する。
 // 認証済み（ready）になったら店舗一覧へ遷移する。管理データは一切描画しない（Req 1.1, 1.3, 7.3）。
 //
 // 版面（本文系の狭い側）と主操作を全幅にする判断は docs/design/design-language.md の 7.9 節が、
@@ -22,7 +22,7 @@ import { Wordmark } from '../../components/wordmark';
 export default function LoginPage() {
   const { status, isSigningIn, signIn } = useAuth();
   const router = useRouter();
-  // 認証ポップアップから /me 確定、遷移開始までを 1 つの処理中状態として示す。
+  // ログインを押してから、Google から戻って /me が確定し、遷移を始めるまでを 1 つの処理中状態として示す。
   const busy = status === 'loading' || status === 'ready' || isSigningIn;
 
   useEffect(() => {
@@ -55,8 +55,8 @@ export default function LoginPage() {
         title="ログイン"
         description="運営・代理店向けダッシュボードです。Google アカウントでログインしてください。"
       />
-      {/* 処理中も焦点を保ったまま重複押下を止める。ポップアップから戻った直後に焦点が文書先頭へ
-          落ちると、操作が受け付けられたか判別しにくいためである。 */}
+      {/* 処理中も焦点を保ったまま重複押下を止める。処理中に焦点が文書先頭へ落ちると、
+          操作が受け付けられたか判別しにくいためである。 */}
       {/* 見た目は Sign in with Google の規定（Light）に従う（docs/design/design-language.md の 7.9 節と
           2.1 節）。G ロゴは規定外の背景に置けないため、アクション色では塗らない。ロゴは装飾なので
           読み上げない（読み上げ名は文言だけ）。 */}

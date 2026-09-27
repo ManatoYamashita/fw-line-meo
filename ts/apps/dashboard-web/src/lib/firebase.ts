@@ -20,7 +20,7 @@ function getFirebaseApp(): FirebaseApp {
 
 let authInstance: Auth | null = null;
 
-// Auth インスタンス（signInWithPopup / onAuthStateChanged / signOut / getIdToken で使用）を遅延取得する。
+// Auth インスタンス（signInWithRedirect / getRedirectResult / onAuthStateChanged / signOut / getIdToken で使用）を遅延取得する。
 // getAuth() はクライアント実行時（ログイン操作・useEffect）にのみ呼ぶ。build 時のサーバー
 // プリレンダで getAuth() を評価すると、build-arg 未注入の空 apiKey で auth/invalid-api-key を投げて
 // next build が失敗するため、モジュール評価時には呼ばない（PR #22 と同型の build-arg 問題を回避）。

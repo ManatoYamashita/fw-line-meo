@@ -7,8 +7,8 @@ const workspaceRoot = path.join(import.meta.dirname, '..', '..');
 /**
  * Firebase Auth のヘルパー（/__/auth/handler など）を自ドメインで配るための中継先（Issue #146）。
  *
- * authDomain を独自ドメイン（dashboard.firstweb-works.com）にすると、ログインのポップアップは
- * そのドメインの /__/auth/ を開く。そこを <project>.firebaseapp.com へ透過的に中継する
+ * authDomain を独自ドメイン（dashboard.firstweb-works.com）にすると、ログインのリダイレクトは
+ * そのドメインの /__/auth/ を通る。そこを <project>.firebaseapp.com へ透過的に中継する
  * （Firebase の「redirect best practices」Option 3。302 では不可なので rewrite で行う）。
  * NEXT_PUBLIC_FIREBASE_PROJECT_ID は Dockerfile の build-arg で next build 前に入る。
  * 未設定（ローカル・テスト）なら中継しない。

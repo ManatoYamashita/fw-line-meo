@@ -12,8 +12,9 @@ import {
 } from 'react';
 import {
   GoogleAuthProvider,
+  getRedirectResult,
   onAuthStateChanged,
-  signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { getFirebaseAuth } from './firebase';
@@ -49,13 +50,7 @@ function signInErrorCopy(error: unknown): AuthErrorCopy | null {
   const code = typeof record.code === 'string' ? record.code : '';
   const detail = typeof record.message === 'string' ? record.message.toLowerCase() : '';
 
-  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return null;
-  if (code === 'auth/popup-blocked') {
-    return {
-      title: 'ログイン画面を開けませんでした',
-      description: 'ブラウザでポップアップを許可して、もう一度お試しください。',
-    };
-  }
+  if (code === 'auth/redirect-cancelled-by-user') return null;
   if (code === 'auth/network-request-failed') {
     return {
       title: 'ログインできませんでした',
@@ -80,6 +75,36 @@ function signInErrorCopy(error: unknown): AuthErrorCopy | null {
   };
 }
 
+// ログインはリダイレクト方式で行う。押した後はページごと Google へ移り、戻ってきたときには
+// 画面のメモリ（下の signInAttempt）が消えている。「利用者が押したログインの戻り」を、初回の
+// セッション復元と区別するため、押したことをこのタブの sessionStorage に印として残す。
+// 保存領域が使えない端末では印を残せないが、ログインそのものは通る（成功の通知が出ないだけ）。
+const SIGN_IN_PENDING_KEY = 'fwlm-sign-in-pending';
+
+function readSignInPending(): boolean {
+  try {
+    return window.sessionStorage.getItem(SIGN_IN_PENDING_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markSignInPending(): void {
+  try {
+    window.sessionStorage.setItem(SIGN_IN_PENDING_KEY, '1');
+  } catch {
+    // swallowed-exception: intentional — 印を残せなくてもログインは進める（成功の通知が出ないだけ）。
+  }
+}
+
+function clearSignInPending(): void {
+  try {
+    window.sessionStorage.removeItem(SIGN_IN_PENDING_KEY);
+  } catch {
+    // swallowed-exception: intentional — 消せない印は次の未ログイン判定で読み捨てられる。
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [me, setMe] = useState<Me | null>(null);
@@ -96,11 +121,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     // getAuth() はクライアント（useEffect）でのみ評価する（build 時プリレンダでは呼ばない）。
     const auth = getFirebaseAuth();
+
+    // Google から戻ってきた直後なら、/me が確定するまで処理中の表示を続ける。
+    if (readSignInPending()) {
+      signInAttempt.current = true;
+      setIsSigningIn(true);
+    }
+    // リダイレクト方式の失敗は、戻ってきた後にここで受け取る。成功した利用者は下の
+    // onAuthStateChanged が受け取るので、ここでは失敗だけを扱う。
+    getRedirectResult(auth).catch((error: unknown) => {
+      if (!active) return;
+      clearSignInPending();
+      signInAttempt.current = false;
+      setIsSigningIn(false);
+      const copy = signInErrorCopy(error);
+      if (copy !== null) notifyActionError(copy);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!active) return;
 
       if (!user) {
         if (handlingUnregistered.current) return; // 意図的サインアウト中は案内状態を維持
+        // Google の画面から「戻る」で帰ってきた場合も、ここで処理中を解く。
+        clearSignInPending();
         signInAttempt.current = false;
         setIsSigningIn(false);
         setMe(null);
@@ -121,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (signInAttempt.current) {
           notifyActionSuccess({ title: 'ログインしました。' });
         }
+        clearSignInPending();
         signInAttempt.current = false;
         return;
       }
@@ -134,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // 利用者向け案内へ進む。認証SDKの内部エラーは画面にも開発者向け出力にも露出させない。
       }
       if (!active) return;
+      clearSignInPending();
       signInAttempt.current = false;
       setIsSigningIn(false);
       setMe(null);
@@ -158,15 +204,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ポップアップ方式のみ（redirect 方式は使わない: ブラウザのサードパーティストレージ分離問題）。
+  // リダイレクト方式（同じタブで Google へ移り、戻ってくる）。
+  //
+  // 以前はポップアップ方式だった。リダイレクト方式は、authDomain が面と別ドメイン
+  // （firebaseapp.com）だとブラウザのサードパーティストレージ分離で戻りを受け取れないため避けていた。
+  // authDomain を dashboard.firstweb-works.com にし、/__/auth/ を dashboard-web が中継する構成へ
+  // 移した（next.config.ts）ので、この制約は無くなった。ポップアップ方式は、ブラウザによっては
+  // Google の画面を前に出さない新しいタブで開き、利用者はボタンが回り続ける理由に気づけなかった。
   const signIn = useCallback(async () => {
     if (signInAttempt.current) return;
     signInAttempt.current = true;
     setIsSigningIn(true);
+    markSignInPending();
     try {
-      await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
-      // 成功後は onAuthStateChanged が発火し /me 解決へ進む。/me が確定するまで処理中を保つ。
+      await signInWithRedirect(getFirebaseAuth(), new GoogleAuthProvider());
+      // 成功するとページごと Google へ移る。戻ってきた後は onAuthStateChanged が /me 解決へ進む。
     } catch (error) {
+      clearSignInPending();
       signInAttempt.current = false;
       setIsSigningIn(false);
       const copy = signInErrorCopy(error);
@@ -177,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     handlingUnregistered.current = false;
+    clearSignInPending();
     signInAttempt.current = false;
     setIsSigningIn(false);
     await firebaseSignOut(getFirebaseAuth());
