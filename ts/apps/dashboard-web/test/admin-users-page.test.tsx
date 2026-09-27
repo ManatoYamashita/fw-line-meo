@@ -6,6 +6,7 @@ import { render, screen, within, cleanup, fireEvent, waitFor } from '@testing-li
 import type { ReactNode } from 'react';
 import { settleEffects } from './focus-observation';
 import { announcedText, ownText } from './live-region';
+import { expectListSkeleton } from './list-skeleton';
 
 // 認証コンテキストはモックし、ready な operator/agency を注入する（invite-codes-page.test と同規約）。
 const useAuthMock = vi.fn();
@@ -643,7 +644,7 @@ describe('利用者管理ページ: 意匠の適用', () => {
     expect(main.querySelectorAll('[data-slot="table-container"]')).toHaveLength(1);
   });
 
-  it('処理中は文言を可視のまま残し、回転する図形を装飾として添える（Req 1.1, 4.5）', () => {
+  it('処理中は文言を可視のまま残し、表の形を装飾として添える（Req 1.1, 4.5）', () => {
     ready('operator');
     api.getDashboardUsers.mockReturnValue(new Promise(() => {}));
     api.getAgencies.mockReturnValue(new Promise(() => {}));
@@ -657,9 +658,8 @@ describe('利用者管理ページ: 意匠の適用', () => {
     expect(ownText(region)).toBe('読み込み中...');
     // 図形側に aria-hidden が付いていないと読み上げ領域が二重になり、この値も二重になる。
     expect(announcedText(region)).toBe('読み込み中...');
-    const spinner = region.querySelector('[data-slot="spinner"]');
-    expect(spinner).not.toBeNull();
-    expect(spinner!.getAttribute('aria-hidden')).toBe('true');
+    // 行の操作は「編集」と「有効化／無効化」の 2 つ。
+    expectListSkeleton(main, region, { actions: 2 });
   });
 
   it('取得の失敗・登録の失敗・操作の失敗・編集の拒否・運営専用の案内が同じ危険の通知の部品に載る（5 経路・Req 1.1, 3.5）', async () => {

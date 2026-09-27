@@ -26,6 +26,11 @@ type TableSkeletonProps = React.ComponentProps<"div"> & {
   columns: number
   /** 本体の行の数。実データの件数とは無関係な固定値でよい。 */
   rows?: number
+  /**
+   * 末尾の列に置く押しボタンの形の数（size="sm" の押しボタンの寸法）。
+   * 0 のときは末尾の列も文字の帯になる。行の操作を持たない一覧は 0 のままにする。
+   */
+  actions?: number
 }
 
 /**
@@ -36,10 +41,18 @@ type TableSkeletonProps = React.ComponentProps<"div"> & {
  * 宣言や表の行数の照合が、中身の無い形を数えてしまう。焦点も得ない（aria-hidden の内側に
  * 焦点可能な要素を置かない）。
  *
- * 末尾の列は行の操作の押しボタン（size="sm"）の位置と寸法に合わせる。
+ * 帯の数と末尾の押しボタンの形は、実際の列の数と行の操作の数に合わせて渡す。
  */
-function TableSkeleton({ columns, rows = 3, className, ...props }: TableSkeletonProps) {
+function TableSkeleton({
+  columns,
+  rows = 3,
+  actions = 0,
+  className,
+  ...props
+}: TableSkeletonProps) {
   const cells = Array.from({ length: columns }, (_, index) => index)
+  // 押しボタンの形を置くときは末尾の列をその形で置き換えるので、文字の帯は 1 列減る。
+  const textCells = actions > 0 ? cells.slice(0, -1) : cells
   return (
     <div
       data-slot="table-skeleton"
@@ -58,13 +71,19 @@ function TableSkeleton({ columns, rows = 3, className, ...props }: TableSkeleton
       {Array.from({ length: rows }, (_, row) => (
         <div
           key={row}
+          data-slot="table-skeleton-row"
           className="flex items-center gap-6 border-b border-border px-4 py-4 last:border-0"
         >
-          <Skeleton className="h-4 w-32" />
-          {cells.slice(1, -1).map((index) => (
-            <Skeleton key={index} className="h-4 w-16" />
+          {textCells.map((index) => (
+            <Skeleton key={index} className={index === 0 ? "h-4 w-32" : "h-4 w-16"} />
           ))}
-          <Skeleton className="ml-auto h-7 w-20" />
+          {actions > 0 && (
+            <div className="ml-auto flex gap-2">
+              {Array.from({ length: actions }, (_, action) => (
+                <Skeleton key={action} data-slot="skeleton-action" className="h-7 w-20" />
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </div>

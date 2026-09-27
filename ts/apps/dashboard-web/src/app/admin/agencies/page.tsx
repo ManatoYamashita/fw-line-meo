@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
+import { ListLoading } from '../../../components/list-loading';
 import { TopNav } from '../../../components/top-nav';
 import {
   notifyActionError,
@@ -160,13 +161,8 @@ function AgenciesView() {
       )}
 
       {list.kind === 'loading' && (
-        // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
-        // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
-        // （Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
-        <p role="status" className="flex items-center gap-2">
-          <Spinner aria-hidden />
-          読み込み中...
-        </p>
+        // 列は代理店名・作成日時の 2 つで、行の操作は持たない。
+        <ListLoading columns={2} />
       )}
       {list.kind === 'error' && (
         <Alert variant="destructive">
