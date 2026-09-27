@@ -150,6 +150,7 @@ describe('main — 致命的エラー時は例外を投げずに process.exitCod
     }) as typeof fetch;
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await expect(main()).resolves.toBeUndefined();
 
@@ -159,5 +160,43 @@ describe('main — 致命的エラー時は例外を投げずに process.exitCod
     expect((loggedLine as string).includes('\n')).toBe(false);
     const parsed = JSON.parse(loggedLine as string) as { event: string; errorKind?: string; configKey?: string };
     expect(parsed.event).toBe('delivery-job.fatal');
+
+    // Issue #139: トークン発行の失敗は致命的エラーとは別の事象名でも残る。delivery-job.fatal は
+    // 対象抽出（DB）の失敗と同じ名前なので、LINE の資格情報の生死はこちらで数える。
+    const tokenFailures = warnSpy.mock.calls
+      .map((call) => JSON.parse(call[0] as string) as { event: string; errorKind?: string })
+      .filter((line) => line.event === 'delivery-job.token_issue_failed');
+    expect(tokenFailures).toHaveLength(1);
+    expect(tokenFailures[0]?.errorKind).toBeTypeOf('string');
+  });
+
+  it('対象抽出（DB）の失敗ではトークン発行の失敗を記録しない（Issue #139）', async () => {
+    process.env.LINE_CHANNEL_ID = 'test-channel-id';
+    process.env.LINE_CHANNEL_SECRET = 'test-channel-secret';
+    process.env.LINE_RICHMENU_COMPLETED_ID = 'richmenu-completed';
+    // DB は到達不能。トークン発行と完了後メニューの照会は成功させ、対象抽出で落とす。
+    process.env.DATABASE_URL = 'postgres://postgres@127.0.0.1:1/does-not-matter';
+
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('/oauth2/v3/token')) {
+        return new Response(JSON.stringify({ access_token: 'token', expires_in: 900, token_type: 'Bearer', key_id: 'k' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(main()).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(1);
+    const fatal = JSON.parse(errorSpy.mock.calls.at(-1)?.[0] as string) as { event: string };
+    expect(fatal.event).toBe('delivery-job.fatal');
+    const events = warnSpy.mock.calls.map((call) => (JSON.parse(call[0] as string) as { event: string }).event);
+    expect(events).not.toContain('delivery-job.token_issue_failed');
   });
 });
