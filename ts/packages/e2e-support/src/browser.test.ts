@@ -7,13 +7,21 @@ const ASIDE = '/Applications/Aside.app/Contents/MacOS/Aside';
 describe('chromiumLaunchOptions', () => {
   it('変数が指定されていれば、その実行ファイルで起動する', () => {
     expect(chromiumLaunchOptions({ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: ASIDE })).toEqual({
-      launchOptions: { executablePath: ASIDE },
+      launchOptions: { executablePath: ASIDE, args: ['--disable-gpu'] },
     });
+  });
+
+  // 差し替えたブラウザは既定で GPU（SwiftShader）で描く。描き直すたびに濃淡や罫線の色が 1/255
+  // 揺れ、画素差で測る検査（mobile-layout.spec.ts の R3）が散発的に落ちた（Issue #378）。
+  it('差し替えるときは GPU を切り、付属 Chromium と同じソフトウェア描画に揃える', () => {
+    expect(chromiumLaunchOptions({ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: ASIDE }).launchOptions?.args).toContain(
+      '--disable-gpu',
+    );
   });
 
   it('前後の空白は取り除く', () => {
     expect(chromiumLaunchOptions({ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: ` ${ASIDE}\n` })).toEqual({
-      launchOptions: { executablePath: ASIDE },
+      launchOptions: { executablePath: ASIDE, args: ['--disable-gpu'] },
     });
   });
 

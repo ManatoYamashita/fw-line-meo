@@ -32,6 +32,8 @@ bash scripts/run-e2e-local.sh --only survey,lighthouse    # 一部だけ
 
 Playwright は既定で付属の Chromium を使う。インストール済みの Chromium 系ブラウザ（Aside、Google Chrome など）で流したいときは、`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` に実行ファイルのパスを渡す。付属 Chromium のダウンロードは要らなくなる。CI（`CI` が立っている環境）ではこの変数を無視し、常に付属 Chromium を使う。判定は `@fwlm/e2e-support/browser` の 1 箇所にあり、3 面の `playwright.config.ts` が共有している。
 
+差し替えたブラウザには `--disable-gpu` を渡し、付属 Chromium と同じソフトウェア描画に揃えている。GPU（SwiftShader）で描かせると、同じ状態を描き直すたびに濃淡や罫線の色が 1/255 揺れ、画素差で測る検査（dashboard-web の `mobile-layout.spec.ts` の R3）が散発的に落ちる（#378。Aside で 11〜18%）。**画素の一致を前提にする検査がローカルでだけ落ちるときは、まず付属 Chromium で流し直して切り分ける**（`env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`）。
+
 ```bash
 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside make e2e
 ```

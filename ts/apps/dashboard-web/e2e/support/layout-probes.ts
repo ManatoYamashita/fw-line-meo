@@ -394,14 +394,33 @@ export interface BandStat {
   readonly columns: number;
 }
 
+export interface SelfDiff {
+  readonly changed: number;
+  readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}
+
+/** 測定に使った 3 枚の画像（差の出所を目で確かめるための添付用）。 */
+export interface CueShots {
+  readonly withCue: Buffer;
+  readonly withoutCue: Buffer;
+  readonly withCueAgain: Buffer;
+}
+
 export interface CueBands {
   readonly left: BandStat;
   readonly right: BandStat;
   readonly center: BandStat;
   /** 同じ状態で 2 回撮った画像の最大の差。0 でなければ描画が安定していない。 */
   readonly maxSelfDelta: number;
+  /**
+   * 同じ状態の 2 枚で差が出た画素の数と、その外接矩形（切り取りの左上を原点とする CSS px）。
+   * 差が無ければ null。**どこが動いたか**を失敗の文言だけで言えるようにするために持つ（Issue #378）。
+   */
+  readonly selfDiff: SelfDiff | null;
   /** 装置の画素 ÷ CSS px。 */
   readonly scale: number;
+  /** 測定に使った 3 枚。JSON へ書き出すときは外す（画像の生データが入る）。 */
+  readonly shots: CueShots;
   readonly clip: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 
@@ -508,7 +527,7 @@ export async function measureCueBands(
   const withoutCue = await page.screenshot({ ...shot, style: hidden });
   const withCueAgain = await page.screenshot({ ...shot, style: HIDE_TEXT_STYLE });
 
-  return page.evaluate(
+  const measured = await page.evaluate(
     async ({
       a,
       b,
@@ -570,11 +589,48 @@ export async function measureCueBands(
         return { changed, maxDelta, total, columns: Math.max(0, Math.min(width, x1) - Math.max(0, x0)) };
       };
 
+      // 同じ状態の 2 枚で差が出た画素の外接矩形。閾値を使わず、差が 1 でもあれば数える
+      // （`maxSelfDelta` の判定と同じ土台で「どこが動いたか」を言うため）。
+      const selfDiffOf = (p: ImageData, q: ImageData) => {
+        let changed = 0;
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -1;
+        let maxY = -1;
+        const width = Math.min(p.width, q.width);
+        const height = Math.min(p.height, q.height);
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const i = (y * p.width + x) * 4;
+            const j = (y * q.width + x) * 4;
+            if (
+              p.data[i] === q.data[j] &&
+              p.data[i + 1] === q.data[j + 1] &&
+              p.data[i + 2] === q.data[j + 2]
+            ) {
+              continue;
+            }
+            changed += 1;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+        if (changed === 0) return null;
+        const css = (value: number) => Math.round((value / scale) * 100) / 100;
+        return {
+          changed,
+          box: { x: css(minX), y: css(minY), width: css(maxX - minX + 1), height: css(maxY - minY + 1) },
+        };
+      };
+
       return {
         left: compare(0, band, first, without),
         right: compare(first.width - band, first.width, first, without),
         center: compare(center, first.width - center, first, without),
         maxSelfDelta: compare(0, first.width, first, second).maxDelta,
+        selfDiff: selfDiffOf(first, second),
         scale,
         clip: rect,
       };
@@ -590,6 +646,7 @@ export async function measureCueBands(
       rect: { x: clip.x, y: clip.y, width: clip.width, height: clip.height },
     },
   );
+  return { ...measured, shots: { withCue, withoutCue, withCueAgain } };
 }
 
 /** 数値を小数第 2 位で丸めた表記（失敗の文言用。比較は丸める前の値で行う）。 */

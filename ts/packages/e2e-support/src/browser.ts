@@ -7,6 +7,12 @@
 // CI ではこの変数を無視し、常に付属 Chromium を使う。CI の結果を、実行するマシンに入っている
 // ブラウザの版に左右させないためである。
 //
+// 差し替えるときは `--disable-gpu` を渡し、付属 Chromium（headless shell）と同じソフトウェア描画に
+// 揃える。差し替えたブラウザは既定で GPU（SwiftShader）で描き、同じ状態を描き直すたびに濃淡や罫線の
+// 色が 1/255 だけ揺れる。画素差で測る検査（dashboard-web の mobile-layout.spec.ts の R3）は
+// 「同じ状態の 2 枚が一致する」ことを前提にしているため、差し替えたときだけ散発的に落ちた
+// （Issue #378 の実測: Aside で 11〜18%・`--disable-gpu` で 0/100・付属 Chromium で 0/340）。
+//
 // 3 面の playwright.config.ts が同じ判定を共有する。複写にしなかったのは、CI で無視する条件を
 // 1 箇所だけ直し忘れても誰も検出できないためである（viewport.ts と同じ理由）。
 import type { LaunchOptions } from '@playwright/test';
@@ -23,5 +29,5 @@ export function chromiumLaunchOptions(env: Env = process.env): { launchOptions?:
   if (env.CI) return {};
   const executablePath = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
   if (!executablePath) return {};
-  return { launchOptions: { executablePath } };
+  return { launchOptions: { executablePath, args: ['--disable-gpu'] } };
 }
