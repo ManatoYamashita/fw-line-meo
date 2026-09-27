@@ -78,8 +78,12 @@ export function detectUngroundedClaims(
   // 店名は素材そのもの。先に取り除く。数値・固有名詞は下で素材と照合するが、日付・時刻は一言の手がかり
   // でしか除外しないので、店名の中の日付の語（「クリスマス食堂」）はここで外さないと創作として数えてしまう。
   // 空白で置き換えるのは、前後の文字が繋がって別の語に化けないようにするため。
+  // モデルは店名の空白を詰めて書くことがある（#222 の実測で「定食屋 あおば」→「定食屋あおば」が 60 件中 4 件）
+  // ので、詰めた形も取り除く。
   let text = draft.normalize('NFKC');
-  if (storeName.trim() !== '') text = text.split(storeName).join(' ');
+  for (const name of new Set([storeName, storeName.replace(/\s+/g, '')])) {
+    if (name.trim() !== '') text = text.split(name).join(' ');
+  }
 
   const claims: GroundingClaim[] = [];
   const seen = new Set<string>();
