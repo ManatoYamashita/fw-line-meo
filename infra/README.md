@@ -362,6 +362,8 @@ CFG
 
 **日付だけを更新して実疎通を省略しないこと。** このガードは人間の実施を強制できず、記録の鮮度しか見ていない。`<証拠>` 欄は、後から「本当に叩いたのか」を第三者が辿るための唯一の手掛かりである。
 
+**places と line-messaging は実トラフィックでも恒常観測している（Issue #139）。** `external-api-liveness` ワークフロー（6 時間ごと）が、日次バッチの取得成功（`places_fetch_ok_runs`）と配信ジョブのトークン発行（`line_token_issued_runs`）をログベース指標で数え、`scripts/check-external-api-liveness.sh` が ALIVE / DEAD / NOT_RUN / UNOBSERVED に分類する（ラベル `external-api-liveness` の追跡 Issue）。**それでも本節の手動実疎通は撤去しない。** gemini は客の操作契機でしか叩かれず「0 件＝正常」があり得るので恒常観測では覆えず、places / line-messaging も対象 0 件や指標の作成直後は UNOBSERVED（判定材料なし）になる。そのときの生死の証拠は本節の記録だけである。places / line-messaging の有効期間 14 日を延ばすかは、恒常観測を数週間走らせて誤報が無いことを確かめてから別 Issue で判断する。
+
 ## 9. GBP 連携の Google 審査（Issue #146 / 機能2・機能1-b の前提）
 
 Google ビジネスプロフィール（GBP）への投稿作成・クチコミ返信（第2フェーズ・Issue #8）を本番で動かすには、**Google の審査を 2 つ通す**必要がある。どちらも所要期間が非公開でクリティカルパスであり、実装の完成を待たずに着手する（これが Issue #146 の趣旨。前身の #7 は審査要件の調査と本節の整備を終えて 2026-08-22 にクローズ済み）。

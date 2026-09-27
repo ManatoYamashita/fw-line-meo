@@ -1,0 +1,149 @@
+# 外部 API（places / line-messaging）の生死を実トラフィックの件数で判定する定期検証（Issue #139）
+#
+# #125 の実疎通（infra/external-api-smoke.tsv・有効期間 14 日）は運用者が思い出して叩く儀式である。
+# places と line-messaging は日次・毎時のジョブが実際に叩いているので、その成否をログベース指標で
+# 数え、本ワークフローが読んで判定する。gemini は客の操作契機でしか叩かれず「0 件＝正常」があり
+# 得るため対象外で、#125 の手動実疎通が唯一の手段として存続する。
+#
+# 判定は ALIVE / DEAD / NOT_RUN / UNOBSERVED の 4 状態（scripts/check-external-api-liveness.sh）。
+# UNOBSERVED（対象 0 件・指標の作成直後）は検証を緑のまま、追跡 Issue で知らせる。
+#
+# CI デプロイ契約（deploy.yml / monitoring-drift.yml と同一・厳守）:
+#   - 本ワークフローは read-only の照会のみ（Monitoring の metricDescriptors / timeSeries）。
+#     構成変更も terraform state への書き込みも行わない。
+#   - **ログを 1 行も読まない。** 読むのは指標の値と定義だけで、roles/monitoring.viewer
+#     （#230 で CI に付与済み）に含まれる。新しい IAM 付与はゼロ。logging 系のロールを付けると
+#     CI がログ本文を読めるようになるので付けない（#227「越えてはならない線」・Req 5.4）。
+#
+# 必要な GitHub リポジトリ変数（vars.*・deploy.yml と共通）:
+#   vars.WIF_PROVIDER   = terraform output wif_provider_name
+#   vars.GCP_PROJECT_ID = gen-fw-line-meo
+name: external-api-liveness
+
+on:
+  # 6 時間ごと。prod-schema-drift（11 分）・prod-image-drift（17 分）・monitoring-drift（29 分）・
+  # secret-version-drift（43 分）と分を分ける。判定の窓は places 30 時間・line-messaging 3 時間で、
+  # 発火が数時間遅れても判定の意味は変わらない（窓は実行時刻から遡る）。
+  schedule:
+    - cron: '53 */6 * * *'
+  # 障害時の即時確認と、通知経路の end-to-end 実証（snapshot に fixture を渡して赤を作る）用。
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: 件数を注入する TSV のパス。通常は空（空なら Monitoring を実測する）
+        required: false
+        default: ''
+
+concurrency:
+  group: external-api-liveness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # WIF の OIDC トークン発行に必須
+  issues: write # 追跡 Issue の起票・コメント・クローズ
+
+jobs:
+  external-api-liveness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout（正典は作業ツリーのファイル・git 履歴は不要）'
+        uses: actions/checkout@v5
+
+      - name: 'Authenticate to Google Cloud (Direct WIF, no SA key)'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+
+      - name: 'Set up gcloud'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: '外部 API の生死を実トラフィックの件数で判定（Issue #139）'
+        id: liveness
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          SNAPSHOT_INPUT: ${{ github.event.inputs.snapshot }}
+        # 検証の赤はこのステップでは落とさず、通知まで通してから最終ステップで落とす。
+        # continue-on-error はジョブの結論を曖昧にするので使わない。
+        #
+        # 注入は `${VAR+x}` で判定される（空文字も「注入あり」）。未入力のまま渡すと空の注入として
+        # 赤になるため、入力があるときだけ export する。
+        run: |
+          set -uo pipefail
+          if [ -n "${SNAPSHOT_INPUT:-}" ]; then
+            export EXTERNAL_API_LIVENESS_SNAPSHOT="$SNAPSHOT_INPUT"
+          fi
+          bash scripts/check-external-api-liveness.sh > "$RUNNER_TEMP/liveness-report.txt" 2>&1 && status=0 || status=$?
+          cat "$RUNNER_TEMP/liveness-report.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/liveness-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: '追跡 Issue へ通知'
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LIVENESS_STATUS: ${{ steps.liveness.outputs.status }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/liveness-report.txt"
+          if [ ! -f "$report" ]; then
+            printf '%s\n' "検証ステップが report を残さずに終了しました（スクリプトの起動自体に失敗した可能性があります）。" > "$report"
+          fi
+          # 検証スクリプトは早期異常でも EXTERNAL-API-LIVENESS-SIGNATURE を出す契約だが、それ以前に
+          # 落ちた場合に備えて空を許さない。空のまま渡すと状態変化の判定ができず、赤が続く限り
+          # 6 時間ごとにコメントが増える。
+          sig="$(grep '^EXTERNAL-API-LIVENESS-SIGNATURE: ' "$report" | tail -n 1 | sed 's/^EXTERNAL-API-LIVENESS-SIGNATURE: //' || true)"
+          if [ -z "$sig" ]; then
+            sig="no-signature"
+          fi
+          state=red
+          if [ "${LIVENESS_STATUS:-}" = "0" ]; then
+            state=green
+            # UNOBSERVED は検証を緑（exit 0）のまま、署名へ <api>=unobserved; を載せる契約である。
+            # 散文（WARN 行）は読まず、署名だけで判断する。
+            case "$sig" in
+              *'=unobserved;'*) state=warn ;;
+            esac
+          fi
+
+          # report-ci-issue.sh は red / green しか受け付けない（fail-closed）。warn は「起票、または
+          # 状態が変わったときだけコメント」が要るので red の経路へ写す（external-api-smoke-freshness と同じ）。
+          case "$state" in
+            green) issue_state=green ;;
+            warn | red) issue_state=red ;;
+            *)
+              echo "ERROR: 未知の state です: ${state}" >&2
+              exit 1
+              ;;
+          esac
+
+          body="$RUNNER_TEMP/issue-body.md"
+          # 本文の組み立ては scripts/external-api-liveness-notify.sh が持つ。
+          # **この run ブロックへ戻さないこと**（Issue #109 と同じ形を再生産する）。
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/external-api-liveness-notify.sh \
+            --state "$state" \
+            --report "$report" \
+            --run-url "$run_url" > "$body"
+
+          # タイトルは起票時にしか付かず、以後の状態変化では変わらない。どの状態で起票されても
+          # 読み違えない文面にする。
+          bash scripts/report-ci-issue.sh \
+            --state "$issue_state" \
+            --label external-api-liveness \
+            --title "chore(ci): 外部 API（places / line-messaging）の生死を確認してください（恒常観測の自動検出）" \
+            --body-file "$body" \
+            --signature "$sig"
+
+      - name: '検証結果でジョブの成否を決める'
+        if: always()
+        env:
+          LIVENESS_STATUS: ${{ steps.liveness.outputs.status }}
+        run: exit "${LIVENESS_STATUS:-1}"
