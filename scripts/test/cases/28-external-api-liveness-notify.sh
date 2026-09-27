@@ -75,16 +75,17 @@ fx_guard external-api-liveness-notify
 eln_report
 eln_compose grean
 expect_output_empty
-if [ "$RC" -eq 0 ]; then
-  _t_fail '未知の state で exit 0 になりました（障害中に復旧通知が飛ぶ形です）。'
-fi
+# stdout は空、stderr に理由が出ることを照合する（原因まで固定する）。
+fx_run_args external-api-liveness-notify --state grean --report report.txt \
+  --run-url https://github.com/owner/repo/actions/runs/1
+expect_red '--state は green / warn / red のいずれかでなければなりません'
 t_end
 
 t_begin 'external-api-liveness 通知: report が無ければ落ちる'
 fx_guard external-api-liveness-notify
 eln_compose red
 expect_output_empty
-if [ "$RC" -eq 0 ]; then
-  _t_fail 'report が無いのに exit 0 になりました（無内容の通知が飛ぶ形です）。'
-fi
+fx_run_args external-api-liveness-notify --state red --report report.txt \
+  --run-url https://github.com/owner/repo/actions/runs/1
+expect_red '--report の検証結果ファイルがありません'
 t_end
