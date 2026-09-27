@@ -141,6 +141,7 @@ function registerDeps(
     isValidCategory: () => Promise.resolve(true),
     registerStore: () =>
       Promise.resolve({ kind: 'confirmed', storeId: '66666666-6666-6666-6666-666666666666' }),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }

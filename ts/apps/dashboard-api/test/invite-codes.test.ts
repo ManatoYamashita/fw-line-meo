@@ -171,6 +171,7 @@ function issueDeps(
   return {
     auth: authDeps(user, disabled),
     issueCode: (agencyId: string) => Promise.resolve(codeItem({ agencyId })),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }
@@ -286,6 +287,7 @@ function disableDeps(
     auth: authDeps(user, disabled),
     disableCode: (id: string, agencyId: string) =>
       Promise.resolve(codeItem({ id, agencyId, disabled: true })),
+    auditLog: () => Promise.resolve(),
     ...over,
   };
 }
