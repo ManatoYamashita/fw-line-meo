@@ -40,6 +40,7 @@ import { PageHeader } from '../src/components/page-header';
 import { PageShell } from '../src/components/page-shell';
 import { RadioGroup, RadioGroupItem } from '../src/components/radio-group';
 import { Select } from '../src/components/select';
+import { TableSkeleton } from '../src/components/skeleton';
 import { Spinner } from '../src/components/spinner';
 import {
   Table,
@@ -787,6 +788,41 @@ function renderTable(): ReturnType<typeof render> {
     </TableContainer>,
   );
 }
+
+describe('TableSkeleton — 取得中の表の形', () => {
+  it('形は支援技術から外れ、表の要素・捲れる容器・焦点可能な要素を持たない', () => {
+    const { container } = render(<TableSkeleton columns={4} actions={1} />);
+    const root = container.querySelector('[data-slot="table-skeleton"]');
+    expect(root).not.toBeNull();
+    expect(root!.getAttribute('aria-hidden')).toBe('true');
+    expect(container.querySelector('table')).toBeNull();
+    expect(container.querySelector('[data-slot="table-container"]')).toBeNull();
+    expect(container.querySelector('[tabindex]')).toBeNull();
+  });
+
+  it('本体の行の数は rows に従う（既定は 3）', () => {
+    const { container, rerender } = render(<TableSkeleton columns={2} />);
+    expect(container.querySelectorAll('[data-slot="table-skeleton-row"]')).toHaveLength(3);
+    rerender(<TableSkeleton columns={2} rows={5} />);
+    expect(container.querySelectorAll('[data-slot="table-skeleton-row"]')).toHaveLength(5);
+  });
+
+  // actions は末尾の列を押しボタンの形で置き換える。行ごとの形の総数が列の数からずれると、
+  // 取得の前後で列の並びが跳ぶ。両端（0 と 2）と中間（1）を固定する。
+  it.each([
+    { actions: 0, text: 4 },
+    { actions: 1, text: 3 },
+    { actions: 2, text: 3 },
+  ])('actions=$actions のとき、各行は文字の帯 $text 本と押しボタンの形 $actions 個を持つ', ({ actions, text }) => {
+    const { container } = render(<TableSkeleton columns={4} rows={2} actions={actions} />);
+    const rows = container.querySelectorAll('[data-slot="table-skeleton-row"]');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.querySelectorAll('[data-slot="skeleton-action"]')).toHaveLength(actions);
+      expect(row.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(text);
+    }
+  });
+});
 
 describe('Table — 支援技術上の役割と構造契約（Requirements 5.1, 5.2）', () => {
   it('行・列・セルの役割が支援技術へ公開される', () => {

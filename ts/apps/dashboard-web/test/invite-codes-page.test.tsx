@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { announcedText, ownText } from './live-region';
+import { expectListSkeleton } from './list-skeleton';
 
 // 認証コンテキストはモックし、ready な operator/agency を注入する（stores-page.test と同規約）。
 const useAuthMock = vi.fn();
@@ -602,9 +603,8 @@ describe('招待コードページ: 意匠の適用', () => {
       expect(ownText(region), role).toBe('読み込み中...');
       // 図形側に aria-hidden が付いていないと読み上げ領域が二重になり、この値も二重になる。
       expect(announcedText(region), role).toBe('読み込み中...');
-      const spinner = region.querySelector('[data-slot="spinner"]');
-      expect(spinner, role).not.toBeNull();
-      expect(spinner!.getAttribute('aria-hidden'), role).toBe('true');
+      // 行の操作は「無効化」1 つ。
+      expectListSkeleton(main, region, { actions: 1 }, role);
       visited += 1;
       cleanup();
     }

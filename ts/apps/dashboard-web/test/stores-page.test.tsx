@@ -46,6 +46,7 @@ vi.mock('../src/lib/api', () => api);
 import StoresPage from '../src/app/stores/page';
 import { settleEffects } from './focus-observation';
 import { announcedText, ownText } from './live-region';
+import { expectListSkeleton } from './list-skeleton';
 
 function ready(role: 'operator' | 'agency') {
   useAuthMock.mockReturnValue({
@@ -804,15 +805,8 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     expect(ownText(region)).toBe('読み込み中...');
     // 図形側に aria-hidden が付いていないと読み上げ領域が二重になり、この値も二重になる。
     expect(announcedText(region)).toBe('読み込み中...');
-    // 取得中の形は読み上げ領域の外に置き、形自身は支援技術から外す。
-    const skeleton = main.querySelector('[data-slot="table-skeleton"]');
-    expect(skeleton).not.toBeNull();
-    expect(region.contains(skeleton)).toBe(false);
-    expect(skeleton!.getAttribute('aria-hidden')).toBe('true');
-    // 形は表の要素も捲れる容器も持たない（取得前から表や捲れる領域として数えられないため）。
-    expect(main.querySelector('table')).toBeNull();
-    expect(main.querySelector('[data-slot="table-container"]')).toBeNull();
-    expect(skeleton!.querySelector('[tabindex]')).toBeNull();
+    // 行の操作は QR 発行の押しボタン 1 つ。
+    expectListSkeleton(main, region, { actions: 1 });
   });
 
   it('取得の失敗は危険の通知の部品として読み上げ領域 1 つに載る（Req 1.1, 3.5）', async () => {

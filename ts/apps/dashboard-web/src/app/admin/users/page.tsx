@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
+import { ListLoading } from '../../../components/list-loading';
 import { DashboardUserEditPanel } from '../../../components/dashboard-user-edit-panel';
 import { TopNav } from '../../../components/top-nav';
 import {
@@ -454,13 +455,8 @@ function UsersView() {
       )}
 
       {list.kind === 'loading' && (
-        // Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
-        // 図形は装飾として扱い aria-hidden で支援技術から外す。文言は可視のテキストのまま残す
-        // （Spinner の aria-label へ移すと sr-only の子要素へ落ちる・Req 4.5）。
-        <p role="status" className="flex items-center gap-2">
-          <Spinner aria-hidden />
-          読み込み中...
-        </p>
+        // 操作の列は「編集」と「有効化／無効化」の 2 つの押しボタンを持つ。
+        <ListLoading columns={COLUMN_COUNT} actions={2} />
       )}
       {list.kind === 'error' && (
         <Alert variant="destructive">
