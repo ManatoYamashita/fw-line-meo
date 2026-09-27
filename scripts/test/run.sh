@@ -33,9 +33,9 @@
 #   Tier A  hermetic。実 node_modules を使わない。合成ツリーの npx スタブを **常に** PATH の
 #           先頭へ置き、eslint / tsc の応答だけを模擬する。CI では install の前に走らせる。
 #           検証できるのは走査範囲・担当分界・件数・**fail-closed 分岐の到達性**。
-#   Tier B  実 ts/node_modules を symlink で借用し、本物の tsc / eslint に問い合わせる。
-#           tsconfig の include の実効範囲、flat config の ignores の合成、@ts-check /
-#           @ts-nocheck、#81 の偽緑 — スタブでは模擬できない層はここでしか検証できない。
+#   Tier B  ケースが必要とする実依存を使う。例: ts/node_modules の tsc / eslint や
+#           PostgreSQL service。設定の実効範囲や migration 適用など、スタブでは模擬できない
+#           層はここでしか検証できない。
 #
 # 所属は**ファイル名で決まる**。`*.tier-b.sh` が Tier B、それ以外は Tier A。ケース単位の宣言に
 # しないのは、宣言を書き忘れた新規ケースが黙って片方の層から消えるのを避けるためである。
@@ -814,7 +814,7 @@ if [ "$assert_count" -eq 0 ]; then
     # 判定に使うのは skip_count ではなく dep_skip_count である（--require-full では skip が
     # 失敗へ変わり skip_count が 0 になるため。理由は t_skip の注記を参照）。
     echo "ERROR: ${dep_skip_count} ケースが依存不足で飛ばされ、1 件も検証できていません（tier=${TIER_SELECT}）。" >&2
-    echo "       → 依存が足りていません。Tier B は 'pnpm -C ts install' が要ります。" >&2
+    echo "       → Tier B のケースが必要とする実依存（例: ts/node_modules、PostgreSQL）が足りていません。" >&2
   else
     echo "ERROR: アサーションを 1 件も実行できませんでした。ハーネスが空振りしています。" >&2
   fi
