@@ -69,24 +69,24 @@ function mentionsCategory(
  * lexicon の JSON（`{"_comment", "placeholders", "patterns", "commentHints"}`）を組み立てる。
  * パターン中の `{NAME}` は placeholders.NAME へ置き換える（過去形の後置条件を 1 か所で持つため）。
  */
-export function readVisitContextLexicon(raw: unknown): VisitContextLexicon {
+export function readVisitContextLexicon(raw: unknown, label = 'visit-context lexicon'): VisitContextLexicon {
   if (typeof raw !== 'object' || raw === null || !('patterns' in raw) || !('commentHints' in raw)) {
-    throw new Error('visit-context lexicon の形式が不正です（patterns と commentHints が要ります）');
+    throw new Error(`${label} の形式が不正です（patterns と commentHints が要ります）`);
   }
   const { placeholders = {}, patterns, commentHints } = raw as {
     placeholders?: unknown;
     patterns: unknown;
     commentHints: unknown;
   };
-  const names = asStringRecord(placeholders, 'placeholders');
-  const rawPatterns = asStringListRecord(patterns, 'patterns');
-  const hints = asStringListRecord(commentHints, 'commentHints');
+  const names = asStringRecord(placeholders, 'placeholders', label);
+  const rawPatterns = asStringListRecord(patterns, 'patterns', label);
+  const hints = asStringListRecord(commentHints, 'commentHints', label);
 
   // 分類は両方向で一致させる。片方にしか無い分類は、一言の除外か検出のどちらかが黙って効かなくなる。
   const a = Object.keys(rawPatterns).sort().join(',');
   const b = Object.keys(hints).sort().join(',');
   if (a !== b) {
-    throw new Error(`visit-context lexicon の patterns と commentHints の分類が一致しません（${a} / ${b}）`);
+    throw new Error(`${label} の patterns と commentHints の分類が一致しません（${a} / ${b}）`);
   }
 
   const compiled: Record<string, RegExp[]> = {};
@@ -95,7 +95,7 @@ export function readVisitContextLexicon(raw: unknown): VisitContextLexicon {
       const expanded = source.replace(/\{([A-Z_]+)\}/g, (_, name: string) => {
         const value = names[name];
         if (value === undefined) {
-          throw new Error(`visit-context lexicon の patterns.${category} が未定義の置き換え {${name}} を使っています`);
+          throw new Error(`${label} の patterns.${category} が未定義の置き換え {${name}} を使っています`);
         }
         return value;
       });
@@ -106,25 +106,25 @@ export function readVisitContextLexicon(raw: unknown): VisitContextLexicon {
   return { patterns: compiled, commentHints: hints };
 }
 
-function asStringRecord(value: unknown, where: string): Record<string, string> {
+function asStringRecord(value: unknown, where: string, label: string): Record<string, string> {
   if (typeof value !== 'object' || value === null) {
-    throw new Error(`visit-context lexicon の ${where} が object ではありません`);
+    throw new Error(`${label} の ${where} が object ではありません`);
   }
   for (const [key, v] of Object.entries(value)) {
     if (typeof v !== 'string' || v.length === 0) {
-      throw new Error(`visit-context lexicon の ${where}.${key} は空でない文字列である必要があります`);
+      throw new Error(`${label} の ${where}.${key} は空でない文字列である必要があります`);
     }
   }
   return value as Record<string, string>;
 }
 
-function asStringListRecord(value: unknown, where: string): Record<string, string[]> {
+function asStringListRecord(value: unknown, where: string, label: string): Record<string, string[]> {
   if (typeof value !== 'object' || value === null) {
-    throw new Error(`visit-context lexicon の ${where} が object ではありません`);
+    throw new Error(`${label} の ${where} が object ではありません`);
   }
   for (const [key, list] of Object.entries(value)) {
     if (!Array.isArray(list) || list.length === 0 || !list.every((s) => typeof s === 'string' && s.length >= 2)) {
-      throw new Error(`visit-context lexicon の ${where}.${key} は 2 文字以上の文字列の配列（1 件以上）である必要があります`);
+      throw new Error(`${label} の ${where}.${key} は 2 文字以上の文字列の配列（1 件以上）である必要があります`);
     }
   }
   return value as Record<string, string[]>;

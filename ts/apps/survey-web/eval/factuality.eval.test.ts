@@ -12,8 +12,17 @@ import {
 import type { DraftMaterial, Star } from '../src/lib/domain';
 import { detectAspectMentions, readLexicon } from '../src/lib/draft/factuality';
 import { detectVisitContextClaims, readVisitContextLexicon } from '../src/lib/draft/visit-context';
+import {
+  detectUngroundedClaims,
+  readGroundingLexicon,
+  GROUNDING_AXES,
+  STAR_NARRATION,
+  type GroundingClaim,
+  type GroundingSource,
+} from '../src/lib/draft/material-grounding';
 import lexiconRaw from '../src/lib/draft/aspect-lexicon.json';
 import visitLexiconRaw from '../src/lib/draft/visit-context-lexicon.json';
+import groundingLexiconRaw from '../src/lib/draft/material-grounding-lexicon.json';
 import aspectsRaw from './aspects.json';
 import datasetRaw from './dataset.json';
 
@@ -27,6 +36,7 @@ import datasetRaw from './dataset.json';
 
 const lexicon = readLexicon(lexiconRaw);
 const visitLexicon = readVisitContextLexicon(visitLexiconRaw);
+const groundingLexicon = readGroundingLexicon(groundingLexiconRaw);
 const labels = aspectsRaw.labels as Record<string, string>;
 const RUNS = Number.parseInt(process.env.EVAL_RUNS ?? '3', 10);
 // 書き出しを 1 つに固定して流す（Issue #254: 候補ごとの創作率を同じ素材で比べるため）。
@@ -69,11 +79,15 @@ interface Sample {
   readonly starNarration: boolean;
   /** 素材の「なし」を「良かった点は無かった」と断定したか（客が言っていない否定の創作）。 */
   readonly absenceAssertion: boolean;
+  /** 素材に無い固有名詞・数値・日付（Issue #222）。既存の軸とは別に、軸ごとに分けて数える。 */
+  readonly groundingClaims: readonly GroundingClaim[];
+  /** 自己照合の対照（下書き自身を一言として渡した結果）。構造的に空でなければ照合の経路が壊れている。 */
+  readonly groundingSelfCheck: readonly GroundingClaim[];
 }
 
 // 下書きの自然さ・事実性の副作用（Issue #254 のレビュー）。語彙ではなく形で数え、検出したものは確実に該当するよう狭く取る。
 // 先頭 10 字の重複率では捉えられない（先頭は店名になりやすい）ので、別に数える。
-const STAR_NARRATION = /評価は\s*[1-5１-５]|[1-5１-５]\s*段階|星\s*[1-5１-５]|★\s*[1-5１-５]|[1-5１-５]\s*点(?!心)|[1-5１-５]つ星/;
+// 星の数の読み上げ（STAR_NARRATION）は、数値の軸（Issue #222）と共有するため material-grounding.ts へ移した（文字列は同一）。
 const ABSENCE_ASSERTION = /(?:良かった|よかった|良い)(?:点|ところ)(?:は|が)?(?:特に|とくに)?(?:なく|なし|無く|無し|ありません|ない|見当たり)/;
 
 /** 気になった点の code。省略した素材は「選ばなかった」として扱う（本番の validate と同じ）。 */
@@ -102,6 +116,17 @@ function toDraftMaterial(m: (typeof datasetRaw.materials)[number]): DraftMateria
   };
   return m.comment === null ? base : { ...base, comment: m.comment };
 }
+
+/** 固有名詞・数値・日付の照合に使う素材（Issue #222）。星と観点はこれらの出所にならないので渡さない。 */
+function groundingSourceOf(dm: DraftMaterial): GroundingSource {
+  return dm.comment === undefined ? { storeName: dm.storeName } : { storeName: dm.storeName, comment: dm.comment };
+}
+
+const AXIS_LABEL: Record<(typeof GROUNDING_AXES)[number], string> = {
+  properNoun: '固有名詞',
+  number: '数値',
+  dateTime: '日付・時刻',
+};
 
 function pct(numerator: number, denominator: number): string {
   return denominator === 0 ? 'n/a' : `${((numerator / denominator) * 100).toFixed(1)}%`;
@@ -151,6 +176,12 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             visitClaims: detectVisitContextClaims(result.value, dm.comment, visitLexicon),
             starNarration: STAR_NARRATION.test(result.value),
             absenceAssertion: ABSENCE_ASSERTION.test(result.value),
+            groundingClaims: detectUngroundedClaims(result.value, groundingSourceOf(dm), groundingLexicon),
+            groundingSelfCheck: detectUngroundedClaims(
+              result.value,
+              { storeName: dm.storeName, comment: result.value },
+              groundingLexicon,
+            ),
           });
         }
       }
@@ -293,6 +324,59 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
         );
       }
 
+      // 素材に無い固有名詞・数値・日付（Issue #222）。既存の軸の数値を変えないよう、別のセクションで軸ごとに出す。
+      console.log('\n--- 素材に無い固有名詞・数値・日付（Issue #222）---');
+      const hasAxis = (s: Sample, axis: string) => s.groundingClaims.some((c) => c.axis === axis);
+      for (const axis of GROUNDING_AXES) {
+        const n = samples.filter((s) => hasAxis(s, axis)).length;
+        const kinds = new Map<string, number>();
+        for (const s of samples) {
+          for (const c of s.groundingClaims) if (c.axis === axis) kinds.set(c.kind, (kinds.get(c.kind) ?? 0) + 1);
+        }
+        const detail = [...kinds.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}×${v}`).join(' ');
+        console.log(
+          `  ${AXIS_LABEL[axis].padEnd(8)} ${n} / ${samples.length}（${pct(n, samples.length)}）` + (detail.length > 0 ? `  内訳: ${detail}` : ''),
+        );
+      }
+      console.log('  店名の種類別（固有名詞 / 数値 / 日付・時刻）:');
+      for (const kind of ['fictional', 'real']) {
+        const mine = samples.filter((s) => s.storeNameKind === kind);
+        const cells = GROUNDING_AXES.map((axis) => {
+          const n = mine.filter((s) => hasAxis(s, axis)).length;
+          return `${n}/${mine.length} (${pct(n, mine.length)})`;
+        });
+        console.log(`    ${kind.padEnd(12)} ${cells.join('  ')}`);
+      }
+      console.log('  素材別（固有名詞 / 数値 / 日付・時刻）:');
+      for (const m of datasetRaw.materials) {
+        const mine = samples.filter((s) => s.materialId === m.id);
+        if (mine.length === 0) continue;
+        const cells = GROUNDING_AXES.map((axis) => String(mine.filter((s) => hasAxis(s, axis)).length).padStart(2));
+        const texts = [...new Set(mine.flatMap((s) => s.groundingClaims.map((c) => c.matchedText)))];
+        console.log(`    ${m.id.padEnd(36)} ${cells.join(' ')} / ${mine.length}` + (texts.length > 0 ? `  創作: ${texts.join(', ')}` : ''));
+      }
+      for (const [title, key, candidates] of [
+        ['書き出し', 'opening', OPENING_TEXTS],
+        ['切り口', 'angle', VARIATION_CANDIDATES.angles.map((c) => c.text)],
+        ['文体', 'tone', [...VARIATION_CANDIDATES.tones]],
+      ] as const) {
+        console.log(`  ${title}の候補ごと（固有名詞 / 数値 / 日付・時刻）:`);
+        for (const candidate of candidates) {
+          const mine = samples.filter((s) => s.variation[key] === candidate);
+          if (mine.length === 0) continue;
+          const cells = GROUNDING_AXES.map((axis) => String(mine.filter((s) => hasAxis(s, axis)).length));
+          console.log(`    ${candidate}  n=${mine.length}  ${cells.join(' / ')}`);
+        }
+      }
+      const grounding = samples.filter((s) => s.groundingClaims.length > 0);
+      if (grounding.length > 0) {
+        console.log('  実例（先頭 3 件）:');
+        for (const s of grounding.slice(0, 3)) {
+          console.log(`    [${s.materialId}] 創作=${s.groundingClaims.map((c) => `${c.axis}/${c.kind}(${c.matchedText})`).join(', ')}`);
+          console.log(`      ${s.draft}`);
+        }
+      }
+
       if (violating.length > 0) {
         console.log('\n--- 逸脱サンプルの実例（先頭 3 件）---');
         for (const s of violating.slice(0, 3)) {
@@ -314,6 +398,17 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       // ここが 0 でなければ検出器か実行経路が壊れている（測定結果全体が信用できない）。
       const control = samples.filter((s) => s.materialId === 'all-selected-star5');
       expect(control.flatMap((s) => s.violations), '対照群で逸脱が検出されました').toEqual([]);
+
+      // 固有名詞・数値・日付の対照（Issue #222）。全観点を選んだ素材でも、モデルは数値や日付を創作しうるので
+      // 上の対照群はこの 3 軸では構造的に 0 にならない。代わりに、全サンプルについて下書き自身を素材として渡す。
+      // 本文に現れたものはすべて素材に含まれることになるので、どの軸も必ず 0 件になる。ここが 0 でなければ、
+      // 素材との照合の経路が壊れている（3 軸の測定結果が信用できない）。
+      for (const axis of GROUNDING_AXES) {
+        expect(
+          samples.flatMap((s) => s.groundingSelfCheck.filter((c) => c.axis === axis)),
+          `自己照合の対照で ${AXIS_LABEL[axis]} の軸が 0 件になりませんでした`,
+        ).toEqual([]);
+      }
 
       // 書き出しを固定したときは、固定が実際に効いたことを確かめる（効いていなければ、別の条件を測っている）。
       if (FORCED_OPENING !== '') {
