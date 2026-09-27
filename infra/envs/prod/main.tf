@@ -182,6 +182,15 @@ module "cicd_wif" {
   depends_on = [module.project_services]
 }
 
+# Issue #251: Cloud SQL IAM DB 認証に使う専用 principal を DB user として登録する。
+# google_sql_user はログイン主体の登録だけを行い、DB 権限は追加しない。
+resource "google_sql_user" "schema_drift" {
+  project  = var.project_id
+  instance = module.database.instance_name
+  name     = trimsuffix(module.cicd_wif.schema_drift_service_account_email, ".gserviceaccount.com")
+  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+}
+
 module "guardrails" {
   source             = "../../modules/guardrails"
   project_id         = var.project_id

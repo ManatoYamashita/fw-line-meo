@@ -51,7 +51,7 @@ WHITELIST=()
 # 2 tier あれば宣言漏れ。片方向だけだと、この一覧そのものが実態から乖離していく。
 # ガードを改名した場合は新しい名前が「2 tier あるのに未宣言」で赤になるため、取り残された
 # 旧名の項目は不活性になるだけで見逃しにはならない。
-TIER_SPLIT=(check-test-code-coverage)
+TIER_SPLIT=(check-test-code-coverage check-prod-schema-drift)
 
 if [ ! -d "$CASES_DIR" ]; then
   echo "ERROR: ケースディレクトリがありません: ${CASES_DIR#$ROOT/}（ガードの自己テストが丸ごと消えています）。" >&2
@@ -121,7 +121,7 @@ check_tier_set() {
   if in_list "$cts_name" ${TIER_SPLIT[@]+"${TIER_SPLIT[@]}"}; then
     if ! in_list 'tier-b' $cts_seen; then
       echo "ERROR: ${cts_name} は TIER_SPLIT の宣言に反して Tier B のケースファイルがありません。" >&2
-      echo "       → 実物の tsc / eslint にしか答えられない層の検証が消えても、Tier A の緑だけで通ります。" >&2
+      echo "       → Tier B の実依存を使う層の検証が消えても、Tier A の緑だけで通ります。" >&2
       echo "         復旧するか、その層を持たない構成にしたのなら TIER_SPLIT から外してください。" >&2
       fail=1
     fi

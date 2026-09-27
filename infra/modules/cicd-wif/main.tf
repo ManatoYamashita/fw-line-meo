@@ -153,3 +153,29 @@ resource "google_project_iam_member" "ci_monitoring_viewer" {
   role    = "roles/monitoring.viewer"
   member  = local.principal_set
 }
+
+# 本番 DB スキーマの定期検証（Issue #251）
+#
+# Direct WIF の GitHub 主体へ Cloud SQL 権限を直接付けず、検証専用 SA だけを偽装させる。
+# SA に付ける GCP 権限は接続・IAM DB login のみ。DB の表・列・行への権限は付与しない。
+# Cloud SQL Auth Proxy の --auto-iam-authn がこの SA の ID で DB へログインする。
+resource "google_service_account" "schema_drift" {
+  project      = var.project_id
+  account_id   = "gha-schema-drift"
+  display_name = "GitHub Actions schema drift checker"
+  description  = "Issue #251 の本番スキーマ存在確認専用。キーは発行しない。"
+}
+
+resource "google_project_iam_member" "schema_drift_cloudsql" {
+  for_each = toset(["roles/cloudsql.client", "roles/cloudsql.instanceUser"])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.schema_drift.email}"
+}
+
+resource "google_service_account_iam_member" "schema_drift_wif_user" {
+  service_account_id = google_service_account.schema_drift.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = local.principal_set
+}

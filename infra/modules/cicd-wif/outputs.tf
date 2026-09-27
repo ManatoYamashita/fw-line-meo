@@ -12,3 +12,8 @@ output "deployer_service_account_email" {
   description = "deploy-prod が偽装するデプロイ SA の email（Issue #316）。"
   value       = google_service_account.deployer.email
 }
+
+output "schema_drift_service_account_email" {
+  description = "本番 DB スキーマの定期検証だけに使う IAM DB ユーザーの主体（Issue #251）。"
+  value       = google_service_account.schema_drift.email
+}

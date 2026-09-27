@@ -1,0 +1,122 @@
+# 本番 Cloud SQL のスキーマと db/migrations の乖離を 6 時間ごとに検証する（Issue #251）。
+# 期待側は一時 PostgreSQL へ migration を実適用し、本番側は Cloud SQL Auth Proxy 経由で
+# pg_catalog の対象名だけを読む。どちらもアプリケーションテーブルの行を SELECT しない。
+name: prod-schema-drift
+
+on:
+  schedule:
+    - cron: '11 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: 本番 catalog 対象を注入する TSV ファイルのパス。空なら Cloud SQL を照会します
+        required: false
+        default: ''
+
+concurrency:
+  group: prod-schema-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  schema-drift:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: schema_drift
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      EXPECTED_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/schema_drift
+      # database モジュール既定の instance_name / region と一致（infra/modules/database/variables.tf）。
+      CLOUD_SQL_INSTANCE_CONNECTION_NAME: ${{ vars.GCP_PROJECT_ID }}:asia-northeast1:fwlm-pg
+      PROD_DATABASE_URL: host=127.0.0.1 port=5433 dbname=fwlm user=gha-schema-drift@${{ vars.GCP_PROJECT_ID }}.iam sslmode=disable
+
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v5
+
+      - name: 'Authenticate to Google Cloud (WIF through schema-drift SA)'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: gha-schema-drift@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+
+      - name: 'Set up gcloud'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: 'Install Cloud SQL Auth Proxy'
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == ''
+        run: |
+          set -euo pipefail
+          url='https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.25.4/cloud-sql-proxy.linux.amd64'
+          curl --fail --location --silent --show-error "$url" --output "$RUNNER_TEMP/cloud-sql-proxy"
+          chmod +x "$RUNNER_TEMP/cloud-sql-proxy"
+          "$RUNNER_TEMP/cloud-sql-proxy" --auto-iam-authn --address 127.0.0.1 --port 5433 \
+            "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" > "$RUNNER_TEMP/cloud-sql-proxy.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/cloud-sql-proxy.pid"
+          for attempt in $(seq 1 30); do
+            if pg_isready --host=127.0.0.1 --port=5433 >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/cloud-sql-proxy.log"
+          echo 'ERROR: Cloud SQL Auth Proxy が接続待受を開始しませんでした。' >&2
+          exit 1
+
+      - name: '本番スキーマと migration の対象集合を照合（Issue #251）'
+        id: drift
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          PROD_SCHEMA_SNAPSHOT: ${{ github.event.inputs.snapshot }}
+        run: |
+          set -uo pipefail
+          bash scripts/check-prod-schema-drift.sh > "$RUNNER_TEMP/schema-report.txt" 2>&1 && status=0 || status=$?
+          cat "$RUNNER_TEMP/schema-report.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/schema-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: '追跡 Issue へ通知'
+        if: always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.snapshot == '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SCHEMA_DRIFT_STATUS: ${{ steps.drift.outputs.status }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/schema-report.txt"
+          if [ ! -f "$report" ]; then
+            printf '%s\n' '検証ステップが report を残さずに終了しました（認証・Proxy・スクリプト起動を確認してください）。' > "$report"
+          fi
+          sig="$(grep '^SCHEMA-DRIFT-SIGNATURE: ' "$report" | tail -n 1 | sed 's/^SCHEMA-DRIFT-SIGNATURE: //' || true)"
+          if [ -z "$sig" ]; then sig='no-signature'; fi
+          state=red
+          if [ "${SCHEMA_DRIFT_STATUS:-}" = 0 ]; then state=green; fi
+          body="$RUNNER_TEMP/issue-body.md"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash scripts/prod-schema-drift-notify.sh --state "$state" --report "$report" --run-url "$run_url" > "$body"
+          bash scripts/report-ci-issue.sh \
+            --state "$state" \
+            --label prod-schema-drift \
+            --title 'fix(infra): 本番スキーマと db/migrations が乖離しています（自動検出）' \
+            --body-file "$body" \
+            --signature "$sig"
+
+      - name: '検証結果でジョブの成否を決める'
+        if: always()
+        env:
+          SCHEMA_DRIFT_STATUS: ${{ steps.drift.outputs.status }}
+        run: exit "${SCHEMA_DRIFT_STATUS:-1}"
