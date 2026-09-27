@@ -1365,14 +1365,26 @@ export function createGbpFlowHandlers(deps: GbpFlowDeps): GbpFlowHandlers {
    * throw しないため会話は壊れない（重複案内が 1 通出る可能性だけが残る）。
    */
   async function guard(
-    what: string,
+    what: 'handleGbpPostback' | 'handleGbpText',
     ownerId: string,
     run: () => Promise<HandledResult>,
   ): Promise<HandledResult> {
     try {
       return await run();
     } catch (err) {
-      deps.logger.error(`gbp: ${what} failed`, { ownerId, errorName: errorNameOf(err) });
+      const fields = { ownerId, errorName: errorNameOf(err) };
+      switch (what) {
+        case 'handleGbpPostback':
+          deps.logger.error('gbp: handleGbpPostback failed', fields);
+          break;
+        case 'handleGbpText':
+          deps.logger.error('gbp: handleGbpText failed', fields);
+          break;
+        default: {
+          const exhaustiveCheck: never = what;
+          throw new Error(`Unexpected GBP guard operation: ${exhaustiveCheck}`);
+        }
+      }
       return 'not_handled';
     }
   }

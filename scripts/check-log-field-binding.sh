@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Issue #228 ガードレール（タスク 2.2）: 記録の正典と**実装**を両方向で突き合わせる。
+# Issue #228 ガードレール（逆方向は Issue #288 で全ソースへ拡張）: 記録の正典と**実装**を両方向で突き合わせる。
 #
 # 正典（docs/observability/log-field-canon.md）は、それ自身が整っていても実装と乖離していれば
 # 意味がない。正典の構造検証は check-log-field-canon.sh が別に負い、本スクリプトは
@@ -14,7 +14,8 @@
 #   1. 正典の各行の出典が実在する
 #   2. 出典に、その層で期待される名前が現れる（ts/ なら応答層の名前、go/ なら日次バッチ層の名前）
 #   3. 共有パッケージの型が持つ項目が、すべて正典に登録されている（逆方向）
-#   4. 抽出が 0 件のときは赤にする（空振り防止）
+#   4. 実装の事象名がすべて正典に登録され、正典の出典はすべて逆方向の走査対象に含まれる
+#   5. 抽出・走査が 0 件のときは赤にする（空振り防止）
 #
 # 使い方: bash scripts/check-log-field-binding.sh
 #   乖離があれば該当を stderr に出して exit 1、無ければ exit 0。
@@ -100,10 +101,98 @@ set_contains() {
   [ "$n" -gt 0 ]
 }
 
+# grep の不一致（exit 1）は空として扱い、評価不能（exit 2 以上）は必ず失敗にする。
+grep_optional() {
+  local pattern file matches rc
+  pattern="$1"
+  file="$2"
+  matches="$(grep -oE -- "$pattern" "$file")" && rc=0 || rc=$?
+  if [ "$rc" -gt 1 ]; then
+    echo "ERROR: ${file#$ROOT/} の事象抽出が評価不能でした（grep exit ${rc}）。" >&2
+    exit 1
+  fi
+  [ "$rc" -eq 0 ] && printf '%s\n' "$matches"
+  return 0
+}
+
+# 補間で構成する事象名は正典と照合できないため、TypeScript 側は fail-closed にする。
+reject_dynamic_ts_events() {
+  local file dynamic_calls
+  file="$1"
+  dynamic_calls="$(grep_optional '(^|[^a-zA-Z0-9_])logger(\?\.|\.)(info|warn|error|debug)[[:space:]]*(\?\.)?\([[:space:]]*`[^`]*[$][{][^`]*`' "$file")"
+  if [ -z "$dynamic_calls" ]; then
+    dynamic_calls="$(grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?\\.)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*\`[^\`]*[$][{][^\`]*\`" "$file")"
+  fi
+  if [ -n "$dynamic_calls" ]; then
+    echo "ERROR: ${file#$ROOT/} のログ事象が補間付きテンプレートで動的に構成されており、正典と照合できません。" >&2
+    echo "       → 事象名を文字列リテラルで指定するか、抽出器で値の集合を解決してください。" >&2
+    exit 1
+  fi
+}
+
+# TypeScript の実行時ログ呼び出しから事象名を抽出する。
+# `logger.info('event', ...)` / 注入された logger メソッドと、
+# `log('warn', 'event', ...)` / writeStructuredLog・correlationLog の Sink 形式を扱う。
+# optional call の log?.(...) と optional property の logger?.warn(...) も扱う。
+extract_ts_events() {
+  local file conditional_events
+  file="$1"
+  reject_dynamic_ts_events "$file"
+  {
+    # Sink 関数（名前付き logger / log / requestLog を含む）の level, event 形式。
+    grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?\\.)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[^']+'" "$file" \
+      | sed -E "s/.*,[[:space:]]*'//; s/'$//"
+
+    # 共有 Sink の引数に条件式を使う呼び出し（line-webhook の起動状態）。
+    conditional_events="$(grep_optional "(writeStructuredLog|correlationLog)\\([[:space:]]*'(info|warn|error|debug)'[,]([^)]*)\\?[^)]*'[^']+'[[:space:]]*:[[:space:]]*'[^']+'" "$file")"
+    if [ -n "$conditional_events" ]; then
+      printf '%s\n' "$conditional_events" | grep -oE "'[^']+'" | sed '1d' | tr -d "'"
+    fi
+
+    # 注入されたオブジェクト logger と、withCorrelation の戻り値を log と呼ぶ Sink。
+    grep_optional "\\.(info|warn|error|debug)[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \
+      | sed -E "s/.*\\('//; s/'$//"
+    # event を第一引数に取る log 関数も扱う。level, event 形式は上の Sink 抽出が受け持つ。
+    grep_optional "(^|[^a-zA-Z0-9_.])log[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \
+      | sed -E "s/.*\\('//; s/'$//" \
+      | awk '$0 !~ /^(info|warn|error|debug)$/'
+
+    # 変数を経由して Sink に渡す実行サマリーの literal（delivery-job.run）。
+    grep_optional "event[[:space:]]*:[[:space:]]*'[^']+'" "$file" \
+      | sed -E "s/.*:[[:space:]]*'//; s/'$//"
+  # Sink の event は文字列なので、空白などを含む値も形式フィルターで捨てず正典と照合する。
+  } | sort -u
+}
+
+# Go の日次バッチは slog の `"event", value` 属性で事象を出す。
+# event 変数は同じファイル内の const literal として解決し、動的値は fail-closed にする。
+extract_go_events() {
+  local file direct refs ref event
+  file="$1"
+  direct="$(grep_optional '"event"[[:space:]]*,[[:space:]]*"[a-zA-Z0-9_.-]+"' "$file" \
+    | sed -E 's/.*,[[:space:]]*"//; s/"$//')"
+  refs="$(grep_optional '"event"[[:space:]]*,[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*' "$file" \
+    | sed -E 's/.*,[[:space:]]*//')"
+  printf '%s\n' "$direct"
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    event="$(grep_optional "^[[:space:]]*const[[:space:]]+${ref}[[:space:]]*=[[:space:]]*\\\"[a-zA-Z0-9_.-]+\\\"" "$file" \
+      | sed -E 's/.*=[[:space:]]*"//; s/"$//')"
+    if [ -z "$event" ]; then
+      echo "ERROR: ${file#$ROOT/} の slog event 変数「${ref}」を同一ファイル内の const literal として解決できません。" >&2
+      exit 1
+    fi
+    printf '%s\n' "$event"
+  done <<EOF
+$refs
+EOF
+}
+
 fail=0
 checked=0
 realtime_names=''
 event_names=''
+canon_source_paths=''
 
 # --- 1〜2: 項目名の表（順方向） ---
 while IFS= read -r row; do
@@ -160,6 +249,11 @@ ${realtime}"
       echo "       → 移送が未了ならこの赤は正常です（移送対象の一覧になります）。" >&2
       fail=1
     fi
+
+    if ! set_contains "$canon_source_paths" "$src"; then
+      canon_source_paths="${canon_source_paths}
+${src}"
+    fi
   done <<INNER
 $(split_sources "$sources")
 INNER
@@ -192,6 +286,11 @@ ${name}"
       echo "ERROR: 出典 ${src} に事象名「${name}」が現れません。" >&2
       echo "       → 移送が未了ならこの赤は正常です（移送対象の一覧になります）。" >&2
       fail=1
+    fi
+
+    if ! set_contains "$canon_source_paths" "$src"; then
+      canon_source_paths="${canon_source_paths}
+${src}"
     fi
   done <<INNER
 $(split_sources "$sources")
@@ -226,30 +325,57 @@ EOF
 #
 # 正典は「名前の唯一の基準」である。実装が正典に無い事象名を出せてしまうと、その主張が
 # 前方に対して成立しない（後から足された名前が規約の外で増えていく）。
-# 抽出源は記録の呼び出しに限る。散文から拾うと誤検知が支配的になる。
-#
-# 呼び出し形は 3 つある（Issue #250 で 2 → 3 に拡張）:
-#   1. 共有 sink の直呼び・相関 ID 付きの sink: `writeStructuredLog('<level>', '<名前>'` / `correlationLog(…`
-#   2. Sink を引数で受けた局所呼び出し: `log('<level>', '<名前>'`（dashboard-api の合成根など）
-#   3. 面ごとの logger: `logger.<level>('<名前>'`（line-webhook・delivery-job など）
-# 2 と 3 を見ていなかった間、`line-webhook.audit_log_failed` は正典に無くても緑だった。
-# 省略可能な呼び出し（`log?.(` / `logger?.warn(`）も同じ形として拾う（拾わないと、握った失敗を
-# 警告で残す経路ほど検査から外れる。#250 の実装で実測）。
-# 名前が次の行へ折り返された呼び出しは拾えない（行単位の抽出の限界）。現行の実装には無い。
+# 抽出源は実行時のログ呼び出しに限る。散文から拾うと誤検知が支配的になる。
+# 走査対象は ts/apps・ts/packages・go の実行時ソース全体とし、正典の出典集合がそこから
+# 1 ファイルも漏れていないことを先に検証する。出典ファイルを追加したときも、走査対象から
+# 除外したときも、緑のまま通さない。
 emitted_events=0
-SINK_CALL="(writeStructuredLog|correlationLog|(^|[^a-zA-Z0-9_.\$])log)(\\?\\.)?\\('(info|warn|error)', *'[a-zA-Z0-9_.-]+'"
-LOGGER_CALL="logger(\\?)?\\.(info|warn|error)(\\?\\.)?\\('[a-zA-Z0-9_.-]+'"
-call_sites="$(grep -rlE "${SINK_CALL}|${LOGGER_CALL}" "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
-  --include='*.ts' --include='*.tsx' \
-  --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
-  --exclude-dir=test --exclude-dir=e2e --exclude-dir=perf --exclude-dir=eval 2>/dev/null || true)"
+observed_events=''
+ts_source_files=''
+go_source_files=''
+if [ -d "${ROOT}/ts/apps" ] && [ -d "${ROOT}/ts/packages" ]; then
+  ts_source_files="$(find "${ROOT}/ts/apps" "${ROOT}/ts/packages" \
+    -type d \( -name node_modules -o -name dist -o -name .next -o -name test -o -name e2e -o -name perf -o -name eval -o -name scripts \) -prune -o \
+    -type f \( -name '*.ts' -o -name '*.tsx' \) -print | sort)"
+fi
+if [ -d "${ROOT}/go" ]; then
+  go_source_files="$(find "${ROOT}/go" \
+    -type d \( -name vendor -o -name testdata \) -prune -o \
+    -type f -name '*.go' ! -name '*_test.go' -print | sort)"
+fi
+scan_files="${ts_source_files}
+${go_source_files}"
+scanned_source_files=0
+
+while IFS= read -r src; do
+  [ -n "$src" ] || continue
+  if [ ! -f "${ROOT}/${src}" ]; then
+    echo "ERROR: 正典の事象出典 ${src} が実在しません。" >&2
+    fail=1
+    continue
+  fi
+  if ! set_contains "$scan_files" "${ROOT}/${src}"; then
+    echo "ERROR: 正典の出典 ${src} が逆方向の事象走査対象に含まれていません。" >&2
+    echo "       → 実行時ソースの走査範囲を広げるか、正典の出典を実装に合わせてください。" >&2
+    fail=1
+  fi
+done <<EOF
+$(printf '%s\n' "$canon_source_paths" | sed '/^$/d' | sort -u)
+EOF
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  used="$(grep -oE "${SINK_CALL}|${LOGGER_CALL}" "$f" \
-    | sed -E "s/'\$//; s/.*'//" | sort -u || true)"
+  scanned_source_files=$((scanned_source_files + 1))
+  case "$f" in
+    *.go) used="$(extract_go_events "$f" | sort -u)" ;;
+    *) used="$(extract_ts_events "$f")" ;;
+  esac
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
-    emitted_events=$((emitted_events + 1))
+    if ! set_contains "$observed_events" "$ev"; then
+      observed_events="${observed_events}
+${ev}"
+      emitted_events=$((emitted_events + 1))
+    fi
     if ! set_contains "$event_names" "$ev"; then
       echo "ERROR: ${f#$ROOT/} が事象名「${ev}」を出しますが、正典に登録されていません。" >&2
       echo "       → 先に ${CANON#$ROOT/} へ行を足してください（正典が先、実装が後）。" >&2
@@ -259,7 +385,7 @@ while IFS= read -r f; do
 $used
 INNER
 done <<EOF
-$call_sites
+$scan_files
 EOF
 
 # --- 4: 空振り防止 ---
@@ -272,7 +398,11 @@ if [ "$checked" -eq 0 ]; then
 fi
 if [ "$emitted_events" -eq 0 ]; then
   echo "ERROR: 実装から事象名を 1 件も抽出できませんでした。ガードが空振りしています。" >&2
-  echo "       → writeStructuredLog / log / logger.<level> の呼び出し形式が前提と異なります。" >&2
+  echo "       → 共有 Sink・注入 logger・Go slog の呼び出し形式が前提と異なります。" >&2
+  exit 1
+fi
+if [ "$scanned_source_files" -eq 0 ]; then
+  echo "ERROR: 実行時ソースを 1 件も走査できませんでした。ガードが空振りしています。" >&2
   exit 1
 fi
 if [ "$declared_count" -eq 0 ]; then
@@ -286,5 +416,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "OK: 正典と実装の照合ガード緑（出典 ${checked} 件 / 型の項目 ${declared_count} 件 / 実装の事象名 ${emitted_events} 件を両方向検証）。"
+echo "OK: 正典と実装の照合ガード緑（出典 ${checked} 件 / 型の項目 ${declared_count} 件 / 実装の事象名 ${emitted_events} 件 / 実行時ソース ${scanned_source_files} ファイルを両方向検証）。"
 exit 0

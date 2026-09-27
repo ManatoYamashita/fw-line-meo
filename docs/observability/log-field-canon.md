@@ -167,6 +167,9 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.dispatch_failed_before_reply_token` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗のうち、**replyToken が判明する前**に起きたもの。返信は試みていない。前者と分けるのは、運用者が「オーナーに案内が届いたか」を判定できるようにするため |
 | `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
 | `line-webhook.start_loading_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 処理中の入力中アニメーション（`chat/loading/start`・Issue #307）の開始に失敗した場合。補助的な UX であり本処理は止めない。**成功は記録しない**（毎イベント発火するため richmenu 系の成功記録とは頻度が桁違いであり、記録の欠落が業務上の不整合につながる性質でもない）。項目は `errorKind` だけである |
+| `line-webhook.gbp_disabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に GBP 連携が無効であることを記録する |
+| `line-webhook.gbp_enabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に GBP 連携が有効であることを記録する |
+| `webhook_signature_verification_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | LINE Webhook の署名検証失敗。`webhook_signature_failures` 指標が参照するため変更禁止。記録するのは `reason` と LINE 採番の `lineRequestId` のみ |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
 | `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンク（`onboarding/conversation.ts`）と、店舗特定済みオーナーの振り分け口のメニュー照合（`owner/router.ts`・line-on-demand-report）の両方が、この出典の同じ関数を呼んで出す |
 | `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**失敗**。リンクの失敗は例外にせず、記録だけを残す（出典のコメントが明記）。振り分け口の照合では、応答は済んでいて会話の段階を変えない（次の操作で再び張る） |
@@ -174,6 +177,17 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.session_stage_update_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/router.ts` | 振り分け口が完了後メニューを張れた後、会話の段階を completed に揃える更新に失敗した場合。応答は済んでいるので例外にしない。段階が completed でないままなので、次の操作で再び張って揃え直す。項目は `errorKind` だけである |
 | `line-webhook.report_replied` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | レポート要求への応答。Reply を送った後に、応答ごとに 1 件出す。項目は `reportKind` と `reportOutcome` だけである。例外で終わった要求は出さない（`line-webhook.dispatch_failed` が記録する） |
 | `line-webhook.report_store_hint_ignored` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | オーナーの確定店舗の集合の外にある店舗が指定され、選択肢を再提示した場合。指定された店舗 ID は載せない（集合外の値は攻撃者に由来しうる。`store-detail.store_hint_ignored` と同じ考え方）。他のオーナーに実在する ID と存在しない ID で記録を変えない |
+| `line push failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/line/client.ts` | LINE push API の非 2xx 応答。オーナーへの通知を妨げず記録する。LINE ユーザー ID は載せない |
+| `gbp oauth callback: owner unknown; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner を特定できず、push 通知を省略した場合 |
+| `gbp oauth callback: owner not found; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が見つからず、push 通知を省略した場合 |
+| `gbp oauth callback: push notification failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback 後の push 通知に失敗した場合 |
+| `gbp oauth callback: unexpected failure while handling callback` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の想定外例外 |
+| `gbp: handleGbpPostback failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP postback 処理の想定外例外 |
+| `gbp: handleGbpText failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP テキスト処理の想定外例外 |
+| `gbp: operation failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP API 操作の失敗。項目 `gbpFlow` で対象フローを識別する |
+| `gbp: createLocalPost threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | 投稿作成クライアントが想定外の例外を投げた場合 |
+| `gbp: listReviews threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | クチコミ取得クライアントが想定外の例外を投げた場合 |
+| `gbp: upsertReviewReply threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | クチコミ返信クライアントが想定外の例外を投げた場合 |
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名を持たない |
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
 | `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
