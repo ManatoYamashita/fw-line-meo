@@ -194,6 +194,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       direction: 'suspend',
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -202,6 +203,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       direction: 'resume',
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -233,6 +235,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -248,6 +251,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     return handleAgencyCreate(deps.admin.agencyCreate, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -261,6 +265,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     return handleDashboardUserCreate(deps.admin.userCreate, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -269,6 +274,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     handleDashboardUserDisable(deps.admin.userDisable, {
       authorization: authHeader(c),
       id: c.req.param('id'),
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -277,6 +283,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     handleDashboardUserEnable(deps.admin.userEnable, {
       authorization: authHeader(c),
       id: c.req.param('id'),
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -290,6 +297,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 

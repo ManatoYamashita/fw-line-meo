@@ -111,6 +111,8 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 代理店の識別子 | `agencyId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 招待コード発行の失敗記録で、どの代理店の操作が失敗したかを特定する。現行は識別子を 1 つも残しておらず対象を判定できない |
+| 監査記録の action | `auditAction` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 監査記録（`audit_logs`）の書込に失敗したとき、欠けた記録が何の操作だったかを示す（Issue #250）。値は `AUDIT_LOG_ACTIONS`（`ts/packages/db/src/audit-logs.ts`）の有限集合 |
+| 監査記録の対象の識別子 | `auditTargetId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 欠けた監査記録の対象（店舗・代理店・利用者・招待コードの UUID）。欠けた記録を人手で補う手がかりに使う。来店客は監査の対象にならないので個人情報を含まない |
 
 ### 1.9 LINE Webhook 面に固有の項目
 
@@ -174,6 +176,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.report_store_hint_ignored` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | オーナーの確定店舗の集合の外にある店舗が指定され、選択肢を再提示した場合。指定された店舗 ID は載せない（集合外の値は攻撃者に由来しうる。`store-detail.store_hint_ignored` と同じ考え方）。他のオーナーに実在する ID と存在しない ID で記録を変えない |
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名を持たない |
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
+| `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 
 ---
 

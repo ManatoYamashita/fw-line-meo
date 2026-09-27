@@ -11,6 +11,7 @@ import type {
   SetStoreSuspensionInput,
   SetStoreSuspensionOutcome,
 } from '@fwlm/db';
+import type { Sink } from '@fwlm/observability';
 import { readJson, type ErrorEnvelope } from './support/json.js';
 
 // POST /stores/:id/suspend・/resume の中核ロジックの単体試験（store-suspension Req 1.1–1.5, 7.1–7.3）。
@@ -238,11 +239,21 @@ describe('handleStoreSuspension: 冪等と監査', () => {
     expect(auditLog.mock.calls[0]?.[0].targetId).toBe(STORE_ID);
   });
 
-  it('監査の失敗は捕捉せず呼び出し元へ伝える（停止は成立している・design の決定）', async () => {
+  it('監査の失敗は警告を残して握り、成立した停止を 200 で返す（Issue #250 の決定）', async () => {
     const { d } = deps(changedSuspend, OP);
     d.auditLog = () => Promise.reject(new Error('audit down'));
-    await expect(
-      handleStoreSuspension(d, { authorization: 'Bearer t', id: STORE_ID, direction: 'suspend' }),
-    ).rejects.toThrow('audit down');
+    const log = vi.fn<Sink>();
+    const res = await handleStoreSuspension(d, {
+      authorization: 'Bearer t',
+      id: STORE_ID,
+      direction: 'suspend',
+      log,
+    });
+    expect(res.status).toBe(200);
+    expect(log).toHaveBeenCalledWith(
+      'warn',
+      'dashboard-api.audit_log_failed',
+      expect.objectContaining({ auditAction: 'store_suspended', auditTargetId: STORE_ID }),
+    );
   });
 });

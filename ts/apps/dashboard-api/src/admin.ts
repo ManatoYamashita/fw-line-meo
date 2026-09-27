@@ -15,6 +15,8 @@ import { authenticate, type AuthDeps } from './auth.js';
 import { requireOperator } from './scope.js';
 import { isUniqueViolation } from './invite-code-gen.js';
 import { jsonError } from './http.js';
+import { recordAudit } from './audit.js';
+import type { Sink } from '@fwlm/observability';
 
 // 管理 API（運営専用）: GET/POST /agencies・GET/POST /dashboard-users・
 // POST /dashboard-users/:id/{disable,enable,update} の中核ロジック（依存注入でテスト可能・
@@ -141,6 +143,7 @@ export interface AgenciesListRequest {
 export interface AgencyCreateRequest {
   authorization: string | undefined;
   body: unknown; // ルート層でパースした JSON body（形状は本ハンドラが検証する）。
+  log?: Sink; // 監査の失敗の警告を相関 ID 付きで残す（Issue #250）。
 }
 
 export interface DashboardUsersListRequest {
@@ -150,22 +153,26 @@ export interface DashboardUsersListRequest {
 export interface DashboardUserCreateRequest {
   authorization: string | undefined;
   body: unknown;
+  log?: Sink;
 }
 
 export interface DashboardUserDisableRequest {
   authorization: string | undefined;
   id: string; // パスパラメータ :id（UUID 形式を事前検証する）。
+  log?: Sink;
 }
 
 export interface DashboardUserEnableRequest {
   authorization: string | undefined;
   id: string; // パスパラメータ :id（UUID 形式を事前検証する・disable と同型）。
+  log?: Sink;
 }
 
 export interface DashboardUserUpdateRequest {
   authorization: string | undefined;
   id: string; // パスパラメータ :id（UUID 形式を事前検証し、小文字へ正規化する・disable と同型）。
   body: unknown; // ルート層の readJsonBody でパースした JSON body（形状は本ハンドラが検証する）。
+  log?: Sink;
 }
 
 // UUID 形式でない id は DB を叩かず 404 扱い（存在の探り当てを許さない・invite-codes と同じ規律）。
@@ -201,7 +208,7 @@ export async function handleAgencyCreate(
 
   // operatorId は認証ユーザー由来（クライアント入力の operatorId は無視する・Req 7.1）。
   const agency = await deps.createAgency({ operatorId: guard.user.operatorId, name });
-  await deps.auditLog({
+  await recordAudit(deps.auditLog, req.log, {
     actorType: 'operator',
     actorId: guard.user.id,
     action: 'agency_created',
@@ -271,7 +278,7 @@ export async function handleDashboardUserCreate(
     }
     return jsonError(500, 'internal', '利用者の登録に失敗しました。時間をおいて再試行してください');
   }
-  await deps.auditLog({
+  await recordAudit(deps.auditLog, req.log, {
     actorType: 'operator',
     actorId: guard.user.id,
     action: 'dashboard_user_created',
@@ -311,7 +318,7 @@ export async function handleDashboardUserDisable(
   const outcome = await deps.disableUser(targetId, guard.user.operatorId);
   if (outcome.kind === 'disabled') {
     // 無効化成功／既に無効（冪等）。現状の利用者行を 200 で返す（Req 2.4）。
-    await deps.auditLog({
+    await recordAudit(deps.auditLog, req.log, {
       actorType: 'operator',
       actorId: guard.user.id,
       action: 'dashboard_user_disabled',
@@ -354,7 +361,7 @@ export async function handleDashboardUserEnable(
     // 不在・越権は不在と同じ 404（存在の秘匿・Req 1.5, 4.1）。
     return jsonError(404, 'not_found', '利用者が見つかりません');
   }
-  await deps.auditLog({
+  await recordAudit(deps.auditLog, req.log, {
     actorType: 'operator',
     actorId: guard.user.id,
     action: 'dashboard_user_enabled',
@@ -402,9 +409,11 @@ export async function handleDashboardUserUpdate(
   switch (outcome.kind) {
     case 'updated': {
       // 前後の DB 行の差分から action を導き、1 件ずつ記録する。変化なしは 0 件（Req 5.1, 5.3, 5.5）。
-      // 監査は業務の書込を確定した後に書く（既存の書込と同じ形・失敗時の扱いは Issue #250 が決める）。
+      // 監査は業務の書込を確定した後に書き、失敗は警告を残して握る（Issue #250）。この経路は
+      // 差分が無ければ監査を書かないので、エラーを返して再試行させても 2 回目は差分が無く、監査は
+      // 二度と書かれない。成功を返しても欠落の大きさは同じで、警告に action と対象が残る分だけ良い。
       for (const action of auditActionsForUserUpdate(outcome.before, outcome.user)) {
-        await deps.auditLog({
+        await recordAudit(deps.auditLog, req.log, {
           actorType: 'operator',
           actorId: guard.user.id,
           action,

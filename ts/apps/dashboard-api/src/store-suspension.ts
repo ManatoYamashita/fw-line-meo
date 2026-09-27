@@ -7,6 +7,8 @@ import type {
 import { authenticate, type AuthDeps } from './auth.js';
 import { resolveAgencyScope } from './scope.js';
 import { jsonError } from './http.js';
+import { recordAudit } from './audit.js';
+import type { Sink } from '@fwlm/observability';
 
 // POST /stores/:id/suspend・POST /stores/:id/resume の中核ロジック（store-suspension・Issue #252。
 // Req 1.1–1.5, 7.1–7.3）。1 つのハンドラが向き（direction）を受けて両ルートを担う。
@@ -34,6 +36,7 @@ export interface StoreSuspensionRequest {
   // パスパラメータ :id（UUID 形式を事前検証する）。
   id: string;
   direction: SuspensionDirection;
+  log?: Sink;
 }
 
 // UUID 形式でない id は DB を叩かず 404 扱い（存在の探り当てを許さない・invite-codes と同じ規律）。
@@ -73,10 +76,10 @@ export async function handleStoreSuspension(
   if (outcome.kind === 'not_found') return notFound();
 
   // 5. 状態が変わったときだけ、コミット後に監査を記録する（変化なしは記録しない・7.3）。
-  //    対象 ID は要求の表記ではなく DB が返した正規表記を使う。監査の失敗は捕捉しない
-  //    （既存の無効化系と同じ扱い。5xx になるが停止・再開そのものは成立している）。
+  //    対象 ID は要求の表記ではなく DB が返した正規表記を使う。監査の失敗は警告を残して握り、
+  //    成立している停止・再開をエラー応答にしない（Issue #250）。
   if (outcome.kind === 'changed') {
-    await deps.auditLog({
+    await recordAudit(deps.auditLog, req.log, {
       actorType: user.role,
       actorId: user.id,
       action: AUDIT_ACTION[req.direction],
