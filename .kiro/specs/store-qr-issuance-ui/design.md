@@ -225,6 +225,13 @@ stateDiagram-v2
 | 7.4 | 不可の例と理由の提示 | StoreQrPanel / qr-poster-text | `PROHIBITED_EXAMPLES`（画面のみ） | — |
 | 7.5 | 掲示面に客の情報を載せない | StoreQrPanel | 領域の要素を店名・画像・依頼文・案内に限定 | — |
 | 7.6 | 未完了時は出さない | StoreQrPanel | `state.kind === 'ready'` の分岐 | 状態遷移 |
+| 8.1 | 当月・前月の回答件数と押下回数 | StoreReviewFunnel / api client / dashboard-api ReviewFunnelRoute | `GET /stores/:storeId/review-funnel` | 実績の取得 |
+| 8.2 | 回答の内容で分けない | ReviewFunnelRoute / `readStoreReviewFunnel` | 応答は月・回答件数・押下回数の 3 項目だけ | — |
+| 8.3 | 投稿数ではないことの明示 | StoreReviewFunnel | 表の直下の注記（同じ `section` の中） | — |
+| 8.4 | 取得失敗で QR を妨げない | StoreQrPanel / StoreReviewFunnel | 別の副作用・別の状態で取得し、失敗は実績の領域の文言に閉じる | 実績の取得 |
+| 8.5 | 掲示面と印刷に含めない | StoreQrPanel / StoreReviewFunnel | `data-print-region` の外に置き、`print:hidden` を直接与える | — |
+| 8.6 | QR と同じ範囲・存在を漏らさない | ReviewFunnelRoute / StoreReviewFunnel | 認証 → 店舗取得 → RBAC の順（QR と同じ）。403 と 404 を同一文言へ写す | — |
+| 8.7 | 0 件を空欄にしない | `readStoreReviewFunnel` / StoreReviewFunnel | 行の無い月も 0 を返し、そのまま描く | — |
 
 ## Components and Interfaces
 
@@ -501,6 +508,43 @@ type QrState =
 実ブラウザで保存リンクを操作し、ファイルが期待したファイル名で保存されることを確認する。
 **物理的な印刷（余白・改ページ・プリンタ依存の再現）と、印刷物を実際にスマートフォンで読み取ること**は
 機械検証の対象外であり、実施結果を tasks の完了条件に記録する（残余は Issue #152 が追跡する）。
+
+## Requirement 8 の設計（Issue #401 で追加）
+
+### 実績の取得
+
+```
+StoreQrPanel ──(QR 画像: 既存の副作用)──────────▶ GET /stores/:storeId/qr.png
+     └─ StoreReviewFunnel ──(実績: 別の副作用)──▶ GET /stores/:storeId/review-funnel
+                                                     └─ readStoreReviewFunnel（@fwlm/db・tallies.ts）
+```
+
+- **QR 画像と実績は別の要求・別の状態で取る。** 1 つの状態へ束ねると、実績の失敗が QR の失敗として描かれるか、QR の成功が実績の読み込み中を隠すかのどちらかになる（8.4）。実績の失敗は実績の領域の文言に閉じ、トースト（`notifyActionError`）も出さない。QR の発行という主操作の結果と取り違えないためである
+- 実績は QR の状態に依らず取得する。QR が 409（場所の未確定・停止中）で失敗しても、過去の実績は読める。403 / 404 は QR と同じく同一の文言へ写す（8.6）
+
+### dashboard-api: ReviewFunnelRoute（`src/review-funnel.ts`・新規）
+
+| Method | Endpoint | Request | Response | Errors |
+|---|---|---|---|---|
+| GET | /stores/:storeId/review-funnel | `Authorization: Bearer <Firebase ID トークン>` | `200 { months: [{ month: 'YYYY-MM', responses: number, reviewLinkOpens: number }] }`（当月・前月の 2 件・新しい順・`Cache-Control: private, no-store`） | 401 unauthenticated, 403 forbidden, 404 not_found, 500 internal（コードは agency-dashboard の小文字の体系。QR の大文字の体系は review-acquisition 由来の既存契約で、揃えない） |
+
+- 評価の順序は QR（`src/qr.ts`）と同じ「認証 → 店舗取得（UUID ガード付き）→ RBAC」。**場所の確定と停止中の判定は置かない。** 実績の読み出しは店舗の利用可否を決めないためである（停止中の店舗の過去の実績を隠す理由が無い）
+- 月の境界は DB 側の `now()` を JST で切る（`readStoreReviewFunnel`・`review-acquisition` design の tallies 節）。画面の側で「今月」を計算しない。端末の時計と TZ に依存させないためである
+- 読み出しの失敗は `dashboard-api.review_funnel_read_failed`（項目は `storeId` だけ）を記録して 500 を返す
+
+### dashboard-web: StoreReviewFunnel（`src/components/store-review-funnel.tsx`・新規）
+
+- Props: `storeId`・`storeName`・`fetchFunnel?`（テストの注入。既定は `getStoreReviewFunnel`）
+- 状態: `loading` / `ready(months)` / `error`。取得は `storeId` を依存にする 1 つの副作用で、アンマウント後の反映を捨てる
+- 描画: `section`（見出し「アンケートの実績」・レベル 3）の中に、月・回答・Google の投稿画面へ進んだ回数の 3 列の表と、8.3 の注記を置く。行を指標・列を月にし、月の列見出しは「今月」「9月」の 2 段で、サーバが返した `month` から作る（1 段の「今月（9月）」は列見出しが折り返さないため幅 320 で行見出しを 1 文字ぶんまで潰した・E2E の R1 で実測）。表は `density="responsive"` にして、狭い幅ではセルの横余白を詰める
+- `StoreQrPanel` は掲示面（`data-print-region`）の**外**、不可の例の前に置き、`section` に `print:hidden` を与える（8.5）。不可の例と同じ二重の守りである
+- 読み上げ: パネルの状態通知（`role="status"`）へは載せない。実績は補助の情報で、発行の状態通知（6.2）と同じ領域で読み上げると主操作の結果を上書きする。失敗の文言も `role="alert"` にしない
+
+### 検証
+
+- dashboard-api: 純粋ハンドラの単体テスト（401 / 403 / 404 / RBAC / 成功の形 / 読み出し失敗の 500 と記録）と、`app-routes` の DB テストで本物の表から読めること
+- dashboard-web: 部品の単体テスト（0 件の描画・失敗の文言・403 と 404 の同一文言・アンマウント後に反映しない）と、パネルの結線テスト（実績の失敗でも QR の保存と印刷が出る・実績が掲示面の外にあり `print:hidden` を持つ）
+- E2E: fixture に実績の応答を足し、QR パネルの a11y 監査と印刷メディアの実測に実績の表が含まれた状態で緑であること（印刷では見えないこと）
 
 ## Security Considerations
 

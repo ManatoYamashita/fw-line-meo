@@ -41,6 +41,7 @@ function fakeAppDeps(): AppDeps {
   return {
     corsOrigin: 'https://dash.example',
     qr: fakeQrDeps(),
+    reviewFunnel: { auth, findStore: notCalled, readFunnel: notCalled },
     me: { auth, findAgencyName: notCalled, findDisplayName: notCalled },
     stores: { auth, listStores: notCalled },
     owners: { auth, listOwners: notCalled },

@@ -37,6 +37,9 @@ const api = vi.hoisted(() => ({
   registerStore: vi.fn(),
   // QR パネルが使う窓口。差し替えを忘れると undefined が呼ばれて既存テストごと落ちる。
   getStoreQr: vi.fn(),
+  // QR パネルの実績の窓口（Issue #401）。既定は応答を返さないまま保つ（下の beforeEach）。実績の表は
+  // 行と見出しを持つので、一覧の行を数える検査へ混ざらないよう、このファイルでは描かせない。
+  getStoreReviewFunnel: vi.fn(),
   // 利用状況の列の操作部品が使う窓口（store-suspension tasks 5.3）。
   suspendStore: vi.fn(),
   resumeStore: vi.fn(),
@@ -144,6 +147,7 @@ function rowOf(storeName: string): HTMLTableRowElement {
 beforeEach(() => {
   useAuthMock.mockReset();
   Object.values(api).forEach((m) => m.mockReset());
+  api.getStoreReviewFunnel.mockReturnValue(new Promise(() => {}));
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
   Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });

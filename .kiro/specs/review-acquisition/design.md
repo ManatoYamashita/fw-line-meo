@@ -27,19 +27,19 @@
 - **下書き生成パイプライン**: プロンプト（素材限定・変動注入）・安全設定・構造化出力・再試行・出力検証
 - **セッショントークン契約**（HMAC 署名・attempt/exp 封入）: 再生成上限のステートレス強制
 - **Google 投稿 URL 組立**（writereview 形式）: 単一モジュールに隔離
-- **tallies 4 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で、`survey_concern_tallies` は `0008` で追加）
+- **tallies 5 表への書込実装**（TS 層の書込責任として。`survey_material_tallies` は本 spec が `0006` で、`survey_concern_tallies` は `0008` で、`survey_review_link_tallies` は `0014` で追加）
 - **QR 生成エンドポイント**（`ts/apps/dashboard-api` の種アプリ・Firebase ID トークン検証・RBAC）
 - **TS モノレポ基盤**（`ts/` pnpm workspace・`packages/db`・lint/test 規約）
 
 ### Out of Boundary
 - ダッシュボード UI・ログインフロー・セッション管理（Issue #5。本 spec の QR API は Bearer ID トークンを受けるだけ）
 - `stores.place_id` の充足・鮮度（オンボーディング／バッチ側。本 spec は毎回 DB から読むのみ）
-- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）と、`survey_concern_tallies` および `survey_material_tallies.concern_count`（`0008`・Issue #221）のみで、4 階層側の表は変更しない
+- seed の変更（不要。`survey_aspects` の選択肢はコード内に二重定義しない）。スキーマ追加は `survey_material_tallies`（`0006`・Issue #137 段階3）と、`survey_concern_tallies` および `survey_material_tallies.concern_count`（`0008`・Issue #221）と、`survey_review_link_tallies`（`0014`・Issue #401）のみで、4 階層側の表は変更しない
 - インフラ本体の構成変更（下記の最小追加を除き gcp-infra-foundation の所有。追加も同 spec の規約に従う）
-- 集計データの読み出し・可視化
+- 集計データの読み出し・可視化（QR パネルでの件数の表示は `store-qr-issuance-ui` Requirement 8 が持つ。読み出しの関数 `readStoreReviewFunnel` は月境界の式を共有するため `tallies.ts` に置くが、呼ぶのは dashboard-api だけである）
 
 ### Allowed Dependencies
-- **four-tier-data-model**: `stores`/`owners`/`dashboard_users`/`survey_aspects` の読取、`survey_rating_tallies`/`survey_aspect_tallies`/`survey_concern_tallies`/`survey_material_tallies` への DML（grants.sql 付与済み・write-boundary.md 準拠）
+- **four-tier-data-model**: `stores`/`owners`/`dashboard_users`/`survey_aspects` の読取、`survey_rating_tallies`/`survey_aspect_tallies`/`survey_concern_tallies`/`survey_material_tallies`/`survey_review_link_tallies` への DML（grants.sql 付与済み・write-boundary.md 準拠）
 - **gcp-infra-foundation**: Cloud Run `survey-web`/`dashboard-api`、IAM DB 認証、Secret Manager（`GEMINI_API_KEY` 既存）
 - **外部**: Gemini API（@google/genai・API キー）、Google writereview URL、Identity Platform（ID トークン検証）
 - **依存方向の制約**: `packages/db → apps/*`（apps が db を import。逆流禁止）。app 内は `lib → app/api → app/(pages)`。UI コンポーネントは DB・Gemini へ直接依存しない
@@ -53,7 +53,7 @@
 ## Architecture
 
 ### Existing Architecture Analysis
-- 書き込み境界: tallies 4 表は「TS リアルタイム応答層」書込（`db/write-boundary.md`）— 本設計はこの境界の**内側**で完結
+- 書き込み境界: tallies 5 表は「TS リアルタイム応答層」書込（`db/write-boundary.md`）— 本設計はこの境界の**内側**で完結
 - `stores.ck_place_confirmed`（confirmed ⇔ place_id 非 NULL）が QR 発行可否と投稿導線の前提条件を構造化済み
 - Cloud Run 3 サービス・IAM DB 認証（パスワードレス）・Secret 供給は稼働済み。本 spec はイメージの中身を提供する
 
@@ -234,9 +234,11 @@ sequenceDiagram
 | 5.6 | 素材の厚みは個数と有無のみ | tallies.ts, `0006`/`0008` の列 allowlist | 良かった点の数・気になった点の数・一言の有無のみ。本文列を持たない・`30_compliance.sql` | 回答フロー |
 | 5.7 | 表示/送信/投稿導線の押下を店舗単位で観測 | SurveyPage（page-data）, ResponsesAPI, ReviewLinkAPI, structured-log, guardrails のログベース指標 | sink の allowlist（storeId のみ）・指標の label は `store_id` のみ・押下は token を検証できたものだけを記録 | Monitoring |
 | 5.8 | 押下の通知は遷移と独立 | SurveyShell, DraftPanel, review-link-beacon | sendBeacon（投げっぱなし・結果を待たない）・投稿リンクは writereview への直リンクのまま | 回答フロー |
+| 5.9 | 下書き画面の押下を月次の匿名集計へ加算 | ReviewLinkAPI, tallies.incrementReviewLinkTally, `0014` の列 allowlist | sessionToken を検証できた押下だけ加算・pageToken は記録のみ・`store_id × period_month × count` のみ | 回答フロー |
+| 5.10 | 通知は 1 回の画面表示につき最初の押下だけ | SurveyShell | 送信済みの印（画面の生存期間だけ・端末に保存しない） | 回答フロー |
 | 5.3 | 個別回答を永続保存しない | SessionToken（往復のみ）, ResponsesAPI | ログ赤字化 | セキュリティ節 |
 | 5.4 | 集計失敗を転嫁しない | ResponsesAPI | 並行実行・握りつぶしログ | 回答フロー |
-| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 4 表のみ（`0006`・`0008` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
+| 5.5 | 既存モデルに記録・階層不変 | tallies.ts | tallies 5 表のみ（`0006`・`0008`・`0014` の追加は `store_id` FK で 4 階層に従属し、階層側の表は変更しない） | — |
 
 ## Components and Interfaces
 
@@ -301,8 +303,8 @@ sequenceDiagram
 
 | Field | Detail |
 |-------|--------|
-| Intent | 投稿導線の押下を、token を検証できたものだけ店舗単位で記録する（Issue #137・#221 の完了条件 4） |
-| Requirements | 5.1, 5.7 |
+| Intent | 投稿導線の押下を、token を検証できたものだけ店舗単位で記録する（Issue #137・#221 の完了条件 4）。sessionToken の押下は月次の匿名集計へも加算する（Issue #401） |
+| Requirements | 5.1, 5.4, 5.7, 5.9 |
 
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
@@ -311,8 +313,10 @@ sequenceDiagram
 
 - 数える条件: `token` が **pageToken（`verifyPage(token, storeId)` が通る）** か、**sessionToken（`verify(token)` が通り、封入された storeId が一致する）** のどちらか。通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録する
 - **2 つの token は証明するものが違う。** 下書き画面から送る sessionToken は `/api/responses` の後にしか発行されないので、「実際の回答の後の押下」を証明する。回答済み画面（24 時間以内の再訪）から送る pageToken は SSR が発行するので、証明するのは「ページが配信された」ことまでで、信頼水準は表示件数（`survey_page_viewed`）と同じである。回答済み画面の判定は localStorage にあり、サーバーは再訪が本物かを確かめられない。sessionToken を localStorage へ保存すれば確かめられるが、素材（回答の中身）を端末に 24 時間残すことになるので採らない
-- Invariants: DB に触れない・応答本文を持たない（クライアントは結果を読まない）・記録するのは `storeId` だけ・レート制限（インスタンス内・IP 単位）を超えた押下は記録しない
-- 数え方の癖: 下振れは token の失効と送達失敗。pageToken は 5 分、sessionToken は発行（または最後の再生成）から 30 分で失効するので、回答済み画面を開いて 5 分、下書き画面で 30 分を超えてからの押下は数えない。上振れは 2 つ。同一 token の多重送信はレート制限まで区別しない（無状態のため、正しい token を持つ者が押し続ければ上限まで数える）。同じ客が下書き画面と 24 時間以内の再訪の回答済み画面の両方で押すと、別の token なので別件になる。したがって押下件数は絶対値ではなく施策前後の変化を見る指標であり、回答から投稿までの所要時間や再訪の割合を変える施策では単独で読まない
+- **加算するのは sessionToken の押下だけ**（Issue #401・5.9）: `tallies.incrementReviewLinkTally(storeId)` で `survey_review_link_tallies` の当月の行へ 1 を足す。pageToken の押下はログにだけ記録し、集計へは足さない。集計はダッシュボードの QR パネルでオーナー向けの数字になるので、「実際の回答の後の押下」を示せる方だけを使う
+- 加算の失敗は応答を変えない（5.4）: 失敗は `review_link_tally_failed`（WARN・項目なし）として記録し、204 を返す。加算は記録（`survey_review_link_opened`）の後に行うので、加算が落ちてもログの観測は欠けない。**ログと集計の乖離自体が集計障害の検知になる**のは ResponsesAPI と同じである（ただし比べられるのは sessionToken の押下の分だけで、ログは pageToken の押下も含む）
+- Invariants: 応答本文を持たない（クライアントは結果を読まない）・記録するのは `storeId` だけ・加算するのは `store_id × period_month` の件数だけで、token の値・時刻を保持しない（5.9）・レート制限（インスタンス内・IP 単位）を超えた押下は記録も加算もしない
+- 数え方の癖（Issue #401 で端末側の重複抑止を入れた後）: SurveyShell は 1 回の画面表示につき最初の押下だけを通知する（5.10）。送信済みの印は画面の生存期間だけ持ち、端末に保存しない（localStorage に残すと再訪の識別に使える値になる）。したがって同じ画面での連打・再生成の後の押し直しは数えない。**再読み込みは別の表示なので別件になる**が、下書き画面を再読み込みすると回答済み画面へ移り pageToken の押下になるので、集計へは足されない。最初の押下の通知が届かなかった場合は、2 回目以降の押下で補わない（下振れ）。以下は重複抑止を入れる前からの癖である。下振れは token の失効と送達失敗。pageToken は 5 分、sessionToken は発行（または最後の再生成）から 30 分で失効するので、回答済み画面を開いて 5 分、下書き画面で 30 分を超えてからの押下は数えない。上振れは 2 つ。同一 token の多重送信はレート制限まで区別しない（無状態のため、正しい token を持つ者が押し続ければ上限まで数える。**正規の画面からは送られなくなったが、API を直接叩けば数えうる**）。同じ客が下書き画面と 24 時間以内の再訪の回答済み画面の両方で押すと、別の token なので別件になる。したがって押下件数は絶対値ではなく施策前後の変化を見る指標であり、回答から投稿までの所要時間や再訪の割合を変える施策では単独で読まない
 
 ### survey-web lib 層
 
@@ -395,6 +399,22 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 - `period_month = date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo')::date`（JST 月境界を SQL 側で確定）
 - 既存 UNIQUE 制約（store_id, period_month, star/aspect_code）に整合。aspect code は seed 由来のみ（FK が構造強制）
 
+#### tallies.incrementReviewLinkTally / tallies.readStoreReviewFunnel（Issue #401）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 投稿導線の押下の月次 UPSERT と、QR パネルが出す月別件数の読み出し |
+| Requirements | 5.4, 5.9（読み出しは `store-qr-issuance-ui` 8.1） |
+
+```typescript
+incrementReviewLinkTally(pool: Pool, storeId: string, now?: Date): Promise<void>  // 失敗は throw（呼び手がログのみ）
+interface StoreReviewFunnelMonth { month: string /* 'YYYY-MM'（JST） */; responses: number; reviewLinkOpens: number }
+readStoreReviewFunnel(pool: Pool, storeId: string, now?: Date): Promise<StoreReviewFunnelMonth[]>  // 当月・前月の 2 件・新しい順
+```
+- **月境界の式は `incrementTallies` と同じ定数を使う**（同じファイルに置く理由）。別の式を書くと、加算した月と読んだ月がずれる日が生まれる。`scripts/check-jst-offset-consistency.sh` もこのファイルに `AT TIME ZONE 'Asia/Tokyo'` が 1 件だけあることを要求する
+- `incrementReviewLinkTally` は 1 文の UPSERT（`ON CONFLICT (store_id, period_month) DO UPDATE SET count = count + 1`）で、トランザクションを張らない
+- `readStoreReviewFunnel` の回答数は `survey_rating_tallies` の当該月の `count` の合計である（1 回答 = rating 1 加算なので回答数と一致する）。**星ごとの内訳は返さない**（`store-qr-issuance-ui` 8.2）。行が無い月は 0 を返す
+
 #### pool / stores / aspects / dashboard-users
 - pool: Cloud SQL Connector（IAM 認証・`CLOUDSQL_CONNECTION_NAME`）＋ pg Pool。ローカルは `DATABASE_URL` フォールバック（テスト用）
 - stores: `findStoreForSurvey(id)` → `{ id, name, placeId, placeStatus }`／`findStoreWithAgency(id)` →（owner 経由 agency_id 同梱・QR RBAC 用）
@@ -421,15 +441,19 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 
 ## Data Models
 
-**スキーマ追加は 2 表と 1 列**（`survey_material_tallies`・`0006`・Issue #137 段階3／`survey_concern_tallies` と `survey_material_tallies.concern_count`・`0008`・Issue #221）。4 階層側の表は変更しない。
+**スキーマ追加は 3 表と 1 列**（`survey_material_tallies`・`0006`・Issue #137 段階3／`survey_concern_tallies` と `survey_material_tallies.concern_count`・`0008`・Issue #221／`survey_review_link_tallies`・`0014`・Issue #401）。4 階層側の表は変更しない。
+
+`0014` は表を足すだけで既存の表を変えない。旧コードは新しい表を知らないので、適用からデプロイまでの間に失敗は起きない。逆に**適用より先にデプロイすると、加算がすべて `review_link_tally_failed` になる**（客の体験は 5.4 で守られる）。本番は `0014` → `grants.sql` → デプロイの順にする。
 
 `0008` は `survey_material_tallies` の一意制約を `(store_id, period_month, aspect_count, concern_count, has_comment)` へ張り替える。**旧コードの UPSERT は旧制約の列を名指ししているため、適用からデプロイ完了までの間は集計の加算が失敗する**（客の体験は 5.4 で守られる）。本番は `0008` → `grants.sql` → マージの順で、適用はマージ直前に行う。
 
 - **読取**: `stores`（存在・place 確定・名前）、`owners`（agency 連鎖）、`dashboard_users`（RBAC）、`survey_aspects`（選択肢 SoT）
-- **書込**: `survey_rating_tallies` / `survey_aspect_tallies` / `survey_concern_tallies` / `survey_material_tallies` のみ（TS 層書込境界の内側）
+- **書込**: `survey_rating_tallies` / `survey_aspect_tallies` / `survey_concern_tallies` / `survey_material_tallies` / `survey_review_link_tallies` のみ（TS 層書込境界の内側）
 - **不変条件（本 spec が追加する運用semantics）**:
   - period_month は **JST** 月初日（four-tier の UNIQUE/CHECK 制約に整合）
-  - 1 回答 = rating 1 加算 + 選択した良かった点ごとに 1 加算 + 選択した気になった点ごとに 1 加算 + 厚み 1 加算。再生成・コピー・遷移は集計に影響しない
+  - 1 回答 = rating 1 加算 + 選択した良かった点ごとに 1 加算 + 選択した気になった点ごとに 1 加算 + 厚み 1 加算。再生成・コピーは集計に影響しない
+  - 下書き画面での投稿導線の押下（sessionToken で検証できたもの）= 押下 1 加算。回答の加算とは別の要求・別の文で行う（押下は回答の後の別の操作であり、回答の集計と母数を共有しない）
+  - 押下の集計が持つのは `store_id × period_month × count` だけ。token・時刻・端末を識別しうる列は存在しない（5.9・`30_compliance.sql` の列 allowlist）
   - 厚みが持つのは「良かった点の選択数」「気になった点の選択数」（いずれも 0 以上・上限なし）と「一言の有無」だけ。本文を持つ列は存在しない（5.6）
   - 自由記述・個別回答はいかなるテーブル・ログにも書かない
 
@@ -449,7 +473,7 @@ incrementTallies(input: TallyInput): Promise<void>  // 失敗は throw（呼び�
 - **Business Logic**: レビューゲーティングに相当する分岐は**存在しないことが正**（テストで star による導線分岐がないことを検証）
 
 ### Monitoring
-- 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
+- 構造化ログ（Cloud Logging 既定）: 集計失敗 WARN（回答の集計は `tally_failed`、押下の集計は `review_link_tally_failed`・Issue #401）・生成失敗 ERROR・安全ブロック INFO（件数把握）。生成失敗は `errorKind` を必ず含め、`API_ERROR` で例外から取得できる場合のみ HTTP `status` を含める。**自由記述・プロンプト・下書き本文・API キーはログ出力禁止**（5.3、Issue #62）
 - ファネル（Issue #137 段階3・5.7）: `survey_page_viewed`（INFO・回答可能な状態で表示できたときのみ）と `survey_response_submitted`（INFO・生成と集計の成否に依らず送信時）。フィールドは `storeId` だけで、来店客に紐づく値は載せない。**数え方の癖**: ページは `force-dynamic` なので bot・プリフェッチ・回答済みの再訪（24 時間判定は localStorage 側で SSR は走る）も表示に数える。したがって「送信 / 表示」は転換率の**下限**であり、絶対値ではなく施策前後の変化を見る指標である。送信は tallies にも入るが、**集計失敗時はログにだけ残るため両者の乖離が集計障害の検知になる**
 - 投稿導線の押下（Issue #137・5.7・5.8）: `survey_review_link_opened`（INFO・ReviewLinkAPI が token を検証できたときだけ）。フィールドは `storeId` だけ。送信の後の段として「送信した客が Google の投稿画面へ進んだか」を読む。Google への投稿そのものは観測できない（代理投稿をしない以上、客と Google の間で完結する）ので、実際に口コミが増えたかは日次バッチが記録する自店の `rating_snapshots.review_count` で読む。ただしこの表は Places の規約に合わせた 30 日ローリング保持なので（competitive-daily-summary の research.md の Decision）、施策の前後を比べられる期間に期限がある。数え方の癖は ReviewLinkAPI の節を参照。施策の前後で並べて読む手順は `docs/observability/review-acquisition-funnel.md`
 - ファネルの保持（Issue #137 段階3・5.7）: 表示件数は **ログにしか存在しない**（tallies は送信された回答しか数えない）。Cloud Run の stdout が入る `_Default` バケットの保持は既定 30 日で、本番にログベース指標もシンクも無かった（実測）。段階4 の判断は施策前後の比較なので、`survey_page_viewed` / `survey_response_submitted` をログベース指標（`infra/modules/guardrails`・時系列 24 か月・label は `store_id` のみ）へ写して残す。**指標は作成時点から数え始める**ため、本 spec のデプロイと同じタイミングで `make tf-apply` すること。フィルタで `severity` を条件にしてはいけない（アプリは `level` を出しており Cloud Run は `severity` へ写さない。本番実測で `severity` は null。条件に入れると常に 0 件の指標になる）。押下（`survey_review_link_opened`）も同じ指標群へ足す（Issue #137）。これも作成時点から数え始めるので、デプロイと同じタイミングで apply する

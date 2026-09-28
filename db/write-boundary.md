@@ -17,6 +17,7 @@
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_concern_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（気になった点の匿名集計加算・`0008`） |
 | `survey_material_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（素材の厚み＝良かった点の選択数・気になった点の選択数・一言の有無の匿名集計加算・`0006`／`0008`） |
+| `survey_review_link_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（投稿導線の押下件数の匿名集計加算。下書き画面の押下のうち sessionToken で検証できたものだけ・`0014`・Issue #401）。読むのは dashboard-api の QR パネルの実績だけ |
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
 | `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`／`line-on-demand-report`: TS 配信ジョブの通知記録。店舗×日の 1 行に、送った結果だけでなく送らなかった理由（`skipped_*`）も記録する・`retry_key` で冪等再送（`0004`・status の 7 値は `0010`） |
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
