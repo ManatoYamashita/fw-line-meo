@@ -104,7 +104,7 @@ function UsersView() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // 編集パネルを開いている利用者。開閉状態は一覧が所有し、同時に開けるのは 1 つだけである
-  // （dashboard-user-edit Req 6.4）。パネル自身は開閉を持たない（店舗一覧の QR パネルと同型）。
+  // （dashboard-user-edit Req 6.4）。パネル自身は開閉を持たず、呼び出し側が状態を所有する。
   const [openUserId, setOpenUserId] = useState<string | null>(null);
   // openUserId の最新値。開いている行の編集がもう一度押されたことを、changeOpenUser が判別するのに使う。
   const openUserIdRef = useRef<string | null>(null);

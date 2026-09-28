@@ -139,6 +139,7 @@ describe('handleQr', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('image/png');
     expect(res.headers.get('Content-Disposition')).toBe(`attachment; filename="qr-${STORE}.png"`);
+    expect(res.headers.get('X-Survey-URL')).toBe(`https://survey.example/s/${STORE}`);
     // QR の中身は {SURVEY_BASE_URL}/s/{storeId}
     expect(renderQr).toHaveBeenCalledWith(`https://survey.example/s/${STORE}`, 512);
   });

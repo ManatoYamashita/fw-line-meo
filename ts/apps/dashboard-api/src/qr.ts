@@ -64,6 +64,8 @@ export async function handleQr(deps: QrDeps, req: QrRequest): Promise<Response> 
       // filename は UUID を使いヘッダインジェクションを避ける（店名は使わない）。
       'Content-Disposition': `attachment; filename="qr-${store.id}.png"`,
       'Cache-Control': 'private, no-store',
+      // QR の生成に渡した値そのものを返し、画面側で URL を再構築しない。
+      'X-Survey-URL': url,
     },
   });
 }

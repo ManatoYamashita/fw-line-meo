@@ -1,8 +1,8 @@
 # Implementation Plan
 
-本計画は `review-acquisition` Requirement 1 の未充足部分（UI 側）を閉じる。サーバ側の QR エンドポイントは実装済みであり、本計画は `dashboard-web` のみを変更する。
+Section 1–5 は `review-acquisition` Requirement 1 の未充足部分（UI 側）と Issue #179 の掲示文言を扱った完了済みの記録である。Issue #400 の追加実装はこの履歴を維持したまま、Section 7 で扱う。追加範囲には `dashboard-api`・共通 `@fwlm/ui`・`dashboard-web` が含まれる。
 
-**前提は既に満たされている**（ギャップ分析で実測）。Tailwind と `@fwlm/ui` の配線は `globals.css` の 3 点セットで完了し、`ts/packages/ui/test/app-integration.test.ts` が機械検証している。vitest と Testing Library の規約も確立済み。新規の外部依存・新規の `NEXT_PUBLIC_*`・DB 変更・インフラ変更はいずれもゼロ。したがって Foundation 段のタスクを置かない。
+**Section 1–5 を作成した時点の前提**はギャップ分析で実測済みだった。Tailwind と `@fwlm/ui` の配線は `globals.css` の 3 点セットで完了し、`ts/packages/ui/test/app-integration.test.ts` が機械検証している。vitest と Testing Library の規約も確立済み。元の範囲には新規外部依存・新規 `NEXT_PUBLIC_*`・DB・インフラ変更が無かったため Foundation 段を置かなかった。Issue #400 では共有 Dialog 部品が必要になるため Section 7.1 に追加する。
 
 `(P)` は直前の同階層タスクと同時実行できることを示す。表示部品と一覧画面はそれぞれ単一ファイルを共有するため `(P)` にできない（各タスクの補足に理由を記す）。
 
@@ -482,3 +482,84 @@ body の高さは画面 3420px → 紙 394px（掲示面ぶんだけに畳まれ
 - 機械強制は置いていない。`expect(document.activeElement)` を一律に禁じると上記の健全な 6 箇所まで
   巻き込み、除外規則を持てば「除外の広さ」を別途担保する必要が出る（#158 (a) の B2 走査面と同じ
   トレードオフ）。再発したらそのときに作る。
+
+## 7. Issue #400: QR 発行結果の右側パネル
+
+既存の行内 QR 表示を右側 Drawer に移し、QR の生成元 URL・コピー操作・既存の注意事項を同じパネルにまとめる。設計は Requirement 9 と [design.md](./design.md) の Issue #400 追補に従う。Section 1–5 の完了記録と実施記録は変更しない。
+
+`(P)` は同階層で並行できるタスクを示す。7.1 は共通 UI、7.2 は API の別境界を扱うため並行可能。以降は依存順に進める。
+
+- [x] 7. Issue #400 の QR 右側パネル
+
+- [x] 7.1 (P) 共通 UI に Base UI Dialog wrapper を追加する
+  - 既存の `@base-ui/react/dialog` を薄く包み、Root / Trigger / Portal / Backdrop / Popup / Title / Description を `@fwlm/ui` から公開する。新規ライブラリや `dashboard-web` の直接依存は追加しない
+  - modal role、背景の inert 化、focus trap、Escape / backdrop dismissal、閉じた後の Trigger への focus restore は Base UI に委譲する。独自の focus trap や document key handler は作らない
+  - Popup は呼び出し側が寸法を指定できる共通部品とする。右端 fixed・全高・幅 `min(100vw, 34rem)`・内部スクロール・translateX 入場は利用側の責務とする。reduced motion 時の transition 短縮は `theme.css` の共通規則に委ねる
+  - Observable: `@fwlm/ui` のテストで dialog の role と名前、Escape / backdrop による close、Trigger への focus 復帰を確認でき、既存部品と `dashboard-web` の型検査が通る
+  - _Requirements: 9.1, 9.5, 9.6, 9.7_
+  - _Boundary: `ts/packages/ui/src/components/dialog.tsx` と同 package の export / test_
+
+- [x] 7.2 (P) dashboard-api が QR と同じ URL を応答ヘッダで返す
+  - `handleQr` が QR 生成に使う既存の `url` 変数を `X-Survey-URL` に設定する。URL の再構築や別設定の導入はしない
+  - Hono CORS の `exposeHeaders` に `X-Survey-URL` だけを追加する。既存の許可 origin・認証・PNG・status・エラー封筒・`Cache-Control` を保つ
+  - テスト fixture には `survey.example` と固定 placeholder store ID のみを使い、実店舗の URL / ID とヘッダ値をログへ出さない
+  - Observable: QR route のテストで QR 生成へ渡る URL とレスポンスヘッダ値が一致し、許可 origin からヘッダを読める。既存 CORS の許可外 origin と認証・失敗応答のテストも従来どおり成立する
+  - _Requirements: 9.2, 9.9_
+  - _Boundary: `ts/apps/dashboard-api/src/qr.ts`, `src/app.ts` と既存 test_
+
+- [x] 7.3 バイナリ API client で正規 URL を検証して返す
+  - `X-Survey-URL` を読み、既存の `BinaryPayload` に `surveyUrl` として含める。QR URL の組み立てはクライアント側で行わない
+  - ヘッダ欠落・相対 URL・HTTP(S) 以外の scheme は `invalid_qr_metadata` として失敗にし、QR 画像のみを成功表示しない
+  - Authorization は引き続き header にだけ置き、応答本文・トークン・URL をログや例外文言へ出さない
+  - Observable: node 単体テストで正しい header 値が `surveyUrl` へ渡り、欠落・相対・`javascript:` URL が拒否され、既存のエラー code / message・非空バイト検査・Authorization のテストが維持される
+  - _Requirements: 5.1, 9.2, 9.9_
+  - _Depends: 6.2_
+  - _Boundary: `ts/apps/dashboard-web/src/lib/api.ts` と同 API client test_
+
+- [x] 7.4 QR パネルに URL・コピー・注意事項をまとめる
+  - 取得済み `surveyUrl` をそのまま表示し、同じ文字列を Clipboard API に渡す。コピー成功・拒否の結果を既存の通知パターンで伝え、失敗時も URL を手動選択できるようにする
+  - 店名・QR・URL・既存の規約準拠依頼文・読み取り案内・注意事項・禁止例を同じパネルに表示する
+  - URL・注意事項・禁止例・コピー等の操作を `data-print-region` の外に置く。掲示用の QR と文面を持つ既存の印刷領域を一つだけ保つ
+  - loading / error 中は成功用 URL・掲示面・印刷操作を出さず、取得・再試行・画像解放・エラー表示の既存契約を保つ
+  - Observable: jsdom テストで API の URL と表示・copy 呼び出しが一致し、Clipboard 拒否が通知され URL を選択できる。掲示面が 1 つで、URL / 注意事項 / 禁止例が印刷領域外にあり、既存の画像・保存・失敗状態テストも成立する
+  - _Requirements: 4.1–4.5, 5.2–5.4, 7.1, 7.3–7.6, 9.2–9.4, 9.8, 9.9_
+  - _Depends: 6.3_
+  - _Boundary: `ts/apps/dashboard-web/src/components/store-qr-panel.tsx` と同 component test_
+
+- [x] 7.5 StoresPage の行内表示を右側 Dialog に置き換える
+  - 行内パネルの展開を廃し、店舗一覧の発行操作から選択店舗を controlled state で保持する単一 Dialog を開く。別店舗の発行で表示店舗を切り替える
+  - Dialog を Portal 内に描画し、一覧や親コンテナの overflow に切られないようにする。Dialog Trigger を発行元ボタンに結び、標準の focus restore を使う
+  - 既存のロール別列、未確定店舗の理由、発行失敗後の一覧状態、店名つき操作名を維持する
+  - Observable: jsdom テストで発行操作直後に dialog と loading が現れ、対象店舗の内容が表示される。close / Escape / backdrop で閉じて起点へ focus が戻り、別店舗へ切り替えられる。既存 StoresPage の role・列・未確定状態テストも成立する
+  - _Requirements: 1.1–1.5, 3.1–3.2, 4.4, 5.5, 6.1, 6.3, 9.1, 9.5_
+  - _Depends: 6.1, 6.4_
+  - _Boundary: `ts/apps/dashboard-web/src/app/stores/page.tsx` と同 page test_
+
+- [x] 7.6 Drawer の実描画・印刷・アクセシビリティを E2E に加える
+  - QR Drawer を `DASHBOARD_SURFACES` に追加し、自動 a11y 監査と横スクロール実測に含める
+  - Playwright で右端固定、狭い viewport 内のスクロール、`prefers-reduced-motion` 時に transition が 0.01ms へ短縮されることを実測する
+  - 印刷メディアでは portal backdrop・URL・注意事項・禁止例・操作を除き `data-print-region` のみが残ることを確認する。画面メディアへ戻したときは対象要素が見えることも確かめる
+  - Observable: E2E で desktop / mobile の Drawer、reduced motion、a11y / 横スクロール面登録、印刷面の出力境界が確認される
+  - _Requirements: 6.5, 9.1, 9.6–9.8_
+  - _Depends: 6.5_
+  - _Boundary: `ts/apps/dashboard-web/e2e/fixtures/api.ts`, 既存 dashboard surfaces / mobile / print specs_
+
+- [x] 7.7 Issue #400 の回帰確認と実ブラウザ確認を記録する
+  - `@fwlm/ui`・`dashboard-api`・`dashboard-web` の該当 unit / integration / E2E、型検査、lint を実行する。`scripts/check-design-tokens.sh` と `scripts/check-next-public-buildargs.sh` も確認する
+  - 実ブラウザで右側からの表示、対象店舗名・QR・URL、URL コピー、閉じる / Escape / backdrop、狭い画面での利用、focus restore、印刷時の掲示面だけの出力を確認し、結果と未確認事項を記録する
+  - `NEXT_PUBLIC_*`、DB、インフラ、外部依存を増やしていないことを確認する。Issue #400 に実装結果と確認状況を記録する
+  - Observable: 関連チェックが緑で、実ブラウザ確認の結果と残件がこのファイルおよび Issue #400 に記録されている
+  - _Requirements: 9.1–9.9_
+  - _Depends: 6.1–6.6_
+
+
+### Issue #400 実装記録（2026-09-28）
+
+- 店舗一覧の QR 発行を Base UI Dialog の右側 modal Drawer に変更した。店名・QR・API が QR と同時に返す URL・コピー操作・既存の掲示文言と注意事項を一画面に表示する
+- `X-Survey-URL` は dashboard-api が QR 生成に使った同一 URL を返し、CORS からそのヘッダだけを公開する。dashboard-web は絶対 HTTP(S) URL を検証し、同じ値を表示・コピーする
+- Drawer は Escape・背面押下・閉じる操作で閉じ、発行元へ焦点を戻す。Portal、viewport 内の縦スクロール、狭い画面、reduced motion、画面と印刷の境界を Chromium E2E で確認した
+- 単体テスト: UI 677 passed、dashboard-api 288 passed / DB 統合 43 skipped、dashboard-web 436 passed
+- 型検査・lint、`scripts/check-design-tokens.sh`、`scripts/check-next-public-buildargs.sh` はすべて成功。workspace build も成功
+- `CI=true bash scripts/run-e2e-local.sh --only surfaces`: Dashboard surfaces 98 passed / 4 skipped、store surfaces 15 passed。4 件は QR modal 表示中に背面ナビゲーションを測定する R2/R3 の幅別検査で、背面が覆われるための意図した skip
+- 新しい外部依存・`NEXT_PUBLIC_*`・DB・インフラ変更はない
+- 残る人手確認: 紙へ実際に印刷してスマートフォンで読む確認（#224）、実スクリーンリーダーでの読み上げ確認（#225）。自動アクセシビリティ監査と印刷メディアのブラウザ検査は完了

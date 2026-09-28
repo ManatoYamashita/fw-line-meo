@@ -1359,6 +1359,26 @@ const MOTION_CLASSIFICATIONS: readonly MotionClassification[] = [
       + '遷移の対象にしていたため色系へ絞った（Issue #201）',
   },
   {
+    utility: 'transition-opacity',
+    kind: 'progress',
+    note: 'Dialog の背面のフェード。到達状態は開始・終了状態の variant が定義する',
+  },
+  {
+    utility: 'transition-transform',
+    kind: 'progress',
+    note: 'Dialog Drawer の横移動。動き低減時は theme.css の共通規則で所要時間を短くする',
+  },
+  {
+    utility: 'duration-200',
+    kind: 'progress',
+    note: 'Dialog のフェードと Drawer の横移動の所要時間',
+  },
+  {
+    utility: 'ease-out',
+    kind: 'progress',
+    note: 'Drawer の横移動の時間関数',
+  },
+  {
     utility: 'transition-none',
     kind: 'progress',
     note: 'Checkbox のチェック表示。もともと遷移させない指定であり抑制と衝突しない',
@@ -1387,6 +1407,24 @@ const MOTION_CLASSIFICATIONS: readonly MotionClassification[] = [
     kind: 'endstate',
     cssProperty: 'translate',
     note: 'Alert のアイコンを本文の行と揃える静的配置',
+  },
+  {
+    utility: 'data-ending-style:translate-x-full',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '閉じる遷移の開始位置。一時的な位置であり、遷移後の到達状態ではない',
+  },
+  {
+    utility: 'data-starting-style:translate-x-full',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '開く遷移の開始位置。一時的な位置であり、遷移後の到達状態ではない',
+  },
+  {
+    utility: 'print:translate-x-0',
+    kind: 'endstate',
+    cssProperty: 'translate',
+    note: '印刷時に Drawer を通常の文書位置へ置く静的配置',
   },
 ];
 

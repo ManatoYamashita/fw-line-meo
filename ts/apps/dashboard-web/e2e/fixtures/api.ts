@@ -163,7 +163,7 @@ const ONE_PIXEL_PNG = Buffer.from(
 );
 
 /** QR エンドポイントのパス（クエリは除いた形で照合する）。 */
-const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
+const QR_PATH = /^\/stores\/([^/]+)\/qr\.png$/;
 
 /**
  * QR パネルの実績（Issue #401）。月は固定値でよい（「今月」の判定はサーバの責務で、画面は受けた順に
@@ -213,8 +213,18 @@ export async function stubDashboardApi(
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (QR_PATH.test(path)) {
-      await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
+    const qrRequest = QR_PATH.exec(path);
+    if (qrRequest !== null) {
+      const surveyUrl = `https://survey.example/s/${decodeURIComponent(qrRequest[1]!)}`;
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        headers: {
+          'Access-Control-Expose-Headers': 'X-Survey-URL',
+          'X-Survey-URL': surveyUrl,
+        },
+        body: ONE_PIXEL_PNG,
+      });
       return;
     }
     if (REVIEW_FUNNEL_PATH.test(path) && request.method() === 'GET') {

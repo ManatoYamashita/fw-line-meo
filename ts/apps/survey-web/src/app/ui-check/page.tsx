@@ -7,7 +7,7 @@
 // 手法（getComputedStyle による実描画判定）は正しかったが、検証対象が本番の部品経路ではなかった。
 //
 // このページは部品を実際に描画してキーボード操作の的にすることで、その穴を塞ぐ。
-// 副次的に、@fwlm/ui の全13部品を import する唯一の面として、`next build` が部品の .tsx を
+// 副次的に、@fwlm/ui の全部品を import する唯一の面として、`next build` が部品の .tsx を
 // コンパイルする恒久経路にもなる（Issue #51。それ以前は一度もコンパイルされていなかった）。
 // 部品を追加した際は、このページにも必ず追加してコンパイル経路に乗せること。
 //
@@ -17,6 +17,12 @@ import type { Metadata } from 'next';
 import { Alert, AlertDescription, AlertTitle } from '@fwlm/ui/components/alert';
 import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@fwlm/ui/components/dialog';
 import {
   Card,
   CardContent,
@@ -110,7 +116,7 @@ export default function UiCheckPage() {
       </Alert>
 
       {/*
-        以下は残りの非対話部品（Issue #51）。全13部品を next build のコンパイル経路に
+        以下は残りの非対話部品（Issue #51）。全部品を next build のコンパイル経路に
         乗せるための恒久配置。tabbable を増やさず（Tab 巡回の起点と MAX_TAB_STEPS を
         崩さない）、既存 E2E の locator（「〜のボタン」「〜の通知」等）と衝突する
         role・テキストも持たせないこと。
@@ -367,6 +373,15 @@ export default function UiCheckPage() {
       <Badge data-testid="outline-badge" variant="outline">
         枠線のバッジ
       </Badge>
+
+      {/* Dialog は dashboard-web の実画面と単体/E2E 検証で操作する。ここでは追加の Tab 停止を
+          作らず、部品ソースが Next.js のコンパイル経路に含まれることだけを固定する。 */}
+      <Dialog open={false}>
+        <DialogContent>
+          <DialogTitle>閉じたダイアログ</DialogTitle>
+          <DialogDescription>この面では開かない検証用です。</DialogDescription>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

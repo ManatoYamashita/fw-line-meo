@@ -15,12 +15,15 @@ import { apiFetchBinary, getStoreQr } from '../src/lib/api';
 
 const STORE_ID = '11111111-2222-3333-4444-555555555555';
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const SURVEY_URL = `https://survey.example/s/${STORE_ID}`;
 
-function pngResponse(bytes: Uint8Array<ArrayBuffer>): Response {
+function pngResponse(bytes: Uint8Array<ArrayBuffer>, surveyUrl: string | null = SURVEY_URL): Response {
   // Uint8Array は lib の総称化により BodyInit へ直接載らないため Blob を経由する。
+  const headers = new Headers({ 'Content-Type': 'image/png' });
+  if (surveyUrl !== null) headers.set('X-Survey-URL', surveyUrl);
   return new Response(new Blob([bytes]), {
     status: 200,
-    headers: { 'Content-Type': 'image/png' },
+    headers,
   });
 }
 
@@ -40,7 +43,22 @@ describe('QR 取得 API クライアント', () => {
     if (!result.ok) return;
     expect(Array.from(result.value.bytes)).toEqual(Array.from(PNG_BYTES));
     expect(result.value.contentType).toBe('image/png');
+    expect(result.value.surveyUrl).toBe(SURVEY_URL);
   });
+
+  it.each([null, '/s/store', 'javascript:alert(1)', 'https://user:pass@survey.example/s/store']) (
+    '欠落または不正な QR URL メタデータを拒否する（8.2, 8.9）',
+    async (surveyUrl) => {
+      const fetchImpl = vi.fn().mockResolvedValue(pngResponse(PNG_BYTES, surveyUrl));
+      const result = await getStoreQr(STORE_ID, { getToken: async () => 'tok', fetchImpl });
+
+      expect(result).toEqual({
+        ok: false,
+        code: 'invalid_qr_metadata',
+        message: 'QR の遷移先を確認できませんでした。時間をおいて再試行してください。',
+      });
+    },
+  );
 
   it('getStoreQr は印刷用途に固定したサイズを要求する（2.7）', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(pngResponse(PNG_BYTES));
