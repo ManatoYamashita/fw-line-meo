@@ -130,6 +130,28 @@
   - _Requirements: 7.1, 7.3, 7.4_
   - _Depends: 5.2_
 
+- [ ] 6. QR パネルでのアンケートの実績（Issue #401 で追加）
+
+- [ ] 6.1 実績を読むエンドポイントを dashboard-api に足す
+  - `GET /stores/:storeId/review-funnel` を認証 → 店舗取得 → RBAC の順で評価し、`readStoreReviewFunnel` の当月・前月を返す
+  - Observable: 単体テスト（401 / 403 / 404 / 成功の形 / 失敗の 500）と DB テスト（本物の表から回答件数と押下回数を読む・担当外の代理店は 403）が緑
+  - _Requirements: 8.1, 8.2, 8.6, 8.7_
+  - _Depends: review-acquisition 9.2_
+  - _Boundary: dashboard-api src/review-funnel.ts / app.ts / composition.ts_
+
+- [ ] 6.2 実績の部品を作り QR パネルへ結線する
+  - `lib/api.ts` に `getStoreReviewFunnel` を足し、`StoreReviewFunnel` を掲示面の外・不可の例の前に置く
+  - Observable: 部品とパネルのテストが緑。実績の取得を失敗させても QR の保存・印刷が出ること、実績の領域を掲示面の中へ移すと赤くなることを実測する
+  - _Requirements: 8.1, 8.3, 8.4, 8.5, 8.6, 8.7_
+  - _Depends: 6.1_
+  - _Boundary: dashboard-web src/lib/api.ts / src/components/store-review-funnel.tsx / store-qr-panel.tsx_
+
+- [ ] 6.3 E2E の fixture と実測へ載せる
+  - fixture に実績の応答を足し、QR パネルの a11y 監査と印刷メディアの実測を実績の表が描かれた状態で通す
+  - Observable: `make e2e --only surfaces` 相当が緑。印刷メディアで実績の表が見えないこと
+  - _Requirements: 8.5, 6.5_
+  - _Depends: 6.2_
+
 ## 4.2 の実施手順
 
 **確認の前提**（3 点がそろっている必要がある）:

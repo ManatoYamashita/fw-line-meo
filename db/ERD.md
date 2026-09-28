@@ -1,6 +1,6 @@
 # ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition / gbp-post-review-reply
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、同（投稿導線の押下件数の匿名集計）は `db/migrations/0014_survey_review_link_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -20,6 +20,7 @@ erDiagram
     stores ||--o{ survey_aspect_tallies : aggregates
     stores ||--o{ survey_concern_tallies : aggregates
     stores ||--o{ survey_material_tallies : aggregates
+    stores ||--o{ survey_review_link_tallies : aggregates
     survey_aspects ||--o{ survey_aspect_tallies : classifies
     survey_aspects ||--o{ survey_concern_tallies : classifies
     stores ||--o{ oauth_tokens : "future authorizes"
@@ -52,6 +53,7 @@ erDiagram
 | survey_aspect_tallies | id (uuid) | (store_id, period_month, aspect_code) unique | store_id → stores, aspect_code → survey_aspects | 良かった点の観点別の匿名集計カウンタ |
 | survey_concern_tallies | id (uuid) | (store_id, period_month, aspect_code) unique | store_id → stores, aspect_code → survey_aspects | 気になった点の観点別の匿名集計カウンタ（`0008`） |
 | survey_material_tallies | id (uuid) | (store_id, period_month, aspect_count, concern_count, has_comment) unique | store_id → stores | 素材の厚み（良かった点の選択数×気になった点の選択数×一言の有無）の匿名集計カウンタ |
+| survey_review_link_tallies | id (uuid) | (store_id, period_month) unique | store_id → stores | 投稿導線の押下件数の匿名集計カウンタ（`0014`） |
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
 | daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
 | summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 通知記録（店舗×日付で一意。その日に通知を送ったか、送らなかったならなぜかを 1 行で表す・`retry_key` で冪等再送・TS 書込） |
@@ -69,6 +71,7 @@ erDiagram
 - **来店客(Customer)・個別回答を表現するエンティティは存在しない**（匿名性の構造保証）。集計は `survey_*_tallies` のカウンタのみ。
 - `survey_material_tallies`（`review-acquisition`・`0006`）は回答 1 件の「素材の厚み」を観点の **選択数** と一言の **有無** だけで数える。`0008` で気になった点の **選択数**（`concern_count`）を自然キーへ加えた（既存行は 0）。一言の本文は列として存在しない（Req 5.1/5.3）。既存 tallies と同じく `created_at` を持たず、時刻も残さない。
 - `survey_concern_tallies`（`review-acquisition`・`0008`・Issue #221）は気になった点を `survey_aspect_tallies` と同じ形で数える。**極性は表で分ける**（同じ表に混ぜると「良かった点別件数」の意味が壊れる）。観点は同じ `survey_aspects` を参照し、`created_at` を持たない。
+- `survey_review_link_tallies`（`review-acquisition`・`0014`・Issue #401）は投稿導線の押下を店舗×月の **件数** だけで数える。数えるのは下書き画面の押下のうち、回答の後にだけ発行される sessionToken で検証できたものだけである。重複を区別するための token も押下の時刻も保存しない（重複は端末の側で、1 回の画面表示につき最初の押下だけを送ることで抑える）。Google への投稿そのものは観測できないので、この件数は投稿数ではない。
 - `rating_snapshots` は追記専用（更新/削除しない）。`subject_kind` で自店/競合を区別し、`place_id` を非正規化保持して競合 churn 後も歴史を自立保持。
 - 共有定数 `categories`・`survey_aspects` は seed（`0002`）が唯一の定義（SoT）。
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。

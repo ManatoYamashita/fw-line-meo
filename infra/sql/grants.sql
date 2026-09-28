@@ -19,6 +19,7 @@
 --   TS 層（line_webhook / survey_web / dashboard_api）→ DML on
 --     operators, agencies, dashboard_users, owners, stores,
 --     survey_rating_tallies, survey_aspect_tallies, survey_concern_tallies, survey_material_tallies,
+--     survey_review_link_tallies（review-acquisition 0014・投稿導線の押下件数・Issue #401）,
 --     oauth_tokens,
 --     agency_invite_codes, onboarding_sessions, line_webhook_events,
 --     gbp_locations, gbp_sessions（gbp-post-review-reply 0013・GBP 連携の身元と会話セッション）
@@ -65,6 +66,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public
 GRANT INSERT, UPDATE, DELETE ON
   operators, agencies, dashboard_users, owners, stores,
   survey_rating_tallies, survey_aspect_tallies, survey_concern_tallies, survey_material_tallies,
+  survey_review_link_tallies,
   oauth_tokens, agency_invite_codes, onboarding_sessions, line_webhook_events,
   gbp_locations, gbp_sessions
   TO :"line_webhook", :"survey", :"dashboard";

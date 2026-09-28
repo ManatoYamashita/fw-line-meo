@@ -221,7 +221,7 @@
 
 - [x] 8. 投稿導線の押下を数え、口コミ獲得を施策の前後で読めるようにする（Issue #137・Issue #221 の完了条件 4）
 - [x] 8.1 押下の通知を受ける API と記録を追加する
-  - `POST /api/review-link-opened` が pageToken（storeId 一致）か sessionToken（封入された storeId が一致）を HMAC 検証し、通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録して 204 を返す。DB には触れない
+  - `POST /api/review-link-opened` が pageToken（storeId 一致）か sessionToken（封入された storeId が一致）を HMAC 検証し、通ったときだけ `survey_review_link_opened`（`storeId` のみ）を記録して 204 を返す。DB には触れない（**Issue #401 のタスク 9 で変更した**。現在は sessionToken の押下だけを月次の匿名集計へ加算する）
   - 事象名を記録の正典（`docs/observability/log-field-canon.md`）へ先に登録する
   - Observable: handler のユニットテスト（token 2 種で記録・他店舗／改ざん／期限切れ／形式不正で記録しない・レート制限）と、正典の照合ガードが緑
   - _Requirements: 5.1, 5.7_
@@ -250,6 +250,40 @@
   - Observable: 本番で `survey_review_link_opened` が記録され、ログベース指標が計上する（本番識別子は先頭 8 文字まで書く）
   - _Requirements: 5.7_
   - _Depends: 8.2, 8.3_
+
+- [ ] 9. 投稿導線の押下を月次の匿名集計へ加算する（Issue #401）
+- [ ] 9.1 押下の集計表を足す
+  - `0014` で `survey_review_link_tallies`（`store_id × period_month × count` のみ・`created_at` を持たない）を追加し、`db/write-boundary.md`（TS 層）・`db/ERD.md`・`infra/sql/grants.sql`（survey の DML）へ載せる
+  - `db/test/assertions/30_compliance.sql` の表と列の allowlist に足し、表ごとの assertions（FK 孤児・自然キーの一意・月初のみ・非負）を置く
+  - Observable: `bash scripts/run-db-test-suites.sh` と `make db-verify-docs` 相当が緑。列を 1 本足すと `30_compliance.sql` が赤くなる
+  - _Requirements: 5.1, 5.5, 5.9_
+  - _Boundary: db/migrations/0014, db/test, db/*.md, infra/sql/grants.sql_
+
+- [ ] 9.2 押下の加算と月別件数の読み出しを DAL に足す
+  - `tallies.ts` に `incrementReviewLinkTally` と `readStoreReviewFunnel` を置き、月境界の式は `incrementTallies` と同じ定数を使う
+  - Observable: DB テストで JST の月境界（UTC 月末 15:00 以降は翌月）・前月の読み出し・行が無い月の 0・星ごとの内訳を返さないことを固定する
+  - _Requirements: 5.9_
+  - _Depends: 9.1_
+
+- [ ] 9.3 sessionToken の押下だけを加算し、失敗を応答へ転嫁しない
+  - ReviewLinkAPI が sessionToken を検証できた押下でだけ `incrementReviewLinkTally` を呼ぶ。pageToken の押下は記録だけで加算しない。加算の失敗は `review_link_tally_failed` を記録して 204 を返す
+  - 事象名を `docs/observability/log-field-canon.md` へ先に登録する
+  - Observable: handler のユニットテスト（sessionToken で加算・pageToken／他店舗／改ざん／レート制限で加算しない・加算の失敗でも 204 と記録）と、DB テストで本物の表に 1 行増えることが緑
+  - _Requirements: 5.4, 5.9_
+  - _Depends: 9.2_
+  - _Boundary: survey-web api/review-link-opened_
+
+- [ ] 9.4 押下の通知を 1 回の画面表示につき最初の 1 回にする（案 A）
+  - SurveyShell が送信済みの印を画面の生存期間だけ持ち、2 回目以降の押下では通知しない。印を端末に保存しない。リンクの既定の遷移は止めない
+  - `docs/observability/review-acquisition-funnel.md` に、適用日を境に押下件数の数え方が変わることを記す
+  - Observable: シェルのテスト（連打・再生成の後の押し直しで通知が 1 回・2 回目以降も遷移は止まらない）が緑。印を外す変異で赤くなる
+  - _Requirements: 5.8, 5.10_
+
+- [ ] 9.5 本番へ適用する
+  - `0014` → `grants.sql` を本番へ当ててからデプロイする（逆順だと加算がすべて失敗する）。当てる前に本番の適用済みの番号を照合する
+  - Observable: 検証用の店舗で回答→下書き画面で押下し、`survey_review_link_tallies` の当月の行が 1 増えることを確かめる（本番識別子は先頭 8 文字まで書く）
+  - _Requirements: 5.9_
+  - _Depends: 9.3, 9.4_
 
 ## Implementation Notes
 
