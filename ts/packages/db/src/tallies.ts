@@ -1,8 +1,10 @@
 import type { Pool } from 'pg';
 
-// 匿名集計の月次加算（本 spec 唯一の DB 書込・write-boundary.md: TS リアルタイム応答層）。
+// 匿名集計の月次加算（review-acquisition の DB 書込・write-boundary.md: TS リアルタイム応答層）。
 // 1 回答 = rating 1 行＋選択した良かった点ごとに 1 行＋選択した気になった点ごとに 1 行＋素材の厚み 1 行を
-// 単一トランザクションで UPSERT する。
+// 単一トランザクションで UPSERT する。投稿導線の押下は回答とは別の要求で、別の表へ 1 行を UPSERT する
+// （incrementReviewLinkTally・Issue #401）。QR パネルの実績の読み出し（readStoreReviewFunnel）も
+// 月境界の式を共有するためここに置く。
 export interface TallyInput {
   storeId: string;
   star: number;
@@ -94,4 +96,71 @@ export async function incrementTallies(
   } finally {
     client.release();
   }
+}
+
+/**
+ * 投稿導線の押下を店舗×月の匿名集計へ 1 件加算する（Issue #401・review-acquisition Requirement 5.9）。
+ *
+ * 呼ぶのは、下書き画面の押下を sessionToken で検証できたときだけである（呼び手の責務）。記録するのは
+ * 件数だけで、token・時刻は受け取らない。1 文の UPSERT なのでトランザクションを張らない。
+ * 月境界は incrementTallies と同じ式で決める（加算した月と読む月がずれないように）。
+ */
+export async function incrementReviewLinkTally(
+  pool: Pool,
+  storeId: string,
+  now?: Date,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO survey_review_link_tallies (store_id, period_month, count)
+     VALUES ($1, ${PERIOD_MONTH_SQL}, 1)
+     ON CONFLICT (store_id, period_month)
+     DO UPDATE SET count = survey_review_link_tallies.count + 1`,
+    [storeId, now ?? null],
+  );
+}
+
+/** QR パネルが出す 1 か月分の実績（store-qr-issuance-ui Requirement 8）。 */
+export interface StoreReviewFunnelMonth {
+  /** JST の暦月（`YYYY-MM`）。 */
+  month: string;
+  /** アンケートの回答件数（survey_rating_tallies の当該月の合計。星ごとの内訳は返さない）。 */
+  responses: number;
+  /** 下書き画面から Google の投稿画面へ進んだ回数（投稿された件数ではない）。 */
+  reviewLinkOpens: number;
+}
+
+/**
+ * 店舗の当月と前月の実績を新しい順に 2 件返す（Issue #401）。
+ *
+ * 行の無い月も 0 で返す（Requirement 8.7）。「当月」は DB の now() を JST で切って決め、呼び手の
+ * 時計に依存させない。now はテストが月境界を固定するための注入である。
+ */
+export async function readStoreReviewFunnel(
+  pool: Pool,
+  storeId: string,
+  now?: Date,
+): Promise<StoreReviewFunnelMonth[]> {
+  const res = await pool.query<{ month: string; responses: number; review_link_opens: number }>(
+    `WITH current_month AS (SELECT ${PERIOD_MONTH_SQL} AS period_month),
+          months AS (
+            SELECT period_month FROM current_month
+            UNION ALL
+            SELECT (period_month - interval '1 month')::date FROM current_month
+          )
+     SELECT to_char(months.period_month, 'YYYY-MM') AS month,
+            COALESCE((SELECT sum(r.count) FROM survey_rating_tallies r
+                      WHERE r.store_id = $1 AND r.period_month = months.period_month), 0)::int
+              AS responses,
+            COALESCE((SELECT l.count FROM survey_review_link_tallies l
+                      WHERE l.store_id = $1 AND l.period_month = months.period_month), 0)::int
+              AS review_link_opens
+     FROM months
+     ORDER BY months.period_month DESC`,
+    [storeId, now ?? null],
+  );
+  return res.rows.map((row) => ({
+    month: row.month,
+    responses: row.responses,
+    reviewLinkOpens: row.review_link_opens,
+  }));
 }

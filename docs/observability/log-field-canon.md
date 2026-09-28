@@ -150,6 +150,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `generation_safety_blocked` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `factuality_residual` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `tally_failed` | survey-web | 既存 | `ts/apps/survey-web/src/app/api/responses/handler.ts` | 集計の失敗は客へ転嫁しない（要件 5.4 の思想）。記録だけ残す |
+| `review_link_tally_failed` | survey-web | 新規 | `ts/apps/survey-web/src/app/api/review-link-opened/handler.ts` | 投稿導線の押下の月次集計（`survey_review_link_tallies`・Issue #401）への加算の失敗。`tally_failed` と同じく客へ転嫁せず記録だけ残す。項目は持たない。同じ要求の `survey_review_link_opened` は加算より先に出るので、両者の乖離が集計障害の検知になる |
 | `store-detail.config_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.pool_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.query_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
@@ -191,6 +192,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名を持たない |
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
 | `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
+| `dashboard-api.review_funnel_read_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/review-funnel.ts` | QR パネルの実績（Issue #401）の読み出しの失敗。応答は 500。項目は `storeId` だけで、件数も例外の文言も載せない |
 
 ---
 

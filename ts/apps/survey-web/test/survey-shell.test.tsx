@@ -92,7 +92,25 @@ afterEach(() => {
 // sessionToken を、回答済み画面は SSR が発行した pageToken を載せる（サーバーはどちらかを検証できた
 // ときだけ数える）。通知は遷移と独立で、リンクの既定の遷移は止めない。
 describe('SurveyShell: 投稿導線の押下の通知', () => {
-  it('下書き画面では最新の sessionToken を載せて通知する（再生成で token が進んだ後も追随する）', async () => {
+  it('下書き画面では最新の sessionToken を載せて通知する（再生成で token が進んだ後に初めて押しても追随する）', async () => {
+    stubFetch({
+      '/api/responses': { body: { generation: 'ok', draft: 'D1', sessionToken: 'T1', regenerationsLeft: 3 } },
+      '/api/drafts': { body: { generation: 'ok', draft: 'D2', sessionToken: 'T2', regenerationsLeft: 2 } },
+    });
+    renderShell();
+    fireEvent.click(screen.getByTestId('submit'));
+    await screen.findByTestId('draft');
+
+    fireEvent.click(screen.getByTestId('regen'));
+    await screen.findByText('D2');
+    fireEvent.click(screen.getByTestId('review-link'));
+    expect(notifyReviewLinkOpened).toHaveBeenCalledTimes(1);
+    expect(notifyReviewLinkOpened).toHaveBeenCalledWith(STORE, 'T2');
+  });
+
+  // Issue #401・Requirement 5.10: 通知は 1 回の画面表示につき最初の押下だけ。押下の件数は QR パネルで
+  // オーナー向けの数字になるので、同じ客の連打・再生成の後の押し直しで件数を重ねない。
+  it('下書き画面の 2 回目以降の押下は通知しない（連打・再生成の後の押し直しを含む）', async () => {
     stubFetch({
       '/api/responses': { body: { generation: 'ok', draft: 'D1', sessionToken: 'T1', regenerationsLeft: 3 } },
       '/api/drafts': { body: { generation: 'ok', draft: 'D2', sessionToken: 'T2', regenerationsLeft: 2 } },
@@ -102,13 +120,41 @@ describe('SurveyShell: 投稿導線の押下の通知', () => {
     await screen.findByTestId('draft');
 
     fireEvent.click(screen.getByTestId('review-link'));
-    expect(notifyReviewLinkOpened).toHaveBeenLastCalledWith(STORE, 'T1');
-
+    fireEvent.click(screen.getByTestId('review-link'));
     fireEvent.click(screen.getByTestId('regen'));
     await screen.findByText('D2');
     fireEvent.click(screen.getByTestId('review-link'));
-    expect(notifyReviewLinkOpened).toHaveBeenLastCalledWith(STORE, 'T2');
-    expect(notifyReviewLinkOpened).toHaveBeenCalledTimes(2);
+
+    expect(notifyReviewLinkOpened).toHaveBeenCalledTimes(1);
+    expect(notifyReviewLinkOpened).toHaveBeenCalledWith(STORE, 'T1');
+  });
+
+  it('回答済み画面の 2 回目以降の押下も通知せず、どの押下でも既定の遷移は止めない', async () => {
+    markAnswered(STORE);
+    stubFetch({});
+    renderShell();
+    await screen.findByText(/ご回答ありがとうございました/);
+    const link = screen.getByRole('link', { name: /クチコミを書く/ });
+
+    // fireEvent.click は preventDefault されると false を返す
+    expect(fireEvent.click(link)).toBe(true);
+    expect(fireEvent.click(link)).toBe(true);
+    expect(fireEvent.click(link)).toBe(true);
+    expect(notifyReviewLinkOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it('送信済みの印を端末に保存しない（localStorage へ書くのは回答済みの印だけ）', async () => {
+    stubFetch({
+      '/api/responses': { body: { generation: 'ok', draft: 'D1', sessionToken: 'T1', regenerationsLeft: 3 } },
+    });
+    renderShell();
+    fireEvent.click(screen.getByTestId('submit'));
+    await screen.findByTestId('draft');
+    const keysBefore = Object.keys(localStorage).sort();
+
+    fireEvent.click(screen.getByTestId('review-link'));
+
+    expect(Object.keys(localStorage).sort()).toEqual(keysBefore);
   });
 
   it('回答済み画面では pageToken を載せて通知し、既定の遷移は止めない', async () => {

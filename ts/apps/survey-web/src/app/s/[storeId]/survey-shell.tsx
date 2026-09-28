@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -51,6 +51,18 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
   const [regenerating, setRegenerating] = useState(false);
   const [draftState, setDraftState] = useState<DraftState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 投稿導線の押下を通知済みか（Issue #401・Requirement 5.10）。1 回の画面表示につき最初の押下だけを
+  // 通知する。通知は無状態で、同じ token を何度送ってもサーバーは区別できない。連打や再生成の後の
+  // 押し直しを数えると、QR パネルに出す「投稿画面へ進んだ回数」が同じ客の分だけ膨らむ。
+  // 印は ref に持ち、端末に保存しない。localStorage に残すと、再訪を識別できる値になる。
+  // 描画に使わない値なので state にしない（押下で再描画を起こさない）。
+  const reviewLinkNotifiedRef = useRef(false);
+
+  function notifyReviewLinkOnce(token: string): void {
+    if (reviewLinkNotifiedRef.current) return;
+    reviewLinkNotifiedRef.current = true;
+    notifyReviewLinkOpened(storeId, token);
+  }
 
   useEffect(() => {
     if (isRecentlyAnswered(storeId)) setPhase('answered');
@@ -142,7 +154,7 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
           href={googleReviewUrl}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={() => notifyReviewLinkOpened(storeId, pageToken)}
+          onClick={() => notifyReviewLinkOnce(pageToken)}
         >
           Google のクチコミを書く
         </a>
@@ -160,7 +172,8 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
         onRegenerate={handleRegenerate}
         // 下書き画面の押下は sessionToken を載せる（Issue #137）。/api/responses の後にしか発行されない
         // ので「実際の回答の後の押下」を証明できる。再生成で進んだ最新の token を使う。
-        onReviewLinkOpen={() => notifyReviewLinkOpened(storeId, draftState.sessionToken)}
+        // 通知は最初の押下だけ（Issue #401）。再生成の後に押し直しても、2 回目は送らない。
+        onReviewLinkOpen={() => notifyReviewLinkOnce(draftState.sessionToken)}
         regenerating={regenerating}
       />
     );

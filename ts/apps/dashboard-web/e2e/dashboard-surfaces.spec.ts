@@ -200,6 +200,10 @@ test.describe('店頭掲示の印刷', () => {
     }
     await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeHidden();
     await expect(page.getByRole('link', { name: /QR 画像を保存/ })).toBeHidden();
+    // 実績の件数も紙に出さない（Issue #401・Requirement 8.5）。掲示面に件数が刷られると、客へ集計結果を
+    // 見せることになる。
+    const funnel = page.getByRole('region', { name: 'アンケートの実績' });
+    await expect(funnel, '実績の件数が紙に出ています').toBeHidden();
 
     // **対照。** 画面へ戻すと同じ要素が見える。これが無いと「そもそも描画されていないから
     // 隠れて見えるだけ」の状態と区別が付かない（`@media print` を丸ごと消しても、
@@ -212,6 +216,7 @@ test.describe('店頭掲示の印刷', () => {
       ).toBeVisible();
     }
     await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeVisible();
+    await expect(funnel, '実績が画面にも出ていません').toBeVisible();
   });
 
   // **この規則は全ルートへ効く。** globals.css は app/layout.tsx 経由で読み込まれるため、

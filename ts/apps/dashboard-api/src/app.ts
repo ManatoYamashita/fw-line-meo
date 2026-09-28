@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { handleQr, type QrDeps } from './qr.js';
+import { handleReviewFunnel, type ReviewFunnelDeps } from './review-funnel.js';
 import { handleMe, type MeDeps } from './me.js';
 import { handleStoresList, type StoresListDeps } from './stores-list.js';
 import { handleStoreSuspension, type StoreSuspensionDeps } from './store-suspension.js';
@@ -45,6 +46,8 @@ export interface AppDeps {
   // CORS で許可するオリジン（config.corsOrigin＝DASHBOARD_WEB_ORIGIN）。
   corsOrigin: string | readonly string[];
   qr: QrDeps;
+  // QR パネルの実績（Issue #401・store-qr-issuance-ui Requirement 8）。読み出し専用。
+  reviewFunnel: ReviewFunnelDeps;
   me: MeDeps;
   stores: StoresListDeps;
   owners: OwnersListDeps;
@@ -300,6 +303,14 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       log: c.get('correlationLog'),
     });
   });
+
+  app.get('/stores/:storeId/review-funnel', (c) =>
+    handleReviewFunnel(deps.reviewFunnel, {
+      storeId: c.req.param('storeId'),
+      authorization: authHeader(c),
+      log: c.get('correlationLog'),
+    }),
+  );
 
   // --- 既存 QR エンドポイント（CORS 適用下・挙動は不変）。 ---
 

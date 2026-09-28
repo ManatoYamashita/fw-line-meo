@@ -165,6 +165,19 @@ const ONE_PIXEL_PNG = Buffer.from(
 /** QR エンドポイントのパス（クエリは除いた形で照合する）。 */
 const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
 
+/**
+ * QR パネルの実績（Issue #401）。月は固定値でよい（「今月」の判定はサーバの責務で、画面は受けた順に
+ * 今月・先月と名付けるだけ）。0 件の月を含めるのは、0 を空欄にしない表示（Requirement 8.7）まで
+ * 実描画の監査へ載せるためである。
+ */
+const REVIEW_FUNNEL_PATH = /^\/stores\/[^/]+\/review-funnel$/;
+const REVIEW_FUNNEL = {
+  months: [
+    { month: '2026-09', responses: 12, reviewLinkOpens: 7 },
+    { month: '2026-08', responses: 0, reviewLinkOpens: 0 },
+  ],
+};
+
 /** 停止・再開のエンドポイント（store-suspension Issue #252）。捕獲は店舗 ID と操作。 */
 const SUSPENSION_PATH = /^\/stores\/([^/]+)\/(suspend|resume)$/;
 
@@ -202,6 +215,10 @@ export async function stubDashboardApi(
     const path = new URL(request.url()).pathname;
     if (QR_PATH.test(path)) {
       await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
+      return;
+    }
+    if (REVIEW_FUNNEL_PATH.test(path) && request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(REVIEW_FUNNEL) });
       return;
     }
     const suspension = SUSPENSION_PATH.exec(path);
@@ -426,6 +443,9 @@ export async function openStoreQrPanelWithToast(page: Page): Promise<void> {
   await openListSurface(page, '/stores', '店舗一覧', 3);
   await page.getByRole('button', { name: new RegExp(`${STORES[0].name} の QR 発行`) }).click();
   await expect(page.locator('[data-print-region]')).toBeVisible();
+  // 実績の表（Issue #401）も描けていることを先に固定する。実績は QR とは別の要求で届くので、
+  // 掲示面が出た時点ではまだ読み込み中でありうる。待たないと、表を持たない状態を監査して緑になる。
+  await expect(page.getByRole('table', { name: `${STORES[0].name} のアンケートの実績` })).toBeVisible();
   // 発行の成功は Toast でも知らせる（Issue #342）。現れる途中で監査・撮影させない。
   await waitForToastsSettled(page);
 }

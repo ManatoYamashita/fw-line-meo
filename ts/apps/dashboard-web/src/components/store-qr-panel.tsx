@@ -10,7 +10,12 @@ import { Heading } from '@fwlm/ui/components/heading';
 import { Spinner } from '@fwlm/ui/components/spinner';
 
 import { notifyActionError, notifyActionSuccess } from '../lib/action-feedback';
-import { getStoreQr, type ApiResult, type BinaryPayload } from '../lib/api';
+import {
+  getStoreQr,
+  type ApiResult,
+  type BinaryPayload,
+  type StoreReviewFunnelMonth,
+} from '../lib/api';
 import { qrFileName } from '../lib/qr-filename';
 import {
   POSTER_CAUTION,
@@ -18,6 +23,7 @@ import {
   POSTER_INVITATION,
   PROHIBITED_EXAMPLES,
 } from '../lib/qr-poster-text';
+import { StoreReviewFunnel } from './store-review-funnel';
 
 // 1 店舗ぶんの QR を取得・表示・保存させ、表示資源（object URL）を確実に解放する部品。
 // 設計: store-qr-issuance-ui「StoreQrPanel」（Requirements 2.1, 2.2, 2.3, 2.8, 3.3, 4.1-4.5,
@@ -33,6 +39,8 @@ export interface StoreQrPanelProps {
   readonly onClose: () => void;
   /** 取得手続きの注入（既定は getStoreQr）。テストでネットワークを発火させないために持つ。 */
   readonly fetchQr?: (storeId: string) => Promise<ApiResult<BinaryPayload>>;
+  /** 実績の取得手続きの注入（既定は getStoreReviewFunnel・Issue #401）。同じ理由で持つ。 */
+  readonly fetchFunnel?: (storeId: string) => Promise<ApiResult<StoreReviewFunnelMonth[]>>;
 }
 
 type QrState =
@@ -102,7 +110,7 @@ function errorTextFor(code: string): QrErrorText {
   return ERROR_TEXT_BY_CODE.get(code) ?? GENERIC_ERROR_TEXT;
 }
 
-export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPanelProps) {
+export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel }: StoreQrPanelProps) {
   const [state, setState] = useState<QrState>({ kind: 'loading' });
   // 再試行の回数。副作用の依存に含めることで、再試行を「取得をやり直す」という
   // 一つの意味に閉じる（取得・生成・解放が常に同じ経路を通る）。
@@ -214,6 +222,11 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr }: StoreQrPa
             <p className="text-sm text-muted-foreground">{POSTER_HOWTO}</p>
           </div>
         ) : null}
+
+        {/* アンケートの実績（Issue #401・Requirement 8）。**掲示面の外に置く**（8.5）。紙に件数が
+            刷られると、客へ集計結果を見せることになる。取得は QR とは独立で、QR の状態に依らず出す
+            （QR の発行に失敗しても過去の実績は読める・実績の失敗は QR を妨げない＝8.4）。 */}
+        <StoreReviewFunnel storeId={storeId} storeName={storeName} fetchFunnel={fetchFunnel} />
 
         {state.kind === 'ready' ? (
           // 不可の例。**画面にだけ出し、掲示物には刷らない。**

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
 
-import type { ApiResult, BinaryPayload } from '../src/lib/api';
+import type { ApiResult, BinaryPayload, StoreReviewFunnelMonth } from '../src/lib/api';
 import {
   POSTER_CAUTION,
   POSTER_HOWTO,
@@ -16,7 +16,12 @@ import { settleEffects } from './focus-observation';
 
 // api.ts は './firebase' を取り込むため、モジュールごと差し替えて実 SDK を発火させない
 // （stores-page.test.tsx と同規約）。取得手続きは props で注入する。
-vi.mock('../src/lib/api', () => ({ getStoreQr: vi.fn() }));
+// 実績の窓口（Issue #401）も同じ理由で差し替える。既定は応答を返さないまま保ち、実績を検査する
+// テストだけが fetchFunnel を注入する（store-review-funnel.test.tsx が部品そのものを検査する）。
+vi.mock('../src/lib/api', () => ({
+  getStoreQr: vi.fn(),
+  getStoreReviewFunnel: vi.fn(() => new Promise(() => {})),
+}));
 
 import { StoreQrPanel } from '../src/components/store-qr-panel';
 
@@ -635,3 +640,102 @@ describe('StoreQrPanel: 店頭掲示の文言（Requirement 7）', () => {
     expect(printRegion().textContent).not.toMatch(/評価|口コミ|レビュー|星|件/);
   });
 });
+
+// ---- ここから Issue #401 が追加した検証（アンケートの実績・Requirement 8） ----
+
+const FUNNEL_OK: ApiResult<StoreReviewFunnelMonth[]> = {
+  ok: true,
+  value: [
+    { month: '2026-09', responses: 12, reviewLinkOpens: 7 },
+    { month: '2026-08', responses: 3, reviewLinkOpens: 1 },
+  ],
+};
+
+function funnelRegion(): Promise<HTMLElement> {
+  return screen.findByRole('region', { name: 'アンケートの実績' });
+}
+
+describe('StoreQrPanel: アンケートの実績（Requirement 8）', () => {
+  it('実績は QR と同じ店舗について取得し、掲示面（印刷対象）の外に置く（8.1 / 8.5）', async () => {
+    const fetchFunnel = vi.fn().mockResolvedValue(FUNNEL_OK);
+    render(
+      <StoreQrPanel
+        storeId={STORE_ID}
+        storeName={STORE_NAME}
+        onClose={vi.fn()}
+        fetchQr={vi.fn().mockResolvedValue(okPayload())}
+        fetchFunnel={fetchFunnel}
+      />,
+    );
+    await screen.findByRole('img');
+    const section = await funnelRegion();
+    await within(section).findByRole('table');
+
+    expect(fetchFunnel).toHaveBeenCalledWith(STORE_ID);
+    // 紙に件数が刷られると、客へ集計結果を見せることになる。
+    expect(printRegion().contains(section), '実績が印刷対象の中にあります').toBe(false);
+    expect(printRegion().textContent).not.toContain('12 件');
+    expect(section.className.split(/\s+/)).toContain('print:hidden');
+  });
+
+  it('実績の取得に失敗しても、QR の表示・保存・印刷と掲示面は出る（8.4）', async () => {
+    render(
+      <StoreQrPanel
+        storeId={STORE_ID}
+        storeName={STORE_NAME}
+        onClose={vi.fn()}
+        fetchQr={vi.fn().mockResolvedValue(okPayload())}
+        fetchFunnel={vi.fn().mockResolvedValue({ ok: false, code: 'internal', message: 'x' })}
+      />,
+    );
+
+    const section = await funnelRegion();
+    await within(section).findByText(/実績を読み込めませんでした/);
+    expect(screen.getByRole('img')).toBeTruthy();
+    expect(screen.getByRole('link', { name: `${STORE_NAME} の QR 画像を保存` })).toBeTruthy();
+    expect(screen.getByRole('button', { name: `${STORE_NAME} の掲示物を印刷` })).toBeTruthy();
+    printRegion();
+    // 実績の失敗を QR の失敗として描かない
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe(`${STORE_NAME} の QR を表示しました`);
+  });
+
+  it('QR の発行に失敗しても、実績は取得して表示する（QR の状態に依らない）', async () => {
+    render(
+      <StoreQrPanel
+        storeId={STORE_ID}
+        storeName={STORE_NAME}
+        onClose={vi.fn()}
+        fetchQr={vi.fn().mockResolvedValue({ ok: false, code: 'STORE_SUSPENDED', message: 'ignored' })}
+        fetchFunnel={vi.fn().mockResolvedValue(FUNNEL_OK)}
+      />,
+    );
+
+    await screen.findByRole('alert');
+    const section = await funnelRegion();
+    expect(await within(section).findByRole('table')).toBeTruthy();
+  });
+
+  it('QR の再試行は実績を取り直さない（取得は店舗ごとに 1 回）', async () => {
+    const fetchQr = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, code: 'network', message: 'x' })
+      .mockResolvedValue(okPayload());
+    const fetchFunnel = vi.fn().mockResolvedValue(FUNNEL_OK);
+    render(
+      <StoreQrPanel
+        storeId={STORE_ID}
+        storeName={STORE_NAME}
+        onClose={vi.fn()}
+        fetchQr={fetchQr}
+        fetchFunnel={fetchFunnel}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: `${STORE_NAME} の QR の発行を再試行` }));
+    await screen.findByRole('img');
+    expect(fetchQr).toHaveBeenCalledTimes(2);
+    expect(fetchFunnel).toHaveBeenCalledTimes(1);
+  });
+});
+

@@ -20,14 +20,16 @@ const MATERIAL: DraftMaterial = {
 
 function deps(tokens: SessionTokenService, over: Partial<ReviewLinkDeps> = {}) {
   const log = vi.fn();
+  const increment = vi.fn((_storeId: string) => Promise.resolve());
   const all: ReviewLinkDeps = {
     tokens,
     rateLimiter: { check: () => true },
     clientKey: () => 'ip1',
     log,
+    incrementReviewLinkTally: increment,
     ...over,
   };
-  return { deps: all, log };
+  return { deps: all, log, increment };
 }
 
 // sendBeacon は文字列の本文を text/plain で送る。既定をそれに合わせる。
@@ -164,5 +166,95 @@ describe('handleReviewLinkOpened', () => {
     await handleReviewLinkOpened(req({ storeId: STORE, token: tokens.signPage(STORE) }), d);
 
     expect(check).toHaveBeenCalledWith('203.0.113.7');
+  });
+});
+
+// Issue #401・Requirement 5.9: 月次の匿名集計へ加算するのは sessionToken の押下だけ。
+// 集計は QR パネルでオーナー向けの数字になるので、「実際の回答の後の押下」を示せる方だけを使う。
+describe('handleReviewLinkOpened: 押下の集計への加算', () => {
+  it('下書き画面の sessionToken の押下は店舗の集計へ 1 件加算する', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const token = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 1 });
+    const { deps: d, increment } = deps(tokens);
+
+    const res = await handleReviewLinkOpened(req({ storeId: STORE, token }), d);
+
+    expect(res.status).toBe(204);
+    expect(increment).toHaveBeenCalledTimes(1);
+    expect(increment).toHaveBeenCalledWith(STORE);
+  });
+
+  it('回答済み画面の pageToken の押下は記録するが集計へは加算しない', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const { deps: d, log, increment } = deps(tokens);
+
+    const res = await handleReviewLinkOpened(req({ storeId: STORE, token: tokens.signPage(STORE) }), d);
+
+    expect(res.status).toBe(204);
+    expect(log).toHaveBeenCalledWith('info', 'survey_review_link_opened', { storeId: STORE });
+    expect(increment).not.toHaveBeenCalled();
+  });
+
+  it('検証できない押下（他店舗・改ざん・期限切れ・形式不正）とレート制限の超過は加算しない', async () => {
+    let now = 1_000_000;
+    const tokens = createSessionTokenService(KEY, () => now);
+    const forged = createSessionTokenService('attacker-key');
+    const { deps: d, increment } = deps(tokens);
+    const expiring = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+
+    const rejected: unknown[] = [
+      { storeId: STORE, token: tokens.sign({ storeId: OTHER, material: MATERIAL, attempt: 0 }) },
+      { storeId: STORE, token: forged.sign({ storeId: STORE, material: MATERIAL, attempt: 0 }) },
+      { storeId: STORE },
+      'not json',
+    ];
+    for (const body of rejected) {
+      expect((await handleReviewLinkOpened(req(body), d)).status).toBe(400);
+    }
+    now += 30 * 60 * 1000 + 1;
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token: expiring }), d)).status).toBe(400);
+
+    const limited = deps(tokens, { rateLimiter: { check: () => false } });
+    const fresh = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token: fresh }), limited.deps)).status).toBe(429);
+
+    expect(increment).not.toHaveBeenCalled();
+    expect(limited.increment).not.toHaveBeenCalled();
+  });
+
+  it('加算に失敗しても 204 を返し、押下の記録と失敗の記録を残す（Requirement 5.4）', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const token = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+    const { deps: d, log } = deps(tokens, {
+      incrementReviewLinkTally: () => Promise.reject(new Error('connection refused')),
+    });
+
+    const res = await handleReviewLinkOpened(req({ storeId: STORE, token }), d);
+
+    expect(res.status).toBe(204);
+    expect(log.mock.calls).toEqual([
+      ['info', 'survey_review_link_opened', { storeId: STORE }],
+      ['warn', 'review_link_tally_failed'],
+    ]);
+    // 例外の文言（接続先などの内部情報）を記録へ載せない
+    expect(JSON.stringify(log.mock.calls)).not.toContain('connection refused');
+  });
+
+  it('押下の記録は加算より先に出る（加算が失敗しても観測は欠けない）', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const token = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+    let loggedBeforeIncrement = false;
+    const log = vi.fn();
+    const { deps: d } = deps(tokens, {
+      log,
+      incrementReviewLinkTally: () => {
+        loggedBeforeIncrement = log.mock.calls.some((call) => call[1] === 'survey_review_link_opened');
+        return Promise.resolve();
+      },
+    });
+
+    await handleReviewLinkOpened(req({ storeId: STORE, token }), d);
+
+    expect(loggedBeforeIncrement).toBe(true);
   });
 });

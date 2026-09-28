@@ -472,3 +472,51 @@ export async function getStoreQr(
   const query = buildQuery({ size: String(QR_SIZE) });
   return await apiFetchBinary(`/stores/${encodeURIComponent(storeId)}/qr.png${query}`, options);
 }
+
+// --- QR パネルの実績（Issue #401・store-qr-issuance-ui Requirement 8） ---
+
+/** 1 か月分の実績。`month` は JST の暦月（`YYYY-MM`）で、「当月」はサーバが決める。 */
+export interface StoreReviewFunnelMonth {
+  readonly month: string;
+  /** アンケートの回答件数。 */
+  readonly responses: number;
+  /** 回答した客が Google の投稿画面へ進んだ回数（投稿された件数ではない）。 */
+  readonly reviewLinkOpens: number;
+}
+
+// 2xx でありながら本文が期待した形でなかった場合の文言。欠けた件数を 0 件として描かないための失敗扱い。
+const INVALID_FUNNEL_MESSAGE = '実績を読み込めませんでした。時間をおいて再試行してください。';
+
+function isFunnelMonth(value: unknown): value is StoreReviewFunnelMonth {
+  if (typeof value !== 'object' || value === null) return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.month === 'string' &&
+    typeof m.responses === 'number' &&
+    typeof m.reviewLinkOpens === 'number'
+  );
+}
+
+/**
+ * GET /stores/:storeId/review-funnel: 店舗の当月と前月の実績を新しい順に取得する。
+ * 401 unauthenticated / 403 forbidden / 404 not_found / 500 internal は code をそのまま返す。
+ * 利用者向けの文言への写像は呼び出し側（表示層）が持つ。
+ *
+ * 本文の形は確かめる。欠けた値を画面が 0 件として描くと、「数えていない」が「0 件だった」に化ける
+ * （Requirement 8.7 の 0 件の表示は、サーバが 0 と答えた場合に限る）。
+ */
+export async function getStoreReviewFunnel(
+  storeId: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreReviewFunnelMonth[]>> {
+  const result = await apiFetch<{ months?: unknown }>(
+    `/stores/${encodeURIComponent(storeId)}/review-funnel`,
+    options,
+  );
+  if (!result.ok) return result;
+  const months = result.value.months;
+  if (!Array.isArray(months) || !months.every(isFunnelMonth)) {
+    return { ok: false, code: 'invalid_response', message: INVALID_FUNNEL_MESSAGE };
+  }
+  return { ok: true, value: months };
+}

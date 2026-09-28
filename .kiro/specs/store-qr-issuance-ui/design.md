@@ -526,7 +526,7 @@ StoreQrPanel ──(QR 画像: 既存の副作用)──────────
 
 | Method | Endpoint | Request | Response | Errors |
 |---|---|---|---|---|
-| GET | /stores/:storeId/review-funnel | `Authorization: Bearer <Firebase ID トークン>` | `200 { months: [{ month: 'YYYY-MM', responses: number, reviewLinkOpens: number }] }`（当月・前月の 2 件・新しい順・`Cache-Control: private, no-store`） | 401 UNAUTHENTICATED, 403 FORBIDDEN, 404 NOT_FOUND, 500 internal |
+| GET | /stores/:storeId/review-funnel | `Authorization: Bearer <Firebase ID トークン>` | `200 { months: [{ month: 'YYYY-MM', responses: number, reviewLinkOpens: number }] }`（当月・前月の 2 件・新しい順・`Cache-Control: private, no-store`） | 401 unauthenticated, 403 forbidden, 404 not_found, 500 internal（コードは agency-dashboard の小文字の体系。QR の大文字の体系は review-acquisition 由来の既存契約で、揃えない） |
 
 - 評価の順序は QR（`src/qr.ts`）と同じ「認証 → 店舗取得（UUID ガード付き）→ RBAC」。**場所の確定と停止中の判定は置かない。** 実績の読み出しは店舗の利用可否を決めないためである（停止中の店舗の過去の実績を隠す理由が無い）
 - 月の境界は DB 側の `now()` を JST で切る（`readStoreReviewFunnel`・`review-acquisition` design の tallies 節）。画面の側で「今月」を計算しない。端末の時計と TZ に依存させないためである
@@ -536,7 +536,7 @@ StoreQrPanel ──(QR 画像: 既存の副作用)──────────
 
 - Props: `storeId`・`storeName`・`fetchFunnel?`（テストの注入。既定は `getStoreReviewFunnel`）
 - 状態: `loading` / `ready(months)` / `error`。取得は `storeId` を依存にする 1 つの副作用で、アンマウント後の反映を捨てる
-- 描画: `section`（見出し「アンケートの実績」・レベル 3）の中に、月・回答・Google の投稿画面へ進んだ回数の 3 列の表と、8.3 の注記を置く。月の行見出しは「今月（9月）」「先月（8月）」の形で、サーバが返した `month` から作る
+- 描画: `section`（見出し「アンケートの実績」・レベル 3）の中に、月・回答・Google の投稿画面へ進んだ回数の 3 列の表と、8.3 の注記を置く。行を指標・列を月にし、月の列見出しは「今月」「9月」の 2 段で、サーバが返した `month` から作る（1 段の「今月（9月）」は列見出しが折り返さないため幅 320 で行見出しを 1 文字ぶんまで潰した・E2E の R1 で実測）。表は `density="responsive"` にして、狭い幅ではセルの横余白を詰める
 - `StoreQrPanel` は掲示面（`data-print-region`）の**外**、不可の例の前に置き、`section` に `print:hidden` を与える（8.5）。不可の例と同じ二重の守りである
 - 読み上げ: パネルの状態通知（`role="status"`）へは載せない。実績は補助の情報で、発行の状態通知（6.2）と同じ領域で読み上げると主操作の結果を上書きする。失敗の文言も `role="alert"` にしない
 

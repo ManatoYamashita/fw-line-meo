@@ -96,7 +96,10 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
   },
   '店舗一覧の QR パネル': {
     navControls: 6,
-    measuredCells: 18,
+    // 店舗一覧の 18 件に、パネルの中の実績の表（Issue #401）の 8 件を足した数。内訳は列見出し 2
+    // （今月・先月）・行見出し 2（回答・投稿画面へ進んだ回数）・データセル 4。角の見出し「項目」は
+    // 読み上げ専用で描かれないので、空のセルへ数える。
+    measuredCells: 26,
     panelCells: 1,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
