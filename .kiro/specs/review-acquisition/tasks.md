@@ -251,7 +251,7 @@
   - _Requirements: 5.7_
   - _Depends: 8.2, 8.3_
 
-- [ ] 9. 投稿導線の押下を月次の匿名集計へ加算する（Issue #401）
+- [x] 9. 投稿導線の押下を月次の匿名集計へ加算する（Issue #401）
 - [x] 9.1 押下の集計表を足す
   - `0014` で `survey_review_link_tallies`（`store_id × period_month × count` のみ・`created_at` を持たない）を追加し、`db/write-boundary.md`（TS 層）・`db/ERD.md`・`infra/sql/grants.sql`（survey の DML）へ載せる
   - `db/test/assertions/30_compliance.sql` の表と列の allowlist に足し、表ごとの assertions（FK 孤児・自然キーの一意・月初のみ・非負）を置く
@@ -279,10 +279,11 @@
   - Observable: シェルのテスト（連打・再生成の後の押し直しで通知が 1 回・2 回目以降も遷移は止まらない）が緑。印を外す変異で赤くなる
   - _Requirements: 5.8, 5.10_
 
-- [ ] 9.5 本番へ適用する
+- [x] 9.5 本番へ適用する
   - `0014` → `grants.sql` を本番へ当ててからデプロイする（逆順だと加算がすべて失敗する）。当てる前に本番の適用済みの番号を照合する
   - Observable: 検証用の店舗で回答→下書き画面で押下し、`survey_review_link_tallies` の当月の行が 1 増えることを確かめる（本番識別子は先頭 8 文字まで書く）
   - _Requirements: 5.9_
+  - 実施記録: 末尾の「Issue #401 の本番実施記録（2026-09-28・投稿導線の押下の集計）」
   - _Depends: 9.3, 9.4_
 
 ## Implementation Notes
@@ -591,3 +592,41 @@ specification` で失敗する（一時 postgres で再現済み）。本番の 
 - 低評価の不満を文体が和らげていないかの測定（文体は感情の強さを変えない形だけに限ったが、数えてはいない）
 - 検出器が拾わない創作（て形で語られた経緯・日付・固有名詞など）。両方の軸とも測っているのは下限である
 - 本番へ出した後の観測
+
+## Issue #401 の本番実施記録（2026-09-28・投稿導線の押下の集計）
+
+時刻は UTC。適用はマージの前に行った（`0014` の design の Data Models の節の順序）。
+
+### マージの前に行ったこと
+
+| 手順 | 結果 |
+|---|---|
+| 回線の確認 | Cloud SQL の公開 IP の TCP 3307 へ到達した |
+| 接続先の確認 | `cloud-sql-proxy --port 15432` 経由で `SHOW cloudsql.iam_authentication` が `on`（手元の postgres ではない） |
+| 適用済みの照合 | `db/migrations/` の `CREATE TABLE` 全 23 表を `to_regclass` で照合し、0001〜0013 の 22 表は在り、`survey_review_link_tallies` だけが無かった。列を変える migration は、同日 05:14 の `prod-schema-drift`（main の `b90d732` に対して）が緑であることで確かめた |
+| `0014` の適用 | proxy の起動（07:34:39）の後、マージ（07:36:14）の前。`BEGIN` / `CREATE TABLE` / `COMMIT`。直後の行数 0 |
+| `grants.sql` の適用 | `GRANT` 7・`REVOKE` 1・`COMMIT`。新しい表への権限は survey-web と dashboard-api が INSERT・UPDATE・SELECT、日次バッチと店舗詳細は SELECT だけ（`has_table_privilege` で確認） |
+
+### マージ後に観測したこと
+
+1. PR #403 のマージ（07:36:14・`95d6646`）→ main の ts-ci 成功 → deploy-prod（workflow_run）成功
+2. `scripts/check-prod-image-drift.sh` がサービス 5・ジョブ 2 の 7 件すべて `ok@95d6646` と収束を返した（survey-web は `survey-web-00208-2lg`）
+3. 検証用の店舗 `865d1c0e` で、客と同じ経路（`review.firstweb-works.com` の SSR から pageToken → `POST /api/responses` → 返った sessionToken で `POST /api/review-link-opened`）を 1 回通した。応答は 200 と 204
+4. `survey_review_link_tallies` の同店舗の行は 0 行から `2026-09 | 1` になった。同じ月の回答件数（`survey_rating_tallies` の合計）は 7 → 8
+5. 構造化ログは `survey_response_submitted`（07:50:37）→ `survey_review_link_opened`（07:50:38）の 2 本で、どちらも新しいリビジョンから出た。`review_link_tally_failed` と `tally_failed` は 0 件
+6. 対照として、回答済み画面と同じ pageToken の押下を 1 回送った。204 で受理され、件数は 1 のまま増えなかった
+7. dashboard-api の `GET /stores/:storeId/review-funnel` は、認証なしと不正な Bearer のどちらにも 401 `unauthenticated` を返した（ルートの不在の 404 ではない）
+
+### 確認していないこと
+
+- **QR パネルの実描画。** 本番の店舗一覧は、検証用の店舗と並んでお客様の店舗の名前を表示する。実施者の側でその画面を読まない扱いにしたため、ブラウザで開いての確認は運用者に委ねた。表示の形は E2E（fixture）の a11y 監査・印刷の実測・幅 393 / 320 の実測で固定してある
+- 押下の通知を 1 回にする変更（Requirement 5.10）の、本番の端末での挙動。上の実測は API を直接叩いたので、画面の送信済みの印を通っていない。単体テストと E2E が持つ
+
+### 識別子について
+
+本記録に書いた店舗 ID は先頭 8 文字の `865d1c0e` だけである（理由は「Issue #137 段階3 の本番実施記録」の同名の節と同じ）。検証の回答 1 件と押下 1 件は、この店舗の 2026-09 の匿名集計に残る（匿名である以上、切り分けられない）。
+
+### 押下の数え方の境目
+
+Requirement 5.10 は survey-web の新しいリビジョン `survey-web-00208-2lg` の作成（**07:48:56**）から効いている（施策の時刻の決め方は手順書の 1 と同じ）。**これより前と後で、押下件数（ログとログベース指標）を比べない**（`docs/observability/review-acquisition-funnel.md`）。
+
