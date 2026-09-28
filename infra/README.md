@@ -103,6 +103,8 @@ psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   #
 
 - migration は `db/migrations/` に存在する番号を実際に確認してから番号順に適用すること（本書の例を鵜呑みにしない）。`infra/sql/grants.sql` は `daily_summaries`/`summary_deliveries`（0004）を含む全テーブルへの GRANT を前提とするため、0004 未適用のまま grants.sql を実行すると失敗する（task 6.1 レビューで発見）。
 
+- 表・型を追加するだけの migration は、**機能フラグが OFF でも main への統合後に本番へ適用する**（機能の有効化まで待たない）。`infra/sql/grants.sql` は main にある全テーブルへ GRANT し、1 件でも表が欠けると全 GRANT がロールバックするため、適用を見送った migration があると、後続の migration の手順が grants.sql の段で失敗する。実例として、既定 OFF で統合した GBP の `0013`（#356）を未適用のまま残し、`prod-schema-drift` が乖離として検出した（#396 で 2026-09-28 に適用）。既存の表・列・enum を変更する migration は、この規律の対象外として個別に判断する。
+
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。ロール名は `:project` から組み立てるため、**この既定値が GCP プロジェクト ID であること**が前提になる（2026-08-24 まで既定が DB 名の `fwlm` になっており、上のコマンドは `role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックしていた・PR #144 で是正）。
 
 ---
