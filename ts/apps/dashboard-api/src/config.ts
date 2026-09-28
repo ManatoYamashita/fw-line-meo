@@ -3,7 +3,7 @@
 export interface DashboardApiConfig {
   surveyBaseUrl: string;
   // CORS で許可するオリジン（dashboard-web の配信元。design Security Considerations）。
-  // 通常は 1 つ。独自ドメインへの移行期間だけ、新旧 2 つを完全一致で許可する（Issue #146）。
+  // 通常は 1 つ。複数を許可する場合は、明示したオリジンをカンマ区切りで指定する。
   corsOrigin: string | readonly string[];
   // Places API (New) の API キー（PlacesSearchAdapter が使用）。
   placesApiKey: string;

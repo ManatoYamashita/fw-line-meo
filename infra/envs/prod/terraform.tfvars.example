@@ -18,13 +18,13 @@ places_quota_caps = {
 }
 
 # review-acquisition（機能3）の env。gemini_model は既定で足りるため通常は省略可。
-# survey_base_url は survey-web 初回デプロイ後の Cloud Run URL（またはカスタムドメイン）を設定。
+# survey_base_url は survey-web の公開 URL を設定する（現行: review.firstweb-works.com）。
 # gemini_model    = "gemini-3.1-flash-lite"
-# survey_base_url = "https://survey-web-xxxxxxxxxx-an.a.run.app"
+# survey_base_url = "https://review.firstweb-works.com"
 
 # agency-dashboard（代理店ダッシュボード）の env。
-# dashboard_web_origin は dashboard-web の配信元（CORS 許可元）。カンマ区切りで複数可（独自ドメインへの移行期間だけ・infra/README.md §9-2-c）。
-# dashboard_web_origin = "https://dashboard-web-xxxxxxxxxx-an.a.run.app"
+# dashboard_web_origin は dashboard-web の配信元（CORS 許可元）。現行 URL は dashboard.firstweb-works.com。
+# dashboard_web_origin = "https://dashboard.firstweb-works.com"
 
 # competitive-daily-summary（機能1）の env。delivery-job（毎時配信）・store-detail（LIFF詳細閲覧）が要求する。
 # line_channel_id は LINE Developers コンソールの Messaging API チャネル ID。
