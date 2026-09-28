@@ -92,14 +92,23 @@ Cloud SQL は public IP でも authorized_networks 空・IAM 認証必須のた�
 
 ```bash
 # Auth Proxy 起動（別ターミナル・要 roles/cloudsql.client）
-cloud-sql-proxy gen-fw-line-meo:asia-northeast1:fwlm-pg --port 5432
+# 5432 は使わない。手元の postgres が 5432 を掴んでいると proxy の bind 失敗に気づかず、psql がローカル DB へ繋がる
+cloud-sql-proxy gen-fw-line-meo:asia-northeast1:fwlm-pg --port 15432
+
+export PGHOST=127.0.0.1 PGPORT=15432 PGUSER=postgres PGDATABASE=fwlm
+export PGPASSWORD="$(gcloud secrets versions access latest --secret=db-admin-password --project=gen-fw-line-meo)"
+
+# 流す前に接続先が Cloud SQL であることを確かめる（on が返らなければ止める）
+psql -X -At -c "select setting from pg_settings where name = 'cloudsql.iam_authentication'"
 
 # migration を番号順に適用 → その後 GRANT を適用
-psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0001_four_tier_baseline.sql
-psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0002_reference_seed.sql
-psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f db/migrations/0004_competitive_daily_summary.sql
-psql "host=127.0.0.1 dbname=fwlm" -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.sql が :project から組み立てる
+psql -v ON_ERROR_STOP=1 -f db/migrations/0001_four_tier_baseline.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/0002_reference_seed.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/0004_competitive_daily_summary.sql
+psql -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.sql が :project から組み立てる
 ```
+
+- 接続先は `cloudsql.iam_authentication` が `on` であることで確かめる。この設定は Cloud SQL にしか無く、手元の postgres では行が返らない。店舗の件数や店名で判定しない（件数は増えるので古くなり、店名はお客様のデータである）。2026-08-24 の 0006 の適用では、runbook の 5432 のままだと手元の DB へ migration を流しかけた。
 
 - migration は `db/migrations/` に存在する番号を実際に確認してから番号順に適用すること（本書の例を鵜呑みにしない）。`infra/sql/grants.sql` は `daily_summaries`/`summary_deliveries`（0004）を含む全テーブルへの GRANT を前提とするため、0004 未適用のまま grants.sql を実行すると失敗する（task 6.1 レビューで発見）。
 
