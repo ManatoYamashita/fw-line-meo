@@ -52,7 +52,7 @@ variable "gemini_model" {
 variable "survey_base_url" {
   description = <<-EOT
     客向けアンケート Web の公開ベース URL（dashboard-api の SURVEY_BASE_URL env・QR 生成に使用）。
-    survey-web の初回デプロイ後にその Cloud Run URL（またはカスタムドメイン）を設定する。
+    現行の公開 URL は https://review.firstweb-works.com（外部 HTTPS ロードバランサ経由）。
   EOT
   type        = string
   default     = ""
@@ -63,8 +63,8 @@ variable "survey_base_url" {
 variable "dashboard_web_origin" {
   description = <<-EOT
     dashboard-web の配信元オリジン（CORS 許可元・dashboard-api の DASHBOARD_WEB_ORIGIN 用）。
-    通常は 1 つ。独自ドメインへの移行期間だけ、カンマ区切りで新旧 2 つを完全一致で許可する
-    （infra/README.md §9-2-c・Issue #146）。末尾スラッシュやパスを付けると起動時に弾かれる。
+    通常は 1 つ。現在の本番オリジンは https://dashboard.firstweb-works.com。複数を許可する場合はカンマ区切りで指定する
+    （infra/README.md §9-2-c）。末尾スラッシュやパスを付けると起動時に弾かれる。
   EOT
   type        = string
   default     = ""

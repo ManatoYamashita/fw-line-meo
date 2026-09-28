@@ -433,7 +433,7 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 |---|---|---|
 | 独自ドメイン | 自己所有・Search Console で所有権検証済み | **`firstweb-works.com` を取得済み**（お名前.com・2026-09-22 登録。9-2-a） |
 | ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT） |
-| OAuth コールバックのドメイン | リダイレクト URI のドメインも承認済みドメインに含める。`run.app` のままでは入れられない（9-2-b） | 経路は開通済み（`api.firstweb-works.com` → 外部ロードバランサ → line-webhook）。OAuth クライアント・同意画面・Terraform env の切り替えは GBP 設定の一括有効化時に行う（Issue #282） |
+| OAuth コールバックのドメイン | 現行 URI は `api.firstweb-works.com`。承認済みドメインに `firstweb-works.com` を登録する（9-2-b） | 経路は開通済み（`api.firstweb-works.com` → 外部ロードバランサ → line-webhook）。OAuth クライアント・同意画面・Terraform env の切り替えは GBP 設定の一括有効化時に行う（Issue #282） |
 | 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 実装済み（ManatoYamashita/fw-website）・独自ドメインでの公開待ち |
 | プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 同上 |
 | スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 下書き済み（fw-website `docs/google-review.md`） |
@@ -453,7 +453,7 @@ DNS は Cloudflare で持つ（ホームページ・ポリシーは Cloudflare W
 1. お名前.com のネームサーバーを、Cloudflare が zone に割り当てた 2 つへ書き換える
 2. **Project Owner** のアカウントで Search Console に **Domain property** を作り、DNS の TXT レコードで検証する
 3. fw-website を apex に載せ、ホームページとプライバシーポリシーを公開する（同一ドメイン）
-4. OAuth コールバックを `api.firstweb-works.com` へ移す（9-2-b）
+4. GBP を有効にするとき、OAuth コールバックに `api.firstweb-works.com` を使う（9-2-b）
 5. OAuth 同意画面の承認済みドメインへ `firstweb-works.com` を登録し、プライバシーポリシー URL をホームページ側のリンクと一致させる
 
 1〜4 は GBP と無関係に進む。**関門 A の事業ゲートを待つ理由にはならない。**
@@ -465,217 +465,70 @@ DNS は Cloudflare で持つ（ホームページ・ポリシーは Cloudflare W
 
 この節は 2026-08-22 版で後者だけを根拠に「Owner または Editor で足り、検証方式の指定は無い」と書いていた。**それは前者のページを見落とした誤りである**（Issue #146 の 2026-09-15 のコメントで指摘）。前者を満たせば後者も満たすので、Project Owner による Domain property の検証だけを行う。
 
-検証するアカウントは gcloud で使うアカウントと揃える。Cloud Run のドメインマッピング（9-2-b）は、**所有者として確認済みのアカウントでしか作れない**（公式: `You must verify domain ownership the first time you use that domain in the Google Cloud project`）。確かめ方:
+Search Console の所有権確認は OAuth ブランド検証の前提として現在も有効です。一方、Cloud Run のドメインマッピングは 2026-09-27 に廃止し、公開経路を外部 HTTPS ロードバランサへ統一しました。現在の証明書準備状況は Certificate Manager の DNS 認証で確認します（`9-2-d`・`9-2-e`）。
 
-```bash
-gcloud domains list-user-verified   # firstweb-works.com が並べば、今の gcloud アカウントで割り当てを作れる
-```
+2026-09-23 の初回構築時は、Cloud Run ドメインマッピングの作成で gcloud と ADC のアカウントが異なり、`Caller is not authorized to administer the domain` が発生しました。これは移行前の経路に関する記録です。現在のロードバランサ経路を構成するための手順としては使いません。
 
-**Terraform は gcloud のアカウントではなく ADC で呼ぶ。** 2026-09-23 の初回の apply は、gcloud が `manapuraza@…`（確認済み）でも ADC が `gen.gourmet1234@…`（未確認）だったため、`Caller is not authorized to administer the domain api.firstweb-works.com` で落ちた（割り当ては失敗状態のまま state に tainted で残り、次の apply で作り直された）。ADC の主体は次で確かめる:
+#### 9-2-b. OAuth コールバックの現行経路（Issue #282・#368）
 
-```bash
-curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)" | grep email
-```
+`api.firstweb-works.com` は外部 HTTPS ロードバランサから line-webhook へ転送します。宣言は `infra/envs/prod/load-balancer.tf` にあります。Cloud Run ドメインマッピングは 2026-09-27 に削除済みです。
 
-食い違うときは、確認済みアカウントのトークンでその apply だけを行う（権限の付与を増やさない）:
+OAuth コールバック URI は `https://api.firstweb-works.com/gbp/oauth/callback` です。Terraform の `gbp_oauth_redirect_url` が line-webhook の `GBP_OAUTH_REDIRECT_URL` に入り、OAuth クライアントの承認済みリダイレクト URI と完全一致させます。同意画面の承認済みドメインには `firstweb-works.com` を登録します。Google は、OAuth リダイレクト URI のドメインを承認済みドメインに含め、Search Console で所有権を確認するよう求めています（[ブランド検証の公式要件](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)）。
 
-```bash
-GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済みのアカウント>)" \
-  terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback
-```
+GBP は既定 OFF です。`gbp_oauth_client_id` と `gbp_oauth_redirect_url` の両方を設定し、必要な Secret Manager の値も揃えた状態で一括して有効化します。URL だけを先に設定すると、line-webhook の起動時検証に失敗します（Issue #323）。
 
-割り当ての作成・削除だけがドメインの権限を要する。作った後の plan（読み取り）は ADC のままで通る。
+設定時は次の順に進めます。
 
-#### 9-2-b. OAuth コールバックを独自ドメインへ移す（Issue #282）
+1. Issue #146 の GBP API 利用承認と Issue #354 の利用導線を完了する。
+2. Google Auth Platform で GBP 専用の Web アプリ OAuth クライアント（`gbp-oauth-line-webhook`）を作成する。ダッシュボードの Identity Platform 用クライアントとは分け、承認済みリダイレクト URI を `https://api.firstweb-works.com/gbp/oauth/callback` に揃える。
+   - 作成ダイアログのコピーボタンは aria-label に client secret を含む。自動操作でダイアログの DOM を読まない。client ID は詳細画面の URL から取り、secret は「Add secret」→ コピー → `printf '%s' "$(pbpaste)" | gcloud secrets versions add gbp-oauth-client-secret --data-file=- --project=gen-fw-line-meo` → `pbcopy </dev/null` の順で、画面にも端末にも値を出さずに渡す。
+3. Terraform で `gbp-oauth-client-secret` と `gbp-token-cipher-key` の Secret Manager リソースを作成してから、`1` の項目 5 の手順で値を登録する。cipher key は `openssl rand -base64 32` で生成し、秘密値を Terraform state や tfvars に保存しない。
+4. tfvars にクライアント ID と上記 callback URL を設定し、Gemini API キーを含む必要な secret が揃っていることを確かめてから apply する。GBP の全項目が揃うまで line-webhook には配線されない。
+5. `https://api.firstweb-works.com/health` が 200 を返すことを確認する。callback の到達は、OAuth 設定を有効にした後の認可フローで確認する。GBP 既定 OFF の間は callback が 404 でも正常です。
+6. 同じ変更で `infra/external-api-smoke.tsv` の GBP 行を更新し、infra/README.md §8 の手順で実疎通を記録する。
 
-> **現行経路（2026-09-27〜）**: `api.firstweb-works.com` は外部ロードバランサから line-webhook へ転送する（9-2-e・Issue #368）。現在の宣言は `infra/envs/prod/load-balancer.tf` にある。Cloud Run ドメインマッピングを使った旧手順は、下記に経緯として残す。
+#### 9-2-c. ダッシュボードの現行 URL と認証設定（移行完了・Issue #368・#375）
 
-OAuth ブランド検証のページ（developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification・2026-09-15 確認）は `The Authorized domains section also needs to include the redirect URIs or JavaScript origins authorized in your "Web application" OAuth client types.` と定める。**コールバックが `run.app` のままでは、承認済みドメインに入れられず関門 B を通らない。**
+`dashboard.firstweb-works.com` は外部 HTTPS ロードバランサから dashboard-web へ転送します。Cloud Run ドメインマッピングは削除済みで、ホスト名の振り分けは `infra/envs/prod/load-balancer.tf` が宣言します。
 
-コールバック URI は `https://api.firstweb-works.com/gbp/oauth/callback` に統一する。Terraform の `gbp_oauth_redirect_url` が line-webhook の `GBP_OAUTH_REDIRECT_URL` に入り、OAuth クライアント（Web アプリケーション）の承認済みリダイレクト URI にも同じ値を設定する。同意画面の承認済みドメインには `firstweb-works.com` を登録する。Google は OAuth クライアントのリダイレクト URI のドメインを承認済みドメインへ含め、Search Console で所有権を確認するよう求めている（[ブランド検証の公式要件](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)）。
+現在のブラウザー向け設定は次のとおりです。
 
-**本番設定は GBP の全項目を揃えてから一括で切り替える。** line-webhook は GBP の OAuth クライアント ID・シークレット・リダイレクト URL・トークン暗号化鍵に加え、下書き生成に使う Gemini API キーを受け取って GBP を有効にする。URL だけを非空にすると一部設定として起動時に失敗するため、`gbp_oauth_redirect_url` は他の GBP 設定・Secret Manager の値と同じ apply で設定する。Terraform 側は `gbp_oauth_client_id` と `gbp_oauth_redirect_url` が両方非空のときだけ GBP の env（secret 3 つを含む）を配線し、片方だけの設定は変数の validation で plan 時に止める。secret の version を先に投入しておいても、ID と URL が空のあいだは line-webhook に配線されない。未設定時は空文字列で GBP は既定 OFF のままになる（Issue #323）。
-
-現時点で経路だけを確認する場合は `/health` を使う。GBP 既定 OFF の間、`/gbp/oauth/callback` はアプリケーション側で 404 になる。全設定の有効化後に、OAuth クライアントと Terraform env の URI が一字一句一致すること、および callback が line-webhook に届くことを確認する。
-
-当時（2026-09-23）は `api.firstweb-works.com` を Cloud Run ドメインマッピングで line-webhook に割り当て、`infra/envs/prod/custom-domain.tf` に宣言していた。2026-09-27 にドメインマッピングを削除し、現在は外部ロードバランサへ移行済みである（9-2-e）。
-
-**当時ドメインマッピングを選んだ理由と、その代償。** 公式は `Cloud Run domain mappings are in the preview launch stage. Due to latency issues, they are not production-ready` と明記している（当時 asia-northeast1 は対応リージョン）。当時は OAuth コールバック専用として使い、LINE Webhook のような応答時間が効く経路をこのドメインへ載せない方針だった。後に外部ロードバランサへ移行した理由と手順は 9-2-e を参照。
-
-手順（9-2-a の検証が済んでから）:
-
-```bash
-# 1. 割り当てだけを作る（素の apply は承認待ちの module.guardrails を巻き込む・§10「apply の作法」）
-terraform -chdir=infra/envs/prod plan  -target=google_cloud_run_domain_mapping.gbp_oauth_callback
-terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback
-
-# 2. 求められる DNS レコードと状態を読む（サブドメインは CNAME ghs.googlehosted.com.）。
-#    gcloud の domain-mappings は beta コンポーネントを要するので、state から読む。
-terraform -chdir=infra/envs/prod state show google_cloud_run_domain_mapping.gbp_oauth_callback
-```
-
-3. Cloudflare の DNS に `api` の CNAME を `ghs.googlehosted.com` で作る。**プロキシは OFF（DNS only）にする。** ON だと Google が証明書の発行時にドメインへ到達できず、割り当てが `CertificatePending` のまま止まる。
-4. 証明書の発行を待つ（数十分〜）。`terraform apply -refresh-only -target=…` の後に 2 を読み直し、`status` の `Ready` が `True` になれば終わり。
-5. 到達を確かめる。line-webhook の `/health` が run.app と同じ応答を返せば、TLS と割り当ての両方が通っている（`/gbp/oauth/callback` は Phase2 のコードがデプロイされるまで 404 でよい）。
-
-```bash
-curl -s -w ' %{http_code}\n' https://api.firstweb-works.com/health   # {"status":"ok"} 200
-```
-
-6. GBP の OAuth と secret を準備する。OAuth クライアントと Secret Manager の値は先行して準備できる。**line-webhook を GBP 有効状態で apply する前に、Issue #146 の GBP API 利用承認と #354 の利用導線を完了すること。** 現行コードでは4つの `GBP_*` env が全て揃うと機能が有効になる。
-   - Google Auth Platform の OAuth クライアントを Web アプリケーションとして作成する。dashboard ログイン用の `Identity Platform - dashboard-web`（Identity Platform の自動生成）とは別に、GBP 専用のクライアント（本番は `gbp-oauth-line-webhook`）を作る。client ID の先頭はプロジェクト番号なので、前方一致ではクライアントを判別できない
-   - 作成ダイアログのコピーボタンは aria-label に client secret を含む。自動操作でダイアログの DOM を読まない。client ID は詳細画面の URL から取り、secret は「Add secret」→ コピー → `printf '%s' "$(pbpaste)" | gcloud secrets versions add gbp-oauth-client-secret --data-file=- --project=gen-fw-line-meo` → `pbcopy </dev/null` の順で、画面にも端末にも値を出さずに渡す
-   - 承認済みリダイレクト URI は `https://api.firstweb-works.com/gbp/oauth/callback` と完全一致させる
-   - 同意画面の承認済みドメインは `firstweb-works.com`。ホームページ等と同じ登録済み top private domain なので、重複登録はしない
-   - `gbp-oauth-client-secret` と `gbp-token-cipher-key` の枠を Terraform で作成した後、値は §1 項目 5 の手順で Secret Manager へ投入する。OAuth secret はクライアントの値、cipher key は `openssl rand -base64 32` で生成する。値を Terraform state や tfvars に保存しない
-   - tfvars に `gbp_oauth_client_id` と `gbp_oauth_redirect_url` を設定する。Secret Manager に GBP OAuth secret・cipher key・既存の Gemini API key があることを確認してから、GBP の全項目を一括で apply する。URL だけを先に非空にしない。同じ PR で `infra/external-api-smoke.tsv` の `gbp-oauth-client-secret` 行を api 行（PENDING）へ切り替え、apply 後に §8 の実疎通を記録する
-   - apply 後、`https://api.firstweb-works.com/health` が 200 であることを確かめ、アプリ側 callback の到達確認は OAuth 認可を一度実行して callback が成功応答することで行う
-
-#### 9-2-c. ダッシュボードも独自ドメインへ移す（Issue #146）
-
-> **2026-09-27 以降、`dashboard.firstweb-works.com` は外部ロードバランサで配っている（9-2-e・Issue #368）。** 下の表の「Cloud Run の割り当て」（ドメインマッピング）は削除した。それ以外の行（authDomain・`/__/auth/` の中継・承認済みドメイン・OAuth クライアント・CORS）は今も有効である。ログインも同日にポップアップ方式からリダイレクト方式へ移した（Issue #375）。
-
-**同意画面（ブランド）はプロジェクトに 1 つで、ダッシュボードの Google ログインと GBP 連携が共有する**（2026-09-23 実測: 本番環境・外部で公開済み）。ブランド検証は承認済みドメインのすべてについて所有権の確認を求めるので、ダッシュボードが `*.run.app` と `*.firebaseapp.com` に残る限り通らない。そこでダッシュボードも `dashboard.firstweb-works.com` へ移す（別プロジェクトへの分離は採らなかった。GBP API の利用申請はプロジェクト単位のため）。
-
-| 対象 | 変更 | 管理 |
+| 対象 | 現行設定 | 管理 |
 |---|---|---|
-| Cloud Run の割り当て | `dashboard.firstweb-works.com` → dashboard-web | 当時は `custom-domain.tf` のドメインマッピング。**2026-09-27 に外部ロードバランサへ移して削除した**（9-2-e） |
-| Firebase Auth の `authDomain` | `gen-fw-line-meo.firebaseapp.com` → `dashboard.firstweb-works.com` | GitHub 変数 `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`（build-arg） |
-| `/__/auth/` の中継 | dashboard-web が `https://gen-fw-line-meo.firebaseapp.com/__/auth/` へ透過的に rewrite する（Firebase「redirect best practices」の Option 3。302 は不可） | `ts/apps/dashboard-web/next.config.ts` |
-| Identity Platform の承認済みドメイン | `dashboard.firstweb-works.com` を追加 | 手作業（§1 の 4）・`identitytoolkit` admin v2 `config` の `authorizedDomains` |
-| OAuth クライアント「Identity Platform - dashboard-web」 | JavaScript 生成元 `https://dashboard.firstweb-works.com`・リダイレクト URI `https://dashboard.firstweb-works.com/__/auth/handler` を追加 | 手作業（§1 の 4） |
-| dashboard-api の CORS | `dashboard_web_origin` をカンマ区切りで新旧 2 つに（移行期間だけ） | tfvars |
+| 公開 URL | `https://dashboard.firstweb-works.com` | 外部 HTTPS ロードバランサ |
+| Firebase Auth の `authDomain` | `dashboard.firstweb-works.com` | GitHub 変数 `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`（build-arg） |
+| `/__/auth/` の中継 | dashboard-web が `https://gen-fw-line-meo.firebaseapp.com/__/auth/` へ透過的に rewrite | `ts/apps/dashboard-web/next.config.ts` |
+| Identity Platform の承認済みドメイン | `dashboard.firstweb-works.com` | Identity Platform の `authorizedDomains` |
+| OAuth クライアント | 生成元 `https://dashboard.firstweb-works.com`、リダイレクト URI `https://dashboard.firstweb-works.com/__/auth/handler` | Identity Platform 用クライアント |
+| dashboard-api の CORS | `dashboard_web_origin=https://dashboard.firstweb-works.com` | Terraform 変数 |
 
-**順序**: 割り当てと中継と追加（上の 5 行）を済ませてから `authDomain` を切り替える。切り替えた後で、新しい URL でログインできることを人が確かめる。確かめた後で、ブランド検証のために次を外す。
+ログインはリダイレクト方式です（Issue #375）。`authDomain`、承認済みドメイン、OAuth クライアント、CORS を変更するときは、この表の現行 URL に揃えます。
 
-- OAuth クライアントの `firebaseapp.com` と `run.app` の生成元・リダイレクト URI
-- 同意画面の承認済みドメインの `dashboard-web-….run.app` と `gen-fw-line-meo.firebaseapp.com`
-- CORS の旧オリジン
+#### 9-2-d. survey-web の現行 URL と QR の互換性（移行完了・Issue #338・#344）
 
-**外した後は run.app のダッシュボードではログインできない。** 利用者には新しい URL を案内する。
+survey-web の公開 URL は `https://review.firstweb-works.com` です。dashboard-api が新しく発行する QR は、Terraform の `survey_base_url` を基にこの URL を使います。ロードバランサは `infra/envs/prod/load-balancer.tf` で review ホストを survey-web へ転送します。
 
-#### 9-2-d. 客向けアンケート Web を独自ドメインへ移す（Issue #338）
+切り替え前に発行した QR は Cloud Run の `run.app` URL を保持しているため、旧 URL も引き続き開ける必要があります。survey-web の ingress を絞らず、Cloud Run への直接経路を維持してください。`run.app` を新規の公開 URL や QR の生成元に設定しないでください。
 
-**これは関門 B の対象ではない。** survey-web は Google OAuth を使わないので、ブランド検証の承認済みドメインに入れる必要が無い。移す理由は 2 つある。QR を読んだ来店客に `run.app` を見せないこと。そして、**印刷した QR の URL は後から変えられない**ので、QR を大量に配る前にドメインを決めてしまうこと。
+DNS の review・api・dashboard レコードはロードバランサの IP を向け、Cloudflare のプロキシは OFF（DNS only）にします。証明書は Certificate Manager の DNS 認証で発行し、HTTPS プロキシは証明書マップを使います。証明書の現在の宣言と名前は `infra/envs/prod/load-balancer.tf` を参照します。
 
-**ドメインは `review.firstweb-works.com`**（2026-09-26 決定）。宣言は `infra/envs/prod/load-balancer.tf` にある。
+ロードバランサ経由と Cloud Run 直アクセスでは `X-Forwarded-For` の要素数が異なります。過去の QR が直アクセスを続けるため、流量制限の鍵は `ts/apps/survey-web/src/lib/client-key.ts` で信頼済みプロキシの設定を考慮して決めます。Terraform の `SURVEY_TRUSTED_PROXY_IPS` にはロードバランサの IP が入ります。プロキシ経由の流量制限を変える場合は、旧 QR の直アクセスも確認してください。LB 側では要求ログを無効にし、survey-web 側のログとの二重記録を避けています。
 
-**ドメインマッピングではなく外部 HTTPS ロードバランサを使う。** 9-2-b のとおり、ドメインマッピングは応答時間が効く経路に載せない。survey-web は来店客が下書きの生成を待つ画面である。Firebase Hosting の rewrite も比べたが、60 秒の時間上限があり、`X-Forwarded-For` の付き方を一次情報で確かめられなかったので採らなかった（比較は Issue #338）。費用は転送ルール $0.025/時（5 本まで同額）で、月 約 $18。
+#### 9-2-e. api・dashboard のロードバランサ移行記録（完了・Issue #368）
 
-**run.app は閉じない。** 切り替え前に発行した QR は run.app を指している。survey-web の ingress を絞ると、それらが開けなくなる。
+2026-09-27 に `api.firstweb-works.com` と `dashboard.firstweb-works.com` をロードバランサへ移し、Cloud Run ドメインマッピングを削除しました。移行は完了済みです。移行用の DNS 切り替え手順を再実行せず、変更時は `infra/envs/prod/load-balancer.tf` の現行宣言を更新してください。
 
-**流量制限の鍵を先に直す（Issue #344）。** survey-web は `X-Forwarded-For` の先頭を鍵にしていて、客が偽れた（2026-09-26 実測）。ロードバランサを前段に置くと、要素の並びも変わる。**`SURVEY_BASE_URL` を切り替える前に、#344 の修正を入れておくこと。** 本番で実測した並びは次のとおり。
+現行経路は次のとおりです。
 
-| 経路 | アプリに届く `X-Forwarded-For` |
-|---|---|
-| run.app 直 | `<客の送った値…>, <送信元 IP>` |
-| ロードバランサ経由 | `<客の送った値…>, <送信元 IP>, <ロードバランサの IP>` |
+| ホスト名 | Cloud Run バックエンド | 公開経路 |
+|---|---|---|
+| `review.firstweb-works.com` | survey-web | 外部 HTTPS ロードバランサ |
+| `api.firstweb-works.com` | line-webhook | 外部 HTTPS ロードバランサ |
+| `dashboard.firstweb-works.com` | dashboard-web | 外部 HTTPS ロードバランサ |
 
-手順:
+3 ホストは同じ HTTPS プロキシと Certificate Manager の証明書マップを使います。DNS を変更するときは DNS 認証レコードの状態と、Cloudflare が DNS only であることを確認します。TLS は 1.2 以上です。ロードバランサの要求ログは無効で、アプリケーション側だけで要求を記録します。
 
-```bash
-# 1. Compute API とロードバランサ一式を作る（素の apply は承認待ちの module.guardrails を巻き込む・§10「apply の作法」）
-terraform -chdir=infra/envs/prod plan  -target=module.project_services -target=google_compute_global_forwarding_rule.survey_web_https -target=google_compute_global_forwarding_rule.survey_web_http
-terraform -chdir=infra/envs/prod apply -target=module.project_services -target=google_compute_global_forwarding_rule.survey_web_https -target=google_compute_global_forwarding_rule.survey_web_http
-
-# NEG がサービス名を参照するので、-target は module.run_services を巻き込む。plan に出る
-# サービスの変更が `client = "gcloud" -> null` と `client_version` だけなら無害（CI の gcloud が
-# 書く管理情報で、リビジョンは作られない。2026-09-26 の plan で 5 サービスとも実測）。
-# それ以外の差分（env・scaling など）が出たら apply しない。溜まっていた差分まで一緒に当たる。
-
-# 2. DNS に向ける IP を読む
-terraform -chdir=infra/envs/prod output -raw survey_web_lb_ip
-```
-
-3. Cloudflare の DNS に `review` の A レコードを作り、2 の IP へ向ける。**プロキシは OFF（DNS only）にする。** ON だと Google がドメインへ到達できず、証明書が `PROVISIONING` のまま止まる。
-4. 証明書の発行を待つ（数十分〜）。`ACTIVE` になれば終わり。**2026-09-26 に、この証明書は Certificate Manager の DNS 認証へ移した（§9-2-e・Issue #368）。** 下のコマンドは移す前の記録として残す。今の証明書の状態は §9-2-e の段 2 のコマンドで見る。
-
-```bash
-gcloud compute ssl-certificates describe survey-web-cert --global --format='value(managed.status,managed.domainStatus)'
-```
-
-5. 到達を確かめる。ロードバランサ経由でも run.app と同じ応答が返れば、TLS と経路の両方が通っている。http:// は https:// へ 301 で送られる。
-
-```bash
-curl -s -w ' %{http_code}\n' https://review.firstweb-works.com/health
-curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://review.firstweb-works.com/health
-```
-
-6. #344 の修正を入れる。**env を先に、イメージを後に**入れる。
-   - survey-web の env `SURVEY_TRUSTED_PROXY_IPS`（ロードバランサの外部 IP）を tf で先に apply する。古いイメージはこの env を読まないので、入れても何も変わらない
-   - その後に、鍵を後ろ側から取るコード（`ts/apps/survey-web/src/lib/client-key.ts`）をデプロイする
-   - 逆の順だと、ロードバランサ経由の客全員が、ロードバランサの IP という 1 つの鍵を分け合う
-   - 確かめ方: 先頭に毎回違う偽の値を入れて `/api/review-link-opened`（1 分 10 回）へ空のトークンで 14 回送り、両方の経路で 11 回目から 429 になること
-7. tfvars の `survey_base_url` を `https://review.firstweb-works.com` にして apply する（dashboard-api の `SURVEY_BASE_URL`。env は tf 側で入る。deploy はイメージしか変えない）。
-8. 新しく発行した QR が新しいドメインを指すこと、**切り替え前に発行した QR（run.app）が引き続き開けること**を、それぞれ実機で確かめる。
-
-#### 9-2-e. api. と dashboard. をロードバランサへ載せ替える（Issue #368）
-
-9-2-b と 9-2-c で作ったドメインマッピングは Preview で、公式は遅延の問題を理由に本番向けではないとする。9-2-d のロードバランサは既にあり、転送ルールは 5 本まで同額なので、載せ替えても費用は増えない。宣言は `infra/envs/prod/load-balancer.tf` の後半にある。
-
-**止めずに切り替える。** 9-2-d の Google マネージド証明書は、DNS がロードバランサを向いてからしか発行されない。そのまま DNS を切り替えると、証明書ができるまで `dashboard.` に TLS で繋がらない。そこで **Certificate Manager の DNS 認証**で、DNS を向ける前に証明書を発行する。`review.` もこの方式へ揃える（HTTPS プロキシは、証明書の一覧と証明書マップのどちらか一方しか持てない）。
-
-**段 1: 足すだけ（本番への影響は無い）**
-
-```bash
-terraform -chdir=infra/envs/prod plan  -target=module.project_services -target=google_compute_url_map.survey_web -target=google_certificate_manager_certificate_map_entry.lb
-terraform -chdir=infra/envs/prod apply -target=module.project_services -target=google_compute_url_map.survey_web -target=google_certificate_manager_certificate_map_entry.lb
-terraform -chdir=infra/envs/prod output -json lb_dns_authorization_records
-```
-
-- plan の差分は、作成（証明書まわり・NEG・バックエンド）と、URL マップへのホスト名の振り分けの追加だけになる。Cloud Run のサービスに出るのは `client` と `client_version` の null 化だけ（9-2-d と同じ読み方）
-- ホスト名に当たらない要求（`review.` を含む）は、これまでどおり survey-web へ届く
-
-**段 2: DNS 認証の CNAME を Cloudflare に足す**
-
-上の output の 3 件（`review`・`api`・`dashboard`）を、そのまま CNAME として足す。**プロキシは OFF（DNS only）にする。** 3 つの証明書が `ACTIVE` になるのを待つ。
-
-段 1 の直後の認証の試みは、CNAME がまだ無いので `CNAME_MISMATCH` で `FAILED` になる。これは想定どおりで、CNAME を足せば自動で試し直される（2026-09-26 は、足してから約 30 分で 3 つとも `ACTIVE`）。
-
-```bash
-gcloud certificate-manager certificates list --format='table(name,managed.state,managed.domains)'
-```
-
-**段 3: 切り替える**（Issue #368 の PR2）
-
-1. HTTPS プロキシを証明書マップへ切り替え、9-2-d の古い証明書を消す。**apply は 2 回に分ける。** 宣言を消した証明書とプロキシの間には依存が無いので、1 回で当てると、まだプロキシが使っている証明書を先に消そうとして失敗しうる。`review.` が途切れないことを確かめる
-
-   **プロキシの切り替えは、tf の 1 回の apply では当たらない（2026-09-26 に実測）。** プロバイダが、証明書マップを付ける前に証明書の一覧を空にしようとし、API が `Error 412: Certificate Map or at least 1 SSL certificate must be specified` で拒否する（変更は丸ごと弾かれ、本番は変わらない）。実際には、次の順で `gcloud` から当ててから、tf で揃えた。
-
-   ```bash
-   gcloud compute target-https-proxies update survey-web-https --global --certificate-map=firstweb-works-lb   # 古い証明書は付けたまま
-   gcloud compute target-https-proxies update survey-web-https --global --clear-ssl-certificates
-   ```
-
-   - `gcloud` は完了の確認で手元が止まることがある。サーバー側の状態は `gcloud compute operations list --global --filter="targetLink~survey-web-https"` で見る
-   - `gcloud` は `certificate_map` を `https://certificatemanager.googleapis.com/v1/…` の形で書く。tf の宣言は `//certificatemanager.googleapis.com/…` なので、plan に書き方だけの差分が出る。同じマップを指していることを確かめ、tf で当て直して揃える（証明書の一覧はもう空なので、今度は拒否されない）
-   - 配られている証明書は、期限の日時で見分けられる: `echo | openssl s_client -connect <LB の IP>:443 -servername <ホスト名> | openssl x509 -noout -enddate`
-
-```bash
-terraform -chdir=infra/envs/prod apply -target=google_compute_target_https_proxy.survey_web
-terraform -chdir=infra/envs/prod apply -target=google_compute_managed_ssl_certificate.survey_web   # 宣言から消した証明書の削除だけが出る
-```
-
-2. **DNS を変えずに**、ロードバランサ経由の経路を確かめる。`/__/auth/handler` は、Firebase Auth の中継（dashboard-web の rewrite）が生きていることの確認
-
-```bash
-curl -s -w ' %{http_code}\n' --resolve api.firstweb-works.com:443:136.68.86.235 https://api.firstweb-works.com/health
-curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:443:136.68.86.235 https://dashboard.firstweb-works.com/login
-curl -s -o /dev/null -w '%{http_code}\n' --resolve dashboard.firstweb-works.com:443:136.68.86.235 https://dashboard.firstweb-works.com/__/auth/handler
-```
-
-3. Cloudflare の `api` と `dashboard` を、CNAME（`ghs.googlehosted.com`）から A レコード（ロードバランサの IP）へ変える。**プロキシは OFF のまま保つ**（ON にすると Cloudflare が前段に入り、`X-Forwarded-For` の並びが変わって流量制限の鍵がずれる・§9-2-d）
-4. `dashboard.` の Google ログインが通ることを人が確かめる（`/__/auth/` は dashboard-web が中継する）
-5. ドメインマッピング（`custom-domain.tf`）を消す（9-2-d の古い証明書は 1 で消し終えている）。**削除にもドメインの権限が要る**（9-2-a）。ADC が確認済みのアカウントでなければ、確認済みアカウントのトークンで当てる
-
-```bash
-GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token --account=<確認済みのアカウント>)" \
-  terraform -chdir=infra/envs/prod apply -target=google_cloud_run_domain_mapping.gbp_oauth_callback -target=google_cloud_run_domain_mapping.dashboard
-```
-
-6. Cloudflare の `api`・`dashboard` のコメント（「現在はドメインマッピング・移行中」）を、外部 LB の説明へ書き直す
-
-**段 3 は 2026-09-27 に完了した。** DNS を A レコードへ変えた後、ユーザーが実機で `dashboard.` の Google ログインを確かめ（Issue #375 のリダイレクト方式でも再確認）、ドメインマッピング 2 件を消した。
+移行では DNS をロードバランサへ向ける前に DNS 認証で証明書を発行し、api・dashboard の経路を確認してから切り替えました。dashboard の Google ログインはリダイレクト方式でも確認済みです（Issue #375）。移行完了の記録は Issue #368 を参照してください。
 
 ### 9-3. 進捗の追跡
 

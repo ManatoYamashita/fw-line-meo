@@ -146,16 +146,16 @@ describe('loadConfig', () => {
   });
 });
 
-// 独自ドメインへの移行期間だけ、新旧 2 つのオリジンを許可する（Issue #146）。
+// 明示された複数のオリジンを CORS で許可できることを確認する。
 describe('DASHBOARD_WEB_ORIGIN の複数指定', () => {
   it('1 つなら文字列のまま返す（従来どおり）', () => {
     expect(parseCorsOrigins('https://dash.example')).toBe('https://dash.example');
   });
 
   it('カンマ区切りなら前後の空白を除いて配列で返す', () => {
-    expect(parseCorsOrigins('https://new.example, https://old.example')).toEqual([
-      'https://new.example',
-      'https://old.example',
+    expect(parseCorsOrigins('https://dashboard.example, https://preview.example')).toEqual([
+      'https://dashboard.example',
+      'https://preview.example',
     ]);
   });
 
@@ -171,17 +171,17 @@ describe('DASHBOARD_WEB_ORIGIN の複数指定', () => {
   );
 
   it('2 つ指定すると両方に ACAO を返し、それ以外には返さない', async () => {
-    const app = createApp({ ...fakeAppDeps(), corsOrigin: ['https://new.example', 'https://old.example'] });
+    const app = createApp({ ...fakeAppDeps(), corsOrigin: ['https://dashboard.example', 'https://preview.example'] });
     const preflight = (origin: string) =>
       app.request('/me', {
         method: 'OPTIONS',
         headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' },
       });
-    expect((await preflight('https://new.example')).headers.get('Access-Control-Allow-Origin')).toBe(
-      'https://new.example',
+    expect((await preflight('https://dashboard.example')).headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://dashboard.example',
     );
-    expect((await preflight('https://old.example')).headers.get('Access-Control-Allow-Origin')).toBe(
-      'https://old.example',
+    expect((await preflight('https://preview.example')).headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://preview.example',
     );
     expect((await preflight('https://evil.example')).headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
