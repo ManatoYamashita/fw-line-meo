@@ -19,7 +19,6 @@ import {
   expectPanelInsideScrollport,
   partsOutsideScrollport,
   readPanelPlacement,
-  STORE_QR_PANEL,
   USER_EDIT_PANEL,
   type PanelProbe,
 } from './support/panel-placement';
@@ -30,7 +29,7 @@ import {
 //   R1 一覧表のセルが 1〜2 文字ずつ縦に並んでいないこと
 //   R2 帯の案内リンクとログアウトに、捲らずに届くこと
 //   R3 表が見える幅に収まらないとき、まだ捲れる側の端に手がかりが描かれていること
-//   R4 行の直下に開くパネルが、捲り容器の見えている矩形に収まること
+//   R4 利用者編集パネルが、捲り容器の見えている矩形に収まること
 //
 // `expectNoHorizontalScroll`（dashboard-surfaces.spec.ts）は捲り容器の**内側**を免除するので、
 // R1・R3・R4 はどれも緑のまま通る。axe は捲り容器の外へ出た要素を黙って対象から外すので、
@@ -70,11 +69,13 @@ const CUE_MIN_CHANGED_RATIO = 0.2;
 const CUE_ABSENT_MAX_COLUMNS = 2;
 
 interface SurfaceLayout {
+  /** 背面が modal Drawer に覆われ、帯の実操作を調べられない面。 */
+  readonly modalOverlay?: boolean;
   /** 帯の中のリンクと押しボタンの数（帯を描かない面は 0）。 */
   readonly navControls: number;
   /** R1 が測るセルの数（**literal で持つ**。走査が空振りしたときに 0 件で緑にしない）。 */
   readonly measuredCells: number;
-  /** 行の直下のパネルのセルの数（R1 の対象外にした件数。外しすぎの検出用）。 */
+  /** 行内パネルのセル数（R1 の対象外にした件数。外しすぎの検出用）。 */
   readonly panelCells: number;
   /** その幅で**必ず溢れている**捲り容器の名前。実測の部分集合であることを主張する。 */
   readonly mustOverflow: Readonly<Record<Width, readonly string[]>>;
@@ -95,12 +96,13 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   '店舗一覧の QR パネル': {
+    modalOverlay: true,
     navControls: 6,
     // 店舗一覧の 18 件に、パネルの中の実績の表（Issue #401）の 8 件を足した数。内訳は列見出し 2
     // （今月・先月）・行見出し 2（回答・投稿画面へ進んだ回数）・データセル 4。角の見出し「項目」は
-    // 読み上げ専用で描かれないので、空のセルへ数える。
+    // 読み上げ専用で描かれないので、空のセルへ数える。Drawer は Portal 内にあり行内セルは無い。
     measuredCells: 26,
-    panelCells: 1,
+    panelCells: 0,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   代理店管理: {
@@ -175,7 +177,7 @@ for (const surface of DASHBOARD_SURFACES) {
         ).toBe(layout.measuredCells);
         expect(
           report.panelCells,
-          `行の直下のパネルのセルの数が宣言と違う（実測 ${report.panelCells} 件）。R1 の対象から` +
+          `行内パネルのセル数が宣言と違う（実測 ${report.panelCells} 件）。R1 の対象から` +
             '外しすぎている可能性がある',
         ).toBe(layout.panelCells);
 
@@ -191,6 +193,7 @@ for (const surface of DASHBOARD_SURFACES) {
       test(`[R2] ${surface.where}（幅 ${width}）: 帯の操作要素すべてに捲らずに届く`, async ({
         page,
       }) => {
+        test.skip(layout.modalOverlay === true, 'modal Drawer が背面の帯を覆うため');
         const report = await readNavReach(page, width);
         expect(
           report.controls.length,
@@ -241,6 +244,7 @@ for (const surface of DASHBOARD_SURFACES) {
       test(`[R3] ${surface.where}（幅 ${width}）: 溢れた捲り容器の端に捲れる手がかりがある`, async ({
         page,
       }, testInfo) => {
+        test.skip(layout.modalOverlay === true, 'modal Drawer が背面の捲り手がかりを覆うため');
         const containers = await markPannableContainers(page);
         const overflowing = containers.filter((container) => container.overflowing);
         for (const name of layout.mustOverflow[width]) {
@@ -369,13 +373,13 @@ for (const surface of DASHBOARD_SURFACES) {
   }
 }
 
-// --- R4: 行の直下に開くパネル -----------------------------------------------------------
+// --- R4: 一覧内の編集パネル -------------------------------------------------------------
 //
+// QR は Issue #400 で右側 modal Drawer へ移ったため、捲り容器内に収まる測定の対象から外す。
 // 利用者の編集パネル（幅 393）は dashboard-surfaces.spec.ts が既に測っている（tasks 3.5）。
-// ここは Issue #283 で新しくこの経路を持った QR パネルと、まだ測っていない幅 320 を足す。
+// ここではまだ測っていない幅 320 を追加する。
 
 const PANEL_CASES: readonly { readonly probe: PanelProbe; readonly widths: readonly Width[] }[] = [
-  { probe: STORE_QR_PANEL, widths: [393, 320] },
   { probe: USER_EDIT_PANEL, widths: [320] },
 ];
 

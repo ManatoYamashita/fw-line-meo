@@ -37,6 +37,8 @@ export interface StoreQrPanelProps {
   readonly storeName: string;
   /** 閉じる操作。開閉状態は呼び出し側（店舗一覧）が所有する。 */
   readonly onClose: () => void;
+  /** 親 Dialog が題名と閉じる操作を表示する場合は false にする。 */
+  readonly showHeader?: boolean;
   /** 取得手続きの注入（既定は getStoreQr）。テストでネットワークを発火させないために持つ。 */
   readonly fetchQr?: (storeId: string) => Promise<ApiResult<BinaryPayload>>;
   /** 実績の取得手続きの注入（既定は getStoreReviewFunnel・Issue #401）。同じ理由で持つ。 */
@@ -45,7 +47,7 @@ export interface StoreQrPanelProps {
 
 type QrState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly imageUrl: string }
+  | { readonly kind: 'ready'; readonly imageUrl: string; readonly surveyUrl: string }
   // サーバの message は保持しない。保持すると「描画してはならない値」を手の届く場所へ置くことに
   // なり、Requirement 4.1 の違反が「たまたま起きていないだけ」の状態になる。code だけを持つ。
   | { readonly kind: 'error'; readonly code: string };
@@ -98,6 +100,13 @@ const ERROR_TEXT_BY_CODE = new Map<string, QrErrorText>([
       description: 'この店舗は停止中です。QR を発行するには、店舗一覧から利用を再開してください。',
     },
   ],
+  [
+    'invalid_qr_metadata',
+    {
+      title: 'QR の遷移先を確認できませんでした',
+      description: '時間をおいて再試行してください。',
+    },
+  ],
 ]);
 
 // 通信障害・内部障害・空応答・未知の code。成功したかのような表示は行わない。
@@ -110,7 +119,14 @@ function errorTextFor(code: string): QrErrorText {
   return ERROR_TEXT_BY_CODE.get(code) ?? GENERIC_ERROR_TEXT;
 }
 
-export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel }: StoreQrPanelProps) {
+export function StoreQrPanel({
+  storeId,
+  storeName,
+  onClose,
+  showHeader = true,
+  fetchQr,
+  fetchFunnel,
+}: StoreQrPanelProps) {
   const [state, setState] = useState<QrState>({ kind: 'loading' });
   // 再試行の回数。副作用の依存に含めることで、再試行を「取得をやり直す」という
   // 一つの意味に閉じる（取得・生成・解放が常に同じ経路を通る）。
@@ -136,7 +152,7 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel
       }
       const blob = new Blob([result.value.bytes], { type: result.value.contentType });
       createdUrl = URL.createObjectURL(blob);
-      setState({ kind: 'ready', imageUrl: createdUrl });
+      setState({ kind: 'ready', imageUrl: createdUrl, surveyUrl: result.value.surveyUrl });
       notifyActionSuccess({ title: `${storeName} の QR を発行しました。` });
     }).catch(() => {
       // 取得そのものは api client が try/catch するため通常は到達しない。到達するのは
@@ -179,16 +195,40 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel
     state.kind === 'loading'
       ? `${storeName} の QR を生成しています`
       : state.kind === 'ready'
-        ? `${storeName} の QR を表示しました`
+        ? `${storeName} の QR とアンケート URL を表示しました`
         : '';
+
+  async function copySurveyUrl(url: string) {
+    try {
+      if (navigator.clipboard?.writeText === undefined) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(url);
+      notifyActionSuccess({ title: `${storeName} のアンケート URL をコピーしました。` });
+    } catch {
+      notifyActionError({
+        title: 'アンケート URL をコピーできませんでした',
+        description: '表示された URL を選択してコピーしてください。',
+      });
+    }
+  }
 
   return (
     <Card size="sm">
-      <CardHeader>
-        <Heading level={2} size="base">
-          {storeName} の QR
-        </Heading>
-      </CardHeader>
+      {showHeader ? (
+        <CardHeader className="flex-row items-center justify-between gap-3">
+          <Heading level={2} size="base">
+            {storeName} の QR
+          </Heading>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="print:hidden"
+            onClick={onClose}
+            aria-label={`${storeName} の QR を閉じる`}
+          >
+            閉じる
+          </Button>
+        </CardHeader>
+      ) : null}
       <CardContent className="flex flex-col gap-3">
         {/* Spinner 自身も role="status" を持つため、読み上げはこの行に一本化する。
          * 図形は装飾として扱い aria-hidden で支援技術から外す。 */}
@@ -229,6 +269,27 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel
         <StoreReviewFunnel storeId={storeId} storeName={storeName} fetchFunnel={fetchFunnel} />
 
         {state.kind === 'ready' ? (
+          <section className="flex flex-col gap-2 print:hidden" aria-label="アンケート URL">
+            <Heading level={3} size="sm">
+              アンケート URL
+            </Heading>
+            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start">
+              <p className="min-w-0 flex-1 select-all break-all rounded-md border border-input bg-muted/40 px-3 py-2 text-sm">
+                <code>{state.surveyUrl}</code>
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copySurveyUrl(state.surveyUrl)}
+                aria-label={`${storeName} のアンケート URL をコピー`}
+              >
+                URL をコピー
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
+        {state.kind === 'ready' ? (
           // 不可の例。**画面にだけ出し、掲示物には刷らない。**
           // 紙に「星5でお願いします」と印刷されたら、この機能が防ごうとした違反そのものを
           // 製品が配ることになる。
@@ -260,7 +321,7 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel
           </Alert>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
           {state.kind === 'ready' ? (
             // 保存は実際のリンク要素として描画する。プログラムによる click 合成は行わない。
             // 表示と保存へ同一の object URL を束ねるため、保存時に再取得は発生しない。
@@ -332,14 +393,6 @@ export function StoreQrPanel({ storeId, storeName, onClose, fetchQr, fetchFunnel
               再試行
             </Button>
           ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            aria-label={`${storeName} の QR を閉じる`}
-          >
-            閉じる
-          </Button>
         </div>
       </CardContent>
     </Card>

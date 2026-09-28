@@ -28,13 +28,14 @@ import { StoreQrPanel } from '../src/components/store-qr-panel';
 const STORE_ID = '11111111-2222-3333-4444-555555555555';
 const STORE_NAME = '炭火焼肉 やました';
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+const SURVEY_URL = `https://survey.example/s/${STORE_ID}`;
 
 // jsdom には object URL を作る手段が無いため差し込む（実装側に抽象は作らない）。
 const createObjectURL = vi.fn(() => 'blob:mock-url');
 const revokeObjectURL = vi.fn();
 
 function okPayload(): ApiResult<BinaryPayload> {
-  return { ok: true, value: { bytes: PNG_BYTES, contentType: 'image/png' } };
+  return { ok: true, value: { bytes: PNG_BYTES, contentType: 'image/png', surveyUrl: SURVEY_URL } };
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -74,6 +75,31 @@ describe('StoreQrPanel: 取得・表示・保存', () => {
     expect(link.getAttribute('download')).toContain(STORE_NAME);
     expect(link.getAttribute('download')?.endsWith('.png')).toBe(true);
     expect(link.getAttribute('href')).toBe('blob:mock-url');
+    expect(screen.getByText(SURVEY_URL)).toBeTruthy();
+    expect(screen.getByRole('button', { name: `${STORE_NAME} のアンケート URL をコピー` })).toBeTruthy();
+  });
+
+  it('API が返した URL と同じ文字列をコピーし、選択可能な形でも表示する', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    render(
+      <StoreQrPanel
+        storeId={STORE_ID}
+        storeName={STORE_NAME}
+        onClose={vi.fn()}
+        fetchQr={vi.fn().mockResolvedValue(okPayload())}
+      />,
+    );
+
+    const urlRegion = await screen.findByRole('region', { name: 'アンケート URL' });
+    const url = urlRegion.querySelector('p');
+    expect(url?.textContent?.trim()).toBe(SURVEY_URL);
+    expect(url?.className).toContain('select-all');
+    fireEvent.click(screen.getByRole('button', { name: `${STORE_NAME} のアンケート URL をコピー` }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(SURVEY_URL));
   });
 
   it('保存は実際のリンク要素として描画する（6.1）', async () => {
@@ -697,7 +723,7 @@ describe('StoreQrPanel: アンケートの実績（Requirement 8）', () => {
     printRegion();
     // 実績の失敗を QR の失敗として描かない
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('status').textContent).toBe(`${STORE_NAME} の QR を表示しました`);
+    expect(screen.getByRole('status').textContent).toBe(`${STORE_NAME} の QR とアンケート URL を表示しました`);
   });
 
   it('QR の発行に失敗しても、実績は取得して表示する（QR の状態に依らない）', async () => {
@@ -738,4 +764,3 @@ describe('StoreQrPanel: アンケートの実績（Requirement 8）', () => {
     expect(fetchFunnel).toHaveBeenCalledTimes(1);
   });
 });
-

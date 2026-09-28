@@ -2,45 +2,50 @@
 
 ## Overview
 
-**Purpose**: 本機能は、運営・代理店に対し、店舗一覧から店舗ごとのアンケート QR を発行し、画面で確認したうえで印刷用の画像として保存する導線を提供する。QR 画像の生成・権限判定・場所の確定判定は `review-acquisition` が実装済みであり、本 spec はそれを利用者が実際に取得できる状態にするまでを担う。
+**Purpose**: 本機能は、運営・代理店に対し、店舗一覧から店舗ごとのアンケート QR を発行し、右側ドロワーで QR・遷移先 URL・注意事項を確認したうえで保存・印刷できる導線を提供する。QR 画像の生成・権限判定・場所の確定判定は `review-acquisition` が担い、本 spec は利用者がそれを取得・確認できる状態にする。
 
 **Users**: 代理店ロールの利用者は担当店舗の QR を、運営ロールの利用者は全店舗の QR を、いずれも `stores` 画面から発行して店頭設置用に印刷する。
 
-**Impact**: `dashboard-web` の店舗一覧に発行列と行内パネルを追加し、`lib/api.ts` に binary 応答の窓口を新設する。`dashboard-api`・データベース・インフラ構成・環境変数はいずれも変更しない。
+**Impact**: 既存の `dashboard-web` 行内パネルを右側ドロワーへ移し、QR の URL 表示・コピーを加える。QR と同一の正規 URL をフロントへ渡すため `dashboard-api` の QR 応答にメタデータヘッダを追加し、許可済み dashboard origin へそのヘッダを CORS で公開する。DB・インフラ構成・環境変数は変更しない。
 
 ### Goals
 
 - `review-acquisition` Requirement 1 の未充足部分（UI 側）を閉じ、QR が実際に取得できる状態にする
 - 取得したバイト列を 1 回だけ転送し、確認と保存の双方へ使い回す
+- QR の生成に使った正規 URL を右側ドロワーへ表示し、利用者がコピーできるようにする
+- 発行操作直後から右端にドロワーを開き、発行中・成功・失敗をそこで完結させる
+- 既存の規約準拠掲示面と画面用注意事項の印刷境界を保つ
 - 店舗の場所が未確定である場合に、理由と次の行動を一覧上で読み取れるようにする
 - 追加する UI をキーボードと支援技術で操作可能にし、既存の視認性基準を割らない
+- 狭い画面でも内容と操作を利用でき、動きの軽減設定を尊重する
 
 ### Non-Goals
 
-- `dashboard-api` の QR エンドポイントの契約変更（`review-acquisition` の所有）
-- Issue #45 の残る意匠整備（ナビゲーション・店舗登録フォーム・ログイン画面・全画面への一斉適用・レスポンシブ対応）
+- QR 画像の生成規則、符号化される URL、RBAC、場所の確定判定の変更（`review-acquisition` の所有）。QR 応答に同じ生成 URL を返すメタデータヘッダを追加することは本 spec の範囲
+- Issue #45 の残る意匠整備（ナビゲーション・店舗登録フォーム・ログイン画面・全画面への一斉適用）。レスポンシブ対応は本ドロワーの利用に必要な範囲に限る
 - 複数店舗の一括発行、印刷面付け、発行履歴・失効・再発行の管理
-- `@fwlm/ui` への overlay 部品（Dialog / Popover / Tooltip）のベンダリング
 - オーナーが LINE 側から QR を取得する導線
 
 ## Boundary Commitments
 
 ### This Spec Owns
 
-- `ts/apps/dashboard-web/src/lib/api.ts` の binary 取得窓口（`apiFetchBinary` と `getStoreQr`）
-- `ts/apps/dashboard-web/src/lib/qr-filename.ts`（新規）— 保存ファイル名の決定規則
-- `ts/apps/dashboard-web/src/components/store-qr-panel.tsx`（新規）— QR の表示・保存・失敗提示と、表示資源の生存期間
-- `ts/apps/dashboard-web/src/app/stores/page.tsx` の発行列・未確定行の理由表示・パネルの開閉状態
-- `ts/apps/dashboard-web/src/lib/qr-poster-text.ts`（新規・Requirement 7）— 掲示文言・禁止語・不可の例
+- `ts/apps/dashboard-web/src/lib/api.ts` の既存 binary 取得窓口（`apiFetchBinary` と `getStoreQr`）への正規 URL メタデータ対応
+- `ts/apps/dashboard-web/src/lib/qr-filename.ts` — 既存の保存ファイル名決定規則
+- `ts/apps/dashboard-web/src/components/store-qr-panel.tsx` — 既存 QR 表示・保存・失敗提示・掲示面の右側ドロワー化と URL コピー
+- `ts/apps/dashboard-web/src/app/stores/page.tsx` — 既存発行列・未確定理由・開閉状態を DialogTrigger / portal 構成へ変更
+- `ts/apps/dashboard-web/src/lib/qr-poster-text.ts` — 既存掲示文言・禁止語・不可の例。値の所有を維持
 - `ts/apps/dashboard-web/src/app/globals.css` の `@media print`（Requirement 7.3）— 印刷対象の限定。
   **この規則は `app/layout.tsx` 経由で全ルートへ効く**ため、掲示面を持たない面の印刷を壊さない
   ように `body:has([data-print-region])` で入口を閉じる責任も本 spec が負う
 - 上記に対応する `ts/apps/dashboard-web/test/` のテストと、`ts/apps/dashboard-web/e2e/` のうち
   QR パネルの面定義（`fixtures/api.ts`）と印刷・横スクロールの実測（`dashboard-surfaces.spec.ts`）
+- `ts/packages/ui/src/components/dialog.tsx` — Base UI Dialog を用いた再利用可能な modal dialog 部品。ドロワーの focus trap・Escape・背景操作・focus restore を担う
+- `ts/apps/dashboard-api/src/qr.ts` / `src/app.ts` — PNG と同じ URL を `X-Survey-URL` 応答ヘッダへ載せ、CORS の `exposeHeaders` に当該ヘッダだけを加える
 
 ### Out of Boundary
 
-- QR 画像の生成規則、符号化される URL、RBAC、場所の確定判定 — `review-acquisition` の所有（`ts/apps/dashboard-api/src/qr.ts`）。本 spec は read するのみで変更しない
+- QR 画像の生成規則、URL の値、RBAC、場所の確定判定 — `review-acquisition` の所有。本 spec は既存の生成値を応答メタデータとして渡すだけで、値の決定や判定規則は変更しない
 - サーバが 403 と 404 で異なる文言を返す点 — 同上。本 UI は両者を同一文言で提示するが、サーバ側の区別の是非は本 spec で扱わない
 - 認証・ロール判定・店舗一覧のスコープ — `agency-dashboard` の所有（`AuthProvider` / `GET /stores`）
 - 意味論トークンと部品の配色 — `ui-design-foundation` の所有。本 spec は既存トークンを使うのみで新しい色を定義しない
@@ -48,17 +53,17 @@
 
 ### Allowed Dependencies
 
-- `@fwlm/ui/components/{card,button,alert,badge,spinner}` — 既存部品の利用のみ。追加・改変はしない
+- `@fwlm/ui/components/{card,button,alert,badge,spinner,dialog}` — 既存部品と、本 spec で追加する Base UI Dialog wrapper を利用する
 - `ts/apps/dashboard-web/src/lib/{api,auth-context,types}.ts` — 既存の窓口と型の利用
-- `GET /stores/:storeId/qr.png` — 既存契約のまま利用（`?size=` のみ指定）
+- `GET /stores/:storeId/qr.png` — PNG と既存エラー契約を維持し、成功応答に `X-Survey-URL` を追加する。許可された dashboard origin に限り CORS で読み取り可能にする
 - ブラウザ標準の `Blob` / `URL.createObjectURL` / `URL.revokeObjectURL` / `download` 属性 / `window.print()` / CSS の `@media print` と `:has()` — 外部ライブラリを追加しない（PDF も自前で組み立てない）
 
 ### Revalidation Triggers
 
 - QR エンドポイントの応答形式・ステータス・エラー `code` が変わったとき（特に 409 `PLACE_NOT_CONFIRMED`）
 - `StoreListItem` から `placeStatus` または `name` が失われたとき
-- `dashboard-api` の CORS に `exposeHeaders` が追加され、応答ヘッダが読めるようになったとき（ファイル名の決定主体を再検討できる）
-- `@fwlm/ui` に overlay 部品が追加され、行内表示から移行する判断が可能になったとき
+- QR エンドポイントまたは CORS の応答ヘッダ契約が変更されたとき（URL表示の正確性と許可範囲を再確認する）
+- `@base-ui/react` の Dialog 契約が更新されたとき（focus trap・背景操作・遷移属性を再確認する）
 
 ## Architecture
 
@@ -68,7 +73,7 @@
 
 Tailwind と `@fwlm/ui` の配線は既に完了している（`globals.css` の 3 点セットと `layout.tsx` のトークン適用）。`ts/packages/ui/test/app-integration.test.ts` が 3 面すべてについて配線と生成を機械検証しているため、本 spec が基盤へ触れる必要はない。
 
-**技術的負債として引き受けるもの**: `dashboard-api` の CORS は `exposeHeaders` を持たないため、サーバが付ける `Content-Disposition` はブラウザから読めない。ファイル名の決定はクライアント側の責務になる。これは本 spec で解消せず、制約として受け入れる。
+**技術的負債として引き受けるもの**: `Content-Disposition` は既存どおり CORS から公開しないため、ファイル名の決定はクライアント側の責務に残す。一方、QR と同一の遷移先を画面へ渡す `X-Survey-URL` だけを許可済み dashboard origin に公開する。
 
 ### Architecture Pattern & Boundary Map
 
@@ -76,15 +81,18 @@ Tailwind と `@fwlm/ui` の配線は既に完了している（`globals.css` の
 graph TB
     subgraph dashboard_web
         StoresPage[StoresPage 一覧と開閉状態]
+        Dialog[UI Dialog focus trap / portal]
         QrPanel[StoreQrPanel 表示と資源]
         QrFilename[qr-filename 命名規則]
         ApiClient[api client]
         AuthCtx[AuthProvider]
     end
     subgraph dashboard_api
-        QrEndpoint[GET stores qr png]
+        QrEndpoint[GET stores qr png + X-Survey-URL]
     end
     StoresPage --> QrPanel
+    StoresPage --> Dialog
+    Dialog --> QrPanel
     QrPanel --> ApiClient
     QrPanel --> QrFilename
     StoresPage --> AuthCtx
@@ -93,9 +101,9 @@ graph TB
 
 **Architecture Integration**:
 
-- 選択パターン: 既存の「画面 → 部品 → 通信窓口」の 3 層をそのまま延長する。新しい層も新しい状態管理機構も導入しない
+- 選択パターン: 既存の「画面 → 部品 → 通信窓口」の 3 層を延長し、共通 UI に Base UI Dialog の薄い wrapper を追加する。新しい状態管理機構は導入しない
 - 依存方向: `page` → `component` → `lib`。逆向きの import を禁止する。`qr-filename` は DOM にもネットワークにも依存しない純粋モジュールとし、依存グラフの末端に置く
-- 責務の分離: **取得とエラー解釈は `api.ts`**、**命名規則は `qr-filename.ts`**、**表示と資源の生存期間は `store-qr-panel.tsx`**、**どの店舗のパネルを開くかは `page.tsx`**。同じ関心を 2 箇所が持たない
+- 責務の分離: **取得・URLヘッダの解釈は `api.ts`**、**QR と URL の生成元は `dashboard-api/src/qr.ts`**、**命名規則は `qr-filename.ts`**、**画像・表示文言・コピー操作と資源の生存期間は `store-qr-panel.tsx`**、**選択中の店舗と Dialog の開閉は `page.tsx`**、**modal の focus trap・portal・dismissal は `@fwlm/ui` の `dialog.tsx`**。同じ関心を二箇所が持たない
 - 既存パターンの保持: `ApiResult<T>` の判別共用体、`// @vitest-environment jsdom` の個別指定、`aria-label` による操作名の付与
 - steering 準拠: 外部ライブラリを追加しない。`any` を使わない。全文言を日本語にする
 
@@ -104,11 +112,11 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |---|---|---|---|
 | Frontend | Next.js 16 / React 19 | 既存アプリ。App Router・クライアント境界は現状のまま | 変更なし |
-| Frontend | `@fwlm/ui`（workspace） | Card / Button / Alert / Badge / Spinner | 新規ベンダリングなし |
+| Frontend | `@fwlm/ui`（workspace） | Button / Alert / Spinner / Dialog | Base UI Dialog primitive を既存依存経由で薄く包む。依存追加なし |
 | Frontend | ブラウザ標準 Blob API | 取得したバイト列の保持と保存 | 外部ライブラリを採らない |
-| Backend | 変更なし | `GET /stores/:storeId/qr.png` を既存契約のまま利用 | `review-acquisition` の所有 |
+| Backend | dashboard-api（Hono） | QR PNG と同じ生成 URL を `X-Survey-URL` 応答ヘッダへ載せる | QR の内容決定規則は変更しない |
 | Data | 変更なし | DB スキーマ・マイグレーションともに影響なし | — |
-| Infrastructure | 変更なし | 新しい `NEXT_PUBLIC_*` は不要（`NEXT_PUBLIC_API_BASE_URL` で足りる） | Dockerfile 変更なし |
+| Infrastructure | 変更なし | 新しい `NEXT_PUBLIC_*` は不要（URL は dashboard-api が返す） | Dockerfile 変更なし |
 
 ## File Structure Plan
 
@@ -117,10 +125,10 @@ graph TB
 ```
 ts/apps/dashboard-web/
 ├── src/
-│   ├── app/stores/page.tsx          # 変更: 発行列・未確定行の理由・パネル開閉状態
-│   ├── app/globals.css              # 変更: @media print（掲示面のみを紙に残す・Req 7.3）
+│   ├── app/stores/page.tsx          # 変更: DialogTrigger・選択中の店舗・portal 内パネル
+│   ├── app/globals.css              # 変更: @media print（掲示面のみを紙に残す・Req 7.3 / 9.8）
 │   ├── components/
-│   │   └── store-qr-panel.tsx       # 新規: 表示・保存・失敗提示・object URL の生存期間・掲示面
+│   │   └── store-qr-panel.tsx       # 変更: 既存 UI のドロワー化・URLコピー・状態・object URL 生存期間
 │   └── lib/
 │       ├── api.ts                   # 変更: apiFetchBinary / getStoreQr を追加
 │       ├── qr-filename.ts           # 新規: 保存ファイル名の決定規則（純粋関数）
@@ -129,18 +137,30 @@ ts/apps/dashboard-web/
 │   ├── fixtures/api.ts              # 変更: QR の PNG 応答と QR パネルの面定義
 │   └── dashboard-surfaces.spec.ts   # 変更: 印刷メディアの実測と QR パネルの横スクロール
 └── test/
-    ├── qr-api.test.ts               # 新規: binary 窓口とエラー封筒の解釈（node 環境）
-    ├── qr-filename.test.ts          # 新規: 命名規則（node 環境）
-    ├── qr-poster-text.test.ts       # 新規: 掲示文言と検出器の両方向照合（node 環境）
-    ├── store-qr-panel.test.tsx      # 新規: 表示・保存・失敗・資源解放・掲示面（jsdom）
-    └── stores-page.test.tsx         # 変更: 発行列・未確定行・パネル開閉の検証を追加
+    ├── qr-api.test.ts               # 変更: URL header の読取と欠落・不正値
+    ├── qr-filename.test.ts           # 既存: 命名規則（変更なし）
+    ├── qr-poster-text.test.ts        # 既存: 文言と検出器の両方向照合（変更なし）
+    ├── store-qr-panel.test.tsx       # 変更: ドロワー・URL表示/コピー・印刷境界
+    └── stores-page.test.tsx          # 変更: Dialog open/close・focus restore
+
+ts/packages/ui/
+├── src/components/dialog.tsx        # 新規: Base UI Dialog の portal / backdrop / popup / title / trigger
+└── test/dialog.test.tsx              # 新規: modal の role・close・focus 契約
+
+ts/apps/dashboard-api/
+├── src/qr.ts                         # 変更: QR 生成と同一値の X-Survey-URL 応答ヘッダ
+├── src/app.ts                        # 変更: X-Survey-URL を CORS exposeHeaders へ追加
+└── test/qr.test.ts / test/app.test.ts # 変更: ヘッダ値と CORS 公開範囲
 ```
 
 ### Modified Files
 
-- `src/lib/api.ts` — `BinaryPayload` 型、`apiFetchBinary`、`getStoreQr` を追加する。既存の `defaultGetToken` と `parseErrorEnvelope` を再利用し、既存メソッドの挙動は変えない
-- `src/app/stores/page.tsx` — テーブルに QR 列を追加し、確定済み行には発行操作を、未確定行には理由を置く。開いている店舗 ID を状態として持ち、対象行の直下にパネル行を挿入する
-- `test/stores-page.test.tsx` — 既存 4 列の検証を保ったまま、新しい列と分岐の検証を追加する
+- `src/lib/api.ts` — `BinaryPayload` に `surveyUrl` を加え、成功ヘッダを読む。既存の `defaultGetToken` と `parseErrorEnvelope` を再利用する
+- `src/app/stores/page.tsx` — QR 列と未確定理由は維持し、行内の detail row を除いて、一覧の外側に単一の modal Dialog と選択店舗の `StoreQrPanel` を置く。各行の発行ボタンは DialogTrigger として焦点復帰元にもする
+- `src/components/store-qr-panel.tsx` — `surveyUrl` の表示・コピーを加え、既存の保存・掲示面・印刷・失敗と再試行をドロワー内で維持する
+- `src/app/globals.css` — portal/backdrop が印刷対象に残らず、既存どおり `data-print-region` だけが印刷されることを維持する
+- `ts/packages/ui/src/components/dialog.tsx` — `@base-ui/react/dialog` を既存 `@fwlm/ui` 依存内で包み、Trigger / Portal / Backdrop / Popup / Title / Description を公開する
+- `ts/apps/dashboard-api/src/qr.ts` / `src/app.ts` — QR と同じ URL を返すヘッダと、その明示的な CORS 公開を追加する。環境変数や DB は変更しない
 
 ## System Flows
 
@@ -154,14 +174,16 @@ sequenceDiagram
     participant A as api client
     participant S as dashboard-api
     U->>P: 発行操作を実行
-    P->>Q: 対象店舗でマウント
+    P->>Q: 選択店舗を設定して Dialog を開く
+    P->>Q: ドロワーを右から表示（loading）
     Q->>A: getStoreQr storeId
     A->>S: GET qr.png with Bearer and size
-    S-->>A: 画像バイト列 または エラー封筒
-    A-->>Q: ApiResult
+    S-->>A: 画像バイト列 + X-Survey-URL または エラー封筒
+    A-->>Q: ApiResult<BinaryPayload{bytes, contentType, surveyUrl}>
     Q->>Q: Blob と object URL を生成
-    Q-->>U: プレビューと保存リンクを提示
-    U->>Q: 閉じる または 別店舗を発行
+    Q-->>U: QR・URL・案内・注意事項・保存/印刷操作を提示
+    U->>Q: URLコピー または 閉じる
+    Q->>P: Dialog を閉じる
     Q->>Q: object URL を解放
 ```
 
@@ -210,7 +232,7 @@ stateDiagram-v2
 | 4.4 | 一覧維持と再試行 | StoresPage / StoreQrPanel | パネル内で完結し一覧を再取得しない | 状態遷移 |
 | 4.5 | 欠けた画像を出さない | api client / StoreQrPanel | 空バイト列を失敗として扱う | 状態遷移 |
 | 5.1 | 認証情報を露出しない | api client | トークンは `Authorization` ヘッダのみ | 発行フロー |
-| 5.2 | 客の情報を表示しない | StoreQrPanel | 表示要素を店名と画像に限定 | — |
+| 5.2 | 客の情報を表示しない | StoreQrPanel | 店舗名・QR・遷移 URL・掲示文言だけを表示し、客の情報は載せない | — |
 | 5.3 | ログアウト後に残さない | StoreQrPanel | 永続化せず解放する | 状態遷移 |
 | 5.4 | 単一導線のみ | StoreQrPanel | 店舗あたり 1 つの画像のみを扱う | — |
 | 5.5 | 日本語 | StoresPage / StoreQrPanel | 全文言を日本語で定義 | — |
@@ -232,16 +254,26 @@ stateDiagram-v2
 | 8.5 | 掲示面と印刷に含めない | StoreQrPanel / StoreReviewFunnel | `data-print-region` の外に置き、`print:hidden` を直接与える | — |
 | 8.6 | QR と同じ範囲・存在を漏らさない | ReviewFunnelRoute / StoreReviewFunnel | 認証 → 店舗取得 → RBAC の順（QR と同じ）。403 と 404 を同一文言へ写す | — |
 | 8.7 | 0 件を空欄にしない | `readStoreReviewFunnel` / StoreReviewFunnel | 行の無い月も 0 を返し、そのまま描く | — |
-
+| 9.1 | 発行中から右側ドロワーを表示 | StoresPage / Dialog / StoreQrPanel | 発行操作で controlled Dialog を開き、パネルを loading 状態でマウント | 発行フロー |
+| 9.2 | 店舗・QR・正確な URL を表示 | StoreQrPanel / api client / dashboard-api | PNG 生成と同じ URL を `X-Survey-URL` で返す | 発行フロー |
+| 9.3 | URL をコピー | StoreQrPanel | URL文字列と Clipboard API 操作、成否は既存 action feedback で通知 | 発行フロー |
+| 9.4 | 規約準拠の文言と注意事項 | StoreQrPanel / qr-poster-text | 既存の掲示文言・禁止例を画面上に配置 | — |
+| 9.5 | 閉じ方と焦点復帰 | Dialog / StoresPage | Dialog primitive の dismiss と trigger への focus restore | 状態遷移 |
+| 9.6 | キーボード・支援技術・動きの軽減 | Dialog / StoreQrPanel | modal semantics と `motion-reduce` 遷移指定 | — |
+| 9.7 | 狭い画面で利用 | Dialog / StoreQrPanel | 幅100%から最大幅を制限し、内容領域だけを縦スクロール | — |
+| 9.8 | 掲示面だけ印刷 | globals.css / StoreQrPanel | URL・注意事項・dialog chrome を印刷対象の外に置く | 印刷フロー |
+| 9.9 | 正規 URL と資格情報の境界 | api client / dashboard-api | サーバ生成の URL を表示し、Bearer は従来どおり Authorization header のみ | 発行フロー |
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |---|---|---|---|---|---|
-| api client（拡張） | lib | 認証付きで binary を取得しエラー封筒を解釈する | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1 | firebase auth (P0), dashboard-api (P0) | Service, API |
+| api client（拡張） | lib | 認証付きで binary と QR の正規 URL を取得しエラー封筒を解釈する | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1, 9.2, 9.3, 9.9 | firebase auth (P0), dashboard-api (P0) | Service, API |
 | qr-filename | lib | 保存ファイル名を決定する純粋関数 | 2.4, 2.5, 2.6 | なし | Service |
 | qr-poster-text | lib | 掲示文言・禁止語・不可の例を規約の条項へ対応させて持つ純粋モジュール | 7.2, 7.4 | なし | Service |
-| StoreQrPanel | components | QR の表示・保存・失敗提示と表示資源の生存期間・店頭掲示の面 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4, 7.1, 7.3–7.6 | api client (P0), qr-filename (P0), qr-poster-text (P0), @fwlm/ui (P1) | Service, State |
-| StoresPage（拡張） | app | 行への発行導線・未確定の理由・パネルの開閉 | 1.1–1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5 | StoreQrPanel (P0), auth-context (P1) | State |
+| StoreQrPanel | components | QR・正規 URL・注意事項・保存/印刷・失敗提示と表示資源の生存期間 | 2.1, 2.2, 2.3, 2.8, 3.3, 4.1–4.5, 5.2, 5.3, 5.4, 6.1, 6.2, 6.4, 7.1, 7.3–7.6, 9.2–9.4, 9.8 | api client (P0), qr-filename (P0), qr-poster-text (P0) | Service, State |
+| StoresPage（拡張） | app | 行への発行導線・未確定の理由・選択店舗と Dialog の開閉 | 1.1–1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5, 9.1, 9.5 | StoreQrPanel (P0), @fwlm/ui Dialog (P0), auth-context (P1) | State |
+| Dialog（新規） | `@fwlm/ui` | Base UI modal primitive の再利用可能な wrapper。portal / backdrop / focus trap / Escape / focus restore を提供 | 9.1, 9.5–9.7 | `@base-ui/react/dialog` (P0) | UI |
+| QR Route（拡張） | dashboard-api | QR 生成に使った URL を同一レスポンスの `X-Survey-URL` で返す | 9.2, 9.9 | config `surveyBaseUrl` (P0) | API |
 
 ### lib
 
@@ -250,12 +282,12 @@ stateDiagram-v2
 | Field | Detail |
 |---|---|
 | Intent | 認証付きの binary 取得を、既存 JSON 経路と同一のエラー解釈で提供する |
-| Requirements | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1 |
+| Requirements | 2.7, 3.3, 4.1, 4.2, 4.3, 4.5, 5.1, 9.2, 9.3, 9.9 |
 
 **Responsibilities & Constraints**
 
 - トークン付与とエラー封筒の解釈を本ファイルへ集約するという既存の不変条件を維持する
-- 成功時はバイト列と content type のみを返し、表示や保存の関心を持たない
+- 成功時はバイト列・content type・サーバが QR に符号化した URL を返し、表示や保存の関心を持たない
 - 既存メソッドの署名・挙動を一切変更しない（後方互換）
 
 **Dependencies**
@@ -273,6 +305,8 @@ stateDiagram-v2
 export interface BinaryPayload {
   readonly bytes: Uint8Array;
   readonly contentType: string;
+  // dashboard-api が QR 生成に使ったものと同一の絶対 URL。
+  readonly surveyUrl: string;
 }
 
 // JSON 用 apiFetch の binary 版。method は GET 固定、body は取らない。
@@ -296,13 +330,20 @@ export function getStoreQr(
 
 | Method | Endpoint | Request | Response | Errors |
 |---|---|---|---|---|
-| GET | `/stores/:storeId/qr.png?size=1024` | `Authorization: Bearer <ID token>` | `image/png` のバイト列 | 401 `UNAUTHENTICATED` / 403 `FORBIDDEN` / 404 `NOT_FOUND` / 409 `PLACE_NOT_CONFIRMED` |
+| GET | `/stores/:storeId/qr.png?size=1024` | `Authorization: Bearer <ID token>` | `image/png` のバイト列 + `X-Survey-URL: <QRと同じURL>`（CORS expose） | 401 `UNAUTHENTICATED` / 403 `FORBIDDEN` / 404 `NOT_FOUND` / 409 `PLACE_NOT_CONFIRMED` |
 
 **Implementation Notes**
 
 - Integration: 非 2xx は既存 `parseErrorEnvelope` へ委譲する。`code` を書き換えたり既定値へ丸めたりしない。これを崩すと 3.3 と 4.1 が同時に壊れる
-- Validation: 2xx でもバイト長が 0 の場合は失敗として扱う（4.5）。JSON 経路と異なり `Content-Type` に `application/json` を設定しない（body を送らないため）
+- Validation: 2xx でもバイト長が 0 の場合は失敗として扱う（4.5）。`X-Survey-URL` が欠落または絶対 HTTP(S) URL でない場合も `invalid_qr_metadata` として失敗し、QR だけを成功表示しない（9.2）。JSON 経路と異なり `Content-Type` に `application/json` を設定しない（body を送らないため）
 - Risks: 応答本文を文字列化してログや例外メッセージへ載せない。QR は店舗のアンケート URL を含む
+
+#### dashboard-api QR 応答の拡張
+
+- `handleQr` が既に QR 生成へ渡している単一の `url` 変数を PNG 応答の `X-Survey-URL` にも設定する。URL を別の処理で再構築しない
+- Hono CORS 設定へ `exposeHeaders: ['X-Survey-URL']` を追加する。許可 origin は既存の `DASHBOARD_WEB_ORIGIN` 判定をそのまま通し、ワイルドカードや credentials は加えない
+- QR の PNG、status、既存エラー封筒、`Cache-Control: private, no-store` は維持する。新しい環境変数や DB は追加しない
+- サーバログへ URL ヘッダ値や PNG 本文を出さない。テストは既存の placeholder `survey.example` と固定 fixture store ID のみを用いる
 
 #### qr-filename（`src/lib/qr-filename.ts`・新規）
 
@@ -351,11 +392,13 @@ export function qrFileName(storeName: string, storeId: string): string;
 
 - 対象は常に 1 店舗。複数店舗の同時保持を行わない（5.4）
 - object URL の生成と解放を単独で所有する。他のどのモジュールも解放責務を持たない
-- 取得結果を永続化しない（`localStorage` 等へ書かない）。生存期間はコンポーネントの生存期間に一致する（5.3）
+- 取得結果（画像・URL）を永続化しない（`localStorage` 等へ書かない）。生存期間はコンポーネントの生存期間に一致する（5.3）
 - 失敗時に一覧を再取得しない。影響をパネル内に閉じる（4.4）
 - 掲示面（`data-print-region`）は**画面の確認用と印刷用を兼ねる 1 つの領域**とし、QR 画像を二重に持たない（7.1）。不可の例と注意書きは領域の外へ置き、`print:hidden` を対にして紙へ出さない（7.3/7.4）
 - 掲示面と印刷操作は取得成功時にだけ描く（7.6）。失敗時に掲示文言だけが残る形は 4.5 が禁じる「成功したかのような表示」に当たる
-- **このパネルが焦点を壊した場合にだけ、このパネルが引き取る**（6.1）。押下元が生き残るなら何もしない。押下元が消える遷移でだけ、パネル内の次の操作へ移す。パネル外に焦点があるときは触らない（横取りになる）
+- modal semantics・背景の inert 化・focus trap・Escape / backdrop dismissal・Trigger への focus restore は `@fwlm/ui` Dialog に委譲し、独自に再実装しない（9.5, 9.6）
+- URL は `X-Survey-URL` から取得した文字列を画面へ表示し、同じ値を Clipboard API へ渡す。クライアント側で URL を組み立て直さない（9.2, 9.3）
+- URL と注意事項・禁止例は印刷領域の外に置く。掲示面を使う印刷では既存の `data-print-region` のみを出力する（9.8）
 
 **Dependencies**
 
@@ -363,7 +406,7 @@ export function qrFileName(storeName: string, storeId: string): string;
 - Outbound: api client `getStoreQr` — 取得（P0）
 - Outbound: `qrFileName` — 保存名（P0）
 - Outbound: `qr-poster-text` — 掲示文言・不可の例（P0）。**実値を面の側に書かない**（規約の条項との対応と機械検証がそちらにある）
-- External: `@fwlm/ui` の Card / Button / Alert / Spinner（P1）
+- External: `@fwlm/ui` の Button / Alert / Spinner（P1）。Dialog root / portal は呼び出し側の StoresPage が所有する
 
 **Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [x]
 
@@ -385,7 +428,7 @@ export interface StoreQrPanelProps {
 ```typescript
 type QrState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly imageUrl: string }
+  | { readonly kind: 'ready'; readonly imageUrl: string; readonly surveyUrl: string }
   | { readonly kind: 'error'; readonly code: string };
 ```
 
@@ -393,35 +436,72 @@ type QrState =
 - 失敗時にサーバの `message` を状態へ保持しない。保持すると「描画してはならない値」を手の届く場所へ置くことになり、4.1 の充足が「たまたま描画していないだけ」の状態になる
 
 - State model: 上記 3 状態のみ。`ready` から `loading` へ戻る遷移を持たない（2.3）
-- Persistence & consistency: 永続化なし。`imageUrl` は取得成功時に生成し、コンポーネントのクリーンアップで解放する
+- Persistence & consistency: 永続化なし。`imageUrl` は取得成功時に生成し、`imageUrl` と `surveyUrl` はアンマウント時に破棄する。`surveyUrl` は API 応答の値をそのまま表示・コピーする
 - Concurrency strategy: 取得中は発行操作を再入不可にする。取得完了前のアンマウントでは結果を状態へ反映しない（2.2）
 
 **Implementation Notes**
 
 - Integration: 取得・URL 生成・解放を単一の副作用として構成し、解放をそのクリーンアップに置く。生成と解放が別の場所に分かれると、解放漏れが「動くが残る」形の欠陥になり検出できない
-- Validation: 状態の変化は `role="status"` と `role="alert"` で通知する（6.2）。画像の `alt` と保存リンクの名前に店名を含める（6.4）。保存は実際のリンク要素（`href` に object URL・`download` にファイル名）とし、プログラムによる click 合成を行わない（6.1・2.3）。失敗状態では再試行の操作を提示し、一覧の再取得を伴わずにパネル内で再要求する（4.3・4.4）。再試行の操作は再取得の間も描画し続け、`disabled` を焦点可能な形（`aria-disabled` / `data-disabled` のみ・native の `disabled` 属性を付けない）で与える。押下の抑止は部品側が担うため呼び出し側にガードを置かない（2.2・6.1）
-- Styling: 新しい色ユーティリティを導入しない。部品の既定 variant と、`@fwlm/ui` の部品が既に使用している `text-muted-foreground`（実 hex `#666666`・`contrast-usage.test.ts` の検証表に登録済み）のみを用いる（6.5）
+- Validation: 状態の変化は `role="status"` と `role="alert"` で通知する（6.2）。画像の `alt` と保存リンクの名前に店名を含める（6.4）。URL は読みやすく折り返すテキストとして表示し、コピー操作は `navigator.clipboard.writeText(surveyUrl)` を用いる。失敗時は既存 action feedback で通知し、URL テキストは選択可能なまま残す（9.3）。保存リンクと再試行は現行契約を維持する
+- Styling: ドロワーは右端固定・高さ `100dvh`・狭い画面で幅 `100%`・広い画面で最大幅を制限し、内容領域だけを縦スクロールさせる。開くときは transform で右から入れ、`motion-reduce:transition-none` で動きを抑える。新しい色は増やさず既存トークンを使う（6.5, 9.6, 9.7）
 - Risks: `URL.createObjectURL` は jsdom に存在しない。テストでは差し込みが必要になる（research.md §3.3）
+
+#### Dialog（`ts/packages/ui/src/components/dialog.tsx`・新規）
+
+| Field | Detail |
+|---|---|
+| Intent | Base UI Dialog を共通 UI 部品として包み、modal overlay の挙動を各画面で再実装しない |
+| Requirements | 9.1, 9.5, 9.6, 9.7 |
+
+**Responsibilities & Constraints**
+
+- `@base-ui/react/dialog` の Root / Trigger / Portal / Backdrop / Popup / Title / Description を token と既存 button variant で薄く包む。新しいライブラリや直接依存を `dashboard-web` に追加しない
+- modal の role、背景 inert 化、focus trap、Escape、Backdrop dismissal、close 後の Trigger への focus restore は Base UI に委譲する。独自の Tab trap や document key handler を実装しない
+- `DialogContent` は呼び出し側の className で位置・寸法を決められる汎用の Popup とし、QR 専用の色や寸法を共通 UI に持たせない
+- Drawer の Popup は viewport 右端に fixed、全高、幅 `min(100vw, 34rem)` 相当とし、内容の overflow は Popup 内部に閉じる。入場は translateX で行い、`prefers-reduced-motion` では transition を無効にする
+- Popup の accessible name は `DialogTitle` に選択中の店舗名を含めて与える。閉じる操作は最初のフォーカス可能要素として DOM 順の先頭に置く
+- Trigger はページ内の全店舗発行ボタンである。選択店舗 ID と controlled `open` state は StoresPage が保持し、Dialog primitive 自体に店舗の業務状態を持たせない
+
+**Public Surface**
+
+```tsx
+<Dialog open={openStoreId !== null} onOpenChange={handleOpenChange}>
+  <DialogTrigger variant="default" size="sm" onClick={() => setOpenStoreId(store.id)}>
+    QR 発行
+  </DialogTrigger>
+  {selectedStore !== null && (
+    <DialogContent aria-describedby={descriptionId}>
+      <DialogTitle>{selectedStore.name} の QR</DialogTitle>
+      <DialogDescription id={descriptionId}>...</DialogDescription>
+      <StoreQrPanel {...selectedStore} onClose={() => setOpenStoreId(null)} />
+    </DialogContent>
+  )}
+</Dialog>
+```
+
+- `DialogTrigger` のクリックと StoresPage の selected store 更新は同じイベントで行う。Base UI の Trigger により起点ボタンを close 後の focus restore 先にする
+- `DialogContent` は Portal 内へ描画され、`TableContainer` の overflow や stacking context に切られない
+- `@media print` 時の backdrop は隠し、Popup は既存の `data-print-region` 規則に任せる。URL・注意事項・閉じる操作など印刷対象外の内容は `print:hidden` を保つ
 
 #### StoresPage（`src/app/stores/page.tsx` の拡張）
 
 | Field | Detail |
 |---|---|
 | Intent | 行に発行導線を置き、未確定行に理由を示し、どの店舗のパネルを開くかを持つ |
-| Requirements | 1.1, 1.2, 1.3, 1.4, 1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5 |
+| Requirements | 1.1, 1.2, 1.3, 1.4, 1.5, 3.1, 3.2, 4.4, 5.5, 6.1, 6.3, 6.5, 9.1, 9.5 |
 
 **Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [x]
 
 **Implementation Notes**
 
-- Integration: QR 列を追加し、`placeStatus === 'confirmed'` の行にのみ発行ボタンを置く。未確定行には同じ位置に理由テキストを置く（3.1・3.2）。開いている店舗の直下へパネル行を挿入し、列数はロールに応じて算出する（列数を定数で二重管理しない）
-- Validation: 発行ボタンの名前に店名を含める（6.3）。既存 4 列の `<th>` と `<td>` を保持する（1.4）。分岐条件に `competitorConfigured` を含めない（1.5）
+- Integration: QR 列と未確定理由は維持し、店舗一覧全体を 1 つの controlled Dialog Root で包む。行内 detail row は外し、DialogTrigger の押下で選択店舗 ID を設定する。portal された Dialog Popup に `key={storeId}` の `StoreQrPanel` を載せる。close / Escape / backdrop は `onOpenChange(false)` で選択店舗を解除する
+- Validation: 発行ボタンの名前に店名を含める（6.3）。既存の一覧列を保持し、発行操作は利用者が閲覧可能な店舗のみに置く。DialogTrigger を使って開いた後の focus restore 元を維持する（9.5）。分岐条件に `competitorConfigured` を含めない（1.5）
 - Styling: 未確定行の理由テキストは `text-muted-foreground` を用いる。それ以外に新しい色指定を持ち込まない（6.5）
 - Risks: パネルは `key={storeId}` で描画する。これを怠ると別店舗を開いたときに前の状態と資源が引き継がれ、2.8 と 5.3 が同時に壊れる。開いている店舗の発行操作を再度押しても `key` が変わらないため再マウントは起きず、重複した取得は発生しない（2.2）
 
 ## Data Models
 
-本機能はデータベースを変更しない。既存の `StoreListItem`（`src/lib/types.ts`）の `id` / `name` / `placeStatus` を read するのみで、新しい永続データも派生データも持たない。転送されるデータは QR の画像バイト列と、失敗時のエラー封筒 `{ error: { code, message } }` の 2 種類のみである。
+本機能はデータベースを変更しない。既存の `StoreListItem`（`src/lib/types.ts`）の `id` / `name` / `placeStatus` を read するのみで、新しい永続データも派生データも持たない。転送される値は QR の画像バイト列、同じ PNG の生成に使ったアンケート URL を含む `X-Survey-URL` ヘッダ、失敗時のエラー封筒 `{ error: { code, message } }` である。URL は必要な間だけメモリ上に保持し、保存しない。
 
 ## Error Handling
 
@@ -439,6 +519,7 @@ type QrState =
 | 通信 | fetch 拒否 | `network` | 失敗と再試行可能である旨を示す | 4.3 |
 | その他 | 非 2xx 全般 | `http_<status>` | 同上 | 4.3 |
 | 応答異常 | 2xx かつ空 | `empty_response` | 画像を表示せず失敗として扱う | 4.5 |
+| 応答異常 | URL ヘッダ欠落・不正 | `invalid_qr_metadata` | QR を成功表示せず、一般的な再試行可能エラーを提示する | 9.2 |
 
 ### Monitoring
 
@@ -453,6 +534,7 @@ type QrState =
 3. `getStoreQr` が `Authorization` ヘッダを付け、URL に `size=1024` を含め、トークンをクエリへ載せないこと（2.7・5.1）
 4. `apiFetchBinary` が非 2xx のエラー封筒から `code` と `message` を保って返すこと。特に 409 の `PLACE_NOT_CONFIRMED` が丸められないこと（3.3・4.1）
 5. `apiFetchBinary` が 2xx かつ空バイト列を失敗として返すこと（4.5）
+6. `getStoreQr` が `X-Survey-URL` を読み取り `surveyUrl` として返すこと、欠落・相対 URL・`javascript:` URL を `invalid_qr_metadata` として拒否すること（9.2, 9.9）
 
 ### Integration Tests（jsdom・StoreQrPanel）
 
@@ -465,6 +547,9 @@ type QrState =
 7. 再試行が成功したとき焦点がパネル内の保存操作へ移ること（6.1）
 8. 再取得の間の再試行操作が `aria-disabled` と `data-disabled` を持ち、押しても取得が増えないこと（2.2・6.1）
 9. 初回取得のとき、および利用者が自分で焦点を移していたときに、成功しても焦点を奪わないこと（6.1）
+10. 成功時に URL が QR の取得応答値と一致して表示され、Copy 操作へ同じ値を渡すこと。Clipboard API の拒否時は失敗通知し、URL を手動選択できること（9.2, 9.3）
+11. 右側ドロワーの dialog 名・閉じる操作・URLコピー名・close 後の focus restore を確認すること（9.1, 9.5, 9.6）
+12. QR 未取得の loading / error 状態では URL・掲示面・印刷操作を表示しないこと（4.5, 7.6, 9.2）
 
 ### UI Tests（jsdom・StoresPage）
 
@@ -473,6 +558,7 @@ type QrState =
 3. 既存 4 列（店名・店舗特定・競合設定・担当代理店）が保たれ、operator と agency で列構成が従来どおり分岐すること（1.4）
 4. 競合未設定の確定済み店舗にも発行操作が出ること（1.5）
 5. 別店舗の発行でパネルが差し替わること（2.8）
+6. 発行操作で右側 Dialog が開き、loading を示し、close / Escape / backdrop で閉じること（9.1, 9.5）
 
 ### Unit Tests（node 環境・掲示文言・Requirement 7）
 
@@ -502,6 +588,8 @@ type QrState =
 3. 掲示面のある面で外側が箱ごと畳まれること（`visibility` では箱が残り、白紙のページが後続する）
 4. QR パネルが自動 a11y 監査と横スクロール実測の対象に入っていること。**この面は Issue #179 まで
    どちらの対象でもなかった**（店舗一覧の後続状態であり、一覧を開いただけでは描画されない）
+5. 実 browser で Dialog が右端に固定され、狭い viewport では内容が内部スクロールし、`prefers-reduced-motion: reduce` で transition が無効になること（9.6, 9.7）
+6. 印刷時に portal の backdrop・URL・注意事項・操作を除き、`data-print-region` だけが残ること（9.8）
 
 ### 手動確認（1 回）
 
@@ -552,6 +640,8 @@ StoreQrPanel ──(QR 画像: 既存の副作用)──────────
 - QR が符号化するのはアンケート URL のみで、店名・利用者・代理店の情報を含まない。これはサーバ側の性質であり本 spec は変更しない
 - 403 と 404 を UI で区別しない。担当外店舗の存在を推測させない（4.1）
 - 取得した画像を永続化しない。生存期間はパネルの生存期間に一致する（5.3）
+- `X-Survey-URL` は店舗 QR の予定された遷移先であり、担当店舗へアクセスできる認証済み利用者にだけ CORS で渡す。トークンは引き続き `Authorization` header のみで送る（5.1, 8.9）
+- URL を本文へ埋め込まず、画面上のテキストと利用者の明示的なコピー操作だけに使う。アプリログへ URL ヘッダ値を出さず、テストでは `survey.example` と固定 placeholder ID のみを使う（8.9）
 - 応答本文をログ・例外メッセージ・エラー表示へ載せない
 
 ## Performance & Scalability

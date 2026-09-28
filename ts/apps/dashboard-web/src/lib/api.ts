@@ -411,10 +411,14 @@ export async function disableInviteCode(
 export interface BinaryPayload {
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly contentType: string;
+  readonly surveyUrl: string;
 }
 
 // 2xx でありながら本文が空だった場合の文言。欠けた画像を QR として提示しないための失敗扱い。
 const EMPTY_RESPONSE_MESSAGE = '画像を取得できませんでした。時間をおいて再試行してください。';
+
+// QR と同じ遷移先をサーバから受け取れない場合、画像だけを成功として表示しない。
+const INVALID_QR_METADATA_MESSAGE = 'QR の遷移先を確認できませんでした。時間をおいて再試行してください。';
 
 // content type が読めなかった場合の既定値（RFC 2046 の汎用バイナリ型）。
 const FALLBACK_CONTENT_TYPE = 'application/octet-stream';
@@ -447,12 +451,36 @@ export async function apiFetchBinary(
     if (bytes.length === 0) {
       return { ok: false, code: 'empty_response', message: EMPTY_RESPONSE_MESSAGE };
     }
+
+    const surveyUrl = res.headers.get('X-Survey-URL');
+    if (surveyUrl === null || !isSafeSurveyUrl(surveyUrl)) {
+      return { ok: false, code: 'invalid_qr_metadata', message: INVALID_QR_METADATA_MESSAGE };
+    }
+
     return {
       ok: true,
-      value: { bytes, contentType: res.headers.get('Content-Type') ?? FALLBACK_CONTENT_TYPE },
+      value: {
+        bytes,
+        contentType: res.headers.get('Content-Type') ?? FALLBACK_CONTENT_TYPE,
+        surveyUrl,
+      },
     };
   } catch {
     return { ok: false, code: 'network', message: NETWORK_MESSAGE };
+  }
+}
+
+function isSafeSurveyUrl(value: string): boolean {
+  if (value.length === 0 || value.trim() !== value) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.username.length === 0 &&
+      url.password.length === 0
+    );
+  } catch {
+    return false;
   }
 }
 

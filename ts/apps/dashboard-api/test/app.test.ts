@@ -90,6 +90,15 @@ describe('dashboard-api app', () => {
     expect(res.status).toBe(401);
   });
 
+  it('許可された dashboard origin へ QR URL ヘッダを公開する', async () => {
+    const res = await app().request('/stores/44444444-4444-4444-4444-444444444444/qr.png', {
+      headers: { Origin: 'https://dash.example' },
+    });
+
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://dash.example');
+    expect(res.headers.get('Access-Control-Expose-Headers')).toBe('X-Survey-URL');
+  });
+
   it('停止・再開のルートが POST で配線され認証なしは 401 を返す', async () => {
     for (const action of ['suspend', 'resume']) {
       const res = await app().request(`/stores/44444444-4444-4444-4444-444444444444/${action}`, {

@@ -13,7 +13,7 @@ import {
   USER_EDIT_PANEL,
 } from './support/panel-placement';
 // 文言の実値は面にもテストにも書かない。**実物の正典を読む**（写すと片方だけが古びる）。
-import { POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-text';
+import { POSTER_CAUTION, POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/lib/qr-poster-text';
 
 // 管理ダッシュボードの実描画検証（Issue #53）。
 //
@@ -184,12 +184,15 @@ test.describe('店舗一覧の停止と再開', () => {
 test.describe('店頭掲示の印刷', () => {
   test('印刷時は掲示面だけが残り、不可の例と操作要素は紙に出ない', async ({ page }) => {
     await surfaceByName('店舗一覧の QR パネル').open(page);
+    const surveyUrl = page.getByRole('region', { name: 'アンケート URL' });
+    await expect(surveyUrl).toBeVisible();
 
     await page.emulateMedia({ media: 'print' });
 
     // 残るもの: 掲示面と、その中の依頼文。
     await expect(page.locator('[data-print-region]')).toBeVisible();
     await expect(page.getByText(POSTER_INVITATION)).toBeVisible();
+    await expect(page.getByText(POSTER_CAUTION)).toBeHidden();
 
     // 消えるもの: 不可の例（全件）と、パネルの操作要素。
     for (const example of PROHIBITED_EXAMPLES) {
@@ -204,11 +207,14 @@ test.describe('店頭掲示の印刷', () => {
     // 見せることになる。
     const funnel = page.getByRole('region', { name: 'アンケートの実績' });
     await expect(funnel, '実績の件数が紙に出ています').toBeHidden();
+    await expect(surveyUrl).toBeHidden();
 
     // **対照。** 画面へ戻すと同じ要素が見える。これが無いと「そもそも描画されていないから
     // 隠れて見えるだけ」の状態と区別が付かない（`@media print` を丸ごと消しても、
     // 不可の例を描画しなくすれば上の assert は緑になってしまう）。
     await page.emulateMedia({ media: 'screen' });
+    await expect(surveyUrl).toBeVisible();
+    await expect(page.getByText(POSTER_CAUTION)).toBeVisible();
     for (const example of PROHIBITED_EXAMPLES) {
       await expect(
         page.getByText(example.text, { exact: false }),
@@ -235,11 +241,9 @@ test.describe('店頭掲示の印刷', () => {
     await expect(page.getByRole('table'), '掲示面を持たない面の一覧が紙に出ません').toBeVisible();
   });
 
-  // 行の直下のパネルは、画面では捲り容器の見えている幅に留めるために、容器の左端から 1rem の
-  // 位置へ sticky で置き、幅も見えている幅から左右 1rem を引いてある（`TableDetailRow`）。
-  // **紙の上ではこの包みを外さなければならない。** 印刷の規則が戻すのは祖先の display と余白・枠・
-  // 背景だけで、位置と幅には触れないためである。外さないと掲示面が紙の左から 1rem ずれ、幅も
-  // 2rem 狭くなる（実測: 幅 393 で left 16 / width 361 ＝ 版面は left 0 / width 393）。
+  // Drawer は画面では viewport 固定・上限幅の modal だが、紙では popup 自体を通常の文書幅へ戻す。
+  // **掲示面を印刷版面の幅に広げる。** Drawer の screen 用 fixed 幅や余白が印刷に残ると、掲示物が
+  // 左端からずれ、版面より狭くなるため、ここでは実際の描画寸法を測る。
   test('印刷時は掲示面が版面の左端から始まり、幅も版面と一致する', async ({ page }) => {
     await surfaceByName('店舗一覧の QR パネル').open(page);
     await page.emulateMedia({ media: 'print' });
@@ -255,7 +259,7 @@ test.describe('店頭掲示の印刷', () => {
 
     expect(
       geometry.left,
-      '掲示面が紙の左端からずれています（行の直下のパネルの包みが印刷でも効いています）',
+      '掲示面が紙の左端からずれています（Drawer の screen 用位置指定が印刷にも残っています）',
     ).toBeLessThanOrEqual(1);
     expect(
       geometry.widthGap,
@@ -268,9 +272,8 @@ test.describe('店頭掲示の印刷', () => {
   test('掲示面のある面では外側が箱ごと畳まれる（白紙のページを後続させない）', async ({ page }) => {
     await surfaceByName('店舗一覧の QR パネル').open(page);
 
-    // **掲示面の祖先は畳まない**（畳むと掲示面ごと消える）。QR パネルは対象行の直下に挿入される
-    // ため、`<table>` も `<tbody>` も祖先であり残る。畳まれるのは祖先でない兄弟のほうなので、
-    // 主見出し（版面の直下にあり掲示面の祖先ではない）で測る。
+    // **掲示面の祖先は畳まない**（畳むと掲示面ごと消える）。QR は Portal 内の Drawer に描かれるため、
+    // 主見出しや一覧は祖先ではなく、紙面から畳まれることを測る。
     const measure = () =>
       page.evaluate(() => ({
         body: Math.round(document.body.getBoundingClientRect().height),
@@ -292,6 +295,79 @@ test.describe('店頭掲示の印刷', () => {
         '高さが残ると、その分だけ白紙のページが後続します',
     ).toBeLessThan(onScreen.body);
   });
+});
+
+test('QR Drawer は右端に固定され、viewport 内に収まる', async ({ page }) => {
+  await surfaceByName('店舗一覧の QR パネル').open(page);
+  const dialog = page.getByRole('dialog', { name: / の QR$/ });
+  const box = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box!.x + box!.width).toBeCloseTo(viewport!.width, 0);
+  expect(box!.height).toBeCloseTo(viewport!.height, 0);
+  expect(box!.width).toBeLessThanOrEqual(34 * 16);
+});
+
+test('QR Drawer に対象店舗の QR・URL・注意事項を表示し、同じ URL をコピーする', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await surfaceByName('店舗一覧の QR パネル').open(page);
+
+  const store = STORES[0]!;
+  const dialog = page.getByRole('dialog', { name: `${store.name} の QR` });
+  const surveyUrl = `https://survey.example/s/${store.id}`;
+  await expect(dialog.getByRole('img', { name: `${store.name} のアンケート QR コード` })).toBeVisible();
+  await expect(dialog.getByRole('region', { name: 'アンケート URL' })).toContainText(surveyUrl);
+  await expect(dialog.getByText(POSTER_CAUTION)).toBeVisible();
+
+  await dialog.getByRole('button', { name: `${store.name} のアンケート URL をコピー` }).click();
+  await expect(page.getByText(`${store.name} のアンケート URL をコピーしました。`)).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(surveyUrl);
+});
+
+test('QR Drawer は閉じる・Escape・背面押下で閉じ、発行元へ焦点を戻す', async ({ page }) => {
+  await surfaceByName('店舗一覧の QR パネル').open(page);
+  const store = STORES[0]!;
+  const trigger = page.getByRole('button', { name: `${store.name} の QR 発行` });
+  const dialog = page.getByRole('dialog', { name: `${store.name} の QR` });
+
+  await dialog.getByRole('button', { name: `${store.name} の QR を閉じる` }).click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await page.locator('[data-slot="dialog-backdrop"]').click({ position: { x: 16, y: 16 } });
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test('QR Drawer は狭い画面で内部スクロールし、reduced motion を尊重する', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 540 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await surfaceByName('店舗一覧の QR パネル').open(page);
+
+  const dialog = page.getByRole('dialog', { name: / の QR$/ });
+  const surveyUrl = page.getByRole('region', { name: 'アンケート URL' });
+  await expect(dialog).toBeVisible();
+  await expect(surveyUrl).toBeVisible();
+  const state = await dialog.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    transitionDurationMs: Number.parseFloat(getComputedStyle(element).transitionDuration) * 1000,
+  }));
+  expect(state.scrollHeight).toBeGreaterThan(state.clientHeight);
+  expect(state.transitionDurationMs).toBeLessThanOrEqual(0.01);
+  await expectNoHorizontalScroll(page, 'QR Drawer', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートの QR パネルで横スクロールが発生しない', async ({ page }) => {
