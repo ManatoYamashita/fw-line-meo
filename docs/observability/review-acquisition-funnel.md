@@ -130,7 +130,7 @@ PY
 
 ### 3. 口コミの増分を取る
 
-本番 DB への接続は `infra/README.md` の手順に従う（Auth Proxy は 5432 を避け、流す前に店舗名で接続先を確かめる）。
+本番 DB への接続は `infra/README.md` の手順に従う（Auth Proxy は 15432 で立て、流す前に `cloudsql.iam_authentication` が `on` であることで接続先を確かめる）。
 
 日次バッチは毎朝 6:00（JST）に走り、その日の日付で `captured_on` を記録する。したがって
 `captured_on = X` の差分は「前日 6:00 から当日 6:00 まで」の増分である。施策の時刻を含むのは
