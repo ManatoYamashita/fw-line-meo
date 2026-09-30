@@ -440,15 +440,15 @@ GCP コンソールで GBP API を有効化しただけでは使えない。**�
 
 `business.manage` は sensitive スコープのため Google の OAuth 検証が必要で、**審査は最大 10 日**。ここで揃える提出物は**デモ動画を除いて GBP に依存しない**。関門 A が事業側で詰まっている間に、ここを空にしておくと承認後の待ち時間が最小になる。
 
-| 提出物 | 要件 | 2026-09-23 時点（状態の正典は Issue #146） |
+| 提出物 | 要件 | 状態（2026-10-01 確認。正典は Issue #146 / #282） |
 |---|---|---|
 | 独自ドメイン | 自己所有・Search Console で所有権検証済み | **`firstweb-works.com` を取得済み**（お名前.com・2026-09-22 登録。9-2-a） |
-| ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT） |
-| OAuth コールバックのドメイン | 現行 URI は `api.firstweb-works.com`。承認済みドメインに `firstweb-works.com` を登録する（9-2-b） | 経路は開通済み（`api.firstweb-works.com` → 外部ロードバランサ → line-webhook）。OAuth クライアント・同意画面・Terraform env の切り替えは GBP 設定の一括有効化時に行う（Issue #282） |
-| 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | 実装済み（ManatoYamashita/fw-website）・独自ドメインでの公開待ち |
-| プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | 同上 |
+| ドメイン所有権の検証 | **Project Owner** のアカウントで、Search Console の **Domain property（DNS の TXT）** を検証する（9-2-a） | **確認済み**（2026-09-23・`manapuraza@…`・DNS の TXT。2026-10-01 に `gcloud domains list-user-verified` で再確認） |
+| OAuth コールバックのドメイン | URI は `https://api.firstweb-works.com/gbp/oauth/callback`。承認済みドメインに `firstweb-works.com` を登録する（9-2-b） | 経路、GBP 専用 OAuth クライアントの URI、同意画面の承認済みドメインは設定済み。line-webhook の `GBP_OAUTH_REDIRECT_URL` は GBP 設定の一括有効化待ち（Issue #282） |
+| 公開ホームページ | ログイン不要で閲覧でき、アプリ／ブランドを正確に説明し、プライバシーポリシーへリンクすること。ログイン画面だけの構成は不可 | `https://firstweb-works.com/app/` を公開済み（HTTP 200） |
+| プライバシーポリシー | **ホームページと同一ドメイン**に置く。ホームページと OAuth 同意画面の両方からリンクし、**両者のリンク先 URL が一致**すること。Google ユーザーデータの取得・利用・保存・共有をどう行うか明記する | `https://firstweb-works.com/privacy/` を公開済み（HTTP 200）。同意画面の登録 URL と一致 |
 | スコープ正当性 | `business.manage` を要求する理由と、より狭いスコープでは不十分な理由。参考リンクは最大 3 本まで添付可 | 下書き済み（fw-website `docs/google-review.md`） |
-| ブランディング | アプリ名・ロゴ・デベロッパー連絡先が実体と一致していること | 下書き済み（同上） |
+| ブランディング | アプリ名・ロゴ・デベロッパー連絡先が実体と一致していること | 登録済み。ただし Google Auth Platform に未公開ドラフトがあり、ブランディング画面と検証センターの表示が食い違う。公開済み版と検証状態の確認が必要 |
 | デモ動画 | YouTube へ Unlisted で上げる。**英語**で OAuth 同意フローを流し、同意画面にアプリ名が正しく出ること・**ブラウザのアドレスバーに OAuth クライアント ID が見えること**を映し、要求スコープが実際に何を可能にするかを実演する | **関門 A 承認後**（実 API 呼び出しの実演が要るため、唯一 GBP を待つ提出物） |
 
 **Testing のまま放置しないこと。** 「未確認アプリ」警告に加え、テストユーザーの承認自体が **7 日で失効**する。IT に不慣れなオーナーへ毎週の再連携を強いることになり、本サービスの存在意義に反する。**検証結果の有効期間も 7 日**で、その間に Published へ切り替えないと再検証がいる。承認が出たら速やかに公開すること。
@@ -488,13 +488,12 @@ OAuth コールバック URI は `https://api.firstweb-works.com/gbp/oauth/callb
 
 GBP は既定 OFF です。`gbp_oauth_client_id` と `gbp_oauth_redirect_url` の両方を設定し、必要な Secret Manager の値も揃えた状態で一括して有効化します。URL だけを先に設定すると、line-webhook の起動時検証に失敗します（Issue #323）。
 
-設定時は次の順に進めます。
+準備済みの値を再作成せず、設定時は次の順に進めます（状態の正典は Issue #282）。
 
 1. Issue #146 の GBP API 利用承認と Issue #354 の利用導線を完了する。
-2. Google Auth Platform で GBP 専用の Web アプリ OAuth クライアント（`gbp-oauth-line-webhook`）を作成する。ダッシュボードの Identity Platform 用クライアントとは分け、承認済みリダイレクト URI を `https://api.firstweb-works.com/gbp/oauth/callback` に揃える。
-   - 作成ダイアログのコピーボタンは aria-label に client secret を含む。自動操作でダイアログの DOM を読まない。client ID は詳細画面の URL から取り、secret は「Add secret」→ コピー → `printf '%s' "$(pbpaste)" | gcloud secrets versions add gbp-oauth-client-secret --data-file=- --project=gen-fw-line-meo` → `pbcopy </dev/null` の順で、画面にも端末にも値を出さずに渡す。
-3. Terraform で `gbp-oauth-client-secret` と `gbp-token-cipher-key` の Secret Manager リソースを作成してから、`1` の項目 5 の手順で値を登録する。cipher key は `openssl rand -base64 32` で生成し、秘密値を Terraform state や tfvars に保存しない。
-4. tfvars にクライアント ID と上記 callback URL を設定し、Gemini API キーを含む必要な secret が揃っていることを確かめてから apply する。GBP の全項目が揃うまで line-webhook には配線されない。
+2. Google Auth Platform の既存の GBP 専用 Web アプリ OAuth クライアント（`gbp-oauth-line-webhook`）で、承認済みリダイレクト URI が `https://api.firstweb-works.com/gbp/oauth/callback` と完全一致することを確認する。同意画面の承認済みドメインが `firstweb-works.com` で、Search Console の所有権確認が有効なことも確認する。ブランディングに未公開の変更があれば、検証センターと公開済みブランディングを確認する。
+3. `gbp-oauth-client-secret`、`gbp-token-cipher-key`、`gemini-api-key` に有効な Secret Manager version があることを、値を表示せずに確認する。欠けている場合だけ `1` の項目 5 の手順で投入する。秘密値を Terraform state や tfvars に保存しない。
+4. tfvars にクライアント ID と上記 callback URL を設定し、Terraform plan で GBP の env と secret がまとめて line-webhook に入ることを確認してから apply する。GBP の全項目が揃うまで line-webhook には配線されない。
 5. `https://api.firstweb-works.com/health` が 200 を返すことを確認する。callback の到達は、OAuth 設定を有効にした後の認可フローで確認する。GBP 既定 OFF の間は callback が 404 でも正常です。
 6. 同じ変更で `infra/external-api-smoke.tsv` の GBP 行を更新し、infra/README.md §8 の手順で実疎通を記録する。
 
