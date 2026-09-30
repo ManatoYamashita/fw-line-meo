@@ -1,10 +1,16 @@
-// 取得のモックを「マクロタスク 1 つ遅れて解決する」形へ包む（Issue #298）。
+// 取得のモックを「実時間で遅れて解決する」形へ包む（Issue #298）。
 //
-// `mockResolvedValue` のモックは同じマイクロタスクの列で解決するので、画面は取得の結果を
-// ほぼ即座に描く。すると「取得で中身が増える要素へ、到着を待たずに触る」検査が手元では
-// 通ってしまい、負荷の高い CI でだけ落ちる（#296 の invite-codes で顕在化した）。
-// 解決をマクロタスクへ送ると、`findBy*` の最初の同期的な照合が必ず取得の前に走るので、
-// この取り違えが手元でも毎回赤になる。
+// `mockResolvedValue` のモックはほぼ即座に解決するので、画面は取得の結果をすぐに描く。
+// すると「取得で中身が増える要素へ、到着を待たずに触る」検査が手元では通ってしまい、
+// 負荷の高い CI でだけ落ちる（#296 の invite-codes で顕在化した）。
+// 解決を遅らせると、取得の前の画面に触る検査が手元でも毎回赤になる。
+//
+// **遅延はマクロタスク 1 つ（setTimeout(0)）では足りない。** Testing Library の `findBy*` は
+// 終わるたびに setTimeout(0) を 1 つ挟んで保留中の作業を流すので、`findBy` を 1 回経るだけで
+// 取得が解決してしまう。導入時（#298）に、修正前の検査へ遅延を変えて当てた赤の件数:
+// 0ms（setTimeout のみ）3 件／1ms 3 件／5ms 8〜9 件（揺れる）／10ms 10 件／30ms 12 件（2 回とも）。
+// 30ms は、決定的にすべてを捕まえた最小の値である。100ms・300ms でも修正後は全件緑だった
+// （検査が遅延の長さに依存していない）。費用は dashboard-web 全体で 2 秒弱（遅延 494 回）。
 //
 // 包むのはモジュールの輸出だけで、`api.getX` の vi.fn はそのまま残す。呼び出しの記録と
 // `mockReset` / `mockResolvedValue` は従来どおり vi.fn に対して効き、入れ子の beforeEach で
@@ -12,7 +18,8 @@
 import { fireEvent, within } from '@testing-library/react';
 import { expect } from 'vitest';
 
-const DEFER_MS = Number(process.env.DEFER_MS ?? 30);
+// 計測用に上書きできる（例: DASHBOARD_TEST_FETCH_DEFER_MS=300 で検査が遅延の長さに依存しないかを見る）。
+const DEFER_MS = Number(process.env.DASHBOARD_TEST_FETCH_DEFER_MS ?? 30);
 
 function deferThenable(value: PromiseLike<unknown>): Promise<unknown> {
   return new Promise((resolve, reject) => {
