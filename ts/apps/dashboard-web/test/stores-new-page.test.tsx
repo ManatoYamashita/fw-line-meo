@@ -35,7 +35,7 @@ const api = vi.hoisted(() => ({
   searchStores: vi.fn(),
   registerStore: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import StoreRegisterPage from '../src/app/stores/new/page';
 

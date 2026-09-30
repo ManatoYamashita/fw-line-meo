@@ -44,7 +44,7 @@ const api = vi.hoisted(() => ({
   // undefined が呼ばれ、保存の経路が例外の汎用文言へ落ちる。
   updateDashboardUser: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import AdminUsersPage from '../src/app/admin/users/page';
 

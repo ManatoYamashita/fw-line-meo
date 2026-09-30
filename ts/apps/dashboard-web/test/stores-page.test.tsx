@@ -44,7 +44,7 @@ const api = vi.hoisted(() => ({
   suspendStore: vi.fn(),
   resumeStore: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import StoresPage from '../src/app/stores/page';
 import { announcedText, ownText } from './live-region';

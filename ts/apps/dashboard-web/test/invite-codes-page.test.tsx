@@ -36,7 +36,7 @@ const api = vi.hoisted(() => ({
   disableInviteCode: vi.fn(),
   getAgencies: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import InviteCodesPage from '../src/app/invite-codes/page';
 
