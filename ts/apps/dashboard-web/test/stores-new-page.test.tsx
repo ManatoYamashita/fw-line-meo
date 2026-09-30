@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { announcedText, ownText } from './live-region';
+import { chooseOption } from './deferred-mocks';
 
 const useAuthMock = vi.fn();
 vi.mock('../src/lib/auth-context', () => ({ useAuth: () => useAuthMock() }));
@@ -66,7 +67,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function selectOwnerAndSearchTo(scope: ReturnType<typeof within>, query: string) {
-  fireEvent.change(await scope.findByLabelText('オーナー'), { target: { value: 'o1' } });
+  await chooseOption(await scope.findByLabelText('オーナー'), '山田オーナー');
   fireEvent.click(scope.getByRole('button', { name: /次へ/ }));
   fireEvent.change(await scope.findByLabelText('店名'), { target: { value: query } });
   fireEvent.click(scope.getByRole('button', { name: '検索' }));
@@ -118,7 +119,7 @@ describe('店舗登録ウィザード', () => {
     await selectOwnerAndSearchTo(scope, '鳥貴族');
     fireEvent.click(await scope.findByRole('button', { name: /鳥貴族 渋谷店/ }));
     fireEvent.click(await scope.findByRole('button', { name: /この店舗で進む/ }));
-    fireEvent.change(await scope.findByLabelText(/カテゴリ/), { target: { value: 'izakaya' } });
+    await chooseOption(await scope.findByLabelText(/カテゴリ/), '居酒屋');
     fireEvent.click(scope.getByRole('button', { name: /登録を確定/ }));
     expect(await scope.findByText('登録が完了しました')).toBeTruthy();
     expect(api.registerStore).toHaveBeenCalledWith(
@@ -178,8 +179,11 @@ function restart() {
 async function advanceToStep(step: 'owner' | 'search' | 'confirm' | 'basic' | 'done') {
   const main = await screen.findByRole('main');
   const scope = within(main);
+  // オーナーの選択欄は一覧が届いてから描かれる。到着を待たずに返すと、owner の段の押しボタンを
+  // 取得前の画面から読んでしまう（Issue #298）。
+  const ownerSelect = await scope.findByLabelText('オーナー');
   if (step === 'owner') return main;
-  fireEvent.change(await scope.findByLabelText('オーナー'), { target: { value: 'o1' } });
+  await chooseOption(ownerSelect, '山田オーナー');
   fireEvent.click(scope.getByRole('button', { name: '次へ（店名検索）' }));
   if (step === 'search') return main;
   fireEvent.change(await scope.findByLabelText('店名'), { target: { value: '鳥貴族' } });
@@ -465,7 +469,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     const next = await scope.findByRole('button', { name: '次へ（店名検索）' });
     // 無効の通知手段は素の無効属性のままにする（焦点の到達を要求する箇所とは別枠・Req 3.5）。
     expect(next.hasAttribute('disabled')).toBe(true);
-    fireEvent.change(await scope.findByLabelText('オーナー'), { target: { value: 'o1' } });
+    await chooseOption(await scope.findByLabelText('オーナー'), '山田オーナー');
     expect(
       scope.getByRole('button', { name: '次へ（店名検索）' }).hasAttribute('disabled'),
     ).toBe(false);
@@ -477,7 +481,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     api.searchStores.mockReturnValue(new Promise(() => {}));
     render(<StoreRegisterPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('オーナー'), { target: { value: 'o1' } });
+    await chooseOption(await scope.findByLabelText('オーナー'), '山田オーナー');
     fireEvent.click(scope.getByRole('button', { name: '次へ（店名検索）' }));
 
     expect(scope.getByRole('button', { name: '検索' }).hasAttribute('disabled')).toBe(true);
@@ -515,14 +519,14 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     // （包む要素へ移ると支援技術もプログラムによる操作も届かない）。
     expect(agency.tagName).toBe('SELECT');
     expect(agency.getAttribute('id')).toBe('agency-select');
-    fireEvent.change(agency, { target: { value: 'a1' } });
+    await chooseOption(agency, '代理店A');
     expect((agency as HTMLSelectElement).value).toBe('a1');
     expect(api.getOwners).toHaveBeenCalledWith({ agencyId: 'a1' });
 
     const ownerSelect = await scope.findByLabelText('オーナー');
     expect(ownerSelect.tagName).toBe('SELECT');
     expect(ownerSelect.getAttribute('id')).toBe('owner-select');
-    fireEvent.change(ownerSelect, { target: { value: 'o1' } });
+    await chooseOption(ownerSelect, '山田オーナー');
     expect((ownerSelect as HTMLSelectElement).value).toBe('o1');
 
     fireEvent.click(scope.getByRole('button', { name: '次へ（店名検索）' }));
@@ -534,7 +538,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     const category = await scope.findByLabelText('カテゴリ（任意）');
     expect(category.tagName).toBe('SELECT');
     expect(category.getAttribute('id')).toBe('category-select');
-    fireEvent.change(category, { target: { value: 'izakaya' } });
+    await chooseOption(category, '居酒屋');
     expect((category as HTMLSelectElement).value).toBe('izakaya');
   });
 
@@ -542,7 +546,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     api.getOwners.mockResolvedValue({ ok: true, value: [owner] });
     render(<StoreRegisterPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('オーナー'), { target: { value: 'o1' } });
+    await chooseOption(await scope.findByLabelText('オーナー'), '山田オーナー');
     fireEvent.click(scope.getByRole('button', { name: '次へ（店名検索）' }));
     const input = await scope.findByLabelText('店名');
     expect(input.tagName).toBe('INPUT');
@@ -557,6 +561,9 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
     render(<StoreRegisterPage />);
     const scope = within(await screen.findByRole('main'));
     await scope.findByLabelText('代理店');
+    // 代理店の一覧が届いた後で不在を読む。届く前の不在は「選ぶ前だから」ではなく
+    // 「取得前だから」起きるので、この表明の根拠にならない（Issue #298）。
+    await scope.findByRole('option', { name: '代理店A' });
     expect(scope.queryByLabelText('オーナー')).toBeNull();
     // 処理中の文言は agency 側だけの分岐である（operator では代理店選択が先行する）。
     expect(scope.queryByText('読み込み中...')).toBeNull();
@@ -762,10 +769,10 @@ describe('店舗登録ウィザード: 段階表示とフォーム（task 5.2・
     }
 
     await assertSelect('代理店');
-    fireEvent.change(await scope.findByLabelText('代理店'), { target: { value: 'a1' } });
+    await chooseOption(await scope.findByLabelText('代理店'), '代理店A');
     await assertSelect('オーナー');
 
-    fireEvent.change(await scope.findByLabelText('オーナー'), { target: { value: 'o1' } });
+    await chooseOption(await scope.findByLabelText('オーナー'), '山田オーナー');
     fireEvent.click(scope.getByRole('button', { name: '次へ（店名検索）' }));
     fireEvent.change(await scope.findByLabelText('店名'), { target: { value: '鳥貴族' } });
     fireEvent.click(scope.getByRole('button', { name: '検索' }));

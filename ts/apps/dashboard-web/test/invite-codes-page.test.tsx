@@ -4,6 +4,7 @@ import { render, screen, within, cleanup, fireEvent } from '@testing-library/rea
 import type { ReactNode } from 'react';
 import { announcedText, ownText } from './live-region';
 import { expectListSkeleton } from './list-skeleton';
+import { chooseOption } from './deferred-mocks';
 
 // 認証コンテキストはモックし、ready な operator/agency を注入する（stores-page.test と同規約）。
 const useAuthMock = vi.fn();
@@ -153,11 +154,11 @@ describe('招待コードページ（operator ロール）', () => {
     render(<InviteCodesPage />);
     const scope = within(await screen.findByRole('main'));
     const select = await scope.findByLabelText('代理店');
-    // 選択肢が届くまで待つ（理由は下の selectAgencyAlpha のコメント）。
+    // 選択肢が届いた後で読む（届く前の未取得は「未選択だから」の根拠にならない）。
     await scope.findByRole('option', { name: '代理店アルファ' });
     // 代理店未選択の間は一覧取得を行わない。
     expect(api.getInviteCodes).not.toHaveBeenCalled();
-    fireEvent.change(select, { target: { value: 'a1' } });
+    await chooseOption(select, '代理店アルファ');
     expect(await scope.findByText('ACTIVE01')).toBeTruthy();
     expect(api.getInviteCodes).toHaveBeenCalledWith({ agencyId: 'a1' });
   });
@@ -177,16 +178,16 @@ describe('招待コードページ（operator ロール）', () => {
     render(<InviteCodesPage />);
     const scope = within(await screen.findByRole('main'));
     const select = await scope.findByLabelText('代理店');
-    // 選択肢が届くまで待つ（理由は下の selectAgencyAlpha のコメント）。
-    await scope.findByRole('option', { name: '代理店アルファ' });
-    fireEvent.change(select, { target: { value: 'a1' } });
+    await chooseOption(select, '代理店アルファ');
     await scope.findByText('ACTIVE01');
 
     fireEvent.click(scope.getByRole('button', { name: '発行' }));
     await scope.findByText('OPNEW009', { selector: 'strong' });
     expect(api.issueInviteCode).toHaveBeenCalledWith({ agencyId: 'a1' });
 
-    fireEvent.click(scope.getByRole('button', { name: '無効化' }));
+    // 発行の結果は一覧の取り直しより先に描かれる。取り直しの間は一覧の行が無いので、
+    // 行の押しボタンは取り直しが届いてから掴む（Issue #298）。
+    fireEvent.click(await scope.findByRole('button', { name: '無効化' }));
     await scope.findByText('無効');
     expect(api.disableInviteCode).toHaveBeenCalledWith({ id: 'ic1', agencyId: 'a1' });
   });
@@ -336,8 +337,7 @@ describe('招待コードページ: 着手前から在った契約（意匠の�
     ]);
 
     // プログラムによる値の変更で操作できる（描画を伴う選択部品へ置き換えると届かなくなる）。
-    fireEvent.change(select, { target: { value: 'a1' } });
-    expect(select.value).toBe('a1');
+    await chooseOption(select, '代理店アルファ');
     expect(await scope.findByText('ACTIVE01')).toBeTruthy();
   });
 });
@@ -346,17 +346,10 @@ describe('招待コードページ: 着手前から在った契約（意匠の�
 
 /** 代理店を選ぶ（operator は選択して初めて一覧の分岐に入る）。 */
 async function selectAgencyAlpha(): Promise<void> {
-  const select = await screen.findByLabelText('代理店');
-  // **選択肢が届くまで待つ。** 選択欄そのものは代理店の一覧を取得する前から描かれているので、
-  // 取得が解決する前に change を投げると、その値を持つ option がまだ無く、**select の値は
-  // 変わらないまま先へ進む**（DOM の select は存在しない値を受け付けない）。代理店未選択の
-  // 状態が続くので、後続の findBy は目的の分岐ではなく「代理店を選択すると…」の空状態を
-  // 見続けることになる。
-  //
-  // この取り違えは手元では起きない（取得のモックが即座に解決する）。負荷の高い CI でだけ
-  // 現れる形で 2026-09-20 に顕在化したので、**赤の実測は CI の失敗ログが唯一の証拠である**。
-  await screen.findByRole('option', { name: '代理店アルファ' });
-  fireEvent.change(select, { target: { value: 'a1' } });
+  // 選択欄そのものは代理店の一覧を取得する前から描かれている。選択肢の到着を待たずに change を
+  // 投げると値が変わらないまま先へ進むので、到着を待って選ぶ（理由の詳細は chooseOption）。
+  // 取得のモックは deferResolution で遅れて解決するので、待ちを外すとこの面の検査は手元でも赤になる。
+  await chooseOption(await screen.findByLabelText('代理店'), '代理店アルファ');
 }
 
 interface SurfaceBranch {
@@ -761,10 +754,7 @@ describe('招待コードページ: 意匠の適用', () => {
 
     // 完了条件: 値の直接変更で操作でき、必須属性を要素から読める。
     expect(select.required).toBe(false);
-    // 選択肢が届くまで待つ（理由は下の selectAgencyAlpha のコメント）。
-    await within(main).findByRole('option', { name: '代理店アルファ' });
-    fireEvent.change(select, { target: { value: 'a1' } });
-    expect(select.value).toBe('a1');
+    await chooseOption(select, '代理店アルファ');
     expect(await within(main).findByText('ACTIVE01')).toBeTruthy();
   });
 
