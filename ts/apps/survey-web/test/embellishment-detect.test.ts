@@ -71,6 +71,9 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     { text: '改めて別のメニューも試したいです。', category: 'intention' },
     { text: '次回は夜に来てみたいです。', category: 'intention' },
     { text: 'リピート確定です。', category: 'intention' },
+    // 否定側の意向（#339 のベースラインの実測で、低評価の素材に足されていた形）。
+    { text: '再訪については慎重に考えたいと思います。', category: 'intention' },
+    { text: 'あえてまた行こうという気持ちにはなれないかもしれない。', category: 'intention' },
     { text: '開放感のある店内でした。', category: 'attribute:atmosphere' },
     { text: '洗練されたお店でした。', category: 'attribute:atmosphere' },
     { text: 'おしゃれな空間でした。', category: 'attribute:atmosphere' },
