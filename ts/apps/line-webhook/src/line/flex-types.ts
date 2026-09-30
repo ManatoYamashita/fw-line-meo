@@ -52,8 +52,8 @@ export interface FlexTextComponent {
    * 大きな段を使う表示にはこれを対で添える（docs/design/design-language.md §7.13）。
    */
   readonly adjustMode?: 'shrink-to-fit';
-  /** 文字を押したときの遷移（投稿者名からプロフィールへ、「Google Maps で見る」から口コミへ）。 */
-  readonly action?: FlexUriAction;
+  /** 文字を押したときの遷移（URI と postback を使う）。 */
+  readonly action?: FlexAction;
 }
 
 export interface FlexButtonComponent {

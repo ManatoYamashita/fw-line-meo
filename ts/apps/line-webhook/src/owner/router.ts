@@ -220,6 +220,7 @@ export function createStoreIdentifiedOwnerRouterFactory(
         messenger,
         liffStoreDetailUrl: deps.liffStoreDetailUrl,
         logger,
+        gbpReplyEnabled: deps.gbp !== undefined,
         ...(deps.reads ? { reads: deps.reads } : {}),
         ...(deps.now ? { now: deps.now } : {}),
       }),

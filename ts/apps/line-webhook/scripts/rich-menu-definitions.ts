@@ -16,6 +16,7 @@
 //     uri は uri、message は text を持つ
 
 import { REPORT_LABELS, encodeReportPostback, type ReportKind } from '@fwlm/line-report';
+import { encodeGbpPostback } from '../src/gbp/postback.js';
 import { encodePostback } from '../src/onboarding/stages.js';
 
 // メニューごとの寸法。**assets/richmenu-*.png の実寸法と必ず一致させること。** 区画の bounds は
@@ -32,7 +33,7 @@ export const ONBOARDING_MENU_SIZE = { width: 2500, height: 843 } as const;
 
 /**
  * 完了後メニューは Full (HD) 2500x1686（比 約 1.483 >= 1.45 要件・Issue #256）。上段 3 区画の
- * レポートと下段 2 区画（詳細・ステータス）の 2 段を持つため、Half では区画が縦に潰れる。
+ * レポートと下段の詳細・ステータス（GBP 有効時は Google 連携も追加）を持つため、Half では区画が縦に潰れる。
  * 占有高さは幅 390pt の端末で約 263pt になるが、これは導線を 5 つ常設することの対価である。
  */
 export const COMPLETED_MENU_SIZE = { width: 2500, height: 1686 } as const;
@@ -109,12 +110,20 @@ export function buildOnboardingRichMenu(): RichMenuObject {
  *
  * 上段はレポートの 3 導線で、data は符号器（@fwlm/line-report）が作る店舗も頁も持たない形だけを使う。
  * displayText を付けるのは、タップした導線の文言をオーナー自身の発言としてトークに残すためである（2.3）。
- * 下段左は詳細画面（LIFF）、下段右は既存のステータス確認（テキスト送信）である。
+ * GBP を無効にした従来面では、下段左は詳細画面（LIFF）、下段右はステータス確認（テキスト送信）である。
  *
- * 第2フェーズ（2.7）は、下段を 833 幅の 3 区画に割り直して 3 つ目に「Google 連携」を置く。
- * 上段 3 区画と下段の既存 2 導線のラベル・action は変えない。
+ * 第2フェーズ（2.7）は gbpEnabled の場合に限り、下段を 833 幅の 3 区画に割り直して
+ * 3 つ目に「Google 連携」を置く。既定（GBP 無効）は既存 5 区画をそのまま返す。
  */
-export function buildCompletedRichMenu(liffStoreDetailUrl: string): RichMenuObject {
+export interface CompletedRichMenuOptions {
+  /** GBP が利用可能なときだけ下段を 3 分割し、「Google 連携」postback を追加する。 */
+  readonly gbpEnabled?: boolean;
+}
+
+export function buildCompletedRichMenu(
+  liffStoreDetailUrl: string,
+  options: CompletedRichMenuOptions = {},
+): RichMenuObject {
   if (liffStoreDetailUrl.length === 0) {
     throw new Error('buildCompletedRichMenu: LIFF_STORE_DETAIL_URL is required');
   }
@@ -129,33 +138,55 @@ export function buildCompletedRichMenu(liffStoreDetailUrl: string): RichMenuObje
     },
   }));
 
+  const bottomAreas: RichMenuArea[] = options.gbpEnabled
+    ? [
+        {
+          bounds: { x: 0, y: COMPLETED_ROW_HEIGHT, width: 833, height: COMPLETED_ROW_HEIGHT },
+          action: { type: 'uri', label: '詳細を見る', uri: liffStoreDetailUrl },
+        },
+        {
+          bounds: { x: 833, y: COMPLETED_ROW_HEIGHT, width: 834, height: COMPLETED_ROW_HEIGHT },
+          action: { type: 'message', label: 'ステータス確認', text: 'ステータス確認' },
+        },
+        {
+          bounds: { x: 1667, y: COMPLETED_ROW_HEIGHT, width: 833, height: COMPLETED_ROW_HEIGHT },
+          action: {
+            type: 'postback',
+            label: 'Google 連携',
+            data: encodeGbpPostback({ action: 'g_status' }),
+            displayText: 'Google 連携',
+          },
+        },
+      ]
+    : [
+        {
+          bounds: { x: 0, y: COMPLETED_ROW_HEIGHT, width: COMPLETED_BOTTOM_WIDTH, height: COMPLETED_ROW_HEIGHT },
+          // Requirement 2.4: 既存の詳細画面を LINE 内で開く。店舗の指定は付けない
+          // （メニューは店舗の文脈を持たない。画面側が対象店舗を確定させる）。
+          action: { type: 'uri', label: '詳細を見る', uri: liffStoreDetailUrl },
+        },
+        {
+          bounds: {
+            x: COMPLETED_BOTTOM_WIDTH,
+            y: COMPLETED_ROW_HEIGHT,
+            width: COMPLETED_BOTTOM_WIDTH,
+            height: COMPLETED_ROW_HEIGHT,
+          },
+          // GBP を無効にした既存メニューでは、従来のテキスト操作を維持する。
+          action: { type: 'message', label: 'ステータス確認', text: 'ステータス確認' },
+        },
+      ];
+
   return {
     size: { width: COMPLETED_MENU_SIZE.width, height: COMPLETED_MENU_SIZE.height },
-    // 5 つの導線を常設する面なので、既定で開いた状態にする（畳まれていると導線に気づけない）。
+    // GBP の有無にかかわらず常設導線を開いた状態にする。
     selected: true,
     name: 'line-onboarding-completed-menu',
-    // チャットバーの文字は、開く面の呼び名（14 文字以内）。導線が 5 つになり、特定の 1 つを
-    // 名乗らせると他の導線が隠れて見えるため「メニュー」とする。
+    // チャットバーの文字は、開く面の呼び名（14 文字以内）。導線の一部を名乗らせず「メニュー」とする。
     chatBarText: 'メニュー',
     areas: [
       ...reportAreas,
-      {
-        bounds: { x: 0, y: COMPLETED_ROW_HEIGHT, width: COMPLETED_BOTTOM_WIDTH, height: COMPLETED_ROW_HEIGHT },
-        // Requirement 2.4: 既存の詳細画面を LINE 内で開く。店舗の指定は付けない
-        // （メニューは店舗の文脈を持たない。画面側が対象店舗を確定させる）。
-        action: { type: 'uri', label: '詳細を見る', uri: liffStoreDetailUrl },
-      },
-      {
-        bounds: {
-          x: COMPLETED_BOTTOM_WIDTH,
-          y: COMPLETED_ROW_HEIGHT,
-          width: COMPLETED_BOTTOM_WIDTH,
-          height: COMPLETED_ROW_HEIGHT,
-        },
-        // Requirement 2.2/2.5: 既存の導線をそのまま残す。テキストとして送られ、
-        // 店舗特定済みオーナーの振り分け口（src/owner/router.ts）がステータス案内を返す。
-        action: { type: 'message', label: 'ステータス確認', text: 'ステータス確認' },
-      },
+      ...bottomAreas,
     ],
   };
 }
