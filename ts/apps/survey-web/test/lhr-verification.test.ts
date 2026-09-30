@@ -8,6 +8,7 @@ import {
   NODE_LABEL_MAX,
   expectedRuns,
   main,
+  matchStoreLabel,
   readSeedStore,
   verifyLhrs,
 } from '../perf/lhr-verification.mjs';
@@ -76,6 +77,25 @@ function entries(...lhrs: Lhr[]) {
 }
 
 const store = { id: STORE_ID, name: STORE_NAME };
+
+/**
+ * lhci が標準出力を区切りごとに文字列へ変換して連結したときの化け方を、同じ機構で作る（Issue #408）。
+ * text の charIndex 文字目（コードポイント単位）を、先頭から bytesBefore バイトのところで 2 つの Buffer に分け、
+ * 別々に toString() して連結する。U+FFFD を手で書かないのは、書いた個数が実際の化け方と食い違うのを防ぐため。
+ * 化けた箇所がちょうど 1 つ・U+FFFD が expected 個であることも確かめる（ヘルパーの空振りを防ぐ）。
+ */
+function splitDecode(text: string, charIndex: number, bytesBefore: number, expected: number): string {
+  const prefix = Array.from(text).slice(0, charIndex).join('');
+  const offset = Buffer.byteLength(prefix, 'utf8') + bytesBefore;
+  const bytes = Buffer.from(text, 'utf8');
+  const out = bytes.subarray(0, offset).toString() + bytes.subarray(offset).toString();
+  expect([...out.matchAll(/\uFFFD+/g)].map((m) => m[0].length)).toEqual([expected]);
+  return out;
+}
+
+const FFFD = '\uFFFD';
+// 2 バイト（é）・3 バイト（食・テ）・4 バイト（😀）の文字を持つ店名。
+const MIXED_NAME = 'Café 😀 テスト';
 
 function seedSql(storesInsert: string): string {
   return [
@@ -202,6 +222,60 @@ describe('expectedRuns', () => {
   });
 });
 
+describe('matchStoreLabel', () => {
+  it('店名と等しい文言は exact（空白の揺れも同じ店名として読む）', () => {
+    expect(matchStoreLabel(STORE_NAME, STORE_NAME)).toBe('exact');
+    expect(matchStoreLabel(` ${STORE_NAME.replace(' ', '  ')}\n`, STORE_NAME)).toBe('exact');
+  });
+
+  // 緑: 1 文字が区切りをまたいだときに出る U+FFFD は 2〜(その文字の UTF-8 バイト数) 個。
+  it.each([
+    ['é（2 バイト）を 1｜1 で切る → 2 個', MIXED_NAME, 3, 1, 2],
+    ['食（3 バイト）を 2｜1 で切る → 2 個', STORE_NAME, 3, 2, 2],
+    ['食（3 バイト）を 1｜2 で切る → 3 個（2026-09-28 の観測と同形）', STORE_NAME, 3, 1, 3],
+    ['😀（4 バイト）を 1｜3 で切る → 4 個', MIXED_NAME, 5, 1, 4],
+    ['😀（4 バイト）を 2｜2 で切る → 3 個', MIXED_NAME, 5, 2, 3],
+    ['😀（4 バイト）を 3｜1 で切る → 2 個', MIXED_NAME, 5, 3, 2],
+  ])('区切りで化けた 1 文字は split（%s）', (_case, name, charIndex, bytesBefore, n) => {
+    expect(matchStoreLabel(splitDecode(name, charIndex, bytesBefore, n), name)).toBe('split');
+  });
+
+  it('観測した文言そのもの（「ッ」が U+FFFD 3 個）は split', () => {
+    const name = 'スターバックス コーヒー';
+    expect(matchStoreLabel(`スターバ${FFFD.repeat(3)}クス コーヒー`, name)).toBe('split');
+  });
+
+  // 赤: 許容を広げすぎていないことの確認。
+  it.each([
+    ['U+FFFD が 1 個（区切りの化けでは出ない数）', `テスト${FFFD}堂 本店`, STORE_NAME],
+    ['U+FFFD が 5 個（4 バイト文字の位置でも 1 文字の分割では出ない数）', `Café ${FFFD.repeat(5)} テスト`, MIXED_NAME],
+    ['3 バイト文字の位置に U+FFFD が 4 個', `テスト${FFFD.repeat(4)}堂 本店`, STORE_NAME],
+    ['2 バイト文字の位置に U+FFFD が 3 個', `Caf${FFFD.repeat(3)} 😀 テスト`, MIXED_NAME],
+    ['ASCII の位置に U+FFFD が 2 個（1 バイト文字は割れない）', `Ca${FFFD.repeat(2)}é 😀 テスト`, MIXED_NAME],
+    ['化けが 2 箇所', `テ${FFFD.repeat(3)}ト${FFFD.repeat(3)}堂 本店`, STORE_NAME],
+    ['U+FFFD が文字を置き換えず挿入されている', `テスト食${FFFD.repeat(3)}堂 本店`, STORE_NAME],
+    ['U+FFFD が 2 文字ぶんを置き換えている', `テスト${FFFD.repeat(3)} 本店`, STORE_NAME],
+    ['化けていない別の店名', 'べつの食堂', STORE_NAME],
+    ['1 文字違いの店名', 'テスト食堂 支店', STORE_NAME],
+    ['店名＋文言の段落', `${STORE_NAME}は休業中です`, STORE_NAME],
+  ])('mismatch（%s）', (_case, label, name) => {
+    expect(matchStoreLabel(label, name)).toBe('mismatch');
+  });
+
+  // 違う文字が化けた箇所の前にある場合と後ろにある場合の両方を置く（片側だけでは、もう片側の一致の判定を
+  // 外しても緑のまま残る）。
+  it.each([
+    ['化けた箇所より後ろ', 'テスト食堂 支店'],
+    ['化けた箇所より前', 'ベスト食堂 本店'],
+  ])('化けた箇所以外の文字も違う店名は mismatch（%s）', (_where, other) => {
+    expect(matchStoreLabel(splitDecode(other, 3, 1, 3), STORE_NAME)).toBe('mismatch');
+  });
+
+  it('店舗が見つからない 1 段落の画面の文言は、化けていても mismatch（#264 の防御を崩さない）', () => {
+    expect(matchStoreLabel(splitDecode(UNAVAILABLE, 3, 1, 3), STORE_NAME)).toBe('mismatch');
+  });
+});
+
 describe('verifyLhrs', () => {
   it('回答画面を測った 3 回は合格し、1 回ごとの行を出す', () => {
     const result = verifyLhrs(entries(lhr(), lhr(), lhr()), store, CONFIG);
@@ -236,6 +310,27 @@ describe('verifyLhrs', () => {
     const result = verifyLhrs(entries(lhr(), lhr(), lhr({ label: `${STORE_NAME}は休業中です` })), store, CONFIG);
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain('LCP 要素が seed の店名ではありません');
+  });
+
+  it('3 回のうち 1 回の LCP 要素が lhci の区切りで化けていても合格し、その 1 件だけを警告する（Issue #408）', () => {
+    const garbled = lhr({ label: splitDecode(STORE_NAME, 3, 1, 3) });
+    const result = verifyLhrs(entries(lhr(), garbled, lhr()), store, CONFIG);
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatch(/^lhr-1001\.json: /);
+    expect(result.warnings[0]).toContain('Issue #408');
+  });
+
+  it('化けていない結果では警告を出さない', () => {
+    expect(verifyLhrs(entries(lhr(), lhr(), lhr()), store, CONFIG).warnings).toEqual([]);
+  });
+
+  it('化けた箇所以外も違う LCP 要素は赤のままで、警告にしない', () => {
+    const result = verifyLhrs(entries(lhr(), lhr(), lhr({ label: splitDecode('テスト食堂 支店', 3, 1, 3) })), store, CONFIG);
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toContain('LCP 要素が seed の店名ではありません');
+    expect(result.warnings).toEqual([]);
   });
 
   it('LCP 要素の空白の揺れ（連続・前後）は同じ店名として読む', () => {
@@ -347,6 +442,19 @@ describe('main', () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain('3/3 件');
     expect(r.out).toContain(STORE_ID);
+  });
+
+  it('回答画面を測った結果では WARN: を出さない', () => {
+    const r = run(fixture([lhr(), lhr(), lhr()]));
+    expect(r.out).not.toContain('WARN:');
+  });
+
+  it('LCP 要素が lhci の区切りで化けた結果は 0 を返し、WARN: の行を出す（Issue #408）', () => {
+    const r = run(fixture([lhr(), lhr({ label: splitDecode(STORE_NAME, 3, 1, 3) }), lhr()]));
+    expect(r.err).toBe('');
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^WARN: lhr-1001\.json: /m);
+    expect(r.out).toContain('3/3 件');
   });
 
   it('1 段落の画面を測った結果なら 1 を返し、理由を出す', () => {
