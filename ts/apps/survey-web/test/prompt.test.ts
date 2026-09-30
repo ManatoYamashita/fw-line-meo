@@ -161,7 +161,8 @@ describe('buildPrompt', () => {
       const legacy: DraftMaterial = { storeName: '店', star: 1, aspectLabels: ['味'] };
       for (const m of [material(), material({ aspectLabels: [], comment: undefined }), legacy]) {
         const { systemInstruction } = buildPrompt(m, VARIATION);
-        expect(systemInstruction).toContain('来店のきっかけ・目的・来店前の期待・また来たいかどうかを書かない');
+        expect(systemInstruction).toContain('来店のきっかけ・目的・また来たいかどうかを書かない');
+        expect(systemInstruction).toContain('来店前の期待との比較で書かない');
         expect(systemInstruction).toContain('項目名の水準で良かった・気になったとだけ書く');
         expect(systemInstruction).toContain('具体的な様子・特徴・五感の描写を足さない');
       }
@@ -179,7 +180,7 @@ describe('buildPrompt', () => {
       const rule = both.systemInstruction.split('\n').find((l) => l.includes('良かった点と気になった点の両方にある'));
       expect(rule).toBeDefined();
       expect(rule).toContain('雰囲気');
-      expect(rule).toContain('中身を創作しない');
+      expect(rule).toContain('具体的にどのようなものだったかは書かない');
       // 素材ブロックではなく systemInstruction 側に置く（データと指示を混ぜない）。
       expect(both.userContent).not.toContain('両方にある');
     });
