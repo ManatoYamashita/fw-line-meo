@@ -163,16 +163,19 @@ describe('buildPrompt', () => {
         const { systemInstruction } = buildPrompt(m, VARIATION);
         expect(systemInstruction).toContain('来店のきっかけ・目的・また来たいかどうかを書かない');
         expect(systemInstruction).toContain('来店前の期待との比較で書かない');
-        expect(systemInstruction).toContain('項目名の水準で良かった・気になったとだけ書く');
+        expect(systemInstruction).toContain('選ばれた項目は項目名の水準で述べ');
         expect(systemInstruction).toContain('具体的な様子・特徴・五感の描写を足さない');
       }
     });
 
-    it('描写を禁じる規則の例は実在の観点名を書かない（書いた観点への言及を呼び込むため・#254）', () => {
+    it('描写を禁じる規則は実在の観点名も「良かった」「気になった」の枠も書かない（#254・#339 の実測）', () => {
       const { systemInstruction } = buildPrompt(material(), VARIATION);
       const rule = systemInstruction.split('\n').find((l) => l.includes('項目名の水準'));
       expect(rule).toBeDefined();
+      // 書いた観点への言及を呼び込む（#254）。
       expect(LABELS.filter((label) => rule!.includes(label))).toEqual([]);
+      // 良かった点が「なし」の素材で「良かった点は特にありませんでした」の断定を呼び込む（#339 の実測）。
+      expect(rule).not.toMatch(/良かった|気になった|気になる点/);
     });
 
     it('同じ観点を両群で選んだときだけ、両面があったことだけを書く規則をその観点の名前つきで出す', () => {
