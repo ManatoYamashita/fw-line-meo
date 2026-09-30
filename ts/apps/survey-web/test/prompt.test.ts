@@ -153,6 +153,84 @@ describe('buildPrompt', () => {
 
   // Issue #132・案C: 素材が乏しいとき、字数の指示が事実性と競合する。
   // 実測で「観点も一言も無い素材の方が下書きが長い」＝字数を満たすために創作していた。
+  // Issue #339: 選んだ観点だけの素材で、観点の具体的な属性と、アンケートが尋ねない来店前の期待・再訪の意向が補われた。
+  describe('選んだ観点の中身と来店の事情を補わせない（Issue #339）', () => {
+    const LABELS = Object.values(aspectsRaw.labels as Record<string, string>);
+
+    it('来店前の期待・再訪の意向と、選んだ項目への具体的な描写の追加を、どの素材でも禁じる', () => {
+      const legacy: DraftMaterial = { storeName: '店', star: 1, aspectLabels: ['味'] };
+      for (const m of [material(), material({ aspectLabels: [], comment: undefined }), legacy]) {
+        const { systemInstruction } = buildPrompt(m, VARIATION);
+        expect(systemInstruction).toContain('来店のきっかけ・目的・また来たいかどうかを書かない');
+        expect(systemInstruction).toContain('来店前の期待との比較で書かない');
+        expect(systemInstruction).toContain('選ばれた項目は項目名の水準で述べ');
+        expect(systemInstruction).toContain('具体的な様子・特徴・五感の描写を足さない');
+      }
+    });
+
+    it('描写を禁じる規則は実在の観点名も「良かった」「気になった」の枠も書かない（#254・#339）', () => {
+      const { systemInstruction } = buildPrompt(material(), VARIATION);
+      const rule = systemInstruction.split('\n').find((l) => l.includes('項目名の水準'));
+      expect(rule).toBeDefined();
+      // 書いた観点への言及を呼び込む（#254）。
+      expect(LABELS.filter((label) => rule!.includes(label))).toEqual([]);
+      // 2 つの枠を順に埋めさせると、良かった点が「なし」の素材で「良かった点は特にありませんでした」を呼ぶおそれがある。
+      expect(rule).not.toMatch(/良かった|気になった|気になる点/);
+    });
+
+    it('同じ観点を両群で選んだときだけ、両面があったことだけを書く規則をその観点の名前つきで出す', () => {
+      const both = buildPrompt(material({ star: 1, aspectLabels: ['雰囲気'], concernLabels: ['雰囲気'] }), VARIATION);
+      const rule = both.systemInstruction.split('\n').find((l) => l.includes('良かった点と気になった点の両方にある'));
+      expect(rule).toBeDefined();
+      expect(rule).toContain('雰囲気');
+      expect(rule).toContain('具体的にどのようなものだったかは書かない');
+      // 素材ブロックではなく systemInstruction 側に置く（データと指示を混ぜない）。
+      expect(both.userContent).not.toContain('両方にある');
+    });
+
+    it('重なっている観点だけを名指しする（片方の群にしか無い観点は含めない）', () => {
+      const { systemInstruction } = buildPrompt(
+        material({ star: 3, aspectLabels: ['味', '雰囲気'], concernLabels: ['味', '量'] }),
+        VARIATION,
+      );
+      const rule = systemInstruction.split('\n').find((l) => l.includes('良かった点と気になった点の両方にある'));
+      expect(rule?.endsWith(': 味')).toBe(true);
+    });
+
+    it('気になった点だけを選んだ素材では、良かった点に触れない規則を出す', () => {
+      const { systemInstruction, userContent } = buildPrompt(
+        material({ star: 2, aspectLabels: [], concernLabels: ['量'], comment: undefined }),
+        VARIATION,
+      );
+      expect(systemInstruction).toContain('良かった点は選ばれていないだけなので、良かった点に触れない');
+      expect(userContent).not.toContain('良かった点に触れない');
+    });
+
+    it('良かった点がある素材・観点が何も無い素材では、良かった点に触れない規則を出さない', () => {
+      const cases: DraftMaterial[] = [
+        material({ aspectLabels: ['味'], concernLabels: ['量'] }),
+        material({ aspectLabels: ['味'] }),
+        material({ aspectLabels: [], concernLabels: [], comment: undefined }),
+        { storeName: '店', star: 1, aspectLabels: [] },
+      ];
+      for (const m of cases) {
+        expect(buildPrompt(m, VARIATION).systemInstruction).not.toContain('良かった点に触れない');
+      }
+    });
+
+    it('重なりが無ければ両面の規則を出さない（気になった点が無い・別の観点・旧 sessionToken）', () => {
+      const cases: DraftMaterial[] = [
+        material({ aspectLabels: ['雰囲気'] }),
+        material({ aspectLabels: ['雰囲気'], concernLabels: ['味'] }),
+        material({ aspectLabels: [], concernLabels: ['雰囲気'] }),
+        { storeName: '店', star: 1, aspectLabels: ['雰囲気'] },
+      ];
+      for (const m of cases) {
+        expect(buildPrompt(m, VARIATION).systemInstruction).not.toContain('良かった点と気になった点の両方にある');
+      }
+    });
+  });
+
   describe('素材が乏しいときは字数より事実性を優先する（Issue #132・案C）', () => {
     it('観点が 1 つも選ばれていなければ短い字数帯を指示する', () => {
       const m: DraftMaterial = { storeName: '店', star: 5, aspectLabels: [] };
