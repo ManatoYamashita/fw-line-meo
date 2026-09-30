@@ -26,10 +26,12 @@ import {
   readEmbellishmentLexicon,
   type EmbellishmentClaim,
 } from '../src/lib/draft/embellishment';
+import { ABSENCE_CATEGORIES, detectAbsenceAssertions, readAbsenceLexicon, type AbsenceClaim } from '../src/lib/draft/absence';
 import lexiconRaw from '../src/lib/draft/aspect-lexicon.json';
 import visitLexiconRaw from '../src/lib/draft/visit-context-lexicon.json';
 import groundingLexiconRaw from '../src/lib/draft/material-grounding-lexicon.json';
 import embellishmentLexiconRaw from '../src/lib/draft/embellishment-lexicon.json';
+import absenceLexiconRaw from '../src/lib/draft/absence-lexicon.json';
 import aspectsRaw from './aspects.json';
 import datasetRaw from './dataset.json';
 
@@ -45,6 +47,7 @@ const lexicon = readLexicon(lexiconRaw);
 const visitLexicon = readVisitContextLexicon(visitLexiconRaw);
 const groundingLexicon = readGroundingLexicon(groundingLexiconRaw);
 const embellishmentLexicon = readEmbellishmentLexicon(embellishmentLexiconRaw);
+const absenceLexicon = readAbsenceLexicon(absenceLexiconRaw);
 const labels = aspectsRaw.labels as Record<string, string>;
 const RUNS = Number.parseInt(process.env.EVAL_RUNS ?? '3', 10);
 // 書き出しを 1 つに固定して流す（Issue #254: 候補ごとの創作率を同じ素材で比べるため）。
@@ -85,8 +88,10 @@ interface Sample {
   readonly visitClaims: readonly { category: string; matchedText: string }[];
   /** 星の数を数値で読み上げたか（「評価は5点」「5段階中2」。定型文の原因・Issue #254 のレビュー）。 */
   readonly starNarration: boolean;
-  /** 素材の「なし」を「良かった点は無かった」と断定したか（客が言っていない否定の創作）。 */
+  /** 選ばなかったことを「無かった」と断定したか（客が言っていない否定の創作・Issue #414 で良かった点以外へ広げた）。 */
   readonly absenceAssertion: boolean;
+  /** 断定の内訳（goodPoints / concerns / others・Issue #414）。 */
+  readonly absenceClaims: readonly AbsenceClaim[];
   /** 素材に無い固有名詞・数値・日付（Issue #222）。既存の軸とは別に、軸ごとに分けて数える。 */
   readonly groundingClaims: readonly GroundingClaim[];
   /** 自己照合の対照（下書き自身を一言として渡した結果）。構造的に空でなければ照合の経路が壊れている。 */
@@ -100,7 +105,8 @@ interface Sample {
 // 下書きの自然さ・事実性の副作用（Issue #254 のレビュー）。語彙ではなく形で数え、検出したものは確実に該当するよう狭く取る。
 // 先頭 10 字の重複率では捉えられない（先頭は店名になりやすい）ので、別に数える。
 // 星の数の読み上げ（STAR_NARRATION）は、数値の軸（Issue #222）と共有するため material-grounding.ts へ移した（文字列は同一）。
-const ABSENCE_ASSERTION = /(?:良かった|よかった|良い)(?:点|ところ)(?:は|が)?(?:特に|とくに)?(?:なく|なし|無く|無し|ありません|ない|見当たり)/;
+// 「無かった」の断定（旧 ABSENCE_ASSERTION）は、良かった点以外の不在へ広げて absence.ts へ移した（Issue #414）。
+// 旧パターンは goodPoints の最初のパターンとして文字列を変えずに残してある。
 
 /** 気になった点の code。省略した素材は「選ばなかった」として扱う（本番の validate と同じ）。 */
 function concernCodesOf(m: (typeof datasetRaw.materials)[number]): string[] {
@@ -175,6 +181,7 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             failures.push(`${material.id}#${run}: ${result.error.kind}`);
             continue;
           }
+          const absenceClaims = detectAbsenceAssertions(result.value, dm.comment, absenceLexicon);
           samples.push({
             materialId: material.id,
             storeNameKind: material.storeNameKind,
@@ -187,7 +194,8 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
             variation,
             visitClaims: detectVisitContextClaims(result.value, dm.comment, visitLexicon),
             starNarration: STAR_NARRATION.test(result.value),
-            absenceAssertion: ABSENCE_ASSERTION.test(result.value),
+            absenceAssertion: absenceClaims.length > 0,
+            absenceClaims,
             groundingClaims: detectUngroundedClaims(result.value, groundingSourceOf(dm), groundingLexicon),
             groundingSelfCheck: detectUngroundedClaims(
               result.value,
@@ -258,7 +266,16 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       const absentN = samples.filter((s) => s.absenceAssertion).length;
       console.log('\n--- 星の数の読み上げ・「無かった」の断定（Issue #254）---');
       console.log(`  星の数の読み上げ: ${starN} / ${samples.length}（${pct(starN, samples.length)}）`);
-      console.log(`  「良かった点は無かった」の断定: ${absentN} / ${samples.length}（${pct(absentN, samples.length)}）`);
+      console.log(`  「無かった」の断定: ${absentN} / ${samples.length}（${pct(absentN, samples.length)}）`);
+      // 内訳（Issue #414）。goodPoints の最初のパターンだけが、#414 より前の「良かった点は無かった」の軸と同じ物差しである。
+      for (const category of ABSENCE_CATEGORIES) {
+        const n = samples.filter((s) => s.absenceClaims.some((c) => c.category === category)).length;
+        console.log(`    ${category.padEnd(12)} ${n} / ${samples.length}（${pct(n, samples.length)}）`);
+      }
+      const absentExamples = samples.filter((s) => s.absenceAssertion).slice(0, 3);
+      for (const s of absentExamples) {
+        console.log(`    [${s.materialId}] ${s.absenceClaims.map((c) => `${c.category}(${c.matchedText})`).join(', ')}`);
+      }
 
       // 変動要素の候補ごとの内訳（Issue #254）。候補の指示が素材に無い情報を求めていれば、
       // その候補だけ創作率が跳ねる。全体の率だけでは、どの候補が原因かを言えない。
