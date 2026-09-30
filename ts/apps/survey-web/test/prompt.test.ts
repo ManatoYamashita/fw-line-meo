@@ -37,7 +37,7 @@ describe('buildPrompt', () => {
       expect(systemInstruction).toContain('選ばれていない項目には触れない');
       expect(systemInstruction).toContain('何かが無かったという文も書かない');
       // 締めくくりの埋め方を素材の側に用意する（禁止の列挙だけでは余白を別の型が埋める・Issue #414）。
-      expect(systemInstruction).toContain('締めくくりは、全体の評価の高低を言葉で述べ直して終える');
+      expect(systemInstruction).toContain('締めくくりは、全体としてどのくらい満足したか');
     }
   });
 
