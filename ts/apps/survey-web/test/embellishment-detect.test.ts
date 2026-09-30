@@ -83,6 +83,8 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     { text: '素材の旨みが感じられました。', category: 'attribute:taste' },
     { text: 'とても香り高い一杯でした。', category: 'attribute:taste' },
     { text: '店員さんの笑顔が印象的でした。', category: 'attribute:service' },
+    { text: '笑顔で迎えてくれました。', category: 'attribute:service' },
+    { text: '気さくに話しかけてくれました。', category: 'attribute:service' },
     { text: 'メニューを丁寧に説明してくれました。', category: 'attribute:service' },
     { text: 'ご飯がたっぷり盛られていました。', category: 'attribute:volume' },
     { text: '床までピカピカでした。', category: 'attribute:cleanliness' },
@@ -129,6 +131,10 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     // 評価の言い換え（丁寧・親切・リーズナブル）は属性として数えない（語彙の設計方針）。
     '丁寧で親切な接客でした。',
     'リーズナブルな価格でした。',
+    // #339 の実測で見つかった誤検出。味の描写を雰囲気の属性と、客の反応を接客の属性と数えていた。
+    // （「洗練された味わい」は味の属性として数えるべきだが、雰囲気の分類へ入れないことをここで固定する）
+    '洗練された味わいでした。',
+    '一口食べるごとに思わず笑顔になるような美味しさでした。',
   ];
 
   it.each(NEGATIVE)('拾ってはならない形を拾わない: %s', (text) => {
