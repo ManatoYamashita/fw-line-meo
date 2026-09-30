@@ -56,7 +56,7 @@ Google Chrome の R3 の赤は、#378 で Aside に起きたものと症状が�
 - Lighthouse は「店舗が見つからない 1 段落の画面」でも合格しうるので、lhci の後に `perf/verify-lhr.mjs` で測った画面を確かめる。見るのは次の 4 つで、判定の中身は `perf/lhr-verification.mjs` の 1 箇所にある
   - 結果の件数が lighthouserc.json の回数ちょうどであること
   - URL が seed の店舗の回答画面であること
-  - LCP 要素が seed の店名であること。lhci が標準出力の区切りで 1 文字を U+FFFD に化けさせた形（その 1 文字の UTF-8 のバイト数までの 2 個以上の連続が 1 箇所）だけは通し、`WARN:` の行を出す（#408）。この行が出なくなれば、上流の lhci が直っている
+  - LCP 要素が seed の店名であること。lhci が標準出力の区切りで 1 文字を U+FFFD に化けさせた形（その 1 文字の UTF-8 のバイト数までの 2 個以上の連続が 1 箇所）だけは通し、`WARN:` の行を出す（#408）。化けは測定 180 回に 1 回なので、`WARN:` が出ないことは上流が直った証拠にならない。許容の撤去は、上流の修正が `@lhci/cli@0.15.x` の範囲で公開された（または ts-ci の版の指定を上げた）後に、その版の `src/collect/node-runner.js` を読んで判断する（#410）
   - 回答フォームの accessibility の監査（`button-name`・`label`）が評価されていること
 
 結果は最後の表で層ごとに読む。Playwright の想定内の失敗（`test.fail`）は ✘ と表示されるが、passed に数えられる。✘ の有無ではなく、層の PASS / FAIL と件数で判断すること。
