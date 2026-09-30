@@ -18,9 +18,9 @@ import type { ApiResult } from '../src/lib/api';
 
 // api.ts は './firebase' を取り込むため、モジュールごと差し替えて実 SDK を発火させない
 // （store-qr-panel.test.tsx と同規約）。
-vi.mock('../src/lib/api', () => ({ suspendStore: vi.fn(), resumeStore: vi.fn() }));
+const api = vi.hoisted(() => ({ suspendStore: vi.fn(), resumeStore: vi.fn() }));
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
-import { resumeStore, suspendStore } from '../src/lib/api';
 import { StoreSuspensionControl } from '../src/app/stores/store-suspension-control';
 
 // jsdom 25 は PointerEvent を実装していない（ui の alert-dialog.test.tsx と同じ理由の最小互換）。
@@ -39,8 +39,8 @@ const SUSPENDED_AT = '2026-09-23T01:00:00.000Z';
 
 type SuspensionValue = { id: string; suspendedAt: string | null };
 
-const suspendMock = vi.mocked(suspendStore);
-const resumeMock = vi.mocked(resumeStore);
+const suspendMock = api.suspendStore;
+const resumeMock = api.resumeStore;
 
 function ok(suspendedAt: string | null): ApiResult<SuspensionValue> {
   return { ok: true, value: { id: STORE_ID, suspendedAt } };

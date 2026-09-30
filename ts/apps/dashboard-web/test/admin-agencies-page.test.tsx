@@ -34,7 +34,7 @@ const api = vi.hoisted(() => ({
   getAgencies: vi.fn(),
   createAgency: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import AdminAgenciesPage from '../src/app/admin/agencies/page';
 

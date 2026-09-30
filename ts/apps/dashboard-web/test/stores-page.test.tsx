@@ -44,7 +44,7 @@ const api = vi.hoisted(() => ({
   suspendStore: vi.fn(),
   resumeStore: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import StoresPage from '../src/app/stores/page';
 import { announcedText, ownText } from './live-region';
@@ -368,7 +368,10 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     await screen.findByText('鳥貴族 渋谷店');
 
     fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    const dialog = await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    // 解放を確かめるには、先に表示資源が作られている必要がある。画像の取得が届く前に閉じると
+    // 資源は作られず、解放の表明が空振りする（Issue #298）。
+    await within(dialog).findByRole('img', { name: /鳥貴族 渋谷店/ });
     fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
@@ -419,7 +422,9 @@ describe('店舗一覧ページ: QR 発行導線', () => {
 
     const trigger = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ });
     fireEvent.click(trigger);
-    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    const dialog = await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    // 解放を確かめるには、先に表示資源が作られている必要がある（理由は上の検査と同じ）。
+    await within(dialog).findByRole('img', { name: /鳥貴族 渋谷店/ });
 
     fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
