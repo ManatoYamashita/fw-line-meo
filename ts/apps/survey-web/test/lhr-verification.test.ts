@@ -262,8 +262,13 @@ describe('matchStoreLabel', () => {
     expect(matchStoreLabel(label, name)).toBe('mismatch');
   });
 
-  it('化けた箇所以外の文字も違う店名は mismatch', () => {
-    expect(matchStoreLabel(splitDecode('テスト食堂 支店', 3, 1, 3), STORE_NAME)).toBe('mismatch');
+  // 違う文字が化けた箇所の前にある場合と後ろにある場合の両方を置く（片側だけでは、もう片側の一致の判定を
+  // 外しても緑のまま残る）。
+  it.each([
+    ['化けた箇所より後ろ', 'テスト食堂 支店'],
+    ['化けた箇所より前', 'ベスト食堂 本店'],
+  ])('化けた箇所以外の文字も違う店名は mismatch（%s）', (_where, other) => {
+    expect(matchStoreLabel(splitDecode(other, 3, 1, 3), STORE_NAME)).toBe('mismatch');
   });
 
   it('店舗が見つからない 1 段落の画面の文言は、化けていても mismatch（#264 の防御を崩さない）', () => {
