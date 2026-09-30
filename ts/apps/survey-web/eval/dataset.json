@@ -19,7 +19,11 @@
     "  - 気になった点（Issue #221）は concernCodes で持つ（省略した素材は「選ばなかった」扱い）。本番と同じく、",
     "    良かった点・気になった点の *どちらにも入っていない* 観点だけを「選ばれなかった軸」として禁止・検出する。",
     "    気になった点だけの素材は観点ありの字数規則に入るので、薄い素材で具体を創作しないかを見る。",
-    "    高評価で気になった点を 1 つ選んだ素材と、同じ観点を両群で選んだ素材も置く。"
+    "    高評価で気になった点を 1 つ選んだ素材と、同じ観点を両群で選んだ素材も置く。",
+    "  - atmosphere-both-sides-star1 は Issue #339 の本番 E2E の再現ケース（星 1・雰囲気を両群・一言なし）。",
+    "    本番の店名は検証用テナントのものなので使わず、業態（COFFEE）と立地の語を含む架空の店名に置き換えた。",
+    "    観点が 1 つでも厚い素材（100〜200 字）と判定される。同じ厚みの対照は taste-only-star5 / service-only-star4 /",
+    "    taste-both-sides-star3。選んだ観点の属性・来店前の期待・再訪の意向を補うかは第四の軸（embellishment）で測る。"
   ],
   "materials": [
     {
@@ -218,6 +222,19 @@
       ],
       "concernCodes": [
         "taste"
+      ],
+      "comment": null
+    },
+    {
+      "id": "atmosphere-both-sides-star1",
+      "storeName": "MINAMO COFFEE 駅前店",
+      "storeNameKind": "fictional",
+      "star": 1,
+      "aspectCodes": [
+        "atmosphere"
+      ],
+      "concernCodes": [
+        "atmosphere"
       ],
       "comment": null
     }
