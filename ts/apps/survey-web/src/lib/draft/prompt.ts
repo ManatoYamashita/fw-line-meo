@@ -225,6 +225,14 @@ export function buildPrompt(material: DraftMaterial, variation: VariationSeed): 
   // 本番 E2E では「開放的で落ち着いた雰囲気」「期待していた通りには過ごせなかった」のように、両面の中身を
   // 素材の外から補った。両面があったという事実だけを書かせる。重なりが無ければ行自体を出さない。
   const bothSides = material.aspectLabels.filter((label) => concerns.includes(label));
+
+  // 気になった点だけを選んだ素材（Issue #339）。来店前の期待を書かせない規則を足すと、この素材では
+  // 余白を「良かった点は特にありませんでした」で埋める下書きが出た（上の一般の規則があっても 3/331）。
+  // 選ばなかったことは無かったことではないので、この素材に限って名指しで書き方を示す。
+  const concernOnlyRule =
+    material.aspectLabels.length === 0 && concerns.length > 0
+      ? '\n- 良かった点は選ばれていないだけなので、良かった点に触れない（「良かった点は特になかった」とも書かない）。気になった点と評価の高低だけで書く'
+      : '';
   const bothSidesRule =
     bothSides.length > 0
       ? `\n- 次の項目は良かった点と気になった点の両方にある。その項目には良い面と気になる面の両方があったことだけを書き、それぞれが具体的にどのようなものだったかは書かない: ${bothSides.join('、')}`
@@ -258,6 +266,7 @@ export function buildPrompt(material: DraftMaterial, variation: VariationSeed): 
     ].join('\n') +
     forbidden +
     bothSidesRule +
+    concernOnlyRule +
     concernRule;
 
   // comment 内にデリミタ・トークン自体が含まれるとデータブロックを早期クローズし得るため除去する

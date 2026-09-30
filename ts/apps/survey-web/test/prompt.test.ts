@@ -197,6 +197,27 @@ describe('buildPrompt', () => {
       expect(rule?.endsWith(': 味')).toBe(true);
     });
 
+    it('気になった点だけを選んだ素材では、良かった点に触れない規則を出す', () => {
+      const { systemInstruction, userContent } = buildPrompt(
+        material({ star: 2, aspectLabels: [], concernLabels: ['量'], comment: undefined }),
+        VARIATION,
+      );
+      expect(systemInstruction).toContain('良かった点は選ばれていないだけなので、良かった点に触れない');
+      expect(userContent).not.toContain('良かった点に触れない');
+    });
+
+    it('良かった点がある素材・観点が何も無い素材では、良かった点に触れない規則を出さない', () => {
+      const cases: DraftMaterial[] = [
+        material({ aspectLabels: ['味'], concernLabels: ['量'] }),
+        material({ aspectLabels: ['味'] }),
+        material({ aspectLabels: [], concernLabels: [], comment: undefined }),
+        { storeName: '店', star: 1, aspectLabels: [] },
+      ];
+      for (const m of cases) {
+        expect(buildPrompt(m, VARIATION).systemInstruction).not.toContain('良かった点に触れない');
+      }
+    });
+
     it('重なりが無ければ両面の規則を出さない（気になった点が無い・別の観点・旧 sessionToken）', () => {
       const cases: DraftMaterial[] = [
         material({ aspectLabels: ['雰囲気'] }),
