@@ -132,6 +132,8 @@ rm -f /tmp/gk   # 使い終わったら必ず消す
 
 案B は Issue #413 で、来店前の期待（`embellishment.ts` の `expectation`）と「無かった」の断定（`absence.ts`）へ広げた。いずれかを検出したら 1 回だけ作り直し、残れば `fabrication_residual` として記録する（未選択の観点の `factuality_residual` とは事象名を分けた）。
 
+実測（2026-09-30・事後検証あり・246 件）では、来店前の期待が 6 → 0、断定が 4 → 0 になった。作り直しの発生は約 4.9% である（`.kiro/specs/review-acquisition/tasks.md` の「Issue #413 の実測記録」）。
+
 `EVAL_POSTCHECK=0` で案B だけを外せる（広げた分も含めて外れる）。**案A 単体と案A+B を同じデータセットで測り分けられる**ようにしてあるのは、どちらがどれだけ効いているかを後から分離できなくなるのを避けるため。
 
 ## 結果の扱い
