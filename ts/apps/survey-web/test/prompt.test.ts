@@ -36,6 +36,8 @@ describe('buildPrompt', () => {
       // Issue #414: 不在の断定の形を名指しする（どの素材でも出す）。
       expect(systemInstruction).toContain('選ばれていない項目には触れない');
       expect(systemInstruction).toContain('何かが無かったという文も書かない');
+      // 書いてよいものの側を列挙する（禁止の列挙だけでは余白を別の型が埋める・Issue #414）。
+      expect(systemInstruction).toContain('評価の高低・選ばれた項目・一言の中身の 3 つだけ');
     }
   });
 
