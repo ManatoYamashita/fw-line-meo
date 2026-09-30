@@ -3,7 +3,7 @@ import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
-import { logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
+import { logFabricationResidual, logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
 import { handleDrafts, type DraftsDeps } from './handler';
 import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation } from '@fwlm/observability';
 
@@ -20,6 +20,7 @@ async function buildDeps(): Promise<DraftsDeps> {
     // 再生成 API も同じ生成器を通るので、事後検証は配線を足さずに効く（Issue #132・案B）。
     generator: await createDefaultDraftGenerator({
       onResidual: (aspectCodes) => logFactualityResidual(writeStructuredLog, aspectCodes),
+      onClaimResidual: (categories) => logFabricationResidual(writeStructuredLog, categories),
     }),
     rateLimiter: createRateLimiter({ limit: 20, windowMs: 60_000 }),
     findStore: async (id) => findStoreForSurvey(await getPool(), id),

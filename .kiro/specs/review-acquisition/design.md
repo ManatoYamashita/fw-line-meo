@@ -347,6 +347,7 @@ interface DraftGenerator {
 - 設定: `model = env GEMINI_MODEL`（既定 `gemini-3.1-flash-lite`）・`temperature 1.0`・seed 非固定・`responseMimeType: application/json` + `responseSchema {draft: string}`・safetySettings 4 カテゴリ `BLOCK_MEDIUM_AND_ABOVE`・`maxOutputTokens` 上限
 - 再試行: 429/5xx に指数バックオフ 1 回。以後 `API_ERROR`
 - 出力検証: 非空・400 字以内・JSON スキーマ準拠。違反は `INVALID_OUTPUT`（クライアントは再試行可能）
+- 事後検証: 生成後に、選んでいない観点への言及（Issue #132）、来店前の期待、選ばなかったことを「無かった」と書く断定（Issue #413）を検出したら、1 回だけ作り直す。作り直しても残れば下書きは返し、`factuality_residual`（観点）と `fabrication_residual`（期待・断定）として記録する（客の投稿導線を止めない）。再訪の意向と観点の属性は、発生が多く境界が曖昧なので、作り直しの引き金にしない（eval で測る）
 
 #### PromptBuilder
 - systemInstruction: 「素材に含まれる事実のみ・誇張禁止・公序良俗・気になった点がある／星 1–2 のときは不満の事実を薄めず、誹謗中傷・人格攻撃・過剰な悪口を書かない・日本語 100〜200 字」（Issue #221 で旧「低評価時は節度」を改めた。トーンを製品側で下げる指示は、否定的な事実を薄める方向にも効くため）

@@ -5,7 +5,12 @@ import type { SessionTokenService } from '../../../lib/session-token';
 import type { SurveyStoreView } from '../responses/handler';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
-import { logFactualityResidual, logGenerationFailure, type SurveyLogger } from '../../../lib/structured-log';
+import {
+  logFabricationResidual,
+  logFactualityResidual,
+  logGenerationFailure,
+  type SurveyLogger,
+} from '../../../lib/structured-log';
 
 // 再生成 API の中核ロジック（依存注入でテスト可能）。
 // 集計には一切触れず、attempt は生成成功時のみ +1、上限到達で 409。
@@ -63,6 +68,7 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
     material,
     pickVariation(material),
     (aspectCodes) => logFactualityResidual(deps.log, aspectCodes),
+    (categories) => logFabricationResidual(deps.log, categories),
   );
 
   if (!gen.ok) {

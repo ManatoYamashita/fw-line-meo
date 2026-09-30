@@ -55,6 +55,7 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 事後検証で残った未選択観点 | `violatedAspects` | 該当なし | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 観点の識別子のみ。下書き本文・一言・生成指示は載せない |
+| 事後検証で残った来店前の期待・「無かった」の断定 | `residualClaims` | 該当なし | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 分類名（`expectation` / `absence:<分類>`）のみ（Issue #413）。下書き本文・一言・生成指示は載せない |
 
 ### 1.5 店舗詳細面に固有の項目
 
@@ -149,6 +150,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62）。**変更禁止**: 本番の集計指標がこの文字列で生成失敗を数え、1 件でも出ればアラートが鳴る（`infra/modules/guardrails/main.tf` の `generation_failures`・Issue #394）。ラベルに写すのは `errorKind` と `status` だけである |
 | `generation_safety_blocked` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `factuality_residual` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
+| `fabrication_residual` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 事後検証（Issue #413）で作り直しても残った来店前の期待と「無かった」の断定。`factuality_residual` の意味（未選択の観点だけ）を変えないため事象名を分けた。項目は `residualClaims` だけである |
 | `tally_failed` | survey-web | 既存 | `ts/apps/survey-web/src/app/api/responses/handler.ts` | 集計の失敗は客へ転嫁しない（要件 5.4 の思想）。記録だけ残す |
 | `review_link_tally_failed` | survey-web | 新規 | `ts/apps/survey-web/src/app/api/review-link-opened/handler.ts` | 投稿導線の押下の月次集計（`survey_review_link_tallies`・Issue #401）への加算の失敗。`tally_failed` と同じく客へ転嫁せず記録だけ残す。項目は持たない。同じ要求の `survey_review_link_opened` は加算より先に出るので、両者の乖離が集計障害の検知になる |
 | `store-detail.config_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |

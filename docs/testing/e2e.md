@@ -156,7 +156,7 @@ PROJECT_ID=gen-fw-line-meo make e2e-prod-checks
 - 選んだ観点の意味のすり替え（評価を来店の動機に変える など）
 - 選んでいない観点への言及
 
-本番の事後検証（`ts/apps/survey-web/src/lib/draft/factuality.ts` の検出器で作り直す）が見るのは、最後の型だけである。ほかの型のいくつかは eval の検出器で下限を測っている（`ts/apps/survey-web/eval/README.md`）が、本番では検出されない。本番の下書きでは人の目で突き合わせる。
+本番の事後検証（`ts/apps/survey-web/src/lib/draft/generator.ts` で検出したら 1 回作り直す）が見るのは、選んでいない観点への言及、来店前の期待、選ばなかったことを「無かった」と書く断定の 3 つだけである（後の 2 つは Issue #413）。ほかの型のいくつかは eval の検出器で下限を測っている（`ts/apps/survey-web/eval/README.md`）が、本番では検出されない。どの型も検出は下限なので、本番の下書きでは人の目で突き合わせる。
 
 ### 4-6. 表示値の確認
 
