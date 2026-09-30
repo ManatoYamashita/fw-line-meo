@@ -168,13 +168,13 @@ describe('buildPrompt', () => {
       }
     });
 
-    it('描写を禁じる規則は実在の観点名も「良かった」「気になった」の枠も書かない（#254・#339 の実測）', () => {
+    it('描写を禁じる規則は実在の観点名も「良かった」「気になった」の枠も書かない（#254・#339）', () => {
       const { systemInstruction } = buildPrompt(material(), VARIATION);
       const rule = systemInstruction.split('\n').find((l) => l.includes('項目名の水準'));
       expect(rule).toBeDefined();
       // 書いた観点への言及を呼び込む（#254）。
       expect(LABELS.filter((label) => rule!.includes(label))).toEqual([]);
-      // 良かった点が「なし」の素材で「良かった点は特にありませんでした」の断定を呼び込む（#339 の実測）。
+      // 2 つの枠を順に埋めさせると、良かった点が「なし」の素材で「良かった点は特にありませんでした」を呼ぶおそれがある。
       expect(rule).not.toMatch(/良かった|気になった|気になる点/);
     });
 
