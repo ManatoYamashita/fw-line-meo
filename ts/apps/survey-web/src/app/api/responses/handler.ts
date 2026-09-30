@@ -9,6 +9,7 @@ import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
 import {
   logGenerationFailure,
+  logFabricationResidual,
   logFactualityResidual,
   logSurveyResponseSubmitted,
   type SurveyLogger,
@@ -135,6 +136,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
     material,
     pickVariation(material),
     (aspectCodes) => logFactualityResidual(deps.log, aspectCodes),
+    (categories) => logFabricationResidual(deps.log, categories),
   );
   const [, gen] = await Promise.all([tally, generation]);
 

@@ -56,6 +56,7 @@ const PLAIN_FIELDS = [
   'auditTargetId',
   'lineRequestId',
   'violatedAspects',
+  'residualClaims',
   'reason',
   'authorizedCount',
   'currentJstHour',

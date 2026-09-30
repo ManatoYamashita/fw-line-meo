@@ -5,7 +5,8 @@
 // 立ち寄りました」「雰囲気を目当てに訪れましたが」が生成された。既存の detectAspectMentions
 // （factuality.ts）は「客が選ばなかった評価軸への言及」しか見ないため、この型は 1 件も拾えなかった。
 //
-// この関数は実 API を呼ばない。評価（eval/）から使う。検出器自身の正しさは
+// この関数は実 API を呼ばない。この分類（来店の経緯・動機）の語彙は評価（eval/）から使う。検出の関数そのものは、
+// embellishment.ts と absence.ts が別の語彙で再利用し、そちらは本番の事後検証にも入る（Issue #413）。検出器自身の正しさは
 // test/visit-context-detect.test.ts が検証する（実 API 不要・CI で常時実行）。
 
 export interface VisitContextLexicon {

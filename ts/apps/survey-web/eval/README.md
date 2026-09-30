@@ -108,8 +108,8 @@ rm -f /tmp/gk   # 使い終わったら必ず消す
 | `../test/visit-context-detect.test.ts` | 第二の軸の検出器の検証。観測済みの下書き・陽性例・否定例・全パターンの発火を固定する |
 | `../src/lib/draft/material-grounding.ts` ／ `material-grounding-lexicon.json` | 第三の軸（素材に無い固有名詞・数値・日付）の検出と語彙（Issue #222）。星の数の読み上げの正規表現 `STAR_NARRATION` もここに置く（数値の軸と共有するため） |
 | `../test/material-grounding-detect.test.ts` | 第三の軸の検出器の検証。観測済みの下書き・軸ごとの陽性例と否定例・全パターンと全語彙の発火・一言による除外の対照・自己照合の対照を固定する |
-| `../src/lib/draft/embellishment.ts` ／ `embellishment-lexicon.json` | 第四の軸（素材の外から補った属性・事前の期待・再訪の意向）の検出と語彙（Issue #339）。検出は第二の軸の関数を使い、分類名の約束（`attribute:<観点>`）と店名の除去だけを持つ |
-| `../src/lib/draft/absence.ts` ／ `absence-lexicon.json` | 「無かった」の断定の検出と語彙（Issue #414）。検出は第二の軸の関数を使い、分類の約束だけを持つ |
+| `../src/lib/draft/embellishment.ts` ／ `embellishment-lexicon.json` | 第四の軸（素材の外から補った属性・事前の期待・再訪の意向）の検出と語彙（Issue #339）。検出は第二の軸の関数を使い、分類名の約束（`attribute:<観点>`）と店名の除去だけを持つ。**`expectation` の分類は本番の事後検証にも入る**（Issue #413） |
+| `../src/lib/draft/absence.ts` ／ `absence-lexicon.json` | 「無かった」の断定の検出と語彙（Issue #414）。検出は第二の軸の関数を使い、分類の約束だけを持つ。**本番の事後検証にも入る**（Issue #413） |
 | `../test/absence-detect.test.ts` | 断定の検出器の検証。本番の観測例・分類ごとの陽性例と否定例・全パターンの発火・一言による除外・当初のパターンの文字列を固定する |
 | `../test/embellishment-detect.test.ts` | 第四の軸の検出器の検証。#339 の観測例・分類ごとの陽性例と否定例・全パターンの発火・観点ごとの一言の除外・店名の除去を固定する |
 
@@ -130,7 +130,11 @@ rm -f /tmp/gk   # 使い終わったら必ず消す
 | 案A | 客が選ばなかった観点をプロンプトで名指し禁止する | `src/lib/draft/prompt.ts` |
 | 案B | 生成後に言及を検出したら **1 回だけ**作り直す。なお残れば下書きは返しログに記録 | `src/lib/draft/generator.ts` |
 
-`EVAL_POSTCHECK=0` で案B だけを外せる。**案A 単体と案A+B を同じデータセットで測り分けられる**ようにしてあるのは、どちらがどれだけ効いているかを後から分離できなくなるのを避けるため。
+案B は Issue #413 で、来店前の期待（`embellishment.ts` の `expectation`）と「無かった」の断定（`absence.ts`）へ広げた。いずれかを検出したら 1 回だけ作り直し、残れば `fabrication_residual` として記録する（未選択の観点の `factuality_residual` とは事象名を分けた）。
+
+実測（2026-09-30・事後検証あり・246 件）では、来店前の期待が 6 → 0、断定が 4 → 0 になった。作り直しの発生は約 4.9% である（`.kiro/specs/review-acquisition/tasks.md` の「Issue #413 の実測記録」）。
+
+`EVAL_POSTCHECK=0` で案B だけを外せる（広げた分も含めて外れる）。**案A 単体と案A+B を同じデータセットで測り分けられる**ようにしてあるのは、どちらがどれだけ効いているかを後から分離できなくなるのを避けるため。
 
 ## 結果の扱い
 

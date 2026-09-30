@@ -68,6 +68,11 @@ export interface LogFields {
 
   /** 事後検証で残った未選択観点の識別子。下書き本文・一言・生成指示は載せない。 */
   readonly violatedAspects?: string;
+  /**
+   * 事後検証で残った来店前の期待・「無かった」の断定の分類（`expectation` / `absence:<分類>`・Issue #413）。
+   * 有限集合の識別子だけで、下書き本文・一言・生成指示は載せない。
+   */
+  readonly residualClaims?: string;
 
   // --- 店舗詳細面 ---
 

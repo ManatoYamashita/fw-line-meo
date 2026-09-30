@@ -9,8 +9,9 @@
 // 形式と意味論は visit-context と同じである（分類ごとの正規表現と、一言に同じ分類の事情があれば数えない除外）。
 // 検出ロジックは visit-context のものをそのまま使い、ここでは語彙と、分類名の約束だけを持つ。
 //
-// この関数は実 API を呼ばない。評価（eval/）から使う。本番の事後検証には使わない（Issue #339 の合意:
-// 属性の語彙の誤検出率が分かる前に作り直しの引き金にしない）。検出器自身の正しさは
+// この関数は実 API を呼ばない。評価（eval/）と、本番の事後検証（generator.ts）の両方から使う。
+// 本番で作り直しの引き金にするのは `expectation`（来店前の期待）の分類だけである（Issue #413）。再訪の意向と
+// 観点の属性は発生が多く、属性は言い換えとの境界が曖昧なので、eval で測るだけにしている。検出器自身の正しさは
 // test/embellishment-detect.test.ts が検証する（実 API 不要・CI で常時実行）。
 
 import { detectVisitContextClaims, readVisitContextLexicon, type VisitContextLexicon } from './visit-context';
