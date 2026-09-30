@@ -33,6 +33,9 @@ describe('buildPrompt', () => {
       const { systemInstruction } = buildPrompt(m, VARIATION);
       expect(systemInstruction).toContain('星の評価を数値');
       expect(systemInstruction).toContain('「無かった」「特になかった」と書かない');
+      // Issue #414: 不在の断定の形を名指しする（どの素材でも出す）。
+      expect(systemInstruction).toContain('選ばれていない項目には触れない');
+      expect(systemInstruction).toContain('何かが無かったという文も書かない');
     }
   });
 
