@@ -477,6 +477,52 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     expect(body.error.code).toBe('email_conflict');
   });
 
+  it('登録: 他運営の代理店と不在の代理店は同じ 404 agency_not_found で、利用者も監査も増えない（Issue #260・Req 4.4）', async () => {
+    const app = buildApp();
+    const pool = await getPool();
+    const otherOperatorEmail = 'f5-create-op2-agency@example.com';
+    const missingEmail = 'f5-create-missing-agency@example.com';
+    const createdAuditCount = async (): Promise<number> => {
+      const res = await pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE action = 'dashboard_user_created'",
+      );
+      return res.rows[0]?.n ?? 0;
+    };
+    await insertOp2Agency();
+    try {
+      const auditBefore = await createdAuditCount();
+      const otherOperator = await app.request('/dashboard-users', {
+        method: 'POST',
+        headers: h(OP_TOKEN),
+        body: JSON.stringify({ role: 'agency', agencyId: EDIT_OP2_AGENCY, email: otherOperatorEmail }),
+      });
+      const missing = await app.request('/dashboard-users', {
+        method: 'POST',
+        headers: h(OP_TOKEN),
+        body: JSON.stringify({ role: 'agency', agencyId: EDIT_MISSING_AGENCY, email: missingEmail }),
+      });
+      // 複合 FK（fk_dashboard_agency_operator）の違反を 500 にせず、入力の誤りとして返す。
+      expect(otherOperator.status).toBe(404);
+      expect(missing.status).toBe(404);
+      const otherOperatorBody = (await otherOperator.json()) as { error: { code: string } };
+      const missingBody = (await missing.json()) as { error: { code: string } };
+      expect(otherOperatorBody.error.code).toBe('agency_not_found');
+      // 存在しない代理店と他運営の代理店を区別できない同一の応答にする（編集の経路と同じ契約）。
+      expect(otherOperatorBody).toEqual(missingBody);
+
+      const rows = await pool.query('SELECT 1 FROM dashboard_users WHERE email = ANY($1::text[])', [
+        [otherOperatorEmail, missingEmail],
+      ]);
+      expect(rows.rowCount).toBe(0);
+      expect(await createdAuditCount()).toBe(auditBefore);
+    } finally {
+      await pool.query('DELETE FROM dashboard_users WHERE email = ANY($1::text[])', [
+        [otherOperatorEmail, missingEmail],
+      ]);
+      await pool.query('DELETE FROM agencies WHERE id = $1', [EDIT_OP2_AGENCY]);
+    }
+  });
+
   it('回帰: 無効化中の利用者は /me で 403 forbidden（Req 3.3・findByAuthSubject の disabled）', async () => {
     const app = buildApp();
     const res = await app.request('/me', { headers: h(DU_DISABLED_LOGIN_TOKEN) });
