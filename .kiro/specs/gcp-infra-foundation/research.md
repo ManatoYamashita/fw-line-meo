@@ -78,6 +78,7 @@
 - 対照実験の結果: apply の前は、ブランチ `contrast/wif-ref-331` に置いた `deploy.yml` から偽装でき、本番の Cloud Run を読めた（run 37268503463 の attempt 1）。apply の約 7 分後に同じ run を再実行すると、`iam.serviceAccounts.getAccessToken` が `PERMISSION_DENIED` で拒否された（attempt 2）。同じ時刻に main から dispatch した deploy-prod（run 37269295398）は成功しており、拒否が IAM の反映待ちでないことの対照になっている
 - 縮小後も、drift 検証の 5 本（prod-image-drift・monitoring-drift・secret-version-drift・external-api-liveness・gcp-auth-smoke）は main からの dispatch ですべて緑だった
 - `job_workflow_ref`（ワークフローのファイルまで限る属性）は採らなかった。値が `@` を含み、principalSet の属性値に使えることを一次情報で確かめられなかったためである。main で走るワークフローはレビュー済みのコードなので、ref で限れば「任意のブランチから本番へ書き込める」穴は塞がる
+- 同日に Issue #426 で、本番スキーマ検証の SA `gha-schema-drift` の偽装も同じ主体（`attribute.ref/refs/heads/main`）に限った。apply の前はブランチ `contrast/schema-drift-ref-426` から偽装でき（run 37273809569 の attempt 1）、apply の約 7 分後の再実行は `PERMISSION_DENIED` で拒否された（attempt 2）。同じ時刻に main から dispatch した prod-schema-drift（run 37274596410）は本番 catalog を照会して緑だった（expected=389 / production=389）。これで SA の偽装は 2 つとも main の ref に限られ、リポジトリ単位の principalSet に残るのは読み取りロールだけになった
 
 ## Design Decisions
 
