@@ -969,6 +969,21 @@ apply で実測）。`roles/logging.bucketWriter` の付与が要るのは宛先
 この差分見積りに含めない。除外は受信後に適用されるため、API受信量の削減にはならない。apply後は
 Billing の Logs Storage と実際の月間 GiB を7日後・30日後に確認し、この仮定を実測値へ更新する。
 
+**7日時点の実測（2026-10-05 確認・Issue #314）。** 期間は apply 翌日から 12 日分（JST の 2026-09-23〜10-04）である。
+
+| 対象 | 実測 | 仮定との比較 |
+|---|---:|---|
+| `fwlm-app-error` の受信量 | 12 日で 429 B（`generation_failed` 1 件） | 仮定の 10 GiB/月に対して実質 0。追加費用は計算式で $0 |
+| `fwlm-app-info` の受信量 | 12 日で 17.7 MiB（1 日あたり約 1.5 MiB） | 30 日保持なので差分見積りの対象外 |
+| `_Default` の受信量 | 12 日で 12.2 MiB（1 日あたり約 1.0 MiB） | 同上 |
+| `fwlm-audit` の受信量 | 0 件 | 対象のイベントは `audit.*` とリッチメニューの切替だけで、期間中に新しいオーナーの店舗特定が無かった |
+| プロジェクト全体の 9 月の受信量 | 50.0 MiB | 無料枠（プロジェクトあたり月 50 GiB）の約 0.1% |
+| 請求レポートの Cloud Logging | ¥0（SKU `Log Storage cost` のみ。使用量は新しい請求先で 0.01 GiB、前の請求先で 0.02 GiB） | 仮定の $0.20/月を下回る |
+
+仮定は実測の 4 桁以上上にある。`fwlm-app-error` の 90 日保持と振り分けの粒度は変えない。エラー系の event 名が期間中に何件あったかも、全バケットを対象に `gcloud logging read` で数えた。結果は 1 件で、`fwlm-app-error` の受信と一致する。振り分けの漏れで 0 になったのではない。
+
+**測り方。** 受信量は Monitoring の `logging.googleapis.com/billing/log_bucket_bytes_ingested` を timeSeries API で読む。照会の終端は JST 0 時に置く。集約は `alignmentPeriod=86400s`・`ALIGN_DELTA`・`REDUCE_SUM`、`groupByFields=metric.label.log_bucket_id` とする。月の合計は `logging.googleapis.com/billing/monthly_bytes_ingested` の月末の値で読む。請求額はコンソールの請求レポートを、サービス Cloud Logging（`services/5490-F7B7-8DF6`）と SKU 別で読む。**請求先が 2026-09 に移っているので、両方の請求先を見る。** 30 日時点（2026-10-22 以降）の確認も同じ手順で行う。
+
 ### 12-2. 適用前後の手順
 
 1. `make tf-plan` で、既存 `_Default` sink が import 対象になっていること、監査・エラー・情報の
