@@ -493,6 +493,7 @@ GBP は既定 OFF です。`gbp_oauth_client_id` と `gbp_oauth_redirect_url` �
 1. Issue #146 の GBP API 利用承認と Issue #354 の利用導線を完了する。
 2. Google Auth Platform の既存の GBP 専用 Web アプリ OAuth クライアント（`gbp-oauth-line-webhook`）で、承認済みリダイレクト URI が `https://api.firstweb-works.com/gbp/oauth/callback` と完全一致することを確認する。同意画面の承認済みドメインが `firstweb-works.com` で、Search Console の所有権確認が有効なことも確認する。ブランディングに未公開の変更があれば、検証センターと公開済みブランディングを確認する。
 3. `gbp-oauth-client-secret`、`gbp-token-cipher-key`、`gemini-api-key` に有効な Secret Manager version があることを、値を表示せずに確認する。欠けている場合だけ `1` の項目 5 の手順で投入する。秘密値を Terraform state や tfvars に保存しない。
+   - `gbp-oauth-client-secret` を入れ直すときは、OAuth クライアントのダイアログの DOM を自動操作で読まない。コピーボタンの aria-label に client secret が入っている。secret は「Add secret」→ コピー → `printf '%s' "$(pbpaste)" | gcloud secrets versions add gbp-oauth-client-secret --data-file=- --project=gen-fw-line-meo` → `pbcopy </dev/null` の順で渡し、画面にも端末にも値を出さない。
 4. tfvars にクライアント ID と上記 callback URL を設定し、Terraform plan で GBP の env と secret がまとめて line-webhook に入ることを確認してから apply する。GBP の全項目が揃うまで line-webhook には配線されない。
 5. `https://api.firstweb-works.com/health` が 200 を返すことを確認する。callback の到達は、OAuth 設定を有効にした後の認可フローで確認する。GBP 既定 OFF の間は callback が 404 でも正常です。
 6. 同じ変更で `infra/external-api-smoke.tsv` の GBP 行を更新し、infra/README.md §8 の手順で実疎通を記録する。
