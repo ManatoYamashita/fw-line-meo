@@ -234,7 +234,8 @@ export async function getDashboardUsers(
 
 // POST /dashboard-users: 利用者を登録（operator 専用）。201 で { user }。
 // role='agency' は agencyId 必須・role='operator' は agencyId を送らない（ck_dashboard_role_scope・Req 6.3）。
-// email 重複は 409(email_conflict)、role/agencyId 不整合や email 形式不正は 400(validation_failed)。
+// email 重複は 409(email_conflict)、role/agencyId 不整合や email 形式不正は 400(validation_failed)、
+// 所属代理店の不在・他運営は 404(agency_not_found)。
 export async function createDashboardUser(
   input: { role: DashboardRole; agencyId?: string; email: string; displayName?: string },
   options: ApiClientOptions = {},

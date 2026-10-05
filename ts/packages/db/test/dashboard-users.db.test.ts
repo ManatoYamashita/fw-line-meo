@@ -10,6 +10,7 @@ import {
   enableDashboardUser,
   findDashboardUserByEmailInOperator,
   updateDashboardUserGuarded,
+  type CreateDashboardUserOutcome,
   type DashboardUserAssignmentChange,
   type DashboardUserUpdateInput,
   type UpdateOutcome,
@@ -20,6 +21,7 @@ import type { DashboardUserItem } from '../src/types.js';
 const OP_A = 'f4000000-0000-0000-0000-0000000000a1';
 const OP_B = 'f4000000-0000-0000-0000-0000000000b2';
 const AG_A1 = 'f4000000-0000-0000-0000-00000000a101';
+const F4_AG_MISSING = 'f4000000-0000-0000-0000-00000000ffff'; // どこにも作らない代理店 id
 
 // 既存（リンク済み）利用者。
 const DU_DISABLED_LINKED = 'f4000000-0000-0000-0000-d00000000001'; // auth_subject 設定済・disabled_at 設定済
@@ -180,15 +182,23 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users accessors (DB)', () 
   });
 
   describe('createPendingDashboardUser', () => {
+    // 作成に成功した結果から利用者を取り出す。agency_not_found なら試験を落とす。
+    function createdUser(outcome: CreateDashboardUserOutcome): DashboardUserItem {
+      if (outcome.kind !== 'created') throw new Error(`expected created, got ${outcome.kind}`);
+      return outcome.user;
+    }
+
     it('operator ロール（agencyId null）で auth_subject NULL の保留行を作り email を正規化保存する（Req 6.2）', async () => {
       const pool = await getPool();
-      const created = await createPendingDashboardUser(pool, {
-        role: 'operator',
-        operatorId: OP_A,
-        agencyId: null,
-        email: 'F4Create-Op@Example.COM',
-        displayName: 'f4作成運営',
-      });
+      const created = createdUser(
+        await createPendingDashboardUser(pool, {
+          role: 'operator',
+          operatorId: OP_A,
+          agencyId: null,
+          email: 'F4Create-Op@Example.COM',
+          displayName: 'f4作成運営',
+        }),
+      );
       expect(created.role).toBe('operator');
       expect(created.operatorId).toBe(OP_A);
       expect(created.agencyId).toBeNull();
@@ -211,16 +221,38 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-users accessors (DB)', () 
 
     it('agency ロール（agencyId 指定）で保留行を作れる（ck_dashboard_role_scope を満たす）（Req 6.3）', async () => {
       const pool = await getPool();
-      const created = await createPendingDashboardUser(pool, {
-        role: 'agency',
-        operatorId: OP_A,
-        agencyId: AG_A1,
-        email: 'f4create-ag@example.com',
-      });
+      const created = createdUser(
+        await createPendingDashboardUser(pool, {
+          role: 'agency',
+          operatorId: OP_A,
+          agencyId: AG_A1,
+          email: 'f4create-ag@example.com',
+        }),
+      );
       expect(created.role).toBe('agency');
       expect(created.agencyId).toBe(AG_A1);
       expect(created.email).toBe('f4create-ag@example.com');
       expect(created.displayName).toBeNull(); // displayName 省略時は null
+    });
+
+    it('他運営の代理店・不在の代理店は同一の agency_not_found で、行を作らない（Issue #260・Req 4.4）', async () => {
+      const pool = await getPool();
+      // OP_B から見た AG_A1 は他運営（OP_A）の代理店。F4_AG_MISSING はどこにも作らない。
+      const cases = [
+        { label: '他運営', operatorId: OP_B, agencyId: AG_A1, email: 'f4create-otherop@example.com' },
+        { label: '不在', operatorId: OP_A, agencyId: F4_AG_MISSING, email: 'f4create-missing@example.com' },
+      ];
+      for (const c of cases) {
+        const res = await createPendingDashboardUser(pool, {
+          role: 'agency',
+          operatorId: c.operatorId,
+          agencyId: c.agencyId,
+          email: c.email,
+        });
+        expect(res, c.label).toEqual({ kind: 'agency_not_found' });
+        const rows = await pool.query('SELECT 1 FROM dashboard_users WHERE email = $1', [c.email]);
+        expect(rows.rowCount, c.label).toBe(0);
+      }
     });
   });
 

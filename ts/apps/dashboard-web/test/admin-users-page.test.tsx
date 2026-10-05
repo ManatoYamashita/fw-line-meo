@@ -158,6 +158,22 @@ describe('利用者管理ページ（operator）', () => {
     expect(await scope.findByText(/既に登録済みのメールアドレスです/)).toBeTruthy();
   });
 
+  it('所属代理店の不在（404 agency_not_found）は再試行ではなく再読み込みを案内する（Issue #260）', async () => {
+    ready('operator');
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.createDashboardUser.mockResolvedValue({ ok: false, code: 'agency_not_found', message: 'x' });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    await chooseOption(await scope.findByLabelText('所属代理店'), '代理店アルファ');
+    fireEvent.change(scope.getByLabelText('メールアドレス'), { target: { value: 'gone@example.com' } });
+    fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
+    expect(
+      await scope.findByText('選択した代理店が見つかりません。画面を再読み込みしてください。'),
+    ).toBeTruthy();
+    expect(scope.queryByText(/時間をおいて再試行してください/)).toBeNull();
+  });
+
   it('無効化ボタンで disableDashboardUser({id}) を呼び、行が無効に変わる（Req 6.4）', async () => {
     ready('operator');
     api.getDashboardUsers

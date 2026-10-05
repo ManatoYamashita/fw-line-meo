@@ -225,6 +225,13 @@ function UsersView() {
         title: '利用者を登録できません',
         description: '既に登録済みのメールアドレスです。',
       });
+    } else if (result.code === 'agency_not_found') {
+      // 選んだ代理店が一覧を開いた後に無くなった場合など（Issue #260）。再試行では直らないので再読み込みを案内する。
+      setFormError('選択した代理店が見つかりません。画面を再読み込みしてください。');
+      notifyActionError({
+        title: '利用者を登録できません',
+        description: '選択した代理店が見つかりません。画面を再読み込みしてください。',
+      });
     } else if (result.code === 'validation_failed') {
       setFormError('入力内容を確認してください（ロールと所属代理店・メールアドレスの形式）。');
       notifyActionError({

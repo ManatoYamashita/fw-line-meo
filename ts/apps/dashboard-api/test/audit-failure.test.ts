@@ -174,7 +174,7 @@ const paths: AuditPath[] = [
   },
   {
     name: 'POST /dashboard-users（利用者の作成）',
-    writeResult: userItem(),
+    writeResult: { kind: 'created', user: userItem() },
     run: (write, auditLog, log) =>
       handleDashboardUserCreate(
         {
