@@ -1,8 +1,11 @@
 # Direct Workload Identity Federation（gcp-infra-foundation / Req 6.x）
 #
-# GitHub Actions → GCP をキーレス認証。deployer SA を作らず（Direct WIF）、
-# principalSet へ直接 IAM を付与する。attribute_condition で単一リポジトリに限定。
+# GitHub Actions → GCP をキーレス認証。attribute_condition で単一リポジトリに限定する。
 # SA JSON キーは一切発行しない（Req 6.2）。
+#
+# 書き込み（本番へのイメージ反映）はデプロイ SA gha-deployer の偽装だけが持ち、その偽装は
+# main の ref に限る（Issue #331）。principalSet（リポジトリ単位）へ直接付けるのは、drift 検証が
+# 使う読み取りロールだけである。
 
 resource "google_iam_workload_identity_pool" "github" {
   project                   = var.project_id
@@ -21,6 +24,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "google.subject"             = "assertion.sub"
     "attribute.repository"       = "assertion.repository"
     "attribute.repository_owner" = "assertion.repository_owner"
+    # デプロイ SA の偽装を main の ref に限るための属性（Issue #331）。値は refs/heads/<branch> の形。
+    "attribute.ref" = "assertion.ref"
   }
 
   # 単一リポジトリのみ許可（Req 6.3）。他リポジトリのトークンは STS が拒否。
@@ -32,25 +37,25 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 }
 
 locals {
-  principal_set = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}/attribute.repository/${var.github_repository}"
+  pool_path     = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}"
+  principal_set = "${local.pool_path}/attribute.repository/${var.github_repository}"
+
+  # デプロイ SA を偽装できる主体。provider の attribute_condition がリポジトリを 1 つに限っているので、
+  # ref だけで絞れば「このリポジトリの main で走るワークフロー」になる（Issue #331）。
+  deploy_principal_set = "${local.pool_path}/attribute.ref/${var.deploy_ref}"
 }
 
-# デプロイに必要な最小ロールを principalSet へ直接付与（Direct WIF）
-resource "google_project_iam_member" "deployer" {
-  for_each = toset(["roles/run.developer", "roles/artifactregistry.writer"])
-
+# drift 検証（prod-image-drift の `gcloud run services list` / `jobs list`、gcp-auth-smoke）が使う
+# Cloud Run の読み取り（Issue #331）。
+#
+# 以前はここで principalSet へ roles/run.developer と roles/artifactregistry.writer を、各ランタイム SA
+# へ roles/iam.serviceAccountUser を直接付けていた。deploy-prod が gha-deployer の偽装へ移った（#316）
+# 後は、どれも書き込みには使われていなかった。残っていると、このリポジトリの任意のブランチの
+# ワークフローが Direct WIF のまま本番へ書き込める。
+resource "google_project_iam_member" "ci_run_viewer" {
   project = var.project_id
-  role    = each.value
+  role    = "roles/run.viewer"
   member  = local.principal_set
-}
-
-# デプロイ時に各ランタイム SA を指定するための serviceAccountUser
-resource "google_service_account_iam_member" "act_as" {
-  for_each = toset(var.runtime_service_account_emails)
-
-  service_account_id = "projects/${var.project_id}/serviceAccounts/${each.value}"
-  role               = "roles/iam.serviceAccountUser"
-  member             = local.principal_set
 }
 
 # deploy-prod 専用のデプロイ SA（Issue #316）
@@ -67,8 +72,7 @@ resource "google_service_account_iam_member" "act_as" {
 # gcp-infra-foundation の research.md は「WIF + SA impersonation」を「必要になった時点で追加」として
 # 不採用にしていた。本 SA はその「必要になった時点」である。
 #
-# principalSet への直付与（上の deployer / act_as）は残す。drift 検証の各ワークフローは Direct WIF の
-# まま読み取りに使っており、deploy-prod を移しても取り除けるのは書き込み系だけである。縮小は別 Issue。
+# principalSet への書き込み系の直付与は Issue #331 で外した（上の ci_run_viewer の注記）。
 resource "google_service_account" "deployer" {
   project      = var.project_id
   account_id   = var.deployer_account_id
@@ -92,11 +96,16 @@ resource "google_service_account_iam_member" "deployer_sa_act_as" {
   member             = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-# 偽装できるのはこのリポジトリの principalSet だけ（attribute_condition と同じ単一リポジトリ限定）。
+# 偽装できるのは、このリポジトリの main の ref で走るワークフローだけ（Issue #331）。
+#
+# deploy.yml の 2 つの起動経路（ts-ci 完了の workflow_run と、main からの workflow_dispatch）は、どちらも
+# OIDC トークンの ref が refs/heads/main になる。main 以外のブランチから workflow_dispatch した場合や、
+# ブランチへ push したワークフローは偽装を拒否される。以前はリポジトリ単位の principalSet に付けて
+# いたため、任意のブランチの deploy.yml から偽装できた（#331 の対照実験で実測）。
 resource "google_service_account_iam_member" "deployer_wif_user" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = local.principal_set
+  member             = local.deploy_principal_set
 }
 
 # シークレット実値の投入漏れを CI が定期検証するためのメタデータ読み取り（Issue #63）

@@ -74,6 +74,11 @@
 
 **改訂（2026-09-23・Issue #316）**: deploy-prod だけ「WIF + SA impersonation」へ移した。Direct WIF の連携トークンは寿命が元の GitHub OIDC トークンに縛られ（実測: 固定すると auth の 5 分 25 秒後に docker push が unauthorized、7 分後に `gcloud run services list` が UNAUTHENTICATED）、gcloud は呼び出しのたびに OIDC エンドポイントへ往復する。その一過性障害でデプロイ成功後の検証段が赤くなっていた（直近 40 実行で 3 件）。デプロイ SA `gha-deployer` を偽装して得る SA のアクセストークンは寿命 1 時間（実測 `expires_in=3591`・7 分後も有効）で、1 度だけ取得して使い回せる。SA キーは発行しない（Req 6.2 は維持）。drift 検証の各ワークフローは Direct WIF のまま。
 
+**改訂（2026-10-05・Issue #331）**: #316 の移行で残した principalSet（リポジトリ単位）への書き込み系の直付与を外した。`roles/run.developer` / `roles/artifactregistry.writer` を drift 検証が使う `roles/run.viewer` に置き換え、各ランタイム SA への `roles/iam.serviceAccountUser` も外した。あわせて `gha-deployer` の偽装を、provider に足した `attribute.ref = assertion.ref` で `refs/heads/main` の主体に限った。リポジトリの限定は provider の `attribute_condition` が担う。
+- 対照実験の結果: apply の前は、ブランチ `contrast/wif-ref-331` に置いた `deploy.yml` から偽装でき、本番の Cloud Run を読めた（run 37268503463 の attempt 1）。apply の約 7 分後に同じ run を再実行すると、`iam.serviceAccounts.getAccessToken` が `PERMISSION_DENIED` で拒否された（attempt 2）。同じ時刻に main から dispatch した deploy-prod（run 37269295398）は成功しており、拒否が IAM の反映待ちでないことの対照になっている
+- 縮小後も、drift 検証の 5 本（prod-image-drift・monitoring-drift・secret-version-drift・external-api-liveness・gcp-auth-smoke）は main からの dispatch ですべて緑だった
+- `job_workflow_ref`（ワークフローのファイルまで限る属性）は採らなかった。値が `@` を含み、principalSet の属性値に使えることを一次情報で確かめられなかったためである。main で走るワークフローはレビュー済みのコードなので、ref で限れば「任意のブランチから本番へ書き込める」穴は塞がる
+
 ## Design Decisions
 
 ### Decision: ランタイム DB 認証は IAM データベース認証（パスワードレス）

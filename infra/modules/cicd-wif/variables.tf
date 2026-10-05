@@ -26,7 +26,7 @@ variable "provider_id" {
 }
 
 variable "runtime_service_account_emails" {
-  description = "デプロイ時に principalSet が impersonate するランタイム SA email 群（run-services + batch-job の output）。"
+  description = "デプロイ SA（gha-deployer）が deploy 時に指定するランタイム SA email 群（run-services + batch-job + delivery-job の output）。gha-deployer にだけ roles/iam.serviceAccountUser を付ける（principalSet には付けない・Issue #331）。"
   type        = list(string)
   default     = []
 }
@@ -41,4 +41,10 @@ variable "deployer_account_id" {
   type        = string
   description = "deploy-prod が偽装するデプロイ SA の account_id（Issue #316）。deploy.yml の service_account はこの値から組み立てる。ずれると auth ステップが偽装に失敗して赤になる（黙って別経路へ落ちない）。"
   default     = "gha-deployer"
+}
+
+variable "deploy_ref" {
+  type        = string
+  description = "デプロイ SA の偽装を許す OIDC トークンの ref（Issue #331）。deploy.yml の起動経路（workflow_run と workflow_dispatch）がどちらもこの ref で走ることが前提。"
+  default     = "refs/heads/main"
 }
