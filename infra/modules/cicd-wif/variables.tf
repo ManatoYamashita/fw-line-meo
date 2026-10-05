@@ -43,8 +43,8 @@ variable "deployer_account_id" {
   default     = "gha-deployer"
 }
 
-variable "deploy_ref" {
+variable "main_ref" {
   type        = string
-  description = "デプロイ SA の偽装を許す OIDC トークンの ref（Issue #331）。deploy.yml の起動経路（workflow_run と workflow_dispatch）がどちらもこの ref で走ることが前提。"
+  description = "SA（gha-deployer・gha-schema-drift）の偽装を許す OIDC トークンの ref（Issue #331 / #426）。deploy.yml（workflow_run と workflow_dispatch）と prod-schema-drift.yml（schedule と workflow_dispatch）の起動経路が、どれもこの ref で走ることが前提。"
   default     = "refs/heads/main"
 }

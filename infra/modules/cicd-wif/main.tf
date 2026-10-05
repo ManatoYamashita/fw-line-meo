@@ -40,9 +40,10 @@ locals {
   pool_path     = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}"
   principal_set = "${local.pool_path}/attribute.repository/${var.github_repository}"
 
-  # デプロイ SA を偽装できる主体。provider の attribute_condition がリポジトリを 1 つに限っているので、
-  # ref だけで絞れば「このリポジトリの main で走るワークフロー」になる（Issue #331）。
-  deploy_principal_set = "${local.pool_path}/attribute.ref/${var.deploy_ref}"
+  # SA（gha-deployer・gha-schema-drift）を偽装できる主体。provider の attribute_condition がリポジトリを
+  # 1 つに限っているので、ref だけで絞れば「このリポジトリの main で走るワークフロー」になる
+  # （Issue #331 / #426）。
+  main_principal_set = "${local.pool_path}/attribute.ref/${var.main_ref}"
 }
 
 # drift 検証（prod-image-drift の `gcloud run services list` / `jobs list`、gcp-auth-smoke）が使う
@@ -105,7 +106,7 @@ resource "google_service_account_iam_member" "deployer_sa_act_as" {
 resource "google_service_account_iam_member" "deployer_wif_user" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = local.deploy_principal_set
+  member             = local.main_principal_set
 }
 
 # シークレット実値の投入漏れを CI が定期検証するためのメタデータ読み取り（Issue #63）
@@ -183,8 +184,12 @@ resource "google_project_iam_member" "schema_drift_cloudsql" {
   member  = "serviceAccount:${google_service_account.schema_drift.email}"
 }
 
+# 偽装できるのは、このリポジトリの main の ref で走るワークフローだけ（Issue #426）。
+# prod-schema-drift.yml の起動経路は schedule と main からの workflow_dispatch で、どちらも ref が
+# refs/heads/main になる。以前はリポジトリ単位の principalSet に付けていたため、任意のブランチの
+# ワークフローから本番 DB への接続主体を偽装できた（#426 の対照実験で実測）。
 resource "google_service_account_iam_member" "schema_drift_wif_user" {
   service_account_id = google_service_account.schema_drift.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = local.principal_set
+  member             = local.main_principal_set
 }
