@@ -2,6 +2,7 @@ import type {
   AgencyItem,
   AuditLogAction,
   AuditLogger,
+  CreateDashboardUserOutcome,
   DashboardRole,
   DashboardUserAssignmentChange,
   DashboardUserIdentity,
@@ -84,7 +85,8 @@ export interface DashboardUserCreateDeps {
   auth: AuthDeps;
   // createPendingDashboardUser（@fwlm/db）委譲（保留行の事前登録・案B）。
   // email UNIQUE 衝突（pg 23505）は本ハンドラが 409 email_conflict に写像する。
-  createUser: (input: DashboardUserCreateInput) => Promise<DashboardUserItem>;
+  // 所属先の不在・他運営は agency_not_found の結果で返り、本ハンドラが 404 に写像する（Issue #260）。
+  createUser: (input: DashboardUserCreateInput) => Promise<CreateDashboardUserOutcome>;
   // 409 強化用のスコープ限定ルックアップ（findDashboardUserByEmailInOperator を委譲・Req 3.2）。
   // 一意違反（23505）捕捉時に、自運営（operatorId）配下の同一メールの無効化状態を引く。
   // 見つかり disabled なら 409 email_conflict_disabled（再有効化での復旧を案内）、そうでなければ
@@ -248,9 +250,9 @@ export async function handleDashboardUserCreate(
   }
 
   // operatorId は認証ユーザー由来（Req 7.1）。email は正規化済み（trim + 小文字化）を渡す。
-  let user: DashboardUserItem;
+  let outcome: CreateDashboardUserOutcome;
   try {
-    user = await deps.createUser({
+    outcome = await deps.createUser({
       role: parsed.role,
       operatorId: guard.user.operatorId,
       agencyId: parsed.agencyId,
@@ -278,6 +280,11 @@ export async function handleDashboardUserCreate(
     }
     return jsonError(500, 'internal', '利用者の登録に失敗しました。時間をおいて再試行してください');
   }
+  if (outcome.kind === 'agency_not_found') {
+    // 所属先の不在・他運営の代理店は同じ応答にする（存在の秘匿・Req 4.4）。編集の経路と同じ契約。
+    return jsonError(404, 'agency_not_found', '所属代理店が見つかりません');
+  }
+  const { user } = outcome;
   await recordAudit(deps.auditLog, req.log, {
     actorType: 'operator',
     actorId: guard.user.id,

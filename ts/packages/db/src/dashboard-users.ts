@@ -113,8 +113,13 @@ function mapDashboardUser(row: DashboardUserItemRow): DashboardUserItem {
  * 運営が未ログインのダッシュボード利用者を事前登録する（保留行・案B・Req 6.2, 6.3）。
  * auth_subject は NULL（初回ログインで linkAuthSubjectByEmail が埋める）、email を正規化保存する。
  * role/agency_id の整合（operator ⇒ agency_id NULL / agency ⇒ agency_id 非 NULL）は
- * ck_dashboard_role_scope が DB 側で強制する。agencyId は呼び出し側指定値をそのまま渡す。
+ * ck_dashboard_role_scope が DB 側で強制する。
  * email は trim + 小文字化して保存し、linkAuthSubjectByEmail の lower(email) 照合と一貫させる。
+ *
+ * 所属先は operator_id スコープで確かめ、不在・他運営の代理店はどちらも agency_not_found を返す
+ * （存在の秘匿・Req 4.4・Issue #260）。確認と INSERT を 1 文の条件つき INSERT にまとめるので、
+ * トランザクションを張らずに原子的である。複合 FK（fk_dashboard_agency_operator）の違反を
+ * 23503 の例外（500）にせず、業務上の結果へ写す点は updateDashboardUserGuarded と同じである。
  */
 export async function createPendingDashboardUser(
   db: Queryable,
@@ -125,18 +130,27 @@ export async function createPendingDashboardUser(
     email: string;
     displayName?: string | null;
   },
-): Promise<DashboardUserItem> {
+): Promise<CreateDashboardUserOutcome> {
   const normalizedEmail = input.email.trim().toLowerCase();
+  // INSERT ... SELECT の選択リストは挿入先の列から型を推論しないため、各パラメータを明示的に型付けする。
   const res = await db.query<DashboardUserItemRow>(
     `INSERT INTO dashboard_users (role, operator_id, agency_id, email, display_name)
-     VALUES ($1, $2, $3, $4, $5)
+     SELECT $1::dashboard_role, $2::uuid, $3::uuid, $4::text, $5::text
+      WHERE $3::uuid IS NULL
+         OR EXISTS (SELECT 1 FROM agencies WHERE id = $3::uuid AND operator_id = $2::uuid)
      RETURNING ${DASHBOARD_USER_COLUMNS}`,
     [input.role, input.operatorId, input.agencyId, normalizedEmail, input.displayName ?? null],
   );
   const row = res.rows[0];
-  if (!row) throw new Error('createPendingDashboardUser: insert did not return a row');
-  return mapDashboardUser(row);
+  if (!row) return { kind: 'agency_not_found' };
+  return { kind: 'created', user: mapDashboardUser(row) };
 }
+
+// 事前登録の結果（判別共用体）。呼び出し側（ハンドラ）が 201 / 404 へ写像する。
+// email の UNIQUE 衝突（23505）は従来どおり例外で伝え、ハンドラが 409 に写す。
+export type CreateDashboardUserOutcome =
+  | { kind: 'created'; user: DashboardUserItem }
+  | { kind: 'agency_not_found' }; // 所属先が不在・他運営（Req 4.4）
 
 /** 指定運営に属するダッシュボード利用者を作成日時の降順で一覧する（Req 6.1・operator スコープ）。 */
 export async function listDashboardUsers(

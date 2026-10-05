@@ -133,14 +133,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
         agencyId: AG_A,
         email: 'nopass@example.com',
       });
-      nopassUserId = nopass.id;
+      if (nopass.kind !== 'created') throw new Error('フィクスチャの保留利用者を作れません');
+      nopassUserId = nopass.user.id;
       const unverified = await createPendingDashboardUser(pool, {
         role: 'agency',
         operatorId: OP1,
         agencyId: AG_A,
         email: 'unverified@example.com',
       });
-      unverifiedUserId = unverified.id;
+      if (unverified.kind !== 'created') throw new Error('フィクスチャの保留利用者を作れません');
+      unverifiedUserId = unverified.user.id;
       // ケース6 の無効化済み利用者（auth_subject は既にリンク済み ＋ disabled_at 設定済み）。
       await pool.query(
         `INSERT INTO dashboard_users (role, operator_id, agency_id, auth_subject, email, display_name, disabled_at)
