@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type {
   ConfirmedStoreSummary,
+  DailySummaryReadRow,
   GbpFlow,
   GbpSessionLookup,
   GbpSessionRow,
@@ -16,6 +17,9 @@ import type { LineMessage, LineMessenger } from '../../src/line/client.js';
 import type { ConnectablePool } from '@fwlm/store-identification';
 import { createGbpFlowHandlers, type GbpFlowDeps } from '../../src/gbp/flows.js';
 import { encodeGbpPostback } from '../../src/gbp/postback.js';
+import { buildCompletedRichMenu } from '../../scripts/rich-menu-definitions.js';
+import { buildNewReviewsReport } from '../../src/report/builders/new-reviews.js';
+import { normalizeReadRow } from '../../src/report/format.js';
 import type { GbpApiError, GbpReview } from '../../src/gbp/client.js';
 import type { GenerationError } from '@fwlm/gemini';
 import { buildStatusGuidanceMessage } from '../../src/line/messages.js';
@@ -30,9 +34,8 @@ import {
 //
 // **main への統合（Issue #323）で入口を振り分け口へ移した。** line-on-demand-report（#256）以降、店舗特定済みの
 // オーナーの入力はすべて振り分け口（owner/router.ts）に来るので、GBP への委譲もそこで行う。本テストは
-// 「振り分け口（実物）→ GbpFlows（実物）」を一気通貫で通す。旧来の導線（毎朝のサマリー Flex の footer と
-// 2×2 の完了後メニュー）は #256 で無くなったので、導線の data の照合は外した。新しい入口（完了後メニュー下段の
-// 「Google 連携」と、新着口コミのレポートの返信ボタン・#256 design.md 2.7）を作る PR で照合を戻す。
+// 「振り分け口（実物）→ GbpFlows（実物）」を一気通貫で通す。完了後メニューの「Google 連携」→状態 Flex、
+// GBP 有効時の新着口コミレポートの返信操作から抽出した実 data を使う（Issue #354）。
 //
 // 何を検証するか（既存テストとの差分＝本タスクの価値）:
 //   - postback.test.ts は encode/decode 対称性を、flex.test.ts（delivery-job）は
@@ -337,12 +340,73 @@ function postbackEvent(data: string): InboundEvent {
   return { kind: 'postback', lineUserId: LINE_USER_ID, replyToken: REPLY_TOKEN, data };
 }
 
-// 入口の data。旧来の導線（サマリー Flex・2×2 のリッチメニュー）は #256 で無くなったので encode の出力だけを使う。
+const ENTRY_REVIEW_ROW: DailySummaryReadRow = {
+  summary_date: '2026-07-18',
+  status: 'ready',
+  rank: 1,
+  rank_total: 1,
+  rank_prev: 1,
+  rating: '4.5',
+  review_count: 10,
+  rating_prev: '4.4',
+  review_count_prev: 9,
+  new_review_count: 1,
+  new_reviews: [
+    {
+      authorName: '試験投稿者',
+      publishTime: '2026-07-18T10:00:00Z',
+      rating: 5,
+      textExcerpt: '試験口コミ',
+      googleMapsUri: 'https://maps.google.com/?q=integration-test',
+    },
+  ],
+  competitors: [],
+  google_maps_reviews_uri: null,
+};
+
+interface VisiblePostbackEntry {
+  readonly label: string;
+  readonly data: string;
+}
+
+function visiblePostbacks(value: unknown): VisiblePostbackEntry[] {
+  if (Array.isArray(value)) return value.flatMap(visiblePostbacks);
+  if (value === null || typeof value !== 'object') return [];
+  const object = value as Record<string, unknown>;
+  const action = object['action'];
+  const own =
+    action !== null && typeof action === 'object' && (action as Record<string, unknown>)['type'] === 'postback'
+      ? [{
+          label: String((action as Record<string, unknown>)['label'] ?? ''),
+          data: String((action as Record<string, unknown>)['data'] ?? ''),
+        }]
+      : [];
+  return [...own, ...Object.values(object).flatMap(visiblePostbacks)];
+}
+
+function visibleEntry(value: unknown, label: string): VisiblePostbackEntry {
+  const entry = visiblePostbacks(value).find((item) => item.label === label);
+  if (entry === undefined) throw new Error(`画面に「${label}」postback が見つからない`);
+  return entry;
+}
+
+const GBP_MENU = buildCompletedRichMenu('https://liff.line.me/2000000000-c9detail', { gbpEnabled: true });
+const GOOGLE_MENU_ENTRY = visibleEntry(GBP_MENU, 'Google 連携');
+const LINKED_STATUS_MESSAGE = buildGbpStatusMessage([{ storeId: STORE_A, name: 'テスト食堂A', linked: true }]);
+const STATUS_POST_ENTRY = visibleEntry(LINKED_STATUS_MESSAGE, 'Google 投稿を作成');
+const REVIEW_REPLY_MESSAGE = buildNewReviewsReport(
+  { storeName: 'テスト食堂A' },
+  normalizeReadRow(ENTRY_REVIEW_ROW),
+  { gbpReplyEnabled: true },
+);
+const REVIEW_REPLY_ENTRY = visibleEntry(REVIEW_REPLY_MESSAGE, '返信する');
+
+// 実際の GBP 状態 Flex と新着口コミレポートから抽出した入口 postback。
 const POST_ENTRIES: readonly { label: string; data: string }[] = [
-  { label: 'encode(g_post)', data: encodeGbpPostback({ action: 'g_post' }) },
+  STATUS_POST_ENTRY,
 ];
 const REPLY_ENTRIES: readonly { label: string; data: string }[] = [
-  { label: 'encode(g_reply)', data: encodeGbpPostback({ action: 'g_reply' }) },
+  REVIEW_REPLY_ENTRY,
 ];
 
 describe('導線からの分岐の統合検証（task 5.3）', () => {
@@ -462,21 +526,27 @@ describe('導線からの分岐の統合検証（task 5.3）', () => {
     });
   });
 
-  describe('g_status は連携状態を返す（3.3 で実装済みの導線）', () => {
+  describe('Google 連携メニューは状態と次の GBP 操作を返す（Issue #354）', () => {
     it('連携済みなら「連携済み」の状態を返す', async () => {
       const h = createHarness({ linkedStoreIds: [STORE_A] });
 
-      await h.handleEvent(postbackEvent(encodeGbpPostback({ action: 'g_status' })));
+      await h.handleEvent(postbackEvent(GOOGLE_MENU_ENTRY.data));
 
       expect(h.replies).toEqual([
         [buildGbpStatusMessage([{ storeId: STORE_A, name: 'テスト食堂A', linked: true }])],
       ]);
+      expect(visiblePostbacks(h.replies[0]?.[0])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Google 投稿を作成', data: STATUS_POST_ENTRY.data }),
+          expect.objectContaining({ label: 'クチコミに返信', data: encodeGbpPostback({ action: 'g_reply' }) }),
+        ]),
+      );
     });
 
     it('未連携なら「未連携」の状態を返す', async () => {
       const h = createHarness({ linkedStoreIds: [] });
 
-      await h.handleEvent(postbackEvent(encodeGbpPostback({ action: 'g_status' })));
+      await h.handleEvent(postbackEvent(GOOGLE_MENU_ENTRY.data));
 
       expect(h.replies).toEqual([
         [buildGbpStatusMessage([{ storeId: STORE_A, name: 'テスト食堂A', linked: false }])],

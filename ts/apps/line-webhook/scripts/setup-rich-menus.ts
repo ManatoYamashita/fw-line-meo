@@ -58,6 +58,8 @@ export interface SetupCompletedRichMenuDeps {
   fetch: typeof fetch;
   /** 完了後メニューの「詳細を見る」が開く URL（env LIFF_STORE_DETAIL_URL）。 */
   liffStoreDetailUrl: string;
+  /** true のときのみ GBP 導線付きの面と画像を使う。 */
+  gbpEnabled?: boolean;
   completedImage: Buffer;
 }
 
@@ -177,7 +179,9 @@ async function createCompletedRichMenu(
   deps: SetupCompletedRichMenuDeps,
   accessToken: string,
 ): Promise<string> {
-  const richMenu: RichMenuObject = buildCompletedRichMenu(deps.liffStoreDetailUrl);
+  const richMenu: RichMenuObject = buildCompletedRichMenu(deps.liffStoreDetailUrl, {
+    gbpEnabled: deps.gbpEnabled ?? false,
+  });
   const completedRichMenuId = await createRichMenu(deps, accessToken, richMenu);
   await uploadRichMenuImage(deps, accessToken, completedRichMenuId, deps.completedImage);
   return completedRichMenuId;
@@ -221,6 +225,8 @@ export async function setupCompletedRichMenuOnly(
 //   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... LIFF_STORE_DETAIL_URL=... pnpm run setup-rich-menus
 //   LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... LIFF_STORE_DETAIL_URL=... \
 //     pnpm run setup-rich-menus --completed-only
+// GBP 有効化後の完了後メニュー作成:
+//     pnpm run setup-rich-menus --completed-only --with-gbp
 // 引数の前に `--` を挟まないこと。pnpm 10 は `--` を区切りとして食わず、そのまま argv へ渡すため、
 // 引数を厳密に読むスクリプト（relink-completed-menu.ts）では `unknown argument --` になる。
 // 運用手順は infra/README.md §10。
@@ -245,16 +251,24 @@ if (isMainModule) {
     // assets/ はカレントディレクトリ（ts/apps/line-webhook）基準で解決する
     // （dist-scripts へのコンパイル後の出力階層に依存させないため）。
     const assetsDir = path.resolve(process.cwd(), 'assets');
-    const completedImage = await readFile(path.join(assetsDir, 'richmenu-completed.png'));
+    const completedOnly = process.argv.includes('--completed-only');
+    const withGbp = process.argv.includes('--with-gbp');
+    if (withGbp && !completedOnly) {
+      throw new Error('--with-gbp requires --completed-only');
+    }
+    const completedImage = await readFile(
+      path.join(assetsDir, withGbp ? 'richmenu-completed-gbp.png' : 'richmenu-completed.png'),
+    );
 
     // メニューの差し替え（Migration Strategy の Step C）は完了後メニューだけを作り直す。
     // 既定メニュー（オンボーディング用）には触れない。
-    if (process.argv.includes('--completed-only')) {
+    if (completedOnly) {
       const result = await setupCompletedRichMenuOnly({
         channelId,
         channelSecret,
         fetch,
         liffStoreDetailUrl,
+        gbpEnabled: withGbp,
         completedImage,
       });
 
