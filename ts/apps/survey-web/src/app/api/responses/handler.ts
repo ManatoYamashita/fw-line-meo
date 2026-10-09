@@ -65,7 +65,17 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   const pageToken = typeof obj.pageToken === 'string' ? obj.pageToken : '';
 
   // pageToken 検証（ページ経由の正規フロー証明・直接 POST を拒否）
-  if (!deps.tokens.verifyPage(pageToken, storeId).ok) {
+  const page = deps.tokens.verifyPage(pageToken, storeId);
+  if (!page.ok) {
+    return error(deps, 400, 'PAGE_TOKEN_INVALID', 'ページを再読み込みしてください');
+  }
+  // structured survey の pageToken（v: 2）は、署名が正しくてもこの legacy の受付では扱わない
+  // （Issue #436）。legacy の本文として検証・集計・生成へ進めると、structured の画面で選んだ回答を
+  // legacy の意味で数えてしまう。発行する版（Issue #438）と、まだ発行しない版のインスタンスが
+  // ローリングデプロイで混在しても、受け取った側が読み違えないように、ここで明示的に拒否する。
+  // 応答は署名の不一致と同じにする（画面を読み直させる）。structured の受付を足すときは、この分岐を
+  // 版の照合 → structured の回答検証へ進む分岐に置き換える（順序は verifyPage の説明を参照）。
+  if ('v' in page.value) {
     return error(deps, 400, 'PAGE_TOKEN_INVALID', 'ページを再読み込みしてください');
   }
 

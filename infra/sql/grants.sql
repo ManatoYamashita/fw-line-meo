@@ -34,7 +34,17 @@
 --   TS 詳細閲覧（store_detail・competitive-daily-summary・task 6.2 で SA を Terraform 実体化）→
 --     読取専用（DML なし）。ID トークン検証済みの自店データのみを API 層で絞り込む
 --     （閲覧専用画面・design.md「書込操作を一切持たない」）
---   categories, survey_aspects は seed 所有 → runtime は read のみ
+--   TS 客向けアンケート Web（survey_web）だけ → 列を絞った INSERT と UPDATE (count) on
+--     survey_structured_material_tallies（structured survey 0015・素材の厚みの匿名集計・Issue #436）。
+--     **既存の tallies の 3 SA 一律付与を写さない。** 書くのは客向けアンケート Web だけで、加算は UPSERT
+--     なので INSERT（書く列だけ）と count の UPDATE だけを与える（DELETE は使わない）。他の主体が要るように
+--     なったら、その機能を足す PR で付与する
+--   categories, survey_aspects, survey_categories, survey_facets, survey_category_facets は
+--     seed 所有 → runtime は read のみ（後 3 表は structured survey の taxonomy・0015）
+--   store_survey_configs, store_survey_category_settings, store_survey_targets（structured survey の
+--     店舗別設定・0015）は TS 層の書込所有だが、**書込面（店舗オーナーが書く SA）は #437 で決める。**
+--     それまでどの SA にも DML を付与しない（SELECT のみ）。db/test/check_docs.sh の
+--     PENDING_WRITE_GRANTS が、ここへ DML が紛れ込んだら赤にする
 --   読み取りは全層に許容 → 全 SA が全テーブルを SELECT 可
 
 \if :{?project}
@@ -102,6 +112,23 @@ GRANT INSERT, UPDATE, DELETE ON
 GRANT INSERT, UPDATE ON
   summary_deliveries
   TO :"delivery";
+
+-- structured survey の素材の厚みの匿名集計（Issue #436・0015）。書くのは客向けアンケート Web だけ。
+-- 加算は ON CONFLICT DO UPDATE の UPSERT なので、列を絞って INSERT と UPDATE だけを与え、DELETE は
+-- 与えない。INSERT は incrementStructuredTallies が書く列だけ（id は既定値に任せる）、UPDATE は
+-- 加算する count だけ（店舗・月・厚みの列は一度書いたら変えない）。ON CONFLICT が参照する列の
+-- SELECT は、上の全表 SELECT で足りる。
+-- 他の SA へ広げない（新しい表では最小権限を優先する。必要になった機能の PR で付与する）。
+-- 主体・列ごとの有無は db/test/check_structured_survey_privileges.sh が実ロールで検証する。
+GRANT
+  INSERT (store_id, period_month,
+          positive_group_count, concern_group_count,
+          positive_target_count, concern_target_count,
+          positive_facet_count, concern_facet_count,
+          has_comment, count),
+  UPDATE (count)
+  ON survey_structured_material_tallies
+  TO :"survey";
 
 -- store_detail（閲覧専用）は上記 SELECT ON ALL TABLES 以外の DML を一切付与しない。
 

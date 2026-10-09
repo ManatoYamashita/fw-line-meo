@@ -52,6 +52,11 @@ EOF
 #!/usr/bin/env bash
 echo "store-suspension-privileges-stub: OK"
 EOF
+  # RUN 表が指す実体その 4（structured survey の表の権限の検査・Issue #436）。既定では成功する。
+  fx_write db/test/check_structured_survey_privileges.sh <<'EOF'
+#!/usr/bin/env bash
+echo "structured-survey-privileges-stub: OK"
+EOF
   # SKIP 表が指す実体（存在照合のためだけに置く）。
   for f in run.sh cross_runtime_steps.sh; do
     fx_write "db/test/${f}" <<'EOF'
@@ -78,7 +83,7 @@ t_begin 'run-db-test-suites: 全スイートが通れば緑（件数を出す）
 rdt_fixture
 fx_run run-db-test-suites
 expect_green
-expect_output_matches 'OK: db/test スイート緑（2 ディレクトリ / 2 SQL / 3 スクリプト・別ジョブ 1 件）'
+expect_output_matches 'OK: db/test スイート緑（2 ディレクトリ / 2 SQL / 4 スクリプト・別ジョブ 1 件）'
 t_end
 
 t_begin 'run-db-test-suites: 最初の失敗で止めず、別スイートの失敗も同じ実行で出す'
@@ -239,7 +244,7 @@ t_begin 'run-db-test-suites: 宣言表が空でも unbound variable で死なな
 # 宣言表が空になるのはこのリポジトリでは常態（既存ガード 7 本の WHITELIST は全て空）なので、
 # 防御形 `${a[@]+"${a[@]}"}` が外れたらここで気づけるようにする。
 rdt_fixture
-sed -i.bak "/^    'check_docs.sh'\$/d; /^    'run.sh|/d; /^    'check_no_optional_capabilities.sh'\$/d; /^    'check_store_suspension_privileges.sh'\$/d; /^    'cross_runtime_integration.sh|/d; /^    'cross_runtime_steps.sh|/d" \
+sed -i.bak "/^    'check_docs.sh'\$/d; /^    'run.sh|/d; /^    'check_no_optional_capabilities.sh'\$/d; /^    'check_store_suspension_privileges.sh'\$/d; /^    'check_structured_survey_privileges.sh'\$/d; /^    'cross_runtime_integration.sh|/d; /^    'cross_runtime_steps.sh|/d" \
   "${FX}/scripts/run-db-test-suites.sh"
 rm -f "${FX}/scripts/run-db-test-suites.sh.bak"
 fx_run run-db-test-suites
