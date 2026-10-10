@@ -106,16 +106,21 @@ export function logSurveyReviewLinkOpened(log: SurveyLogger, storeId: string): v
 
 /**
  * structured の下書き（Natural LLM Realizer・Issue #439）の 1 回目が hard gate を通らず、作り直したことを記録する。
- * 載せるのは失格の種類（頭の名前）だけで、下書き・一言・料理名は載せない。
+ * 載せるのは失格の種類（頭の名前）と claim の件数だけで、下書き・一言・料理名は載せない。
  */
-export function logStructuredDraftRetry(log: SurveyLogger, kinds: readonly string[]): void {
-  log('info', 'survey-web.structured_draft_retry', { residualClaims: [...kinds].sort().join(',') });
+export function logStructuredDraftRetry(log: SurveyLogger, kinds: readonly string[], claimCount: number): void {
+  log('info', 'survey-web.structured_draft_retry', { residualClaims: [...kinds].sort().join(','), claimCount });
 }
 
 /**
  * structured の下書きが safe fallback（claim からの決定的なテンプレート）へ落ちたことを記録する（Issue #439）。
  * reason は `gate`（2 回とも hard gate を通らなかった）か `generation`（生成そのものの失敗）。本文は載せない。
  */
-export function logStructuredDraftFallback(log: SurveyLogger, reason: 'gate' | 'generation', kinds: readonly string[]): void {
-  log('warn', 'survey-web.structured_draft_fallback', { reason, residualClaims: [...kinds].sort().join(',') });
+export function logStructuredDraftFallback(
+  log: SurveyLogger,
+  reason: 'gate' | 'generation',
+  kinds: readonly string[],
+  claimCount: number,
+): void {
+  log('warn', 'survey-web.structured_draft_fallback', { reason, residualClaims: [...kinds].sort().join(','), claimCount });
 }

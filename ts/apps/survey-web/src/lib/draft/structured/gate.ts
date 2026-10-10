@@ -18,6 +18,14 @@ import groundingLexiconRaw from '../material-grounding-lexicon.json';
 // 判定は既存と同じく **高 precision** に倒す（検出したものは確実に違反・測るのは下限）。coverage は文字列一致では
 // なく、Target の言い方（subjects）と語彙の意味の手がかり（facetMeanings・polarityCues）で文単位に判定する。
 // 例: 「刺身盛り合わせ / 味 / positive」は「刺身盛り合わせがおいしかったです」で満たす（「味」の字は要らない）。
+//
+// 責務の境界（本番の runtime hard gate と、最終 PR 前の offline eval gate）:
+//   runtime hard gate … この関数そのもの。高 precision に検出できるものを本番で自動的に止める（作り直し → safe fallback）。
+//     本番の入力が持つのは、回答の素材・一言・回答時点の定義の未回答の Target の名前（完全一致）である。
+//   offline eval gate … 同じ関数を、固定ケースの追加の知識（Target の言い換え・一言の内容の語・ケース固有の禁止の
+//     意味）つきで流す（eval/structured）。runtime より広く拾う。さらに、語彙で決まらないもの（主題を省いた因果・
+//     言い換えた未回答の Target・語彙に無い属性や強度）はブラインドの人手評価で測る。
+// **runtime hard gate を通った = 事実どおりの保証ではない。** 語彙の判定は違反の下限である。
 
 // ---------------------------------------------------------------------------
 // 判定の入力（回答受付が作る素材と、評価の固定ケースの共通部分）
@@ -40,7 +48,10 @@ export interface GateSelection {
   readonly facets: readonly GateFacet[];
 }
 
-/** 店舗に登録済みだが客が選ばなかった Target（評価の固定ケースだけが持つ。本番の素材には無い）。 */
+/**
+ * 店舗に登録済みだが客が選ばなかった Target。本番は回答の検証に使った同じ定義の active な Target から作り
+ * （素材の unselectedTargets・LLM へは渡さない）、評価は固定ケースが持つ。aliases は評価の固定ケースだけが持つ。
+ */
 export interface GateMenuTarget {
   readonly id: string;
   readonly label: string;
@@ -49,8 +60,8 @@ export interface GateMenuTarget {
 }
 
 /**
- * 判定の入力。本番（Natural LLM Realizer の事後検証）は素材から作り、subjects・menuTargets・commentKeywords・
- * forbiddenMeanings を空で渡す。評価の固定ケース（eval/structured/cases.json）はこれらも持つ。
+ * 判定の入力。本番（Natural LLM Realizer の事後検証）は素材から作り、menuTargets は素材の unselectedTargets から、
+ * subjects・commentKeywords・forbiddenMeanings は空で渡す。評価の固定ケース（eval/structured/cases.json）はこれらも持つ。
  */
 export interface StructuredGateInput {
   readonly storeName: string;
@@ -59,7 +70,7 @@ export interface StructuredGateInput {
   /** Target を指す言い方（Target の名前そのものは常に含む）。 */
   readonly subjects: Readonly<Record<string, readonly string[]>>;
   readonly menuTargets: readonly GateMenuTarget[];
-  /** 一言の内容を指す語。空なら一言の因果づけ（commentLinkage）は判定しない。 */
+  /** 一言の内容を指す語（固定ケースだけが持つ）。判定は一言から取り出した語（commentContentWords）を常に足す。 */
   readonly commentKeywords: readonly string[];
   readonly forbiddenMeanings: readonly { readonly id: string; readonly pattern: RegExp; readonly note?: string }[];
 }
@@ -240,6 +251,37 @@ function mask(text: string, words: readonly string[]): string {
   return out;
 }
 
+const nfkc = (s: string) => s.normalize('NFKC');
+
+/**
+ * 表示名の照合の形（NFKC・名前の中の空白の有無を問わない）。**完全一致の範囲だけ** を見て、言い換え
+ * （「刺身盛り合わせ」→「刺し盛り」）は推測しない。1 文字の名前は普通名詞の一部に当たりやすいので照合しない。
+ */
+function labelPattern(label: string): RegExp | null {
+  const parts = nfkc(label).trim().split(/\s+/).filter((p) => p !== '');
+  if (parts.join('').length < 2) return null;
+  return new RegExp(parts.map(escape).join('\\s*'));
+}
+
+/**
+ * 一言から内容の語を取り出す（漢字・カタカナ・英数字の 2 文字以上の連なり）。形態素解析はしない。
+ * 一言の因果づけ（commentLinkage）の判定に使う。本番は素材の一言から、評価は固定ケースの語に足して使う。
+ */
+export function commentContentWords(comment: string): string[] {
+  return [...new Set(nfkc(comment).match(/[\p{Script=Han}\p{Script=Katakana}ー々A-Za-z0-9]{2,}/gu) ?? [])];
+}
+
+/** パターンのどれかが最後に当たった位置（理由を表す接続の、文の中で最も後ろのもの）。 */
+function lastMatchIndex(text: string, patterns: readonly RegExp[]): number {
+  let last = -1;
+  for (const p of patterns) {
+    for (const m of text.matchAll(new RegExp(p.source, p.flags.includes('g') ? p.flags : `${p.flags}g`))) {
+      if (m.index > last) last = m.index;
+    }
+  }
+  return last;
+}
+
 function subjectWords(c: StructuredGateInput, targetId: string, label: string): string[] {
   return [label, ...(c.subjects[targetId] ?? [])];
 }
@@ -280,10 +322,20 @@ export function evaluateStructuredDraft(
   const selectedFacetLabels = claims.flatMap((cl) => (cl.facetLabel ? [cl.facetLabel] : []));
   const scan = mask(text, [...targetWords, ...selectedFacetLabels]);
 
-  // --- 未回答の Target ------------------------------------------------------------
+  // --- 未回答の Target（店舗の active な Target のうち、客が選ばなかったもの） ----------------------
+  // 名前（と固定ケースの言い方）の完全一致だけを見る。選んだ Target の名前に含まれる名前（選んだ「刺身盛り合わせ」と
+  // 未回答の「刺身」）は、選んだ名前を消してから探す。一言に書かれた名前は客の素材なので数えない。
+  const selectedNames = targetWords.map(nfkc);
+  const textN = nfkc(text);
+  const withoutSelected = mask(textN, selectedNames);
+  const commentN = nfkc(comment ?? '');
   for (const m of c.menuTargets) {
+    if (selectedTargets.some((s) => s.targetId === m.id)) continue;
     for (const w of [m.label, ...m.aliases]) {
-      if (scan.includes(w) && !(comment ?? '').includes(w)) {
+      const p = labelPattern(w);
+      if (p === null) continue;
+      const haystack = selectedNames.some((t) => p.test(t)) ? withoutSelected : textN;
+      if (p.test(haystack) && !p.test(commentN)) {
         add('unselectedTarget', w);
         break;
       }
@@ -437,21 +489,28 @@ export function evaluateStructuredDraft(
     }
   }
 
-  // 一言の内容を、別の claim の理由として結ぶ（「店員さんが丁寧だったので、刺身もおいしく感じた」）。
-  if (comment !== undefined && c.commentKeywords.length > 0) {
+  // 一言の内容を、別の claim の理由として結ぶ（「店員さんが丁寧だったので、刺身もおいしく感じた」「窓側の席だったので
+  // 居心地が良かった」）。拾うのは次の 3 つが揃った文だけである（高 precision・同じ文に並べるだけなら数えない）:
+  //   1. 一言の語（固定ケースの語 ＋ 一言から取り出した語。選んだ Target の名前と重なる語は除く）が、
+  //   2. 理由を表す接続（commentConnective）より **前**（理由の側）にあり、
+  //   3. 同じ文に別の claim の主題（Target の名前・カテゴリ全体の facet の手がかり）がある。
+  // 一言そのものが理由を述べている（一言に接続がある）なら、客が自分で書いた因果なので数えない。
+  // 主題を省いた文（「窓側の席だったので、おいしく感じました」）は拾えない（評価の人手の読みで測る）。
+  if (comment !== undefined && firstMatch(nfkc(comment), lex.lists.commentConnective) === null) {
+    const keywords = [...new Set([...c.commentKeywords, ...commentContentWords(comment)].map(nfkc))].filter(
+      (k) => !selectedNames.some((t) => t.includes(k) || k.includes(t)),
+    );
+    const overlapsKeyword = (w: string) => keywords.some((k) => k.includes(w) || w.includes(k));
     for (const sentence of sentences) {
-      const keyword = c.commentKeywords.find((k) => sentence.includes(k));
-      if (!keyword) continue;
-      const connective = firstMatch(sentence, lex.lists.commentConnective);
-      if (!connective) continue;
-      // 別の claim の主題（Target の名前、またはカテゴリ全体の facet の手がかり）が同じ文にある。一言そのものを
-      // 指す語（一言の言い換え）に当たっただけなら、別の claim とは数えない。
+      const s = nfkc(sentence);
+      const at = lastMatchIndex(s, lex.lists.commentConnective);
+      if (at < 0) continue;
+      const cause = mask(s.slice(0, at), selectedNames);
+      if (!keywords.some((k) => cause.includes(k))) continue;
       const otherSubject = claims.some((cl) => {
-        if (cl.targetId !== undefined) {
-          return subjectWords(c, cl.targetId, cl.targetLabel!).some((w) => sentence.includes(w) && !c.commentKeywords.includes(w));
-        }
-        const hit = firstMatch(sentence, subjectPatternsOf(cl));
-        return hit !== null && !c.commentKeywords.some((k) => k.includes(hit) || hit.includes(k));
+        if (cl.targetId !== undefined) return subjectWords(c, cl.targetId, cl.targetLabel!).some((w) => s.includes(nfkc(w)));
+        const hit = firstMatch(s, subjectPatternsOf(cl));
+        return hit !== null && !overlapsKeyword(hit);
       });
       if (otherSubject) add('commentLinkage', sentence);
     }

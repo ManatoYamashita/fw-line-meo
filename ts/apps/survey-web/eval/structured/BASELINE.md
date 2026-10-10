@@ -58,4 +58,5 @@ D の AI っぽさの診断（率・合否ではない）: 「全体として」
 
 - D は本番の safe fallback（`structuredFallbackDraft(compileStructuredClaims(...))`）へ差し替えた。キー無しで測り直した値は上の表と同じ（36/36・失格 0・coverage 100%・平均 35 字）。
 - C は `createNaturalRealizer` を methods.ts へ登録した。**実 Gemini では未測定**（この環境にキーが無い）。§4 の release gate はそのまま残る。
-- 本番の事後検証は eval と同じ判定（`src/lib/draft/structured/gate.ts`・語彙も同じファイル）を使う。ただし本番は固定ケースの持つ Target の言い換え（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・ケース固有の禁止の意味を持たないので、**一言の因果づけ（commentLinkage）と未回答の Target の混入は eval でしか測れない**。prompt は Target を回答の名前のまま書くよう指示している。
+- 本番の事後検証は eval と同じ判定（`src/lib/draft/structured/gate.ts`・語彙も同じファイル）を使う。runtime / eval の揃え（同日）で、**未回答の Target の混入（名前の完全一致）と一言の因果づけ（一言の語が理由の側にある形）は本番でも止める**ようにした（素材の `unselectedTargets` は回答時点の定義から作り、LLM へは渡さない）。Target の言い換え・ケース固有の禁止の意味・主題を省いた因果は、引き続き eval と人手評価でだけ測る（境界は `../README.md` の「runtime hard gate と offline eval gate」）。
+- 一言の因果づけの判定を「一言の語が理由の接続より前にある」形へ絞り、「から」を述語の後（〜たから 等）に限った。固定ケースの許す言い換え・失格になるべき例の自己検証は変わらず緑である。

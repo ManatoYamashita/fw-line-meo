@@ -144,6 +144,8 @@ describe('handleResponses × structured survey（Issue #438）', () => {
           facets: [{ code: 'taste', label: '味' }],
         },
       ],
+      // 店舗の Target はすべて選ばれたので、事後検証用の未回答の Target は空（Issue #439）。
+      unselectedTargets: [],
     });
   });
 

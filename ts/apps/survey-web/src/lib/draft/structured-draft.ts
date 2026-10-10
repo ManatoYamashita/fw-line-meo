@@ -1,4 +1,4 @@
-import type { ResolvedStructuredAnswer } from '../structured-answer';
+import type { ResolvedStructuredAnswer, UnselectedTarget } from '../structured-answer';
 
 // structured survey の回答から下書きを作る口（Issue #438 で接続・Issue #439 で中身を実装した）。
 //
@@ -12,6 +12,12 @@ import type { ResolvedStructuredAnswer } from '../structured-answer';
 /** 生成器へ渡す素材。店名は表示用で、PII は含めない。 */
 export interface StructuredDraftMaterial extends ResolvedStructuredAnswer {
   storeName: string;
+  /**
+   * 回答の検証に使った同じ定義の active な Target のうち、客が選ばなかったもの（unselectedTargetsOf）。
+   * **事後検証（未回答の Target の混入）だけが使い、LLM へは渡さない。** 店舗が公開しているメニュー名で、客の回答ではない。
+   * Issue #439 の runtime / eval の揃えより前に発行した sessionToken には無い（無ければ照合しない）。
+   */
+  unselectedTargets?: UnselectedTarget[];
 }
 
 export type StructuredDraftResult =

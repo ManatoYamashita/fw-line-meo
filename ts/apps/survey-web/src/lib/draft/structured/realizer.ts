@@ -56,20 +56,23 @@ export interface NaturalRealizerOptions {
   readonly legacyLexicons?: LegacyLexicons;
   /**
    * 1 回目が hard gate を通らず作り直したとき・safe fallback へ落ちたときに呼ばれる（記録は配線側が決める）。
-   * 渡すのは失格の種類（頭の名前）だけで、本文や一言は渡さない。
+   * 渡すのは失格の種類（頭の名前）と claim の件数だけで、本文・一言・料理名は渡さない。
    */
-  readonly onRetry?: (kinds: readonly string[]) => void;
-  readonly onFallback?: (reason: 'gate' | 'generation', kinds: readonly string[]) => void;
+  readonly onRetry?: (kinds: readonly string[], claimCount: number) => void;
+  readonly onFallback?: (reason: 'gate' | 'generation', kinds: readonly string[], claimCount: number) => void;
 }
 
-/** 素材から hard gate の入力を作る。本番の素材は Target の言い換え・店舗の他の Target・一言の語を持たない。 */
+/**
+ * 素材から hard gate の入力を作る。未回答の Target は素材の unselectedTargets（回答時点の定義）から作り、名前の
+ * 完全一致だけで照合する。Target の言い換え・一言の内容の語・ケース固有の禁止は本番の素材に無い（評価だけが持つ）。
+ */
 export function gateInputOf(material: StructuredDraftMaterial): StructuredGateInput {
   return {
     storeName: material.storeName,
     ...(material.comment !== undefined ? { comment: material.comment } : {}),
     selections: material.selections,
     subjects: {},
-    menuTargets: [],
+    menuTargets: (material.unselectedTargets ?? []).map((t) => ({ ...t, aliases: [] })),
     commentKeywords: [],
     forbiddenMeanings: [],
   };
@@ -134,22 +137,22 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
 
       const first = await generate(claims, comment, []);
       if (first === null) {
-        options.onFallback?.('generation', []);
+        options.onFallback?.('generation', [], claims.length);
         return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 1 };
       }
       const firstKinds = failedKinds(first);
       if (firstKinds.length === 0) return { kind: 'draft', draft: first, source: 'llm', attempts: 1 };
 
-      options.onRetry?.(firstKinds);
+      options.onRetry?.(firstKinds, claims.length);
       const notes = firstKinds.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
       const second = await generate(claims, comment, notes);
       if (second === null) {
-        options.onFallback?.('generation', firstKinds);
+        options.onFallback?.('generation', firstKinds, claims.length);
         return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 2 };
       }
       const secondKinds = failedKinds(second);
       if (secondKinds.length === 0) return { kind: 'draft', draft: second, source: 'llm', attempts: 2 };
-      options.onFallback?.('gate', secondKinds);
+      options.onFallback?.('gate', secondKinds, claims.length);
       return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 2 };
     },
   };

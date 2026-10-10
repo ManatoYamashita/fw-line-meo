@@ -3,7 +3,7 @@ import { pickVariation } from '../../src/lib/draft/prompt';
 import { pendingStructuredDraft, type StructuredDraftPort } from '../../src/lib/draft/structured-draft';
 import { compileStructuredClaims } from '../../src/lib/draft/structured/claims';
 import { structuredFallbackDraft } from '../../src/lib/draft/structured/fallback';
-import { createNaturalRealizer } from '../../src/lib/draft/structured/realizer';
+import { createNaturalRealizer, type NaturalRealizerOptions } from '../../src/lib/draft/structured/realizer';
 import type { DraftMaterial } from '../../src/lib/domain';
 import { claimsOf, type EvalClaim, type StructuredEvalCase } from './gates';
 
@@ -100,6 +100,11 @@ export interface MethodOptions {
   readonly model: string;
   /** C に差し込む口。既定は client があれば本番の Natural LLM Realizer、無ければ下書きを作らない口。 */
   readonly structuredPort?: StructuredDraftPort;
+  /**
+   * C（本番の Realizer）の作り直し・safe fallback の通知。最終の下書きだけでは、生成が全件失敗して safe fallback の文に
+   * なった C（キーやモデル名の誤り）と、LLM の文で通った C を見分けられないため、実測が数える。
+   */
+  readonly realizerEvents?: Pick<NaturalRealizerOptions, 'onRetry' | 'onFallback'>;
 }
 
 function parseDraft(res: GenAiResponse): string | null {
@@ -117,7 +122,8 @@ function parseDraft(res: GenAiResponse): string | null {
  */
 export function evalMethods(options: MethodOptions): EvalMethod[] {
   const { client, model } = options;
-  const port = options.structuredPort ?? (client ? createNaturalRealizer(client, { model }) : pendingStructuredDraft);
+  const port =
+    options.structuredPort ?? (client ? createNaturalRealizer(client, { model, ...options.realizerEvents }) : pendingStructuredDraft);
   return [
     {
       id: 'legacy-direct',
@@ -170,6 +176,8 @@ export function evalMethods(options: MethodOptions): EvalMethod[] {
             facets: s.facets.map((f) => ({ code: f.code, label: f.label })),
           })),
           ...(c.comment !== undefined ? { comment: c.comment } : {}),
+          // 本番と同じく、店舗の未回答の Target の名前（言い方は渡さない）を事後検証へ渡す。
+          unselectedTargets: c.menuTargets.map((m) => ({ id: m.id, label: m.label, categoryCode: m.categoryCode })),
         })) as { kind: string; draft?: string };
         // claim の無いケースは無いので、本番の実装なら常に draft（LLM か fallback）を返す。
         return typeof result.draft === 'string' ? result.draft : null;

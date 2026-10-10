@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import casesRaw from '../eval/structured/cases.json';
 import lexiconRaw from '../src/lib/draft/structured/lexicon.json';
 import { readLegacyLexicons, readStructuredCases, readStructuredEvalLexicon, evaluateStructuredDraft, type StructuredEvalCase } from '../eval/structured/gates';
@@ -175,6 +175,28 @@ describe('比較する方式', () => {
     expect(await c.generate(byId('A-simple-positive'), 0)).toBeNull();
     const plugged = evalMethods({ model: 'm', structuredPort: { prepare: async () => ({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。' }) as never } });
     expect(await plugged.find((m) => m.id === 'natural-realizer')!.generate(byId('A-simple-positive'), 0)).toBe('刺身盛り合わせがおいしかったです。');
+  });
+
+  it('C は client があれば本番の Realizer で、未回答の Target の名前を事後検証へ渡し、作り直し・fallback を通知する', async () => {
+    const replies = ['刺身盛り合わせもだし巻き玉子も、鶏の唐揚げもおいしかったです。', '刺身盛り合わせもだし巻き玉子もおいしかったです。'];
+    const contents: string[] = [];
+    const client: GenAiClient = {
+      models: {
+        generateContent: async (req) => {
+          contents.push(req.contents);
+          return { text: JSON.stringify({ draft: replies.shift() ?? '' }) };
+        },
+      },
+    };
+    const onRetry = vi.fn();
+    const onFallback = vi.fn();
+    const c = evalMethods({ client, model: 'gemini-test', realizerEvents: { onRetry, onFallback } }).find((m) => m.id === 'natural-realizer')!;
+    // 1 回目は未回答の「鶏の唐揚げ」を足したので作り直し、2 回目の LLM の文を返す（本番と同じ runtime hard gate）。
+    expect(await c.generate(byId('C-multi-target'), 0)).toBe('刺身盛り合わせもだし巻き玉子もおいしかったです。');
+    expect(onRetry.mock.calls[0]![0]).toContain('unselectedTarget');
+    expect(onFallback).not.toHaveBeenCalled();
+    // 未回答の Target は事後検証だけが使い、LLM へは渡さない。
+    for (const text of contents) expect(text).not.toContain('鶏の唐揚げ');
   });
 
   it('A・B は同じクライアント・同じモデル・本番と同じ temperature で呼ぶ', async () => {

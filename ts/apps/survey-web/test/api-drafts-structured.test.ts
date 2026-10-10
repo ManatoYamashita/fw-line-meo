@@ -13,6 +13,7 @@ import type { StructuredDraftMaterial, StructuredDraftPort } from '../src/lib/dr
 const KEY = 'test-signing-key';
 const STORE = '44444444-4444-4444-4444-444444444444';
 const SASHIMI = 'a4390000-0000-4000-8000-0000000000a1';
+const YAKITORI = 'a4390000-0000-4000-8000-0000000000a2';
 const tokens = createSessionTokenService(KEY);
 
 const DEFINITION: StructuredSurveyDefinition = {
@@ -26,7 +27,10 @@ const DEFINITION: StructuredSurveyDefinition = {
       allowsTargets: true,
       categoryFacets: [{ code: 'taste', label: '味', sortOrder: 10 }],
       targetFacets: [{ code: 'taste', label: '味', sortOrder: 10 }],
-      targets: [{ id: SASHIMI, label: '刺身盛り合わせ', sortOrder: 0 }],
+      targets: [
+        { id: SASHIMI, label: '刺身盛り合わせ', sortOrder: 0 },
+        { id: YAKITORI, label: '焼き鳥5種盛り', sortOrder: 1 },
+      ],
     },
   ],
 };
@@ -93,7 +97,10 @@ describe('structured の下書き（Issue #439）', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ mode: 'structured', generation: 'ok', draft: '刺身盛り合わせがおいしかったです。', regenerationsLeft: REGEN_MAX });
     const verified = tokens.verifyStructured(body.sessionToken as string);
-    expect(verified.ok && verified.value.structured).toEqual(SNAPSHOT);
+    // 未回答の Target は、検証に使った同じ定義から作って素材へ封入する（事後検証だけが使い、LLM へは渡さない）。
+    const sealed = { ...SNAPSHOT, unselectedTargets: [{ id: YAKITORI, label: '焼き鳥5種盛り', categoryCode: 'food' }] };
+    expect(verified.ok && verified.value.structured).toEqual(sealed);
+    expect(realizer.prepare).toHaveBeenCalledWith(sealed);
     expect(verified.ok && verified.value.attempt).toBe(0);
     // legacy の再生成の token としては通らない。
     expect(tokens.verify(body.sessionToken as string).ok).toBe(false);

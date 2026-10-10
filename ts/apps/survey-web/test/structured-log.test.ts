@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   logFabricationResidual,
   logFactualityResidual,
+  logStructuredDraftFallback,
+  logStructuredDraftRetry,
   logSurveyPageViewed,
   logSurveyResponseSubmitted,
   logSurveyReviewLinkOpened,
@@ -112,6 +114,26 @@ describe('logFabricationResidual', () => {
       }),
     );
     output.mockRestore();
+  });
+});
+
+// Issue #439: structured の下書きの作り直し・safe fallback。匿名の metadata（失格の種類・claim の件数）だけを載せる。
+describe('structured の下書きの作り直し・fallback', () => {
+  it('失格の種類（並び順を固定）と claim の件数だけを出し、下書き・一言・料理名は載せない', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    logStructuredDraftRetry(writeStructuredLog, ['unselectedTarget', 'commentLinkage'], 3);
+    logStructuredDraftFallback(writeStructuredLog, 'gate', ['commentLinkage'], 3);
+
+    expect(info).toHaveBeenCalledWith(
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_retry', residualClaims: 'commentLinkage,unselectedTarget', claimCount: 3 }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      JSON.stringify({ severity: 'WARNING', event: 'survey-web.structured_draft_fallback', residualClaims: 'commentLinkage', claimCount: 3, reason: 'gate' }),
+    );
+    info.mockRestore();
+    warn.mockRestore();
   });
 });
 

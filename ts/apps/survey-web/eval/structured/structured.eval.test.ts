@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GenAiClient, GenAiResponse } from '../../src/lib/draft/generator';
@@ -62,7 +62,16 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
     }
 
     const client = hasKey ? await realClient() : undefined;
-    const methods = evalMethods({ ...(client ? { client } : {}), model: MODEL }).filter(
+    // C の経路の内訳（作り直し・safe fallback）。最終の下書きは safe fallback の文でも hard gate を通るので、ここで見分ける。
+    const realizer = { retry: 0, fallbackGate: 0, fallbackGeneration: 0 };
+    const methods = evalMethods({
+      ...(client ? { client } : {}),
+      model: MODEL,
+      realizerEvents: {
+        onRetry: () => (realizer.retry += 1),
+        onFallback: (reason) => (reason === 'gate' ? (realizer.fallbackGate += 1) : (realizer.fallbackGeneration += 1)),
+      },
+    }).filter(
       (m) => (ONLY.length === 0 || ONLY.includes(m.id)) && (!m.requiresApi || hasKey),
     );
     if (!hasKey) console.log('GEMINI_API_KEY が無いので、実 API を呼ぶ方式（A・B・C）を skip し、D だけを流します。');
@@ -86,6 +95,16 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
     console.log(`\n## structured survey の下書きの実測（model=${MODEL}・runs=${RUNS}・key=${hasKey ? 'あり' : 'なし'}）\n`);
     console.log(formatSummary(summary));
 
+    const cSamples = samples.filter((s) => s.method === 'natural-realizer').length;
+    if (cSamples > 0) {
+      console.log(
+        `
+C の経路: ${cSamples} 本中、作り直し ${realizer.retry}・safe fallback（2 回とも hard gate 不合格）${realizer.fallbackGate}・safe fallback（生成の失敗）${realizer.fallbackGeneration}`,
+      );
+      // 生成が 1 本も成功しない C は、safe fallback の文だけで測ったことになる（キー・モデル名・通信の誤り）。比較に使わせない。
+      expect(realizer.fallbackGeneration, 'C の生成が全件失敗しました（GEMINI_API_KEY・GEMINI_MODEL・通信を確認）').toBeLessThan(cSamples);
+    }
+
     // 対照: D は claim から決定的に作るので、hard gate を構造的にすべて通る。落ちたら検出器か D が壊れている。
     const fallback = summary.methods.find((m) => m.method === 'safe-fallback');
     if (fallback) {
@@ -94,7 +113,15 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
     }
 
     if (OUT !== '') {
-      const meta = { model: MODEL, runs: RUNS, seed: SEED, methods: methods.map((m) => m.id), measuredAt: new Date().toISOString() };
+      mkdirSync(dirname(resolve(OUT)), { recursive: true });
+      const meta = {
+        model: MODEL,
+        runs: RUNS,
+        seed: SEED,
+        methods: methods.map((m) => m.id),
+        realizer,
+        measuredAt: new Date().toISOString(),
+      };
       writeFileSync(OUT, JSON.stringify({ meta, summary, samples }, null, 2));
       const packet = buildBlindPacket(
         samples.filter((s) => s.draft !== null).map((s) => ({
@@ -120,5 +147,6 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
       writeFileSync(`${OUT}.pairwise.csv`, packet.pairwiseTemplate);
       console.log(`\n書き出し: ${OUT}（.blind.md / .blind-key.json / .ratings.csv / .pairwise.csv）`);
     }
-  });
+    // 実 Gemini では A・B・C を逐次に呼ぶ（12 ケース × 3 回 × 最大 4 リクエスト）。設定の既定 10 分では足りないことがある。
+  }, 45 * 60 * 1000);
 });

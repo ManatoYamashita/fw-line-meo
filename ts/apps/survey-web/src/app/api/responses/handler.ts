@@ -13,6 +13,7 @@ import { checkSurveyRevision, type CurrentSurvey, type SessionTokenService } fro
 import {
   resolveStructuredAnswer,
   structuredMaterialCounts,
+  unselectedTargetsOf,
   validateStructuredAnswer,
 } from '../../../lib/structured-answer';
 import type { StructuredDraftPort } from '../../../lib/draft/structured-draft';
@@ -152,7 +153,8 @@ async function handleStructured(
   const tally = deps
     .incrementStructuredTallies({ storeId, star: answer.star, ...structuredMaterialCounts(answer) })
     .catch(() => deps.log('warn', 'tally_failed'));
-  const structured = { storeName, ...material };
+  // 未回答の Target は同じ定義から作り、事後検証だけが使う（LLM へは渡さない）。
+  const structured = { storeName, ...material, unselectedTargets: unselectedTargetsOf(answer, definition) };
   const draft = deps.structuredDrafts.prepare(structured);
   const [, prepared] = await Promise.all([tally, draft]);
 

@@ -319,6 +319,26 @@ export function resolveStructuredAnswer(
   return result;
 }
 
+/** 店舗の active な Target のうち、客が選ばなかったもの（下書きの事後検証だけが使う）。 */
+export interface UnselectedTarget {
+  id: string;
+  label: string;
+  categoryCode: string;
+}
+
+/**
+ * 回答の検証・解決に使った **同じ定義** から、どちらの極性でも選ばれなかった Target を定義の順で返す。
+ * 定義は active な Target しか持たないので、非表示の Target は含まれない。
+ */
+export function unselectedTargetsOf(answer: StructuredSurveyAnswer, definition: StructuredSurveyDefinition): UnselectedTarget[] {
+  const selected = new Set(
+    [...answer.positiveSelections, ...answer.concernSelections].flatMap((g) => (g.targetId !== undefined ? [g.targetId] : [])),
+  );
+  return definition.categories.flatMap((c) =>
+    c.targets.filter((t) => !selected.has(t.id)).map((t) => ({ id: t.id, label: t.label, categoryCode: c.code })),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // 匿名集計（素材の厚み）
 // ---------------------------------------------------------------------------

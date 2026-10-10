@@ -256,7 +256,8 @@ export function createSessionTokenService(
         typeof s.storeId !== 'string' ||
         typeof s.attempt !== 'number' ||
         s.structured == null ||
-        !Array.isArray(s.structured.selections)
+        !Array.isArray(s.structured.selections) ||
+        (s.structured.unselectedTargets !== undefined && !Array.isArray(s.structured.unselectedTargets))
       ) {
         return err('INVALID');
       }

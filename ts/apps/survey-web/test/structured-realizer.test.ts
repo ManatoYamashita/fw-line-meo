@@ -166,7 +166,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const result = await createNaturalRealizer(client, { random: fixed, onFallback }).prepare(material());
     expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせは味が良かったです。', source: 'fallback', attempts: 2 });
     expect(requests).toHaveLength(2);
-    expect(onFallback).toHaveBeenCalledWith('gate', expect.arrayContaining(['newAttribute', 'revisit']));
+    expect(onFallback).toHaveBeenCalledWith('gate', expect.arrayContaining(['newAttribute', 'revisit']), expect.any(Number));
   });
 
   it('exact overlap で両面の理由を作ったら（Issue #418）、作り直し、それでも作れば fallback で理由の無い文を返す', async () => {
@@ -202,7 +202,8 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
       const result = await createNaturalRealizer(client, { random: fixed, onFallback }).prepare(material());
       expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせは味が良かったです。', source: 'fallback', attempts: 1 });
       expect(requests).toHaveLength(1);
-      expect(onFallback).toHaveBeenCalledWith('generation', []);
+      // 匿名の metadata だけ（失格の種類と claim の件数）。
+      expect(onFallback).toHaveBeenCalledWith('generation', [], 1);
     }
   });
 

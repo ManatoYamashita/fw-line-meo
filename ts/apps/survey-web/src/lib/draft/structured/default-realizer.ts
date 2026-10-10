@@ -9,7 +9,7 @@ export async function createDefaultStructuredDrafts(): Promise<StructuredDraftPo
   const client = await createDefaultGenAiClient();
   return createNaturalRealizer(client, {
     ...(process.env.GEMINI_MODEL ? { model: process.env.GEMINI_MODEL } : {}),
-    onRetry: (kinds) => logStructuredDraftRetry(writeStructuredLog, kinds),
-    onFallback: (reason, kinds) => logStructuredDraftFallback(writeStructuredLog, reason, kinds),
+    onRetry: (kinds, claimCount) => logStructuredDraftRetry(writeStructuredLog, kinds, claimCount),
+    onFallback: (reason, kinds, claimCount) => logStructuredDraftFallback(writeStructuredLog, reason, kinds, claimCount),
   });
 }

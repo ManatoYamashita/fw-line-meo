@@ -172,6 +172,20 @@ AI detector は「人間らしさ」の正解に使わない。
 
 一言に同じ意味があれば、その分類は数えない（客が自分で書いたことは素材である・既存の検出器と同じ意味論）。
 
+### runtime hard gate と offline eval gate（Issue #439）
+
+判定の実装は 1 つ（`../src/lib/draft/structured/gate.ts`・語彙は `lexicon.json`）で、本番と評価が同じものを使う。違うのは入力が持つ知識だけである。
+
+| 区分 | どこで | 入力が持つもの | 止め方 |
+|---|---|---|---|
+| runtime hard gate | 本番の Natural LLM Realizer の事後検証 | 回答の素材・一言・回答時点の定義の未回答の Target の名前（素材の `unselectedTargets`・LLM へは渡さない） | 作り直し → safe fallback |
+| offline eval gate | `eval/structured`（最終 PR 前の release gate） | 上に加えて、固定ケースの Target の言い方（`subjects`・`menuTargets[].aliases`）・一言の内容の語（`commentKeywords`）・ケース固有の禁止の意味 | 方式の採否 |
+| 人手評価 | ブラインドの `.blind.md` | （語彙で決まらないもの） | 方式の採否 |
+
+- 未回答の Target: runtime は名前の **完全一致**（NFKC・名前の中の空白の有無を問わない・1 文字の名前は照合しない）だけを拾う。言い換え（「刺身盛り合わせ」→「刺し盛り」）は推測せず、固定ケースの言い方で評価だけが拾う。
+- 一言の因果づけ: 一言の語（一言から取り出した漢字・カタカナ・英数字の 2 文字以上の連なり。評価は固定ケースの語も足す）が理由の接続（ので・ため・〜たから など）の **前** にあり、同じ文に別の claim の主題があるときだけ拾う。主題を省いた因果（「窓側の席だったので、おいしく感じました」）は拾えず、人手評価で測る。
+- **runtime hard gate を通った = 事実どおりの保証ではない。** 語彙の判定は違反の下限で、runtime で止められない残りは offline eval gate と人手評価で release 前に測る。
+
 ### coverage は文字列一致ではない
 
 「刺身盛り合わせ / 味 / positive」は「刺身盛り合わせがおいしかったです」で満たす。判定は文単位で、**主題**（Target の言い方・カテゴリ全体の facet の意味の手がかり）と**極性の手がかり**が同じ文にあるかを見る。主題を省略した文は直前の文の Target を引き継ぐ。同じ Target・同じ極性の facet は統合してよいので、facet の意味まで述べたか（`facetMentioned`）は診断に留める。
@@ -203,10 +217,43 @@ AI detector は「人間らしさ」の正解に使わない。
 # キーなし: D（決定的なテンプレート）だけを流し、検出器と集計の経路を確かめる
 EVAL_OUT=/tmp/structured-eval.json pnpm --filter @fwlm/survey-web run eval:structured
 
-# 実 Gemini（課金が発生する。キーはファイル経由で渡し、表示しない）
-GEMINI_API_KEY="$(cat /tmp/gk)" GEMINI_MODEL=gemini-3.1-flash-lite EVAL_RUNS=3 \
-  EVAL_OUT=/tmp/structured-eval.json pnpm --filter @fwlm/survey-web run eval:structured
+# 実 Gemini（課金が発生する）は下の「実 Gemini で A/B/C/D を測る」の手順で、キーを画面にも履歴にも残さずに渡す
 ```
+
+#### 実 Gemini で A/B/C/D を測る（最終 PR 前の release gate）
+
+使うのは **自分の開発用の `GEMINI_API_KEY`** である。本番のシークレット（Secret Manager）からは取らない。キーは `.env` / `.env.local`・リポジトリ・ログ・`EVAL_OUT` の出力・シェルの履歴のどこにも残さない（入力を表示しないプロンプトで受け、その 1 コマンドの環境にだけ渡す）。1 コマンドで A・B・C・D を同じ fixture・同じモデル・同じ回数で流す。`ts/` で実行する。
+
+Git Bash（Windows）/ bash:
+
+```bash
+read -rsp 'GEMINI_API_KEY: ' GEMINI_API_KEY; echo   # 入力は表示されず、履歴にも残らない（export しない）
+GEMINI_API_KEY="$GEMINI_API_KEY" GEMINI_MODEL=gemini-3.1-flash-lite EVAL_RUNS=3 \
+  EVAL_OUT="$HOME/fwlm-eval/$(date +%Y%m%d-%H%M)/structured.json" \
+  pnpm --filter @fwlm/survey-web run eval:structured
+unset GEMINI_API_KEY
+```
+
+PowerShell:
+
+```powershell
+$sec = Read-Host -AsSecureString 'GEMINI_API_KEY'   # 入力は表示されず、PSReadLine の履歴にも残らない
+try {
+  $env:GEMINI_API_KEY = [System.Net.NetworkCredential]::new('', $sec).Password
+  $env:GEMINI_MODEL = 'gemini-3.1-flash-lite'; $env:EVAL_RUNS = '3'
+  $env:EVAL_OUT = "$env:LOCALAPPDATA\fwlm-eval\$(Get-Date -Format yyyyMMdd-HHmm)\structured.json"
+  pnpm --filter @fwlm/survey-web run eval:structured
+} finally {
+  Remove-Item Env:GEMINI_API_KEY, Env:GEMINI_MODEL, Env:EVAL_RUNS, Env:EVAL_OUT -ErrorAction SilentlyContinue
+  Remove-Variable sec
+}
+```
+
+- `EVAL_OUT` の親ディレクトリは無ければ作る。リポジトリの中を指すと止まる。出力（下書きの全件とブラインド評価の束）にキーは入らない。
+- 画面には集計の表と、C の経路の内訳（作り直し・safe fallback の本数）が出る。**C の生成が全件失敗した（キー・モデル名・通信の誤り）ときは赤になる**（safe fallback の文だけで C を測ったことにしない）。
+- 終わったら、集計だけを `structured/BASELINE.md` の §2 の表へ写す。実出力はリポジトリへ入れない。
+- 判定の基準（最終 PR の条件）: 事実性（hard gate の失格）で C が A・B より悪化しない／exact overlap の理由の創作が C で 0／未回答の Target・facet・原因・来店の経緯・推奨などの失格を増やさない／D より明確に自然（人手評価）／B・D のようなチェックリストの読み上げに寄りすぎない／同じ入力の再生成で、意味を保ったまま表現が変わる（再生成の類似度が D の 1.00 より下がり、失格は増えない）。
+- 人手評価: `.blind.md` を方式名を隠したまま 2 名以上（本人を含めてよい）で、自然さ・AI っぽさ・投稿しやすさ・忠実さ（`.ratings.csv`）と、どちらを自分の口コミとして使いたいか（`.pairwise.csv`）を記入する。`.blind-key.json` は評価者に見せない。評価者は `R1` のような符号だけで記録する。
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
