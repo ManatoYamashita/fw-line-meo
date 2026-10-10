@@ -99,7 +99,8 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
 /**
  * structured の再生成（Issue #439）。sessionToken に封入した素材（回答時点の Target の名前の snapshot）から作り直す。
  * 集計には触れない。上限・店舗の可否・レート制限は legacy と同じ規則。生成器が下書きを返せなかった（claim の無い
- * 素材）ときは生成失敗として返し、試行は消費しない。
+ * 素材・最大回数まで作れなかった generation error）ときは生成失敗として返し、試行は消費しない。生成器の内部の
+ * 作り直し（最大 3 回）は 1 回の再生成として数える。
  */
 async function handleStructuredDrafts(req: Request, payload: StructuredSessionPayload, deps: DraftsDeps): Promise<Response> {
   if (!deps.rateLimiter.check(deps.clientKey(req))) {

@@ -192,7 +192,7 @@ export const RETRY_NOTES: Readonly<Record<string, string>> = {
   absence: '回答に無いことを「無かった」「特にない」と書かない。',
   ungrounded: '回答に無い固有名詞・数字・日付を書かない。',
   caseForbidden: '回答に無い事情を書かない。',
-  // style（事実としては安全な不自然さ）。2 回目にこれだけが残っても safe fallback へは落とさない（style.ts）。
+  // style（事実としては安全な不自然さ）。最後の試行にこれだけが残っても、その LLM の文を返す（style.ts）。
   'style:abstractEvaluation': '「満足できる内容」「満足できるもの」のようにまとめず、「量にも満足できました」のように直接書く。',
   'style:repetitiveEnding': '同じ文末を続けない。文の長さとつなぎ方を変える。',
 };

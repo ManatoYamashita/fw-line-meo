@@ -168,16 +168,16 @@ AI detector は自然さの正解に使わない。
 | 止める: 回答に無い対象 | 未回答の Target・facet・カテゴリ。Target だけ（項目の指定なし）の回答は「良かった」「印象に残った」まで（味・量・見た目を補わない） |
 | 止める: exact overlap の理由 | 「味について良かった点もあり、気になる点もありました」は通す。「最初は美味しかったが後半は味が落ちた」は止める |
 
-safe fallback は通常の文章ではない。LLM 生成 → runtime hard gate → 作り直し → それでも失格（または生成の失敗）のときだけ返す最後の手段である。
+**ユーザーに表示する下書きは通常生成だけである。** 最初の生成も「別の文章を生成」も、Gemini の文を runtime hard gate で検査し、失格なら作り直す（最大 3 回）。最後まで作れなければ generation error（客の画面は既存の「下書きの生成に失敗しました」と再試行）で、safe fallback の文は返さない。safe fallback（`fallback.ts`）は内部用（単体テスト・評価の事実性の対照・将来の非常用）である。
 
 ### factuality の hard gate と style check の分離
 
 | | 中身 | 1 回目 | 2 回目 |
 |---|---|---|---|
-| factuality（`gate.ts`） | 未回答の Target / facet・数字・来店の文脈・原因・推奨 / 再訪・極性の反転・exact overlap の理由 など | 作り直し | まだ違反なら safe fallback（ただし 1 回目が style だけの問題だったなら 1 回目の LLM の文） |
-| style（`style.ts`） | 「満足できる内容」「満足できるもの」などの抽象語のまとめ（`style:abstractEvaluation`）・同じ文末の 3 連続（`style:repetitiveEnding`） | 作り直し | **残っていても LLM の文を返す**（style だけで safe fallback へ落とさない） |
+| factuality（`gate.ts`） | 未回答の Target / facet・数字・来店の文脈・原因・推奨 / 再訪・極性の反転・exact overlap の理由 など | 作り直し（3 回目まで） | 3 回とも違反なら generation error（style だけの問題の文が途中にあれば、その LLM の文） |
+| style（`style.ts`） | 「満足できる内容」「満足できるもの」などの抽象語のまとめ（`style:abstractEvaluation`）・同じ文末の 3 連続（`style:repetitiveEnding`） | 作り直し（3 回目まで） | **3 回目に残っていても LLM の文を返す** |
 
-LLM の呼び出しは 1 回の下書きで最大 2 回（作り直しを含む）。「少し不自然だが事実として安全な LLM の文」は、決定的な safe fallback の文より自然なことが多いので、style の問題では落とさない。「全体として」の使いすぎ・構成の偏りは runtime では見ず、評価の診断（`styleWarnings`）で頻度として見る。
+LLM の呼び出しは 1 回の下書き（1 回の送信・1 回の「別の文章を生成」）で最大 3 回。内部の作り直しは再生成の残り回数を消費せず、generation error も消費しない。優先順位は 1. 事実として安全 2. できれば自然 3. 決定的な定型は出さない。「全体として」の使いすぎ・構成の偏りは runtime では見ず、評価の診断（`styleWarnings`）で頻度として見る。
 
 避ける定型: 「満足できる内容でした」「満足できるものでした」「良い内容でした」のような抽象語のまとめ（「量にも満足できました」と直接言う）／総評（「全体として満足」）を毎回付けること／気になったことが 2 つ以上あるときの「〜だけ」。
 
@@ -198,7 +198,7 @@ LLM の呼び出しは 1 回の下書きで最大 2 回（作り直しを含む�
 | `structured/cases.json` | 固定ケース 15 件（A 単純 positive／B 複数 facet／C 複数 Target／D positive + concern／E 同じ Target・別 facet／F exact overlap／G Target のみ／H カテゴリ全体の facet／I1〜I3 一言あり（硬め・普通・カジュアル）／K 量・接客と入店の待ち時間（読み上げになりやすい典型）／L 予約・接客・料理の量とドリンクの種類（再生成の構成のバリエーション）／M 全体と Target の量・入店の待ち時間・接客の丁寧さが両面・料理の価格（safe fallback へ落ちた実例）／J 情報量が多い）。店名・料理名・一言はすべて架空。ケースごとに、Target の言い方（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・固有の禁止の意味・**許す言い換え**・**失格になるべき例**を持つ |
 | `../src/lib/draft/structured/lexicon.json` | hard gate の語彙。**本番の runtime hard gate と eval が同じ語彙・同じ判定を使う**（物差しを 2 つに割らない） |
 | `structured/gates.ts` | 固定ケースの読み込み。判定の本体は `../src/lib/draft/structured/gate.ts`（本番と共有）で、ここから再輸出する |
-| `structured/methods.ts` | 評価の対象（`production`＝本番の通常生成・作り直しと safe fallback を含む／`safe-fallback`＝事実性の対照） |
+| `structured/methods.ts` | 評価の対象（`production`＝本番の通常生成・作り直しを含む・作れなければ下書きなし／`safe-fallback`＝事実性の対照・内部用） |
 | `structured/diagnostics.ts` | 自然さの診断（個々の合否ではない）と再生成の類似度 |
 | `structured/report.ts` | 1 本ずつの記録・集計・表と、自動の成功条件（`successChecks`） |
 | `structured/rating.ts` | 人手の採点の束と、記入済みの表の集計 |
@@ -242,7 +242,7 @@ safe fallback 風（`fallbackLike`: 「〜良かったです。〜気になり�
 |---|---|
 | offline eval gate の失格（runtime を通った最終の下書きの残差） | 0 件 |
 | exact overlap の理由の創作 | 0 件 |
-| safe fallback に落ちた率 | ≤ 10% |
+| safe fallback に落ちた率（本番の経路では常に 0。下書きを作れなかった本数は「生成できた本数」の欠けで見る） | ≤ 10% |
 | 通常生成の文が safe fallback 風 | ≤ 5% |
 | 3 主題以上を入力の順に 1 文 1 主題で読み上げた | ≤ 10% |
 | 同じ文末が 3 文続いた | ≤ 5% |

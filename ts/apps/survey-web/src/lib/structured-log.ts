@@ -114,37 +114,47 @@ export function logStructuredDraftRetry(log: SurveyLogger, kinds: readonly strin
 
 /**
  * structured の下書きの最終の結果を記録する（**ローカル検証用**・`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ配線する）。
- * reason は `<llm|fallback>:attempts=<1|2>:<no_retry|fact_retry|style_retry>` の決まった形、residualClaims は最終の
- * 下書きに残った種類（受け入れた style の問題・fallback の理由）。下書き・一言・料理名は載せない。
+ * reason は `<llm|generation_error>:attempts=<n>:accepted=<n|none>` の決まった形。residualClaims は試行ごとの種類
+ * （`a1=cause+style:abstractEvaluation;a2=generation;a3=ok`）。下書き・一言・料理名は載せない。
  */
 export function logStructuredDraftResult(
   log: SurveyLogger,
   outcome: {
-    readonly source: 'llm' | 'fallback';
+    readonly result: 'llm' | 'generation_error';
     readonly attempts: number;
-    readonly retried: boolean;
-    readonly styleOnlyRetry: boolean;
-    readonly residualKinds: readonly string[];
+    readonly acceptedAttempt: number | null;
+    readonly history: readonly {
+      readonly attempt: number;
+      readonly generationFailed: boolean;
+      readonly factuality: readonly string[];
+      readonly style: readonly string[];
+    }[];
   },
   claimCount: number,
 ): void {
-  const retry = !outcome.retried ? 'no_retry' : outcome.styleOnlyRetry ? 'style_retry' : 'fact_retry';
+  const history = outcome.history
+    .map((h) => {
+      const kinds = h.generationFailed ? ['generation'] : [...[...h.factuality].sort(), ...[...h.style].sort()];
+      return `a${h.attempt}=${kinds.length === 0 ? 'ok' : kinds.join('+')}`;
+    })
+    .join(';');
   log('info', 'survey-web.structured_draft_result', {
-    reason: `${outcome.source}:attempts=${outcome.attempts}:${retry}`,
-    residualClaims: [...outcome.residualKinds].sort().join(','),
+    reason: `${outcome.result}:attempts=${outcome.attempts}:accepted=${outcome.acceptedAttempt ?? 'none'}`,
+    residualClaims: history,
     claimCount,
   });
 }
 
 /**
- * structured の下書きが safe fallback（claim からの決定的なテンプレート）へ落ちたことを記録する（Issue #439）。
- * reason は `gate`（2 回とも hard gate を通らなかった）か `generation`（生成そのものの失敗）。本文は載せない。
+ * structured の下書きを最大回数まで作れなかった（generation error）ことを記録する（Issue #439）。safe fallback の文は
+ * 返していない。reason は `gate`（最後の試行まで factuality の hard gate を通らなかった）か `generation`（すべて
+ * 生成そのものの失敗）。residualClaims は最後に検査できた試行の factuality の種類。本文は載せない。
  */
-export function logStructuredDraftFallback(
+export function logStructuredDraftFailed(
   log: SurveyLogger,
   reason: 'gate' | 'generation',
   kinds: readonly string[],
   claimCount: number,
 ): void {
-  log('warn', 'survey-web.structured_draft_fallback', { reason, residualClaims: [...kinds].sort().join(','), claimCount });
+  log('warn', 'survey-web.structured_draft_failed', { reason, residualClaims: [...kinds].sort().join(','), claimCount });
 }

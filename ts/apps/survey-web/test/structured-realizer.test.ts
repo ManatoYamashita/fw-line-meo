@@ -4,7 +4,7 @@ import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft'
 import { compileStructuredClaims, overlappingIdentities } from '../src/lib/draft/structured/claims';
 import { structuredFallbackDraft } from '../src/lib/draft/structured/fallback';
 import { availableCompositions, buildRealizerPrompt, COMMENT_TONE, COMPOSITIONS, overallImpression, REGENERATION_NOTE, RETRY_NOTES, TONES } from '../src/lib/draft/structured/prompt';
-import { createNaturalRealizer } from '../src/lib/draft/structured/realizer';
+import { createNaturalRealizer, MAX_ATTEMPTS } from '../src/lib/draft/structured/realizer';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。実 Gemini は呼ばず、偽のクライアントで生成の結果を決める。
 // 事実の境界（claims と hard gate）がコードで守られることと、作り直し・safe fallback の制御を固定する。
@@ -200,27 +200,35 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     expect(requests[1]!.config.systemInstruction).toBe(requests[0]!.config.systemInstruction);
   });
 
-  it('2 回とも hard gate を通らなければ、safe fallback（決定的なテンプレート）を返す。LLM は 2 回まで', async () => {
-    const onFallback = vi.fn();
-    const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '脂ののった刺身盛り合わせがおいしかった。また行きたい。', '呼ばれないはず');
-    const result = await createNaturalRealizer(client, { random: fixed, onFallback }).prepare(material());
-    expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせは味が良かったです。', source: 'fallback', attempts: 2 });
-    expect(requests).toHaveLength(2);
-    expect(onFallback).toHaveBeenCalledWith('gate', expect.arrayContaining(['newAttribute', 'revisit']), expect.any(Number));
+  it('1 回目・2 回目が factuality 違反でも、3 回目が通れば 3 回目の LLM の文を返す', async () => {
+    const onRetry = vi.fn();
+    const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '刺身盛り合わせがおいしく、また行きたいです。', '刺身盛り合わせがおいしかったです。', '呼ばれないはず');
+    const result = await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(material());
+    expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。', source: 'llm', attempts: 3 });
+    expect(requests).toHaveLength(MAX_ATTEMPTS);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    expect(onRetry.mock.calls[0]![0]).toContain('newAttribute');
+    expect(onRetry.mock.calls[1]![0]).toContain('revisit');
+    // 3 回目の注意は 2 回目の違反に応じたもの。
+    expect(requests[2]!.contents).toContain(RETRY_NOTES.revisit!);
   });
 
-  it('exact overlap で両面の理由を作ったら（Issue #418）、作り直し、それでも作れば fallback で理由の無い文を返す', async () => {
+  it('3 回とも factuality 違反なら、safe fallback の文ではなく generation error（下書きなし）', async () => {
+    const onFailed = vi.fn();
+    const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '脂ののった刺身盛り合わせ。', '刺身盛り合わせ、また行きたい。', '呼ばれないはず');
+    const result = await createNaturalRealizer(client, { random: fixed, onFailed }).prepare(material());
+    expect(result).toEqual({ kind: 'failed', attempts: 3 });
+    expect(requests).toHaveLength(3);
+    expect(onFailed).toHaveBeenCalledWith('gate', expect.arrayContaining(['revisit']), 1);
+  });
+
+  it('exact overlap で両面の理由を作り続けたら generation error（理由の文も定型の文も返さない）', async () => {
     const { client } = fakeClient(
       '刺身盛り合わせの味は、時間帯によって良いときと気になるときがありました。',
       '刺身盛り合わせの味は、部位によって良かったり気になったりしました。',
+      '刺身盛り合わせの味は、最初は良かったのですが後半は気になりました。',
     );
-    const result = await createNaturalRealizer(client, { random: fixed }).prepare(OVERLAP);
-    expect(result).toEqual({
-      kind: 'draft',
-      draft: '刺身盛り合わせの味については、良かった点と気になる点の両方がありました。',
-      source: 'fallback',
-      attempts: 2,
-    });
+    expect(await createNaturalRealizer(client, { random: fixed }).prepare(OVERLAP)).toEqual({ kind: 'failed', attempts: 3 });
   });
 
   it('exact overlap で両面だけを書いた下書きは通す', async () => {
@@ -235,16 +243,26 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     expect(onRetry.mock.calls[0]![0]).toContain('concernDropped');
   });
 
-  it('生成そのものの失敗（API の例外・JSON でない・空）は作り直さず safe fallback へ', async () => {
-    for (const reply of [new Error('503'), '']) {
-      const onFallback = vi.fn();
-      const { client, requests } = fakeClient(reply as string | Error);
-      const result = await createNaturalRealizer(client, { random: fixed, onFallback }).prepare(material());
-      expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせは味が良かったです。', source: 'fallback', attempts: 1 });
-      expect(requests).toHaveLength(1);
-      // 匿名の metadata だけ（失格の種類と claim の件数）。
-      expect(onFallback).toHaveBeenCalledWith('generation', [], 1);
-    }
+  it('生成そのものの失敗（API の例外・JSON でない・空）は作り直し、3 回とも失敗なら generation error', async () => {
+    const onFailed = vi.fn();
+    const onRetry = vi.fn();
+    const { client, requests } = fakeClient(new Error('503'), '', new Error('timeout'));
+    const result = await createNaturalRealizer(client, { random: fixed, onFailed, onRetry }).prepare(material());
+    expect(result).toEqual({ kind: 'failed', attempts: 3 });
+    expect(requests).toHaveLength(3);
+    expect(onRetry.mock.calls.map((c) => c[0])).toEqual([['generation'], ['generation']]);
+    // 匿名の metadata だけ（失格の種類と claim の件数）。
+    expect(onFailed).toHaveBeenCalledWith('generation', [], 1);
+  });
+
+  it('生成の失敗のあとに通れば、その LLM の文を返す', async () => {
+    const { client } = fakeClient(new Error('503'), '刺身盛り合わせがおいしかったです。');
+    expect(await createNaturalRealizer(client, { random: fixed }).prepare(material())).toEqual({
+      kind: 'draft',
+      draft: '刺身盛り合わせがおいしかったです。',
+      source: 'llm',
+      attempts: 2,
+    });
   });
 
   it('一言の内容・語調は使ってよい（一言にある意向は失格にしない）', async () => {
@@ -376,49 +394,59 @@ describe('factuality と style の分離（style の問題だけでは safe fall
     const onResult = vi.fn();
     const { client } = fakeClient(GOOD);
     expect(await createNaturalRealizer(client, { random: fixed, onResult }).prepare(MIXED)).toEqual({ kind: 'draft', draft: GOOD, source: 'llm', attempts: 1 });
-    expect(onResult).toHaveBeenCalledWith({ source: 'llm', attempts: 1, retried: false, styleOnlyRetry: false, residualKinds: [] }, 6);
-  });
-
-  it('「満足できる内容」だけの問題は style として作り直し、2 回目も style だけなら LLM の文を返す（fallback にしない）', async () => {
-    const onRetry = vi.fn();
-    const onFallback = vi.fn();
-    const onResult = vi.fn();
-    const { client, requests } = fakeClient(STYLE_ONLY, STYLE_ONLY);
-    const result = await createNaturalRealizer(client, { random: fixed, onRetry, onFallback, onResult }).prepare(MIXED);
-    expect(result).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 2 });
-    expect(onRetry).toHaveBeenCalledWith(['style:abstractEvaluation'], 6);
-    expect(requests[1]!.contents).toContain(RETRY_NOTES['style:abstractEvaluation']!);
-    expect(onFallback).not.toHaveBeenCalled();
     expect(onResult).toHaveBeenCalledWith(
-      { source: 'llm', attempts: 2, retried: true, styleOnlyRetry: true, residualKinds: ['style:abstractEvaluation'] },
+      { result: 'llm', attempts: 1, acceptedAttempt: 1, history: [{ attempt: 1, generationFailed: false, factuality: [], style: [] }] },
       6,
     );
   });
 
-  it('1 回目が style だけの問題なら、2 回目が factuality 違反・生成の失敗でも 1 回目の LLM の文を返す', async () => {
-    for (const second of [CAUSE, new Error('503')]) {
-      const { client } = fakeClient(STYLE_ONLY, second);
-      expect(await createNaturalRealizer(client, { random: fixed }).prepare(MIXED)).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 2 });
-    }
+  it('「満足できる内容」だけの問題は style として作り直し、3 回目も style だけなら 3 回目の LLM の文を返す（generation error にしない）', async () => {
+    const onRetry = vi.fn();
+    const onFailed = vi.fn();
+    const onResult = vi.fn();
+    const third = STYLE_ONLY.replace('入店までの待ち時間も少なく、', '待ち時間も少なく、');
+    const { client, requests } = fakeClient(STYLE_ONLY, STYLE_ONLY, third);
+    const result = await createNaturalRealizer(client, { random: fixed, onRetry, onFailed, onResult }).prepare(MIXED);
+    expect(result).toEqual({ kind: 'draft', draft: third, source: 'llm', attempts: 3 });
+    expect(onRetry).toHaveBeenCalledWith(['style:abstractEvaluation'], 6);
+    expect(requests[1]!.contents).toContain(RETRY_NOTES['style:abstractEvaluation']!);
+    expect(onFailed).not.toHaveBeenCalled();
+    expect(onResult.mock.calls[0]![0]).toMatchObject({ result: 'llm', attempts: 3, acceptedAttempt: 3 });
+  });
+
+  it('style だけの問題の文があれば、後の試行が factuality 違反・生成の失敗でも、その LLM の文を返す', async () => {
+    const { client } = fakeClient(STYLE_ONLY, CAUSE, new Error('503'));
+    expect(await createNaturalRealizer(client, { random: fixed }).prepare(MIXED)).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 3 });
   });
 
   it('同じ文末の羅列（「Xでした。Yでした。Zでした。」）も style の問題で、事実として安全なら fallback にしない', async () => {
     const listy =
       '入店まではスムーズでした。焼き鳥5種盛りの量も満足でした。料理全体の量も満足でした。接客の丁寧さは良い点も気になる点もありました。料理の価格は気になりました。';
     const onRetry = vi.fn();
-    const { client } = fakeClient(listy, listy);
-    expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(MIXED)).toMatchObject({ source: 'llm', attempts: 2 });
+    const { client } = fakeClient(listy, listy, listy);
+    expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(MIXED)).toMatchObject({ source: 'llm', attempts: 3 });
     expect(onRetry.mock.calls[0]![0]).toEqual(['style:repetitiveEnding']);
   });
 
-  it('原因の創作（予約のおかげか）は factuality 違反: 作り直し、2 回続けば safe fallback', async () => {
-    const onFallback = vi.fn();
+  it('原因の創作（予約のおかげか）は factuality 違反: 作り直し、3 回続けば generation error（fallback の文は返さない）', async () => {
+    const onFailed = vi.fn();
     const onResult = vi.fn();
-    const { client } = fakeClient(CAUSE, CAUSE);
-    const result = await createNaturalRealizer(client, { random: fixed, onFallback, onResult }).prepare(MIXED);
-    expect(result).toMatchObject({ source: 'fallback', attempts: 2 });
-    expect(onFallback).toHaveBeenCalledWith('gate', ['cause'], 6);
-    expect(onResult).toHaveBeenCalledWith({ source: 'fallback', attempts: 2, retried: true, styleOnlyRetry: false, residualKinds: ['cause'] }, 6);
+    const { client } = fakeClient(CAUSE, CAUSE, CAUSE);
+    expect(await createNaturalRealizer(client, { random: fixed, onFailed, onResult }).prepare(MIXED)).toEqual({ kind: 'failed', attempts: 3 });
+    expect(onFailed).toHaveBeenCalledWith('gate', ['cause'], 6);
+    expect(onResult.mock.calls[0]![0]).toMatchObject({ result: 'generation_error', attempts: 3, acceptedAttempt: null });
+  });
+
+  it('最終の結果は llm か generation_error だけ（本番の経路で fallback は出ない）', async () => {
+    const results = new Set<string>();
+    const onResult = (o: { result: string }) => results.add(o.result);
+    const scripts: (string | Error)[][] = [[GOOD], [CAUSE, GOOD], [STYLE_ONLY, CAUSE, CAUSE], [CAUSE, CAUSE, CAUSE], [new Error('x'), '', new Error('y')]];
+    for (const replies of scripts) {
+      const { client } = fakeClient(...replies);
+      const r = await createNaturalRealizer(client, { random: fixed, onResult }).prepare(MIXED);
+      if (r.kind === 'draft') expect(r.source).toBe('llm');
+    }
+    expect([...results].sort()).toEqual(['generation_error', 'llm']);
   });
 
   it('safe fallback は最低限自然な定型: 待ち時間の positive・量の重複のまとめ・exact overlap の両面', () => {

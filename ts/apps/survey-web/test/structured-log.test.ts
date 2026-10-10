@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   logFabricationResidual,
   logFactualityResidual,
-  logStructuredDraftFallback,
+  logStructuredDraftFailed,
   logStructuredDraftResult,
   logStructuredDraftRetry,
   logSurveyPageViewed,
@@ -118,20 +118,20 @@ describe('logFabricationResidual', () => {
   });
 });
 
-// Issue #439: structured の下書きの作り直し・safe fallback。匿名の metadata（失格の種類・claim の件数）だけを載せる。
-describe('structured の下書きの作り直し・fallback', () => {
+// Issue #439: structured の下書きの作り直し・generation error。匿名の metadata（失格の種類・claim の件数）だけを載せる。
+describe('structured の下書きの作り直し・generation error', () => {
   it('失格の種類（並び順を固定）と claim の件数だけを出し、下書き・一言・料理名は載せない', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     logStructuredDraftRetry(writeStructuredLog, ['unselectedTarget', 'commentLinkage'], 3);
-    logStructuredDraftFallback(writeStructuredLog, 'gate', ['commentLinkage'], 3);
+    logStructuredDraftFailed(writeStructuredLog, 'gate', ['commentLinkage'], 3);
 
     expect(info).toHaveBeenCalledWith(
       JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_retry', residualClaims: 'commentLinkage,unselectedTarget', claimCount: 3 }),
     );
     expect(warn).toHaveBeenCalledWith(
-      JSON.stringify({ severity: 'WARNING', event: 'survey-web.structured_draft_fallback', residualClaims: 'commentLinkage', claimCount: 3, reason: 'gate' }),
+      JSON.stringify({ severity: 'WARNING', event: 'survey-web.structured_draft_failed', residualClaims: 'commentLinkage', claimCount: 3, reason: 'gate' }),
     );
     info.mockRestore();
     warn.mockRestore();
@@ -141,17 +141,30 @@ describe('structured の下書きの作り直し・fallback', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     logStructuredDraftResult(
       writeStructuredLog,
-      { source: 'llm', attempts: 2, retried: true, styleOnlyRetry: true, residualKinds: ['style:abstractEvaluation'] },
+      {
+        result: 'llm',
+        attempts: 3,
+        acceptedAttempt: 3,
+        history: [
+          { attempt: 1, generationFailed: false, factuality: ['cause', 'ungrounded'], style: ['style:abstractEvaluation'] },
+          { attempt: 2, generationFailed: true, factuality: [], style: [] },
+          { attempt: 3, generationFailed: false, factuality: [], style: [] },
+        ],
+      },
       6,
     );
-    logStructuredDraftResult(writeStructuredLog, { source: 'fallback', attempts: 2, retried: true, styleOnlyRetry: false, residualKinds: ['cause'] }, 6);
+    logStructuredDraftResult(
+      writeStructuredLog,
+      { result: 'generation_error', attempts: 3, acceptedAttempt: null, history: [1, 2, 3].map((attempt) => ({ attempt, generationFailed: false, factuality: ['cause'], style: [] })) },
+      6,
+    );
     expect(info).toHaveBeenNthCalledWith(
       1,
-      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'style:abstractEvaluation', claimCount: 6, reason: 'llm:attempts=2:style_retry' }),
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'a1=cause+ungrounded+style:abstractEvaluation;a2=generation;a3=ok', claimCount: 6, reason: 'llm:attempts=3:accepted=3' }),
     );
     expect(info).toHaveBeenNthCalledWith(
       2,
-      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'cause', claimCount: 6, reason: 'fallback:attempts=2:fact_retry' }),
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'a1=cause;a2=cause;a3=cause', claimCount: 6, reason: 'generation_error:attempts=3:accepted=none' }),
     );
     info.mockRestore();
   });

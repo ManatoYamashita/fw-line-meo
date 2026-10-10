@@ -165,10 +165,15 @@ async function handleStructured(
     // claim の無い回答（星だけ・一言だけ）。下書きは作らず、客の画面は回答済み（Google の投稿導線）へ進む。
     return jsonOk({ mode: 'structured', generation: 'unavailable', draft: null });
   }
+  const sessionToken = deps.tokens.signStructured({ storeId, structured, attempt: 0 });
+  if (prepared.kind === 'failed') {
+    // 通常生成が最大回数まで作れなかった（generation error）。safe fallback の文は返さず、legacy と同じ失敗の応答に
+    // する（客の画面は「下書きの生成に失敗しました」と再試行。再試行は /api/drafts が同じ素材から作る）。
+    return jsonOk({ mode: 'structured', generation: 'failed', draft: null, sessionToken, regenerationsLeft: REGEN_MAX });
+  }
   // 下書き（Natural LLM Realizer・Issue #439）。再生成は /api/drafts が、sessionToken に封入した同じ素材
   // （Target の名前の snapshot）から作り直す。応答の形は legacy と同じなので、下書きの画面（コピー・Google の
   // 投稿導線・再生成）をそのまま使う。
-  const sessionToken = deps.tokens.signStructured({ storeId, structured, attempt: 0 });
   return jsonOk({ mode: 'structured', generation: 'ok', draft: prepared.draft, sessionToken, regenerationsLeft: REGEN_MAX });
 }
 

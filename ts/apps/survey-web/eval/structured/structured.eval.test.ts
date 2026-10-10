@@ -70,7 +70,7 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
     const generators = evalGenerators({
       ...(client ? { client } : {}),
       model: MODEL,
-      realizerEvents: { onFallback: (reason) => (reason === 'generation' ? (generationFailures += 1) : undefined) },
+      realizerEvents: { onFailed: (reason) => (reason === 'generation' ? (generationFailures += 1) : undefined) },
     }).filter((g) => !g.requiresApi || hasKey);
     if (!hasKey) console.log('GEMINI_API_KEY が無いので、本番の通常生成（production）を skip し、safe fallback だけを流します。');
 

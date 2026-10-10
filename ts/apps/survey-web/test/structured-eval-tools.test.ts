@@ -181,7 +181,7 @@ describe('評価の対象（本番の通常生成と safe fallback の 2 つだ�
     };
     const onRetry = vi.fn();
     const onFallback = vi.fn();
-    const p = evalGenerators({ client, model: 'gemini-test', realizerEvents: { onRetry, onFallback } }).find((g) => g.id === 'production')!;
+    const p = evalGenerators({ client, model: 'gemini-test', realizerEvents: { onRetry, onFailed: onFallback } }).find((g) => g.id === 'production')!;
     // 1 回目は未回答の「鶏の唐揚げ」を足したので作り直し、2 回目の LLM の文を返す（本番と同じ runtime hard gate）。
     expect(await p.generate(byId('C-multi-target'), 0)).toEqual({
       draft: '刺身盛り合わせもだし巻き玉子もおいしかったです。',

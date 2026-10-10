@@ -24,10 +24,15 @@ export type StructuredDraftResult =
   /** 下書きを作らなかった（claim が無い＝星だけ・一言だけの回答）。客の画面は回答済み（Google の投稿導線）へ進む。 */
   | { readonly kind: 'unavailable' }
   /**
-   * 下書き。source は通常 `llm`（hard gate を通った生成）で、2 回とも通らなかった・生成に失敗したときだけ
-   * `fallback`（claim からの決定的なテンプレート）。attempts は LLM を呼んだ回数（1〜2）。
+   * 下書き。**必ず LLM の通常生成の文**（factuality の hard gate を通った文）。attempts は LLM を呼んだ回数（1〜3）。
+   * 決定的な safe fallback の文はここに入れない（本番の応答では使わない）。
    */
-  | { readonly kind: 'draft'; readonly draft: string; readonly source: 'llm' | 'fallback'; readonly attempts: number };
+  | { readonly kind: 'draft'; readonly draft: string; readonly source: 'llm'; readonly attempts: number }
+  /**
+   * 下書きを作れなかった（generation error）。最大回数まで factuality の違反・生成の失敗が続いた。客の画面は既存の
+   * 「下書きの生成に失敗しました」（再試行と投稿導線）を出す。
+   */
+  | { readonly kind: 'failed'; readonly attempts: number };
 
 export interface StructuredDraftOptions {
   /**

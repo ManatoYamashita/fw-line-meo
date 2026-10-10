@@ -8,7 +8,7 @@ import absenceLexiconRaw from '../absence-lexicon.json';
 import groundingLexiconRaw from '../material-grounding-lexicon.json';
 
 // structured survey の下書きの hard gate と coverage（Issue #440 で評価のために作り、Issue #439 で本番の事後検証へ移した）。
-// 実 API を呼ばない純関数。**本番（Natural LLM Realizer の作り直しと safe fallback の判断）と評価（eval/structured）は
+// 実 API を呼ばない純関数。**本番（Natural LLM Realizer の作り直しと generation error の判断）と評価（eval/structured）は
 // 同じこの判定を使う。** 物差しを 2 つに分けると、評価で緑の方式が本番では別の基準で通ることになる。
 //
 // 「自然でも、これが起きたら失格」を決定的に判定する。既存の検出器（来店の経緯・期待と再訪・属性・断定・
@@ -25,7 +25,7 @@ import groundingLexiconRaw from '../material-grounding-lexicon.json';
 // 例: 「刺身盛り合わせ / 味 / positive」は「刺身盛り合わせがおいしかったです」で満たす（「味」の字は要らない）。
 //
 // 責務の境界（本番の runtime hard gate と、最終 PR 前の offline eval gate）:
-//   runtime hard gate … この関数そのもの。高 precision に検出できるものを本番で自動的に止める（作り直し → safe fallback）。
+//   runtime hard gate … この関数そのもの。高 precision に検出できるものを本番で自動的に止める（作り直し → generation error）。
 //     本番の入力が持つのは、回答の素材・一言・回答時点の定義の未回答の Target の名前（完全一致）である。
 //   offline eval gate … 同じ関数を、固定ケースの追加の知識（Target の言い換え・一言の内容の語・ケース固有の禁止の
 //     意味）つきで流す（eval/structured）。runtime より広く拾う。さらに、語彙で決まらないもの（主題を省いた因果・

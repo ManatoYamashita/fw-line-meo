@@ -6,6 +6,12 @@ import { createSessionTokenService } from '../src/lib/session-token';
 import { ok } from '../src/lib/result';
 import { REGEN_MAX } from '../src/lib/limits';
 import type { StructuredDraftMaterial, StructuredDraftPort } from '../src/lib/draft/structured-draft';
+import type { GenAiClient } from '../src/lib/draft/generator';
+import { createNaturalRealizer } from '../src/lib/draft/structured/realizer';
+
+// safe fallback は本番の応答で呼ばない（内部用）。呼ばれたら分かるように差し替える。
+const fallbackSpy = vi.hoisted(() => vi.fn(() => 'SAFE FALLBACK'));
+vi.mock('../src/lib/draft/structured/fallback', () => ({ structuredFallbackDraft: fallbackSpy }));
 
 // structured の下書き（Issue #439）の受付と再生成。回答受付は下書きと structured の sessionToken を返し、再生成は
 // sessionToken に封入した同じ素材（Target の名前の snapshot）から作り直す。legacy の token とは互いに通さない。
@@ -147,5 +153,74 @@ describe('structured の下書き（Issue #439）', () => {
     expect(res.status).toBe(200);
     expect(deps.generator.generate).toHaveBeenCalledTimes(1);
     expect(realizer.prepare).not.toHaveBeenCalled();
+  });
+});
+
+// 本番の Realizer（偽の Gemini）を通した受付・再生成。ユーザーに返す下書きは必ず LLM の文で、safe fallback は呼ばない。
+// 内部の作り直し（最大 3 回）は再生成の残り回数を 1 回しか消費せず、generation error では消費しない。
+describe('ユーザーに表示する下書きは通常生成だけ（safe fallback を返さない）', () => {
+  const OK_DRAFT = '刺身盛り合わせがおいしかったです。';
+  const BAD = '新鮮な刺身盛り合わせがおいしかったです。';
+  function realizer(...replies: (string | Error)[]) {
+    const client: GenAiClient = {
+      models: {
+        generateContent: async () => {
+          const reply = replies.shift();
+          if (reply instanceof Error) throw reply;
+          return { text: JSON.stringify({ draft: reply ?? '' }) };
+        },
+      },
+    };
+    return createNaturalRealizer(client, { random: () => 0 });
+  }
+  const submit = (port: StructuredDraftPort) =>
+    handleResponses(
+      post('http://x/api/responses', {
+        storeId: STORE,
+        pageToken: tokens.signStructuredPage(STORE, 2, surveyDefinitionFingerprint(DEFINITION)),
+        star: 4,
+        positiveSelections: [{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] }],
+        concernSelections: [],
+      }),
+      responsesDeps(port),
+    );
+  const regenerate = (port: StructuredDraftPort, attempt = 0) =>
+    handleDrafts(post('http://x/api/drafts', { sessionToken: tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt }) }), draftsDeps(port));
+
+  it('受付: 内部で作り直して通った LLM の文を返し、safe fallback は呼ばない', async () => {
+    fallbackSpy.mockClear();
+    const body = (await (await submit(realizer(BAD, BAD, OK_DRAFT))).json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ mode: 'structured', generation: 'ok', draft: OK_DRAFT, regenerationsLeft: REGEN_MAX });
+    expect(fallbackSpy).not.toHaveBeenCalled();
+  });
+
+  it('受付: 3 回とも作れなければ generation error（下書きなし）で、safe fallback の文を返さない', async () => {
+    fallbackSpy.mockClear();
+    const res = await submit(realizer(BAD, new Error('503'), BAD));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ mode: 'structured', generation: 'failed', draft: null, regenerationsLeft: REGEN_MAX });
+    // 再試行（/api/drafts）できる token を返す（試行は消費していない）。
+    const verified = tokens.verifyStructured(body.sessionToken as string);
+    expect(verified.ok && verified.value.attempt).toBe(0);
+    expect(fallbackSpy).not.toHaveBeenCalled();
+  });
+
+  it('再生成: 内部の作り直し（3 回）は残り回数を 1 回だけ消費し、LLM の文を返す。safe fallback は呼ばない', async () => {
+    fallbackSpy.mockClear();
+    const body = (await (await regenerate(realizer(BAD, BAD, OK_DRAFT))).json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ generation: 'ok', draft: OK_DRAFT, regenerationsLeft: REGEN_MAX - 1 });
+    const verified = tokens.verifyStructured(body.sessionToken as string);
+    expect(verified.ok && verified.value.attempt).toBe(1);
+    expect(fallbackSpy).not.toHaveBeenCalled();
+  });
+
+  it('再生成: generation error なら残り回数を消費せず、下書きなしで返す（safe fallback は呼ばない）', async () => {
+    fallbackSpy.mockClear();
+    const body = (await (await regenerate(realizer(BAD, BAD, BAD), 1)).json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ generation: 'failed', draft: null, regenerationsLeft: REGEN_MAX - 1 });
+    const verified = tokens.verifyStructured(body.sessionToken as string);
+    expect(verified.ok && verified.value.attempt).toBe(1);
+    expect(fallbackSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,6 @@
 import type { GenAiClient, GenAiResponse } from '../generator';
 import type { StructuredDraftMaterial, StructuredDraftOptions, StructuredDraftPort, StructuredDraftResult } from '../structured-draft';
 import { claimSubjectKey, compileStructuredClaims, type StructuredClaim } from './claims';
-import { structuredFallbackDraft } from './fallback';
 import {
   evaluateStructuredDraft,
   gateFamily,
@@ -16,22 +15,28 @@ import { detectStyleIssues } from './style';
 import lexiconRaw from './lexicon.json';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。structured の回答から、事実の境界を claim に固定したうえで、
-// LLM に自然な口コミの文章を書かせる。プロダクトの概念は「通常生成」と「safe fallback」の 2 つだけである。
+// LLM に自然な口コミの文章を書かせる。**ユーザーに表示する下書きは、最初の生成も再生成も、すべてこの通常生成の文である。**
+// 決定的な safe fallback（fallback.ts）は本番の応答では使わない（単体テスト・内部の診断・将来の非常用に限る）。
 //
 //   compileStructuredClaims（決定的）
-//   → 生成 1 回目 → factuality の hard gate（gate.ts・評価と同じ物差し）と style check（style.ts）
-//       両方 OK → 下書き
-//       どちらか NG → 生成 2 回目（違反の種類に応じた決まった注意を足す）
-//            factuality OK → 2 回目の下書き（style の問題が残っていても返す）
-//            factuality NG → 1 回目が factuality OK（style だけの問題）だったなら 1 回目の下書き、そうでなければ safe fallback
-//   生成そのものの失敗（API・安全性・形式）→ 1 回目が factuality OK ならその下書き、そうでなければ safe fallback
-// LLM の呼び出しは最大 2 回。**safe fallback へ落とすのは factuality の違反と生成の失敗だけで、style の問題では落とさない。**
-// fallback は通常の経路ではない。
+//   → 生成（最大 MAX_ATTEMPTS = 3 回）→ factuality の hard gate（gate.ts・評価と同じ物差し）と style check（style.ts）
+//       両方 OK            → その下書き
+//       factuality NG       → 違反の種類に応じた決まった注意を足して作り直す
+//       style だけ NG       → 作り直す（その文は「事実として安全な候補」として覚えておく）
+//       生成そのものの失敗 → 同じ注意のまま作り直す
+//   最後まで両方 OK の文が無ければ、事実として安全な候補（style だけの問題の文・最も新しいもの）を返す。
+//   候補も無ければ generation error（{ kind: 'failed' }）。**safe fallback の文を下書きとして返さない。**
+// 優先順位は 1. 事実として安全 2. できれば自然 3. 決定的な定型は出さない。
 //
 // 「hard gate を通った = 完全に事実どおり」とは扱わない（語彙の判定は違反の下限）。評価（eval/structured）で
 // 通常生成の残差（事実性と自然さ）を測る。
 
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
+/**
+ * 1 回の下書き（ユーザーの 1 回の送信・1 回の「別の文章を生成」）で LLM を呼ぶ最大回数。実 Gemini で 2 回では
+ * 落ちる回答があった。これより増やすと待ち時間と API の利用量が増える。
+ */
+export const MAX_ATTEMPTS = 3;
 const MAX_DRAFT_CHARS = 400;
 
 const SAFETY_SETTINGS = [
@@ -58,14 +63,14 @@ export interface NaturalRealizerOptions {
   readonly lexicon?: StructuredGateLexicon;
   readonly legacyLexicons?: LegacyLexicons;
   /**
-   * 1 回目が hard gate を通らず作り直したとき・safe fallback へ落ちたときに呼ばれる（記録は配線側が決める）。
-   * 渡すのは失格の種類（頭の名前）と claim の件数だけで、本文・一言・料理名は渡さない。
+   * 作り直したとき（attempt 1〜2 が使えなかった）・最後まで下書きを作れなかったときに呼ばれる（記録は配線側が決める）。
+   * 渡すのは失格の種類（頭の名前・生成の失敗は `generation`）と claim の件数だけで、本文・一言・料理名は渡さない。
    */
   readonly onRetry?: (kinds: readonly string[], claimCount: number) => void;
-  readonly onFallback?: (reason: 'gate' | 'generation', kinds: readonly string[], claimCount: number) => void;
+  readonly onFailed?: (reason: 'gate' | 'generation', kinds: readonly string[], claimCount: number) => void;
   /**
-   * 最終の結果（ローカル検証の記録用）。source・LLM の呼び出し回数・作り直しの有無と、最終の下書きに残った種類
-   * （style の問題を受け入れた・safe fallback へ落ちた理由）だけを渡し、本文・一言・料理名は渡さない。
+   * 最終の結果（ローカル検証の記録用）。結果（llm / generation_error）・LLM の呼び出し回数・試行ごとの失格の種類だけを
+   * 渡し、本文・一言・料理名は渡さない。
    */
   readonly onResult?: (result: RealizerOutcome, claimCount: number) => void;
 }
@@ -99,15 +104,23 @@ export function shuffleSubjects(claims: readonly StructuredClaim[], random: () =
   return keys.flatMap((k) => claims.filter((c) => `${c.polarity}:${claimSubjectKey(c)}` === k));
 }
 
+/** 1 回の試行の結果（種類だけ）。 */
+export interface AttemptRecord {
+  readonly attempt: number;
+  /** 生成そのものの失敗（API・安全性・形式・空）。 */
+  readonly generationFailed: boolean;
+  readonly factuality: readonly string[];
+  readonly style: readonly string[];
+}
+
 export interface RealizerOutcome {
-  readonly source: 'llm' | 'fallback';
+  /** 最終の結果。safe fallback は本番の経路では出ない。 */
+  readonly result: 'llm' | 'generation_error';
+  /** LLM を呼んだ回数（1〜MAX_ATTEMPTS）。 */
   readonly attempts: number;
-  /** 1 回目が作り直しになったか（factuality / style のどちらでも）。 */
-  readonly retried: boolean;
-  /** 1 回目の作り直しの理由が style だけだったか。 */
-  readonly styleOnlyRetry: boolean;
-  /** 最終の下書きに残った種類（LLM の文なら受け入れた style の問題、fallback なら落ちた理由）。 */
-  readonly residualKinds: readonly string[];
+  /** 返した下書きの試行の番号（generation_error なら null）。 */
+  readonly acceptedAttempt: number | null;
+  readonly history: readonly AttemptRecord[];
 }
 
 /** 1 回の下書き作り（作り直しを含む）で固定する文章の組み立て。作り直しでは回答と組み立てを変えない。 */
@@ -196,38 +209,42 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       const factualityKinds = (draft: string) => [
         ...new Set(evaluateStructuredDraft(input, draft, lexicon, legacy).findings.map((f) => gateFamily(f.kind))),
       ];
-      const done = (draft: string, source: 'llm' | 'fallback', attempts: number, outcome: Omit<RealizerOutcome, 'source' | 'attempts'>) => {
-        options.onResult?.({ source, attempts, ...outcome }, claims.length);
-        return { kind: 'draft' as const, draft, source, attempts };
-      };
-      const fallback = (reason: 'gate' | 'generation', kinds: readonly string[], attempts: number, retried: boolean, styleOnlyRetry: boolean) => {
-        options.onFallback?.(reason, kinds, claims.length);
-        return done(structuredFallbackDraft(claims), 'fallback', attempts, { retried, styleOnlyRetry, residualKinds: [...kinds] });
-      };
-
       const plan = planOf(claims, draftOptions);
-      const first = await generate(plan, comment, material.star, []);
-      if (first === null) return fallback('generation', [], 1, false, false);
-      const firstFact = factualityKinds(first);
-      const firstStyle = detectStyleIssues(first, lexicon, comment);
-      if (firstFact.length === 0 && firstStyle.length === 0) {
-        return done(first, 'llm', 1, { retried: false, styleOnlyRetry: false, residualKinds: [] });
-      }
+      const history: AttemptRecord[] = [];
+      // 事実として安全だが style の問題が残った文（最も新しいもの）。最後まで両方 OK の文が無ければこれを返す。
+      let safe: { draft: string; attempt: number } | null = null;
+      let notes: string[] = [];
+      const accept = (draft: string, attempt: number) => {
+        options.onResult?.({ result: 'llm', attempts: history.length, acceptedAttempt: attempt, history }, claims.length);
+        return { kind: 'draft' as const, draft, source: 'llm' as const, attempts: history.length };
+      };
 
-      const firstKinds = [...firstFact, ...firstStyle];
-      const styleOnlyRetry = firstFact.length === 0;
-      options.onRetry?.(firstKinds, claims.length);
-      const notes = firstKinds.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
-      const second = await generate(plan, comment, material.star, notes);
-      // 1 回目が factuality OK（style だけの問題）なら、2 回目が使えなくても 1 回目の LLM の文を返す。
-      const keepFirst = () => done(first, 'llm', 2, { retried: true, styleOnlyRetry, residualKinds: firstStyle });
-      if (second === null) return styleOnlyRetry ? keepFirst() : fallback('generation', firstKinds, 2, true, false);
-      const secondFact = factualityKinds(second);
-      if (secondFact.length === 0) {
-        return done(second, 'llm', 2, { retried: true, styleOnlyRetry, residualKinds: detectStyleIssues(second, lexicon, comment) });
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const draft = await generate(plan, comment, material.star, notes);
+        if (draft === null) {
+          history.push({ attempt, generationFailed: true, factuality: [], style: [] });
+          if (attempt < MAX_ATTEMPTS) options.onRetry?.(['generation'], claims.length);
+          continue;
+        }
+        const factuality = factualityKinds(draft);
+        const style = detectStyleIssues(draft, lexicon, comment);
+        history.push({ attempt, generationFailed: false, factuality, style });
+        if (factuality.length === 0 && style.length === 0) return accept(draft, attempt);
+        if (factuality.length === 0) safe = { draft, attempt };
+        if (attempt < MAX_ATTEMPTS) {
+          const kinds = [...factuality, ...style];
+          options.onRetry?.(kinds, claims.length);
+          notes = kinds.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
+        }
       }
-      if (styleOnlyRetry) return keepFirst();
-      return fallback('gate', secondFact, 2, true, false);
+      if (safe !== null) return accept(safe.draft, safe.attempt);
+
+      // 下書きを作れなかった（generation error）。safe fallback の文は返さない。
+      const lastFactuality = [...history].reverse().find((h) => !h.generationFailed)?.factuality ?? [];
+      const reason = history.every((h) => h.generationFailed) ? 'generation' : 'gate';
+      options.onFailed?.(reason, reason === 'gate' ? lastFactuality : [], claims.length);
+      options.onResult?.({ result: 'generation_error', attempts: history.length, acceptedAttempt: null, history }, claims.length);
+      return { kind: 'failed', attempts: history.length };
     },
   };
 }

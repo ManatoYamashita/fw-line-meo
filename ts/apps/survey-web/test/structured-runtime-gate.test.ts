@@ -205,15 +205,15 @@ describe('Realizer の作り直し（未回答の Target・一言の因果づけ
     for (const c of contents) expect(c).not.toMatch(/焼き鳥5種盛り|名物もつ煮/);
   });
 
-  it('2 回とも一言を理由に結べば safe fallback', async () => {
-    const onFallback = vi.fn();
+  it('3 回とも一言を理由に結べば generation error（safe fallback の文は返さない）', async () => {
+    const onFailed = vi.fn();
     const comfort = { polarity: 'positive' as const, categoryCode: 'atmosphere', categoryLabel: '店内・雰囲気', facets: [{ code: 'comfort', label: '居心地' }] };
-    const { client } = fakeClient('窓側の席だったので居心地が良かったです。', '窓側の席だったため、居心地が良かったです。');
-    const result = await createNaturalRealizer(client, { random: () => 0, onFallback }).prepare(
+    const { client } = fakeClient('窓側の席だったので居心地が良かったです。', '窓側の席だったため、居心地が良かったです。', '窓側の席だったので、居心地よく過ごせました。');
+    const result = await createNaturalRealizer(client, { random: () => 0, onFailed }).prepare(
       material({ selections: [comfort], comment: '窓側の席でした' }),
     );
-    expect(result).toMatchObject({ source: 'fallback', attempts: 2, draft: '居心地が良かったです。' });
-    expect(onFallback).toHaveBeenCalledWith('gate', ['commentLinkage'], 1);
+    expect(result).toEqual({ kind: 'failed', attempts: 3 });
+    expect(onFailed).toHaveBeenCalledWith('gate', ['commentLinkage'], 1);
   });
 });
 
