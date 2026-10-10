@@ -9,9 +9,9 @@ import { ok, err, type Result } from './result';
 
 // structured survey の回答契約・検証・正規化・label snapshot（Issue #436・Issue #441 の PR1）。
 //
-// **この PR の時点では呼び手が無い。** 客向けの画面と /api/responses への接続は Issue #438、下書き生成への
-// 接続は Issue #439 で行う。legacy の回答（aspectCodes / concernCodes・validate.ts）はこのファイルと独立で、
-// 意味も検証も変えない。
+// 呼び手は /api/responses の structured の分岐（Issue #438）。表示の版・定義の指紋を照合したのと同じ定義の読み取りの
+// 結果で検証・解決する。解決した素材を下書きへ渡す生成は Issue #439 で実装する（lib/draft/structured-draft.ts）。
+// legacy の回答（aspectCodes / concernCodes・validate.ts）はこのファイルと独立で、意味も検証も変えない。
 //
 // 意味（Issue #435）:
 //   { categoryCode: 'food', facetCodes: ['taste'] }                  = 料理全体 → 味

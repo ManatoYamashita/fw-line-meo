@@ -20,14 +20,17 @@ export interface LegacyPagePayload {
 }
 
 /**
- * structured survey の pageToken（Issue #436）。表示時の店舗設定の版（store_survey_configs.revision）を
- * 署名する。送信時に現在の版と一致しなければ、古い画面の回答を新しい設定として解釈しない。
+ * structured survey の pageToken（Issue #436・Issue #438）。表示時の店舗設定の版（store_survey_configs.revision）と、
+ * 表示した有効な定義の指紋（@fwlm/db の surveyDefinitionFingerprint）を署名する。送信時にどちらかが現在と
+ * 一致しなければ、古い画面の回答を新しい設定として解釈しない。版だけでは全店舗共通の taxonomy の変更を
+ * 見逃すので、指紋を併せて照合する。
  */
 export interface StructuredPagePayload {
   kind: 'page';
   v: 2;
   storeId: string;
   surveyRevision: number;
+  definitionFingerprint: string;
   exp: number; // epoch ms
 }
 
@@ -52,20 +55,18 @@ export type TokenError = 'INVALID' | 'EXPIRED';
 
 export interface SessionTokenService {
   signPage(storeId: string): string;
-  /** structured survey の pageToken（Issue #438 で画面へ接続する。この PR の時点では呼び手が無い）。 */
-  signStructuredPage(storeId: string, surveyRevision: number): string;
+  /** structured survey の pageToken（Issue #438）。表示に使った定義の版と指紋を署名する。 */
+  signStructuredPage(storeId: string, surveyRevision: number, definitionFingerprint: string): string;
   /**
    * pageToken の **署名・種別・店舗・期限だけ** を検証する。legacy と structured（v = 2）の両方を通す。
    *
    * **通った = 回答を受理してよい、ではない（Issue #436）。** structured の token は、表示の後に店舗が
    * 設定を変えていれば古い画面である。回答受付（Issue #438）は必ず次の順にすること:
    *   1. verifyPage（署名・期限）
-   *   2. checkSurveyRevision（現在の店舗の survey の種類・版との照合。戻り値で legacy / structured の
-   *      どちらの検証を使うかが決まる）
-   *   3. 回答の検証（legacy は validateSurveyAnswer、structured は validateStructuredAnswer）
-   * 現在の legacy の回答受付は 1 だけを行う。structured の token を発行する経路がまだ無い
-   * （signStructuredPage の呼び手が無い）ので挙動は変わらないが、Issue #438 で発行を始めるときは
-   * 同時に 2 を接続すること。
+   *   2. 現在の定義を 1 回だけ読み（readStoreSurveyDefinition）、checkSurveyRevision で種類・版・指紋を照合する
+   *      （戻り値で legacy / structured のどちらの検証を使うかが決まる）
+   *   3. 回答の検証（legacy は validateSurveyAnswer、structured は 2 と同じ読み取りの結果で validateStructuredAnswer）
+   * 回答受付（app/api/responses/handler.ts）はこの順に行う。
    */
   verifyPage(token: string, storeId: string): Result<PagePayload, TokenError>;
   sign(input: SessionInput): string;
@@ -76,8 +77,18 @@ function isRevision(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 }
 
-/** 回答を受け付けるときに使う survey の種類と版（@fwlm/db の StoreSurveyDefinition が満たす形）。 */
-export type CurrentSurvey = { mode: 'legacy' } | { mode: 'structured'; revision: number };
+/** SHA-256 の base64url（43 文字）。@fwlm/db の surveyDefinitionFingerprint の出力の形。 */
+function isFingerprint(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+/**
+ * 回答を受け付けるときの、現在の survey の種類・版・定義の指紋。structured の指紋は、照合・検証・解決に使うのと
+ * **同じ 1 回の読み取りの結果** から計算すること（@fwlm/db の surveyDefinitionFingerprint）。
+ */
+export type CurrentSurvey =
+  | { mode: 'legacy' }
+  | { mode: 'structured'; revision: number; definitionFingerprint: string };
 
 export type SurveyRevisionError = 'STALE_SURVEY';
 
@@ -85,8 +96,9 @@ export type SurveyRevisionError = 'STALE_SURVEY';
  * pageToken が署名した画面の種類・版が、現在の店舗の survey と一致するかを判定する（Issue #436）。
  *
  * - legacy の token × legacy の店舗 → 'legacy'
- * - structured の token × structured の店舗 × 同じ版 → 'structured'
- * - 版が違う・種類が違う（表示の後に店舗が structured を有効 / 無効にした）→ STALE_SURVEY
+ * - structured の token × structured の店舗 × 同じ版 × 同じ指紋 → 'structured'
+ * - 版が違う・指紋が違う（店舗の設定か全店舗共通の taxonomy が変わった）・種類が違う（表示の後に店舗が
+ *   structured を有効 / 無効にした）→ STALE_SURVEY
  *   古い画面の選択を現在の設定として解釈しない。呼び手は再読み込みを案内する。
  *
  * 署名と期限の検証は verifyPage が済ませている前提。ここは純粋な照合だけを行う。回答の検証より
@@ -99,7 +111,11 @@ export function checkSurveyRevision(
   current: CurrentSurvey,
 ): Result<'legacy' | 'structured', SurveyRevisionError> {
   if (!('v' in page)) return current.mode === 'legacy' ? ok('legacy') : err('STALE_SURVEY');
-  if (current.mode !== 'structured' || current.revision !== page.surveyRevision) {
+  if (
+    current.mode !== 'structured' ||
+    current.revision !== page.surveyRevision ||
+    current.definitionFingerprint !== page.definitionFingerprint
+  ) {
     return err('STALE_SURVEY');
   }
   return ok('structured');
@@ -146,9 +162,10 @@ export function createSessionTokenService(
       return encode({ kind: 'page', storeId, exp: now() + PAGE_TTL_MS });
     },
 
-    signStructuredPage(storeId, surveyRevision) {
+    signStructuredPage(storeId, surveyRevision, definitionFingerprint) {
       if (!isRevision(surveyRevision)) throw new Error('surveyRevision must be a positive integer');
-      return encode({ kind: 'page', v: 2, storeId, surveyRevision, exp: now() + PAGE_TTL_MS });
+      if (!isFingerprint(definitionFingerprint)) throw new Error('definitionFingerprint must be a SHA-256 base64url');
+      return encode({ kind: 'page', v: 2, storeId, surveyRevision, definitionFingerprint, exp: now() + PAGE_TTL_MS });
     },
 
     // 版の印（v）を持たない token は legacy として従来どおりに検証し、従来と同じ形で返す。
@@ -164,9 +181,18 @@ export function createSessionTokenService(
         if (now() > p.exp) return err('EXPIRED');
         return ok({ kind: 'page', storeId, exp: p.exp });
       }
-      if (p.v !== 2 || !isRevision(p.surveyRevision)) return err('INVALID');
+      if (p.v !== 2 || !isRevision(p.surveyRevision) || !isFingerprint(p.definitionFingerprint)) {
+        return err('INVALID');
+      }
       if (now() > p.exp) return err('EXPIRED');
-      return ok({ kind: 'page', v: 2, storeId, surveyRevision: p.surveyRevision, exp: p.exp });
+      return ok({
+        kind: 'page',
+        v: 2,
+        storeId,
+        surveyRevision: p.surveyRevision,
+        definitionFingerprint: p.definitionFingerprint,
+        exp: p.exp,
+      });
     },
 
     sign(input) {

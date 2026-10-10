@@ -2,8 +2,20 @@ import type { DraftMaterial } from '../../../lib/domain';
 import type { DraftGenerator } from '../../../lib/draft/generator';
 import { pickVariation } from '../../../lib/draft/prompt';
 import type { RateLimiter } from '../../../lib/rate-limit';
-import type { PlaceStatus } from '@fwlm/db';
-import type { SessionTokenService } from '../../../lib/session-token';
+import {
+  surveyDefinitionFingerprint,
+  type PlaceStatus,
+  type StoreSurveyDefinition,
+  type StructuredSurveyDefinition,
+  type StructuredTallyInput,
+} from '@fwlm/db';
+import { checkSurveyRevision, type CurrentSurvey, type SessionTokenService } from '../../../lib/session-token';
+import {
+  resolveStructuredAnswer,
+  structuredMaterialCounts,
+  validateStructuredAnswer,
+} from '../../../lib/structured-answer';
+import type { StructuredDraftPort } from '../../../lib/draft/structured-draft';
 import { validateSurveyAnswer } from '../../../lib/validate';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
@@ -44,10 +56,25 @@ export interface ResponsesDeps {
     concernCodes: string[];
     hasComment: boolean;
   }) => Promise<void>;
+  /**
+   * 店舗の有効なアンケート定義（@fwlm/db の readStoreSurveyDefinition）。**1 回の回答につき 1 回だけ** 呼び、
+   * 種類・版・指紋の照合と、structured の検証・表示名の解決に同じ結果を渡す（Issue #438）。
+   */
+  readDefinition: (storeId: string) => Promise<StoreSurveyDefinition>;
+  /**
+   * structured の回答の匿名集計（@fwlm/db の incrementStructuredTallies）。星（survey_rating_tallies）も
+   * これが加算するので、structured の回答では incrementTallies を呼ばない（星を二重に数えない）。
+   */
+  incrementStructuredTallies: (input: StructuredTallyInput) => Promise<void>;
+  /** structured の素材から下書きを作る口（Stage 2 は作らない・Issue #439 で実装）。 */
+  structuredDrafts: StructuredDraftPort;
   clientKey: (req: Request) => string;
   log: SurveyLogger;
   supportCode?: string;
 }
+
+/** 表示の後にアンケートの内容が変わった（Issue #438）。通常の失敗と区別して再読み込みを案内する。 */
+export const STALE_SURVEY_MESSAGE = 'アンケート内容が更新されました。ページを再読み込みして、もう一度回答してください。';
 
 function error(deps: ResponsesDeps, status: number, code: string, message: string): Response {
   return jsonError(status, code, message, deps.supportCode);
@@ -64,18 +91,9 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
   const storeId = typeof obj.storeId === 'string' ? obj.storeId : '';
   const pageToken = typeof obj.pageToken === 'string' ? obj.pageToken : '';
 
-  // pageToken 検証（ページ経由の正規フロー証明・直接 POST を拒否）
+  // pageToken 検証（ページ経由の正規フロー証明・直接 POST を拒否）。署名・種別・店舗・期限だけを見る。
   const page = deps.tokens.verifyPage(pageToken, storeId);
   if (!page.ok) {
-    return error(deps, 400, 'PAGE_TOKEN_INVALID', 'ページを再読み込みしてください');
-  }
-  // structured survey の pageToken（v: 2）は、署名が正しくてもこの legacy の受付では扱わない
-  // （Issue #436）。legacy の本文として検証・集計・生成へ進めると、structured の画面で選んだ回答を
-  // legacy の意味で数えてしまう。発行する版（Issue #438）と、まだ発行しない版のインスタンスが
-  // ローリングデプロイで混在しても、受け取った側が読み違えないように、ここで明示的に拒否する。
-  // 応答は署名の不一致と同じにする（画面を読み直させる）。structured の受付を足すときは、この分岐を
-  // 版の照合 → structured の回答検証へ進む分岐に置き換える（順序は verifyPage の説明を参照）。
-  if ('v' in page.value) {
     return error(deps, 400, 'PAGE_TOKEN_INVALID', 'ページを再読み込みしてください');
   }
 
@@ -90,6 +108,67 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
     return error(deps, 404, 'STORE_NOT_AVAILABLE', 'このアンケートは現在利用できません');
   }
 
+  // 現在の定義を **1 回だけ** 読み、表示した画面の種類・版・定義の指紋と照合する（Issue #438）。
+  // legacy の token と structured の token を互いの意味で読まない: 表示の後に店舗が structured を有効 / 無効に
+  // した・設定や全店舗共通の taxonomy が変わった画面の回答は、どちらの検証へも進めずに再読み込みを案内する。
+  const definition = await deps.readDefinition(storeId);
+  const current: CurrentSurvey =
+    definition.mode === 'legacy'
+      ? { mode: 'legacy' }
+      : {
+          mode: 'structured',
+          revision: definition.revision,
+          definitionFingerprint: surveyDefinitionFingerprint(definition),
+        };
+  const mode = checkSurveyRevision(page.value, current);
+  if (!mode.ok) {
+    return error(deps, 409, 'STALE_SURVEY', STALE_SURVEY_MESSAGE);
+  }
+  if (mode.value === 'structured' && definition.mode === 'structured') {
+    return handleStructured(body, storeId, store.name, definition, deps);
+  }
+  return handleLegacy(body, storeId, store, deps);
+}
+
+/**
+ * structured の回答（Issue #438）。照合に使ったのと **同じ読み取りの結果** で検証し、回答時点の表示名へ解決する
+ * （途中で定義を読み直さない）。集計は incrementStructuredTallies だけで、legacy の incrementTallies は呼ばない。
+ * 下書きは Stage 2 では作らない（Issue #439 で structuredDrafts を実装する）。
+ */
+async function handleStructured(
+  body: unknown,
+  storeId: string,
+  storeName: string,
+  definition: StructuredSurveyDefinition,
+  deps: ResponsesDeps,
+): Promise<Response> {
+  const validated = validateStructuredAnswer(body, definition);
+  if (!validated.ok) {
+    return error(deps, 400, 'VALIDATION', '入力内容をご確認ください');
+  }
+  const answer = validated.value;
+  const material = resolveStructuredAnswer(answer, definition);
+
+  const tally = deps
+    .incrementStructuredTallies({ storeId, star: answer.star, ...structuredMaterialCounts(answer) })
+    .catch(() => deps.log('warn', 'tally_failed'));
+  const draft = deps.structuredDrafts.prepare({ storeName, ...material });
+  const [, prepared] = await Promise.all([tally, draft]);
+
+  // ファネルの分子（Issue #137 段階3）。legacy と同じく、客が送信した事実を記録する。
+  logSurveyResponseSubmitted(deps.log, storeId);
+
+  // 下書きを作らなかった（Stage 2 の暫定）。客の画面は受付と Google の投稿導線を出す（全評価で同一）。
+  return jsonOk({ mode: 'structured', generation: prepared.kind, draft: null });
+}
+
+/** legacy の回答（従来どおり。survey_aspects の観点・incrementTallies・legacy の下書き生成）。 */
+async function handleLegacy(
+  body: unknown,
+  storeId: string,
+  store: SurveyStoreView,
+  deps: ResponsesDeps,
+): Promise<Response> {
   // 選択肢（seed 由来・許可 code の SoT）
   const aspects = await deps.listAspects();
   const allowed = aspects.map((a) => a.code);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Queryable } from './pool.js';
 
 // structured survey の客向けの有効な定義（Issue #436・Issue #441 の PR1）。
@@ -133,4 +134,30 @@ export async function readStoreSurveyDefinition(
     throw new Error(`store_survey_configs.revision is out of range: ${row.revision}`);
   }
   return { mode: 'structured', revision, categories: row.categories };
+}
+
+/**
+ * 有効な定義の指紋（Issue #438）。客が見た定義の **意味** が同じかを、送信時に確かめるための値。
+ *
+ * store_survey_configs.revision は店舗設定の変更しか表せず、全店舗共通の taxonomy（survey_categories・
+ * survey_facets・survey_category_facets）を変える migration を見逃す。指紋は、客の画面に出るもの
+ * そのものから決定的に導くので、どちらの変更でも変わる。含めるもの（並び順は配列の順そのもの）:
+ *   - 表示するカテゴリの code・名前・Target を持てるか・並び
+ *   - カテゴリ全体用 / Target 用の facet の code・名前・並び（Category × Facet の対応）
+ *   - active な Target の UUID・名前・並び
+ * 含めないもの: revision（別に照合する）と、数値の sort_order（並びが同じなら意味は同じ）。
+ *
+ * 出力は SHA-256 の base64url（43 文字）。pageToken へ署名し、送信時に同じ読み取りの結果から計算し直して
+ * 照合する（呼び手は readStoreSurveyDefinition を 1 回だけ呼び、その結果を照合・検証・解決へ渡すこと）。
+ */
+export function surveyDefinitionFingerprint(definition: StructuredSurveyDefinition): string {
+  const canonical = definition.categories.map((c) => [
+    c.code,
+    c.label,
+    c.allowsTargets,
+    c.categoryFacets.map((f) => [f.code, f.label]),
+    c.targetFacets.map((f) => [f.code, f.label]),
+    c.targets.map((t) => [t.id, t.label]),
+  ]);
+  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('base64url');
 }

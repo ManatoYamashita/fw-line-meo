@@ -4,10 +4,19 @@ import {
   closePool,
   incrementStructuredTallies,
   readStoreSurveyDefinition,
+  surveyDefinitionFingerprint,
+  type StoreSurveyDefinition,
   type StructuredSurveyDefinition,
 } from '@fwlm/db';
 import { structuredMaterialCounts, validateStructuredAnswer } from '../src/lib/structured-answer';
-import { createSessionTokenService, checkSurveyRevision } from '../src/lib/session-token';
+import { createSessionTokenService, checkSurveyRevision, type CurrentSurvey } from '../src/lib/session-token';
+
+/** 読み取りの結果から、回答受付と同じ形の照合の入力を作る。 */
+function current(definition: StoreSurveyDefinition): CurrentSurvey {
+  return definition.mode === 'legacy'
+    ? { mode: 'legacy' }
+    : { mode: 'structured', revision: definition.revision, definitionFingerprint: surveyDefinitionFingerprint(definition) };
+}
 
 // 実 postgres の店舗設定から読んだ定義で structured の回答を検証する（Issue #436）。
 // 他店舗・非表示の Target を「定義に現れない」ことで拒否できること、設定の版を進めると表示済みの
@@ -133,19 +142,48 @@ describe.skipIf(!process.env.DATABASE_URL)('structured answer × DB definition',
     }
   });
 
+  it('表示時の版と定義の指紋を署名した pageToken は、全店舗共通の taxonomy の変更でも stale になる（版は同じ）', async () => {
+    const tokens = createSessionTokenService('structured-answer-db-key');
+    const shown = await structured(STORE);
+    const page = tokens.verifyPage(
+      tokens.signStructuredPage(STORE, shown.revision, surveyDefinitionFingerprint(shown)),
+      STORE,
+    );
+    if (!page.ok) throw new Error('page token should verify');
+    expect(checkSurveyRevision(page.value, current(shown))).toEqual({ ok: true, value: 'structured' });
+
+    // taxonomy を変える migration に相当する変更を、トランザクションの中だけで行って巻き戻す
+    // （他のテストと共有する DB の seed を残さない）。店舗の revision は進まない。
+    const client = await (await getPool()).connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE survey_facets SET label = '味わい' WHERE code = 'taste'`);
+      const changed = await readStoreSurveyDefinition(client, STORE);
+      if (changed.mode !== 'structured') throw new Error('expected structured');
+      expect(changed.revision).toBe(shown.revision);
+      expect(checkSurveyRevision(page.value, current(changed))).toEqual({ ok: false, error: 'STALE_SURVEY' });
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
   it('表示時の版を署名した pageToken は、設定の版が進むと stale になる', async () => {
     const tokens = createSessionTokenService('structured-answer-db-key');
     const shown = await structured(STORE);
-    const page = tokens.verifyPage(tokens.signStructuredPage(STORE, shown.revision), STORE);
+    const page = tokens.verifyPage(
+      tokens.signStructuredPage(STORE, shown.revision, surveyDefinitionFingerprint(shown)),
+      STORE,
+    );
     if (!page.ok) throw new Error('page token should verify');
-    expect(checkSurveyRevision(page.value, shown)).toEqual({ ok: true, value: 'structured' });
+    expect(checkSurveyRevision(page.value, current(shown))).toEqual({ ok: true, value: 'structured' });
 
     // 店舗が設定を変えた（#437 では変更と同じトランザクションで +1 する）。
     await (await getPool()).query(
       'UPDATE store_survey_configs SET revision = revision + 1 WHERE store_id = $1',
       [STORE],
     );
-    const current = await readStoreSurveyDefinition(await getPool(), STORE);
-    expect(checkSurveyRevision(page.value, current)).toEqual({ ok: false, error: 'STALE_SURVEY' });
+    const now = await readStoreSurveyDefinition(await getPool(), STORE);
+    expect(checkSurveyRevision(page.value, current(now))).toEqual({ ok: false, error: 'STALE_SURVEY' });
   });
 });

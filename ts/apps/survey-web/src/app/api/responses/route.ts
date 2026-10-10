@@ -1,4 +1,12 @@
-import { getPool, findStoreForSurvey, listSurveyAspects, incrementTallies } from '@fwlm/db';
+import {
+  getPool,
+  findStoreForSurvey,
+  listSurveyAspects,
+  incrementTallies,
+  incrementStructuredTallies,
+  readStoreSurveyDefinition,
+} from '@fwlm/db';
+import { pendingStructuredDraft } from '../../../lib/draft/structured-draft';
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
@@ -34,6 +42,12 @@ async function buildDeps(): Promise<ResponsesDeps> {
     incrementTallies: async (input) => {
       await incrementTallies(await getPool(), input);
     },
+    readDefinition: async (storeId) => readStoreSurveyDefinition(await getPool(), storeId),
+    incrementStructuredTallies: async (input) => {
+      await incrementStructuredTallies(await getPool(), input);
+    },
+    // structured の下書きは Issue #439 で実装する。Stage 2 は作らない（legacy の生成器へ押し込まない）。
+    structuredDrafts: pendingStructuredDraft,
     clientKey: createClientKey(),
     log: writeStructuredLog,
   };

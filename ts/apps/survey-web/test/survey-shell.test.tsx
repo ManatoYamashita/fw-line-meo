@@ -72,7 +72,7 @@ function renderShell() {
     <SurveyShell
       storeId={STORE}
       storeName="テスト店"
-      aspects={[{ code: 'taste', label: '味' }]}
+      survey={{ mode: 'legacy', aspects: [{ code: 'taste', label: '味' }] }}
       pageToken="PT"
       googleReviewUrl="https://review/ChIJ"
     />,

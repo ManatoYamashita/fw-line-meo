@@ -28,6 +28,10 @@ function baseDeps(over: Partial<ResponsesDeps> = {}): ResponsesDeps {
         { code: 'service', label: '接客' },
       ]),
     incrementTallies: () => Promise.resolve(),
+    // 既定は legacy の店舗（structured の振る舞いは api-responses-structured.test.ts が確かめる）。
+    readDefinition: () => Promise.resolve({ mode: 'legacy' }),
+    incrementStructuredTallies: () => Promise.reject(new Error('legacy の回答で structured の集計を呼んだ')),
+    structuredDrafts: { prepare: () => Promise.reject(new Error('legacy の回答で structured の下書きを呼んだ')) },
     clientKey: () => 'ip1',
     log: () => {},
     ...over,

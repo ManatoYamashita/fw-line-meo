@@ -5,7 +5,10 @@ import {
   findStoreForSurvey,
   listSurveyAspects,
   incrementTallies,
+  incrementStructuredTallies,
+  readStoreSurveyDefinition,
 } from '@fwlm/db';
+import { pendingStructuredDraft } from '../src/lib/draft/structured-draft';
 import { handleResponses, type ResponsesDeps } from '../src/app/api/responses/handler';
 import { handleDrafts, type DraftsDeps } from '../src/app/api/drafts/handler';
 import { createSessionTokenService } from '../src/lib/session-token';
@@ -41,6 +44,11 @@ function responsesDeps(generator: DraftGenerator): ResponsesDeps {
     incrementTallies: async (input) => {
       await incrementTallies(await getPool(), input);
     },
+    readDefinition: async (storeId) => readStoreSurveyDefinition(await getPool(), storeId),
+    incrementStructuredTallies: async (input) => {
+      await incrementStructuredTallies(await getPool(), input);
+    },
+    structuredDrafts: pendingStructuredDraft,
     clientKey: () => 'itest',
     log: () => {},
   };

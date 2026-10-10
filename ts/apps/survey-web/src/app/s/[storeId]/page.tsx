@@ -1,4 +1,4 @@
-import { getPool, findStoreForSurvey, listSurveyAspects } from '@fwlm/db';
+import { getPool, findStoreForSurvey, listSurveyAspects, readStoreSurveyDefinition } from '@fwlm/db';
 import { headers } from 'next/headers';
 import { correlationIdFromHeaders, withCorrelation } from '@fwlm/observability';
 import { Heading } from '@fwlm/ui/components/heading';
@@ -30,8 +30,10 @@ async function buildDeps(): Promise<SurveyPageDeps> {
   const correlationId = await requestCorrelationId();
   return {
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
+    readDefinition: async (id) => readStoreSurveyDefinition(await getPool(), id),
     listAspects: async () => listSurveyAspects(await getPool()),
     signPage: (storeId) => tokens.signPage(storeId),
+    signStructuredPage: (storeId, revision, fingerprint) => tokens.signStructuredPage(storeId, revision, fingerprint),
     buildReviewUrl: (placeId) => buildGoogleReviewUrl(placeId),
     log: withCorrelation(writeStructuredLog, correlationId),
   };
@@ -62,10 +64,12 @@ export default async function SurveyPage({
       <Heading className="mb-8" level={1}>
         {data.store.name}
       </Heading>
+      {/* legacy と structured は店舗の設定で分岐する（Issue #438）。回答・下書き・投稿導線のフェーズは
+          どちらもシェルが持ち、フォームだけが変わる。 */}
       <SurveyShell
         storeId={data.store.id}
         storeName={data.store.name}
-        aspects={data.aspects}
+        survey={data.mode === 'legacy' ? { mode: 'legacy', aspects: data.aspects } : { mode: 'structured', definition: data.definition }}
         pageToken={data.pageToken}
         googleReviewUrl={data.googleReviewUrl}
       />
