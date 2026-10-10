@@ -1,0 +1,888 @@
+{
+  "_comment": [
+    "structured survey の下書き評価（Issue #440）の固定ケース。店名・料理名・一言はすべて架空で、実店舗・実回答を使わない。",
+    "selections は回答受付が作る素材（resolveStructuredAnswer の selections）と同じ形。Target は id と回答時点の名前を持つ。",
+    "subjects は Target を指す言い方（名前そのものは常に含む）。coverage と Target の同一性はこの言い方で判定し、facet の文字列一致では判定しない。",
+    "menuTargets は店舗に登録済みだが客が選ばなかった Target。下書きに出たら『未回答の Target の追加』。",
+    "commentKeywords は一言の内容を指す語。一言の内容を別の claim の理由として結んだら失格（commentLinkage）。",
+    "forbiddenMeanings はそのケースに固有の禁止の意味。allowedParaphrases は許す言い換えの例で、すべての hard gate を通らなければならない。",
+    "forbiddenExamples は失格になるべき例と、当たるべき hard gate の種類。検出器の自己検証に使う（test/structured-eval-gates.test.ts）。"
+  ],
+  "cases": [
+    {
+      "id": "A-simple-positive",
+      "title": "単純 positive",
+      "storeName": "海鮮食堂 しおさい",
+      "star": 5,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [
+        {
+          "id": "t-yakitori",
+          "label": "焼き鳥盛り合わせ",
+          "categoryCode": "food",
+          "aliases": [
+            "焼き鳥"
+          ]
+        }
+      ],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせがおいしかったです。",
+        "刺身盛り合わせの味が良かったです。",
+        "お刺身の盛り合わせ、味が良かったです。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "新鮮な刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしく、また来たいと思いました。",
+          "kinds": [
+            "revisit"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがとてもおいしかったです。",
+          "kinds": [
+            "intensity"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしく、量もちょうど良かったです。",
+          "kinds": [
+            "unselectedFacet"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしかったので、友人にもおすすめしたいです。",
+          "kinds": [
+            "companion",
+            "recommendation"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせも焼き鳥もおいしかったです。",
+          "kinds": [
+            "unselectedTarget"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせは味が残念でした。",
+          "kinds": [
+            "polarityReversal",
+            "positiveDropped"
+          ]
+        },
+        {
+          "text": "期待して伺いましたが、刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "expectation"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしかったです。気になる点は特にありませんでした。",
+          "kinds": [
+            "absence"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしく、店員さんも良かったです。",
+          "kinds": [
+            "unselectedCategory"
+          ]
+        },
+        {
+          "text": "駅前を通る際に立ち寄りました。刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "visitContext"
+          ]
+        },
+        {
+          "text": "先週末に食べた刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "ungrounded"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "B-multi-facet",
+      "title": "複数 facet（同じ Target）",
+      "storeName": "海鮮食堂 しおさい",
+      "star": 4,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            },
+            {
+              "code": "appearance",
+              "label": "見た目"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせは味も見た目も良かったです。",
+        "刺身盛り合わせがおいしかったです。盛り付けもきれいでした。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "脂ののった刺身盛り合わせは、見た目も良かったです。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせは味も見た目も良く、季節を感じました。",
+          "kinds": [
+            "newAttribute"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-multi-target",
+      "title": "複数 Target",
+      "storeName": "旬菜 あかり",
+      "star": 4,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-dashimaki",
+          "targetLabel": "だし巻き玉子",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ],
+        "t-dashimaki": [
+          "だし巻き",
+          "出汁巻き",
+          "玉子焼き"
+        ]
+      },
+      "menuTargets": [
+        {
+          "id": "t-karaage",
+          "label": "鶏の唐揚げ",
+          "categoryCode": "food",
+          "aliases": [
+            "唐揚げ",
+            "からあげ"
+          ]
+        }
+      ],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせもだし巻き玉子もおいしかったです。",
+        "刺身盛り合わせがおいしかったです。だし巻き玉子も良かったです。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "targetDropped"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせと、出汁が効いただし巻き玉子がおいしかったです。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせもだし巻き玉子も唐揚げもおいしかったです。",
+          "kinds": [
+            "unselectedTarget"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-positive-and-concern",
+      "title": "positive + concern（別カテゴリ）",
+      "storeName": "旬菜 あかり",
+      "star": 3,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "serving",
+              "label": "料理・ドリンクの提供"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせがおいしかったです。料理の提供については気になる点がありました。",
+        "刺身盛り合わせはおいしかったのですが、提供のところは気になりました。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "concernDropped"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせはおいしかったですが、混雑していたためか提供が遅く気になりました。",
+          "kinds": [
+            "cause"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしく、提供もスムーズで良かったです。",
+          "kinds": [
+            "polarityReversal",
+            "concernDropped"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせはおいしかったですが、提供まで30分かかったのが気になりました。",
+          "kinds": [
+            "ungrounded:number"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "E-same-target-other-facet",
+      "title": "同じ Target・別 facet",
+      "storeName": "海鮮食堂 しおさい",
+      "star": 3,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "volume",
+              "label": "量"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [
+        {
+          "id": "supply",
+          "pattern": "仕入れ|在庫|品切れ",
+          "note": "量が気になった理由（仕入れ・在庫）の創作"
+        }
+      ],
+      "allowedParaphrases": [
+        "刺身盛り合わせは味が良かったですが、量は気になりました。",
+        "刺身盛り合わせはおいしかったです。量については気になりました。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせは味も量も良かったです。",
+          "kinds": [
+            "polarityReversal",
+            "concernDropped"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせは味が良かったですが、仕入れの都合か量は少なめで気になりました。",
+          "kinds": [
+            "caseForbidden:supply"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-exact-overlap",
+      "title": "exact overlap（同じ Target・同じ facet を両群）",
+      "storeName": "海鮮食堂 しおさい",
+      "star": 3,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせの味は、良かったところもありつつ気になる点もありました。",
+        "刺身盛り合わせの味について、良かった点もあり、気になる点もありました。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせの味は、時間帯によって良いときと気になるときがありました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせは、部位によって味が良いものと気になるものがありました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせの味は、最初は良かったのですが後半は気になりました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせの味は濃いめで、好みには合いましたが気になる点もありました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせの味は、その時々の状況によって印象が変わるものでした。良い点も気になる点もありました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "concernDropped"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-target-only",
+      "title": "Target のみ（facet なし）",
+      "storeName": "海鮮食堂 しおさい",
+      "star": 5,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": []
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせが良かったです。",
+        "刺身盛り合わせが印象に残りました。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせがおいしかったです。",
+          "kinds": [
+            "unselectedFacet"
+          ]
+        },
+        {
+          "text": "新鮮な刺身盛り合わせが良かったです。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせはボリュームがあって良かったです。",
+          "kinds": [
+            "unselectedFacet"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせは見た目も華やかで良かったです。",
+          "kinds": [
+            "unselectedFacet"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H-category-facets",
+      "title": "category-wide facet（店内・雰囲気）",
+      "storeName": "珈琲と本 こもれび",
+      "star": 3,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "atmosphere",
+          "categoryLabel": "店内・雰囲気",
+          "facets": [
+            {
+              "code": "comfort",
+              "label": "居心地"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "atmosphere",
+          "categoryLabel": "店内・雰囲気",
+          "facets": [
+            {
+              "code": "noise_level",
+              "label": "音・にぎやかさ"
+            }
+          ]
+        }
+      ],
+      "subjects": {},
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "居心地は良かったです。にぎやかさは気になりました。",
+        "居心地は良かったのですが、店内の音が気になりました。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "落ち着いた照明で居心地が良かったのですが、音は気になりました。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "居心地は良かったのですが、週末で混んでいたせいかにぎやかで気になりました。",
+          "kinds": [
+            "timing",
+            "cause"
+          ]
+        },
+        {
+          "text": "居心地が良く、静かで過ごしやすかったです。",
+          "kinds": [
+            "polarityReversal",
+            "concernDropped"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "I1-comment-formal",
+      "title": "一言あり（硬め）",
+      "storeName": "割烹 みなせ",
+      "star": 4,
+      "comment": "刺身の味は良好でした。料理の提供にはやや時間を要しました。",
+      "commentTone": "formal",
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "serving",
+              "label": "料理・ドリンクの提供"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [
+        "時間を要"
+      ],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせの味は良好でした。料理の提供にはやや時間を要しました。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせの味は良好でした。ランチの時間帯で、料理の提供にはやや時間を要しました。",
+          "kinds": [
+            "timing"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "I2-comment-neutral",
+      "title": "一言あり（普通）",
+      "storeName": "割烹 みなせ",
+      "star": 5,
+      "comment": "店員さんの対応が丁寧でした",
+      "commentTone": "neutral",
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "service_courtesy",
+              "label": "接客の丁寧さ"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [
+        "店員",
+        "対応",
+        "丁寧"
+      ],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせがおいしかったです。店員さんの対応も丁寧でした。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "店員さんの対応が丁寧だったので、刺身盛り合わせもおいしく感じました。",
+          "kinds": [
+            "commentLinkage"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "I3-comment-casual",
+      "title": "一言あり（カジュアル）",
+      "storeName": "酒場 ゆらり",
+      "star": 5,
+      "comment": "刺身うまかった！また行く",
+      "commentTone": "casual",
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [
+        "また行く"
+      ],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせ、うまかった！また行きます。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "刺身盛り合わせ、うまかった！友達とまた行きます。",
+          "kinds": [
+            "companion"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせ、めちゃくちゃうまかった！！また行きます！",
+          "kinds": [
+            "intensity"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J-dense",
+      "title": "情報量が多い（チェックリスト読み上げの観察）",
+      "storeName": "旬菜 あかり",
+      "star": 4,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-sashimi",
+          "targetLabel": "刺身盛り合わせ",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            },
+            {
+              "code": "appearance",
+              "label": "見た目"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-dashimaki",
+          "targetLabel": "だし巻き玉子",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "drink",
+          "categoryLabel": "ドリンク",
+          "targetId": "t-lemon",
+          "targetLabel": "自家製レモンサワー",
+          "facets": [
+            {
+              "code": "taste",
+              "label": "味"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "atmosphere",
+          "categoryLabel": "店内・雰囲気",
+          "facets": [
+            {
+              "code": "comfort",
+              "label": "居心地"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "price",
+          "categoryLabel": "価格",
+          "facets": [
+            {
+              "code": "value",
+              "label": "コスパ"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "serving",
+              "label": "料理・ドリンクの提供"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "reservation_visit",
+          "categoryLabel": "予約・来店",
+          "facets": [
+            {
+              "code": "entry_wait",
+              "label": "入店までの待ち時間"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-sashimi": [
+          "刺身",
+          "お造り"
+        ],
+        "t-dashimaki": [
+          "だし巻き",
+          "出汁巻き",
+          "玉子焼き"
+        ],
+        "t-lemon": [
+          "レモンサワー"
+        ]
+      },
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "刺身盛り合わせは味も見た目も良く、だし巻き玉子もおいしかったです。自家製レモンサワーもおいしく、居心地も良くてコスパも良いと感じました。料理の提供と、入店までの待ち時間は気になりました。"
+      ],
+      "forbiddenExamples": []
+    }
+  ]
+}

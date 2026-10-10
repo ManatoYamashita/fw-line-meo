@@ -141,3 +141,82 @@ rm -f /tmp/gk   # 使い終わったら必ず消す
 許容水準は **11.1%（案A 適用後の実測値）を受け入れる**ことで合意済み。ゼロは要求しない。案B はその残差をさらに刈るための層であり、作り直してもなお残る場合は下書きを客へ返して `factuality_residual` として記録する（客の Google 投稿導線を殺さない）。
 
 是正案の比較は、**同じデータセットで前後を測って**行うこと。
+
+## structured survey の評価（Issue #440）
+
+structured survey（店舗別の Target・facet・極性・Issue #436 / #438）の回答から作る下書きを、**#439 の生成方式を選ぶ前に**同じ物差しで比べるための評価一式。目的は 2 つあり、片方だけでは足りない。
+
+1. **事実性**: 客が回答していないことを作らない（hard gate・決定的に判定）
+2. **人間らしさ**: アンケートの読み上げのような AI っぽい文章にしない（主評価はブラインドの人手比較・自動の数値は診断）
+
+AI detector は「人間らしさ」の正解に使わない。
+
+### 構成
+
+| ファイル | 役割 |
+|---|---|
+| `structured/cases.json` | 固定ケース 12 件（A 単純 positive／B 複数 facet／C 複数 Target／D positive + concern／E 同じ Target・別 facet／F exact overlap／G Target のみ／H カテゴリ全体の facet／I1〜I3 一言あり（硬め・普通・カジュアル）／J 情報量が多い）。店名・料理名・一言はすべて架空。ケースごとに、Target の言い方（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・固有の禁止の意味・**許す言い換え**・**失格になるべき例**を持つ |
+| `structured/structured-eval-lexicon.json` | eval 専用の語彙（facet / カテゴリの意味の手がかり・極性の手がかり・強度・推奨・再訪・原因・時間帯・同行者・属性・overlap の理由・一言の因果づけ・AI っぽさの句）。**本番の生成器・事後検証には使わない** |
+| `structured/gates.ts` | hard gate と coverage の判定（純関数）。既存の検出器（来店の経緯・期待と再訪・属性・断定・固有名詞と数値と日付）を再利用する |
+| `structured/diagnostics.ts` | AI っぽさの診断（合否ではない）と再生成の類似度 |
+| `structured/blind.ts` | 方式名を隠したブラインド評価の束と、記入済みの表の集計 |
+| `structured/methods.ts` | 比較する方式（A legacy-direct／B claims-plain／C natural-realizer＝本番の `StructuredDraftPort`／D safe-fallback） |
+| `structured/report.ts` | 1 本ずつの記録と方式ごとの集計・表 |
+| `structured/structured.eval.test.ts` | 実測（A・B・C は `GEMINI_API_KEY` が無ければ skip し、D だけを流す） |
+| `structured/BASELINE.md` | #439 の前の baseline の記録 |
+| `../test/structured-eval-gates.test.ts` ／ `../test/structured-eval-tools.test.ts` | 検出器・診断・ブラインド・方式・集計の検証。**実 API 不要で CI で常時走る** |
+
+### hard gate（自然でも、これが起きたら失格）
+
+未回答の Target（`unselectedTarget`）／未回答の facet（`unselectedFacet`）／未回答のカテゴリ（`unselectedCategory`）／新しい具体属性（`newAttribute`）／原因（`cause`）／時間帯（`timing`・`ungrounded:dateTime`）／同行者・来店の経緯と動機（`companion`・`visitContext:*`）／期待（`expectation`）／再訪の意向（`revisit`）／推奨（`recommendation`）／入力に無い強度（`intensity`）／極性の反転（`polarityReversal`）／positive・concern の片側を丸ごと落とす（`positiveDropped`・`concernDropped`）／Target を落とす（`targetDropped`）／exact overlap の理由の創作（`overlapReason`・Issue #418）／一言の内容を別の claim の理由として結ぶ（`commentLinkage`）／「無かった」の断定（`absence`）／素材に無い固有名詞・数値（`ungrounded:*`）／ケース固有の禁止の意味（`caseForbidden:*`）。
+
+一言に同じ意味があれば、その分類は数えない（客が自分で書いたことは素材である・既存の検出器と同じ意味論）。
+
+### coverage は文字列一致ではない
+
+「刺身盛り合わせ / 味 / positive」は「刺身盛り合わせがおいしかったです」で満たす。判定は文単位で、**主題**（Target の言い方・カテゴリ全体の facet の意味の手がかり）と**極性の手がかり**が同じ文にあるかを見る。主題を省略した文は直前の文の Target を引き継ぐ。同じ Target・同じ極性の facet は統合してよいので、facet の意味まで述べたか（`facetMentioned`）は診断に留める。
+
+### exact overlap
+
+同じ Target・同じ facet を両群で選んだケース（F）では、両面を述べることだけを許し（「良かったところもありつつ気になる点もありました」）、共存の理由（時間帯・部位・最初と後半・好みと濃さ・「その時々の状況によって印象が変わる」）を作ったら `overlapReason` で失格にする。理由の語は overlap のケースでだけ数える（別の facet のケースの「部位によって」は数えない）。
+
+### AI っぽさの診断（傾向の観察）
+
+「全体として」「一方で」「好印象」「満足度」「という印象」の出現率・「良かったです」の反復・同じ語尾の連続・店名で始める率・再訪で締める率・推奨で締める率・星の読み上げ・**チェックリストの読み上げ**（主題を入力の順に 1 文 1 主題で並べる・3 主題以上）・入力の順のまま・一言より感嘆符が増えたか・文数・字数・claim 数ごとの平均字数（薄い素材ほど長い状態を見る・固定の字数を成功条件にしない）・同じ入力の再生成の類似度。
+
+### ブラインドの人手評価
+
+`EVAL_OUT` を指定すると、その隣に次を書き出す（すべてリポジトリの外）。
+
+| ファイル | 中身 |
+|---|---|
+| `<EVAL_OUT>.blind.md` | ケースごとに、方式名を隠した候補（候補A/B/C…）をシード付きの乱数（`EVAL_SEED`・既定 440）で並べた評価用の本文 |
+| `<EVAL_OUT>.blind-key.json` | 候補の記号 → 方式名の対応表（**評価者に渡さない**） |
+| `<EVAL_OUT>.ratings.csv` | 自然さ・AI っぽさ・投稿しやすさ・内容の忠実さ（各 1〜5）の記入表 |
+| `<EVAL_OUT>.pairwise.csv` | 2 候補の比較（どちらを自分の口コミとして使いたいか・候補の記号か「同等」）の記入表 |
+
+評価者は `R1` のような符号だけで記録し、名前などの個人情報をリポジトリへ入れない。記入済みの表は `structured/blind.ts` の `aggregateRatings` / `aggregatePairwise` で方式ごとの平均・勝率へ集計する。
+
+### 実行
+
+```bash
+# キーなし: D（決定的なテンプレート）だけを流し、検出器と集計の経路を確かめる
+EVAL_OUT=/tmp/structured-eval.json pnpm --filter @fwlm/survey-web run eval:structured
+
+# 実 Gemini（課金が発生する。キーはファイル経由で渡し、表示しない）
+GEMINI_API_KEY="$(cat /tmp/gk)" GEMINI_MODEL=gemini-3.1-flash-lite EVAL_RUNS=3 \
+  EVAL_OUT=/tmp/structured-eval.json pnpm --filter @fwlm/survey-web run eval:structured
+```
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `GEMINI_API_KEY` | （なし） | 無ければ A・B・C を skip する（D だけを流す） |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | 本番と揃える |
+| `EVAL_RUNS` | `3` | ケース 1 件あたりの回数（再生成の類似度にも使う） |
+| `EVAL_METHODS` | （全方式） | `legacy-direct,claims-plain,natural-realizer,safe-fallback` から選ぶ |
+| `EVAL_OUT` | （なし） | サンプル全件と集計を JSON で書き出し、隣にブラインド評価の束を置く。**リポジトリの外のパスでなければ止まる** |
+| `EVAL_SEED` | `440` | ブラインド評価の並びのシード |
+
+規模の目安: 12 ケース × 3 回 × 2 方式（A・B）= 72 リクエスト。
+
+`eval:factuality`（legacy の評価）は従来どおり `factuality.eval.test.ts` だけを流す。
