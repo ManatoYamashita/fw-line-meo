@@ -217,7 +217,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const result = await createNaturalRealizer(client, { random: fixed }).prepare(OVERLAP);
     expect(result).toEqual({
       kind: 'draft',
-      draft: '刺身盛り合わせの味は、良かったところもあり、気になるところもありました。',
+      draft: '刺身盛り合わせの味については、良かった点と気になる点の両方がありました。',
       source: 'fallback',
       attempts: 2,
     });
@@ -262,7 +262,7 @@ describe('safe fallback', () => {
       { polarity: 'concern', categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI, targetLabel: '刺身盛り合わせ', facets: [{ code: 'taste', label: '味' }] },
     ]);
     expect(structuredFallbackDraft(claims)).toBe(
-      '刺身盛り合わせの味は、良かったところもあり、気になるところもありました。刺身盛り合わせは見た目が良かったです。',
+      '刺身盛り合わせの味については、良かった点と気になる点の両方がありました。刺身盛り合わせは見た目が良かったです。',
     );
   });
 });
@@ -351,5 +351,93 @@ describe('再生成のバリエーション（文章の組み立て・項目の�
     // 事後検証の素材は封入した回答だけ: 前回の文の事実（友人と）を繰り返した下書きは、作り直しになる。
     expect(onRetry.mock.calls[0]![0]).toContain('companion');
     expect(result).toEqual({ kind: 'draft', draft: clean, source: 'llm', attempts: 2 });
+  });
+});
+
+describe('factuality と style の分離（style の問題だけでは safe fallback へ落とさない）', () => {
+  // 実 Gemini で safe fallback へ落ちた回答（全体と Target の量・入店の待ち時間・接客の丁寧さが両面・料理の価格）。
+  const YAKITORI = 'a4390000-0000-4000-8000-0000000000b5';
+  const MIXED = material({
+    star: 4,
+    selections: [
+      { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] },
+      { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', targetId: YAKITORI, targetLabel: '焼き鳥5種盛り', facets: [{ code: 'volume', label: '量' }] },
+      { polarity: 'positive', categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] },
+      { polarity: 'positive', categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] },
+      { polarity: 'concern', categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] },
+      { polarity: 'concern', categoryCode: 'price', categoryLabel: '価格', facets: [{ code: 'food_price', label: '料理の価格' }] },
+    ],
+  });
+  const GOOD = '入店までの待ち時間も少なく、焼き鳥5種盛りもしっかりした量で満足できました。ただ、接客の丁寧さや料理の価格については少し気になるところもありました。';
+  const STYLE_ONLY = '入店までの待ち時間も少なく、焼き鳥5種盛りを含め量もしっかりあって満足できる内容でした。接客の丁寧さや料理の価格については、良い部分もあれば気になる点もありました。';
+  const CAUSE = '予約のおかげか待ち時間も少なく、焼き鳥5種盛りを含め量もしっかりあって満足できました。接客の丁寧さや料理の価格については、良い部分もあれば気になる点もありました。';
+
+  it('実 Gemini の 2 本目の文（自然・事実として安全）は、そのまま 1 回で通る', async () => {
+    const onResult = vi.fn();
+    const { client } = fakeClient(GOOD);
+    expect(await createNaturalRealizer(client, { random: fixed, onResult }).prepare(MIXED)).toEqual({ kind: 'draft', draft: GOOD, source: 'llm', attempts: 1 });
+    expect(onResult).toHaveBeenCalledWith({ source: 'llm', attempts: 1, retried: false, styleOnlyRetry: false, residualKinds: [] }, 6);
+  });
+
+  it('「満足できる内容」だけの問題は style として作り直し、2 回目も style だけなら LLM の文を返す（fallback にしない）', async () => {
+    const onRetry = vi.fn();
+    const onFallback = vi.fn();
+    const onResult = vi.fn();
+    const { client, requests } = fakeClient(STYLE_ONLY, STYLE_ONLY);
+    const result = await createNaturalRealizer(client, { random: fixed, onRetry, onFallback, onResult }).prepare(MIXED);
+    expect(result).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 2 });
+    expect(onRetry).toHaveBeenCalledWith(['style:abstractEvaluation'], 6);
+    expect(requests[1]!.contents).toContain(RETRY_NOTES['style:abstractEvaluation']!);
+    expect(onFallback).not.toHaveBeenCalled();
+    expect(onResult).toHaveBeenCalledWith(
+      { source: 'llm', attempts: 2, retried: true, styleOnlyRetry: true, residualKinds: ['style:abstractEvaluation'] },
+      6,
+    );
+  });
+
+  it('1 回目が style だけの問題なら、2 回目が factuality 違反・生成の失敗でも 1 回目の LLM の文を返す', async () => {
+    for (const second of [CAUSE, new Error('503')]) {
+      const { client } = fakeClient(STYLE_ONLY, second);
+      expect(await createNaturalRealizer(client, { random: fixed }).prepare(MIXED)).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 2 });
+    }
+  });
+
+  it('同じ文末の羅列（「Xでした。Yでした。Zでした。」）も style の問題で、事実として安全なら fallback にしない', async () => {
+    const listy =
+      '入店まではスムーズでした。焼き鳥5種盛りの量も満足でした。料理全体の量も満足でした。接客の丁寧さは良い点も気になる点もありました。料理の価格は気になりました。';
+    const onRetry = vi.fn();
+    const { client } = fakeClient(listy, listy);
+    expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(MIXED)).toMatchObject({ source: 'llm', attempts: 2 });
+    expect(onRetry.mock.calls[0]![0]).toEqual(['style:repetitiveEnding']);
+  });
+
+  it('原因の創作（予約のおかげか）は factuality 違反: 作り直し、2 回続けば safe fallback', async () => {
+    const onFallback = vi.fn();
+    const onResult = vi.fn();
+    const { client } = fakeClient(CAUSE, CAUSE);
+    const result = await createNaturalRealizer(client, { random: fixed, onFallback, onResult }).prepare(MIXED);
+    expect(result).toMatchObject({ source: 'fallback', attempts: 2 });
+    expect(onFallback).toHaveBeenCalledWith('gate', ['cause'], 6);
+    expect(onResult).toHaveBeenCalledWith({ source: 'fallback', attempts: 2, retried: true, styleOnlyRetry: false, residualKinds: ['cause'] }, 6);
+  });
+
+  it('safe fallback は最低限自然な定型: 待ち時間の positive・量の重複のまとめ・exact overlap の両面', () => {
+    expect(structuredFallbackDraft(compileStructuredClaims(MIXED.selections))).toBe(
+      '料理全体の量に満足でき、焼き鳥5種盛りの量も良かったです。' +
+        '接客の丁寧さについては、良かった点と気になる点の両方がありました。' +
+        '入店まではスムーズでした。' +
+        '料理の価格が気になりました。',
+    );
+  });
+
+  it('量のまとめは並びに依らず、同じ claim を 2 回書かない（Target が先でも）', () => {
+    const reversed = compileStructuredClaims([MIXED.selections[1]!, MIXED.selections[0]!]);
+    expect(structuredFallbackDraft(reversed)).toBe('料理全体の量に満足でき、焼き鳥5種盛りの量も良かったです。');
+    // Target に別の facet があれば、その facet だけを Target の文に残す。
+    const withTaste = compileStructuredClaims([
+      MIXED.selections[0]!,
+      { ...MIXED.selections[1]!, facets: [{ code: 'volume', label: '量' }, { code: 'taste', label: '味' }] },
+    ]);
+    expect(structuredFallbackDraft(withTaste)).toBe('料理全体の量に満足でき、焼き鳥5種盛りの量も良かったです。焼き鳥5種盛りは味が良かったです。');
   });
 });

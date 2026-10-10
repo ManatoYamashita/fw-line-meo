@@ -170,6 +170,15 @@ AI detector は自然さの正解に使わない。
 
 safe fallback は通常の文章ではない。LLM 生成 → runtime hard gate → 作り直し → それでも失格（または生成の失敗）のときだけ返す最後の手段である。
 
+### factuality の hard gate と style check の分離
+
+| | 中身 | 1 回目 | 2 回目 |
+|---|---|---|---|
+| factuality（`gate.ts`） | 未回答の Target / facet・数字・来店の文脈・原因・推奨 / 再訪・極性の反転・exact overlap の理由 など | 作り直し | まだ違反なら safe fallback（ただし 1 回目が style だけの問題だったなら 1 回目の LLM の文） |
+| style（`style.ts`） | 「満足できる内容」「満足できるもの」などの抽象語のまとめ（`style:abstractEvaluation`）・同じ文末の 3 連続（`style:repetitiveEnding`） | 作り直し | **残っていても LLM の文を返す**（style だけで safe fallback へ落とさない） |
+
+LLM の呼び出しは 1 回の下書きで最大 2 回（作り直しを含む）。「少し不自然だが事実として安全な LLM の文」は、決定的な safe fallback の文より自然なことが多いので、style の問題では落とさない。「全体として」の使いすぎ・構成の偏りは runtime では見ず、評価の診断（`styleWarnings`）で頻度として見る。
+
 避ける定型: 「満足できる内容でした」「満足できるものでした」「良い内容でした」のような抽象語のまとめ（「量にも満足できました」と直接言う）／総評（「全体として満足」）を毎回付けること／気になったことが 2 つ以上あるときの「〜だけ」。
 
 ### 再生成のバリエーション（「別の文章を生成」）
@@ -186,7 +195,7 @@ safe fallback は通常の文章ではない。LLM 生成 → runtime hard gate 
 
 | ファイル | 役割 |
 |---|---|
-| `structured/cases.json` | 固定ケース 14 件（A 単純 positive／B 複数 facet／C 複数 Target／D positive + concern／E 同じ Target・別 facet／F exact overlap／G Target のみ／H カテゴリ全体の facet／I1〜I3 一言あり（硬め・普通・カジュアル）／K 量・接客と入店の待ち時間（読み上げになりやすい典型）／L 予約・接客・料理の量とドリンクの種類（再生成の構成のバリエーション）／J 情報量が多い）。店名・料理名・一言はすべて架空。ケースごとに、Target の言い方（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・固有の禁止の意味・**許す言い換え**・**失格になるべき例**を持つ |
+| `structured/cases.json` | 固定ケース 15 件（A 単純 positive／B 複数 facet／C 複数 Target／D positive + concern／E 同じ Target・別 facet／F exact overlap／G Target のみ／H カテゴリ全体の facet／I1〜I3 一言あり（硬め・普通・カジュアル）／K 量・接客と入店の待ち時間（読み上げになりやすい典型）／L 予約・接客・料理の量とドリンクの種類（再生成の構成のバリエーション）／M 全体と Target の量・入店の待ち時間・接客の丁寧さが両面・料理の価格（safe fallback へ落ちた実例）／J 情報量が多い）。店名・料理名・一言はすべて架空。ケースごとに、Target の言い方（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・固有の禁止の意味・**許す言い換え**・**失格になるべき例**を持つ |
 | `../src/lib/draft/structured/lexicon.json` | hard gate の語彙。**本番の runtime hard gate と eval が同じ語彙・同じ判定を使う**（物差しを 2 つに割らない） |
 | `structured/gates.ts` | 固定ケースの読み込み。判定の本体は `../src/lib/draft/structured/gate.ts`（本番と共有）で、ここから再輸出する |
 | `structured/methods.ts` | 評価の対象（`production`＝本番の通常生成・作り直しと safe fallback を含む／`safe-fallback`＝事実性の対照） |
@@ -324,6 +333,6 @@ try {
 | `EVAL_CASES` | （全ケース） | ケースの id をカンマ区切りで絞る |
 | `EVAL_OUT` | （なし） | サンプル全件と集計を JSON で書き出し、隣に採点の束を置く。**リポジトリの外のパスでなければ止まる** |
 
-規模の目安: 14 ケース × 3 回。1 本あたり最大 2 リクエスト（初回が runtime hard gate を落ちたときの作り直し）なので、合計 42〜84 リクエスト。
+規模の目安: 15 ケース × 3 回。1 本あたり最大 2 リクエスト（初回が runtime hard gate を落ちたときの作り直し）なので、合計 45〜90 リクエスト。
 
 `eval:factuality`（legacy の評価）は従来どおり `factuality.eval.test.ts` だけを流す。

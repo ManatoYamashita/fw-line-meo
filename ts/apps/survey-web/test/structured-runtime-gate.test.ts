@@ -306,3 +306,53 @@ describe('自然さ重視の境界（controlled inference）: 本番の runtime 
     expect(families(m, '刺身盛り合わせはおいしかったです。でも残念でした。')).toContain('polarityReversal');
   });
 });
+
+describe('safe fallback へ落ちた実例の誤検出と、回答の項目どうしの因果（実 Gemini・2026-10-11）', () => {
+  const volume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] };
+  const courtesy = (polarity: 'positive' | 'concern') => ({
+    polarity,
+    categoryCode: 'service_delivery',
+    categoryLabel: '接客・提供',
+    facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }],
+  });
+  const entryWait = { polarity: 'positive' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] };
+  const reservation = { polarity: 'positive' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'reservation_ease', label: '予約のしやすさ' }] };
+  const price = { polarity: 'concern' as const, categoryCode: 'price', categoryLabel: '価格', facets: [{ code: 'food_price', label: '料理の価格' }] };
+  const mixed = material({ selections: [volume, courtesy('positive'), entryWait, courtesy('concern'), price] });
+
+  it('「〜は気になりませんでした」は positive の言い方で、極性の反転に数えない', () => {
+    expect(families(mixed, '入店までの待ち時間は気になりませんでした。料理の量にも満足できました。接客の丁寧さは良い点も気になる点もあり、料理の価格は気になりました。')).toEqual([]);
+    // 否定でない「気になりました」は concern のまま（positive の claim の反転）。
+    expect(families(material({ selections: [entryWait] }), '入店までの待ち時間が気になりました。')).toContain('polarityReversal');
+  });
+
+  it('exact overlap の理由は overlap の主題の文でだけ数える（無関係な文の「〜ものの」では数えない）', () => {
+    expect(families(mixed, '料理の量に満足できたものの、料理の価格は気になりました。接客の丁寧さは良い面も気になる面もありました。入店までスムーズでした。')).toEqual([]);
+    expect(families(mixed, '接客の丁寧さは、時間帯によって良いときと気になるときがありました。料理の量に満足できました。入店までスムーズで、料理の価格は気になりました。')).toContain('overlapReason');
+    // overlap の文の直後の、主題を名指さない文の理由も数える。
+    expect(families(mixed, '接客の丁寧さは良い点も気になる点もありました。その時々で違うのだと思います。料理の量に満足できました。入店までスムーズで、料理の価格は気になりました。')).toContain('overlapReason');
+  });
+
+  it('「〜のおかげか」「〜のおかげで」「〜からか」は原因の創作', () => {
+    for (const draft of [
+      '予約のおかげか待ち時間も少なく、料理の量にも満足できました。接客の丁寧さは良い点も気になる点もあり、料理の価格は気になりました。',
+      'スタッフのおかげで入店までスムーズで、料理の量にも満足できました。接客の丁寧さは良い点も気になる点もあり、料理の価格は気になりました。',
+      '空いていたからか入店までスムーズで、料理の量にも満足できました。接客の丁寧さは良い点も気になる点もあり、料理の価格は気になりました。',
+    ]) {
+      expect(families(mixed, draft), draft).toContain('cause');
+    }
+  });
+
+  it('予約と待ち時間を両方回答していても、因果で結ばない（「予約のおかげで待ち時間が短かった」は失格）', () => {
+    const both = material({ selections: [reservation, entryWait] });
+    expect(families(both, '予約がしやすく、入店までの待ち時間も短く済みました。')).toEqual([]);
+    expect(families(both, '予約のおかげで、入店までの待ち時間も短く済みました。')).toContain('cause');
+    // 一言に客が書いた因果は、客の素材として数えない（既存の意味論）。
+    const commented = material({ selections: [reservation, entryWait], comment: '予約していたおかげですぐ入れた' });
+    expect(families(commented, '予約していたおかげで、入店までスムーズでした。')).not.toContain('cause');
+  });
+
+  it('exact overlap の両面だけの言い方は通す（原因や時間の順を足さなければよい）', () => {
+    expect(families(mixed, '接客の丁寧さについては、良い部分もあれば気になる点もありました。料理の量に満足でき、入店までスムーズでした。料理の価格は気になりました。')).toEqual([]);
+  });
+});

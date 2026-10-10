@@ -142,7 +142,7 @@ describe('評価の対象（本番の通常生成と safe fallback の 2 つだ�
       expect(r.findings, `${c.id}: ${text}`).toEqual([]);
       expect(r.coverage.every((cv) => cv.covered), `${c.id}: ${text}`).toBe(true);
     }
-    expect(safeFallback(byId('F-exact-overlap'))).toBe('刺身盛り合わせの味は、良かったところもあり、気になるところもありました。');
+    expect(safeFallback(byId('F-exact-overlap'))).toBe('刺身盛り合わせの味については、良かった点と気になる点の両方がありました。');
   });
 
   it('production は本番の StructuredDraftPort を呼び、下書きの出どころと LLM の呼び出し回数を返す', async () => {

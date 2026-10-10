@@ -3,6 +3,7 @@ import {
   logFabricationResidual,
   logFactualityResidual,
   logStructuredDraftFallback,
+  logStructuredDraftResult,
   logStructuredDraftRetry,
   logSurveyPageViewed,
   logSurveyResponseSubmitted,
@@ -134,6 +135,25 @@ describe('structured の下書きの作り直し・fallback', () => {
     );
     info.mockRestore();
     warn.mockRestore();
+  });
+
+  it('最終の結果（ローカル検証用）は決まった形の reason と残った種類・claim の件数だけを出す', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    logStructuredDraftResult(
+      writeStructuredLog,
+      { source: 'llm', attempts: 2, retried: true, styleOnlyRetry: true, residualKinds: ['style:abstractEvaluation'] },
+      6,
+    );
+    logStructuredDraftResult(writeStructuredLog, { source: 'fallback', attempts: 2, retried: true, styleOnlyRetry: false, residualKinds: ['cause'] }, 6);
+    expect(info).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'style:abstractEvaluation', claimCount: 6, reason: 'llm:attempts=2:style_retry' }),
+    );
+    expect(info).toHaveBeenNthCalledWith(
+      2,
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'cause', claimCount: 6, reason: 'fallback:attempts=2:fact_retry' }),
+    );
+    info.mockRestore();
   });
 });
 

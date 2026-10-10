@@ -1021,6 +1021,130 @@
       ]
     },
     {
+      "id": "M-overlap-volume-wait",
+      "title": "全体と Target の量・入店の待ち時間が良く、接客の丁寧さが両面・料理の価格が気になった（safe fallback へ落ちた実例）",
+      "storeName": "海鮮酒場 さざなみ",
+      "star": 4,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "facets": [
+            {
+              "code": "volume",
+              "label": "量"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "targetId": "t-yakitori5",
+          "targetLabel": "焼き鳥5種盛り",
+          "facets": [
+            {
+              "code": "volume",
+              "label": "量"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "service_courtesy",
+              "label": "接客の丁寧さ"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "reservation_visit",
+          "categoryLabel": "予約・来店",
+          "facets": [
+            {
+              "code": "entry_wait",
+              "label": "入店までの待ち時間"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "service_courtesy",
+              "label": "接客の丁寧さ"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "price",
+          "categoryLabel": "価格",
+          "facets": [
+            {
+              "code": "food_price",
+              "label": "料理の価格"
+            }
+          ]
+        }
+      ],
+      "subjects": {
+        "t-yakitori5": [
+          "焼き鳥"
+        ]
+      },
+      "menuTargets": [
+        {
+          "id": "t-sashimi",
+          "label": "刺身盛り合わせ",
+          "categoryCode": "food",
+          "aliases": [
+            "刺身"
+          ]
+        }
+      ],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "入店までの待ち時間も少なく、焼き鳥5種盛りもしっかりした量で満足できました。ただ、接客の丁寧さや料理の価格については少し気になるところもありました。",
+        "入店までの待ち時間は気になりませんでした。焼き鳥5種盛りも含めて量に満足できました。接客の丁寧さは良い点も気になる点もあり、料理の価格は少し気になりました。",
+        "料理の量に満足できたものの、料理の価格は少し気になりました。接客の丁寧さは良い面も気になる面もありました。入店までの待ち時間も短く、焼き鳥5種盛りも量がしっかりあって満足でした。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "予約のおかげか待ち時間も少なく、焼き鳥5種盛りを含め量もしっかりあって満足できました。接客の丁寧さや料理の価格については、良い部分もあれば気になる点もありました。",
+          "kinds": [
+            "cause"
+          ]
+        },
+        {
+          "text": "混んでいなかったからか待ち時間も少なく、焼き鳥5種盛りの量にも満足できました。接客の丁寧さは良い点も気になる点もあり、料理の価格は少し気になりました。",
+          "kinds": [
+            "cause"
+          ]
+        },
+        {
+          "text": "入店までスムーズで、焼き鳥5種盛りの量にも満足できました。接客の丁寧さは、最初は良かったのですが後半は気になりました。料理の価格も気になりました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        },
+        {
+          "text": "入店までスムーズで、焼き鳥5種盛りの量にも満足できました。接客の丁寧さは良い点も気になる点もありました。時間帯によって違うのかもしれません。料理の価格も気になりました。",
+          "kinds": [
+            "overlapReason"
+          ]
+        }
+      ]
+    },
+    {
       "id": "J-dense",
       "title": "情報量が多い（チェックリスト読み上げの観察）",
       "storeName": "旬菜 あかり",

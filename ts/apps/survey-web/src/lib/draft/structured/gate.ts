@@ -488,10 +488,18 @@ export function evaluateStructuredDraft(
     }
   }
 
-  // exact overlap: 両面の共存の理由を作らない（Issue #418）。理由の語は、overlap のケースでだけ数える。
-  if (exactOverlaps(c).length > 0) {
+  // exact overlap: 両面の共存の理由を作らない（Issue #418）。理由の語は、overlap のケースの **overlap の主題を述べた文**
+  // （と、その直後の主題を名指さない文）でだけ数える。下書き全体で数えると、overlap と関係の無い文の「〜によって」
+  // 「〜ものの」まで理由と数え、自然な下書きが作り直し → safe fallback へ落ちた（実 Gemini・2026-10-11）。
+  const overlapKeys = new Set(exactOverlaps(c));
+  const overlapClaims = claims.filter((cl) => overlapKeys.has(`${cl.targetId ?? cl.categoryCode}:${cl.facetCode ?? ''}`));
+  if (overlapClaims.length > 0) {
+    const aboutAny = (i: number) => claims.some((cl) => aboutClaim(cl, i));
+    const aboutOverlap = (i: number) => overlapClaims.some((cl) => aboutClaim(cl, i));
+    const scoped = sentences.filter((_, i) => aboutOverlap(i) || (i > 0 && aboutOverlap(i - 1) && !aboutAny(i)));
+    const scopedScan = mask(scoped.join(''), [...targetWords, ...selectedFacetLabels]);
     for (const p of lex.lists.overlapReason) {
-      const hit = p.exec(scan);
+      const hit = p.exec(scopedScan);
       if (hit && !inComment(p)) {
         add('overlapReason', hit[0]);
         break;

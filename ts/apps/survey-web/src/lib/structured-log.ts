@@ -113,6 +113,30 @@ export function logStructuredDraftRetry(log: SurveyLogger, kinds: readonly strin
 }
 
 /**
+ * structured の下書きの最終の結果を記録する（**ローカル検証用**・`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ配線する）。
+ * reason は `<llm|fallback>:attempts=<1|2>:<no_retry|fact_retry|style_retry>` の決まった形、residualClaims は最終の
+ * 下書きに残った種類（受け入れた style の問題・fallback の理由）。下書き・一言・料理名は載せない。
+ */
+export function logStructuredDraftResult(
+  log: SurveyLogger,
+  outcome: {
+    readonly source: 'llm' | 'fallback';
+    readonly attempts: number;
+    readonly retried: boolean;
+    readonly styleOnlyRetry: boolean;
+    readonly residualKinds: readonly string[];
+  },
+  claimCount: number,
+): void {
+  const retry = !outcome.retried ? 'no_retry' : outcome.styleOnlyRetry ? 'style_retry' : 'fact_retry';
+  log('info', 'survey-web.structured_draft_result', {
+    reason: `${outcome.source}:attempts=${outcome.attempts}:${retry}`,
+    residualClaims: [...outcome.residualKinds].sort().join(','),
+    claimCount,
+  });
+}
+
+/**
  * structured の下書きが safe fallback（claim からの決定的なテンプレート）へ落ちたことを記録する（Issue #439）。
  * reason は `gate`（2 回とも hard gate を通らなかった）か `generation`（生成そのものの失敗）。本文は載せない。
  */

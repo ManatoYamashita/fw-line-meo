@@ -78,7 +78,8 @@ DATABASE_URL=postgres://postgres@localhost:5432/fwlm_preview SESSION_SIGNING_KEY
 ```bash
 # (C') 客向けアンケートを実 Gemini で起動する（(C) の代わり・Git Bash）
 read -rsp 'GEMINI_API_KEY: ' GEMINI_API_KEY; echo
-DATABASE_URL=postgres://postgres@localhost:5432/fwlm_preview SESSION_SIGNING_KEY=local-preview-signing-key   GEMINI_API_KEY="$GEMINI_API_KEY" PORT=3100 pnpm -C ts --filter @fwlm/survey-web start
+DATABASE_URL=postgres://postgres@localhost:5432/fwlm_preview SESSION_SIGNING_KEY=local-preview-signing-key \
+  GEMINI_API_KEY="$GEMINI_API_KEY" STRUCTURED_DRAFT_DEBUG_LOG=1 PORT=3100 pnpm -C ts --filter @fwlm/survey-web start
 unset GEMINI_API_KEY
 ```
 
@@ -92,10 +93,19 @@ unset GEMINI_API_KEY
 | 4 | 料理 → 刺身盛り合わせ → 味 | 接客・提供 → 料理・ドリンクの提供 | 提供について、時間（「20分」）や原因（混雑）を作っていないか |
 | 5 | 料理 → 刺身盛り合わせ → 味 | 料理 → 刺身盛り合わせ → 味（exact overlap） | 「良かった点もあり、気になる点もありました」の範囲か。「最初は良かったが後半は…」のような理由を作っていないか |
 | 6 | 予約・来店 → 予約のしやすさ／接客・提供 → 接客の丁寧さ／料理 → 量（★5） | ドリンク → 種類 | 最初の 1 本と「別の文章を生成」3 回の計 4 本で、項目の順番・文の数・まとめ方が変わるか（語尾だけの違いでないか） |
+| 7 | 料理 → 料理全体の量・焼き鳥5種盛り → 量／接客・提供 → 接客の丁寧さ／予約・来店 → 入店までの待ち時間（★4） | 接客・提供 → 接客の丁寧さ（両面）／価格 → 料理の価格 | 4 本で safe fallback が 0〜1 回程度か。「予約のおかげで」のような原因を作っていないか。fallback が出ても「料理全体の量に満足でき、焼き鳥5種盛りの量も良かったです。」の形か |
 
 ケース 6 で見ること: (1)「満足できる内容」「満足できるもの」が出ない (2)「全体として〜」が毎回は付かない (3) 4 本で構成が違う (4)「〜だったよ」のような友達口調に戻っていない (5) 回答に無い具体的な事実（時間・原因・人数など）が無い (6) safe fallback（羅列の文）に落ちていない。
 
-safe fallback の文（「刺身盛り合わせは味が良かったです。」の形・羅列）が出たら、通常生成が 2 回とも失格になったか生成に失敗したことを示す。サーバーのログ（`survey-web.structured_draft_retry` / `survey-web.structured_draft_fallback`）に、失格の種類と claim の件数だけが残る（下書き・一言・料理名は残らない）。
+safe fallback の文（「刺身盛り合わせは味が良かったです。」の形・定型の羅列）が出たら、通常生成が 2 回とも factuality の hard gate で失格になったか生成に失敗したことを示す（style の問題だけでは落ちない）。サーバーのログに、失格の種類と claim の件数だけが残る（下書き・一言・料理名は残らない）。
+
+| 事象 | いつ | 見るところ |
+|---|---|---|
+| `survey-web.structured_draft_result` | 毎回（`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ） | `reason` = `<llm\|fallback>:attempts=<1\|2>:<no_retry\|fact_retry\|style_retry>`、`residualClaims` = 最終の下書きに残った種類（受け入れた `style:*`・fallback の理由） |
+| `survey-web.structured_draft_retry` | 1 回目が作り直しになったとき | `residualClaims` = 1 回目の違反の種類（`style:*` は style の問題） |
+| `survey-web.structured_draft_fallback` | safe fallback へ落ちたとき | `reason`（`gate` / `generation`）と `residualClaims` |
+
+同じ回答を 4 回作ったら、`structured_draft_result` の `fallback:` が 0〜1 回程度か、`residualClaims` に `cause` が出ていないかを見る。
 
 同じ端末で回答すると、その店舗は回答済みの画面になる。もう一度試すときは、ブラウザの localStorage を消すか、シークレットウィンドウを使う。
 

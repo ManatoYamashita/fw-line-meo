@@ -146,7 +146,7 @@ export function diagnoseDraft(c: StructuredEvalCase, draft: string, lex: Structu
   const fallbackText = structuredFallbackDraft(compileStructuredClaims(c.selections));
   const fallbackLike =
     draft.trim() === fallbackText ||
-    (sentences.length >= 2 && sentences.every((s) => /(?:良かったです|気になりました|気になるところもありました)[。！!]?$/u.test(s)));
+    (sentences.length >= 2 && sentences.every((s) => /(?:良かったです|気になりました|気になるところもありました|両方がありました)[。！!]?$/u.test(s)));
   const longLabels = [
     ...new Set(claimsOf(c).flatMap((cl) => (cl.facetLabel !== undefined && [...cl.facetLabel].length >= 3 ? [cl.facetLabel] : []))),
   ];
