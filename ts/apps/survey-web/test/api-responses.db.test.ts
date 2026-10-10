@@ -60,6 +60,7 @@ function draftsDeps(generator: DraftGenerator): DraftsDeps {
     generator,
     rateLimiter: createRateLimiter({ limit: 1000, windowMs: 60_000 }),
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
+    structuredDrafts: pendingStructuredDraft,
     clientKey: () => 'itest',
     log: () => {},
   };

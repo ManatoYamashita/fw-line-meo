@@ -84,6 +84,21 @@ describe('SurveyShell × structured（Issue #438）', () => {
     expect(notifyReviewLinkOpened).toHaveBeenCalledWith(STORE, 'PT-v2');
   });
 
+  it('structured の下書き（Issue #439）が返れば、legacy と同じ下書きの画面（コピー・Google の投稿導線・再生成）を出す', async () => {
+    stubFetch(200, {
+      mode: 'structured',
+      generation: 'ok',
+      draft: '刺身盛り合わせがおいしかったです。',
+      sessionToken: 'ST-v2',
+      regenerationsLeft: 3,
+    });
+    renderShell();
+    fireEvent.click(screen.getByTestId('structured-submit'));
+    expect(await screen.findByDisplayValue('刺身盛り合わせがおいしかったです。')).toBeDefined();
+    expect(screen.getByRole('link', { name: /Google のクチコミを書く/ }).getAttribute('href')).toBe('https://review/ChIJ');
+    expect(screen.getByRole('button', { name: /別の文章を生成（残り3回）/ })).toBeDefined();
+  });
+
   it('STALE_SURVEY は「アンケート内容が更新されました」と再読み込みを案内し、回答済みにしない', async () => {
     stubFetch(409, {
       error: {

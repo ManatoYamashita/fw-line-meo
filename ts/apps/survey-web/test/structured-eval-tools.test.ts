@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import casesRaw from '../eval/structured/cases.json';
-import lexiconRaw from '../eval/structured/structured-eval-lexicon.json';
+import lexiconRaw from '../src/lib/draft/structured/lexicon.json';
 import { readLegacyLexicons, readStructuredCases, readStructuredEvalLexicon, evaluateStructuredDraft, type StructuredEvalCase } from '../eval/structured/gates';
 import { bigramJaccard, diagnoseDraft, regenerationSimilarity, summarizeDiagnostics } from '../eval/structured/diagnostics';
 import {

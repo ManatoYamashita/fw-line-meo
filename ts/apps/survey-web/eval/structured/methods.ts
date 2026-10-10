@@ -1,19 +1,22 @@
 import { createDraftGenerator, type GenAiClient, type GenAiResponse } from '../../src/lib/draft/generator';
 import { pickVariation } from '../../src/lib/draft/prompt';
 import { pendingStructuredDraft, type StructuredDraftPort } from '../../src/lib/draft/structured-draft';
+import { compileStructuredClaims } from '../../src/lib/draft/structured/claims';
+import { structuredFallbackDraft } from '../../src/lib/draft/structured/fallback';
+import { createNaturalRealizer } from '../../src/lib/draft/structured/realizer';
 import type { DraftMaterial } from '../../src/lib/domain';
-import { claimsOf, exactOverlaps, type EvalClaim, type StructuredEvalCase } from './gates';
+import { claimsOf, type EvalClaim, type StructuredEvalCase } from './gates';
 
 // structured survey の下書きを作る方式（Issue #440 の比較対象）。同じケース・同じモデル・同じ回数で比べる。
 //
 //   A legacy-direct      現行の生成器（createDraftGenerator・prompt.ts）へ、structured の素材を legacy の観点の
 //                        ラベルへ平らにして流す。「現行に近い direct generation」
 //   B claims-plain       claim を箇条書きで渡し、回答に無いことは書かないとだけ指示する。自然化の指示は弱い
-//   C natural-realizer   本番の StructuredDraftPort（src/lib/draft/structured-draft.ts）。**Issue #439 で中身を実装する。**
-//                        Stage 2 の暫定実装は下書きを作らないので、この時点では全件「生成なし」になる
-//   D safe-fallback      claim から決定的に作るテンプレート（参考・API 不要）
+//   C natural-realizer   本番の Natural LLM Realizer（src/lib/draft/structured/realizer.ts・Issue #439）。作り直しと
+//                        safe fallback を含む本番の経路そのものを測る
+//   D safe-fallback      本番の safe fallback（claim から決定的に作るテンプレート・参考・API 不要）
 //
-// B と D は評価のためだけの方式で、本番の生成には使わない（Issue #439 の prompt / generator を先取りしない）。
+// B は評価のためだけの方式で、本番の生成には使わない。
 
 export interface EvalMethod {
   readonly id: string;
@@ -74,37 +77,11 @@ function categoryLabelOf(c: StructuredEvalCase, cl: EvalClaim): string {
 }
 
 /**
- * D: claim から決定的に作る安全なテンプレート（参考）。主題（Target / カテゴリ全体の facet）ごとに 1 文で、
- * 回答した facet だけを名指す。exact overlap は「良かったところもあり、気になるところもありました」とだけ書く。
- * 強度・理由・意向は足さない。一言は文面に混ぜない（客の文章を書き換えないため）。
+ * D: 本番の safe fallback（src/lib/draft/structured/fallback.ts）。Natural LLM Realizer が 2 回とも hard gate を通らない
+ * ときに本番が返す文と同じものを測る（参考・API 不要）。
  */
 export function safeFallback(c: StructuredEvalCase): string {
-  const claims = claimsOf(c);
-  const overlaps = new Set(exactOverlaps(c));
-  const subjectKey = (cl: EvalClaim) => cl.targetId ?? `${cl.categoryCode}:${cl.facetCode}`;
-  const sentences: string[] = [];
-  const done = new Set<string>();
-  for (const cl of claims) {
-    const key = `${cl.polarity}:${subjectKey(cl)}`;
-    if (done.has(key)) continue;
-    done.add(key);
-    const sameSubject = claims.filter((x) => x.polarity === cl.polarity && subjectKey(x) === subjectKey(cl));
-    const facets = sameSubject.flatMap((x) => (x.facetLabel ? [x.facetLabel] : []));
-    const overlap = sameSubject.some((x) => overlaps.has(`${x.targetId ?? x.categoryCode}:${x.facetCode ?? ''}`));
-    if (overlap) {
-      if (cl.polarity === 'concern') continue;
-      const subject = cl.targetLabel !== undefined ? `${cl.targetLabel}の${facets.join('・')}` : facets.join('・');
-      sentences.push(`${subject}は、良かったところもあり、気になるところもありました。`);
-      continue;
-    }
-    const verb = cl.polarity === 'positive' ? '良かったです' : '気になりました';
-    if (cl.targetLabel !== undefined) {
-      sentences.push(facets.length > 0 ? `${cl.targetLabel}は${facets.join('と')}が${verb}。` : `${cl.targetLabel}が${verb}。`);
-    } else {
-      sentences.push(`${facets.join('と')}が${verb}。`);
-    }
-  }
-  return sentences.join('');
+  return structuredFallbackDraft(compileStructuredClaims(c.selections));
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +98,7 @@ const SAFETY_SETTINGS = [
 export interface MethodOptions {
   readonly client?: GenAiClient;
   readonly model: string;
-  /** C に差し込む本番の口。既定は本番の現在の実装（Stage 2 の暫定・下書きを作らない）。 */
+  /** C に差し込む口。既定は client があれば本番の Natural LLM Realizer、無ければ下書きを作らない口。 */
   readonly structuredPort?: StructuredDraftPort;
 }
 
@@ -140,7 +117,7 @@ function parseDraft(res: GenAiResponse): string | null {
  */
 export function evalMethods(options: MethodOptions): EvalMethod[] {
   const { client, model } = options;
-  const port = options.structuredPort ?? pendingStructuredDraft;
+  const port = options.structuredPort ?? (client ? createNaturalRealizer(client, { model }) : pendingStructuredDraft);
   return [
     {
       id: 'legacy-direct',
@@ -194,7 +171,7 @@ export function evalMethods(options: MethodOptions): EvalMethod[] {
           })),
           ...(c.comment !== undefined ? { comment: c.comment } : {}),
         })) as { kind: string; draft?: string };
-        // Stage 2 の暫定実装は { kind: 'unavailable' } を返す（下書きなし）。Issue #439 で draft を返すようになる。
+        // claim の無いケースは無いので、本番の実装なら常に draft（LLM か fallback）を返す。
         return typeof result.draft === 'string' ? result.draft : null;
       },
     },

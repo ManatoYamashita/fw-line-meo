@@ -6,7 +6,7 @@
 - `E2E_STUB_IDP=1` で店舗詳細をビルドすると、`@line/liff` がスタブに差し替わり、固定の ID トークンを返す（出荷経路へ漏れないことは `scripts/check-e2e-idp-stub-isolation.sh` が機械強制する）。
 - 店舗詳細のサーバーの `LIFF_VERIFY_ENDPOINT`（本番では未設定）を、ローカルの偽の検証サーバー（`ts/apps/store-detail/e2e/stubs/liff-verify-server.mjs`）へ向ける。偽物は固定の sub（`U-e2e`）を返す。
 
-structured survey の有効化は、店舗オーナーの操作には無い（客向けの新しいアンケートの下書き生成は Issue #439 で作る）。ローカルでは `ts/apps/survey-web/e2e/structured-seed.sql` が、E2E と同じく fixture として 1 店舗だけ有効にする。
+structured survey の有効化は、店舗オーナーの操作には無い（structured の回答の下書きは Issue #439 の Natural LLM Realizer が作る）。ローカルでは `ts/apps/survey-web/e2e/structured-seed.sql` が、E2E と同じく fixture として 1 店舗だけ有効にする。
 
 ## 1. 必要なもの
 
@@ -50,7 +50,7 @@ node ts/apps/store-detail/e2e/stubs/liff-verify-server.mjs --sub U-e2e --port 31
 DATABASE_URL=postgres://postgres@localhost:5432/fwlm_preview LIFF_CHANNEL_ID=local-preview \
   LIFF_VERIFY_ENDPOINT=http://127.0.0.1:3199 PORT=3121 pnpm -C ts --filter @fwlm/store-detail start
 
-# (C) 客向けアンケート（127.0.0.1:3100）。legacy の下書き生成は Gemini をモックする（E2E と同じ）
+# (C) 客向けアンケート（127.0.0.1:3100）。下書き生成（legacy と structured の両方）は Gemini をモックする（E2E と同じ）
 DATABASE_URL=postgres://postgres@localhost:5432/fwlm_preview SESSION_SIGNING_KEY=local-preview-signing-key \
   GEMINI_API_KEY=local-preview-dummy-key \
   NODE_OPTIONS="--import file:///$(cygpath -m "$PWD/ts/apps/survey-web/e2e/mock-gemini.mjs")" \
@@ -67,7 +67,9 @@ DATABASE_URL=postgres://postgres@localhost:5432/fwlm_preview SESSION_SIGNING_KEY
 4. 客向けアンケート `http://127.0.0.1:3100/s/55555555-5555-4555-8555-555555555555` を開く（設定を変えた後は再読み込みする）。
 5. 星を選び、「良かったところ」の「料理」を開くと、登録した料理が「具体的な料理」に出る。料理を選び、「〇〇について」の「味」などを選ぶ。
 6. 「気になったところ」も同じように選べる（同じ料理・同じ項目を選んでもよい）。一言は任意。
-7. 「送信する」で、回答済みの画面（Google のクチコミを書く）へ進む。structured の回答の下書きは、まだ作らない（Issue #439）。
+7. 「送信する」で、下書きの画面（「コピーして投稿する」・Google のクチコミを書く・別の文章を生成）へ進む。下書きはモックが回答の claim から組み立てた文（「刺身盛り合わせの味が良かったです。」の形）で、hard gate を通った LLM の経路を通ったことを示す。safe fallback に落ちたときは「刺身盛り合わせは味が良かったです。」の形になる。星だけ・開いて閉じただけの回答は claim が無いので、従来どおり回答済みの画面（Google のクチコミを書く）へ進む。
+
+   実 Gemini の文を見るときだけ、モックの `NODE_OPTIONS` を外して `GEMINI_API_KEY` に自分の開発用キーを渡す（課金が発生する。本番のシークレットは使わない。キーをファイルやシェル履歴へ残さない）。
 
 同じ端末で回答すると、その店舗は回答済みの画面になる。もう一度試すときは、ブラウザの localStorage を消すか、シークレットウィンドウを使う。
 

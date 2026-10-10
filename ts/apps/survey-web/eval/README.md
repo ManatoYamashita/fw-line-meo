@@ -156,14 +156,14 @@ AI detector は「人間らしさ」の正解に使わない。
 | ファイル | 役割 |
 |---|---|
 | `structured/cases.json` | 固定ケース 12 件（A 単純 positive／B 複数 facet／C 複数 Target／D positive + concern／E 同じ Target・別 facet／F exact overlap／G Target のみ／H カテゴリ全体の facet／I1〜I3 一言あり（硬め・普通・カジュアル）／J 情報量が多い）。店名・料理名・一言はすべて架空。ケースごとに、Target の言い方（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・固有の禁止の意味・**許す言い換え**・**失格になるべき例**を持つ |
-| `structured/structured-eval-lexicon.json` | eval 専用の語彙（facet / カテゴリの意味の手がかり・極性の手がかり・強度・推奨・再訪・原因・時間帯・同行者・属性・overlap の理由・一言の因果づけ・AI っぽさの句）。**本番の生成器・事後検証には使わない** |
-| `structured/gates.ts` | hard gate と coverage の判定（純関数）。既存の検出器（来店の経緯・期待と再訪・属性・断定・固有名詞と数値と日付）を再利用する |
+| `../src/lib/draft/structured/lexicon.json` | hard gate の語彙（facet / カテゴリの意味の手がかり・極性の手がかり・強度・推奨・再訪・原因・時間帯・同行者・属性・overlap の理由・一言の因果づけ・AI っぽさの句）。Issue #439 で eval から移し、**本番の Natural LLM Realizer の事後検証と eval が同じ語彙・同じ判定を使う**（物差しを 2 つに割らない） |
+| `structured/gates.ts` | 固定ケースの読み込み。hard gate と coverage の判定（純関数）の本体は `../src/lib/draft/structured/gate.ts`（本番と共有）で、ここから再輸出する。既存の検出器（来店の経緯・期待と再訪・属性・断定・固有名詞と数値と日付）を再利用する |
 | `structured/diagnostics.ts` | AI っぽさの診断（合否ではない）と再生成の類似度 |
 | `structured/blind.ts` | 方式名を隠したブラインド評価の束と、記入済みの表の集計 |
-| `structured/methods.ts` | 比較する方式（A legacy-direct／B claims-plain／C natural-realizer＝本番の `StructuredDraftPort`／D safe-fallback） |
+| `structured/methods.ts` | 比較する方式（A legacy-direct／B claims-plain／C natural-realizer＝本番の Natural LLM Realizer（`createNaturalRealizer`・Issue #439）／D safe-fallback＝本番の safe fallback（`structuredFallbackDraft`）） |
 | `structured/report.ts` | 1 本ずつの記録と方式ごとの集計・表 |
 | `structured/structured.eval.test.ts` | 実測（A・B・C は `GEMINI_API_KEY` が無ければ skip し、D だけを流す） |
-| `structured/BASELINE.md` | #439 の前の baseline の記録 |
+| `structured/BASELINE.md` | Issue #439 の前の baseline の記録と、最終 PR 前の release gate |
 | `../test/structured-eval-gates.test.ts` ／ `../test/structured-eval-tools.test.ts` | 検出器・診断・ブラインド・方式・集計の検証。**実 API 不要で CI で常時走る** |
 
 ### hard gate（自然でも、これが起きたら失格）
@@ -217,6 +217,6 @@ GEMINI_API_KEY="$(cat /tmp/gk)" GEMINI_MODEL=gemini-3.1-flash-lite EVAL_RUNS=3 \
 | `EVAL_OUT` | （なし） | サンプル全件と集計を JSON で書き出し、隣にブラインド評価の束を置く。**リポジトリの外のパスでなければ止まる** |
 | `EVAL_SEED` | `440` | ブラインド評価の並びのシード |
 
-規模の目安: 12 ケース × 3 回 × 2 方式（A・B）= 72 リクエスト。
+規模の目安: 12 ケース × 3 回 × 3 方式（A・B・C）。C は 1 本あたり最大 2 リクエスト（初回が hard gate を落ちたときの再試行）なので、合計 108〜144 リクエスト。
 
 `eval:factuality`（legacy の評価）は従来どおり `factuality.eval.test.ts` だけを流す。

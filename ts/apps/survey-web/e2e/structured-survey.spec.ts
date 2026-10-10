@@ -5,7 +5,7 @@ import { expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 import { openStructuredSurvey } from './fixtures/structured';
 
 // structured survey の客向け画面（Issue #438）の実ブラウザ検証。QR → 携帯（Pixel 5 相当・projects の既定）を想定し、
-// 星 → 料理を開く → Target → facet → 気になったところ → 一言 → 送信 → 回答済み（Google の投稿導線）を通す。
+// 星 → 料理を開く → Target → facet → 気になったところ → 一言 → 送信 → 下書き（Issue #439・コピーと Google の投稿導線）を通す。
 // 送信は実際の /api/responses（実 DB・e2e/structured-seed.sql の店舗）へ届き、サーバーが版・指紋を照合して受け付ける。
 // 面を開く手順と前提の assert は fixtures/structured.ts が持つ。
 
@@ -16,7 +16,7 @@ const positive = (page: Page) => page.getByRole('region', { name: '良かった�
 const concern = (page: Page) => page.getByRole('region', { name: '気になったところ（任意）' });
 
 test.describe('structured survey（客向け）', () => {
-  test('星・料理・Target・facet・気になったところ・一言を選んで送信し、回答済みの画面へ進む', async ({ page }) => {
+  test('星・料理・Target・facet・気になったところ・一言を選んで送信し、structured の下書きの画面へ進む', async ({ page }) => {
     await openStructuredSurvey(page);
     await page.getByRole('button', { name: '星4' }).click();
 
@@ -59,8 +59,16 @@ test.describe('structured survey（客向け）', () => {
     expect(JSON.stringify(body)).not.toContain('刺身盛り合わせ');
     expect((await response).status()).toBe(200);
 
-    await expect(page.getByText(/へのご回答ありがとうございました。/)).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
+    // 下書き（Issue #439）: Natural LLM Realizer（E2E では mock-gemini.mjs）の文が hard gate を通って出る。
+    // 「〇〇の味が良かったです」は mock の言い回しで、safe fallback（「〇〇は味が良かったです」）ではないことを示す。
+    const draft = page.getByLabel('口コミ下書き');
+    await expect(draft).toHaveValue(/刺身盛り合わせの味が良かったです。/);
+    await expect(draft).toHaveValue(/刺身盛り合わせの温度・状態が気になりました。/);
+    await expect(draft).toHaveValue(/焼き鳥5種盛りが良かったです。/);
+    // legacy と同じ導線（コピー・Google の投稿・再生成）を出す。
+    await expect(page.getByRole('button', { name: 'コピーして投稿する' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Google のクチコミを書く/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /別の文章を生成（残り\d+回）/ })).toBeVisible();
   });
 
   test('カテゴリを開いて閉じただけなら、星だけの回答として送る', async ({ page }) => {

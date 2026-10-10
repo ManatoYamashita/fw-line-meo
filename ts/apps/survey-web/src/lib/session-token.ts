@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { DraftMaterial } from './domain';
+import type { StructuredDraftMaterial } from './draft/structured-draft';
 import { ok, err, type Result } from './result';
 
 // 再生成上限をサーバー無状態で強制するための HMAC 署名トークン。
@@ -51,6 +52,26 @@ export interface SessionInput {
   attempt: number;
 }
 
+/**
+ * structured survey の sessionToken（Issue #439）。回答時点の表示名へ解決した素材（Target の名前の snapshot）を
+ * 封入し、/api/drafts の再生成で同じ素材から作り直す。legacy の SessionPayload（v: 1・DraftMaterial）とは版で分け、
+ * 互いの素材として読まない。サーバーに個別回答を保存しない（素材は token の中だけにある）のは legacy と同じ。
+ */
+export interface StructuredSessionPayload {
+  kind: 'session';
+  v: 2;
+  storeId: string;
+  structured: StructuredDraftMaterial;
+  attempt: number;
+  exp: number; // epoch ms
+}
+
+export interface StructuredSessionInput {
+  storeId: string;
+  structured: StructuredDraftMaterial;
+  attempt: number;
+}
+
 export type TokenError = 'INVALID' | 'EXPIRED';
 
 export interface SessionTokenService {
@@ -70,7 +91,12 @@ export interface SessionTokenService {
    */
   verifyPage(token: string, storeId: string): Result<PagePayload, TokenError>;
   sign(input: SessionInput): string;
+  /** structured survey の sessionToken（Issue #439）。 */
+  signStructured(input: StructuredSessionInput): string;
+  /** legacy の sessionToken（v: 1）だけを通す。structured（v: 2）は INVALID（互いの素材として読まない）。 */
   verify(token: string): Result<SessionPayload, TokenError>;
+  /** structured の sessionToken（v: 2）だけを通す（Issue #439）。legacy（v: 1）は INVALID。 */
+  verifyStructured(token: string): Result<StructuredSessionPayload, TokenError>;
 }
 
 function isRevision(value: unknown): value is number {
@@ -136,7 +162,7 @@ export function createSessionTokenService(
 ): SessionTokenService {
   if (!signingKey) throw new Error('signingKey is required');
 
-  function encode(payload: PagePayload | SessionPayload): string {
+  function encode(payload: PagePayload | SessionPayload | StructuredSessionPayload): string {
     const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
     return `${body}.${sign(body, signingKey)}`;
   }
@@ -205,6 +231,37 @@ export function createSessionTokenService(
         exp: now() + SESSION_TTL_MS,
       };
       return encode(payload);
+    },
+
+    signStructured(input) {
+      const payload: StructuredSessionPayload = {
+        kind: 'session',
+        v: 2,
+        storeId: input.storeId,
+        structured: input.structured,
+        attempt: input.attempt,
+        exp: now() + SESSION_TTL_MS,
+      };
+      return encode(payload);
+    },
+
+    verifyStructured(token) {
+      const decoded = decode(token);
+      if (!decoded.ok) return decoded;
+      const s = decoded.value as Partial<StructuredSessionPayload>;
+      if (
+        s.kind !== 'session' ||
+        s.v !== 2 ||
+        typeof s.exp !== 'number' ||
+        typeof s.storeId !== 'string' ||
+        typeof s.attempt !== 'number' ||
+        s.structured == null ||
+        !Array.isArray(s.structured.selections)
+      ) {
+        return err('INVALID');
+      }
+      if (now() > s.exp) return err('EXPIRED');
+      return ok(s as StructuredSessionPayload);
     },
 
     verify(token) {

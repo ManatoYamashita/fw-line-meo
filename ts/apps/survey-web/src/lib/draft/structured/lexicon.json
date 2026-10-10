@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "structured survey の下書き評価（Issue #440）の語彙。eval 専用で、本番の生成器・事後検証には使わない。",
+    "structured survey の下書きの hard gate の語彙（Issue #440 で評価のために作り、Issue #439 で本番の事後検証へ移した）。本番（Natural LLM Realizer の作り直しと safe fallback の判断・src/lib/draft/structured/gate.ts）と評価（eval/structured）が同じこの語彙を使う。",
     "既存の検出器（visit-context / embellishment / absence / material-grounding）と同じく、検出したものは確実にその意味である形だけを置く（高 precision・測るのは下限）。",
     "値はすべて正規表現のソース（JS の RegExp・フラグなし）。照合の前に、店名・Target 名（ケースの subjects を含む）を本文から取り除く。",
     "facetMeanings / categoryMeanings は「その意味に言及した」ことの手がかりで、coverage（言うべき意味を言ったか）と未回答の追加（言ってはいけない意味を言ったか）の両方に使う。",

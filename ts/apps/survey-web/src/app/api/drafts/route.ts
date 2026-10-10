@@ -5,6 +5,7 @@ import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { logFabricationResidual, logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
 import { handleDrafts, type DraftsDeps } from './handler';
+import { createDefaultStructuredDrafts } from '../../../lib/draft/structured/default-realizer';
 import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation } from '@fwlm/observability';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,8 @@ async function buildDeps(): Promise<DraftsDeps> {
     }),
     rateLimiter: createRateLimiter({ limit: 20, windowMs: 60_000 }),
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
+    // structured の再生成（Issue #439）。同じ Natural LLM Realizer を通る。
+    structuredDrafts: await createDefaultStructuredDrafts(),
     clientKey: createClientKey(),
     log: writeStructuredLog,
   };

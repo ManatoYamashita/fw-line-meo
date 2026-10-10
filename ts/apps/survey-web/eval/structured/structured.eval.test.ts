@@ -4,7 +4,7 @@ import { dirname, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GenAiClient, GenAiResponse } from '../../src/lib/draft/generator';
 import casesRaw from './cases.json';
-import lexiconRaw from './structured-eval-lexicon.json';
+import lexiconRaw from '../../src/lib/draft/structured/lexicon.json';
 import { buildBlindPacket } from './blind';
 import { evaluateStructuredDraft, readLegacyLexicons, readStructuredCases, readStructuredEvalLexicon, claimsOf } from './gates';
 import { evalMethods } from './methods';

@@ -6,7 +6,7 @@ import {
   incrementStructuredTallies,
   readStoreSurveyDefinition,
 } from '@fwlm/db';
-import { pendingStructuredDraft } from '../../../lib/draft/structured-draft';
+import { createDefaultStructuredDrafts } from '../../../lib/draft/structured/default-realizer';
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
@@ -46,8 +46,8 @@ async function buildDeps(): Promise<ResponsesDeps> {
     incrementStructuredTallies: async (input) => {
       await incrementStructuredTallies(await getPool(), input);
     },
-    // structured の下書きは Issue #439 で実装する。Stage 2 は作らない（legacy の生成器へ押し込まない）。
-    structuredDrafts: pendingStructuredDraft,
+    // structured の下書きは Natural LLM Realizer（Issue #439）。legacy の生成器とは分ける。
+    structuredDrafts: await createDefaultStructuredDrafts(),
     clientKey: createClientKey(),
     log: writeStructuredLog,
   };

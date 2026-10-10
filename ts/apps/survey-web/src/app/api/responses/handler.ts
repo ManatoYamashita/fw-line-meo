@@ -66,7 +66,7 @@ export interface ResponsesDeps {
    * これが加算するので、structured の回答では incrementTallies を呼ばない（星を二重に数えない）。
    */
   incrementStructuredTallies: (input: StructuredTallyInput) => Promise<void>;
-  /** structured の素材から下書きを作る口（Stage 2 は作らない・Issue #439 で実装）。 */
+  /** structured の素材から下書きを作る口（Natural LLM Realizer・Issue #439）。 */
   structuredDrafts: StructuredDraftPort;
   clientKey: (req: Request) => string;
   log: SurveyLogger;
@@ -133,7 +133,7 @@ export async function handleResponses(req: Request, deps: ResponsesDeps): Promis
 /**
  * structured の回答（Issue #438）。照合に使ったのと **同じ読み取りの結果** で検証し、回答時点の表示名へ解決する
  * （途中で定義を読み直さない）。集計は incrementStructuredTallies だけで、legacy の incrementTallies は呼ばない。
- * 下書きは Stage 2 では作らない（Issue #439 で structuredDrafts を実装する）。
+ * 下書きは structuredDrafts（Natural LLM Realizer・Issue #439）が作る。
  */
 async function handleStructured(
   body: unknown,
@@ -152,14 +152,22 @@ async function handleStructured(
   const tally = deps
     .incrementStructuredTallies({ storeId, star: answer.star, ...structuredMaterialCounts(answer) })
     .catch(() => deps.log('warn', 'tally_failed'));
-  const draft = deps.structuredDrafts.prepare({ storeName, ...material });
+  const structured = { storeName, ...material };
+  const draft = deps.structuredDrafts.prepare(structured);
   const [, prepared] = await Promise.all([tally, draft]);
 
   // ファネルの分子（Issue #137 段階3）。legacy と同じく、客が送信した事実を記録する。
   logSurveyResponseSubmitted(deps.log, storeId);
 
-  // 下書きを作らなかった（Stage 2 の暫定）。客の画面は受付と Google の投稿導線を出す（全評価で同一）。
-  return jsonOk({ mode: 'structured', generation: prepared.kind, draft: null });
+  if (prepared.kind === 'unavailable') {
+    // claim の無い回答（星だけ・一言だけ）。下書きは作らず、客の画面は回答済み（Google の投稿導線）へ進む。
+    return jsonOk({ mode: 'structured', generation: 'unavailable', draft: null });
+  }
+  // 下書き（Natural LLM Realizer・Issue #439）。再生成は /api/drafts が、sessionToken に封入した同じ素材
+  // （Target の名前の snapshot）から作り直す。応答の形は legacy と同じなので、下書きの画面（コピー・Google の
+  // 投稿導線・再生成）をそのまま使う。
+  const sessionToken = deps.tokens.signStructured({ storeId, structured, attempt: 0 });
+  return jsonOk({ mode: 'structured', generation: 'ok', draft: prepared.draft, sessionToken, regenerationsLeft: REGEN_MAX });
 }
 
 /** legacy の回答（従来どおり。survey_aspects の観点・incrementTallies・legacy の下書き生成）。 */

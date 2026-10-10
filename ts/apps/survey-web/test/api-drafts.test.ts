@@ -21,6 +21,8 @@ function baseDeps(tokens: ReturnType<typeof createSessionTokenService>, over: Pa
     rateLimiter: { check: () => true },
     findStore: () =>
       Promise.resolve({ id: STORE, name: '店', placeId: 'ChIJ', placeStatus: 'confirmed', suspendedAt: null }),
+    // legacy の再生成のテスト。structured の再生成は呼ばれないことを、呼ばれたら落ちる偽物で示す。
+    structuredDrafts: { prepare: () => Promise.reject(new Error('legacy の再生成で structured の生成器を呼んだ')) },
     clientKey: () => 'ip1',
     log: () => {},
     ...over,
