@@ -216,3 +216,93 @@ describe('Realizer の作り直し（未回答の Target・一言の因果づけ
     expect(onFallback).toHaveBeenCalledWith('gate', ['commentLinkage'], 1);
   });
 });
+
+describe('自然さ重視の境界（controlled inference）: 本番の runtime hard gate', () => {
+  // 回答から自然に導ける主観的・意味を保った言い換えは通し、新しい具体的事実は止める。
+  const volume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] };
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const entryWait = { polarity: 'concern' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] };
+  const serving = { polarity: 'concern' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'serving', label: '料理・ドリンクの提供' }] };
+  const sashimiTasteLook = { ...sashimiTaste, facets: [{ code: 'taste', label: '味' }, { code: 'appearance', label: '見た目' }] };
+  const sashimiTasteConcern = { ...sashimiTaste, polarity: 'concern' as const };
+  const sashimiOnly = { ...sashimiTaste, facets: [] };
+
+  const everyday = material({ star: 5, selections: [volume, courtesy, entryWait] });
+  const cases: [string, StructuredDraftMaterial, string[], [string, string][]][] = [
+    [
+      'ケース1: 量・接客 positive / 入店の待ち時間 concern',
+      everyday,
+      [
+        '入店までの待ち時間は少し気になりましたが、料理は満足感のある量で、接客も丁寧でした。',
+        '料理は量にも満足できて、丁寧に対応してもらえました。待ち時間の部分だけ、やや気になりました。全体としては満足です。',
+      ],
+      [
+        ['入店まで20分待ちましたが、料理の量に満足で、接客も丁寧でした。', 'ungrounded'],
+        ['予約客が多かったので入店まで待ちましたが、料理の量に満足で、接客も丁寧でした。', 'commentLinkage|cause'],
+        ['料理の量に満足で、店員さんが笑顔で対応してくれました。待ち時間は気になりました。', 'newAttribute'],
+        ['友人と行きました。料理の量に満足で、接客も丁寧でした。待ち時間は気になりました。', 'companion'],
+        ['料理の量に満足で、接客も丁寧でした。待ち時間は気になりましたが、また行きたいです。', 'revisit'],
+        ['料理の量にとても満足で、接客も丁寧でした。待ち時間は気になりました。', 'intensity'],
+      ],
+    ],
+    [
+      'ケース2: 刺身盛り合わせ / 味 positive',
+      material({ star: 5 }),
+      ['刺身盛り合わせ、おいしかったです！', '刺身盛り合わせの味が印象に残りました。全体的に満足です。'],
+      [
+        ['新鮮な刺身盛り合わせがおいしかったです。', 'newAttribute'],
+        ['刺身盛り合わせがおいしくて、絶対おすすめです。', 'intensity'],
+      ],
+    ],
+    [
+      'ケース3: 刺身盛り合わせ / 味・見た目 positive',
+      material({ selections: [sashimiTasteLook] }),
+      ['刺身盛り合わせは見た目もきれいで、味も満足でした。', '刺身盛り合わせ、盛り付けが印象に残りました。おいしかったです。'],
+      [['刺身盛り合わせは香ばしくて見た目も良かったです。', 'newAttribute']],
+    ],
+    [
+      'ケース4: 刺身盛り合わせ / 味 positive・提供 concern',
+      material({ star: 3, selections: [sashimiTaste, serving] }),
+      ['刺身盛り合わせはおいしかったです。提供の部分は少し気になりました。', '提供までの待ち時間がやや気になりましたが、刺身盛り合わせはおいしかったです。'],
+      [
+        ['刺身盛り合わせはおいしかったですが、提供まで30分かかりました。', 'ungrounded'],
+        ['刺身盛り合わせはおいしかったですが、混雑していて提供が気になりました。', 'cause'],
+      ],
+    ],
+    [
+      'ケース5: exact overlap（刺身盛り合わせ / 味 が両方）',
+      material({ star: 3, selections: [sashimiTaste, sashimiTasteConcern] }),
+      ['刺身盛り合わせの味について、良かった点もあり、気になる点もありました。'],
+      [['刺身盛り合わせは、最初は美味しかったが後半は味が落ちた。', 'overlapReason']],
+    ],
+    [
+      'Target だけ（項目の指定なし）は厳しいまま',
+      material({ selections: [sashimiOnly] }),
+      ['刺身盛り合わせが印象に残りました。', '刺身盛り合わせが良かったです。'],
+      [
+        ['刺身盛り合わせがおいしかったです。', 'unselectedFacet'],
+        ['刺身盛り合わせは新鮮でした。', 'newAttribute'],
+      ],
+    ],
+  ];
+
+  for (const [name, m, allowed, forbidden] of cases) {
+    describe(name, () => {
+      for (const draft of allowed) {
+        it(`通す: ${draft}`, () => expect(families(m, draft)).toEqual([]));
+      }
+      for (const [draft, kinds] of forbidden) {
+        it(`止める（${kinds}）: ${draft}`, () => {
+          const got = families(m, draft);
+          expect(got.some((k) => kinds.split('|').includes(k)), JSON.stringify(got)).toBe(true);
+        });
+      }
+    });
+  }
+
+  it('全体の印象の文は、直前の料理を主題として引き継がない（★の抽象的な不満を、料理の極性の反転と数えない）', () => {
+    const m = material({ star: 2 });
+    expect(families(m, '刺身盛り合わせはおいしかったです。全体としては不満が残りました。')).toEqual([]);
+    expect(families(m, '刺身盛り合わせはおいしかったです。でも残念でした。')).toContain('polarityReversal');
+  });
+});

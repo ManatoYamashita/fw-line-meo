@@ -25,7 +25,7 @@ const families = (c: StructuredEvalCase, text: string) =>
   [...new Set(evaluateStructuredDraft(c, text, lex, legacy).findings.map((f) => f.kind))];
 
 describe('structured eval fixture の形', () => {
-  it('A〜J の 12 ケース（一言ありは硬め・普通・カジュアルの 3 種）を持ち、すべて架空の店名', () => {
+  it('A〜K の 13 ケース（一言ありは硬め・普通・カジュアルの 3 種）を持ち、すべて架空の店名', () => {
     expect(cases.map((c) => c.id)).toEqual([
       'A-simple-positive',
       'B-multi-facet',
@@ -38,6 +38,7 @@ describe('structured eval fixture の形', () => {
       'I1-comment-formal',
       'I2-comment-neutral',
       'I3-comment-casual',
+      'K-everyday-mix',
       'J-dense',
     ]);
     expect(cases.filter((c) => c.comment !== undefined).map((c) => c.commentTone)).toEqual(['formal', 'neutral', 'casual']);

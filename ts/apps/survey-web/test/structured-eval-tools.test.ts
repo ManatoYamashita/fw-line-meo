@@ -3,27 +3,34 @@ import casesRaw from '../eval/structured/cases.json';
 import lexiconRaw from '../src/lib/draft/structured/lexicon.json';
 import { readLegacyLexicons, readStructuredCases, readStructuredEvalLexicon, evaluateStructuredDraft, type StructuredEvalCase } from '../eval/structured/gates';
 import { bigramJaccard, diagnoseDraft, regenerationSimilarity, summarizeDiagnostics } from '../eval/structured/diagnostics';
-import {
-  aggregatePairwise,
-  aggregateRatings,
-  buildBlindPacket,
-  parseCsv,
-  seededRandom,
-  seededShuffle,
-  type BlindSample,
-} from '../eval/structured/blind';
-import { claimsPlainPrompt, evalMethods, safeFallback, toLegacyMaterial } from '../eval/structured/methods';
-import { formatSummary, recordSample, summarize } from '../eval/structured/report';
+import { aggregateRatings, buildRatingPacket, parseCsv, RATINGS_HEADER, type RatingSample } from '../eval/structured/rating';
+import { evalGenerators, materialOf, safeFallback } from '../eval/structured/methods';
+import { formatSummary, recordSample, successChecks, summarize } from '../eval/structured/report';
 import type { GenAiClient } from '../src/lib/draft/generator';
 
 // structured survey の評価の道具（Issue #440）の検証。実 API 不要で CI で常時走る。
+// 評価の対象は本番の通常生成と safe fallback の 2 つだけ（方式の比較はしない）。
 
 const cases = readStructuredCases(casesRaw);
 const lex = readStructuredEvalLexicon(lexiconRaw);
 const legacy = readLegacyLexicons();
 const byId = (id: string): StructuredEvalCase => cases.find((c) => c.id === id)!;
 
-describe('AI っぽさの診断（合否ではない）', () => {
+describe('自然さの診断（個々の合否ではない）', () => {
+  it('safe fallback 風（羅列）・1 文 1 主題・項目名の読み上げを数え、自然な文では立たない', () => {
+    const k = byId('K-everyday-mix');
+    const fb = diagnoseDraft(k, safeFallback(k), lex);
+    expect(fb.fallbackLike).toBe(true);
+    expect(fb.subjectPerSentence).toBe(true);
+    // 読み上げに近い文（項目名のまま・1 文 1 主題）。順番が入力と違っても subjectPerSentence は立つ。
+    const readout = diagnoseDraft(k, '入店までの待ち時間が気になりました。料理の量は満足できました。接客の丁寧さも良かったです。', lex);
+    expect(readout).toMatchObject({ fallbackLike: false, subjectPerSentence: true, checklistLike: false, labelVerbatimRate: 1 });
+    for (const natural of k.allowedParaphrases) {
+      expect(diagnoseDraft(k, natural, lex), natural).toMatchObject({ fallbackLike: false, subjectPerSentence: false });
+    }
+    expect(diagnoseDraft(k, k.allowedParaphrases[1]!, lex).labelVerbatimRate).toBe(0);
+  });
+
   it('定型句・反復・語尾の連続・店名の書き出し・締めの意向と推奨を数える', () => {
     const c = byId('J-dense');
     const d = diagnoseDraft(
@@ -79,86 +86,56 @@ describe('AI っぽさの診断（合否ではない）', () => {
   });
 });
 
-describe('ブラインドの人手評価', () => {
-  const samples: BlindSample[] = ['legacy-direct', 'claims-plain', 'safe-fallback'].flatMap((method) =>
-    [0, 1].map((run) => ({ caseId: 'A-simple-positive', caseTitle: '単純 positive', method, run, draft: `${method}-${run} の下書き` })),
-  );
+describe('人手の採点（本番の通常生成の下書き）', () => {
+  const samples: RatingSample[] = [1, 0, 2].map((run) => ({ caseId: 'A-simple-positive', run, draft: `下書き-${run}` }));
 
-  it('同じシードからは同じ並び、違うシードからは違う並びになる（決定的）', () => {
-    const a = seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], seededRandom(440));
-    expect(seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], seededRandom(440))).toEqual(a);
-    expect(seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], seededRandom(441))).not.toEqual(a);
-    expect([...a].sort()).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-  });
-
-  it('本文に方式名を出さず、対応表は別に持つ。各方式の最初の run を 1 本ずつ出す', () => {
-    const packet = buildBlindPacket(samples, { seed: 440 });
-    for (const method of ['legacy-direct', 'claims-plain', 'safe-fallback']) {
-      // 本文には方式の下書き（run 0）だけが出て、方式の名前の説明は出ない。
-      expect(packet.sheet).not.toContain(`方式: ${method}`);
-    }
-    expect(packet.sheet).toContain('### 候補A');
-    expect(packet.sheet).toContain('### 候補C');
-    expect(packet.sheet).not.toContain('-1 の下書き');
-    expect(Object.values(packet.key['A-simple-positive']!).sort()).toEqual(['claims-plain', 'legacy-direct', 'safe-fallback']);
-    expect(buildBlindPacket(samples, { seed: 440 })).toEqual(packet);
+  it('ケースごとに run の順で S1・S2… を振り、下書きの出どころ（LLM / safe fallback）を出さない', () => {
+    const packet = buildRatingPacket(samples, { caseContext: { 'A-simple-positive': '★5・良:刺身盛り合わせ/味' } });
+    expect(packet.sheet).toContain('回答: ★5・良:刺身盛り合わせ/味');
+    expect(packet.sheet).toContain('### S1\n\n下書き-0');
+    expect(packet.sheet).toContain('### S3\n\n下書き-2');
+    expect(packet.sheet).not.toMatch(/fallback|llm|production|方式/i);
+    expect(packet.ratingsTemplate.trim().split('\n')).toEqual([
+      RATINGS_HEADER,
+      'A-simple-positive,S1,,,,,',
+      'A-simple-positive,S2,,,,,',
+      'A-simple-positive,S3,,,,,',
+    ]);
   });
 
   it('記入用の表は評価者を符号で記録する列を持ち、名前の列を持たない', () => {
-    const packet = buildBlindPacket(samples, { seed: 440 });
-    expect(packet.ratingsTemplate.split('\n')[0]).toBe('case_id,candidate,rater,naturalness,ai_likeness,postability,fidelity');
-    expect(packet.pairwiseTemplate.split('\n')[0]).toBe('case_id,left,right,rater,choice');
-    expect(packet.ratingsTemplate).not.toMatch(/name|氏名|名前/);
-    expect(packet.pairwiseTemplate.trim().split('\n')).toHaveLength(1 + 3);
+    expect(RATINGS_HEADER).toBe('case_id,sample,rater,naturalness,postability,fidelity,fabrication');
+    expect(RATINGS_HEADER).not.toMatch(/name|氏名|名前/);
   });
 
-  it('記入済みの表を方式ごとの平均と、方式どうしの勝ち・負け・同等へ集計する', () => {
-    const packet = buildBlindPacket(samples, { seed: 440 });
-    const key = packet.key;
-    const letterOf = (method: string) => Object.entries(key['A-simple-positive']!).find(([, m]) => m === method)![0];
-    const [lg, cp, sf] = ['legacy-direct', 'claims-plain', 'safe-fallback'].map(letterOf);
-    const ratings = parseCsv(
-      [
-        'case_id,candidate,rater,naturalness,ai_likeness,postability,fidelity',
-        `A-simple-positive,${lg},R1,2,4,2,5`,
-        `A-simple-positive,${cp},R1,4,2,4,5`,
-        `A-simple-positive,${sf},R1,1,5,1,5`,
-        `A-simple-positive,${cp},R2,5,1,5,4`,
-        `A-simple-positive,${sf},R2,,,,`,
-      ].join('\n'),
+  it('記入済みの表を、全体と評価者ごとの平均・創作の指摘の件数へ集計する（評価者の空欄・範囲外は数えない）', () => {
+    const agg = aggregateRatings(
+      parseCsv(
+        [
+          RATINGS_HEADER,
+          'A-simple-positive,S1,R1,4,4,5,0',
+          'A-simple-positive,S2,R1,2,3,5,1',
+          'A-simple-positive,S1,R2,5,5,5,0',
+          'A-simple-positive,S2,R2,9,,,',
+          'A-simple-positive,S3,,5,5,5,0',
+        ].join('\n'),
+      ),
     );
-    const agg = aggregateRatings(ratings, key);
-    expect(agg['claims-plain']).toEqual({ n: 2, mean: { naturalness: 4.5, ai_likeness: 1.5, postability: 4.5, fidelity: 4.5 } });
-    expect(agg['safe-fallback']!.n).toBe(1);
-    const [a, b] = [cp, lg].sort() as [string, string];
-    const pairs = aggregatePairwise(
-      parseCsv(['case_id,left,right,rater,choice', `A-simple-positive,${a},${b},R1,${cp}`, `A-simple-positive,${a},${b},R2,同等`, `A-simple-positive,${a},${b},R3,Z`].join('\n')),
-      key,
-    );
-    expect(pairs['claims-plain vs legacy-direct']).toEqual({ wins: 1, losses: 0, ties: 1 });
+    expect(agg.raters).toEqual(['R1', 'R2']);
+    expect(agg.overall).toEqual({ n: 3, fabrication: 1, mean: { naturalness: 11 / 3, postability: 4, fidelity: 5 } });
+    expect(agg.byRater.R1).toEqual({ n: 2, fabrication: 1, mean: { naturalness: 3, postability: 3.5, fidelity: 5 } });
   });
 });
 
-describe('比較する方式', () => {
-  it('A: structured の素材を legacy の観点のラベルへ平らにする（Target と facet は「刺身盛り合わせの味」）', () => {
-    expect(toLegacyMaterial(byId('E-same-target-other-facet'))).toEqual({
-      storeName: '海鮮食堂 しおさい',
-      star: 3,
-      aspectLabels: ['刺身盛り合わせの味'],
-      concernLabels: ['刺身盛り合わせの量'],
-    });
-    expect(toLegacyMaterial(byId('G-target-only')).aspectLabels).toEqual(['刺身盛り合わせ']);
-    expect(toLegacyMaterial(byId('I2-comment-neutral')).comment).toBe('店員さんの対応が丁寧でした');
+describe('評価の対象（本番の通常生成と safe fallback の 2 つだけ）', () => {
+  it('対象は production と safe-fallback だけ', () => {
+    expect(evalGenerators({ model: 'm' }).map((g) => [g.id, g.requiresApi])).toEqual([
+      ['production', true],
+      ['safe-fallback', false],
+    ]);
   });
 
-  it('B: claim を箇条書きで渡し、選んでいない極性の見出しを出さない（未選択を「なし」と書かせない）', () => {
-    const { userContent } = claimsPlainPrompt(byId('A-simple-positive'));
-    expect(userContent).toContain('- 料理 > 刺身盛り合わせ > 味');
-    expect(userContent).not.toContain('気になったところ');
-    expect(userContent).not.toMatch(/なし/);
-  });
-
-  it('D: 決定的なテンプレートは、すべてのケースで hard gate を通り、すべての claim を述べる', () => {
+  it('safe fallback: 決定的なテンプレートは、すべてのケースで hard gate を通り、すべての claim を述べる', () => {
     for (const c of cases) {
       const text = safeFallback(c);
       const r = evaluateStructuredDraft(c, text, lex, legacy);
@@ -168,16 +145,30 @@ describe('比較する方式', () => {
     expect(safeFallback(byId('F-exact-overlap'))).toBe('刺身盛り合わせの味は、良かったところもあり、気になるところもありました。');
   });
 
-  it('C は本番の StructuredDraftPort を呼ぶ。Stage 2 の暫定実装（下書きなし）では生成なしとして数える', async () => {
-    const methods = evalMethods({ model: 'm' });
-    expect(methods.map((m) => m.id)).toEqual(['legacy-direct', 'claims-plain', 'natural-realizer', 'safe-fallback']);
-    const c = methods.find((m) => m.id === 'natural-realizer')!;
-    expect(await c.generate(byId('A-simple-positive'), 0)).toBeNull();
-    const plugged = evalMethods({ model: 'm', structuredPort: { prepare: async () => ({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。' }) as never } });
-    expect(await plugged.find((m) => m.id === 'natural-realizer')!.generate(byId('A-simple-positive'), 0)).toBe('刺身盛り合わせがおいしかったです。');
+  it('production は本番の StructuredDraftPort を呼び、下書きの出どころと LLM の呼び出し回数を返す', async () => {
+    const none = evalGenerators({ model: 'm' }).find((g) => g.id === 'production')!;
+    expect(await none.generate(byId('A-simple-positive'), 0)).toEqual({ draft: null, source: null, attempts: 0 });
+    const plugged = evalGenerators({
+      model: 'm',
+      structuredPort: {
+        prepare: async () => ({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。', source: 'llm', attempts: 2 }),
+      },
+    }).find((g) => g.id === 'production')!;
+    expect(await plugged.generate(byId('A-simple-positive'), 0)).toEqual({
+      draft: '刺身盛り合わせがおいしかったです。',
+      source: 'llm',
+      attempts: 2,
+    });
   });
 
-  it('C は client があれば本番の Realizer で、未回答の Target の名前を事後検証へ渡し、作り直し・fallback を通知する', async () => {
+  it('本番の素材を作る: 未回答の Target は名前だけ（言い方は渡さない）・星と一言はそのまま', () => {
+    const m = materialOf(byId('C-multi-target'));
+    expect(m.unselectedTargets).toEqual([{ id: 't-karaage', label: '鶏の唐揚げ', categoryCode: 'food' }]);
+    expect(m.star).toBe(4);
+    expect(materialOf(byId('I3-comment-casual')).comment).toBe('刺身うまかった！また行く');
+  });
+
+  it('production は client があれば本番の Realizer で、未回答の Target の名前を事後検証へ渡し、作り直しを通知する', async () => {
     const replies = ['刺身盛り合わせもだし巻き玉子も、鶏の唐揚げもおいしかったです。', '刺身盛り合わせもだし巻き玉子もおいしかったです。'];
     const contents: string[] = [];
     const client: GenAiClient = {
@@ -190,51 +181,70 @@ describe('比較する方式', () => {
     };
     const onRetry = vi.fn();
     const onFallback = vi.fn();
-    const c = evalMethods({ client, model: 'gemini-test', realizerEvents: { onRetry, onFallback } }).find((m) => m.id === 'natural-realizer')!;
+    const p = evalGenerators({ client, model: 'gemini-test', realizerEvents: { onRetry, onFallback } }).find((g) => g.id === 'production')!;
     // 1 回目は未回答の「鶏の唐揚げ」を足したので作り直し、2 回目の LLM の文を返す（本番と同じ runtime hard gate）。
-    expect(await c.generate(byId('C-multi-target'), 0)).toBe('刺身盛り合わせもだし巻き玉子もおいしかったです。');
+    expect(await p.generate(byId('C-multi-target'), 0)).toEqual({
+      draft: '刺身盛り合わせもだし巻き玉子もおいしかったです。',
+      source: 'llm',
+      attempts: 2,
+    });
     expect(onRetry.mock.calls[0]![0]).toContain('unselectedTarget');
     expect(onFallback).not.toHaveBeenCalled();
     // 未回答の Target は事後検証だけが使い、LLM へは渡さない。
     for (const text of contents) expect(text).not.toContain('鶏の唐揚げ');
   });
-
-  it('A・B は同じクライアント・同じモデル・本番と同じ temperature で呼ぶ', async () => {
-    const requests: { model: string; config: Record<string, unknown> }[] = [];
-    const client: GenAiClient = {
-      models: {
-        generateContent: async (req) => {
-          requests.push({ model: req.model, config: req.config });
-          return { text: JSON.stringify({ draft: '刺身盛り合わせがおいしかったです。' }) };
-        },
-      },
-    };
-    const methods = evalMethods({ client, model: 'gemini-test' });
-    for (const id of ['legacy-direct', 'claims-plain']) {
-      expect(await methods.find((m) => m.id === id)!.generate(byId('A-simple-positive'), 0)).toBe('刺身盛り合わせがおいしかったです。');
-    }
-    expect(requests.map((r) => [r.model, r.config.temperature])).toEqual([
-      ['gemini-test', 1],
-      ['gemini-test', 1],
-    ]);
-  });
 });
 
-describe('集計の形', () => {
-  it('方式ごとに hard gate・overlap の理由・coverage・診断・再生成の類似度・ケースごとの合否を出す', () => {
+describe('集計の形と成功条件', () => {
+  const llm = (draft: string | null) => ({ draft, source: draft === null ? null : ('llm' as const), attempts: 1 });
+
+  it('対象ごとに offline eval gate・overlap の理由・coverage・fallback・作り直し・診断・ケースごとの合否を出す', () => {
     const f = byId('F-exact-overlap');
     const a = byId('A-simple-positive');
     const samples = [
-      recordSample(f, 'x', 0, '刺身盛り合わせの味は、時間帯によって良いときと気になるときがありました。', lex, legacy),
-      recordSample(f, 'x', 1, safeFallback(f), lex, legacy),
-      recordSample(a, 'x', 0, '刺身盛り合わせがおいしかったです。', lex, legacy),
-      recordSample(a, 'x', 1, null, lex, legacy),
+      recordSample(f, 'production', 0, llm('刺身盛り合わせの味は、時間帯によって良いときと気になるときがありました。'), lex, legacy),
+      recordSample(f, 'production', 1, { draft: safeFallback(f), source: 'fallback', attempts: 2 }, lex, legacy),
+      recordSample(a, 'production', 0, llm('刺身盛り合わせがおいしかったです。'), lex, legacy),
+      recordSample(a, 'production', 1, llm(null), lex, legacy),
     ];
     const s = summarize([a, f], samples);
-    const m = s.methods[0]!;
-    expect(m).toMatchObject({ method: 'x', samples: 4, missing: 1, hardFailed: 1, overlapReason: { failed: 1, of: 2 } });
+    const m = s.generators[0]!;
+    expect(m).toMatchObject({
+      generator: 'production',
+      samples: 4,
+      missing: 1,
+      fallback: 1,
+      retried: 1,
+      hardFailed: 1,
+      overlapReason: { failed: 1, of: 2 },
+    });
     expect(m.gateCounts.overlapReason).toBe(1);
     expect(m.byCase['F-exact-overlap']).toEqual({ passed: 1, of: 2, kinds: ['overlapReason', 'timing'] });
-    expect(formatSummary(s)).toContain('| x | 3/4 | 1/3（33.3%） | 1/2 |');
+    // 自然さの診断は LLM の文だけ（safe fallback の文を除く）。
+    expect(m.diagnostics.n).toBe(2);
+    const text = formatSummary(s);
+    expect(text).toContain('| production | 3/4 | 1/3 | 1/3 | 1/3（33.3%） | 1/2 |');
+    expect(text).toContain('| offline eval gate の失格（runtime を通った最終の下書きの残差） | 1/3 | 0 件 | FAIL |');
+  });
+
+  it('成功条件: 事実性の残差 0・fallback 10% 以下・fallback 風 5% 以下・読み上げ 10% 以下などを判定する', () => {
+    const k = byId('K-everyday-mix');
+    const good = k.allowedParaphrases.map((d, run) => recordSample(k, 'production', run, llm(d), lex, legacy));
+    const pass = successChecks(summarize([k], good).generators[0]!);
+    expect(pass.filter((c) => !c.passed).map((c) => c.id)).toEqual([]);
+    expect(pass.map((c) => c.id)).toEqual([
+      'factuality',
+      'overlapReason',
+      'fallbackRate',
+      'fallbackLike',
+      'checklistLike',
+      'sameEndingRun3',
+      'length',
+      'duplicates',
+    ]);
+
+    const fallbackish = [0, 1].map((run) => recordSample(k, 'production', run, llm(safeFallback(k)), lex, legacy));
+    const fail = successChecks(summarize([k], fallbackish).generators[0]!);
+    expect(fail.filter((c) => !c.passed).map((c) => c.id)).toEqual(expect.arrayContaining(['fallbackLike', 'duplicates']));
   });
 });

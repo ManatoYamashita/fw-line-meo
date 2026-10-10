@@ -11,11 +11,11 @@ import {
   type StructuredGateInput,
   type StructuredGateLexicon,
 } from './gate';
-import { buildRealizerPrompt, RETRY_NOTES, STRUCTURE_HINTS } from './prompt';
+import { buildRealizerPrompt, RETRY_NOTES, STRUCTURE_HINTS, TONES } from './prompt';
 import lexiconRaw from './lexicon.json';
 
-// Natural LLM Realizer（Issue #439）。structured の回答から、事実の境界を claim に固定したうえで、LLM に自然な
-// 口コミの文章へ整えさせる。
+// structured の通常生成（Natural LLM Realizer・Issue #439）。structured の回答から、事実の境界を claim に固定したうえで、
+// LLM に自然な口コミの文章を書かせる。プロダクトの概念は「通常生成」と「safe fallback」の 2 つだけである。
 //
 //   compileStructuredClaims（決定的）
 //   → 生成 1 回目 → hard gate（src/lib/draft/structured/gate.ts・評価と同じ物差し）
@@ -26,7 +26,7 @@ import lexiconRaw from './lexicon.json';
 // LLM の呼び出しは最大 2 回。fallback は通常の経路ではない。
 //
 // 「hard gate を通った = 完全に事実どおり」とは扱わない（語彙の判定は違反の下限）。評価（eval/structured）で
-// 方式ごとの残差を測る。
+// 通常生成の残差（事実性と自然さ）を測る。
 
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 const MAX_DRAFT_CHARS = 400;
@@ -50,7 +50,7 @@ const DEFAULT_LEGACY = readLegacyLexicons();
 export interface NaturalRealizerOptions {
   readonly model?: string;
   readonly temperature?: number;
-  /** 文章の形の候補を選ぶ乱数（テストで固定する）。 */
+  /** 文章の形・文体の候補を選ぶ乱数（テストで固定する）。 */
   readonly random?: () => number;
   readonly lexicon?: StructuredGateLexicon;
   readonly legacyLexicons?: LegacyLexicons;
@@ -97,12 +97,20 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
   const lexicon = options.lexicon ?? DEFAULT_LEXICON;
   const legacy = options.legacyLexicons ?? DEFAULT_LEGACY;
 
-  async function generate(claims: readonly StructuredClaim[], comment: string | undefined, retryNotes: readonly string[]): Promise<string | null> {
-    const structureHint = STRUCTURE_HINTS[Math.floor(random() * STRUCTURE_HINTS.length)] ?? STRUCTURE_HINTS[0]!;
+  const pick = (items: readonly string[]) => items[Math.floor(random() * items.length)] ?? items[0]!;
+
+  async function generate(
+    claims: readonly StructuredClaim[],
+    comment: string | undefined,
+    star: number,
+    retryNotes: readonly string[],
+  ): Promise<string | null> {
     const { systemInstruction, userContent } = buildRealizerPrompt({
       claims,
       ...(comment !== undefined ? { comment } : {}),
-      structureHint,
+      star,
+      structureHint: pick(STRUCTURE_HINTS),
+      tone: pick(TONES),
       retryNotes,
     });
     try {
@@ -135,7 +143,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
         ...new Set(evaluateStructuredDraft(input, draft, lexicon, legacy).findings.map((f) => gateFamily(f.kind))),
       ];
 
-      const first = await generate(claims, comment, []);
+      const first = await generate(claims, comment, material.star, []);
       if (first === null) {
         options.onFallback?.('generation', [], claims.length);
         return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 1 };
@@ -145,7 +153,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
 
       options.onRetry?.(firstKinds, claims.length);
       const notes = firstKinds.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
-      const second = await generate(claims, comment, notes);
+      const second = await generate(claims, comment, material.star, notes);
       if (second === null) {
         options.onFallback?.('generation', firstKinds, claims.length);
         return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 2 };

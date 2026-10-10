@@ -3,11 +3,12 @@ import type { GenAiClient, GenAiRequest } from '../src/lib/draft/generator';
 import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
 import { compileStructuredClaims, overlappingIdentities } from '../src/lib/draft/structured/claims';
 import { structuredFallbackDraft } from '../src/lib/draft/structured/fallback';
-import { buildRealizerPrompt, RETRY_NOTES, STRUCTURE_HINTS } from '../src/lib/draft/structured/prompt';
+import { buildRealizerPrompt, COMMENT_TONE, overallImpression, RETRY_NOTES, STRUCTURE_HINTS, TONES } from '../src/lib/draft/structured/prompt';
 import { createNaturalRealizer } from '../src/lib/draft/structured/realizer';
 
-// Natural LLM Realizer（Issue #439）。実 Gemini は呼ばず、偽のクライアントで生成の結果を決める。
+// structured の通常生成（Natural LLM Realizer・Issue #439）。実 Gemini は呼ばず、偽のクライアントで生成の結果を決める。
 // 事実の境界（claims と hard gate）がコードで守られることと、作り直し・safe fallback の制御を固定する。
+// 自然さ重視への方針変更で、弱い主観（少し・やや・満足できた・印象に残った）は作り直しの引き金にしないことも固定する。
 
 const SASHIMI = 'a4390000-0000-4000-8000-0000000000a1';
 const DASHIMAKI = 'a4390000-0000-4000-8000-0000000000a2';
@@ -82,18 +83,37 @@ describe('compileStructuredClaims（決定的）', () => {
 });
 
 describe('プロンプト', () => {
-  it('claim の表示名と極性と一言だけを渡し、星・店名・code を渡さない', () => {
-    const claims = compileStructuredClaims(material({ star: 1 }).selections);
-    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった', structureHint: STRUCTURE_HINTS[0]! });
+  it('claim の表示名と極性と一言を渡し、店名・code・星の数そのものは渡さない', () => {
+    const claims = compileStructuredClaims(material().selections);
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった', star: 1, structureHint: STRUCTURE_HINTS[0]! });
     expect(userContent).toContain('良かったところ:');
     expect(userContent).toContain('- 刺身盛り合わせ（料理）: 味');
     expect(userContent).toContain('一言: 「おいしかった」');
     expect(userContent).not.toContain('気になったところ:');
     expect(userContent).not.toMatch(/[★☆]|星|満足度|海鮮食堂|taste|food/);
-    expect(systemInstruction).toContain('書いてよいのは「回答」にある内容だけです');
-    // 星を変えてもプロンプトは変わらない（星から内容・程度を作らせない）。
-    const star5 = buildRealizerPrompt({ claims: compileStructuredClaims(material({ star: 5 }).selections), comment: 'おいしかった', structureHint: STRUCTURE_HINTS[0]! });
-    expect(star5.userContent).toBe(userContent);
+    expect(userContent.slice(0, userContent.indexOf('文章の形:'))).not.toMatch(/[0-9０-９]/);
+    // 自然さを前面に出す（読み上げない・言い換えてよい・弱い主観はよい）。具体的な創作の型は短く名指す。
+    expect(systemInstruction).toContain('アンケートの項目を順番に読み上げない');
+    expect(systemInstruction).toContain('「少し」「やや」「満足できた」「印象に残った」「過ごしやすかった」');
+    expect(systemInstruction).toContain('具体的な事実の創作');
+  });
+
+  it('星は全体の印象へ丸めて渡す（★4〜5 は満足・★1〜2 は不満が残った・★3 は渡さない）', () => {
+    expect([1, 2, 3, 4, 5].map(overallImpression)).toEqual(['不満が残った', '不満が残った', null, '満足', '満足']);
+    const claims = compileStructuredClaims(material().selections);
+    const at = (star: number) => buildRealizerPrompt({ claims, star, structureHint: STRUCTURE_HINTS[0]! }).userContent;
+    expect(at(5)).toContain('全体の印象: 満足（書くなら最後に短く添える程度');
+    expect(at(4)).toBe(at(5));
+    expect(at(2)).toContain('全体の印象: 不満が残った');
+    expect(at(3)).not.toContain('全体の印象');
+  });
+
+  it('文体は候補から選び、一言があるときは一言の口調に合わせる', () => {
+    const claims = compileStructuredClaims(material().selections);
+    expect(buildRealizerPrompt({ claims, structureHint: STRUCTURE_HINTS[0]!, tone: TONES[1]! }).userContent).toContain(`文体: ${TONES[1]}`);
+    const withComment = buildRealizerPrompt({ claims, comment: 'めっちゃよかった！', structureHint: STRUCTURE_HINTS[0]!, tone: TONES[1]! }).userContent;
+    expect(withComment).toContain(`文体: ${COMMENT_TONE}`);
+    expect(withComment).not.toContain(TONES[1]!);
   });
 
   it('Target だけの claim は「料理そのもの（項目の指定なし）」として渡し、味などを補わない', () => {
@@ -136,6 +156,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     ['友人と行きました。刺身盛り合わせがおいしかったです。', 'companion'],
     ['刺身盛り合わせがおいしかったです。また行きたいです。', 'revisit'],
     ['刺身盛り合わせがとてもおいしかったです。', 'intensity'],
+    ['刺身盛り合わせがおいしかったです。店員さんが笑顔で迎えてくれました。', 'newAttribute'],
   ];
 
   for (const [bad, kind] of violations) {
@@ -151,6 +172,25 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
       expect(requests[1]!.contents).not.toContain(bad);
     });
   }
+
+  it('回答から自然に導ける弱い主観（少し・やや・満足・印象に残った）は作り直さない', async () => {
+    const m = material({
+      selections: [
+        { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] },
+        { polarity: 'positive', categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] },
+        { polarity: 'concern', categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] },
+      ],
+    });
+    for (const draft of [
+      '料理は満足感のある量で、丁寧に対応してもらえました。待ち時間だけ少し気になりました。',
+      '入店までの待ち時間はやや気になったものの、料理の量にも満足できて、接客も丁寧でした。全体としては満足です。',
+    ]) {
+      const onRetry = vi.fn();
+      const { client } = fakeClient(draft);
+      expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(m), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
+      expect(onRetry).not.toHaveBeenCalled();
+    }
+  });
 
   it('作り直しは意味を足さない: 2 回目の「回答」は 1 回目と同じで、注意だけが増える', async () => {
     const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '刺身盛り合わせがおいしかったです。');

@@ -15,6 +15,11 @@ import groundingLexiconRaw from '../material-grounding-lexicon.json';
 // 固有名詞と数値と日付）はそのまま再利用し、structured 固有の検査（Target / facet の同一性・極性・片側の欠落・
 // 未回答の追加・exact overlap の理由・一言の因果づけ・強度・推奨）をここで足す。
 //
+// 止めるのは **具体的な創作**（未回答の Target / facet・数字・原因・来店の文脈・人物の様子・観測していない属性・
+// 強い強度・推奨・再訪・exact overlap の理由・一言の因果づけ）である。回答から自然に導ける弱い主観（「少し」「やや」
+// 「満足できた」「印象に残った」「過ごしやすかった」）と意味を保った言い換えは、自然な口コミの言い方として通す
+// （controlled inference）。自然な文章まで過剰に弾くと、作り直しと safe fallback が増えて読み上げの文章へ戻る。
+//
 // 判定は既存と同じく **高 precision** に倒す（検出したものは確実に違反・測るのは下限）。coverage は文字列一致では
 // なく、Target の言い方（subjects）と語彙の意味の手がかり（facetMeanings・polarityCues）で文単位に判定する。
 // 例: 「刺身盛り合わせ / 味 / positive」は「刺身盛り合わせがおいしかったです」で満たす（「味」の字は要らない）。
@@ -253,6 +258,9 @@ function mask(text: string, words: readonly string[]): string {
 
 const nfkc = (s: string) => s.normalize('NFKC');
 
+/** 全体の印象を述べる文の印（個別の料理・項目の話ではない）。 */
+const OVERALL = /全体|総じて|トータル|総合的/;
+
 /**
  * 表示名の照合の形（NFKC・名前の中の空白の有無を問わない）。**完全一致の範囲だけ** を見て、言い換え
  * （「刺身盛り合わせ」→「刺し盛り」）は推測しない。1 文字の名前は普通名詞の一部に当たりやすいので照合しない。
@@ -420,8 +428,10 @@ export function evaluateStructuredDraft(
         .filter((s) => subjectWords(c, s.targetId!, s.targetLabel!).some((w) => sentence.includes(w)))
         .map((s) => s.targetId!),
     );
-    // 別の claim の主題（カテゴリ全体の facet）を名指す文は、Target を引き継がない（話題が移った）。
-    const namesOther = claims.some((cl) => cl.targetId === undefined && firstMatch(sentence, subjectPatternsOf(cl)) !== null);
+    // 別の claim の主題（カテゴリ全体の facet）を名指す文と、全体の印象を述べる文（「全体としては満足でした」・
+    // 星から許す抽象的な満足）は、Target を引き継がない（話題が移った）。
+    const namesOther =
+      OVERALL.test(sentence) || claims.some((cl) => cl.targetId === undefined && firstMatch(sentence, subjectPatternsOf(cl)) !== null);
     topics.push(named.size > 0 ? named : namesOther ? new Set() : (topics[topics.length - 1] ?? new Set()));
   }
   const aboutClaim = (cl: GateClaim, index: number): boolean => {

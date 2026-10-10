@@ -1,9 +1,11 @@
 import { STAR_NARRATION } from '../../src/lib/draft/material-grounding';
+import { compileStructuredClaims } from '../../src/lib/draft/structured/claims';
+import { structuredFallbackDraft } from '../../src/lib/draft/structured/fallback';
 import { claimsOf, splitSentences, type StructuredEvalCase, type StructuredEvalLexicon } from './gates';
 
-// 「AI っぽさ」の自動診断（Issue #440）。**合否の判定ではない。** 特定の語を禁止するためではなく、生成方式が定型へ
-// 寄りすぎていないか（アンケートの読み上げ・まとめの定型句・締めの定型）を傾向として観察するための数値である。
-// 自然さの主評価はブラインドの人手比較（blind.ts）で行う。
+// 自然さの自動診断（Issue #440）。**個々の下書きの合否ではない。** 特定の語を禁止するためではなく、通常生成が定型へ
+// 寄りすぎていないか（アンケートの読み上げ・safe fallback 風の文・まとめの定型句・締めの定型）を傾向として観察する
+// 数値である。release の目安は率で置く（eval/README.md の「成功条件」）。自然さの主評価は人手の採点（rating.ts）で行う。
 
 export interface DraftDiagnostics {
   readonly charCount: number;
@@ -29,6 +31,15 @@ export interface DraftDiagnostics {
   readonly checklistLike: boolean;
   /** claim を主題（極性 × Target / カテゴリ全体の facet）にまとめた数。 */
   readonly subjectCount: number;
+  /** 3 主題以上を、順番を問わず 1 文 1 主題で並べたか（checklistLike の順番を問わない版・読み上げの傾向）。 */
+  readonly subjectPerSentence: boolean;
+  /**
+   * safe fallback 風か: safe fallback と同じ文、または 2 文以上がすべて「〜良かったです。」「〜気になりました。」で
+   * 終わる（通常生成がこの形へ寄ったら、自然さの方針が効いていない）。
+   */
+  readonly fallbackLike: boolean;
+  /** 3 字以上の項目名（「入店までの待ち時間」「接客の丁寧さ」など）を、項目名のまま書いた割合（読み上げの傾向）。 */
+  readonly labelVerbatimRate: number | null;
   /** claim の最初の言及の順が入力の順と一致した割合（2 claim 以上のとき・言及した claim だけで見る）。 */
   readonly inputOrderPreserved: boolean | null;
   /** 一言より感嘆符・絵文字が増えたか（一言のあるケースだけ）。 */
@@ -96,6 +107,16 @@ export function diagnoseDraft(c: StructuredEvalCase, draft: string, lex: Structu
     subjectIdx.length === subjectMentions.length &&
     new Set(subjectIdx).size === subjectIdx.length &&
     subjectIdx.every((m, i) => i === 0 || m > subjectIdx[i - 1]!);
+  const subjectPerSentence =
+    subjectMentions.length >= 3 && subjectIdx.length === subjectMentions.length && new Set(subjectIdx).size === subjectIdx.length;
+  const fallbackText = structuredFallbackDraft(compileStructuredClaims(c.selections));
+  const fallbackLike =
+    draft.trim() === fallbackText ||
+    (sentences.length >= 2 && sentences.every((s) => /(?:良かったです|気になりました|気になるところもありました)[。！!]?$/u.test(s)));
+  const longLabels = [
+    ...new Set(claimsOf(c).flatMap((cl) => (cl.facetLabel !== undefined && [...cl.facetLabel].length >= 3 ? [cl.facetLabel] : []))),
+  ];
+  const labelVerbatimRate = longLabels.length === 0 ? null : longLabels.filter((l) => draft.includes(l)).length / longLabels.length;
   const comment = c.comment ?? null;
   return {
     charCount,
@@ -111,6 +132,9 @@ export function diagnoseDraft(c: StructuredEvalCase, draft: string, lex: Structu
     starNarration: STAR_NARRATION.test(draft),
     checklistLike,
     subjectCount: subjectMentions.length,
+    subjectPerSentence,
+    fallbackLike,
+    labelVerbatimRate,
     inputOrderPreserved: mentioned.length >= 2 ? inOrder : null,
     exclamationAdded:
       comment === null
@@ -179,6 +203,9 @@ export interface DiagnosticsSummary {
   readonly rates: Readonly<Record<string, number>>;
   readonly meanChars: number;
   readonly meanSentences: number;
+  readonly maxChars: number;
+  /** 1 claim あたりの字数の平均（必要以上に長くないか）。 */
+  readonly meanCharsPerClaim: number;
   /** claim の数ごとの平均字数（薄い素材ほど長い状態を見る）。 */
   readonly charsByClaimCount: Readonly<Record<string, number>>;
 }
@@ -196,6 +223,10 @@ export function summarizeDiagnostics(list: readonly DraftDiagnostics[]): Diagnos
   rates.endsWithRecommendation = rate((d) => d.endsWithRecommendation);
   rates.starNarration = rate((d) => d.starNarration);
   rates.checklistLike = rate((d) => d.checklistLike);
+  rates.subjectPerSentence = rate((d) => d.subjectPerSentence);
+  rates.fallbackLike = rate((d) => d.fallbackLike);
+  const labelled = list.filter((d) => d.labelVerbatimRate !== null);
+  rates.labelVerbatim = labelled.length === 0 ? 0 : labelled.reduce((a, d) => a + d.labelVerbatimRate!, 0) / labelled.length;
   const ordered = list.filter((d) => d.inputOrderPreserved !== null);
   rates.inputOrderPreserved = ordered.length === 0 ? 0 : ordered.filter((d) => d.inputOrderPreserved).length / ordered.length;
   const commented = list.filter((d) => d.exclamationAdded !== null);
@@ -208,6 +239,8 @@ export function summarizeDiagnostics(list: readonly DraftDiagnostics[]): Diagnos
     rates,
     meanChars: mean(list.map((d) => d.charCount)),
     meanSentences: mean(list.map((d) => d.sentenceCount)),
+    maxChars: list.reduce((m, d) => Math.max(m, d.charCount), 0),
+    meanCharsPerClaim: mean(list.map((d) => d.charsPerClaim)),
     charsByClaimCount: Object.fromEntries([...byClaims.entries()].sort((a, b) => a[0] - b[0]).map(([k, v]) => [String(k), mean(v)])),
   };
 }

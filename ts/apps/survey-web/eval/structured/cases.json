@@ -6,7 +6,8 @@
     "menuTargets は店舗に登録済みだが客が選ばなかった Target。下書きに出たら『未回答の Target の追加』。",
     "commentKeywords は一言の内容を指す語。一言の内容を別の claim の理由として結んだら失格（commentLinkage）。",
     "forbiddenMeanings はそのケースに固有の禁止の意味。allowedParaphrases は許す言い換えの例で、すべての hard gate を通らなければならない。",
-    "forbiddenExamples は失格になるべき例と、当たるべき hard gate の種類。検出器の自己検証に使う（test/structured-eval-gates.test.ts）。"
+    "forbiddenExamples は失格になるべき例と、当たるべき hard gate の種類。検出器の自己検証に使う（test/structured-eval-gates.test.ts）。",
+    "自然さ重視への方針変更（通常生成 + safe fallback）: 新しい具体的事実は創作させないが、回答から自然に導ける主観的・意味を保った言い換え（「おいしかった」「満足感のある量」「少し気になった」「印象に残った」「過ごしやすかった」）は許す。allowedParaphrases にその境界の通る側を、forbiddenExamples に止める側（数字・原因・属性・人物の様子・来店の文脈・強い強度・意向）を置く。"
   ],
   "cases": [
     {
@@ -50,7 +51,9 @@
       "allowedParaphrases": [
         "刺身盛り合わせがおいしかったです。",
         "刺身盛り合わせの味が良かったです。",
-        "お刺身の盛り合わせ、味が良かったです。"
+        "お刺身の盛り合わせ、味が良かったです。",
+        "刺身盛り合わせ、おいしかったです！全体的に満足でした。",
+        "刺身盛り合わせの味が印象に残りました。"
       ],
       "forbiddenExamples": [
         {
@@ -126,6 +129,19 @@
           "kinds": [
             "ungrounded"
           ]
+        },
+        {
+          "text": "刺身盛り合わせは脂がのっていておいしかったです。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせが絶対おすすめです。",
+          "kinds": [
+            "intensity",
+            "recommendation"
+          ]
         }
       ]
     },
@@ -164,7 +180,8 @@
       "forbiddenMeanings": [],
       "allowedParaphrases": [
         "刺身盛り合わせは味も見た目も良かったです。",
-        "刺身盛り合わせがおいしかったです。盛り付けもきれいでした。"
+        "刺身盛り合わせがおいしかったです。盛り付けもきれいでした。",
+        "刺身盛り合わせは見た目も味も満足でした。"
       ],
       "forbiddenExamples": [
         {
@@ -305,7 +322,9 @@
       "forbiddenMeanings": [],
       "allowedParaphrases": [
         "刺身盛り合わせがおいしかったです。料理の提供については気になる点がありました。",
-        "刺身盛り合わせはおいしかったのですが、提供のところは気になりました。"
+        "刺身盛り合わせはおいしかったのですが、提供のところは気になりました。",
+        "刺身盛り合わせはおいしかったです。提供の部分はやや気になりました。",
+        "提供のところが少し気になりましたが、刺身盛り合わせはおいしかったです。"
       ],
       "forbiddenExamples": [
         {
@@ -331,6 +350,18 @@
           "text": "刺身盛り合わせはおいしかったですが、提供まで30分かかったのが気になりました。",
           "kinds": [
             "ungrounded:number"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせはおいしかったですが、スタッフが足りなかったためか提供が気になりました。",
+          "kinds": [
+            "cause"
+          ]
+        },
+        {
+          "text": "刺身盛り合わせはおいしかったですが、店員さんが忙しそうで提供が気になりました。",
+          "kinds": [
+            "cause"
           ]
         }
       ]
@@ -385,7 +416,8 @@
       ],
       "allowedParaphrases": [
         "刺身盛り合わせは味が良かったですが、量は気になりました。",
-        "刺身盛り合わせはおいしかったです。量については気になりました。"
+        "刺身盛り合わせはおいしかったです。量については気になりました。",
+        "刺身盛り合わせはおいしかったのですが、量が少し物足りなく感じました。"
       ],
       "forbiddenExamples": [
         {
@@ -447,7 +479,8 @@
       "forbiddenMeanings": [],
       "allowedParaphrases": [
         "刺身盛り合わせの味は、良かったところもありつつ気になる点もありました。",
-        "刺身盛り合わせの味について、良かった点もあり、気になる点もありました。"
+        "刺身盛り合わせの味について、良かった点もあり、気になる点もありました。",
+        "刺身盛り合わせの味については、良かった点もあり、気になる点もありました。"
       ],
       "forbiddenExamples": [
         {
@@ -485,6 +518,12 @@
           "kinds": [
             "concernDropped"
           ]
+        },
+        {
+          "text": "刺身盛り合わせは、最初は美味しかったが後半は味が落ちた。",
+          "kinds": [
+            "overlapReason"
+          ]
         }
       ]
     },
@@ -514,7 +553,8 @@
       "forbiddenMeanings": [],
       "allowedParaphrases": [
         "刺身盛り合わせが良かったです。",
-        "刺身盛り合わせが印象に残りました。"
+        "刺身盛り合わせが印象に残りました。",
+        "刺身盛り合わせが良かったです。全体としても満足です。"
       ],
       "forbiddenExamples": [
         {
@@ -578,7 +618,8 @@
       "forbiddenMeanings": [],
       "allowedParaphrases": [
         "居心地は良かったです。にぎやかさは気になりました。",
-        "居心地は良かったのですが、店内の音が気になりました。"
+        "居心地は良かったのですが、店内の音が気になりました。",
+        "居心地よく過ごせましたが、にぎやかさは少し気になりました。"
       ],
       "forbiddenExamples": [
         {
@@ -751,7 +792,8 @@
       ],
       "forbiddenMeanings": [],
       "allowedParaphrases": [
-        "刺身盛り合わせ、うまかった！また行きます。"
+        "刺身盛り合わせ、うまかった！また行きます。",
+        "刺身盛り合わせ、うまかった！またぜひ行きます！"
       ],
       "forbiddenExamples": [
         {
@@ -764,6 +806,133 @@
           "text": "刺身盛り合わせ、めちゃくちゃうまかった！！また行きます！",
           "kinds": [
             "intensity"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "K-everyday-mix",
+      "title": "量・接客が良く、入店の待ち時間が気になった（読み上げになりやすい典型）",
+      "storeName": "大衆食堂 ひだまり",
+      "star": 4,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "facets": [
+            {
+              "code": "volume",
+              "label": "量"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "service_courtesy",
+              "label": "接客の丁寧さ"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "reservation_visit",
+          "categoryLabel": "予約・来店",
+          "facets": [
+            {
+              "code": "entry_wait",
+              "label": "入店までの待ち時間"
+            }
+          ]
+        }
+      ],
+      "subjects": {},
+      "menuTargets": [
+        {
+          "id": "t-karaage",
+          "label": "鶏の唐揚げ定食",
+          "categoryCode": "food",
+          "aliases": [
+            "唐揚げ"
+          ]
+        }
+      ],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "入店までの待ち時間は少し気になりましたが、料理は満足感のある量で、接客も丁寧でした。",
+        "料理は量にも満足できて、丁寧に対応してもらえました。待ち時間の部分だけ、やや気になりました。全体としては満足です。",
+        "丁寧に対応してもらえて、料理の量もしっかりありました。入るまで待ち時間が少し気になったくらいです。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "入店まで20分待ちましたが、料理は満足感のある量で、接客も丁寧でした。",
+          "kinds": [
+            "ungrounded"
+          ]
+        },
+        {
+          "text": "混雑していたので入店まで待ちましたが、料理の量にも満足で、接客も丁寧でした。",
+          "kinds": [
+            "cause"
+          ]
+        },
+        {
+          "text": "料理の量に満足で、店員さんが笑顔で丁寧に対応してくれました。待ち時間は気になりました。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "料理の量に満足で、親切そうな店員さんが丁寧に対応してくれました。待ち時間は気になりました。",
+          "kinds": [
+            "newAttribute"
+          ]
+        },
+        {
+          "text": "ランチで訪問しました。料理の量に満足で、接客も丁寧でした。待ち時間は気になりました。",
+          "kinds": [
+            "timing"
+          ]
+        },
+        {
+          "text": "仕事帰りに寄りました。料理の量に満足で、接客も丁寧でした。待ち時間は気になりました。",
+          "kinds": [
+            "companion"
+          ]
+        },
+        {
+          "text": "料理の量に満足で、接客も丁寧でした。待ち時間は気になりましたが、また行きたいです。",
+          "kinds": [
+            "revisit"
+          ]
+        },
+        {
+          "text": "料理はとても満足な量で、接客も丁寧でした。待ち時間は気になりました。",
+          "kinds": [
+            "intensity"
+          ]
+        },
+        {
+          "text": "唐揚げの量に満足で、接客も丁寧でした。待ち時間は気になりました。",
+          "kinds": [
+            "unselectedTarget"
+          ]
+        },
+        {
+          "text": "料理の量にも味にも満足で、接客も丁寧でした。待ち時間は気になりました。",
+          "kinds": [
+            "unselectedFacet"
+          ]
+        },
+        {
+          "text": "料理の量に満足で、接客も丁寧でした。",
+          "kinds": [
+            "concernDropped"
           ]
         }
       ]
