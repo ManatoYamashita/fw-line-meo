@@ -1,4 +1,12 @@
-import { getPool, findStoreForSurvey, listSurveyAspects, incrementTallies } from '@fwlm/db';
+import {
+  getPool,
+  findStoreForSurvey,
+  listSurveyAspects,
+  incrementTallies,
+  incrementStructuredTallies,
+  readStoreSurveyDefinition,
+} from '@fwlm/db';
+import { createDefaultStructuredDrafts } from '../../../lib/draft/structured/default-realizer';
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
@@ -34,6 +42,12 @@ async function buildDeps(): Promise<ResponsesDeps> {
     incrementTallies: async (input) => {
       await incrementTallies(await getPool(), input);
     },
+    readDefinition: async (storeId) => readStoreSurveyDefinition(await getPool(), storeId),
+    incrementStructuredTallies: async (input) => {
+      await incrementStructuredTallies(await getPool(), input);
+    },
+    // structured の下書きは Natural LLM Realizer（Issue #439）。legacy の生成器とは分ける。
+    structuredDrafts: await createDefaultStructuredDrafts(),
     clientKey: createClientKey(),
     log: writeStructuredLog,
   };

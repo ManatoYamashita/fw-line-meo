@@ -57,6 +57,7 @@ const PLAIN_FIELDS = [
   'lineRequestId',
   'violatedAspects',
   'residualClaims',
+  'claimCount',
   'reason',
   'authorizedCount',
   'currentJstHour',

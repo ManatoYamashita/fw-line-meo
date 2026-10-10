@@ -34,6 +34,7 @@ const STORE_NAME = '海鮮酒場 うみのて';
 
 const READY: SurveyPageData = {
   kind: 'ready',
+  mode: 'legacy',
   store: { id: STORE_ID, name: STORE_NAME },
   aspects: [
     { code: 'taste', label: '味' },

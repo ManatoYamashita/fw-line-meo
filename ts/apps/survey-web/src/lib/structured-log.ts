@@ -103,3 +103,57 @@ export function logSurveyResponseSubmitted(log: SurveyLogger, storeId: string): 
 export function logSurveyReviewLinkOpened(log: SurveyLogger, storeId: string): void {
   log('info', 'survey_review_link_opened', { storeId });
 }
+
+/**
+ * structured の下書き（Natural LLM Realizer・Issue #439）の 1 回目が hard gate を通らず、作り直したことを記録する。
+ * 載せるのは失格の種類（頭の名前）と claim の件数だけで、下書き・一言・料理名は載せない。
+ */
+export function logStructuredDraftRetry(log: SurveyLogger, kinds: readonly string[], claimCount: number): void {
+  log('info', 'survey-web.structured_draft_retry', { residualClaims: [...kinds].sort().join(','), claimCount });
+}
+
+/**
+ * structured の下書きの最終の結果を記録する（**ローカル検証用**・`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ配線する）。
+ * reason は `<llm|generation_error>:attempts=<n>:accepted=<n|none>` の決まった形。residualClaims は試行ごとの種類
+ * （`a1=cause+timing;a2=generation;a3=ok`）。下書き・一言・料理名は載せない。
+ */
+export function logStructuredDraftResult(
+  log: SurveyLogger,
+  outcome: {
+    readonly result: 'llm' | 'generation_error';
+    readonly attempts: number;
+    readonly acceptedAttempt: number | null;
+    readonly history: readonly {
+      readonly attempt: number;
+      readonly generationFailed: boolean;
+      readonly factuality: readonly string[];
+    }[];
+  },
+  claimCount: number,
+): void {
+  const history = outcome.history
+    .map((h) => {
+      const kinds = h.generationFailed ? ['generation'] : [...h.factuality].sort();
+      return `a${h.attempt}=${kinds.length === 0 ? 'ok' : kinds.join('+')}`;
+    })
+    .join(';');
+  log('info', 'survey-web.structured_draft_result', {
+    reason: `${outcome.result}:attempts=${outcome.attempts}:accepted=${outcome.acceptedAttempt ?? 'none'}`,
+    residualClaims: history,
+    claimCount,
+  });
+}
+
+/**
+ * structured の下書きを最大回数まで作れなかった（generation error）ことを記録する（Issue #439）。safe fallback の文は
+ * 返していない。reason は `gate`（最後の試行まで factuality の hard gate を通らなかった）か `generation`（すべて
+ * 生成そのものの失敗）。residualClaims は最後に検査できた試行の factuality の種類。本文は載せない。
+ */
+export function logStructuredDraftFailed(
+  log: SurveyLogger,
+  reason: 'gate' | 'generation',
+  kinds: readonly string[],
+  claimCount: number,
+): void {
+  log('warn', 'survey-web.structured_draft_failed', { reason, residualClaims: [...kinds].sort().join(','), claimCount });
+}

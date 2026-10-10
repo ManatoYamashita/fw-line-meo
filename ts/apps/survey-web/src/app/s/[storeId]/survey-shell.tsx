@@ -4,20 +4,32 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
+import type { StructuredSurveyDefinition } from '@fwlm/db';
 import { SurveyForm } from './survey-form';
+import { StructuredSurveyForm } from './structured-survey-form';
 import { DraftPanel } from './draft-panel';
 import { isRecentlyAnswered, markAnswered } from './answered-flag';
 import { notifyReviewLinkOpened } from '../../../lib/review-link-beacon';
 import type { AspectOption, SurveyAnswer } from './types';
+import type { StructuredSurveyAnswer } from '../../../lib/structured-answer';
 
 // クライアント合成シェル（統合の中心）。回答フェーズと結果 state を所有し、
 // /api/responses・/api/drafts を呼び出して SurveyForm / DraftPanel に props を渡す。
 // localStorage の回答済み判定はクライアント側で行う（SSR からは読めないため）。
+//
+// legacy と structured（Issue #438）は店舗の設定で分岐し、ここではフォームだけを切り替える。回答済みの判定・
+// 下書き・再生成・投稿導線・押下の通知は両方で共有する。structured の回答には Stage 2 では下書きを作らないので
+// （Issue #439 で実装する）、受付の後は回答済みの画面（Google の投稿導線）へ進む。
+
+/** 店舗の種類ごとのフォームの入力。legacy は従来の観点、structured は店舗別の定義。 */
+export type SurveyKind =
+  | { mode: 'legacy'; aspects: AspectOption[] }
+  | { mode: 'structured'; definition: StructuredSurveyDefinition };
 
 interface Props {
   storeId: string;
   storeName: string;
-  aspects: AspectOption[];
+  survey: SurveyKind;
   pageToken: string;
   googleReviewUrl: string;
 }
@@ -32,12 +44,13 @@ interface DraftState {
 }
 
 interface ApiResult {
-  generation?: 'ok' | 'failed';
+  mode?: 'structured';
+  generation?: 'ok' | 'failed' | 'unavailable';
   draft?: string | null;
   sessionToken?: string;
   regenerationsLeft?: number;
   supportCode?: string;
-  error?: { message?: string };
+  error?: { code?: string; message?: string };
 }
 
 function apiErrorMessage(json: ApiResult, fallback: string): string {
@@ -45,12 +58,14 @@ function apiErrorMessage(json: ApiResult, fallback: string): string {
   return json.supportCode ? `${message}（サポートコード: ${json.supportCode}）` : message;
 }
 
-export function SurveyShell({ storeId, storeName, aspects, pageToken, googleReviewUrl }: Props) {
+export function SurveyShell({ storeId, storeName, survey, pageToken, googleReviewUrl }: Props) {
   const [phase, setPhase] = useState<Phase>('answering');
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [draftState, setDraftState] = useState<DraftState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 表示の後にアンケートの内容が変わった（Issue #438・STALE_SURVEY）。通常の失敗と区別し、再読み込みを案内する。
+  const [stale, setStale] = useState(false);
   // 投稿導線の押下を通知済みか（Issue #401・Requirement 5.10）。1 回の画面表示につき最初の押下だけを
   // 通知する。通知は無状態で、同じ token を何度送ってもサーバーは区別できない。連打や再生成の後の
   // 押し直しを数えると、QR パネルに出す「投稿画面へ進んだ回数」が同じ客の分だけ膨らむ。
@@ -68,9 +83,10 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
     if (isRecentlyAnswered(storeId)) setPhase('answered');
   }, [storeId]);
 
-  async function handleSubmit(answer: SurveyAnswer): Promise<void> {
+  async function handleSubmit(answer: SurveyAnswer | StructuredSurveyAnswer): Promise<void> {
     setSubmitting(true);
     setError(null);
+    setStale(false);
     try {
       const res = await fetch('/api/responses', {
         method: 'POST',
@@ -79,10 +95,17 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
       });
       const json = (await res.json()) as ApiResult;
       if (!res.ok) {
+        if (json.error?.code === 'STALE_SURVEY') setStale(true);
         setError(apiErrorMessage(json, '送信に失敗しました。時間をおいて再度お試しください。'));
         return;
       }
       markAnswered(storeId);
+      if (json.mode === 'structured' && json.generation === 'unavailable') {
+        // structured の回答には Stage 2 では下書きを作らない（Issue #439 で実装）。回答済みの画面へ進み、
+        // Google の投稿導線を出す（全評価で同一）。
+        setPhase('answered');
+        return;
+      }
       setDraftState({
         draft: json.draft ?? '',
         sessionToken: json.sessionToken ?? '',
@@ -187,10 +210,22 @@ export function SurveyShell({ storeId, storeName, aspects, pageToken, googleRevi
         // 下の余白だけは面の側に残す。フォームとの間隔は外側の律であって、通知の部品の領分では
         // ないためである（正典 7.10 が面の側に禁じたのは高さ・内側余白・文字寸法）。
         <Alert className="mb-4" variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            {error}
+            {stale ? (
+              // 古い画面の選択は送り直せない（現在の内容で読み直す）。押しボタンは再読み込みだけをする。
+              <button className="mt-2 block underline" type="button" onClick={() => window.location.reload()}>
+                ページを再読み込みする
+              </button>
+            ) : null}
+          </AlertDescription>
         </Alert>
       )}
-      <SurveyForm aspects={aspects} onSubmit={handleSubmit} submitting={submitting} />
+      {survey.mode === 'structured' ? (
+        <StructuredSurveyForm definition={survey.definition} onSubmit={handleSubmit} submitting={submitting} />
+      ) : (
+        <SurveyForm aspects={survey.aspects} onSubmit={handleSubmit} submitting={submitting} />
+      )}
     </>
   );
 }

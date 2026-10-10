@@ -10,7 +10,8 @@
     "lint": "eslint src test e2e perf eval next.config.ts postcss.config.mjs vitest.config.ts vitest.eval.config.ts playwright.config.ts",
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "eval:factuality": "vitest run --config vitest.eval.config.ts",
+    "eval:factuality": "vitest run --config vitest.eval.config.ts eval/factuality.eval.test.ts",
+    "eval:structured": "vitest run --config vitest.eval.config.ts eval/structured",
     "perf:budget": "node perf/bundle-budget.mjs"
   },
   "dependencies": {

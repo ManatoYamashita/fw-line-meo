@@ -5,7 +5,7 @@
 DO $$
 DECLARE bad text;
 BEGIN
-    -- テーブル allowlist: public の BASE TABLE は既知 23 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
+    -- テーブル allowlist: public の BASE TABLE は既知 30 テーブルのみ（未知テーブルの混入＝匿名性リスクを検出）
     SELECT string_agg(table_name, ', ') INTO bad
     FROM information_schema.tables
     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -16,7 +16,12 @@ BEGIN
         'oauth_tokens',
         'daily_summaries','summary_deliveries',
         'agency_invite_codes','onboarding_sessions','line_webhook_events','audit_logs',
-        'gbp_locations','gbp_sessions'
+        'gbp_locations','gbp_sessions',
+        -- structured survey（Issue #436・0015）。taxonomy 3 表・店舗別の設定 3 表・構造化の匿名集計 1 表。
+        -- 回答 1 件を表す表は無い（構造化の回答も個別には保存しない）。
+        'survey_categories','survey_facets','survey_category_facets',
+        'store_survey_configs','store_survey_category_settings','store_survey_targets',
+        'survey_structured_material_tallies'
       );
     IF bad IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: allowlist 外のテーブル（顧客/個別回答の疑い・要レビュー）: %', bad;
@@ -63,6 +68,29 @@ BEGIN
       AND table_name = 'survey_review_link_tallies'
       AND column_name NOT IN ('id','store_id','period_month','count');
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: survey_review_link_tallies に想定外の列: %', bad; END IF;
+    -- 構造化回答の素材の厚み（Issue #436）。極性ごとのグループ数・Target を指すグループ数・facet 数と
+    -- 一言の有無だけを持つ。Target 名・カテゴリや facet の code・一言の本文・時刻を保存する列が
+    -- 生えたらここで落ちる。
+    SELECT string_agg(table_name || '.' || column_name, ', ') INTO bad
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'survey_structured_material_tallies'
+      AND column_name NOT IN ('id','store_id','period_month',
+                              'positive_group_count','concern_group_count',
+                              'positive_target_count','concern_target_count',
+                              'positive_facet_count','concern_facet_count',
+                              'has_comment','count');
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: survey_structured_material_tallies に想定外の列: %', bad; END IF;
+    -- 店舗が登録する Target（Issue #436）。店舗の設定であって客の入力ではない。客の回答から
+    -- 自動登録しない（#436）ので、回答・客に由来する列（件数・選択回数・自由入力の出所など）が
+    -- 生えたらここで落ちる。
+    SELECT string_agg(table_name || '.' || column_name, ', ') INTO bad
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'store_survey_targets'
+      AND column_name NOT IN ('id','store_id','category_code','category_allows_targets','label',
+                              'active','sort_order','created_at','updated_at');
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL: store_survey_targets に想定外の列: %', bad; END IF;
     RAISE NOTICE 'PASS 5.3b: survey tallies are fixed anonymous counters (allowlist)';
 
     -- 二次ガード: 来店客 PII を匂わす列名の denylist（owners.line_user_id はオーナー識別子で対象外）。

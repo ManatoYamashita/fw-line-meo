@@ -35,7 +35,7 @@ Gemini API）。運営保有の **単一 LINE 公式アカウント** に全オ�
 | アプリ | Cloud Run 名 | 種別 | 主な技術 | 使う人 | LINE 経由 | 担当機能 | 対応 spec |
 |---|---|---|---|---|:---:|---|---|
 | `@fwlm/line-webhook` | `line-webhook` | Service | Hono / `@line/bot-sdk` | 飲食店オーナー | あり（Webhook） | オンボーディング・機能1 のレポート応答 | [line-onboarding](../.kiro/specs/line-onboarding/design.md)・[line-on-demand-report](../.kiro/specs/line-on-demand-report/design.md) |
-| `@fwlm/store-detail` | `store-detail` | Service | Next.js / `@line/liff` | 飲食店オーナー | あり（LIFF） | 機能1 詳細閲覧（読取専用） | [competitive-daily-summary](../.kiro/specs/competitive-daily-summary/design.md) |
+| `@fwlm/store-detail` | `store-detail` | Service | Next.js / `@line/liff` | 飲食店オーナー | あり（LIFF） | 機能1 詳細閲覧（読取専用）／アンケート設定（料理名・ドリンク名の編集・#437） | [competitive-daily-summary](../.kiro/specs/competitive-daily-summary/design.md) |
 | `@fwlm/dashboard-web` | `dashboard-web` | Service | Next.js / Firebase | 運営・代理店 | なし | 管理画面 UI | [agency-dashboard](../.kiro/specs/agency-dashboard/design.md) |
 | `@fwlm/dashboard-api` | `dashboard-api` | Service | Hono / firebase-admin / qrcode | 運営・代理店 | なし | 管理 API・QR 発行 | [agency-dashboard](../.kiro/specs/agency-dashboard/design.md) |
 | `@fwlm/survey-web` | `survey-web` | Service | Next.js / `@google/genai` | 来店客（匿名） | なし（QR） | 機能3 口コミ | [review-acquisition](../.kiro/specs/review-acquisition/design.md) |
@@ -89,7 +89,7 @@ flowchart TD
         C1["daily-batch(Go)<br/>毎朝06:00 競合データ取得・算出"]
         C2["summary-delivery(TS)<br/>毎時 変化があった店舗へ短文通知"]
         C3["line-webhook(TS)<br/>メニューの3レポートを Reply"]
-        C4["store-detail(LIFF)<br/>詳細を LINE 内で閲覧（読取専用）"]
+        C4["store-detail(LIFF)<br/>詳細を LINE 内で閲覧（読取専用）<br/>アンケート設定の編集（#437）"]
         C1 --> C2
         C1 --> C3
         C3 --> C4

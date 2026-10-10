@@ -778,6 +778,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
 
   it('絞り込みの結果が 0 件なら、一覧の Card を導線の無い空状態に置き換え、検索欄と件数の文言は残す（要件 4.9・7.5）', async () => {
     // 店舗の切替リンクを 1 つ持つ応答にして、リンクの個数と読み上げ名が検索で変わらないことも確かめる（要件 7.5）。
+    // 2 本目はアンケート設定への導線（Issue #437）。主見出しの下に常に 1 本ある。
     await renderPage(
       withCompetitors(FIVE_COMPETITORS, {
         stores: [
@@ -787,7 +788,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       }),
     );
     const linkNames = (): readonly string[] => screen.queryAllByRole('link').map((link) => announcedText(link));
-    expect(linkNames()).toEqual(['店舗を切り替える']);
+    expect(linkNames()).toEqual(['店舗を切り替える', 'アンケート設定']);
 
     typeQuery(NO_MATCH_QUERY);
 
@@ -811,7 +812,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
     expect(within(section).getAllByRole('status')).toEqual([status]);
     // 節の中にリンクは無く、面のリンクの個数と読み上げ名は変わらない。
     expect(within(section).queryAllByRole('link')).toHaveLength(0);
-    expect(linkNames()).toEqual(['店舗を切り替える']);
+    expect(linkNames()).toEqual(['店舗を切り替える', 'アンケート設定']);
     // 検索欄は Card と一緒に消えずに残り、空状態は検索欄と件数の文言の後に置く。
     expect(searchBox().value).toBe(NO_MATCH_QUERY);
     expect(precedes(searchBox(), status)).toBe(true);

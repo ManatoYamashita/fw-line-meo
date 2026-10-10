@@ -21,7 +21,7 @@ GCP に一元デプロイされる。
 | アプリ | Cloud Run 名 | 使う人 | 担当 |
 |---|---|---|---|
 | `@fwlm/line-webhook` | `line-webhook` | オーナー | LINE オンボーディング |
-| `@fwlm/store-detail` | `store-detail` | オーナー | 機能1 競合レポート詳細（LIFF・読取専用） |
+| `@fwlm/store-detail` | `store-detail` | オーナー | 機能1 競合レポート詳細（LIFF・読取専用）／アンケート設定（料理名・ドリンク名・#437） |
 | `@fwlm/dashboard-web` | `dashboard-web` | 運営・代理店 | 管理画面 UI |
 | `@fwlm/dashboard-api` | `dashboard-api` | 運営・代理店 | 管理 API・QR 発行 |
 | `@fwlm/survey-web` | `survey-web` | 来店客（匿名） | 機能3 口コミアンケート・AI 下書き |

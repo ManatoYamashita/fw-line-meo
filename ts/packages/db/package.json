@@ -13,6 +13,10 @@
     "./daily-summary": {
       "types": "./dist/daily-summary.d.ts",
       "default": "./dist/daily-summary.js"
+    },
+    "./survey-settings-rules": {
+      "types": "./dist/survey-settings-rules.d.ts",
+      "default": "./dist/survey-settings-rules.js"
     }
   },
   "scripts": {

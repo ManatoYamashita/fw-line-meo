@@ -35,6 +35,8 @@
 // 店舗選択は <a> リンクで行う——「表示する対象を選ぶ」は本来ナビゲーションであり、リンクはデータを
 // 送信できないため、<button> を導入するより厳格な保証を維持できる。書込系 fetch（POST/PUT/DELETE/PATCH）も
 // 一切呼び出さない — 発行するのは `/api/detail` への GET のみ（test/store-page.test.tsx で検証）。
+// アンケート設定（Issue #437）の書込の手段は別の面（app/store/survey-settings）が持ち、この面はそこへの
+// リンクを 1 本置くだけである。上の保証はこの面（詳細画面）について引き続き成り立つ。
 //
 // 意匠（ui-airbnb-surfaces task 3.1）:
 //   版面・主見出し・処理中・通知を共通部品から描く。判断の正典は docs/design/design-language.md
@@ -66,7 +68,7 @@
 //   翌朝の日次バッチが埋め、新着を増やす口コミ QR の発行はオーナーの面ではなく代理店の管理画面
 //   （dashboard-web の店舗一覧の QR パネル）にある。**0 件の状態をオーナー自身が解消する行き先は無い。**
 //   この面のリンクは、店舗切り替えと、口コミを出すときに Places のポリシーが必須にする帰属の導線
-//   （Issue #287・Issue #303）だけである。後者は 0 件の状態には現れない（出す口コミが無い）。
+//   （Issue #287・Issue #303）と、アンケート設定の画面への導線（Issue #437・表示できたときだけ）である。後者は 0 件の状態には現れない（出す口コミが無い）。
 //   要件 3.1（書込要素 0 件）と 3.3（個数固定）は、その不在を構造として保証しているにすぎず、
 //   **緩めても導線は現れない**（「3.3 と両立しない」と書くと歯止めを外せば解決するように読める）。
 //   その代わり、空状態の文言で異常ではなく次回更新を待つ状態だと伝える。空状態の部品は
@@ -130,6 +132,7 @@ import {
 // （import type は実行時コードを一切バンドルしない — pg 等 Node 専用依存をクライアントへ持ち込まない）。
 import type { StoreDetailSummary, StoreDetailTrendPoint } from '../../lib/data';
 import type { StoreDetailResponse, StoreRef, StoreSelectionRequiredBody } from '../../lib/contract';
+import { surveySettingsPageHref } from '../../lib/survey-settings-contract';
 import {
   DEFAULT_METRIC,
   DEFAULT_PERIOD,
@@ -168,6 +171,7 @@ const SERVER_ERROR_MESSAGE = 'サーバーエラーが発生しました。時�
 const NETWORK_ERROR_MESSAGE = '通信に失敗しました。時間をおいて再度お試しください。';
 const SELECT_STORE_HEADING = '表示する店舗を選んでください';
 const SWITCH_STORE_LABEL = '店舗を切り替える';
+const SURVEY_SETTINGS_LINK_LABEL = 'アンケート設定';
 
 // --- 画面状態 ------------------------------------------------------------------------
 
@@ -938,6 +942,13 @@ export default function StorePage(): React.JSX.Element {
             <a href="/store">{SWITCH_STORE_LABEL}</a>
           </p>
         ) : null}
+        {/* アンケート設定（Issue #437）への導線。書込の手段はこの面ではなく遷移先の設定画面が持つ。
+            ヒントは表示中の店舗（認可済み集合の中の 1 店）で、遷移先のサーバーも集合の中でだけ解釈する。
+            見た目はこの面の他のリンク（店舗の切り替え）と同じ素のリンクにする。押しボタンの見た目を借りると、
+            面の側に任意の値のクラスを書かない意匠の契約（test/store-page.test.tsx）に触れる。 */}
+        <p>
+          <a href={surveySettingsPageHref(data.storeId)}>{SURVEY_SETTINGS_LINK_LABEL}</a>
+        </p>
       </header>
       <SummarySection summary={data.summary} />
       <CompetitorsSection competitors={data.competitors} />
