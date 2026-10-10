@@ -6,7 +6,7 @@
 - `E2E_STUB_IDP=1` で店舗詳細をビルドすると、`@line/liff` がスタブに差し替わり、固定の ID トークンを返す（出荷経路へ漏れないことは `scripts/check-e2e-idp-stub-isolation.sh` が機械強制する）。
 - 店舗詳細のサーバーの `LIFF_VERIFY_ENDPOINT`（本番では未設定）を、ローカルの偽の検証サーバー（`ts/apps/store-detail/e2e/stubs/liff-verify-server.mjs`）へ向ける。偽物は固定の sub（`U-e2e`）を返す。
 
-structured survey の有効化は、店舗オーナーの操作には無い（structured の回答の下書きは Issue #439 の通常生成＝Natural LLM Realizer が作り、失格が続いたときだけ safe fallback を返す）。ローカルでは `ts/apps/survey-web/e2e/structured-seed.sql` が、E2E と同じく fixture として 1 店舗だけ有効にする。
+structured survey の有効化は、店舗オーナーの操作には無い（structured の回答の下書きは Issue #439 の通常生成＝Natural LLM Realizer が作る。明確な捏造は作り直し（最大 3 回）、作れなければ generation error で、safe fallback の文は表示しない）。ローカルでは `ts/apps/survey-web/e2e/structured-seed.sql` が、E2E と同じく fixture として 1 店舗だけ有効にする。
 
 ## 1. 必要なもの
 

@@ -80,8 +80,6 @@ export interface GeneratorSummary {
   readonly samples: number;
   /** 下書きを作れなかった本数。 */
   readonly missing: number;
-  /** 最終の下書きのうち safe fallback の文だった本数（本番の通常生成で見る）。 */
-  readonly fallback: number;
   /** 1 回目が runtime hard gate を通らず作り直した本数（LLM を 2 回呼んだ）。 */
   readonly retried: number;
   /** 明確な捏造（release の判定）があった本数と、片側を完全に無視した本数。 */
@@ -97,7 +95,7 @@ export interface GeneratorSummary {
   /** claim を述べた割合（主題 × 極性）と、facet の意味まで述べた割合（統合・省略を許すので診断）。 */
   readonly claimCoverage: number;
   readonly facetMention: number;
-  /** 自然さの診断。LLM の文だけ（safe fallback の文を除く）で集計する。 */
+  /** 自然さの診断（production は LLM の文・safe-fallback はテンプレートの文）。 */
   readonly diagnostics: DiagnosticsSummary;
   /** 同じケースの複数の生成で、書き出し・主題の順・文の数・文の組み立てが同じだったケースの数（LLM の文だけ）。 */
   readonly structure: StructureSameness;
@@ -132,7 +130,7 @@ export function summarize(cases: readonly StructuredEvalCase[], samples: readonl
       const overlapMade = made.filter((s) => overlapCases.has(s.caseId));
       const coverage = made.flatMap((s) => s.evaluation!.coverage);
       const ratio = (n: number, d: number) => (d === 0 ? 0 : n / d);
-      // 自然さは通常生成の文で見る。safe fallback だけの対象（safe-fallback）はその文で見る。
+      // 自然さは通常生成の文で見る（本番の経路は safe fallback を返さない）。safe-fallback の対象はその文で見る。
       const natural = generator === 'safe-fallback' ? made : made.filter((s) => s.source !== 'fallback');
       let pairs = 0;
       let exact = 0;
@@ -159,7 +157,6 @@ export function summarize(cases: readonly StructuredEvalCase[], samples: readonl
         generator,
         samples: mine.length,
         missing: mine.length - made.length,
-        fallback: made.filter((s) => s.source === 'fallback').length,
         fabricated: made.filter((s) => s.release!.some((k) => k !== 'positiveDropped' && k !== 'concernDropped')).length,
         sideDropped: made.filter((s) => s.release!.some((k) => k === 'positiveDropped' || k === 'concernDropped')).length,
         retried: made.filter((s) => s.attempts >= 2).length,
@@ -253,7 +250,7 @@ const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 export function formatSummary(summary: StructuredEvalSummary): string {
   const rows = summary.generators.map((m) => {
     const made = m.samples - m.missing;
-    return `| ${m.generator} | ${made}/${m.samples} | ${m.fallback}/${made} | ${m.retried}/${made} | ${m.hardFailed}/${made}（${pct(m.hardFailRate)}） | ${m.overlapReason.failed}/${m.overlapReason.of} | ${pct(m.claimCoverage)} | ${m.diagnostics.meanChars.toFixed(0)} | ${m.diagnostics.meanSentences.toFixed(1)} | ${m.regeneration.meanJaccard === null ? '—' : m.regeneration.meanJaccard.toFixed(2)} |`;
+    return `| ${m.generator} | ${made}/${m.samples} | ${m.retried}/${made} | ${m.hardFailed}/${made}（${pct(m.hardFailRate)}） | ${m.overlapReason.failed}/${m.overlapReason.of} | ${pct(m.claimCoverage)} | ${m.diagnostics.meanChars.toFixed(0)} | ${m.diagnostics.meanSentences.toFixed(1)} | ${m.regeneration.meanJaccard === null ? '—' : m.regeneration.meanJaccard.toFixed(2)} |`;
   });
   const gates = summary.generators.map(
     (m) => `- ${m.generator}: ${Object.entries(m.gateCounts).sort().map(([k, v]) => `${k} ${v}`).join(' / ') || '失格なし'}`,
@@ -270,8 +267,8 @@ export function formatSummary(summary: StructuredEvalSummary): string {
   return [
     `ケース ${summary.cases} 件・claim ${summary.claims} 件`,
     '',
-    '| 対象 | 生成できた本数 | safe fallback | 作り直し | offline eval gate の失格（診断） | exact overlap の理由 | claim の coverage（診断） | 平均字数 | 平均文数 | 再生成の類似度 |',
-    '|---|---|---|---|---|---|---|---|---|---|',
+    '| 対象 | 生成できた本数 | 作り直し | offline eval gate の失格（診断） | exact overlap の理由 | claim の coverage（診断） | 平均字数 | 平均文数 | 再生成の類似度 |',
+    '|---|---|---|---|---|---|---|---|---|',
     ...rows,
     '',
     '失格の種類（本数）:',

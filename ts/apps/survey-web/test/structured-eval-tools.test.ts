@@ -213,7 +213,6 @@ describe('集計の形と成功条件', () => {
       generator: 'production',
       samples: 4,
       missing: 1,
-      fallback: 1,
       retried: 1,
       hardFailed: 1,
       overlapReason: { failed: 1, of: 2 },
@@ -223,7 +222,7 @@ describe('集計の形と成功条件', () => {
     // 自然さの診断は LLM の文だけ（safe fallback の文を除く）。
     expect(m.diagnostics.n).toBe(2);
     const text = formatSummary(s);
-    expect(text).toContain('| production | 3/4 | 1/3 | 1/3 | 1/3（33.3%） | 1/2 |');
+    expect(text).toContain('| production | 3/4 | 1/3 | 1/3（33.3%） | 1/2 |');
     expect(text).toContain('| 明確な捏造（新しい具体的事実・数字・来店の文脈・勝手な因果・極性の反転など） | 1/3 | 0 件 | FAIL |');
   });
 

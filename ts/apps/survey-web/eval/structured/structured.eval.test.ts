@@ -64,8 +64,8 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
     }
 
     const client = hasKey ? await realClient() : undefined;
-    // 生成の失敗で safe fallback に落ちた本数（最終の下書きだけでは、キーやモデル名の誤りで全件 fallback になった実測と
-    // 区別できない）。失格の種類は記録しない（本番のログと同じく、種類だけを集計に出す）。
+    // 生成の失敗（API の誤り）で下書きを作れなかった本数（下書きなしの数だけでは、キーやモデル名の誤りで全件失敗した実測と
+    // factuality の作り直しが尽きた実測を区別できない）。失格の種類は記録しない（本番のログと同じく、種類だけを集計に出す）。
     let generationFailures = 0;
     const generators = evalGenerators({
       ...(client ? { client } : {}),
@@ -98,8 +98,8 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
     const production = summary.generators.find((g) => g.generator === 'production');
     if (production) {
       const made = production.samples - production.missing;
-      console.log(`\n通常生成の経路: ${made} 本中、作り直し ${production.retried}・safe fallback ${production.fallback}（うち生成の失敗 ${generationFailures}）`);
-      // 生成が 1 本も成功しない実測は、safe fallback の文だけで測ったことになる（キー・モデル名・通信の誤り）。
+      console.log(`\n通常生成の経路: ${production.samples} 本中、生成できた ${made}（うち作り直し ${production.retried}）・generation error ${production.missing}（うち生成の失敗 ${generationFailures}）`);
+      // 生成が 1 本も成功しない実測は、何も測っていない（キー・モデル名・通信の誤り）。
       expect(generationFailures, '通常生成が全件失敗しました（GEMINI_API_KEY・GEMINI_MODEL・通信を確認）').toBeLessThan(made);
     }
 

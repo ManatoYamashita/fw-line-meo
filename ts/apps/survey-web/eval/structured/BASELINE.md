@@ -1,6 +1,6 @@
 # structured survey の下書き評価の記録（Issue #440）
 
-本番の **通常生成**（Natural LLM Realizer・`src/lib/draft/structured/realizer.ts`）と **safe fallback** の実測の記録である。測り方・成功条件・人手の採点の手順は `../README.md` の「structured survey の評価」にある（`pnpm --filter @fwlm/survey-web run eval:structured`）。
+本番の **通常生成**（Natural LLM Realizer・`src/lib/draft/structured/realizer.ts`）と、事実性の対照としての **safe fallback**（内部用・ユーザーには表示しない）の実測の記録である。現在の仕様は §1 の最後の「最終の方針」にある。測り方・成功条件・人手の採点の手順は `../README.md` の「structured survey の評価」にある（`pnpm --filter @fwlm/survey-web run eval:structured`）。
 
 実 Gemini の出力そのものはリポジトリに入れない（`EVAL_OUT` はリポジトリの外）。ここに残すのは集計だけである。
 
@@ -40,12 +40,22 @@
 - ローカル検証用に最終の結果のログ（`survey-web.structured_draft_result`・`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ）を足した
 - fixture にケース M（上の回答）を足した
 
+### 最終の方針（2026-10-11・同日・現在の仕様）
+
+上の 2 つの節（再生成のバリエーション・safe fallback へ落ちる問題）の対処の一部は、その後の実 Gemini の確認で取りやめた。**現在の仕様はこの節である。**
+
+- ユーザーに表示する下書きは **すべて Gemini の通常生成** である。safe fallback の文は本番の応答で返さない（内部・評価・テスト用に残す）。最大 3 回の試行で作れなければ generation error（既存の「下書きの生成に失敗しました」と再試行）
+- 初回の生成と「別の文章を生成」は **同じプロンプト・同じ処理** である。文章の組み立て（`COMPOSITIONS`）・行の並び・文体・総評の有無の抽選と、「前とは違う組み立てにする」指示は外した（品質のばらつきの原因になった）
+- 本番の runtime hard gate は **明確な捏造だけ** を止める（新しい具体的属性・数字 / 日時 / 固有情報・来店の文脈・勝手な因果・exact overlap の理由・明確な極性の反転・待ち時間の具体化・再訪 / 推奨 / 期待の創作）。positive / concern の片側を完全に落とした下書きも作り直す。claim ごとの coverage と style は本番では見ない（評価の診断だけ）
+
+PR 前の確認として、実 Gemini で同じ回答から 4 本を作り、4 本とも大きな捏造・会話調・勝手な因果が無く、safe fallback の文も出ず、Google 口コミとしてそのまま使える水準であることを人が目視で確かめた（本文はリポジトリに入れない）。
+
 ## 2. 結果
 
-| 対象 | 生成できた本数 | safe fallback | 作り直し | offline eval gate の失格 | exact overlap の理由 | claim の coverage | 平均字数 | 平均文数 | 再生成の類似度 |
-|---|---|---|---|---|---|---|---|---|---|
-| production | 未測定（この記録の環境に `GEMINI_API_KEY` が無い） | | | | | | | | |
-| safe-fallback | 15/15 | 15/15 | 0/15 | 0/15（0.0%） | 0/2 | 100.0% | 41 | 2.3 | — |
+| 対象 | 生成できた本数 | 作り直し | offline eval gate の失格 | exact overlap の理由 | claim の coverage | 平均字数 | 平均文数 | 再生成の類似度 |
+|---|---|---|---|---|---|---|---|---|
+| production | 未測定（自動の実測は行っていない。PR 前の確認は §1「最終の方針」の目視） | | | | | | | |
+| safe-fallback | 15/15 | 0/15 | 0/15（0.0%） | 0/2 | 100.0% | 41 | 2.3 | — |
 
 safe fallback の自然さの診断（参考・通常生成が寄ってはいけない形・15 ケース）: safe fallback 風 100%・項目名の読み上げ 96.3%・「良かったです」93.3%（2 回以上の反復 26.7%）・同じ語尾の 3 連続 6.7%・1 文 1 主題 20.0%・抽象語のまとめ 0%・総評の句 0%。claim 数ごとの平均字数は 1 件 16 字・2 件 32 字・3 件 45 字・4 件 58 字・6 件 89 字・8 件 115 字。
 
@@ -67,12 +77,12 @@ safe fallback の自然さの診断（参考・通常生成が寄ってはいけ
 - 星は全体の印象（★4〜5 は満足・★1〜2 は不満が残った）にだけ使い、具体的な理由・強い言葉へは広げていない。
 - 再生成の類似度は文字 bigram の Jaccard で、意味の違いは見ない。語尾だけを変えた組は別に数える（`sameExceptEndingPairs`）。
 
-## 4. 最終 PR 前の必須の release gate（未実施）
+## 4. 実 Gemini の確認
 
-- [ ] 実 Gemini で production を 15 ケース × 3 回以上測り、§2 の表と成功条件（`../README.md` の「成功条件」）を埋める。自動の成功条件がすべて PASS。自然さの警告（`styleWarnings`）が出たら中身を読んで目安を調整する
-- [ ] 人手の採点: `EVAL_OUT` の隣の `.rating.md` を **2 名以上** で採点し、`aggregateRatings` で集計する。創作の指摘 0・自然さ / 投稿しやすさの平均 ≥ 4.0・忠実さの平均 ≥ 4.5
-- [ ] ローカル preview（`docs/testing/structured-survey-local-preview.md`）の 5 ケースを実 Gemini で目視し、読み上げ・fallback 風になっていないことを確かめる
-- [ ] 結果（集計だけ）をこのファイルへ追記する。実出力はリポジトリへ入れない
+- [x] PR 前: 実 Gemini で同じ回答から 4 本を作り、目視で確かめた（§1「最終の方針」）。これを PR の判断とした
+- [ ] 任意（プロンプト・hard gate を変えるとき）: production を 15 ケース × 3 回以上測り、§2 の表と成功条件（`../README.md` の「成功条件」）を埋める。自然さの警告（`styleWarnings`）は hard fail にしない
+- [ ] 任意: 人手の採点（`EVAL_OUT` の隣の `.rating.md` を 2 名以上で採点し、`aggregateRatings` で集計する）
+- 結果は集計だけをこのファイルへ追記する。実出力はリポジトリへ入れない
 
 ## 5. 以前の記録（方式比較の時代・2026-10-10）
 
