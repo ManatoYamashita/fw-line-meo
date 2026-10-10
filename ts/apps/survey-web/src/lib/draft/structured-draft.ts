@@ -34,16 +34,12 @@ export type StructuredDraftResult =
    */
   | { readonly kind: 'failed'; readonly attempts: number };
 
-export interface StructuredDraftOptions {
-  /**
-   * 「別の文章を生成」（/api/drafts）からの呼び出しか。true なら前とは違う組み立てにする決まった指示を足す。
-   * 前回の下書きそのものは渡さない（客の端末から戻る値を、事実の源にも指示にもしない）。
-   */
-  readonly regeneration?: boolean;
-}
-
+/**
+ * 下書きを作る口。初回の生成（/api/responses）も「別の文章を生成」（/api/drafts）も、同じ素材で同じ処理をもう一度
+ * 実行するだけである（再生成のために構成を変える指示は足さない。前回の下書きは受け取らない）。
+ */
 export interface StructuredDraftPort {
-  prepare(material: StructuredDraftMaterial, options?: StructuredDraftOptions): Promise<StructuredDraftResult>;
+  prepare(material: StructuredDraftMaterial): Promise<StructuredDraftResult>;
 }
 
 /**

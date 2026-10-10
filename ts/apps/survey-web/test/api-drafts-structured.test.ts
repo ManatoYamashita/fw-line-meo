@@ -120,8 +120,8 @@ describe('structured の下書き（Issue #439）', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ generation: 'ok', draft: '刺身盛り合わせ、おいしかったです。', regenerationsLeft: REGEN_MAX - 1 });
-    // 再生成であることだけを伝える（前とは違う組み立てにする決まった指示）。素材は封入したものだけ。
-    expect(realizer.prepare).toHaveBeenCalledWith(SNAPSHOT, { regeneration: true });
+    // 初回と同じ生成をもう一度行う（構成を変える指示は足さない）。素材は封入したものだけ。
+    expect(realizer.prepare).toHaveBeenCalledWith(SNAPSHOT);
     expect(deps.generator.generate).not.toHaveBeenCalled();
     const next = tokens.verifyStructured(body.sessionToken as string);
     expect(next.ok && next.value.attempt).toBe(1);
@@ -171,7 +171,7 @@ describe('ユーザーに表示する下書きは通常生成だけ（safe fallb
         },
       },
     };
-    return createNaturalRealizer(client, { random: () => 0 });
+    return createNaturalRealizer(client, {});
   }
   const submit = (port: StructuredDraftPort) =>
     handleResponses(

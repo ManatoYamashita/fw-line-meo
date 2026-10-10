@@ -4,6 +4,7 @@ import type { GenAiClient } from '../src/lib/draft/generator';
 import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
 import { evaluateStructuredDraft, gateFamily, readLegacyLexicons, readStructuredGateLexicon } from '../src/lib/draft/structured/gate';
 import { createNaturalRealizer, gateInputOf } from '../src/lib/draft/structured/realizer';
+import { detectStyleIssues } from '../src/lib/draft/structured/style';
 import { unselectedTargetsOf } from '../src/lib/structured-answer';
 import lexiconRaw from '../src/lib/draft/structured/lexicon.json';
 
@@ -197,7 +198,7 @@ describe('Realizer の作り直し（未回答の Target・一言の因果づけ
   it('未回答の Target を足した 1 回目は作り直し、2 回目が通れば LLM の下書き。未回答の Target 一覧は LLM へ渡さない', async () => {
     const onRetry = vi.fn();
     const { client, contents } = fakeClient('刺身盛り合わせがおいしく、焼き鳥5種盛りも良かったです。', '刺身盛り合わせがおいしかったです。');
-    const result = await createNaturalRealizer(client, { random: () => 0, onRetry }).prepare(material());
+    const result = await createNaturalRealizer(client, { onRetry }).prepare(material());
     expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。', source: 'llm', attempts: 2 });
     // 「5種」の数字も素材に無い数値として当たる（ungrounded）。種類と claim の件数だけを渡す。
     expect(onRetry.mock.calls[0]![0]).toContain('unselectedTarget');
@@ -209,7 +210,7 @@ describe('Realizer の作り直し（未回答の Target・一言の因果づけ
     const onFailed = vi.fn();
     const comfort = { polarity: 'positive' as const, categoryCode: 'atmosphere', categoryLabel: '店内・雰囲気', facets: [{ code: 'comfort', label: '居心地' }] };
     const { client } = fakeClient('窓側の席だったので居心地が良かったです。', '窓側の席だったため、居心地が良かったです。', '窓側の席だったので、居心地よく過ごせました。');
-    const result = await createNaturalRealizer(client, { random: () => 0, onFailed }).prepare(
+    const result = await createNaturalRealizer(client, { onFailed }).prepare(
       material({ selections: [comfort], comment: '窓側の席でした' }),
     );
     expect(result).toEqual({ kind: 'failed', attempts: 3 });
@@ -354,5 +355,49 @@ describe('safe fallback へ落ちた実例の誤検出と、回答の項目ど�
 
   it('exact overlap の両面だけの言い方は通す（原因や時間の順を足さなければよい）', () => {
     expect(families(mixed, '接客の丁寧さについては、良い部分もあれば気になる点もありました。料理の量に満足でき、入店までスムーズでした。料理の価格は気になりました。')).toEqual([]);
+  });
+});
+
+describe('最終調整: 回答の項目どうしの因果・待ち時間の強め・不自然な日本語（実 Gemini・2026-10-11）', () => {
+  const reservation = { polarity: 'positive' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'reservation_ease', label: '予約のしやすさ' }] };
+  const entryWait = { polarity: 'positive' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] };
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const volume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] };
+  const both = material({ selections: [reservation, entryWait] });
+
+  it('独立した回答同士を因果で結んだら失格（予約していたので / 予約のおかげで）', () => {
+    expect(families(both, '予約していたので、入店までスムーズでした。')).toContain('cause');
+    expect(families(both, '予約していたので待ち時間なく入れました。')).toEqual(expect.arrayContaining(['cause', 'overstatement']));
+    expect(families(both, '予約のおかげで待たずに入れました。')).toEqual(expect.arrayContaining(['cause', 'overstatement']));
+    expect(families(material({ selections: [courtesy, volume] }), '接客が丁寧だったので、料理の量にも満足できました。')).toContain('cause');
+  });
+
+  it('因果でない並べ方・同じ主題の中の「ので」・「〜のですが」は数えない', () => {
+    expect(families(both, '予約がしやすく、入店までスムーズでした。')).toEqual([]);
+    expect(families(material({ selections: [volume] }), '料理の量が多めだったので、満足できました。')).toEqual([]);
+    expect(families(material({ selections: [courtesy, volume] }), '接客は丁寧だったのですが、料理の量にも満足できました。')).not.toContain('cause');
+  });
+
+  it('入店までの待ち時間の positive は「スムーズ」「気になりませんでした」まで。待ち時間ゼロへの強めは失格', () => {
+    const wait = material({ selections: [entryWait] });
+    for (const ok of ['入店までスムーズでした。', '入店までの待ち時間は気になりませんでした。']) expect(families(wait, ok), ok).toEqual([]);
+    for (const ng of ['入店までの待ち時間がなかったのが良かったです。', '待たずに入れて良かったです。', 'すぐ入れて良かったです。', '入店まで待つことなく入れて良かったです。']) {
+      expect(families(wait, ng), ng).toContain('overstatement');
+    }
+    // 一言に客が書いた言い方は数えない。
+    expect(families(material({ selections: [entryWait], comment: 'すぐ入れた' }), 'すぐ入れて良かったです。')).not.toContain('overstatement');
+  });
+
+  it('不自然な日本語は style の問題（factuality は通る）', () => {
+    const m = material({ selections: [volume, { polarity: 'concern' as const, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] }] });
+    for (const text of [
+      '料理の量にも満足できました。ドリンクの種類がもう少しあればと思いました。',
+      '料理の量に満足できました。ドリンクの種類はもう少し多いと嬉しいと感じました。',
+      '料理の量も十分。ドリンクの種類は少し気になりました。',
+    ]) {
+      expect(families(m, text), text).toEqual([]);
+      expect(detectStyleIssues(text, LEX), text).toContain('style:awkwardPhrase');
+    }
+    expect(detectStyleIssues('料理の量にも満足できました。ドリンクの種類はもう少し多いと嬉しかったです。', LEX)).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import type { GenAiClient, GenAiRequest } from '../src/lib/draft/generator';
 import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
 import { compileStructuredClaims, overlappingIdentities } from '../src/lib/draft/structured/claims';
 import { structuredFallbackDraft } from '../src/lib/draft/structured/fallback';
-import { availableCompositions, buildRealizerPrompt, COMMENT_TONE, COMPOSITIONS, overallImpression, REGENERATION_NOTE, RETRY_NOTES, TONES } from '../src/lib/draft/structured/prompt';
+import { buildRealizerPrompt, RETRY_NOTES } from '../src/lib/draft/structured/prompt';
 import { createNaturalRealizer, MAX_ATTEMPTS } from '../src/lib/draft/structured/realizer';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。実 Gemini は呼ばず、偽のクライアントで生成の結果を決める。
@@ -49,8 +49,6 @@ function fakeClient(...replies: (string | Error)[]) {
   return { client, requests };
 }
 
-const fixed = () => 0;
-
 describe('compileStructuredClaims（決定的）', () => {
   it('Target だけ・Target + facet・カテゴリ全体の facet を区別し、素材の順に並べる', () => {
     const claims = compileStructuredClaims([
@@ -83,50 +81,37 @@ describe('compileStructuredClaims（決定的）', () => {
 });
 
 describe('プロンプト', () => {
-  it('claim の表示名と極性と一言を渡し、店名・code・星の数そのものは渡さない', () => {
-    const claims = compileStructuredClaims(material().selections);
-    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった', star: 1, composition: COMPOSITIONS[0]!.text });
+  it('claim の表示名と極性と一言だけを渡し、店名・code・星は渡さない', () => {
+    const claims = compileStructuredClaims(material({ star: 1 }).selections);
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった' });
     expect(userContent).toContain('良かったところ:');
     expect(userContent).toContain('- 刺身盛り合わせ（料理）: 味');
     expect(userContent).toContain('一言: 「おいしかった」');
     expect(userContent).not.toContain('気になったところ:');
-    expect(userContent).not.toMatch(/[★☆]|星|満足度|海鮮食堂|taste|food/);
-    expect(userContent.slice(0, userContent.indexOf('文章の組み立て:'))).not.toMatch(/[0-9０-９]/);
-    // 自然さを前面に出す（読み上げない・言い換えてよい・弱い主観はよい）。具体的な創作の型は短く名指す。
-    expect(systemInstruction).toContain('アンケートの項目を順番に読み上げない');
-    expect(systemInstruction).toContain('「少し」「やや」「満足できた」「印象に残った」「過ごしやすかった」');
-    expect(systemInstruction).toContain('具体的な事実の創作');
+    expect(userContent).not.toMatch(/[★☆]|星|満足度|全体の印象|海鮮食堂|taste|food|[0-9０-９]/);
+    // 中心の指示: 自然なです・ます調・箇条書きのように並べない・新しい具体的事実と因果を作らない。
+    expect(systemInstruction).toContain('一般の利用者が Google 口コミにそのまま投稿するような自然な日本語');
+    expect(systemInstruction).toContain('自然なです・ます調で書き、回答項目を箇条書きのようにそのまま並べず');
+    expect(systemInstruction).toContain('独立した回答同士を、勝手に因果関係として結ばないでください');
   });
 
-  it('星は全体の印象へ丸めて渡す（★4〜5 は満足・★1〜2 は不満が残った・★3 は渡さない）', () => {
-    expect([1, 2, 3, 4, 5].map(overallImpression)).toEqual(['不満が残った', '不満が残った', null, '満足', '満足']);
+  it('文体・組み立て・総評の抽選や、再生成で構成を変える指示は渡さない', () => {
     const claims = compileStructuredClaims(material().selections);
-    const at = (star: number) => buildRealizerPrompt({ claims, star, composition: COMPOSITIONS[0]!.text }).userContent;
-    expect(at(5)).toContain('全体の印象: 満足（書いても書かなくてもよい');
-    expect(at(4)).toBe(at(5));
-    expect(at(2)).toContain('全体の印象: 不満が残った');
-    expect(at(3)).not.toContain('全体の印象');
-  });
-
-  it('文体は候補から選び、一言があるときは一言の口調に合わせる', () => {
-    const claims = compileStructuredClaims(material().selections);
-    expect(buildRealizerPrompt({ claims, composition: COMPOSITIONS[0]!.text, tone: TONES[1]! }).userContent).toContain(`文体: ${TONES[1]}`);
-    const withComment = buildRealizerPrompt({ claims, comment: 'めっちゃよかった！', composition: COMPOSITIONS[0]!.text, tone: TONES[1]! }).userContent;
-    expect(withComment).toContain(`文体: ${COMMENT_TONE}`);
-    expect(withComment).not.toContain(TONES[1]!);
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims });
+    expect(userContent).not.toMatch(/文体:|文章の組み立て:|文章の形:|作り直し:|全体の印象/);
+    expect(systemInstruction).not.toMatch(/体言止めを交え|常体/);
   });
 
   it('Target だけの claim は「料理そのもの（項目の指定なし）」として渡し、味などを補わない', () => {
     const { userContent } = buildRealizerPrompt({
       claims: compileStructuredClaims([{ polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI, targetLabel: '刺身盛り合わせ', facets: [] }]),
-      composition: COMPOSITIONS[0]!.text,
     });
     expect(userContent).toContain('- 刺身盛り合わせ（料理）: 料理・ドリンクそのもの（項目の指定なし）');
     expect(userContent).not.toContain('味');
   });
 
   it('exact overlap は、両方あったことだけを書くよう回答の側に添える', () => {
-    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections), composition: COMPOSITIONS[0]!.text });
+    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections) });
     expect(userContent).toContain('同じ項目が良かったところと気になったところの両方にあります');
   });
 });
@@ -134,7 +119,7 @@ describe('プロンプト', () => {
 describe('Natural LLM Realizer の通常の経路', () => {
   it('1 回目が hard gate を通れば、そのまま返す（LLM は 1 回）', async () => {
     const { client, requests } = fakeClient('刺身盛り合わせがおいしかったです。');
-    const result = await createNaturalRealizer(client, { random: fixed }).prepare(material());
+    const result = await createNaturalRealizer(client, {}).prepare(material());
     expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。', source: 'llm', attempts: 1 });
     expect(requests).toHaveLength(1);
     expect(requests[0]!.config.temperature).toBe(1);
@@ -163,7 +148,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     it(`1 回目「${bad}」→ ${kind} を検出して作り直し、2 回目が通れば LLM の下書きを返す`, async () => {
       const onRetry = vi.fn();
       const { client, requests } = fakeClient(bad, '刺身盛り合わせがおいしかったです。');
-      const result = await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(material());
+      const result = await createNaturalRealizer(client, { onRetry }).prepare(material());
       expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。', source: 'llm', attempts: 2 });
       expect(requests).toHaveLength(2);
       expect(onRetry.mock.calls[0]![0]).toContain(kind);
@@ -187,23 +172,22 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     ]) {
       const onRetry = vi.fn();
       const { client } = fakeClient(draft);
-      expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(m), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
+      expect(await createNaturalRealizer(client, { onRetry }).prepare(m), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
       expect(onRetry).not.toHaveBeenCalled();
     }
   });
 
   it('作り直しは意味を足さない: 2 回目の「回答」は 1 回目と同じで、注意だけが増える', async () => {
     const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '刺身盛り合わせがおいしかったです。');
-    await createNaturalRealizer(client, { random: fixed }).prepare(material());
-    const answer = (contents: string) => contents.slice(0, contents.indexOf('文章の組み立て:'));
-    expect(answer(requests[1]!.contents)).toBe(answer(requests[0]!.contents));
+    await createNaturalRealizer(client, {}).prepare(material());
+    expect(requests[1]!.contents.startsWith(`${requests[0]!.contents}\n\n前回の文章は`)).toBe(true);
     expect(requests[1]!.config.systemInstruction).toBe(requests[0]!.config.systemInstruction);
   });
 
   it('1 回目・2 回目が factuality 違反でも、3 回目が通れば 3 回目の LLM の文を返す', async () => {
     const onRetry = vi.fn();
     const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '刺身盛り合わせがおいしく、また行きたいです。', '刺身盛り合わせがおいしかったです。', '呼ばれないはず');
-    const result = await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(material());
+    const result = await createNaturalRealizer(client, { onRetry }).prepare(material());
     expect(result).toEqual({ kind: 'draft', draft: '刺身盛り合わせがおいしかったです。', source: 'llm', attempts: 3 });
     expect(requests).toHaveLength(MAX_ATTEMPTS);
     expect(onRetry).toHaveBeenCalledTimes(2);
@@ -216,7 +200,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
   it('3 回とも factuality 違反なら、safe fallback の文ではなく generation error（下書きなし）', async () => {
     const onFailed = vi.fn();
     const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '脂ののった刺身盛り合わせ。', '刺身盛り合わせ、また行きたい。', '呼ばれないはず');
-    const result = await createNaturalRealizer(client, { random: fixed, onFailed }).prepare(material());
+    const result = await createNaturalRealizer(client, { onFailed }).prepare(material());
     expect(result).toEqual({ kind: 'failed', attempts: 3 });
     expect(requests).toHaveLength(3);
     expect(onFailed).toHaveBeenCalledWith('gate', expect.arrayContaining(['revisit']), 1);
@@ -228,18 +212,18 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
       '刺身盛り合わせの味は、部位によって良かったり気になったりしました。',
       '刺身盛り合わせの味は、最初は良かったのですが後半は気になりました。',
     );
-    expect(await createNaturalRealizer(client, { random: fixed }).prepare(OVERLAP)).toEqual({ kind: 'failed', attempts: 3 });
+    expect(await createNaturalRealizer(client, {}).prepare(OVERLAP)).toEqual({ kind: 'failed', attempts: 3 });
   });
 
   it('exact overlap で両面だけを書いた下書きは通す', async () => {
     const { client } = fakeClient('刺身盛り合わせの味は、良かったところもありつつ気になる点もありました。');
-    expect(await createNaturalRealizer(client, { random: fixed }).prepare(OVERLAP)).toMatchObject({ source: 'llm', attempts: 1 });
+    expect(await createNaturalRealizer(client, {}).prepare(OVERLAP)).toMatchObject({ source: 'llm', attempts: 1 });
   });
 
   it('positive / concern の片側を落とした下書きは作り直す', async () => {
     const onRetry = vi.fn();
     const { client } = fakeClient('刺身盛り合わせがおいしかったです。', '刺身盛り合わせの味は、良かったところもありつつ気になる点もありました。');
-    await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(OVERLAP);
+    await createNaturalRealizer(client, { onRetry }).prepare(OVERLAP);
     expect(onRetry.mock.calls[0]![0]).toContain('concernDropped');
   });
 
@@ -247,7 +231,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const onFailed = vi.fn();
     const onRetry = vi.fn();
     const { client, requests } = fakeClient(new Error('503'), '', new Error('timeout'));
-    const result = await createNaturalRealizer(client, { random: fixed, onFailed, onRetry }).prepare(material());
+    const result = await createNaturalRealizer(client, { onFailed, onRetry }).prepare(material());
     expect(result).toEqual({ kind: 'failed', attempts: 3 });
     expect(requests).toHaveLength(3);
     expect(onRetry.mock.calls.map((c) => c[0])).toEqual([['generation'], ['generation']]);
@@ -257,7 +241,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
 
   it('生成の失敗のあとに通れば、その LLM の文を返す', async () => {
     const { client } = fakeClient(new Error('503'), '刺身盛り合わせがおいしかったです。');
-    expect(await createNaturalRealizer(client, { random: fixed }).prepare(material())).toEqual({
+    expect(await createNaturalRealizer(client, {}).prepare(material())).toEqual({
       kind: 'draft',
       draft: '刺身盛り合わせがおいしかったです。',
       source: 'llm',
@@ -268,7 +252,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
   it('一言の内容・語調は使ってよい（一言にある意向は失格にしない）', async () => {
     const { client, requests } = fakeClient('刺身盛り合わせ、うまかった！また行きます。');
     const m = material({ comment: '刺身うまかった！また行く' });
-    expect(await createNaturalRealizer(client, { random: fixed }).prepare(m)).toMatchObject({ source: 'llm', attempts: 1 });
+    expect(await createNaturalRealizer(client, {}).prepare(m)).toMatchObject({ source: 'llm', attempts: 1 });
     expect(requests[0]!.contents).toContain('一言: 「刺身うまかった！また行く」');
   });
 });
@@ -285,7 +269,7 @@ describe('safe fallback', () => {
   });
 });
 
-describe('再生成のバリエーション（文章の組み立て・項目の並び・総評の有無をサーバーが選ぶ）', () => {
+describe('再生成は初回と同じ生成をもう一度行う（抽選も構成の指示も無い）', () => {
   // 実 Gemini で、同じ回答の再生成が語尾違いだけ（予約 → 接客 → 料理の量 → ドリンク → 総評）だったケース。
   const RESERVATION = material({
     star: 5,
@@ -296,8 +280,6 @@ describe('再生成のバリエーション（文章の組み立て・項目の�
       { polarity: 'concern', categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] },
     ],
   });
-  /** 決まった値を順に返す乱数（尽きたら 0）。 */
-  const seq = (...values: number[]) => () => values.shift() ?? 0;
 
   it('語順・文の数・項目の並びが違う下書きも、同じ事実なら hard gate を通る（作り直さない）', async () => {
     for (const draft of [
@@ -309,59 +291,39 @@ describe('再生成のバリエーション（文章の組み立て・項目の�
     ]) {
       const onRetry = vi.fn();
       const { client } = fakeClient(draft);
-      expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(RESERVATION), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
+      expect(await createNaturalRealizer(client, { onRetry }).prepare(RESERVATION), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
       expect(onRetry).not.toHaveBeenCalled();
     }
   });
 
-  it('組み立ては回答に対して成り立つ候補から選ぶ（両極性が無ければ対比・気になった先行を選ばない）', () => {
-    const onlyPositive = availableCompositions(compileStructuredClaims(material().selections)).map((c) => c.id);
-    expect(onlyPositive).toEqual(['plain', 'combined']);
-    expect(availableCompositions(compileStructuredClaims(RESERVATION.selections)).map((c) => c.id)).toEqual(COMPOSITIONS.map((c) => c.id));
+  it('初回も再生成も、同じ回答なら同じプロンプト（並びは定義の順・positive → concern）', async () => {
+    const a = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
+    const b = fakeClient('予約もしやすく、接客も丁寧でした。料理の量にも満足できましたが、ドリンクの種類は少し気になりました。');
+    await createNaturalRealizer(a.client).prepare(RESERVATION);
+    await createNaturalRealizer(b.client).prepare(RESERVATION);
+    expect(b.requests[0]!.contents).toBe(a.requests[0]!.contents);
+    expect(b.requests[0]!.config.systemInstruction).toBe(a.requests[0]!.config.systemInstruction);
+    const lines = a.requests[0]!.contents.split('\n').filter((l) => l.startsWith('- '));
+    expect(lines).toEqual(['- 予約のしやすさ（予約・来店）', '- 接客の丁寧さ（接客・提供）', '- 量（料理）', '- 種類（ドリンク）']);
   });
 
-  it('乱数に応じて、回答の行の並び・組み立て・総評の有無が変わる（回答の中身は同じ）', async () => {
-    const contents = async (random: () => number) => {
-      const { client, requests } = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
-      await createNaturalRealizer(client, { random }).prepare(RESERVATION);
-      return requests[0]!.contents;
-    };
-    const a = await contents(seq(0, 0, 0, 0.99, 0, 0, 0));
-    const b = await contents(seq(0.99, 0.99, 0.99, 0, 0.5, 0.9));
-    const lines = (s: string) => s.split('\n').filter((l) => l.startsWith('- '));
-    expect(lines(a)).not.toEqual(lines(b));
-    expect([...lines(a)].sort()).toEqual([...lines(b)].sort());
-    expect(a.match(/文章の組み立て: .*/)![0]).not.toBe(b.match(/文章の組み立て: .*/)![0]);
-    // 総評は任意の合図: 乱数が OVERALL_RATE 未満のときだけ渡す。
-    expect(a.includes('全体の印象') !== b.includes('全体の印象')).toBe(true);
-  });
-
-  it('作り直しでは、回答の並び・組み立て・総評の有無を変えない（違反の注意だけが増える）', async () => {
+  it('作り直しでは回答は変えず、違反の注意だけが増える', async () => {
     const { client, requests } = fakeClient('新鮮な料理の量に満足でした。', '料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
-    await createNaturalRealizer(client, { random: seq(0.7, 0.2, 0.9, 0.4, 0.5, 0.1, 0.3) }).prepare(RESERVATION);
+    await createNaturalRealizer(client).prepare(RESERVATION);
     expect(requests).toHaveLength(2);
     expect(requests[1]!.contents.startsWith(`${requests[0]!.contents}\n\n前回の文章は`)).toBe(true);
-  });
-
-  it('再生成のときだけ「前とは違う組み立て」の決まった指示を足す', async () => {
-    const first = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
-    await createNaturalRealizer(first.client, { random: fixed }).prepare(RESERVATION);
-    expect(first.requests[0]!.contents).not.toContain(REGENERATION_NOTE);
-    const regen = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
-    await createNaturalRealizer(regen.client, { random: fixed }).prepare(RESERVATION, { regeneration: true });
-    expect(regen.requests[0]!.contents).toContain(REGENERATION_NOTE);
   });
 
   it('前回の下書きは再生成へ渡さず、前回の下書きにあった未回答の事実も次の生成の事実の源にならない', async () => {
     // 1 回目の生成（客へ返った下書き）に、検査をすり抜けた創作が混ざっていたと仮定する。
     const previous = '友人と行きました。予約はしやすく、接客も丁寧でした。料理の量にも満足でした。ドリンクの種類は少し気になりました。';
-    const realizer = createNaturalRealizer(fakeClient(previous).client, { random: fixed });
+    const realizer = createNaturalRealizer(fakeClient(previous).client, {});
     await realizer.prepare(RESERVATION);
     // 再生成: プロンプトには前回の下書きが入らない。
     const clean = '料理の量にも満足でき、接客も丁寧でした。予約もしやすかったです。ドリンクの種類は少し気になりました。';
     const regen = fakeClient(`友人と行きました。${clean}`, clean);
     const onRetry = vi.fn();
-    const result = await createNaturalRealizer(regen.client, { random: fixed, onRetry }).prepare(RESERVATION, { regeneration: true });
+    const result = await createNaturalRealizer(regen.client, { onRetry }).prepare(RESERVATION);
     for (const req of regen.requests) {
       expect(req.contents).not.toContain(previous);
       expect(req.contents).not.toContain('友人');
@@ -393,7 +355,7 @@ describe('factuality と style の分離（style の問題だけでは safe fall
   it('実 Gemini の 2 本目の文（自然・事実として安全）は、そのまま 1 回で通る', async () => {
     const onResult = vi.fn();
     const { client } = fakeClient(GOOD);
-    expect(await createNaturalRealizer(client, { random: fixed, onResult }).prepare(MIXED)).toEqual({ kind: 'draft', draft: GOOD, source: 'llm', attempts: 1 });
+    expect(await createNaturalRealizer(client, { onResult }).prepare(MIXED)).toEqual({ kind: 'draft', draft: GOOD, source: 'llm', attempts: 1 });
     expect(onResult).toHaveBeenCalledWith(
       { result: 'llm', attempts: 1, acceptedAttempt: 1, history: [{ attempt: 1, generationFailed: false, factuality: [], style: [] }] },
       6,
@@ -406,7 +368,7 @@ describe('factuality と style の分離（style の問題だけでは safe fall
     const onResult = vi.fn();
     const third = STYLE_ONLY.replace('入店までの待ち時間も少なく、', '待ち時間も少なく、');
     const { client, requests } = fakeClient(STYLE_ONLY, STYLE_ONLY, third);
-    const result = await createNaturalRealizer(client, { random: fixed, onRetry, onFailed, onResult }).prepare(MIXED);
+    const result = await createNaturalRealizer(client, { onRetry, onFailed, onResult }).prepare(MIXED);
     expect(result).toEqual({ kind: 'draft', draft: third, source: 'llm', attempts: 3 });
     expect(onRetry).toHaveBeenCalledWith(['style:abstractEvaluation'], 6);
     expect(requests[1]!.contents).toContain(RETRY_NOTES['style:abstractEvaluation']!);
@@ -416,7 +378,7 @@ describe('factuality と style の分離（style の問題だけでは safe fall
 
   it('style だけの問題の文があれば、後の試行が factuality 違反・生成の失敗でも、その LLM の文を返す', async () => {
     const { client } = fakeClient(STYLE_ONLY, CAUSE, new Error('503'));
-    expect(await createNaturalRealizer(client, { random: fixed }).prepare(MIXED)).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 3 });
+    expect(await createNaturalRealizer(client, {}).prepare(MIXED)).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 3 });
   });
 
   it('同じ文末の羅列（「Xでした。Yでした。Zでした。」）も style の問題で、事実として安全なら fallback にしない', async () => {
@@ -424,7 +386,7 @@ describe('factuality と style の分離（style の問題だけでは safe fall
       '入店まではスムーズでした。焼き鳥5種盛りの量も満足でした。料理全体の量も満足でした。接客の丁寧さは良い点も気になる点もありました。料理の価格は気になりました。';
     const onRetry = vi.fn();
     const { client } = fakeClient(listy, listy, listy);
-    expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(MIXED)).toMatchObject({ source: 'llm', attempts: 3 });
+    expect(await createNaturalRealizer(client, { onRetry }).prepare(MIXED)).toMatchObject({ source: 'llm', attempts: 3 });
     expect(onRetry.mock.calls[0]![0]).toEqual(['style:repetitiveEnding']);
   });
 
@@ -432,7 +394,7 @@ describe('factuality と style の分離（style の問題だけでは safe fall
     const onFailed = vi.fn();
     const onResult = vi.fn();
     const { client } = fakeClient(CAUSE, CAUSE, CAUSE);
-    expect(await createNaturalRealizer(client, { random: fixed, onFailed, onResult }).prepare(MIXED)).toEqual({ kind: 'failed', attempts: 3 });
+    expect(await createNaturalRealizer(client, { onFailed, onResult }).prepare(MIXED)).toEqual({ kind: 'failed', attempts: 3 });
     expect(onFailed).toHaveBeenCalledWith('gate', ['cause'], 6);
     expect(onResult.mock.calls[0]![0]).toMatchObject({ result: 'generation_error', attempts: 3, acceptedAttempt: null });
   });
@@ -443,7 +405,7 @@ describe('factuality と style の分離（style の問題だけでは safe fall
     const scripts: (string | Error)[][] = [[GOOD], [CAUSE, GOOD], [STYLE_ONLY, CAUSE, CAUSE], [CAUSE, CAUSE, CAUSE], [new Error('x'), '', new Error('y')]];
     for (const replies of scripts) {
       const { client } = fakeClient(...replies);
-      const r = await createNaturalRealizer(client, { random: fixed, onResult }).prepare(MIXED);
+      const r = await createNaturalRealizer(client, { onResult }).prepare(MIXED);
       if (r.kind === 'draft') expect(r.source).toBe('llm');
     }
     expect([...results].sort()).toEqual(['generation_error', 'llm']);

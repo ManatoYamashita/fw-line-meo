@@ -114,8 +114,8 @@ async function handleStructuredDrafts(req: Request, payload: StructuredSessionPa
   if (attempt >= REGEN_MAX) {
     return error(deps, 409, 'REGEN_LIMIT', '再生成の上限に達しました。編集してご利用ください');
   }
-  // 前とは違う組み立てにする決まった指示だけを足す（前回の下書きは受け取らず、渡さない）。
-  const prepared = await deps.structuredDrafts.prepare(structured, { regeneration: true });
+  // 初回と同じ生成をもう一度行う（構成を変える指示は足さない。前回の下書きは受け取らず、渡さない）。
+  const prepared = await deps.structuredDrafts.prepare(structured);
   if (prepared.kind !== 'draft') {
     const token = deps.tokens.signStructured({ storeId, structured, attempt });
     return jsonOk({ generation: 'failed', draft: null, sessionToken: token, regenerationsLeft: REGEN_MAX - attempt });

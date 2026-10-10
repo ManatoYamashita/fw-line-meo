@@ -104,7 +104,16 @@ export interface StructuredGateLexicon {
   readonly categoryMeanings: Readonly<Record<string, readonly RegExp[]>>;
   readonly polarityCues: Readonly<Record<Polarity, readonly RegExp[]>>;
   readonly lists: Readonly<Record<
-    'intensity' | 'recommendation' | 'revisit' | 'cause' | 'timing' | 'companion' | 'attribute' | 'overlapReason' | 'commentConnective',
+    | 'intensity'
+    | 'overstatement'
+    | 'recommendation'
+    | 'revisit'
+    | 'cause'
+    | 'timing'
+    | 'companion'
+    | 'attribute'
+    | 'overlapReason'
+    | 'commentConnective',
     readonly RegExp[]
   >>;
   readonly aiish: Readonly<Record<string, readonly RegExp[]>>;
@@ -120,6 +129,7 @@ const LIST_KEYS = [
   'attribute',
   'overlapReason',
   'commentConnective',
+  'overstatement',
 ] as const;
 
 function regexes(v: unknown, where: string): RegExp[] {
@@ -392,6 +402,15 @@ export function evaluateStructuredDraft(
   listGate('timing', 'timing');
   listGate('companion', 'companion');
   listGate('attribute', 'newAttribute');
+  // 回答より強い言い切り（入店までの待ち時間の positive から「待ち時間がなかった」「すぐ入れた」）。回答した項目名
+  // （「入店までの待ち時間」）を消した本文では「〜がなかった」だけが残って拾えないので、店名だけを消した本文で見る。
+  for (const p of lex.lists.overstatement) {
+    const hit = p.exec(text);
+    if (hit && !inComment(p)) {
+      add('overstatement', hit[0]);
+      break;
+    }
+  }
 
   for (const f of c.forbiddenMeanings) {
     const hit = f.pattern.exec(scan);
@@ -531,6 +550,31 @@ export function evaluateStructuredDraft(
         return hit !== null && !overlapsKeyword(hit);
       });
       if (otherSubject) add('commentLinkage', sentence);
+    }
+  }
+
+  // 回答の項目どうしの因果（「予約していたので待ち時間なく入れた」「接客が丁寧だったので居心地よく過ごせた」）。
+  // 理由を表す接続（commentConnective）の前に 1 つの主題、後に **別の** 主題があれば、回答に無い因果を作ったとみなす
+  // （回答はそれぞれ独立に選ばれ、互いの理由ではない）。一言そのものが理由を述べているなら客の因果なので数えない。
+  if (comment === undefined || firstMatch(nfkc(comment), lex.lists.commentConnective) === null) {
+    const subjectKey = (cl: GateClaim) => cl.targetId ?? `${cl.categoryCode}:${cl.facetCode}`;
+    const subjectsIn = (part: string) =>
+      new Set(
+        claims
+          .filter((cl) =>
+            cl.targetId !== undefined
+              ? subjectWords(c, cl.targetId, cl.targetLabel!).some((w) => part.includes(nfkc(w)))
+              : firstMatch(part, subjectPatternsOf(cl)) !== null,
+          )
+          .map(subjectKey),
+      );
+    for (const sentence of sentences) {
+      const s = nfkc(sentence);
+      const at = lastMatchIndex(s, lex.lists.commentConnective);
+      if (at <= 0) continue;
+      const before = subjectsIn(s.slice(0, at));
+      const after = subjectsIn(s.slice(at));
+      if ([...before].some((x) => [...after].some((y) => y !== x))) add('cause', sentence);
     }
   }
 
