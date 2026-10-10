@@ -224,28 +224,32 @@ describe('集計の形と成功条件', () => {
     expect(m.diagnostics.n).toBe(2);
     const text = formatSummary(s);
     expect(text).toContain('| production | 3/4 | 1/3 | 1/3 | 1/3（33.3%） | 1/2 |');
-    expect(text).toContain('| offline eval gate の失格（runtime を通った最終の下書きの残差） | 1/3 | 0 件 | FAIL |');
+    expect(text).toContain('| 明確な捏造（新しい具体的事実・数字・来店の文脈・勝手な因果・極性の反転など） | 1/3 | 0 件 | FAIL |');
   });
 
-  it('成功条件: 事実性の残差 0・fallback 10% 以下・fallback 風 5% 以下・読み上げ 10% 以下などを判定する', () => {
+  it('成功条件は明確な捏造・片側の欠落・generation error だけ（claim ごとの回収と style は条件にしない）', () => {
     const k = byId('K-everyday-mix');
     const good = k.allowedParaphrases.map((d, run) => recordSample(k, 'production', run, llm(d), lex, legacy));
     const pass = successChecks(summarize([k], good).generators[0]!);
     expect(pass.filter((c) => !c.passed).map((c) => c.id)).toEqual([]);
-    expect(pass.map((c) => c.id)).toEqual([
-      'factuality',
-      'overlapReason',
-      'fallbackRate',
-      'fallbackLike',
-      'checklistLike',
-      'sameEndingRun3',
-      'length',
-      'duplicates',
-    ]);
+    expect(pass.map((c) => c.id)).toEqual(['fabrication', 'overlapReason', 'sideDropped', 'generationErrors']);
 
+    // 項目を個別に回収しない自然な文（offline gate の coverage では落ちる）は release を落とさない。
+    const merged = [recordSample(k, 'production', 0, llm('食事の量には満足しました。丁寧に対応してもらえましたが、待ち時間は少し気になりました。'), lex, legacy)];
+    expect(successChecks(summarize([k], merged).generators[0]!).filter((c) => !c.passed)).toEqual([]);
+
+    // safe fallback 風・再生成の完全一致は style の警告（成功条件ではない）。
     const fallbackish = [0, 1].map((run) => recordSample(k, 'production', run, llm(safeFallback(k)), lex, legacy));
-    const fail = successChecks(summarize([k], fallbackish).generators[0]!);
-    expect(fail.filter((c) => !c.passed).map((c) => c.id)).toEqual(expect.arrayContaining(['fallbackLike', 'duplicates']));
+    const summaryFb = summarize([k], fallbackish).generators[0]!;
+    expect(successChecks(summaryFb).filter((c) => !c.passed)).toEqual([]);
+    expect(styleWarnings(summaryFb).map((w) => w.id)).toEqual(expect.arrayContaining(['fallbackLike', 'duplicates']));
+
+    // 明確な捏造・片側の欠落は落とす。
+    const bad = [
+      recordSample(k, 'production', 0, llm('友人と行きました。料理の量に満足で、接客も丁寧でした。待ち時間は気になりました。'), lex, legacy),
+      recordSample(k, 'production', 1, llm('料理の量に満足で、接客も丁寧でした。'), lex, legacy),
+    ];
+    expect(successChecks(summarize([k], bad).generators[0]!).filter((c) => !c.passed).map((c) => c.id)).toEqual(['fabrication', 'sideDropped']);
   });
 });
 
@@ -285,7 +289,7 @@ describe('自然さの診断: 抽象語のまとめ・総評の頻度・再生�
     expect(structureSameness([endingOnly])).toEqual({ cases: 1, sameOpening: 1, sameClaimOrder: 1, sameSentenceCount: 1, sameStructure: 1 });
     const samples = endingOnly.map((_, run) => recordSample(l, 'production', run, llm(['予約がスムーズにできて、料理の量も満足できました。接客も丁寧でしたが、ドリンクの種類はもう少しあると嬉しかったです。', '予約がスムーズで、料理の量も満足でした。接客も丁寧でしたが、ドリンクの種類は少し気になりました。', '予約がしやすく、料理の量にも満足できました。接客も丁寧でしたが、ドリンクの種類はもう少し欲しかったです。'][run]!), lex, legacy));
     expect(styleWarnings(summarize([l], samples).generators[0]!).map((w) => w.id)).toEqual(
-      expect.arrayContaining(['sameOpening', 'sameClaimOrder', 'sameSentenceCount', 'sameStructure']),
+      expect.arrayContaining(['sameStructure']),
     );
   });
 

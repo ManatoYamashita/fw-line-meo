@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { StructuredSurveyDefinition } from '@fwlm/db';
 import type { GenAiClient } from '../src/lib/draft/generator';
 import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
-import { evaluateStructuredDraft, gateFamily, readLegacyLexicons, readStructuredGateLexicon } from '../src/lib/draft/structured/gate';
+import { evaluateStructuredDraft, gateFamily, readLegacyLexicons, readStructuredGateLexicon, runtimeViolations } from '../src/lib/draft/structured/gate';
 import { createNaturalRealizer, gateInputOf } from '../src/lib/draft/structured/realizer';
 import { detectStyleIssues } from '../src/lib/draft/structured/style';
 import { unselectedTargetsOf } from '../src/lib/structured-answer';
@@ -399,5 +399,51 @@ describe('最終調整: 回答の項目どうしの因果・待ち時間の強�
       expect(detectStyleIssues(text, LEX), text).toContain('style:awkwardPhrase');
     }
     expect(detectStyleIssues('料理の量にも満足できました。ドリンクの種類はもう少し多いと嬉しかったです。', LEX)).toEqual([]);
+  });
+});
+
+describe('runtime hard gate は明確な捏造だけを止める（文章表現は Gemini に任せる・2026-10-11 の大幅簡素化）', () => {
+  const runtime = (m: StructuredDraftMaterial, draft: string) => runtimeViolations(gateInputOf(m), draft, LEX, LEGACY);
+  const SASHIMI_ID = 'a4390000-0000-4000-8000-0000000000c1';
+  const YAKITORI_ID = 'a4390000-0000-4000-8000-0000000000c2';
+  const volume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] };
+  const yakitoriVolume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', targetId: YAKITORI_ID, targetLabel: '焼き鳥5種盛り', facets: [{ code: 'volume', label: '量' }] };
+  const sashimiTaste = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI_ID, targetLabel: '刺身盛り合わせ', facets: [{ code: 'taste', label: '味' }] };
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const drinkVariety = { polarity: 'concern' as const, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] };
+  const reservation = { polarity: 'positive' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'reservation_ease', label: '予約のしやすさ' }] };
+  const entryWait = { polarity: 'positive' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] };
+
+  it('自由な自然表現は通る（Target 名・facet 名を出さない・まとめる・省略する）', () => {
+    const food = material({ selections: [volume, yakitoriVolume] });
+    expect(runtime(food, '料理はボリュームがあって満足できました。')).toEqual([]);
+    expect(runtime(food, '食事の量には満足しました。')).toEqual([]);
+    expect(runtime(material({ selections: [drinkVariety] }), 'ドリンクはもう少し選べると嬉しかったです。')).toEqual([]);
+    // 「気持ちよく」は接客の positive から導ける抽象的な主観（具体的な出来事・属性ではない）。
+    expect(runtime(material({ selections: [courtesy] }), '接客も良く、気持ちよく利用できました。')).toEqual([]);
+    const all = material({ selections: [volume, yakitoriVolume, courtesy, drinkVariety] });
+    expect(runtime(all, '料理はボリュームがあって満足できました。接客も良く、気持ちよく利用できました。ドリンクはもう少し選べると嬉しかったです。')).toEqual([]);
+    // 評価の offline gate（全 claim の回収・表面語）なら落ちる文でも、本番では作り直さない。
+    expect(families(all, '料理はボリュームがあって満足できました。接客も良く、気持ちよく利用できました。ドリンクはもう少し選べると嬉しかったです。')).not.toEqual([]);
+  });
+
+  it('待ち時間の positive は「スムーズに入店できた」「気にならなかった」まで自由、「すぐ入れた」など具体化は止める', () => {
+    const wait = material({ selections: [entryWait] });
+    expect(runtime(wait, 'スムーズに入店できました。')).toEqual([]);
+    expect(runtime(wait, '待ち時間は気になりませんでした。')).toEqual([]);
+    expect(runtime(wait, 'すぐ入れて良かったです。')).toContain('overstatement');
+  });
+
+  it('明確な捏造は止める: 新しい具体属性・勝手な因果・数字・来店の文脈', () => {
+    expect(runtime(material({ selections: [sashimiTaste] }), '刺身が新鮮でプリプリでした。')).toContain('newAttribute');
+    expect(runtime(material({ selections: [reservation, entryWait] }), '予約していたので待たずに入れました。')).toEqual(expect.arrayContaining(['cause', 'overstatement']));
+    expect(runtime(material({ selections: [entryWait] }), '20分ほど待ちましたが、入店までスムーズでした。')).toContain('ungrounded');
+    expect(runtime(material({ selections: [volume] }), '友人と利用しました。料理の量に満足できました。')).toContain('companion');
+  });
+
+  it('片側の完全な無視だけを止める（どの claim を述べたかは問わない）', () => {
+    const both = material({ selections: [volume, courtesy, drinkVariety] });
+    expect(runtime(both, '料理の量に満足でき、接客も良かったです。')).toContain('concernDropped');
+    expect(runtime(both, 'ドリンクはもう少し選べると嬉しかったですが、全体的に満足できました。')).toEqual([]);
   });
 });

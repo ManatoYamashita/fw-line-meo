@@ -89,10 +89,13 @@ describe('プロンプト', () => {
     expect(userContent).toContain('一言: 「おいしかった」');
     expect(userContent).not.toContain('気になったところ:');
     expect(userContent).not.toMatch(/[★☆]|星|満足度|全体の印象|海鮮食堂|taste|food|[0-9０-９]/);
-    // 中心の指示: 自然なです・ます調・箇条書きのように並べない・新しい具体的事実と因果を作らない。
-    expect(systemInstruction).toContain('一般の利用者が Google 口コミにそのまま投稿するような自然な日本語');
-    expect(systemInstruction).toContain('自然なです・ます調で書き、回答項目を箇条書きのようにそのまま並べず');
-    expect(systemInstruction).toContain('独立した回答同士を、勝手に因果関係として結ばないでください');
+    // 中心の指示だけ: 自然な口コミ・読み上げなくてよい・まとめや省略は自由・新しい具体的事実は作らない。
+    expect(systemInstruction).toContain('本人が Google 口コミにそのまま投稿するような自然な日本語の口コミを書いてください');
+    expect(systemInstruction).toContain('アンケート項目を一つずつ読み上げる必要はありません');
+    expect(systemInstruction).toContain('内容が近いものは自然にまとめたり、省略したりして構いません');
+    expect(systemInstruction).toContain('入力にない具体的な出来事、数量、原因、来店状況、料理や接客の具体属性を新しく作らないでください');
+    // 例文・文体指定・構成指定は置かない。
+    expect(systemInstruction).not.toMatch(/例:|です・ます調|体言止め|文体|組み立て/);
   });
 
   it('文体・組み立て・総評の抽選や、再生成で構成を変える指示は渡さない', () => {
@@ -334,7 +337,7 @@ describe('再生成は初回と同じ生成をもう一度行う（抽選も構�
   });
 });
 
-describe('factuality と style の分離（style の問題だけでは safe fallback へ落とさない）', () => {
+describe('文章は Gemini に任せ、明確な捏造だけを止める（style・claim ごとの coverage では作り直さない）', () => {
   // 実 Gemini で safe fallback へ落ちた回答（全体と Target の量・入店の待ち時間・接客の丁寧さが両面・料理の価格）。
   const YAKITORI = 'a4390000-0000-4000-8000-0000000000b5';
   const MIXED = material({
@@ -357,37 +360,33 @@ describe('factuality と style の分離（style の問題だけでは safe fall
     const { client } = fakeClient(GOOD);
     expect(await createNaturalRealizer(client, { onResult }).prepare(MIXED)).toEqual({ kind: 'draft', draft: GOOD, source: 'llm', attempts: 1 });
     expect(onResult).toHaveBeenCalledWith(
-      { result: 'llm', attempts: 1, acceptedAttempt: 1, history: [{ attempt: 1, generationFailed: false, factuality: [], style: [] }] },
+      { result: 'llm', attempts: 1, acceptedAttempt: 1, history: [{ attempt: 1, generationFailed: false, factuality: [] }] },
       6,
     );
   });
 
-  it('「満足できる内容」だけの問題は style として作り直し、3 回目も style だけなら 3 回目の LLM の文を返す（generation error にしない）', async () => {
-    const onRetry = vi.fn();
-    const onFailed = vi.fn();
-    const onResult = vi.fn();
-    const third = STYLE_ONLY.replace('入店までの待ち時間も少なく、', '待ち時間も少なく、');
-    const { client, requests } = fakeClient(STYLE_ONLY, STYLE_ONLY, third);
-    const result = await createNaturalRealizer(client, { onRetry, onFailed, onResult }).prepare(MIXED);
-    expect(result).toEqual({ kind: 'draft', draft: third, source: 'llm', attempts: 3 });
-    expect(onRetry).toHaveBeenCalledWith(['style:abstractEvaluation'], 6);
-    expect(requests[1]!.contents).toContain(RETRY_NOTES['style:abstractEvaluation']!);
-    expect(onFailed).not.toHaveBeenCalled();
-    expect(onResult.mock.calls[0]![0]).toMatchObject({ result: 'llm', attempts: 3, acceptedAttempt: 3 });
-  });
-
-  it('style だけの問題の文があれば、後の試行が factuality 違反・生成の失敗でも、その LLM の文を返す', async () => {
-    const { client } = fakeClient(STYLE_ONLY, CAUSE, new Error('503'));
-    expect(await createNaturalRealizer(client, {}).prepare(MIXED)).toEqual({ kind: 'draft', draft: STYLE_ONLY, source: 'llm', attempts: 3 });
-  });
-
-  it('同じ文末の羅列（「Xでした。Yでした。Zでした。」）も style の問題で、事実として安全なら fallback にしない', async () => {
+  it('style が好みでないだけ（満足できる内容・同じ文末の羅列）では作り直さず、1 回目の LLM の文を返す', async () => {
     const listy =
       '入店まではスムーズでした。焼き鳥5種盛りの量も満足でした。料理全体の量も満足でした。接客の丁寧さは良い点も気になる点もありました。料理の価格は気になりました。';
-    const onRetry = vi.fn();
-    const { client } = fakeClient(listy, listy, listy);
-    expect(await createNaturalRealizer(client, { onRetry }).prepare(MIXED)).toMatchObject({ source: 'llm', attempts: 3 });
-    expect(onRetry.mock.calls[0]![0]).toEqual(['style:repetitiveEnding']);
+    for (const draft of [STYLE_ONLY, listy]) {
+      const onRetry = vi.fn();
+      const { client, requests } = fakeClient(draft);
+      expect(await createNaturalRealizer(client, { onRetry }).prepare(MIXED), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
+      expect(onRetry).not.toHaveBeenCalled();
+      expect(requests).toHaveLength(1);
+    }
+  });
+
+  it('claim を個別に回収しなくてよい: Target 名や facet 名を出さずにまとめた自然な文も 1 回で通る', async () => {
+    for (const draft of [
+      '料理はボリュームがあって満足できました。入店もスムーズでした。ただ、接客には良い面も気になる面もあり、価格は少し高めに感じました。',
+      '食事の量には満足しました。接客は良いところと気になるところの両方があり、料理の値段は気になりました。',
+    ]) {
+      const onRetry = vi.fn();
+      const { client } = fakeClient(draft);
+      expect(await createNaturalRealizer(client, { onRetry }).prepare(MIXED), draft).toMatchObject({ kind: 'draft', draft, attempts: 1 });
+      expect(onRetry).not.toHaveBeenCalled();
+    }
   });
 
   it('原因の創作（予約のおかげか）は factuality 違反: 作り直し、3 回続けば generation error（fallback の文は返さない）', async () => {

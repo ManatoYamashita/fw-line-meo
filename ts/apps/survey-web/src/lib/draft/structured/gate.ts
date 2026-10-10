@@ -582,6 +582,56 @@ export function evaluateStructuredDraft(
 }
 
 /** 失格の種類を、分類つきのものは頭の名前へまとめる（集計の表の行）。 */
+/**
+ * 本番（runtime）で作り直しの引き金にする失格の種類（頭の名前）。**明確な捏造だけ** を止める（2026-10-11 の大幅簡素化）。
+ *   新しい具体的事実（属性・人物の様子・断定・回答に無い料理名）・数字や日時や固有名詞・来店の文脈・勝手な因果・
+ *   exact overlap の理由・明確な極性の反転・回答より強い具体化（待ち時間ゼロ）・意向（再訪・推奨・期待）・誇張の強度
+ * 本番で **見ない** もの（評価の offline gate と診断だけが使う）: 未回答の facet / カテゴリの語（「注文」「席」など表面語で
+ * 拾うので自然な言い換えを弾く）・Target 名の欠落・claim ごとの coverage（各 claim を文章で個別に回収することは
+ * 求めない）・style。片側の欠落は runtimeViolations が下書き全体の極性だけでゆるく見る。
+ */
+export const RUNTIME_HARD_KINDS: ReadonlySet<string> = new Set([
+  'newAttribute',
+  'ungrounded',
+  'timing',
+  'companion',
+  'visitContext',
+  'cause',
+  'commentLinkage',
+  'overlapReason',
+  'polarityReversal',
+  'overstatement',
+  'unselectedTarget',
+  'revisit',
+  'recommendation',
+  'expectation',
+  'intensity',
+  'absence',
+]);
+
+/**
+ * 本番の runtime hard gate。evaluateStructuredDraft の失格のうち RUNTIME_HARD_KINDS だけを返し、片側の欠落は
+ * **下書き全体** にその極性の手がかりが 1 つも無いときだけ数える（どの claim を述べたかは問わない。positive と concern の
+ * 両方を回答したのに、どちらかを完全に無視した下書きだけを止める）。返すのは頭の名前の重複なしの一覧。
+ */
+export function runtimeViolations(
+  c: StructuredGateInput,
+  draft: string,
+  lex: StructuredGateLexicon,
+  legacy: LegacyLexicons,
+): string[] {
+  const kinds = new Set(
+    evaluateStructuredDraft(c, draft, lex, legacy)
+      .findings.map((f) => gateFamily(f.kind))
+      .filter((k) => RUNTIME_HARD_KINDS.has(k)),
+  );
+  const claims = claimsOf(c);
+  for (const p of POLARITIES) {
+    if (claims.some((cl) => cl.polarity === p) && firstMatch(draft, lex.polarityCues[p]) === null) kinds.add(`${p}Dropped`);
+  }
+  return [...kinds];
+}
+
 export function gateFamily(kind: string): string {
   const i = kind.indexOf(':');
   return i < 0 ? kind : kind.slice(0, i);

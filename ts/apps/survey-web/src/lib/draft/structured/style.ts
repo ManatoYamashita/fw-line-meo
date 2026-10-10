@@ -1,12 +1,10 @@
 import { splitSentences, type StructuredGateLexicon } from './gate';
 
-// structured の下書きの style check（自然さ）。**factuality の hard gate とは分ける。**
+// structured の下書きの style check（自然さ）。**診断用（評価・単体テスト）で、本番の作り直しの引き金にはしない**（2026-10-11 の大幅簡素化）。
 //
 // hard gate（gate.ts）は「事実として言ってはいけないこと」を止める。ここは事実としては安全だが不自然な言い方
-// （「満足できる内容でした」・同じ文末の羅列）を拾う。扱いの違い:
-//   1〜2 回目: factuality NG でも style NG でも作り直す（style の注意だけを足すこともある）
-//   3 回目まで両方 OK の文が無ければ: style NG だけの文（事実として安全）を返す。それも無ければ generation error
-// 「少し不自然だが事実として安全な LLM の文」は、決定的な定型より自然なことが多い。style だけを理由に下書きを捨てない。
+// （「満足できる内容でした」・同じ文末の羅列）を拾う。本番は style では作り直さず、事実として安全な LLM の文をそのまま
+// 返す（日本語として多少好みでない文でも、Gemini 自身の文章を優先する）。
 //
 // 種類（頭に `style:` を付けて、作り直し・結果の記録に載せる。本文は載せない）:
 //   abstractEvaluation  「満足できる内容」「満足できるもの」「良い内容」（語彙は lexicon.json の aiish.naiyou・診断と同じ）

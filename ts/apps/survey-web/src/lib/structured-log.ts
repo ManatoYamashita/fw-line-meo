@@ -115,7 +115,7 @@ export function logStructuredDraftRetry(log: SurveyLogger, kinds: readonly strin
 /**
  * structured の下書きの最終の結果を記録する（**ローカル検証用**・`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ配線する）。
  * reason は `<llm|generation_error>:attempts=<n>:accepted=<n|none>` の決まった形。residualClaims は試行ごとの種類
- * （`a1=cause+style:abstractEvaluation;a2=generation;a3=ok`）。下書き・一言・料理名は載せない。
+ * （`a1=cause+timing;a2=generation;a3=ok`）。下書き・一言・料理名は載せない。
  */
 export function logStructuredDraftResult(
   log: SurveyLogger,
@@ -127,14 +127,13 @@ export function logStructuredDraftResult(
       readonly attempt: number;
       readonly generationFailed: boolean;
       readonly factuality: readonly string[];
-      readonly style: readonly string[];
     }[];
   },
   claimCount: number,
 ): void {
   const history = outcome.history
     .map((h) => {
-      const kinds = h.generationFailed ? ['generation'] : [...[...h.factuality].sort(), ...[...h.style].sort()];
+      const kinds = h.generationFailed ? ['generation'] : [...h.factuality].sort();
       return `a${h.attempt}=${kinds.length === 0 ? 'ok' : kinds.join('+')}`;
     })
     .join(';');

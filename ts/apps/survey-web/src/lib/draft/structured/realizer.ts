@@ -2,16 +2,14 @@ import type { GenAiClient, GenAiResponse } from '../generator';
 import type { StructuredDraftMaterial, StructuredDraftPort, StructuredDraftResult } from '../structured-draft';
 import { compileStructuredClaims, type StructuredClaim } from './claims';
 import {
-  evaluateStructuredDraft,
-  gateFamily,
   readLegacyLexicons,
+  runtimeViolations,
   readStructuredGateLexicon,
   type LegacyLexicons,
   type StructuredGateInput,
   type StructuredGateLexicon,
 } from './gate';
 import { buildRealizerPrompt, RETRY_NOTES } from './prompt';
-import { detectStyleIssues } from './style';
 import lexiconRaw from './lexicon.json';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。structured の回答から、事実の境界を claim に固定したうえで、
@@ -19,14 +17,13 @@ import lexiconRaw from './lexicon.json';
 // 決定的な safe fallback（fallback.ts）は本番の応答では使わない（単体テスト・内部の診断・将来の非常用に限る）。
 //
 //   compileStructuredClaims（決定的）
-//   → 生成（最大 MAX_ATTEMPTS = 3 回）→ factuality の hard gate（gate.ts・評価と同じ物差し）と style check（style.ts）
-//       両方 OK            → その下書き
-//       factuality NG       → 違反の種類に応じた決まった注意を足して作り直す
-//       style だけ NG       → 作り直す（その文は「事実として安全な候補」として覚えておく）
+//   → 生成（最大 MAX_ATTEMPTS = 3 回）→ runtime hard gate（gate.ts の runtimeViolations）
+//       OK                 → その下書き（言い回し・構成・どの項目をどうまとめたかは問わない）
+//       明確な捏造         → 違反の種類に応じた決まった注意を足して作り直す
 //       生成そのものの失敗 → 同じ注意のまま作り直す
-//   最後まで両方 OK の文が無ければ、事実として安全な候補（style だけの問題の文・最も新しいもの）を返す。
-//   候補も無ければ generation error（{ kind: 'failed' }）。**safe fallback の文を下書きとして返さない。**
-// 優先順位は 1. 事実として安全 2. できれば自然 3. 決定的な定型は出さない。
+//   3 回とも使えなければ generation error（{ kind: 'failed' }）。**safe fallback の文を下書きとして返さない。**
+// 文章は Gemini に任せ、コードは明確な捏造だけを止める（2026-10-11 の大幅簡素化）。style（言い回しの好み）や
+// claim ごとの coverage では作り直さない（それらは評価の診断だけが見る）。
 //
 // 「hard gate を通った = 完全に事実どおり」とは扱わない（語彙の判定は違反の下限）。評価（eval/structured）で
 // 通常生成の残差（事実性と自然さ）を測る。
@@ -95,7 +92,6 @@ export interface AttemptRecord {
   /** 生成そのものの失敗（API・安全性・形式・空）。 */
   readonly generationFailed: boolean;
   readonly factuality: readonly string[];
-  readonly style: readonly string[];
 }
 
 export interface RealizerOutcome {
@@ -159,12 +155,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       if (claims.length === 0) return { kind: 'unavailable' };
       const comment = material.comment !== undefined && material.comment.trim() !== '' ? material.comment : undefined;
       const input = gateInputOf(material);
-      const factualityKinds = (draft: string) => [
-        ...new Set(evaluateStructuredDraft(input, draft, lexicon, legacy).findings.map((f) => gateFamily(f.kind))),
-      ];
       const history: AttemptRecord[] = [];
-      // 事実として安全だが style の問題が残った文（最も新しいもの）。最後まで両方 OK の文が無ければこれを返す。
-      let safe: { draft: string; attempt: number } | null = null;
       let notes: string[] = [];
       const accept = (draft: string, attempt: number) => {
         options.onResult?.({ result: 'llm', attempts: history.length, acceptedAttempt: attempt, history }, claims.length);
@@ -174,22 +165,18 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const draft = await generate(claims, comment, notes);
         if (draft === null) {
-          history.push({ attempt, generationFailed: true, factuality: [], style: [] });
+          history.push({ attempt, generationFailed: true, factuality: [] });
           if (attempt < MAX_ATTEMPTS) options.onRetry?.(['generation'], claims.length);
           continue;
         }
-        const factuality = factualityKinds(draft);
-        const style = detectStyleIssues(draft, lexicon, comment);
-        history.push({ attempt, generationFailed: false, factuality, style });
-        if (factuality.length === 0 && style.length === 0) return accept(draft, attempt);
-        if (factuality.length === 0) safe = { draft, attempt };
+        const factuality = runtimeViolations(input, draft, lexicon, legacy);
+        history.push({ attempt, generationFailed: false, factuality });
+        if (factuality.length === 0) return accept(draft, attempt);
         if (attempt < MAX_ATTEMPTS) {
-          const kinds = [...factuality, ...style];
-          options.onRetry?.(kinds, claims.length);
-          notes = kinds.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
+          options.onRetry?.(factuality, claims.length);
+          notes = factuality.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
         }
       }
-      if (safe !== null) return accept(safe.draft, safe.attempt);
 
       // 下書きを作れなかった（generation error）。safe fallback の文は返さない。
       const lastFactuality = [...history].reverse().find((h) => !h.generationFailed)?.factuality ?? [];

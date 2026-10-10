@@ -12,6 +12,7 @@ import {
   evaluateStructuredDraft,
   exactOverlaps,
   gateFamily,
+  runtimeViolations,
   type GateFinding,
   type LegacyLexicons,
   type StructuredEvalCase,
@@ -36,6 +37,11 @@ export interface StructuredEvalSample {
   readonly source: DraftSource | null;
   readonly attempts: number;
   readonly evaluation: StructuredEvaluation | null;
+  /**
+   * release の判定に使う明確な捏造（本番の runtime hard gate の種類を、固定ケースの言い方つきで判定したもの）と
+   * ケース固有の禁止の意味。片側の完全な無視（positiveDropped / concernDropped）もここに入る。
+   */
+  readonly release: readonly string[] | null;
   readonly diagnostics: DraftDiagnostics | null;
 }
 
@@ -56,6 +62,15 @@ export function recordSample(
     source: generated.source,
     attempts: generated.attempts,
     evaluation: draft === null ? null : evaluateStructuredDraft(c, draft, lex, legacy),
+    release:
+      draft === null
+        ? null
+        : [
+            ...new Set([
+              ...runtimeViolations(c, draft, lex, legacy),
+              ...evaluateStructuredDraft(c, draft, lex, legacy).findings.map((f) => gateFamily(f.kind)).filter((k) => k === 'caseForbidden'),
+            ]),
+          ],
     diagnostics: draft === null ? null : diagnoseDraft(c, draft, lex),
   };
 }
@@ -69,7 +84,10 @@ export interface GeneratorSummary {
   readonly fallback: number;
   /** 1 回目が runtime hard gate を通らず作り直した本数（LLM を 2 回呼んだ）。 */
   readonly retried: number;
-  /** offline eval gate を 1 つでも落とした本数と率（作れた下書きが母数）。 */
+  /** 明確な捏造（release の判定）があった本数と、片側を完全に無視した本数。 */
+  readonly fabricated: number;
+  readonly sideDropped: number;
+  /** offline eval gate（claim ごとの coverage・表面語を含む全部）を 1 つでも落とした本数と率。**診断**（release の条件にしない）。 */
   readonly hardFailed: number;
   readonly hardFailRate: number;
   /** 失格の種類（分類は頭の名前へまとめる）ごとの本数。 */
@@ -142,6 +160,8 @@ export function summarize(cases: readonly StructuredEvalCase[], samples: readonl
         samples: mine.length,
         missing: mine.length - made.length,
         fallback: made.filter((s) => s.source === 'fallback').length,
+        fabricated: made.filter((s) => s.release!.some((k) => k !== 'positiveDropped' && k !== 'concernDropped')).length,
+        sideDropped: made.filter((s) => s.release!.some((k) => k === 'positiveDropped' || k === 'concernDropped')).length,
         retried: made.filter((s) => s.attempts >= 2).length,
         hardFailed: failed.length,
         hardFailRate: ratio(failed.length, made.length),
@@ -179,19 +199,15 @@ export interface SuccessCheck {
  */
 export function successChecks(production: GeneratorSummary): SuccessCheck[] {
   const made = production.samples - production.missing;
-  const d = production.diagnostics;
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
-  const rate = (n: number) => (made === 0 ? 0 : n / made);
-  const r = (k: string) => d.rates[k] ?? 0;
+  const errorRate = production.samples === 0 ? 0 : production.missing / production.samples;
+  // release の条件は「明確な捏造が無い」「片側を完全に落としていない」「下書きを作れている」だけ。claim ごとの coverage と
+  // style は条件にしない（診断・styleWarnings で見る）。自然さの最終判断は人手の採点。
   return [
-    { id: 'factuality', label: 'offline eval gate の失格（runtime を通った最終の下書きの残差）', value: `${production.hardFailed}/${made}`, threshold: '0 件', passed: production.hardFailed === 0 },
+    { id: 'fabrication', label: '明確な捏造（新しい具体的事実・数字・来店の文脈・勝手な因果・極性の反転など）', value: `${production.fabricated}/${made}`, threshold: '0 件', passed: production.fabricated === 0 },
     { id: 'overlapReason', label: 'exact overlap の理由の創作', value: `${production.overlapReason.failed}/${production.overlapReason.of}`, threshold: '0 件', passed: production.overlapReason.failed === 0 },
-    { id: 'fallbackRate', label: 'safe fallback に落ちた率', value: pct(rate(production.fallback)), threshold: '≤ 10%', passed: rate(production.fallback) <= 0.1 },
-    { id: 'fallbackLike', label: '通常生成の文が safe fallback 風（「〜良かったです。〜気になりました。」の羅列）', value: pct(r('fallbackLike')), threshold: '≤ 5%', passed: r('fallbackLike') <= 0.05 },
-    { id: 'checklistLike', label: '3 主題以上を入力の順に 1 文 1 主題で読み上げた', value: pct(r('checklistLike')), threshold: '≤ 10%', passed: r('checklistLike') <= 0.1 },
-    { id: 'sameEndingRun3', label: '同じ文末が 3 文続いた', value: pct(r('sameEndingRun3')), threshold: '≤ 5%', passed: r('sameEndingRun3') <= 0.05 },
-    { id: 'length', label: '1 claim あたりの平均字数 / 最長', value: `${d.meanCharsPerClaim.toFixed(0)} 字 / ${d.maxChars} 字`, threshold: '≤ 45 字 / ≤ 250 字', passed: d.meanCharsPerClaim <= 45 && d.maxChars <= 250 },
-    { id: 'duplicates', label: '同じケースの再生成が完全一致した組', value: `${production.regeneration.exactDuplicatePairs}/${production.regeneration.pairs}`, threshold: '0 組', passed: production.regeneration.exactDuplicatePairs === 0 },
+    { id: 'sideDropped', label: 'positive / concern の片側を完全に無視した', value: `${production.sideDropped}/${made}`, threshold: '0 件', passed: production.sideDropped === 0 },
+    { id: 'generationErrors', label: '下書きを作れなかった（generation error）率', value: pct(errorRate), threshold: '≤ 10%', passed: errorRate <= 0.1 },
   ];
 }
 
@@ -215,14 +231,18 @@ export function styleWarnings(summary: GeneratorSummary): StyleWarning[] {
   const s = summary.structure;
   const share = (n: number) => (s.cases === 0 ? 0 : n / s.cases);
   const fmt = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const d = summary.diagnostics;
   const candidates: (StyleWarning & { readonly over: boolean })[] = [
+    { id: 'fallbackLike', label: '通常生成の文が safe fallback 風（「〜良かったです。〜気になりました。」の羅列）', value: fmt(r('fallbackLike')), threshold: '≤ 5%', over: r('fallbackLike') > 0.05 },
+    { id: 'checklistLike', label: '3 主題以上を入力の順に 1 文 1 主題で読み上げた', value: fmt(r('checklistLike')), threshold: '≤ 10%', over: r('checklistLike') > 0.1 },
+    { id: 'sameEndingRun3', label: '同じ文末が 3 文続いた', value: fmt(r('sameEndingRun3')), threshold: '≤ 5%', over: r('sameEndingRun3') > 0.05 },
+    { id: 'length', label: '1 claim あたりの平均字数 / 最長', value: `${d.meanCharsPerClaim.toFixed(0)} 字 / ${d.maxChars} 字`, threshold: '≤ 45 字 / ≤ 250 字', over: d.meanCharsPerClaim > 45 || d.maxChars > 250 },
+    { id: 'duplicates', label: '同じケースの再生成が完全一致した組', value: `${summary.regeneration.exactDuplicatePairs}/${summary.regeneration.pairs}`, threshold: '0 組', over: summary.regeneration.exactDuplicatePairs > 0 },
     { id: 'overallClosing', label: '星を渡しうるケースで総評の句（全体として・全体的に・総じて）が付いた率', value: fmt(r('overallClosingStarred')), threshold: '≤ 50%', over: r('overallClosingStarred') > 0.5 },
     { id: 'abstractEvaluation', label: '「満足できる内容」「満足できるもの」のような抽象語のまとめ', value: fmt(r('abstractEvaluation')), threshold: '≤ 5%', over: r('abstractEvaluation') > 0.05 },
     { id: 'dakeWithMultipleConcerns', label: '気になったことが 2 つ以上あるのに「〜だけ」', value: fmt(r('dakeWithMultipleConcerns')), threshold: '0%', over: r('dakeWithMultipleConcerns') > 0 },
-    { id: 'sameOpening', label: '再生成の書き出しがすべて同じだったケース', value: `${s.sameOpening}/${s.cases}`, threshold: '≤ 50%', over: share(s.sameOpening) > 0.5 },
-    { id: 'sameClaimOrder', label: '再生成の主題の順がすべて同じだったケース', value: `${s.sameClaimOrder}/${s.cases}`, threshold: '≤ 50%', over: share(s.sameClaimOrder) > 0.5 },
-    { id: 'sameSentenceCount', label: '再生成の文の数がすべて同じだったケース', value: `${s.sameSentenceCount}/${s.cases}`, threshold: '≤ 70%', over: share(s.sameSentenceCount) > 0.7 },
-    { id: 'sameStructure', label: '再生成の文の組み立て（文ごとの主題）がすべて同じだったケース', value: `${s.sameStructure}/${s.cases}`, threshold: '≤ 30%', over: share(s.sameStructure) > 0.3 },
+    // 再生成は同じ生成をもう一度行うだけなので、構成が似ること自体は問題にしない（目安は緩めに置く）。
+    { id: 'sameStructure', label: '再生成の文の組み立て（文ごとの主題）がすべて同じだったケース', value: `${s.sameStructure}/${s.cases}`, threshold: '≤ 80%', over: share(s.sameStructure) > 0.8 },
   ];
   return candidates.filter((c) => c.over).map((c) => ({ id: c.id, label: c.label, value: c.value, threshold: c.threshold }));
 }
@@ -250,7 +270,7 @@ export function formatSummary(summary: StructuredEvalSummary): string {
   return [
     `ケース ${summary.cases} 件・claim ${summary.claims} 件`,
     '',
-    '| 対象 | 生成できた本数 | safe fallback | 作り直し | offline eval gate の失格 | exact overlap の理由 | claim の coverage | 平均字数 | 平均文数 | 再生成の類似度 |',
+    '| 対象 | 生成できた本数 | safe fallback | 作り直し | offline eval gate の失格（診断） | exact overlap の理由 | claim の coverage（診断） | 平均字数 | 平均文数 | 再生成の類似度 |',
     '|---|---|---|---|---|---|---|---|---|---|',
     ...rows,
     '',

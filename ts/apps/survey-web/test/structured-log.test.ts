@@ -146,21 +146,21 @@ describe('structured の下書きの作り直し・generation error', () => {
         attempts: 3,
         acceptedAttempt: 3,
         history: [
-          { attempt: 1, generationFailed: false, factuality: ['cause', 'ungrounded'], style: ['style:abstractEvaluation'] },
-          { attempt: 2, generationFailed: true, factuality: [], style: [] },
-          { attempt: 3, generationFailed: false, factuality: [], style: [] },
+          { attempt: 1, generationFailed: false, factuality: ['cause', 'ungrounded'] },
+          { attempt: 2, generationFailed: true, factuality: [] },
+          { attempt: 3, generationFailed: false, factuality: [] },
         ],
       },
       6,
     );
     logStructuredDraftResult(
       writeStructuredLog,
-      { result: 'generation_error', attempts: 3, acceptedAttempt: null, history: [1, 2, 3].map((attempt) => ({ attempt, generationFailed: false, factuality: ['cause'], style: [] })) },
+      { result: 'generation_error', attempts: 3, acceptedAttempt: null, history: [1, 2, 3].map((attempt) => ({ attempt, generationFailed: false, factuality: ['cause'] })) },
       6,
     );
     expect(info).toHaveBeenNthCalledWith(
       1,
-      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'a1=cause+ungrounded+style:abstractEvaluation;a2=generation;a3=ok', claimCount: 6, reason: 'llm:attempts=3:accepted=3' }),
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'a1=cause+ungrounded;a2=generation;a3=ok', claimCount: 6, reason: 'llm:attempts=3:accepted=3' }),
     );
     expect(info).toHaveBeenNthCalledWith(
       2,
