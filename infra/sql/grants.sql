@@ -32,8 +32,10 @@
 --     summary_deliveries のみ（INSERT で retry_key 付き予約、UPDATE で結果記録。
 --     DELETE は行わない = パージ対象外。ts/apps/delivery-job/src/deliveries.ts 参照）
 --   TS 詳細閲覧（store_detail・competitive-daily-summary・task 6.2 で SA を Terraform 実体化）→
---     読取専用（DML なし）。ID トークン検証済みの自店データのみを API 層で絞り込む
---     （閲覧専用画面・design.md「書込操作を一切持たない」）
+--     詳細データは読取専用（DML なし）。ID トークン検証済みの自店データのみを API 層で絞り込む
+--     （閲覧画面・design.md「書込操作を一切持たない」）。**例外は店舗オーナーのアンケート設定だけ**
+--     （Issue #437）: store_survey_configs / store_survey_category_settings / store_survey_targets へ
+--     列を絞った INSERT・UPDATE と、audit_logs への列を絞った INSERT。DELETE は無い
 --   TS 客向けアンケート Web（survey_web）だけ → 列を絞った INSERT と UPDATE (count) on
 --     survey_structured_material_tallies（structured survey 0015・素材の厚みの匿名集計・Issue #436）。
 --     **既存の tallies の 3 SA 一律付与を写さない。** 書くのは客向けアンケート Web だけで、加算は UPSERT
@@ -42,9 +44,8 @@
 --   categories, survey_aspects, survey_categories, survey_facets, survey_category_facets は
 --     seed 所有 → runtime は read のみ（後 3 表は structured survey の taxonomy・0015）
 --   store_survey_configs, store_survey_category_settings, store_survey_targets（structured survey の
---     店舗別設定・0015）は TS 層の書込所有だが、**書込面（店舗オーナーが書く SA）は #437 で決める。**
---     それまでどの SA にも DML を付与しない（SELECT のみ）。db/test/check_docs.sh の
---     PENDING_WRITE_GRANTS が、ここへ DML が紛れ込んだら赤にする
+--     店舗別設定・0015）は TS 層の書込所有で、**書くのは store_detail だけ**（Issue #437・上の例外）。
+--     他の SA へは DML を付与しない（客向けアンケート Web も店舗設定を書けない）
 --   読み取りは全層に許容 → 全 SA が全テーブルを SELECT 可
 
 \if :{?project}
@@ -130,6 +131,44 @@ GRANT
   ON survey_structured_material_tallies
   TO :"survey";
 
--- store_detail（閲覧専用）は上記 SELECT ON ALL TABLES 以外の DML を一切付与しない。
+-- structured survey の店舗設定（Issue #437・0015 の店舗設定 3 表）。書くのは店舗オーナーの LIFF 面
+-- （store-detail）だけで、オーナーが自店の設定画面から料理名・ドリンク名と予約・来店の表示を変える。
+-- **store-detail に与える書込はここと、下の監査記録の追記だけである。** stores・owners・評価や集計の表・
+-- taxonomy（survey_categories / survey_facets / survey_category_facets）へは何も与えない。
+-- 列を絞り、ts/packages/db/src/survey-settings.ts が書く列と操作だけを与える:
+--   store_survey_configs: 行の作成（store_id だけ・他は既定値）と、版の加算（revision, updated_at）。
+--     **structured_enabled は書けない**（客向けの structured の画面が接続されるまで、オーナーは切り替えない）。
+--   store_survey_category_settings: 行の作成と、表示の切り替え（enabled）。並び順は書き換えない。
+--   store_survey_targets: 行の作成（id・active・時刻は既定値）と、名前・表示・並び順の変更。
+--     store_id・category_code は書き換えない（他店・別カテゴリへ移せない）。
+-- DELETE はどの表にも与えない（Target は active = false で非表示にし、行を消さない）。
+-- ON CONFLICT・FOR UPDATE が要る SELECT は上の全表 SELECT で足りる（FOR UPDATE は UPDATE の列権限も要る）。
+-- 主体・列ごとの有無は db/test/check_structured_survey_privileges.sh が実ロールで検証し、
+-- ts/packages/db/test/survey-settings-privileges.db.test.ts がこのファイルの付与だけで実際の DAL が動くことを確かめる。
+GRANT
+  INSERT (store_id),
+  UPDATE (revision, updated_at)
+  ON store_survey_configs
+  TO :"detail";
+GRANT
+  INSERT (store_id, category_code, enabled, sort_order),
+  UPDATE (enabled)
+  ON store_survey_category_settings
+  TO :"detail";
+GRANT
+  INSERT (store_id, category_code, label, sort_order),
+  UPDATE (label, active, sort_order, updated_at)
+  ON store_survey_targets
+  TO :"detail";
+
+-- 店舗オーナーの設定変更の監査記録（Issue #437）。上の line_webhook・dashboard と同じく追記だけを与え、
+-- UPDATE・DELETE は与えない。id は既定値に任せる。
+GRANT
+  INSERT (actor_type, actor_id, action, target_type, target_id, occurred_at)
+  ON audit_logs
+  TO :"detail";
+
+-- store_detail は、上の SELECT ON ALL TABLES と、アンケート設定 3 表・監査記録への列を絞った書込の
+-- ほかに DML を一切付与しない（詳細データの閲覧面は引き続き読取専用）。
 
 COMMIT;

@@ -156,7 +156,9 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `store-detail.config_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.pool_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.query_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
-| `store-detail.store_hint_ignored` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
+| `store-detail.store_hint_ignored` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | アンケート設定 API（`ts/apps/store-detail/lib/survey-settings-api.ts`・Issue #437）も、認可済み集合の外のヒントを無視したときに同じ事象名・同じ項目で出す |
+| `store-detail.survey_settings_error` | store-detail | 新規 | `ts/apps/store-detail/lib/survey-settings-api.ts` | アンケート設定 API（Issue #437）の 500。設定の欠落・接続の失敗（`ts/apps/store-detail/lib/survey-settings-route.ts`）と、読み書きの失敗をまとめる。項目は `errorKind` と、設定の欠落のときの `configKey` だけである（料理名・ドリンク名・入力値は載せない） |
+| `store-detail.audit_log_failed` | store-detail | 新規 | `ts/apps/store-detail/lib/survey-settings-api.ts` | 店舗オーナーのアンケート設定の変更（Issue #437）の監査記録（`audit_logs`）の書込の失敗。設定の変更は巻き戻さず、応答も変更の結果どおりに返す（`dashboard-api.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 | `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している。**変更禁止**: トークン発行が通った実行でしか出ないため、本番の集計指標がこの文字列で LINE の資格情報の生死を数える（`infra/modules/guardrails/main.tf` の `line_token_issued_runs`・Issue #139） |
 | `delivery-job.token_issue_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | LINE のトークン発行に失敗したとき（Issue #139）。直後に `delivery-job.fatal` も出るが、そちらは対象抽出（DB）の失敗と同じ事象名なので LINE の失敗だけを数えられない。**変更禁止**: 本番の集計指標がこの文字列で絞り込む（`line_token_issue_failures`）。項目は `errorKind` と、状態コードがあれば `status` だけである |
 | `daily-batch.run` | daily-batch | 新規 | `go/cmd/daily-batch/main.go` | 日次バッチの実行サマリー行（Issue #139）。**変更禁止**: 本番の集計指標がこの文字列と `fetch_ok` / `stores_total` で Places の生死を数える（`places_fetch_ok_runs` / `places_fetch_eligible_runs`） |

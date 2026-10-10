@@ -3,6 +3,8 @@ export * from './pool.js';
 export * from './stores.js';
 export * from './aspects.js';
 export * from './survey-definition.js';
+export * from './survey-settings.js';
+export * from './survey-settings-rules.js';
 export * from './dashboard-users.js';
 export * from './tallies.js';
 export * from './delivery-settings.js';

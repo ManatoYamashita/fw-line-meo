@@ -19,9 +19,9 @@
 | `survey_material_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（素材の厚み＝良かった点の選択数・気になった点の選択数・一言の有無の匿名集計加算・`0006`／`0008`） |
 | `survey_review_link_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（投稿導線の押下件数の匿名集計加算。下書き画面の押下のうち sessionToken で検証できたものだけ・`0014`・Issue #401）。読むのは dashboard-api の QR パネルの実績だけ |
 | `survey_structured_material_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（structured survey の素材の厚み＝極性ごとのグループ数・Target を指すグループ数・facet 数・一言の有無の匿名集計加算・`0015`・Issue #436）。legacy の `survey_material_tallies` を読み替えない。星は `survey_rating_tallies` を共通に使う。**DML は客向けアンケート Web の SA（`sa-survey-web`）の INSERT（書く列だけ）と count 列の UPDATE だけ**（既存 tallies の 3 SA 一律付与を写さない・`db/test/check_structured_survey_privileges.sh`） |
-| `store_survey_configs` | TS リアルタイム応答層 | structured survey の店舗別設定のルート（`0015`・Issue #436）。行なし・`structured_enabled = false` は legacy survey。`revision` は設定の変更と同じトランザクションで +1 する。**書込面（店舗オーナーが書く SA と経路）は #437 で決め、それまでどの SA にも DML を付与しない**（`check_docs.sh` の `PENDING_WRITE_GRANTS`）。客向けアンケート Web は read のみ |
-| `store_survey_category_settings` | TS リアルタイム応答層 | カテゴリの表示 / 非表示・並び順の店舗別 override（`0015`・Issue #436）。行なしは `survey_categories` の既定。**書込面は #437 で決め、それまでどの SA にも DML を付与しない**。客向けアンケート Web は read のみ |
-| `store_survey_targets` | TS リアルタイム応答層 | 店舗自身が登録する料理名・ドリンク名（`0015`・Issue #436）。identity は UUID、非表示は `active = false` の soft delete。客の回答から自動登録しない。**書込面は #437 で決め、それまでどの SA にも DML を付与しない**。客向けアンケート Web は read のみ |
+| `store_survey_configs` | TS リアルタイム応答層 | structured survey の店舗別設定のルート（`0015`・Issue #436）。行なし・`structured_enabled = false` は legacy survey。`revision` は設定の変更と同じトランザクションで +1 する。**書くのは店舗オーナーの LIFF 面（store-detail の SA）だけ**（#437）。DML は行の作成（`store_id` だけ）と版の加算（`revision`・`updated_at`）に列を絞り、`structured_enabled` は書けない。客向けアンケート Web は read のみ |
+| `store_survey_category_settings` | TS リアルタイム応答層 | カテゴリの表示 / 非表示・並び順の店舗別 override（`0015`・Issue #436）。行なしは `survey_categories` の既定。**書くのは store-detail の SA だけ**（#437）で、行の作成と `enabled` の更新に列を絞る（並び順は書き換えない）。客向けアンケート Web は read のみ |
+| `store_survey_targets` | TS リアルタイム応答層 | 店舗自身が登録する料理名・ドリンク名（`0015`・Issue #436）。identity は UUID、非表示は `active = false` の soft delete。客の回答から自動登録しない。**書くのは store-detail の SA だけ**（#437）で、行の作成と名前・表示・並び順の更新に列を絞る（`store_id`・`category_code` は書き換えない・DELETE なし）。非表示の同名を追加すると、その行を再表示して UUID を引き継ぐ。客向けアンケート Web は read のみ |
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
 | `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`／`line-on-demand-report`: TS 配信ジョブの通知記録。店舗×日の 1 行に、送った結果だけでなく送らなかった理由（`skipped_*`）も記録する・`retry_key` で冪等再送（`0004`・status の 7 値は `0010`） |
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
@@ -55,7 +55,11 @@
 - `audit_logs` の書込は業務の書込を確定した**後**に行い、**失敗しても業務の書込を巻き戻さず、応答も
   業務の結果どおりに返す**（Issue #250 で案 A に決定）。失敗は警告として構造化ログへ残す
   （dashboard-api は `dashboard-api.audit_log_failed`・`ts/apps/dashboard-api/src/audit.ts`、line-webhook は
-  `line-webhook.audit_log_failed`・`ts/apps/line-webhook/src/owner/completed-menu.ts`）。
+  `line-webhook.audit_log_failed`・`ts/apps/line-webhook/src/owner/completed-menu.ts`、store-detail は
+  `store-detail.audit_log_failed`・`ts/apps/store-detail/lib/survey-settings-api.ts`）。
+  - store-detail（Issue #437）が書くのは、店舗オーナーが自店のアンケート設定を変えた操作だけである
+    （`survey_target_*`・`survey_targets_reordered`・`survey_category_visibility_updated`、対象は店舗）。
+    **料理名・ドリンク名は監査記録へ写さない**（`audit_logs` に payload の列は無く、変化の種類を action の名前に持たせる）。
   - 理由: 業務の書込は別の接続で確定済みなので、エラーを返すと「書込は成功・監査は欠ける・応答はエラー」になり、
     押し直した利用者が代理店や招待コードを重複して作る（`agencies` に名前の一意制約は無く、招待コードは発行のたびに
     別のコードになる）。2 つの実行面の規則も揃う。

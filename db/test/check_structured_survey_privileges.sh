@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# structured survey の表の書込権限の検証（Issue #436・0015）。
+# structured survey の表の書込権限の検証（Issue #436・0015／店舗設定の書込面は Issue #437）。
 #
 # 新しい 7 表は、既存の表の「TS 層の 3 SA へ一律に DML」という付与を写さず、**今書く主体 × 今要る操作**
 # だけを与える。どの主体が何を書けるかを、grants.sql を実ロールへ適用して has_table_privilege で問う
@@ -16,9 +16,14 @@
 #   survey_categories / survey_facets / survey_category_facets（taxonomy・seed が SoT）
 #     - 全 6 SA: INSERT・UPDATE・DELETE のいずれも無い
 #   store_survey_configs / store_survey_category_settings / store_survey_targets（店舗設定）
-#     - 全 6 SA: INSERT・UPDATE・DELETE のいずれも無い。店舗オーナーの書込面は Issue #437 で
-#       store-detail SA へ限定して足す。そのときこの期待もその PR で改める
+#     - detail（店舗オーナーの LIFF 面・Issue #437）: ts/packages/db/src/survey-settings.ts が書く列だけの
+#       INSERT・UPDATE。表単位の INSERT・UPDATE・DELETE は無い。structured_enabled・store_id（Target の）・
+#       category_code（Target の）・カテゴリの並び順は UPDATE できない
+#     - line_webhook・survey・dashboard・batch・delivery: どの列の INSERT・UPDATE も、DELETE も無い
 #     （客向けアンケート Web が店舗設定を書けないことも、ここで検証される）
+#   store-detail のそれ以外（Issue #437）
+#     - 店舗設定 3 表と audit_logs（列を絞った INSERT だけ）のほかに、public のどの表も書けない
+#       （stores・owners・評価や集計の表・taxonomy を含む。表は catalog から列挙する）
 #   上の 7 表すべて
 #     - 全 6 SA: SELECT がある（読み取りは全層に許容する既存の方針）
 #
@@ -136,6 +141,10 @@ expect_column() {
 # incrementStructuredTallies（ts/packages/db/src/tallies.ts）が INSERT する列。id だけが既定値。
 TALLY_INSERT_COLUMNS=" store_id period_month positive_group_count concern_group_count positive_target_count concern_target_count positive_facet_count concern_facet_count has_comment count "
 # 列は catalog から列挙する（列を足したときに検査から漏れないように）。
+# table_columns <table> — 削除済みでない通常の列を 1 行 1 列で返す。
+table_columns() {
+    q "SELECT attname FROM pg_attribute WHERE attrelid = 'public.${1}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum;" | tr -d '\r'
+}
 mapfile -t TALLY_COLUMNS < <(q "SELECT attname FROM pg_attribute WHERE attrelid = 'public.${TALLY_TABLE}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum;" | tr -d '\r')
 if [ "${#TALLY_COLUMNS[@]}" -lt 11 ]; then
     echo "FAIL: ${TALLY_TABLE} の列を列挙できません（${#TALLY_COLUMNS[@]} 列。走査の前提が崩れています）" >&2
@@ -237,13 +246,93 @@ for stmt in \
     fi
 done
 
-echo ">> [privilege-check] (S2) taxonomy 3 表と店舗設定 3 表は、どの SA も書けない"
-for t in "${TAXONOMY_TABLES[@]}" "${CONFIG_TABLES[@]}"; do
+echo ">> [privilege-check] (S2) taxonomy 3 表は、どの SA も書けない（表単位・列単位とも）"
+for t in "${TAXONOMY_TABLES[@]}"; do
+    mapfile -t cols < <(table_columns "$t")
     for key in "${ROLE_KEYS[@]}"; do
         for mode in INSERT UPDATE DELETE; do
             expect "$key" "$t" "$mode" f
         done
+        for col in "${cols[@]}"; do
+            expect_column "$key" "$t" "$col" INSERT f
+            expect_column "$key" "$t" "$col" UPDATE f
+        done
     done
+done
+
+echo ">> [privilege-check] (S2') 店舗設定 3 表を書けるのは store-detail だけで、書く列だけ（Issue #437）"
+# 期待する列（ts/packages/db/src/survey-settings.ts が書く列・infra/sql/grants.sql の付与と同じ）。
+# 前後の空白は case の照合のため。表単位の INSERT・UPDATE・DELETE はどの SA にも無い。
+config_insert_cols() {
+    case "$1" in
+        store_survey_configs)           echo " store_id " ;;
+        store_survey_category_settings) echo " store_id category_code enabled sort_order " ;;
+        store_survey_targets)           echo " store_id category_code label sort_order " ;;
+    esac
+}
+config_update_cols() {
+    case "$1" in
+        store_survey_configs)           echo " revision updated_at " ;;
+        store_survey_category_settings) echo " enabled " ;;
+        store_survey_targets)           echo " label active sort_order updated_at " ;;
+    esac
+}
+for t in "${CONFIG_TABLES[@]}"; do
+    mapfile -t cols < <(table_columns "$t")
+    ins="$(config_insert_cols "$t")"
+    upd="$(config_update_cols "$t")"
+    for key in "${ROLE_KEYS[@]}"; do
+        for mode in INSERT UPDATE DELETE; do
+            expect "$key" "$t" "$mode" f
+        done
+        for col in "${cols[@]}"; do
+            want_ins=f
+            want_upd=f
+            if [ "$key" = detail ]; then
+                case "$ins" in *" ${col} "*) want_ins=t ;; esac
+                case "$upd" in *" ${col} "*) want_upd=t ;; esac
+            fi
+            expect_column "$key" "$t" "$col" INSERT "$want_ins"
+            expect_column "$key" "$t" "$col" UPDATE "$want_upd"
+        done
+    done
+done
+# structured_enabled はどの SA も書けない（客向けの structured の画面が接続されるまで、オーナーも切り替えない）。
+for key in "${ROLE_KEYS[@]}"; do
+    expect_column "$key" store_survey_configs structured_enabled UPDATE f
+done
+
+echo ">> [privilege-check] (S4) store-detail は店舗設定 3 表と監査記録の追記のほかに、どの表も書けない（Issue #437）"
+# 列挙は catalog から行う（表を足したときに検査から漏れないように）。
+DETAIL_WRITABLE=" store_survey_configs store_survey_category_settings store_survey_targets audit_logs "
+AUDIT_INSERT_COLS=" actor_type actor_id action target_type target_id occurred_at "
+mapfile -t ALL_TABLES < <(q "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;" | tr -d '\r')
+if [ "${#ALL_TABLES[@]}" -lt 30 ]; then
+    echo "FAIL: public の表を列挙できません（${#ALL_TABLES[@]} 表。走査の前提が崩れています）" >&2
+    exit 1
+fi
+for t in "${ALL_TABLES[@]}"; do
+    case "$DETAIL_WRITABLE" in *" ${t} "*) continue ;; esac
+    for mode in INSERT UPDATE DELETE; do
+        expect detail "$t" "$mode" f
+    done
+    any="$(q "SELECT has_any_column_privilege('$(role_name detail)', 'public.${t}', 'INSERT') OR has_any_column_privilege('$(role_name detail)', 'public.${t}', 'UPDATE');")"
+    checked=$((checked + 1))
+    if [ "$any" = f ]; then
+        echo "PASS: detail は ${t} のどの列も書けない"
+    else
+        note_fail "detail が ${t} のいずれかの列を書けます（店舗設定 3 表と監査記録のほかへ書込を広げていないか）"
+    fi
+done
+mapfile -t audit_cols < <(table_columns audit_logs)
+for mode in INSERT UPDATE DELETE; do
+    expect detail audit_logs "$mode" f
+done
+for col in "${audit_cols[@]}"; do
+    want=f
+    case "$AUDIT_INSERT_COLS" in *" ${col} "*) want=t ;; esac
+    expect_column detail audit_logs "$col" INSERT "$want"
+    expect_column detail audit_logs "$col" UPDATE f
 done
 
 echo ">> [privilege-check] (S3) 7 表とも全 SA が読める"
