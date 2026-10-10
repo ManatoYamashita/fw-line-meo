@@ -16,10 +16,10 @@
 import {
   addSurveyTarget,
   readStoreSurveySettings,
-  renameSurveyTarget,
   reorderSurveyTargets,
   setSurveyCategoryEnabled,
   setSurveyTargetActive,
+  updateSurveyTarget,
   type AuditLogInput,
   type Queryable,
   type Result,
@@ -230,17 +230,14 @@ async function applyChange(
       if ((label === undefined && active === undefined) || (active !== undefined && typeof active !== 'boolean')) {
         return invalidBody();
       }
-      // 名前と表示の両方が来たら、名前 → 表示の順に別々のトランザクションで確定する（それぞれ版を進める）。
-      const results: SurveySettingsChange[] = [];
-      if (label !== undefined) {
-        const renamed = await renameSurveyTarget(deps.pool, storeId, operation.targetId, label);
-        results.push(renamed);
-        if (!renamed.ok) return results;
-      }
-      if (typeof active === 'boolean') {
-        results.push(await setSurveyTargetActive(deps.pool, storeId, operation.targetId, active));
-      }
-      return results;
+      // 名前と表示は、どちらか一方でも両方でも 1 つのトランザクション・1 回の版の加算で確定する
+      // （片方が通らなければ両方とも書かない）。監査も 1 操作として 1 件だけ残す。
+      return [
+        await updateSurveyTarget(deps.pool, storeId, operation.targetId, {
+          ...(label !== undefined ? { label } : {}),
+          ...(typeof active === 'boolean' ? { active } : {}),
+        }),
+      ];
     }
     case 'disableTarget':
       if (!UUID_RE.test(operation.targetId)) return notFound();

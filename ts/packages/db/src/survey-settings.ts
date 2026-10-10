@@ -287,62 +287,85 @@ export async function addSurveyTarget(
   });
 }
 
-/** 名前を変える。identity（UUID）は変えない。 */
-export async function renameSurveyTarget(
+/**
+ * 1 つの Target の名前と表示を変える（Issue #437・`PATCH /api/survey-settings/targets/:targetId`）。
+ *
+ * 名前（`label`）と表示（`active`）の **どちらか一方でも両方でも、1 つのトランザクション・1 回の版の加算** で
+ * 確定する。どちらかが通らなければ（名前の誤り・同名・上限・自店に無い）、何も書かずに巻き戻す。
+ * identity（UUID）は変えない。非表示は行を消さない。表示へ戻すときは上限と同名の判定を通す。
+ * 監査の action は 1 つ: 名前だけ → survey_target_renamed、表示だけ → survey_target_disabled / enabled、
+ * 両方 → survey_target_updated。
+ */
+export async function updateSurveyTarget(
+  pool: TransactionCapable,
+  storeId: string,
+  targetId: string,
+  input: { label?: unknown; active?: boolean },
+): Promise<SurveySettingsChange> {
+  let nextLabel: string | undefined;
+  if (input.label !== undefined) {
+    const label = normalizeTargetLabel(input.label);
+    if (!label.ok) return fail(label.error);
+    nextLabel = label.value;
+  }
+
+  return withSettingsChange(pool, storeId, async (client, revision) => {
+    const target = await findOwnTarget(client, storeId, targetId);
+    if (!target) throw new Rollback(fail('TARGET_NOT_FOUND'));
+    const label = nextLabel ?? target.label;
+    const active = input.active ?? target.active;
+    const labelChanged = label !== target.label;
+    const activeChanged = active !== target.active;
+    if (!labelChanged && !activeChanged) throw new Rollback(unchanged);
+
+    let sortOrder = target.sort_order;
+    if (active) {
+      // 表示中になる行（表示のまま名前を変える行を含む）は、表示中の同名と重ならない。
+      if (await hasActiveLabel(client, storeId, target.category_code, label, target.id)) {
+        throw new Rollback(fail('DUPLICATE_LABEL'));
+      }
+      if (activeChanged) {
+        if (!isOwnerTargetCategoryCode(target.category_code)) throw new Rollback(fail('CATEGORY_NOT_EDITABLE'));
+        if ((await activeCount(client, storeId, target.category_code)) >= ACTIVE_TARGET_LIMITS[target.category_code]) {
+          throw new Rollback(fail('TARGET_LIMIT_REACHED'));
+        }
+        sortOrder = await nextSortOrder(client, storeId, target.category_code);
+      }
+    }
+    await client.query(
+      `UPDATE store_survey_targets SET label = $2, active = $3, sort_order = $4, updated_at = now() WHERE id = $1`,
+      [target.id, label, active, sortOrder],
+    );
+    const action: AuditLogAction =
+      labelChanged && activeChanged
+        ? 'survey_target_updated'
+        : labelChanged
+          ? 'survey_target_renamed'
+          : active
+            ? 'survey_target_enabled'
+            : 'survey_target_disabled';
+    return { ok: true, changed: true, action, revision, targetId: target.id };
+  });
+}
+
+/** 名前だけを変える（updateSurveyTarget の一部）。 */
+export function renameSurveyTarget(
   pool: TransactionCapable,
   storeId: string,
   targetId: string,
   rawLabel: unknown,
 ): Promise<SurveySettingsChange> {
-  const label = normalizeTargetLabel(rawLabel);
-  if (!label.ok) return fail(label.error);
-
-  return withSettingsChange(pool, storeId, async (client, revision) => {
-    const target = await findOwnTarget(client, storeId, targetId);
-    if (!target) throw new Rollback(fail('TARGET_NOT_FOUND'));
-    if (target.label === label.value) throw new Rollback(unchanged);
-    if (target.active && (await hasActiveLabel(client, storeId, target.category_code, label.value, target.id))) {
-      throw new Rollback(fail('DUPLICATE_LABEL'));
-    }
-    await client.query(`UPDATE store_survey_targets SET label = $2, updated_at = now() WHERE id = $1`, [
-      target.id,
-      label.value,
-    ]);
-    return { ok: true, changed: true, action: 'survey_target_renamed', revision, targetId: target.id };
-  });
+  return updateSurveyTarget(pool, storeId, targetId, { label: rawLabel });
 }
 
-/** 表示 / 非表示を切り替える。行は消さない。再表示は上限と同名の判定を通す。 */
-export async function setSurveyTargetActive(
+/** 表示 / 非表示だけを切り替える（updateSurveyTarget の一部）。 */
+export function setSurveyTargetActive(
   pool: TransactionCapable,
   storeId: string,
   targetId: string,
   active: boolean,
 ): Promise<SurveySettingsChange> {
-  return withSettingsChange(pool, storeId, async (client, revision) => {
-    const target = await findOwnTarget(client, storeId, targetId);
-    if (!target) throw new Rollback(fail('TARGET_NOT_FOUND'));
-    if (target.active === active) throw new Rollback(unchanged);
-    if (!active) {
-      await client.query(`UPDATE store_survey_targets SET active = false, updated_at = now() WHERE id = $1`, [
-        target.id,
-      ]);
-      return { ok: true, changed: true, action: 'survey_target_disabled', revision, targetId: target.id };
-    }
-    if (!isOwnerTargetCategoryCode(target.category_code)) throw new Rollback(fail('CATEGORY_NOT_EDITABLE'));
-    if (await hasActiveLabel(client, storeId, target.category_code, target.label, target.id)) {
-      throw new Rollback(fail('DUPLICATE_LABEL'));
-    }
-    if ((await activeCount(client, storeId, target.category_code)) >= ACTIVE_TARGET_LIMITS[target.category_code]) {
-      throw new Rollback(fail('TARGET_LIMIT_REACHED'));
-    }
-    const sortOrder = await nextSortOrder(client, storeId, target.category_code);
-    await client.query(
-      `UPDATE store_survey_targets SET active = true, sort_order = $2, updated_at = now() WHERE id = $1`,
-      [target.id, sortOrder],
-    );
-    return { ok: true, changed: true, action: 'survey_target_enabled', revision, targetId: target.id };
-  });
+  return updateSurveyTarget(pool, storeId, targetId, { active });
 }
 
 /**
