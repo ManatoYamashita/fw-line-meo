@@ -40,6 +40,20 @@ export interface DraftDiagnostics {
   readonly fallbackLike: boolean;
   /** 3 字以上の項目名（「入店までの待ち時間」「接客の丁寧さ」など）を、項目名のまま書いた割合（読み上げの傾向）。 */
   readonly labelVerbatimRate: number | null;
+  /** 星由来の総評を渡しうるケース（★3 以外）か。総評の句の頻度の母数。 */
+  readonly starSignal: boolean;
+  /** 総評の句（「全体として」「全体的に」「総じて」）があるか。単体では合格で、頻度だけを見る。 */
+  readonly overallClosing: boolean;
+  /** 「満足できる内容」「満足できるもの」「良い内容」のような抽象語でまとめる言い方があるか。 */
+  readonly abstractEvaluation: boolean;
+  /** 気になったことが 2 主題以上あるのに「〜だけ」で 1 つに絞って書いたか。 */
+  readonly dakeWithMultipleConcerns: boolean;
+  /** 書き出しの 2 字（同じケースの再生成で文頭が同じかを見る・「予約が」「予約は」を同じと数える）。 */
+  readonly opening: string;
+  /** 主題（極性 × Target / カテゴリ全体の facet）を本文で最初に述べた順。 */
+  readonly subjectOrder: readonly string[];
+  /** 文ごとに述べた主題の並び（文の分け方・まとめ方の粗い形）。 */
+  readonly structure: string;
   /** claim の最初の言及の順が入力の順と一致した割合（2 claim 以上のとき・言及した claim だけで見る）。 */
   readonly inputOrderPreserved: boolean | null;
   /** 一言より感嘆符・絵文字が増えたか（一言のあるケースだけ）。 */
@@ -70,6 +84,26 @@ function firstMentions(c: StructuredEvalCase, sentences: readonly string[], lex:
     );
     return index < 0 ? null : index;
   });
+}
+
+function subjectKeyOf(cl: ReturnType<typeof claimsOf>[number]): string {
+  return `${cl.polarity}:${cl.targetId ?? `${cl.categoryCode}:${cl.facetCode}`}`;
+}
+
+/** 主題を述べた位置（本文の文字位置）。Target は名前か言い方、カテゴリ全体の facet は意味の手がかりで見る。 */
+function subjectPositions(c: StructuredEvalCase, text: string, lex: StructuredEvalLexicon): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const cl of claimsOf(c)) {
+    const patterns =
+      cl.targetId !== undefined
+        ? [cl.targetLabel!, ...(c.subjects[cl.targetId] ?? [])].map((w) => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+        : (lex.facetMeanings[cl.facetCode!] ?? []);
+    const hits = patterns.map((p) => p.exec(text)?.index ?? -1).filter((i) => i >= 0);
+    if (hits.length === 0) continue;
+    const key = subjectKeyOf(cl);
+    out.set(key, Math.min(out.get(key) ?? Infinity, ...hits));
+  }
+  return out;
 }
 
 export function diagnoseDraft(c: StructuredEvalCase, draft: string, lex: StructuredEvalLexicon): DraftDiagnostics {
@@ -117,6 +151,12 @@ export function diagnoseDraft(c: StructuredEvalCase, draft: string, lex: Structu
     ...new Set(claimsOf(c).flatMap((cl) => (cl.facetLabel !== undefined && [...cl.facetLabel].length >= 3 ? [cl.facetLabel] : []))),
   ];
   const labelVerbatimRate = longLabels.length === 0 ? null : longLabels.filter((l) => draft.includes(l)).length / longLabels.length;
+  const positions = subjectPositions(c, draft, lex);
+  const subjectOrder = [...positions.entries()].sort((a, b) => a[1] - b[1]).map(([k]) => k);
+  const structure = sentences
+    .map((s) => [...subjectPositions(c, s, lex).keys()].sort().join('+') || '-')
+    .join('|');
+  const concernSubjects = new Set(claimsOf(c).filter((cl) => cl.polarity === 'concern').map(subjectKeyOf));
   const comment = c.comment ?? null;
   return {
     charCount,
@@ -135,6 +175,13 @@ export function diagnoseDraft(c: StructuredEvalCase, draft: string, lex: Structu
     subjectPerSentence,
     fallbackLike,
     labelVerbatimRate,
+    starSignal: c.star !== 3,
+    overallClosing: (lex.aiish.zentai ?? []).some((p) => p.test(draft)),
+    abstractEvaluation: (lex.aiish.naiyou ?? []).some((p) => p.test(draft)),
+    dakeWithMultipleConcerns: concernSubjects.size >= 2 && /だけ/.test(draft),
+    opening: [...draft.trim()].slice(0, 2).join(''),
+    subjectOrder,
+    structure,
     inputOrderPreserved: mentioned.length >= 2 ? inOrder : null,
     exclamationAdded:
       comment === null
@@ -194,6 +241,37 @@ export function regenerationSimilarity(drafts: readonly string[], storeName: str
 }
 
 // ---------------------------------------------------------------------------
+// 再生成の構成の偏り（同じケースの複数の生成が、語尾違いだけになっていないか）
+// ---------------------------------------------------------------------------
+
+export interface StructureSameness {
+  /** 2 本以上の生成があったケースの数（母数）。 */
+  readonly cases: number;
+  /** すべての生成で、書き出しの 2 字が同じだったケースの数。 */
+  readonly sameOpening: number;
+  /** すべての生成で、主題を述べた順が同じだったケースの数。 */
+  readonly sameClaimOrder: number;
+  /** すべての生成で、文の数が同じだったケースの数。 */
+  readonly sameSentenceCount: number;
+  /** すべての生成で、文ごとの主題の並び（文の分け方・まとめ方）が同じだったケースの数。 */
+  readonly sameStructure: number;
+}
+
+/** ケースごとの生成の診断（同じケース・2 本以上）から、構成の偏りを数える。厳密な解析ではない簡単な目安。 */
+export function structureSameness(byCase: readonly (readonly DraftDiagnostics[])[]): StructureSameness {
+  const groups = byCase.filter((list) => list.length >= 2);
+  const all = (list: readonly DraftDiagnostics[], f: (d: DraftDiagnostics) => string | number) =>
+    new Set(list.map((d) => String(f(d)))).size === 1;
+  return {
+    cases: groups.length,
+    sameOpening: groups.filter((l) => all(l, (d) => d.opening)).length,
+    sameClaimOrder: groups.filter((l) => all(l, (d) => d.subjectOrder.join('>'))).length,
+    sameSentenceCount: groups.filter((l) => all(l, (d) => d.sentenceCount)).length,
+    sameStructure: groups.filter((l) => all(l, (d) => d.structure)).length,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 集計
 // ---------------------------------------------------------------------------
 
@@ -224,6 +302,10 @@ export function summarizeDiagnostics(list: readonly DraftDiagnostics[]): Diagnos
   rates.starNarration = rate((d) => d.starNarration);
   rates.checklistLike = rate((d) => d.checklistLike);
   rates.subjectPerSentence = rate((d) => d.subjectPerSentence);
+  rates.abstractEvaluation = rate((d) => d.abstractEvaluation);
+  rates.dakeWithMultipleConcerns = rate((d) => d.dakeWithMultipleConcerns);
+  const starred = list.filter((d) => d.starSignal);
+  rates.overallClosingStarred = starred.length === 0 ? 0 : starred.filter((d) => d.overallClosing).length / starred.length;
   rates.fallbackLike = rate((d) => d.fallbackLike);
   const labelled = list.filter((d) => d.labelVerbatimRate !== null);
   rates.labelVerbatim = labelled.length === 0 ? 0 : labelled.reduce((a, d) => a + d.labelVerbatimRate!, 0) / labelled.length;

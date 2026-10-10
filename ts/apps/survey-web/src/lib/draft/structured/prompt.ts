@@ -15,9 +15,16 @@ import { claimSubjectKey, overlappingIdentities, type StructuredClaim } from './
 //
 // 素材に入れないもの:
 //   - 店名: 店名から書き始める定型を避ける（Google の口コミは店のページに載るので、店名は要らない）
-//   - 星の数そのもの: 星は「全体の印象」（★4〜5 は満足・★1〜2 は不満が残った・★3 は渡さない）へ丸めて、書くなら
-//     最後に短く添える程度にとどめる。星から具体的な理由・強い言葉を作らせない
+//   - 星の数そのもの: 星は「全体の印象」（★4〜5 は満足・★1〜2 は不満が残った・★3 は渡さない）へ丸める。しかも
+//     **任意の締めの合図** で、生成ごとにサーバーが渡すかどうかを決める（OVERALL_RATE）。毎回渡すと「全体として満足です」
+//     が毎回最後に付いた（実 Gemini・2026-10-11）。星から具体的な理由・強い言葉を作らせない
 // 一言は内容としても、口調の参考としても使ってよい（人物像は推測しない）。
+//
+// 再生成のバリエーション: 同じ回答から作り直しても語尾だけが変わり、項目の順番と文の組み立てが固定だった。そこで
+// 生成ごとにサーバーが「文章の組み立て」（COMPOSITIONS）・項目の並び（回答の行の順）・文体・総評の有無を選ぶ。
+// 再生成では「前とは違う組み立てにする」決まった指示だけを足す。**前回の下書きはモデルへ渡さない。** 前回の文は
+// 客の端末から戻ってくる値で、渡せば指示やまだ検査していない事実の持ち込み口になる。組み立てをサーバー側で
+// 変えれば、事実の源（回答）を一切増やさずに構成を変えられる。
 
 export const REALIZER_MARKER = '[structured-review-realizer]';
 
@@ -29,6 +36,9 @@ const SYSTEM_INSTRUCTION = `${REALIZER_MARKER}
 - 項目名をそのまま使わなくてよい。意味が変わらない範囲で、「味」→「おいしかった」、「接客の丁寧さ」→「丁寧に対応してもらえた」、「量」→「満足できる量だった」、「居心地」→「居心地よく過ごせた」のように普段の言葉にする。
 - 「少し」「やや」「満足できた」「印象に残った」「過ごしやすかった」くらいの控えめな気持ちの言葉は使ってよい。
 - 良かったことと気になったことの両方があれば、どちらも伝わるように書く（良い / 気になるの向きは変えない）。項目を 1 つずつ書き並べる必要はなく、同じ料理の項目はまとめてよい。料理名・ドリンク名は回答の表記のまま、すべて入れる。
+- 「満足できる内容でした」「満足できるものでした」「良い内容でした」のように、「内容」「もの」でまとめる言い方をしない。「量にも満足できました」「量もしっかりあって満足でした」のように直接言う。
+- 「全体として満足」のような総評は必須ではない。良かったこと・気になったことだけで自然に終わってよい。
+- 気になったことが 2 つ以上あるときは「〜だけ気になった」と書かない。
 - 一言があれば、内容も口調（くだけた言い方・「！」など）も活かしてよい。書き手の年齢・性別・人柄は推測しない。
 - 長さは内容に合わせる。項目が少なければ 1〜2 文の短い感想でよい。
 
@@ -41,20 +51,46 @@ const SYSTEM_INSTRUCTION = `${REALIZER_MARKER}
 
 JSON {"draft": "..."} の形で返してください。`;
 
-/** 文章の形の候補（内容は変えない）。再生成のたびにサーバーが選ぶ。 */
-export const STRUCTURE_HINTS: readonly string[] = [
-  '1〜2 文で短くまとめる。',
-  '2〜3 文に分け、文の長さに変化をつける。',
-  '一番印象に残ったことから書き始める。',
-  '良かったことと気になったことがあれば、1 文の中でつないでもよい。',
+/**
+ * 文章の組み立ての候補（内容は変えない）。生成ごとにサーバーが、回答に対して成り立つ候補から選ぶ。
+ * needs: any＝いつでも／both＝良かったことと気になったことの両方がある／multi＝主題が 2 つ以上。
+ * 語尾や同義語ではなく、情報の順番・文の分け方・まとめ方そのものを変える候補だけを置く。
+ */
+export interface Composition {
+  readonly id: string;
+  readonly text: string;
+  readonly needs: 'any' | 'both' | 'multi';
+}
+
+export const COMPOSITIONS: readonly Composition[] = [
+  { id: 'plain', text: '2〜3 文で、思いついた順に素直に書く。', needs: 'any' },
+  { id: 'combined', text: '近い項目を 1 文にまとめ、全体を 1〜2 文で書く。', needs: 'any' },
+  { id: 'contrast', text: '良かったことを先にまとめて書き、気になったことは後半で「〜ましたが」などでつなぐ。', needs: 'both' },
+  { id: 'split', text: '3〜4 の短めの文に分ける。気になったことは独立した文にする。', needs: 'both' },
+  { id: 'concernFirst', text: '気になったことから書き始め、良かったことを後に書く。', needs: 'both' },
+  { id: 'highlight', text: '一番印象に残った良かったことから書き始め、残りの項目は 1 文にまとめる。', needs: 'multi' },
 ];
+
+/** 回答に対して成り立つ組み立ての候補（素材の有無だけを見る）。 */
+export function availableCompositions(claims: readonly StructuredClaim[]): Composition[] {
+  const hasBoth = claims.some((c) => c.polarity === 'positive') && claims.some((c) => c.polarity === 'concern');
+  const subjects = new Set(claims.map((c) => `${c.polarity}:${claimSubjectKey(c)}`)).size;
+  return COMPOSITIONS.filter((c) => c.needs === 'any' || (c.needs === 'both' ? hasBoth : subjects >= 2));
+}
 
 /**
  * 文体の候補（legacy の TONES から、文の形だけを変えるものを取り込んだ）。一言があるときは一言の口調に合わせる
- * （COMMENT_TONE）。感情の強さを変える候補（「明るい」など）は置かない。
+ * （COMMENT_TONE）。感情の強さを変える候補（「明るい」など）と、会話調（「〜だったよ」）を呼んだ常体は置かない。
  */
-export const TONES: readonly string[] = ['話し言葉に近い敬体', '体言止めを交えた敬体', '親しみやすい常体', '簡潔で落ち着いた敬体'];
+export const TONES: readonly string[] = ['丁寧すぎない敬体', '簡潔な敬体', '体言止めを少し交えた敬体'];
 export const COMMENT_TONE = '一言の口調に合わせる（くだけた一言なら、くだけた書き方でよい）';
+
+/** 星由来の総評を渡す割合（任意の締めの合図・渡さない生成の方が多い）。 */
+export const OVERALL_RATE = 0.35;
+
+/** 再生成のときだけ足す決まった指示（前回の下書きそのものは渡さない）。 */
+export const REGENERATION_NOTE =
+  '作り直し: 前に作った文章とは違う組み立てにする。語尾や同義語の置き換えではなく、情報の順番・文の分け方・まとめ方を変える。';
 
 /** 星を全体の印象へ丸める（★3 は渡さない）。具体的な理由や強度は作らせない。 */
 export function overallImpression(star: number): string | null {
@@ -89,10 +125,14 @@ function answerLines(claims: readonly StructuredClaim[], polarity: StructuredCla
 export interface RealizerPromptInput {
   readonly claims: readonly StructuredClaim[];
   readonly comment?: string;
-  /** 回答の星（全体の印象へ丸めて渡す）。省略したときは全体の印象を渡さない。 */
+  /** 回答の星（全体の印象へ丸めて渡す）。省略したとき・includeOverall が false のときは全体の印象を渡さない。 */
   readonly star?: number;
-  /** STRUCTURE_HINTS から選んだ文章の形。 */
-  readonly structureHint: string;
+  /** 星由来の総評を渡すか（任意の締めの合図・サーバーが生成ごとに決める）。既定 true。 */
+  readonly includeOverall?: boolean;
+  /** COMPOSITIONS から選んだ文章の組み立て。 */
+  readonly composition: string;
+  /** 再生成（「別の文章を生成」）か。true なら REGENERATION_NOTE を足す。 */
+  readonly regeneration?: boolean;
   /** TONES から選んだ文体（一言があるときは COMMENT_TONE が優先）。 */
   readonly tone?: string;
   /** 2 回目の生成で足す注意（RETRY_NOTES の値だけ・検出器の出力そのものは入れない）。 */
@@ -104,7 +144,7 @@ export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruc
   const concern = answerLines(input.claims, 'concern');
   const overlap = overlappingIdentities(input.claims).length > 0;
   const comment = input.comment !== undefined && input.comment.trim() !== '' ? input.comment : undefined;
-  const overall = input.star === undefined ? null : overallImpression(input.star);
+  const overall = input.star === undefined || input.includeOverall === false ? null : overallImpression(input.star);
   const tone = comment !== undefined ? COMMENT_TONE : input.tone;
   const lines = [
     '回答:',
@@ -112,10 +152,13 @@ export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruc
     ...(concern.length > 0 ? ['気になったところ:', ...concern] : []),
     ...(overlap ? ['（同じ項目が良かったところと気になったところの両方にあります。両方あったことだけを書いてください）'] : []),
     ...(comment !== undefined ? [`一言: 「${comment}」`] : []),
-    ...(overall !== null ? [`全体の印象: ${overall}（書くなら最後に短く添える程度。理由や強い言葉は足さない）`] : []),
+    ...(overall !== null
+      ? [`全体の印象: ${overall}（書いても書かなくてもよい。書くなら短く、言い方も置く場所も自由。理由や強い言葉は足さない）`]
+      : []),
     '',
-    `文章の形: ${input.structureHint}`,
+    `文章の組み立て: ${input.composition}`,
     ...(tone !== undefined ? [`文体: ${tone}`] : []),
+    ...(input.regeneration === true ? [REGENERATION_NOTE] : []),
     ...(input.retryNotes !== undefined && input.retryNotes.length > 0
       ? ['', '前回の文章は次の点を守れていませんでした。意味は変えずに、言い回し・順番・文の分け方を変えて書き直してください:', ...input.retryNotes.map((n) => `- ${n}`)]
       : []),

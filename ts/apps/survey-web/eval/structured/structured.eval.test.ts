@@ -8,7 +8,7 @@ import lexiconRaw from '../../src/lib/draft/structured/lexicon.json';
 import { evaluateStructuredDraft, readLegacyLexicons, readStructuredCases, readStructuredEvalLexicon, claimsOf } from './gates';
 import { evalGenerators, type GeneratedDraft } from './methods';
 import { buildRatingPacket } from './rating';
-import { formatSummary, recordSample, successChecks, summarize, type StructuredEvalSample } from './report';
+import { formatSummary, recordSample, styleWarnings, successChecks, summarize, type StructuredEvalSample } from './report';
 
 // structured survey の下書きの実測（Issue #440）。対象は **本番の通常生成（production）と safe fallback** の 2 つだけ。
 // production（実 Gemini を叩く）は GEMINI_API_KEY が無ければ skip し、API の要らない safe fallback だけを流す。
@@ -119,6 +119,7 @@ describe('structured survey の下書きの実測（Issue #440）', () => {
         generators: generators.map((g) => g.id),
         generationFailures,
         successChecks: production ? successChecks(production) : [],
+        styleWarnings: production ? styleWarnings(production) : [],
         measuredAt: new Date().toISOString(),
       };
       writeFileSync(OUT, JSON.stringify({ meta, summary, samples }, null, 2));

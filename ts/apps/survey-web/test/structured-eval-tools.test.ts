@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import casesRaw from '../eval/structured/cases.json';
 import lexiconRaw from '../src/lib/draft/structured/lexicon.json';
 import { readLegacyLexicons, readStructuredCases, readStructuredEvalLexicon, evaluateStructuredDraft, type StructuredEvalCase } from '../eval/structured/gates';
-import { bigramJaccard, diagnoseDraft, regenerationSimilarity, summarizeDiagnostics } from '../eval/structured/diagnostics';
+import { bigramJaccard, diagnoseDraft, regenerationSimilarity, structureSameness, summarizeDiagnostics } from '../eval/structured/diagnostics';
 import { aggregateRatings, buildRatingPacket, parseCsv, RATINGS_HEADER, type RatingSample } from '../eval/structured/rating';
 import { evalGenerators, materialOf, safeFallback } from '../eval/structured/methods';
-import { formatSummary, recordSample, successChecks, summarize } from '../eval/structured/report';
+import { formatSummary, recordSample, styleWarnings, successChecks, summarize } from '../eval/structured/report';
 import type { GenAiClient } from '../src/lib/draft/generator';
 
 // structured survey の評価の道具（Issue #440）の検証。実 API 不要で CI で常時走る。
@@ -246,5 +246,63 @@ describe('集計の形と成功条件', () => {
     const fallbackish = [0, 1].map((run) => recordSample(k, 'production', run, llm(safeFallback(k)), lex, legacy));
     const fail = successChecks(summarize([k], fallbackish).generators[0]!);
     expect(fail.filter((c) => !c.passed).map((c) => c.id)).toEqual(expect.arrayContaining(['fallbackLike', 'duplicates']));
+  });
+});
+
+describe('自然さの診断: 抽象語のまとめ・総評の頻度・再生成の構成の偏り（hard fail にしない）', () => {
+  const l = byId('L-reservation-drink');
+  const llm = (draft: string) => ({ draft, source: 'llm' as const, attempts: 1 });
+
+  it('「満足できる内容」「満足できるもの」を拾い、直接の言い方では立たない（どれも hard gate は通る）', () => {
+    for (const text of [
+      '予約はスムーズで、接客も丁寧でした。料理の量は満足できる内容でしたが、ドリンクの種類は少し気になりました。',
+      '予約はスムーズで、接客も丁寧でした。料理の量も満足できるものでしたが、ドリンクの種類は少し気になりました。',
+    ]) {
+      expect(evaluateStructuredDraft(l, text, lex, legacy).findings, text).toEqual([]);
+      expect(diagnoseDraft(l, text, lex).abstractEvaluation, text).toBe(true);
+    }
+    expect(diagnoseDraft(l, l.allowedParaphrases[0]!, lex).abstractEvaluation).toBe(false);
+  });
+
+  it('総評の句は単体では合格。星を渡しうるケースで毎回付くときだけ警告する', () => {
+    const closing = l.allowedParaphrases[4]!; // 「…全体的に満足です。」
+    expect(evaluateStructuredDraft(l, closing, lex, legacy).findings).toEqual([]);
+    expect(diagnoseDraft(l, closing, lex)).toMatchObject({ overallClosing: true, starSignal: true });
+    const always = [0, 1, 2].map((run) => recordSample(l, 'production', run, llm(`${l.allowedParaphrases[run]!}全体として満足でした。`), lex, legacy));
+    expect(styleWarnings(summarize([l], always).generators[0]!).map((w) => w.id)).toContain('overallClosing');
+    const sometimes = [0, 1, 2].map((run) => recordSample(l, 'production', run, llm(run === 0 ? `${l.allowedParaphrases[0]!}全体として満足でした。` : l.allowedParaphrases[run]!), lex, legacy));
+    expect(styleWarnings(summarize([l], sometimes).generators[0]!).map((w) => w.id)).not.toContain('overallClosing');
+    // 警告は成功条件（hard fail）に入れない。
+    expect(successChecks(summarize([l], always).generators[0]!).map((c) => c.id)).not.toContain('overallClosing');
+  });
+
+  it('語尾だけ違う再生成は、書き出し・主題の順・文の数・文の組み立てがすべて同じとして数える', () => {
+    const endingOnly = [
+      '予約がスムーズにできて、料理の量も満足できました。接客も丁寧でしたが、ドリンクの種類はもう少しあると嬉しかったです。',
+      '予約がスムーズで、料理の量も満足でした。接客も丁寧でしたが、ドリンクの種類は少し気になりました。',
+      '予約がしやすく、料理の量にも満足できました。接客も丁寧でしたが、ドリンクの種類はもう少し欲しかったです。',
+    ].map((d) => diagnoseDraft(l, d, lex));
+    expect(structureSameness([endingOnly])).toEqual({ cases: 1, sameOpening: 1, sameClaimOrder: 1, sameSentenceCount: 1, sameStructure: 1 });
+    const samples = endingOnly.map((_, run) => recordSample(l, 'production', run, llm(['予約がスムーズにできて、料理の量も満足できました。接客も丁寧でしたが、ドリンクの種類はもう少しあると嬉しかったです。', '予約がスムーズで、料理の量も満足でした。接客も丁寧でしたが、ドリンクの種類は少し気になりました。', '予約がしやすく、料理の量にも満足できました。接客も丁寧でしたが、ドリンクの種類はもう少し欲しかったです。'][run]!), lex, legacy));
+    expect(styleWarnings(summarize([l], samples).generators[0]!).map((w) => w.id)).toEqual(
+      expect.arrayContaining(['sameOpening', 'sameClaimOrder', 'sameSentenceCount', 'sameStructure']),
+    );
+  });
+
+  it('構成の違う再生成（項目の順・文の数・まとめ方が違う）は偏りとして数えず、どれも hard gate を通る', () => {
+    const varied = l.allowedParaphrases.slice(0, 4);
+    for (const d of varied) expect(evaluateStructuredDraft(l, d, lex, legacy).findings, d).toEqual([]);
+    const diags = varied.map((d) => diagnoseDraft(l, d, lex));
+    expect(new Set(diags.map((d) => d.subjectOrder.join('>'))).size).toBeGreaterThan(1);
+    expect(new Set(diags.map((d) => d.sentenceCount)).size).toBeGreaterThan(1);
+    expect(structureSameness([diags])).toEqual({ cases: 1, sameOpening: 0, sameClaimOrder: 0, sameSentenceCount: 0, sameStructure: 0 });
+    const samples = varied.map((d, run) => recordSample(l, 'production', run, llm(d), lex, legacy));
+    expect(styleWarnings(summarize([l], samples).generators[0]!)).toEqual([]);
+  });
+
+  it('気になったことが 2 つ以上あるのに「〜だけ」と書いたら数える', () => {
+    const j = byId('J-dense');
+    expect(diagnoseDraft(j, '料理はどれもおいしく、居心地も良かったです。提供だけ少し気になりました。', lex).dakeWithMultipleConcerns).toBe(true);
+    expect(diagnoseDraft(byId('K-everyday-mix'), '料理は量にも満足できて、丁寧に対応してもらえました。待ち時間だけ少し気になりました。', lex).dakeWithMultipleConcerns).toBe(false);
   });
 });

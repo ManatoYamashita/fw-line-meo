@@ -938,6 +938,89 @@
       ]
     },
     {
+      "id": "L-reservation-drink",
+      "title": "予約・接客・料理の量が良く、ドリンクの種類が気になった（再生成の構成のバリエーション）",
+      "storeName": "居酒屋 まるなか",
+      "star": 5,
+      "selections": [
+        {
+          "polarity": "positive",
+          "categoryCode": "reservation_visit",
+          "categoryLabel": "予約・来店",
+          "facets": [
+            {
+              "code": "reservation_ease",
+              "label": "予約のしやすさ"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "service_delivery",
+          "categoryLabel": "接客・提供",
+          "facets": [
+            {
+              "code": "service_courtesy",
+              "label": "接客の丁寧さ"
+            }
+          ]
+        },
+        {
+          "polarity": "positive",
+          "categoryCode": "food",
+          "categoryLabel": "料理",
+          "facets": [
+            {
+              "code": "volume",
+              "label": "量"
+            }
+          ]
+        },
+        {
+          "polarity": "concern",
+          "categoryCode": "drink",
+          "categoryLabel": "ドリンク",
+          "facets": [
+            {
+              "code": "variety",
+              "label": "種類"
+            }
+          ]
+        }
+      ],
+      "subjects": {},
+      "menuTargets": [],
+      "commentKeywords": [],
+      "forbiddenMeanings": [],
+      "allowedParaphrases": [
+        "予約はスムーズで、接客も丁寧でした。料理の量にも満足できましたが、ドリンクの種類はもう少し多いと嬉しかったです。",
+        "接客が丁寧で、料理の量にも満足できました。予約もスムーズでした。ドリンクはもう少し種類があると嬉しいです。",
+        "予約から当日までスムーズで、接客も丁寧でした。料理の量は満足できましたが、ドリンクの種類は少し気になりました。",
+        "料理の量に満足でき、接客も丁寧でした。予約もしやすかったです。一方で、ドリンクの種類はもう少しあると嬉しかったです。",
+        "予約がスムーズで接客も丁寧でしたし、料理の量には満足できました。ただ、ドリンクの種類はもう少しあると嬉しかったです。全体的に満足です。"
+      ],
+      "forbiddenExamples": [
+        {
+          "text": "予約はスムーズで、接客も丁寧でした。料理の量にも満足できました。",
+          "kinds": [
+            "concernDropped"
+          ]
+        },
+        {
+          "text": "予約は電話で20分ほどかかりましたが、接客も丁寧で料理の量にも満足でした。ドリンクの種類は少し気になりました。",
+          "kinds": [
+            "ungrounded"
+          ]
+        },
+        {
+          "text": "予約もしやすく接客も丁寧で、料理の量にも満足でした。ドリンクの種類は少し気になりましたが、また行きたいです。",
+          "kinds": [
+            "revisit"
+          ]
+        }
+      ]
+    },
+    {
       "id": "J-dense",
       "title": "情報量が多い（チェックリスト読み上げの観察）",
       "storeName": "旬菜 あかり",

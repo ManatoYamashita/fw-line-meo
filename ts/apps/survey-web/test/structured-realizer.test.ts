@@ -3,7 +3,7 @@ import type { GenAiClient, GenAiRequest } from '../src/lib/draft/generator';
 import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
 import { compileStructuredClaims, overlappingIdentities } from '../src/lib/draft/structured/claims';
 import { structuredFallbackDraft } from '../src/lib/draft/structured/fallback';
-import { buildRealizerPrompt, COMMENT_TONE, overallImpression, RETRY_NOTES, STRUCTURE_HINTS, TONES } from '../src/lib/draft/structured/prompt';
+import { availableCompositions, buildRealizerPrompt, COMMENT_TONE, COMPOSITIONS, overallImpression, REGENERATION_NOTE, RETRY_NOTES, TONES } from '../src/lib/draft/structured/prompt';
 import { createNaturalRealizer } from '../src/lib/draft/structured/realizer';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。実 Gemini は呼ばず、偽のクライアントで生成の結果を決める。
@@ -85,13 +85,13 @@ describe('compileStructuredClaims（決定的）', () => {
 describe('プロンプト', () => {
   it('claim の表示名と極性と一言を渡し、店名・code・星の数そのものは渡さない', () => {
     const claims = compileStructuredClaims(material().selections);
-    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった', star: 1, structureHint: STRUCTURE_HINTS[0]! });
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった', star: 1, composition: COMPOSITIONS[0]!.text });
     expect(userContent).toContain('良かったところ:');
     expect(userContent).toContain('- 刺身盛り合わせ（料理）: 味');
     expect(userContent).toContain('一言: 「おいしかった」');
     expect(userContent).not.toContain('気になったところ:');
     expect(userContent).not.toMatch(/[★☆]|星|満足度|海鮮食堂|taste|food/);
-    expect(userContent.slice(0, userContent.indexOf('文章の形:'))).not.toMatch(/[0-9０-９]/);
+    expect(userContent.slice(0, userContent.indexOf('文章の組み立て:'))).not.toMatch(/[0-9０-９]/);
     // 自然さを前面に出す（読み上げない・言い換えてよい・弱い主観はよい）。具体的な創作の型は短く名指す。
     expect(systemInstruction).toContain('アンケートの項目を順番に読み上げない');
     expect(systemInstruction).toContain('「少し」「やや」「満足できた」「印象に残った」「過ごしやすかった」');
@@ -101,8 +101,8 @@ describe('プロンプト', () => {
   it('星は全体の印象へ丸めて渡す（★4〜5 は満足・★1〜2 は不満が残った・★3 は渡さない）', () => {
     expect([1, 2, 3, 4, 5].map(overallImpression)).toEqual(['不満が残った', '不満が残った', null, '満足', '満足']);
     const claims = compileStructuredClaims(material().selections);
-    const at = (star: number) => buildRealizerPrompt({ claims, star, structureHint: STRUCTURE_HINTS[0]! }).userContent;
-    expect(at(5)).toContain('全体の印象: 満足（書くなら最後に短く添える程度');
+    const at = (star: number) => buildRealizerPrompt({ claims, star, composition: COMPOSITIONS[0]!.text }).userContent;
+    expect(at(5)).toContain('全体の印象: 満足（書いても書かなくてもよい');
     expect(at(4)).toBe(at(5));
     expect(at(2)).toContain('全体の印象: 不満が残った');
     expect(at(3)).not.toContain('全体の印象');
@@ -110,8 +110,8 @@ describe('プロンプト', () => {
 
   it('文体は候補から選び、一言があるときは一言の口調に合わせる', () => {
     const claims = compileStructuredClaims(material().selections);
-    expect(buildRealizerPrompt({ claims, structureHint: STRUCTURE_HINTS[0]!, tone: TONES[1]! }).userContent).toContain(`文体: ${TONES[1]}`);
-    const withComment = buildRealizerPrompt({ claims, comment: 'めっちゃよかった！', structureHint: STRUCTURE_HINTS[0]!, tone: TONES[1]! }).userContent;
+    expect(buildRealizerPrompt({ claims, composition: COMPOSITIONS[0]!.text, tone: TONES[1]! }).userContent).toContain(`文体: ${TONES[1]}`);
+    const withComment = buildRealizerPrompt({ claims, comment: 'めっちゃよかった！', composition: COMPOSITIONS[0]!.text, tone: TONES[1]! }).userContent;
     expect(withComment).toContain(`文体: ${COMMENT_TONE}`);
     expect(withComment).not.toContain(TONES[1]!);
   });
@@ -119,14 +119,14 @@ describe('プロンプト', () => {
   it('Target だけの claim は「料理そのもの（項目の指定なし）」として渡し、味などを補わない', () => {
     const { userContent } = buildRealizerPrompt({
       claims: compileStructuredClaims([{ polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI, targetLabel: '刺身盛り合わせ', facets: [] }]),
-      structureHint: STRUCTURE_HINTS[0]!,
+      composition: COMPOSITIONS[0]!.text,
     });
     expect(userContent).toContain('- 刺身盛り合わせ（料理）: 料理・ドリンクそのもの（項目の指定なし）');
     expect(userContent).not.toContain('味');
   });
 
   it('exact overlap は、両方あったことだけを書くよう回答の側に添える', () => {
-    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections), structureHint: STRUCTURE_HINTS[0]! });
+    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections), composition: COMPOSITIONS[0]!.text });
     expect(userContent).toContain('同じ項目が良かったところと気になったところの両方にあります');
   });
 });
@@ -195,7 +195,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
   it('作り直しは意味を足さない: 2 回目の「回答」は 1 回目と同じで、注意だけが増える', async () => {
     const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '刺身盛り合わせがおいしかったです。');
     await createNaturalRealizer(client, { random: fixed }).prepare(material());
-    const answer = (contents: string) => contents.slice(0, contents.indexOf('文章の形:'));
+    const answer = (contents: string) => contents.slice(0, contents.indexOf('文章の組み立て:'));
     expect(answer(requests[1]!.contents)).toBe(answer(requests[0]!.contents));
     expect(requests[1]!.config.systemInstruction).toBe(requests[0]!.config.systemInstruction);
   });
@@ -264,5 +264,92 @@ describe('safe fallback', () => {
     expect(structuredFallbackDraft(claims)).toBe(
       '刺身盛り合わせの味は、良かったところもあり、気になるところもありました。刺身盛り合わせは見た目が良かったです。',
     );
+  });
+});
+
+describe('再生成のバリエーション（文章の組み立て・項目の並び・総評の有無をサーバーが選ぶ）', () => {
+  // 実 Gemini で、同じ回答の再生成が語尾違いだけ（予約 → 接客 → 料理の量 → ドリンク → 総評）だったケース。
+  const RESERVATION = material({
+    star: 5,
+    selections: [
+      { polarity: 'positive', categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'reservation_ease', label: '予約のしやすさ' }] },
+      { polarity: 'positive', categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] },
+      { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] },
+      { polarity: 'concern', categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] },
+    ],
+  });
+  /** 決まった値を順に返す乱数（尽きたら 0）。 */
+  const seq = (...values: number[]) => () => values.shift() ?? 0;
+
+  it('語順・文の数・項目の並びが違う下書きも、同じ事実なら hard gate を通る（作り直さない）', async () => {
+    for (const draft of [
+      '予約はスムーズで、接客も丁寧でした。料理の量にも満足できましたが、ドリンクの種類はもう少し多いと嬉しかったです。',
+      '接客が丁寧で、料理の量にも満足できました。予約もスムーズでした。ドリンクはもう少し種類があると嬉しいです。',
+      '予約から当日までスムーズで、接客も丁寧でした。料理の量は満足できましたが、ドリンクの種類は少し気になりました。',
+      '料理の量に満足でき、接客も丁寧でした。予約もしやすかったです。一方で、ドリンクの種類はもう少しあると嬉しかったです。',
+      'ドリンクの種類は少し気になりました。それでも予約はしやすく、接客も丁寧で、料理の量もしっかりありました。',
+    ]) {
+      const onRetry = vi.fn();
+      const { client } = fakeClient(draft);
+      expect(await createNaturalRealizer(client, { random: fixed, onRetry }).prepare(RESERVATION), draft).toEqual({ kind: 'draft', draft, source: 'llm', attempts: 1 });
+      expect(onRetry).not.toHaveBeenCalled();
+    }
+  });
+
+  it('組み立ては回答に対して成り立つ候補から選ぶ（両極性が無ければ対比・気になった先行を選ばない）', () => {
+    const onlyPositive = availableCompositions(compileStructuredClaims(material().selections)).map((c) => c.id);
+    expect(onlyPositive).toEqual(['plain', 'combined']);
+    expect(availableCompositions(compileStructuredClaims(RESERVATION.selections)).map((c) => c.id)).toEqual(COMPOSITIONS.map((c) => c.id));
+  });
+
+  it('乱数に応じて、回答の行の並び・組み立て・総評の有無が変わる（回答の中身は同じ）', async () => {
+    const contents = async (random: () => number) => {
+      const { client, requests } = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
+      await createNaturalRealizer(client, { random }).prepare(RESERVATION);
+      return requests[0]!.contents;
+    };
+    const a = await contents(seq(0, 0, 0, 0.99, 0, 0, 0));
+    const b = await contents(seq(0.99, 0.99, 0.99, 0, 0.5, 0.9));
+    const lines = (s: string) => s.split('\n').filter((l) => l.startsWith('- '));
+    expect(lines(a)).not.toEqual(lines(b));
+    expect([...lines(a)].sort()).toEqual([...lines(b)].sort());
+    expect(a.match(/文章の組み立て: .*/)![0]).not.toBe(b.match(/文章の組み立て: .*/)![0]);
+    // 総評は任意の合図: 乱数が OVERALL_RATE 未満のときだけ渡す。
+    expect(a.includes('全体の印象') !== b.includes('全体の印象')).toBe(true);
+  });
+
+  it('作り直しでは、回答の並び・組み立て・総評の有無を変えない（違反の注意だけが増える）', async () => {
+    const { client, requests } = fakeClient('新鮮な料理の量に満足でした。', '料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
+    await createNaturalRealizer(client, { random: seq(0.7, 0.2, 0.9, 0.4, 0.5, 0.1, 0.3) }).prepare(RESERVATION);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.contents.startsWith(`${requests[0]!.contents}\n\n前回の文章は`)).toBe(true);
+  });
+
+  it('再生成のときだけ「前とは違う組み立て」の決まった指示を足す', async () => {
+    const first = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
+    await createNaturalRealizer(first.client, { random: fixed }).prepare(RESERVATION);
+    expect(first.requests[0]!.contents).not.toContain(REGENERATION_NOTE);
+    const regen = fakeClient('料理の量にも満足できました。接客も丁寧で、予約もしやすかったです。ドリンクの種類は少し気になりました。');
+    await createNaturalRealizer(regen.client, { random: fixed }).prepare(RESERVATION, { regeneration: true });
+    expect(regen.requests[0]!.contents).toContain(REGENERATION_NOTE);
+  });
+
+  it('前回の下書きは再生成へ渡さず、前回の下書きにあった未回答の事実も次の生成の事実の源にならない', async () => {
+    // 1 回目の生成（客へ返った下書き）に、検査をすり抜けた創作が混ざっていたと仮定する。
+    const previous = '友人と行きました。予約はしやすく、接客も丁寧でした。料理の量にも満足でした。ドリンクの種類は少し気になりました。';
+    const realizer = createNaturalRealizer(fakeClient(previous).client, { random: fixed });
+    await realizer.prepare(RESERVATION);
+    // 再生成: プロンプトには前回の下書きが入らない。
+    const clean = '料理の量にも満足でき、接客も丁寧でした。予約もしやすかったです。ドリンクの種類は少し気になりました。';
+    const regen = fakeClient(`友人と行きました。${clean}`, clean);
+    const onRetry = vi.fn();
+    const result = await createNaturalRealizer(regen.client, { random: fixed, onRetry }).prepare(RESERVATION, { regeneration: true });
+    for (const req of regen.requests) {
+      expect(req.contents).not.toContain(previous);
+      expect(req.contents).not.toContain('友人');
+    }
+    // 事後検証の素材は封入した回答だけ: 前回の文の事実（友人と）を繰り返した下書きは、作り直しになる。
+    expect(onRetry.mock.calls[0]![0]).toContain('companion');
+    expect(result).toEqual({ kind: 'draft', draft: clean, source: 'llm', attempts: 2 });
   });
 });

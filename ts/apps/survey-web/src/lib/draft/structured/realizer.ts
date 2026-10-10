@@ -1,6 +1,6 @@
 import type { GenAiClient, GenAiResponse } from '../generator';
-import type { StructuredDraftMaterial, StructuredDraftPort, StructuredDraftResult } from '../structured-draft';
-import { compileStructuredClaims, type StructuredClaim } from './claims';
+import type { StructuredDraftMaterial, StructuredDraftOptions, StructuredDraftPort, StructuredDraftResult } from '../structured-draft';
+import { claimSubjectKey, compileStructuredClaims, type StructuredClaim } from './claims';
 import { structuredFallbackDraft } from './fallback';
 import {
   evaluateStructuredDraft,
@@ -11,7 +11,7 @@ import {
   type StructuredGateInput,
   type StructuredGateLexicon,
 } from './gate';
-import { buildRealizerPrompt, RETRY_NOTES, STRUCTURE_HINTS, TONES } from './prompt';
+import { availableCompositions, buildRealizerPrompt, OVERALL_RATE, RETRY_NOTES, TONES } from './prompt';
 import lexiconRaw from './lexicon.json';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。structured の回答から、事実の境界を claim に固定したうえで、
@@ -50,7 +50,7 @@ const DEFAULT_LEGACY = readLegacyLexicons();
 export interface NaturalRealizerOptions {
   readonly model?: string;
   readonly temperature?: number;
-  /** 文章の形・文体の候補を選ぶ乱数（テストで固定する）。 */
+  /** 文章の組み立て・項目の並び・文体・総評の有無を選ぶ乱数（テストで固定する）。 */
   readonly random?: () => number;
   readonly lexicon?: StructuredGateLexicon;
   readonly legacyLexicons?: LegacyLexicons;
@@ -78,6 +78,28 @@ export function gateInputOf(material: StructuredDraftMaterial): StructuredGateIn
   };
 }
 
+/**
+ * 主題（極性 × Target / カテゴリ全体の facet）の単位で claim の並びを入れ替える。プロンプトの回答の行の順が変わるだけで、
+ * claim の中身・極性は変えない（事後検証は素材から作るので、並びに依存しない）。
+ */
+export function shuffleSubjects(claims: readonly StructuredClaim[], random: () => number): StructuredClaim[] {
+  const keys = [...new Set(claims.map((c) => `${c.polarity}:${claimSubjectKey(c)}`))];
+  for (let i = keys.length - 1; i > 0; i--) {
+    const j = Math.min(i, Math.floor(random() * (i + 1)));
+    [keys[i], keys[j]] = [keys[j]!, keys[i]!];
+  }
+  return keys.flatMap((k) => claims.filter((c) => `${c.polarity}:${claimSubjectKey(c)}` === k));
+}
+
+/** 1 回の下書き作り（作り直しを含む）で固定する文章の組み立て。作り直しでは回答と組み立てを変えない。 */
+interface Plan {
+  readonly claims: readonly StructuredClaim[];
+  readonly composition: string;
+  readonly tone: string;
+  readonly includeOverall: boolean;
+  readonly regeneration: boolean;
+}
+
 function extractDraft(res: GenAiResponse): string | null {
   if (res.promptFeedback?.blockReason) return null;
   try {
@@ -99,18 +121,31 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
 
   const pick = (items: readonly string[]) => items[Math.floor(random() * items.length)] ?? items[0]!;
 
+  function planOf(claims: readonly StructuredClaim[], options: StructuredDraftOptions): Plan {
+    const compositions = availableCompositions(claims);
+    return {
+      claims: shuffleSubjects(claims, random),
+      composition: (compositions[Math.floor(random() * compositions.length)] ?? compositions[0]!).text,
+      tone: pick(TONES),
+      includeOverall: random() < OVERALL_RATE,
+      regeneration: options.regeneration === true,
+    };
+  }
+
   async function generate(
-    claims: readonly StructuredClaim[],
+    plan: Plan,
     comment: string | undefined,
     star: number,
     retryNotes: readonly string[],
   ): Promise<string | null> {
     const { systemInstruction, userContent } = buildRealizerPrompt({
-      claims,
+      claims: plan.claims,
       ...(comment !== undefined ? { comment } : {}),
       star,
-      structureHint: pick(STRUCTURE_HINTS),
-      tone: pick(TONES),
+      includeOverall: plan.includeOverall,
+      composition: plan.composition,
+      tone: plan.tone,
+      regeneration: plan.regeneration,
       retryNotes,
     });
     try {
@@ -133,7 +168,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
   }
 
   return {
-    async prepare(material: StructuredDraftMaterial): Promise<StructuredDraftResult> {
+    async prepare(material: StructuredDraftMaterial, draftOptions: StructuredDraftOptions = {}): Promise<StructuredDraftResult> {
       const claims = compileStructuredClaims(material.selections);
       // claim が無い（星だけ・一言だけ）回答からは下書きを作らない。素材の無い文章は創作になる。
       if (claims.length === 0) return { kind: 'unavailable' };
@@ -143,7 +178,8 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
         ...new Set(evaluateStructuredDraft(input, draft, lexicon, legacy).findings.map((f) => gateFamily(f.kind))),
       ];
 
-      const first = await generate(claims, comment, material.star, []);
+      const plan = planOf(claims, draftOptions);
+      const first = await generate(plan, comment, material.star, []);
       if (first === null) {
         options.onFallback?.('generation', [], claims.length);
         return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 1 };
@@ -153,7 +189,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
 
       options.onRetry?.(firstKinds, claims.length);
       const notes = firstKinds.map((k) => RETRY_NOTES[k] ?? RETRY_NOTES.caseForbidden!).filter((n, i, a) => a.indexOf(n) === i);
-      const second = await generate(claims, comment, material.star, notes);
+      const second = await generate(plan, comment, material.star, notes);
       if (second === null) {
         options.onFallback?.('generation', firstKinds, claims.length);
         return { kind: 'draft', draft: structuredFallbackDraft(claims), source: 'fallback', attempts: 2 };

@@ -29,8 +29,16 @@ export type StructuredDraftResult =
    */
   | { readonly kind: 'draft'; readonly draft: string; readonly source: 'llm' | 'fallback'; readonly attempts: number };
 
+export interface StructuredDraftOptions {
+  /**
+   * 「別の文章を生成」（/api/drafts）からの呼び出しか。true なら前とは違う組み立てにする決まった指示を足す。
+   * 前回の下書きそのものは渡さない（客の端末から戻る値を、事実の源にも指示にもしない）。
+   */
+  readonly regeneration?: boolean;
+}
+
 export interface StructuredDraftPort {
-  prepare(material: StructuredDraftMaterial): Promise<StructuredDraftResult>;
+  prepare(material: StructuredDraftMaterial, options?: StructuredDraftOptions): Promise<StructuredDraftResult>;
 }
 
 /**

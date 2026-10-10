@@ -114,10 +114,21 @@ describe('structured の下書き（Issue #439）', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ generation: 'ok', draft: '刺身盛り合わせ、おいしかったです。', regenerationsLeft: REGEN_MAX - 1 });
-    expect(realizer.prepare).toHaveBeenCalledWith(SNAPSHOT);
+    // 再生成であることだけを伝える（前とは違う組み立てにする決まった指示）。素材は封入したものだけ。
+    expect(realizer.prepare).toHaveBeenCalledWith(SNAPSHOT, { regeneration: true });
     expect(deps.generator.generate).not.toHaveBeenCalled();
     const next = tokens.verifyStructured(body.sessionToken as string);
     expect(next.ok && next.value.attempt).toBe(1);
+  });
+
+  it('再生成の要求に前回の下書きを載せても、生成器へは渡らない（事実の源は封入した素材だけ）', async () => {
+    const realizer = port();
+    const token = tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 });
+    const body = { sessionToken: token, draft: '友人と行きました。刺身盛り合わせが20分で出てきました。', previousDraft: '友人と行きました。' };
+    const res = await handleDrafts(post('http://x/api/drafts', body), draftsDeps(realizer));
+    expect(res.status).toBe(200);
+    expect(realizer.prepare).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(realizer.prepare.mock.calls[0])).not.toMatch(/友人|20分/);
   });
 
   it('再生成の上限に達したら 409 で、生成器を呼ばない', async () => {

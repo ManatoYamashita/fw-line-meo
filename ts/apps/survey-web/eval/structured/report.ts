@@ -1,4 +1,12 @@
-import { diagnoseDraft, regenerationSimilarity, summarizeDiagnostics, type DiagnosticsSummary, type DraftDiagnostics } from './diagnostics';
+import {
+  diagnoseDraft,
+  regenerationSimilarity,
+  structureSameness,
+  summarizeDiagnostics,
+  type DiagnosticsSummary,
+  type DraftDiagnostics,
+  type StructureSameness,
+} from './diagnostics';
 import {
   claimsOf,
   evaluateStructuredDraft,
@@ -73,6 +81,8 @@ export interface GeneratorSummary {
   readonly facetMention: number;
   /** 自然さの診断。LLM の文だけ（safe fallback の文を除く）で集計する。 */
   readonly diagnostics: DiagnosticsSummary;
+  /** 同じケースの複数の生成で、書き出し・主題の順・文の数・文の組み立てが同じだったケースの数（LLM の文だけ）。 */
+  readonly structure: StructureSameness;
   /** ケースごとの再生成の類似度（同じ対象の 2 本以上）。 */
   readonly regeneration: { readonly meanJaccard: number | null; readonly exactDuplicatePairs: number; readonly sameExceptEndingPairs: number; readonly pairs: number };
   /** ケースごとの合格の本数（どのケースで落ちるかを見る）。 */
@@ -143,6 +153,7 @@ export function summarize(cases: readonly StructuredEvalCase[], samples: readonl
         claimCoverage: ratio(coverage.filter((c) => c.covered).length, coverage.length),
         facetMention: ratio(coverage.filter((c) => c.facetMentioned).length, coverage.length),
         diagnostics: summarizeDiagnostics(natural.map((s) => s.diagnostics!)),
+        structure: structureSameness(cases.map((c) => natural.filter((s) => s.caseId === c.id).map((s) => s.diagnostics!))),
         regeneration: { meanJaccard: pairs === 0 ? null : weighted / pairs, exactDuplicatePairs: exact, sameExceptEndingPairs: sameExceptEnding, pairs },
         byCase,
       };
@@ -184,6 +195,38 @@ export function successChecks(production: GeneratorSummary): SuccessCheck[] {
   ];
 }
 
+// ---------------------------------------------------------------------------
+// 自然さの警告（hard fail にしない・実 Gemini の結果を見て目安を調整する）
+// ---------------------------------------------------------------------------
+
+export interface StyleWarning {
+  readonly id: string;
+  readonly label: string;
+  readonly value: string;
+  readonly threshold: string;
+}
+
+/**
+ * 定型への寄りと再生成の構成の偏りの警告。**release gate の FAIL にはしない**（successChecks と分ける）。
+ * 総評の句は単体では合格で、星を渡しうるケース（★3 以外）の 50% を超えて付くときだけ警告する。
+ */
+export function styleWarnings(summary: GeneratorSummary): StyleWarning[] {
+  const r = (k: string) => summary.diagnostics.rates[k] ?? 0;
+  const s = summary.structure;
+  const share = (n: number) => (s.cases === 0 ? 0 : n / s.cases);
+  const fmt = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const candidates: (StyleWarning & { readonly over: boolean })[] = [
+    { id: 'overallClosing', label: '星を渡しうるケースで総評の句（全体として・全体的に・総じて）が付いた率', value: fmt(r('overallClosingStarred')), threshold: '≤ 50%', over: r('overallClosingStarred') > 0.5 },
+    { id: 'abstractEvaluation', label: '「満足できる内容」「満足できるもの」のような抽象語のまとめ', value: fmt(r('abstractEvaluation')), threshold: '≤ 5%', over: r('abstractEvaluation') > 0.05 },
+    { id: 'dakeWithMultipleConcerns', label: '気になったことが 2 つ以上あるのに「〜だけ」', value: fmt(r('dakeWithMultipleConcerns')), threshold: '0%', over: r('dakeWithMultipleConcerns') > 0 },
+    { id: 'sameOpening', label: '再生成の書き出しがすべて同じだったケース', value: `${s.sameOpening}/${s.cases}`, threshold: '≤ 50%', over: share(s.sameOpening) > 0.5 },
+    { id: 'sameClaimOrder', label: '再生成の主題の順がすべて同じだったケース', value: `${s.sameClaimOrder}/${s.cases}`, threshold: '≤ 50%', over: share(s.sameClaimOrder) > 0.5 },
+    { id: 'sameSentenceCount', label: '再生成の文の数がすべて同じだったケース', value: `${s.sameSentenceCount}/${s.cases}`, threshold: '≤ 70%', over: share(s.sameSentenceCount) > 0.7 },
+    { id: 'sameStructure', label: '再生成の文の組み立て（文ごとの主題）がすべて同じだったケース', value: `${s.sameStructure}/${s.cases}`, threshold: '≤ 30%', over: share(s.sameStructure) > 0.3 },
+  ];
+  return candidates.filter((c) => c.over).map((c) => ({ id: c.id, label: c.label, value: c.value, threshold: c.threshold }));
+}
+
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 /** 集計を人が読む表（Markdown）にする。BASELINE.md の記録と同じ形。 */
@@ -200,6 +243,10 @@ export function formatSummary(summary: StructuredEvalSummary): string {
   );
   const production = summary.generators.find((m) => m.generator === 'production');
   const checks = production && production.samples - production.missing > 0 ? successChecks(production) : [];
+  const structure = summary.generators.map(
+    (m) => `- ${m.generator}: 比べたケース ${m.structure.cases}・書き出しが同じ ${m.structure.sameOpening}・主題の順が同じ ${m.structure.sameClaimOrder}・文の数が同じ ${m.structure.sameSentenceCount}・文の組み立てが同じ ${m.structure.sameStructure}`,
+  );
+  const warnings = production && production.samples - production.missing > 0 ? styleWarnings(production) : [];
   return [
     `ケース ${summary.cases} 件・claim ${summary.claims} 件`,
     '',
@@ -212,8 +259,14 @@ export function formatSummary(summary: StructuredEvalSummary): string {
     '',
     '自然さの診断（率・個々の合否ではない。production は LLM の文だけで集計）:',
     ...diag,
+    '',
+    '再生成の構成の偏り（同じケースの 2 本以上・すべて同じだったケースの数）:',
+    ...structure,
     ...(checks.length > 0
       ? ['', '成功条件（production・自動の下限。最終判断は人手の採点）:', '', '| 条件 | 値 | 目安 | 判定 |', '|---|---|---|---|', ...checks.map((c) => `| ${c.label} | ${c.value} | ${c.threshold} | ${c.passed ? 'PASS' : 'FAIL'} |`)]
+      : []),
+    ...(warnings.length > 0
+      ? ['', '自然さの警告（hard fail ではない。目安は実測を見て調整する）:', ...warnings.map((w) => `- WARN ${w.label}: ${w.value}（目安 ${w.threshold}）`)]
       : []),
   ].join('\n');
 }
