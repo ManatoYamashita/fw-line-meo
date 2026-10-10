@@ -9,11 +9,11 @@ import { claimsOf, exactOverlaps, type EvalClaim, type StructuredEvalCase } from
 //   A legacy-direct      現行の生成器（createDraftGenerator・prompt.ts）へ、structured の素材を legacy の観点の
 //                        ラベルへ平らにして流す。「現行に近い direct generation」
 //   B claims-plain       claim を箇条書きで渡し、回答に無いことは書かないとだけ指示する。自然化の指示は弱い
-//   C natural-realizer   本番の StructuredDraftPort（src/lib/draft/structured-draft.ts）。**#439 で中身を実装する。**
+//   C natural-realizer   本番の StructuredDraftPort（src/lib/draft/structured-draft.ts）。**Issue #439 で中身を実装する。**
 //                        Stage 2 の暫定実装は下書きを作らないので、この時点では全件「生成なし」になる
 //   D safe-fallback      claim から決定的に作るテンプレート（参考・API 不要）
 //
-// B と D は評価のためだけの方式で、本番の生成には使わない（#439 の prompt / generator を先取りしない）。
+// B と D は評価のためだけの方式で、本番の生成には使わない（Issue #439 の prompt / generator を先取りしない）。
 
 export interface EvalMethod {
   readonly id: string;
@@ -178,7 +178,7 @@ export function evalMethods(options: MethodOptions): EvalMethod[] {
     },
     {
       id: 'natural-realizer',
-      label: 'C #439 の Natural LLM Realizer（本番の StructuredDraftPort）',
+      label: 'C Issue #439 の Natural LLM Realizer（本番の StructuredDraftPort）',
       requiresApi: true,
       async generate(c) {
         const result = (await port.prepare({
@@ -194,7 +194,7 @@ export function evalMethods(options: MethodOptions): EvalMethod[] {
           })),
           ...(c.comment !== undefined ? { comment: c.comment } : {}),
         })) as { kind: string; draft?: string };
-        // Stage 2 の暫定実装は { kind: 'unavailable' } を返す（下書きなし）。#439 で draft を返すようになる。
+        // Stage 2 の暫定実装は { kind: 'unavailable' } を返す（下書きなし）。Issue #439 で draft を返すようになる。
         return typeof result.draft === 'string' ? result.draft : null;
       },
     },

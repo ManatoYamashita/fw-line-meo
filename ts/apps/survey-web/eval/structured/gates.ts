@@ -244,7 +244,7 @@ export interface EvalClaim {
 
 /**
  * 素材を claim へ分ける（入力の順）。Target だけ → facet の無い claim、Target + facet → facet ごと、
- * カテゴリ全体の facet → Target の無い claim。#439 の compileStructuredClaims の本体ではなく、評価のための写し。
+ * カテゴリ全体の facet → Target の無い claim。Issue #439 の compileStructuredClaims の本体ではなく、評価のための写し。
  */
 export function claimsOf(c: StructuredEvalCase): EvalClaim[] {
   const claims: EvalClaim[] = [];

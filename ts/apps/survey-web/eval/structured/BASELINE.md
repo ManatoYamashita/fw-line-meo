@@ -40,7 +40,16 @@ D の AI っぽさの診断（率・合否ではない）: 「全体として」
 - exact overlap の理由の語彙（`overlapReason`）は、Issue #418 の本番の観測例と、#439 の禁止例を陽性に固定している。
 - 再生成の類似度は文字 bigram の Jaccard で、意味の違いは見ない。語尾だけを変えた組は別に数える（`sameExceptEndingPairs`）。
 
-## 4. 次に測ること
+## 4. 最終 PR 前の必須の release gate（未実施）
+
+実 Gemini の baseline（A・B）は、この環境にキーが無いため取れていない。Issue #439 の実装はキー無しで進めてよいが、**最終 PR の前に次を必ず行う**（行うまで最終 PR を出さない）。
+
+- [ ] 実 Gemini で A（legacy-direct）・B（claims-plain）・C（natural-realizer）・D（safe-fallback）を同じ fixture・同じモデル・同じ回数（12 ケース × 3 回以上）で測り、この表を埋める
+- [ ] factuality の hard gate: C が A・B より悪化していない。exact overlap の理由（`overlapReason`）が C で 0 件
+- [ ] ブラインドの人手評価: `EVAL_OUT` の隣の `.blind.md` を 2 名以上（できなければ評価者を固定）で採点し、`aggregateRatings` / `aggregatePairwise` で集計する。C の自然さ・投稿しやすさが A・B より改善傾向で、チェックリストの読み上げが増えていない
+- [ ] 結果（集計だけ）をこのファイルへ追記する。実出力はリポジトリへ入れない
+
+## 5. 次に測ること
 
 1. キーのある環境で A・B を同じ条件（12 ケース × 3 回）で測り、この表を埋める。出力のブラインド評価の束（`EVAL_OUT` の隣の `.blind.md`）を 2 名以上で採点する。
 2. #439 で C を実装したら、C を同じ条件で測り、A・B・D と並べる。採用の条件は #440 の本文の「導入判断」（hard gate が baseline より悪化しない・overlap の理由が 0・人手評価が改善傾向・チェックリストの読み上げが増えない・再生成で意味を変えずに表現が変わる）。
