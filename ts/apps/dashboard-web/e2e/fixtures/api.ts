@@ -424,11 +424,6 @@ export interface DashboardSurface {
   readonly where: string;
   /** 表や主要部品が現れるまでの操作と、本体が描けていることの前提 assert。 */
   readonly open: (page: Page) => Promise<void>;
-  /**
-   * 素の `<select>` 由来の既知の溢れを持つ面か（Issue #186）。
-   * 横スクロールの spec はこの印で `test.fail` 側と通常側を振り分ける。
-   */
-  readonly knownOverflow: boolean;
 }
 
 /**
@@ -576,7 +571,6 @@ export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
 export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   {
     where: '店舗一覧',
-    knownOverflow: false,
     open: async (page) => {
       await openListSurface(page, '/stores', '店舗一覧', 3);
     },
@@ -585,19 +579,16 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     // QR パネルは店舗一覧の中で開く後続状態であり、Issue #179 まで自動 a11y 監査の対象外だった
     // （客向けの下書き画面が同じ形で漏れていたのと同型。PR #218 のレビューで判明した）。
     where: '店舗一覧の QR パネル',
-    knownOverflow: false,
     open: openStoreQrPanel,
   },
   {
     where: '代理店管理',
-    knownOverflow: false,
     open: async (page) => {
       await openListSurface(page, '/admin/agencies', '代理店管理', 2);
     },
   },
   {
     where: 'ログイン',
-    knownOverflow: false,
     open: async (page) => {
       await startSignedOut(page);
       await stubDashboardApi(page);
@@ -608,7 +599,6 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   },
   {
     where: '招待コード',
-    knownOverflow: true,
     open: async (page) => {
       await stubDashboardApi(page);
       await page.goto('/invite-codes');
@@ -621,7 +611,6 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   },
   {
     where: '利用者管理',
-    knownOverflow: true,
     open: async (page) => {
       await openListSurface(page, '/admin/users', '利用者管理', 3);
     },
@@ -630,12 +619,10 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     // 編集パネルは利用者管理の中で開く後続状態である。一覧の URL だけを監査しても、パネルは
     // 構造的に一度も監査されない（QR パネルと同じ理由で、面として明示する・Issue #259）。
     where: '利用者管理の編集パネル',
-    knownOverflow: false,
     open: openUserEditPanel,
   },
   {
     where: '店舗登録',
-    knownOverflow: true,
     open: async (page) => {
       await stubDashboardApi(page);
       await page.goto('/stores/new');
