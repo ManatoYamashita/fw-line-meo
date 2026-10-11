@@ -71,9 +71,13 @@ export function claimSubjectKey(claim: StructuredClaim): string {
   return claim.kind === 'category_facet' ? `${claim.categoryCode}:${claim.facetCode}` : claim.targetId;
 }
 
+/** claim の identity（主題と facet）。同じ identity が両極性にあれば exact overlap。 */
+export function claimIdentity(c: StructuredClaim): string {
+  return `${claimSubjectKey(c)}:${c.kind === 'target' ? '' : c.facetCode}`;
+}
+
 /** 同じ identity（主題と facet）が両極性にある組の key（exact overlap）。 */
 export function overlappingIdentities(claims: readonly StructuredClaim[]): string[] {
-  const identity = (c: StructuredClaim) => `${claimSubjectKey(c)}:${c.kind === 'target' ? '' : c.facetCode}`;
-  const positive = new Set(claims.filter((c) => c.polarity === 'positive').map(identity));
-  return [...new Set(claims.filter((c) => c.polarity === 'concern').map(identity))].filter((k) => positive.has(k));
+  const positive = new Set(claims.filter((c) => c.polarity === 'positive').map(claimIdentity));
+  return [...new Set(claims.filter((c) => c.polarity === 'concern').map(claimIdentity))].filter((k) => positive.has(k));
 }

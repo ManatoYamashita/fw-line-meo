@@ -134,9 +134,36 @@ describe('プロンプト', () => {
     expect(userContent).not.toContain('味');
   });
 
-  it('exact overlap は、両方あったことだけを書くよう回答の側に添える', () => {
-    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections) });
-    expect(userContent).toContain('同じ項目が良かったところと気になったところの両方にあります');
+  it('exact overlap は、どの項目が両方にあるかを名指し、両面の意味（理由・中身を決めない）を伝える', () => {
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections) });
+    expect(userContent).toContain('両方で選んだ項目（良い面も気になる面もあった）: 刺身盛り合わせの味');
+    // どちらの側も捨てない。
+    expect(userContent).toContain('良かったところ:\n- 刺身盛り合わせ（料理）: 味');
+    expect(userContent).toContain('気になったところ:\n- 刺身盛り合わせ（料理）: 味');
+    expect(systemInstruction).toContain('感想に理由が書かれていればそれに沿い、無ければ何が良くて何が足りなかったか（多い・少ない など）を決めずに');
+  });
+
+  it('exact overlap が無ければ両方の欄は出さない。カテゴリ全体の facet の overlap は facet 名で名指す', () => {
+    expect(buildRealizerPrompt({ claims: compileStructuredClaims(material().selections) }).userContent).not.toContain('両方で選んだ項目');
+    const drink = (polarity: 'positive' | 'concern') => ({ polarity, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] });
+    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims([drink('positive'), drink('concern')]), comment: '定番は揃っていたけどノンアルが少なかった' });
+    expect(userContent).toContain('両方で選んだ項目（良い面も気になる面もあった）: 種類');
+    expect(userContent).toContain('「定番は揃っていたけどノンアルが少なかった」');
+  });
+
+  it('星は渡さず、選んでいない側の良し悪しと入力に無い総評を足さないよう伝える（★1 で positive だけ・★5 で concern だけ）', () => {
+    for (const star of [1, 5] as const) {
+      const { systemInstruction, userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(material({ star }).selections) });
+      expect(userContent).not.toMatch(/[★☆]|星/);
+      expect(systemInstruction).toContain('選んでいない側の良し悪しも補わないでください');
+      expect(systemInstruction).toContain('入力に無い店全体の総評');
+    }
+  });
+
+  it('感想と選んだ項目が食い違えば感想に沿うよう伝える（どちらかを誤りと決めつけない）', () => {
+    const { systemInstruction } = buildRealizerPrompt({ claims: compileStructuredClaims(material().selections), comment: '量は思ったより少なかった' });
+    expect(systemInstruction).toContain('感想と選んだ項目が食い違うときは感想の内容に沿い');
+    expect(systemInstruction).toContain('どちらかを誤りと決めつけたり');
   });
 });
 

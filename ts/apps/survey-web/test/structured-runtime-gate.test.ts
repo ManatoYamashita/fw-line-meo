@@ -518,3 +518,80 @@ describe('ボタン回答だけの自然な口コミ（軽い主観への展開�
     expect(runtimeOf(material({ selections: [courtesy] }), '温かい接客で、気持ちよく利用できました。')).toEqual([]);
   });
 });
+
+describe('矛盾して見える回答（星と内容・exact overlap・感想と選択の食い違い）を誤りとして弾かない（2026-10-11）', () => {
+  // 利用者は「★1 で良かったところだけ」「同じ項目を良かった・気になった両方」「選んだ項目と逆の感想」のように答える。
+  // gate は星を見ない（claim の真偽を決めない）。明確な捏造だけを止め、本人の言葉に沿った文は通す。
+  const runtimeOf = (m: StructuredDraftMaterial, draft: string) => runtimeViolations(gateInputOf(m), draft, LEX, LEGACY);
+  const volume = (polarity: 'positive' | 'concern') => ({ polarity, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] });
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const entryWait = { polarity: 'concern' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] };
+  const variety = (polarity: 'positive' | 'concern') => ({ polarity, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] });
+  const bothVariety = [variety('positive'), variety('concern')];
+
+  it('★1 + 良かったところだけ: 選んだ良さはそのまま通し、強い総評（大満足）は止める', () => {
+    const m = material({ star: 1, selections: [volume('positive'), courtesy] });
+    expect(runtimeOf(m, 'ボリュームがあって、接客も丁寧で気持ちよく利用できました。')).toEqual([]);
+    expect(runtimeOf(m, 'ボリュームがあって接客も丁寧で、大満足でした。')).toContain('intensity');
+  });
+
+  it('★5 + 気になったところだけ: 気になったことはそのまま通す（星で positive を要求しない）', () => {
+    const m = material({ star: 5, selections: [entryWait, variety('concern')] });
+    expect(runtimeOf(m, '入店まで少し待ちました。ドリンクはもう少し種類があると嬉しいです。')).toEqual([]);
+  });
+
+  it('星は判定に効かない（同じ下書き・同じ回答なら星が違っても結果は同じ）', () => {
+    const draft = 'ボリュームがあって、接客も丁寧でした。';
+    const of = (star: 1 | 5) => runtimeOf(material({ star, selections: [volume('positive'), courtesy] }), draft);
+    expect(of(1)).toEqual(of(5));
+  });
+
+  it('exact overlap（感想なし）: 両面だけの言い方は通し、理由を作れば止める', () => {
+    const m = material({ selections: bothVariety });
+    expect(runtimeOf(m, 'ドリンクの種類は、良いところも気になるところもありました。')).toEqual([]);
+    expect(runtimeOf(m, 'ドリンクの種類は良いと思う反面、少し気になる部分もありました。')).toEqual([]);
+    expect(runtimeOf(m, 'ドリンクの種類は、時間帯によって良いときと気になるときがありました。')).toContain('overlapReason');
+  });
+
+  it('exact overlap + 理由を書いた感想: 感想の具体性で両面を書いた文は通す', () => {
+    const m = material({ selections: bothVariety, comment: '定番は揃っていたけどノンアルが少なかった' });
+    expect(runtimeOf(m, 'ドリンクは定番がひと通り揃っていて良かったです。ただ、ノンアルの種類がもう少しあると嬉しいです。')).toEqual([]);
+    expect(runtimeOf(m, '定番のドリンクは揃っていましたが、ノンアルが少なかったのは残念でした。')).toEqual([]);
+  });
+
+  it('選んだ項目と逆の感想: 感想に沿った文は極性の反転に数えない（comment-first）', () => {
+    const m = material({ selections: [volume('positive')], comment: '量は思ったより少なかった' });
+    expect(runtimeOf(m, '料理の量は思ったより少なめでした。')).toEqual([]);
+    expect(runtimeOf(m, '料理の量は思っていたより少し物足りなかったです。')).toEqual([]);
+  });
+
+  it('感想が同じ向き・別の主題なら、選んだ項目と逆の文は従来どおり反転として止める', () => {
+    expect(runtimeOf(material({ selections: [volume('positive')], comment: '量よかった' }), '料理の量は少し物足りなかったです。')).toContain('polarityReversal');
+    expect(runtimeOf(material({ selections: [volume('positive')], comment: '接客がよかった' }), '料理の量は少し物足りなかったです。')).toContain('polarityReversal');
+    expect(runtimeOf(material({ selections: [volume('positive')] }), '料理の量は少し物足りなかったです。')).toContain('polarityReversal');
+  });
+
+  it('★1 + かなり positive な感想・★5 + やや negative な感想: 感想に沿った文は通す', () => {
+    const low = material({ star: 1, selections: [volume('positive'), courtesy], comment: 'めっちゃ美味しかったし店員さんも感じよかった' });
+    expect(runtimeOf(low, '量もしっかりあって、店員さんの感じもとても良かったです。')).toEqual([]);
+    const high = material({ star: 5, selections: [volume('positive'), courtesy], comment: '量はよかったけど接客がちょっと雑だった' });
+    expect(runtimeOf(high, '料理の量は良かったです。ただ、接客は少し雑に感じました。')).toEqual([]);
+  });
+
+  it('通常の矛盾の無い回答は従来どおり通る', () => {
+    const m = material({ star: 4, selections: [volume('positive'), courtesy, variety('concern')] });
+    expect(runtimeOf(m, '料理はボリュームがあり、接客も丁寧でした。ドリンクの種類が増えるとより良いと思います。')).toEqual([]);
+  });
+
+  it('感想に沿った 1 回目の下書きを、作り直さずにそのまま返す', async () => {
+    const onRetry = vi.fn();
+    const client: GenAiClient = {
+      models: { generateContent: async () => ({ text: JSON.stringify({ draft: '料理の量は思ったより少なめでした。' }) }) },
+    };
+    const result = await createNaturalRealizer(client, { onRetry }).prepare(
+      material({ selections: [volume('positive')], comment: '量は思ったより少なかった' }),
+    );
+    expect(result).toEqual({ kind: 'draft', draft: '料理の量は思ったより少なめでした。', source: 'llm', attempts: 1 });
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+});

@@ -1,4 +1,4 @@
-import { claimSubjectKey, overlappingIdentities, type StructuredClaim } from './claims';
+import { claimIdentity, claimSubjectKey, overlappingIdentities, type StructuredClaim } from './claims';
 
 // structured の通常生成のプロンプト（Issue #439）。**事実の境界はコード（claims と hard gate）が主で、プロンプトは自然な
 // 口コミを書かせることだけに集中する。**
@@ -23,6 +23,16 @@ import { claimSubjectKey, overlappingIdentities, type StructuredClaim } from './
 // 素材に入れないもの:
 //   - 店名: 店名から書き始める定型を避ける（Google の口コミは店のページに載るので、店名は要らない）
 //   - 星: 星から総評・理由・強い言葉を作らせない（総評の定型「全体として満足です」が毎回付いた）
+//
+// 矛盾して見える回答（2026-10-11）: 利用者は「★1 で良かったところだけ」「★5 で気になったところだけ」「同じ項目を
+// 良かった・気になった両方」「選んだ項目と逆の感想」のように答える。どれも入力の誤りとして弾かず、次のように扱う:
+//   - 星は claim の真偽を決めない。プロンプトに出さないので、星から無い良し悪しや総評は生まれない。代わりに、
+//     選んでいない側の良し悪しと、入力に無い店全体の総評（全体的に満足／残念）を足さないことを指示する。強い総評
+//     （大満足・最高）は hard gate の intensity が止める
+//   - exact overlap は「同じ項目に良い面も気になる面もあった」という曖昧な両面で、どちらも捨てない。どの項目かを
+//     名指し、感想に理由が無ければ中身（豊富・少ない）を決めさせない（「種類が豊富だが、もう少し選択肢が欲しい」の
+//     自己矛盾は、両側をそれぞれ典型的な言い換えへ広げたことで起きた）
+//   - 感想と選んだ項目が食い違えば、本人の言葉である感想に沿う（hard gate も感想が同じ主題を述べた向きを反転と数えない）
 // 前回の下書きはモデルへ渡さない（客の端末から戻る値を事実の源にしない）。
 
 export const REALIZER_MARKER = '[structured-review-realizer]';
@@ -37,8 +47,11 @@ const SYSTEM_INSTRUCTION = `${REALIZER_MARKER}
 
 選んだ項目から利用者が自然に感じそうな主観までは、広げて構いません（量が良かった → ボリュームがある、しっかり食べたいときにも良さそう／接客が丁寧 → 気持ちよく利用できた／種類が気になった → もう少し選べると嬉しい／コスパが良い → お得感がある、利用しやすい）。
 ただし、入力から分からない具体的な事実（店員さんが笑顔だった・魚が新鮮だった・衣がサクサクだった・30 分待った・店内が静かだった など）は作らないでください。
+選んでいない側の良し悪しも補わないでください（良かったところだけなら不満を、気になったところだけなら褒める点を足さない）。入力に無い店全体の総評（全体的に満足だった・全体的に残念だった など）も足さないでください。
+同じ項目を良かったところと気になったところの両方で選んでいるのは、その項目に良い面も気になる面もあったという意味です。感想に理由が書かれていればそれに沿い、無ければ何が良くて何が足りなかったか（多い・少ない など）を決めずに、両面があったことだけを書いてください。
 
 本人が書いた感想がある場合は、それを口コミの中心にし、選んだ項目は足りない観点を補うときだけ使ってください。
+感想と選んだ項目が食い違うときは感想の内容に沿い、食い違う項目は書かなくて構いません（どちらかを誤りと決めつけたり、両方を言い切ったりしない）。
 誤字・助詞・文法・語順・重複・句読点・不自然な口語は直して読みやすく整えてください。もともと自然な文なら、直すのは必要な部分だけで構いません。
 本人の具体的な感覚や温度感（「コスパ」「お得」「ちょっと待った」「量が多かった」など）は残し、「満足度の高い内容でした」「非常に良い印象を受けました」のような抽象的・レポート的な言い方に置き換えないでください。
 
@@ -76,7 +89,11 @@ export interface RealizerPromptInput {
 export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruction: string; userContent: string } {
   const positive = answerLines(input.claims, 'positive');
   const concern = answerLines(input.claims, 'concern');
-  const overlap = overlappingIdentities(input.claims).length > 0;
+  const overlapKeys = new Set(overlappingIdentities(input.claims));
+  // 両方で選んだ項目を名指す（どの項目の両面かが分からないと、モデルが別々の項目として両側を言い切る）。
+  const overlap = input.claims
+    .filter((c) => c.polarity === 'positive' && overlapKeys.has(claimIdentity(c)))
+    .map((c) => (c.kind === 'target' ? c.targetLabel : c.kind === 'target_facet' ? `${c.targetLabel}の${c.facetLabel}` : c.facetLabel));
   const comment = input.comment !== undefined && input.comment.trim() !== '' ? input.comment : undefined;
   // 感想があれば先に置く（口コミの中心）。選んだ項目はその後ろに「手がかり」として置く。
   const lines = [
@@ -84,7 +101,7 @@ export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruc
     '本人が選んだ項目（どう感じたかの手がかり）:',
     ...(positive.length > 0 ? ['良かったところ:', ...positive] : []),
     ...(concern.length > 0 ? ['気になったところ:', ...concern] : []),
-    ...(overlap ? ['（同じ項目が良かったところと気になったところの両方にあります。両方あったことだけを書いてください）'] : []),
+    ...(overlap.length > 0 ? [`両方で選んだ項目（良い面も気になる面もあった）: ${overlap.join('、')}`] : []),
     ...(input.retryNotes !== undefined && input.retryNotes.length > 0
       ? ['', '前回の文章は次の点を守れていませんでした。意味は変えずに書き直してください:', ...input.retryNotes.map((n) => `- ${n}`)]
       : []),

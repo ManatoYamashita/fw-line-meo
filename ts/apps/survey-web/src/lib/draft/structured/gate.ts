@@ -511,6 +511,16 @@ export function evaluateStructuredDraft(
     if (!words.some((w) => draft.includes(w))) add('targetDropped', s.targetLabel!);
   }
 
+  // 本人の感想（一言）が同じ主題を述べていれば、その主題の向きは本人の言葉に従う（2026-10-11）。量を「良かった」と
+  // 選び、一言に「量は思ったより少なかった」と書いた客の下書きが感想に沿うのは正しい（comment-first）。反転と数えると、
+  // 作り直しの注意が感想と逆の「量が多くて満足」へ寄せるか、generation error になる。一言のその文が下書きの文と同じ極性か、
+  // 極性の手がかりの語彙に当たらない（「少なかった」）ときに限り、一言が反対の向き（「量よかった」）なら従来どおり数える。
+  const commentStates = (cl: GateClaim, sp: ReadonlySet<Polarity>): boolean =>
+    commentRelates(cl, (cs) => {
+      const cp = polarityOf(cs, lex);
+      return cp.size === 0 || [...cp].some((p) => sp.has(p));
+    });
+
   // 極性の反転: 主題（と facet）について述べた文の極性が、回答のどの極性とも重ならない。
   for (const [index, sentence] of sentences.entries()) {
     const sp = polarityOf(sentence, lex);
@@ -523,7 +533,7 @@ export function evaluateStructuredDraft(
         ? sameSubject.filter((x) => x.facetCode && firstMatch(sentence, lex.facetMeanings[x.facetCode] ?? []) !== null)
         : sameSubject;
       const expected = new Set((facetHits.length > 0 ? facetHits : sameSubject).map((x) => x.polarity));
-      if (![...sp].some((p) => expected.has(p))) add('polarityReversal', sentence);
+      if (![...sp].some((p) => expected.has(p)) && !commentStates(cl, sp)) add('polarityReversal', sentence);
     }
   }
   // Target の文に、回答した facet と逆の極性で別の facet が出た場合（「味も量も良かった」で量が concern）。
@@ -535,7 +545,7 @@ export function evaluateStructuredDraft(
       for (const cl of claims.filter((x) => x.targetId === s.targetId && x.facetCode)) {
         if (firstMatch(sentence, lex.facetMeanings[cl.facetCode!] ?? []) === null) continue;
         const polarities = new Set(claims.filter((x) => x.targetId === s.targetId && x.facetCode === cl.facetCode).map((x) => x.polarity));
-        if (![...sp].some((p) => polarities.has(p))) add('polarityReversal', sentence);
+        if (![...sp].some((p) => polarities.has(p)) && !commentStates(cl, sp)) add('polarityReversal', sentence);
       }
     }
   }
