@@ -134,21 +134,64 @@ describe('プロンプト', () => {
     expect(userContent).not.toContain('味');
   });
 
-  it('exact overlap は、どの項目が両方にあるかを名指し、両面の意味（理由・中身を決めない）を伝える', () => {
-    const { systemInstruction, userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(OVERLAP.selections) });
-    expect(userContent).toContain('両方で選んだ項目（良い面も気になる面もあった）: 刺身盛り合わせの味');
-    // どちらの側も捨てない。
-    expect(userContent).toContain('良かったところ:\n- 刺身盛り合わせ（料理）: 味');
-    expect(userContent).toContain('気になったところ:\n- 刺身盛り合わせ（料理）: 味');
-    expect(systemInstruction).toContain('感想に理由が書かれていればそれに沿い、無ければ何が良くて何が足りなかったか（多い・少ない など）を決めずに');
+  it('exact overlap（感想なし）: 生成用の入力では両側へ独立に載せず、mixed として 1 回だけ渡す', () => {
+    const claims = compileStructuredClaims(OVERLAP.selections);
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims });
+    expect(userContent).toContain('良い面も気になる面もあったところ:\n- 刺身盛り合わせ（料理）: 味');
+    expect(userContent).not.toContain('良かったところ:');
+    expect(userContent).not.toContain('気になったところ:');
+    expect(userContent.match(/刺身盛り合わせ/g)).toHaveLength(1);
+    // 意味づけ: 両側とも中身を決めない・良い側は控えめ・同じ軸で強く褒めて強く不満を言わない。
+    expect(systemInstruction).toContain('良い側も気になる側も中身を決めず（豊富だった・選ぶ楽しさがあった・少なかった などと書かない）');
+    expect(systemInstruction).toContain('同じ項目を強く褒めてから強く不満を言う書き方はしないでください');
+    // 正規化は生成用の入力だけ。claim（gate が見る意味）は両極性のまま。
+    expect(claims.map((c) => c.polarity)).toEqual(['positive', 'concern']);
   });
 
-  it('exact overlap が無ければ両方の欄は出さない。カテゴリ全体の facet の overlap は facet 名で名指す', () => {
-    expect(buildRealizerPrompt({ claims: compileStructuredClaims(material().selections) }).userContent).not.toContain('両方で選んだ項目');
+  it('exact overlap（感想あり）: mixed のまま渡し、感想を中心に置く（理由は感想から使ってよい）', () => {
     const drink = (polarity: 'positive' | 'concern') => ({ polarity, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] });
-    const { userContent } = buildRealizerPrompt({ claims: compileStructuredClaims([drink('positive'), drink('concern')]), comment: '定番は揃っていたけどノンアルが少なかった' });
-    expect(userContent).toContain('両方で選んだ項目（良い面も気になる面もあった）: 種類');
-    expect(userContent).toContain('「定番は揃っていたけどノンアルが少なかった」');
+    const { systemInstruction, userContent } = buildRealizerPrompt({
+      claims: compileStructuredClaims([drink('positive'), drink('concern')]),
+      comment: '定番は揃っていたけどノンアルが少なかった',
+    });
+    expect(userContent.indexOf('「定番は揃っていたけどノンアルが少なかった」')).toBeLessThan(userContent.indexOf('良い面も気になる面もあったところ:'));
+    expect(userContent).toContain('良い面も気になる面もあったところ:\n- 種類（ドリンク）');
+    expect(userContent).not.toMatch(/良かったところ:|気になったところ:/);
+    expect(systemInstruction).toContain('感想に理由が書かれていればそれに沿ってください');
+  });
+
+  it('一部だけ overlap: 重なった facet だけを mixed にし、残りは従来どおりの側に置く', () => {
+    const { userContent } = buildRealizerPrompt({
+      claims: compileStructuredClaims([
+        { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI, targetLabel: '刺身盛り合わせ', facets: [{ code: 'taste', label: '味' }, { code: 'volume', label: '量' }] },
+        { polarity: 'concern', categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI, targetLabel: '刺身盛り合わせ', facets: [{ code: 'taste', label: '味' }] },
+        { polarity: 'concern', categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] },
+      ]),
+    });
+    expect(userContent).toContain('良かったところ:\n- 刺身盛り合わせ（料理）: 量');
+    expect(userContent).toContain('気になったところ:\n- 種類（ドリンク）');
+    expect(userContent).toContain('良い面も気になる面もあったところ:\n- 刺身盛り合わせ（料理）: 味');
+    expect(userContent).not.toContain('量、味');
+  });
+
+  it('overlap が無ければ従来どおり（mixed の欄は出さない）', () => {
+    const { userContent } = buildRealizerPrompt({
+      claims: compileStructuredClaims([
+        ...material().selections,
+        { polarity: 'concern', categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] },
+      ]),
+    });
+    expect(userContent).toContain('良かったところ:\n- 刺身盛り合わせ（料理）: 味');
+    expect(userContent).toContain('気になったところ:\n- 種類（ドリンク）');
+    expect(userContent).not.toContain('良い面も気になる面もあったところ');
+  });
+
+  it('mixed への正規化は回答の素材を変えない（保存・集計の positive / concern はそのまま）', async () => {
+    const before = structuredClone(OVERLAP);
+    const { client, requests } = fakeClient('刺身盛り合わせの味は、悪くなかったですが、もう少し良くなると嬉しいです。');
+    expect(await createNaturalRealizer(client, {}).prepare(OVERLAP)).toMatchObject({ source: 'llm', attempts: 1 });
+    expect(OVERLAP).toEqual(before);
+    expect(requests[0]!.contents).toContain('良い面も気になる面もあったところ:');
   });
 
   it('星は渡さず、選んでいない側の良し悪しと入力に無い総評を足さないよう伝える（★1 で positive だけ・★5 で concern だけ）', () => {

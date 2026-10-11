@@ -29,9 +29,11 @@ import { claimIdentity, claimSubjectKey, overlappingIdentities, type StructuredC
 //   - 星は claim の真偽を決めない。プロンプトに出さないので、星から無い良し悪しや総評は生まれない。代わりに、
 //     選んでいない側の良し悪しと、入力に無い店全体の総評（全体的に満足／残念）を足さないことを指示する。強い総評
 //     （大満足・最高）は hard gate の intensity が止める
-//   - exact overlap は「同じ項目に良い面も気になる面もあった」という曖昧な両面で、どちらも捨てない。どの項目かを
-//     名指し、感想に理由が無ければ中身（豊富・少ない）を決めさせない（「種類が豊富だが、もう少し選択肢が欲しい」の
-//     自己矛盾は、両側をそれぞれ典型的な言い換えへ広げたことで起きた）
+//   - exact overlap は「同じ項目に良い面も気になる面もあった」という曖昧な両面である。**生成用の入力だけ** で、その項目を
+//     良かったところ・気になったところの両方へ独立に載せず、「良い面も気になる面もあったところ」として 1 回だけ渡す
+//     （回答・保存・集計の positive / concern はそのまま。claim も gate も両極性のまま見る）。両側へ独立に載せると、
+//     モデルは各側を典型的な言い換えへ強く広げ（豊富・選ぶ楽しさ／もっと選択肢が欲しい）、同じ軸で自己矛盾した
+//     （実 Gemini・2026-10-11。両方にあると注記するだけでは直らなかった）。感想に理由が無ければ両側とも具体化させない
 //   - 感想と選んだ項目が食い違えば、本人の言葉である感想に沿う（hard gate も感想が同じ主題を述べた向きを反転と数えない）
 // 前回の下書きはモデルへ渡さない（客の端末から戻る値を事実の源にしない）。
 
@@ -48,7 +50,7 @@ const SYSTEM_INSTRUCTION = `${REALIZER_MARKER}
 選んだ項目から利用者が自然に感じそうな主観までは、広げて構いません（量が良かった → ボリュームがある、しっかり食べたいときにも良さそう／接客が丁寧 → 気持ちよく利用できた／種類が気になった → もう少し選べると嬉しい／コスパが良い → お得感がある、利用しやすい）。
 ただし、入力から分からない具体的な事実（店員さんが笑顔だった・魚が新鮮だった・衣がサクサクだった・30 分待った・店内が静かだった など）は作らないでください。
 選んでいない側の良し悪しも補わないでください（良かったところだけなら不満を、気になったところだけなら褒める点を足さない）。入力に無い店全体の総評（全体的に満足だった・全体的に残念だった など）も足さないでください。
-同じ項目を良かったところと気になったところの両方で選んでいるのは、その項目に良い面も気になる面もあったという意味です。感想に理由が書かれていればそれに沿い、無ければ何が良くて何が足りなかったか（多い・少ない など）を決めずに、両面があったことだけを書いてください。
+「良い面も気になる面もあったところ」は、その項目が良いとも気になるとも言い切れなかったという意味です。感想に理由が書かれていればそれに沿ってください。無ければ、良い側も気になる側も中身を決めず（豊富だった・選ぶ楽しさがあった・少なかった などと書かない）、良い側は控えめに言い、その項目には 1 回だけ触れてください。同じ項目を強く褒めてから強く不満を言う書き方はしないでください。
 
 本人が書いた感想がある場合は、それを口コミの中心にし、選んだ項目は足りない観点を補うときだけ使ってください。
 感想と選んだ項目が食い違うときは感想の内容に沿い、食い違う項目は書かなくて構いません（どちらかを誤りと決めつけたり、両方を言い切ったりしない）。
@@ -61,6 +63,7 @@ JSON {"draft": "..."} の形で返してください。`;
 
 /** 選んだ項目の 1 行（主題ごと）。claim の表示名だけを使い、code は出さない。並びは回答の検証が正規化した定義の順。 */
 function answerLines(claims: readonly StructuredClaim[], polarity: StructuredClaim['polarity']): string[] {
+  // claims は呼び出し側で絞った集合（exact overlap を除いた／overlap だけ）。
   const lines: string[] = [];
   const done = new Set<string>();
   for (const claim of claims.filter((c) => c.polarity === polarity)) {
@@ -87,13 +90,13 @@ export interface RealizerPromptInput {
 }
 
 export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruction: string; userContent: string } {
-  const positive = answerLines(input.claims, 'positive');
-  const concern = answerLines(input.claims, 'concern');
+  // exact overlap は生成用の入力でだけ mixed へまとめる（両側へ独立に載せない）。claims そのものは変えない。
   const overlapKeys = new Set(overlappingIdentities(input.claims));
-  // 両方で選んだ項目を名指す（どの項目の両面かが分からないと、モデルが別々の項目として両側を言い切る）。
-  const overlap = input.claims
-    .filter((c) => c.polarity === 'positive' && overlapKeys.has(claimIdentity(c)))
-    .map((c) => (c.kind === 'target' ? c.targetLabel : c.kind === 'target_facet' ? `${c.targetLabel}の${c.facetLabel}` : c.facetLabel));
+  const isMixed = (c: StructuredClaim) => overlapKeys.has(claimIdentity(c));
+  const single = input.claims.filter((c) => !isMixed(c));
+  const positive = answerLines(single, 'positive');
+  const concern = answerLines(single, 'concern');
+  const mixed = answerLines(input.claims.filter(isMixed), 'positive');
   const comment = input.comment !== undefined && input.comment.trim() !== '' ? input.comment : undefined;
   // 感想があれば先に置く（口コミの中心）。選んだ項目はその後ろに「手がかり」として置く。
   const lines = [
@@ -101,7 +104,7 @@ export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruc
     '本人が選んだ項目（どう感じたかの手がかり）:',
     ...(positive.length > 0 ? ['良かったところ:', ...positive] : []),
     ...(concern.length > 0 ? ['気になったところ:', ...concern] : []),
-    ...(overlap.length > 0 ? [`両方で選んだ項目（良い面も気になる面もあった）: ${overlap.join('、')}`] : []),
+    ...(mixed.length > 0 ? ['良い面も気になる面もあったところ:', ...mixed] : []),
     ...(input.retryNotes !== undefined && input.retryNotes.length > 0
       ? ['', '前回の文章は次の点を守れていませんでした。意味は変えずに書き直してください:', ...input.retryNotes.map((n) => `- ${n}`)]
       : []),

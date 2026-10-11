@@ -21,17 +21,19 @@ const LEGACY_DRAFT = 'E2E モックの口コミ下書きです。';
 function realizedDraft(contents) {
   /** @type {string[]} */
   const sentences = [];
-  /** @type {'positive' | 'concern' | null} */
+  /** @type {'positive' | 'concern' | 'mixed' | null} */
   let polarity = null;
   for (const line of contents.split('\n')) {
     if (line.startsWith('良かったところ')) polarity = 'positive';
     else if (line.startsWith('気になったところ')) polarity = 'concern';
+    else if (line.startsWith('良い面も気になる面もあったところ')) polarity = 'mixed';
     else if (line.startsWith('- ') && polarity !== null) {
       const m = /^- (.+?)（.+?）(?:: (.+))?$/.exec(line);
       if (!m) continue;
-      const verb = polarity === 'positive' ? '良かったです' : '気になりました';
       const facets = m[2] && !m[2].startsWith('料理・ドリンクそのもの') ? m[2].split('、').join('と') : null;
-      sentences.push(facets ? `${m[1]}の${facets}が${verb}。` : `${m[1]}が${verb}。`);
+      const subject = facets ? `${m[1]}の${facets}` : m[1];
+      if (polarity === 'mixed') sentences.push(`${subject}は良いところも気になるところもありました。`);
+      else sentences.push(`${subject}が${polarity === 'positive' ? '良かったです' : '気になりました'}。`);
     } else if (line.trim() === '') polarity = null;
   }
   return sentences.join('');

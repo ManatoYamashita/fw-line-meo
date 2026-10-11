@@ -553,7 +553,17 @@ describe('矛盾して見える回答（星と内容・exact overlap・感想と
     expect(runtimeOf(m, 'ドリンクの種類は、時間帯によって良いときと気になるときがありました。')).toContain('overlapReason');
   });
 
+  it('exact overlap（感想なし）の mixed の控えめな言い方は止めない', () => {
+    const m = material({ selections: bothVariety });
+    for (const draft of [
+      'ドリンクの種類はある程度揃っていましたが、もう少し選べると嬉しいです。',
+      'ドリンクの種類は悪くなかったですが、もう少し選択肢があると嬉しいです。',
+      'ドリンクはそこそこ選べましたが、もう少し種類があるとより良いと思います。',
+    ]) expect(runtimeOf(m, draft)).toEqual([]);
+  });
+
   it('exact overlap + 理由を書いた感想: 感想の具体性で両面を書いた文は通す', () => {
+    expect(runtimeOf(material({ selections: bothVariety, comment: '定番は揃っていたけどノンアルが少なかった' }), '定番のドリンクは揃っていましたが、ノンアルの選択肢がもう少しあると嬉しいです。')).toEqual([]);
     const m = material({ selections: bothVariety, comment: '定番は揃っていたけどノンアルが少なかった' });
     expect(runtimeOf(m, 'ドリンクは定番がひと通り揃っていて良かったです。ただ、ノンアルの種類がもう少しあると嬉しいです。')).toEqual([]);
     expect(runtimeOf(m, '定番のドリンクは揃っていましたが、ノンアルが少なかったのは残念でした。')).toEqual([]);
