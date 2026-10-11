@@ -590,8 +590,12 @@ describe.each(APPS)('$packageName から @fwlm/ui を追加実装なしで利用
     it.each(REPRESENTATIVE_UTILITIES)(
       '.$utility はアプリ自身のソースには存在しない（生成が @source 由来である担保）',
       ({ utility }) => {
+        // Tailwind の候補（空白・引用符で区切られた 1 語）として同じものがあるかを見る。部分文字列では見ない。
+        // `has-[[data-checked]]:bg-primary/10` は別の候補で、`.bg-primary` の規則を生成しない。
+        const escaped = utility.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const candidate = new RegExp(`(^|[\\s'"\`{])${escaped}(?=$|[\\s'"\`}])`, 'm');
         const offenders = collectAppSourceFiles(app.dir).filter((file) =>
-          readFileSync(file, 'utf8').includes(utility),
+          candidate.test(readFileSync(file, 'utf8')),
         );
         expect(
           offenders,

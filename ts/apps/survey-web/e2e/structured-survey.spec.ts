@@ -9,8 +9,10 @@ import { openStructuredSurvey } from './fixtures/structured';
 // 送信は実際の /api/responses（実 DB・e2e/structured-seed.sql の店舗）へ届き、サーバーが版・指紋を照合して受け付ける。
 // 面を開く手順と前提の assert は fixtures/structured.ts が持つ。
 
-// 捲れる領域は一言の <textarea> の 1 つ（legacy の回答画面と同じ・ui-foundation.spec.ts）。
+// 捲れる領域は一言の <textarea> の 1 つ（legacy の回答画面と同じ・ui-foundation.spec.ts）。一言欄は最初は畳まれていて
+// <textarea> が無いので、開く前は 0 である。
 const SCROLL_REGIONS = 1;
+const SCROLL_REGIONS_COMMENT_CLOSED = 0;
 
 const positive = (page: Page) => page.getByRole('region', { name: '良かったところを教えてください' });
 const concern = (page: Page) => page.getByRole('region', { name: '気になったところ（任意）' });
@@ -104,7 +106,9 @@ test.describe('structured survey（客向け）', () => {
 
   test('携帯の幅と 320px で、料理と Target を開いた状態でも横スクロールしない', async ({ page }) => {
     await openStructuredSurvey(page);
-    await expectNoHorizontalScroll(page, 'structured の回答画面（初期）', SCROLL_REGIONS);
+    await expectNoHorizontalScroll(page, 'structured の回答画面（初期）', SCROLL_REGIONS_COMMENT_CLOSED);
+    await page.getByRole('button', { name: /^その他の感想（任意）/ }).click();
+    await expectNoHorizontalScroll(page, 'structured の回答画面（その他の感想を開いた）', SCROLL_REGIONS);
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('group', { name: '料理' }).getByRole('checkbox', { name: '刺身盛り合わせ' }).click();
     await expectNoHorizontalScroll(page, 'structured の回答画面（料理と Target を開いた）', SCROLL_REGIONS);

@@ -78,6 +78,64 @@ test.describe('アンケート設定（LIFF 面）', () => {
     expect(api.requests).toHaveLength(1);
   });
 
+  test('ドリンク名を追加できる（料理と同じ操作・ドリンクの節に入る）', async ({ page }) => {
+    const api = await openSurveySettingsSurface(page);
+    const drink = page.getByRole('region', { name: 'ドリンク' });
+    await drink.getByLabel('ドリンク名を追加').fill('生ビール');
+    await drink.getByRole('button', { name: '追加する' }).click();
+    await expect(page.getByRole('status').filter({ hasText: '「生ビール」を追加しました。' })).toBeVisible();
+    await expect(drink.getByText('表示中 2 / 10 件')).toBeVisible();
+    expect(api.activeLabels('drink')).toEqual(['自家製レモンサワー', '生ビール']);
+    expect(api.activeLabels('food')).toEqual([LONGEST_LABEL, '焼き鳥5種盛り']);
+  });
+
+  test('表示中が上限（10 件）に達すると、追加と再表示を止めて直し方を出す', async ({ page }) => {
+    const api = await openSurveySettingsSurface(page);
+    const food = page.getByRole('region', { name: '料理' });
+    for (let i = 1; i <= 8; i++) {
+      await food.getByLabel('料理名を追加').fill(`追加の料理${i}`);
+      await food.getByRole('button', { name: '追加する' }).click();
+      await expect(page.getByRole('status').filter({ hasText: `「追加の料理${i}」を追加しました。` })).toBeVisible();
+    }
+    await expect(food.getByText('表示中 10 / 10 件')).toBeVisible();
+    await expect(food.getByLabel('料理名を追加')).toBeDisabled();
+    await expect(food.getByRole('button', { name: '追加する' })).toBeDisabled();
+    await expect(food.getByText('料理は10件まで登録できます。追加するには、どれかを非表示にしてください。')).toBeVisible();
+    await expect(food.getByRole('button', { name: '「名物もつ煮」を再表示する' })).toBeDisabled();
+
+    // 1 件を非表示にすると、また追加できる。
+    await food.getByRole('button', { name: '「追加の料理8」を非表示にする' }).click();
+    await expect(food.getByText('表示中 9 / 10 件')).toBeVisible();
+    await expect(food.getByRole('button', { name: '追加する' })).toBeEnabled();
+    expect(api.activeLabels('food')).toHaveLength(9);
+  });
+
+  test('オーナーは structured の有効・無効を変えられない（切り替えの操作が無く、送らない）', async ({ page }) => {
+    const bodies: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/survey-settings')) bodies.push(request.postData() ?? '');
+    });
+    const api = await openSurveySettingsSurface(page);
+    // 無効の店舗には、準備ができしだい表示される旨の案内だけを出す。
+    await expect(page.getByText(/新しいアンケートの準備ができしだいお客様の画面に表示されます/)).toBeVisible();
+    // 切り替えの部品は予約・来店の表示の 2 択だけ（structured の有効化の押しボタン・スイッチは無い）。
+    await expect(page.getByRole('switch')).toHaveCount(0);
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await expect(page.getByRole('radio')).toHaveCount(2);
+    await expect(page.getByRole('button', { name: /有効|無効|アンケートを切り替/ })).toHaveCount(0);
+
+    // ほかの操作をしても、structuredEnabled を送らない。
+    await page.getByRole('region', { name: '予約・来店' }).getByRole('radio', { name: '表示しない' }).click();
+    await expect(page.getByRole('status').filter({ hasText: '予約・来店をアンケートに表示しません。' })).toBeVisible();
+    await page.getByRole('region', { name: '予約・来店' }).getByRole('radio', { name: '表示する' }).click();
+    await expect(page.getByRole('status').filter({ hasText: /予約・来店をアンケートに表示します/ })).toBeVisible();
+    expect(api.requests.filter((r) => r.method !== 'GET').map((r) => r.path)).toEqual([
+      '/api/survey-settings/categories/reservation_visit',
+      '/api/survey-settings/categories/reservation_visit',
+    ]);
+    expect(bodies.join('\n')).not.toMatch(/structured/i);
+  });
+
   test('自動 a11y 監査（既定の表示と、名前の変更中）', async ({ page }) => {
     await openSurveySettingsSurface(page);
     await expectNoAxeViolations(page);
