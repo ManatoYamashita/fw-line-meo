@@ -1,0 +1,4 @@
+interface:
+  display_name: "shadcn/ui"
+  short_description: "Manage shadcn components and registries"
+  default_prompt: "Use $shadcn to add, search, compose, or debug shadcn/ui components in this project."

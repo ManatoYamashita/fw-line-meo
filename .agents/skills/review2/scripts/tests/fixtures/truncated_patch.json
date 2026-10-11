@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "blob-large",
+    "filename": "src/large.ts",
+    "status": "modified",
+    "additions": 4,
+    "deletions": 2,
+    "changes": 6,
+    "patch": "@@ -1,2 +1,2 @@\n-oldValue\n+newValue\n context"
+  }
+]

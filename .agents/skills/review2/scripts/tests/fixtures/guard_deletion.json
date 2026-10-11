@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "blob-guard",
+    "filename": "src/auth.ts",
+    "status": "modified",
+    "additions": 0,
+    "deletions": 1,
+    "changes": 1,
+    "patch": "@@ -10,3 +10,2 @@\n function updateResource() {\n-  authorize(user)\n   mutate()"
+  }
+]

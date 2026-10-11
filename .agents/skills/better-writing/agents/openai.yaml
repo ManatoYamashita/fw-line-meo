@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Writing"
+  short_description: "UX writing, interface copy and microcopy"
+  default_prompt: "Use $better-writing to review this interface's labels, errors, empty states, terminology, tone, and microcopy."

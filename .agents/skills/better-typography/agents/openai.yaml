@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Typography"
+  short_description: "Fonts, type scales, spacing and wrapping"
+  default_prompt: "Use $better-typography to review this interface's fonts, type scale, line height, wrapping, truncation, and text accessibility."
