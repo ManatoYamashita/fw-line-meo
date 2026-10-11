@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import type { StructuredSurveyDefinition } from '@fwlm/db';
 import {
   EMPTY_EVIDENCE,
+  MIN_MATERIALS,
   categoryEvidence,
+  countMaterials,
   summarizeCategory,
   summaryText,
   toSelectionGroups,
@@ -131,5 +133,56 @@ describe('structured selection', () => {
     expect(summaryText(summarizeCategory(categoryEvidence(c, 'concern', 'service_delivery'), service), service)).toBe(
       '料理・ドリンクの提供',
     );
+  });
+});
+
+describe('countMaterials（口コミ文を作るのに要る回答材料の数）', () => {
+  it('下限は 2 件', () => {
+    expect(MIN_MATERIALS).toBe(2);
+  });
+
+  it('何も選んでいなければ 0 件', () => {
+    expect(countMaterials(EMPTY_EVIDENCE, DEF)).toBe(0);
+  });
+
+  it('カテゴリ全体の facet は 1 つにつき 1 件', () => {
+    let s = toggleCategoryFacet(EMPTY_EVIDENCE, 'positive', 'food', 'taste');
+    expect(countMaterials(s, DEF)).toBe(1);
+    s = toggleCategoryFacet(s, 'positive', 'food', 'volume');
+    expect(countMaterials(s, DEF)).toBe(2);
+  });
+
+  it('Target だけは 1 件。その Target に facet を足しても Target と facet を二重に数えない', () => {
+    let s = toggleTarget(EMPTY_EVIDENCE, 'positive', 'food', SASHIMI);
+    expect(countMaterials(s, DEF)).toBe(1);
+    s = toggleTargetFacet(s, 'positive', 'food', SASHIMI, 'taste');
+    expect(countMaterials(s, DEF)).toBe(1);
+    // 同じ Target の別の facet は独立した材料（刺身盛り合わせ：味・見た目 = 2 件）。
+    s = toggleTargetFacet(s, 'positive', 'food', SASHIMI, 'appearance');
+    expect(countMaterials(s, DEF)).toBe(2);
+  });
+
+  it('良かったところと気になったところを合計する（極性ごとの下限は無い）', () => {
+    let s = toggleCategoryFacet(EMPTY_EVIDENCE, 'positive', 'food', 'taste');
+    s = toggleCategoryFacet(s, 'concern', 'service_delivery', 'serving');
+    expect(countMaterials(s, DEF)).toBe(2);
+
+    let c = toggleCategoryFacet(EMPTY_EVIDENCE, 'concern', 'food', 'volume');
+    c = toggleCategoryFacet(c, 'concern', 'service_delivery', 'serving');
+    expect(countMaterials(c, DEF)).toBe(2);
+  });
+
+  it('選択を外すと数も戻る（Target を外すとその facet も数えない）', () => {
+    let s = toggleTarget(EMPTY_EVIDENCE, 'positive', 'food', SASHIMI);
+    s = toggleTargetFacet(s, 'positive', 'food', SASHIMI, 'taste');
+    s = toggleCategoryFacet(s, 'positive', 'food', 'volume');
+    expect(countMaterials(s, DEF)).toBe(2);
+    s = toggleTarget(s, 'positive', 'food', SASHIMI);
+    expect(countMaterials(s, DEF)).toBe(1);
+  });
+
+  it('定義に無いカテゴリの選択は送らないので数えない', () => {
+    const s = toggleCategoryFacet(EMPTY_EVIDENCE, 'positive', 'hidden', 'x');
+    expect(countMaterials(s, DEF)).toBe(0);
   });
 });

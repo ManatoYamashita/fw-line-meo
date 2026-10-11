@@ -171,3 +171,27 @@ export function summaryText(summary: CategorySummary, category: SurveyCategoryDe
   for (const t of summary.targets) parts.push(t.facets.length > 0 ? `${t.label}：${t.facets.join('・')}` : t.label);
   return parts.join('／');
 }
+
+/** 口コミ文を作るのに要る、独立した回答材料の数（Issue #443 の UX 調整）。 */
+export const MIN_MATERIALS = 2;
+
+/**
+ * 独立した回答材料の数を、**送信される選択（toSelectionGroups の結果）だけ**から数える。良かったところと
+ * 気になったところの合計で、極性ごとの下限は持たない。
+ *
+ *   カテゴリ全体の facet          → facet 1 つにつき 1 件（料理全体：味・量 = 2 件）
+ *   Target → facet               → facet 1 つにつき 1 件（刺身盛り合わせ：味・温度 = 2 件）
+ *   Target だけ（facet 0 件）     → 1 件（Target を選んだこと自体が evidence）
+ *
+ * Target とその facet を別々に数えない（刺身盛り合わせ + 刺身盛り合わせ：味 は 1 件）。同じ意味の操作を二重に
+ * 数えると、実質 1 つの回答で下限を満たしてしまう。カテゴリを開いただけ・星・一言は evidence ではないので数えない。
+ */
+export function countMaterials(state: EvidenceState, definition: StructuredSurveyDefinition): number {
+  let count = 0;
+  for (const polarity of ['positive', 'concern'] as const) {
+    for (const group of toSelectionGroups(state[polarity], definition)) {
+      count += group.targetId === undefined ? group.facetCodes.length : Math.max(1, group.facetCodes.length);
+    }
+  }
+  return count;
+}

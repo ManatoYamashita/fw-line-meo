@@ -11,7 +11,9 @@ import type { Polarity, StructuredSurveyAnswer } from '../../../lib/structured-a
 import type { Star } from '../../../lib/domain';
 import {
   EMPTY_EVIDENCE,
+  MIN_MATERIALS,
   categoryEvidence,
+  countMaterials,
   hasEvidence,
   summarizeCategory,
   summaryText,
@@ -67,6 +69,11 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
   const [slow, setSlow] = useState(false);
   const starErrorId = useId();
   const commentPanelId = useId();
+  const submitNoteId = useId();
+  // 口コミ文を作るには、星に加えて独立した回答材料が MIN_MATERIALS 件要る（良かったところ・気になったところの合計）。
+  // 数えるのは送信される evidence だけで、カテゴリを開いただけ・星・一言は数えない（lib/structured-selection.ts）。
+  const materials = countMaterials(evidence, definition);
+  const enoughMaterials = materials >= MIN_MATERIALS;
   const commentRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -80,7 +87,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
 
   function submit(): void {
     // 二重送信を止める（押しボタンの disabled に加えて、Enter での送信も弾く）。
-    if (submitting) return;
+    if (submitting || !enoughMaterials) return;
     if (star === null) {
       setShowStarError(true);
       return;
@@ -192,29 +199,49 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
       </div>
 
       <div className="space-y-3">
-        <Button size="lg" className="w-full" type="submit" disabled={submitting} aria-busy={submitting}>
+        {/* 材料が足りない間は押せない。押せない理由と今の数は直下の案内が示す（星の未入力は従来どおり押して知らせる）。 */}
+        <Button
+          size="lg"
+          className="w-full"
+          type="submit"
+          disabled={submitting || !enoughMaterials}
+          aria-busy={submitting}
+          aria-describedby={submitNoteId}
+        >
           {submitting ? (
             <>
               {/* 図形は装飾。状態は直下の文言で伝える（動きを止める設定でも読める）。 */}
               {/* 部品の読み上げ名（動き低減時に可視化される「読み込み中」）は空にする。状態は直下の文言が伝えるので、
                   押しボタンの中で文言を二重に出さない（狭い画面で折り返さない押しボタンからはみ出す）。 */}
               <Spinner aria-hidden aria-label="" />
-              口コミを作成しています…
+              口コミ文を作成しています…
             </>
           ) : (
-            'AIで口コミ文を作る'
+            '口コミ文を作る'
           )}
         </Button>
-        {/* 生成中の補足。容器を常時マウントし、中身だけを差し替える（挿入と同時の領域は読み上げが発火しない・
-            draft-panel.tsx の notification と同じ理由）。 */}
+        {/* 押しボタンの補足（あと何件か・生成中）。容器を常時マウントし、中身だけを差し替える（挿入と同時の領域は
+            読み上げが発火しない・draft-panel.tsx の notification と同じ理由）。文言が変わるのは件数の段階と生成の
+            開始・長引いたときだけなので、選ぶたびに読み上げが続くことはない。
+            「AI」の語は出さない（下書きパネルと揃える・Issue #179）。伝えるのは手段ではなく、回答から文章を作ること。 */}
         <div role="status">
-          {submitting ? (
-            <p className="text-center text-sm text-muted-foreground">
-              {slow
+          <p id={submitNoteId} className="text-center text-sm text-muted-foreground">
+            {submitting
+              ? slow
                 ? '少し時間がかかっています。画面を閉じずにこのままお待ちください'
-                : '回答内容をもとにAIが文章を作成しています'}
-            </p>
-          ) : null}
+                : '回答内容をもとに文章を作成しています'
+              : enoughMaterials
+                ? '回答内容をもとに文章を作成します'
+                : (
+                    <>
+                      {materials === 0
+                        ? `感想を${MIN_MATERIALS}つ以上選ぶと口コミ文を作れます`
+                        : `あと${MIN_MATERIALS - materials}つ選ぶと口コミ文を作れます`}
+                      {/* 今の数は 1 まとまりで折り返す（狭い画面で「1 /」と「2」が別の行に割れない）。 */}
+                      <span className="whitespace-nowrap">{`（${materials} / ${MIN_MATERIALS} 選択済み）`}</span>
+                    </>
+                  )}
+          </p>
         </div>
       </div>
     </form>

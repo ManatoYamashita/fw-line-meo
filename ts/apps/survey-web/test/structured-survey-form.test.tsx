@@ -65,8 +65,8 @@ const POSITIVE_TITLE = '良かったところを教えてください';
 const CONCERN_TITLE = '気になったところがあれば教えてください（任意）';
 const COMMENT_TOGGLE = /さらに伝えたいことがある（任意）/;
 const COMMENT_LABEL = 'さらに伝えたいことがあれば入力してください';
-const SUBMIT = 'AIで口コミ文を作る';
-const SUBMITTING = '口コミを作成しています…';
+const SUBMIT = '口コミ文を作る';
+const SUBMITTING = '口コミ文を作成しています…';
 
 const section = (name: string) => within(screen.getByRole('region', { name }));
 const positive = () => section(POSITIVE_TITLE);
@@ -79,6 +79,16 @@ function star(n: number): void {
 function submit(): void {
   fireEvent.click(screen.getByRole('button', { name: SUBMIT }));
 }
+const SERVICE_BOTH = { categoryCode: 'service_delivery', facetCodes: ['service_courtesy', 'serving'] };
+/** 良かったところで「接客・提供」の facet を 2 つ選ぶ（口コミ文を作れる最小の材料）。 */
+function pickTwo(): void {
+  openCategory(positive(), '接客・提供');
+  fireEvent.click(positive().getByRole('checkbox', { name: '接客の丁寧さ' }));
+  fireEvent.click(positive().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
+}
+const submitButton = () => screen.getByRole('button', { name: SUBMIT }) as HTMLButtonElement;
+const note = () => screen.getByRole('status').textContent;
+
 /** カテゴリの開閉の押しボタン。選択済みの読み上げ名は「料理（選択あり）」なので、名前の先頭で掴む。 */
 function openCategory(where: ReturnType<typeof within>, label: string): void {
   fireEvent.click(where.getByRole('button', { name: new RegExp(`^${label}(\\s*（選択あり）)?$`) }));
@@ -100,17 +110,18 @@ describe('StructuredSurveyForm', () => {
     expect(commentToggle().getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('星だけで送信でき、選択は空の配列になる。星が無ければ送信を止める', () => {
+  it('星は必須のまま: 材料が 2 件あっても星が無ければ送信を止める', () => {
     const { onSubmit } = setup();
+    pickTwo();
     submit();
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toContain('満足度');
     star(2);
     submit();
-    expect(onSubmit).toHaveBeenCalledWith({ star: 2, positiveSelections: [], concernSelections: [] });
+    expect(onSubmit).toHaveBeenCalledWith({ star: 2, positiveSelections: [SERVICE_BOTH], concernSelections: [] });
   });
 
-  it('カテゴリを開いて閉じただけでは、何も送らない（開くことは回答ではない）', () => {
+  it('カテゴリを開いて閉じただけでは数えず、口コミ文を作る押しボタンは押せない（開くことは回答ではない）', () => {
     const { onSubmit } = setup();
     star(4);
     openCategory(positive(), '料理');
@@ -118,8 +129,10 @@ describe('StructuredSurveyForm', () => {
     openCategory(positive(), '接客・提供');
     openCategory(concern(), '料理');
     openCategory(concern(), '料理');
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toContain('0 / 2 選択済み');
     submit();
-    expect(onSubmit).toHaveBeenCalledWith({ star: 4, positiveSelections: [], concernSelections: [] });
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('カテゴリ全体の facet・Target だけ・Target + facet・複数の Target を区別して送る', () => {
@@ -193,11 +206,12 @@ describe('StructuredSurveyForm', () => {
     const panel = within(concern().getByRole('group', { name: '料理' }));
     expect(panel.queryByText('具体的な料理')).toBeNull();
     fireEvent.click(panel.getByRole('checkbox', { name: '味' }));
+    fireEvent.click(panel.getByRole('checkbox', { name: '量' }));
     submit();
     expect(onSubmit).toHaveBeenCalledWith({
       star: 4,
       positiveSelections: [],
-      concernSelections: [{ categoryCode: 'food', facetCodes: ['taste'] }],
+      concernSelections: [{ categoryCode: 'food', facetCodes: ['taste', 'volume'] }],
     });
   });
 
@@ -234,6 +248,7 @@ describe('StructuredSurveyForm', () => {
   it('一言は空白だけなら送らず、書いたら送る', () => {
     const { onSubmit } = setup();
     star(5);
+    pickTwo();
     fireEvent.click(commentToggle());
     const box = screen.getByRole('textbox', { name: COMMENT_LABEL });
     fireEvent.change(box, { target: { value: '   ' } });
@@ -267,6 +282,7 @@ describe('StructuredSurveyForm', () => {
   it('一言欄は押すと開き、閉じて開き直しても入力は消えず、閉じたままでも送信に載る', () => {
     const { onSubmit } = setup();
     star(4);
+    pickTwo();
     const toggle = commentToggle();
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
@@ -297,20 +313,21 @@ describe('StructuredSurveyForm', () => {
     expect(category.textContent).toContain('✓');
   });
 
-  it('送信中は押しボタンが「口コミを作成しています…」になり、無効・処理中で、補足を読み上げ領域に出す', () => {
+  it('送信中は押しボタンが「口コミ文を作成しています…」になり、無効・処理中で、補足を読み上げ領域に出す', () => {
     const onSubmit = vi.fn();
     const { rerender } = render(<StructuredSurveyForm definition={definition()} onSubmit={onSubmit} submitting={false} />);
-    const idle = screen.getByRole('button', { name: SUBMIT }) as HTMLButtonElement;
+    pickTwo();
+    const idle = submitButton();
     expect(idle.disabled).toBe(false);
     expect(idle.getAttribute('aria-busy')).toBe('false');
-    expect(screen.getByRole('status').textContent).toBe('');
+    expect(note()).toBe('回答内容をもとに文章を作成します');
 
     rerender(<StructuredSurveyForm definition={definition()} onSubmit={onSubmit} submitting />);
     const busy = screen.getByRole('button', { name: SUBMITTING }) as HTMLButtonElement;
     expect(busy.disabled).toBe(true);
     expect(busy.getAttribute('aria-busy')).toBe('true');
     expect(busy.querySelector('[data-slot="spinner"]')?.getAttribute('aria-hidden')).toBe('true');
-    expect(screen.getByRole('status').textContent).toBe('回答内容をもとにAIが文章を作成しています');
+    expect(screen.getByRole('status').textContent).toBe('回答内容をもとに文章を作成しています');
 
     // 送信中に form を送っても onSubmit を呼ばない（二重送信の防止）。
     star(5);
@@ -322,7 +339,7 @@ describe('StructuredSurveyForm', () => {
     vi.useFakeTimers();
     try {
       render(<StructuredSurveyForm definition={definition()} onSubmit={vi.fn()} submitting />);
-      expect(screen.getByRole('status').textContent).toBe('回答内容をもとにAIが文章を作成しています');
+      expect(screen.getByRole('status').textContent).toBe('回答内容をもとに文章を作成しています');
       act(() => {
         vi.advanceTimersByTime(8000);
       });
@@ -330,5 +347,94 @@ describe('StructuredSurveyForm', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('客側の文言に「AI」を出さない（下書きパネルと揃える・Issue #179）', () => {
+    const { rerender } = render(<StructuredSurveyForm definition={definition()} onSubmit={vi.fn()} submitting={false} />);
+    pickTwo();
+    expect(document.body.textContent).not.toMatch(/AI/);
+    rerender(<StructuredSurveyForm definition={definition()} onSubmit={vi.fn()} submitting />);
+    expect(document.body.textContent).not.toMatch(/AI/);
+  });
+});
+
+describe('StructuredSurveyForm: 口コミ文を作るには感想が 2 件要る', () => {
+  it('0 件: 押せず、2 つ以上選ぶよう案内し、今の数を出す', () => {
+    setup();
+    star(5);
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toBe('感想を2つ以上選ぶと口コミ文を作れます（0 / 2 選択済み）');
+    // 押しボタンが案内を説明として指す（押せない理由が支援技術にも伝わる）。
+    expect(document.getElementById(submitButton().getAttribute('aria-describedby')!)!.textContent).toBe(note());
+  });
+
+  it('1 件: 押せず、「あと1つ」と案内する', () => {
+    setup();
+    star(5);
+    openCategory(positive(), '接客・提供');
+    fireEvent.click(positive().getByRole('checkbox', { name: '接客の丁寧さ' }));
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toBe('あと1つ選ぶと口コミ文を作れます（1 / 2 選択済み）');
+  });
+
+  it('良かったところ 2 件で押せ、不足の案内は消える', () => {
+    const { onSubmit } = setup();
+    star(5);
+    pickTwo();
+    expect(submitButton().disabled).toBe(false);
+    expect(note()).not.toContain('あと');
+    expect(note()).not.toContain('選択済み');
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith({ star: 5, positiveSelections: [SERVICE_BOTH], concernSelections: [] });
+  });
+
+  it('良かったところ 1 件 + 気になったところ 1 件で押せる', () => {
+    setup();
+    star(3);
+    openCategory(positive(), '接客・提供');
+    fireEvent.click(positive().getByRole('checkbox', { name: '接客の丁寧さ' }));
+    openCategory(concern(), '接客・提供');
+    fireEvent.click(concern().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('気になったところ 2 件だけでも押せる', () => {
+    setup();
+    star(2);
+    openCategory(concern(), '接客・提供');
+    fireEvent.click(concern().getByRole('checkbox', { name: '接客の丁寧さ' }));
+    fireEvent.click(concern().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('Target とその facet は 1 件として数える（二重に数えない）', () => {
+    setup();
+    star(4);
+    openCategory(positive(), '料理');
+    const panel = within(positive().getByRole('group', { name: '料理' }));
+    fireEvent.click(panel.getByRole('checkbox', { name: '刺身盛り合わせ' }));
+    const sashimi = within(panel.getByText('刺身盛り合わせについて').parentElement!);
+    fireEvent.click(sashimi.getByRole('checkbox', { name: '味' }));
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toContain('1 / 2 選択済み');
+  });
+
+  it('星と一言は感想の数に含めない', () => {
+    setup();
+    star(5);
+    fireEvent.click(commentToggle());
+    fireEvent.change(screen.getByRole('textbox', { name: COMMENT_LABEL }), { target: { value: '窓側の席が落ち着いた' } });
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toContain('0 / 2 選択済み');
+  });
+
+  it('選択を外して 1 件に戻ると、再び押せなくなる', () => {
+    setup();
+    star(5);
+    pickTwo();
+    expect(submitButton().disabled).toBe(false);
+    fireEvent.click(positive().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toBe('あと1つ選ぶと口コミ文を作れます（1 / 2 選択済み）');
   });
 });

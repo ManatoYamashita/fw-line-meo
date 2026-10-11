@@ -45,7 +45,7 @@ test.describe('structured survey（客向け）', () => {
 
     const request = page.waitForRequest((r) => r.url().endsWith('/api/responses') && r.method() === 'POST');
     const response = page.waitForResponse((r) => r.url().endsWith('/api/responses'));
-    await page.getByRole('button', { name: 'AIで口コミ文を作る' }).click();
+    await page.getByRole('button', { name: '口コミ文を作る' }).click();
     const body = (await request).postDataJSON() as Record<string, unknown>;
     expect(body).toMatchObject({
       star: 4,
@@ -73,15 +73,29 @@ test.describe('structured survey（客向け）', () => {
     await expect(page.getByRole('button', { name: /別の文章を生成（残り\d+回）/ })).toBeVisible();
   });
 
-  test('カテゴリを開いて閉じただけなら、星だけの回答として送る', async ({ page }) => {
+  test('カテゴリを開いて閉じただけでは数えず押せない。気になったところ 2 件だけで口コミ文を作れる', async ({ page }) => {
     await openStructuredSurvey(page);
     await page.getByRole('button', { name: '星2' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await concern(page).getByRole('button', { name: '接客・提供' }).click();
+    const submitButton = page.getByRole('button', { name: '口コミ文を作る' });
+    await expect(submitButton).toBeDisabled();
+    await expect(page.getByText('感想を2つ以上選ぶと口コミ文を作れます（0 / 2 選択済み）')).toBeVisible();
+
+    const service = concern(page).getByRole('group', { name: '接客・提供' });
+    await service.getByRole('checkbox').nth(0).click();
+    await expect(submitButton).toBeDisabled();
+    await expect(page.getByText('あと1つ選ぶと口コミ文を作れます（1 / 2 選択済み）')).toBeVisible();
+    await service.getByRole('checkbox').nth(1).click();
+    await expect(submitButton).toBeEnabled();
+
     const request = page.waitForRequest((r) => r.url().endsWith('/api/responses') && r.method() === 'POST');
-    await page.getByRole('button', { name: 'AIで口コミ文を作る' }).click();
-    expect((await request).postDataJSON()).toMatchObject({ star: 2, positiveSelections: [], concernSelections: [] });
+    await submitButton.click();
+    const body = (await request).postDataJSON() as { star: number; positiveSelections: unknown[]; concernSelections: { facetCodes: string[] }[] };
+    expect(body).toMatchObject({ star: 2, positiveSelections: [] });
+    expect(body.concernSelections).toHaveLength(1);
+    expect(body.concernSelections[0]!.facetCodes).toHaveLength(2);
     await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
   });
 
