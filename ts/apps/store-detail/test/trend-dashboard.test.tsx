@@ -438,7 +438,7 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
       cleanup();
       vi.unstubAllGlobals();
     }
-    expect(visited).toBe(cases.length);
+    expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('選択肢を要約のカードの外に置き、グラフを要約の 3 組の上に、表をカードの下に置く（§7.19）', async () => {
@@ -543,7 +543,7 @@ describe('推移の節の期間と指標（store-detail-trend-dashboard task 4.1
       cleanup();
       vi.unstubAllGlobals();
     }
-    expect(visited).toBe(cases.length);
+    expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 });
 
@@ -707,7 +707,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       cleanup();
       vi.unstubAllGlobals();
     }
-    expect(visited).toBe(cases.length);
+    expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('当日の競合が 2 店以上なら、一覧の Card の外に、見えるラベル付きの検索欄と件数の文言を出す（要件 4.1・4.7・5.7、§7.19）', async () => {
@@ -750,7 +750,7 @@ describe('競合の節の検索（store-detail-trend-dashboard task 4.2・Issue 
       cleanup();
       vi.unstubAllGlobals();
     }
-    expect(visited).toBe(cases.length);
+    expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('検索語を入れると、店名に検索語を含む競合だけを元の順で残し、件数の文言が追随する（要件 4.3・4.4・4.5・4.7）', async () => {
@@ -1161,7 +1161,7 @@ describe('操作の無副作用（store-detail-trend-dashboard task 4.3・Issue 
         expect(soleAttribution(step.name), `${step.name}: 帰属表示が同じ要素のまま残る`).toBe(attribution);
         visited += 1;
       }
-      expect(visited).toBe(steps.length);
+      expect(visited).toBe(8); // 配列の長さと比べると、要素を落としても緑のまま通る
 
       // 取得は、描画時の 1 回のまま。その 1 回は /api/detail への GET で、本文を持たない（要件 7.3・7.6）。
       // 入力した検索語は、要求の URL にも本文にも載らず、下の検査のとおり端末にも残らない（要件 8.6）。

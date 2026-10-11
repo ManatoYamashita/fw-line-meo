@@ -512,7 +512,7 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
       }
       // 期間と指標の組み合わせを回り切ったこと（空振り対策）。
       expect(COMBINATIONS).toHaveLength(TREND_PERIODS.length * TREND_METRICS.length);
-      expect(visited).toBe(CHART_CASES.length);
+      expect(visited).toBe(17); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('figcaption に、指標名・期間の始点と終点・順位の向き・最新の値と日付を見える文字で置く（Req 1.3, 1.11, 3.6）', () => {

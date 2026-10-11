@@ -598,7 +598,7 @@ describe('store detail page', () => {
           branch.name,
         ).toBe(headings[0]);
       });
-      expect(visited).toBe(SURFACE_BRANCHES.length);
+      expect(visited).toBe(4); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('4 分岐すべてで主要領域をちょうど 1 つに保つ（Req 3.3）', async () => {
@@ -606,7 +606,7 @@ describe('store detail page', () => {
         expect(container.querySelectorAll('main'), branch.name).toHaveLength(1);
         expect(screen.getAllByRole('main'), branch.name).toHaveLength(1);
       });
-      expect(visited).toBe(SURFACE_BRANCHES.length);
+      expect(visited).toBe(4); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     // 4 分岐の書込要素 0 件の検査は、Issue #265 で末尾の「構造契約（許可リスト方式）」へ置き換えた。
@@ -619,7 +619,7 @@ describe('store detail page', () => {
         const names = screen.queryAllByRole('link').map((link) => link.textContent);
         expect(names, branch.name).toEqual(branch.linkNames);
       });
-      expect(visited).toBe(SURFACE_BRANCHES.length);
+      expect(visited).toBe(4); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('5 種の失敗の文言を完全一致で固定し、読み上げ役割をちょうど 1 つに保つ（Req 3.2, 3.5）', async () => {
@@ -673,7 +673,7 @@ describe('store detail page', () => {
         cleanup();
         vi.unstubAllGlobals();
       }
-      expect(visited).toBe(failures.length);
+      expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('読み込み中の文言は可視のテキストとして置かれる（Req 4.5）', async () => {
@@ -759,7 +759,7 @@ describe('store detail page', () => {
         const widthTokens = tokens.filter((token) => /(^|:)(?:max-|min-)?w-/.test(token));
         expect(widthTokens, branch.name).toEqual(['w-full', 'max-w-xl']);
       });
-      expect(visited).toBe(SURFACE_BRANCHES.length);
+      expect(visited).toBe(4); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('4 分岐すべてで主見出しを共通の見出し部品から描く（Req 1.1）', async () => {
@@ -769,7 +769,7 @@ describe('store detail page', () => {
         // 支援技術に通知される階層と、部品へ渡した階層が一致していること。
         expect(heading.getAttribute('data-level'), branch.name).toBe('1');
       });
-      expect(visited).toBe(SURFACE_BRANCHES.length);
+      expect(visited).toBe(4); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('処理中は共通部品を装飾として添え、読み上げ領域を 1 つに保つ（Req 1.1, 4.5）', async () => {
@@ -897,7 +897,7 @@ describe('store detail page', () => {
         expect(list!.querySelectorAll('[data-slot="badge"]'), item.name).toHaveLength(item.pair[1].includes('前日比') ? 1 : 0);
         expect(container.querySelectorAll('dl').length, item.name).toBeGreaterThan(0);
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(6); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('自店の評価を独立した指標として 6 分岐で固定する（Issue #258, Req 4.7）', async () => {
@@ -916,7 +916,7 @@ describe('store detail page', () => {
         expect(list, item.name).not.toBeNull();
         expect(definitionPairs(list!), item.name).toEqual(item.pairs);
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(6); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('新着クチコミの件数表記と 0 件の文言を固定する（Req 3.2）', async () => {
@@ -939,7 +939,7 @@ describe('store detail page', () => {
         expect(soleParagraphAnnouncing(container, item.present), item.name).toBeDefined();
         expect(Array.from(container.querySelectorAll('p')).some((p) => announcedText(p) === item.absent), item.name).toBe(false);
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     // --- 口コミの帰属（Places API のポリシー・Issue #287）---------------------------------
@@ -1080,7 +1080,7 @@ describe('store detail page', () => {
         const count = item.body.summary!.newReviewCount;
         expect(soleParagraphAnnouncing(container, `${count}件の新着クチコミ`), item.name).toBeDefined();
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('口コミ一覧への導線は、読めていない新着が残る日にだけ出る（Issue #303）', async () => {
@@ -1133,7 +1133,7 @@ describe('store detail page', () => {
           expect(links[0]!.getAttribute('href'), item.name).toBe(REVIEWS_URI);
         }
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('帰属表示は、面の側が色と大きさを書く 1 行だけである（Issue #287・§7.19 の 2 つ目の例外）', async () => {
@@ -1177,7 +1177,7 @@ describe('store detail page', () => {
           ]);
         }
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(3); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     // Issue #255: Google に評価が無い店（クチコミ 0 件）。応答は読込時に正規化済み（評価なしは null・
@@ -1230,7 +1230,7 @@ describe('store detail page', () => {
         const notes = Array.from(container.querySelectorAll('p')).filter((p) => announcedText(p) === EXCLUDED_NOTE);
         expect(notes, item.name).toHaveLength(item.note ? 1 : 0);
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('自店が未評価の日は、取得失敗ではなく評価が無いため順位を出せない旨を描く（Issue #255）', async () => {
@@ -1295,7 +1295,7 @@ describe('store detail page', () => {
           item.name,
         ).toEqual(item.rows);
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('サマリーが取得できない 2 分岐の文言を完全一致で固定する（Req 3.2）', async () => {
@@ -1315,7 +1315,7 @@ describe('store detail page', () => {
         expect(screen.queryByText(/新着クチコミ/), item.name).toBeNull();
         expect(screen.queryByText(/自店の評価/), item.name).toBeNull();
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('節の見出しの読み上げ名と階層を分岐ごとに固定する（Req 3.2）', async () => {
@@ -1349,7 +1349,7 @@ describe('store detail page', () => {
           expect(screen.getByRole('heading', { name }), `${item.name} / ${name}`).toBeDefined();
         }
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(3); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('店舗選択待ちの節の見出しを読み上げ名と階層で固定する（Req 3.2）', async () => {
@@ -1392,7 +1392,7 @@ describe('store detail page', () => {
       const visited = await forEachResponse(cases, (item) => {
         inspectHeadings(item.name);
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(3); // 配列の長さと比べると、要素を落としても緑のまま通る
 
       // 店舗選択待ちの h2 はどのタスクにも割り当てられていなかった（task 3.1 の報告 → 3.3 へ）。
       // 5 つが部品になるのに 1 つだけ素のタグが残ると、同一役割が同じ面の中で 2 通りに描かれる。
@@ -1600,7 +1600,7 @@ describe('store detail page', () => {
           expect(state.querySelectorAll('a, button'), item.name).toHaveLength(0);
         }
       });
-      expect(visited).toBe(cases.length);
+      expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
     });
 
     it('面の側が節と一覧に書く className はレイアウトと文字サイズだけである（Req 1.3, 1.5）', async () => {
