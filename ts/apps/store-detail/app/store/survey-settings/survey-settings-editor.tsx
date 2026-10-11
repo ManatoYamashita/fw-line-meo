@@ -303,7 +303,7 @@ function TargetRow({
         <Button
           variant="outline"
           disabled={busy}
-          aria-label={`「${target.label}」の名前を変更する`}
+          aria-label={`編集：「${target.label}」の名前を変更する`}
           onClick={() => {
             onError(null);
             setValue(target.label);

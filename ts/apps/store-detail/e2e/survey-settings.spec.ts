@@ -20,7 +20,7 @@ test.describe('アンケート設定（LIFF 面）', () => {
     await openSurveySettingsSurface(page);
     await expectNoHorizontalScroll(page, 'アンケート設定（既定の幅）', SCROLL_REGIONS);
     // 名前の変更の欄を開いた状態も測る（入力欄と押しボタンが横へ並ぶ）。
-    await page.getByRole('button', { name: `「${LONGEST_LABEL}」の名前を変更する` }).click();
+    await page.getByRole('button', { name: `編集：「${LONGEST_LABEL}」の名前を変更する` }).click();
     await expect(page.getByLabel('料理名を変更')).toBeVisible();
     await expectNoHorizontalScroll(page, 'アンケート設定（名前の変更中）', SCROLL_REGIONS);
     await page.setViewportSize({ width: 320, height: 720 });
@@ -40,7 +40,7 @@ test.describe('アンケート設定（LIFF 面）', () => {
     await expect(page.getByRole('status').filter({ hasText: '並び順を保存しました。' })).toBeVisible();
     expect(api.activeLabels('food')).toEqual([LONGEST_LABEL, '海鮮丼', '焼き鳥5種盛り']);
 
-    await food.getByRole('button', { name: '「海鮮丼」の名前を変更する' }).click();
+    await food.getByRole('button', { name: '編集：「海鮮丼」の名前を変更する' }).click();
     await food.getByLabel('料理名を変更').fill('特製海鮮丼');
     await food.getByRole('button', { name: '保存する' }).click();
     await expect(page.getByRole('status').filter({ hasText: '名前を変更しました。' })).toBeVisible();
@@ -139,7 +139,7 @@ test.describe('アンケート設定（LIFF 面）', () => {
   test('自動 a11y 監査（既定の表示と、名前の変更中）', async ({ page }) => {
     await openSurveySettingsSurface(page);
     await expectNoAxeViolations(page);
-    await page.getByRole('button', { name: '「焼き鳥5種盛り」の名前を変更する' }).click();
+    await page.getByRole('button', { name: '編集：「焼き鳥5種盛り」の名前を変更する' }).click();
     await expect(page.getByLabel('料理名を変更')).toBeVisible();
     await expectNoAxeViolations(page);
   });

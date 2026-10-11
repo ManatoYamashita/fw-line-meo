@@ -75,6 +75,10 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
   // 数えるのは送信される evidence だけで、カテゴリを開いただけ・星・一言は数えない（lib/structured-selection.ts）。
   const materials = countMaterials(evidence, definition);
   const enoughMaterials = materials >= MIN_MATERIALS;
+  // 不足の間だけ、数え方の補足を出す（料理名と詳細を両方選んでも 1 件のままの理由・一言が件数に入らないこと）。
+  // 料理名・ドリンク名の文は、選べる Target がある店でだけ出す。
+  const countingNote = enoughMaterials || submitting ? null : materialCountingNote(definition);
+  const countingNoteId = useId();
   const commentRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -199,7 +203,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
           type="submit"
           disabled={submitting || !enoughMaterials}
           aria-busy={submitting}
-          aria-describedby={submitNoteId}
+          aria-describedby={countingNote === null ? submitNoteId : `${submitNoteId} ${countingNoteId}`}
         >
           {submitting ? (
             <>
@@ -230,9 +234,27 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
                   : `あと${MIN_MATERIALS - materials}つ選ぶと口コミ文を作れます`}
           </p>
         </div>
+        {/* 数え方の補足は読み上げ領域の外に置く（選ぶたびに読み上げない）。押しボタンの説明としては指す。 */}
+        {countingNote === null ? null : (
+          <p id={countingNoteId} className="text-center text-sm text-muted-foreground">
+            {countingNote}
+          </p>
+        )}
       </div>
     </form>
   );
+}
+
+/**
+ * 件数の数え方の補足（lib/structured-materials.ts の countSelectionGroupMaterials と同じ意味）。
+ *   名前だけ = 1 件／名前＋詳細 1 つ = 1 件／名前＋詳細 2 つ = 2 件／その他の感想（一言）は数えない。
+ * 名前の文は、選べる名前（Target）を持つカテゴリがある店でだけ出す。カテゴリ名は定義から取る（画面に列挙しない）。
+ */
+function materialCountingNote(definition: StructuredSurveyDefinition): string {
+  const commentNote = 'その他の感想は件数に含まれません。';
+  const labels = definition.categories.filter((c) => c.allowsTargets && c.targets.length > 0).map((c) => c.label);
+  if (labels.length === 0) return commentNote;
+  return `${labels.join('・')}の名前は、詳細と合わせて1件と数えます（詳細が2つ以上ならその数）。${commentNote}`;
 }
 
 // --- 良かったところ / 気になったところ（同じ部品） ----------------------------------------

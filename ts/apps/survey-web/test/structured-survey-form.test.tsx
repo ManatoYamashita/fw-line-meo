@@ -97,6 +97,8 @@ function pickTwo(): void {
 }
 const submitButton = () => screen.getByRole('button', { name: SUBMIT }) as HTMLButtonElement;
 const note = () => screen.getByRole('status').textContent;
+const COUNTING_NOTE =
+  '料理の名前は、詳細と合わせて1件と数えます（詳細が2つ以上ならその数）。その他の感想は件数に含まれません。';
 
 /** カテゴリの開閉の押しボタン。選択済みの読み上げ名は「料理（選択あり）」なので、名前の先頭で掴む。 */
 function openCategory(where: ReturnType<typeof within>, label: string): void {
@@ -376,8 +378,9 @@ describe('StructuredSurveyForm: 口コミ文を作るには感想が 2 件要る
     star(5);
     expect(submitButton().disabled).toBe(true);
     expect(note()).toBe('感想を2つ以上選ぶと口コミ文を作れます');
-    // 押しボタンが案内を説明として指す（押せない理由が支援技術にも伝わる）。
-    expect(document.getElementById(submitButton().getAttribute('aria-describedby')!)!.textContent).toBe(note());
+    // 押しボタンが案内を説明として指す（押せない理由が支援技術にも伝わる）。数え方の補足も指す。
+    const described = submitButton().getAttribute('aria-describedby')!.split(' ');
+    expect(described.map((id) => document.getElementById(id)!.textContent)).toEqual([note(), COUNTING_NOTE]);
   });
 
   it('1 件: 押せず、「あと1つ」と案内する', () => {
@@ -448,6 +451,32 @@ describe('StructuredSurveyForm: 口コミ文を作るには感想が 2 件要る
     fireEvent.click(positive().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
     expect(submitButton().disabled).toBe(true);
     expect(note()).toBe('あと1つ選ぶと口コミ文を作れます');
+  });
+
+  it('不足の間だけ数え方の補足を出し、料理名と詳細を合わせて 1 件と数えること・一言を数えないことを伝える', () => {
+    setup();
+    star(4);
+    expect(screen.getByText(COUNTING_NOTE)).toBeDefined();
+    // 料理名＋詳細 1 つ = 1 件のまま（補足が説明する状態）。
+    openCategory(positive(), '料理');
+    const panel = within(positive().getByRole('group', { name: '料理' }));
+    fireEvent.click(panel.getByRole('checkbox', { name: '刺身盛り合わせ' }));
+    const sashimi = within(panel.getByText('刺身盛り合わせについて').parentElement!);
+    fireEvent.click(sashimi.getByRole('checkbox', { name: '味' }));
+    expect(note()).toBe('あと1つ選ぶと口コミ文を作れます');
+    expect(screen.getByText(COUNTING_NOTE)).toBeDefined();
+    // 詳細が 2 つで 2 件（補足の「詳細が2つ以上ならその数」）。足りたら補足は消え、押しボタンも指さない。
+    fireEvent.click(sashimi.getByRole('checkbox', { name: '温度・状態' }));
+    expect(submitButton().disabled).toBe(false);
+    expect(screen.queryByText(COUNTING_NOTE)).toBeNull();
+    expect(submitButton().getAttribute('aria-describedby')!.split(' ')).toHaveLength(1);
+  });
+
+  it('料理名が 1 つも無い店では、料理名の数え方を出さず、一言を数えないことだけを伝える', () => {
+    setup(definition({ foodTargets: [] }));
+    star(4);
+    expect(screen.getByText('その他の感想は件数に含まれません。')).toBeDefined();
+    expect(screen.queryByText(/の名前は、詳細と合わせて/)).toBeNull();
   });
 
   it('件数の表示（「0 / 2 選択済み」など）は出さない', () => {

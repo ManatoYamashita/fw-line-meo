@@ -29,12 +29,24 @@ import { SurveySettingsEditor, type SettingsMutation } from './survey-settings-e
 
 const PAGE_TITLE = 'アンケート設定';
 const LIFF_ERROR_MESSAGE = 'LINE 連携でエラーが発生しました。LINE アプリからこの画面を開き直してください。';
-const NOT_FOUND_MESSAGE = '店舗情報を取得できませんでした。';
+const NOT_FOUND_MESSAGE = '店舗情報を確認できませんでした。店舗の登録と LINE 連携が済んでいるかご確認ください。';
+// 戻り先は詳細画面の素のパス（`?storeId=` を付けない）。ヒントの店が見つからなかった場合でも、詳細画面は
+// ID トークンから店を決め直す（複数店舗なら店の選択を出す）。
+const STORE_DETAIL_PATH = '/store';
 const SELECT_STORE_HEADING = '設定する店舗を選んでください';
+
+// 失敗の種類で次の行動が違うため、案内を分ける。
+// - liff: LINE の中で開き直せば直る。戻り先のリンクも同じ LIFF を通るので出さない。
+// - store-not-found: 店舗の登録・連携の確認が要る。詳細画面へ戻れるようにし、解決しない場合の問い合わせを案内する。
+// - general: サーバー・通信の一時的な失敗。サーバー（またはクライアント）が返した案内とサポートコードをそのまま出す。
+type ErrorView =
+  | { readonly kind: 'liff' }
+  | { readonly kind: 'store-not-found'; readonly supportCode?: string }
+  | { readonly kind: 'general'; readonly message: string };
 
 type ViewState =
   | { readonly status: 'loading' }
-  | { readonly status: 'error'; readonly message: string }
+  | { readonly status: 'error'; readonly error: ErrorView }
   | { readonly status: 'select'; readonly stores: readonly StoreRef[] }
   | { readonly status: 'ready'; readonly data: SurveySettingsResponse };
 
@@ -62,9 +74,66 @@ function readStoreIdHint(): string | null {
   return hint && hint.length > 0 ? hint : null;
 }
 
-function errorMessage(result: Extract<SurveySettingsCallResult, { kind: 'error' }>): string {
-  const base = result.status === 404 && result.code === 'STORE_NOT_FOUND' ? NOT_FOUND_MESSAGE : result.message;
-  return result.supportCode ? `${base}（サポートコード: ${result.supportCode}）` : base;
+type CallError = Extract<SurveySettingsCallResult, { kind: 'error' }>;
+
+function isStoreNotFound(result: CallError): boolean {
+  return result.status === 404 && result.code === 'STORE_NOT_FOUND';
+}
+
+function withSupportCode(message: string, supportCode: string | undefined): string {
+  return supportCode ? `${message}（サポートコード: ${supportCode}）` : message;
+}
+
+function toErrorView(result: CallError): ErrorView {
+  if (isStoreNotFound(result)) {
+    return { kind: 'store-not-found', ...(result.supportCode ? { supportCode: result.supportCode } : {}) };
+  }
+  return { kind: 'general', message: withSupportCode(result.message, result.supportCode) };
+}
+
+/** 編集の途中の失敗をその場に出す 1 行の文言。 */
+function inlineErrorMessage(result: CallError): string {
+  return withSupportCode(isStoreNotFound(result) ? NOT_FOUND_MESSAGE : result.message, result.supportCode);
+}
+
+/**
+ * 問い合わせの案内。運営の問い合わせ先は LINE の案内（line-webhook の messages.ts）と同じく「運営まで」とだけ言い、
+ * リポジトリに正式な問い合わせ先の URL が無いため、リンクは作らない。
+ */
+function contactGuidance(supportCode: string | undefined): string {
+  return supportCode
+    ? `解決しない場合は、サポートコード ${supportCode} を添えて運営までお問い合わせください。`
+    : '解決しない場合は、運営までお問い合わせください。';
+}
+
+function ErrorBody({ error }: { readonly error: ErrorView }): React.JSX.Element {
+  if (error.kind === 'liff') {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{LIFF_ERROR_MESSAGE}</AlertDescription>
+      </Alert>
+    );
+  }
+  if (error.kind === 'general') {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{error.message}</AlertDescription>
+      </Alert>
+    );
+  }
+  return (
+    <>
+      <Alert variant="destructive">
+        <AlertDescription>
+          <p>{NOT_FOUND_MESSAGE}</p>
+          <p>{contactGuidance(error.supportCode)}</p>
+        </AlertDescription>
+      </Alert>
+      <p>
+        <a href={STORE_DETAIL_PATH}>店舗詳細へ戻る</a>
+      </p>
+    </>
+  );
 }
 
 export default function SurveySettingsPage(): React.JSX.Element {
@@ -82,7 +151,7 @@ export default function SurveySettingsPage(): React.JSX.Element {
       }
       if (cancelled || token.kind === 'redirecting') return;
       if (token.kind === 'failed') {
-        setState({ status: 'error', message: LIFF_ERROR_MESSAGE });
+        setState({ status: 'error', error: { kind: 'liff' } });
         return;
       }
       const hint = readStoreIdHint();
@@ -91,7 +160,7 @@ export default function SurveySettingsPage(): React.JSX.Element {
       if (cancelled) return;
       if (result.ok) setState({ status: 'ready', data: result.data });
       else if (result.kind === 'select') setState({ status: 'select', stores: result.stores });
-      else setState({ status: 'error', message: errorMessage(result) });
+      else setState({ status: 'error', error: toErrorView(result) });
     }
     void run();
     return () => {
@@ -112,7 +181,7 @@ export default function SurveySettingsPage(): React.JSX.Element {
       setState({ status: 'select', stores: result.stores });
       return { ok: false, message: SELECT_STORE_HEADING };
     }
-    return { ok: false, message: errorMessage(result) };
+    return { ok: false, message: inlineErrorMessage(result) };
   }, []);
 
   if (state.status === 'loading') {
@@ -131,9 +200,7 @@ export default function SurveySettingsPage(): React.JSX.Element {
     return (
       <PageShell width="sm" className="flex flex-col gap-6">
         <Heading level={1}>{PAGE_TITLE}</Heading>
-        <Alert variant="destructive">
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
+        <ErrorBody error={state.error} />
       </PageShell>
     );
   }

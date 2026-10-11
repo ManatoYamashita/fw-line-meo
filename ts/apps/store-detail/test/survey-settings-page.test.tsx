@@ -169,6 +169,21 @@ describe('アンケート設定画面', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('評価・おすすめの言葉を含む名前は、追加でも名前の変更でも送らずに直し方を出す（サーバーと同じ規則）', async () => {
+    const calls = await renderReady();
+    const food = section('料理');
+    fireEvent.change(within(food).getByLabelText('料理名を追加'), { target: { value: '絶品新鮮刺身盛り' } });
+    fireEvent.click(within(food).getByRole('button', { name: '追加する' }));
+    expect(await within(food).findByText(/料理名・ドリンク名だけを入力してください/)).toBeDefined();
+
+    fireEvent.click(within(food).getByRole('button', { name: '編集：「焼き鳥5種盛り」の名前を変更する' }));
+    const rename = within(section('料理')).getByLabelText('料理名を変更');
+    fireEvent.change(rename, { target: { value: '店長おすすめ焼き鳥' } });
+    fireEvent.click(within(section('料理')).getByRole('button', { name: '保存する' }));
+    expect(await within(section('料理')).findAllByText(/料理名・ドリンク名だけを入力してください/)).toHaveLength(2);
+    expect(calls).toHaveLength(1);
+  });
+
   it('サーバーが拒否した理由（同名など）を、追加の欄の下に出す', async () => {
     await renderReady({
       status: 409,
@@ -208,7 +223,7 @@ describe('アンケート設定画面', () => {
     expect((within(food).getByRole('button', { name: '追加する' }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(food).getByText('料理は10件まで登録できます。追加するには、どれかを非表示にしてください。')).toBeDefined();
     expect((within(food).getByRole('button', { name: '「非表示の料理」を再表示する' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(food).getByRole('button', { name: '「料理 3」の名前を変更する' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(food).getByRole('button', { name: '編集：「料理 3」の名前を変更する' }) as HTMLButtonElement).disabled).toBe(false);
     expect((within(food).getByRole('button', { name: '「料理 3」を下へ移動する' }) as HTMLButtonElement).disabled).toBe(false);
     expect((within(food).getByRole('button', { name: '「料理 3」を非表示にする' }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -238,7 +253,7 @@ describe('アンケート設定画面', () => {
     await screen.findByText('「焼き鳥5種盛り」を非表示にしました。');
     fireEvent.click(within(section('料理')).getByRole('button', { name: '「名物もつ煮」を再表示する' }));
     await screen.findByText('「名物もつ煮」を再表示しました。');
-    fireEvent.click(within(section('料理')).getByRole('button', { name: '「刺身盛り合わせ」の名前を変更する' }));
+    fireEvent.click(within(section('料理')).getByRole('button', { name: '編集：「刺身盛り合わせ」の名前を変更する' }));
     const edit = within(section('料理')).getByLabelText('料理名を変更');
     fireEvent.change(edit, { target: { value: 'お刺身盛り合わせ' } });
     fireEvent.click(within(section('料理')).getByRole('button', { name: '保存する' }));
@@ -317,5 +332,70 @@ describe('アンケート設定画面', () => {
     liffMocks.getIDToken.mockReturnValue(null);
     render(<SurveySettingsPage />);
     expect(await screen.findByText(/LINE 連携でエラーが発生しました/)).toBeDefined();
+    // LIFF の失敗は開き直しで直る。店舗の登録・連携の確認や問い合わせの案内、戻り先は出さない。
+    expect(screen.queryByText(/店舗の登録と LINE 連携/)).toBeNull();
+    expect(screen.queryByText(/運営までお問い合わせください/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '店舗詳細へ戻る' })).toBeNull();
+  });
+
+  it('ボタンのアクセシブルな名前は、表示している文言を含む（WCAG 2.5.3 Label in Name）', async () => {
+    await renderReady();
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      // 矢印などの記号は読み上げの対象外なので、表示の文言から外して比べる。
+      const visible = (button.textContent ?? '').replace(/[↑↓]/g, '').trim();
+      if (visible === '') continue;
+      const name = button.getAttribute('aria-label') ?? visible;
+      expect(name, `表示「${visible}」`).toContain(visible);
+    }
+    expect(within(section('料理')).getByRole('button', { name: '編集：「刺身盛り合わせ」の名前を変更する' })).toBeDefined();
+  });
+
+  describe('店舗が見つからないときの復旧の案内', () => {
+    const NOT_FOUND = '店舗情報を確認できませんでした。店舗の登録と LINE 連携が済んでいるかご確認ください。';
+
+    it('登録・連携の確認、詳細画面への戻り先、サポートコードを添えた問い合わせを案内する', async () => {
+      setUrl('?storeId=store-gone');
+      stubFetch({
+        status: 404,
+        body: { error: { code: 'STORE_NOT_FOUND', message: '店舗情報が見つかりません' }, supportCode: 'ab12cd34' },
+      });
+      render(<SurveySettingsPage />);
+      expect(await screen.findByText(NOT_FOUND)).toBeDefined();
+      expect(
+        screen.getByText('解決しない場合は、サポートコード ab12cd34 を添えて運営までお問い合わせください。'),
+      ).toBeDefined();
+      // 戻り先はヒントを付けない詳細画面。見つからなかったヒントを引き継がない。
+      expect(screen.getByRole('link', { name: '店舗詳細へ戻る' }).getAttribute('href')).toBe('/store');
+      // サーバーの素の文言は出さない（何をすればよいかが分からないため）。
+      expect(screen.queryByText(/店舗情報が見つかりません/)).toBeNull();
+    });
+
+    it('サポートコードが無いときは、コードを出さずに問い合わせを案内する', async () => {
+      stubFetch({ status: 404, body: { error: { code: 'STORE_NOT_FOUND', message: '店舗情報が見つかりません' } } });
+      render(<SurveySettingsPage />);
+      expect(await screen.findByText(NOT_FOUND)).toBeDefined();
+      expect(screen.getByText('解決しない場合は、運営までお問い合わせください。')).toBeDefined();
+      expect(screen.queryByText(/サポートコード/)).toBeNull();
+      expect(screen.getByRole('link', { name: '店舗詳細へ戻る' })).toBeDefined();
+    });
+
+    it('サーバーの一般的な失敗は、登録・連携の確認を案内しない（返された案内とサポートコードを出す）', async () => {
+      stubFetch({ status: 500, body: { error: { code: 'INTERNAL', message: 'x' }, supportCode: 'ef56ab78' } });
+      render(<SurveySettingsPage />);
+      expect(
+        await screen.findByText('サーバーエラーが発生しました。時間をおいて再度お試しください。（サポートコード: ef56ab78）'),
+      ).toBeDefined();
+      expect(screen.queryByText(/店舗の登録と LINE 連携/)).toBeNull();
+    });
+
+    it('404 でも STORE_NOT_FOUND 以外は、登録・連携の確認を案内しない', async () => {
+      stubFetch({ status: 404, body: { error: { code: 'TARGET_NOT_FOUND', message: '料理名が見つかりません' } } });
+      render(<SurveySettingsPage />);
+      expect(await screen.findByText('料理名が見つかりません')).toBeDefined();
+      expect(screen.queryByText(/店舗の登録と LINE 連携/)).toBeNull();
+      expect(screen.queryByRole('link', { name: '店舗詳細へ戻る' })).toBeNull();
+    });
   });
 });
