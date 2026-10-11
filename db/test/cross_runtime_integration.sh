@@ -11,10 +11,10 @@
 #
 # CROSS_RUNTIME_USE_EXISTING_DB=1（CI・Issue #158 (b)）:
 #   **すでに migrations が当たっている** postgres へ DATABASE_URL で繋ぎ、steps を直接実行する。
-#   with-test-db.sh を CI で使わないのは、同スクリプトが initdb / pg_ctl を要求する一方で
-#   ubuntu-latest ではこれらが PATH に無い（/usr/lib/postgresql/<ver>/bin）ためである。PATH 細工は
-#   runner イメージのバージョンへの暗黙の結合を作る。service container なら ts-ci の既存ジョブと
-#   同じ土俵で、そこには実績がある。
+#   with-test-db.sh を CI で使わないのは、同スクリプトが runner イメージに入っている postgres
+#   （ubuntu-latest では /usr/lib/postgresql/<ver>/bin）を探して起動するため、CI の DB の版が
+#   runner イメージの更新へ暗黙に結合するからである。service container なら版を `postgres:16` で
+#   固定でき、ts-ci の既存ジョブと同じ土俵で、そこには実績がある。
 #
 #   **入口はこのファイル 1 つのまま保つこと。** ワークフローから cross_runtime_steps.sh を直接
 #   叩けばモードスイッチは要らないが、その瞬間に scripts/run-db-test-suites.sh の

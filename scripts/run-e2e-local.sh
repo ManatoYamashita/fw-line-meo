@@ -31,7 +31,7 @@
 #   bash scripts/run-e2e-local.sh --only survey,lighthouse   # 一部だけ
 #   make e2e
 #
-# 前提: pnpm・Homebrew の postgres（initdb / pg_ctl / psql）・go・lsof・Chrome（Lighthouse 用）。
+# 前提: pnpm・postgres（Homebrew または apt。initdb / pg_ctl / psql）・go・lsof・Chrome（Lighthouse 用）。
 # 最初の失敗で止めず、選んだ層をすべて流してから結果を集約する。1 層でも赤なら exit 1、引数の誤りは exit 2。
 set -euo pipefail
 
@@ -290,14 +290,25 @@ missing_cmds() {
     printf '%s' "$out"
 }
 
+# initdb / pg_ctl は PATH に無くても with-test-db.sh が探し当てる（apt の postgres）ので、
+# command -v ではなく同じ探し方で判定する。
+missing_server_cmds() {
+    bash "$WITH_TEST_DB" --print-server-bindir >/dev/null 2>&1 || printf 'initdb pg_ctl'
+}
+
+# 2 つの不足一覧を空白区切りで繋ぐ（どちらも空なら空）。
+join_missing() {
+    printf '%s' "${1}${1:+${2:+ }}${2}"
+}
+
 # 層を止める理由を出す（止めなくてよければ空）。判定は呼び出し側で行う（ここでフラグを立てない）。
 layer_blocker() {
     local missing=''
     case "$1" in
-        survey) missing="$(missing_cmds lsof psql initdb pg_ctl)" ;;
+        survey) missing="$(join_missing "$(missing_cmds lsof psql)" "$(missing_server_cmds)")" ;;
         surfaces) missing="$(missing_cmds lsof)" ;;
-        lighthouse) missing="$(missing_cmds lsof psql initdb pg_ctl npx)" ;;
-        cross-runtime) missing="$(missing_cmds psql initdb pg_ctl go)" ;;
+        lighthouse) missing="$(join_missing "$(missing_cmds lsof psql npx)" "$(missing_server_cmds)")" ;;
+        cross-runtime) missing="$(join_missing "$(missing_cmds psql go)" "$(missing_server_cmds)")" ;;
         *) ;;
     esac
     if [ -n "$missing" ]; then
