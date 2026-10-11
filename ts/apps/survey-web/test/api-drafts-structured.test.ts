@@ -319,5 +319,33 @@ describe('structured の生成失敗の監視（generation_failed / generation_s
       expect(body).toMatchObject({ generation: 'ok', draft: OK_DRAFT });
       expect(events(log)).not.toContain('generation_failed');
     });
+
+    // 全試行の生成の失敗は順番に依らずまとめ、記録は 1 件だけ（PR #443 の追加レビュー）。
+    const API = statusError(402);
+    const SAFETY = { promptFeedback: { blockReason: 'SAFETY' } };
+    const INVALID = { text: 'not json' };
+    for (const [seq, replies, expected] of [
+      ['API, API, SAFETY', [API, API, SAFETY], ['error', 'generation_failed', { errorKind: 'API_ERROR', status: 402 }]],
+      ['SAFETY, API, SAFETY', [SAFETY, API, SAFETY], ['error', 'generation_failed', { errorKind: 'API_ERROR', status: 402 }]],
+      ['SAFETY, SAFETY, API', [SAFETY, SAFETY, API], ['error', 'generation_failed', { errorKind: 'API_ERROR', status: 402 }]],
+      ['INVALID, SAFETY, SAFETY', [INVALID, SAFETY, SAFETY], ['error', 'generation_failed', { errorKind: 'INVALID_OUTPUT' }]],
+      ['SAFETY, INVALID, SAFETY', [SAFETY, INVALID, SAFETY], ['error', 'generation_failed', { errorKind: 'INVALID_OUTPUT' }]],
+      ['SAFETY, SAFETY, INVALID', [SAFETY, SAFETY, INVALID], ['error', 'generation_failed', { errorKind: 'INVALID_OUTPUT' }]],
+      ['SAFETY × 3', [SAFETY, SAFETY, SAFETY], ['info', 'generation_safety_blocked', { errorKind: 'SAFETY_BLOCKED' }]],
+      ['API × 3', [API, API, API], ['error', 'generation_failed', { errorKind: 'API_ERROR', status: 402 }]],
+    ] as const) {
+      it(`${name}: ${seq} → ${expected[1]} を 1 件だけ`, async () => {
+        const { log } = await run(realizer(...(replies as readonly (Error | object)[])));
+        const monitored = log.mock.calls.filter((c) => c[1] === 'generation_failed' || c[1] === 'generation_safety_blocked');
+        expect(monitored).toEqual([expected]);
+      });
+    }
+
+    it(`${name}: 生成の失敗と hard gate の失格が混ざった場合は gate のまま（generation_failed を出さない）`, async () => {
+      const { body, log } = await run(realizer(API, BAD, SAFETY));
+      expect(body).toMatchObject({ generation: 'failed', draft: null });
+      expect(events(log)).not.toContain('generation_failed');
+      expect(events(log)).not.toContain('generation_safety_blocked');
+    });
   }
 });

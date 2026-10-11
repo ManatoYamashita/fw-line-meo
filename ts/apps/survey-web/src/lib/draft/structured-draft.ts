@@ -42,7 +42,7 @@ export type StructuredDraftResult =
        */
       readonly reason: 'gate' | 'generation';
       /**
-       * reason が generation のときだけ、最後の試行の失敗の分類（legacy の生成器と同じ DraftError）。呼び手は
+       * reason が generation のときだけ、全試行の失敗を順番に依らずまとめた分類（legacy の生成器と同じ DraftError・aggregateGenerationErrors）。呼び手は
        * logGenerationFailure で記録し、API の障害を既存の監視（generation_failed）へ乗せる。gate の失格は載せない。
        */
       readonly generationError?: DraftError;

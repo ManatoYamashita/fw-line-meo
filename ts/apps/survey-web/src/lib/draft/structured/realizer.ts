@@ -107,6 +107,28 @@ export interface RealizerOutcome {
 /** 1 回の生成の結果。失敗は legacy の生成器と同じ分類（DraftError）で返す（監視の generation_failed と揃える）。 */
 type GenerationResult = { readonly ok: true; readonly draft: string } | { readonly ok: false; readonly error: DraftError };
 
+/**
+ * 全試行の生成の失敗を、**順番に依らない** 1 つの分類へまとめる（PR #443 の追加レビュー）。記録は最後に 1 件だけ
+ * （試行ごとには出さない）。優先順位:
+ *   1. API_ERROR が 1 件でもある → API_ERROR（generation_failed・既存の監視に乗る）
+ *      status は、API_ERROR がすべて同じ status を持つときだけ残し、違う status・status の無いものが混ざれば省く
+ *   2. API_ERROR は無いが INVALID_OUTPUT が 1 件でもある → INVALID_OUTPUT（generation_failed）
+ *   3. すべて SAFETY_BLOCKED → SAFETY_BLOCKED（generation_safety_blocked）
+ * 安全性の遮断として扱うのは、全試行が安全性の遮断だったときだけである（API の障害が 1 回でも混ざれば監視へ乗せる）。
+ * 空の配列は呼び手の誤り（失敗の無い集約）なので例外にする。
+ */
+export function aggregateGenerationErrors(errors: readonly DraftError[]): DraftError {
+  if (errors.length === 0) throw new Error('aggregateGenerationErrors: errors is empty');
+  const apiErrors = errors.filter((e): e is Extract<DraftError, { kind: 'API_ERROR' }> => e.kind === 'API_ERROR');
+  if (apiErrors.length > 0) {
+    const statuses = new Set(apiErrors.map((e) => e.status));
+    const [status] = [...statuses];
+    return statuses.size === 1 && status !== undefined ? { kind: 'API_ERROR', status } : { kind: 'API_ERROR' };
+  }
+  if (errors.some((e) => e.kind === 'INVALID_OUTPUT')) return { kind: 'INVALID_OUTPUT' };
+  return { kind: 'SAFETY_BLOCKED' };
+}
+
 function readResponse(res: GenAiResponse): GenerationResult {
   // 安全性ブロック（prompt レベル・候補の finishReason=SAFETY）。legacy の生成器と同じ判定。
   if (res.promptFeedback?.blockReason != null || res.candidates?.some((c) => c.finishReason === 'SAFETY')) {
@@ -173,7 +195,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       const input = gateInputOf(material);
       const history: AttemptRecord[] = [];
       let notes: string[] = [];
-      let lastGenerationError: DraftError | undefined;
+      const generationErrors: DraftError[] = [];
       const accept = (draft: string, attempt: number) => {
         options.onResult?.({ result: 'llm', attempts: history.length, acceptedAttempt: attempt, history }, claims.length);
         return { kind: 'draft' as const, draft, source: 'llm' as const, attempts: history.length };
@@ -182,7 +204,7 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const generated = await generate(claims, comment, notes);
         if (!generated.ok) {
-          lastGenerationError = generated.error;
+          generationErrors.push(generated.error);
           history.push({ attempt, generationFailed: true, factuality: [] });
           if (attempt < MAX_ATTEMPTS) options.onRetry?.(['generation'], claims.length);
           continue;
@@ -202,10 +224,11 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       const reason = history.every((h) => h.generationFailed) ? 'generation' : 'gate';
       options.onFailed?.(reason, reason === 'gate' ? lastFactuality : [], claims.length);
       options.onResult?.({ result: 'generation_error', attempts: history.length, acceptedAttempt: null, history }, claims.length);
-      // すべての試行で生成そのものが失敗した（API の障害・残高切れ・安全性・出力の形）ときだけ、最後の失敗の分類を返す。
-      // factuality の hard gate の失格は API の障害ではないので載せない（generation_failed の監視を鳴らさない）。
-      return reason === 'generation' && lastGenerationError !== undefined
-        ? { kind: 'failed', attempts: history.length, reason, generationError: lastGenerationError }
+      // すべての試行で生成そのものが失敗した（API の障害・残高切れ・安全性・出力の形）ときだけ、全試行の失敗を順番に
+      // 依らずまとめた分類を返す（aggregateGenerationErrors）。factuality の hard gate の失格が 1 回でもあれば reason は
+      // gate で、API の障害としては載せない（generation_failed の監視を鳴らさない・従来どおり）。
+      return reason === 'generation' && generationErrors.length > 0
+        ? { kind: 'failed', attempts: history.length, reason, generationError: aggregateGenerationErrors(generationErrors) }
         : { kind: 'failed', attempts: history.length, reason };
     },
   };

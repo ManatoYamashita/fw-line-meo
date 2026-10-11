@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { GenAiClient, GenAiRequest } from '../src/lib/draft/generator';
+import type { DraftError, GenAiClient, GenAiRequest } from '../src/lib/draft/generator';
 import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
 import { compileStructuredClaims, overlappingIdentities } from '../src/lib/draft/structured/claims';
 import { structuredFallbackDraft } from '../src/lib/draft/structured/fallback';
 import { buildRealizerPrompt, RETRY_NOTES } from '../src/lib/draft/structured/prompt';
-import { createNaturalRealizer, MAX_ATTEMPTS } from '../src/lib/draft/structured/realizer';
+import { aggregateGenerationErrors, createNaturalRealizer, MAX_ATTEMPTS } from '../src/lib/draft/structured/realizer';
 
 // structured の通常生成（Natural LLM Realizer・Issue #439）。実 Gemini は呼ばず、偽のクライアントで生成の結果を決める。
 // 事実の境界（claims と hard gate）がコードで守られることと、作り直し・safe fallback の制御を固定する。
@@ -560,5 +560,36 @@ describe('文章は Gemini に任せ、明確な捏造だけを止める（style
       { ...MIXED.selections[1]!, facets: [{ code: 'volume', label: '量' }, { code: 'taste', label: '味' }] },
     ]);
     expect(structuredFallbackDraft(withTaste)).toBe('料理全体の量に満足でき、焼き鳥5種盛りの量も良かったです。焼き鳥5種盛りは味が良かったです。');
+  });
+});
+
+// 全試行の生成の失敗を順番に依らずまとめる（PR #443 の追加レビュー）。最後の試行だけを見ると、同じ失敗の集合でも
+// 順番で generation_failed の監視に乗るかどうかが変わっていた。
+describe('aggregateGenerationErrors（全試行の生成の失敗の集約・順番に依らない）', () => {
+  const API = (status?: number): DraftError => (status === undefined ? { kind: 'API_ERROR' } : { kind: 'API_ERROR', status });
+  const SAFETY: DraftError = { kind: 'SAFETY_BLOCKED' };
+  const INVALID: DraftError = { kind: 'INVALID_OUTPUT' };
+  /** 配列のすべての並び。 */
+  const permutations = <T,>(xs: readonly T[]): T[][] =>
+    xs.length <= 1 ? [[...xs]] : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest]));
+
+  it.each([
+    ['API(402), API(402), SAFETY', [API(402), API(402), SAFETY], API(402)],
+    ['SAFETY, API(402), SAFETY', [SAFETY, API(402), SAFETY], API(402)],
+    ['INVALID, SAFETY, SAFETY', [INVALID, SAFETY, SAFETY], INVALID],
+    ['API, INVALID, SAFETY', [API(503), INVALID, SAFETY], API(503)],
+    ['SAFETY × 3', [SAFETY, SAFETY, SAFETY], SAFETY],
+    ['API(402) × 3', [API(402), API(402), API(402)], API(402)],
+    ['INVALID × 3', [INVALID, INVALID, INVALID], INVALID],
+    ['status の違う API が混ざる → status を省く', [API(402), API(503), SAFETY], API()],
+    ['status の無い API が混ざる → status を省く', [API(402), API(), API(402)], API()],
+  ] as const)('%s（すべての並びで同じ結果）', (_name, errors, expected) => {
+    for (const order of permutations(errors)) {
+      expect(aggregateGenerationErrors(order), JSON.stringify(order)).toEqual(expected);
+    }
+  });
+
+  it('空の配列は呼び手の誤り', () => {
+    expect(() => aggregateGenerationErrors([])).toThrow();
   });
 });
