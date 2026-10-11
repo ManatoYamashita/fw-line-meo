@@ -386,7 +386,12 @@ export function evaluateStructuredDraft(
   }
 
   // --- 語彙で決まる追加（一言にあれば数えない） ---------------------------------------
-  const listGate = (key: keyof StructuredGateLexicon['lists'], kind: string) => {
+  // 本人の事情・気持ちの分類（強さ・推奨・再訪・事情・時間帯・同行者）は、**一言がその分類のどれかに当たれば分類ごと
+  // 数えない**。一言は誤字・話し言葉を整えて書き直すので、一言の「めっちゃ」が下書きで「とても」に、「昼に」が「ランチで」
+  // になる。語の完全一致だけで許すと、本人が書いたことを整えた文まで捏造として弾く。具体的な属性（newAttribute）は
+  // 語ごとに見る（一言の「新鮮」から「サクサク」を許さない）。
+  const listGate = (key: keyof StructuredGateLexicon['lists'], kind: string, wholeList: boolean) => {
+    if (wholeList && lex.lists[key].some(inComment)) return;
     for (const p of lex.lists[key]) {
       const hit = p.exec(scan);
       if (hit && !inComment(p)) {
@@ -395,13 +400,13 @@ export function evaluateStructuredDraft(
       }
     }
   };
-  listGate('intensity', 'intensity');
-  listGate('recommendation', 'recommendation');
-  listGate('revisit', 'revisit');
-  listGate('cause', 'cause');
-  listGate('timing', 'timing');
-  listGate('companion', 'companion');
-  listGate('attribute', 'newAttribute');
+  listGate('intensity', 'intensity', true);
+  listGate('recommendation', 'recommendation', true);
+  listGate('revisit', 'revisit', true);
+  listGate('cause', 'cause', true);
+  listGate('timing', 'timing', true);
+  listGate('companion', 'companion', true);
+  listGate('attribute', 'newAttribute', false);
   // 回答より強い言い切り（入店までの待ち時間の positive から「待ち時間がなかった」「すぐ入れた」）。回答した項目名
   // （「入店までの待ち時間」）を消した本文では「〜がなかった」だけが残って拾えないので、店名だけを消した本文で見る。
   for (const p of lex.lists.overstatement) {
@@ -453,6 +458,18 @@ export function evaluateStructuredDraft(
       OVERALL.test(sentence) || claims.some((cl) => cl.targetId === undefined && firstMatch(sentence, subjectPatternsOf(cl)) !== null);
     topics.push(named.size > 0 ? named : namesOther ? new Set() : (topics[topics.length - 1] ?? new Set()));
   }
+  /** text がその claim の主題に触れているか（Target の名前・カテゴリ全体の facet の手がかり）。 */
+  const mentions = (text: string, cl: GateClaim): boolean =>
+    cl.targetId !== undefined
+      ? subjectWords(c, cl.targetId, cl.targetLabel!).some((w) => text.includes(nfkc(w)))
+      : firstMatch(text, subjectPatternsOf(cl)) !== null;
+  /**
+   * 一言の **同じ文** が、claim の主題と、もう一方（語・別の claim の主題）の両方に触れているか。本人がその 2 つを
+   * 結びつけて書いた（「人気店で少し待った」「接客丁寧で居心地よかった」）とみなす。別々の文で触れただけなら結びつけていない。
+   */
+  const commentSentences = splitSentences(commentN);
+  const commentRelates = (cl: GateClaim, other: (sentence: string) => boolean): boolean =>
+    commentSentences.some((cs) => mentions(cs, cl) && other(cs));
   const aboutClaim = (cl: GateClaim, index: number): boolean => {
     const sentence = sentences[index]!;
     if (cl.targetId !== undefined) return topics[index]!.has(cl.targetId);
@@ -544,7 +561,10 @@ export function evaluateStructuredDraft(
       if (at < 0) continue;
       const cause = mask(s.slice(0, at), selectedNames);
       if (!keywords.some((k) => cause.includes(k))) continue;
+      // 一言の同じ文が理由の語とその主題の両方に触れていれば（「人気店で少し待った」と入店までの待ち時間）、結びつけたのは本人である。
+      const causeWords = keywords.filter((k) => cause.includes(k));
       const otherSubject = claims.some((cl) => {
+        if (commentRelates(cl, (cs) => causeWords.some((k) => cs.includes(k)))) return false;
         if (cl.targetId !== undefined) return subjectWords(c, cl.targetId, cl.targetLabel!).some((w) => s.includes(nfkc(w)));
         const hit = firstMatch(s, subjectPatternsOf(cl));
         return hit !== null && !overlapsKeyword(hit);
@@ -572,9 +592,12 @@ export function evaluateStructuredDraft(
       const s = nfkc(sentence);
       const at = lastMatchIndex(s, lex.lists.commentConnective);
       if (at <= 0) continue;
+      // 一言の同じ文が両方の主題に触れていれば（「接客丁寧で居心地よかった」）、結びつけたのは本人である。
+      const related = (x: string, y: string) =>
+        claims.some((a) => subjectKey(a) === x && commentRelates(a, (cs) => claims.some((b) => subjectKey(b) === y && mentions(cs, b))));
       const before = subjectsIn(s.slice(0, at));
       const after = subjectsIn(s.slice(at));
-      if ([...before].some((x) => [...after].some((y) => y !== x))) add('cause', sentence);
+      if ([...before].some((x) => [...after].some((y) => y !== x && !related(x, y)))) add('cause', sentence);
     }
   }
 
@@ -588,7 +611,7 @@ export function evaluateStructuredDraft(
  *   exact overlap の理由・明確な極性の反転・回答より強い具体化（待ち時間ゼロ）・意向（再訪・推奨・期待）・誇張の強度
  * 本番で **見ない** もの（評価の offline gate と診断だけが使う）: 未回答の facet / カテゴリの語（「注文」「席」など表面語で
  * 拾うので自然な言い換えを弾く）・Target 名の欠落・claim ごとの coverage（各 claim を文章で個別に回収することは
- * 求めない）・style。片側の欠落は runtimeViolations が下書き全体の極性だけでゆるく見る。
+ * 求めない）・style。concern の欠落だけは runtimeViolations が下書き全体の極性でゆるく見る。
  */
 export const RUNTIME_HARD_KINDS: ReadonlySet<string> = new Set([
   'newAttribute',
@@ -610,9 +633,12 @@ export const RUNTIME_HARD_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 本番の runtime hard gate。evaluateStructuredDraft の失格のうち RUNTIME_HARD_KINDS だけを返し、片側の欠落は
- * **下書き全体** にその極性の手がかりが 1 つも無いときだけ数える（どの claim を述べたかは問わない。positive と concern の
- * 両方を回答したのに、どちらかを完全に無視した下書きだけを止める）。返すのは頭の名前の重複なしの一覧。
+ * 本番の runtime hard gate。evaluateStructuredDraft の失格のうち RUNTIME_HARD_KINDS だけを返し、欠落は
+ * **気になったところ（concern）を下書き全体で完全に無視したときだけ** 数える（どの claim を述べたかは問わない）。
+ * 低評価の内容を消した口コミは「評価の操作」に近づくので止める。良かったところの欠落は捏造ではないので本番では見ない
+ * （「お得だった」「量が多かった」のような本人の言葉は極性の手がかりの語彙に当たらず、「良かった」「満足」を
+ * 言わせるための作り直しが、項目を読み上げる文へ寄せていた・2026-10-11）。評価（evaluateStructuredDraft）は両側を見る。
+ * 返すのは頭の名前の重複なしの一覧。
  */
 export function runtimeViolations(
   c: StructuredGateInput,
@@ -626,9 +652,7 @@ export function runtimeViolations(
       .filter((k) => RUNTIME_HARD_KINDS.has(k)),
   );
   const claims = claimsOf(c);
-  for (const p of POLARITIES) {
-    if (claims.some((cl) => cl.polarity === p) && firstMatch(draft, lex.polarityCues[p]) === null) kinds.add(`${p}Dropped`);
-  }
+  if (claims.some((cl) => cl.polarity === 'concern') && firstMatch(draft, lex.polarityCues.concern) === null) kinds.add('concernDropped');
   return [...kinds];
 }
 

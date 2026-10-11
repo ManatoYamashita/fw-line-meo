@@ -447,3 +447,35 @@ describe('runtime hard gate は明確な捏造だけを止める（文章表現�
     expect(runtime(both, 'ドリンクはもう少し選べると嬉しかったですが、全体的に満足できました。')).toEqual([]);
   });
 });
+
+describe('本人の感想（一言）を中心に整えた文（2026-10-11 の人間らしさの見直し）', () => {
+  const runtimeOf = (m: StructuredDraftMaterial, draft: string) => runtimeViolations(gateInputOf(m), draft, LEX, LEGACY);
+  const volume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] };
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const comfort = { polarity: 'positive' as const, categoryCode: 'atmosphere', categoryLabel: '店内・雰囲気', facets: [{ code: 'comfort', label: '居心地' }] };
+  const entryWaitConcern = { polarity: 'concern' as const, categoryCode: 'reservation_visit', categoryLabel: '予約・来店', facets: [{ code: 'entry_wait', label: '入店までの待ち時間' }] };
+
+  it('一言の話し言葉の強さを整えた言い方は通す（「めっちゃ」→「とても」）。一言が無ければ従来どおり止める', () => {
+    const m = material({ selections: [volume], comment: '量めっちゃ多くてお得だった' });
+    expect(runtimeOf(m, '量がとても多くて、お得に感じました。')).toEqual([]);
+    expect(runtimeOf(material({ selections: [volume] }), '量がとても多くて満足できました。')).toContain('intensity');
+  });
+
+  it('一言が自分で結びつけた事情は、整えて書いても因果の創作に数えない（「人気店で少し待った」）', () => {
+    const m = material({ selections: [entryWaitConcern], comment: '人気店で少し待った' });
+    expect(runtimeOf(m, '人気店なので少し待ちました。')).toEqual([]);
+  });
+
+  it('一言が両方の項目に触れていれば、項目どうしを結んでも本人の因果として通す', () => {
+    const m = material({ selections: [courtesy, comfort], comment: '接客丁寧で居心地よかった' });
+    expect(runtimeOf(m, '接客が丁寧だったので、居心地よく過ごせました。')).toEqual([]);
+    // 一言が無ければ、独立に選んだ項目どうしの因果は従来どおり止める。
+    expect(runtimeOf(material({ selections: [courtesy, comfort] }), '接客が丁寧だったので、居心地よく過ごせました。')).toContain('cause');
+  });
+
+  it('具体的な属性は語ごとに見る（一言の「新鮮」から「サクサク」は許さない）', () => {
+    const m = material({ comment: '刺身が新鮮だった' });
+    expect(runtimeOf(m, '刺身盛り合わせが新鮮でおいしかったです。')).toEqual([]);
+    expect(runtimeOf(m, '刺身盛り合わせが新鮮でサクサクでした。')).toContain('newAttribute');
+  });
+});

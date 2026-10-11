@@ -3,37 +3,46 @@ import { claimSubjectKey, overlappingIdentities, type StructuredClaim } from './
 // structured の通常生成のプロンプト（Issue #439）。**事実の境界はコード（claims と hard gate）が主で、プロンプトは自然な
 // 口コミを書かせることだけに集中する。**
 //
-// 方針（2026-10-11 の大幅簡素化）: 文章は Gemini に任せ、指示は「自然な口コミにする・まとめや省略は自由・新しい具体的な
-// 出来事 / 数量 / 原因 / 来店状況 / 具体属性は作らない」だけにする。例文・文体指定・構成指定は置かない（モデルの文章が
-// アンケート項目の言い換えに寄った）。明確な捏造はコード（runtimeViolations）が止める。
+// 目的（2026-10-11 の見直し）: 「アンケート回答を自然な日本語に変換した文章」ではなく、**実際に利用した本人が自分の体験を
+// 振り返って Google 口コミに書いたような文章** を作る。以前の指示（「回答を参考に」「読み上げる必要はない」と、項目を
+// 見出しで並べた入力・末尾の「一言」）では、モデルが項目ごとに 1 文を作り、一言を補足として扱った（項目の読み上げ・
+// 「満足できる内容でした」への抽象化）。そこで次のように変えた:
+//   - 選んだ項目は「1 つずつ文章にする材料」ではなく「何についてどう感じたかの手がかり」と位置づける
+//   - 本人が書いた感想（一言）があれば **口コミの中心** にし、誤字・語順・重複を整えつつ本人の言葉を残させる
+//   - 自然に言える主観の言い換えは自由・素材に無い具体的な様子だけは足さない、の 1 本に絞る
+// 明確な捏造はコード（runtimeViolations）が止める。プロンプトへ禁止事項を積み増さない。
 //
 // 初回の生成も「別の文章を生成」も、**同じプロンプトで独立にもう一度生成するだけ** である。
 // 以前は再生成のバリエーションのために、文体・文章の組み立て・項目の並び・総評の有無をサーバーが抽選し、再生成では
 // 「前と違う構成にする」指示を足していた。実 Gemini でこれが品質のばらつき（体言止めの断片・不自然な言い回し）を生んだ
-// ので、すべて外した。文章が多少似ても、品質が安定している方を優先する（Gemini 自身の生成の揺らぎに任せる）。
+// ので、すべて外した（Gemini 自身の生成の揺らぎに任せる）。
 //
 // 素材に入れないもの:
 //   - 店名: 店名から書き始める定型を避ける（Google の口コミは店のページに載るので、店名は要らない）
 //   - 星: 星から総評・理由・強い言葉を作らせない（総評の定型「全体として満足です」が毎回付いた）
-// 一言は内容として使ってよい（人物像は推測しない）。前回の下書きはモデルへ渡さない（客の端末から戻る値を事実の源に
-// しない）。
+// 前回の下書きはモデルへ渡さない（客の端末から戻る値を事実の源にしない）。
 
 export const REALIZER_MARKER = '[structured-review-realizer]';
 
 const SYSTEM_INSTRUCTION = `${REALIZER_MARKER}
-以下は利用者がアンケートで回答した内容です。
-この内容を参考に、本人が Google 口コミにそのまま投稿するような自然な日本語の口コミを書いてください。
+実際にこの店を利用した本人として、Google 口コミ欄に投稿する口コミを書いてください。
+入力は、本人がアンケートで選んだ項目と、本人が書いた感想（ある場合）です。
 
-アンケート項目を一つずつ読み上げる必要はありません。
-内容が近いものは自然にまとめたり、省略したりして構いません。
+選んだ項目は、1 つずつ文章にするための材料ではなく、本人が何についてどう感じたかを知る手がかりです。
+入力全体から「この人がこの店でどんな印象を持ったか」をつかみ、1 つの口コミとして書いてください。
+項目を順番に並べたり、1 項目を 1 文にしたりしないでください。意味が近いものはまとめてよく、すべてを均等に書く必要もありません。
 
-回答から自然に導ける程度の言い換えは自由です。
+本人が書いた感想がある場合は、それを口コミの中心にしてください。
+誤字・脱字・話し言葉・語順の乱れ・重複は直して読みやすく整えてください。ただし要約や抽象的な言い換え（「満足度の高い内容でした」など）にはせず、本人が使った具体的な言葉や感覚をできるだけ残してください。
 
-ただし、入力にない具体的な出来事、数量、原因、来店状況、料理や接客の具体属性を新しく作らないでください。
+「ボリュームに満足した」「気持ちよく利用できた」「もう少し選べると嬉しい」のような、選んだ項目から自然に言える主観的な言い換えは自由です。
+本人が選んでも書いてもいない具体的な様子（新鮮だった・サクサクだった・店員が笑顔だった・5 分で入れた など）は足さないでください。
+
+目標は、本人が自分で書いた口コミを少し上手に整えたような文章です。アンケートの要約・レポート・広告のような文章、褒めすぎ、かしこまりすぎた言い方、「〜だよ」「〜かな」のようなくだけすぎた言い方、付け足しの総評は避けてください。材料が少なければ 1〜2 文で構いません。
 
 JSON {"draft": "..."} の形で返してください。`;
 
-/** 回答の 1 行（主題ごと）。claim の表示名だけを使い、code は出さない。並びは回答の検証が正規化した定義の順。 */
+/** 選んだ項目の 1 行（主題ごと）。claim の表示名だけを使い、code は出さない。並びは回答の検証が正規化した定義の順。 */
 function answerLines(claims: readonly StructuredClaim[], polarity: StructuredClaim['polarity']): string[] {
   const lines: string[] = [];
   const done = new Set<string>();
@@ -46,12 +55,9 @@ function answerLines(claims: readonly StructuredClaim[], polarity: StructuredCla
       lines.push(`- ${claim.facetLabel}（${claim.categoryLabel}）`);
       continue;
     }
+    // Target だけの選択は名前だけを渡す（味・量などを補わせない）。
     const facets = same.flatMap((c) => (c.kind === 'target_facet' ? [c.facetLabel] : []));
-    lines.push(
-      facets.length > 0
-        ? `- ${claim.targetLabel}（${claim.categoryLabel}）: ${facets.join('、')}`
-        : `- ${claim.targetLabel}（${claim.categoryLabel}）: 料理・ドリンクそのもの（項目の指定なし）`,
-    );
+    lines.push(facets.length > 0 ? `- ${claim.targetLabel}（${claim.categoryLabel}）: ${facets.join('、')}` : `- ${claim.targetLabel}（${claim.categoryLabel}）`);
   }
   return lines;
 }
@@ -68,12 +74,13 @@ export function buildRealizerPrompt(input: RealizerPromptInput): { systemInstruc
   const concern = answerLines(input.claims, 'concern');
   const overlap = overlappingIdentities(input.claims).length > 0;
   const comment = input.comment !== undefined && input.comment.trim() !== '' ? input.comment : undefined;
+  // 感想があれば先に置く（口コミの中心）。選んだ項目はその後ろに「手がかり」として置く。
   const lines = [
-    '回答:',
+    ...(comment !== undefined ? ['本人が書いた感想（口コミの中心にする）:', `「${comment}」`, ''] : []),
+    '本人が選んだ項目（どう感じたかの手がかり）:',
     ...(positive.length > 0 ? ['良かったところ:', ...positive] : []),
     ...(concern.length > 0 ? ['気になったところ:', ...concern] : []),
     ...(overlap ? ['（同じ項目が良かったところと気になったところの両方にあります。両方あったことだけを書いてください）'] : []),
-    ...(comment !== undefined ? [`一言: 「${comment}」`] : []),
     ...(input.retryNotes !== undefined && input.retryNotes.length > 0
       ? ['', '前回の文章は次の点を守れていませんでした。意味は変えずに書き直してください:', ...input.retryNotes.map((n) => `- ${n}`)]
       : []),
@@ -104,7 +111,7 @@ export const RETRY_NOTES: Readonly<Record<string, string>> = {
   concernDropped: '気になったところを必ず書く。',
   targetDropped: '回答にある料理・ドリンクの名前をすべて、回答の表記のまま書く。',
   overlapReason: '良かったところと気になったところが両方あったことだけを書き、その理由や条件を書かない。',
-  commentLinkage: '一言の内容を、他の項目の理由として結びつけない。',
+  commentLinkage: '本人の感想に無い因果で、感想の内容を他の項目の理由として結びつけない。',
   absence: '回答に無いことを「無かった」「特にない」と書かない。',
   ungrounded: '回答に無い固有名詞・数字・日付を書かない。',
   caseForbidden: '回答に無い事情を書かない。',

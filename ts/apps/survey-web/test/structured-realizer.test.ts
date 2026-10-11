@@ -83,19 +83,36 @@ describe('compileStructuredClaims（決定的）', () => {
 describe('プロンプト', () => {
   it('claim の表示名と極性と一言だけを渡し、店名・code・星は渡さない', () => {
     const claims = compileStructuredClaims(material({ star: 1 }).selections);
-    const { systemInstruction, userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった' });
+    const { userContent } = buildRealizerPrompt({ claims, comment: 'おいしかった' });
     expect(userContent).toContain('良かったところ:');
     expect(userContent).toContain('- 刺身盛り合わせ（料理）: 味');
-    expect(userContent).toContain('一言: 「おいしかった」');
+    expect(userContent).toContain('「おいしかった」');
     expect(userContent).not.toContain('気になったところ:');
     expect(userContent).not.toMatch(/[★☆]|星|満足度|全体の印象|海鮮食堂|taste|food|[0-9０-９]/);
-    // 中心の指示だけ: 自然な口コミ・読み上げなくてよい・まとめや省略は自由・新しい具体的事実は作らない。
-    expect(systemInstruction).toContain('本人が Google 口コミにそのまま投稿するような自然な日本語の口コミを書いてください');
-    expect(systemInstruction).toContain('アンケート項目を一つずつ読み上げる必要はありません');
-    expect(systemInstruction).toContain('内容が近いものは自然にまとめたり、省略したりして構いません');
-    expect(systemInstruction).toContain('入力にない具体的な出来事、数量、原因、来店状況、料理や接客の具体属性を新しく作らないでください');
-    // 例文・文体指定・構成指定は置かない。
+  });
+
+  it('選んだ項目は手がかりとして渡し、項目ごとに文にさせない', () => {
+    const { systemInstruction, userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(material().selections) });
+    expect(userContent).toContain('本人が選んだ項目（どう感じたかの手がかり）:');
+    expect(systemInstruction).toContain('1 つずつ文章にするための材料ではなく、本人が何についてどう感じたかを知る手がかりです');
+    expect(systemInstruction).toContain('1 項目を 1 文にしたりしないでください');
+    expect(systemInstruction).toContain('本人が選んでも書いてもいない具体的な様子');
+    // 感想が無ければ感想の欄は出さない。
+    expect(userContent).not.toContain('本人が書いた感想');
+    // 文体指定・構成指定は置かない。
     expect(systemInstruction).not.toMatch(/例:|です・ます調|体言止め|文体|組み立て/);
+  });
+
+  it('本人が書いた感想は、選んだ項目より先に「口コミの中心」として渡す', () => {
+    const { systemInstruction, userContent } = buildRealizerPrompt({
+      claims: compileStructuredClaims(material().selections),
+      comment: '量多くてお得だった',
+    });
+    expect(userContent.indexOf('本人が書いた感想（口コミの中心にする）:')).toBe(0);
+    expect(userContent).toContain('「量多くてお得だった」');
+    expect(userContent.indexOf('「量多くてお得だった」')).toBeLessThan(userContent.indexOf('本人が選んだ項目'));
+    expect(systemInstruction).toContain('本人が書いた感想がある場合は、それを口コミの中心にしてください');
+    expect(systemInstruction).toContain('本人が使った具体的な言葉や感覚をできるだけ残してください');
   });
 
   it('文体・組み立て・総評の抽選や、再生成で構成を変える指示は渡さない', () => {
@@ -105,11 +122,11 @@ describe('プロンプト', () => {
     expect(systemInstruction).not.toMatch(/体言止めを交え|常体/);
   });
 
-  it('Target だけの claim は「料理そのもの（項目の指定なし）」として渡し、味などを補わない', () => {
+  it('Target だけの claim は名前だけを渡し、味などを補わない', () => {
     const { userContent } = buildRealizerPrompt({
       claims: compileStructuredClaims([{ polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', targetId: SASHIMI, targetLabel: '刺身盛り合わせ', facets: [] }]),
     });
-    expect(userContent).toContain('- 刺身盛り合わせ（料理）: 料理・ドリンクそのもの（項目の指定なし）');
+    expect(userContent).toMatch(/^- 刺身盛り合わせ（料理）$/m);
     expect(userContent).not.toContain('味');
   });
 
@@ -256,7 +273,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const { client, requests } = fakeClient('刺身盛り合わせ、うまかった！また行きます。');
     const m = material({ comment: '刺身うまかった！また行く' });
     expect(await createNaturalRealizer(client, {}).prepare(m)).toMatchObject({ source: 'llm', attempts: 1 });
-    expect(requests[0]!.contents).toContain('一言: 「刺身うまかった！また行く」');
+    expect(requests[0]!.contents).toContain('「刺身うまかった！また行く」');
   });
 });
 
