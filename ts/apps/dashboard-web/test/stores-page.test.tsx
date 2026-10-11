@@ -703,7 +703,7 @@ describe('店舗一覧ページ: 意匠の適用', () => {
       cleanup();
     }
     // 走査対象が 1 件も無い状態で緑にならないようにする（要件 7.4）。
-    expect(visited).toBe(SURFACE_BRANCHES.length);
+    expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('主見出しを見出しの部品で描き、読み上げ名と階層を変えない（Req 1.1, 3.2）', async () => {

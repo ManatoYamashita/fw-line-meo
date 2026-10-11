@@ -964,7 +964,7 @@ describe('管理ダッシュボードのフォーム部品の幅は面をまた�
       matches.forEach((match) => found.add(match));
       scanned += 1;
     }
-    expect(scanned).toBe(SURFACE_SOURCES.length);
+    expect(scanned).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
     // 段が 2 つに割れた時点で赤くなる。
     expect(Array.from(found)).toEqual(['sm:max-w-xs']);
   });

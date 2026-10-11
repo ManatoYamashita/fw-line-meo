@@ -493,7 +493,7 @@ describe('招待コードページ: 意匠の適用', () => {
       cleanup();
     }
     // 走査対象が 1 件も無い状態で緑にならないようにする（要件 7.4）。
-    expect(visited).toBe(SURFACE_BRANCHES.length);
+    expect(visited).toBe(9); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('主見出しを見出しの部品で描き、読み上げ名と階層を変えない（Req 1.1, 3.2）', async () => {
@@ -666,7 +666,7 @@ describe('招待コードページ: 意匠の適用', () => {
       visited += 1;
       cleanup();
     }
-    expect(visited).toBe(failures.length);
+    expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('発行した新コードの案内も通知の部品へ載せ、全文と強調を保つ（Req 1.1, 3.5）', async () => {
@@ -725,7 +725,7 @@ describe('招待コードページ: 意匠の適用', () => {
       visited += 1;
       cleanup();
     }
-    expect(visited).toBe(branches.length);
+    expect(visited).toBe(2); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('選択を選択の部品へ移し、包む要素を段落から汎用の容器へ置き換える（Req 1.1, 3.4）', async () => {
