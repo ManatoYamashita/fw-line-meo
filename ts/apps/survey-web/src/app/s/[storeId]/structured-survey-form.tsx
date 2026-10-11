@@ -162,7 +162,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
       />
 
       {/* 一言は任意。タップだけで回答できることを優先し、最初は開く押しボタンだけを出す。 */}
-      <div className="space-y-2 border-t border-border pt-4">
+      <div className="space-y-2">
         <DisclosureToggle
           label="その他の感想（任意）"
           open={commentOpen}
@@ -275,7 +275,7 @@ function PolaritySection({
 
   return (
     <section
-      className={collapsible ? 'space-y-3 border-t border-border pt-4' : 'space-y-3'}
+      className="space-y-3"
       aria-labelledby={headingId}
     >
       {collapsible ? (
