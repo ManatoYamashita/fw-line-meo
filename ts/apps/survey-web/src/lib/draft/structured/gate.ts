@@ -117,6 +117,8 @@ export interface StructuredGateLexicon {
     readonly RegExp[]
   >>;
   readonly aiish: Readonly<Record<string, readonly RegExp[]>>;
+  /** 回答していない facet の観測した状態を表す語（facet code → 語）。本番でも止める。 */
+  readonly observation: Readonly<Record<string, readonly RegExp[]>>;
 }
 
 const LIST_KEYS = [
@@ -152,6 +154,7 @@ export function readStructuredGateLexicon(raw: unknown): StructuredGateLexicon {
     polarityCues: { positive: cues.positive, concern: cues.concern },
     lists,
     aiish: regexMap(r.aiish, 'aiish'),
+    observation: regexMap(r.observation, 'observation'),
   };
 }
 
@@ -380,6 +383,19 @@ export function evaluateStructuredDraft(
       const hit = p.exec(scan);
       if (hit && !selectedHint(hit[0]) && !inComment(p)) {
         add('unselectedCategory', `${code}:${hit[0]}`);
+        break;
+      }
+    }
+  }
+
+  // 回答していない facet の観測した状態（「店内が静かで」「揚げたてで」）。表面語ではなく状態を言い切る語だけを見るので、
+  // 本番でも止める（新しい具体的事実の創作）。回答した facet・カテゴリの手がかりに当たる語と、一言にある語は数えない。
+  for (const [code, patterns] of Object.entries(lex.observation)) {
+    if (selectedFacetCodes.has(code)) continue;
+    for (const p of patterns) {
+      const hit = p.exec(scan);
+      if (hit && !selectedHint(hit[0]) && !inComment(p)) {
+        add('unselectedObservation', `${code}:${hit[0]}`);
         break;
       }
     }
@@ -615,6 +631,7 @@ export function evaluateStructuredDraft(
  */
 export const RUNTIME_HARD_KINDS: ReadonlySet<string> = new Set([
   'newAttribute',
+  'unselectedObservation',
   'ungrounded',
   'timing',
   'companion',

@@ -95,8 +95,11 @@ describe('プロンプト', () => {
     const { systemInstruction, userContent } = buildRealizerPrompt({ claims: compileStructuredClaims(material().selections) });
     expect(userContent).toContain('本人が選んだ項目（どう感じたかの手がかり）:');
     expect(systemInstruction).toContain('1 つずつ文章にするための材料ではなく、本人が何についてどう感じたかを知る手がかりです');
-    expect(systemInstruction).toContain('1 項目を 1 文にしたりしないでください');
-    expect(systemInstruction).toContain('本人が選んでも書いてもいない具体的な様子');
+    expect(systemInstruction).toContain('1 項目を 1 文にしない');
+    expect(systemInstruction).toContain('関係のない項目を「〜ですが」などで無理につなげない');
+    expect(systemInstruction).toContain('利用者が自然に感じそうな主観までは、広げて構いません');
+    expect(systemInstruction).toContain('入力から分からない具体的な事実');
+    expect(systemInstruction).toContain('抽象語での水増し');
     // 感想が無ければ感想の欄は出さない。
     expect(userContent).not.toContain('本人が書いた感想');
     // 文体指定・構成指定は置かない。
@@ -111,8 +114,9 @@ describe('プロンプト', () => {
     expect(userContent.indexOf('本人が書いた感想（口コミの中心にする）:')).toBe(0);
     expect(userContent).toContain('「量多くてお得だった」');
     expect(userContent.indexOf('「量多くてお得だった」')).toBeLessThan(userContent.indexOf('本人が選んだ項目'));
-    expect(systemInstruction).toContain('本人が書いた感想がある場合は、それを口コミの中心にしてください');
-    expect(systemInstruction).toContain('本人が使った具体的な言葉や感覚をできるだけ残してください');
+    expect(systemInstruction).toContain('本人が書いた感想がある場合は、それを口コミの中心にし');
+    expect(systemInstruction).toContain('もともと自然な文なら、直すのは必要な部分だけで構いません');
+    expect(systemInstruction).toContain('本人の具体的な感覚や温度感');
   });
 
   it('文体・組み立て・総評の抽選や、再生成で構成を変える指示は渡さない', () => {

@@ -479,3 +479,42 @@ describe('本人の感想（一言）を中心に整えた文（2026-10-11 の�
     expect(runtimeOf(m, '刺身盛り合わせが新鮮でサクサクでした。')).toContain('newAttribute');
   });
 });
+
+describe('ボタン回答だけの自然な口コミ（軽い主観への展開は通し、新しい具体的事実だけを止める）', () => {
+  const runtimeOf = (m: StructuredDraftMaterial, draft: string) => runtimeViolations(gateInputOf(m), draft, LEX, LEGACY);
+  const volume = { polarity: 'positive' as const, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] };
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const value = { polarity: 'positive' as const, categoryCode: 'price', categoryLabel: '価格', facets: [{ code: 'value', label: 'コスパ' }] };
+  const drinkVariety = { polarity: 'concern' as const, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] };
+  const noise = { polarity: 'positive' as const, categoryCode: 'atmosphere', categoryLabel: '店内・雰囲気', facets: [{ code: 'noise_level', label: '音の大きさ' }] };
+  const three = material({ selections: [volume, courtesy, drinkVariety] });
+
+  it.each([
+    'ボリュームがあって、しっかり食べたいときにも良さそうです。接客も丁寧で気持ちよく利用できました。ドリンクはもう少し選べると嬉しいです。',
+    '料理はボリュームがあり、接客も丁寧で過ごしやすかったです。ドリンクの種類が増えるとより良いと思います。',
+    '量が多くて満足感があります。スタッフの方の対応も丁寧でした。お酒の選択肢がもう少しあればなお良いです。',
+  ])('通す: %s', (draft) => expect(runtimeOf(three, draft)).toEqual([]));
+
+  it('気になったところを願望の形（「増えると嬉しい」「増えるとより良い」）で書いても、欠落・反転に数えない', () => {
+    const m = material({ selections: [value, drinkVariety] });
+    expect(runtimeOf(m, 'お得感があって利用しやすいと感じました。ドリンクの種類が増えると嬉しいです。')).toEqual([]);
+    expect(runtimeOf(m, 'コスパが良くて使いやすいお店だと思います。ドリンクは選択肢が増えるとより良いですね。')).toEqual([]);
+    const commented = material({ selections: [volume, value, drinkVariety], comment: '料理全体量多くてコスパいいと思た。酒もっと種類あるとなおいい' });
+    expect(runtimeOf(commented, '料理は全体的に量が多く、コスパも良いと思いました。お酒はもっと種類があるとなお良いです。')).toEqual([]);
+  });
+
+  it('新しい具体的事実は止める（笑顔・新鮮・サクサク・30 分・回答していない店内の静かさ）', () => {
+    expect(runtimeOf(material({ selections: [volume, courtesy] }), '店員さんが笑顔で、量も多かったです。')).toContain('newAttribute');
+    expect(runtimeOf(material({ selections: [volume] }), '魚が新鮮で、量も多かったです。')).toContain('newAttribute');
+    expect(runtimeOf(material({ selections: [volume] }), '衣がサクサクで、量も多かったです。')).toContain('newAttribute');
+    expect(runtimeOf(material({ selections: [volume] }), '30分待ちましたが、量が多かったです。')).toContain('ungrounded');
+    expect(runtimeOf(material({ selections: [volume] }), '店内が静かで、量も多かったです。')).toContain('unselectedObservation');
+    expect(runtimeOf(material({ selections: [volume] }), '揚げたてで、量も多かったです。')).toContain('unselectedObservation');
+  });
+
+  it('観測した状態の語は、その facet を回答したか一言にあれば通す。主観にも使う「温かい」は数えない', () => {
+    expect(runtimeOf(material({ selections: [noise] }), '店内が静かで落ち着けました。')).toEqual([]);
+    expect(runtimeOf(material({ selections: [volume], comment: '静かな店' }), '静かなお店で、量も多かったです。')).toEqual([]);
+    expect(runtimeOf(material({ selections: [courtesy] }), '温かい接客で、気持ちよく利用できました。')).toEqual([]);
+  });
+});
