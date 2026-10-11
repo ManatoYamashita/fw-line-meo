@@ -42,7 +42,9 @@ async function buildDeps(): Promise<ResponsesDeps> {
     incrementTallies: async (input) => {
       await incrementTallies(await getPool(), input);
     },
-    // 表示（s/[storeId]/page.tsx）と同じ読み方（structured の表・権限が無ければ legacy・記録つき）。
+    // 表示（s/[storeId]/page.tsx）と同じ読み方・同じ設定。42P01 / 42501 を legacy として扱うのは
+    // STRUCTURED_SCHEMA_COMPAT_FALLBACK=1（完全一致）で明示的に有効にしたときだけ（記録つき）。既定・pilot・本運用では
+    // 無効で、42P01 / 42501 も投げて 5xx になる（lib/survey-definition-reader.ts）。
     readDefinition: createSurveyDefinitionReader(getPool, writeStructuredLog),
     incrementStructuredTallies: async (input) => {
       await incrementStructuredTallies(await getPool(), input);

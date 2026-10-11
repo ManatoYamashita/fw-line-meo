@@ -329,7 +329,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const onRetry = vi.fn();
     const { client, requests } = fakeClient(new Error('503'), '', new Error('timeout'));
     const result = await createNaturalRealizer(client, { onFailed, onRetry }).prepare(material());
-    // 最後の試行の失敗の分類（ネットワーク断の例外 = ステータスの無い API_ERROR）を返す。
+    // 全試行の失敗をまとめた分類を返す（API_ERROR を含むので API_ERROR。ステータスの無い例外が混ざるので status は省く）。
     expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'generation', generationError: { kind: 'API_ERROR' } });
     expect(requests).toHaveLength(3);
     expect(onRetry.mock.calls.map((c) => c[0])).toEqual([['generation'], ['generation']]);

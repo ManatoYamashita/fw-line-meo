@@ -32,7 +32,9 @@ async function buildDeps(): Promise<SurveyPageDeps> {
   const log = withCorrelation(writeStructuredLog, correlationId);
   return {
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
-    // 回答受付（api/responses/route.ts）と同じ読み方（structured の表・権限が無ければ legacy・記録つき）。
+    // 回答受付（api/responses/route.ts）と同じ読み方・同じ設定。42P01 / 42501 を legacy として扱うのは
+    // STRUCTURED_SCHEMA_COMPAT_FALLBACK=1（完全一致）で明示的に有効にしたときだけ（記録つき）。既定・pilot・本運用では
+    // 無効で、42P01 / 42501 も投げて 5xx になる（lib/survey-definition-reader.ts）。
     readDefinition: createSurveyDefinitionReader(getPool, log),
     listAspects: async () => listSurveyAspects(await getPool()),
     signPage: (storeId) => tokens.signPage(storeId),
