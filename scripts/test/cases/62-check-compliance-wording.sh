@@ -255,7 +255,7 @@ t_end
 t_begin 'check-compliance-wording: 未追跡ファイルは走査しない（射程の明示・Issue #214）'
 cw_fixture
 fx_track_now
-# 追跡させたあとに違反ファイルを書く。**緑であることが正しい。** AGENTS.md がこの状態にある。
+# 追跡させたあとに違反ファイルを書く。**緑であることが正しい。** 走査は git の索引から列挙する。
 fx_write docs/untracked-note.md <<'EOF'
 - 客ごとに語彙を変えスパム判定を回避する。
 EOF

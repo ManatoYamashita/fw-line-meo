@@ -235,7 +235,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
       visited += 1;
     }
     // 走査対象が 0 件で緑にならないようにする（Req 7.4）。
-    expect(visited).toBe(expected.length);
+    expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   // --- 領域とリンクの個数（Req 3.3）------------------------------------------
@@ -290,7 +290,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
       expect(actual.slice().sort(), step).toEqual([...names].sort());
       visited += 1;
     }
-    expect(visited).toBe(expected.length);
+    expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('候補の押しボタンの読み上げ名は店名と住所の連結のままである（Req 3.2）', async () => {
@@ -404,7 +404,7 @@ describe('店舗登録ウィザード: 着手前から在った契約（意匠�
       expect(ownTextsIn(main), testCase.name).toContain(testCase.text);
       visited += 1;
     }
-    expect(visited).toBe(cases.length);
+    expect(visited).toBe(6); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('確定の失敗はサーバの内部文言を出さず、利用者向けの案内を提示する（Req 3.2）', async () => {
@@ -691,7 +691,7 @@ describe('店舗登録ウィザード: 段階表示とフォーム（task 5.2・
       expect(items.indexOf(current[0]!), step).toBe(visited);
       visited += 1;
     }
-    expect(visited).toBe(expected.length);
+    expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('段階表示の現在地の印と見た目は同じ判定から出る（正典 §7.8 と同型）', async () => {
@@ -909,7 +909,7 @@ describe('店舗登録ウィザード: 段階表示とフォーム（task 5.2・
       expect(alert.getAttribute('data-slot'), branch.name).toBe('alert-description');
       visited += 1;
     }
-    expect(visited).toBe(branches.length);
+    expect(visited).toBe(7); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('面の側に色ユーティリティを持ち込まない（Req 1.4, 6.1）', () => {

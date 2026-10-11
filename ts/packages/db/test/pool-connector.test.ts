@@ -13,7 +13,7 @@ import { closePool, getPool } from '../src/pool.js';
 //
 // このフェイクは「構築でタイマーを張り、close() で解除する」というその性質だけを再現する。
 // 実 Cloud SQL へは到達できないため、検証対象は「閉じたか」ではなく
-// 「プロセスが終われる状態へ戻ったか」に置く。
+// 「Connector が掴んだタイマーを手放し、プロセスが終われる状態へ戻ったか」に置く。
 const connectorState = vi.hoisted(() => ({
   constructed: 0,
   closed: 0,
@@ -54,9 +54,15 @@ vi.mock('@google-cloud/cloud-sql-connector', () => {
   };
 });
 
-/** イベントループを掴んでいるタイマーの数。setTimeout / setInterval はいずれも 'Timeout'。 */
-function activeTimeoutCount(): number {
-  return process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length;
+/**
+ * Connector がイベントループを掴んでいるタイマーの数。
+ *
+ * process.getActiveResourcesInfo() では数えない。同じプロセスにある vitest 自身の ref 付き
+ * タイマー（@vitest/runner の sendTasksUpdateThrottled）も数えてしまい、基準値を取ってから
+ * 比べるまでの間にそれが発火すると数が 1 ずれる。
+ */
+function heldConnectorTimerCount(): number {
+  return connectorState.timers.length;
 }
 
 /** cloud-sql-iam 経路の必須 env を組み立てる（DATABASE_URL の不在がモードを決める）。 */
@@ -72,7 +78,7 @@ describe('pool — Connector のライフサイクル（Issue #151）', () => {
 
   afterEach(async () => {
     // singleton を跨ぐため必ず破棄する。閉じ忘れが残っている場合はここで掃除して
-    // 後続のケースへ漏らさない（漏らすと基準値がずれて診断を取り違える）。
+    // 後続のケースへ漏らさない（漏らすとタイマーの数がずれて診断を取り違える）。
     await closePool();
     for (const timer of connectorState.timers.splice(0)) clearTimeout(timer);
     connectorState.constructed = 0;
@@ -101,29 +107,29 @@ describe('pool — Connector のライフサイクル（Issue #151）', () => {
     expect(connectorState.closed).toBe(1);
   });
 
-  it('帰結: closePool() 後にタイマーが基準値へ戻り、プロセスが終われる状態になる', async () => {
+  it('帰結: closePool() 後に Connector のタイマーが残らず、プロセスが終われる状態になる', async () => {
     useCloudSqlIamEnv();
-    const baseline = activeTimeoutCount();
+    expect(heldConnectorTimerCount()).toBe(0);
 
     await getPool();
-    // 掴んだこと自体の確認。ここが baseline のままなら「解放できた」は空振りである。
-    expect(activeTimeoutCount()).toBe(baseline + 1);
+    // 掴んだこと自体の確認。ここが 0 のままなら「解放できた」は空振りである。
+    expect(heldConnectorTimerCount()).toBe(1);
 
     await closePool();
 
-    expect(activeTimeoutCount()).toBe(baseline);
+    expect(heldConnectorTimerCount()).toBe(0);
   });
 
   it('エラー経路: getOptions() が失敗しても Connector を取り残さず、例外は伝播する', async () => {
     useCloudSqlIamEnv();
     connectorState.getOptionsRejection = new Error('simulated getOptions failure');
-    const baseline = activeTimeoutCount();
+    expect(heldConnectorTimerCount()).toBe(0);
 
     await expect(getPool()).rejects.toThrow('simulated getOptions failure');
 
     expect(connectorState.constructed).toBe(1);
     expect(connectorState.closed).toBe(1);
-    expect(activeTimeoutCount()).toBe(baseline);
+    expect(heldConnectorTimerCount()).toBe(0);
   });
 
   // 逆方向。テスト・ローカルの経路で誤検知しないことを固定する（この経路は Connector を
