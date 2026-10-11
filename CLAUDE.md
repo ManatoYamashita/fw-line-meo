@@ -33,7 +33,8 @@ E2E（Issue #257・手順書は `docs/testing/e2e.md`。自動層・本番の読
 - `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks`（`bash scripts/run-e2e-prod-checks.sh`）— 本番の読み取り専用の確認（稼働イメージ・シークレット・実疎通の鮮度・**本番のコミットに対する ts-ci の E2E ジョブ**・日次ジョブ・配信の件数と致命的な失敗）。デプロイ待ち・デプロイ中は WARN。**運用者用・CI からは呼ばない**（ログを読むため）。本番の状態は変えない
 - **`playwright test` を素で打たない。** survey-web の `.env.local` は開発用 DB と実の Gemini キーを持つので、env を明示しない実行はそちらへ繋がる。`make ts-test-e2e` は `run-e2e-local.sh --only survey` を呼ぶ
 
-CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
+CI ガード（すべて read-only・各項目のコマンドで単体実行可）:
+- `python3 scripts/check-agent-skills.py` — 同梱スキルの登録・実体・内部参照・配布ハッシュの整合検証（Issue #449）。追加依存不要。`.agents/skills` の外部文書は既存LINEスキルと同じく文体チェックの対象外とし、自作の `_shared/` は対象へ残す
 - `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
 - `scripts/check-prod-image-drift.sh` — 本番稼働イメージと `origin/main` の乖離検証（Issue #91）。`PROJECT_ID` 必須。`PROD_IMAGE_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
 - `scripts/check-secret-declaration-coverage.sh` — シークレット実値投入の宣言カバレッジ（Issue #63）。tf の `locals.secret_ids` ／ `infra/secrets-provisioned.tsv` ／ `infra/README.md` の投入手順 ／ 消費側配線を両方向で照合する。`--print-secrets` で **宣言 6 件の正典**を `<secret_id>\t<version>` の TSV で出す
@@ -94,6 +95,19 @@ Cloud Run（Webhook/客向けWeb/ダッシュボードAPI・ゼロスケール�
 ## LINE Messaging API 実装時
 
 `.claude/skills/messaging-api/` スキルを使う。**LINE API を記憶で答えない**（頻繁に更新される）。Webhook 署名検証・Flex Message・リッチメニュー実装時は同スキルの references を必ず参照。
+
+## リポジトリ共通Skills
+
+- スキルの実体と依存資料は `.agents/skills/` に置く。選定一覧と出典は
+  `docs/agent-skills/README.md` と `docs/agent-skills/manifest.json` を参照する。
+- スキルを使う前に `.agents/skills/_shared/runtime.md` を読む。
+  この共通実行規則は、同梱した上流スキルの環境固有の記述に優先する。
+- 同名のスキルが個人PCにもある場合は、リポジトリ内の版を使用する。
+  スキルの依存はリポジトリ内の相対パスで解決する。
+- 未導入サービスへの移行、フレームワーク更新、外部への書き込みを、
+  スキルが記載しているという理由だけで実施しない。ユーザーの依頼範囲で使用する。
+- 同梱は認証情報、MCP接続、ブラウザセッションやCLIの同期を意味しない。
+  使えるツールを確認し、実行した検証と未検証の範囲を区別して報告する。
 
 ## 開発ワークフロー（Kiro Spec-Driven）
 

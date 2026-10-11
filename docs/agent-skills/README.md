@@ -89,3 +89,5 @@ python3 .agents/skills/pr-critical-review/scripts/build-html.py self-check
 登録漏れ、ファイル欠落、内部リンク切れ、個人PCへの固定参照、リポジトリ外symlink、
 manifestと配布内容の乖離を検出する。
 内容の技術的な正しさ、外部リンクの生存、実行環境のツール接続や資格情報は検証しない。
+外部スキルの文書は既存LINEスキルと同じく、プロジェクト固有の文章表記チェックから外す。
+自作の `_shared/` とスキル以外のプロジェクト文書は引き続きチェックする。
