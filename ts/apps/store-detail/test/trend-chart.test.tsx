@@ -304,6 +304,11 @@ const CHART_CASES: readonly ChartCase[] = [
 /** 文言だけを出す状態も含めた、すべての状態。 */
 const ALL_CASES: readonly ChartCase[] = [...CHART_CASES, RATING_EMPTY_7];
 
+// 走査件数の期待値は表の長さから取らない（表から 1 件を落とすと両辺が一緒に縮み、緑のまま通る）。
+// 手で書いた状態の数は literal で持ち、組み合わせの数だけを製品の定数から導く。
+const HAND_WRITTEN_CHART_CASE_COUNT = 11;
+const CHART_CASE_COUNT = HAND_WRITTEN_CHART_CASE_COUNT + TREND_PERIODS.length * TREND_METRICS.length;
+
 // --- 取り出しの補助 ------------------------------------------------------------------------
 
 function renderChart(props: TrendChartProps): { readonly container: HTMLElement; readonly figure: HTMLElement } {
@@ -474,6 +479,13 @@ const FOCUSABLE_SELECTOR = [
 // --- テスト ------------------------------------------------------------------------------
 
 describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', () => {
+  // 表を回る検査は件数を数えないものがあるので、表そのものの件数をここで固定する。
+  // 表から状態を 1 件落とすと、その状態はどの検査からも黙って外れる。
+  it('状態の表が想定の件数を持つ', () => {
+    expect(CHART_CASES).toHaveLength(CHART_CASE_COUNT);
+    expect(ALL_CASES).toHaveLength(CHART_CASE_COUNT + 1);
+  });
+
   describe('意味論', () => {
     it('説明文をグラフの名前として取れ、名前を持つのは線の層だけである（Req 5.1）', () => {
       const { figure } = renderChart(RANK_7.props);
@@ -510,9 +522,7 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
         cleanup();
         visited += 1;
       }
-      // 期間と指標の組み合わせを回り切ったこと（空振り対策）。
-      expect(COMBINATIONS).toHaveLength(TREND_PERIODS.length * TREND_METRICS.length);
-      expect(visited).toBe(CHART_CASES.length);
+      expect(visited).toBe(CHART_CASE_COUNT);
     });
 
     it('figcaption に、指標名・期間の始点と終点・順位の向き・最新の値と日付を見える文字で置く（Req 1.3, 1.11, 3.6）', () => {
@@ -586,7 +596,7 @@ describe('TrendChart（store-detail-trend-dashboard task 3.1・Issue #265）', (
         cleanup();
       }
       // グラフを描く状態では、線の層と点の層の 2 枚を必ず走査している。
-      expect(scannedSvgs).toBe(CHART_CASES.length * 2);
+      expect(scannedSvgs).toBe(CHART_CASE_COUNT * 2);
     });
   });
 
