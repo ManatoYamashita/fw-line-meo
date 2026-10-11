@@ -4,6 +4,7 @@ import { closePool, createAuditLog, getPool, type AuditLogInput } from '@fwlm/db
 import { authorizeStoreDetailRequest } from '../lib/liff-auth';
 import { handleSurveySettings, type SurveySettingsDeps, type SurveySettingsOperation } from '../lib/survey-settings-api';
 import type { SurveySettingsResponse } from '../lib/survey-settings-contract';
+import { TARGET_LABEL_ERROR_MESSAGES } from '@fwlm/db/survey-settings-rules';
 
 // 店舗オーナーのアンケート設定 API（Issue #437）を、実 PostgreSQL と実物の認可（lib/liff-auth.ts）で確かめる。
 // LINE の ID トークン検証だけを fetch の差し替えで固定し（トークン → sub）、それ以外は本番と同じ経路を通す。
@@ -236,6 +237,7 @@ describe.skipIf(!process.env.DATABASE_URL)('survey settings API (DB)', () => {
         ['あ'.repeat(41), 'LABEL_TOO_LONG', '名前は40文字以内で入力してください。'],
         ['刺身\n盛り', 'LABEL_MULTILINE', '名前に改行は使えません。1 行で入力してください。'],
         [42, 'LABEL_INVALID', '名前を文字で入力してください。'],
+        ['絶品新鮮刺身盛り', 'LABEL_EVALUATIVE', TARGET_LABEL_ERROR_MESSAGES.LABEL_EVALUATIVE],
       ];
       for (const [label, code, message] of cases) {
         const res = await call(ADD, { body: { categoryCode: 'food', label } });
@@ -298,6 +300,15 @@ describe.skipIf(!process.env.DATABASE_URL)('survey settings API (DB)', () => {
       expect(await revisionOf(STORE)).toBe(before);
       const row = await (await getPool()).query('SELECT label, active FROM store_survey_targets WHERE id = $1', [theirs]);
       expect(row.rows).toEqual([{ label: '他店の料理', active: true }]);
+    });
+
+    it('名前の変更でも、評価・おすすめ・再訪の言葉を含む名前は 400 で、名前は変わらない（API を直接呼んでも同じ）', async () => {
+      const id = await addTarget('名前の規則の刺身');
+      const res = await call({ kind: 'updateTarget', targetId: id }, { method: 'PATCH', body: { label: 'また食べたい刺身盛り' } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toEqual({ code: 'LABEL_EVALUATIVE', message: TARGET_LABEL_ERROR_MESSAGES.LABEL_EVALUATIVE });
+      const settings = await call(READ, { method: 'GET' });
+      expect((settings.body as unknown as SurveySettingsResponse).targets.find((t) => t.id === id)?.label).toBe('名前の規則の刺身');
     });
 
     it('PATCH の本文は label か active のどちらかが要り、active は真偽値に限る', async () => {

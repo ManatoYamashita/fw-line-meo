@@ -1,5 +1,6 @@
 import type { StructuredSurveyDefinition, SurveyCategoryDefinition } from '@fwlm/db';
 import type { Polarity, SelectionGroup } from './structured-answer';
+import { countSelectionGroupMaterials } from './structured-materials';
 
 // structured survey の客の選択（evidence）の状態と、送信する形への変換（Issue #438）。
 //
@@ -13,7 +14,8 @@ import type { Polarity, SelectionGroup } from './structured-answer';
 // カテゴリ全体の facet と Target の facet は別の evidence で、互いへ読み替えない。
 // 良かったところと気になったところは同じ定義・同じ関数で扱い、同じ選択が両方に在ってよい。
 //
-// このモジュールはクライアントに同梱される。@fwlm/db・structured-answer からは型だけを取り込む。
+// このモジュールはクライアントに同梱される。@fwlm/db・structured-answer からは型だけを取り込む
+// （structured-materials は型以外の依存を持たない純関数のモジュール）。
 
 /** 1 つのカテゴリの選択。Target は「選んだ」こと自体が evidence なので、facet が空でも Map に残す。 */
 export interface CategoryEvidence {
@@ -172,19 +174,13 @@ export function summaryText(summary: CategorySummary, category: SurveyCategoryDe
   return parts.join('／');
 }
 
-/** 口コミ文を作るのに要る、独立した回答材料の数（Issue #443 の UX 調整）。 */
-export const MIN_MATERIALS = 2;
+// 回答材料の下限と数え方は /api/responses と共有する（lib/structured-materials.ts）。ここは画面の状態から
+// 送信する形（toSelectionGroups）へ変換して、同じ関数で数えるだけにする。
+export { MIN_MATERIALS } from './structured-materials';
 
 /**
  * 独立した回答材料の数を、**送信される選択（toSelectionGroups の結果）だけ**から数える。良かったところと
- * 気になったところの合計で、極性ごとの下限は持たない。
- *
- *   カテゴリ全体の facet          → facet 1 つにつき 1 件（料理全体：味・量 = 2 件）
- *   Target → facet               → facet 1 つにつき 1 件（刺身盛り合わせ：味・温度 = 2 件）
- *   Target だけ（facet 0 件）     → 1 件（Target を選んだこと自体が evidence）
- *
- * Target とその facet を別々に数えない（刺身盛り合わせ + 刺身盛り合わせ：味 は 1 件）。同じ意味の操作を二重に
- * 数えると、実質 1 つの回答で下限を満たしてしまう。カテゴリを開いただけ・星・一言は evidence ではないので数えない。
+ * 気になったところの合計。数え方は countSelectionGroupMaterials（サーバーの下限の判定と同じ関数）。
  */
 export function countMaterials(state: EvidenceState, definition: StructuredSurveyDefinition): number {
   return countPolarityMaterials(state.positive, definition) + countPolarityMaterials(state.concern, definition);
@@ -192,9 +188,5 @@ export function countMaterials(state: EvidenceState, definition: StructuredSurve
 
 /** 1 つの極性の回答材料の数（数え方は countMaterials と同じ）。折り畳んだ極性に「N件選択済み」を出すのに使う。 */
 export function countPolarityMaterials(evidence: PolarityEvidence, definition: StructuredSurveyDefinition): number {
-  let count = 0;
-  for (const group of toSelectionGroups(evidence, definition)) {
-    count += group.targetId === undefined ? group.facetCodes.length : Math.max(1, group.facetCodes.length);
-  }
-  return count;
+  return countSelectionGroupMaterials(toSelectionGroups(evidence, definition));
 }

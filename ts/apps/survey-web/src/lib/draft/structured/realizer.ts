@@ -1,4 +1,4 @@
-import type { GenAiClient, GenAiResponse } from '../generator';
+import { toApiError, type DraftError, type GenAiClient, type GenAiResponse } from '../generator';
 import type { StructuredDraftMaterial, StructuredDraftPort, StructuredDraftResult } from '../structured-draft';
 import { compileStructuredClaims, type StructuredClaim } from './claims';
 import {
@@ -104,8 +104,19 @@ export interface RealizerOutcome {
   readonly history: readonly AttemptRecord[];
 }
 
+/** 1 回の生成の結果。失敗は legacy の生成器と同じ分類（DraftError）で返す（監視の generation_failed と揃える）。 */
+type GenerationResult = { readonly ok: true; readonly draft: string } | { readonly ok: false; readonly error: DraftError };
+
+function readResponse(res: GenAiResponse): GenerationResult {
+  // 安全性ブロック（prompt レベル・候補の finishReason=SAFETY）。legacy の生成器と同じ判定。
+  if (res.promptFeedback?.blockReason != null || res.candidates?.some((c) => c.finishReason === 'SAFETY')) {
+    return { ok: false, error: { kind: 'SAFETY_BLOCKED' } };
+  }
+  const draft = extractDraft(res);
+  return draft === null ? { ok: false, error: { kind: 'INVALID_OUTPUT' } } : { ok: true, draft };
+}
+
 function extractDraft(res: GenAiResponse): string | null {
-  if (res.promptFeedback?.blockReason) return null;
   try {
     const parsed = JSON.parse(res.text ?? '') as { draft?: unknown };
     if (typeof parsed.draft !== 'string') return null;
@@ -123,7 +134,11 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
   const legacy = options.legacyLexicons ?? DEFAULT_LEGACY;
 
   // 初回の生成も再生成も同じ。文体・組み立て・並び・総評をサーバーで抽選しない（Gemini 自身の揺らぎに任せる）。
-  async function generate(claims: readonly StructuredClaim[], comment: string | undefined, retryNotes: readonly string[]): Promise<string | null> {
+  async function generate(
+    claims: readonly StructuredClaim[],
+    comment: string | undefined,
+    retryNotes: readonly string[],
+  ): Promise<GenerationResult> {
     const { systemInstruction, userContent } = buildRealizerPrompt({
       claims,
       ...(comment !== undefined ? { comment } : {}),
@@ -142,9 +157,10 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
           safetySettings: SAFETY_SETTINGS,
         },
       });
-      return extractDraft(res);
-    } catch {
-      return null;
+      return readResponse(res);
+    } catch (e) {
+      // 例外の本文は持ち出さない（分類と HTTP ステータスだけ）。
+      return { ok: false, error: toApiError(e) };
     }
   }
 
@@ -157,18 +173,21 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       const input = gateInputOf(material);
       const history: AttemptRecord[] = [];
       let notes: string[] = [];
+      let lastGenerationError: DraftError | undefined;
       const accept = (draft: string, attempt: number) => {
         options.onResult?.({ result: 'llm', attempts: history.length, acceptedAttempt: attempt, history }, claims.length);
         return { kind: 'draft' as const, draft, source: 'llm' as const, attempts: history.length };
       };
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        const draft = await generate(claims, comment, notes);
-        if (draft === null) {
+        const generated = await generate(claims, comment, notes);
+        if (!generated.ok) {
+          lastGenerationError = generated.error;
           history.push({ attempt, generationFailed: true, factuality: [] });
           if (attempt < MAX_ATTEMPTS) options.onRetry?.(['generation'], claims.length);
           continue;
         }
+        const draft = generated.draft;
         const factuality = runtimeViolations(input, draft, lexicon, legacy);
         history.push({ attempt, generationFailed: false, factuality });
         if (factuality.length === 0) return accept(draft, attempt);
@@ -183,7 +202,11 @@ export function createNaturalRealizer(client: GenAiClient, options: NaturalReali
       const reason = history.every((h) => h.generationFailed) ? 'generation' : 'gate';
       options.onFailed?.(reason, reason === 'gate' ? lastFactuality : [], claims.length);
       options.onResult?.({ result: 'generation_error', attempts: history.length, acceptedAttempt: null, history }, claims.length);
-      return { kind: 'failed', attempts: history.length };
+      // すべての試行で生成そのものが失敗した（API の障害・残高切れ・安全性・出力の形）ときだけ、最後の失敗の分類を返す。
+      // factuality の hard gate の失格は API の障害ではないので載せない（generation_failed の監視を鳴らさない）。
+      return reason === 'generation' && lastGenerationError !== undefined
+        ? { kind: 'failed', attempts: history.length, reason, generationError: lastGenerationError }
+        : { kind: 'failed', attempts: history.length, reason };
     },
   };
 }

@@ -262,11 +262,16 @@ function firstMatch(text: string, patterns: readonly RegExp[]): string | null {
   return null;
 }
 
-function mask(text: string, words: readonly string[]): string {
+/**
+ * 語を本文から消す。keep に当たる部分は消さずに残す（語の中の評価・推奨・再訪の言葉を、検査の対象に残す）。
+ * 例: 選んだ Target の名前「絶品刺身盛り」は「 絶品 」へ置き換わり、「刺身盛り」は消えて「絶品」は intensity に当たる。
+ */
+function mask(text: string, words: readonly string[], keep: readonly RegExp[] = []): string {
   let out = text;
   // 長い語から先に消す（「刺身盛り合わせ」を「刺身」より先に）。空白で置き換え、前後の文字を繋げない。
   for (const w of [...new Set(words)].filter((x) => x.trim() !== '').sort((a, b) => b.length - a.length)) {
-    out = out.split(w).join(' '.repeat(Math.min(w.length, 1)));
+    const kept = keep.flatMap((p) => [...w.matchAll(new RegExp(p.source, 'g'))].map((m) => m[0]));
+    out = out.split(w).join(kept.length === 0 ? ' ' : ` ${kept.join(' ')} `);
   }
   return out;
 }
@@ -343,7 +348,12 @@ export function evaluateStructuredDraft(
   const text = mask(draft, [c.storeName, c.storeName.replace(/\s+/g, '')]);
   // 回答した facet の表示名も客が選んだ語なので消す（「料理・ドリンクの提供」の「ドリンク」を、未回答のカテゴリに数えない）。
   const selectedFacetLabels = claims.flatMap((cl) => (cl.facetLabel ? [cl.facetLabel] : []));
-  const scan = mask(text, [...targetWords, ...selectedFacetLabels]);
+  // ただし名前の中の評価・推奨・再訪の言葉（「絶品」「おすすめ」「また来たい」）は消さない。名前に入れておけば検査を
+  // すり抜けて下書きに残せてしまうため（PR #443 のレビュー）。登録の時点でも止める（@fwlm/db の
+  // TARGET_LABEL_EVALUATIVE_PATTERNS・同じ語彙）。ここはその前に登録された名前への備えである。具体的な属性の語
+  // （「自家製」「出汁」）は商品の名前の一部として消す（「自家製レモンサワー」を創作の属性に数えない）。
+  const evaluative = [...lex.lists.intensity, ...lex.lists.recommendation, ...lex.lists.revisit];
+  const scan = mask(text, [...targetWords, ...selectedFacetLabels], evaluative);
 
   // --- 未回答の Target（店舗の active な Target のうち、客が選ばなかったもの） ----------------------
   // 名前（と固定ケースの言い方）の完全一致だけを見る。選んだ Target の名前に含まれる名前（選んだ「刺身盛り合わせ」と

@@ -94,7 +94,11 @@ describe('structured の下書き（Issue #439）', () => {
         storeId: STORE,
         pageToken: tokens.signStructuredPage(STORE, 2, surveyDefinitionFingerprint(DEFINITION)),
         star: 4,
-        positiveSelections: [{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] }],
+        // 口コミ文を作るのに要る材料は 2 件（画面とサーバーで同じ下限・lib/structured-materials.ts）。
+        positiveSelections: [
+          { categoryCode: 'food', facetCodes: ['taste'] },
+          { categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] },
+        ],
         concernSelections: [],
       }),
       responsesDeps(realizer),
@@ -104,7 +108,14 @@ describe('structured の下書き（Issue #439）', () => {
     expect(body).toMatchObject({ mode: 'structured', generation: 'ok', draft: '刺身盛り合わせがおいしかったです。', regenerationsLeft: REGEN_MAX });
     const verified = tokens.verifyStructured(body.sessionToken as string);
     // 未回答の Target は、検証に使った同じ定義から作って素材へ封入する（事後検証だけが使い、LLM へは渡さない）。
-    const sealed = { ...SNAPSHOT, unselectedTargets: [{ id: YAKITORI, label: '焼き鳥5種盛り', categoryCode: 'food' }] };
+    const sealed = {
+      ...SNAPSHOT,
+      selections: [
+        { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'taste', label: '味' }] },
+        ...SNAPSHOT.selections,
+      ],
+      unselectedTargets: [{ id: YAKITORI, label: '焼き鳥5種盛り', categoryCode: 'food' }],
+    };
     expect(verified.ok && verified.value.structured).toEqual(sealed);
     expect(realizer.prepare).toHaveBeenCalledWith(sealed);
     expect(verified.ok && verified.value.attempt).toBe(0);
@@ -179,7 +190,11 @@ describe('ユーザーに表示する下書きは通常生成だけ（safe fallb
         storeId: STORE,
         pageToken: tokens.signStructuredPage(STORE, 2, surveyDefinitionFingerprint(DEFINITION)),
         star: 4,
-        positiveSelections: [{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] }],
+        // 口コミ文を作るのに要る材料は 2 件（画面とサーバーで同じ下限・lib/structured-materials.ts）。
+        positiveSelections: [
+          { categoryCode: 'food', facetCodes: ['taste'] },
+          { categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] },
+        ],
         concernSelections: [],
       }),
       responsesDeps(port),
@@ -223,4 +238,86 @@ describe('ユーザーに表示する下書きは通常生成だけ（safe fallb
     expect(verified.ok && verified.value.attempt).toBe(1);
     expect(fallbackSpy).not.toHaveBeenCalled();
   });
+});
+
+// structured の Gemini の全面障害（残高切れ・API 障害）を、legacy と同じ generation_failed で記録し、既存の監視
+// （infra/modules/guardrails の generation_failures）へ乗せる。factuality の失格は API の障害として数えない。
+describe('structured の生成失敗の監視（generation_failed / generation_safety_blocked）', () => {
+  const OK_DRAFT = '刺身盛り合わせがおいしかったです。';
+  const BAD = '新鮮な刺身盛り合わせがおいしかったです。';
+  const statusError = (status: number) => Object.assign(new Error('secret-api-key-in-message'), { status });
+  function realizer(...replies: (string | Error | object)[]) {
+    const client: GenAiClient = {
+      models: {
+        generateContent: async () => {
+          const reply = replies.shift();
+          if (reply instanceof Error) throw reply;
+          if (typeof reply === 'object') return reply as never;
+          return { text: JSON.stringify({ draft: reply ?? '' }) };
+        },
+      },
+    };
+    return createNaturalRealizer(client, {});
+  }
+  const ANSWER = {
+    storeId: STORE,
+    star: 4,
+    positiveSelections: [
+      { categoryCode: 'food', facetCodes: ['taste'] },
+      { categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] },
+    ],
+    concernSelections: [],
+    comment: '店員さんが丁寧でした',
+  };
+  async function submit(p: StructuredDraftPort) {
+    const log = vi.fn();
+    const res = await handleResponses(
+      post('http://x/api/responses', { ...ANSWER, pageToken: tokens.signStructuredPage(STORE, 2, surveyDefinitionFingerprint(DEFINITION)) }),
+      { ...responsesDeps(p), log },
+    );
+    return { body: (await res.json()) as Record<string, unknown>, log };
+  }
+  async function regenerate(p: StructuredDraftPort) {
+    const log = vi.fn();
+    const res = await handleDrafts(
+      post('http://x/api/drafts', { sessionToken: tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 }) }),
+      { ...draftsDeps(p), log },
+    );
+    return { body: (await res.json()) as Record<string, unknown>, log };
+  }
+  const events = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[1] as string);
+
+  for (const [name, run] of [
+    ['受付', submit],
+    ['再生成', regenerate],
+  ] as const) {
+    it(`${name}: 全試行で API の例外（402）→ generation_failed（errorKind と status だけ）`, async () => {
+      const { body, log } = await run(realizer(statusError(402), statusError(402), statusError(402)));
+      expect(body).toMatchObject({ generation: 'failed', draft: null });
+      expect(log).toHaveBeenCalledWith('error', 'generation_failed', { errorKind: 'API_ERROR', status: 402 });
+      // 下書き・一言・料理名・例外の本文は記録しない。
+      const logged = JSON.stringify(log.mock.calls);
+      for (const secret of ['店員さんが丁寧でした', '刺身盛り合わせ', 'secret-api-key-in-message']) expect(logged).not.toContain(secret);
+    });
+
+    it(`${name}: 全試行で安全性による遮断 → generation_safety_blocked（generation_failed は出さない）`, async () => {
+      const blocked = { promptFeedback: { blockReason: 'SAFETY' } };
+      const { log } = await run(realizer(blocked, blocked, blocked));
+      expect(log).toHaveBeenCalledWith('info', 'generation_safety_blocked', { errorKind: 'SAFETY_BLOCKED' });
+      expect(events(log)).not.toContain('generation_failed');
+    });
+
+    it(`${name}: factuality の hard gate で 3 回失格 → API の障害ではないので generation_failed を出さない`, async () => {
+      const { body, log } = await run(realizer(BAD, BAD, BAD));
+      expect(body).toMatchObject({ generation: 'failed', draft: null });
+      expect(events(log)).not.toContain('generation_failed');
+      expect(events(log)).not.toContain('generation_safety_blocked');
+    });
+
+    it(`${name}: 作り直して作れたなら、途中の API の失敗は generation_failed にしない`, async () => {
+      const { body, log } = await run(realizer(statusError(503), OK_DRAFT));
+      expect(body).toMatchObject({ generation: 'ok', draft: OK_DRAFT });
+      expect(events(log)).not.toContain('generation_failed');
+    });
+  }
 });

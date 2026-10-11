@@ -17,6 +17,7 @@ import {
   validateStructuredAnswer,
 } from '../../../lib/structured-answer';
 import type { StructuredDraftPort } from '../../../lib/draft/structured-draft';
+import { countStructuredAnswerMaterials, hasEnoughMaterials } from '../../../lib/structured-materials';
 import { validateSurveyAnswer } from '../../../lib/validate';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
@@ -148,6 +149,11 @@ async function handleStructured(
     return error(deps, 400, 'VALIDATION', '入力内容をご確認ください');
   }
   const answer = validated.value;
+  // 口コミ文を作るのに要る材料の下限（画面の押しボタンと同じ関数・同じ下限）。画面を通らずに送られた回答も、
+  // 集計・生成へ進む前にここで止める。
+  if (!hasEnoughMaterials(countStructuredAnswerMaterials(answer))) {
+    return error(deps, 400, 'VALIDATION', '入力内容をご確認ください');
+  }
   const material = resolveStructuredAnswer(answer, definition);
 
   const tally = deps
@@ -167,6 +173,10 @@ async function handleStructured(
   }
   const sessionToken = deps.tokens.signStructured({ storeId, structured, attempt: 0 });
   if (prepared.kind === 'failed') {
+    // 生成そのものが全試行で失敗した（API の障害・残高切れ等）ときは、legacy と同じ generation_failed /
+    // generation_safety_blocked で記録し、既存の監視（infra/modules/guardrails の generation_failures）へ乗せる。
+    // factuality の hard gate の失格（reason: gate）は API の障害ではないので記録しない。
+    if (prepared.generationError !== undefined) logGenerationFailure(deps.log, prepared.generationError);
     // 通常生成が最大回数まで作れなかった（generation error）。safe fallback の文は返さず、legacy と同じ失敗の応答に
     // する（客の画面は「下書きの生成に失敗しました」と再試行。再試行は /api/drafts が同じ素材から作る）。
     return jsonOk({ mode: 'structured', generation: 'failed', draft: null, sessionToken, regenerationsLeft: REGEN_MAX });

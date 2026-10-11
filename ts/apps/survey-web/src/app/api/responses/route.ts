@@ -4,7 +4,6 @@ import {
   listSurveyAspects,
   incrementTallies,
   incrementStructuredTallies,
-  readStoreSurveyDefinition,
 } from '@fwlm/db';
 import { createDefaultStructuredDrafts } from '../../../lib/draft/structured/default-realizer';
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
@@ -12,6 +11,7 @@ import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { logFabricationResidual, logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
+import { createSurveyDefinitionReader } from '../../../lib/survey-definition-reader';
 import { handleResponses, type ResponsesDeps } from './handler';
 import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation } from '@fwlm/observability';
 
@@ -42,7 +42,8 @@ async function buildDeps(): Promise<ResponsesDeps> {
     incrementTallies: async (input) => {
       await incrementTallies(await getPool(), input);
     },
-    readDefinition: async (storeId) => readStoreSurveyDefinition(await getPool(), storeId),
+    // 表示（s/[storeId]/page.tsx）と同じ読み方（structured の表・権限が無ければ legacy・記録つき）。
+    readDefinition: createSurveyDefinitionReader(getPool, writeStructuredLog),
     incrementStructuredTallies: async (input) => {
       await incrementStructuredTallies(await getPool(), input);
     },

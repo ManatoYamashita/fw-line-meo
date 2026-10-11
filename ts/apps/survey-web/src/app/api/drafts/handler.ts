@@ -117,6 +117,10 @@ async function handleStructuredDrafts(req: Request, payload: StructuredSessionPa
   // 初回と同じ生成をもう一度行う（構成を変える指示は足さない。前回の下書きは受け取らず、渡さない）。
   const prepared = await deps.structuredDrafts.prepare(structured);
   if (prepared.kind !== 'draft') {
+    // 生成そのものが全試行で失敗した（API の障害・残高切れ等）ときは、legacy と同じ generation_failed /
+    // generation_safety_blocked で記録し、既存の監視（infra/modules/guardrails の generation_failures）へ乗せる。
+    // factuality の hard gate の失格（reason: gate）は API の障害ではないので記録しない。
+    if (prepared.kind === 'failed' && prepared.generationError !== undefined) logGenerationFailure(deps.log, prepared.generationError);
     const token = deps.tokens.signStructured({ storeId, structured, attempt });
     return jsonOk({ generation: 'failed', draft: null, sessionToken: token, regenerationsLeft: REGEN_MAX - attempt });
   }

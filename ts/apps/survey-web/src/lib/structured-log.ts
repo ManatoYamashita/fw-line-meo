@@ -157,3 +157,14 @@ export function logStructuredDraftFailed(
 ): void {
   log('warn', 'survey-web.structured_draft_failed', { reason, residualClaims: [...kinds].sort().join(','), claimCount });
 }
+
+/**
+ * structured survey の表・権限がまだ無いため、店舗のアンケートを legacy として扱った（PR #443 のレビュー）。
+ *
+ * migration 0015 / 0016 と infra/sql/grants.sql を本番へ当てる前にコードがデプロイされたときだけ出る。正規の手順
+ * （migration → grants → 確認 → デプロイ）が守られていれば 1 件も出ない。出たら手順の抜けである。項目は
+ * errorKind（PostgreSQL のエラーコード `42P01` / `42501`）だけで、店舗 ID・エラーの本文は載せない。
+ */
+export function logStructuredSchemaUnavailable(log: SurveyLogger, code: string): void {
+  log('warn', 'survey-web.structured_schema_unavailable', { errorKind: code });
+}

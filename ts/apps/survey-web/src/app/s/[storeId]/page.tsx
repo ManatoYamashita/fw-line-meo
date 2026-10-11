@@ -1,4 +1,4 @@
-import { getPool, findStoreForSurvey, listSurveyAspects, readStoreSurveyDefinition } from '@fwlm/db';
+import { getPool, findStoreForSurvey, listSurveyAspects } from '@fwlm/db';
 import { headers } from 'next/headers';
 import { correlationIdFromHeaders, withCorrelation } from '@fwlm/observability';
 import { Heading } from '@fwlm/ui/components/heading';
@@ -6,6 +6,7 @@ import { PageShell } from '@fwlm/ui/components/page-shell';
 import { buildGoogleReviewUrl } from '../../../lib/google-review-url';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { writeStructuredLog } from '../../../lib/structured-log';
+import { createSurveyDefinitionReader } from '../../../lib/survey-definition-reader';
 import { loadSurveyPageData, type SurveyPageDeps } from './page-data';
 import { SurveyShell } from './survey-shell';
 
@@ -28,14 +29,16 @@ async function buildDeps(): Promise<SurveyPageDeps> {
   if (!signingKey) throw new Error('SESSION_SIGNING_KEY is required');
   const tokens = createSessionTokenService(signingKey);
   const correlationId = await requestCorrelationId();
+  const log = withCorrelation(writeStructuredLog, correlationId);
   return {
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
-    readDefinition: async (id) => readStoreSurveyDefinition(await getPool(), id),
+    // 回答受付（api/responses/route.ts）と同じ読み方（structured の表・権限が無ければ legacy・記録つき）。
+    readDefinition: createSurveyDefinitionReader(getPool, log),
     listAspects: async () => listSurveyAspects(await getPool()),
     signPage: (storeId) => tokens.signPage(storeId),
     signStructuredPage: (storeId, revision, fingerprint) => tokens.signStructuredPage(storeId, revision, fingerprint),
     buildReviewUrl: (placeId) => buildGoogleReviewUrl(placeId),
-    log: withCorrelation(writeStructuredLog, correlationId),
+    log,
   };
 }
 

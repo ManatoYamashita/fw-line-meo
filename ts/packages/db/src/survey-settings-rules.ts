@@ -47,7 +47,9 @@ export type TargetLabelError =
   /** 改行を含む。 */
   | 'LABEL_MULTILINE'
   /** 制御文字・区切り文字・壊れた文字を含む。 */
-  | 'LABEL_INVALID_CHARACTER';
+  | 'LABEL_INVALID_CHARACTER'
+  /** 評価・おすすめ・再訪の言葉を含む（TARGET_LABEL_EVALUATIVE_PATTERNS）。 */
+  | 'LABEL_EVALUATIVE';
 
 export type TargetLabelResult =
   | { readonly ok: true; readonly value: string }
@@ -59,6 +61,80 @@ const LINE_BREAK = /[\r\n\u0085\u2028\u2029]/u;
 const INVALID_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}\uFFFD]/u;
 // 対になっていないサロゲート（壊れた UTF-16）。DB へは送れない文字列である。
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+
+/**
+ * Target 名に使えない、評価・おすすめ・再訪の言葉（PR #443 のレビュー対応）。
+ *
+ * 客が選んだ Target の名前は口コミの下書きの主題としてそのまま文に入り、下書きの事実チェック（survey-web の
+ * lib/draft/structured/gate.ts）は名前を「客が選んだ語」として検査の対象から外す。名前に「絶品」「おすすめ」
+ * 「また来たい」が入っていると、本人が言っていない評価・推奨・再訪の言葉が下書きに残り、店舗が口コミの内容へ
+ * 介入する経路になる（CLAUDE.md「下書き文面への介入禁止」）。そこで、登録と名前の変更の時点で止める。
+ *
+ * 値は下書きの事実チェックの語彙（survey-web の lib/draft/structured/lexicon.json の intensity・recommendation・
+ * revisit）と **同じ正規表現のソース** で、一致は survey-web のテスト（structured-target-label-rule.test.ts）が
+ * 機械強制する。依存の向きは survey-web → @fwlm/db だけで、ここから survey-web を参照しない。
+ *
+ * 具体的な属性の語（新鮮・自家製・濃厚・出汁 など）は対象にしない。「自家製レモンサワー」「出汁巻き玉子」
+ * 「濃厚担々麺」のように商品の名前そのものに入る語で、名前として登録された商品の呼び名は客の選んだ主題である。
+ * 照合は NFKC へ揃えた名前に対して行う（半角カナの「ｵｽｽﾒ」も止める）。
+ */
+export const TARGET_LABEL_EVALUATIVE_PATTERNS: Readonly<Record<'intensity' | 'recommendation' | 'revisit', readonly string[]>> = {
+  intensity: [
+    'とても',
+    'すごく',
+    '凄く',
+    '非常に',
+    'かなり',
+    '大変',
+    'めちゃくちゃ',
+    'めちゃ',
+    '本当に',
+    'ほんとうに',
+    'ほんとに',
+    '最高',
+    '絶品',
+    '格別',
+    '抜群',
+    '大満足',
+    '極上',
+    'とびきり',
+    'この上な',
+    'すこぶる',
+    'ものすごく',
+    'とっても',
+    '絶対',
+    'ぜったい',
+    '圧倒的',
+    'めっちゃ',
+    'マジで',
+  ],
+  recommendation: [
+    'おすすめ',
+    'お勧め',
+    'お薦め',
+    'オススメ',
+    'おススメ',
+    '勧めたい',
+    'すすめたい',
+    'ぜひ.{0,8}(?:行って|食べて|訪れて|足を運|利用して|味わって)',
+    '皆さんも',
+    'みなさんも',
+    '一度は',
+    '行ってみて',
+    '試してみて',
+  ],
+  revisit: ['また(?:来|行|伺|訪|利用|食べ|寄)', 'リピート', '再訪', '次回', '今度は', '次は'],
+};
+
+const EVALUATIVE_LABEL_PATTERNS: readonly RegExp[] = Object.values(TARGET_LABEL_EVALUATIVE_PATTERNS)
+  .flat()
+  .map((source) => new RegExp(source));
+
+/** 名前が評価・おすすめ・再訪の言葉を含むか（TARGET_LABEL_EVALUATIVE_PATTERNS・NFKC で照合）。 */
+export function hasEvaluativeTargetLabel(label: string): boolean {
+  const normalized = label.normalize('NFKC');
+  return EVALUATIVE_LABEL_PATTERNS.some((p) => p.test(normalized));
+}
 
 /**
  * Target 名を検証し、保存する形（前後の空白を除き、Unicode の NFC へ正規化した文字列）へ整える。
@@ -74,6 +150,7 @@ export function normalizeTargetLabel(raw: unknown): TargetLabelResult {
   if (LINE_BREAK.test(value)) return { ok: false, error: 'LABEL_MULTILINE' };
   if (INVALID_CHARACTER.test(value)) return { ok: false, error: 'LABEL_INVALID_CHARACTER' };
   if ([...value].length > TARGET_LABEL_MAX_LENGTH) return { ok: false, error: 'LABEL_TOO_LONG' };
+  if (hasEvaluativeTargetLabel(value)) return { ok: false, error: 'LABEL_EVALUATIVE' };
   return { ok: true, value };
 }
 
@@ -84,6 +161,8 @@ export const TARGET_LABEL_ERROR_MESSAGES: Readonly<Record<TargetLabelError, stri
   LABEL_TOO_LONG: `名前は${TARGET_LABEL_MAX_LENGTH}文字以内で入力してください。`,
   LABEL_MULTILINE: '名前に改行は使えません。1 行で入力してください。',
   LABEL_INVALID_CHARACTER: '名前に使えない文字が含まれています。記号や見えない文字を取り除いてください。',
+  LABEL_EVALUATIVE:
+    '「絶品」「おすすめ」「リピート」のような、味の評価やおすすめの言葉は名前に使えません。お客様の口コミの文にそのまま入るため、料理名・ドリンク名だけを入力してください（例：「絶品餃子」なら「餃子」）。',
 };
 
 /** active な Target の上限に達したときの案内。 */

@@ -115,18 +115,64 @@ FROM cfg
 `;
 
 /**
+ * structured survey の表（0015）や権限（infra/sql/grants.sql）がまだ無いことを示す PostgreSQL のエラーコード。
+ *
+ *   42P01 undefined_table          … 0015 を当てる前（表が無い）
+ *   42501 insufficient_privilege   … 0015 を当てたが grants.sql を当て直す前（`GRANT ... ON ALL TABLES` は付与の
+ *                                    時点の表にしか効かない）
+ *
+ * DEFINITION_SQL が触るのは structured survey の表（store_survey_configs・store_survey_category_settings・
+ * store_survey_targets・survey_categories・survey_facets・survey_category_facets）だけなので、この 2 つはその
+ * 表の準備が済んでいないことを高い精度で示す。接続の失敗・タイムアウト・その他の SQL の誤りは含めない。
+ */
+export const STRUCTURED_SCHEMA_UNAVAILABLE_CODES = ['42P01', '42501'] as const;
+export type StructuredSchemaUnavailableCode = (typeof STRUCTURED_SCHEMA_UNAVAILABLE_CODES)[number];
+
+function structuredSchemaUnavailableCode(error: unknown): StructuredSchemaUnavailableCode | null {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return (STRUCTURED_SCHEMA_UNAVAILABLE_CODES as readonly unknown[]).includes(code)
+    ? (code as StructuredSchemaUnavailableCode)
+    : null;
+}
+
+export interface ReadStoreSurveyDefinitionOptions {
+  /**
+   * structured survey の表・権限が無いため legacy として扱ったときに呼ばれる（記録は呼び手が決める）。渡すのは
+   * エラーコードだけで、店舗 ID・エラーの本文は渡さない。
+   */
+  readonly onStructuredSchemaUnavailable?: (code: StructuredSchemaUnavailableCode) => void;
+}
+
+/**
  * 店舗の有効なアンケート定義を返す。
  *
  * - 設定行が無い・structured_enabled = false → `{ mode: 'legacy' }`（既定。既存店舗はすべてこれ）
  * - structured_enabled = true → 表示するカテゴリ（非表示を除く）・facet・active な Target と revision
+ * - structured survey の表・権限がまだ無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）→ `{ mode: 'legacy' }`
+ *
+ * 最後の分岐は、migration 0015 / 0016 と grants.sql を本番へ当てる前にこのコードがデプロイされたときの互換の
+ * 逃げ道である（PR #443 のレビュー）。その状態の本番に structured の店舗は存在しえない（設定の表そのものが無い）
+ * ので、legacy として扱っても意味は変わらない。表示（/s/[storeId]）と回答（/api/responses）が同じこの関数を
+ * 通るので、両者の判定はずれない。**それ以外のエラー（接続・タイムアウト・SQL の誤り）は投げる**（黙って legacy へ
+ * 落とすと、structured の店舗が障害の間だけ legacy に化ける）。正規の手順は migration → grants → 確認 → デプロイ
+ * である（db/migrations/0015 の冒頭・infra/README.md）。
  *
  * 店舗の存在・place 確定・利用停止の判定はしない（呼び手が findStoreForSurvey で行う）。
  */
 export async function readStoreSurveyDefinition(
   db: Queryable,
   storeId: string,
+  options: ReadStoreSurveyDefinitionOptions = {},
 ): Promise<StoreSurveyDefinition> {
-  const res = await db.query<DefinitionRow>(DEFINITION_SQL, [storeId]);
+  let res: { rows: DefinitionRow[] };
+  try {
+    res = await db.query<DefinitionRow>(DEFINITION_SQL, [storeId]);
+  } catch (error) {
+    const code = structuredSchemaUnavailableCode(error);
+    if (code === null) throw error;
+    options.onStructuredSchemaUnavailable?.(code);
+    return { mode: 'legacy' };
+  }
   const row = res.rows[0];
   if (!row) return { mode: 'legacy' };
   const revision = Number(row.revision);

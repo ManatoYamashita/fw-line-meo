@@ -297,7 +297,8 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const onFailed = vi.fn();
     const { client, requests } = fakeClient('新鮮な刺身盛り合わせ。', '脂ののった刺身盛り合わせ。', '刺身盛り合わせ、また行きたい。', '呼ばれないはず');
     const result = await createNaturalRealizer(client, { onFailed }).prepare(material());
-    expect(result).toEqual({ kind: 'failed', attempts: 3 });
+    // factuality の失格は API の障害ではないので、監視へ載せる分類（generationError）を返さない。
+    expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'gate' });
     expect(requests).toHaveLength(3);
     expect(onFailed).toHaveBeenCalledWith('gate', expect.arrayContaining(['revisit']), 1);
   });
@@ -308,7 +309,7 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
       '刺身盛り合わせの味は、部位によって良かったり気になったりしました。',
       '刺身盛り合わせの味は、最初は良かったのですが後半は気になりました。',
     );
-    expect(await createNaturalRealizer(client, {}).prepare(OVERLAP)).toEqual({ kind: 'failed', attempts: 3 });
+    expect(await createNaturalRealizer(client, {}).prepare(OVERLAP)).toEqual({ kind: 'failed', attempts: 3, reason: 'gate' });
   });
 
   it('exact overlap で両面だけを書いた下書きは通す', async () => {
@@ -328,11 +329,49 @@ describe('作り直しと safe fallback（Stage 3A の hard gate を使う）', 
     const onRetry = vi.fn();
     const { client, requests } = fakeClient(new Error('503'), '', new Error('timeout'));
     const result = await createNaturalRealizer(client, { onFailed, onRetry }).prepare(material());
-    expect(result).toEqual({ kind: 'failed', attempts: 3 });
+    // 最後の試行の失敗の分類（ネットワーク断の例外 = ステータスの無い API_ERROR）を返す。
+    expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'generation', generationError: { kind: 'API_ERROR' } });
     expect(requests).toHaveLength(3);
     expect(onRetry.mock.calls.map((c) => c[0])).toEqual([['generation'], ['generation']]);
     // 匿名の metadata だけ（失格の種類と claim の件数）。
     expect(onFailed).toHaveBeenCalledWith('generation', [], 1);
+  });
+
+  describe('生成そのものの失敗は、legacy の生成器と同じ分類（DraftError）で返す（generation_failed の監視へ乗せるため）', () => {
+    const statusError = (status: number) => Object.assign(new Error('api'), { status });
+    function clientOf(...responses: (object | Error)[]): GenAiClient {
+      return {
+        models: {
+          generateContent: async () => {
+            const next = responses.shift();
+            if (next instanceof Error) throw next;
+            return next as never;
+          },
+        },
+      };
+    }
+
+    it('全試行で API の例外（残高切れの 402 など）→ HTTP ステータスつきの API_ERROR', async () => {
+      const result = await createNaturalRealizer(clientOf(statusError(402), statusError(402), statusError(402))).prepare(material());
+      expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'generation', generationError: { kind: 'API_ERROR', status: 402 } });
+    });
+
+    it('全試行で安全性による遮断 → SAFETY_BLOCKED（prompt の blockReason・候補の finishReason）', async () => {
+      const blocked = { promptFeedback: { blockReason: 'SAFETY' } };
+      const finish = { text: JSON.stringify({ draft: '刺身盛り合わせがおいしかったです。' }), candidates: [{ finishReason: 'SAFETY' }] };
+      const result = await createNaturalRealizer(clientOf(blocked, finish, blocked)).prepare(material());
+      expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'generation', generationError: { kind: 'SAFETY_BLOCKED' } });
+    });
+
+    it('全試行で JSON でない・空 → INVALID_OUTPUT', async () => {
+      const result = await createNaturalRealizer(clientOf({ text: 'not json' }, { text: '' }, { text: '{"draft":""}' })).prepare(material());
+      expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'generation', generationError: { kind: 'INVALID_OUTPUT' } });
+    });
+
+    it('API の失敗と factuality の失格が混ざって作れなかった場合は gate として返す（API の全面障害ではない）', async () => {
+      const { client } = fakeClient(new Error('503'), '新鮮な刺身盛り合わせ。', new Error('503'));
+      expect(await createNaturalRealizer(client, {}).prepare(material())).toEqual({ kind: 'failed', attempts: 3, reason: 'gate' });
+    });
   });
 
   it('生成の失敗のあとに通れば、その LLM の文を返す', async () => {
@@ -486,7 +525,7 @@ describe('文章は Gemini に任せ、明確な捏造だけを止める（style
     const onFailed = vi.fn();
     const onResult = vi.fn();
     const { client } = fakeClient(CAUSE, CAUSE, CAUSE);
-    expect(await createNaturalRealizer(client, { onFailed, onResult }).prepare(MIXED)).toEqual({ kind: 'failed', attempts: 3 });
+    expect(await createNaturalRealizer(client, { onFailed, onResult }).prepare(MIXED)).toEqual({ kind: 'failed', attempts: 3, reason: 'gate' });
     expect(onFailed).toHaveBeenCalledWith('gate', ['cause'], 6);
     expect(onResult.mock.calls[0]![0]).toMatchObject({ result: 'generation_error', attempts: 3, acceptedAttempt: null });
   });

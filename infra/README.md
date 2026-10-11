@@ -114,6 +114,32 @@ psql -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.s
 
 - 表・型を追加するだけの migration は、**機能フラグが OFF でも main への統合後に本番へ適用する**（機能の有効化まで待たない）。`infra/sql/grants.sql` は main にある全テーブルへ GRANT し、1 件でも表が欠けると全 GRANT がロールバックするため、適用を見送った migration があると、後続の migration の手順が grants.sql の段で失敗する。実例として、既定 OFF で統合した GBP の `0013`（#356）を未適用のまま残し、`prod-schema-drift` が乖離として検出した（#396 で 2026-09-28 に適用）。既存の表・列・enum を変更する migration は、この規律の対象外として個別に判断する。
 
+- **表を毎回読むコードより先に当てる migration**: 新しいコードが**機能フラグに関係なく**新しい表を読むときは、上の「統合後に適用」ではなく、**統合（merge）の前に** migration と `infra/sql/grants.sql` を当てて確かめる。main の ts-ci が緑になると `deploy.yml` が自動でデプロイするので、統合の後に当てると、その間は新しいコードが無い表・権限を読む。実例は structured survey（PR #443）で、survey-web は legacy の店舗でも表示と回答のたびに `readStoreSurveyDefinition` で `0015` の表を読む。順序は次のとおり:
+  1. `db/migrations/0015_structured_survey_foundation.sql`
+  2. `db/migrations/0016_survey_settings_audit_actions.sql`（`ck_audit_logs_action` の値の拡大。旧コードと互換）
+  3. `infra/sql/grants.sql`（`GRANT SELECT ON ALL TABLES` は付与の時点の表にしか効かないので、0015 の後に当て直す）
+  4. 確認（下の SQL）。すべて `t` で、`structured_enabled` の店舗が 0 件であること
+  5. PR の統合（自動デプロイ）
+
+  ```sql
+  -- 表がある（7 表）
+  SELECT t, to_regclass('public.' || t) IS NOT NULL
+    FROM unnest(ARRAY['survey_categories','survey_facets','survey_category_facets','store_survey_configs',
+                      'store_survey_category_settings','store_survey_targets','survey_structured_material_tallies']) AS t;
+  -- 客向けアンケート Web が読める（readStoreSurveyDefinition が触る 6 表）
+  SELECT t, has_table_privilege('sa-survey-web@gen-fw-line-meo.iam', t, 'SELECT')
+    FROM unnest(ARRAY['survey_categories','survey_facets','survey_category_facets','store_survey_configs',
+                      'store_survey_category_settings','store_survey_targets']) AS t;
+  -- 店舗オーナーの設定画面（store-detail）が読める
+  SELECT has_table_privilege('sa-store-detail@gen-fw-line-meo.iam', 'store_survey_targets', 'SELECT');
+  -- 0016 の値が CHECK に入っている
+  SELECT pg_get_constraintdef(oid) LIKE '%survey_target_added%' FROM pg_constraint WHERE conname = 'ck_audit_logs_action';
+  -- まだどの店舗も structured ではない
+  SELECT count(*) FROM store_survey_configs WHERE structured_enabled;
+  ```
+
+  事故で順序が逆になったときに legacy のアンケートを落とさないよう、表が無い（`42P01`）・権限が無い（`42501`）ときに限り `readStoreSurveyDefinition` は legacy として扱い、警告 `survey-web.structured_schema_unavailable` を出す。接続・タイムアウトなど他の失敗は従来どおり失敗する。これは逃げ道であって手順の代わりではない。
+
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。ロール名は `:project` から組み立てるため、**この既定値が GCP プロジェクト ID であること**が前提になる（2026-08-24 まで既定が DB 名の `fwlm` になっており、上のコマンドは `role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックしていた・PR #144 で是正）。
 
 ---

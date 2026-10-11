@@ -12,6 +12,12 @@ import {
   toggleTarget,
   toggleTargetFacet,
 } from '../src/lib/structured-selection';
+import {
+  MIN_MATERIALS as SHARED_MIN_MATERIALS,
+  countSelectionGroupMaterials,
+  countStructuredAnswerMaterials,
+  hasEnoughMaterials,
+} from '../src/lib/structured-materials';
 
 // structured survey の選択（evidence）の状態と送信の形（Issue #438）。画面の展開状態はここに無い。
 
@@ -184,5 +190,45 @@ describe('countMaterials（口コミ文を作るのに要る回答材料の数�
   it('定義に無いカテゴリの選択は送らないので数えない', () => {
     const s = toggleCategoryFacet(EMPTY_EVIDENCE, 'positive', 'hidden', 'x');
     expect(countMaterials(s, DEF)).toBe(0);
+  });
+});
+
+describe('画面の数え方とサーバーの数え方は同じ（lib/structured-materials.ts）', () => {
+  it('画面の状態から数えた件数は、送信する選択（SelectionGroup[]）から数えた件数と一致する', () => {
+    const states = [
+      EMPTY_EVIDENCE,
+      toggleTarget(EMPTY_EVIDENCE, 'positive', 'food', SASHIMI),
+      toggleTargetFacet(toggleTarget(EMPTY_EVIDENCE, 'positive', 'food', SASHIMI), 'positive', 'food', SASHIMI, 'taste'),
+      toggleTargetFacet(
+        toggleTargetFacet(toggleTarget(EMPTY_EVIDENCE, 'concern', 'food', SASHIMI), 'concern', 'food', SASHIMI, 'taste'),
+        'concern',
+        'food',
+        SASHIMI,
+        'appearance',
+      ),
+      toggleCategoryFacet(toggleCategoryFacet(EMPTY_EVIDENCE, 'positive', 'food', 'taste'), 'concern', 'service_delivery', 'serving'),
+    ];
+    for (const state of states) {
+      const answer = {
+        positiveSelections: toSelectionGroups(state.positive, DEF),
+        concernSelections: toSelectionGroups(state.concern, DEF),
+      };
+      expect(countMaterials(state, DEF)).toBe(countStructuredAnswerMaterials(answer));
+    }
+  });
+
+  it('下限は画面とサーバーで同じ定数', () => {
+    expect(MIN_MATERIALS).toBe(SHARED_MIN_MATERIALS);
+    expect(hasEnoughMaterials(MIN_MATERIALS - 1)).toBe(false);
+    expect(hasEnoughMaterials(MIN_MATERIALS)).toBe(true);
+  });
+
+  it('SelectionGroup[] からの数え方: Target だけ 1・Target + facet 1 つで 1・2 つで 2・カテゴリ全体の facet は 1 つずつ', () => {
+    expect(countSelectionGroupMaterials([{ categoryCode: 'food', targetId: SASHIMI, facetCodes: [] }])).toBe(1);
+    expect(countSelectionGroupMaterials([{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] }])).toBe(1);
+    expect(countSelectionGroupMaterials([{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste', 'appearance'] }])).toBe(2);
+    expect(countSelectionGroupMaterials([{ categoryCode: 'food', facetCodes: ['taste'] }])).toBe(1);
+    expect(countSelectionGroupMaterials([{ categoryCode: 'food', facetCodes: ['taste', 'volume'] }])).toBe(2);
+    expect(countSelectionGroupMaterials([])).toBe(0);
   });
 });

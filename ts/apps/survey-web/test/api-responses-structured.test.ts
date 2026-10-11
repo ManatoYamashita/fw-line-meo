@@ -214,16 +214,61 @@ describe('handleResponses × structured survey（Issue #438）', () => {
     }
   });
 
-  it('星だけの structured の回答（選択なし）も受け付ける', async () => {
-    const deps = spiedDeps(definition());
-    const res = await handleResponses(
-      req({ pageToken: structuredToken(), star: 2, positiveSelections: [], concernSelections: [] }),
-      deps,
-    );
+  describe('口コミ文を作る材料が 2 件に満たない回答は 400 VALIDATION で、集計・生成へ進まない（画面と同じ下限）', () => {
+    const SERVING = { categoryCode: 'service_delivery', facetCodes: ['serving'] };
+    const cases: [string, Record<string, unknown>][] = [
+      ['Target だけ 1 つ', { positiveSelections: [{ categoryCode: 'food', targetId: SASHIMI, facetCodes: [] }] }],
+      ['カテゴリ全体の facet 1 つ', { positiveSelections: [SERVING] }],
+      [
+        'Target + facet 1 つ（合わせて 1 件）',
+        { positiveSelections: [{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste'] }] },
+      ],
+      ['1 件 + 一言（一言は数えない）', { positiveSelections: [SERVING], comment: '窓側の席が落ち着いた' }],
+      ['星 + 一言だけ', { positiveSelections: [], concernSelections: [], comment: '窓側の席が落ち着いた' }],
+      ['星だけ（選択なし）', { positiveSelections: [], concernSelections: [] }],
+    ];
+    for (const [name, answer] of cases) {
+      it(name, async () => {
+        const deps = spiedDeps(definition());
+        const res = await handleResponses(req({ pageToken: structuredToken(), star: 4, ...answer }), deps);
+        expect(res.status).toBe(400);
+        expect((await res.json()).error.code).toBe('VALIDATION');
+        expectNoStructuredWork(deps);
+        expectNoLegacyWork(deps);
+      });
+    }
+  });
+
+  describe('材料が 2 件あれば受け付ける', () => {
+    const cases: [string, Record<string, unknown>][] = [
+      [
+        'Target + facet 2 つ（2 件）',
+        { positiveSelections: [{ categoryCode: 'food', targetId: SASHIMI, facetCodes: ['taste', 'temperature_condition'] }] },
+      ],
+      [
+        '良かったところ 1 件 + 気になったところ 1 件',
+        {
+          positiveSelections: [{ categoryCode: 'food', facetCodes: ['taste'] }],
+          concernSelections: [{ categoryCode: 'service_delivery', facetCodes: ['serving'] }],
+        },
+      ],
+    ];
+    for (const [name, answer] of cases) {
+      it(name, async () => {
+        const deps = spiedDeps(definition());
+        const res = await handleResponses(req({ pageToken: structuredToken(), star: 4, ...answer }), deps);
+        expect(res.status).toBe(200);
+        expect(deps.incrementStructuredTallies).toHaveBeenCalledTimes(1);
+        expect(deps.structuredDrafts.prepare).toHaveBeenCalledTimes(1);
+      });
+    }
+  });
+
+  it('legacy の回答には材料の下限を当てない（観点 0 件・星だけでも従来どおり受け付ける）', async () => {
+    const deps = spiedDeps({ mode: 'legacy' });
+    const res = await handleResponses(req({ pageToken: tokens.signPage(STORE), star: 5 }), deps);
     expect(res.status).toBe(200);
-    expect(deps.incrementStructuredTallies).toHaveBeenCalledWith(
-      expect.objectContaining({ star: 2, positiveGroupCount: 0, concernGroupCount: 0, hasComment: false }),
-    );
+    expect(deps.generator.generate).toHaveBeenCalledTimes(1);
   });
 
   it('structured の集計が失敗しても回答は受け付け、warn を残す（legacy と同じく非致命）', async () => {

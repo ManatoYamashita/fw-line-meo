@@ -185,6 +185,8 @@ describe.skipIf(!process.env.DATABASE_URL)('store survey settings (DB)', () => {
     expect(await revisionOf(store)).toBe(3);
     expect(await renameSurveyTarget(pool, store, id, '刺身盛り合わせ')).toEqual({ ok: false, error: 'DUPLICATE_LABEL' });
     expect(await renameSurveyTarget(pool, store, id, '')).toEqual({ ok: false, error: 'LABEL_EMPTY' });
+    // 名前の変更でも、評価・おすすめ・再訪の言葉を含む名前は登録できない（PR #443 のレビュー）。
+    expect(await renameSurveyTarget(pool, store, id, '絶品もつ煮込み')).toEqual({ ok: false, error: 'LABEL_EVALUATIVE' });
     expect(await revisionOf(store)).toBe(3);
     const target = (await readStoreSurveySettings(pool, store)).targets.find((t) => t.id === id);
     expect(target?.label).toBe('名物もつ煮込み');

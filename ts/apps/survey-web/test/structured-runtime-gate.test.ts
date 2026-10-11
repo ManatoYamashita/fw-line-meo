@@ -119,6 +119,32 @@ describe('未回答の Target（runtime）', () => {
   });
 });
 
+describe('Target の名前に入れた評価・推奨・再訪の言葉は検査から外さない（PR #443 のレビュー）', () => {
+  const named = (label: string) =>
+    material({ selections: [{ ...sashimiTaste, targetLabel: label }], unselectedTargets: [] });
+  const runtime = (label: string, draft: string) => runtimeViolations(gateInputOf(named(label)), draft, LEX, LEGACY);
+
+  it('名前に同じ語を含めても、強さ・推奨・再訪は下書きに残せない', () => {
+    const label = '絶品で新鮮な刺身の味が良かったです。また来たいし、おすすめです';
+    const kinds = runtime(label, `${label}。`);
+    expect(kinds).toEqual(expect.arrayContaining(['intensity', 'recommendation', 'revisit']));
+  });
+
+  it('「絶品新鮮刺身盛り」をそのまま書いた下書きも、名前の中の「絶品」で止める', () => {
+    expect(runtime('絶品新鮮刺身盛り', '絶品新鮮刺身盛りがおいしかったです。')).toContain('intensity');
+  });
+
+  it('評価の言葉を含まない名前は、従来どおり名前ごと検査から外す（属性の語を含む商品名を創作と数えない）', () => {
+    for (const label of ['だし巻き玉子', '出汁巻き玉子', '自家製レモンサワー', '濃厚担々麺', '刺身盛り合わせ']) {
+      expect(runtime(label, `${label}がおいしかったです。`), label).toEqual([]);
+    }
+  });
+
+  it('名前の外の評価の言葉は、これまでどおり止める', () => {
+    expect(runtime('刺身盛り合わせ', '刺身盛り合わせが絶品でした。')).toContain('intensity');
+  });
+});
+
 describe('一言の因果づけ（runtime）', () => {
   const comfort = { polarity: 'positive' as const, categoryCode: 'atmosphere', categoryLabel: '店内・雰囲気', facets: [{ code: 'comfort', label: '居心地' }] };
   const withWindow = (over: Partial<StructuredDraftMaterial> = {}) => material({ selections: [comfort], comment: '窓側の席でした', ...over });
@@ -213,7 +239,7 @@ describe('Realizer の作り直し（未回答の Target・一言の因果づけ
     const result = await createNaturalRealizer(client, { onFailed }).prepare(
       material({ selections: [comfort], comment: '窓側の席でした' }),
     );
-    expect(result).toEqual({ kind: 'failed', attempts: 3 });
+    expect(result).toEqual({ kind: 'failed', attempts: 3, reason: 'gate' });
     expect(onFailed).toHaveBeenCalledWith('gate', ['commentLinkage'], 1);
   });
 });

@@ -1,4 +1,5 @@
 import type { ResolvedStructuredAnswer, UnselectedTarget } from '../structured-answer';
+import type { DraftError } from './generator';
 
 // structured survey の回答から下書きを作る口（Issue #438 で接続・Issue #439 で中身を実装した）。
 //
@@ -32,7 +33,20 @@ export type StructuredDraftResult =
    * 下書きを作れなかった（generation error）。最大回数まで factuality の違反・生成の失敗が続いた。客の画面は既存の
    * 「下書きの生成に失敗しました」（再試行と投稿導線）を出す。
    */
-  | { readonly kind: 'failed'; readonly attempts: number };
+  | {
+      readonly kind: 'failed';
+      readonly attempts: number;
+      /**
+       * 作れなかった理由。gate = 最後まで factuality の hard gate を通らなかった（生成は動いている）。
+       * generation = すべての試行で生成そのもの（API・安全性・出力の形）が失敗した。
+       */
+      readonly reason: 'gate' | 'generation';
+      /**
+       * reason が generation のときだけ、最後の試行の失敗の分類（legacy の生成器と同じ DraftError）。呼び手は
+       * logGenerationFailure で記録し、API の障害を既存の監視（generation_failed）へ乗せる。gate の失格は載せない。
+       */
+      readonly generationError?: DraftError;
+    };
 
 /**
  * 下書きを作る口。初回の生成（/api/responses）も「別の文章を生成」（/api/drafts）も、同じ素材で同じ処理をもう一度

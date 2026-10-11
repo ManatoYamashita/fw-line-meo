@@ -2,6 +2,16 @@
 -- structured survey（Issue #436・PR 分割は #441 の PR1）: 飲食店向けの店舗別アンケート定義と、
 -- 構造化回答の匿名集計の器を足す。PostgreSQL 15+ 互換。0014 適用後に実行する。
 --
+-- **本番の適用順（PR #443 のレビュー）: この migration・0016・infra/sql/grants.sql の適用と確認を、PR の統合
+-- （main への merge）より先に済ませる。** main の ts-ci が緑になると deploy.yml が自動でデプロイし、新しい
+-- survey-web は legacy の店舗でも表示・回答のたびに readStoreSurveyDefinition でこの migration の表を読む。
+-- 手順（infra/README.md §3「表を毎回読むコードより先に当てる migration」）:
+--   1. 0015（この migration）→ 2. 0016 → 3. infra/sql/grants.sql（`GRANT ... ON ALL TABLES` は付与の時点の
+--   表にしか効かないので、0015 の後に当て直す）→ 4. 表と権限の確認 → 5. merge（自動デプロイ）。
+-- 事故で順序が逆になっても legacy のアンケートを落とさないよう、表が無い（42P01）・権限が無い（42501）
+-- ときに限って readStoreSurveyDefinition が legacy として扱う（ts/packages/db/src/survey-definition.ts）。
+-- これは逃げ道であって手順の代わりではない（その間は警告 survey-web.structured_schema_unavailable が出る）。
+--
 -- 構造（#435）:
 --   Category ─┬─ category-wide Facet（例: 料理 → 味）
 --             └─ Target（店舗が登録した料理名・ドリンク名）─ Target Facet（例: 料理 → 刺身盛り合わせ → 味）

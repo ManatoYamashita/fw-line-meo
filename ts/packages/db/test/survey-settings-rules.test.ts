@@ -5,6 +5,7 @@ import {
   OWNER_TOGGLEABLE_CATEGORY_CODES,
   TARGET_LABEL_ERROR_MESSAGES,
   TARGET_LABEL_MAX_LENGTH,
+  hasEvaluativeTargetLabel,
   isOwnerTargetCategoryCode,
   isOwnerToggleableCategoryCode,
   normalizeTargetLabel,
@@ -83,5 +84,44 @@ describe('survey settings rules', () => {
   it('誤りごとに、何を直せばよいかの日本語の案内を持つ', () => {
     expect(TARGET_LABEL_ERROR_MESSAGES.LABEL_TOO_LONG).toContain('40文字以内');
     for (const message of Object.values(TARGET_LABEL_ERROR_MESSAGES)) expect(message.length).toBeGreaterThan(0);
+  });
+
+  describe('評価・おすすめ・再訪の言葉を含む名前は登録できない（PR #443 のレビュー対応）', () => {
+    it.each([
+      ['絶品新鮮刺身盛り'],
+      ['絶品で新鮮な刺身の味が良かったです。また来たいし、おすすめです'],
+      ['極上カルビ'],
+      ['店長おすすめ盛り合わせ'],
+      ['ｵｽｽﾒ串盛り'],
+      ['リピート確定唐揚げ'],
+      ['また食べたい餃子'],
+      ['とってもジューシー唐揚げ'],
+      ['一度は食べてほしいカレー'],
+    ])('%s', (label) => {
+      expect(hasEvaluativeTargetLabel(label)).toBe(true);
+      expect(normalizeTargetLabel(label)).toEqual({ ok: false, error: 'LABEL_EVALUATIVE' });
+    });
+
+    it.each([
+      ['だし巻き玉子'],
+      ['出汁巻き玉子'],
+      ['刺身盛り合わせ'],
+      ['焼き鳥5種盛り'],
+      ['名物もつ煮'],
+      ['自家製レモンサワー'],
+      ['濃厚担々麺'],
+      ['季節の天ぷら'],
+      ['新鮮野菜のサラダ'],
+      ['またぎ鍋'],
+      ['大根サラダ'],
+      ['生ビール（中）'],
+    ])('通常の名前は通す: %s', (label) => {
+      expect(hasEvaluativeTargetLabel(label)).toBe(false);
+      expect(normalizeTargetLabel(label)).toEqual({ ok: true, value: label });
+    });
+
+    it('案内は直し方（料理名・ドリンク名だけにする）を伝える', () => {
+      expect(TARGET_LABEL_ERROR_MESSAGES.LABEL_EVALUATIVE).toContain('料理名・ドリンク名だけを入力してください');
+    });
   });
 });
