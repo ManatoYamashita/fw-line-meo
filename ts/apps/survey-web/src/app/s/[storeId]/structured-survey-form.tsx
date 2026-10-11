@@ -152,7 +152,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
       <PolaritySection
         polarity="concern"
         emphasis="secondary"
-        title="気になったところがあれば教えてください（任意）"
+        title="気になったところ（任意）"
         hint="当てはまるものがあれば選んでください"
         summaryLabel="気になったところで選んだ内容"
         definition={definition}
@@ -232,15 +232,9 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
                 : '回答内容をもとに文章を作成しています'
               : enoughMaterials
                 ? '回答内容をもとに文章を作成します'
-                : (
-                    <>
-                      {materials === 0
-                        ? `感想を${MIN_MATERIALS}つ以上選ぶと口コミ文を作れます`
-                        : `あと${MIN_MATERIALS - materials}つ選ぶと口コミ文を作れます`}
-                      {/* 今の数は 1 まとまりで折り返す（狭い画面で「1 /」と「2」が別の行に割れない）。 */}
-                      <span className="whitespace-nowrap">{`（${materials} / ${MIN_MATERIALS} 選択済み）`}</span>
-                    </>
-                  )}
+                : materials === 0
+                  ? `感想を${MIN_MATERIALS}つ以上選ぶと口コミ文を作れます`
+                  : `あと${MIN_MATERIALS - materials}つ選ぶと口コミ文を作れます`}
           </p>
         </div>
       </div>

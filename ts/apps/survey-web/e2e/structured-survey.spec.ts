@@ -13,7 +13,7 @@ import { openStructuredSurvey } from './fixtures/structured';
 const SCROLL_REGIONS = 1;
 
 const positive = (page: Page) => page.getByRole('region', { name: '良かったところを教えてください' });
-const concern = (page: Page) => page.getByRole('region', { name: '気になったところがあれば教えてください（任意）' });
+const concern = (page: Page) => page.getByRole('region', { name: '気になったところ（任意）' });
 
 test.describe('structured survey（客向け）', () => {
   test('星・料理・Target・facet・気になったところ・一言を選んで送信し、structured の下書きの画面へ進む', async ({ page }) => {
@@ -81,12 +81,12 @@ test.describe('structured survey（客向け）', () => {
     await concern(page).getByRole('button', { name: '接客・提供' }).click();
     const submitButton = page.getByRole('button', { name: '口コミ文を作る' });
     await expect(submitButton).toBeDisabled();
-    await expect(page.getByText('感想を2つ以上選ぶと口コミ文を作れます（0 / 2 選択済み）')).toBeVisible();
+    await expect(page.getByText('感想を2つ以上選ぶと口コミ文を作れます')).toBeVisible();
 
     const service = concern(page).getByRole('group', { name: '接客・提供' });
     await service.getByRole('checkbox').nth(0).click();
     await expect(submitButton).toBeDisabled();
-    await expect(page.getByText('あと1つ選ぶと口コミ文を作れます（1 / 2 選択済み）')).toBeVisible();
+    await expect(page.getByText('あと1つ選ぶと口コミ文を作れます')).toBeVisible();
     await service.getByRole('checkbox').nth(1).click();
     await expect(submitButton).toBeEnabled();
 

@@ -26,7 +26,7 @@ export async function openStructuredSurvey(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1, name: STRUCTURED_STORE_NAME })).toBeVisible();
   await expect(page.getByRole('group', { name: '今回の満足度（必須）' })).toBeVisible();
   await expect(page.getByRole('region', { name: '良かったところを教えてください' })).toBeVisible();
-  await expect(page.getByRole('region', { name: '気になったところがあれば教えてください（任意）' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '気になったところ（任意）' })).toBeVisible();
   // legacy のフォーム（「良かった点」）は出ていない。
   await expect(page.getByRole('group', { name: '良かった点' })).toHaveCount(0);
 }
