@@ -137,6 +137,13 @@ function structuredSchemaUnavailableCode(error: unknown): StructuredSchemaUnavai
 
 export interface ReadStoreSurveyDefinitionOptions {
   /**
+   * structured survey の表・権限が無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）ときに legacy として扱うか。
+   * **既定は false**（投げる）。true にしてよいのは、migration の前にコードが動く一時的な互換期間・緊急時だけで、
+   * structured の店舗を 1 件でも有効にする前に必ず false に戻す（PR #443 の追加レビュー）。有効化の後に権限の乱れ・
+   * 表の削除・grants の破損が起きたとき、structured の店舗が黙って legacy に化けるのを防ぐため。
+   */
+  readonly allowStructuredSchemaFallback?: boolean;
+  /**
    * structured survey の表・権限が無いため legacy として扱ったときに呼ばれる（記録は呼び手が決める）。渡すのは
    * エラーコードだけで、店舗 ID・エラーの本文は渡さない。
    */
@@ -148,14 +155,16 @@ export interface ReadStoreSurveyDefinitionOptions {
  *
  * - 設定行が無い・structured_enabled = false → `{ mode: 'legacy' }`（既定。既存店舗はすべてこれ）
  * - structured_enabled = true → 表示するカテゴリ（非表示を除く）・facet・active な Target と revision
- * - structured survey の表・権限がまだ無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）→ `{ mode: 'legacy' }`
+ * - structured survey の表・権限がまだ無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）
+ *     - 既定: 投げる（呼び手は 5xx）
+ *     - `allowStructuredSchemaFallback: true` のときだけ `{ mode: 'legacy' }`
  *
- * 最後の分岐は、migration 0015 / 0016 と grants.sql を本番へ当てる前にこのコードがデプロイされたときの互換の
- * 逃げ道である（PR #443 のレビュー）。その状態の本番に structured の店舗は存在しえない（設定の表そのものが無い）
- * ので、legacy として扱っても意味は変わらない。表示（/s/[storeId]）と回答（/api/responses）が同じこの関数を
- * 通るので、両者の判定はずれない。**それ以外のエラー（接続・タイムアウト・SQL の誤り）は投げる**（黙って legacy へ
- * 落とすと、structured の店舗が障害の間だけ legacy に化ける）。正規の手順は migration → grants → 確認 → デプロイ
- * である（db/migrations/0015 の冒頭・infra/README.md）。
+ * 最後の分岐の legacy は、migration 0015 / 0016 と grants.sql を本番へ当てる前にコードが動く **一時的な互換期間**
+ * の逃げ道である（PR #443 のレビュー）。その状態の本番に structured の店舗は存在しえない（設定の表そのものが無い）
+ * ので、legacy として扱っても意味は変わらない。ただし structured の店舗を有効にした後に同じエラーが出たら、それは
+ * 権限・表の事故であって、legacy へ落とすと structured の店舗が黙って別のアンケートに化ける。そのため明示的に
+ * 有効にしたときだけ使う（既定は投げる）。**どちらでも、それ以外のエラー（接続・タイムアウト・SQL の誤り）は投げる。**
+ * 正規の手順は migration → grants → 確認 → デプロイで、この逃げ道を使わない（db/migrations/0015 の冒頭・infra/README.md）。
  *
  * 店舗の存在・place 確定・利用停止の判定はしない（呼び手が findStoreForSurvey で行う）。
  */
@@ -169,7 +178,7 @@ export async function readStoreSurveyDefinition(
     res = await db.query<DefinitionRow>(DEFINITION_SQL, [storeId]);
   } catch (error) {
     const code = structuredSchemaUnavailableCode(error);
-    if (code === null) throw error;
+    if (code === null || options.allowStructuredSchemaFallback !== true) throw error;
     options.onStructuredSchemaUnavailable?.(code);
     return { mode: 'legacy' };
   }

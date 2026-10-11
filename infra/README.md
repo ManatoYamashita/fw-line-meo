@@ -138,7 +138,11 @@ psql -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.s
   SELECT count(*) FROM store_survey_configs WHERE structured_enabled;
   ```
 
-  事故で順序が逆になったときに legacy のアンケートを落とさないよう、表が無い（`42P01`）・権限が無い（`42501`）ときに限り `readStoreSurveyDefinition` は legacy として扱い、警告 `survey-web.structured_schema_unavailable` を出す。接続・タイムアウトなど他の失敗は従来どおり失敗する。これは逃げ道であって手順の代わりではない。
+  **互換の逃げ道（既定で無効）**: survey-web の環境変数 `STRUCTURED_SCHEMA_COMPAT_FALLBACK=1` を明示したときだけ、表が無い（`42P01`）・権限が無い（`42501`）ときに `readStoreSurveyDefinition` が legacy として扱い、警告 `survey-web.structured_schema_unavailable` を出す（値は `1` との完全一致だけを有効と読む）。
+  - 上の正規の手順では使わない。migration の前にコードが動く**一時的な互換期間・緊急時だけ**に使い、手順の代わりにしない
+  - **structured の店舗を 1 件でも有効にする前に必ず外す**。pilot・本運用中は無効のままにする（有効のままだと、権限の乱れ・表の削除・grants の破損が起きたとき structured の店舗が黙って legacy に化ける）
+  - 無効（既定・未設定）のとき、`42P01` / `42501` は 5xx になる。接続・タイムアウトなど他の失敗は、有効・無効にかかわらず失敗する
+  - Cloud Run の env は Terraform 専権（§5）。有効にする場合も Terraform で一時的に足し、外すのも Terraform で行う
 
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。ロール名は `:project` から組み立てるため、**この既定値が GCP プロジェクト ID であること**が前提になる（2026-08-24 まで既定が DB 名の `fwlm` になっており、上のコマンドは `role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックしていた・PR #144 で是正）。
 

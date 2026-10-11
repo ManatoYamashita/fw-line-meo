@@ -161,7 +161,8 @@ export function logStructuredDraftFailed(
 /**
  * structured survey の表・権限がまだ無いため、店舗のアンケートを legacy として扱った（PR #443 のレビュー）。
  *
- * migration 0015 / 0016 と infra/sql/grants.sql を本番へ当てる前にコードがデプロイされたときだけ出る。正規の手順
+ * 互換の逃げ道を STRUCTURED_SCHEMA_COMPAT_FALLBACK=1 で明示的に有効にしている間に、migration 0015 / 0016 と
+ * infra/sql/grants.sql が未適用のときだけ出る（既定は無効で、その場合は 5xx になりこの記録は出ない）。正規の手順
  * （migration → grants → 確認 → デプロイ）が守られていれば 1 件も出ない。出たら手順の抜けである。項目は
  * errorKind（PostgreSQL のエラーコード `42P01` / `42501`）だけで、店舗 ID・エラーの本文は載せない。
  */
