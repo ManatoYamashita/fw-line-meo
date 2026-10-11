@@ -142,7 +142,9 @@ describe('プロンプト', () => {
     expect(userContent).not.toContain('気になったところ:');
     expect(userContent.match(/刺身盛り合わせ/g)).toHaveLength(1);
     // 意味づけ: 両側とも中身を決めない・良い側は控えめ・同じ軸で強く褒めて強く不満を言わない。
-    expect(systemInstruction).toContain('良い側も気になる側も中身を決めず（豊富だった・選ぶ楽しさがあった・少なかった などと書かない）');
+    expect(systemInstruction).toContain('どちらか片方だけにせず、その項目に 1 回触れる中で両方を書いてください');
+    expect(systemInstruction).toContain('理由や中身は作らず（豊富だった・選ぶ楽しさがあった・少なかった などと書かない）');
+    expect(systemInstruction).toContain('良い面は「悪くはなかった」「ある程度」くらいの控えめな言い方にしてください');
     expect(systemInstruction).toContain('同じ項目を強く褒めてから強く不満を言う書き方はしないでください');
     // 正規化は生成用の入力だけ。claim（gate が見る意味）は両極性のまま。
     expect(claims.map((c) => c.polarity)).toEqual(['positive', 'concern']);

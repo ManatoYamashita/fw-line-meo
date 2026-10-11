@@ -113,6 +113,7 @@ export interface StructuredGateLexicon {
     | 'companion'
     | 'attribute'
     | 'overlapReason'
+    | 'mixedPositive'
     | 'commentConnective',
     readonly RegExp[]
   >>;
@@ -132,6 +133,7 @@ const LIST_KEYS = [
   'overlapReason',
   'commentConnective',
   'overstatement',
+  'mixedPositive',
 ] as const;
 
 function regexes(v: unknown, where: string): RegExp[] {
@@ -567,6 +569,26 @@ export function evaluateStructuredDraft(
         break;
       }
     }
+
+    // exact overlap（生成の入力では mixed）を片側だけに潰さない（2026-10-11）。本番は positive の欠落を見ないので、
+    // mixed の項目が「もう少し選べると嬉しい」だけ（concern 単独）に収束しても止まらなかった。mixed の項目に触れた文
+    // （と、その前後の別の claim を名指さない文）に、控えめでも良い面（positive の手がかり・mixedPositive）と気になる面の
+    // 両方があることだけを見る。「〜と嬉しい」の願望は concern の言い方なので、良い面の手がかりから除いて数える。
+    // 対象は overlap の項目だけで、一般の positive の欠落は従来どおり見ない。一言がその項目に触れていれば一言に従う。
+    // その項目に触れない下書きは数えない（全項目の回収は求めない・片側の完全な無視は concernDropped が見る）。
+    const positiveCues = [...lex.polarityCues.positive, ...lex.lists.mixedPositive];
+    const withoutWishes = (t: string) => lex.polarityCues.concern.reduce((acc, p) => acc.replace(new RegExp(p.source, 'g'), ''), t);
+    for (const cl of overlapClaims.filter((x) => x.polarity === 'positive')) {
+      if (comment !== undefined && commentRelates(cl, () => true)) continue;
+      const near = sentences
+        .map((_, i) => i)
+        .filter((i) => aboutClaim(cl, i) || ((aboutClaim(cl, i - 1) || (i + 1 < sentences.length && aboutClaim(cl, i + 1))) && !aboutAny(i)));
+      if (!near.some((i) => aboutClaim(cl, i))) continue;
+      const scope = near.map((i) => sentences[i]!).join('');
+      const hasPositive = firstMatch(withoutWishes(scope), positiveCues) !== null;
+      const hasConcern = firstMatch(scope, lex.polarityCues.concern) !== null;
+      if (!hasPositive || !hasConcern) add('mixedCollapsed', scope);
+    }
   }
 
   // 一言の内容を、別の claim の理由として結ぶ（「店員さんが丁寧だったので、刺身もおいしく感じた」「窓側の席だったので
@@ -649,6 +671,7 @@ export const RUNTIME_HARD_KINDS: ReadonlySet<string> = new Set([
   'cause',
   'commentLinkage',
   'overlapReason',
+  'mixedCollapsed',
   'polarityReversal',
   'overstatement',
   'unselectedTarget',

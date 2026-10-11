@@ -605,3 +605,88 @@ describe('矛盾して見える回答（星と内容・exact overlap・感想と
     expect(onRetry).not.toHaveBeenCalled();
   });
 });
+
+describe('exact overlap（mixed）を片側だけに潰さない（mixedCollapsed・mixed の項目だけの runtime check）', () => {
+  // 実 Gemini（2026-10-11）: mixed の項目が 3 回とも「もう少し選べると嬉しい」だけ（concern 単独）になった。本番は
+  // positive の欠落を見ないので止まらなかった。mixed の項目だけに、控えめな良い面と気になる面の両方を求める。
+  const runtimeOf = (m: StructuredDraftMaterial, draft: string) => runtimeViolations(gateInputOf(m), draft, LEX, LEGACY);
+  const variety = (polarity: 'positive' | 'concern') => ({ polarity, categoryCode: 'drink', categoryLabel: 'ドリンク', facets: [{ code: 'variety', label: '種類' }] });
+  const volume = (polarity: 'positive' | 'concern') => ({ polarity, categoryCode: 'food', categoryLabel: '料理', facets: [{ code: 'volume', label: '量' }] });
+  const courtesy = { polarity: 'positive' as const, categoryCode: 'service_delivery', categoryLabel: '接客・提供', facets: [{ code: 'service_courtesy', label: '接客の丁寧さ' }] };
+  const mixed = material({ selections: [variety('positive'), variety('concern')] });
+
+  it.each([
+    'ドリンクの種類については、もう少し選択肢があると嬉しいと感じました。',
+    'ドリンクの種類については、もう少し選べるとより嬉しかったです。',
+    'ドリンクの種類については、もう少し選択肢があると嬉しいなと感じました。',
+  ])('感想なし: concern 単独に潰れた下書きは止める（実例）: %s', (draft) => {
+    expect(runtimeOf(mixed, draft)).toContain('mixedCollapsed');
+  });
+
+  it('感想なし: positive 単独に潰れた下書きも止める', () => {
+    expect(runtimeOf(mixed, 'ドリンクの種類は良かったです。')).toContain('mixedCollapsed');
+  });
+
+  it.each([
+    'ドリンクの種類はある程度揃っていましたが、もう少し選べると嬉しいです。',
+    'ドリンクの種類は悪くなかったですが、もう少し選択肢があると嬉しいです。',
+    'ドリンクの種類はそこそこでしたが、もう少し選べるとより良いと思います。',
+    'ドリンクの種類は良いと思う反面、少し気になる部分もありました。',
+    'ドリンクの種類は悪くはなかったです。ただ、もう少し選べると嬉しいです。',
+  ])('感想なし: 控えめな良い面と気になる面の両方を書いた mixed は通す: %s', (draft) => {
+    expect(runtimeOf(mixed, draft)).toEqual([]);
+  });
+
+  it('感想あり: 感想の具体性で両面を書いた文は通す。感想がその項目に触れていれば感想に従う', () => {
+    const commented = material({ selections: [variety('positive'), variety('concern')], comment: '定番は揃っていたけどノンアルが少なかった' });
+    expect(runtimeOf(commented, '定番のドリンクは揃っていた一方で、ノンアルの選択肢はもう少しあると嬉しいです。')).toEqual([]);
+    expect(runtimeOf(commented, 'ドリンクは定番がひと通り揃っていて良かったです。ただ、ノンアルの種類がもう少しあると嬉しいです。')).toEqual([]);
+    const aboutVariety = material({ selections: [variety('positive'), variety('concern')], comment: 'ノンアルの種類が少なかった' });
+    expect(runtimeOf(aboutVariety, 'ノンアルの種類がもう少しあると嬉しいです。')).toEqual([]);
+  });
+
+  it('通常の positive だけ: 一般の positive の欠落は従来どおり見ない（positive coverage の hard gate を戻さない）', () => {
+    const m = material({ selections: [volume('positive'), courtesy, variety('concern')] });
+    expect(runtimeOf(m, 'ドリンクはもう少し種類があると嬉しいです。')).toEqual([]);
+    expect(runtimeOf(material({ selections: [volume('positive'), courtesy] }), '接客が丁寧で気持ちよく利用できました。')).toEqual([]);
+  });
+
+  it('通常の concern だけ: 従来どおり（mixedCollapsed は出ず、concern を完全に無視したら止める）', () => {
+    const m = material({ selections: [variety('concern')] });
+    expect(runtimeOf(m, 'ドリンクはもう少し種類があると嬉しいです。')).toEqual([]);
+    const both = material({ selections: [volume('positive'), variety('concern')] });
+    expect(runtimeOf(both, 'ボリュームがあって良かったです。')).toEqual(['concernDropped']);
+  });
+
+  it('non-overlap: 従来の判定のまま（mixedCollapsed は出ない）', () => {
+    const m = material({ selections: [volume('positive'), courtesy, variety('concern')] });
+    expect(runtimeOf(m, '料理はボリュームがあり、接客も丁寧でした。ドリンクの種類が増えるとより良いと思います。')).toEqual([]);
+  });
+
+  it('一部だけ overlap: non-overlap の claim は普通に書けて、mixed の項目だけ両面を求める', () => {
+    const m = material({ selections: [volume('positive'), variety('positive'), variety('concern')] });
+    expect(runtimeOf(m, '料理はボリュームがありました。ドリンクの種類は悪くなかったですが、もう少し選べると嬉しいです。')).toEqual([]);
+    // 前の文の「良かった」は量の文（別の claim）なので、ドリンクの両面には数えない。
+    expect(runtimeOf(m, '料理はボリュームがあって良かったです。ドリンクの種類はもう少し選べると嬉しいです。')).toContain('mixedCollapsed');
+    // mixed の項目に触れない下書きは数えない（全項目の回収は求めない）。concern の完全な無視は concernDropped が見る。
+    expect(runtimeOf(m, '料理はボリュームがあって良かったです。')).not.toContain('mixedCollapsed');
+  });
+
+  it('Realizer: concern 単独に潰れた 1 回目は mixed の注意を足して作り直し、両面の 2 回目を返す', async () => {
+    const onRetry = vi.fn();
+    const contents: string[] = [];
+    const replies = ['ドリンクの種類については、もう少し選択肢があると嬉しいと感じました。', 'ドリンクの種類は悪くなかったですが、もう少し選べると嬉しいです。'];
+    const client: GenAiClient = {
+      models: {
+        generateContent: async (req) => {
+          contents.push(req.contents);
+          return { text: JSON.stringify({ draft: replies.shift() ?? '' }) };
+        },
+      },
+    };
+    const result = await createNaturalRealizer(client, { onRetry }).prepare(mixed);
+    expect(result).toEqual({ kind: 'draft', draft: 'ドリンクの種類は悪くなかったですが、もう少し選べると嬉しいです。', source: 'llm', attempts: 2 });
+    expect(onRetry.mock.calls[0]![0]).toEqual(['mixedCollapsed']);
+    expect(contents[1]).toContain('片側だけにしない');
+  });
+});
