@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -76,6 +76,20 @@ export function DraftPanel({
 
   const canRegenerate = regenerationsLeft > 0 && !regenerating;
 
+  // 再生成の押しボタンの中身。生成中は押しボタン自身が処理中であることを示す（押せたかどうかを迷わせない）。
+  // 図形は装飾として読み上げから隠し、状態は直下の文言で伝える（動きを止める設定でも読める）。
+  function regenerateLabel(idle: string): ReactNode {
+    if (!regenerating) return idle;
+    return (
+      <>
+        {/* 部品の読み上げ名（動き低減時に可視化される「読み込み中」）は空にする。状態は直下の文言が伝えるので、
+            押しボタンの中で文言を二重に出さない（狭い画面で折り返さない押しボタンからはみ出す）。 */}
+        <Spinner aria-hidden aria-label="" />
+        別の文章を作成しています…
+      </>
+    );
+  }
+
   // 穏やかな通知（生成中・コピー結果）を **1 つのライブリージョンへ集約する**。
   //
   // 領域を内容と同時に DOM へ挿入する形（`{regenerating && <p aria-live="polite">…</p>}`）では、
@@ -100,13 +114,8 @@ export function DraftPanel({
   const notification = (
     <div role="status">
       {regenerating ? (
-        // 文言は直下のテキストノードのまま残す。処理中の図形へ読み上げ名として畳むと、文言が
-        // 部品内部の読み上げ専用要素へ移り、動きの低減が要求されていない実ブラウザでは見えなく
-        // なる。図形は装飾なので必ず読み上げから隠す。
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner aria-hidden />
-          生成中…
-        </p>
+        // 文言は直下のテキストノードのまま残す。処理中の図形は押しボタンの側が持つ（二重に回さない）。
+        <p className="text-center text-sm text-muted-foreground">回答内容をもとに文章を作成しています</p>
       ) : copyState === 'copied' ? (
         <Alert variant="success" role={undefined}>
           <AlertDescription>コピーしました。投稿画面に貼り付けてください。</AlertDescription>
@@ -139,8 +148,9 @@ export function DraftPanel({
           type="button"
           onClick={() => onRegenerate()}
           disabled={!canRegenerate}
+          aria-busy={regenerating}
         >
-          もう一度生成する
+          {regenerateLabel('もう一度生成する')}
         </Button>
         {notification}
         {reviewLink}
@@ -198,8 +208,9 @@ export function DraftPanel({
           type="button"
           onClick={() => onRegenerate()}
           disabled={!canRegenerate}
+          aria-busy={regenerating}
         >
-          別の文章を生成（残り{regenerationsLeft}回）
+          {regenerateLabel(`別の文章を生成（残り${regenerationsLeft}回）`)}
         </Button>
       </div>
       {notification}

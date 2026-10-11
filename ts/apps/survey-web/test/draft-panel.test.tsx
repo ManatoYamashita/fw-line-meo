@@ -10,6 +10,8 @@ import type { DraftPanelProps } from '../src/app/s/[storeId]/types';
 import { announcedText, ownText } from './live-region';
 
 const URL = 'https://search.google.com/local/writereview?placeid=ChIJ';
+/** 再生成中の押しボタンの文言（三点リーダは U+2026）。 */
+const REGENERATING_BUTTON = '別の文章を作成しています…';
 
 function props(over: Partial<DraftPanelProps> = {}): DraftPanelProps {
   return {
@@ -77,10 +79,29 @@ describe('DraftPanel', () => {
     expect((screen.getByRole('button', { name: /別の文章を生成/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('生成中は「生成中…」を表示し再生成を無効化（3.6）', () => {
+  it('生成中は押しボタン自身が「別の文章を作成しています…」に変わり、無効・処理中になる（3.6）', () => {
     render(<DraftPanel {...props({ regenerating: true })} />);
-    expect(screen.getByText('生成中…')).toBeDefined();
-    expect((screen.getByRole('button', { name: /別の文章を生成/ }) as HTMLButtonElement).disabled).toBe(true);
+    const button = screen.getByRole('button', { name: REGENERATING_BUTTON }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    // 図形は押しボタンの中で装飾として回る（状態は文言で伝える）。
+    expect(button.querySelector('[data-slot="spinner"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByText(GENERATING)).toBeDefined();
+    expect(screen.queryByRole('button', { name: /別の文章を生成/ })).toBeNull();
+  });
+
+  it('生成失敗の再試行も、生成中は「別の文章を作成しています…」に変わり無効になる', () => {
+    render(<DraftPanel {...props({ generationFailed: true, regenerating: true })} />);
+    const button = screen.getByRole('button', { name: REGENERATING_BUTTON }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('生成中でないときの押しボタンは処理中ではない', () => {
+    render(<DraftPanel {...props()} />);
+    const button = screen.getByRole('button', { name: /別の文章を生成（残り3回）/ });
+    expect(button.getAttribute('aria-busy')).toBe('false');
+    expect(button.querySelector('[data-slot="spinner"]')).toBeNull();
   });
 
   it('生成失敗時は失敗メッセージ＋再試行＋投稿導線を表示する（3.9）', () => {
@@ -124,8 +145,8 @@ describe('DraftPanel', () => {
 
 // ---- ここから ui-airbnb-surfaces task 4.2 が追加した検証 ----
 
-/** 生成中の文言。三点リーダは U+2026。既存検証（`getByText('生成中…')`）と同じ値を指す。 */
-const GENERATING = '生成中…';
+/** 生成中に読み上げ領域へ出す補足。処理中の図形と「作成しています…」は押しボタンの側が持つ。 */
+const GENERATING = '回答内容をもとに文章を作成しています';
 const COPIED = 'コピーしました。投稿画面に貼り付けてください。';
 const MANUAL = '自動コピーできませんでした。上の文章を選択して手動でコピーしてください。';
 const FAILED = '下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。';
@@ -326,10 +347,10 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     expect(announcedText(theLiveRegion()), '生成中の読み上げ文字列').toBe(GENERATING);
   });
 
-  it('処理中の図形は装飾として添えられている（aria-hidden）', () => {
+  it('処理中の図形は押しボタンに装飾として添えられ、読み上げ領域には入らない（aria-hidden）', () => {
     render(<DraftPanel {...props({ regenerating: true })} />);
-    const region = theLiveRegion();
-    const spinner = region.querySelector('[data-slot="spinner"]');
+    expect(theLiveRegion().querySelector('[data-slot="spinner"]'), '図形が読み上げ領域の中で二重に回っています').toBeNull();
+    const spinner = screen.getByRole('button', { name: REGENERATING_BUTTON }).querySelector('[data-slot="spinner"]');
     // **否定の前に非空アンカーを置く。** 図形を掴めていないと下の判定は空振りする。
     expect(spinner, '処理中の図形を掴めていません').not.toBeNull();
     expect(
@@ -340,7 +361,7 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     cleanup();
     render(<DraftPanel {...props()} />);
     expect(
-      theLiveRegion().querySelector('[data-slot="spinner"]'),
+      document.querySelector('[data-slot="spinner"]'),
       '生成中でないのに処理中の図形が描かれています',
     ).toBeNull();
   });
@@ -469,7 +490,9 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     for (const over of [{ regenerationsLeft: 0 }, { regenerating: true }]) {
       cleanup();
       render(<DraftPanel {...props(over)} />);
-      const button = screen.getByRole('button', { name: /別の文章を生成/ }) as HTMLButtonElement;
+      const button = screen.getByRole('button', {
+        name: 'regenerating' in over ? REGENERATING_BUTTON : /別の文章を生成/,
+      }) as HTMLButtonElement;
       const where = JSON.stringify(over);
       expect(button.hasAttribute('disabled'), `${where}: disabled 属性がありません`).toBe(true);
       expect(button.disabled, `${where}: 無効になっていません`).toBe(true);

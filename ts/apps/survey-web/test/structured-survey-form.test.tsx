@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import type { StructuredSurveyDefinition } from '@fwlm/db';
 import { StructuredSurveyForm } from '../src/app/s/[storeId]/structured-survey-form';
 
@@ -61,15 +61,23 @@ function setup(def = definition()) {
   return { onSubmit };
 }
 
+const POSITIVE_TITLE = '良かったところを教えてください';
+const CONCERN_TITLE = '気になったところがあれば教えてください（任意）';
+const COMMENT_TOGGLE = /さらに伝えたいことがある（任意）/;
+const COMMENT_LABEL = 'さらに伝えたいことがあれば入力してください';
+const SUBMIT = 'AIで口コミ文を作る';
+const SUBMITTING = '口コミを作成しています…';
+
 const section = (name: string) => within(screen.getByRole('region', { name }));
-const positive = () => section('良かったところ（任意）');
-const concern = () => section('気になったところ（任意）');
+const positive = () => section(POSITIVE_TITLE);
+const concern = () => section(CONCERN_TITLE);
+const commentToggle = () => screen.getByRole('button', { name: COMMENT_TOGGLE });
 
 function star(n: number): void {
   fireEvent.click(screen.getByRole('button', { name: `星${n}` }));
 }
 function submit(): void {
-  fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+  fireEvent.click(screen.getByRole('button', { name: SUBMIT }));
 }
 /** カテゴリの開閉の押しボタン。選択済みの読み上げ名は「料理（選択あり）」なので、名前の先頭で掴む。 */
 function openCategory(where: ReturnType<typeof within>, label: string): void {
@@ -87,7 +95,9 @@ describe('StructuredSurveyForm', () => {
     }
     // 開く前は facet を 1 つも出さない（初期状態で全 facet を縦に展開しない）。
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
-    expect(screen.getByRole('textbox', { name: /その他、伝えたいこと（任意）/ })).toBeDefined();
+    // 一言欄は最初は閉じている（タップだけで回答できることを優先する）。
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(commentToggle().getAttribute('aria-expanded')).toBe('false');
   });
 
   it('星だけで送信でき、選択は空の配列になる。星が無ければ送信を止める', () => {
@@ -224,7 +234,8 @@ describe('StructuredSurveyForm', () => {
   it('一言は空白だけなら送らず、書いたら送る', () => {
     const { onSubmit } = setup();
     star(5);
-    const box = screen.getByRole('textbox');
+    fireEvent.click(commentToggle());
+    const box = screen.getByRole('textbox', { name: COMMENT_LABEL });
     fireEvent.change(box, { target: { value: '   ' } });
     submit();
     expect(onSubmit.mock.calls[0]![0]).not.toHaveProperty('comment');
@@ -239,5 +250,85 @@ describe('StructuredSurveyForm', () => {
     openCategory(concern(), '料理');
     const ids = Array.from(document.querySelectorAll('[id]')).map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('良かったところが主の見出し、気になったところは任意と分かる見出しで最初から表示される', () => {
+    setup();
+    const positiveHeading = screen.getByRole('heading', { name: POSITIVE_TITLE });
+    const concernHeading = screen.getByRole('heading', { name: CONCERN_TITLE });
+    expect(concernHeading.textContent).toContain('（任意）');
+    // 気になったところは折り畳まない: カテゴリの押しボタンが最初から操作できる。
+    expect(concern().getAllByRole('button').map((b) => b.textContent)).toEqual(['料理', '接客・提供']);
+    // 見出しの強さで優先度を付ける（主の方が強い）。
+    expect(positiveHeading.className).toContain('text-xl');
+    expect(concernHeading.className).not.toContain('text-xl');
+  });
+
+  it('一言欄は押すと開き、閉じて開き直しても入力は消えず、閉じたままでも送信に載る', () => {
+    const { onSubmit } = setup();
+    star(4);
+    const toggle = commentToggle();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const box = screen.getByRole('textbox', { name: COMMENT_LABEL });
+    expect(toggle.getAttribute('aria-controls')).toBe(box.closest('label')!.id);
+    fireEvent.change(box, { target: { value: '窓側の席が落ち着いた' } });
+
+    fireEvent.click(commentToggle());
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(commentToggle().textContent).toContain('入力済み');
+
+    fireEvent.click(commentToggle());
+    expect((screen.getByRole('textbox', { name: COMMENT_LABEL }) as HTMLTextAreaElement).value).toBe('窓側の席が落ち着いた');
+
+    fireEvent.click(commentToggle());
+    submit();
+    expect(onSubmit.mock.calls[0]![0].comment).toBe('窓側の席が落ち着いた');
+  });
+
+  it('選んだ札とカテゴリは、色以外の手掛かり（チェック印・✓）でも分かる', () => {
+    setup();
+    openCategory(positive(), '接客・提供');
+    const chip = positive().getByRole('checkbox', { name: '接客の丁寧さ' });
+    fireEvent.click(chip);
+    expect(chip.getAttribute('aria-checked')).toBe('true');
+    openCategory(positive(), '料理');
+    const category = positive().getByRole('button', { name: /^接客・提供\s*（選択あり）$/ });
+    expect(category.textContent).toContain('✓');
+  });
+
+  it('送信中は押しボタンが「口コミを作成しています…」になり、無効・処理中で、補足を読み上げ領域に出す', () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(<StructuredSurveyForm definition={definition()} onSubmit={onSubmit} submitting={false} />);
+    const idle = screen.getByRole('button', { name: SUBMIT }) as HTMLButtonElement;
+    expect(idle.disabled).toBe(false);
+    expect(idle.getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('status').textContent).toBe('');
+
+    rerender(<StructuredSurveyForm definition={definition()} onSubmit={onSubmit} submitting />);
+    const busy = screen.getByRole('button', { name: SUBMITTING }) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    expect(busy.querySelector('[data-slot="spinner"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByRole('status').textContent).toBe('回答内容をもとにAIが文章を作成しています');
+
+    // 送信中に form を送っても onSubmit を呼ばない（二重送信の防止）。
+    star(5);
+    fireEvent.submit(busy.closest('form')!);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('送信が長引くと、処理中であることを言い直す', () => {
+    vi.useFakeTimers();
+    try {
+      render(<StructuredSurveyForm definition={definition()} onSubmit={vi.fn()} submitting />);
+      expect(screen.getByRole('status').textContent).toBe('回答内容をもとにAIが文章を作成しています');
+      act(() => {
+        vi.advanceTimersByTime(8000);
+      });
+      expect(screen.getByRole('status').textContent).toContain('このままお待ちください');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

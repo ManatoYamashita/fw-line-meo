@@ -1,10 +1,11 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { StructuredSurveyDefinition, SurveyCategoryDefinition, SurveyFacetOption } from '@fwlm/db';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
+import { Spinner } from '@fwlm/ui/components/spinner';
 import { Textarea } from '@fwlm/ui/components/textarea';
 import type { Polarity, StructuredSurveyAnswer } from '../../../lib/structured-answer';
 import type { Star } from '../../../lib/domain';
@@ -41,8 +42,14 @@ const STARS = [1, 2, 3, 4, 5] as const;
 const COMMENT_PLACEHOLDER = '例）窓側の席が落ち着いた／提供まで少し待った';
 
 // 選択の札（チェックボックスを包むラベル）。legacy の観点の札と同じ寸法・枠にする（survey-form.tsx）。
+// 選んだ札は枠・面・字の太さでも示す（スマホで一覧したとき、小さなチェック印だけでは見落とすため）。
+// 色だけには頼らない: チェック印（Checkbox の中の ✓）と字の太さが色と別の手掛かりとして残る。
 const CHIP_CLASS =
-  'mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border border-input px-4 py-2 transition-colors duration-150';
+  'mr-2 mb-2 inline-flex min-h-11 items-center gap-2 rounded-lg border border-input px-4 py-2 transition-colors duration-150 has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary/10 has-[[data-checked]]:font-semibold';
+
+// 生成に時間がかかっているときの案内へ切り替えるまでの時間。数秒で返る通常の生成では出さず、
+// 「固まった」と感じ始める前に、まだ処理中であることを言い直す。
+const SLOW_NOTICE_MS = 8000;
 
 export interface StructuredSurveyFormProps {
   definition: StructuredSurveyDefinition;
@@ -55,9 +62,25 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
   const [evidence, setEvidence] = useState<EvidenceState>(EMPTY_EVIDENCE);
   const [comment, setComment] = useState('');
   const [showStarError, setShowStarError] = useState(false);
+  // 一言欄の開閉（画面の状態）。閉じても comment は残し、送信にも載せる。
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [slow, setSlow] = useState(false);
   const starErrorId = useId();
+  const commentPanelId = useId();
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!submitting) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), SLOW_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [submitting]);
 
   function submit(): void {
+    // 二重送信を止める（押しボタンの disabled に加えて、Enter での送信も弾く）。
+    if (submitting) return;
     if (star === null) {
       setShowStarError(true);
       return;
@@ -107,39 +130,93 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
         )}
       </fieldset>
 
+      {/* 良かったところを主の入力、気になったところを任意の補助として見せる。差は見出しの強さ・区切り・補足文で
+          付け、気になったところは折り畳まない（低評価の声を隠す UI にしない）。部品・操作・回答の意味は同じ。 */}
       <PolaritySection
         polarity="positive"
-        title="良かったところ（任意）"
-        hint="当てはまるものを選んでください"
+        emphasis="primary"
+        title="良かったところを教えてください"
+        hint="当てはまるものをいくつでも選べます"
+        summaryLabel="良かったところで選んだ内容"
         definition={definition}
         evidence={evidence}
         onChange={setEvidence}
       />
       <PolaritySection
         polarity="concern"
-        title="気になったところ（任意）"
-        hint="あれば教えてください"
+        emphasis="secondary"
+        title="気になったところがあれば教えてください（任意）"
+        hint="当てはまるものがあれば選んでください"
+        summaryLabel="気になったところで選んだ内容"
         definition={definition}
         evidence={evidence}
         onChange={setEvidence}
       />
 
-      <label className="block">
-        <span className="text-lg font-semibold">その他、伝えたいこと（任意）</span>
-        <span className="mt-1 block text-sm text-muted-foreground">選択肢にないことがあれば入力してください</span>
-        <Textarea
-          className="mt-2"
-          rows={3}
-          value={comment}
-          maxLength={COMMENT_MAX}
-          placeholder={COMMENT_PLACEHOLDER}
-          onChange={(e) => setComment(e.target.value)}
-        />
-      </label>
+      {/* 一言は任意。タップだけで回答できることを優先し、最初は開く押しボタンだけを出す。 */}
+      <div className="space-y-2">
+        {/* 押しボタン部品の寸法区分（固定の高さ・折り返さない）では狭い画面で文言がはみ出すので、素の要素で描く。
+            焦点の指標は theme.css の :focus-visible が全要素に当てる。 */}
+        <button
+          type="button"
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg px-1 text-left font-medium underline-offset-4 hover:underline"
+          aria-expanded={commentOpen}
+          aria-controls={commentOpen ? commentPanelId : undefined}
+          onClick={() => {
+            const next = !commentOpen;
+            setCommentOpen(next);
+            // 開いたら入力欄へ焦点を移す（押した直後に書き始められる）。
+            if (next) requestAnimationFrame(() => commentRef.current?.focus());
+          }}
+        >
+          <span aria-hidden="true">{commentOpen ? '－' : '＋'}</span>
+          さらに伝えたいことがある（任意）
+          {!commentOpen && comment.trim() !== '' ? (
+            <span className="text-sm font-normal text-muted-foreground">（入力済み）</span>
+          ) : null}
+        </button>
+        {commentOpen ? (
+          <label id={commentPanelId} className="block">
+            <span className="text-sm font-medium">さらに伝えたいことがあれば入力してください</span>
+            <Textarea
+              ref={commentRef}
+              className="mt-2"
+              rows={3}
+              value={comment}
+              maxLength={COMMENT_MAX}
+              placeholder={COMMENT_PLACEHOLDER}
+              onChange={(e) => setComment(e.target.value)}
+            />
+          </label>
+        ) : null}
+      </div>
 
-      <Button size="lg" className="w-full" type="submit" disabled={submitting}>
-        送信する
-      </Button>
+      <div className="space-y-3">
+        <Button size="lg" className="w-full" type="submit" disabled={submitting} aria-busy={submitting}>
+          {submitting ? (
+            <>
+              {/* 図形は装飾。状態は直下の文言で伝える（動きを止める設定でも読める）。 */}
+              {/* 部品の読み上げ名（動き低減時に可視化される「読み込み中」）は空にする。状態は直下の文言が伝えるので、
+                  押しボタンの中で文言を二重に出さない（狭い画面で折り返さない押しボタンからはみ出す）。 */}
+              <Spinner aria-hidden aria-label="" />
+              口コミを作成しています…
+            </>
+          ) : (
+            'AIで口コミ文を作る'
+          )}
+        </Button>
+        {/* 生成中の補足。容器を常時マウントし、中身だけを差し替える（挿入と同時の領域は読み上げが発火しない・
+            draft-panel.tsx の notification と同じ理由）。 */}
+        <div role="status">
+          {submitting ? (
+            <p className="text-center text-sm text-muted-foreground">
+              {slow
+                ? '少し時間がかかっています。画面を閉じずにこのままお待ちください'
+                : '回答内容をもとにAIが文章を作成しています'}
+            </p>
+          ) : null}
+        </div>
+      </div>
     </form>
   );
 }
@@ -148,14 +225,27 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
 
 interface PolaritySectionProps {
   polarity: Polarity;
+  /** 見た目の優先度。primary = 良かったところ（主の入力）、secondary = 気になったところ（任意の補助）。 */
+  emphasis: 'primary' | 'secondary';
   title: string;
   hint: string;
+  /** 折り畳んだカテゴリの要約一覧の読み上げ名。 */
+  summaryLabel: string;
   definition: StructuredSurveyDefinition;
   evidence: EvidenceState;
   onChange: (next: EvidenceState) => void;
 }
 
-function PolaritySection({ polarity, title, hint, definition, evidence, onChange }: PolaritySectionProps) {
+function PolaritySection({
+  polarity,
+  emphasis,
+  title,
+  hint,
+  summaryLabel,
+  definition,
+  evidence,
+  onChange,
+}: PolaritySectionProps) {
   // 画面の展開状態（回答の意味ではない）。極性ごとに独立し、開いているカテゴリは 1 つまで。
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const headingId = `${polarity}-heading`;
@@ -164,9 +254,12 @@ function PolaritySection({ polarity, title, hint, definition, evidence, onChange
     .filter(({ category, selected }) => category.code !== openCategory && hasEvidence(selected));
 
   return (
-    <section className="space-y-3" aria-labelledby={headingId}>
+    <section
+      className={emphasis === 'primary' ? 'space-y-3' : 'space-y-3 border-t border-border pt-6'}
+      aria-labelledby={headingId}
+    >
       <div>
-        <h2 id={headingId} className="text-lg font-semibold">
+        <h2 id={headingId} className={emphasis === 'primary' ? 'text-xl font-bold' : 'text-base font-medium'}>
           {title}
         </h2>
         <p className="text-sm text-muted-foreground">{hint}</p>
@@ -180,6 +273,8 @@ function PolaritySection({ polarity, title, hint, definition, evidence, onChange
               key={category.code}
               type="button"
               variant={open ? 'secondary' : 'outline'}
+              // 選択済みのカテゴリは枠でも示す（✓ と読み上げに加えて、閉じた状態でも一目で分かるように）。
+              className={selected ? 'border-primary font-semibold' : undefined}
               aria-expanded={open}
               aria-controls={open ? panelId(polarity, category.code) : undefined}
               onClick={() => setOpenCategory(open ? null : category.code)}
@@ -194,7 +289,7 @@ function PolaritySection({ polarity, title, hint, definition, evidence, onChange
         })}
       </div>
       {summaries.length === 0 ? null : (
-        <ul className="space-y-1 text-sm" aria-label={`${title.replace('（任意）', '')}で選んだ内容`}>
+        <ul className="space-y-1 text-sm" aria-label={summaryLabel}>
           {summaries.map(({ category, selected }) => (
             <li key={category.code}>
               ✓ {category.label}：{summaryText(summarizeCategory(selected, category), category)}

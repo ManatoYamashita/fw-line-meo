@@ -12,8 +12,8 @@ import { openStructuredSurvey } from './fixtures/structured';
 // 捲れる領域は一言の <textarea> の 1 つ（legacy の回答画面と同じ・ui-foundation.spec.ts）。
 const SCROLL_REGIONS = 1;
 
-const positive = (page: Page) => page.getByRole('region', { name: '良かったところ（任意）' });
-const concern = (page: Page) => page.getByRole('region', { name: '気になったところ（任意）' });
+const positive = (page: Page) => page.getByRole('region', { name: '良かったところを教えてください' });
+const concern = (page: Page) => page.getByRole('region', { name: '気になったところがあれば教えてください（任意）' });
 
 test.describe('structured survey（客向け）', () => {
   test('星・料理・Target・facet・気になったところ・一言を選んで送信し、structured の下書きの画面へ進む', async ({ page }) => {
@@ -39,11 +39,13 @@ test.describe('structured survey（客向け）', () => {
     await concernFood.getByRole('checkbox', { name: '刺身盛り合わせ' }).click();
     await concernFood.getByText('刺身盛り合わせについて').locator('..').getByRole('checkbox', { name: '温度・状態' }).click();
 
-    await page.getByRole('textbox', { name: /その他、伝えたいこと/ }).fill('少しぬるかった');
+    // 一言欄は最初は閉じている。開く押しボタンを押してから書く。
+    await page.getByRole('button', { name: /さらに伝えたいことがある（任意）/ }).click();
+    await page.getByRole('textbox', { name: 'さらに伝えたいことがあれば入力してください' }).fill('少しぬるかった');
 
     const request = page.waitForRequest((r) => r.url().endsWith('/api/responses') && r.method() === 'POST');
     const response = page.waitForResponse((r) => r.url().endsWith('/api/responses'));
-    await page.getByRole('button', { name: '送信する' }).click();
+    await page.getByRole('button', { name: 'AIで口コミ文を作る' }).click();
     const body = (await request).postDataJSON() as Record<string, unknown>;
     expect(body).toMatchObject({
       star: 4,
@@ -78,7 +80,7 @@ test.describe('structured survey（客向け）', () => {
     await positive(page).getByRole('button', { name: '料理' }).click();
     await concern(page).getByRole('button', { name: '接客・提供' }).click();
     const request = page.waitForRequest((r) => r.url().endsWith('/api/responses') && r.method() === 'POST');
-    await page.getByRole('button', { name: '送信する' }).click();
+    await page.getByRole('button', { name: 'AIで口コミ文を作る' }).click();
     expect((await request).postDataJSON()).toMatchObject({ star: 2, positiveSelections: [], concernSelections: [] });
     await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
   });
