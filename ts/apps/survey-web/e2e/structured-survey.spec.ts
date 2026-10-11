@@ -34,14 +34,16 @@ test.describe('structured survey（客向け）', () => {
     );
 
     // 気になったところ: 同じ刺身盛り合わせ → 味（矛盾として扱わない）。
+    // 気になったところは最初は畳まれている。入口を押して開く。
+    await page.getByRole('button', { name: /^気になったところ（任意）/ }).click();
     await concern(page).getByRole('button', { name: '料理' }).click();
     const concernFood = concern(page).getByRole('group', { name: '料理' });
     await concernFood.getByRole('checkbox', { name: '刺身盛り合わせ' }).click();
     await concernFood.getByText('刺身盛り合わせについて').locator('..').getByRole('checkbox', { name: '温度・状態' }).click();
 
     // 一言欄は最初は閉じている。開く押しボタンを押してから書く。
-    await page.getByRole('button', { name: /さらに伝えたいことがある（任意）/ }).click();
-    await page.getByRole('textbox', { name: 'さらに伝えたいことがあれば入力してください' }).fill('少しぬるかった');
+    await page.getByRole('button', { name: /^その他の感想（任意）/ }).click();
+    await page.getByRole('textbox', { name: 'その他に伝えたいことがあれば入力してください' }).fill('少しぬるかった');
 
     const request = page.waitForRequest((r) => r.url().endsWith('/api/responses') && r.method() === 'POST');
     const response = page.waitForResponse((r) => r.url().endsWith('/api/responses'));
@@ -78,6 +80,7 @@ test.describe('structured survey（客向け）', () => {
     await page.getByRole('button', { name: '星2' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
+    await page.getByRole('button', { name: /^気になったところ（任意）/ }).click();
     await concern(page).getByRole('button', { name: '接客・提供' }).click();
     const submitButton = page.getByRole('button', { name: '口コミ文を作る' });
     await expect(submitButton).toBeDisabled();

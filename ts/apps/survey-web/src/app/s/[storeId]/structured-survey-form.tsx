@@ -14,6 +14,7 @@ import {
   MIN_MATERIALS,
   categoryEvidence,
   countMaterials,
+  countPolarityMaterials,
   hasEvidence,
   summarizeCategory,
   summaryText,
@@ -137,8 +138,8 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
         )}
       </fieldset>
 
-      {/* 良かったところを主の入力、気になったところを任意の補助として見せる。差は見出しの強さ・区切り・補足文で
-          付け、気になったところは折り畳まない（低評価の声を隠す UI にしない）。部品・操作・回答の意味は同じ。 */}
+      {/* 良かったところを主の入力として常に開き、気になったところは任意の補助として最初は畳む（必要な人だけ開く）。
+          畳んでも入口は常に見え、選んだ内容は消えずに送信・件数に含まれる。部品・操作・回答の意味は同じ。 */}
       <PolaritySection
         polarity="positive"
         emphasis="primary"
@@ -161,30 +162,22 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
       />
 
       {/* 一言は任意。タップだけで回答できることを優先し、最初は開く押しボタンだけを出す。 */}
-      <div className="space-y-2">
-        {/* 押しボタン部品の寸法区分（固定の高さ・折り返さない）では狭い画面で文言がはみ出すので、素の要素で描く。
-            焦点の指標は theme.css の :focus-visible が全要素に当てる。 */}
-        <button
-          type="button"
-          className="inline-flex min-h-11 items-center gap-2 rounded-lg px-1 text-left font-medium underline-offset-4 hover:underline"
-          aria-expanded={commentOpen}
-          aria-controls={commentOpen ? commentPanelId : undefined}
-          onClick={() => {
+      <div className="space-y-2 border-t border-border pt-4">
+        <DisclosureToggle
+          label="その他の感想（任意）"
+          open={commentOpen}
+          controls={commentPanelId}
+          status={comment.trim() !== '' ? '入力済み' : null}
+          onToggle={() => {
             const next = !commentOpen;
             setCommentOpen(next);
             // 開いたら入力欄へ焦点を移す（押した直後に書き始められる）。
             if (next) requestAnimationFrame(() => commentRef.current?.focus());
           }}
-        >
-          <span aria-hidden="true">{commentOpen ? '－' : '＋'}</span>
-          さらに伝えたいことがある（任意）
-          {!commentOpen && comment.trim() !== '' ? (
-            <span className="text-sm font-normal text-muted-foreground">（入力済み）</span>
-          ) : null}
-        </button>
+        />
         {commentOpen ? (
           <label id={commentPanelId} className="block">
-            <span className="text-sm font-medium">さらに伝えたいことがあれば入力してください</span>
+            <span className="text-sm text-muted-foreground">その他に伝えたいことがあれば入力してください</span>
             <Textarea
               ref={commentRef}
               className="mt-2"
@@ -269,67 +262,133 @@ function PolaritySection({
 }: PolaritySectionProps) {
   // 画面の展開状態（回答の意味ではない）。極性ごとに独立し、開いているカテゴリは 1 つまで。
   const [openCategory, setOpenCategory] = useState<string | null>(null);
+  // 極性そのものの開閉（secondary だけが畳める）。畳んでも evidence はフォームが持つので消えない。
+  // この部品は畳んでもマウントされたままなので、開き直したときに開いていたカテゴリも戻る。
+  const collapsible = emphasis === 'secondary';
+  const [expanded, setExpanded] = useState(!collapsible);
   const headingId = `${polarity}-heading`;
+  const bodyId = `${polarity}-body`;
+  const selectedCount = collapsible ? countPolarityMaterials(evidence[polarity], definition) : 0;
   const summaries = definition.categories
     .map((category) => ({ category, selected: categoryEvidence(evidence, polarity, category.code) }))
     .filter(({ category, selected }) => category.code !== openCategory && hasEvidence(selected));
 
   return (
     <section
-      className={emphasis === 'primary' ? 'space-y-3' : 'space-y-3 border-t border-border pt-6'}
+      className={collapsible ? 'space-y-3 border-t border-border pt-4' : 'space-y-3'}
       aria-labelledby={headingId}
     >
-      <div>
-        <h2 id={headingId} className={emphasis === 'primary' ? 'text-xl font-bold' : 'text-base font-medium'}>
-          {title}
-        </h2>
-        <p className="text-sm text-muted-foreground">{hint}</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {definition.categories.map((category) => {
-          const open = openCategory === category.code;
-          const selected = hasEvidence(categoryEvidence(evidence, polarity, category.code));
-          return (
-            <Button
-              key={category.code}
-              type="button"
-              variant={open ? 'secondary' : 'outline'}
-              // 選択済みのカテゴリは枠でも示す（✓ と読み上げに加えて、閉じた状態でも一目で分かるように）。
-              className={selected ? 'border-primary font-semibold' : undefined}
-              aria-expanded={open}
-              aria-controls={open ? panelId(polarity, category.code) : undefined}
-              onClick={() => setOpenCategory(open ? null : category.code)}
-            >
-              {/* 選択済みは印と読み上げの両方で示す（色だけにしない）。印は読み上げから隠し、読み上げ名は
-                  「料理（選択あり）」にする。 */}
-              {selected ? <span aria-hidden="true">✓ </span> : null}
-              {category.label}
-              {selected ? <span className="sr-only">（選択あり）</span> : null}
-            </Button>
-          );
-        })}
-      </div>
-      {summaries.length === 0 ? null : (
-        <ul className="space-y-1 text-sm" aria-label={summaryLabel}>
-          {summaries.map(({ category, selected }) => (
-            <li key={category.code}>
-              ✓ {category.label}：{summaryText(summarizeCategory(selected, category), category)}
-            </li>
-          ))}
-        </ul>
-      )}
-      {definition.categories
-        .filter((category) => category.code === openCategory)
-        .map((category) => (
-          <CategoryPanel
-            key={category.code}
-            polarity={polarity}
-            category={category}
-            evidence={evidence}
-            onChange={onChange}
+      {collapsible ? (
+        // 見出しの中に開閉の押しボタンを置く（見出しで移動したとき、その場で開ける）。領域の名前は件数を含まない
+        // 見出しの文言だけにする。
+        <h2 className="text-base font-medium">
+          <DisclosureToggle
+            label={title}
+            labelId={headingId}
+            open={expanded}
+            controls={bodyId}
+            status={selectedCount > 0 ? `${selectedCount}件選択済み` : null}
+            onToggle={() => setExpanded(!expanded)}
           />
-        ))}
+        </h2>
+      ) : (
+        <div>
+          <h2 id={headingId} className="text-xl font-bold">
+            {title}
+          </h2>
+          <p className="text-sm text-muted-foreground">{hint}</p>
+        </div>
+      )}
+      {expanded ? (
+        <div id={bodyId} className="space-y-3">
+          {collapsible ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            {definition.categories.map((category) => {
+              const open = openCategory === category.code;
+              const selected = hasEvidence(categoryEvidence(evidence, polarity, category.code));
+              return (
+                <Button
+                  key={category.code}
+                  type="button"
+                  variant={open ? 'secondary' : 'outline'}
+                  // 選択済みのカテゴリは枠でも示す（✓ と読み上げに加えて、閉じた状態でも一目で分かるように）。
+                  className={selected ? 'border-primary font-semibold' : undefined}
+                  aria-expanded={open}
+                  aria-controls={open ? panelId(polarity, category.code) : undefined}
+                  onClick={() => setOpenCategory(open ? null : category.code)}
+                >
+                  {/* 選択済みは印と読み上げの両方で示す（色だけにしない）。印は読み上げから隠し、読み上げ名は
+                      「料理（選択あり）」にする。 */}
+                  {selected ? <span aria-hidden="true">✓ </span> : null}
+                  {category.label}
+                  {selected ? <span className="sr-only">（選択あり）</span> : null}
+                </Button>
+              );
+            })}
+          </div>
+          {summaries.length === 0 ? null : (
+            <ul className="space-y-1 text-sm" aria-label={summaryLabel}>
+              {summaries.map(({ category, selected }) => (
+                <li key={category.code}>
+                  ✓ {category.label}：{summaryText(summarizeCategory(selected, category), category)}
+                </li>
+              ))}
+            </ul>
+          )}
+          {definition.categories
+            .filter((category) => category.code === openCategory)
+            .map((category) => (
+              <CategoryPanel
+                key={category.code}
+                polarity={polarity}
+                category={category}
+                evidence={evidence}
+                onChange={onChange}
+              />
+            ))}
+        </div>
+      ) : null}
     </section>
+  );
+}
+
+// --- 任意の項目の開閉 ------------------------------------------------------------------------
+
+interface DisclosureToggleProps {
+  label: string;
+  /** label の文言を包む要素の id（領域の名前として指すとき）。 */
+  labelId?: string;
+  open: boolean;
+  /** 開いているときに出る中身の id。 */
+  controls: string;
+  /** 畳んでいるときに添える状態（「2件選択済み」「入力済み」）。無ければ null。 */
+  status: string | null;
+  onToggle: () => void;
+}
+
+// 押しボタン部品の寸法区分（固定の高さ・折り返さない）では狭い画面で文言がはみ出すので、素の要素で描く。
+// 焦点の指標は theme.css の :focus-visible が全要素に当てる。ラベルは折り返さない（「（任意）」だけが次の行に割れない）。開閉は ＋／− の印だけに頼らず、aria-expanded と
+// 文言（開いているときの「閉じる」・畳んでいるときの状態）でも伝える。印は読み上げから隠す。
+function DisclosureToggle({ label, labelId, open, controls, status, onToggle }: DisclosureToggleProps) {
+  return (
+    <button
+      type="button"
+      className="flex min-h-11 w-full flex-wrap items-center gap-x-2 rounded-lg px-1 py-1 text-left text-base font-medium"
+      aria-expanded={open}
+      aria-controls={open ? controls : undefined}
+      onClick={onToggle}
+    >
+      <span aria-hidden="true">{open ? '−' : '＋'}</span>
+      <span id={labelId} className="whitespace-nowrap">
+        {label}
+      </span>
+      {open ? (
+        <span className="ml-auto shrink-0 text-sm font-normal text-muted-foreground">閉じる</span>
+      ) : status !== null ? (
+        // 狭い画面で収まらないときは、ラベルを割らずに状態だけを次の行へ回す。
+        <span className="whitespace-nowrap text-sm font-normal text-primary">✓ {status}</span>
+      ) : null}
+    </button>
   );
 }
 

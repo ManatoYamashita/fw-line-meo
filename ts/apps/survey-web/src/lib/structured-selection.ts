@@ -187,11 +187,14 @@ export const MIN_MATERIALS = 2;
  * 数えると、実質 1 つの回答で下限を満たしてしまう。カテゴリを開いただけ・星・一言は evidence ではないので数えない。
  */
 export function countMaterials(state: EvidenceState, definition: StructuredSurveyDefinition): number {
+  return countPolarityMaterials(state.positive, definition) + countPolarityMaterials(state.concern, definition);
+}
+
+/** 1 つの極性の回答材料の数（数え方は countMaterials と同じ）。折り畳んだ極性に「N件選択済み」を出すのに使う。 */
+export function countPolarityMaterials(evidence: PolarityEvidence, definition: StructuredSurveyDefinition): number {
   let count = 0;
-  for (const polarity of ['positive', 'concern'] as const) {
-    for (const group of toSelectionGroups(state[polarity], definition)) {
-      count += group.targetId === undefined ? group.facetCodes.length : Math.max(1, group.facetCodes.length);
-    }
+  for (const group of toSelectionGroups(evidence, definition)) {
+    count += group.targetId === undefined ? group.facetCodes.length : Math.max(1, group.facetCodes.length);
   }
   return count;
 }
