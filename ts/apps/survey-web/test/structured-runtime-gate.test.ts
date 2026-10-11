@@ -143,6 +143,33 @@ describe('Target の名前に入れた評価・推奨・再訪の言葉は検査
   it('名前の外の評価の言葉は、これまでどおり止める', () => {
     expect(runtime('刺身盛り合わせ', '刺身盛り合わせが絶品でした。')).toContain('intensity');
   });
+
+  it('規則より前に登録された、語の中を空白・見えない文字で区切った名前も、評価・推奨・再訪の部分は検査から外さない', () => {
+    expect(runtime('絶 品刺身', '絶 品刺身がおいしかったです。')).toContain('intensity');
+    expect(runtime('絶​品刺身', '絶​品刺身がおいしかったです。')).toContain('intensity');
+    expect(runtime('お​すすめ盛り', 'お​すすめ盛りがおいしかったです。')).toContain('recommendation');
+    expect(runtime('また​来たい盛り', 'また​来たい盛りがおいしかったです。')).toContain('revisit');
+  });
+
+  it('名前の外でも、空白・見えない文字で区切った評価・推奨・再訪の語を止める', () => {
+    expect(runtime('刺身盛り合わせ', '刺身盛り合わせが絶 品でした。')).toContain('intensity');
+    expect(runtime('刺身盛り合わせ', '刺身盛り合わせが絶​品でした。')).toContain('intensity');
+    expect(runtime('刺身盛り合わせ', '刺身盛り合わせ、お⁠すすめです。')).toContain('recommendation');
+    expect(runtime('刺身盛り合わせ', '刺身盛り合わせがおいしかったです。また️来たいです。')).toContain('revisit');
+  });
+
+  it('空白を含む普通の名前・属性の語を含む商品名は、判定用の形でも誤って止めない', () => {
+    for (const label of ['焼き鳥 5種盛り', '季節の　天ぷら', '自家製レモンサワー', '出汁巻き玉子', '濃厚担々麺']) {
+      expect(runtime(label, `${label}がおいしかったです。`), label).toEqual([]);
+    }
+    // 名前を消した前後が繋がって、新しい語にならない（「また」＋名前＋「来」）。
+    expect(runtime('焼き鳥 5種盛り', 'またまた焼き鳥 5種盛り来店時に頼みました。')).not.toContain('revisit');
+  });
+
+  it('一言に同じ語があれば、区切った形でも客の素材として数えない', () => {
+    const m = material({ selections: [sashimiTaste], unselectedTargets: [], comment: '絶 品でした' });
+    expect(runtimeViolations(gateInputOf(m), '刺身盛り合わせが絶品でした。', LEX, LEGACY)).not.toContain('intensity');
+  });
 });
 
 describe('一言の因果づけ（runtime）', () => {

@@ -311,6 +311,27 @@ describe.skipIf(!process.env.DATABASE_URL)('survey settings API (DB)', () => {
       expect((settings.body as unknown as SurveySettingsResponse).targets.find((t) => t.id === id)?.label).toBe('名前の規則の刺身');
     });
 
+    it('見えない文字・語中の空白で区切った評価語も、API を直接呼んだ追加・名前の変更・再表示で拒否する', async () => {
+      for (const label of ['絶​品刺身', 'お すすめ盛り', 'また​来たい盛り']) {
+        const res = await call(ADD, { body: { categoryCode: 'food', label } });
+        expect(res.status, JSON.stringify(label)).toBe(400);
+        expect(res.body.error).toMatchObject({ code: 'LABEL_EVALUATIVE' });
+      }
+      const id = await addTarget('見えない文字の規則の刺身');
+      const renamed = await call({ kind: 'updateTarget', targetId: id }, { method: 'PATCH', body: { label: '絶 品刺身' } });
+      expect(renamed.status).toBe(400);
+      expect(renamed.body.error).toMatchObject({ code: 'LABEL_EVALUATIVE' });
+
+      // 規則より前に登録して非表示にした名前（行を直接書き換えて再現）は、名前を変えずに再表示できない。
+      expect((await call({ kind: 'disableTarget', targetId: id })).status).toBe(200);
+      await (await getPool()).query('UPDATE store_survey_targets SET label = $2 WHERE id = $1', [id, '絶​品刺身']);
+      const reshow = await call({ kind: 'updateTarget', targetId: id }, { method: 'PATCH', body: { active: true } });
+      expect(reshow.status).toBe(400);
+      expect(reshow.body.error).toMatchObject({ code: 'LABEL_EVALUATIVE' });
+      const settings = await call(READ, { method: 'GET' });
+      expect((settings.body as unknown as SurveySettingsResponse).targets.find((t) => t.id === id)?.active).toBe(false);
+    });
+
     it('PATCH の本文は label か active のどちらかが要り、active は真偽値に限る', async () => {
       const id = await addTarget('本文の検査');
       for (const body of [{}, { active: 'false' }, { active: 1 }, { storeId: OTHER_STORE }]) {

@@ -6,6 +6,7 @@ import visitLexiconRaw from '../visit-context-lexicon.json';
 import embellishmentLexiconRaw from '../embellishment-lexicon.json';
 import absenceLexiconRaw from '../absence-lexicon.json';
 import groundingLexiconRaw from '../material-grounding-lexicon.json';
+import { canonicalizeForEvaluativePolicy } from '@fwlm/db/survey-settings-rules';
 
 // structured survey の下書きの hard gate と coverage（Issue #440 で評価のために作り、Issue #439 で本番の事後検証へ移した）。
 // 実 API を呼ばない純関数。**本番（Natural LLM Realizer の作り直しと generation error の判断）と評価（eval/structured）は
@@ -265,12 +266,15 @@ function firstMatch(text: string, patterns: readonly RegExp[]): string | null {
 /**
  * 語を本文から消す。keep に当たる部分は消さずに残す（語の中の評価・推奨・再訪の言葉を、検査の対象に残す）。
  * 例: 選んだ Target の名前「絶品刺身盛り」は「 絶品 」へ置き換わり、「刺身盛り」は消えて「絶品」は intensity に当たる。
+ * keep は語の **判定用の形**（canonicalizeForEvaluativePolicy: NFKC・空白と表示されない文字の除去）に当てる。
+ * 「絶 品刺身」「絶<U+200B>品刺身」のように語の中を区切った名前も「 絶品 」へ置き換わり、検査から外れない。
  */
 function mask(text: string, words: readonly string[], keep: readonly RegExp[] = []): string {
   let out = text;
   // 長い語から先に消す（「刺身盛り合わせ」を「刺身」より先に）。空白で置き換え、前後の文字を繋げない。
   for (const w of [...new Set(words)].filter((x) => x.trim() !== '').sort((a, b) => b.length - a.length)) {
-    const kept = keep.flatMap((p) => [...w.matchAll(new RegExp(p.source, 'g'))].map((m) => m[0]));
+    const canonical = canonicalizeForEvaluativePolicy(w);
+    const kept = keep.flatMap((p) => [...canonical.matchAll(new RegExp(p.source, 'g'))].map((m) => m[0]));
     out = out.split(w).join(kept.length === 0 ? ' ' : ` ${kept.join(' ')} `);
   }
   return out;
@@ -354,6 +358,14 @@ export function evaluateStructuredDraft(
   // （「自家製」「出汁」）は商品の名前の一部として消す（「自家製レモンサワー」を創作の属性に数えない）。
   const evaluative = [...lex.lists.intensity, ...lex.lists.recommendation, ...lex.lists.revisit];
   const scan = mask(text, [...targetWords, ...selectedFacetLabels], evaluative);
+  // 評価・推奨・再訪の語は、本文も判定用の形（空白・表示されない文字を除いた形）でも探す（「絶 品」「お<U+200B>すすめ」）。
+  // 名前は同じ形にしてから消す（空白で置き換えるので、消した名前の前後が繋がって新しい語にはならない）。
+  const policyScan = mask(
+    canonicalizeForEvaluativePolicy(text),
+    [...targetWords, ...selectedFacetLabels].map(canonicalizeForEvaluativePolicy),
+    evaluative,
+  );
+  const commentPolicy = comment !== undefined ? canonicalizeForEvaluativePolicy(comment) : undefined;
 
   // --- 未回答の Target（店舗の active な Target のうち、客が選ばなかったもの） ----------------------
   // 名前（と固定ケースの言い方）の完全一致だけを見る。選んだ Target の名前に含まれる名前（選んだ「刺身盛り合わせ」と
@@ -418,19 +430,21 @@ export function evaluateStructuredDraft(
   // 数えない**。一言は誤字・話し言葉を整えて書き直すので、一言の「めっちゃ」が下書きで「とても」に、「昼に」が「ランチで」
   // になる。語の完全一致だけで許すと、本人が書いたことを整えた文まで捏造として弾く。具体的な属性（newAttribute）は
   // 語ごとに見る（一言の「新鮮」から「サクサク」を許さない）。
-  const listGate = (key: keyof StructuredGateLexicon['lists'], kind: string, wholeList: boolean) => {
-    if (wholeList && lex.lists[key].some(inComment)) return;
+  const listGate = (key: keyof StructuredGateLexicon['lists'], kind: string, wholeList: boolean, policy = false) => {
+    // 判定用の形でも探す分類では、一言も同じ形で照合する（一言の「絶 品」も客の素材として扱う）。
+    const commented = (p: RegExp) => inComment(p) || (policy && commentPolicy !== undefined && p.test(commentPolicy));
+    if (wholeList && lex.lists[key].some(commented)) return;
     for (const p of lex.lists[key]) {
-      const hit = p.exec(scan);
-      if (hit && !inComment(p)) {
+      const hit = p.exec(scan) ?? (policy ? p.exec(policyScan) : null);
+      if (hit && !commented(p)) {
         add(kind, hit[0]);
         return;
       }
     }
   };
-  listGate('intensity', 'intensity', true);
-  listGate('recommendation', 'recommendation', true);
-  listGate('revisit', 'revisit', true);
+  listGate('intensity', 'intensity', true, true);
+  listGate('recommendation', 'recommendation', true, true);
+  listGate('revisit', 'revisit', true, true);
   listGate('cause', 'cause', true);
   listGate('timing', 'timing', true);
   listGate('companion', 'companion', true);

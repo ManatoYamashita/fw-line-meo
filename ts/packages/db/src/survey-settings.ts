@@ -326,6 +326,12 @@ export async function updateSurveyTarget(
       }
       if (activeChanged) {
         if (!isOwnerTargetCategoryCode(target.category_code)) throw new Rollback(fail('CATEGORY_NOT_EDITABLE'));
+        // 再表示でも、今の名前の規則（評価語・見えない文字など）を通す（PR #443 の追加レビュー）。規則を足す前に
+        // 登録して非表示にした名前を、名前を変えずに表示へ戻せないようにする。名前を同時に変えるときは上で検証済み。
+        if (nextLabel === undefined) {
+          const current = normalizeTargetLabel(target.label);
+          if (!current.ok) throw new Rollback(fail(current.error));
+        }
         if ((await activeCount(client, storeId, target.category_code)) >= ACTIVE_TARGET_LIMITS[target.category_code]) {
           throw new Rollback(fail('TARGET_LIMIT_REACHED'));
         }

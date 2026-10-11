@@ -7,6 +7,7 @@ import {
   reorderSurveyTargets,
   setSurveyCategoryEnabled,
   setSurveyTargetActive,
+  updateSurveyTarget,
   type SurveySettingsChange,
 } from '../src/survey-settings.js';
 import { readStoreSurveyDefinition } from '../src/survey-definition.js';
@@ -190,6 +191,41 @@ describe.skipIf(!process.env.DATABASE_URL)('store survey settings (DB)', () => {
     expect(await revisionOf(store)).toBe(3);
     const target = (await readStoreSurveySettings(pool, store)).targets.find((t) => t.id === id);
     expect(target?.label).toBe('名物もつ煮込み');
+  });
+
+  it('見えない文字・語中の空白で区切った評価語も、追加・名前の変更で拒否する（PR #443 の追加レビュー）', async () => {
+    const pool = await getPool();
+    const store = await newStore();
+    for (const label of ['絶​品刺身', 'お すすめ盛り', 'また​来たい盛り']) {
+      expect(await add(store, 'food', label), label).toEqual({ ok: false, error: 'LABEL_EVALUATIVE' });
+    }
+    expect(await add(store, 'food', '刺身​盛り')).toEqual({ ok: false, error: 'LABEL_INVALID_CHARACTER' });
+    const id = changedId(await add(store, 'food', '焼き鳥 5種盛り'));
+    expect(await renameSurveyTarget(pool, store, id, '絶 品焼き鳥')).toEqual({ ok: false, error: 'LABEL_EVALUATIVE' });
+    expect((await readStoreSurveySettings(pool, store)).targets.find((t) => t.id === id)?.label).toBe('焼き鳥 5種盛り');
+  });
+
+  it('規則より前に登録して非表示にした危険な名前は、名前を変えずに再表示できない。名前を直せば再表示できる', async () => {
+    const pool = await getPool();
+    const store = await newStore();
+    const id = changedId(await add(store, 'food', '刺身盛り合わせ'));
+    changedId(await setSurveyTargetActive(pool, store, id, false));
+    // 規則を足す前のデータを再現する（API・DAL は通さず、行を直接書き換える）。
+    for (const legacyLabel of ['絶 品刺身', '絶​品刺身']) {
+      await pool.query('UPDATE store_survey_targets SET label = $2 WHERE id = $1', [id, legacyLabel]);
+      const before = await revisionOf(store);
+      expect(await setSurveyTargetActive(pool, store, id, true), legacyLabel).toEqual({ ok: false, error: 'LABEL_EVALUATIVE' });
+      expect(await revisionOf(store)).toBe(before);
+      expect((await readStoreSurveySettings(pool, store)).targets.find((t) => t.id === id)?.active).toBe(false);
+    }
+    await pool.query('UPDATE store_survey_targets SET label = $2 WHERE id = $1', [id, '刺身​盛り']);
+    expect(await setSurveyTargetActive(pool, store, id, true)).toEqual({ ok: false, error: 'LABEL_INVALID_CHARACTER' });
+    // 名前を同時に直す再表示は通る。
+    expect(await updateSurveyTarget(pool, store, id, { label: '刺身盛り合わせ', active: true })).toMatchObject({
+      ok: true,
+      changed: true,
+      action: 'survey_target_updated',
+    });
   });
 
   it('上限（10 件）に達したら 11 件目の追加と再表示を拒否する。上限でも名前の変更・非表示・並び替えはできる', async () => {

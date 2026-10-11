@@ -5,6 +5,7 @@ import {
   OWNER_TOGGLEABLE_CATEGORY_CODES,
   TARGET_LABEL_ERROR_MESSAGES,
   TARGET_LABEL_MAX_LENGTH,
+  canonicalizeForEvaluativePolicy,
   hasEvaluativeTargetLabel,
   isOwnerTargetCategoryCode,
   isOwnerToggleableCategoryCode,
@@ -123,5 +124,63 @@ describe('survey settings rules', () => {
     it('案内は直し方（料理名・ドリンク名だけにする）を伝える', () => {
       expect(TARGET_LABEL_ERROR_MESSAGES.LABEL_EVALUATIVE).toContain('料理名・ドリンク名だけを入力してください');
     });
+  });
+});
+
+// 見えない文字・語中の空白で評価語の判定をすり抜けさせない（PR #443 の追加レビュー）。判定は専用の形
+// （canonicalizeForEvaluativePolicy）で行い、保存する名前の表示（「焼き鳥 5種盛り」の空白）は変えない。
+describe('評価語の判定用の形（canonicalizeForEvaluativePolicy）', () => {
+  it('NFKC → 空白（全角を含む）・表示されない文字（ゼロ幅・異体字セレクタ・ソフトハイフン）を除く', () => {
+    expect(canonicalizeForEvaluativePolicy('絶 品')).toBe('絶品');
+    expect(canonicalizeForEvaluativePolicy('絶　品')).toBe('絶品');
+    expect(canonicalizeForEvaluativePolicy('絶​品')).toBe('絶品');
+    expect(canonicalizeForEvaluativePolicy('絶‍品')).toBe('絶品');
+    expect(canonicalizeForEvaluativePolicy('絶️品')).toBe('絶品');
+    expect(canonicalizeForEvaluativePolicy('絶­品')).toBe('絶品');
+    expect(canonicalizeForEvaluativePolicy('ｵｽｽﾒ')).toBe('オススメ');
+  });
+
+  it.each([
+    ['絶​品刺身'],
+    ['お​すすめ盛り'],
+    ['また​来たい盛り'],
+    ['絶 品刺身'],
+    ['お すすめ盛り'],
+    ['絶️品刺身'],
+    ['ｵｽｽﾒ串盛り'],
+  ])('すり抜けの形も LABEL_EVALUATIVE: %j', (label) => {
+    expect(hasEvaluativeTargetLabel(label)).toBe(true);
+    expect(normalizeTargetLabel(label)).toEqual({ ok: false, error: 'LABEL_EVALUATIVE' });
+  });
+
+  it.each([['自家製レモンサワー'], ['出汁巻き玉子'], ['濃厚担々麺'], ['焼き鳥 5種盛り'], ['季節の　天ぷら'], ['Craft Beer IPA'], ['生ビール（中）']])(
+    '通常の名前は通し、空白は保存する名前に残す: %s',
+    (label) => {
+      expect(hasEvaluativeTargetLabel(label)).toBe(false);
+      expect(normalizeTargetLabel(label)).toEqual({ ok: true, value: label });
+    },
+  );
+});
+
+describe('書式文字（Unicode の Cf）は名前に使えない', () => {
+  it.each([
+    ['刺身​盛り'],
+    ['刺身‎盛り'],
+    ['刺身­盛り'],
+    ['刺身﻿盛り'],
+    ['刺身⁠盛り'],
+  ])('%j → LABEL_INVALID_CHARACTER', (label) => {
+    expect(normalizeTargetLabel(label)).toEqual({ ok: false, error: 'LABEL_INVALID_CHARACTER' });
+  });
+
+  it('絵文字の異体字セレクタ・絵文字どうしのゼロ幅接合子は通す（普通の名前を壊さない）', () => {
+    for (const label of ['☕️ブレンド', '🍣盛り合わせ', '👨‍🍳おまかせコース', '❤️‍🔥激辛ラーメン']) {
+      expect(normalizeTargetLabel(label), label).toEqual({ ok: true, value: label });
+    }
+  });
+
+  it('絵文字に挟まれていないゼロ幅接合子は止める', () => {
+    expect(normalizeTargetLabel('刺身‍盛り')).toEqual({ ok: false, error: 'LABEL_INVALID_CHARACTER' });
+    expect(normalizeTargetLabel('🍣‍盛り')).toEqual({ ok: false, error: 'LABEL_INVALID_CHARACTER' });
   });
 });
