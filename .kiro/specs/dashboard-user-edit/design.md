@@ -581,7 +581,7 @@ export interface DashboardUserEditPanelProps {
   2. `DASHBOARD_USERS[1]`（代理店・無効化済み。所属代理店の選択が出るので、最も横に広い状態）の編集ボタンを、**完全一致の名前**で押す。
   3. 前提 assert はパネルにしか無い要素にする（level 2 の見出し・保存ボタン）。
 - `goto` は持たない（`check-e2e-goto-ownership.sh`）。
-- `DASHBOARD_SURFACES` に `{ where: '利用者管理の編集パネル', knownOverflow: false, open: openUserEditPanel }` を足す。a11y 監査はこの一覧から自動で生成される。
+- `DASHBOARD_SURFACES` に `{ where: '利用者管理の編集パネル', open: openUserEditPanel }` を足す。a11y 監査はこの一覧から自動で生成される。
 - `dashboard-surfaces.spec.ts` に、横スクロール実測のテストを 1 本足す。
   - 宣言する捲れる領域は `NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS`（= 2）。
   - パネルは表の容器の内側にあるので、領域を増やさない。
