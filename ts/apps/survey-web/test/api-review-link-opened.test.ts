@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { handleReviewLinkOpened, type ReviewLinkDeps } from '../src/app/api/review-link-opened/handler';
 import { createSessionTokenService, type SessionTokenService } from '../src/lib/session-token';
 import type { DraftMaterial } from '../src/lib/domain';
+import type { StructuredDraftMaterial } from '../src/lib/draft/structured-draft';
+import { handleDrafts } from '../src/app/api/drafts/handler';
 
 // 投稿導線の押下の通知（Issue #137・Requirement 5.7）。
 // 数えるのは token を検証できた押下だけで、記録するのは storeId だけ。
@@ -256,5 +258,109 @@ describe('handleReviewLinkOpened: 押下の集計への加算', () => {
     await handleReviewLinkOpened(req({ storeId: STORE, token }), d);
 
     expect(loggedBeforeIncrement).toBe(true);
+  });
+});
+
+// structured survey の下書き画面は v2 の sessionToken（signStructured）を送る（PR #443）。legacy の v1 と同じく
+// 「実際の回答の後の押下」の証明として受け、押下の記録と月次集計へ加算する。
+describe('handleReviewLinkOpened × structured の sessionToken（v2）', () => {
+  const SNAPSHOT: StructuredDraftMaterial = {
+    storeName: '店',
+    surveyRevision: 2,
+    star: 4,
+    selections: [
+      { polarity: 'positive', categoryCode: 'food', categoryLabel: '料理', targetId: 'a4430000-0000-4000-8000-000000000001', targetLabel: '刺身盛り合わせ', facets: [{ code: 'taste', label: '味' }] },
+    ],
+    comment: '客の自由記述',
+  };
+
+  it('同じ店舗の v2 sessionToken なら 204 で、押下の記録 1 件・月次集計へ 1 回加算する', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const token = tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 });
+    const { deps: d, log, increment } = deps(tokens);
+
+    const res = await handleReviewLinkOpened(req({ storeId: STORE, token }), d);
+
+    expect(res.status).toBe(204);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith('info', 'survey_review_link_opened', { storeId: STORE });
+    expect(increment).toHaveBeenCalledTimes(1);
+    expect(increment).toHaveBeenCalledWith(STORE);
+    // 素材（料理名・一言）は記録へ載せない。
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/刺身盛り合わせ|客の自由記述/);
+  });
+
+  it('再生成（/api/drafts）で試行を進めた v2 sessionToken でも通る', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const regen = await handleDrafts(
+      new Request('http://x/api/drafts', {
+        method: 'POST',
+        body: JSON.stringify({ sessionToken: tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 }) }),
+      }),
+      {
+        tokens,
+        generator: { generate: vi.fn() },
+        rateLimiter: { check: () => true },
+        findStore: () =>
+          Promise.resolve({ id: STORE, name: '店', placeId: 'ChIJ', placeStatus: 'confirmed' as const, suspendedAt: null }),
+        structuredDrafts: {
+          prepare: () => Promise.resolve({ kind: 'draft' as const, draft: '刺身盛り合わせがおいしかったです。', source: 'llm' as const, attempts: 1 }),
+        },
+        clientKey: () => 'ip1',
+        log: () => {},
+      },
+    );
+    const regenerated = ((await regen.json()) as { sessionToken: string }).sessionToken;
+    const verified = tokens.verifyStructured(regenerated);
+    expect(verified.ok && verified.value.attempt).toBe(1);
+
+    const { deps: d, log, increment } = deps(tokens);
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token: regenerated }), d)).status).toBe(204);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(increment).toHaveBeenCalledTimes(1);
+  });
+
+  it('他店舗向けの v2 sessionToken は 400 で、記録も加算もしない', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const token = tokens.signStructured({ storeId: OTHER, structured: SNAPSHOT, attempt: 0 });
+    const { deps: d, log, increment } = deps(tokens);
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token }), d)).status).toBe(400);
+    expect(log).not.toHaveBeenCalled();
+    expect(increment).not.toHaveBeenCalled();
+  });
+
+  it('改ざんした v2 sessionToken（別の鍵・本文の書き換え）は 400 で、記録も加算もしない', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const forged = createSessionTokenService('attacker-key').signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 });
+    const [body, mac] = tokens.signStructured({ storeId: OTHER, structured: SNAPSHOT, attempt: 0 }).split('.');
+    const payload = JSON.parse(Buffer.from(body!, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const rewritten = `${Buffer.from(JSON.stringify({ ...payload, storeId: STORE }), 'utf8').toString('base64url')}.${mac}`;
+    const { deps: d, log, increment } = deps(tokens);
+    for (const token of [forged, rewritten]) {
+      expect((await handleReviewLinkOpened(req({ storeId: STORE, token }), d)).status).toBe(400);
+    }
+    expect(log).not.toHaveBeenCalled();
+    expect(increment).not.toHaveBeenCalled();
+  });
+
+  it('期限切れ（30 分）の v2 sessionToken は 400 で、記録も加算もしない', async () => {
+    let now = 1_000_000;
+    const tokens = createSessionTokenService(KEY, () => now);
+    const token = tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 });
+    const { deps: d, log, increment } = deps(tokens);
+    now += 30 * 60 * 1000 + 1;
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token }), d)).status).toBe(400);
+    expect(log).not.toHaveBeenCalled();
+    expect(increment).not.toHaveBeenCalled();
+  });
+
+  it('legacy の v1 sessionToken・pageToken の扱いは変わらない（session は加算・page は記録だけ）', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const { deps: d, log, increment } = deps(tokens);
+    const v1 = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token: v1 }), d)).status).toBe(204);
+    expect((await handleReviewLinkOpened(req({ storeId: STORE, token: tokens.signPage(STORE) }), d)).status).toBe(204);
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(increment).toHaveBeenCalledTimes(1);
   });
 });
