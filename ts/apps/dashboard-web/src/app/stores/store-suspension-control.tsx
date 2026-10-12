@@ -174,11 +174,12 @@ export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionCont
 
       {/* 成功の通知。領域は常に置き、文言だけを差し替える（先頭の注記）。display: none にすると
         * 支援技術から領域ごと外れるので隠さない。空のときは余白を持たせず、行の高さを変えない。
-        * 成功色はアクション色と色だけでは見分けられないので、文言には必ず印を添える。 */}
-      <p role="status" className="flex items-center gap-1 text-xs text-success [&:not(:empty)]:mt-2">
+        * 成功色はアクション色と色だけでは見分けられないので、文言には必ず印を添える。
+        * 店名が長いと文言は折り返すので、印は 1 行目の高さに揃える（中央揃えだと行の間に浮く）。 */}
+      <p role="status" className="flex items-start gap-1 text-xs text-success [&:not(:empty)]:mt-2">
         {successMessage !== '' && (
           <>
-            <SuccessIcon className="size-3.5" />
+            <SuccessIcon className="mt-px size-3.5" />
             {successMessage}
           </>
         )}
