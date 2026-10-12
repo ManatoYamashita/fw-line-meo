@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Colors"
+  short_description: "Building, naming and applying color systems"
+  default_prompt: "Use $better-colors to review this interface's color tokens, palette roles, themes, and measured contrast."

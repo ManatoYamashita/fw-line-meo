@@ -1,0 +1,6 @@
+interface:
+  display_name: "Break"
+  short_description: "Render one component under hostile inputs and report what breaks"
+  default_prompt: "Use $break to render this component across its reachable states and hostile content scenarios, then report observed breaks."
+policy:
+  allow_implicit_invocation: false

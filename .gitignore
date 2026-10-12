@@ -22,6 +22,10 @@ playwright-report/
 test-results/
 .lighthouseci/
 
+# --- Skills の Python 補助スクリプト ---
+__pycache__/
+*.py[cod]
+
 # --- Go ---
 bin/
 *.exe

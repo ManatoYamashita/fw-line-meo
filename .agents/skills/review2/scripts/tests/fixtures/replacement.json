@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "blob-replacement",
+    "filename": "src/transform.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "@@ -5,2 +5,2 @@\n-return legacy(value)\n+return modern(value)\n export default transform"
+  }
+]

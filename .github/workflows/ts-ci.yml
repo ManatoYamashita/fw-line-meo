@@ -24,6 +24,10 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v5
+      - name: 'リポジトリ同梱スキルの整合検証（Issue #449）'
+        run: |
+          python3 scripts/check-agent-skills.py
+          python3 -m unittest discover -s scripts/test -p test_agent_skills.py
       - name: 'NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）'
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh

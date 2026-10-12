@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Layout"
+  short_description: "Structure, grouping, alignment and adaptive layout"
+  default_prompt: "Use $better-layout to review this interface's hierarchy, spacing, alignment, responsive behavior, and RTL layout."

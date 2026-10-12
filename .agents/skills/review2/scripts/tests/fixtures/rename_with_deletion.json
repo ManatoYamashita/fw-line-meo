@@ -1,0 +1,12 @@
+[
+  {
+    "sha": "blob-renamed",
+    "filename": "src/new-name.ts",
+    "previous_filename": "src/old-name.ts",
+    "status": "renamed",
+    "additions": 0,
+    "deletions": 1,
+    "changes": 1,
+    "patch": "@@ -1,2 +1,1 @@\n-deprecatedSetup()\n keepSetup()"
+  }
+]

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Interface Review"
+  short_description: "Branch, PR and working-tree interface review"
+  default_prompt: "Use $interface-review to review the UI impact of this branch, pull request, commit range, or working-tree change."
+policy:
+  allow_implicit_invocation: false

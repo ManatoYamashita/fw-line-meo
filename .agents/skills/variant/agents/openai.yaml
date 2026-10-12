@@ -1,0 +1,6 @@
+interface:
+  display_name: "Variant"
+  short_description: "Several versions of one UI piece behind a picker"
+  default_prompt: "Use $variant to build three purposeful variants of this UI piece on its real page and compare their tradeoffs."
+policy:
+  allow_implicit_invocation: false
