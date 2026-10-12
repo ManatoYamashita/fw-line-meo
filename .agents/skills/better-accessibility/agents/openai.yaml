@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Accessibility"
+  short_description: "Focus, keyboard, ARIA, forms and screen readers"
+  default_prompt: "Use $better-accessibility to audit this interface for keyboard, focus, ARIA, forms, and screen-reader issues."

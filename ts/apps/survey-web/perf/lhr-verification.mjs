@@ -11,7 +11,8 @@
 //      lhr-*.json を消し、失敗した試行は保存しない。0 件も古い結果の混入も赤にする）
 //   2. URL: finalDisplayedUrl と mainDocumentUrl の pathname が /s/<seed の店舗 id> と完全に一致する
 //   3. 店名: LCP 要素の文言が seed の店名と等しい（回答画面では店名の h1 が LCP になる。1 段落の画面は
-//      店名を出さない）
+//      店名を出さない）。lhci が標準出力の区切りで 1 文字を化けさせた形だけは許し、警告を出す（Issue #408・
+//      matchStoreLabel を参照）
 //   4. フォーム: 回答フォームがあって初めて評価される accessibility の監査が評価されている
 //      （1 段落の画面ではこれらが notApplicable になり、a11y の満点は何も監査していない満点になる）
 //
@@ -59,7 +60,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * @property {{ accessibility?: { score?: number | null } }} [categories]
  *
  * @typedef {{ file: string, lhr: Lhr }} LhrEntry
- * @typedef {{ ok: boolean, lines: string[], errors: string[], count: number, expected: number }} VerifyResult
+ * @typedef {{ ok: boolean, lines: string[], errors: string[], warnings: string[], count: number, expected: number }} VerifyResult
+ * @typedef {'exact' | 'split' | 'mismatch'} LabelMatch
  */
 
 /**
@@ -301,6 +303,46 @@ export function expectedRuns(config) {
 /** @param {string} s */
 const normalizeSpaces = (s) => s.replace(/\s+/g, ' ').trim();
 
+const utf8 = new TextEncoder();
+
+/**
+ * LCP 要素の文言が店名と一致するかを判定する（Issue #408）。
+ *
+ * lhci（@lhci/cli 0.15.1 の src/collect/node-runner.js）は Lighthouse の結果の JSON を標準出力で受け、
+ * `child.stdout.on('data', chunk => (stdout += chunk.toString()))` と区切りごとに文字列へ変換して連結する。
+ * マルチバイト文字が区切りをまたぐと、前の区切りに残った断片が 1 つ、次の区切りへ入った各バイトが 1 つずつ
+ * U+FFFD になり、結果のファイルにはその形で書かれる。
+ *
+ * そこで、次をすべて満たすときだけ「区切りで化けた」とみなして 'split' を返す。
+ *   - 最初の U+FFFD の連続の前後が店名の先頭・末尾と一致し、その連続が店名のちょうど 1 文字を置き換えている
+ *     （後ろに 2 つ目の連続があれば末尾が店名と一致しないので、化けは 1 箇所に限られる。1 つの文言は
+ *     80 字以下で、区切りを 2 回またげない）
+ *   - U+FFFD の個数 n が、置き換えた文字の UTF-8 のバイト数 b に対して 2 ≤ n ≤ b
+ *     （1 文字を 2 つに分けたときの個数。n = 1 になる分け方は無く、n > b は 1 文字の分割では出ない。
+ *     1 バイトの文字は割れないので必ず外れる）
+ * 化けていない文言は、空白の揺れを除いて店名と等しいときだけ 'exact' になる。
+ * @param {string} label
+ * @param {string} name
+ * @returns {LabelMatch}
+ */
+export function matchStoreLabel(label, name) {
+  const got = normalizeSpaces(label);
+  const want = normalizeSpaces(name);
+  if (got === want) return 'exact';
+
+  const hole = /\uFFFD+/.exec(got);
+  if (hole === null) return 'mismatch';
+  const before = got.slice(0, hole.index);
+  const after = got.slice(hole.index + hole[0].length);
+  if (!want.startsWith(before) || !want.endsWith(after)) return 'mismatch';
+
+  const replaced = Array.from(want.slice(before.length, want.length - after.length));
+  const char = replaced[0];
+  if (replaced.length !== 1 || char === undefined) return 'mismatch';
+  const n = hole[0].length;
+  return n >= 2 && n <= utf8.encode(char).length ? 'split' : 'mismatch';
+}
+
 /**
  * @param {string | undefined} url
  * @returns {string | undefined}
@@ -334,11 +376,12 @@ export function verifyLhrs(entries, store, config) {
   for (const n of expected.values()) expectedTotal += n;
 
   const wantPath = `/s/${store.id}`;
-  const wantLabel = normalizeSpaces(store.name);
   /** @type {string[]} */
   const lines = [];
   /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
+  const warnings = [];
   /** @type {Map<string, number>} */
   const seen = new Map();
 
@@ -368,10 +411,17 @@ export function verifyLhrs(entries, store, config) {
 
     if (label === undefined) {
       errors.push(`${file}: LCP 要素の監査（largest-contentful-paint-element）がありません`);
-    } else if (normalizeSpaces(label) !== wantLabel) {
-      errors.push(
-        `${file}: LCP 要素が seed の店名ではありません（「${label}」）。店舗が見つからない画面を測った可能性があります`,
-      );
+    } else {
+      const match = matchStoreLabel(label, store.name);
+      if (match === 'mismatch') {
+        errors.push(
+          `${file}: LCP 要素が seed の店名ではありません（「${label}」）。店舗が見つからない画面を測った可能性があります`,
+        );
+      } else if (match === 'split') {
+        warnings.push(
+          `${file}: LCP 要素の文言が lhci の出力の区切りで化けています（「${label}」）。化けた 1 文字を除いて店名と一致したので通します（Issue #408）`,
+        );
+      }
     }
 
     for (const auditId of FORM_AUDITS) {
@@ -392,7 +442,7 @@ export function verifyLhrs(entries, store, config) {
     if (!expected.has(url)) errors.push(`lighthouserc.json に無い URL の結果が ${n} 件あります: ${url}`);
   }
 
-  return { ok: errors.length === 0, lines, errors, count: entries.length, expected: expectedTotal };
+  return { ok: errors.length === 0, lines, errors, warnings, count: entries.length, expected: expectedTotal };
 }
 
 /** @param {unknown} e */
@@ -468,6 +518,7 @@ export function main({ surveyDir, argv, out = (s) => console.log(s), err = (s) =
     return 1;
   }
   for (const line of result.lines) out(line);
+  for (const w of result.warnings) out(`WARN: ${w}`);
   if (!result.ok) {
     for (const e of result.errors) err(`NG: ${e}`);
     err(

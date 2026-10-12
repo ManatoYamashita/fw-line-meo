@@ -41,6 +41,13 @@ export interface LogFields {
   /** 代理店の識別子。どの代理店の操作が失敗したかを特定する。 */
   readonly agencyId?: string;
 
+  // --- ダッシュボード API（監査記録の失敗・Issue #250） ---
+
+  /** 書けなかった監査記録の action。有限集合の識別子（AUDIT_LOG_ACTIONS）。 */
+  readonly auditAction?: string;
+  /** 書けなかった監査記録の対象の識別子（UUID）。欠けた記録を人手で補う手がかりに使う。 */
+  readonly auditTargetId?: string;
+
   // --- 外部プラットフォーム由来の識別子 ---
 
   /**
@@ -61,6 +68,11 @@ export interface LogFields {
 
   /** 事後検証で残った未選択観点の識別子。下書き本文・一言・生成指示は載せない。 */
   readonly violatedAspects?: string;
+  /**
+   * 事後検証で残った来店前の期待・「無かった」の断定の分類（`expectation` / `absence:<分類>`・Issue #413）。
+   * 有限集合の識別子だけで、下書き本文・一言・生成指示は載せない。
+   */
+  readonly residualClaims?: string;
 
   // --- 店舗詳細面 ---
 

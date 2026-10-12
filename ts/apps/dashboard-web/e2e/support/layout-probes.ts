@@ -77,6 +77,10 @@ export function readCellWrapping(page: Page): Promise<CellWrapReport> {
       tables += 1;
       const columns = table.querySelector('thead tr')?.children.length ?? 0;
       for (const cell of Array.from(table.querySelectorAll('th, td'))) {
+        // 入れ子の表のセルは、その表の番で数える（Issue #401）。querySelectorAll は子孫の表のセルまで
+        // 拾うので、この条件が無いと外側の表と内側の表とで同じセルを 2 回数える（QR パネルの実績の表で
+        // 実測: 8 件の増分が 16 件と出た）。
+        if (cell.closest('table') !== table) continue;
         const tableCell = cell as HTMLTableCellElement;
         // 行の直下のパネル（全列にまたがるセル）は、折り返しの規則ではなく配置の問題であり、
         // R4（パネルが見えている矩形に収まるか）が受け持つ。外した件数は呼び出し側が宣言と

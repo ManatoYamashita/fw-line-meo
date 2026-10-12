@@ -229,6 +229,90 @@ fx_run check-log-field-binding
 expect_red '正典に登録されていません'
 t_end
 
+t_begin 'check-log-field-binding: 注入 logger 経由の未登録事象も逆方向で赤'
+fx_guard check-log-field-binding
+lfb_fixture
+# 直呼びの既知事象を残して旧ガードの「抽出 0 件」防止を通し、注入 logger の未登録事象だけを追加する。
+fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
+export function run(deps: { logger: { warn(event: string): void } }): void {
+  writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+  deps.logger.warn('demo.unregistered');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: 空白入りの未登録 event 値も逆方向で赤'
+fx_guard check-log-field-binding
+lfb_fixture
+# event 値が識別子形式でなくても、抽出後に捨てず正典との不一致として検出する。
+fx_write ts/apps/demo/src/log.ts <<'EOF'
+import { writeStructuredLog } from '@fwlm/observability';
+
+export function run(deps: { logger: { warn(event: string): void } }): void {
+  writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+  deps.logger.warn('demo unregistered');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo unregistered」を出しますが、正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: logger の補間付きテンプレート event は fail-closed'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/dynamic-logger.ts <<'EOF'
+export function run(logger: { error(event: string): void }, operation: string): void {
+  logger.error(`demo: ${operation} failed`);
+}
+EOF
+fx_run check-log-field-binding
+expect_red '補間付きテンプレートで動的に構成されており'
+t_end
+
+t_begin 'check-log-field-binding: Sink の補間付きテンプレート event も fail-closed'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/dynamic-sink.ts <<'EOF'
+import type { Sink } from '@fwlm/observability';
+
+export function run(log: Sink, operation: string): void {
+  log('error', `demo: ${operation} failed`);
+}
+EOF
+fx_run check-log-field-binding
+expect_red '補間付きテンプレートで動的に構成されており'
+t_end
+
+t_begin 'check-log-field-binding: 正典の出典ファイルが走査対象外なら赤'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 店舗の識別子 | `storeId` | `store_id` | 既存 | `ts/packages/observability/src/fields.ts` ／ `go/internal/demo/log.go` | 変更禁止 |
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 出力時は別名へ写す |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | 既存 | `ts/apps/demo/test/log.ts` | |
+EOF
+fx_write ts/apps/demo/test/log.ts <<'EOF'
+writeStructuredLog('info', 'demo.started', { storeId: 'store-1' });
+EOF
+fx_run check-log-field-binding
+expect_red '逆方向の事象走査対象に含まれていません'
+t_end
+
 t_begin 'check-log-field-binding: 実装の事象名を 1 件も拾えなければ赤（空振り防止）'
 fx_guard check-log-field-binding
 lfb_fixture
@@ -239,4 +323,81 @@ export const EVENT = 'demo.started';
 EOF
 fx_run check-log-field-binding
 expect_red '実装から事象名を 1 件も抽出できませんでした'
+t_end
+
+# ---------------------------------------------------------------------------
+# Issue #250: 逆方向の抽出が `writeStructuredLog(` / `correlationLog(` の 2 形しか見ておらず、
+# 面ごとの logger（`deps.logger.warn('<事象名>', …)`）と Sink を受けた局所呼び出し
+# （`log('warn', '<事象名>', …)`）で出す事象名が、正典に無くても緑だった。
+
+t_begin 'check-log-field-binding: logger.<level> で出す未登録の事象名を赤にする'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/logger.ts <<'EOF'
+export function onFailure(deps: { logger: { warn: (e: string, f?: object) => void } }): void {
+  deps.logger.warn('demo.logger_unregistered', { errorKind: 'Error' });
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.logger_unregistered」を出しますが、正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: Sink の局所呼び出しで出す未登録の事象名を赤にする'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/sink-local.ts <<'EOF'
+import type { Sink } from '@fwlm/observability';
+
+export function onFailure(log: Sink): void {
+  log('error', 'demo.sink_unregistered', { storeId: 'store-1' });
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.sink_unregistered」を出しますが、正典に登録されていません'
+t_end
+
+t_begin 'check-log-field-binding: logger.<level> の登録済みの事象名は数えて緑'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write docs/observability/log-field-canon.md <<'EOF'
+# 記録の正典（テスト用）
+
+## 1. 項目名
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 店舗の識別子 | `storeId` | `store_id` | 既存 | `ts/packages/observability/src/fields.ts` ／ `go/internal/demo/log.go` | 変更禁止 |
+| 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 出力時は別名へ写す |
+
+## 2. 事象名
+
+| 事象名 | 実行面 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|
+| `demo.started` | demo | 既存 | `ts/apps/demo/src/log.ts` | |
+| `demo.logger_started` | demo | 既存 | `ts/apps/demo/src/logger.ts` | |
+EOF
+fx_write ts/apps/demo/src/logger.ts <<'EOF'
+export function onStart(deps: { logger: { info: (e: string) => void } }): void {
+  deps.logger.info('demo.logger_started');
+}
+EOF
+fx_run check-log-field-binding
+expect_green
+expect_output_matches '実装の事象名 2 件'
+t_end
+
+t_begin 'check-log-field-binding: 省略可能な呼び出し（log?.( / logger?.warn()で出す未登録の事象名も赤にする'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/optional.ts <<'EOF'
+import type { Sink } from '@fwlm/observability';
+
+export function onFailure(log: Sink | undefined, logger?: { warn: (e: string) => void }): void {
+  log?.('warn', 'demo.optional_sink_unregistered');
+  logger?.warn('demo.optional_logger_unregistered');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.optional_sink_unregistered」を出しますが'
+expect_red '事象名「demo.optional_logger_unregistered」を出しますが'
 t_end

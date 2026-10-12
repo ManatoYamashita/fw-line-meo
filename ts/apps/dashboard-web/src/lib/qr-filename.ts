@@ -1,7 +1,7 @@
 // QR 画像を保存するときのファイル名を決定する純粋関数（Requirements 2.4, 2.5, 2.6）。
 //
 // サーバは `Content-Disposition: attachment; filename="qr-{storeId}.png"` を付けるが、
-// dashboard-api の CORS に exposeHeaders が無いためブラウザからこのヘッダは読めない。
+// dashboard-api の CORS が Content-Disposition を公開していないためブラウザからこのヘッダは読めない。
 // したがってファイル名の決定はクライアント側の責務になる（design.md 参照）。
 //
 // このモジュールは DOM・ネットワーク・React のいずれにも依存しない。依存グラフの末端に置く。

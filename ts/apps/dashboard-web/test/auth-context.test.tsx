@@ -32,7 +32,11 @@ vi.mock('firebase/auth', () => ({
 
 // /me の結果は api.getMe をモックして制御する（fetch は間接依存にしない）。
 const getMeMock = vi.fn();
-vi.mock('../src/lib/api', () => ({ getMe: (...args: unknown[]) => getMeMock(...args) }));
+vi.mock('../src/lib/api', async () =>
+  (await import('./deferred-mocks')).deferResolution({
+    getMe: (...args: unknown[]) => getMeMock(...args),
+  }),
+);
 
 import { AuthProvider, useAuth } from '../src/lib/auth-context';
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better Interface"
+  short_description: "Cross-discipline interface review"
+  default_prompt: "Use $better-interface to perform a complete evidence-based UI review across accessibility, layout, writing, typography, color, and polish."

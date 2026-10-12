@@ -278,6 +278,50 @@ EOF
 fi
 t_end
 
+t_begin 'check-markdown-emphasis: 追跡済み .agents/skills の外部文書は走査しない'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_write .agents/skills/vendored/reference.md <<'EOF'
+第三者のスキル文書であり**別の規則（vendor）**で書かれている。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: .agents/skills/_shared の自作文書は走査する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_write .agents/skills/_shared/runtime.md <<'EOF'
+共通実行規則は**自作の文書（shared）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red '.agents/skills/_shared/runtime.md'
+  fx_write .agents/skills/_shared/runtime.md <<'EOF'
+共通実行規則は自作の文書である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_green
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: .agents/skills 外のプロジェクト文書は走査する'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_write .agents/rules.md <<'EOF'
+この文書は**プロジェクトの規則（rules）**である。
+EOF
+  fx_run check-markdown-emphasis
+  expect_red '.agents/rules.md'
+fi
+t_end
+
 # ---------------------------------------------------------------------------
 
 t_begin 'check-markdown-emphasis: Markdown を 1 件も拾えないとき緑を返さない（空振り防止）'

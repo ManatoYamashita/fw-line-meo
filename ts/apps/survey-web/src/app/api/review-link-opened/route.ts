@@ -1,3 +1,4 @@
+import { getPool, incrementReviewLinkTally } from '@fwlm/db';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
@@ -20,6 +21,7 @@ function buildDeps(): ReviewLinkDeps {
     rateLimiter: createRateLimiter({ limit: 10, windowMs: 60_000 }),
     clientKey: createClientKey(),
     log: writeStructuredLog,
+    incrementReviewLinkTally: async (storeId) => incrementReviewLinkTally(await getPool(), storeId),
   };
 }
 

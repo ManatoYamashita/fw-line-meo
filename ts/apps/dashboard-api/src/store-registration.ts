@@ -2,6 +2,7 @@ import type { AuditLogger, StoreCandidate } from '@fwlm/db';
 import type { ConfirmOutcome, SearchOutcome } from '@fwlm/store-identification';
 import { authenticate, canAccessStore, type AuthDeps } from './auth.js';
 import { jsonError } from './http.js';
+import { recordAudit } from './audit.js';
 import type { Sink } from '@fwlm/observability';
 
 // POST /stores/search・POST /stores の中核ロジック（依存注入でテスト可能・ルート配線は app 側の責務）。
@@ -146,7 +147,8 @@ export async function handleStoreRegister(
     : await deps.registerStore(input, req.log);
   switch (outcome.kind) {
     case 'confirmed':
-      await deps.auditLog({
+      // 監査の失敗は警告を残して握り、成立した登録をエラー応答にしない（Issue #250）。
+      await recordAudit(deps.auditLog, req.log, {
         actorType: auth.user.role,
         actorId: auth.user.id,
         action: 'store_registered',

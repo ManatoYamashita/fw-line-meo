@@ -234,7 +234,8 @@ export async function getDashboardUsers(
 
 // POST /dashboard-users: 利用者を登録（operator 専用）。201 で { user }。
 // role='agency' は agencyId 必須・role='operator' は agencyId を送らない（ck_dashboard_role_scope・Req 6.3）。
-// email 重複は 409(email_conflict)、role/agencyId 不整合や email 形式不正は 400(validation_failed)。
+// email 重複は 409(email_conflict)、role/agencyId 不整合や email 形式不正は 400(validation_failed)、
+// 所属代理店の不在・他運営は 404(agency_not_found)。
 export async function createDashboardUser(
   input: { role: DashboardRole; agencyId?: string; email: string; displayName?: string },
   options: ApiClientOptions = {},
@@ -411,10 +412,14 @@ export async function disableInviteCode(
 export interface BinaryPayload {
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly contentType: string;
+  readonly surveyUrl: string;
 }
 
 // 2xx でありながら本文が空だった場合の文言。欠けた画像を QR として提示しないための失敗扱い。
 const EMPTY_RESPONSE_MESSAGE = '画像を取得できませんでした。時間をおいて再試行してください。';
+
+// QR と同じ遷移先をサーバから受け取れない場合、画像だけを成功として表示しない。
+const INVALID_QR_METADATA_MESSAGE = 'QR の遷移先を確認できませんでした。時間をおいて再試行してください。';
 
 // content type が読めなかった場合の既定値（RFC 2046 の汎用バイナリ型）。
 const FALLBACK_CONTENT_TYPE = 'application/octet-stream';
@@ -447,12 +452,36 @@ export async function apiFetchBinary(
     if (bytes.length === 0) {
       return { ok: false, code: 'empty_response', message: EMPTY_RESPONSE_MESSAGE };
     }
+
+    const surveyUrl = res.headers.get('X-Survey-URL');
+    if (surveyUrl === null || !isSafeSurveyUrl(surveyUrl)) {
+      return { ok: false, code: 'invalid_qr_metadata', message: INVALID_QR_METADATA_MESSAGE };
+    }
+
     return {
       ok: true,
-      value: { bytes, contentType: res.headers.get('Content-Type') ?? FALLBACK_CONTENT_TYPE },
+      value: {
+        bytes,
+        contentType: res.headers.get('Content-Type') ?? FALLBACK_CONTENT_TYPE,
+        surveyUrl,
+      },
     };
   } catch {
     return { ok: false, code: 'network', message: NETWORK_MESSAGE };
+  }
+}
+
+function isSafeSurveyUrl(value: string): boolean {
+  if (value.length === 0 || value.trim() !== value) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.username.length === 0 &&
+      url.password.length === 0
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -471,4 +500,52 @@ export async function getStoreQr(
 ): Promise<ApiResult<BinaryPayload>> {
   const query = buildQuery({ size: String(QR_SIZE) });
   return await apiFetchBinary(`/stores/${encodeURIComponent(storeId)}/qr.png${query}`, options);
+}
+
+// --- QR パネルの実績（Issue #401・store-qr-issuance-ui Requirement 8） ---
+
+/** 1 か月分の実績。`month` は JST の暦月（`YYYY-MM`）で、「当月」はサーバが決める。 */
+export interface StoreReviewFunnelMonth {
+  readonly month: string;
+  /** アンケートの回答件数。 */
+  readonly responses: number;
+  /** 回答した客が Google の投稿画面へ進んだ回数（投稿された件数ではない）。 */
+  readonly reviewLinkOpens: number;
+}
+
+// 2xx でありながら本文が期待した形でなかった場合の文言。欠けた件数を 0 件として描かないための失敗扱い。
+const INVALID_FUNNEL_MESSAGE = '実績を読み込めませんでした。時間をおいて再試行してください。';
+
+function isFunnelMonth(value: unknown): value is StoreReviewFunnelMonth {
+  if (typeof value !== 'object' || value === null) return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.month === 'string' &&
+    typeof m.responses === 'number' &&
+    typeof m.reviewLinkOpens === 'number'
+  );
+}
+
+/**
+ * GET /stores/:storeId/review-funnel: 店舗の当月と前月の実績を新しい順に取得する。
+ * 401 unauthenticated / 403 forbidden / 404 not_found / 500 internal は code をそのまま返す。
+ * 利用者向けの文言への写像は呼び出し側（表示層）が持つ。
+ *
+ * 本文の形は確かめる。欠けた値を画面が 0 件として描くと、「数えていない」が「0 件だった」に化ける
+ * （Requirement 8.7 の 0 件の表示は、サーバが 0 と答えた場合に限る）。
+ */
+export async function getStoreReviewFunnel(
+  storeId: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreReviewFunnelMonth[]>> {
+  const result = await apiFetch<{ months?: unknown }>(
+    `/stores/${encodeURIComponent(storeId)}/review-funnel`,
+    options,
+  );
+  if (!result.ok) return result;
+  const months = result.value.months;
+  if (!Array.isArray(months) || !months.every(isFunnelMonth)) {
+    return { ok: false, code: 'invalid_response', message: INVALID_FUNNEL_MESSAGE };
+  }
+  return { ok: true, value: months };
 }

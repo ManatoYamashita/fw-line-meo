@@ -163,7 +163,20 @@ const ONE_PIXEL_PNG = Buffer.from(
 );
 
 /** QR エンドポイントのパス（クエリは除いた形で照合する）。 */
-const QR_PATH = /^\/stores\/[^/]+\/qr\.png$/;
+const QR_PATH = /^\/stores\/([^/]+)\/qr\.png$/;
+
+/**
+ * QR パネルの実績（Issue #401）。月は固定値でよい（「今月」の判定はサーバの責務で、画面は受けた順に
+ * 今月・先月と名付けるだけ）。0 件の月を含めるのは、0 を空欄にしない表示（Requirement 8.7）まで
+ * 実描画の監査へ載せるためである。
+ */
+const REVIEW_FUNNEL_PATH = /^\/stores\/[^/]+\/review-funnel$/;
+const REVIEW_FUNNEL = {
+  months: [
+    { month: '2026-09', responses: 12, reviewLinkOpens: 7 },
+    { month: '2026-08', responses: 0, reviewLinkOpens: 0 },
+  ],
+};
 
 /** 停止・再開のエンドポイント（store-suspension Issue #252）。捕獲は店舗 ID と操作。 */
 const SUSPENSION_PATH = /^\/stores\/([^/]+)\/(suspend|resume)$/;
@@ -200,8 +213,22 @@ export async function stubDashboardApi(
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (QR_PATH.test(path)) {
-      await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
+    const qrRequest = QR_PATH.exec(path);
+    if (qrRequest !== null) {
+      const surveyUrl = `https://survey.example/s/${decodeURIComponent(qrRequest[1]!)}`;
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        headers: {
+          'Access-Control-Expose-Headers': 'X-Survey-URL',
+          'X-Survey-URL': surveyUrl,
+        },
+        body: ONE_PIXEL_PNG,
+      });
+      return;
+    }
+    if (REVIEW_FUNNEL_PATH.test(path) && request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(REVIEW_FUNNEL) });
       return;
     }
     const suspension = SUSPENSION_PATH.exec(path);
@@ -291,20 +318,32 @@ export async function openLoginStorageFailureToast(page: Page): Promise<void> {
   await expect(page.getByText(/端末の空き容量を確認/)).toBeVisible();
   await expect(page.getByText(/IndexedDB|IO error|writable file/i)).toHaveCount(0);
   await expect(signInButton).toBeEnabled();
-  await waitForToastSettled(page);
+  await waitForToastsSettled(page);
 }
 
 /**
- * Toast が現れ終わるのを待つ。**現れる途中で監査させない。**
+ * Toast が現れ終わるのを待ち、**自動で消える時計を止めた状態で返す**（Issue #342・#359・#360）。
  *
- * Toast は不透明度を上げながら現れる。その途中で axe にコントラストを測らせると、半透明の文字色と
- * 白の合成色で比が割れ、測った瞬間によって赤になったり緑になったりする（2026-09-26 に実測: 危険色の
- * 途中が 3.84:1、成功色の途中が 3.23:1）。アニメーションと遷移がすべて終わるのを待ち、さらに
- * 計算後の不透明度が 1 になったことを確かめる（遷移の始まる前のフレームで待つと空振りするため）。
+ * Toast は不透明度を 0 から 1 へ上げながら現れる。途中で axe に対比を測らせると、半透明の文字色と
+ * 白の合成色を測る（#15803D が α ≈ 0.80 で #439963・3.51:1 など）。最終の色は AA を満たすのに、
+ * 測った瞬間の速さで赤と緑が入れ替わり、main の ts-ci を落として本番デプロイを止めた（#360）。
+ *
+ * 待ち方: 要素の中の動き（アニメーションと遷移）がすべて終わり、**全件の**計算後の不透明度が 1 に
+ * なるまで繰り返す。動きの終わりだけを待つと、遷移が始まる前のフレームで待って空振りする。
+ * 途中で取り消された動きの `finished` は reject するので、握って次の周回で見直す。
+ *
+ * 待つ前に Toast の上へポインタを置く。Sonner は Toaster の上にポインタがある間（`expanded`）
+ * 自動で消える時計を止める（sonner 2.0.8 の `pauseTimer`）。止めないと、監査が表示時間（6 秒）を
+ * 越えたときに**消える途中**を測り、同じ形で赤になる。ポインタは Toast の中央に置くので、
+ * ホバーで色の変わる閉じるボタンには触れない。
+ *
+ * 監査の spec は待たずに `expectToastsSettled` で確かめるだけにする。待ちを spec へ置くと、
+ * ここから待ちが消えても spec の待ちが隠し、面を開く手順の不備が見えなくなる。
  */
-async function waitForToastSettled(page: Page): Promise<void> {
+async function waitForToastsSettled(page: Page): Promise<void> {
   const toasts = page.locator('[data-sonner-toast]');
   await expect(toasts.first()).toBeVisible();
+  await toasts.first().hover();
   await expect
     .poll(
       () =>
@@ -319,6 +358,33 @@ async function waitForToastSettled(page: Page): Promise<void> {
       { message: 'Toast が現れ終わらない（不透明度が 1 にならない）' },
     )
     .toBe(true);
+}
+
+/**
+ * Toast が現れ終わって留まっていることを、**待たずに**確かめる（Issue #360）。
+ *
+ * 監査の直前と直後に当てる。直前に当てれば、面を開く手順が待ちを失ったときに「測る瞬間の速さ」に
+ * 頼らず確定的に赤になる（現れた直後は動きが走っている）。直後に当てれば、監査の間に消え始めた
+ * ときに、原因の読めない対比の赤ではなく、この理由で赤になる。
+ *
+ * 1 回だけ読んで判定する。poll にすると、それ自体が待ちになって上の性質を失う。
+ */
+export async function expectToastsSettled(page: Page): Promise<void> {
+  const problems = await page.locator('[data-sonner-toast]').evaluateAll((elements) => {
+    if (elements.length === 0) return ['Toast が 1 件も無い'];
+    return elements.flatMap((element, index) => {
+      const found: string[] = [];
+      const opacity = getComputedStyle(element).opacity;
+      if (opacity !== '1') found.push(`${index} 件目の不透明度が ${opacity}`);
+      const running = element
+        .getAnimations({ subtree: true })
+        .filter((animation) => animation.playState === 'running').length;
+      if (running > 0) found.push(`${index} 件目で動きが ${running} 件走っている`);
+      if (element.getAttribute('data-removed') === 'true') found.push(`${index} 件目が消え始めている`);
+      return found;
+    });
+  });
+  expect(problems, 'Toast が現れ終わって留まっている状態で監査していない').toEqual([]);
 }
 
 /**
@@ -358,11 +424,6 @@ export interface DashboardSurface {
   readonly where: string;
   /** 表や主要部品が現れるまでの操作と、本体が描けていることの前提 assert。 */
   readonly open: (page: Page) => Promise<void>;
-  /**
-   * 素の `<select>` 由来の既知の溢れを持つ面か（Issue #186）。
-   * 横スクロールの spec はこの印で `test.fail` 側と通常側を振り分ける。
-   */
-  readonly knownOverflow: boolean;
 }
 
 /**
@@ -387,8 +448,11 @@ export async function openStoreQrPanelWithToast(page: Page): Promise<void> {
   await openListSurface(page, '/stores', '店舗一覧', 3);
   await page.getByRole('button', { name: new RegExp(`${STORES[0].name} の QR 発行`) }).click();
   await expect(page.locator('[data-print-region]')).toBeVisible();
+  // 実績の表（Issue #401）も描けていることを先に固定する。実績は QR とは別の要求で届くので、
+  // 掲示面が出た時点ではまだ読み込み中でありうる。待たないと、表を持たない状態を監査して緑になる。
+  await expect(page.getByRole('table', { name: `${STORES[0].name} のアンケートの実績` })).toBeVisible();
   // 発行の成功は Toast でも知らせる（Issue #342）。現れる途中で監査・撮影させない。
-  await waitForToastSettled(page);
+  await waitForToastsSettled(page);
 }
 
 /** 表示中の Toast をすべて閉じ、消えたことを確かめる。 */
@@ -480,29 +544,10 @@ export const OVERLAY_SURFACES: readonly OverlaySurface[] = [
  *
  * Toast はモーダルではなく下の面を操作不能にしないため、`OVERLAY_SURFACES` とは分ける。
  * ただし URL だけを開く通常面では現れない後続状態なので、明示しなければ監査から漏れる。
- */
-/**
- * 通知（Toast）の表示の動きが終わるまで待つ（Issue #359）。
  *
- * Toast は不透明度を 0 から 1 へ 400ms かけて上げる。**表示された直後に色の対比を測ると、
- * 白に混ざった途中の色を測る。** axe は不透明度を合成した色で判定するため、最終の色
- * （--destructive・白地で 6 を超える）では満たす対比が、途中では 2.48〜4.27 に落ちて赤になった
- * （ローカルで 40 回中 18 回。CI の main でも同じ形で落ちていた）。
- *
- * 不透明度が 1 に届いたことを先に待ち、そのうえで要素の中の動きがすべて終わるのを待つ。
- * 前者だけだと、不透明度以外の動き（位置・高さ）が残ったまま測ることがある。
+ * **各 `open` は Toast が現れ終わった状態で返す**（`waitForToastsSettled`・Issue #360）。
+ * 監査の spec は待たずに `expectToastsSettled` で確かめるので、待ちを持たない `open` は必ず赤になる。
  */
-export async function waitForToastsSettled(page: Page): Promise<void> {
-  const toasts = page.locator('[data-sonner-toast]');
-  await expect(toasts.first()).toBeVisible();
-  await expect(toasts.first()).toHaveCSS('opacity', '1');
-  await toasts.evaluateAll(async (elements) => {
-    await Promise.all(
-      elements.flatMap((element) => element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
-    );
-  });
-}
-
 export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
   {
     where: 'ログインの保存領域エラー通知',
@@ -526,7 +571,6 @@ export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
 export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   {
     where: '店舗一覧',
-    knownOverflow: false,
     open: async (page) => {
       await openListSurface(page, '/stores', '店舗一覧', 3);
     },
@@ -535,19 +579,16 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     // QR パネルは店舗一覧の中で開く後続状態であり、Issue #179 まで自動 a11y 監査の対象外だった
     // （客向けの下書き画面が同じ形で漏れていたのと同型。PR #218 のレビューで判明した）。
     where: '店舗一覧の QR パネル',
-    knownOverflow: false,
     open: openStoreQrPanel,
   },
   {
     where: '代理店管理',
-    knownOverflow: false,
     open: async (page) => {
       await openListSurface(page, '/admin/agencies', '代理店管理', 2);
     },
   },
   {
     where: 'ログイン',
-    knownOverflow: false,
     open: async (page) => {
       await startSignedOut(page);
       await stubDashboardApi(page);
@@ -558,7 +599,6 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   },
   {
     where: '招待コード',
-    knownOverflow: true,
     open: async (page) => {
       await stubDashboardApi(page);
       await page.goto('/invite-codes');
@@ -571,7 +611,6 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
   },
   {
     where: '利用者管理',
-    knownOverflow: true,
     open: async (page) => {
       await openListSurface(page, '/admin/users', '利用者管理', 3);
     },
@@ -580,12 +619,10 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     // 編集パネルは利用者管理の中で開く後続状態である。一覧の URL だけを監査しても、パネルは
     // 構造的に一度も監査されない（QR パネルと同じ理由で、面として明示する・Issue #259）。
     where: '利用者管理の編集パネル',
-    knownOverflow: false,
     open: openUserEditPanel,
   },
   {
     where: '店舗登録',
-    knownOverflow: true,
     open: async (page) => {
       await stubDashboardApi(page);
       await page.goto('/stores/new');

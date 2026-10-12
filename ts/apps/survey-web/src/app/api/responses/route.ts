@@ -3,7 +3,7 @@ import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
-import { logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
+import { logFabricationResidual, logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
 import { handleResponses, type ResponsesDeps } from './handler';
 import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation } from '@fwlm/observability';
 
@@ -21,6 +21,7 @@ async function buildDeps(): Promise<ResponsesDeps> {
   // 生成失敗ではない。生成器はロガーを持たないので、記録の仕方はここで決める。
   const generator = await createDefaultDraftGenerator({
     onResidual: (aspectCodes) => logFactualityResidual(writeStructuredLog, aspectCodes),
+    onClaimResidual: (categories) => logFabricationResidual(writeStructuredLog, categories),
   });
   const rateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 

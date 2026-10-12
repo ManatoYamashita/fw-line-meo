@@ -121,7 +121,7 @@ const guardCases: GuardCase[] = [
   {
     name: 'POST /dashboard-users',
     invoke: ({ user, disabled = false, authorization }) => {
-      const dep = vi.fn(() => Promise.resolve(userItem()));
+      const dep = vi.fn(() => Promise.resolve({ kind: 'created' as const, user: userItem() }));
       const res = handleDashboardUserCreate(
         {
           auth: authDeps(user, disabled),
@@ -351,9 +351,10 @@ function userCreateDeps(over: Partial<DashboardUserCreateDeps> = {}, user: Dashb
   return {
     auth: authDeps(user),
     createUser: (input) =>
-      Promise.resolve(
-        userItem({ role: input.role, operatorId: input.operatorId, agencyId: input.agencyId, email: input.email, displayName: input.displayName }),
-      ),
+      Promise.resolve({
+        kind: 'created',
+        user: userItem({ role: input.role, operatorId: input.operatorId, agencyId: input.agencyId, email: input.email, displayName: input.displayName }),
+      }),
     // 既定は「自運営配下に該当メールなし（＝越境 or 不在扱い）」。衝突分岐を検証するテストで差し替える。
     findUserByEmailInOperator: () => Promise.resolve(null),
     auditLog: () => Promise.resolve(),
@@ -447,6 +448,21 @@ describe('handleDashboardUserCreate', () => {
       email: 'mixedcase@example.com',
       displayName: null,
     });
+  });
+
+  it('所属先の不在・他運営（agency_not_found）は 404 agency_not_found で、監査を書かない（Issue #260・Req 4.4）', async () => {
+    const createUser = vi.fn(() => Promise.resolve({ kind: 'agency_not_found' as const }));
+    const auditLog = vi.fn(() => Promise.resolve());
+    const res = await handleDashboardUserCreate(userCreateDeps({ createUser, auditLog }), {
+      authorization: 'Bearer tok',
+      body: { role: 'agency', agencyId: AGENCY_ID, email: 'new@example.com' },
+    });
+    expect(res.status).toBe(404);
+    const json = await readJson<ErrorEnvelope>(res);
+    expect(json.error.code).toBe('agency_not_found');
+    // 編集の経路（POST /dashboard-users/:id/update）と同じ文言にする。
+    expect(json.error.message).toBe('所属代理店が見つかりません');
+    expect(auditLog).not.toHaveBeenCalled();
   });
 
   it('email UNIQUE 衝突（pg 23505）は 409 email_conflict', async () => {

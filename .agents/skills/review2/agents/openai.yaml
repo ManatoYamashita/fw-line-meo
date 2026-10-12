@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Review + E2E"
+  short_description: "根拠重視でPRを高精度レビューし必要に応じてE2E検証"
+  default_prompt: "Use $review2 to review this pull request and verify the highest-risk behavior before recommending whether to merge."

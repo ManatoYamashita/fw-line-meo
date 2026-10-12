@@ -33,7 +33,8 @@ E2E（Issue #257・手順書は `docs/testing/e2e.md`。自動層・本番の読
 - `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks`（`bash scripts/run-e2e-prod-checks.sh`）— 本番の読み取り専用の確認（稼働イメージ・シークレット・実疎通の鮮度・**本番のコミットに対する ts-ci の E2E ジョブ**・日次ジョブ・配信の件数と致命的な失敗）。デプロイ待ち・デプロイ中は WARN。**運用者用・CI からは呼ばない**（ログを読むため）。本番の状態は変えない
 - **`playwright test` を素で打たない。** survey-web の `.env.local` は開発用 DB と実の Gemini キーを持つので、env を明示しない実行はそちらへ繋がる。`make ts-test-e2e` は `run-e2e-local.sh --only survey` を呼ぶ
 
-CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可）:
+CI ガード（すべて read-only・各項目のコマンドで単体実行可）:
+- `python3 scripts/check-agent-skills.py` — 同梱スキルの登録・実体・内部参照・配布ハッシュの整合検証（Issue #449）。追加依存不要。`.agents/skills` の外部文書は既存LINEスキルと同じく文体チェックの対象外とし、自作の `_shared/` は対象へ残す
 - `scripts/check-deploy-image-coverage.sh` — デプロイパイプラインのカバレッジ（Issue #33/#91）。`--print-targets` で **デプロイ対象 7 件の正典**を `<service|job>\t<name>` の TSV で出す（サービスは tf の run-services、ジョブはその差集合として導出。列挙を二重管理しない）
 - `scripts/check-prod-image-drift.sh` — 本番稼働イメージと `origin/main` の乖離検証（Issue #91）。`PROJECT_ID` 必須。`PROD_IMAGE_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
 - `scripts/check-secret-declaration-coverage.sh` — シークレット実値投入の宣言カバレッジ（Issue #63）。tf の `locals.secret_ids` ／ `infra/secrets-provisioned.tsv` ／ `infra/README.md` の投入手順 ／ 消費側配線を両方向で照合する。`--print-secrets` で **宣言 6 件の正典**を `<secret_id>\t<version>` の TSV で出す
@@ -41,7 +42,8 @@ CI ガード（すべて read-only・`bash scripts/<name>.sh` で単体実行可
 - `scripts/check-external-api-smoke.sh` — 外部 API 実疎通の棚卸しと記録の構造検証（Issue #125・層1・ts-ci）。`infra/external-api-smoke.tsv` を secret 正典（`check-secret-declaration-coverage.sh --print-secrets`）と `infra/README.md` §8 の手順見出しの両方に対して両方向照合する。**`date` を 1 箇所も持たない**（時間依存の判定は層2 の責務）
 - `scripts/check-external-api-smoke-freshness.sh` — 実疎通記録の鮮度検証（Issue #125・層2・`external-api-smoke-freshness` ワークフローが日次実行）。`PENDING` と有効期間 14 日超を赤にする。**残り 2 日以内（経過 12〜14 日・定数 `WARN_WITHIN_DAYS`）は赤にせず期限間近として予告する**: API ごとの `WARN` 行（経過日数・最終確認日・有効期限＝最終確認日 + 14 日・残り日数）と署名 `<api>=warn;`・最も早い有効期限の `EXTERNAL-API-SMOKE-EXPIRY:` 行を出して exit 0 のまま返し、ワークフローが同じ追跡 Issue（ラベル `external-api-smoke`）を「期限間近」として起票／コメントする（`report-ci-issue.sh` へは red として写し、ジョブは緑のまま）。**GCP へ一切アクセスしない**（鍵も読まない）。基準日は記録側と揃えて `TZ=Asia/Tokyo` に固定する（runner は UTC なので素の `date` だと最大 1 日ずれ、正当な記録が未来日と誤判定される）。`EXTERNAL_API_SMOKE_NOW` に `YYYY-MM-DD` を渡せば基準日を注入できる
 - `scripts/run-external-api-smoke.sh` — 外部 API への実疎通そのもの（Issue #125・**運用者用・CI からは呼ばない**）。鍵を CI へ渡さないのは Req 5.4 のため。出力は PASS/FAIL・HTTP ステータス・`status` フィールドだけの allowlist（応答本文も鍵も出さない）。LINE は送信系を使わず `/v2/bot/info` で確認する
-- `scripts/check-monitoring-coverage.sh` — Cloud Run サービス監視の構造検証（Issue #230・ts-ci）。5xx のポリシーが**サービス名を述語に持たない**こと（持つと「サービスを足したとき忘れる」余地が生まれる・#151 と同型）、遅延監視の列挙がデプロイ正典に実在すること、**ログベース指標が数える event 名をそのサービスが実際に出力していること**、通知先と `auto_close` の接続を検証する。**GCP へ一切アクセスしない**
+- `scripts/check-external-api-liveness.sh` — places / line-messaging の生死を**実トラフィックの件数**で判定する（Issue #139・`external-api-liveness` ワークフローが 6 時間ごとに実行）。ログベース指標（日次バッチの取得成功・配信ジョブのトークン発行）と組込みの実行件数を Monitoring の timeSeries で読み、ALIVE / DEAD（実行して全部失敗）/ NOT_RUN（実行していない）/ UNOBSERVED（対象 0 件・指標の作成直後）に分ける。**UNOBSERVED は緑にせず**、exit 0 のまま署名 `<api>=unobserved;` を出して追跡 Issue（ラベル `external-api-liveness`）で知らせる。`PROJECT_ID` 必須。**ログを 1 行も読まない**（CI の `roles/monitoring.viewer` だけで足り、新しい IAM 付与はゼロ）。gemini は覆えないので #125 の手動実疎通は存続する。`EXTERNAL_API_LIVENESS_SNAPSHOT`（件数 TSV）／`EXTERNAL_API_LIVENESS_RAW_DIR`（API 応答の生の形）で任意の状態を注入できる
+- `scripts/check-monitoring-coverage.sh` — Cloud Run サービス監視の構造検証（Issue #230・ts-ci）。5xx のポリシーが**サービス名を述語に持たない**こと（持つと「サービスを足したとき忘れる」余地が生まれる・#151 と同型）、遅延監視の列挙がデプロイ正典に実在すること、**ログベース指標が数える event 名をそのサービス（ジョブの指標は `push-images.sh` の Dockerfile 対応が指すソース木）が実際に出力していること**、アラートを持たない指標の読み手宣言（`analytics-only` / `ci-read`・後者は読み手のスクリプトが指標名を書いていることまで照合）、通知先と `auto_close` の接続を検証する。**GCP へ一切アクセスしない**
 - `scripts/check-monitoring-drift.sh` — 本番の監視構成と宣言の乖離検証（Issue #230・`monitoring-drift` ワークフローが 6 時間ごとに実行）。`PROJECT_ID` 必須。宣言（`guardrails/main.tf`）と本番（alert policy の display_name / ログベース指標）を**両方向**で照合する。**ログを 1 行も読まない**（指標の存在確認は Monitoring の `metricDescriptors` を使う。`gcloud logging metrics list` に必要な `logging.logMetrics.*` は `roles/monitoring.viewer` に含まれず、代わりに `roles/logging.viewer` を付けると CI がログ本文を読めるようになるため）。`PROD_MONITORING_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
 - `scripts/check-prod-schema-drift.sh` — migration を使い捨て PostgreSQL へ実適用した後の catalog と本番 `pg_catalog` を照合（Issue #251・`prod-schema-drift` ワークフローが 6 時間ごとに実行）。本番側は専用 IAM DB user で対象名だけを読み、表の行は読まない。`EXPECTED_SCHEMA_SNAPSHOT` / `PROD_SCHEMA_SNAPSHOT` で任意の TSV 状態を注入できる。データだけを変える migration の内容は検査対象外
 - `scripts/check-jst-offset-consistency.sh` — JST の固定 `+09:00` と整形方式の整合検証（Issue #299・ts-ci）。TS 4 実装（暦日 3・投稿時刻 1）と Go 1 実装の値が 32,400 秒に一致すること、SQL の `AT TIME ZONE 'Asia/Tokyo'`、宣言と実装候補の双方向一致を検証する。宣言済みファイルへ 2 つ目の候補を足すときは既存の固定値を再利用し、独立させるなら別ファイルとして登録する。**テストコードは本番の時刻決定権を持たないため走査対象外**。外部サービス・実行時刻・実行環境の TZ へ依存しない
@@ -93,6 +95,19 @@ Cloud Run（Webhook/客向けWeb/ダッシュボードAPI・ゼロスケール�
 ## LINE Messaging API 実装時
 
 `.claude/skills/messaging-api/` スキルを使う。**LINE API を記憶で答えない**（頻繁に更新される）。Webhook 署名検証・Flex Message・リッチメニュー実装時は同スキルの references を必ず参照。
+
+## リポジトリ共通Skills
+
+- スキルの実体と依存資料は `.agents/skills/` に置く。選定一覧と出典は
+  `docs/agent-skills/README.md` と `docs/agent-skills/manifest.json` を参照する。
+- スキルを使う前に `.agents/skills/_shared/runtime.md` を読む。
+  この共通実行規則は、同梱した上流スキルの環境固有の記述に優先する。
+- 同名のスキルが個人PCにもある場合は、リポジトリ内の版を使用する。
+  スキルの依存はリポジトリ内の相対パスで解決する。
+- 未導入サービスへの移行、フレームワーク更新、外部への書き込みを、
+  スキルが記載しているという理由だけで実施しない。ユーザーの依頼範囲で使用する。
+- 同梱は認証情報、MCP接続、ブラウザセッションやCLIの同期を意味しない。
+  使えるツールを確認し、実行した検証と未検証の範囲を区別して報告する。
 
 ## 開発ワークフロー（Kiro Spec-Driven）
 

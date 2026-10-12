@@ -413,7 +413,7 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 | GET | /agencies | — | `{ agencies: AgencyItem[] }` | 401, 403(非operator) |
 | POST | /agencies | `{ name: string }` | `{ agency: AgencyItem }` | 400, 401, 403 |
 | GET | /dashboard-users | — | `{ users: DashboardUserItem[] }` | 401, 403(非operator) |
-| POST | /dashboard-users | `{ role, agencyId?, email, displayName? }` | `{ user: DashboardUserItem }` | 400, 401, 403, 409(email重複) |
+| POST | /dashboard-users | `{ role, agencyId?, email, displayName? }` | `{ user: DashboardUserItem }` | 400, 401, 403, 404(所属代理店の不在・他運営・Issue #260), 409(email重複) |
 | POST | /dashboard-users/:id/disable | — | `{ user: DashboardUserItem }` | 401, 403, 404 |
 
 - エラー封筒は既存 `jsonError` の `{ error: { code, message } }` に統一。message は日本語（7.3, 7.4）。

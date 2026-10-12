@@ -5,7 +5,7 @@ import {
   ACTION_RESULT_SURFACES,
   DASHBOARD_SURFACES,
   OVERLAY_SURFACES,
-  waitForToastsSettled,
+  expectToastsSettled,
 } from './fixtures/api';
 
 // 管理ダッシュボード 8 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを、
@@ -15,9 +15,6 @@ import {
 // 横スクロール実測（dashboard-surfaces.spec.ts）と同じ面定義を使う。面が本体を描けている
 // ことの前提 assert も各 open が持つ ——「空の画面には違反が出ようがない」ため、a11y 監査
 // こそ前提の固定が要る。
-//
-// 既知の溢れ（Issue #186）を持つ 3 面もここでは通常どおり監査する。溢れは要件 3.3 の話で
-// あって a11y 違反ではなく、axe も溢れを違反として報告しない。
 //
 // axe の守備範囲と限界（とくにフォーカス指標は自動検出できないこと）は
 // @fwlm/e2e-support/a11y に記す。
@@ -46,13 +43,18 @@ for (const surface of OVERLAY_SURFACES) {
 
 // 操作結果の通知状態（Issue #342）。面全体に加えて Toast 自体へ絞った監査も当て、通知の
 // 前提 assert と合わせて「失敗状態が出ていない空振り」を成功として扱わない。
-// 監査の前に表示の動きが終わるのを待つ。途中で測ると白に混ざった色を測る（Issue #359）。
+//
+// Toast が現れる途中・消える途中に測ると、白に混ざった色を測って実行の速さ次第で赤になる
+// （Issue #360）。待つのは面を開く側（open）で、ここは**待たずに確かめるだけ**にする。ここで
+// 待つと、open が待ちを失っても緑のままになる。監査の後にも確かめ、監査の間に消え始めたら、
+// 対比の赤ではなくその理由で赤にする。
 for (const surface of ACTION_RESULT_SURFACES) {
   test(`${surface.where}が WCAG A/AA の自動監査を通る`, async ({ page }) => {
     await surface.open(page);
-    await waitForToastsSettled(page);
+    await expectToastsSettled(page);
     await expectNoAxeViolations(page);
     await expectNoAxeViolations(page, { selector: surface.selector });
+    await expectToastsSettled(page);
   });
 }
 

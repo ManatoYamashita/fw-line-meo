@@ -24,6 +24,10 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/fwlm
     steps:
       - uses: actions/checkout@v5
+      - name: 'リポジトリ同梱スキルの整合検証（Issue #449）'
+        run: |
+          python3 scripts/check-agent-skills.py
+          python3 -m unittest discover -s scripts/test -p test_agent_skills.py
       - name: 'NEXT_PUBLIC_* ビルド時 build-arg ガード（Issue #23）'
         # 依存インストール前に fail-fast（checkout 済みのみが前提の read-only grep 検証）。
         run: bash scripts/check-next-public-buildargs.sh
@@ -504,8 +508,9 @@ jobs:
       # ワークフローに固定される。
       - run: pnpm -C ts install --frozen-lockfile
       - name: apply migrations
-        # 既存 DB モードは migrations 適用済みを前提にする（with-test-db.sh は
-        # initdb / pg_ctl を要求するが ubuntu-latest ではこれらが PATH に無い）。
+        # 既存 DB モードは migrations 適用済みを前提にする（CI は service container の
+        # postgres を使い、with-test-db.sh で一時インスタンスを起こさない。理由は
+        # db/test/cross_runtime_integration.sh の冒頭）。
         run: for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
       # name は引用する。YAML の plain scalar は " #" 以降をコメントとして捨てる
       # （scripts/check-workflow-step-names.sh が機械強制する）。

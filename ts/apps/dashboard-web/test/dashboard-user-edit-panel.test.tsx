@@ -10,7 +10,7 @@ import { settleEffects } from './focus-observation';
 // （store-qr-panel.test.tsx と同規約）。送信関数は原則として props で注入し、
 // 既定の送信関数（updateDashboardUser を包むアダプタ）だけをこのモックで観測する。
 const api = vi.hoisted(() => ({ updateDashboardUser: vi.fn() }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import {
   DashboardUserEditPanel,

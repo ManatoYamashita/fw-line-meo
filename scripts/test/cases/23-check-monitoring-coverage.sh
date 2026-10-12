@@ -591,3 +591,157 @@ fx_guard_mutate check-monitoring-coverage \
 fx_run check-monitoring-coverage
 expect_red 'が出力していません'
 t_end
+
+# ---------------------------------------------------------------------------
+# ジョブの指標と ci-read 宣言（Issue #139）
+#
+# 外部 API の生死判定の指標は Cloud Run の**ジョブ**の行を数え、アラートではなく CI の定期検証
+# （scripts/check-external-api-liveness.sh）が読む。ジョブの事象名の照合と、読み手の実在の照合が
+# 効いていることを固定する。
+
+mcov_job_fixture() {
+  mcov_fixture
+  fx_write scripts/push-images.sh <<'EOS'
+#!/usr/bin/env bash
+IMAGE_NAMES=(survey-web line-webhook daily-batch)
+declare -A DOCKERFILE=(
+  [daily-batch]="go/Dockerfile"
+  [survey-web]="ts/apps/survey-web/Dockerfile"
+)
+EOS
+  fx_write infra/envs/prod/main.tf <<'EOS'
+module "run-services" {
+  services = {
+    "survey-web" = {
+      image = "cloudrun/container/hello"
+    }
+    "line-webhook" = {
+      image = "cloudrun/container/hello"
+    }
+  }
+}
+
+module "batch_job" {
+  source     = "../../modules/batch-job"
+  project_id = var.project_id
+}
+
+module "guardrails" {
+  source                   = "../../modules/guardrails"
+  survey_service_name      = module.run_services.service_names["survey-web"]
+  webhook_service_name     = module.run_services.service_names["line-webhook"]
+  batch_job_name           = module.batch_job.job_name
+  latency_watched_services = ["survey-web"]
+}
+EOS
+  fx_write infra/modules/batch-job/variables.tf <<'EOS'
+variable "job_name" {
+  description = "Cloud Run ジョブ名。"
+  type        = string
+  default     = "daily-batch"
+}
+EOS
+  fx_write go/cmd/daily-batch/main.go <<'EOS'
+package main
+
+const summaryEvent = "daily-batch.run"
+EOS
+  fx_write scripts/check-external-api-liveness.sh <<'EOS'
+#!/usr/bin/env bash
+USER_METRICS="places_fetch_ok_runs"
+EOS
+  cat >> "${FX}/infra/modules/guardrails/main.tf" <<'EOS'
+
+resource "google_logging_metric" "places_fetch_ok_runs" {
+  # monitoring-coverage: ci-read (#139) scripts/check-external-api-liveness.sh
+  project = var.project_id
+  name    = "places_fetch_ok_runs"
+  filter  = "resource.type = \"cloud_run_job\" AND resource.labels.job_name = \"${var.batch_job_name}\" AND jsonPayload.event = \"daily-batch.run\" AND jsonPayload.fetch_ok > 0"
+}
+EOS
+}
+
+t_begin 'check-monitoring-coverage: ジョブの指標の事象名を Go のソースで照合し、ci-read を受理する'
+mcov_job_fixture
+fx_run check-monitoring-coverage
+expect_green
+expect_output_matches 'logging metric 3 本 / 事象名 4 件'
+t_end
+
+t_begin 'check-monitoring-coverage: ジョブが事象名を出していなければ赤（テストにだけ在っても数えない）'
+mcov_job_fixture
+fx_write go/cmd/daily-batch/main.go <<'EOS'
+package main
+EOS
+fx_write go/cmd/daily-batch/summary_test.go <<'EOS'
+package main
+
+const wantEvent = "daily-batch.run"
+EOS
+fx_run check-monitoring-coverage
+expect_red '数える事象 "daily-batch.run" を daily-batch が出力していません'
+t_end
+
+# 事象名の `.` は正規表現の任意 1 文字である。逃がさないと別の文字列に一致して緑になる。
+t_begin 'check-monitoring-coverage: 事象名の . を任意の 1 文字として扱わない'
+mcov_job_fixture
+fx_write go/cmd/daily-batch/main.go <<'EOS'
+package main
+
+const summaryEvent = "daily-batchXrun"
+EOS
+fx_run check-monitoring-coverage
+expect_red '数える事象 "daily-batch.run" を daily-batch が出力していません'
+t_end
+
+t_begin 'check-monitoring-coverage: ci-read の読み手が指標名を書いていなければ赤'
+mcov_job_fixture
+fx_write scripts/check-external-api-liveness.sh <<'EOS'
+#!/usr/bin/env bash
+USER_METRICS="places_fetch_ok_runs_v2"
+EOS
+fx_run check-monitoring-coverage
+expect_red '指標 places_fetch_ok_runs を ci-read の読み手 scripts/check-external-api-liveness.sh が参照していません'
+t_end
+
+t_begin 'check-monitoring-coverage: ci-read の読み手が無ければ赤'
+mcov_job_fixture
+rm -f "${FX}/scripts/check-external-api-liveness.sh"
+fx_run check-monitoring-coverage
+expect_red 'ci-read 宣言が指す読み手 scripts/check-external-api-liveness.sh がありません'
+t_end
+
+t_begin 'check-monitoring-coverage: ci-read に Issue 番号が無ければ除外として認めない'
+mcov_job_fixture
+sed 's/ci-read (#139) /ci-read /' "${FX}/infra/modules/guardrails/main.tf" > "${FX}/guardrails.tmp"
+mv "${FX}/guardrails.tmp" "${FX}/infra/modules/guardrails/main.tf"
+if [ "$(grep -c 'ci-read scripts/' "${FX}/infra/modules/guardrails/main.tf")" -ne 1 ]; then
+  _t_fail 'Issue 番号を外す変異が当たりませんでした。'
+fi
+fx_run check-monitoring-coverage
+expect_red '指標 places_fetch_ok_runs を読む alert policy がありません'
+t_end
+
+t_begin 'check-monitoring-coverage: ジョブ名をリテラルで配線したら赤'
+mcov_job_fixture
+sed 's/batch_job_name           = module.batch_job.job_name/batch_job_name           = "daily-batch"/' \
+  "${FX}/infra/envs/prod/main.tf" > "${FX}/root.tmp"
+mv "${FX}/root.tmp" "${FX}/infra/envs/prod/main.tf"
+if [ "$(grep -c 'batch_job_name           = "daily-batch"' "${FX}/infra/envs/prod/main.tf")" -ne 1 ]; then
+  _t_fail 'ジョブ名をリテラルへ変える変異が当たりませんでした。'
+fi
+fx_run check-monitoring-coverage
+expect_red 'batch_job_name が module.<name>.job_name から配線されていません'
+t_end
+
+t_begin 'check-monitoring-coverage: ジョブ名がデプロイ正典に無ければ赤'
+mcov_job_fixture
+fx_write infra/modules/batch-job/variables.tf <<'EOS'
+variable "job_name" {
+  type    = string
+  default = "daily-batch-v2"
+}
+EOS
+fx_run check-monitoring-coverage
+expect_red 'ジョブ "daily-batch-v2" はデプロイ正典に存在しません'
+t_end

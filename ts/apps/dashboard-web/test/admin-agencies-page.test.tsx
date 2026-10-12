@@ -34,7 +34,7 @@ const api = vi.hoisted(() => ({
   getAgencies: vi.fn(),
   createAgency: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import AdminAgenciesPage from '../src/app/admin/agencies/page';
 
@@ -307,7 +307,7 @@ describe('代理店管理ページ: 意匠の適用', () => {
       cleanup();
     }
     // 走査対象が 1 件も無い状態で緑にならないようにする（要件 7.4）。
-    expect(visited).toBe(SURFACE_BRANCHES.length);
+    expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('主見出しを見出しの部品で描き、読み上げ名と階層を変えない（両分岐・Req 1.1, 3.2）', async () => {
@@ -472,7 +472,7 @@ describe('代理店管理ページ: 意匠の適用', () => {
       visited += 1;
       cleanup();
     }
-    expect(visited).toBe(branches.length);
+    expect(visited).toBe(3); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('0 件の案内を空状態の部品へ移し、文言を変えない（Req 1.1, 2.3）', async () => {

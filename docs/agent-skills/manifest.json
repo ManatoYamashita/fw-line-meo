@@ -1,0 +1,1295 @@
+{
+  "formatVersion": 1,
+  "importedAt": "2026-10-12",
+  "issue": 449,
+  "skills": [
+    {
+      "name": "agent-browser",
+      "group": "browser",
+      "path": ".agents/skills/agent-browser",
+      "source": "https://github.com/vercel-labs/agent-browser.git",
+      "sourcePath": "skills/agent-browser/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "82def67855a0d2aad7794207951820fa5422fdb0",
+      "upstreamSnapshotSha256": "80161e6836b3b40f4e83730a290deb40ac14d877d38c97ad5f6d71be37ce74c3",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel-labs--agent-browser.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel-labs/agent-browser/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "f2c94645705cd969fcd116c58a1510f8d13b7d31a62c886d5b54f7954bd6de87"
+    },
+    {
+      "name": "better-accessibility",
+      "group": "ui",
+      "path": ".agents/skills/better-accessibility",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-accessibility/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "ebf9388ad7f6acc424584674ac97406e2118616f",
+      "upstreamSnapshotSha256": "4b525f48ae0ff58c0a77ce9976d76150c410266ff601f648ae86af5b5690872e",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 8,
+      "vendoredSha256": "57c4ea3c2b7f6549b9d9299472c2038c98b67799dc8e9352d5cab5485a65dd94"
+    },
+    {
+      "name": "better-colors",
+      "group": "ui",
+      "path": ".agents/skills/better-colors",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-colors/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "2bf09c8493b760bc4449fed26079244368eaaa16",
+      "upstreamSnapshotSha256": "72b5e9047b58cc38d3ff54329f4a29a4de53fa55361f28d6420c24fb90cae912",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 8,
+      "vendoredSha256": "3470f809d436144d11f5db8d8e3318288a13847613ba39b920e582810b60103e"
+    },
+    {
+      "name": "better-interface",
+      "group": "ui",
+      "path": ".agents/skills/better-interface",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-interface/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "828b477582842f5890fe307b4f95cdf05bd88d92",
+      "upstreamSnapshotSha256": "c69c929611cf43081a2c8d3880d7c51ac6a5bc8934ddf0e89a279d971c10fd14",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 3,
+      "vendoredSha256": "a72c157ae8be2b2d9afa552ad01815b9cd9815fbd963906ddc1c69629600dac0"
+    },
+    {
+      "name": "better-layout",
+      "group": "ui",
+      "path": ".agents/skills/better-layout",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-layout/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "8f1f1b163848cec18aea8143b9fe10cfb3226874",
+      "upstreamSnapshotSha256": "28e656cf56a4c1231d7e5eb8404ad8d779c8b67694871cface6cf2bb913085e1",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 4,
+      "vendoredSha256": "3aaa51af4ca5eb26127d0fb5e723ffa8c45c792066b09f0e4e9b3dc7343598b1"
+    },
+    {
+      "name": "better-typography",
+      "group": "ui",
+      "path": ".agents/skills/better-typography",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-typography/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "b0c51ed316e9cca63f5182bc569066985b25b9c0",
+      "upstreamSnapshotSha256": "f5d6376bd2c66a45a230860904dcd134878a127bd8f853b27ef70906ca84ea9e",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 8,
+      "vendoredSha256": "f2215ab39eecd1c261f9f25fd9e8b7e7c68b3e3704a1e998d7c7d5064c453ce5"
+    },
+    {
+      "name": "better-ui",
+      "group": "ui",
+      "path": ".agents/skills/better-ui",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-ui/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "710b8e9a1b4086594d24050bbb6768dbc421e9dc",
+      "upstreamSnapshotSha256": "43c01b019f0f20342dc428417f515dade58d2e1e5b20bf355b31aa59c5713b94",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 8,
+      "vendoredSha256": "9198fb6aee94a7a7a15fab5c861faccdbbe6dd7ce469fc367538b6033f776fea"
+    },
+    {
+      "name": "better-writing",
+      "group": "ui",
+      "path": ".agents/skills/better-writing",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/better-writing/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "f0637167d46253f6f5d2d09776552df4979ea562",
+      "upstreamSnapshotSha256": "4af513ea523bef209e540177c815182878b8043952b91318447d60ee04460ad4",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 2,
+      "vendoredSha256": "768ff8fe3e94145e2006e76122fbe1fb820657d2f87f2de0f41f5023619a6ea5"
+    },
+    {
+      "name": "break",
+      "group": "ui",
+      "path": ".agents/skills/break",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/break/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "7a748aa03499cc6974278099154358596c3635c9",
+      "upstreamSnapshotSha256": "037521486cfce25b8e37892b212c690bde455a7b5740a16c94639632d7fad194",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 3,
+      "vendoredSha256": "09446f0e459dbef596d11193f98deeef0b55302eb8fe23e5af8c3628db05064f"
+    },
+    {
+      "name": "building-components",
+      "group": "ui",
+      "path": ".agents/skills/building-components",
+      "source": "https://github.com/vercel/components.build.git",
+      "sourcePath": "skills/building-components/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "b7f8c5d9010b2f8cd1b4c9f250886264d5ce6d15",
+      "upstreamSnapshotSha256": "ca8e61b707725e3f75e607dd0a9b8296935cc4315f3c1c4ea67aaaffb91e40d8",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel--components.build.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel/components.build/main/LICENSE",
+      "fileCount": 16,
+      "vendoredSha256": "4d7dc43c1bd1555d2422264cab3a149e2f7b5ae27b8e1666aec1e22226800ed7"
+    },
+    {
+      "name": "cloud-run-basics",
+      "group": "gcp",
+      "path": ".agents/skills/cloud-run-basics",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/cloud-run-basics/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "2bd6f9b3e39f1fee8ced4decdcbc1337e47bfd4af54bb2a4aee64fb595973386",
+      "upstreamSnapshotSha256": "aff24d64371e2ba307b65712271fda231286e29d94b6fdee7637d171ebaab0d7",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 8,
+      "vendoredSha256": "1dbf5ab6d3fa9c3807ab1537e76eb1e5d1ce03ed52ae478f612fb02e913f2bdd"
+    },
+    {
+      "name": "cloud-sql-basics",
+      "group": "gcp",
+      "path": ".agents/skills/cloud-sql-basics",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/cloud-sql-basics/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "7108becb6aa2e926e8294049ad641b266a2dbf86835ec3de8065c9d69ba68111",
+      "upstreamSnapshotSha256": "950964e2253847b4adac630eb7b18f78e56c10ff45f672fdae9d03fd0590d2c0",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 8,
+      "vendoredSha256": "9a134b31a8c2fb888fd8e5152518c1a48242ff524ba8f805b8c81253c129c81a"
+    },
+    {
+      "name": "explain-interface",
+      "group": "ui",
+      "path": ".agents/skills/explain-interface",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/explain-interface/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "1d56e70e250e711690fdf95baa04546d9ad36020",
+      "upstreamSnapshotSha256": "95e87b6a623b68cfc182f0d60e682b80bcc4cf6ab29cb426beb54eb43811cfe0",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 6,
+      "vendoredSha256": "59c74124b9043cc03e78c827e5504914d166f0906cc78790157d7ccc124132f9"
+    },
+    {
+      "name": "firebase-basics",
+      "group": "gcp",
+      "path": ".agents/skills/firebase-basics",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/firebase-basics/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "d06efe30e52a84ead9e3acbe2759726cc035b6b18baef76252117d205d7f2906",
+      "upstreamSnapshotSha256": "53857b3810a93538e6b61fc43810b1c7f9abfa4e826f600ca7fe523d6801222d",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 20,
+      "vendoredSha256": "57c155ea3fa735a455278c375c55ed0d9dae8ed1f92e98d73858e8c0c4893369"
+    },
+    {
+      "name": "frontend-design",
+      "group": "ui",
+      "path": ".agents/skills/frontend-design",
+      "source": "user-installed frontend-design snapshot (upstream not recorded)",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "dbc59d4d3b506bb6842f712be85672af2d3b6426c05dc204e955b55201a5d8a7",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "fileCount": 3,
+      "vendoredSha256": "773e72e86ffabc523ecb388058d402e5fbdb2d32c728dad6e678f4cbfd1b60a7"
+    },
+    {
+      "name": "gcloud",
+      "group": "gcp",
+      "path": ".agents/skills/gcloud",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/gcloud/SKILL.md",
+      "sourceRef": "main",
+      "sourceHash": "d51f9a8502005dbf43db2e84db6832a14195196accd22790d03401248a2e85cb",
+      "upstreamSnapshotSha256": "f4abd54c216fde67bc44661c7977b0c0ebc9e5602b8425d39ac46009c85d0713",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 3,
+      "vendoredSha256": "a78d629afa71e0a3256aacd94a95d523dec696a2a3d8b3b635f02d3500d3a6ac"
+    },
+    {
+      "name": "gemini-api",
+      "group": "gcp",
+      "path": ".agents/skills/gemini-api",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/gemini-api/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "b888f7e323f27e8cf943239a6e51cbd394da1925d02fbbbdea222a546d9f05af",
+      "upstreamSnapshotSha256": "fe86878399c239bbe9c00e2622cb9fcb55bc47ecddf25e6f03f6b63b6514f94a",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 10,
+      "vendoredSha256": "b3bc477fe71fca52c9735200b512f61c115837fb308c6b91749be45df7a95cc9"
+    },
+    {
+      "name": "google-cloud-networking-observability",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-networking-observability",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-networking-observability/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "a22bc1863b3645268c134d89e756d0c761df1d3132e7b563e3270485174c2716",
+      "upstreamSnapshotSha256": "fc0ecc1088e7ab0c0786636259230b6f13f9b4ade96b506bcedefa2dc0afc1a4",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 9,
+      "vendoredSha256": "bafb7e40b5eb0e6145a846a446dd80d5d6076a6abf0d9cb0db16bb00c8e3af99"
+    },
+    {
+      "name": "google-cloud-recipe-auth",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-recipe-auth",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-recipe-auth/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "a188e06aacfbc4f6e7935cc0642e7b831774ce3aba0a17fda8b220d458f2f9ca",
+      "upstreamSnapshotSha256": "331a2b19f762b81ebe9ba9769a505cb192f9117396722c9c6f952945682e9228",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "cde0508322b0b4513fdec9e663c256b9ab4a3935e3f7e085077dad8679afab23"
+    },
+    {
+      "name": "google-cloud-recipe-onboarding",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-recipe-onboarding",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-recipe-onboarding/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "d590a64a207d7d0e231788cf5f5e383e934ba08cff2864fbfd3f99b844303b42",
+      "upstreamSnapshotSha256": "67fa067067bef1ba54f37b85ca4828e7bcaa1ef2089ee44be3582761d65123ae",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "dbafa0518fbb2db154efbe5fe762f3ce16b4cc8817c329ed79e0c8994198a02a"
+    },
+    {
+      "name": "google-cloud-waf-cost-optimization",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-waf-cost-optimization",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-waf-cost-optimization/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "b3febbf52e5c5fab8f0a04e3cbd4236c5251658882342cc805a7ae66d195514d",
+      "upstreamSnapshotSha256": "f8c4b592c89d7ab733fc70fb8247170ea7b11ff29ae4d9c9f29dcda976f344d7",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "0e4982fddba3b1bc466895160c4d84cdd40cf06e742387cfecb60013b8868524"
+    },
+    {
+      "name": "google-cloud-waf-operational-excellence",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-waf-operational-excellence",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-waf-operational-excellence/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "bdc6a9f415f6400fa85e1dcf77d961ea37f5f264eafc23108a297ff5d044d46b",
+      "upstreamSnapshotSha256": "2e75011bf9515bc5c295e32dbca1d690542a047d592481e8d36002f4cc375979",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "ddfa91d8c79607e88d9513b510f1082f738c2609ce4efdb691a7cef88206dc45"
+    },
+    {
+      "name": "google-cloud-waf-performance-optimization",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-waf-performance-optimization",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-waf-performance-optimization/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "89a4947438cff9e1fe7cabb7dd4e639b4c1c70fd2335b64f7fb35501535da624",
+      "upstreamSnapshotSha256": "2768c4c5add8a79a0a2a1bdb3dfa22aeaafd8816bb7183125c79167673a8a013",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "e91310a17822c95ca3f5a9eb4b916ba04fd8dc6cdceabfeff8d0e98d35183d38"
+    },
+    {
+      "name": "google-cloud-waf-reliability",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-waf-reliability",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-waf-reliability/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "9baf33bd5b7576be4655d47c78d015f1256808e1666aef1edd682761e1a4b1c8",
+      "upstreamSnapshotSha256": "3a63babc77e758d331cace594e8da3602f5b7235d1190bfd8cf132e9a07649c8",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "d1513ce16e4e7bc28b26e1a6d56996be17a7e21fd52e8c13b009b06fbe4cac83"
+    },
+    {
+      "name": "google-cloud-waf-security",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-waf-security",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-waf-security/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "e791a44cda991912c66cd2ec20e505886722eeb174e85fbd92cd42561653e443",
+      "upstreamSnapshotSha256": "3dfbb4c717992de0f72a2f85bab95a23ac75b3d0b72108c88dd9dd9870b017ad",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "e96e956ed6c6879db517cf3de4f39f8c39b9c844d30411214afe7024ad076715"
+    },
+    {
+      "name": "google-cloud-waf-sustainability",
+      "group": "gcp",
+      "path": ".agents/skills/google-cloud-waf-sustainability",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/google-cloud-waf-sustainability/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "7d0a6921cb59d92f19876f037e2106a4cd28f11b65dc25f6441b177f1e819b4f",
+      "upstreamSnapshotSha256": "c667b61d6f7c9ddea1ce1c024c421e663b4f22f2cdf0ef4c8b4cc90bbc47849a",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "86635f4da6601d0884e65a56342eaeb8ae1c3dc775e177a785a96e4e022e8f4b"
+    },
+    {
+      "name": "hono",
+      "group": "api",
+      "path": ".agents/skills/hono",
+      "source": "https://github.com/honojs/skills",
+      "sourcePath": "skills/hono/SKILL.md",
+      "sourceRef": "main",
+      "sourceHash": "2b2d642a6698cf1767d7a65f8beb4aceb078033d5afc5838c08da6d683fc333d",
+      "upstreamSnapshotSha256": "54b81fda1da4699dcf865f1e153b87ab32c823d7d4b14c1e2ab8f2e02232b2d7",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/honojs--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/honojs/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "673a8839717ff6861b5c86150fdabdda86e03e5eefe520fac6447d3d1f3af0ea"
+    },
+    {
+      "name": "iam-recommendations-fetcher",
+      "group": "gcp",
+      "path": ".agents/skills/iam-recommendations-fetcher",
+      "source": "https://github.com/google/skills",
+      "sourcePath": "skills/cloud/iam-recommendations-fetcher/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "49407100c6783efb8d849bfc0adcf826372cb43722c3040ecc196c0c4d24e8eb",
+      "upstreamSnapshotSha256": "92b4a49060a6ca1dbe9cda59060398129610c93fce2e5dbb79a231c433ec38d6",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/google--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/skills/main/LICENSE",
+      "fileCount": 1,
+      "vendoredSha256": "f6907a18455cfb21b917e5beaa8f04bad3d69bad940df2f6a580b190a51e1fca"
+    },
+    {
+      "name": "interface-review",
+      "group": "ui",
+      "path": ".agents/skills/interface-review",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/interface-review/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "af8fbfa0733bb1c16f7e6c625161cdbef18aefda",
+      "upstreamSnapshotSha256": "bb821f58ed45d18789dbf8d3309bdb27be500b616c1b5978f0d30999b8ac1db4",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 4,
+      "vendoredSha256": "e2c2fa6ad0aacc907dabcab81c3e2ca7f7e2e25c6898454df6eda04d7767476c"
+    },
+    {
+      "name": "kiro-debug",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-debug",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "f822a7905f2af20831595a265171ee6d974b534f9606347bcf53a39ef0c800a8",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "ab7383a145ecd623b08ae371ee7d1a1b464d514f224ef3549c7a1fe8b7c0a76c"
+    },
+    {
+      "name": "kiro-discovery",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-discovery",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "c1a61290f24a7586698037164c2dc84515dbb3541513ac68404df65979f73ef1",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "explicit invocation policy preserved"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 2,
+      "vendoredSha256": "64bf27813c52013c0ed00ab67e474d3fc51d06d7604a26203d4eda9087be451e"
+    },
+    {
+      "name": "kiro-impl",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-impl",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "1dbe97e5c8e5bac7238283449947ab707cdad4251aeeea80435c2c9c1c427ae3",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "explicit invocation policy preserved"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 5,
+      "vendoredSha256": "5bc732dd6fc42040f6c61f6102b3040ffacd8427db13ef6b9c4ea120c570b6ad"
+    },
+    {
+      "name": "kiro-review",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-review",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "a8a5242cd314e81f0509e17fea61a2550cd30a7a209a1f4e61b233326a633fdd",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "9b7978789d313c26a165938458cfbc1fd4d120a8725fbfd93f090dc538d18412"
+    },
+    {
+      "name": "kiro-spec-batch",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-batch",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "6e3ee82c8d52d5cd0efc7017fba87754b0070b03076ebe3d9bca065f1122bbf5",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "20284afc7deb4b2356e9b2c91c472a8379ccf359007922c24325351f1daf6e18"
+    },
+    {
+      "name": "kiro-spec-design",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-design",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "09dc40fc3a3c062b20f50da5241d14db37a75c94faa8a583311e8f8b0c5c7350",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 6,
+      "vendoredSha256": "5306156adbe75759b1d019670d4d3e3411e1d654284a853228a314afc08e7455"
+    },
+    {
+      "name": "kiro-spec-init",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-init",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "3c84966e6fe8b78f9c6dab3f8265f0b9d8bc2f9f856bedac01193a35a83bcb67",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "594f6326cffc5347e0baec379f8f0a4ca1dd9c4cf7a2987beda2a64327b990a5"
+    },
+    {
+      "name": "kiro-spec-quick",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-quick",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "bf8348ebcc4c813cf131e0c27eab13b19bae45885f1e5682f66a286f40fb8c77",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "2ebef0bf6a414e4d9e0770026c2a0ce4adc44f1878dcd8a3fe31cbde5d977fe3"
+    },
+    {
+      "name": "kiro-spec-requirements",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-requirements",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "e75ae3cb8f9d7120a84a257debf72d1dc496ecd4b45b6377be831568ef573d06",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 3,
+      "vendoredSha256": "9e36e6c0b61ff89aed774f61e447e1e3a8ed4cee9f6608862a4c06066c049333"
+    },
+    {
+      "name": "kiro-spec-status",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-status",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "70d28361ccaa4b86509796c7f91457111d52a9114841c8aa07f3e6457cb77949",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "413cdbdcdc0da68b1a3322d37c8768035b707bd9e37d71f69068ea81de133664"
+    },
+    {
+      "name": "kiro-spec-tasks",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-spec-tasks",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "c50b4cc446e6ebf7381e42254812353d4eee7b54882ea6756cdd4e0a82c80d6f",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 3,
+      "vendoredSha256": "66f1000815d899775f8f277c3a54cf46a5dd04a762f8d0c71268a8400ec20f66"
+    },
+    {
+      "name": "kiro-steering",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-steering",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "c5490abdab45280cc0fb6ffcb03f14811e7036f15b0dc3c849ef3442e64808ff",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 2,
+      "vendoredSha256": "a66f5178d5a819dac981092b642ebb1f692ce66dcfa1651ecd6a73643f1350ad"
+    },
+    {
+      "name": "kiro-steering-custom",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-steering-custom",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "6274df851906095229029dd5d2e005db76c0264d9ba482cb52654087c406b445",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 2,
+      "vendoredSha256": "64465e0e268775a132465635cbaf05a2503d60b76ffddd1f55e3a500fbc76b10"
+    },
+    {
+      "name": "kiro-validate-design",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-validate-design",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "4765cc543cd6b12b7e0234e682d4d321511a69b25cbf0ac43249409f234c114b",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 2,
+      "vendoredSha256": "7731dae30c0e06005cff1bd6f491d1eee03735d8d9a2db5f869c5ab5e41e8ead"
+    },
+    {
+      "name": "kiro-validate-gap",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-validate-gap",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "1087eb9f319bbc4f708ccc616391ad6b8907f2a2447cd51c2bcf765d7d04e37a",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 2,
+      "vendoredSha256": "8cb0743ff26d76d7211458395387054115baa224e001ab5b5b4424a628161db6"
+    },
+    {
+      "name": "kiro-validate-impl",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-validate-impl",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "d142642cfe2b49ee07e53e2674ae822df498b372a1acc253c736c06cb19a1d8c",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "1ff68a640073d08c8c78fba7e8851e2e7814520aad145ea16797409411223134"
+    },
+    {
+      "name": "kiro-verify-completion",
+      "group": "kiro",
+      "path": ".agents/skills/kiro-verify-completion",
+      "source": "https://github.com/gotalab/cc-sdd",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "1424416093fbb94afdaa430c2cf2695eb005a3e35e7b9681b6e796ee01a79895",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/gotalab--cc-sdd.txt",
+      "licenseSource": "https://raw.githubusercontent.com/gotalab/cc-sdd/main/LICENSE",
+      "sourceVersion": "cc-sdd 3.0.2 with installed project customizations",
+      "fileCount": 1,
+      "vendoredSha256": "963db8abbdcf686481eaa33a10d095052a4d4820c0e91e49b72ac1779f5b279c"
+    },
+    {
+      "name": "messaging-api",
+      "group": "line",
+      "path": ".agents/skills/messaging-api",
+      "source": "existing-repository-skill",
+      "sourcePath": ".claude/skills/messaging-api",
+      "license": "see .claude/skills/messaging-api/LICENSE",
+      "adaptations": [
+        "repository-internal symlink; no duplicate LINE references"
+      ],
+      "licenseFile": ".claude/skills/messaging-api/LICENSE",
+      "fileCount": 29,
+      "vendoredSha256": "ae360cb986eb494ed4f5e1b0d1f2e2d6a7233388dac3a0669f15402ca4cdb494"
+    },
+    {
+      "name": "migrate-radix-to-base",
+      "group": "ui",
+      "path": ".agents/skills/migrate-radix-to-base",
+      "source": "https://github.com/shadcn/ui",
+      "sourcePath": "skills/migrate-radix-to-base/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "e1f2030ee5059be3dff0812ca0e4b995ee9fa3132176f049ebe6c90346a6755e",
+      "upstreamSnapshotSha256": "6297cdfaccdfa49147493f23df3634df44e091ef8818686ae5c4a6f9c81fb5dc",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/shadcn--ui.txt",
+      "licenseSource": "https://raw.githubusercontent.com/shadcn/ui/main/LICENSE.md",
+      "fileCount": 10,
+      "vendoredSha256": "85897a539e04a10dc639fb4445ca432285f98288f2dffb162ef1d2d9e8e364d6"
+    },
+    {
+      "name": "modern-web-guidance",
+      "group": "ui",
+      "path": ".agents/skills/modern-web-guidance",
+      "source": "https://github.com/GoogleChrome/modern-web-guidance.git",
+      "sourcePath": "skills/modern-web-guidance/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "9bd508d217b14d82adb63f2ec05b955c551c24cc",
+      "upstreamSnapshotSha256": "c36e7cf13ade0d74219a6a472aba2fc94acfb20e401086a11b487c98c849e22c",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/GoogleChrome--modern-web-guidance.txt",
+      "licenseSource": "https://raw.githubusercontent.com/GoogleChrome/modern-web-guidance/main/LICENSE",
+      "fileCount": 145,
+      "vendoredSha256": "c9d77890b61fda089207836a03814667044b60e3e625d6be35459a33c7300a53"
+    },
+    {
+      "name": "next-best-practices",
+      "group": "next-foundation",
+      "path": ".agents/skills/next-best-practices",
+      "source": "https://github.com/vercel-labs/next-skills",
+      "sourcePath": "skills/next-best-practices/SKILL.md",
+      "sourceRef": "dc1de9caf7612d73f56a8dec3cb1bd6c9ec096b9",
+      "sourceHash": "923cf68cb8f4ce917d81744b78b93ff586d3146b6c96dacfef797237b4897f16",
+      "upstreamSnapshotSha256": "75787b2b6bd385579d47d02666da363c6e84a76f79a81178ea9874142e6892a5",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "fileCount": 21,
+      "vendoredSha256": "e93851e7c2ee127e7302d6c01c370179265b1bd80747b176fc4c3c185f16a536"
+    },
+    {
+      "name": "next-cache-components",
+      "group": "next-foundation",
+      "path": ".agents/skills/next-cache-components",
+      "source": "https://github.com/vercel-labs/next-skills",
+      "sourcePath": "skills/next-cache-components/SKILL.md",
+      "sourceRef": "dc1de9caf7612d73f56a8dec3cb1bd6c9ec096b9",
+      "sourceHash": "a94b83ddcd2ff1c30722577f693b1bfe32f2e1a83abdd6c08c2d6cc6753b53c8",
+      "upstreamSnapshotSha256": "f835d8226c28abf012cc013928e2627c8a7a046de61127ef229be1711bd1f255",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "fileCount": 1,
+      "vendoredSha256": "271a3d09084ba868d2c275ee5d0676a5cf4bc2f3c282588eabdce0512a341492"
+    },
+    {
+      "name": "next-cache-components-adoption",
+      "group": "next",
+      "path": ".agents/skills/next-cache-components-adoption",
+      "source": "https://github.com/vercel/next.js.git",
+      "sourcePath": "skills/next-cache-components-adoption/SKILL.md",
+      "sourceRef": "canary",
+      "sourceHash": "881b94f835b78daf3f9086c36c664ef8b105d787",
+      "upstreamSnapshotSha256": "a5b0290475746771e6490f593a891eb6f95c1fa6164e1bbc6fe7c13c0bca4f01",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel--next.js.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel/next.js/canary/license.md",
+      "fileCount": 3,
+      "vendoredSha256": "54a923142edd5ddb54e774ef0ba0c57aa592e91c44176384edbdbc60a82cd307"
+    },
+    {
+      "name": "next-cache-components-optimizer",
+      "group": "next",
+      "path": ".agents/skills/next-cache-components-optimizer",
+      "source": "https://github.com/vercel/next.js.git",
+      "sourcePath": "skills/next-cache-components-optimizer/SKILL.md",
+      "sourceRef": "canary",
+      "sourceHash": "c5c9f7c159f25ea97584e51776aea0e1dca2c7de",
+      "upstreamSnapshotSha256": "c73a85bb3ab654f256f8f162c3b9f5746e145850baed62abca53253fb57e4746",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel--next.js.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel/next.js/canary/license.md",
+      "fileCount": 6,
+      "vendoredSha256": "24cf74d0aa0c4f9959f8381441251e9d9b40025a5040ddde2cfd1feaf4a51902"
+    },
+    {
+      "name": "next-dev-loop",
+      "group": "next",
+      "path": ".agents/skills/next-dev-loop",
+      "source": "https://github.com/vercel/next.js.git",
+      "sourcePath": "skills/next-dev-loop/SKILL.md",
+      "sourceRef": "canary",
+      "sourceHash": "43db25476942a9581650ae6e961e633103437ef1",
+      "upstreamSnapshotSha256": "d604c9440a736b08836fe782e8c0bf6a596d00c4e20e3e245e4a4394efbf74f4",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel--next.js.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel/next.js/canary/license.md",
+      "fileCount": 1,
+      "vendoredSha256": "9c3dea957ef4377c29d2b8c1e18e0f5578cdb8e23846a83eaa50b0765f6a51c5"
+    },
+    {
+      "name": "next-partial-prefetching-adoption",
+      "group": "next",
+      "path": ".agents/skills/next-partial-prefetching-adoption",
+      "source": "https://github.com/vercel/next.js.git",
+      "sourcePath": "skills/next-partial-prefetching-adoption/SKILL.md",
+      "sourceRef": "canary",
+      "sourceHash": "05e9b82c5a55dfcdc261bf9c83adf167afa10056",
+      "upstreamSnapshotSha256": "874116b94b6b5100ce36fc7ab8a2c637514bbbe89265f142e47b620563c99566",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel--next.js.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel/next.js/canary/license.md",
+      "fileCount": 2,
+      "vendoredSha256": "f59705d7d1af9b6414774bc78bef643149ffe7e1e9c2dbcc53ec0a18562e369c"
+    },
+    {
+      "name": "next-partial-prefetching-optimizer",
+      "group": "next",
+      "path": ".agents/skills/next-partial-prefetching-optimizer",
+      "source": "https://github.com/vercel/next.js.git",
+      "sourcePath": "skills/next-partial-prefetching-optimizer/SKILL.md",
+      "sourceRef": "canary",
+      "sourceHash": "6aa4a1a545b8c3067a820e3135234f15510dc76e",
+      "upstreamSnapshotSha256": "11c69c2bcd6c41300701b5a493898ee1273631b4d8d85fcd8da0be07bc13de2a",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/vercel--next.js.txt",
+      "licenseSource": "https://raw.githubusercontent.com/vercel/next.js/canary/license.md",
+      "fileCount": 3,
+      "vendoredSha256": "0fca12fd83cb908fd352496f051278c443d660beb288dbed788fe6fcecf2e49d"
+    },
+    {
+      "name": "next-upgrade",
+      "group": "next-foundation",
+      "path": ".agents/skills/next-upgrade",
+      "source": "https://github.com/vercel-labs/next-skills",
+      "sourcePath": "skills/next-upgrade/SKILL.md",
+      "sourceRef": "dc1de9caf7612d73f56a8dec3cb1bd6c9ec096b9",
+      "sourceHash": "be6bbf6ab1dc2cc6f2505cea52d497920c04f5b532c0846ee201f6029b803fb0",
+      "upstreamSnapshotSha256": "e3aeb1f9e8a68d24df0c1c2e3c8ab97ede09a7251a2c76988318d02254346979",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "fileCount": 1,
+      "vendoredSha256": "f6836f5cd9b3391522d897878fd7c6772dc52b20ee51a34d3b38cefe3de56ee5"
+    },
+    {
+      "name": "pr-critical-review",
+      "group": "review",
+      "path": ".agents/skills/pr-critical-review",
+      "source": "https://github.com/yamashitamanato-kozokaAI/skills",
+      "sourcePath": null,
+      "sourceRef": "e0f4faf8a4764c884f683d331ab5451f8109ac3d",
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "f392942cc0be7b9f80a7937d018a373142bc4c31bd092a6c4dd79a327671ffb0",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "provider-neutral HTML output and design fallback; optional evaluation corpus"
+      ],
+      "fileCount": 3,
+      "vendoredSha256": "5042072be996ac4d0bf02a21487ea74211abdb8f66307d368e4b7d2d59b1841a"
+    },
+    {
+      "name": "pr-review-e2e",
+      "group": "review",
+      "path": ".agents/skills/pr-review-e2e",
+      "source": "https://github.com/yamashitamanato-kozokaAI/skills",
+      "sourcePath": null,
+      "sourceRef": "e0f4faf8a4764c884f683d331ab5451f8109ac3d",
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "75cc2b5a509e6039577bbf7ff2abb13fd7965b119291a4727a66db2c14d0c4a4",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "provider-neutral HTML output and design fallback; optional evaluation corpus"
+      ],
+      "fileCount": 4,
+      "vendoredSha256": "82f35d489e9fbb4c38b1e0efa7dc9a1bb9b5c745b63a3a3d0293e077fce51492"
+    },
+    {
+      "name": "review2",
+      "group": "review",
+      "path": ".agents/skills/review2",
+      "source": "https://github.com/yamashitamanato-kozokaAI/skills",
+      "sourcePath": null,
+      "sourceRef": "e0f4faf8a4764c884f683d331ab5451f8109ac3d",
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "51a983afcf65cebacd298fb20e403adc1f2d63feb754ea07d0e5ab079c29d8ae",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "provider-neutral HTML output and design fallback; optional evaluation corpus"
+      ],
+      "fileCount": 21,
+      "vendoredSha256": "b81777b42dd371469e9a16158cb16cf02caa2d18a632ad658511ff66996d5138"
+    },
+    {
+      "name": "review3",
+      "group": "review",
+      "path": ".agents/skills/review3",
+      "source": "https://github.com/yamashitamanato-kozokaAI/skills",
+      "sourcePath": null,
+      "sourceRef": "e0f4faf8a4764c884f683d331ab5451f8109ac3d",
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "5041093fb282b85825e0cc54917d38f386845a8a5b657eb50d672429f3dd6caf",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "provider-neutral HTML output and design fallback; optional evaluation corpus"
+      ],
+      "fileCount": 4,
+      "vendoredSha256": "f5b602a4ea324eb172333fc233a19d90a96e5068832cc8cfa274e57b91af4b45"
+    },
+    {
+      "name": "shadcn",
+      "group": "ui",
+      "path": ".agents/skills/shadcn",
+      "source": "https://github.com/shadcn/ui",
+      "sourcePath": "skills/shadcn/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "f615de216e085a84e31593ad0fa9062232adc40cd87b7c7ab2b8e49abf6500be",
+      "upstreamSnapshotSha256": "81fe89ff2872a78348c4c61ed4dd19c7b800caba173de6c7bc02e858a532983f",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/shadcn--ui.txt",
+      "licenseSource": "https://raw.githubusercontent.com/shadcn/ui/main/LICENSE.md",
+      "fileCount": 16,
+      "vendoredSha256": "f411d94f9c3b3911feb76cd9e276787763712011b34f959de4856445267c2b62"
+    },
+    {
+      "name": "supabase-postgres-best-practices",
+      "group": "postgres",
+      "path": ".agents/skills/supabase-postgres-best-practices",
+      "source": "https://github.com/supabase/agent-skills",
+      "sourcePath": null,
+      "sourceRef": null,
+      "sourceHash": null,
+      "upstreamSnapshotSha256": "1727cc8117e10acd006511e695df473ee5f843524dd9fd116806b14562e4e04d",
+      "license": "MIT",
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/supabase--agent-skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/supabase/agent-skills/main/LICENSE",
+      "fileCount": 36,
+      "vendoredSha256": "c99b845181687e868fd278c8ec414853a4eb0547f7630dd706bd442c62f21096"
+    },
+    {
+      "name": "variant",
+      "group": "ui",
+      "path": ".agents/skills/variant",
+      "source": "https://github.com/jakubkrehel/skills.git",
+      "sourcePath": "skills/variant/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "10e4d83f2f34cf226cf9819ab6b4dd6f8d7a0e6a",
+      "upstreamSnapshotSha256": "551e2e0667f7da23439860dab5298429683d660f4b2702af962d765167d00b38",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "licenseFile": "docs/agent-skills/licenses/jakubkrehel--skills.txt",
+      "licenseSource": "https://raw.githubusercontent.com/jakubkrehel/skills/main/LICENSE",
+      "fileCount": 3,
+      "vendoredSha256": "1b7f33b9bfa358c6c7bbd1c9fb4f322de23b347afc7fa06c104e6039b61cf767"
+    },
+    {
+      "name": "vercel-composition-patterns",
+      "group": "react",
+      "path": ".agents/skills/vercel-composition-patterns",
+      "source": "https://github.com/vercel-labs/agent-skills.git",
+      "sourcePath": "skills/composition-patterns/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "bf90d0a4b83ea054653350f9c67f6de235d3a368",
+      "upstreamSnapshotSha256": "646f870906914c3787efa7403ec4716dfddf78fc17a12ec1f0556caf2143ac66",
+      "license": "MIT",
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "fileCount": 14,
+      "vendoredSha256": "9c6e901eba60293d4b81080208088f3991b0ae0ebfad2a47f00f8cd101d606ad"
+    },
+    {
+      "name": "vercel-react-best-practices",
+      "group": "react",
+      "path": ".agents/skills/vercel-react-best-practices",
+      "source": "https://github.com/vercel-labs/agent-skills.git",
+      "sourcePath": "skills/react-best-practices/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "343db72180d05814949fef7d46be96b5c6ee86b3",
+      "upstreamSnapshotSha256": "e3f2294574b469c7c198373a443a86571012769d0bbeed68854bd55642ec0d7b",
+      "license": "MIT",
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "repaired links in compiled AGENTS.md"
+      ],
+      "fileCount": 76,
+      "vendoredSha256": "5654074aa6b7debefc148c98010701feeae67faa94d28fd83cbeebbd4ecc3ee5"
+    },
+    {
+      "name": "vercel-react-view-transitions",
+      "group": "react",
+      "path": ".agents/skills/vercel-react-view-transitions",
+      "source": "https://github.com/vercel-labs/agent-skills.git",
+      "sourcePath": "skills/react-view-transitions/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "13063dbbfc1b085cbc11b9bd5d4324aa2f41bb3a",
+      "upstreamSnapshotSha256": "d106bb3f2b3f3647da9ac7710fb426d556e1fcbf190254425d3437121c82aeee",
+      "license": "MIT",
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter",
+        "repaired links in compiled AGENTS.md"
+      ],
+      "fileCount": 9,
+      "vendoredSha256": "5b11a5565e0c73ab522c3dac8e70802b01e136f8a76c432939aace7f4674e222"
+    },
+    {
+      "name": "web-design-guidelines",
+      "group": "ui",
+      "path": ".agents/skills/web-design-guidelines",
+      "source": "https://github.com/vercel-labs/agent-skills.git",
+      "sourcePath": "skills/web-design-guidelines/SKILL.md",
+      "sourceRef": null,
+      "sourceHash": "3116f3e62dbd02b44a598b1aa690d2a8938e8f89",
+      "upstreamSnapshotSha256": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474",
+      "license": null,
+      "adaptations": [
+        "repository runtime reference",
+        "Codex-compatible frontmatter"
+      ],
+      "fileCount": 1,
+      "vendoredSha256": "117cd6d4216f8d047e94130dd0fc05547332c2e609eda9a686a5e14a2c9f46a2"
+    }
+  ]
+}

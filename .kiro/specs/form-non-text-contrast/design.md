@@ -8,6 +8,8 @@
 
 **Impact**: 色の値の単一情報源に **識別用の枠色役割を 1 つ追加**し、既存の装飾用枠色から分離する。既存 13 部品のうち 5 部品の className を変更し、検証ガードの抽出範囲を「不透明度付き」から「色として解決できる全ユーティリティ」へ広げる。**新しいファイル・新しい依存関係は一切増えない。**
 
+**色の値と比について**: 本文の hex と比（`primary` の 5.016、`destructive` の 6.470、両者の境界の 1.290 など）は、本仕様の実装時点のパレットの値である。その後 ui-airbnb-foundation（Issue #177）で `primary` と `destructive` の値が差し替わった（`borderInteractive` の `#767676` は維持）。現行の値の正典は `@fwlm/design-tokens` と ui-airbnb-foundation の design.md である。
+
 ### Goals
 
 - フォーム入力部品（一行入力・複数行入力・チェックボックス・ラジオボタン）および対話的部品の輪郭が、隣接背景に対し 3:1 以上で識別できる。
@@ -55,7 +57,7 @@
 
 以下の変更が起きた場合、依存する仕様・consumer は統合を再確認すること。
 
-- `ColorTokens` へのキー追加・削除・リネーム（`theme-sync.test.ts` と `colors.test.ts` の両方向網羅ガードが同時更新を強制する）。
+- `ColorTokens` へのキー追加・削除・リネーム（`theme-sync.test.ts` と `colors.test.ts` の両方向網羅ガード、`tokens.test.ts` の役割名の網羅ガードが同時更新を強制する）。
 - `--input` / `--border` が指す役割の変更。
 - **ダークモード配色の導入**。`--input` は本仕様以降「枠色」であって「面塗り色」ではない。`dark:bg-input/30` 等の既存ダーククラスは面塗り前提で書かれており、ダーク着手時に必ず再設計が要る。
 - コントラスト検証ガードの抽出パターン変更（検出対象が変わると分類表の網羅性の意味が変わる）。
@@ -152,7 +154,7 @@ graph TB
 
 ## File Structure Plan
 
-**新規作成ファイルはゼロ。** 既存 13 ファイルの変更のみで完結する。
+**新規作成ファイルはゼロ。** 既存 15 ファイルの変更のみで完結する（下の Modified Files 表と同数）。
 
 ### Directory Structure
 
@@ -161,7 +163,9 @@ ts/
 ├── packages/
 │   ├── design-tokens/
 │   │   ├── src/colors.ts              # 変更: borderInteractive 役割を追加（値の単一情報源）
-│   │   └── test/colors.test.ts        # 変更: 新役割を NON_TEXT_ROLES へ分類（網羅ガード充足）
+│   │   └── test/
+│   │       ├── colors.test.ts         # 変更: 新役割を NON_TEXT_ROLES へ分類（網羅ガード充足）
+│   │       └── tokens.test.ts         # 変更: 役割名を列挙する第 5 の網羅ガードへ新役割を追加
 │   └── ui/
 │       ├── src/
 │       │   ├── theme.css              # 変更: --color-border-interactive 追加 / --input を付け替え
@@ -174,7 +178,8 @@ ts/
 │       └── test/
 │           ├── theme-sync.test.ts     # 変更: 役割対応表へ新役割を追記
 │           ├── contrast-usage.test.ts # 変更: 抽出器の拡張と分類表の充填（本仕様の中核）
-│           └── components.test.tsx    # 変更: エラー×チェック済みのクラス宣言を固定
+│           ├── components.test.tsx    # 変更: エラー×チェック済みのクラス宣言を固定
+│           └── app-integration.test.ts # 変更: ダーク専用指定を除外してよい前提を機械検証
 └── apps/survey-web/
     ├── src/app/ui-check/page.tsx      # 変更: エラー / チェック済み / 無効化の状態を描画
     └── e2e/ui-foundation.spec.ts      # 変更: 状態依存の実描画色を実測
@@ -194,8 +199,9 @@ ts/
 | `ts/packages/ui/src/components/checkbox.tsx` | エラー×チェック済みの枠色を選択色からエラー色へ | 3.1, 3.2 |
 | `ts/packages/ui/src/components/radio-group.tsx` | 同上 | 3.1, 3.2 |
 | `ts/packages/ui/src/components/field.tsx` | `FieldLabel` 選択枠の不透明度を撤去 | 2.1 |
-| `ts/packages/ui/test/contrast-usage.test.ts` | 抽出器を色ユーティリティ全般へ拡張、`USAGE_PAIRS` を 20 件充填、`EXEMPT_UTILITIES` を再編 | 5.1〜5.5, 5.7 |
+| `ts/packages/ui/test/contrast-usage.test.ts` | 抽出器を色ユーティリティ全般へ拡張、新規検出 20 件を分類（`USAGE_PAIRS` へ 19 件・`EXEMPT_UTILITIES` へ 1 件。19 件のうち `border-border` は部品の是正で消える過渡）、`EXEMPT_UTILITIES` を再編 | 5.1〜5.5, 5.7 |
 | `ts/packages/ui/test/components.test.tsx` | エラー×チェック済みのクラス宣言を assert | 3.1, 3.2, 3.3 |
+| `ts/packages/ui/test/app-integration.test.ts` | ダーク専用指定を除外してよい前提（無効化宣言の存在・`.dark` を付与する箇所の不在・生成 CSS が OS 設定で有効になる形を持たないこと）を機械検証する（タスク 5.2 で追加。当初の計画に無かった） | 5.7, 6.6 |
 | `ts/apps/survey-web/src/app/ui-check/page.tsx` | エラー・チェック済み・エラー×チェック済み・無効化の 4 状態を描画 | 3.4, 6.3 |
 | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | 上記状態の実描画色を測定しコントラストを検証 | 1.1, 3.4, 6.3 |
 
@@ -353,7 +359,7 @@ interface ColorTokens {
 **Implementation Notes**
 
 - 統合: `NON_TEXT_ROLES` へ分類する。テキスト前景として使わないため `AA_TEXT_PAIRS` には入れない（D7）。
-- 検証: `colors.test.ts` の分類網羅ガードが未分類を検出する。`theme-sync.test.ts` の両方向網羅ガードが `@theme` への未追加を検出する。
+- 検証: `colors.test.ts` の分類網羅ガードが未分類を検出する。`tokens.test.ts` の役割名の網羅ガードが列挙漏れを検出する。`theme-sync.test.ts` の両方向網羅ガードが `@theme` への未追加を検出する。
 - リスク: 役割追加は **5 箇所**（`colors.ts` / `colors.test.ts` / **`tokens.test.ts`** / `theme.css` / `theme-sync.test.ts`）の同時更新を要するが、**いずれの漏れも既存ガードが赤化させる**ため静かに壊れない。
   - **訂正（2026-08-01・タスク 2.1 実装時に判明）**: 当初この設計は 4 箇所と記載していたが、`tokens.test.ts` に `ColorTokens` の役割名を列挙する**第 5 の網羅ガード**が実在する。摂動により、この 1 行を欠くと確実に赤化することを確認済み。想定より 1 段厚い網が掛かっており、「静かに壊れない」という主張自体は強化された。
 
@@ -479,11 +485,27 @@ function semanticNameOf(utility: string): string;
 function isColorUtility(utility: string): boolean;
 
 /**
- * 部品ソースから色ユーティリティを抽出する。
+ * ソースから色ユーティリティの字面を持つ語を拾う（色として解決できるかは問わない）。
  * `dark:` を含むクラスは除外する（ダーク配色未整備・要件 5.7）。
  */
+function extractUtilityTokens(source: string): readonly string[];
+
+/** 部品ソースから色ユーティリティを抽出する（`extractUtilityTokens` を `isColorUtility` で絞る）。 */
 function extractColorUtilities(source: string): readonly string[];
+
+/** パターンには一致したが色として解決できず捨てられた語（下の固定検証だけが使う）。 */
+function extractNonColorTokens(source: string): readonly string[];
+
+/**
+ * 実ソースから落ちた語の集合の固定値。増減の双方で赤化させる観測値であり、
+ * 色／非色の判定には使わない（判定は D6 のとおり isColorUtility だけが行う）。
+ */
+const NON_COLOR_TOKENS: readonly string[];
 ```
+
+- **当初の宣言からの追加**: 当初は上の 7 シンボルのうち `COLOR_UTILITY_PATTERN` / `semanticNameOf` / `isColorUtility` / `extractColorUtilities` の 4 つだけを宣言していた。実装で `extractUtilityTokens` / `extractNonColorTokens` / `NON_COLOR_TOKENS` を足した。
+  - **想定が外れた理由**: D6 の「解決に失敗したら除外」は、綴り誤り（`bg-primry`）や意味論名でない既定色（`text-white` 等）を、未分類として赤化させずに黙って捨てる。不透明度を必須としていた頃は赤化していた経路であり、抽出器の拡張はここに限って検出力を下げる。固定フィクスチャでは実ソースを見ないため塞げず、落とした語の集合を実ソースから取り出して固定する検証が要った（tasks.md 1.2）。
+  - D6 は崩していない。`NON_COLOR_TOKENS` は判定の入力ではなく、判定結果を写した観測値である。
 
 - **事前条件**: `theme.css` の宣言が収集済みであること。部品ソースが 1 件以上読めていること。
 - **事後条件**: 返り値のすべてが `isColorUtility` を満たす。`dark:` 由来のものを含まない。
@@ -505,7 +527,7 @@ function extractColorUtilities(source: string): readonly string[];
 
 - 統合: 抽出器の拡張により新たに 20 件が検出される。うち **17 件は分類を与えるだけで通過**し、是正が要るのは `border-input` / `border-border` の 2 件（識別用への移行で解消）と `border-primary/30`（不透明度撤去で解消）の計 3 件。
 - 検証: `AA_NON_TEXT_RATIO`（3:1）の閾値分岐は本仕様が**初めて実行する**経路である。分岐そのものが機能することを、赤化の実証（System Flows 段 1）で同時に確認する。
-- リスク: 除外一覧の `ring-destructive/20` は「エラー伝達は `aria-invalid:border-destructive` が担う」ことを根拠としている。本仕様でエラー枠の適用範囲が広がるため、**この根拠文の妥当性を再確認**すること。
+- リスク: 除外一覧の `ring-destructive/20` は「エラー伝達は `aria-invalid:border-destructive` が担う」ことを根拠としている。本仕様でエラー枠の適用範囲が広がるため、**この根拠文の妥当性を再確認**すること。→ **解消**: 根拠文を書き換えた。その後の再改訂は Open Questions #6 を参照。
 - リスク: 既存の除外理由に記載された「1.96:1」は誤りであり実測は 1.522:1（`research.md` 第 2 節）。当該エントリは検証表へ移動するため理由文ごと消えるが、**誤りであった事実を記録として残す**。
 
 ### survey-web 層
@@ -529,17 +551,41 @@ function extractColorUtilities(source: string): readonly string[];
 
 ##### Service Interface
 
-既存ヘルパを流用する。**新規実装は追加しない。**
+測定ヘルパは `ts/apps/survey-web/e2e/ui-foundation.spec.ts` に置く。コントラスト比と合成の計算は design-tokens の `contrastRatio` / `compositeOver` に委ね、検証側に第 2 の実装を持たない。
 
 ```typescript
-/**
- * computed style を canvas 経由で sRGB 実測し 6 桁大文字 hex を返す（既存・:69-90）。
- * 半透明（alpha !== 255）の場合は null を返す。
- */
-function readRenderedColors(
-  locator: Locator,
-): Promise<{ readonly color: string; readonly backgroundColor: string } | null>;
+// RenderedLayers（合成前の色と alpha・要素の opacity）と MeasuredColor（hex と alpha）は同じファイルの型。
+interface RenderedColors {
+  /** 実際に描画される文字色・背景色（6 桁 hex）。半透明でその要素だけで色が決まらないときは null。 */
+  color: string | null;
+  backgroundColor: string | null;
+  /** 実際に描画される枠色。半透明のときに加え、四辺の色が食い違うときも null。 */
+  borderColor: string | null;
+  /** 枠の描画幅（px）。上・右・下・左の順。 */
+  borderWidths: readonly number[];
+  focused: boolean;
+}
+
+/** computed style を canvas 経由で sRGB 実測する。null はフィールド単位で返す。 */
+function readRenderedColors(locator: Locator): Promise<RenderedColors>;
+
+/** 合成前のレイヤ（色・alpha）と要素の opacity を返す。合成は呼び出し側が行う。 */
+function readRenderedLayers(locator: Locator): Promise<RenderedLayers>;
+
+/** レイヤの半透明と要素の opacity を、下地へ 2 段で合成した実効色（D8 の記録値の導出）。 */
+function effectiveColorOver(layer: MeasuredColor, backdrop: string, elementOpacity: number): string;
+
+/** 全周の枠を持つ部品の枠色。四辺の幅が 0 でないことと、四辺の色の一致を要求する。 */
+function readRenderedBorder(locator: Locator, where: string): Promise<RenderedColors>;
+
+/** 頁の下地の色（枠が識別すべき隣接背景）。 */
+function readPageBackground(page: Page): Promise<string>;
 ```
+
+- **当初の記載からの訂正**: 当初は「既存ヘルパを流用する。新規実装は追加しない」とし、`readRenderedColors` を `Promise<{color, backgroundColor} | null>` と記していた。
+  - シグネチャは変更前の実物とも食い違っていた（写し取りの誤り）。実物は当時から、null を全体ではなくフィールド単位で返していた。
+  - 「新規実装は追加しない」は、同じ文書の下の Implementation Notes（枠色の測定拡張が要る）と Open Questions #4（半透明値と要素の opacity を織り込んだ実効色が要る）と矛盾していた。実装では枠色・合成前のレイヤ・実効色・頁背景の測定ヘルパを新設した。
+  - 設計の趣旨（コントラスト計算の第 2 実装を作らない）は守っている。新設したのは測定の手段だけである。
 
 - **事前条件**: 測定対象が `/ui-check` に描画されており、アクセシブル名で一意に特定できること。
 - **事後条件**: 測定した枠色と隣接背景のコントラスト比が、状態に応じた閾値を満たす。
@@ -547,8 +593,8 @@ function readRenderedColors(
 **Implementation Notes**
 
 - 統合: 既存の E2E は `mobile-chromium`（`devices['Pixel 5']`）で走る。本仕様が測る色は hover に依存しないため、`test.use({ isMobile: false })` は不要。
-- 検証: **枠色の測定には borderColor の computed style が要る**。既存 `readRenderedColors` は `color` / `backgroundColor` のみを返すため、枠色を測る拡張が必要になる。
-- リスク: `/ui-check` に要素を追加すると、既存の Tab 巡回テストが辿る要素数が増える。当該テストは `MAX_TAB_STEPS = 24` を上限としており、**到達目標としている要素（「破壊的なボタン」「複数行入力」）へ届かなくなる可能性**がある。追加要素は到達目標より後ろへ配置するか、上限を引き上げること。
+- 検証: **枠色の測定には borderColor の computed style が要る**。変更前の `readRenderedColors` は `color` / `backgroundColor` のみを返していたため、枠色を測る拡張を加えた（上の Service Interface の `borderColor` と `readRenderedBorder`）。
+- リスク: `/ui-check` に要素を追加すると、既存の Tab 巡回テストが辿る要素数が増える。上限で打ち切られると、**到達目標としている要素（「破壊的なボタン」「複数行入力」）へ届かない**まま、その先はフォーカス可視性を検査されずに緑になる。追加要素は到達目標より後ろへ配置した。そのうえで上限を `MAX_TAB_STEPS = 48` とし、`/ui-check` の巡回テストに**打ち切りの発生自体を失敗とする** assert を置いた（Open Questions #5）。
 
 ---
 
@@ -606,7 +652,7 @@ CI が唯一の監視点である。`ts-ci.yml` の `lint-build-test` ジョブ�
 
 本仕様は Tailwind のユーティリティ生成のみを変更し、ランタイム JS を増やさない。生成 CSS への影響は識別用変数 1 つ分（数十バイト）に留まる。`perf:budget`（client JS 300 KB gzip）への影響はない。
 
-E2E の実行時間は `/ui-check` への状態追加分だけ増える。追加は 4 状態であり、既存の Tab 巡回上限（`MAX_TAB_STEPS = 24`）との整合のみ確認を要する（Implementation Notes 参照）。
+E2E の実行時間は `/ui-check` への状態追加分だけ増える。追加は 4 状態であり、Tab 巡回の上限（`MAX_TAB_STEPS = 48`）との整合だけが論点になる（Implementation Notes 参照）。
 
 ---
 
@@ -616,7 +662,7 @@ E2E の実行時間は `/ui-check` への状態追加分だけ増える。追加
 |---|---|---|---|
 | 1 | Badge outline 枠の識別用への移行により、静的な Badge の見た目が濃くなる | 意匠 | 要件 4.4 の安全側規定に従う判断。実描画を確認したうえで、意匠上の異議があれば要件へ差し戻す |
 | 2 | `FieldLabel` の選択枠が不透明度撤去により明確に濃くなる | 意匠 | 選択状態の識別性は向上する。チェックボックス・ラジオの選択枠と同色になり語彙が統一される |
-| 3 | エラー色の枠と選択色の面塗りが隣接し 1.290:1 となる | 視認性 | 枠が識別すべき相手は頁背景（6.470:1）であり要件は満たす。両者の境界が曖昧に見える点は実描画で確認する |
-| 4 | `readRenderedColors` は枠色を返さず、かつ**半透明値では `null` を返す**（`alpha !== 255` の判定）。加えて要素の `opacity` は computed style へ合成されない | 実装 | 枠色の取得に加え、**半透明値と要素 `opacity` を織り込んだ実効色を求める手段**が要る。D8 の記録値（枠 `#BBBBBB` / 面 `#DDDDDD`）は利用者が見る合成後の色であり、computed style の生値（`#767676` と `rgba(118,118,118,0.5)`）とは異なる。computed 値と `opacity` から design-tokens の合成ヘルパで導出する方針を採る。これが成立しない場合は D8 の記録値の定義から見直すため design へ差し戻す |
-| 5 | `/ui-check` への要素追加が既存 Tab 巡回テストの到達目標に影響しうる | 検証 | 追加要素を到達目標より後方へ配置する。それで解決しない場合のみ上限を引き上げる |
-| 6 | 除外理由 `ring-destructive/20` の根拠文がエラー枠の適用範囲拡大により陳腐化しうる | 検証 | 実装時に根拠文の妥当性を再確認し、必要なら書き換える |
+| 3 | エラー色の枠と選択色の面塗りが隣接し 1.290:1 となる | 視認性 | 枠が識別すべき相手は頁背景（6.470:1）であり要件は満たす。両者の境界が曖昧に見える点は実描画で確認する。→ その後 Issue #177 の意匠差し替えで比が 1.35:1 に変わり、選択済みの checkbox / radio-group では枠だけでエラーを示せないと判断された。リング（`ring-destructive/60`）に 3:1 を課して補っている（Open Questions #6） |
+| 4 | `readRenderedColors` は枠色を返さず、かつ**半透明値では `null` を返す**（`alpha !== 255` の判定）。加えて要素の `opacity` は computed style へ合成されない | 実装 | 枠色の取得に加え、**半透明値と要素 `opacity` を織り込んだ実効色を求める手段**が要る。D8 の記録値（枠 `#BBBBBB` / 面 `#DDDDDD`）は利用者が見る合成後の色であり、computed style の生値（`#767676` と `rgba(118,118,118,0.5)`）とは異なる。computed 値と `opacity` から design-tokens の合成ヘルパで導出する方針を採る。これが成立しない場合は D8 の記録値の定義から見直すため design へ差し戻す。→ **解消**（タスク 4.3）: 差し戻しは不要だった。枠は不透明な色を要素の opacity で下地と合成し、面は半透明の色を下地と合成してから要素の opacity でさらに合成する 2 段で、D8 の記録値を導出できた。合成は `compositeOver` に委ねている（`effectiveColorOver`） |
+| 5 | `/ui-check` への要素追加が既存 Tab 巡回テストの到達目標に影響しうる | 検証 | 追加要素を到達目標より後方へ配置する。それで解決しない場合のみ上限を引き上げる。→ **解消**: 追加要素は後方へ配置した。その後 #52（ui-a11y-gaps）の取り込みで実測の巡回数が 21 に増え、上限 24 との余裕が 3 になった。上限を 48 へ引き上げ、`/ui-check` の巡回テストに打ち切りの発生自体を失敗とする assert を追加した |
+| 6 | 除外理由 `ring-destructive/20` の根拠文がエラー枠の適用範囲拡大により陳腐化しうる | 検証 | 実装時に根拠文の妥当性を再確認し、必要なら書き換える。→ **解消**（タスク 1.3）: 書き換えた。旧文の根拠（エラーの伝達はエラー枠が担う）は、是正前の「エラーかつチェック済み」でだけ実際に破れていた（枠が選択色へ戻るため）。新しい理由文は、タスク 3.3 のエラー×チェック済みの是正が入ることを前提にしている。その後 Issue #177（ui-airbnb-foundation の意匠差し替え）で再改訂した。選択済みの面（`primary`）とエラーの枠（`destructive`）の比が 1.35:1 になり、checkbox / radio-group の選択済みでは枠がエラーを運べなくなった。除外の前提を面が透明な部品（input / textarea / button / badge）に限り、checkbox / radio-group のリングは `ring-destructive/60` として 3:1 を課す側へ移した（現行の正典は `contrast-usage.test.ts`） |

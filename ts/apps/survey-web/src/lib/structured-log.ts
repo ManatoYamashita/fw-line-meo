@@ -53,6 +53,17 @@ export function logFactualityResidual(log: SurveyLogger, aspectCodes: readonly s
 }
 
 /**
+ * 事後検証（Issue #413）で作り直してもなお残った、来店前の期待と「無かった」の断定を記録する。
+ *
+ * `factuality_residual`（未選択の観点）と同じく下書きは客へ返すので、重大度は警告である。事象名を分けるのは、
+ * 既存の事象の意味（未選択の観点だけ）を変えないため。載せるのは分類名だけで、下書き本文・一言・プロンプトは含めない。
+ */
+export function logFabricationResidual(log: SurveyLogger, categories: readonly string[]): void {
+  // 並び順を固定して集計しやすくする（同じ組み合わせが別文字列に散らばらないように）。
+  log('warn', 'fabrication_residual', { residualClaims: [...categories].sort().join(',') });
+}
+
+/**
  * アンケートページが回答可能な状態で表示された（ファネルの分母・Issue #137 段階3）。
  *
  * 素材の厚みは survey_material_tallies に月次で残るが、それは **送信された回答** しか

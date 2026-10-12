@@ -37,14 +37,16 @@ const api = vi.hoisted(() => ({
   registerStore: vi.fn(),
   // QR パネルが使う窓口。差し替えを忘れると undefined が呼ばれて既存テストごと落ちる。
   getStoreQr: vi.fn(),
+  // QR パネルの実績の窓口（Issue #401）。既定は応答を返さないまま保つ（下の beforeEach）。実績の表は
+  // 行と見出しを持つので、一覧の行を数える検査へ混ざらないよう、このファイルでは描かせない。
+  getStoreReviewFunnel: vi.fn(),
   // 利用状況の列の操作部品が使う窓口（store-suspension tasks 5.3）。
   suspendStore: vi.fn(),
   resumeStore: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import StoresPage from '../src/app/stores/page';
-import { settleEffects } from './focus-observation';
 import { announcedText, ownText } from './live-region';
 import { expectListSkeleton } from './list-skeleton';
 
@@ -130,7 +132,14 @@ const createObjectURL = vi.fn(() => 'blob:mock-url');
 const revokeObjectURL = vi.fn();
 
 function qrOk() {
-  return { ok: true as const, value: { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' } };
+  return {
+    ok: true as const,
+    value: {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: 'image/png',
+      surveyUrl: 'https://survey.example/s/test-store',
+    },
+  };
 }
 
 // 対象店舗の行を返す（行内の発行操作とパネルの挿入位置を検査するため）。
@@ -144,6 +153,7 @@ function rowOf(storeName: string): HTMLTableRowElement {
 beforeEach(() => {
   useAuthMock.mockReset();
   Object.values(api).forEach((m) => m.mockReset());
+  api.getStoreReviewFunnel.mockReturnValue(new Promise(() => {}));
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
   Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
@@ -316,39 +326,7 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     expect(headers).toEqual(['店名', '店舗特定', '競合設定', '利用状況', 'QR']);
   });
 
-  it('発行操作でパネルが対象行の直下に現れる（1.3）', async () => {
-    ready('agency');
-    api.getStores.mockResolvedValue({
-      ok: true,
-      value: [storeConfirmed, storeConfirmedNoCompetitor],
-    });
-    api.getStoreQr.mockResolvedValue(qrOk());
-    render(<StoresPage />);
-    await screen.findByText('鳥貴族 渋谷店');
-
-    const targetRow = rowOf('鳥貴族 渋谷店');
-    fireEvent.click(within(targetRow).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-
-    const heading = await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
-    expect(targetRow.nextElementSibling?.contains(heading)).toBe(true);
-  });
-
-  it('挿入したパネルの行が表の全列にまたがる（1.4）', async () => {
-    ready('operator');
-    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
-    api.getStoreQr.mockResolvedValue(qrOk());
-    render(<StoresPage />);
-    await screen.findByText('鳥貴族 渋谷店');
-
-    const targetRow = rowOf('鳥貴族 渋谷店');
-    fireEvent.click(within(targetRow).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
-
-    const panelCell = targetRow.nextElementSibling?.querySelector('td');
-    expect(panelCell?.getAttribute('colspan')).toBe('6');
-  });
-
-  it('別店舗の発行でパネルを差し替え、前の資源を引き継がせない（2.8）', async () => {
+  it('発行操作で対象店舗の右側 Dialog が開く（8.1）', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({
       ok: true,
@@ -359,18 +337,54 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     await screen.findByText('鳥貴族 渋谷店');
 
     fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+
+    const dialog = await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    expect(dialog.getAttribute('id')).toBe('store-qr-drawer');
+    expect(await within(dialog).findByRole('status')).toBeTruthy();
+  });
+
+  it('operator の全列を維持し、Drawer は表の overflow 外へ描画する', async () => {
+    ready('operator');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
+    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+
+    expect(document.querySelectorAll('th')).toHaveLength(6);
+    expect(document.getElementById('store-qr-drawer')?.closest('[data-slot="table-container"]')).toBeNull();
+  });
+
+  it('閉じて別店舗を発行すると選択店舗と表示資源が切り替わる', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({
+      ok: true,
+      value: [storeConfirmed, storeConfirmedNoCompetitor],
+    });
+    api.getStoreQr.mockResolvedValue(qrOk());
+    render(<StoresPage />);
+    await screen.findByText('鳥貴族 渋谷店');
+
+    fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
+    const dialog = await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    // 解放を確かめるには、先に表示資源が作られている必要がある。画像の取得が届く前に閉じると
+    // 資源は作られず、解放の表明が空振りする（Issue #298）。
+    await within(dialog).findByRole('img', { name: /鳥貴族 渋谷店/ });
+    fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
     fireEvent.click(
       within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店 の QR 発行/ }),
     );
-    await screen.findByRole('heading', { name: /競合未設定の確定店/ });
+    await screen.findByRole('dialog', { name: '競合未設定の確定店 の QR' });
 
-    expect(screen.queryByRole('heading', { name: /鳥貴族 渋谷店/ })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '鳥貴族 渋谷店 の QR' })).toBeNull();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
   });
 
-  it('同じ店舗の発行操作を再度押しても取得を再発行しない（2.2）', async () => {
+  it('発行操作で対象店舗の画像を 1 回取得する', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     api.getStoreQr.mockResolvedValue(qrOk());
@@ -379,9 +393,7 @@ describe('店舗一覧ページ: QR 発行導線', () => {
 
     const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ });
     fireEvent.click(button);
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
-    fireEvent.click(button);
-    fireEvent.click(button);
+    await screen.findByRole('img', { name: /鳥貴族 渋谷店/ });
 
     expect(api.getStoreQr).toHaveBeenCalledTimes(1);
   });
@@ -401,18 +413,22 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     expect(api.getStores).toHaveBeenCalledTimes(1);
   });
 
-  it('パネルを閉じると表示を残さない（2.8）', async () => {
+  it('Drawer を閉じると表示資源を解放して発行操作へ戻る', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     api.getStoreQr.mockResolvedValue(qrOk());
     render(<StoresPage />);
     await screen.findByText('鳥貴族 渋谷店');
 
-    fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    const trigger = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ });
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    // 解放を確かめるには、先に表示資源が作られている必要がある（理由は上の検査と同じ）。
+    await within(dialog).findByRole('img', { name: /鳥貴族 渋谷店/ });
 
-    fireEvent.click(screen.getByRole('button', { name: /閉じる/ }));
-    expect(screen.queryByRole('heading', { name: /鳥貴族 渋谷店/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
   });
 });
@@ -432,7 +448,7 @@ describe('店舗一覧ページ: 行と取得対象の対応', () => {
     fireEvent.click(
       within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店 の QR 発行/ }),
     );
-    await screen.findByRole('heading', { name: /競合未設定の確定店/ });
+    await screen.findByRole('dialog', { name: '競合未設定の確定店 の QR' });
 
     expect(api.getStoreQr).toHaveBeenCalledWith('s3');
     expect(api.getStoreQr).not.toHaveBeenCalledWith('s1');
@@ -449,11 +465,13 @@ describe('店舗一覧ページ: 行と取得対象の対応', () => {
     await screen.findByText('鳥貴族 渋谷店');
 
     fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     fireEvent.click(
       within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店 の QR 発行/ }),
     );
-    await screen.findByRole('heading', { name: /競合未設定の確定店/ });
+    await screen.findByRole('dialog', { name: '競合未設定の確定店 の QR' });
 
     expect(api.getStoreQr.mock.calls.map(([id]) => id)).toEqual(['s1', 's3']);
   });
@@ -500,11 +518,11 @@ describe('店舗一覧ページ: 発行導線の操作性', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false');
 
     fireEvent.click(button);
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
     expect(button.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('パネルを閉じたとき焦点を発行操作へ戻す（6.1）', async () => {
+  it('Drawer を閉じたとき焦点を発行操作へ戻す（8.5）', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     api.getStoreQr.mockResolvedValue(qrOk());
@@ -513,24 +531,24 @@ describe('店舗一覧ページ: 発行導線の操作性', () => {
 
     const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ });
     fireEvent.click(button);
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
 
-    fireEvent.click(screen.getByRole('button', { name: /閉じる/ }));
-    expect(document.activeElement).toBe(button);
+    fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
+    await waitFor(() => expect(document.activeElement).toBe(button));
   });
 
-  it('agency でもパネル行が全列にまたがる（1.4）', async () => {
+  it('agency の Drawer の発行元を aria-controls で結び付ける', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     api.getStoreQr.mockResolvedValue(qrOk());
     render(<StoresPage />);
     await screen.findByText('鳥貴族 渋谷店');
 
-    const targetRow = rowOf('鳥貴族 渋谷店');
-    fireEvent.click(within(targetRow).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    const trigger = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ });
+    fireEvent.click(trigger);
+    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
 
-    expect(targetRow.nextElementSibling?.querySelector('td')?.getAttribute('colspan')).toBe('5');
+    expect(trigger.getAttribute('aria-controls')).toBe('store-qr-drawer');
   });
 
   it('発行に失敗しても他店舗の発行を妨げない（4.4）', async () => {
@@ -546,6 +564,9 @@ describe('店舗一覧ページ: 発行導線の操作性', () => {
     fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
     await screen.findByRole('alert');
 
+    fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
     api.getStoreQr.mockResolvedValue(qrOk());
     fireEvent.click(
       within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店 の QR 発行/ }),
@@ -557,7 +578,7 @@ describe('店舗一覧ページ: 発行導線の操作性', () => {
 });
 
 describe('店舗一覧ページ: 発行導線の焦点', () => {
-  it('初回取得が成功しても焦点を発行操作から奪わない（6.1）', async () => {
+  it('Drawer を開くと閉じる操作へ焦点を移す（8.5, 8.6）', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     api.getStoreQr.mockResolvedValue(qrOk());
@@ -567,15 +588,13 @@ describe('店舗一覧ページ: 発行導線の焦点', () => {
     const button = within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ });
     button.focus();
     fireEvent.click(button);
-    await screen.findByRole('img');
+    await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
 
-    // 初回はパネルが焦点を壊していないため、引き取ってはならない（横取りになる）。
-    // 否定の比較なので待たずに観測点を確定させる（Issue #166）。
-    await settleEffects();
-    expect(document.activeElement).toBe(button);
+    const close = screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' });
+    await waitFor(() => expect(document.activeElement).toBe(close));
   });
 
-  it('失敗から再試行して成功するまで焦点が body へ落ちない（6.1）', async () => {
+  it('失敗から再試行して成功しても焦点が Drawer の外へ落ちない（6.1）', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     api.getStoreQr
@@ -594,9 +613,8 @@ describe('店舗一覧ページ: 発行導線の焦点', () => {
     fireEvent.click(retry);
     expect(document.activeElement).not.toBe(document.body);
 
-    const link = await screen.findByRole('link', { name: /鳥貴族 渋谷店/ });
-    // 収束を待つ（Issue #166。store-qr-panel.test.tsx と同じ理由で、ここも偽の赤になりうる）。
-    await waitFor(() => expect(document.activeElement).toBe(link));
+    const dialog = screen.getByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
   });
 });
 
@@ -685,7 +703,7 @@ describe('店舗一覧ページ: 意匠の適用', () => {
       cleanup();
     }
     // 走査対象が 1 件も無い状態で緑にならないようにする（要件 7.4）。
-    expect(visited).toBe(SURFACE_BRANCHES.length);
+    expect(visited).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
   });
 
   it('主見出しを見出しの部品で描き、読み上げ名と階層を変えない（Req 1.1, 3.2）', async () => {
@@ -835,7 +853,7 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     expect(within(main).queryAllByRole('status')).toHaveLength(0);
   });
 
-  it('発行パネルの行も表の部品を通り、対象行の直後へ 1 段だけ挿さる（Req 2.1）', async () => {
+  it('QR Drawer を Portal に描き、表の行構造を変えない', async () => {
     ready('operator');
     api.getStores.mockResolvedValue({
       ok: true,
@@ -848,25 +866,12 @@ describe('店舗一覧ページ: 意匠の適用', () => {
 
     const targetRow = rowOf('鳥貴族 渋谷店');
     fireEvent.click(within(targetRow).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
-    await screen.findByRole('heading', { name: /鳥貴族 渋谷店/ });
+    const dialog = await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
 
-    const panelRow = targetRow.nextElementSibling;
-    expect(panelRow?.tagName).toBe('TR');
-    expect(panelRow?.getAttribute('data-slot')).toBe('table-row');
-    // 本体は子をそのまま tbody へ流す（間に要素を挟むと隣接関係が壊れる）。
-    expect(panelRow?.parentElement).toBe(targetRow.parentElement);
+    expect(dialog.closest('[data-slot="table-container"]')).toBeNull();
     expect(targetRow.parentElement?.getAttribute('data-slot')).toBe('table-body');
-
-    const panelCell = panelRow?.querySelector('td');
-    expect(panelCell?.getAttribute('data-slot')).toBe('table-cell');
-    // 桁数は列見出しの実数と一致する（operator は担当代理店列を含む 6 列）。列数の起点は
-    // <th> の並びとは別に持たれているため、両者が一致することをここで結び付ける。
-    expect(panelCell?.getAttribute('colspan')).toBe('6');
-    expect(panelCell?.getAttribute('colspan')).toBe(
-      String(within(main).getAllByRole('columnheader').length),
-    );
-    // 発行操作から開閉先を指す id は行ごとに一意である。
-    expect(panelCell?.getAttribute('id')).toBe('qr-panel-s1');
+    expect(targetRow.nextElementSibling?.getAttribute('data-slot')).toBe('table-row');
+    expect(document.querySelector('[data-slot="dialog-backdrop"]')).not.toBeNull();
   });
 
   it('発行できない理由の文言に色を増やさず、補足の色 1 つだけを与える（Req 1.3, 1.4）', async () => {
@@ -1041,7 +1046,7 @@ describe('店舗一覧ページ: 利用状況', () => {
     expect(within(statusCellOf('鳥貴族 渋谷店')).getByText('利用中')).toBeTruthy();
   });
 
-  it('QR パネルを開いた店舗が停止されたら、パネルを閉じて保存の導線を残さない（5.6）', async () => {
+  it('QR Drawer の表示中は背面の停止操作を隠し、閉じてから停止すると発行導線を外す（5.6）', async () => {
     ready('agency');
     api.getStores
       .mockResolvedValueOnce({ ok: true, value: [storeConfirmed] })
@@ -1051,7 +1056,7 @@ describe('店舗一覧ページ: 利用状況', () => {
     render(<StoresPage />);
     await screen.findByText('鳥貴族 渋谷店');
 
-    // パネルは店名を見出しに持つので、開く前に行と列の位置を取っておく。
+    // Drawer の背面にある一覧操作が modal によって操作対象から外れることを確認する。
     const row = rowOf('鳥貴族 渋谷店');
     const statusIndex = screen
       .getAllByRole('columnheader')
@@ -1060,6 +1065,12 @@ describe('店舗一覧ページ: 利用状況', () => {
     const statusCell = row.children[statusIndex] as HTMLElement;
     fireEvent.click(within(row).getByRole('button', { name: '鳥貴族 渋谷店 の QR 発行' }));
     await screen.findByRole('img');
+
+    expect(
+      within(statusCell).queryByRole('button', { name: '鳥貴族 渋谷店 を停止' }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '鳥貴族 渋谷店 の QR を閉じる' }));
+    await waitFor(() => expect(screen.queryByRole('img')).toBeNull());
 
     fireEvent.click(within(statusCell).getByRole('button', { name: '鳥貴族 渋谷店 を停止' }));
     fireEvent.click(await screen.findByRole('button', { name: '停止する' }));

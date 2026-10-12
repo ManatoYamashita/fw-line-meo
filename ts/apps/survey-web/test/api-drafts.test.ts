@@ -118,6 +118,23 @@ describe('handleDrafts', () => {
     });
   });
 
+  it('事後検証の残り（未選択の観点・Issue #413 の期待と断定）を記録する', async () => {
+    const tokens = createSessionTokenService(KEY);
+    const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 1 });
+    // 生成器が事後検証の残りを通知したら、両方の事象が記録される（配線が切れると黙って記録されない）。
+    const residualGen: DraftGenerator = {
+      generate: (_m, _v, onResidual, onClaimResidual) => {
+        onResidual?.(['service', 'atmosphere']);
+        onClaimResidual?.(['expectation', 'absence:others']);
+        return Promise.resolve(ok('下書き'));
+      },
+    };
+    const log = vi.fn();
+    await handleDrafts(req({ sessionToken }), baseDeps(tokens, { generator: residualGen, log }));
+    expect(log).toHaveBeenCalledWith('warn', 'factuality_residual', { violatedAspects: 'atmosphere,service' });
+    expect(log).toHaveBeenCalledWith('warn', 'fabrication_residual', { residualClaims: 'absence:others,expectation' });
+  });
+
   it('INVALID_OUTPUT は errorKind のみを ERROR ログに含める', async () => {
     const tokens = createSessionTokenService(KEY);
     const sessionToken = tokens.sign({ storeId: STORE, material: MATERIAL, attempt: 0 });

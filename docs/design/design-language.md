@@ -735,6 +735,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 | `button.tsx` | `Button`, `buttonVariants` | 押しボタン |
 | `card.tsx` | `Card`, `CardAction`, `CardContent`, `CardDescription`, `CardFooter`, `CardHeader`, `CardTitle` | 情報の容器 |
 | `checkbox.tsx` | `Checkbox` | 複数選択 |
+| `dialog.tsx` | `Dialog`, `DialogBackdrop`, `DialogClose`, `DialogContent`, `DialogDescription`, `DialogPortal`, `DialogTitle`, `DialogTrigger` | modal ダイアログ（Escape・背面押下で閉じ、閉じた後は起点へ焦点を戻す） |
 | `empty-state.tsx` | `EmptyState` | 一覧が空のときの案内。押しボタンを内包しない |
 | `field.tsx` | `Field`, `FieldContent`, `FieldDescription`, `FieldError`, `FieldGroup`, `FieldLabel`, `FieldLegend`, `FieldSeparator`, `FieldSet`, `FieldTitle` | フォームの構造と検証状態 |
 | `heading.tsx` | `DEFAULT_SIZE_BY_LEVEL`, `Heading`, `headingVariants` | 見出し階層 |

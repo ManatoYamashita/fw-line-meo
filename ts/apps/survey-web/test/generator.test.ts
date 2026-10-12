@@ -267,4 +267,89 @@ describe('createDraftGenerator', () => {
       expect(calls).toHaveLength(1);
     });
   });
+
+  // Issue #413: 来店前の期待と「無かった」の断定も、未選択の観点と同じく事後検証で 1 回だけ作り直す。
+  // どちらも語の形で決まり、誤検出が少ない（#415 の数え直しで約 230 文を読み 0 件）。再訪の意向と観点の属性は
+  // 発生が多く（約 11%）、属性は言い換えとの境界が曖昧なので、作り直しの引き金にしない。
+  describe('来店前の期待と「無かった」の断定の事後検証（Issue #413）', () => {
+    // 観点を選んでいない素材（未選択の観点の検証が効かない形）。この軸だけで作り直しが起きることを確かめる。
+    const PLAIN: DraftMaterial = { storeName: '店', star: 2, aspectLabels: [], concernLabels: ['量'] };
+
+    it('来店前の期待を検出したら作り直し、解消した方を返す', async () => {
+      const { client, calls } = fakeClient([
+        draftResponse('量が少なく、期待していた水準には届きませんでした。'),
+        draftResponse('量が少なく、満足できませんでした。'),
+      ]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      expect(await gen.generate(PLAIN, VARIATION)).toEqual({ ok: true, value: '量が少なく、満足できませんでした。' });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('「無かった」の断定を検出したら作り直し、解消した方を返す', async () => {
+      const { client, calls } = fakeClient([
+        draftResponse('量が少なかったです。その他の点については特筆すべき事項はありません。'),
+        draftResponse('量が少なく、満足できませんでした。'),
+      ]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      expect(await gen.generate(PLAIN, VARIATION)).toEqual({ ok: true, value: '量が少なく、満足できませんでした。' });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('作り直しても残れば下書きを返しつつ、残った分類を通知する（未選択の観点の通知とは分ける）', async () => {
+      const aspects: string[][] = [];
+      const claims: string[][] = [];
+      const { client, calls } = fakeClient([draftResponse('期待していた水準には届かず、気になった点は特にありませんでした。')]);
+      const gen = createDraftGenerator(client, {
+        backoff: NOOP_BACKOFF,
+        onResidual: (codes) => aspects.push(codes),
+        onClaimResidual: (categories) => claims.push(categories),
+      });
+      const res = await gen.generate(PLAIN, VARIATION);
+      expect(res.ok).toBe(true);
+      expect(calls).toHaveLength(2);
+      expect(aspects).toEqual([]);
+      expect(claims).toEqual([['absence:concerns', 'expectation']]);
+    });
+
+    it('呼び出しごとの通知先を渡せば、生成器の既定より優先する', async () => {
+      const fromOptions: string[][] = [];
+      const fromRequest: string[][] = [];
+      const { client } = fakeClient([draftResponse('期待していた水準には届きませんでした。')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF, onClaimResidual: (c) => fromOptions.push(c) });
+      await gen.generate(PLAIN, VARIATION, undefined, (c) => fromRequest.push(c));
+      expect(fromOptions).toEqual([]);
+      expect(fromRequest).toEqual([['expectation']]);
+    });
+
+    it('再訪の意向と観点の属性では作り直さない（引き金にしない分類）', async () => {
+      const { client, calls } = fakeClient([draftResponse('落ち着いた雰囲気で、また機会があれば利用したいです。')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      await gen.generate(PLAIN, VARIATION);
+      expect(calls).toHaveLength(1);
+    });
+
+    it('客が一言に書いた事情は数えない（一言「期待していたほどではありませんでした」）', async () => {
+      const { client, calls } = fakeClient([draftResponse('期待していたほどではありませんでした。')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      await gen.generate({ ...PLAIN, comment: '期待していたほどではありませんでした' }, VARIATION);
+      expect(calls).toHaveLength(1);
+    });
+
+    it('factualityCheck: false なら、この軸も検証しない（eval の案A 単体の測定）', async () => {
+      const { client, calls } = fakeClient([draftResponse('期待していた水準には届きませんでした。')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF, factualityCheck: false });
+      await gen.generate(PLAIN, VARIATION);
+      expect(calls).toHaveLength(1);
+    });
+
+    it('未選択の観点とこの軸が同時に当たっても、作り直しは 1 回だけ', async () => {
+      const { client, calls } = fakeClient([draftResponse('雰囲気が良く、期待以上でした。')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF, lexicon: { atmosphere: ['雰囲気'] } });
+      await gen.generate(
+        { ...PLAIN, unselectedAspectLabels: ['雰囲気'], unselectedAspectCodes: ['atmosphere'] },
+        VARIATION,
+      );
+      expect(calls).toHaveLength(2);
+    });
+  });
 });

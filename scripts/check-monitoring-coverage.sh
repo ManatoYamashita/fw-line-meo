@@ -20,6 +20,8 @@
 #   4. **ログベース指標を読む alert policy が実在すること。** 指標だけが生き残り、それを読む
 #      アラートが消えると、値は数え続けるのに誰にも通知されない（#230 の鏡像であり、指標側の
 #      検査 3 だけでは素通りする）。アラートを持たない指標は tf 内へ理由を in-band で宣言する
+#      （分析専用 = analytics-only、CI の定期検証が読む = ci-read。後者は読み手のスクリプトが
+#      指標名を実際に書いていることまで照合する・Issue #139）
 #   5. 全 alert policy が通知チャネルへ接続されていること（鳴っても届かない状態の検出）
 #   6. 全 alert policy が auto_close を持つこと（既定 7 日では復旧を短時間で観測できない）
 #   7. 空振り防止: resource ブロック 0 件・policy 0 件・metric 0 件・正典 0 件はいずれも赤
@@ -30,6 +32,9 @@
 # **アプリのディレクトリ対応を書き写さない。** 指標の filter が参照する var 名を root の
 # module 配線から module.run_services.service_names["<key>"] へ解決し、その <key> を
 # ts/apps/<key>/src の実体へ当てる。表へ書き写すと、配線を変えた瞬間にガードが実物から切れる。
+# ジョブの指標（job_name で絞るもの・Issue #139）は root の `<var> = module.<mod>.job_name` から
+# ジョブ名を解決し、scripts/push-images.sh の Dockerfile 対応が指す置き場所（go/ や
+# ts/apps/delivery-job）を探す。イメージを実際に組む装置から導くので、ここも書き写さない。
 #
 # 使い方: bash scripts/check-monitoring-coverage.sh
 #   漏れがあれば該当を stderr に出して exit 1、無ければ exit 0。
@@ -56,9 +61,10 @@ fi
 GUARDRAILS_TF="${ROOT}/infra/modules/guardrails/main.tf"
 ROOT_TF="${ROOT}/infra/envs/prod/main.tf"
 COVERAGE_GUARD="${SCRIPT_DIR}/check-deploy-image-coverage.sh"
+PUSH_IMAGES="${SCRIPT_DIR}/push-images.sh"
 APPS_DIR="${ROOT}/ts/apps"
 
-for f in "$GUARDRAILS_TF" "$ROOT_TF" "$COVERAGE_GUARD"; do
+for f in "$GUARDRAILS_TF" "$ROOT_TF" "$COVERAGE_GUARD" "$PUSH_IMAGES"; do
   if [ ! -f "$f" ]; then
     echo "ERROR: 検証対象ファイルが見つかりません: ${f#"$ROOT"/}" >&2
     exit 1
@@ -241,6 +247,15 @@ if [ -z "$canon_services" ]; then
 fi
 canon_count="$(count_lines "$canon_services")"
 
+# ジョブは空でも赤にしない（ジョブの指標を持たない構成はあり得る）。ジョブの指標が在るのに
+# 正典が空なら、下の解決で「正典に存在しません」として赤になる。
+canon_jobs_rc=0
+canon_jobs="$(printf '%s\n' "$canon_tsv" | awk -F'\t' '$1 == "job" { print $2 }' | sort -u)" || canon_jobs_rc=$?
+if [ "$canon_jobs_rc" -ne 0 ]; then
+  echo "ERROR: デプロイ正典から job 行を抽出できません（awk exit=${canon_jobs_rc}）。" >&2
+  exit 1
+fi
+
 # --- 検証2: 5xx 率がサービス名を述語に持たないこと -------------------------------------------
 #
 # ここが「5 サービス全部が監視下にある」ことの根拠である。述語を持たないポリシーが 1 本ある
@@ -339,29 +354,87 @@ for mf in $metric_files; do
     *) continue ;;
   esac
 
-  # --- 対象サービスの解決: var.<name> → root の module 配線 → service_names["<key>"] ---
+  # --- 対象の解決 ---
+  #   サービス: var.<name> → root の module 配線 → service_names["<key>"] → ts/apps/<key>/src
+  #   ジョブ  : var.<name> → root の `<name> = module.<mod>.job_name` → そのモジュールの job_name
+  #             （root での上書き、無ければモジュールの variables.tf の既定値）→ デプロイ正典の job →
+  #             push-images.sh の Dockerfile 対応の置き場所（Issue #139）
+  # ジョブのソース木を表へ書き写さないのはサービスと同じ理由である。push-images.sh は実際に
+  # イメージを組む装置なので、そこから導けば「組まれるコード」と「探すコード」が切れない。
   svc_var="$(printf '%s\n' "$mfilter" | sed -nE 's/.*service_name = \\"\$\{var\.([a-z_]+)\}\\".*/\1/p')"
-  if [ -z "$svc_var" ]; then
-    echo "ERROR: google_logging_metric.${mname} の filter から対象サービスの変数名を解決できません。" >&2
-    echo "       → service_name は \${var.<name>} で受けてください。リテラルを直書きすると、" >&2
-    echo "         run-services の実体と切れてもここが気づけなくなります。" >&2
-    fail=1
-    continue
-  fi
-  svc_key="$(sed -nE "s/^[[:space:]]*${svc_var}[[:space:]]*=[[:space:]]*module\.run_services\.service_names\[\"([A-Za-z0-9_-]+)\"\].*/\1/p" "$ROOT_TF")"
-  if [ -z "$svc_key" ]; then
-    echo "ERROR: ${ROOT_TF#"$ROOT"/} で ${svc_var} が module.run_services.service_names[...] から配線されていません。" >&2
-    fail=1
-    continue
-  fi
-  if ! in_list "$svc_key" $canon_services; then
-    echo "ERROR: ${svc_var} が指す \"${svc_key}\" はデプロイ正典に存在しません。" >&2
+  job_var="$(printf '%s\n' "$mfilter" | sed -nE 's/.*job_name = \\"\$\{var\.([a-z_]+)\}\\".*/\1/p')"
+  if [ -n "$svc_var" ]; then
+    svc_key="$(sed -nE "s/^[[:space:]]*${svc_var}[[:space:]]*=[[:space:]]*module\.run_services\.service_names\[\"([A-Za-z0-9_-]+)\"\].*/\1/p" "$ROOT_TF")"
+    if [ -z "$svc_key" ]; then
+      echo "ERROR: ${ROOT_TF#"$ROOT"/} で ${svc_var} が module.run_services.service_names[...] から配線されていません。" >&2
+      fail=1
+      continue
+    fi
+    if ! in_list "$svc_key" $canon_services; then
+      echo "ERROR: ${svc_var} が指す \"${svc_key}\" はデプロイ正典に存在しません。" >&2
+      fail=1
+      continue
+    fi
+    src_dir="${APPS_DIR}/${svc_key}/src"
+  elif [ -n "$job_var" ]; then
+    job_mod="$(sed -nE "s/^[[:space:]]*${job_var}[[:space:]]*=[[:space:]]*module\.([a-z_]+)\.job_name[[:space:]]*$/\1/p" "$ROOT_TF")"
+    if [ -z "$job_mod" ]; then
+      echo "ERROR: ${ROOT_TF#"$ROOT"/} で ${job_var} が module.<name>.job_name から配線されていません。" >&2
+      echo "       → ジョブ名をリテラルで渡すと、ジョブのモジュールと切れてもここが気づけなくなります。" >&2
+      fail=1
+      continue
+    fi
+    # root の module ブロックから source と job_name の上書きを読む。
+    job_mod_body="$(awk -v m="$job_mod" '
+      $0 ~ ("^module \"" m "\"") { inb = 1; next }
+      inb && /^}/ { exit }
+      inb { print }
+    ' "$ROOT_TF")"
+    job_mod_dir="$(printf '%s\n' "$job_mod_body" | sed -nE 's/^[[:space:]]*source[[:space:]]*=[[:space:]]*"\.\.\/\.\.\/modules\/([A-Za-z0-9_-]+)".*/\1/p')"
+    if [ -z "$job_mod_dir" ]; then
+      echo "ERROR: ${ROOT_TF#"$ROOT"/} の module \"${job_mod}\" から source を解決できません。" >&2
+      fail=1
+      continue
+    fi
+    job_key="$(printf '%s\n' "$job_mod_body" | sed -nE 's/^[[:space:]]*job_name[[:space:]]*=[[:space:]]*"([A-Za-z0-9_-]+)".*/\1/p')"
+    if [ -z "$job_key" ]; then
+      job_vars_tf="${ROOT}/infra/modules/${job_mod_dir}/variables.tf"
+      if [ -f "$job_vars_tf" ]; then
+        job_key="$(awk '
+          /^variable "job_name"/ { inb = 1; next }
+          inb && /^}/ { exit }
+          inb && /^[[:space:]]*default[[:space:]]*=/ { print; exit }
+        ' "$job_vars_tf" | sed -nE 's/.*"([A-Za-z0-9_-]+)".*/\1/p')"
+      fi
+    fi
+    if [ -z "$job_key" ]; then
+      echo "ERROR: module \"${job_mod}\" のジョブ名を解決できません（root の上書きも variables.tf の既定値もありません）。" >&2
+      fail=1
+      continue
+    fi
+    if ! in_list "$job_key" $canon_jobs; then
+      echo "ERROR: ${job_var} が指すジョブ \"${job_key}\" はデプロイ正典に存在しません。" >&2
+      fail=1
+      continue
+    fi
+    job_dockerfile="$(sed -nE "s/^[[:space:]]*\[${job_key}\]=\"([A-Za-z0-9_./-]+)\/Dockerfile\".*/\1/p" "$PUSH_IMAGES")"
+    if [ -z "$job_dockerfile" ]; then
+      echo "ERROR: ${PUSH_IMAGES#"$ROOT"/} の Dockerfile 対応にジョブ \"${job_key}\" がありません。" >&2
+      fail=1
+      continue
+    fi
+    svc_key="$job_key"
+    src_dir="${ROOT}/${job_dockerfile}"
+  else
+    echo "ERROR: google_logging_metric.${mname} の filter から対象サービスの変数名を解決できません（ジョブなら job_name の変数名）。" >&2
+    echo "       → service_name / job_name は \${var.<name>} で受けてください。リテラルを直書きすると、" >&2
+    echo "         run-services やジョブのモジュールの実体と切れてもここが気づけなくなります。" >&2
     fail=1
     continue
   fi
 
   # --- event 名の解決: リテラル、または for_each = toset([...]) の各要素 ---
-  events="$(printf '%s\n' "$mfilter" | sed -nE 's/.*jsonPayload\.event = \\"([a-z0-9_]+)\\".*/\1/p')"
+  events="$(printf '%s\n' "$mfilter" | sed -nE 's/.*jsonPayload\.event = \\"([a-z0-9_.-]+)\\".*/\1/p')"
   if [ -z "$events" ]; then
     fe_rc=0
     fe_line="$(read_assignment_span "$mpath" for_each)" || fe_rc=$?
@@ -370,7 +443,7 @@ for mf in $metric_files; do
       fail=1
       continue
     fi
-    events="$(printf '%s\n' "$fe_line" | tr ',' '\n' | sed -nE 's/.*"([a-z0-9_]+)".*/\1/p' | sort -u)"
+    events="$(printf '%s\n' "$fe_line" | tr ',' '\n' | sed -nE 's/.*"([a-z0-9_.-]+)".*/\1/p' | sort -u)"
   fi
   if [ -z "$events" ]; then
     echo "ERROR: google_logging_metric.${mname} から event 名を1件も解決できませんでした。" >&2
@@ -379,7 +452,6 @@ for mf in $metric_files; do
     continue
   fi
 
-  src_dir="${APPS_DIR}/${svc_key}/src"
   if [ ! -d "$src_dir" ]; then
     echo "ERROR: google_logging_metric.${mname} が指すサービス \"${svc_key}\" のソース木がありません: ${src_dir#"$ROOT"/}" >&2
     fail=1
@@ -391,8 +463,14 @@ for mf in $metric_files; do
     # pipefail 下では pipeline の終了状態が grep のものになる。**無一致（1）と評価不能
     # （2 以上）を分ける。** 潰すと「出力していない」という本命の診断が「探索できない」へ
     # 化け、赤の理由が別物にすり替わる（Issue #120。この誤りは本ケースの赤側が実際に暴いた）。
+    #
+    # 事象名の `.` は正規表現の任意 1 文字なので逃がす（`delivery-job.run` が `delivery-jobXrun`
+    # に一致して緑になるのを防ぐ）。テストコードは除く。テストだけが事象名を書いている状態は
+    # 「アプリが出している」ではない。Go の日次バッチ（Issue #139）のため .go も探す。
+    ev_re="$(printf '%s' "$ev" | sed 's/\./\\./g')"
     hit_rc=0
-    hit_count="$(grep -rlE "['\"]${ev}['\"]" --include='*.ts' --include='*.tsx' "$src_dir" | wc -l | tr -d '[:space:]')" || hit_rc=$?
+    hit_count="$(grep -rlE "['\"]${ev_re}['\"]" --include='*.ts' --include='*.tsx' --include='*.go' \
+      --exclude='*_test.go' --exclude='*.test.ts' --exclude='*.test.tsx' "$src_dir" | wc -l | tr -d '[:space:]')" || hit_rc=$?
     if [ "$hit_rc" -gt 1 ]; then
       echo "ERROR: 事象名 ${ev} の探索を評価できません（grep exit=${hit_rc}）。" >&2
       fail=1
@@ -400,7 +478,7 @@ for mf in $metric_files; do
     fi
     if [ "$hit_count" -eq 0 ]; then
       echo "ERROR: 指標 ${mname} が数える事象 \"${ev}\" を ${svc_key} が出力していません。" >&2
-      echo "       → ${src_dir#"$ROOT"/} 配下の .ts/.tsx にこの文字列がありません。" >&2
+      echo "       → ${src_dir#"$ROOT"/} 配下の .ts/.tsx/.go（テストを除く）にこの文字列がありません。" >&2
       echo "       → 指標は存在するのに値が永久に 0 という静かな失敗です。2026-09-06〜09-09 の本番が" >&2
       echo "         実際にこの状態で、署名検証が全件失敗しても誰にも通知されない構成になっていました。" >&2
       fail=1
@@ -469,6 +547,45 @@ for mf in $metric_files; do
     continue
   fi
   if [ "$ao_rc" -eq 0 ]; then
+    continue
+  fi
+
+  # CI の定期検証が読む指標（Issue #139）。書式は Issue 番号と読み手のスクリプトが必須:
+  #
+  #   # monitoring-coverage: ci-read (#139) scripts/check-external-api-liveness.sh
+  #
+  # **宣言だけで逃がさない。** 読み手が実在し、かつ指標名をそのスクリプトが実際に書いている
+  # ことまで要求する。宣言だけを見ると、読み手から指標名が消えても（＝誰も読んでいない）緑になり、
+  # analytics-only を装った「面倒だから逃がす」と区別できなくなる。
+  ci_re='^[[:space:]]*#[[:space:]]*monitoring-coverage:[[:space:]]*ci-read[[:space:]]*\(#[0-9]+\)[[:space:]]+scripts/[A-Za-z0-9_.-]+\.sh[[:space:]]*$'
+  has_match "$ci_re" "$mpath" && ci_rc=0 || ci_rc=$?
+  if [ "$ci_rc" -eq 2 ]; then
+    echo "ERROR: ${mres} の ci-read 宣言を評価できません。" >&2
+    fail=1
+    continue
+  fi
+  if [ "$ci_rc" -eq 0 ]; then
+    ci_reader="$(sed -nE 's/^[[:space:]]*#[[:space:]]*monitoring-coverage:[[:space:]]*ci-read[[:space:]]*\(#[0-9]+\)[[:space:]]+(scripts\/[A-Za-z0-9_.-]+\.sh)[[:space:]]*$/\1/p' "$mpath" | sed -n '1,1p')"
+    if [ ! -f "${ROOT}/${ci_reader}" ]; then
+      echo "ERROR: ${mres} の ci-read 宣言が指す読み手 ${ci_reader} がありません。" >&2
+      echo "       → 読み手の無い指標は、数え続けるだけで誰も見ていません（#230 の鏡像）。" >&2
+      fail=1
+      continue
+    fi
+    for mn in $mnames; do
+      linked_checked=$((linked_checked + 1))
+      has_match "(^|[^A-Za-z0-9_-])${mn}([^A-Za-z0-9_-]|$)" "${ROOT}/${ci_reader}" && cr_rc=0 || cr_rc=$?
+      if [ "$cr_rc" -eq 2 ]; then
+        echo "ERROR: 指標 ${mn} と読み手 ${ci_reader} の接続を評価できません。" >&2
+        fail=1
+        continue
+      fi
+      if [ "$cr_rc" -ne 0 ]; then
+        echo "ERROR: 指標 ${mn} を ci-read の読み手 ${ci_reader} が参照していません。" >&2
+        echo "       → 宣言だけが残り、実際には誰もこの指標を読んでいない状態です。" >&2
+        fail=1
+      fi
+    done
     continue
   fi
 

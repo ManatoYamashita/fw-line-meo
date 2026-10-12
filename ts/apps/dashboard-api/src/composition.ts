@@ -3,6 +3,7 @@ import {
   getPool,
   findByAuthSubject,
   findStoreWithAgency,
+  readStoreReviewFunnel,
   linkAuthSubjectByEmail,
   listStoresWithStatus,
   setStoreCategory,
@@ -110,6 +111,11 @@ export function buildAppDeps({ config, verifier, structuredLog }: CompositionInp
       findStore: async (id) => findStoreWithAgency(await getPool(), id),
       renderQr: (text, size) => QRCode.toBuffer(text, { width: size, margin: 1 }),
       surveyBaseUrl: config.surveyBaseUrl,
+    },
+    reviewFunnel: {
+      auth: authDeps,
+      findStore: async (id) => findStoreWithAgency(await getPool(), id),
+      readFunnel: async (storeId) => readStoreReviewFunnel(await getPool(), storeId),
     },
     me: {
       auth: authDeps,

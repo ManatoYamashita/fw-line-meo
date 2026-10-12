@@ -28,7 +28,7 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 重大度 | `severity` | `severity` | 新規 | `ts/packages/observability/src/sink.ts` ／ `go/internal/logging/logging.go` | 集約基盤が重大度として解釈する特別項目。標準ライブラリが既定で出す `level` という名前では解釈されない（移送前の本番実測）。値は集約基盤の列挙に従い `DEBUG` / `INFO` / `WARNING` / `ERROR` を用いる。**警告は `WARNING` であって `WARN` ではない**（標準ライブラリは `WARN` を返すため写し替えが要る） |
-| 事象名 | `event` | 該当なし | 既存 | `ts/packages/observability/src/sink.ts` | 日次バッチ層は `msg` 文字列で識別する。事象名の付与は本 spec の範囲外（#232 が必要とした時点で別課題） |
+| 事象名 | `event` | `event` | 既存 | `ts/packages/observability/src/sink.ts` ／ `go/cmd/daily-batch/main.go` | 日次バッチ層は原則 `msg` 文字列で識別する。**実行サマリー行だけは `event` = `daily-batch.run` を持つ**（Issue #139）。ログベース指標が外部 API の生死判定のためにこの行を数えるので、人が読む `msg` の文言ではなく変わらない名前で識別する。それ以外の行への付与は必要になった時点で別課題 |
 | 相関識別子 | `correlationId` | 該当なし | 新規 | `ts/packages/observability/src/sink.ts` | **出力時は集約基盤が解釈する `logging.googleapis.com/trace` へ写す**（同一値の記録が 1 本に束ねられる）。**値の供給は #229**。本 spec では常に未設定であり、未設定なら項目ごと出力しない |
 
 ### 1.2 面をまたいで使う項目
@@ -55,6 +55,7 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 事後検証で残った未選択観点 | `violatedAspects` | 該当なし | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 観点の識別子のみ。下書き本文・一言・生成指示は載せない |
+| 事後検証で残った来店前の期待・「無かった」の断定 | `residualClaims` | 該当なし | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 分類名（`expectation` / `absence:<分類>`）のみ（Issue #413）。下書き本文・一言・生成指示は載せない |
 
 ### 1.5 店舗詳細面に固有の項目
 
@@ -111,6 +112,8 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 代理店の識別子 | `agencyId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 招待コード発行の失敗記録で、どの代理店の操作が失敗したかを特定する。現行は識別子を 1 つも残しておらず対象を判定できない |
+| 監査記録の action | `auditAction` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 監査記録（`audit_logs`）の書込に失敗したとき、欠けた記録が何の操作だったかを示す（Issue #250）。値は `AUDIT_LOG_ACTIONS`（`ts/packages/db/src/audit-logs.ts`）の有限集合 |
+| 監査記録の対象の識別子 | `auditTargetId` | 該当なし | 新規 | `ts/packages/observability/src/fields.ts` | 欠けた監査記録の対象（店舗・代理店・利用者・招待コードの UUID）。欠けた記録を人手で補う手がかりに使う。来店客は監査の対象にならないので個人情報を含まない |
 
 ### 1.9 LINE Webhook 面に固有の項目
 
@@ -137,22 +140,26 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 
 ## 2. 事象名
 
-事象名は面ごとに固有であり、応答層と日次バッチ層で対応づく性質のものではない。**日次バッチ層は事象名を持たない**（`msg` 文字列で識別する。本 spec の範囲外）。
+事象名は面ごとに固有であり、応答層と日次バッチ層で対応づく性質のものではない。**日次バッチ層は実行サマリー行（`daily-batch.run`・Issue #139）だけが事象名を持つ**。それ以外の行は `msg` 文字列で識別する（本 spec の範囲外）。
 
 | 事象名 | 実行面 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|
 | `survey_page_viewed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 本番の集計指標がこの文字列で絞り込む（`infra/modules/guardrails/main.tf` の `survey_funnel`） |
 | `survey_response_submitted` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 同上 |
 | `survey_review_link_opened` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 同上。投稿導線の押下（Issue #137）。token を検証できた押下だけを記録する |
-| `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62） |
+| `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62）。**変更禁止**: 本番の集計指標がこの文字列で生成失敗を数え、1 件でも出ればアラートが鳴る（`infra/modules/guardrails/main.tf` の `generation_failures`・Issue #394）。ラベルに写すのは `errorKind` と `status` だけである |
 | `generation_safety_blocked` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `factuality_residual` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
+| `fabrication_residual` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 事後検証（Issue #413）で作り直しても残った来店前の期待と「無かった」の断定。`factuality_residual` の意味（未選択の観点だけ）を変えないため事象名を分けた。項目は `residualClaims` だけである |
 | `tally_failed` | survey-web | 既存 | `ts/apps/survey-web/src/app/api/responses/handler.ts` | 集計の失敗は客へ転嫁しない（要件 5.4 の思想）。記録だけ残す |
+| `review_link_tally_failed` | survey-web | 新規 | `ts/apps/survey-web/src/app/api/review-link-opened/handler.ts` | 投稿導線の押下の月次集計（`survey_review_link_tallies`・Issue #401）への加算の失敗。`tally_failed` と同じく客へ転嫁せず記録だけ残す。項目は持たない。同じ要求の `survey_review_link_opened` は加算より先に出るので、両者の乖離が集計障害の検知になる |
 | `store-detail.config_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.pool_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.query_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.store_hint_ignored` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
-| `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している |
+| `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している。**変更禁止**: トークン発行が通った実行でしか出ないため、本番の集計指標がこの文字列で LINE の資格情報の生死を数える（`infra/modules/guardrails/main.tf` の `line_token_issued_runs`・Issue #139） |
+| `delivery-job.token_issue_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | LINE のトークン発行に失敗したとき（Issue #139）。直後に `delivery-job.fatal` も出るが、そちらは対象抽出（DB）の失敗と同じ事象名なので LINE の失敗だけを数えられない。**変更禁止**: 本番の集計指標がこの文字列で絞り込む（`line_token_issue_failures`）。項目は `errorKind` と、状態コードがあれば `status` だけである |
+| `daily-batch.run` | daily-batch | 新規 | `go/cmd/daily-batch/main.go` | 日次バッチの実行サマリー行（Issue #139）。**変更禁止**: 本番の集計指標がこの文字列と `fetch_ok` / `stores_total` で Places の生死を数える（`places_fetch_ok_runs` / `places_fetch_eligible_runs`） |
 | `delivery-job.fatal` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | `delivery-job.isolated_error` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 1 店舗の失敗を他店から隔離したときの記録 |
 | `delivery-job.exit` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 資源の閉じ忘れ検知（#151） |
@@ -163,6 +170,9 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.dispatch_failed_before_reply_token` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | イベント処理の失敗のうち、**replyToken が判明する前**に起きたもの。返信は試みていない。前者と分けるのは、運用者が「オーナーに案内が届いたか」を判定できるようにするため |
 | `line-webhook.retry_reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 再試行案内の返信自体に失敗した場合 |
 | `line-webhook.start_loading_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 処理中の入力中アニメーション（`chat/loading/start`・Issue #307）の開始に失敗した場合。補助的な UX であり本処理は止めない。**成功は記録しない**（毎イベント発火するため richmenu 系の成功記録とは頻度が桁違いであり、記録の欠落が業務上の不整合につながる性質でもない）。項目は `errorKind` だけである |
+| `line-webhook.gbp_disabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に GBP 連携が無効であることを記録する |
+| `line-webhook.gbp_enabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に GBP 連携が有効であることを記録する |
+| `webhook_signature_verification_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | LINE Webhook の署名検証失敗。`webhook_signature_failures` 指標が参照するため変更禁止。記録するのは `reason` と LINE 採番の `lineRequestId` のみ |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
 | `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンク（`onboarding/conversation.ts`）と、店舗特定済みオーナーの振り分け口のメニュー照合（`owner/router.ts`・line-on-demand-report）の両方が、この出典の同じ関数を呼んで出す |
 | `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**失敗**。リンクの失敗は例外にせず、記録だけを残す（出典のコメントが明記）。振り分け口の照合では、応答は済んでいて会話の段階を変えない（次の操作で再び張る） |
@@ -170,8 +180,21 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.session_stage_update_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/router.ts` | 振り分け口が完了後メニューを張れた後、会話の段階を completed に揃える更新に失敗した場合。応答は済んでいるので例外にしない。段階が completed でないままなので、次の操作で再び張って揃え直す。項目は `errorKind` だけである |
 | `line-webhook.report_replied` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | レポート要求への応答。Reply を送った後に、応答ごとに 1 件出す。項目は `reportKind` と `reportOutcome` だけである。例外で終わった要求は出さない（`line-webhook.dispatch_failed` が記録する） |
 | `line-webhook.report_store_hint_ignored` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | オーナーの確定店舗の集合の外にある店舗が指定され、選択肢を再提示した場合。指定された店舗 ID は載せない（集合外の値は攻撃者に由来しうる。`store-detail.store_hint_ignored` と同じ考え方）。他のオーナーに実在する ID と存在しない ID で記録を変えない |
+| `line push failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/line/client.ts` | LINE push API の非 2xx 応答。オーナーへの通知を妨げず記録する。LINE ユーザー ID は載せない |
+| `gbp oauth callback: owner unknown; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner を特定できず、push 通知を省略した場合 |
+| `gbp oauth callback: owner not found; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が見つからず、push 通知を省略した場合 |
+| `gbp oauth callback: push notification failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback 後の push 通知に失敗した場合 |
+| `gbp oauth callback: unexpected failure while handling callback` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の想定外例外 |
+| `gbp: handleGbpPostback failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP postback 処理の想定外例外 |
+| `gbp: handleGbpText failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP テキスト処理の想定外例外 |
+| `gbp: operation failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP API 操作の失敗。項目 `gbpFlow` で対象フローを識別する |
+| `gbp: createLocalPost threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | 投稿作成クライアントが想定外の例外を投げた場合 |
+| `gbp: listReviews threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | クチコミ取得クライアントが想定外の例外を投げた場合 |
+| `gbp: upsertReviewReply threw` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | クチコミ返信クライアントが想定外の例外を投げた場合 |
 | `dashboard-api.category_followup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名を持たない |
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
+| `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
+| `dashboard-api.review_funnel_read_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/review-funnel.ts` | QR パネルの実績（Issue #401）の読み出しの失敗。応答は 500。項目は `storeId` だけで、件数も例外の文言も載せない |
 
 ---
 

@@ -105,12 +105,15 @@ EOF
 # .claude/skills/ 配下は vendored（ATTRIBUTION.md に Apache-2.0・"Modifications: None. Files
 # copied verbatim" と明記された第三者文書）である。我々が書き換えてはならない文書の指摘で
 # CI を赤くしても直す手段が無いため、走査から外す。導入時点で違反 0 件だが方針として除外する。
+# .agents/skills/ も同梱した外部スキルとして同じ扱いにする（Issue #449）。
+# 自作の _shared/ はプロジェクト文書なので走査対象へ残す。
 # 除外が広がりすぎて全件消えた場合は下の空振り防止が捕まえる。
 targets=''
 while IFS= read -r md_path; do
   [ -n "$md_path" ] || continue
   case "${md_path#$ROOT/}" in
-    .claude/skills/*) continue ;;
+    .agents/skills/_shared/*) ;;
+    .claude/skills/* | .agents/skills/*) continue ;;
   esac
   targets="${targets}${md_path}
 "

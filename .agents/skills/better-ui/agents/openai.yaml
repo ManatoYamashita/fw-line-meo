@@ -1,0 +1,4 @@
+interface:
+  display_name: "Better UI"
+  short_description: "Design engineering details for polished interfaces"
+  default_prompt: "Use $better-ui to review surfaces, radii, shadows, icon states, interaction motion, and UI polish."

@@ -93,8 +93,8 @@ interface RenderedLayers {
   backgroundColor: MeasuredColor;
   /** 上・右・下・左の順。 */
   borderColors: readonly MeasuredColor[];
-  /** 枠の描画幅（px・上辺）。0 は「枠が描かれていない」ことを意味する。 */
-  borderWidth: number;
+  /** 枠の描画幅（px）。上・右・下・左の順。0 はその辺に枠が描かれていないことを意味する。 */
+  borderWidths: readonly number[];
   /** 要素全体（枠も面も子孫も）に掛かる不透明度（0..1）。計算値の色には合成されていない。 */
   opacity: number;
   /** 測定時点でこの要素がフォーカスされていたか（Requirements 1.2 の前提確認用）。 */
@@ -143,7 +143,12 @@ function readRenderedLayers(locator: Locator): Promise<RenderedLayers> {
         style.borderBottomColor,
         style.borderLeftColor,
       ].map(measure),
-      borderWidth: Number.parseFloat(style.borderTopWidth),
+      borderWidths: [
+        style.borderTopWidth,
+        style.borderRightWidth,
+        style.borderBottomWidth,
+        style.borderLeftWidth,
+      ].map((width) => Number.parseFloat(width)),
       opacity: Number.parseFloat(style.opacity),
       focused: element.matches(':focus'),
     };
@@ -157,8 +162,8 @@ interface RenderedColors {
   backgroundColor: string | null;
   /** 実際に描画される枠色（6桁 hex）。四辺で色が食い違う場合と半透明なら null。 */
   borderColor: string | null;
-  /** 枠の描画幅（px・上辺）。0 は「枠が描かれていない」ことを意味する。 */
-  borderWidth: number;
+  /** 枠の描画幅（px）。上・右・下・左の順。0 はその辺に枠が描かれていないことを意味する。 */
+  borderWidths: readonly number[];
   /** 測定時点でこの要素がフォーカスされていたか（Requirements 1.2 の前提確認用）。 */
   focused: boolean;
 }
@@ -186,7 +191,7 @@ async function readRenderedColors(locator: Locator): Promise<RenderedColors> {
     color: opaqueHex(layers.color),
     backgroundColor: opaqueHex(layers.backgroundColor),
     borderColor: top != null && sides.every((side) => side === top) ? top : null,
-    borderWidth: layers.borderWidth,
+    borderWidths: layers.borderWidths,
     focused: layers.focused,
   };
 }
@@ -218,12 +223,20 @@ function effectiveColorOver(
 // `border: 0 solid` を敷き、theme.css の base レイヤが色だけを与えているため）。色だけを見ると
 // 枠が一切描かれていなくても assert が通ってしまうので、幅が 0 でないことを先に要求する
 // （tasks.md Implementation Notes「空振りしているかどうかは色ではなく枠幅を見ると一発で分かる」）。
+//
+// 幅は四辺すべてに要求する。base レイヤは幅 0 の辺にも色を塗るので、全周の枠（border）が
+// 一辺だけの枠（border-t 等）へ退行しても四辺の色は一致したまま残り、上辺の幅だけを見ると
+// 3 辺が見えなくなっても緑になる。この関数は全周の枠を持つ部品専用であり、一辺だけの枠が
+// 正当な部品（表の行の区切りなど）は、その辺の幅を個別に測る。
 async function readRenderedBorder(locator: Locator, where: string): Promise<RenderedColors> {
   const rendered = await readRenderedColors(locator);
+  const sideNames = ['上', '右', '下', '左'] as const;
+  const missingSides = sideNames.filter((_, index) => !(rendered.borderWidths[index]! > 0));
   expect(
-    rendered.borderWidth,
-    `${where}: 枠が描画されていない（幅 0）。枠の指定が発火していない可能性がある`,
-  ).toBeGreaterThan(0);
+    missingSides,
+    `${where}: 枠が描画されていない辺がある（幅 0・上右下左 ${rendered.borderWidths.join('/')}px）。` +
+      '枠の指定が発火していないか、全周の枠が一辺だけの枠へ退行している可能性がある',
+  ).toEqual([]);
   expect(
     rendered.borderColor,
     `${where}: 枠色を実測できない（四辺の色が食い違うか半透明）`,

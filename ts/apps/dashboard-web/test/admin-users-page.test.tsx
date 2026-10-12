@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import { settleEffects } from './focus-observation';
 import { announcedText, ownText } from './live-region';
 import { expectListSkeleton } from './list-skeleton';
+import { chooseOption } from './deferred-mocks';
 
 // 認証コンテキストはモックし、ready な operator/agency を注入する（invite-codes-page.test と同規約）。
 const useAuthMock = vi.fn();
@@ -44,7 +45,7 @@ const api = vi.hoisted(() => ({
   // undefined が呼ばれ、保存の経路が例外の汎用文言へ落ちる。
   updateDashboardUser: vi.fn(),
 }));
-vi.mock('../src/lib/api', () => api);
+vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
 import AdminUsersPage from '../src/app/admin/users/page';
 
@@ -131,7 +132,7 @@ describe('利用者管理ページ（operator）', () => {
     api.createDashboardUser.mockResolvedValue({ ok: true, value: agencyUser });
     render(<AdminUsersPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('所属代理店'), { target: { value: 'a1' } });
+    await chooseOption(await scope.findByLabelText('所属代理店'), '代理店アルファ');
     fireEvent.change(scope.getByLabelText('メールアドレス'), { target: { value: 'agency@example.com' } });
     fireEvent.change(scope.getByLabelText('表示名'), { target: { value: '代理花子' } });
     fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
@@ -151,10 +152,26 @@ describe('利用者管理ページ（operator）', () => {
     api.createDashboardUser.mockResolvedValue({ ok: false, code: 'email_conflict', message: 'x' });
     render(<AdminUsersPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('所属代理店'), { target: { value: 'a1' } });
+    await chooseOption(await scope.findByLabelText('所属代理店'), '代理店アルファ');
     fireEvent.change(scope.getByLabelText('メールアドレス'), { target: { value: 'dup@example.com' } });
     fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
     expect(await scope.findByText(/既に登録済みのメールアドレスです/)).toBeTruthy();
+  });
+
+  it('所属代理店の不在（404 agency_not_found）は再試行ではなく再読み込みを案内する（Issue #260）', async () => {
+    ready('operator');
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    api.createDashboardUser.mockResolvedValue({ ok: false, code: 'agency_not_found', message: 'x' });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    await chooseOption(await scope.findByLabelText('所属代理店'), '代理店アルファ');
+    fireEvent.change(scope.getByLabelText('メールアドレス'), { target: { value: 'gone@example.com' } });
+    fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
+    expect(
+      await scope.findByText('選択した代理店が見つかりません。画面を再読み込みしてください。'),
+    ).toBeTruthy();
+    expect(scope.queryByText(/時間をおいて再試行してください/)).toBeNull();
   });
 
   it('無効化ボタンで disableDashboardUser({id}) を呼び、行が無効に変わる（Req 6.4）', async () => {
@@ -237,7 +254,7 @@ describe('利用者管理ページ（operator）', () => {
     api.createDashboardUser.mockResolvedValue({ ok: false, code: 'email_conflict_disabled', message: 'x' });
     render(<AdminUsersPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('所属代理店'), { target: { value: 'a1' } });
+    await chooseOption(await scope.findByLabelText('所属代理店'), '代理店アルファ');
     fireEvent.change(scope.getByLabelText('メールアドレス'), { target: { value: 'disabled@example.com' } });
     fireEvent.click(scope.getByRole('button', { name: '利用者登録' }));
     expect(await scope.findByText(/このメールアドレスは無効化済みの利用者です。利用者一覧から有効化してください/)).toBeTruthy();
@@ -403,7 +420,7 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
     api.createDashboardUser.mockReturnValue(new Promise(() => {}));
     render(<AdminUsersPage />);
     const scope = within(await screen.findByRole('main'));
-    fireEvent.change(await scope.findByLabelText('所属代理店'), { target: { value: 'a1' } });
+    await chooseOption(await scope.findByLabelText('所属代理店'), '代理店アルファ');
     fireEvent.change(scope.getByLabelText('メールアドレス'), {
       target: { value: 'pending@example.com' },
     });
@@ -822,7 +839,7 @@ describe('利用者管理ページ: 意匠の適用', () => {
     expect(nameInput.hasAttribute('required')).toBe(false);
 
     // 値の直接変更が届く（ブラウザ標準の選択要素の振る舞いを保つ・Req 3.4）。
-    fireEvent.change(agencySelect, { target: { value: 'a1' } });
+    await chooseOption(agencySelect, '代理店アルファ');
     expect(agencySelect.value).toBe('a1');
     fireEvent.change(emailInput, { target: { value: 'x@example.com' } });
     expect(emailInput.value).toBe('x@example.com');
@@ -947,7 +964,7 @@ describe('管理ダッシュボードのフォーム部品の幅は面をまた�
       matches.forEach((match) => found.add(match));
       scanned += 1;
     }
-    expect(scanned).toBe(SURFACE_SOURCES.length);
+    expect(scanned).toBe(5); // 配列の長さと比べると、要素を落としても緑のまま通る
     // 段が 2 つに割れた時点で赤くなる。
     expect(Array.from(found)).toEqual(['sm:max-w-xs']);
   });

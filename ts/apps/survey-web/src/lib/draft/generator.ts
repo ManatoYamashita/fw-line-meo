@@ -2,7 +2,11 @@ import type { DraftMaterial } from '../domain';
 import { ok, err, type Result } from '../result';
 import { buildPrompt, type VariationSeed } from './prompt';
 import { detectAspectMentions, readLexicon, type AspectLexicon } from './factuality';
+import { detectEmbellishments, readEmbellishmentLexicon, type EmbellishmentLexicon } from './embellishment';
+import { detectAbsenceAssertions, readAbsenceLexicon, type AbsenceLexicon } from './absence';
 import lexiconRaw from './aspect-lexicon.json';
+import embellishmentLexiconRaw from './embellishment-lexicon.json';
+import absenceLexiconRaw from './absence-lexicon.json';
 
 // 下書き生成（Gemini）。Gemini 呼出の全パラメータ（モデル・スキーマ・安全設定・再試行・出力検証）を単一所有。
 // @google/genai の ai.models.generateContent を GenAiClient 面で抽象化し、テストでモック可能にする。
@@ -18,6 +22,7 @@ export interface DraftGenerator {
     material: DraftMaterial,
     variation: VariationSeed,
     onResidual?: (aspectCodes: string[]) => void,
+    onClaimResidual?: (categories: string[]) => void,
   ): Promise<Result<string, DraftError>>;
 }
 
@@ -55,6 +60,34 @@ const RESPONSE_SCHEMA = {
 
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 const DEFAULT_LEXICON = readLexicon(lexiconRaw);
+const DEFAULT_EMBELLISHMENT_LEXICON = readEmbellishmentLexicon(embellishmentLexiconRaw);
+const DEFAULT_ABSENCE_LEXICON = readAbsenceLexicon(absenceLexiconRaw);
+
+/**
+ * 事後検証で作り直す補完の分類（Issue #413）。語の形で決まり、誤検出の少ないものに限る。
+ * 再訪の意向と観点の属性は、発生が多く（約 11%）、属性は言い換えとの境界が曖昧なので引き金にしない。
+ */
+const REGENERATED_EMBELLISHMENTS: readonly string[] = ['expectation'];
+
+/**
+ * 下書きから、作り直しの対象になる来店前の期待と「無かった」の断定を検出する（Issue #413）。
+ * 返すのは分類名だけ（`expectation` / `absence:<分類>`）。一言に同じ事情があれば数えない（検出器の意味論）。
+ */
+function detectRegeneratedClaims(
+  draft: string,
+  material: DraftMaterial,
+  embellishmentLexicon: EmbellishmentLexicon,
+  absenceLexicon: AbsenceLexicon,
+): string[] {
+  // 空白だけの一言は「一言なし」として扱う（プロンプトの素材の描画と同じ）。
+  const comment = material.comment !== undefined && material.comment.trim() !== '' ? material.comment : undefined;
+  const source = comment === undefined ? { storeName: material.storeName } : { storeName: material.storeName, comment };
+  const expectation = detectEmbellishments(draft, source, embellishmentLexicon)
+    .map((c) => c.category)
+    .filter((category) => REGENERATED_EMBELLISHMENTS.includes(category));
+  const absence = detectAbsenceAssertions(draft, comment, absenceLexicon).map((c) => `absence:${c.category}`);
+  return [...expectation, ...absence].sort();
+}
 
 export interface DraftGeneratorOptions {
   model?: string;
@@ -63,19 +96,26 @@ export interface DraftGeneratorOptions {
   maxDraftChars?: number;
   backoff?: (attempt: number) => Promise<void>;
   /**
-   * 生成後に「客が選ばなかった観点へ言及していないか」を検証し、していれば 1 回だけ作り直す
-   * （Issue #132・案B）。既定 true。
+   * 生成後に「客が選ばなかった観点へ言及していないか」（Issue #132・案B）と、「来店前の期待・
+   * 選ばなかったことを無かったと書く断定」（Issue #413）を検証し、どれかがあれば 1 回だけ作り直す。既定 true。
    *
    * false にできるのは **測定の独立性のため**である。これが無いと eval が案A（プロンプトでの
    * 禁止）単体の効果を測れなくなり、前後比較の意味が失われる。
    */
   factualityCheck?: boolean;
   lexicon?: AspectLexicon;
+  embellishmentLexicon?: EmbellishmentLexicon;
+  absenceLexicon?: AbsenceLexicon;
   /**
    * 作り直してもなお言及が残ったときに呼ばれる（下書き自体は客へ返す）。
    * 生成器はロガーを持たないので、記録の仕方は配線側（route.ts）が決める。
    */
   onResidual?: (aspectCodes: string[]) => void;
+  /**
+   * 作り直してもなお来店前の期待か「無かった」の断定が残ったときに呼ばれる（Issue #413・下書き自体は客へ返す）。
+   * 未選択の観点の onResidual とは分ける（既存の `factuality_residual` の意味を変えないため）。
+   */
+  onClaimResidual?: (categories: string[]) => void;
 }
 
 /** テスト可能な生成器を作る（client を注入）。 */
@@ -92,10 +132,13 @@ export function createDraftGenerator(
   const backoff = options.backoff ?? ((attempt) => delay(200 * 2 ** attempt));
   const factualityCheck = options.factualityCheck ?? true;
   const lexicon = options.lexicon ?? DEFAULT_LEXICON;
+  const embellishmentLexicon = options.embellishmentLexicon ?? DEFAULT_EMBELLISHMENT_LEXICON;
+  const absenceLexicon = options.absenceLexicon ?? DEFAULT_ABSENCE_LEXICON;
   const onResidual = options.onResidual;
+  const onClaimResidual = options.onClaimResidual;
 
   return {
-    async generate(material, variation, requestOnResidual) {
+    async generate(material, variation, requestOnResidual, requestOnClaimResidual) {
       const { systemInstruction, userContent } = buildPrompt(material, variation);
       const req: GenAiRequest = {
         model,
@@ -144,12 +187,15 @@ export function createDraftGenerator(
       const first = await attempt();
       if (!first.ok) return first;
 
-      // --- 事後検証（Issue #132・案B）---
+      // --- 事後検証（Issue #132・案B ／ Issue #413）---
       // 検証する観点は、プロンプトで禁止したのと同じ差集合（material 由来）をそのまま使う。
-      // 項目を持たない旧 sessionToken 由来の素材では検証がかからず、案A のみの挙動へ劣化する。
+      // 項目を持たない旧 sessionToken 由来の素材では観点の検証がかからず、案A のみの挙動へ劣化する。
+      // 来店前の期待と「無かった」の断定は、観点の差集合に依存しないので、どの素材でも検証する。
+      if (!factualityCheck) return first;
       const targets = material.unselectedAspectCodes ?? [];
-      if (!factualityCheck || targets.length === 0) return first;
-      if (detectAspectMentions(first.value, targets, lexicon).length === 0) return first;
+      const aspectsOf = (draft: string) => (targets.length === 0 ? [] : detectAspectMentions(draft, targets, lexicon));
+      const claimsOf = (draft: string) => detectRegeneratedClaims(draft, material, embellishmentLexicon, absenceLexicon);
+      if (aspectsOf(first.value).length === 0 && claimsOf(first.value).length === 0) return first;
 
       // 1 回だけ作り直す。variation は呼び出し側から受けた値のまま使う（temperature 1.0 なので
       // 同じ入力でも出力は変わる）。これは生成器内部の再試行であり、客の再生成回数
@@ -158,9 +204,13 @@ export function createDraftGenerator(
       // 作り直しに失敗したときは初回の下書きを返す。客に何も出さない方が実害が大きい。
       if (!second.ok) return first;
 
-      const residual = detectAspectMentions(second.value, targets, lexicon);
+      const residual = aspectsOf(second.value);
       if (residual.length > 0) {
         (requestOnResidual ?? onResidual)?.(residual.map((v) => v.aspectCode));
+      }
+      const claimResidual = claimsOf(second.value);
+      if (claimResidual.length > 0) {
+        (requestOnClaimResidual ?? onClaimResidual)?.(claimResidual);
       }
       return ok(second.value);
     },

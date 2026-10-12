@@ -1,15 +1,15 @@
-// 行の直下に開くパネルが、捲り容器の**見えている矩形**に収まっていることを測る道具。
+// 行内の編集パネルが、捲り容器の**見えている矩形**に収まっていることを測る道具。
 //
 // もとは dashboard-surfaces.spec.ts のモジュール private だった（dashboard-user-edit tasks 3.5・
-// Issue #259）。Issue #283 で店舗一覧の表も捲れるようになり、QR パネルが同じ経路を持つように
-// なったため、パネルの種類を引数に取る形で切り出した。**規則・しきい値・文言は変えていない**
-// （利用者の編集パネルの 2 本が件数も文言も変えずに緑であることが、切り出しの完了条件である）。
+// Issue #259）。パネルの種類を引数に取れる共有 helper として切り出した。
+// QR は Issue #400 で Portal を使う modal Drawer になったため、ここではなく dashboard-surfaces.spec.ts
+// で viewport と横溢れを測る。利用者編集パネルの検査条件は変えていない。
 //
 // spec から spec は import できない（Playwright が test file の相互 import を拒む）ので、
 // 共有する関数は spec ではなくこの場所に置く。
 import { expect, type Locator, type Page } from '@playwright/test';
 
-import { DASHBOARD_USERS, STORES } from '../fixtures/api';
+import { DASHBOARD_USERS } from '../fixtures/api';
 
 /** 画面上の左右の端（CSS px・ビューポート基準）。 */
 export interface HorizontalExtent {
@@ -53,8 +53,8 @@ export interface PanelProbe {
   /**
    * Tab で焦点を載せて、見えていることを確かめる操作要素。
    *
-   * **文言と読み上げ名は別に持つ。** QR パネルの「閉じる」は、どの店舗の QR を閉じるのかを
-   * 読み上げ名に含めており（WCAG 2.5.3 を満たすための設計）、文言だけでは引けない。
+   * **文言と読み上げ名は別に持つ。** 編集パネルの操作名には対象利用者を含むことがあり、
+   * 表示文言だけでは特定できない場合がある。
    */
   readonly focusTarget: {
     /** `parts` に現れる文言。 */
@@ -80,27 +80,6 @@ export const USER_EDIT_PANEL: PanelProbe = {
   focusTarget: {
     part: '保存',
     locate: (region) => region.getByRole('button', { name: '保存', exact: true }),
-  },
-};
-
-/**
- * 店舗の QR パネル（store-qr-issuance-ui Req 1.1・Issue #283 で対象に加えた）。
- *
- * Issue #283 の前は店舗一覧の表が容器に収まっており、この経路を持たなかった。折り返しの規則を
- * 当てて表が捲れるようになったので、編集パネルと同じ網を張る。保存は `<a download>` であり
- * 押しボタンではない（要素の種類そのものに意味がある）ので、操作要素の走査はリンクも拾う。
- */
-export const STORE_QR_PANEL: PanelProbe = {
-  where: '店舗一覧の QR パネル',
-  trigger: (page) =>
-    page.getByRole('button', { name: `${STORES[0].name} の QR 発行`, exact: true }),
-  region: (page) => page.getByRole('region', { name: '店舗一覧', exact: true }),
-  parts: ['カード', '見出し', '画像を保存', '掲示物を印刷', '閉じる'],
-  minCardDescendants: 12,
-  focusTarget: {
-    part: '閉じる',
-    locate: (region) =>
-      region.getByRole('button', { name: `${STORES[0].name} の QR を閉じる`, exact: true }),
   },
 };
 

@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { handleQr, type QrDeps } from './qr.js';
+import { handleReviewFunnel, type ReviewFunnelDeps } from './review-funnel.js';
 import { handleMe, type MeDeps } from './me.js';
 import { handleStoresList, type StoresListDeps } from './stores-list.js';
 import { handleStoreSuspension, type StoreSuspensionDeps } from './store-suspension.js';
@@ -42,9 +43,11 @@ import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation
 // 実起動なしで app.request からテスト可能な Hono アプリのファクトリ。
 // 純粋ハンドラ（2.1–2.5）を実依存（index.ts で注入）と結線する統合層（3.1）。
 export interface AppDeps {
-  // CORS で許可するオリジン（config.corsOrigin＝DASHBOARD_WEB_ORIGIN）。移行期間だけ複数（Issue #146）。
+  // CORS で許可するオリジン（config.corsOrigin＝DASHBOARD_WEB_ORIGIN）。
   corsOrigin: string | readonly string[];
   qr: QrDeps;
+  // QR パネルの実績（Issue #401・store-qr-issuance-ui Requirement 8）。読み出し専用。
+  reviewFunnel: ReviewFunnelDeps;
   me: MeDeps;
   stores: StoresListDeps;
   owners: OwnersListDeps;
@@ -134,14 +137,15 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
   // コンテナへ届く前に 404 が返る（Issue #219・scripts/check-cloud-run-reserved-paths.sh）。
   app.get('/health', (c) => c.json({ status: 'ok' }));
 
-  // 以降の全業務ルートに CORS を適用。許可は単一オリジンのみ・GET/POST・Authorization/Content-Type。
-  // credentials は不使用（Cookie 非採用）。design Security Considerations に準拠。
+  // 以降の全業務ルートに CORS を適用。許可元・GET/POST・Authorization/Content-Type は既存契約を保ち、
+  // QR の応答 URL ヘッダだけを expose する。credentials は不使用（Cookie 非採用）。
   app.use(
     '*',
     cors({
       origin: typeof deps.corsOrigin === 'string' ? deps.corsOrigin : [...deps.corsOrigin],
       allowMethods: ['GET', 'POST'],
       allowHeaders: ['Authorization', 'Content-Type'],
+      exposeHeaders: ['X-Survey-URL'],
     }),
   );
 
@@ -194,6 +198,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       direction: 'suspend',
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -202,6 +207,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       direction: 'resume',
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -233,6 +239,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -248,6 +255,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     return handleAgencyCreate(deps.admin.agencyCreate, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -261,6 +269,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     return handleDashboardUserCreate(deps.admin.userCreate, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 
@@ -269,6 +278,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     handleDashboardUserDisable(deps.admin.userDisable, {
       authorization: authHeader(c),
       id: c.req.param('id'),
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -277,6 +287,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     handleDashboardUserEnable(deps.admin.userEnable, {
       authorization: authHeader(c),
       id: c.req.param('id'),
+      log: c.get('correlationLog'),
     }),
   );
 
@@ -290,8 +301,17 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
+
+  app.get('/stores/:storeId/review-funnel', (c) =>
+    handleReviewFunnel(deps.reviewFunnel, {
+      storeId: c.req.param('storeId'),
+      authorization: authHeader(c),
+      log: c.get('correlationLog'),
+    }),
+  );
 
   // --- 既存 QR エンドポイント（CORS 適用下・挙動は不変）。 ---
 

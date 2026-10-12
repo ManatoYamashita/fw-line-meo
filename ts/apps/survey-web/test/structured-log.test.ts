@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  logFabricationResidual,
   logFactualityResidual,
   logSurveyPageViewed,
   logSurveyResponseSubmitted,
@@ -93,6 +94,24 @@ describe('logFactualityResidual', () => {
     logFactualityResidual(log as Parameters<typeof logFactualityResidual>[0], ['service', 'atmosphere']);
     logFactualityResidual(log as Parameters<typeof logFactualityResidual>[0], ['atmosphere', 'service']);
     expect(seen[0]).toBe(seen[1]);
+  });
+});
+
+// Issue #413: 事後検証で作り直しても残った来店前の期待と「無かった」の断定。未選択の観点とは事象名を分ける。
+describe('logFabricationResidual', () => {
+  it('分類名だけを warn で出力し、並び順を固定する（本文・一言・プロンプトは載せない）', () => {
+    const output = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    logFabricationResidual(writeStructuredLog, ['expectation', 'absence:concerns']);
+
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        severity: 'WARNING',
+        event: 'fabrication_residual',
+        residualClaims: 'absence:concerns,expectation',
+      }),
+    );
+    output.mockRestore();
   });
 });
 
