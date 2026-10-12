@@ -42,6 +42,7 @@ import type {
   FlexBubbleContents,
   FlexTextComponent,
 } from '../../line/flex-types.js';
+import { encodeGbpPostback } from '../../gbp/postback.js';
 import {
   IMAGE_URL_MAX_LENGTH,
   URI_ACTION_MAX_LENGTH,
@@ -238,11 +239,16 @@ function buildAuthorRow(review: DailySummaryNewReview): FlexBoxComponent {
 }
 
 /**
- * 1 件の口コミ。投稿者の段・星・本文・「Google Maps で見る」を並べる。星の値で構成を変えない。
+ * 1 件の口コミ。投稿者の段・星・本文・「Google Maps で見る」を並べる。GBP が有効なら返信開始も追加する。
+ * 星の値で構成を変えない。
  * withTexts が false なら本文を置かない（30KB を超えたときの組み直し）。本文が空の口コミも本文を置かない
  * （空の text を LINE へ送らない）。
  */
-function buildReviewBlock({ review, googleMapsUri }: DisplayableReview, withTexts: boolean): FlexBoxComponent {
+function buildReviewBlock(
+  { review, googleMapsUri }: DisplayableReview,
+  withTexts: boolean,
+  gbpReplyEnabled: boolean,
+): FlexBoxComponent {
   const text = withTexts && review.textExcerpt.trim() !== '' ? fitText(review.textExcerpt, REVIEW_TEXT_MAX_LENGTH) : null;
   const contents: FlexBoxContent[] = [
     buildAuthorRow(review),
@@ -265,6 +271,20 @@ function buildReviewBlock({ review, googleMapsUri }: DisplayableReview, withText
     color: lineColors.action,
     action: { type: 'uri', label: GOOGLE_MAPS_LINK_TEXT, uri: googleMapsUri },
   });
+  if (gbpReplyEnabled) {
+    contents.push({
+      type: 'text',
+      text: '返信する',
+      size: lineLayout.descriptionSize,
+      color: lineColors.action,
+      action: {
+        type: 'postback',
+        label: '返信する',
+        data: encodeGbpPostback({ action: 'g_reply' }),
+        displayText: 'クチコミに返信',
+      },
+    });
+  }
   return { type: 'box', layout: 'vertical', spacing: lineLayout.itemGap, contents };
 }
 
@@ -287,7 +307,7 @@ function buildStoreReviewsLink(row: NormalizedReadRow): FlexTextComponent | null
   };
 }
 
-function buildBody(row: NormalizedReadRow, withTexts: boolean): FlexBoxContent[] {
+function buildBody(row: NormalizedReadRow, withTexts: boolean, gbpReplyEnabled: boolean): FlexBoxContent[] {
   if (row.review_count_prev === null) {
     return [statusText(UNDETERMINABLE_TEXT)];
   }
@@ -323,7 +343,7 @@ function buildBody(row: NormalizedReadRow, withTexts: boolean): FlexBoxContent[]
 
   return [
     countLine,
-    ...shown.map((item) => buildReviewBlock(item, withTexts)),
+    ...shown.map((item) => buildReviewBlock(item, withTexts, gbpReplyEnabled)),
     ...(remaining > 0 ? [noteText(`表示していない新着口コミがほかに${remaining}件あります。`)] : []),
     ...storeReviewsLinkParts,
   ];
@@ -345,6 +365,8 @@ function altTextFor(ctx: ReportContext, row: NormalizedReadRow): string {
 export interface NewReviewsBubbleOptions {
   /** 口コミの本文を置くか。30KB を超えたときの組み直しで false にする。 */
   readonly withTexts: boolean;
+  /** GBP の会話が組み立て済みのとき、表示する各口コミに返信開始 postback を置く。 */
+  readonly gbpReplyEnabled?: boolean;
 }
 
 /** 新着口コミのバブル。見出しに店舗名とデータ対象日、footer に帰属表示を置く（4.2・8.1・8.3）。 */
@@ -356,7 +378,7 @@ export function buildNewReviewsBubble(
   return buildReportBubble({
     ctx,
     span: { kind: 'date', date: row.summary_date },
-    body: buildBody(row, options.withTexts),
+    body: buildBody(row, options.withTexts, options.gbpReplyEnabled ?? false),
   });
 }
 
@@ -364,8 +386,14 @@ export function buildNewReviewsBubble(
  * 新着口コミのレポート（4.1）。30KB を超えるときは、口コミの本文を落として組み直す（design.md の
  * Error Handling）。それでも超えるときは toReportMessage が FlexBubbleTooLargeError を投げる。
  */
-export function buildNewReviewsReport(ctx: ReportContext, row: NormalizedReadRow): LineMessage {
-  const full = buildNewReviewsBubble(ctx, row, { withTexts: true });
-  const bubble = fitsFlexBubbleLimit(full) ? full : buildNewReviewsBubble(ctx, row, { withTexts: false });
+export function buildNewReviewsReport(
+  ctx: ReportContext,
+  row: NormalizedReadRow,
+  options: Pick<NewReviewsBubbleOptions, 'gbpReplyEnabled'> = {},
+): LineMessage {
+  const full = buildNewReviewsBubble(ctx, row, { withTexts: true, ...options });
+  const bubble = fitsFlexBubbleLimit(full)
+    ? full
+    : buildNewReviewsBubble(ctx, row, { withTexts: false, ...options });
   return toReportMessage(altTextFor(ctx, row), bubble);
 }

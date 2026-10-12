@@ -13,6 +13,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DailySummaryNewReview, DailySummaryReadRow } from '@fwlm/db';
 import { lineColors, lineLayout } from '@fwlm/design-tokens';
+import { encodeGbpPostback } from '../../src/gbp/postback.js';
 import type { LineMessage } from '../../src/line/client.js';
 import type { FlexBoxComponent, FlexBubbleContents, FlexTextComponent } from '../../src/line/flex-types.js';
 import {
@@ -257,6 +258,30 @@ describe('新着件数と口コミ（4.1–4.4・8.2・8.6）', () => {
     expect(blocks.map((block) => textWith(block, GOOGLE_MAPS_LINK_TEXT).action)).toEqual([
       { type: 'uri', label: GOOGLE_MAPS_LINK_TEXT, uri: mapsUri('TEST1') },
       { type: 'uri', label: GOOGLE_MAPS_LINK_TEXT, uri: mapsUri('TEST2') },
+    ]);
+  });
+
+  it('GBP が有効なときだけ、表示する各口コミに返信開始 postback を置く', () => {
+    const input = row({ new_review_count: 2, new_reviews: [review(1), review(2)] });
+    const withoutGbp = JSON.stringify(buildNewReviewsReport(STORE, input));
+    const withGbp = bubbleOf(buildNewReviewsReport(STORE, input, { gbpReplyEnabled: true }));
+    const replyActions: Array<{ type: string; label?: string; data?: string; displayText?: string }> = [];
+    walk(withGbp, (object) => {
+      const action = object['action'];
+      if (
+        action !== null &&
+        typeof action === 'object' &&
+        (action as Record<string, unknown>)['type'] === 'postback' &&
+        (action as Record<string, unknown>)['data'] === encodeGbpPostback({ action: 'g_reply' })
+      ) {
+        replyActions.push(action as { type: string; label?: string; data?: string; displayText?: string });
+      }
+    });
+
+    expect(withoutGbp).not.toContain(encodeGbpPostback({ action: 'g_reply' }));
+    expect(replyActions).toEqual([
+      { type: 'postback', label: '返信する', data: encodeGbpPostback({ action: 'g_reply' }), displayText: 'クチコミに返信' },
+      { type: 'postback', label: '返信する', data: encodeGbpPostback({ action: 'g_reply' }), displayText: 'クチコミに返信' },
     ]);
   });
 

@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8">
+<!--
+  GBP 連携を有効にした完了後リッチメニューの焼き元（Issue #354）。
+
+  正典は隣の ../richmenu-completed-gbp.png である。macOS + Google Chrome で焼き、目視してから使う。
+  GBP 無効時の既存 richmenu-completed.png は変更しない。
+
+  焼き出し（カレントディレクトリ = ts/apps/line-webhook/assets）:
+    CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "$CHROME" --headless --disable-gpu --no-sandbox --no-first-run --disable-extensions \
+      --hide-scrollbars --force-device-scale-factor=1 --window-size=2500,1686 \
+      --screenshot="richmenu-completed-gbp.png" "file://$PWD/source/richmenu-completed-gbp.html"
+
+  区画は上段 3（既存レポート）・下段 3（詳細・ステータス・Google 連携）。下段の action は
+  rich-menu-definitions.ts の GBP 有効定義と一致させる。デモ／パイロット中は張り替えない。
+-->
+<style>
+  html,body{margin:0;padding:0;width:2500px;height:1686px;overflow:hidden}
+  body{position:relative;background:#FFFFFF;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Hiragino Sans",Meiryo,sans-serif;-webkit-font-smoothing:antialiased}
+  .cell{position:absolute;display:flex;align-items:center;justify-content:center;text-align:center;white-space:nowrap;letter-spacing:.01em}
+  .report{font-size:72px;font-weight:700;color:#333333}
+  .secondary{font-size:66px;font-weight:400;color:#666666}
+  .divider{position:absolute;background:#AAAAAA}
+</style>
+<div class="cell report" style="left:0;top:0;width:833px;height:843px">新着口コミをみる</div>
+<div class="cell report" style="left:833px;top:0;width:834px;height:843px">競合店との比較をみる</div>
+<div class="cell report" style="left:1667px;top:0;width:833px;height:843px">直近の推移を見る</div>
+<div class="cell secondary" style="left:0;top:843px;width:833px;height:843px">詳細を見る</div>
+<div class="cell secondary" style="left:833px;top:843px;width:834px;height:843px">ステータス確認</div>
+<div class="cell secondary" style="left:1667px;top:843px;width:833px;height:843px">Google 連携</div>
+<div class="divider" style="left:830px;top:0;width:5px;height:843px"></div>
+<div class="divider" style="left:1664px;top:0;width:5px;height:843px"></div>
+<div class="divider" style="left:0;top:840px;width:2500px;height:5px"></div>
+<div class="divider" style="left:830px;top:845px;width:5px;height:841px"></div>
+<div class="divider" style="left:1664px;top:845px;width:5px;height:841px"></div>

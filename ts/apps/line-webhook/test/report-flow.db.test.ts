@@ -58,6 +58,8 @@ import {
   type SearchOutcome,
 } from '@fwlm/store-identification';
 import { createApp, type AppDeps } from '../src/app.js';
+import type { GbpFlowHandlers } from '../src/gbp/flows.js';
+import { encodeGbpPostback } from '../src/gbp/postback.js';
 import type { LineMessage, LineMessenger } from '../src/line/client.js';
 import { buildStatusGuidanceMessage } from '../src/line/messages.js';
 import { createConversationHandlers } from '../src/onboarding/conversation.js';
@@ -465,8 +467,11 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
     clearStatements(): void;
   }
 
-  /** index.ts と同じ形で配線したアプリ。試験ごとに作り直し、偽物の呼び出しの記録を独立させる。 */
-  async function buildHarness(): Promise<Harness> {
+  /**
+   * index.ts と同じ形で配線したアプリ。試験ごとに作り直し、偽物の呼び出しの記録を独立させる。
+   * gbp を渡すと、index.ts が GBP を有効にしたときと同じく振り分け口へ GBP の会話を配線する。
+   */
+  async function buildHarness(options: { readonly gbp?: GbpFlowHandlers } = {}): Promise<Harness> {
     const pool = await getPool();
     const db = { query: pool.query.bind(pool) } satisfies Queryable;
     const querySpy = vi.spyOn(db, 'query');
@@ -495,6 +500,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
         lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
         liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
         now: () => FIXED_NOW,
+        ...(options.gbp ? { gbp: options.gbp } : {}),
       }),
     });
 
@@ -614,6 +620,37 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
       // SELECT の前に何も書かない INSERT（ON CONFLICT DO NOTHING）が 1 回ある。
       expect(harness.statementKinds()).toEqual(['owner', 'session_create_attempt', 'session', 'stores', 'latest_summary']);
       expect(harness.readCount()).toBe(4);
+    });
+
+    it('新着口コミ: GBP の会話が配線されていれば、表示する口コミごとに返信開始を置く（Issue #354）', async () => {
+      // レポートの postback は GBP の会話へ渡らない（`g_` で始まらない）。ここで確かめるのは、振り分け口が
+      // GBP の配線の有無をレポートへ伝えることだけなので、GBP の会話は何も引き受けない偽物にする。
+      const gbp: GbpFlowHandlers = {
+        handleGbpPostback: vi.fn(async () => 'not_handled' as const),
+        handleGbpText: vi.fn(async () => 'not_handled' as const),
+      };
+      const harness = await buildHarness({ gbp });
+      const token = await sendPostback(
+        harness,
+        SINGLE_USER,
+        'single-new-reviews-gbp',
+        encodeReportPostback(menuRequest('new_reviews')),
+      );
+
+      const message = onlyReplyTo(harness, token);
+      expect(message).toEqual(
+        buildNewReviewsReport({ storeName: SINGLE_STORE_NAME }, normalizeReadRow(SINGLE_LATEST), {
+          gbpReplyEnabled: true,
+        }),
+      );
+      const replyData = encodeGbpPostback({ action: 'g_reply' });
+      const replyActions = collect(bubbleOf(message).body, (record) =>
+        record.type === 'postback' && record.data === replyData ? record : null,
+      );
+      // 表示する口コミ（帰属 3 項目を持つ 2 件）ごとに 1 つ。
+      expect(replyActions).toHaveLength(2);
+      expect(gbp.handleGbpPostback).not.toHaveBeenCalled();
+      expect(gbp.handleGbpText).not.toHaveBeenCalled();
     });
 
     it('競合店との比較: その店舗のレポートを 1 回返し、DB の読み出しは 4 回', async () => {

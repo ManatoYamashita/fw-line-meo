@@ -330,6 +330,49 @@ describe('setupCompletedRichMenuOnly', () => {
     expect(result).toEqual({ completedRichMenuId: 'richmenu-completed-2' });
   });
 
+  it('GBP 有効時は 6 区画の完了後メニューを作り、既定メニューには触れない', async () => {
+    const { fetchMock, createCalls, defaultCalls } = createFetchMock(['richmenu-completed-gbp-1']);
+
+    await setupCompletedRichMenuOnly({
+      channelId: 'id',
+      channelSecret: 'secret',
+      fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      gbpEnabled: true,
+      completedImage: Buffer.from('completed-gbp-bytes'),
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect((createCalls[0]!.body.areas as unknown[])).toHaveLength(6);
+    const googleEntry = (createCalls[0]!.body.areas as Array<{ action: { data?: string } }>)[5];
+    expect(googleEntry?.action.data).toBe('a=g_status');
+    expect(defaultCalls).toEqual([]);
+  });
+
+  it('GBP 用 PNG をアップロードする場合も、宣言寸法・PNG 仕様・6 区画が一致する', async () => {
+    const assetsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets');
+    const completedGbpImage = await readFile(path.join(assetsDir, 'richmenu-completed-gbp.png'));
+    const { fetchMock, createCalls, uploadCalls, defaultCalls } = createFetchMock(['richmenu-completed-gbp-2']);
+
+    await setupCompletedRichMenuOnly({
+      channelId: 'id',
+      channelSecret: 'secret',
+      fetch: fetchMock,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+      gbpEnabled: true,
+      completedImage: completedGbpImage,
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]!.body.size).toEqual({ width: 2500, height: 1686 });
+    expect((createCalls[0]!.body.areas as unknown[])).toHaveLength(6);
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0]!.body).toEqual(completedGbpImage);
+    expect(completedGbpImage.byteLength).toBeLessThanOrEqual(RICH_MENU_IMAGE_MAX_BYTES);
+    expect(PNG_COLOR_TYPES_WITH_ALPHA).not.toContain(readPngHeader(completedGbpImage).colorType);
+    expect(defaultCalls).toEqual([]);
+  });
+
   it('作成に失敗した場合は例外を投げる（画像を登録しないメニューを残さない）', async () => {
     const fetchMock = vi.fn(async (rawUrl: Parameters<typeof fetch>[0]) => {
       const url = String(rawUrl);

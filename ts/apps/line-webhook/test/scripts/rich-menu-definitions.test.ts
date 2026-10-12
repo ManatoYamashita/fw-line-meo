@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPORT_LABELS, encodeReportPostback, exposesAllReportActions } from '@fwlm/line-report';
 import type { ReportKind } from '@fwlm/line-report';
+import { encodeGbpPostback } from '../../src/gbp/postback.js';
 import {
   COMPLETED_MENU_SIZE,
   ONBOARDING_MENU_SIZE,
@@ -43,6 +44,15 @@ const EXPECTED_COMPLETED_BOUNDS: ReadonlyArray<{
   { place: '上段右', x: 1667, y: 0, width: 833, height: 843 },
   { place: '下段左', x: 0, y: 843, width: 1250, height: 843 },
   { place: '下段右', x: 1250, y: 843, width: 1250, height: 843 },
+];
+
+const EXPECTED_GBP_COMPLETED_BOUNDS = [
+  { x: 0, y: 0, width: 833, height: 843 },
+  { x: 833, y: 0, width: 834, height: 843 },
+  { x: 1667, y: 0, width: 833, height: 843 },
+  { x: 0, y: 843, width: 833, height: 843 },
+  { x: 833, y: 843, width: 834, height: 843 },
+  { x: 1667, y: 843, width: 833, height: 843 },
 ];
 
 /** 上段 3 区画のレポートの種類（design.md の区画表の並び）。 */
@@ -137,6 +147,22 @@ describe('buildCompletedRichMenu', () => {
     expect(status!.action).toEqual({ type: 'message', label: 'ステータス確認', text: 'ステータス確認' });
   });
 
+  it('GBP 有効時は下段を 3 分割し、Google 連携から状態 Flex を開く', () => {
+    const menu = buildCompletedRichMenu(LIFF_STORE_DETAIL_URL, { gbpEnabled: true });
+
+    expect(menu.areas).toHaveLength(6);
+    assertAreasFitWithoutOverlap(menu);
+    expect(menu.areas.map(({ bounds }) => bounds)).toEqual(EXPECTED_GBP_COMPLETED_BOUNDS);
+    expect(menu.areas[3]?.action).toEqual({ type: 'uri', label: '詳細を見る', uri: LIFF_STORE_DETAIL_URL });
+    expect(menu.areas[4]?.action).toEqual({ type: 'message', label: 'ステータス確認', text: 'ステータス確認' });
+    expect(menu.areas[5]?.action).toEqual({
+      type: 'postback',
+      label: 'Google 連携',
+      data: encodeGbpPostback({ action: 'g_status' }),
+      displayText: 'Google 連携',
+    });
+  });
+
   it('ラベルとチャットバーが LINE の上限に収まり、既定で開いた状態にする', () => {
     const menu = buildCompletedRichMenu(LIFF_STORE_DETAIL_URL);
 
@@ -184,9 +210,10 @@ describe('メニューごとの寸法の宣言', () => {
   // 宣言した寸法と、その面に貼る PNG の実寸法の一致（Issue #195 と同じ主眼を、定義の側でも固定する）。
   it('assets の実 PNG の寸法と一致する', async () => {
     const assetsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets');
-    const [onboardingImage, completedImage] = await Promise.all([
+    const [onboardingImage, completedImage, completedGbpImage] = await Promise.all([
       readFile(path.join(assetsDir, 'richmenu-onboarding.png')),
       readFile(path.join(assetsDir, 'richmenu-completed.png')),
+      readFile(path.join(assetsDir, 'richmenu-completed-gbp.png')),
     ]);
 
     expect(readPngSize(onboardingImage)).toEqual({
@@ -194,6 +221,10 @@ describe('メニューごとの寸法の宣言', () => {
       height: ONBOARDING_MENU_SIZE.height,
     });
     expect(readPngSize(completedImage)).toEqual({
+      width: COMPLETED_MENU_SIZE.width,
+      height: COMPLETED_MENU_SIZE.height,
+    });
+    expect(readPngSize(completedGbpImage)).toEqual({
       width: COMPLETED_MENU_SIZE.width,
       height: COMPLETED_MENU_SIZE.height,
     });

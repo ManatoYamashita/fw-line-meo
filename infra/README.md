@@ -562,6 +562,12 @@ a new rich menu and re-upload.*）。区画と action も作った後では変�
 その 3 導線を持つことを確かめるまで通知を送らない（見送りの理由 `skipped_menu_unavailable`）。
 差し替えが終わるまで通知は 1 通も出ない。
 
+Issue #354 の GBP 入口は、GBP を有効にした専用面（6 区画）として追加した。既存の5区画メニューと画像は維持し、
+GBP の OAuth/API 利用条件が満たされるまで `--with-gbp` を使わない。GBP 面では「Google 連携」から状態 Flex を開き、
+連携済みの場合に投稿・返信操作を提示する。新着口コミごとの「返信する」は GBP フロー配線がある環境だけに表示する。
+本番での作成・張り替えは、GBP API 承認、OAuth クライアント設定と Secret Manager 値、#354 のマージ・デプロイが
+すべて揃い、かつパイロット／デモ期間外であることを確認してから行う。
+
 **CI では一切検証できない。** `ts/apps/line-webhook/test/scripts/` の試験が見るのは、区画が
 重ならず面を覆うこと・postback が符号器の出力と一致すること・宣言した寸法が実 PNG の IHDR と
 一致すること・張り替えの 4 分類と削除の条件までである。実チャネルへの反映が正しいかは実機でしか
@@ -657,12 +663,16 @@ SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --p
 LINE_CHANNEL_ID='<§8-0 の方法で確認する>' \
 LINE_CHANNEL_SECRET="$SECRET" \
 LIFF_STORE_DETAIL_URL='<§8-0 の方法で確認する>' \
-  pnpm run setup-rich-menus --completed-only
+pnpm run setup-rich-menus --completed-only
+# GBP 承認と OAuth/Secret Manager の設定、Issue #354 のコード反映後だけ:
+# pnpm run setup-rich-menus --completed-only --with-gbp
 ```
 
 - **`--completed-only` を必ず付ける。** 付けないとオンボーディング用メニューまで作り直し、
   `setDefaultRichMenu` で既定を差し替える。既定はオンボーディング用のままでなければならず
   （Req 2.6）、差し替えで既定に触る理由は無い。
+- GBP 面の作成では、上記の条件が揃った後に限り `--with-gbp` を追加する。これは GBP 用 PNG と6区画定義を
+  同時に使う専用スイッチであり、通常の完了後メニューには影響しない。
 - 出力は完了用の `richMenuId` が 1 つだけ。次の段で使うので控える。
 - 完了後メニューの `name` は新旧とも `line-onboarding-completed-menu` である。差し替えの最中は
   同名の 2 面が一覧に並ぶので、**名前ではなく ID で区別する。**
