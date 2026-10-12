@@ -112,7 +112,7 @@ export default function Home() {
             <Image src="/icon.png" alt="" width={40} height={40} unoptimized loading="eager" className="size-10 shrink-0" />
             <span className="flex min-w-0 flex-col gap-1 leading-tight">
               <span className="text-xs text-muted-foreground">Firstweb 集客AI<wbr />アシスタント</span>
-              <span className="text-xl font-bold text-brand">QR口コミ支援</span>
+              <span className="text-xl font-bold text-primary">QR口コミ支援</span>
             </span>
           </span>
           <nav aria-label="ページ内の案内" className="flex flex-wrap gap-x-6 gap-y-2 text-sm">

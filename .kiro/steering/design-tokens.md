@@ -2,17 +2,22 @@
 
 意匠の値の正典は実装（`ts/packages/design-tokens/src/` と `ts/packages/ui/src/theme.css`）と、
 それを守るテストである。写像版の読み物は `docs/design/design-language.md`、そう決めた理由の記録は
-`.kiro/specs/ui-airbnb-foundation/design.md` の D1〜D8。以下は忘れると壊れる規律だけを置く。
+`.kiro/specs/ui-airbnb-foundation/design.md` の D1〜D8（ブランド色・アクション色・hover を LINE の緑系へ
+差し替えた判断は `docs/design/line-green-palette.md`）。以下は忘れると壊れる規律だけを置く。
 実測値をここへ書き写さない。値は上の 2 箇所が持ち、機械照合が守っている。
 
 ## 色
 
-- **ブランド色とアクション色を分ける。** ブランド色は白文字と WCAG AA（4.5:1）に届かないため
-  装飾・アイコン・大テキスト専用であり、アクション面にも文字にも使わない。
+- **ブランド色とアクション色を分ける。** ブランド色（LINE Green）は白背景に対して大きい文字の 3:1 にも
+  届かないため装飾・アイコン専用であり、アクション面にも文字にも使わない。色を持たせたい文字は
+  アクション色で描く（`text-brand` は `ts/packages/ui/test/brand-usage.test.ts` が落とす）。
 - **hover は暗くする方向で作る。** `/80` のようなアルファ合成は白背景では合成後が明るくなり、
   ホバー時にだけ AA を割る（Issue #50）。各成分を定数倍した確定値をトークンへ置く。
 - **成功色をアクション色と共有しない。** 共有していると、アクション色を暖色へ変えた瞬間に
   成功通知が危険通知と同系色になる。色相の変化は輝度を変えないので、比を見るガードは全緑で通る。
+- **成功の表示には印と文言を付ける。** 値を分けていても、成功色はアクション色と色だけでは見分けられない。
+  Alert の成功の変種は部品が印を描く。部品を使わずに成功色で描くなら `SuccessIcon` を文言の前に置き、
+  `ts/packages/ui/test/success-cue.test.tsx` の表へ載せる（載せ忘れは棚卸しが落とす）。
 - **フォーカス輪郭にアクション色を参照しない。** 輪郭は本文色で描く。`outline-offset` を 0 にすると
   「隣接色は親の背景」という前提が崩れ、隣接コントラストの検証ごと組み直しになる。
 - **`color-mix` は `in oklab` で書く。** `in oklch` は無彩色の色相が powerless になり赤へ解決される。
@@ -62,5 +67,5 @@
 
 ---
 _Rules that change behavior. Values live in the implementation and are machine-verified_
-_一次情報源: `docs/design/design-language.md`／`.kiro/specs/ui-airbnb-foundation/design.md`_
+_一次情報源: `docs/design/design-language.md`／`.kiro/specs/ui-airbnb-foundation/design.md`／`docs/design/line-green-palette.md`_
 _created_at: 2026-09-02_

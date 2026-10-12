@@ -32,6 +32,9 @@ const AA_TEXT_PAIRS: ReadonlyArray<{
   // 面を暗くしたときに上の文字が AA を割っても気づけない。面の役割はここで前景と対にして固定する。
   { foreground: 'text', background: 'surfaceStrong' },
   { foreground: 'textMuted', background: 'surfaceSoft' },
+  // 副次面の上のリンク。赤系のアクション色では 4.37:1 で既知の限界だった組であり、緑系へ差し替えて
+  // 届くようになった。届いている状態を固定し、アクション色を明るくする変更で黙って割らせない。
+  { foreground: 'primary', background: 'surfaceStrong' },
   // Google Maps の帰属表示（Issue #287）。Places API のポリシー自身も 4.5:1 の確保を求めており、
   // ここでの検証はその要求とも重なる。
   { foreground: 'attribution', background: 'background' },
@@ -41,6 +44,8 @@ const AA_TEXT_PAIRS: ReadonlyArray<{
 
 /** AA 検証の対象外とする意味役割（装飾・面塗り・非テキスト用途）。 */
 const NON_TEXT_ROLES: readonly (keyof typeof colors)[] = [
+  // 大きい文字の 3:1 にも届かないので、文字としては一切使わない（@fwlm/ui の test/brand-usage.test.ts が
+  // 面の側に文字色・面塗りとしての使用が無いことを照合する）。
   'brand',
   'border',
   // 識別用の枠色。テキスト前景としては使わないため AA_TEXT_PAIRS には入れない。
@@ -64,16 +69,17 @@ describe('コントラスト計算ヘルパ（既知値による自己検証）'
     );
   });
 
-  it('ブランド色 #FF385C と白は約 3.52:1（AA 非準拠の既知値）と計算される', () => {
-    // この自己検証はリテラル引数なので、トークンを差し替えても緑のまま通ってしまう。
-    // 現行のブランド色を書いておかないと「非準拠を記録している」という主張だけが残り、
-    // 中身が別の色の話になる（意匠差し替え時に実際そうなりかけた）。
-    expect(contrastRatio('#FF385C', '#FFFFFF')).toBeCloseTo(3.52, 2);
+  it('ブランド色 #06C755 と白は約 2.26:1（大きい文字の 3:1 にも届かない既知値）と計算される', () => {
+    // リテラルだけの自己検証は、トークンを差し替えても緑のまま通り、別の色の話が残る。
+    // トークンの現在値との一致も併せて固定する。
+    expect(colors.brand).toBe('#06C755');
+    expect(contrastRatio('#06C755', '#FFFFFF')).toBeCloseTo(2.26, 2);
   });
 
-  it('アクション色 #E00B41 と白は約 4.89:1（AA 準拠の下限に近い既知値）と計算される', () => {
+  it('アクション色 #047733 と白は約 5.69:1（AA 準拠の既知値）と計算される', () => {
     // 上の非準拠色とこの準拠色の差が、装飾用とアクション用を分ける根拠そのものである。
-    expect(contrastRatio('#E00B41', '#FFFFFF')).toBeCloseTo(4.89, 2);
+    expect(colors.primary).toBe('#047733');
+    expect(contrastRatio('#047733', '#FFFFFF')).toBeCloseTo(5.69, 2);
   });
 });
 
@@ -196,26 +202,23 @@ describe('成功と危険の識別（Requirements 2.1, 2.2）', () => {
     ).not.toBe(side(colors.destructive));
   });
 
-  // アクション色と危険色は、この意匠では**色では区別できない**。
+  // アクション色と危険色は、色相では分かれるが、明るさではほぼ同じである。
   //
-  // 出典のパレットは暖色一色（brand / primary / destructive がすべて赤系）であり、
-  // アクション色 #E00B41 と危険色 #B32505 は色相が約 14 度、相互コントラストが 1.35:1 しかない。
-  // 差し替え前の緑と赤の組も相互比は 1.29:1 だったので、**両者を分けていたのは輝度ではなく色相**
-  // であり、その色相差が失われた。成功色に入れた分離の不変条件はここへは適用できない
-  // （危険色を暖色から外すと「危険」に読まれなくなる）。
+  // 緑系のアクション色 #047733 と危険色 #B32505 は OKLCH の色相で約 116 度離れるが、相互コントラストは
+  // 1.16:1 しかない。緑と赤は、もっとも多い色覚特性（2 型）で見分けにくい組み合わせなので、
+  // 色相の差だけを頼りに「選択済み」と「エラー」を区別させることはできない。
   //
-  // したがってこの組は「色では区別できない」ことを受け入れ、区別は色以外の手掛かりが担う。
-  // 手掛かりの実効性は @fwlm/ui の test/contrast-usage.test.ts
-  //「選択済みの面をアクション色で塗る部品のエラー指標」が数値で検証する。
+  // したがって両者の区別は色以外の手掛かりが担う。手掛かりの実効性は @fwlm/ui の
+  // test/contrast-usage.test.ts「選択済みの面をアクション色で塗る部品のエラー指標」が数値で検証する。
   // 本テストはその判定が前提にしている状態を固定する。**前提が変われば向こうも見直しが要る。**
-  it('アクション色は暖色側にあり、危険色と色では区別できない（受容した前提の固定）', () => {
-    // tasks.md 2.3 が要求していた「アクション色・危険色は成功色の逆側」の固定でもある。
-    expect(side(colors.primary), `primary(${colors.primary}) が寒色側にあります`).toBe('warm');
+  it('アクション色は寒色側・危険色は暖色側にあるが、明るさでは区別できない（受容した前提の固定）', () => {
+    expect(side(colors.primary), `primary(${colors.primary}) が暖色側にあります`).toBe('cool');
+    expect(side(colors.destructive), `destructive(${colors.destructive}) が寒色側にあります`).toBe('warm');
     const ratio = contrastRatio(colors.primary, colors.destructive);
     expect(
       ratio,
       `primary(${colors.primary}) と destructive(${colors.destructive}) の相互比が ` +
-        `${ratio.toFixed(2)}:1 になり、色だけで区別できるようになりました。` +
+        `${ratio.toFixed(2)}:1 になり、明るさだけで区別できるようになりました。` +
         '@fwlm/ui 側で「色以外の手掛かり」を要求している判定が過剰になっていないか見直すこと。',
     ).toBeLessThan(AA_NON_TEXT_RATIO);
   });
@@ -231,5 +234,34 @@ describe('成功と危険の識別（Requirements 2.1, 2.2）', () => {
         `success が ${name} と同値です。${name} を差し替えると成功通知の色が巻き込まれます。`,
       ).not.toBe(value);
     }
+  });
+});
+
+// 成功とアクションの識別。
+//
+// 成功色とアクション色は値こそ分けてあるが、**色では見分けられない。** どちらも緑で、OKLCH の色相の差は
+// 1 度に満たず、相互コントラストは 1.13:1 しかない。成功通知の文字は、押しボタンやリンクと同じ色に見える。
+// これは受け入れた前提である（成功色だけを青緑へ逃がす案は採らなかった）。
+//
+// 受け入れた以上、成功の表示は色以外の手がかり（アイコンと文言）を必ず伴う。その手がかりが成功の表示の
+// 全箇所にあることは @fwlm/ui の test/success-cue.test.tsx が照合する。本テストは向こうの要求が前提にしている
+// 状態を固定する。**この前提が外れても（成功色を色相で分けても）、色以外の手がかりは外さない。**
+// 色覚の特性によっては色相の差も見えないためである。
+describe('成功とアクションの識別', () => {
+  const side = (hex: string): 'warm' | 'cool' => {
+    const [red, green] = hexToRgb(hex);
+    return red > green ? 'warm' : 'cool';
+  };
+
+  it('成功色とアクション色は同じ側にあり、明るさでも区別できない（受容した前提の固定）', () => {
+    expect(side(colors.success), `success(${colors.success}) が赤寄りです`).toBe('cool');
+    expect(side(colors.primary), `primary(${colors.primary}) が赤寄りです`).toBe('cool');
+    const ratio = contrastRatio(colors.success, colors.primary);
+    expect(
+      ratio,
+      `success(${colors.success}) と primary(${colors.primary}) の相互比が ${ratio.toFixed(2)}:1 になりました。` +
+        'docs/design/design-language.md §2.4 と §10 の記述（色だけでは見分けられない）を見直すこと。' +
+        '成功の表示の色以外の手がかり（@fwlm/ui の test/success-cue.test.tsx）は外さない。',
+    ).toBeLessThan(AA_NON_TEXT_RATIO);
   });
 });

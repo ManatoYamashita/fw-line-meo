@@ -39,6 +39,7 @@ import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
 import { Spinner } from '@fwlm/ui/components/spinner';
+import { SuccessIcon } from '@fwlm/ui/components/success-icon';
 import { notifyActionError, notifyActionSuccess } from '../../lib/action-feedback';
 import { resumeStore, suspendStore, type ApiResult } from '../../lib/api';
 import type { StoreSuspensionState } from '../../lib/types';
@@ -172,9 +173,15 @@ export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionCont
       </AlertDialog>
 
       {/* 成功の通知。領域は常に置き、文言だけを差し替える（先頭の注記）。display: none にすると
-        * 支援技術から領域ごと外れるので隠さない。空のときは余白を持たせず、行の高さを変えない。 */}
-      <p role="status" className="text-xs text-success [&:not(:empty)]:mt-2">
-        {successMessage}
+        * 支援技術から領域ごと外れるので隠さない。空のときは余白を持たせず、行の高さを変えない。
+        * 成功色はアクション色と色だけでは見分けられないので、文言には必ず印を添える。 */}
+      <p role="status" className="flex items-center gap-1 text-xs text-success [&:not(:empty)]:mt-2">
+        {successMessage !== '' && (
+          <>
+            <SuccessIcon className="size-3.5" />
+            {successMessage}
+          </>
+        )}
       </p>
       {/* 危険を伝える変種は読み上げ役割 alert を自ら持つ。文言の側へ role を重ねない。 */}
       {errorMessage !== null && (

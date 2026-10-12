@@ -73,7 +73,7 @@ describe('トップナビの管理メニュー（Req 6.5）', () => {
 });
 
 // 帯の意匠（Req 1.1 / 1.3 / 3.2 / 3.3）。現在地の示し方は docs/design/design-language.md の 7.8 節、
-// ワードマークの色は同 7.4 節と 10 節が正典であり、ここでは結論も数値も転記せず構造だけを固定する。
+// ワードマークの色は同 7.4 節が正典であり、ここでは結論も数値も転記せず構造だけを固定する。
 describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3）', () => {
   function navLinks(): HTMLElement[] {
     return within(screen.getByRole('navigation')).getAllByRole('link');

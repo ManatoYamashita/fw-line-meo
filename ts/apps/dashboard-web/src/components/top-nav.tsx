@@ -75,8 +75,8 @@ export function TopNav() {
       aria-label="メインナビゲーション"
       className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-border px-4 pt-2 lg:flex lg:h-20 lg:gap-6 lg:px-6 lg:pt-0"
     >
-      {/* ワードマーク。装飾専用色の使い所をここへ限る判断は 7.4 節、大きい文字としてのみ用いる根拠は
-          10 節にある。リンクにも見出しにもしない（リンクの個数を固定した構造契約・Req 3.3）。 */}
+      {/* ワードマーク。色の使い所の判断は 7.4 節にある。
+          リンクにも見出しにもしない（リンクの個数を固定した構造契約・Req 3.3）。 */}
       <Wordmark className="col-span-2 row-start-1" />
       {/* 狭い画面の 3 段目。折り返して全リンクを見せる（捲れる手がかりの無い帯では、画面の外の
           リンクは存在しないように見える・Issue #283）。広い画面では 1 行に並べ、万一の溢れだけを

@@ -1,25 +1,26 @@
 // 色トークンの単一定義箇所（Requirements 1.1, 1.3 / design.md「@fwlm/design-tokens」）。
 //
-// 意匠の出典は docs/design/upstream/airbnb-DESIGN.md（VoltAgent/awesome-design-md・MIT）。
-// 採否の判断と実測コントラスト比は .kiro/specs/ui-airbnb-foundation/design.md D1 が正典で、
-// 網羅的な機械検証は test/colors.test.ts が担う。
+// 意匠の出典は docs/design/upstream/airbnb-DESIGN.md（VoltAgent/awesome-design-md・MIT）。以下で「出典」と
+// 書くのはこの文書を指す。ただしブランド色・アクション色・hover の 3 役割だけは出典の赤系ではなく
+// LINE の緑系から採っている。
+// 実測コントラスト比の読み物は docs/design/design-language.md §2、網羅的な機械検証は test/colors.test.ts が担う。
 //
-// 出典の色をそのまま持ち込んでいない点が本ファイルの要である:
-//  - brand は出典のブランド色そのもの。白文字と 3.52:1 で WCAG AA（4.5:1）に届かないため
-//    **装飾・アイコン・大テキスト専用**とし、アクション色にも文字色にも使わない。
-//  - primary は出典の「押下時の色」。白文字と 4.89:1 で AA を満たす下限であり、
-//    これより明るい色をアクション面に置くことはできない。
-//  - success は出典に対応色が無い唯一の役割。以前アクション色だった緑を横滑りさせている。
-//    アクション色と共有してはならない理由は下の宣言に書いた。
+// 緑をそのまま持ち込んでいない点が本ファイルの要である:
+//  - brand は LINE Green（LINE ログインボタンのガイドラインが基本色として指定する値）。白文字と 2.26:1 で
+//    大きい文字の 3:1 にも届かないため**装飾・アイコン専用**とし、文字色にも、文字を載せる面にも使わない。
+//  - primary は brand の各成分を 0.6 倍した暗い緑。白文字と 5.69:1、副次面（surfaceStrong）の上でも
+//    5.08:1 で AA を満たす。0.65 倍では副次面の上で AA を割るため、この濃さを採る。
+//  - success は出典に対応色が無い役割で、アクション色とは独立した値を持つ。色相がアクション色とほぼ
+//    同じであることは受け入れており、成功の表示は色以外の手がかり（アイコンと文言）で識別させる。
 //  - lineColors は Flex Message（非 Web コンテンツ）用のため AA 検証対象外。値は現行の LINE 面の
 //    実装（messages.ts・delivery-job の notification.ts・line-webhook の report/builders）と
-//    同一に保ち、Web 側の意匠差し替えで LINE の見た目が動かないことを保証する
+//    同一に保ち、Web 側の配色の差し替えで LINE の見た目が動かないことを保証する
 //    （LINE アプリ自身の配色の中で成立させるための決定）。ただし attribution
 //    （Google Maps の帰属表示）だけは現行色から採らず、Places API ポリシーが許す色から選んでいる。
 
 /** Web 面（survey-web / store-detail / dashboard-web）の意味役割カラートークン。 */
 export interface ColorTokens {
-  /** ブランド基調色（装飾・アイコン・大テキスト専用・AA 非保証）。 */
+  /** ブランド基調色（装飾・アイコン専用。大きい文字の 3:1 にも届かないため文字には使わない）。 */
   readonly brand: string;
   /** アクション色（ボタン背景等。primaryForeground と 4.5:1 以上）。 */
   readonly primary: string;
@@ -46,6 +47,10 @@ export interface ColorTokens {
    * 成功通知が危険通知と同系色になる。この事故は色相の変化であって輝度の変化ではないため、
    * コントラスト比を見るどのガードにも掛からず CI 全緑で通る（test/colors.test.ts の
    * 「成功と危険の識別」がこの経路を塞ぐ）。
+   *
+   * 値を分けていても、いまのアクション色とは色だけでは見分けられない（色相の差 1 度未満・
+   * 相互比 1.13:1）。成功の表示は必ずアイコンと文言を伴わせる（Alert の success 変種は部品が
+   * アイコンを描く・@fwlm/ui の test/success-cue.test.tsx が成功の表示の全箇所を照合する）。
    */
   readonly success: string;
   /** 破壊的操作・エラー色（destructiveForeground と 4.5:1 以上）。 */
@@ -111,15 +116,14 @@ export interface LineColorTokens {
 }
 
 export const colors: ColorTokens = {
-  // 出典のブランド色。白文字と約 3.52:1 で AA 非準拠のため装飾専用。
-  brand: '#FF385C',
-  // 出典の押下時の色。白文字と約 4.89:1。AA の下限に最も近い役割であり、
-  // これ以上明るい値をアクション面に採ることはできない。
-  primary: '#E00B41',
+  // LINE Green。白文字と約 2.26:1 で、大きい文字の 3:1 にも届かないため装飾・アイコン専用。
+  brand: '#06C755',
+  // brand の各成分を 0.6 倍した値。白文字と約 5.69:1・surfaceStrong の上で約 5.08:1。
+  primary: '#047733',
   // hover は primary を「暗くする」方向で表現する。アルファ合成（bg-primary/80 等）は
   // 白背景では合成後が明るくなり、ホバー時にだけ AA を割る（Issue #50）。
-  // 各成分を 0.8 倍した確定値（白文字と約 6.99:1）。
-  primaryHover: '#B30934',
+  // 各成分を 0.8 倍した確定値（白文字と約 7.86:1）。
+  primaryHover: '#035F29',
   primaryForeground: '#FFFFFF',
   // 出典の ink。純黒を使わないのは出典の方針をそのまま採ったもの（対白 約 15.9:1）。
   text: '#222222',
@@ -130,8 +134,8 @@ export const colors: ColorTokens = {
   background: '#FFFFFF',
   surfaceSoft: '#F7F7F7',
   surfaceStrong: '#F2F2F2',
-  // 出典に対応色が無い唯一の役割。意匠差し替え前にアクション色だった緑をそのまま横滑りさせる
-  // （対白 約 5.02:1）。アクション色と共有しない理由は ColorTokens の宣言に書いた。
+  // 出典に対応色が無い役割（対白 約 5.02:1）。アクション色と共有しない理由と、
+  // 色だけでは見分けられないことの扱いは ColorTokens の宣言に書いた。
   success: '#15803D',
   // 淡い面（bg-destructive/10・/20）の上に同色の文字を載せる shadcn の destructive 表現では、
   // 判定すべきは単体の対白比ではなく合成後の実効色に対する比である。出典のエラー色は

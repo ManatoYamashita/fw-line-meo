@@ -8,14 +8,14 @@ export const SURFACE_NAME = '管理用ダッシュボード';
 
 // ワードマーク（帯とログインの 2 箇所で共有する）。
 //
-// 装飾専用色の使い所をここへ限る判断は docs/design/design-language.md の 7.4 節、大きい文字としてのみ
-// 用いる根拠は 2.2 節と 10 節にある。
+// 色の使い所の判断は docs/design/design-language.md の 7.4 節にある。
 // リンクにも見出しにもしない（リンクと押しボタンの個数を固定した構造契約・Req 3.3）。
 //
-// 2 段に組む。上の段はアプリ名を補足の色の小さい文字で、下の段は面の役割を装飾専用色の大きい文字で置く。
+// 2 段に組む。上の段はアプリ名を補足の色の小さい文字で、下の段は面の役割をアクション色の大きい太字で置く。
 // アプリ名は 3 アプリで共通なので、この画面で目に入れたいのは面の役割のほうである。アプリ名を大きく
-// すると帯の横幅を取りすぎ、案内リンクと近づいた。装飾専用色は大きい文字にしか使えないため、
-// 小さくしたアプリ名には載せない。アプリ名は「集客AI」の後でだけ折れる（語の途中で割らない）。
+// すると帯の横幅を取りすぎ、案内リンクと近づいた。ブランド色（LINE Green）は大きい文字の 3:1 にも
+// 届かないので文字には使わず、同じ色相の暗い側であるアクション色で描く。
+// アプリ名は「集客AI」の後でだけ折れる（語の途中で割らない）。
 // アイコンは名前と同じことを言う装飾なので読み上げない。
 export function Wordmark({ className }: { className?: string }) {
   return (
@@ -37,7 +37,7 @@ export function Wordmark({ className }: { className?: string }) {
           <wbr />
           アシスタント
         </span>
-        <span className="text-xl font-bold text-brand">{SURFACE_NAME}</span>
+        <span className="text-xl font-bold text-primary">{SURFACE_NAME}</span>
       </span>
     </span>
   );

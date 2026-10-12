@@ -9,7 +9,7 @@
 //  3. 再開は確認なしで送る（Req 1.6 は停止だけを確認の対象にしている）
 //  4. 成功・失敗のどちらでも一覧の読み直し（onChanged）を呼ぶ
 //  5. 失敗は alert の役割を持つ文言で示し、成功の通知を出さない（1.8）
-//  6. 成功はダイアログの外のライブリージョンで告げる
+//  6. 成功はダイアログの外のライブリージョンで告げ、文言に成功の印を添える（色だけで伝えない）
 //  7. 実行中は二重に送らない
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -174,6 +174,27 @@ describe('StoreSuspensionControl — 停止の確認（1.6）', () => {
     }
     expect(screen.queryByRole('alert')).toBeNull();
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  // 成功の文字色はアクション色と色だけでは見分けられない（design-tokens の ColorTokens.success）。
+  // 成功であることは印と文言で示す。印が消えても文言の読み上げは変わらないので、ほかのテストは緑のまま通る。
+  it('成功の文言には読み上げない成功の印が添えられ、結果の前の空の領域には印を置かない', async () => {
+    suspendMock.mockResolvedValue(ok(SUSPENDED_AT));
+    renderControl(null);
+    const region = () => screen.getAllByRole('status').find((node) => node.tagName === 'P')!;
+    expect(region().querySelector('[data-slot="success-icon"]')).toBeNull();
+    // 空の領域は余白を持たない（:empty が効く）ことの前提。印だけが残ると行の高さが変わる。
+    expect(region().childNodes).toHaveLength(0);
+
+    fireEvent.click(within(await openConfirm()).getByRole('button', { name: '停止する' }));
+
+    await waitFor(() => expect(region().textContent).toBe(`${STORE_NAME} を停止しました。`));
+    const icon = region().querySelector('[data-slot="success-icon"]');
+    expect(icon, '成功の文言に印が添えられていません').not.toBeNull();
+    expect(icon!.tagName.toLowerCase()).toBe('svg');
+    expect(icon!.getAttribute('aria-hidden')).toBe('true');
+    // 印は文言の前に置く（文言だけが先に目に入ると、色でしか成功を区別できない）。
+    expect(region().firstElementChild).toBe(icon);
   });
 
   it('ライブリージョンは結果の前から置かれている（文言と同時に挿入すると読み上げられないことがある）', () => {
