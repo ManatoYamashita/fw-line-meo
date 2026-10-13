@@ -1,4 +1,5 @@
 'use client';
+import { toast } from '@fwlm/ui/components/app-toaster';
 
 import { useEffect, useId, useRef, useState } from 'react';
 import type { StructuredSurveyDefinition, SurveyCategoryDefinition, SurveyFacetOption } from '@fwlm/db';
@@ -95,6 +96,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
     if (submitting || !enoughMaterials) return;
     if (star === null) {
       setShowStarError(true);
+      toast.error('満足度を選択してください。');
       return;
     }
     const answer: StructuredSurveyAnswer = {
@@ -136,7 +138,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
           </button>
         ))}
         {showStarError && (
-          <Alert id={starErrorId} variant="destructive">
+          <Alert id={starErrorId} variant="destructive" role={undefined}>
             <AlertDescription>満足度を選択してください</AlertDescription>
           </Alert>
         )}

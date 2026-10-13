@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { toast } from '@fwlm/ui/components/app-toaster';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button, buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -25,6 +26,9 @@ export function DraftPanel({
 }: DraftPanelProps) {
   const [text, setText] = useState(draft);
   const [copyState, setCopyState] = useState<CopyState>('idle');
+  const [copying, setCopying] = useState(false);
+  const copyingRef = useRef(false);
+  const [slow, setSlow] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const noteId = useId();
 
@@ -34,26 +38,48 @@ export function DraftPanel({
     setCopyState('idle');
   }, [draft]);
 
+  useEffect(() => {
+    if (!regenerating && !copying) { setSlow(false); return; }
+    const timer = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(timer);
+  }, [regenerating, copying]);
+
+  function finishCopy(): void {
+    copyingRef.current = false;
+    setCopying(false);
+  }
+
   function handleCopy(): void {
-    // await を挟まずジェスチャー内で同期的に writeText を呼ぶ（Safari 制約）。
-    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
-    if (!clipboard || typeof clipboard.writeText !== 'function') {
+    if (copyingRef.current || regenerating) return;
+    copyingRef.current = true;
+    setCopying(true);
+    setCopyState('idle');
+    try {
+      // await を挟まずジェスチャー内で同期的に writeText を呼ぶ（Safari 制約）。
+      const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+      if (!clipboard || typeof clipboard.writeText !== 'function') {
+        showManualFallback();
+        finishCopy();
+        return;
+      }
+      clipboard.writeText(text).then(
+        () => {
+          setCopyState('copied');
+          toast.success('コピーしました。投稿画面に貼り付けてください。');
+        },
+        () => showManualFallback(),
+      ).finally(finishCopy);
+    } catch {
       showManualFallback();
-      return;
+      finishCopy();
     }
-    clipboard.writeText(text).then(
-      () => setCopyState('copied'),
-      () => showManualFallback(),
-    );
   }
 
   function showManualFallback(): void {
     setCopyState('manual');
+    toast.error('自動コピーできませんでした。文章を選択して手動でコピーしてください。');
     const el = textareaRef.current;
-    if (el) {
-      el.focus();
-      el.select();
-    }
+    if (el) { el.focus(); el.select(); }
   }
 
   // 投稿導線（全状態・全評価で同一。ゲーティングをしない）。
@@ -74,7 +100,7 @@ export function DraftPanel({
     </a>
   );
 
-  const canRegenerate = regenerationsLeft > 0 && !regenerating;
+  const canRegenerate = regenerationsLeft > 0 && !regenerating && !copying;
 
   // 再生成の押しボタンの中身。生成中は押しボタン自身が処理中であることを示す（押せたかどうかを迷わせない）。
   // 図形は装飾として読み上げから隠し、状態は直下の文言で伝える（動きを止める設定でも読める）。
@@ -90,45 +116,24 @@ export function DraftPanel({
     );
   }
 
-  // 穏やかな通知（生成中・コピー結果）を **1 つのライブリージョンへ集約する**。
-  //
-  // 領域を内容と同時に DOM へ挿入する形（`{regenerating && <p aria-live="polite">…</p>}`）では、
-  // 支援技術は挿入を「領域の出現」として扱い、読み上げが発火しない。容器を常時マウントし、
-  // 中身だけを差し替える。したがって言うことが無いときは容器だけが空で残る。
-  //
-  // 読み上げ強度は穏やか（`status`）で固定する。進行中の読み上げを中断させる強度は生成失敗の
-  // 通知だけの権利であり、処理中やコピー結果でそれを使うと利用者の作業が毎回遮られる。
-  //
-  // **容器そのものを通知の部品にはできない。** 通知の部品は言うことが無いときも枠と内側余白を
-  // 描くため、空のまま常時マウントすると中身の無い箱が見えたままになる。容器は素の要素にし、
-  // 通知の部品はその中身として使う（部品の割り当ては design.md「Error Handling」が正典）。
-  //
-  // **中身の通知からは役割を外す（`role={undefined}`）。** 通知の部品は変種ごとに読み上げ役割を
-  // 自分で付けるため、そのままだと容器と合わせて穏やかな読み上げ領域が 2 つになる。役割は容器が
-  // 1 つだけ持ち、部品には見た目と変種だけを担わせる。部品は `role` を `{...props}` より前に
-  // 置いており、呼び出し側からの上書きを想定した作りである。
-  //
-  // 集約はもう 1 つの欠陥も直す。`copyState` は `draft` が変わるまで idle へ戻らないため、
-  // 領域を分けているとコピー後に再生成を押した時点で「生成中…」と「コピーしました…」の
-  // 2 つが同時に読み上げ対象として並んでいた。
+  // 処理中の通知は常時マウントする。結果は Toast が読み上げ、画面内の案内は静的に残す。
   const notification = (
-    <div role="status">
-      {regenerating ? (
-        // 文言は直下のテキストノードのまま残す。処理中の図形は押しボタンの側が持つ（二重に回さない）。
-        <p className="text-center text-sm text-muted-foreground">回答内容をもとに文章を作成しています</p>
-      ) : copyState === 'copied' ? (
+    <>
+      <div role="status">
+        {regenerating || copying ? <p className="text-center text-sm text-muted-foreground">
+          {slow ? '少し時間がかかっています。画面を閉じずにこのままお待ちください' : copying ? '文章をコピーしています' : '回答内容をもとに文章を作成しています'}
+        </p> : null}
+      </div>
+      {regenerating || copying ? null : copyState === 'copied' ? (
         <Alert variant="success" role={undefined}>
           <AlertDescription>コピーしました。投稿画面に貼り付けてください。</AlertDescription>
         </Alert>
       ) : copyState === 'manual' ? (
-        // 自動コピーが働かなかったことは失敗ではなく次の手順の案内なので、既定の変種で描く。
         <Alert role={undefined}>
-          <AlertDescription>
-            自動コピーできませんでした。上の文章を選択して手動でコピーしてください。
-          </AlertDescription>
+          <AlertDescription>自動コピーできませんでした。上の文章を選択して手動でコピーしてください。</AlertDescription>
         </Alert>
       ) : null}
-    </div>
+    </>
   );
 
   if (generationFailed) {
@@ -136,7 +141,7 @@ export function DraftPanel({
       <section className="space-y-4">
         {/* 読み上げ役割（進行中の読み上げを中断するライブリージョン）は変種から部品が決める。
             面の側で役割を手書きすると、部品の分岐と二重管理になる。 */}
-        <Alert variant="destructive">
+        <Alert variant="destructive" role={undefined}>
           <AlertDescription>
             下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。
           </AlertDescription>
@@ -198,8 +203,8 @@ export function DraftPanel({
       />
       <div className="flex flex-col gap-3">
         {/* 客向け面の主操作は拡大の区分で全幅（正典 7.9 / 7.10）。寸法の実値は部品の側が持つ。 */}
-        <Button size="lg" className="w-full" type="button" onClick={handleCopy}>
-          コピーして投稿する
+        <Button size="lg" className="w-full" type="button" onClick={handleCopy} disabled={copying || regenerating} aria-busy={copying}>
+          {copying ? <><Spinner aria-hidden aria-label="" />コピー中…</> : 'コピーして投稿する'}
         </Button>
         <Button
           variant="outline"

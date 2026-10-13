@@ -6,7 +6,8 @@
 // 並べる。予約・来店は「表示する / 表示しない」の 2 択にする。
 // 規則の値（40 文字・10 件）は @fwlm/db/survey-settings-rules の 1 箇所から読み、画面に数値を書かない。
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { toast } from '@fwlm/ui/components/app-toaster';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Card, CardContent } from '@fwlm/ui/components/card';
@@ -15,6 +16,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@fwlm/ui/compon
 import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { RadioGroup, RadioGroupItem } from '@fwlm/ui/components/radio-group';
+import { Spinner } from '@fwlm/ui/components/spinner';
 import type { SurveySettingsCategory, SurveySettingsTarget } from '@fwlm/db';
 import {
   TARGET_LABEL_ERROR_MESSAGES,
@@ -32,7 +34,12 @@ export type SettingsMutation = (
 ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 
 /** 1 つの操作を流し、成功なら案内を、失敗なら誤りの文言を返す（null は成功）。 */
-type Run = (method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown, success: string) => Promise<string | null>;
+interface PendingAction { readonly key: string; readonly label: string }
+type Run = (method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown, success: string, action: PendingAction) => Promise<string | null>;
+
+function ActionLabel({ pending, actionKey, children }: { pending: PendingAction | null; actionKey: string; children: React.ReactNode }) {
+  return pending?.key === actionKey ? <><Spinner aria-hidden aria-label="" />{pending.label}</> : children;
+}
 
 const PENDING_NOTICE =
   'ここで登録した料理名・ドリンク名は、新しいアンケートの準備ができしだいお客様の画面に表示されます。今お客様が使っているアンケートは変わりません。';
@@ -55,21 +62,39 @@ export function SurveySettingsEditor({
   readonly data: SurveySettingsResponse;
   readonly mutate: SettingsMutation;
 }): React.JSX.Element {
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const pendingRef = useRef(false);
+  const busy = pending !== null;
+  const [slow, setSlow] = useState(false);
   const [notice, setNotice] = useState('');
 
-  const run: Run = async (method, path, body, success) => {
-    setBusy(true);
+  useEffect(() => {
+    if (pending === null) { setSlow(false); return; }
+    const timer = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(timer);
+  }, [pending]);
+
+  const run: Run = async (method, path, body, success, action) => {
+    if (pendingRef.current) return '処理中です。完了までお待ちください。';
+    pendingRef.current = true;
+    setPending(action);
     setNotice('');
     try {
       const result = await mutate(method, path, body);
       if (result.ok) {
         setNotice(success);
+        toast.success(success);
         return null;
       }
+      toast.error(result.message);
       return result.message;
+    } catch {
+      const message = '保存できませんでした。入力内容は残っています。時間をおいてもう一度お試しください。';
+      toast.error(message);
+      return message;
     } finally {
-      setBusy(false);
+      pendingRef.current = false;
+      setPending(null);
     }
   };
 
@@ -78,15 +103,15 @@ export function SurveySettingsEditor({
 
   return (
     <div className="flex flex-col gap-8">
-      {/* 案内と、操作の結果を読み上げへ届ける行（成功の案内）を 1 つの束にする。行は空のときも置いたままにし
-          （書き換えとして読み上げさせるため）、束の内側の狭い間隔だけを取らせる。誤りは操作した場所の近くに出す。 */}
+      {/* 結果の読み上げは Toast に集約する。画面内には確認・復旧に必要な案内を残す。 */}
       <div className="flex flex-col gap-2">
         {data.structuredEnabled ? null : (
-          <Alert>
+          <Alert role={undefined}>
             <AlertDescription>{PENDING_NOTICE}</AlertDescription>
           </Alert>
         )}
-        <p role="status">{notice}</p>
+        <p>{notice}</p>
+        <p role="status">{pending === null ? '' : slow ? '保存に時間がかかっています。画面を閉じずにこのままお待ちください。' : pending.label}</p>
       </div>
       {targetCategories.map((category) => (
         <TargetSection
@@ -94,11 +119,12 @@ export function SurveySettingsEditor({
           category={category}
           targets={data.targets.filter((t) => t.categoryCode === category.code)}
           busy={busy}
+          pending={pending}
           run={run}
         />
       ))}
       {toggleable.map((category) => (
-        <CategoryVisibility key={category.code} category={category} busy={busy} run={run} />
+        <CategoryVisibility key={category.code} category={category} busy={busy} pending={pending} run={run} />
       ))}
     </div>
   );
@@ -110,11 +136,13 @@ function TargetSection({
   category,
   targets,
   busy,
+  pending,
   run,
 }: {
   readonly category: SurveySettingsCategory;
   readonly targets: readonly SurveySettingsTarget[];
   readonly busy: boolean;
+  readonly pending: PendingAction | null;
   readonly run: Run;
 }): React.JSX.Element {
   const active = targets.filter((t) => t.active);
@@ -129,7 +157,7 @@ function TargetSection({
     const [moved] = ids.splice(index, 1);
     ids.splice(index + delta, 0, moved!);
     setError(
-      await run('PUT', SURVEY_SETTINGS_PATHS.order, { categoryCode: category.code, targetIds: ids }, '並び順を保存しました。'),
+      await run('PUT', SURVEY_SETTINGS_PATHS.order, { categoryCode: category.code, targetIds: ids }, '並び順を保存しました。', { key: `move:${active[index]!.id}:${delta}`, label: '移動中…' }),
     );
   };
 
@@ -145,7 +173,7 @@ function TargetSection({
         </span>
       </div>
       {error === null ? null : (
-        <Alert variant="destructive">
+        <Alert variant="destructive" role={undefined}>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
@@ -165,6 +193,7 @@ function TargetSection({
                   first={index === 0}
                   last={index === active.length - 1}
                   busy={busy}
+                  pending={pending}
                   run={run}
                   onMove={(delta) => move(index, delta)}
                   onError={setError}
@@ -181,6 +210,7 @@ function TargetSection({
         limit={limit}
         hidden={hidden}
         busy={busy}
+        pending={pending}
         run={run}
       />
       {hidden.length === 0 ? null : (
@@ -193,6 +223,7 @@ function TargetSection({
                 <Button
                   variant="outline"
                   disabled={busy || atLimit}
+                  aria-busy={pending?.key === `enable:${target.id}`}
                   aria-label={`「${target.label}」を再表示する`}
                   onClick={async () =>
                     setError(
@@ -201,11 +232,12 @@ function TargetSection({
                         SURVEY_SETTINGS_PATHS.target(target.id),
                         { active: true },
                         `「${target.label}」を再表示しました。`,
+                        { key: `enable:${target.id}`, label: '再表示中…' },
                       ),
                     )
                   }
                 >
-                  再表示
+                  <ActionLabel pending={pending} actionKey={`enable:${target.id}`}>再表示</ActionLabel>
                 </Button>
               </li>
             ))}
@@ -222,6 +254,7 @@ function TargetRow({
   first,
   last,
   busy,
+  pending,
   run,
   onMove,
   onError,
@@ -231,6 +264,7 @@ function TargetRow({
   readonly first: boolean;
   readonly last: boolean;
   readonly busy: boolean;
+  readonly pending: PendingAction | null;
   readonly run: Run;
   readonly onMove: (delta: -1 | 1) => Promise<void>;
   readonly onError: (message: string | null) => void;
@@ -244,12 +278,14 @@ function TargetRow({
   if (editing) {
     const save = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
       event.preventDefault();
+      if (busy) return;
       const invalid = checkLabel(value);
       if (invalid) {
         setFieldError(invalid);
+        toast.error(invalid);
         return;
       }
-      const error = await run('PATCH', SURVEY_SETTINGS_PATHS.target(target.id), { label: value }, '名前を変更しました。');
+      const error = await run('PATCH', SURVEY_SETTINGS_PATHS.target(target.id), { label: value }, '名前を変更しました。', { key: `rename:${target.id}`, label: '保存中…' });
       if (error) setFieldError(error);
       else setEditing(false);
     };
@@ -262,6 +298,7 @@ function TargetRow({
               id={inputId}
               value={value}
               autoComplete="off"
+              disabled={busy}
               aria-invalid={fieldError !== null}
               aria-describedby={fieldError ? errorId : undefined}
               onChange={(event) => {
@@ -272,11 +309,11 @@ function TargetRow({
             <FieldDescription>
               {lengthOf(value)} / {TARGET_LABEL_MAX_LENGTH} 文字
             </FieldDescription>
-            {fieldError === null ? null : <FieldError id={errorId}>{fieldError}</FieldError>}
+            {fieldError === null ? null : <FieldError id={errorId} role={undefined}>{fieldError}</FieldError>}
           </Field>
           <div className="flex gap-2">
-            <Button type="submit" disabled={busy}>
-              保存する
+            <Button type="submit" disabled={busy} aria-busy={pending?.key === `rename:${target.id}`}>
+              <ActionLabel pending={pending} actionKey={`rename:${target.id}`}>保存する</ActionLabel>
             </Button>
             <Button
               type="button"
@@ -312,15 +349,16 @@ function TargetRow({
         >
           編集
         </Button>
-        <Button variant="outline" disabled={busy || first} aria-label={`「${target.label}」を上へ移動する`} onClick={() => onMove(-1)}>
-          ↑ 上へ
+        <Button variant="outline" disabled={busy || first} aria-busy={pending?.key === `move:${target.id}:-1`} aria-label={`「${target.label}」を上へ移動する`} onClick={() => onMove(-1)}>
+          <ActionLabel pending={pending} actionKey={`move:${target.id}:-1`}>↑ 上へ</ActionLabel>
         </Button>
-        <Button variant="outline" disabled={busy || last} aria-label={`「${target.label}」を下へ移動する`} onClick={() => onMove(1)}>
-          ↓ 下へ
+        <Button variant="outline" disabled={busy || last} aria-busy={pending?.key === `move:${target.id}:1`} aria-label={`「${target.label}」を下へ移動する`} onClick={() => onMove(1)}>
+          <ActionLabel pending={pending} actionKey={`move:${target.id}:1`}>↓ 下へ</ActionLabel>
         </Button>
         <Button
           variant="outline"
           disabled={busy}
+          aria-busy={pending?.key === `disable:${target.id}`}
           aria-label={`「${target.label}」を非表示にする`}
           onClick={async () =>
             onError(
@@ -329,11 +367,12 @@ function TargetRow({
                 SURVEY_SETTINGS_PATHS.disableTarget(target.id),
                 undefined,
                 `「${target.label}」を非表示にしました。`,
+                { key: `disable:${target.id}`, label: '非表示にしています…' },
               ),
             )
           }
         >
-          非表示
+          <ActionLabel pending={pending} actionKey={`disable:${target.id}`}>非表示</ActionLabel>
         </Button>
       </div>
     </li>
@@ -347,6 +386,7 @@ function AddTargetForm({
   limit,
   hidden,
   busy,
+  pending,
   run,
 }: {
   readonly category: SurveySettingsCategory;
@@ -355,6 +395,7 @@ function AddTargetForm({
   readonly limit: number;
   readonly hidden: readonly SurveySettingsTarget[];
   readonly busy: boolean;
+  readonly pending: PendingAction | null;
   readonly run: Run;
 }): React.JSX.Element {
   const [value, setValue] = useState('');
@@ -365,9 +406,11 @@ function AddTargetForm({
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
+    if (busy || atLimit) return;
     const invalid = checkLabel(value);
     if (invalid) {
       setFieldError(invalid);
+      toast.error(invalid);
       return;
     }
     const normalized = normalizeTargetLabel(value);
@@ -379,6 +422,7 @@ function AddTargetForm({
       SURVEY_SETTINGS_PATHS.targets,
       { categoryCode: category.code, label: value },
       reshown ? `非表示にしていた「${label}」を再表示しました。` : `「${label}」を追加しました。`,
+      { key: `add:${category.code}`, label: '追加中…' },
     );
     if (error) {
       setFieldError(error);
@@ -399,7 +443,7 @@ function AddTargetForm({
           placeholder={category.code === 'food' ? '例: 刺身盛り合わせ' : '例: 自家製レモンサワー'}
           aria-invalid={fieldError !== null}
           aria-describedby={[descriptionId, fieldError ? errorId : null].filter(Boolean).join(' ')}
-          disabled={atLimit}
+          disabled={busy || atLimit}
           onChange={(event) => {
             setValue(event.target.value);
             setFieldError(null);
@@ -410,11 +454,11 @@ function AddTargetForm({
             ? targetLimitMessage(category.label, limit)
             : `この名前がお客様のアンケートに表示されます（${lengthOf(value)} / ${TARGET_LABEL_MAX_LENGTH} 文字）`}
         </FieldDescription>
-        {fieldError === null ? null : <FieldError id={errorId}>{fieldError}</FieldError>}
+        {fieldError === null ? null : <FieldError id={errorId} role={undefined}>{fieldError}</FieldError>}
       </Field>
       <div>
-        <Button type="submit" disabled={busy || atLimit}>
-          追加する
+        <Button type="submit" disabled={busy || atLimit} aria-busy={pending?.key === `add:${category.code}`}>
+          <ActionLabel pending={pending} actionKey={`add:${category.code}`}>追加する</ActionLabel>
         </Button>
       </div>
     </form>
@@ -426,10 +470,12 @@ function AddTargetForm({
 function CategoryVisibility({
   category,
   busy,
+  pending,
   run,
 }: {
   readonly category: SurveySettingsCategory;
   readonly busy: boolean;
+  readonly pending: PendingAction | null;
   readonly run: Run;
 }): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
@@ -446,6 +492,7 @@ function CategoryVisibility({
         SURVEY_SETTINGS_PATHS.category(category.code),
         { enabled },
         enabled ? `${category.label}をアンケートに表示します。` : `${category.label}をアンケートに表示しません。`,
+        { key: `category:${category.code}`, label: '保存中…' },
       ),
     );
   };
@@ -457,7 +504,7 @@ function CategoryVisibility({
       </Heading>
       <p className="text-sm">予約を受けていないお店は「表示しない」を選ぶと、この質問がアンケートから外れます。</p>
       {error === null ? null : (
-        <Alert variant="destructive">
+        <Alert variant="destructive" role={undefined}>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
@@ -476,6 +523,7 @@ function CategoryVisibility({
           <FieldLabel htmlFor={offId}>表示しない</FieldLabel>
         </Field>
       </RadioGroup>
+      {pending?.key === `category:${category.code}` ? <p className="flex items-center gap-2"><Spinner aria-hidden aria-label="" />保存中…</p> : null}
     </section>
   );
 }

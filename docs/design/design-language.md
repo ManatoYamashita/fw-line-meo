@@ -311,10 +311,12 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 ### 7.5 overlay 系は操作結果の Toast だけを例外とする
 
 **Dialog / Popover / Tooltip / Tabs は 4 面すべてで新規ベンダリングしない。** Select は標準要素を
-共通部品で包む。管理ダッシュボードだけは、非同期操作の成功・失敗を画面遷移後も見失わせないため、
+共通部品で包む。管理ダッシュボード・店舗詳細・客向けアンケートでは、非同期操作の成功・失敗を画面遷移後も見失わせないため、
 `Sonner` の Toast を共通の通知面として使う。Toaster はルートに 1 つだけ置き、通知には利用者が
 理解できる結果と次の行動だけを記す。API・SDK・例外の内部メッセージをそのまま表示してはならない。
-各操作は Toast とは別に、実行中の押しボタンへ Spinner または処理中の文言を示し、重複実行を止める。
+各操作は Toast とは別に、実行中の押しボタンへ Spinner と処理中の文言を示し、重複実行を止める。
+結果の読み上げは Toast に集約し、同じ結果を残す画面内の案内はライブリージョンにしない。
+HTTP が成功でも下書きの生成が失敗した場合は失敗として通知し、コピー成功は Clipboard の完了後に通知する。
 Toast の状態色は検証済みの意味色へ接続し、狭い画面では左右余白を含めて表示幅に収める。
 
 **Toast は白い面に本文色の文字で描き、状態は左上の角から左辺に沿うにじみとアイコンの意味色で示す。**
@@ -335,7 +337,7 @@ QR の行直下パネル・利用者編集の行直下パネル・停止確認�
 Toast へ置き換えない。Toast は操作結果の通知だけを担い、入力に結び付く検証エラーや、利用者が
 次の行動を取るまで残す必要がある案内は従来どおり画面内にも置く。
 
-由来: `.kiro/specs/ui-airbnb-foundation/design.md` の D6、Issue #342
+由来: `.kiro/specs/ui-airbnb-foundation/design.md` の D6、Issue #342・#450
 
 ### 7.6 写真前提の意匠は採らない
 
@@ -729,6 +731,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 
 | ファイル | export | 役割 |
 |---|---|---|
+| `app-toaster.tsx` | `AppToaster`, `TOASTER_POSITION`, `toast` | 非同期操作の結果を右下に通知する共有Toast |
 | `alert.tsx` | `Alert`, `AlertAction`, `AlertDescription`, `AlertTitle` | 通知（既定・成功・危険） |
 | `alert-dialog.tsx` | `AlertDialog`, `AlertDialogAction`, `AlertDialogCancel`, `AlertDialogContent`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogHeader`, `AlertDialogTitle`, `AlertDialogTrigger` | 確認ダイアログ（応答を求める。背景の押下では閉じない・既定の焦点はキャンセル） |
 | `badge.tsx` | `Badge`, `badgeVariants` | 状態ラベル |

@@ -33,28 +33,28 @@ test.describe('アンケート設定（LIFF 面）', () => {
 
     await food.getByLabel('料理名を追加').fill('海鮮丼');
     await food.getByRole('button', { name: '追加する' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '「海鮮丼」を追加しました。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '「海鮮丼」を追加しました。' })).toBeVisible();
     await expect(food.getByText('表示中 3 / 10 件')).toBeVisible();
 
     await food.getByRole('button', { name: '「海鮮丼」を上へ移動する' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '並び順を保存しました。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '並び順を保存しました。' })).toBeVisible();
     expect(api.activeLabels('food')).toEqual([LONGEST_LABEL, '海鮮丼', '焼き鳥5種盛り']);
 
     await food.getByRole('button', { name: '編集：「海鮮丼」の名前を変更する' }).click();
     await food.getByLabel('料理名を変更').fill('特製海鮮丼');
     await food.getByRole('button', { name: '保存する' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '名前を変更しました。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '名前を変更しました。' })).toBeVisible();
 
     await food.getByRole('button', { name: '「特製海鮮丼」を非表示にする' }).click();
     await expect(food.getByRole('button', { name: '「特製海鮮丼」を再表示する' })).toBeVisible();
     await food.getByRole('button', { name: '「名物もつ煮」を再表示する' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '「名物もつ煮」を再表示しました。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '「名物もつ煮」を再表示しました。' })).toBeVisible();
     expect(api.activeLabels('food')).toEqual([LONGEST_LABEL, '焼き鳥5種盛り', '名物もつ煮']);
 
     // 予約・来店の表示を切り替える。
     const visit = page.getByRole('region', { name: '予約・来店' });
     await visit.getByRole('radio', { name: '表示しない' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '予約・来店をアンケートに表示しません。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '予約・来店をアンケートに表示しません。' })).toBeVisible();
 
     expect(api.requests.map((r) => `${r.method} ${r.path}`)).toEqual([
       'GET /api/survey-settings',
@@ -83,7 +83,7 @@ test.describe('アンケート設定（LIFF 面）', () => {
     const drink = page.getByRole('region', { name: 'ドリンク' });
     await drink.getByLabel('ドリンク名を追加').fill('生ビール');
     await drink.getByRole('button', { name: '追加する' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '「生ビール」を追加しました。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '「生ビール」を追加しました。' })).toBeVisible();
     await expect(drink.getByText('表示中 2 / 10 件')).toBeVisible();
     expect(api.activeLabels('drink')).toEqual(['自家製レモンサワー', '生ビール']);
     expect(api.activeLabels('food')).toEqual([LONGEST_LABEL, '焼き鳥5種盛り']);
@@ -95,7 +95,7 @@ test.describe('アンケート設定（LIFF 面）', () => {
     for (let i = 1; i <= 8; i++) {
       await food.getByLabel('料理名を追加').fill(`追加の料理${i}`);
       await food.getByRole('button', { name: '追加する' }).click();
-      await expect(page.getByRole('status').filter({ hasText: `「追加の料理${i}」を追加しました。` })).toBeVisible();
+      await expect(page.locator('[data-sonner-toast]').filter({ hasText: `「追加の料理${i}」を追加しました。` })).toBeVisible();
     }
     await expect(food.getByText('表示中 10 / 10 件')).toBeVisible();
     await expect(food.getByLabel('料理名を追加')).toBeDisabled();
@@ -126,9 +126,9 @@ test.describe('アンケート設定（LIFF 面）', () => {
 
     // ほかの操作をしても、structuredEnabled を送らない。
     await page.getByRole('region', { name: '予約・来店' }).getByRole('radio', { name: '表示しない' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '予約・来店をアンケートに表示しません。' })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '予約・来店をアンケートに表示しません。' })).toBeVisible();
     await page.getByRole('region', { name: '予約・来店' }).getByRole('radio', { name: '表示する' }).click();
-    await expect(page.getByRole('status').filter({ hasText: /予約・来店をアンケートに表示します/ })).toBeVisible();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: /予約・来店をアンケートに表示します/ })).toBeVisible();
     expect(api.requests.filter((r) => r.method !== 'GET').map((r) => r.path)).toEqual([
       '/api/survey-settings/categories/reservation_visit',
       '/api/survey-settings/categories/reservation_visit',

@@ -129,7 +129,8 @@ describe('StructuredSurveyForm', () => {
     pickTwo();
     submit();
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toContain('満足度');
+    expect(screen.getByText('満足度を選択してください')).toBeDefined();
+    expect(screen.queryByRole('alert')).toBeNull();
     star(2);
     submit();
     expect(onSubmit).toHaveBeenCalledWith({ star: 2, positiveSelections: [SERVICE_BOTH], concernSelections: [] });

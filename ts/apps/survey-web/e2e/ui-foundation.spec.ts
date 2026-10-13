@@ -2207,7 +2207,7 @@ test('本番画面の通知に変種の状態色が実描画で届いている',
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   await page.getByRole('button', { name: /コピー/ }).click();
-  await expect(page.getByText(/コピーしました/)).toBeVisible();
+  await expect(page.locator('[data-slot="alert"]').getByText(/コピーしました/)).toBeVisible();
 
   const successAlert = page.locator('[data-slot="alert"]');
   await expect(successAlert, '下書き画面に成功の通知が 1 つに解決されていない').toHaveCount(1);

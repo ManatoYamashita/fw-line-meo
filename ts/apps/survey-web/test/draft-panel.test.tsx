@@ -106,7 +106,7 @@ describe('DraftPanel', () => {
 
   it('生成失敗時は失敗メッセージ＋再試行＋投稿導線を表示する（3.9）', () => {
     render(<DraftPanel {...props({ generationFailed: true })} />);
-    expect(screen.getByRole('alert').textContent).toContain('失敗');
+    expect(screen.getByText(/下書きの生成に失敗/).textContent).toContain('失敗');
     expect(screen.getByRole('button', { name: /もう一度生成/ })).toBeDefined();
     expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
   });
@@ -147,8 +147,6 @@ describe('DraftPanel', () => {
 
 /** 生成中に読み上げ領域へ出す補足。処理中の図形と「作成しています…」は押しボタンの側が持つ。 */
 const GENERATING = '回答内容をもとに文章を作成しています';
-const COPIED = 'コピーしました。投稿画面に貼り付けてください。';
-const MANUAL = '自動コピーできませんでした。上の文章を選択して手動でコピーしてください。';
 const FAILED = '下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。';
 
 function classesOf(element: Element): string[] {
@@ -205,6 +203,7 @@ function theLiveRegion(): HTMLElement {
  */
 function theNoticeBody(): HTMLElement | null {
   const children = Array.from(theLiveRegion().children);
+  if (children.length === 0) return document.querySelector('[data-slot="alert"]');
   expect(children.length, `通知の中身が ${children.length} 個あります（0 個か 1 個）`).toBeLessThanOrEqual(1);
   return (children[0] as HTMLElement | undefined) ?? null;
 }
@@ -313,14 +312,14 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     // 強い側は失われていないこと（同じ箇条書きのもう半分）。
     cleanup();
     render(<DraftPanel {...props({ generationFailed: true })} />);
-    expect(screen.queryAllByRole('alert'), '中断させる通知の個数').toHaveLength(1);
+    expect(screen.queryAllByRole('alert'), '結果の読み上げは Toast が担う').toHaveLength(0);
   });
 
   it('コピー後に再生成しても読み上げ領域は 1 つのまま（生成中が勝つ）', async () => {
     const { rerender } = render(<DraftPanel {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: /コピー/ }));
     expect(await screen.findByText(/コピーしました/)).toBeDefined();
-    expect(announcedText(theLiveRegion()), 'コピー直後の読み上げ文字列').toBe(COPIED);
+    expect(announcedText(theLiveRegion()), 'コピー直後の読み上げ文字列').toBe('');
 
     // `draft` は変えない。着手前の実装はここで領域が 2 つ並んだ（`copyState` が idle へ戻らない）。
     rerender(<DraftPanel {...props({ regenerating: true })} />);
@@ -366,17 +365,17 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     ).toBeNull();
   });
 
-  it('コピー結果の 2 通りが同じ読み上げ領域に載る', async () => {
+  it('コピー結果は画面内の読み上げ領域に重ねない（Toast が通知する）', async () => {
     render(<DraftPanel {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: /コピー/ }));
     expect(await screen.findByText(/コピーしました/)).toBeDefined();
-    expect(announcedText(theLiveRegion()), '自動コピー成功時の読み上げ文字列').toBe(COPIED);
+    expect(announcedText(theLiveRegion()), '自動コピー成功時の読み上げ文字列').toBe('');
 
     cleanup();
     vi.stubGlobal('navigator', {});
     render(<DraftPanel {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: /コピー/ }));
-    expect(announcedText(theLiveRegion()), '手動コピー案内時の読み上げ文字列').toBe(MANUAL);
+    expect(announcedText(theLiveRegion()), '手動コピー案内時の読み上げ文字列').toBe('');
   });
 
   // design.md「Error Handling」の割り当て: 成功の通知は成功の変種、処理中は図形。
@@ -542,10 +541,11 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     }
   });
 
-  it('生成失敗の通知は部品を通り、読み上げ強度が中断のまま', () => {
+  it('生成失敗の案内は部品を通り、Toastと二重に読み上げない', () => {
     render(<DraftPanel {...props({ generationFailed: true })} />);
-    const alerts = screen.queryAllByRole('alert');
-    expect(alerts, '危険の通知の個数が 1 つではありません').toHaveLength(1);
+    const alerts = document.querySelectorAll<HTMLElement>('[data-slot="alert"]');
+    expect(alerts, '危険の案内の個数が 1 つではありません').toHaveLength(1);
+    expect(alerts[0]!.getAttribute('role')).toBeNull();
     const alert = alerts[0]!;
     expect(alert.getAttribute('data-slot'), '通知が部品を通っていません').toBe('alert');
     expect(
