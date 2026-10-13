@@ -153,13 +153,20 @@ export function SurveyShell({ storeId, storeName, survey, pageToken, googleRevie
         toast.error(message);
         return;
       }
+      // 表示中の下書きがある状態の再生成の失敗（Issue #450）は、その下書きを残す。失敗専用の画面へ切り替えると
+      // 入力欄ごと消え、客が手で直した文章も失われる。draft を同じ値のまま渡すので、パネルの側の編集内容も
+      // 上書きされない（パネルは draft が変わったときだけ編集内容を差し替える）。失敗専用の画面は、まだ
+      // 下書きが 1 つも無い（初回の生成が失敗した）ときだけに使う。
+      const failed = json.generation === 'failed';
+      const hadDraft = !draftState.generationFailed;
       setDraftState({
-        draft: json.draft ?? draftState.draft,
+        draft: failed ? draftState.draft : (json.draft ?? draftState.draft),
         sessionToken: json.sessionToken ?? draftState.sessionToken,
         regenerationsLeft: json.regenerationsLeft ?? draftState.regenerationsLeft,
-        generationFailed: json.generation === 'failed',
+        generationFailed: failed && !hadDraft,
       });
-      if (json.generation === 'failed') toast.error('下書きの生成に失敗しました。もう一度生成するか、そのまま投稿画面へお進みください。');
+      if (failed && hadDraft) toast.error('別の文章を作成できませんでした。今の文章はそのまま編集・コピーできます。');
+      else if (failed) toast.error('下書きの生成に失敗しました。もう一度生成するか、そのまま投稿画面へお進みください。');
       else toast.success('別の口コミ文を作成しました。');
     } catch {
       const message = '通信に失敗しました。文章は残っています。時間をおいて再度お試しください。';

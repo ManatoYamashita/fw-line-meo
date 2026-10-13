@@ -46,8 +46,14 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
 
   // structured の sessionToken（v: 2・Issue #439）は structured の再生成へ。legacy の検証（v: 1）は v: 2 を通さないので、
   // 先に分岐する。legacy の経路はこの分岐の後で従来どおり。
+  // verifyStructured の EXPIRED は署名と v: 2 の形を確かめた後にしか返らない（＝本物の structured の token の期限切れ）。
+  // legacy の検証へ流すと v: 2 を INVALID と読んで TOKEN_INVALID に化けるので、ここで返す。INVALID のときだけ legacy の
+  // token の可能性として legacy の検証へ進む。
   const structured = deps.tokens.verifyStructured(sessionToken);
   if (structured.ok) return handleStructuredDrafts(req, structured.value, deps);
+  if (structured.error === 'EXPIRED') {
+    return error(deps, 400, 'TOKEN_EXPIRED', 'お手数ですが最初から回答し直してください');
+  }
 
   const verified = deps.tokens.verify(sessionToken);
   if (!verified.ok) {

@@ -60,6 +60,30 @@ describe('回答・再生成の通知（#450）', () => {
     else { expect(notices.error).toHaveBeenCalledTimes(1); expect(notices.success).not.toHaveBeenCalled(); }
     if (kind === 'network error') expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('下書きの文章');
   });
+
+  it('既存の下書きがある状態の再生成が HTTP 200 / generation:failed でも、編集済みの文章と操作を保つ', async () => {
+    const failed = new Response(JSON.stringify({ generation: 'failed', draft: null, sessionToken: 'token2', regenerationsLeft: 3 }), { status: 200 });
+    const fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(failed);
+    vi.stubGlobal('fetch', fetch);
+    renderShell(); submit();
+    await act(async () => {});
+    const textarea = screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '自分で直した文章' } });
+    vi.clearAllMocks();
+    fireEvent.click(screen.getByRole('button', { name: /別の文章を生成/ }));
+    await act(async () => {});
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('自分で直した文章');
+    expect((screen.getByRole('button', { name: 'コピーして投稿する' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: /別の文章を生成（残り3回）/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole('link', { name: 'Google のクチコミを書く' })).toBeDefined();
+    expect(notices.error).toHaveBeenCalledTimes(1);
+    expect(notices.success).not.toHaveBeenCalled();
+    expect(screen.queryByText(/下書きの生成に失敗しました。再試行するか/)).toBeNull();
+    // 再生成の失敗の後も、編集を続けられる
+    fireEvent.change(screen.getByLabelText('口コミ下書き'), { target: { value: 'さらに直した文章' } });
+    expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('さらに直した文章');
+  });
 });
 
 describe('コピーの通知（#450）', () => {

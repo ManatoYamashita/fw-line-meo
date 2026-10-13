@@ -167,6 +167,53 @@ describe('structured の下書き（Issue #439）', () => {
   });
 });
 
+// sessionToken の検証結果の分類。structured（v: 2）の期限切れは legacy の検証へ流さず TOKEN_EXPIRED で返す
+// （legacy の検証は v: 2 を INVALID と読むので、流すと期限切れが TOKEN_INVALID に化ける）。
+describe('再生成の sessionToken の分類（v: 1 / v: 2）', () => {
+  const SESSION_TTL_PAST = 365 * 24 * 60 * 60 * 1000;
+  const later = createSessionTokenService(KEY, () => Date.now() + SESSION_TTL_PAST);
+  const LEGACY_MATERIAL = { storeName: 'テスト店', star: 5 as const, aspectLabels: ['味'] };
+  const run = async (sessionToken: string, at: 'now' | 'later' = 'now') => {
+    const deps = { ...draftsDeps(port()), tokens: at === 'now' ? tokens : later };
+    const res = await handleDrafts(post('http://x/api/drafts', { sessionToken }), deps);
+    return { status: res.status, body: (await res.json()) as { generation?: string; error?: { code?: string } } };
+  };
+  const v2 = () => tokens.signStructured({ storeId: STORE, structured: SNAPSHOT, attempt: 0 });
+  const v1 = () => tokens.sign({ storeId: STORE, material: LEGACY_MATERIAL, attempt: 0 });
+
+  it('v2 有効 → 200', async () => {
+    const { status, body } = await run(v2());
+    expect(status).toBe(200);
+    expect(body.generation).toBe('ok');
+  });
+
+  it('v2 期限切れ → 400 TOKEN_EXPIRED', async () => {
+    const { status, body } = await run(v2(), 'later');
+    expect(status).toBe(400);
+    expect(body.error?.code).toBe('TOKEN_EXPIRED');
+  });
+
+  it('v2 改ざん → 400 TOKEN_INVALID', async () => {
+    const [payload, mac] = v2().split('.');
+    const tampered = `${payload}.${mac!.slice(0, -2)}${mac!.endsWith('AA') ? 'BB' : 'AA'}`;
+    const { status, body } = await run(tampered);
+    expect(status).toBe(400);
+    expect(body.error?.code).toBe('TOKEN_INVALID');
+  });
+
+  it('v1 期限切れ → 400 TOKEN_EXPIRED', async () => {
+    const { status, body } = await run(v1(), 'later');
+    expect(status).toBe(400);
+    expect(body.error?.code).toBe('TOKEN_EXPIRED');
+  });
+
+  it('v1 有効 → 200', async () => {
+    const { status, body } = await run(v1());
+    expect(status).toBe(200);
+    expect(body.generation).toBe('ok');
+  });
+});
+
 // 本番の Realizer（偽の Gemini）を通した受付・再生成。ユーザーに返す下書きは必ず LLM の文で、safe fallback は呼ばない。
 // 内部の作り直し（最大 3 回）は再生成の残り回数を 1 回しか消費せず、generation error では消費しない。
 describe('ユーザーに表示する下書きは通常生成だけ（safe fallback を返さない）', () => {
