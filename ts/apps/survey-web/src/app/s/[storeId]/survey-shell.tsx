@@ -39,6 +39,8 @@ type Phase = 'answering' | 'drafting' | 'answered';
 
 interface DraftState {
   draft: string;
+  /** 生成に成功した回数（DraftPanel の draftRevision）。失敗では進めない。 */
+  revision: number;
   sessionToken: string;
   regenerationsLeft: number;
   generationFailed: boolean;
@@ -118,6 +120,7 @@ export function SurveyShell({ storeId, storeName, survey, pageToken, googleRevie
       }
       setDraftState({
         draft: json.draft ?? '',
+        revision: 0,
         sessionToken: json.sessionToken ?? '',
         regenerationsLeft: json.regenerationsLeft ?? 0,
         generationFailed: json.generation === 'failed',
@@ -161,6 +164,7 @@ export function SurveyShell({ storeId, storeName, survey, pageToken, googleRevie
       const hadDraft = !draftState.generationFailed;
       setDraftState({
         draft: failed ? draftState.draft : (json.draft ?? draftState.draft),
+        revision: failed ? draftState.revision : draftState.revision + 1,
         sessionToken: json.sessionToken ?? draftState.sessionToken,
         regenerationsLeft: json.regenerationsLeft ?? draftState.regenerationsLeft,
         generationFailed: failed && !hadDraft,
@@ -221,6 +225,7 @@ export function SurveyShell({ storeId, storeName, survey, pageToken, googleRevie
       {error === null ? null : <Alert variant="destructive" role={undefined}><AlertDescription>{error}</AlertDescription></Alert>}
       <DraftPanel
         draft={draftState.draft}
+        draftRevision={draftState.revision}
         generationFailed={draftState.generationFailed}
         regenerationsLeft={draftState.regenerationsLeft}
         googleReviewUrl={googleReviewUrl}

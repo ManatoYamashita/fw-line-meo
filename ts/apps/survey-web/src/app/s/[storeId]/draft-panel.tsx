@@ -17,6 +17,7 @@ type CopyState = 'idle' | 'copied' | 'manual';
 
 export function DraftPanel({
   draft,
+  draftRevision,
   generationFailed,
   regenerationsLeft,
   googleReviewUrl,
@@ -32,11 +33,12 @@ export function DraftPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const noteId = useId();
 
-  // 再生成で新しい下書きが届いたら編集内容を更新する（再生成は上書き）。
+  // 再生成で新しい下書きが届いたら編集内容を更新する（再生成は上書き）。同じ文面が届いた成功も
+  // draftRevision で見分ける。失敗ではシェルが draft・draftRevision とも据え置くので、編集内容は残る。
   useEffect(() => {
     setText(draft);
     setCopyState('idle');
-  }, [draft]);
+  }, [draft, draftRevision]);
 
   useEffect(() => {
     if (!regenerating && !copying) { setSlow(false); return; }

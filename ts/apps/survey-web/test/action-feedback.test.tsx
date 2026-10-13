@@ -84,6 +84,48 @@ describe('回答・再生成の通知（#450）', () => {
     fireEvent.change(screen.getByLabelText('口コミ下書き'), { target: { value: 'さらに直した文章' } });
     expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('さらに直した文章');
   });
+
+  it('再生成が成功して前と同じ文面が返っても、編集内容を新しい下書きで置き換える', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response());
+    vi.stubGlobal('fetch', fetch);
+    renderShell(); submit();
+    await act(async () => {});
+    fireEvent.change(screen.getByLabelText('口コミ下書き'), { target: { value: '自分で直した文章' } });
+    fireEvent.click(screen.getByRole('button', { name: /別の文章を生成/ }));
+    await act(async () => {});
+    expect(notices.success).toHaveBeenLastCalledWith('別の口コミ文を作成しました。');
+    expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('下書きの文章');
+  });
+
+  it('再生成の失敗で返った sessionToken で次の再生成を送り、成功すると下書き・token・残り回数が進む', async () => {
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(json({ generation: 'failed', draft: null, sessionToken: 'token2', regenerationsLeft: 3 }))
+      .mockResolvedValueOnce(json({ generation: 'ok', draft: '新しい下書き', sessionToken: 'token3', regenerationsLeft: 2 }))
+      .mockResolvedValueOnce(json({ generation: 'ok', draft: 'さらに新しい下書き', sessionToken: 'token4', regenerationsLeft: 1 }));
+    vi.stubGlobal('fetch', fetch);
+    const draftsBody = (call: number) => JSON.parse((fetch.mock.calls[call] as [string, RequestInit])[1].body as string) as unknown;
+    renderShell(); submit();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: /別の文章を生成/ }));
+    await act(async () => {});
+    expect(draftsBody(1)).toEqual({ sessionToken: 'token' });
+
+    fireEvent.click(screen.getByRole('button', { name: /別の文章を生成/ }));
+    await act(async () => {});
+    expect(fetch.mock.calls[2]![0]).toBe('/api/drafts');
+    expect(draftsBody(2)).toEqual({ sessionToken: 'token2' });
+    expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('新しい下書き');
+    expect(screen.getByRole('button', { name: '別の文章を生成（残り2回）' })).toBeDefined();
+    expect(notices.success).toHaveBeenLastCalledWith('別の口コミ文を作成しました。');
+
+    // 成功で返った新しい token へ進んでいる
+    fireEvent.click(screen.getByRole('button', { name: /別の文章を生成/ }));
+    await act(async () => {});
+    expect(draftsBody(3)).toEqual({ sessionToken: 'token3' });
+    expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('さらに新しい下書き');
+  });
 });
 
 describe('コピーの通知（#450）', () => {

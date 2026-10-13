@@ -216,11 +216,13 @@ test.describe('structured の送信中・下書き・再生成', () => {
     await expect(page.getByLabel('口コミ下書き')).toHaveCount(0);
   });
 
-  test('再生成に失敗しても回数は減らさず、もう一度生成すると成功の下書きへ戻る', async ({ page }) => {
+  test('表示中の下書きがある再生成の失敗は、編集済みの文章と操作を残し、回数も減らさない。もう一度押すと成功する', async ({ page }) => {
     await openStructuredSurvey(page);
     await page.getByRole('button', { name: '星4' }).click();
     await pickTwoPositives(page);
     await submitAndWaitForDraft(page);
+    const draft = page.getByLabel('口コミ下書き');
+    await draft.fill('自分の言葉に直した文章です。');
 
     // サーバーが生成失敗を返したときの応答（同じ sessionToken・残り回数は据え置き）をブラウザ側で返す。
     await page.route('**/api/drafts', async (route) => {
@@ -232,12 +234,24 @@ test.describe('structured の送信中・下書き・再生成', () => {
       });
     });
     await regenerateButton(page).click();
-    await expect(page.getByText('下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。')).toBeVisible();
+    // 失敗は Toast で伝え、失敗専用の画面（初回の生成の失敗だけに使う）へは切り替えない。
+    const failedToast = page.locator('[data-sonner-toast]').filter({ hasText: '別の文章を作成できませんでした' });
+    await expect(failedToast).toBeVisible();
+    await expect(failedToast).toHaveAttribute('data-type', 'error');
+    await expect(draft).toBeVisible();
+    await expect(draft).toHaveValue('自分の言葉に直した文章です。');
+    await expect(page.getByRole('button', { name: 'コピーして投稿する' })).toBeEnabled();
+    await expect(regenerateButton(page)).toHaveText('別の文章を生成（残り3回）');
+    await expect(regenerateButton(page)).toBeEnabled();
+    await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
+    await expect(page.getByText('下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'もう一度生成する' })).toHaveCount(0);
     await page.unroute('**/api/drafts');
 
-    // 実サーバーへ。失敗では試行を消費していないので、成功して残り 2 回になる。
-    await page.getByRole('button', { name: 'もう一度生成する' }).click();
-    await expect(page.getByLabel('口コミ下書き')).toHaveValue(/刺身盛り合わせの味が良かったです。/);
+    // 実サーバーへ。失敗では試行を消費していないので、成功して残り 2 回になり、新しい下書きへ置き換わる。
+    await regenerateButton(page).click();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '別の口コミ文を作成しました。' })).toHaveAttribute('data-type', 'success');
+    await expect(draft).toHaveValue(/刺身盛り合わせの味が良かったです。/);
     await expect(regenerateButton(page)).toHaveText('別の文章を生成（残り2回）');
   });
 

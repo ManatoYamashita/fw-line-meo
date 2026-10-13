@@ -22,6 +22,9 @@ export interface SurveyFormProps {
 // 下書きパネル（葉・4.5）の props 契約。API 呼出はシェルが所有し、パネルはコールバックのみ。
 export interface DraftPanelProps {
   draft: string;
+  // 生成に成功するたびにシェルが進める番号。再生成が前と同じ文面を返しても、成功したなら編集内容を置き換える
+  // （文面の比較だけだと、客が直した文章が残ったまま「別の口コミ文を作成しました」と通知してしまう）。
+  draftRevision?: number;
   generationFailed: boolean;
   regenerationsLeft: number;
   googleReviewUrl: string;
