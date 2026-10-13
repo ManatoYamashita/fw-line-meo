@@ -94,6 +94,12 @@ function definitionPairs(list: Element): readonly (readonly [string, string])[] 
 const REVIEW_LINKS_PER_ROW = 2;
 
 /**
+ * アンケート設定の画面への導線の本数（Issue #437）。表示できた分岐（ready）にだけ 1 本ある。書込の手段は
+ * 遷移先の別の面が持ち、この面はリンクを置くだけである（リンクはデータを送信できない）。
+ */
+const SURVEY_SETTINGS_LINKS = 1;
+
+/**
  * 店舗の口コミ一覧への導線の文言（Issue #303）。実装の定数ではなく文字列で固定する。定数を参照すると、
  * 文言を変える改変が両側で同時に動いて緑のまま通る。
  */
@@ -424,8 +430,27 @@ describe('store detail page', () => {
       const switchLink = screen.getByText('店舗を切り替える');
       expect(switchLink.getAttribute('href')).toBe('/store');
       // 切替リンクは storeId を持たないため、遷移先で再び 409 → 選択画面へ戻る。
-      // 残りは新着口コミ 1 件が持つ帰属の導線（Issue #287）と、店舗の口コミ一覧への導線（Issue #303）。
-      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + 1);
+      // 残りは新着口コミ 1 件が持つ帰属の導線（Issue #287）と、店舗の口コミ一覧への導線（Issue #303）と、
+      // アンケート設定への導線（Issue #437）。
+      expect(container.querySelectorAll('a')).toHaveLength(
+        REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + SURVEY_SETTINGS_LINKS + 1,
+      );
+    });
+
+    it('表示中の店舗のアンケート設定へ、店舗のヒントを付けた導線を出す（Issue #437）', async () => {
+      const fetchMock = stubFetch({ ok: true, status: 200, body: { ...mockResult, stores: MULTI_STORES } });
+
+      render(<StorePage />);
+      await waitFor(() => {
+        expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
+      });
+
+      const link = screen.getByRole('link', { name: 'アンケート設定' });
+      expect(link.getAttribute('href')).toBe('/store/survey-settings?storeId=store-1');
+      // 導線を足しても、この面が発行するのは /api/detail の GET だけである。
+      for (const [, init] of fetchMock.mock.calls as unknown as [string, RequestInit][]) {
+        expect(init.method).toBe('GET');
+      }
     });
 
     it('単一店舗の場合は「店舗を切り替える」リンクを出さない', async () => {
@@ -439,8 +464,10 @@ describe('store detail page', () => {
 
       expect(screen.queryByText('店舗を切り替える')).toBeNull();
       // 切替リンクは 0 本。残るのは新着口コミ 1 件が持つ帰属の導線（Issue #287）と、
-      // 読めていない新着が残るときの口コミ一覧への導線（Issue #303）である。
-      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS);
+      // 読めていない新着が残るときの口コミ一覧への導線（Issue #303）と、アンケート設定への導線（Issue #437）である。
+      expect(container.querySelectorAll('a')).toHaveLength(
+        REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + SURVEY_SETTINGS_LINKS,
+      );
     });
 
     it('選択画面にも書込操作を一切含まない（新経路を no-write 保証と同格にする）', async () => {
@@ -550,7 +577,8 @@ describe('store detail page', () => {
         // その口コミごとに元の口コミへ辿れなければならないので、リンクは口コミの件数に比例する。
         // 3 本目は店舗の口コミ一覧への導線（Issue #303）。この固定値は新着 2 件のうち 1 件しか
         // 内容を出せない状態に対応する。全件を出せる日には出ない（末尾の専用の試験が両向きを固定する）。
-        linkNames: ['山田太郎さん', 'Google Maps で見る', 'Google Maps で口コミをすべて見る'],
+        // 先頭はアンケート設定への導線（Issue #437）。主見出しの直下に置く。
+        linkNames: ['アンケート設定', '山田太郎さん', 'Google Maps で見る', 'Google Maps で口コミをすべて見る'],
       },
     ];
 
@@ -720,8 +748,10 @@ describe('store detail page', () => {
       const link = screen.getByRole('link', { name: '店舗を切り替える' });
       expect(link.getAttribute('href')).toBe('/store');
       // 切替リンク 1 本と、新着口コミ 1 件が持つ帰属の導線（Issue #287）、
-      // 店舗の口コミ一覧への導線（Issue #303）。
-      expect(container.querySelectorAll('a')).toHaveLength(REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + 1);
+      // 店舗の口コミ一覧への導線（Issue #303）、アンケート設定への導線（Issue #437）。
+      expect(container.querySelectorAll('a')).toHaveLength(
+        REVIEW_LINKS_PER_ROW + STORE_REVIEWS_LINKS + SURVEY_SETTINGS_LINKS + 1,
+      );
     });
 
     it('店舗選択待ちには通知の役割を持ち込まない（Req 3.5）', async () => {

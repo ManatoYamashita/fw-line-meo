@@ -136,6 +136,18 @@ EOF
   fx_write ts/apps/store-detail/app/api/detail/route.ts <<'EOF'
 export async function GET() { return new Response('ok'); }
 EOF
+  # アンケート設定（Issue #437）の宣言済みの 6 ルート。実リポジトリと同じ木にして、緑の対照に含める。
+  for r in \
+    'survey-settings' \
+    'survey-settings/targets' \
+    'survey-settings/targets/order' \
+    'survey-settings/targets/[targetId]' \
+    'survey-settings/targets/[targetId]/disable' \
+    'survey-settings/categories/[categoryCode]'; do
+    fx_write "ts/apps/store-detail/app/api/${r}/route.ts" <<'EOF'
+export async function GET() { return new Response('ok'); }
+EOF
+  done
 
   CNOC_DB_URL='postgres://stub@127.0.0.1:5432/stub'
 }
@@ -185,8 +197,10 @@ expect_output_matches 'PASS \(A0\): owners と stores のテーブルが存在�
 expect_output_matches 'PASS \(A1\): owners・stores にオプトアウト相当の列は存在しない'
 expect_output_matches 'PASS \(B1\): .*（参照 2 件）'
 expect_output_matches 'PASS \(B2\): .*（走査 6 ディレクトリ）'
-expect_output_matches 'PASS \(B3\): .*（route\.ts 1 件）'
-expect_output_matches 'PASS \(B4\): .*（走査 4 ディレクトリ・6 ファイル）'
+# route.ts は /api/detail と、アンケート設定（Issue #437）の宣言済み 6 本の計 7 件。B4 の走査ファイルも、
+# store-detail/app 配下の 6 本ぶん増える。
+expect_output_matches 'PASS \(B3\): .*（route\.ts 7 件）'
+expect_output_matches 'PASS \(B4\): .*（走査 4 ディレクトリ・12 ファイル）'
 t_end
 
 t_begin 'check-no-optional-capabilities: DATABASE_URL が無ければ無言終了しない'
@@ -320,7 +334,16 @@ fx_write ts/apps/store-detail/app/api/optout/route.ts <<'EOF'
 export async function POST() { return new Response('ok'); }
 EOF
 cnoc_run
-expect_red 'store-detail に /api/detail 以外のルートが見つかりました'
+expect_red 'store-detail に宣言していないルートが見つかりました'
+t_end
+
+t_begin 'check-no-optional-capabilities: アンケート設定の配下でも、宣言していないルートが生えると赤（Issue #437）'
+cnoc_fixture
+fx_write 'ts/apps/store-detail/app/api/survey-settings/targets/[targetId]/delete/route.ts' <<'EOF'
+export async function POST() { return new Response('ok'); }
+EOF
+cnoc_run
+expect_red 'store-detail に宣言していないルートが見つかりました'
 t_end
 
 # ---------------------------------------------------------------------------
@@ -381,7 +404,7 @@ t_end
 
 t_begin 'check-no-optional-capabilities: route.ts が 0 件になると赤'
 cnoc_fixture
-rm -f "${FX}/ts/apps/store-detail/app/api/detail/route.ts"
+find "${FX}/ts/apps/store-detail/app/api" -name route.ts -exec rm -f {} +
 cnoc_run
 expect_red 'route.ts が 1 件もありません'
 t_end

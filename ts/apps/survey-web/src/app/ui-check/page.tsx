@@ -13,6 +13,7 @@
 //
 // 利用者向けの導線からは一切リンクせず、検索エンジンにも登録させない（下の metadata）。
 import type { Metadata } from 'next';
+import { TOASTER_POSITION } from '@fwlm/ui/components/app-toaster';
 
 import { Alert, AlertDescription, AlertTitle } from '@fwlm/ui/components/alert';
 import { Badge } from '@fwlm/ui/components/badge';
@@ -75,6 +76,7 @@ export default function UiCheckPage() {
     // 2 つになると main を 1 つに解決している e2e の複数の検証が同時に壊れる。
     // 見出しと説明文は PageHeader が描く（この面の h1 は 1 つだけである）。
     <PageShell width="sm" className="flex flex-col gap-4">
+      <span hidden data-toaster-position={TOASTER_POSITION} />
       <PageHeader
         title="UI 基盤の検証面"
         description="自動検証（E2E）専用のページです。利用者向けの機能はありません。"

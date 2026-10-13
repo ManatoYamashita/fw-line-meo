@@ -1,3 +1,4 @@
+import { surveyDefinitionFingerprint, type StoreSurveyDefinition, type StructuredSurveyDefinition } from '@fwlm/db';
 import type { AspectOption } from './types';
 import { logSurveyPageViewed, type SurveyLogger } from '../../../lib/structured-log';
 
@@ -14,8 +15,11 @@ export interface StoreForPage {
 
 export interface SurveyPageDeps {
   findStore: (id: string) => Promise<StoreForPage | null>;
+  /** 店舗の有効なアンケート定義（@fwlm/db の readStoreSurveyDefinition）。1 回の表示につき 1 回だけ読む。 */
+  readDefinition: (storeId: string) => Promise<StoreSurveyDefinition>;
   listAspects: () => Promise<AspectOption[]>;
   signPage: (storeId: string) => string;
+  signStructuredPage: (storeId: string, surveyRevision: number, definitionFingerprint: string) => string;
   buildReviewUrl: (placeId: string) => string;
   log: SurveyLogger;
 }
@@ -24,8 +28,19 @@ export type SurveyPageData =
   | { kind: 'unavailable' }
   | {
       kind: 'ready';
+      /** 設定行が無い・structured_enabled = false の店舗（既定）。従来の観点の一覧で回答する。 */
+      mode: 'legacy';
       store: { id: string; name: string };
       aspects: AspectOption[];
+      pageToken: string;
+      googleReviewUrl: string;
+    }
+  | {
+      kind: 'ready';
+      /** structured survey の店舗（Issue #438）。店舗別の定義で段階的に回答する。 */
+      mode: 'structured';
+      store: { id: string; name: string };
+      definition: StructuredSurveyDefinition;
       pageToken: string;
       googleReviewUrl: string;
     };
@@ -42,6 +57,22 @@ export async function loadSurveyPageData(
   if (!store || store.placeStatus !== 'confirmed' || store.suspendedAt !== null || !store.placeId) {
     return { kind: 'unavailable' };
   }
+  // 種類は店舗の設定で決まる（Issue #438）。定義は 1 回だけ読み、structured なら **その結果** から指紋を計算して
+  // 版と一緒に pageToken へ署名する。送信時は回答受付が現在の定義を読み直して同じ計算で照合する。
+  const definition = await deps.readDefinition(store.id);
+  const storeView = { id: store.id, name: store.name };
+  const googleReviewUrl = deps.buildReviewUrl(store.placeId);
+  if (definition.mode === 'structured') {
+    logSurveyPageViewed(deps.log, store.id);
+    return {
+      kind: 'ready',
+      mode: 'structured',
+      store: storeView,
+      definition,
+      pageToken: deps.signStructuredPage(store.id, definition.revision, surveyDefinitionFingerprint(definition)),
+      googleReviewUrl,
+    };
+  }
   const aspects = await deps.listAspects();
   // ファネルの分母（Issue #137 段階3）。**回答可能な状態で表示できたときだけ** 数える。
   // 店舗不在・place 未確定は客が回答へ進める状態ではなく、離脱として数えると
@@ -49,9 +80,10 @@ export async function loadSurveyPageData(
   logSurveyPageViewed(deps.log, store.id);
   return {
     kind: 'ready',
-    store: { id: store.id, name: store.name },
+    mode: 'legacy',
+    store: storeView,
     aspects,
     pageToken: deps.signPage(store.id),
-    googleReviewUrl: deps.buildReviewUrl(store.placeId),
+    googleReviewUrl,
   };
 }

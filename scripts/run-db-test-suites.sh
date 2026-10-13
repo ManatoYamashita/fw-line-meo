@@ -73,6 +73,7 @@ RUN_SCRIPTS=(
     'check_docs.sh'
     'check_no_optional_capabilities.sh'
     'check_store_suspension_privileges.sh'
+    'check_structured_survey_privileges.sh'
 )
 
 # SKIP 形式: `<ファイル名>|<Issue>|<理由>`。**理由と追跡先の無い SKIP を作らない。**
@@ -197,6 +198,10 @@ for sh_path in "${TEST_DIR}"/*.sh; do
             # 追加の env は要らない（DATABASE_URL は export 済み）。ロールを作って infra/sql/grants.sql を
             # 当てるので、接続ユーザーに CREATEROLE が要る。無ければスクリプト自身が赤にする。
             # 作ったロールは終了時にスクリプトが片付けるので、後続の TS 統合テストの DB を汚さない。
+            ;;
+        check_structured_survey_privileges.sh)
+            # 追加の env は要らない（DATABASE_URL は export 済み）。check_store_suspension_privileges.sh と
+            # 同じくロールを作って grants.sql を当てるので CREATEROLE が要り、ロールは終了時に片付ける。
             ;;
     esac
 

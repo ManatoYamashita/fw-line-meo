@@ -1253,25 +1253,24 @@ test.describe('動き低減設定が有効な環境', () => {
     const measured = await (async () => {
       try {
         await page.getByRole('button', { name: /別の文章を生成/ }).click();
-        await expect(page.locator('[role="status"] [data-slot="spinner"]')).toBeVisible();
+        // 処理中の図形と文言は再生成の押しボタン自身が持つ（読み上げ領域には補足の文だけを出す）。
+        await expect(page.locator('button[aria-busy="true"] [data-slot="spinner"]')).toBeVisible();
         return await page.evaluate(() => {
-          const region = document.querySelector('[role="status"]');
-          if (region === null) return null;
-          const spinner = region.querySelector('[data-slot="spinner"]');
+          const button = document.querySelector('button[aria-busy="true"]');
+          if (button === null) return null;
+          const spinner = button.querySelector('[data-slot="spinner"]');
           const icon = spinner === null ? null : spinner.querySelector('svg');
           // 文言は「直下のテキストノード」であることが要る。図形の読み上げ名へ畳むと
           // 部品内部の読み上げ専用要素へ落ち、動きの低減が要求されていない環境で見えなくなる。
           const range = document.createRange();
           const own: string[] = [];
           let width = 0;
-          for (const paragraph of Array.from(region.querySelectorAll('p'))) {
-            for (const node of Array.from(paragraph.childNodes)) {
-              const text = (node.textContent ?? '').trim();
-              if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
-                own.push(text);
-                range.selectNodeContents(node);
-                width = Math.max(width, range.getBoundingClientRect().width);
-              }
+          for (const node of Array.from(button.childNodes)) {
+            const text = (node.textContent ?? '').trim();
+            if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
+              own.push(text);
+              range.selectNodeContents(node);
+              width = Math.max(width, range.getBoundingClientRect().width);
             }
           }
           return {
@@ -1288,7 +1287,7 @@ test.describe('動き低減設定が有効な環境', () => {
     })();
 
     // 空振り防止: 領域と図形を実際に掴めていること。掴めていないと以下はすべて空の比較になる。
-    expect(measured, '本番の下書き画面に読み上げ領域が無い').not.toBeNull();
+    expect(measured, '本番の下書き画面に処理中の押しボタンが無い').not.toBeNull();
     const cue = measured as NonNullable<typeof measured>;
     expect(cue.spinnerPresent, '処理中の図形を掴めていない（再生成が始まっていない疑い）').toBe(
       true,
@@ -1298,7 +1297,7 @@ test.describe('動き低減設定が有効な環境', () => {
       cue.ownText,
       `処理中の文言が直下のテキストノードとして置かれていない（実測「${cue.ownText}」）。` +
         '図形の読み上げ名へ畳むと、動きの低減が要求されていない環境で文言が見えなくなる',
-    ).toBe('生成中…');
+    ).toBe('別の文章を作成しています…');
     expect(
       cue.width,
       `処理中の文言が実描画で ${cue.width}px しかない（可視化されていない）`,
@@ -2241,7 +2240,7 @@ test('本番画面の通知に変種の状態色が実描画で届いている',
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   await page.getByRole('button', { name: /コピー/ }).click();
-  await expect(page.getByText(/コピーしました/)).toBeVisible();
+  await expect(page.locator('[data-slot="alert"]').getByText(/コピーしました/)).toBeVisible();
 
   const successAlert = page.locator('[data-slot="alert"]');
   await expect(successAlert, '下書き画面に成功の通知が 1 つに解決されていない').toHaveCount(1);

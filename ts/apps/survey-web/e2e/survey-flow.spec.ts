@@ -59,7 +59,7 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
   await expect(page.getByText(/ご自身の言葉に直してから投稿してください。/)).toBeVisible();
 
   await page.getByRole('button', { name: /コピー/ }).click();
-  await expect(page.getByText(/コピーしました/)).toBeVisible();
+  await expect(page.locator('[data-slot="alert"]').getByText(/コピーしました/)).toBeVisible();
 
   const link = page.getByRole('link', { name: /クチコミを書く/ });
   await expect(link).toHaveAttribute('href', WRITEREVIEW);

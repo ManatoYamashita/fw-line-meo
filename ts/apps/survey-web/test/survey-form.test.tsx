@@ -53,7 +53,8 @@ describe('SurveyForm', () => {
     const { onSubmit } = setup();
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toContain('満足度');
+    expect(screen.getByText('満足度を選択してください')).toBeDefined();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('星＋良かった点＋一言を送信する', () => {
@@ -98,7 +99,7 @@ describe('SurveyForm', () => {
 
   it('送信中は送信ボタンが無効', () => {
     setup(true);
-    expect((screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '口コミ文を作成しています…' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('空白のみの一言は comment を含めない', () => {
@@ -264,8 +265,9 @@ describe('回答フォーム: 着手前から在った契約（意匠の適用�
 
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
 
-    const alerts = screen.queryAllByRole('alert');
-    expect(alerts, 'ライブリージョンの個数が 1 つではありません').toHaveLength(1);
+    const alerts = document.querySelectorAll<HTMLElement>('[data-slot="alert"]');
+    expect(alerts, '案内の個数が 1 つではありません').toHaveLength(1);
+    expect(alerts[0]!.getAttribute('role'), '結果は Toast が読み上げる').toBeNull();
     expect(alerts[0]!.getAttribute('data-slot'), '通知が部品を通っていません').toBe('alert');
     // 相等で固定する。包含だと文言の後付け（「※」「必須」などの追記）が素通りし、
     // 読み上げられる名前を変えないという要求（Requirement 3.2）を守れない。
@@ -282,7 +284,7 @@ describe('回答フォーム: 着手前から在った契約（意匠の適用�
     cleanup();
     setup(true);
     expect(
-      (screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: '口コミ文を作成しています…' }) as HTMLButtonElement).disabled,
       '送信中に無効化されていません',
     ).toBe(true);
   });

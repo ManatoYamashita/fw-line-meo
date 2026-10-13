@@ -73,6 +73,11 @@ export interface LogFields {
    * 有限集合の識別子だけで、下書き本文・一言・生成指示は載せない。
    */
   readonly residualClaims?: string;
+  /**
+   * structured の下書き（Natural LLM Realizer・Issue #439）の claim の件数。素材の厚みだけを表す匿名の数で、
+   * Target 名・facet・一言は載せない。
+   */
+  readonly claimCount?: number;
 
   // --- 店舗詳細面 ---
 

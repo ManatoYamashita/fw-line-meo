@@ -141,3 +141,185 @@ rm -f /tmp/gk   # 使い終わったら必ず消す
 許容水準は **11.1%（案A 適用後の実測値）を受け入れる**ことで合意済み。ゼロは要求しない。案B はその残差をさらに刈るための層であり、作り直してもなお残る場合は下書きを客へ返して `factuality_residual` として記録する（客の Google 投稿導線を殺さない）。
 
 是正案の比較は、**同じデータセットで前後を測って**行うこと。
+
+## structured survey の評価（Issue #440）
+
+structured survey（店舗別の Target・facet・極性・Issue #436 / #438）の回答から作る下書きを、**本番の通常生成が自然で、安全か**を確かめるための評価一式。評価の対象は **通常生成**（Natural LLM Realizer・`src/lib/draft/structured/realizer.ts`・ユーザーに表示する唯一の経路）と **safe fallback**（`structuredFallbackDraft`・内部用の事実性の対照で、ユーザーには表示しない）の 2 つだけである（以前の A/B/C/D の方式比較はやめた。方式比較そのものは目的ではない）。
+
+目的は 2 つあり、片方だけでは足りない。
+
+1. **事実性**: 新しい具体的事実を作らない（hard gate・決定的に判定）
+2. **自然さ**: 実際に Google 口コミへ投稿したくなる文章にする。アンケートの読み上げ・safe fallback 風の羅列にしない（主評価は人手の採点・自動の数値は診断）
+
+AI detector は自然さの正解に使わない。
+
+### 生成の方針（自然さ重視）
+
+**新しい具体的事実は創作しない。ただし、回答から自然に導ける主観的・意味を保った膨らませ方は許す。**
+
+| 区分 | 例 |
+|---|---|
+| 許す: 意味を保った言い換え | 味 →「おいしかった」／接客の丁寧さ →「丁寧に対応してもらえた」／量 →「満足感のある量だった」／居心地 →「居心地よく過ごせた」 |
+| 許す: 弱い主観（controlled inference） | 「少し」「やや」「ちょっと」「満足できた」「印象に残った」「過ごしやすかった」「しっかり楽しめた」 |
+| 渡さない: 星 | 星から総評・理由・強い言葉を作らせない（総評の定型「全体として満足です」が毎回付いたため、星はプロンプトに渡さない） |
+| 許す: 統合・省略・並べ替え | 同じ主題はまとめる・順番を変える・主語を繰り返さない。ただし positive / concern の片側を丸ごと落とさない・料理名は落とさない |
+| 許す: 一言の口調 | 「めっちゃよかった！」ならくだけた書き方でよい（人物像は推測しない） |
+| 止める: 具体的な事実 | 数値・具体時間（20分）／原因（混雑・人手不足・予約客が多かった）／観測していない属性（新鮮・脂・香ばしい・サクサク）／人物の様子（笑顔・忙しそう・親切そう）／来店の文脈（友人と・デート・ランチ・仕事帰り）／意向（また行きたい・おすすめ）／強い強度（とても・最高・絶対） |
+| 止める: 回答に無い対象 | 未回答の Target・facet・カテゴリ。Target だけ（項目の指定なし）の回答は「良かった」「印象に残った」まで（味・量・見た目を補わない） |
+| 止める: exact overlap の理由 | 「味について良かった点もあり、気になる点もありました」は通す。「最初は美味しかったが後半は味が落ちた」は止める |
+
+**ユーザーに表示する下書きは通常生成だけである。** 最初の生成も「別の文章を生成」も、Gemini の文を runtime hard gate で検査し、失格なら作り直す（最大 3 回）。最後まで作れなければ generation error（客の画面は既存の「下書きの生成に失敗しました」と再試行）で、safe fallback の文は返さない。safe fallback（`fallback.ts`）は内部用（単体テスト・評価の事実性の対照・将来の非常用）である。
+
+### 本番の runtime hard gate（明確な捏造だけ）
+
+**文章は Gemini に任せ、コードは明確な捏造だけを止める**（2026-10-11 の大幅簡素化）。本番の作り直しの引き金は `gate.ts` の `runtimeViolations` だけで、次の種類に限る: 新しい具体的事実（属性・店員の様子・回答に無い料理名・「無かった」の断定）・数字 / 日時 / 固有名詞・来店の文脈（同行者・時間帯・経緯）・勝手な因果（回答どうし・一言との結びつけ）・exact overlap の理由・明確な極性の反転・待ち時間ゼロなどへの具体化・意向（再訪・推奨・期待）・誇張の強度。positive と concern の両方を回答したのにどちらかを **完全に** 無視した下書き（下書き全体にその極性の言い方が 1 つも無い）も作り直す。
+
+本番で **見ない** もの: claim ごとの coverage（Target 名・facet 名を文章に出すこと・各 claim を個別に回収すること）・未回答の facet / カテゴリの表面語・style（「満足できる内容」・文末の繰り返し・体言止め など）。これらは評価の offline gate と診断（`styleWarnings`・`style.ts`）だけが見る。
+
+LLM の呼び出しは 1 回の下書き（1 回の送信・1 回の「別の文章を生成」）で最大 3 回で、作り直すのは上の明確な捏造と生成の失敗のときだけ。3 回とも使えなければ generation error。
+
+### 再生成（「別の文章を生成」）
+
+初回の生成も再生成も、**同じ回答から同じプロンプトでもう一度生成するだけ** である。文体・文章の組み立て・項目の並び・総評の有無の抽選や、再生成で「前と違う構成にする」指示は置かない（実 Gemini で品質のばらつきの原因になった・2026-10-11）。項目の並びは回答の検証が正規化した定義の順（良かったところ → 気になったところ）。文章が多少似ても、品質が安定している方を優先し、違いは Gemini 自身の生成の揺らぎに任せる。前回の下書きはモデルへ渡さない（客の端末から戻る値を事実の源にしない）。
+
+### 構成
+
+| ファイル | 役割 |
+|---|---|
+| `structured/cases.json` | 固定ケース 15 件（A 単純 positive／B 複数 facet／C 複数 Target／D positive + concern／E 同じ Target・別 facet／F exact overlap／G Target のみ／H カテゴリ全体の facet／I1〜I3 一言あり（硬め・普通・カジュアル）／K 量・接客と入店の待ち時間（読み上げになりやすい典型）／L 予約・接客・料理の量とドリンクの種類（再生成の構成のバリエーション）／M 全体と Target の量・入店の待ち時間・接客の丁寧さが両面・料理の価格（safe fallback へ落ちた実例）／J 情報量が多い）。店名・料理名・一言はすべて架空。ケースごとに、Target の言い方（subjects）・未回答の Target（menuTargets）・一言の内容の語（commentKeywords）・固有の禁止の意味・**許す言い換え**・**失格になるべき例**を持つ |
+| `../src/lib/draft/structured/lexicon.json` | hard gate の語彙。**本番の runtime hard gate と eval が同じ語彙・同じ判定を使う**（物差しを 2 つに割らない） |
+| `structured/gates.ts` | 固定ケースの読み込み。判定の本体は `../src/lib/draft/structured/gate.ts`（本番と共有）で、ここから再輸出する |
+| `structured/methods.ts` | 評価の対象（`production`＝本番の通常生成・作り直しを含む・作れなければ下書きなし／`safe-fallback`＝事実性の対照・内部用） |
+| `structured/diagnostics.ts` | 自然さの診断（個々の合否ではない）と再生成の類似度 |
+| `structured/report.ts` | 1 本ずつの記録・集計・表と、自動の成功条件（`successChecks`） |
+| `structured/rating.ts` | 人手の採点の束と、記入済みの表の集計 |
+| `structured/structured.eval.test.ts` | 実測（`production` は `GEMINI_API_KEY` が無ければ skip し、safe fallback だけを流す） |
+| `structured/BASELINE.md` | 実測の記録と、PR 前の確認の記録 |
+| `../test/structured-eval-gates.test.ts` ／ `../test/structured-eval-tools.test.ts` ／ `../test/structured-runtime-gate.test.ts` | 検出器・境界（許す言い換え / 止める創作）・診断・採点・集計の検証。**実 API 不要で CI で常時走る** |
+
+### hard gate（自然でも、これが起きたら失格）
+
+未回答の Target（`unselectedTarget`）／未回答の facet（`unselectedFacet`）／未回答のカテゴリ（`unselectedCategory`）／新しい具体属性・人物の様子（`newAttribute`）／原因（`cause`）／時間帯（`timing`・`ungrounded:dateTime`）／同行者・来店の経緯と動機（`companion`・`visitContext:*`）／期待（`expectation`）／再訪の意向（`revisit`）／推奨（`recommendation`）／入力に無い **強い** 強度（`intensity`・「少し」「やや」は数えない）／極性の反転（`polarityReversal`）／positive・concern の片側を丸ごと落とす（`positiveDropped`・`concernDropped`）／Target を落とす（`targetDropped`）／exact overlap の理由の創作（`overlapReason`・Issue #418）／一言の内容を別の claim の理由として結ぶ（`commentLinkage`）／「無かった」の断定（`absence`）／素材に無い固有名詞・数値（`ungrounded:*`）／ケース固有の禁止の意味（`caseForbidden:*`）。
+
+一言に同じ意味があれば、その分類は数えない（客が自分で書いたことは素材である・既存の検出器と同じ意味論）。判定は高 precision に倒す。自然な文章まで過剰に弾くと、作り直しと generation error が増え、読み上げの文章へ戻すしかなくなるからである。
+
+### runtime hard gate と offline eval gate（Issue #439）
+
+判定の実装は 1 つ（`../src/lib/draft/structured/gate.ts`・語彙は `lexicon.json`）で、本番と評価が同じものを使う。違うのは入力が持つ知識だけである。
+
+| 区分 | どこで | 入力が持つもの | 止め方 |
+|---|---|---|---|
+| runtime hard gate | 本番の通常生成の事後検証 | 回答の素材・一言・回答時点の定義の未回答の Target の名前（素材の `unselectedTargets`・LLM へは渡さない） | 作り直し（最大 3 回）→ 作れなければ generation error（下書きなし） |
+| offline eval gate | `eval/structured`（実 Gemini の実測・手動） | 上に加えて、固定ケースの Target の言い方（`subjects`・`menuTargets[].aliases`）・一言の内容の語（`commentKeywords`）・ケース固有の禁止の意味 | release の判断（runtime が拾えない残差） |
+| 人手の採点 | `.rating.md` | （語彙で決まらないもの・自然さ） | release の判断 |
+
+- 未回答の Target: runtime は名前の **完全一致**（NFKC・名前の中の空白の有無を問わない・1 文字の名前は照合しない）だけを拾う。言い換え（「刺身盛り合わせ」→「刺し盛り」）は推測せず、固定ケースの言い方で評価だけが拾う。
+- 一言の因果づけ: 一言の語が理由の接続（ので・ため・〜たから など）の **前** にあり、同じ文に別の claim の主題があるときだけ拾う。主題を省いた因果は拾えず、人手の採点で測る。
+- **runtime hard gate を通った = 事実どおりの保証ではない。** 語彙の判定は違反の下限で、runtime で止められない残りは offline eval gate と人手の確認（実 Gemini の目視・任意の採点）で見る。
+
+### coverage は文字列一致ではない
+
+「刺身盛り合わせ / 味 / positive」は「刺身盛り合わせがおいしかったです」で満たす。判定は文単位で、**主題**（Target の言い方・カテゴリ全体の facet の意味の手がかり）と**極性の手がかり**が同じ文にあるかを見る。主題を省略した文は直前の文の Target を引き継ぐ（全体の印象を述べる文は引き継がない）。facet の意味まで述べたか（`facetMentioned`）は診断に留める（統合・省略を許すため）。
+
+### 自然さの診断（傾向の観察）
+
+safe fallback 風（`fallbackLike`: 「〜良かったです。〜気になりました。」の羅列）・1 文 1 主題の並べ（`subjectPerSentence`・入力の順なら `checklistLike`）・3 字以上の項目名をそのまま書いた割合（`labelVerbatim`）・「良かったです」の反復・同じ語尾の連続・「全体として」「一方で」「好印象」などの句・店名で始める率・再訪 / 推奨で締める率・星の読み上げ・一言より感嘆符が増えたか・字数（1 claim あたり・最長）・同じ入力の再生成の類似度。`production` の文は常に LLM の文である（本番の経路は safe fallback を返さない）。
+
+### 成功条件（実測するときの目安）
+
+自動（`report.ts` の `successChecks`・実測の表の末尾に PASS / FAIL で出る）:
+
+| 条件 | 目安 |
+|---|---|
+| 明確な捏造（本番の runtime hard gate の種類を、固定ケースの言い方つきで判定・ケース固有の禁止を含む） | 0 件 |
+| exact overlap の理由の創作 | 0 件 |
+| positive / concern の片側を完全に無視した | 0 件 |
+| 下書きを作れなかった（generation error）率 | ≤ 10% |
+
+人手（`.rating.md` と `.ratings.csv`・**評価者 2 名以上**・`rating.ts` の `aggregateRatings` で集計）:
+
+| 条件 | 目安 |
+|---|---|
+| 創作の指摘（`fabrication` = 1） | 0 件 |
+| 自然さ（naturalness）の平均 | ≥ 4.0（評価者ごとにも ≥ 3.5） |
+| 投稿しやすさ（postability）の平均 | ≥ 4.0 |
+| 内容の忠実さ（fidelity）の平均 | ≥ 4.5 |
+
+自然さの警告（`report.ts` の `styleWarnings`・**hard fail にしない**。目安は初期値で、実 Gemini の結果を見て調整する）:
+
+| 警告 | 目安 |
+|---|---|
+| 星を渡しうるケース（★3 以外）で総評の句（全体として・全体的に・総じて）が付いた率 | ≤ 50% |
+| 「満足できる内容」「満足できるもの」のような抽象語のまとめ | ≤ 5% |
+| 気になったことが 2 つ以上あるのに「〜だけ」 | 0% |
+| 同じケースの再生成で、書き出しの 2 字がすべて同じだったケース | ≤ 50% |
+| 同じケースの再生成で、主題を述べた順がすべて同じだったケース | ≤ 50% |
+| 同じケースの再生成で、文の数がすべて同じだったケース | ≤ 70% |
+| 同じケースの再生成で、文ごとの主題の並び（文の分け方・まとめ方）がすべて同じだったケース | ≤ 30% |
+
+FAIL があれば、まず語彙の誤検出（自然な文を落としていないか）と、プロンプトの指示を見直す。目安は今回の方針で置いた初期値で、実測で根拠が揃えば BASELINE.md に理由を残して改める。
+
+### 人手の採点
+
+`EVAL_OUT` を指定すると、その隣に次を書き出す（すべてリポジトリの外）。
+
+| ファイル | 中身 |
+|---|---|
+| `<EVAL_OUT>.rating.md` | ケースごとに、本番の通常生成の最終の下書きを `S1`・`S2`… の符号で並べた採点用の本文（LLM の文か safe fallback の文かは出さない） |
+| `<EVAL_OUT>.ratings.csv` | 自然さ・投稿しやすさ・内容の忠実さ（各 1〜5）と、創作の有無（0 / 1）の記入表 |
+
+評価者は `R1` のような符号だけで記録し、名前などの個人情報をリポジトリへ入れない。評価者ごとに表を複製して記入し、行を連結して `aggregateRatings` で全体・評価者ごとの平均へ集計する。
+
+### 実行
+
+```bash
+# キーなし: safe fallback だけを流し、検出器と集計の経路を確かめる
+EVAL_OUT=/tmp/structured-eval.json pnpm --filter @fwlm/survey-web run eval:structured
+```
+
+#### 実 Gemini で本番の通常生成を測る（手動・プロンプトや hard gate を変えるとき）
+
+使うのは **自分の開発用の `GEMINI_API_KEY`** である。本番のシークレット（Secret Manager）からは取らない。キーは `.env` / `.env.local`・リポジトリ・ログ・`EVAL_OUT` の出力・シェルの履歴のどこにも残さない（入力を表示しないプロンプトで受け、その 1 コマンドの環境にだけ渡す）。`ts/` で実行する。
+
+Git Bash（Windows）/ bash:
+
+```bash
+read -rsp 'GEMINI_API_KEY: ' GEMINI_API_KEY; echo   # 入力は表示されず、履歴にも残らない（export しない）
+GEMINI_API_KEY="$GEMINI_API_KEY" GEMINI_MODEL=gemini-3.1-flash-lite EVAL_RUNS=3 \
+  EVAL_OUT="$HOME/fwlm-eval/$(date +%Y%m%d-%H%M)/structured.json" \
+  pnpm --filter @fwlm/survey-web run eval:structured
+unset GEMINI_API_KEY
+```
+
+PowerShell:
+
+```powershell
+$sec = Read-Host -AsSecureString 'GEMINI_API_KEY'   # 入力は表示されず、PSReadLine の履歴にも残らない
+try {
+  $env:GEMINI_API_KEY = [System.Net.NetworkCredential]::new('', $sec).Password
+  $env:GEMINI_MODEL = 'gemini-3.1-flash-lite'; $env:EVAL_RUNS = '3'
+  $env:EVAL_OUT = "$env:LOCALAPPDATA\fwlm-eval\$(Get-Date -Format yyyyMMdd-HHmm)\structured.json"
+  pnpm --filter @fwlm/survey-web run eval:structured
+} finally {
+  Remove-Item Env:GEMINI_API_KEY, Env:GEMINI_MODEL, Env:EVAL_RUNS, Env:EVAL_OUT -ErrorAction SilentlyContinue
+  Remove-Variable sec
+}
+```
+
+- まず 5 ケースだけ試すなら `EVAL_CASES=K-everyday-mix,A-simple-positive,B-multi-facet,D-positive-and-concern,F-exact-overlap` を足す（ローカル確認の 5 ケースと同じ素材）。
+- 同じ回答の生成の安定を見るなら `EVAL_CASES=L-reservation-drink EVAL_RUNS=4`（同じ回答を 4 回・構成の偏りと総評の頻度が表に出る）。
+- `EVAL_OUT` の親ディレクトリは無ければ作る。リポジトリの中を指すと止まる。出力（下書きの全件と採点の束）にキーは入らない。
+- 画面には集計の表・成功条件の PASS / FAIL・通常生成の経路の内訳（作り直し・generation error の本数）が出る。**通常生成が全件失敗した（キー・モデル名・通信の誤り）ときは赤になる**（下書きが 1 本も無い実測を測ったことにしない）。
+- 終わったら、集計だけを `structured/BASELINE.md` の §2 の表へ写す。実出力はリポジトリへ入れない。
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `GEMINI_API_KEY` | （なし） | 無ければ `production` を skip する（safe fallback だけを流す） |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | 本番と揃える |
+| `EVAL_RUNS` | `3` | ケース 1 件あたりの回数（再生成の類似度にも使う） |
+| `EVAL_CASES` | （全ケース） | ケースの id をカンマ区切りで絞る |
+| `EVAL_OUT` | （なし） | サンプル全件と集計を JSON で書き出し、隣に採点の束を置く。**リポジトリの外のパスでなければ止まる** |
+
+規模の目安: 15 ケース × 3 回。1 本あたり最大 3 リクエスト（runtime hard gate を落ちたときの作り直し）なので、合計 45〜135 リクエスト。
+
+`eval:factuality`（legacy の評価）は従来どおり `factuality.eval.test.ts` だけを流す。

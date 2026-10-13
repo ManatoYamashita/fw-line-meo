@@ -130,14 +130,51 @@ reject_dynamic_ts_events() {
   fi
 }
 
+# Sonner の named import は UI 通知であり、同名の error/info メソッドでもログではない。
+# ファイル全体や toast という名前を除外せず、既知の通知モジュールからの import binding だけを識別する。
+ui_notification_receivers() {
+  awk '
+    /^[[:space:]]*import[[:space:]]*\{/ { in_import = 1; statement = "" }
+    !in_import { source = source " " $0 }
+    in_import {
+      statement = statement " " $0
+      if (statement !~ /\}[[:space:]]*from/) next
+      if (statement ~ /from[[:space:]]+[\042\047](sonner|@fwlm\/ui\/components\/app-toaster)[\042\047]/) {
+        sub(/^.*\{/, "", statement)
+        sub(/\}.*$/, "", statement)
+        n = split(statement, bindings, ",")
+        for (i = 1; i <= n; i++) {
+          binding = bindings[i]
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", binding)
+          if (binding == "toast") candidates["toast"] = 1
+          else if (binding ~ /^toast[[:space:]]+as[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*$/) {
+            sub(/^toast[[:space:]]+as[[:space:]]+/, "", binding)
+            candidates[binding] = 1
+          }
+        }
+      }
+      in_import = 0
+    }
+    END {
+      for (binding in candidates) {
+        # 引数・局所宣言など同名の binding があり得るファイルでは除外しない（fail-closed）。
+        shadow = "(^|[[:space:]({,:])" binding "[[:space:]]*[:),=}]"
+        declaration = "(^|[^a-zA-Z0-9_])(const|let|var)[[:space:]]+" binding "([^a-zA-Z0-9_]|$)"
+        if (source !~ shadow && source !~ declaration) print binding
+      }
+    }
+  ' "$1" | sort -u
+}
+
 # TypeScript の実行時ログ呼び出しから事象名を抽出する。
 # `logger.info('event', ...)` / 注入された logger メソッドと、
 # `log('warn', 'event', ...)` / writeStructuredLog・correlationLog の Sink 形式を扱う。
 # optional call の log?.(...) と optional property の logger?.warn(...) も扱う。
 extract_ts_events() {
-  local file conditional_events
+  local file conditional_events ui_receivers
   file="$1"
   reject_dynamic_ts_events "$file"
+  ui_receivers="$(ui_notification_receivers "$file")"
   {
     # Sink 関数（名前付き logger / log / requestLog を含む）の level, event 形式。
     grep_optional "(^|[^a-zA-Z0-9_])[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(\\?\\.)?\\([[:space:]]*'(info|warn|error|debug)'[[:space:]]*,[[:space:]]*'[^']+'" "$file" \
@@ -150,7 +187,16 @@ extract_ts_events() {
     fi
 
     # 注入されたオブジェクト logger と、withCorrelation の戻り値を log と呼ぶ Sink。
-    grep_optional "\\.(info|warn|error|debug)[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \
+    grep_optional "[a-zA-Z0-9_?.]*\\.(info|warn|error|debug)[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \
+      | awk -v receivers="$ui_receivers" '
+          BEGIN { n = split(receivers, names, "\n"); for (i = 1; i <= n; i++) ui[names[i]] = 1 }
+          {
+            receiver = $0
+            sub(/\.(info|warn|error|debug).*/, "", receiver)
+            sub(/\?$/, "", receiver)
+            if (!(receiver in ui)) print
+          }
+        ' \
       | sed -E "s/.*\\('//; s/'$//"
     # event を第一引数に取る log 関数も扱う。level, event 形式は上の Sink 抽出が受け持つ。
     grep_optional "(^|[^a-zA-Z0-9_.])log[[:space:]]*(\\?\\.)?\\([[:space:]]*'[^']+'" "$file" \

@@ -6,6 +6,7 @@ import { PageShell } from '@fwlm/ui/components/page-shell';
 import { buildGoogleReviewUrl } from '../../../lib/google-review-url';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { writeStructuredLog } from '../../../lib/structured-log';
+import { createSurveyDefinitionReader } from '../../../lib/survey-definition-reader';
 import { loadSurveyPageData, type SurveyPageDeps } from './page-data';
 import { SurveyShell } from './survey-shell';
 
@@ -28,12 +29,18 @@ async function buildDeps(): Promise<SurveyPageDeps> {
   if (!signingKey) throw new Error('SESSION_SIGNING_KEY is required');
   const tokens = createSessionTokenService(signingKey);
   const correlationId = await requestCorrelationId();
+  const log = withCorrelation(writeStructuredLog, correlationId);
   return {
     findStore: async (id) => findStoreForSurvey(await getPool(), id),
+    // 回答受付（api/responses/route.ts）と同じ読み方・同じ設定。42P01 / 42501 を legacy として扱うのは
+    // STRUCTURED_SCHEMA_COMPAT_FALLBACK=1（完全一致）で明示的に有効にしたときだけ（記録つき）。既定・pilot・本運用では
+    // 無効で、42P01 / 42501 も投げて 5xx になる（lib/survey-definition-reader.ts）。
+    readDefinition: createSurveyDefinitionReader(getPool, log),
     listAspects: async () => listSurveyAspects(await getPool()),
     signPage: (storeId) => tokens.signPage(storeId),
+    signStructuredPage: (storeId, revision, fingerprint) => tokens.signStructuredPage(storeId, revision, fingerprint),
     buildReviewUrl: (placeId) => buildGoogleReviewUrl(placeId),
-    log: withCorrelation(writeStructuredLog, correlationId),
+    log,
   };
 }
 
@@ -62,10 +69,12 @@ export default async function SurveyPage({
       <Heading className="mb-8" level={1}>
         {data.store.name}
       </Heading>
+      {/* legacy と structured は店舗の設定で分岐する（Issue #438）。回答・下書き・投稿導線のフェーズは
+          どちらもシェルが持ち、フォームだけが変わる。 */}
       <SurveyShell
         storeId={data.store.id}
         storeName={data.store.name}
-        aspects={data.aspects}
+        survey={data.mode === 'legacy' ? { mode: 'legacy', aspects: data.aspects } : { mode: 'structured', definition: data.definition }}
         pageToken={data.pageToken}
         googleReviewUrl={data.googleReviewUrl}
       />

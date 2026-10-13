@@ -1,6 +1,6 @@
 # ER 図: four-tier-data-model / competitive-daily-summary / review-acquisition / gbp-post-review-reply
 
-fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、同（投稿導線の押下件数の匿名集計）は `db/migrations/0014_survey_review_link_tallies.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
+fw-line-meo の 4 階層データモデル（PostgreSQL）の正本 ER 図。スキーマ本体は `db/migrations/0001_four_tier_baseline.sql`、`competitive-daily-summary`（日次サマリー・配信記録）は `db/migrations/0004_competitive_daily_summary.sql`、`review-acquisition`（素材の厚みの匿名集計）は `db/migrations/0006_survey_material_tallies.sql`、同（気になった点の匿名集計・厚みへの個数の追加）は `db/migrations/0008_survey_concern_tallies.sql`、同（投稿導線の押下件数の匿名集計）は `db/migrations/0014_survey_review_link_tallies.sql`、structured survey（店舗別アンケート定義と構造化回答の匿名集計・Issue #436）は `db/migrations/0015_structured_survey_foundation.sql`、`line-on-demand-report`（通知記録の status に送らなかった理由の 3 値を追加）は `db/migrations/0010_summary_notification_statuses.sql`、書き込み境界は `db/write-boundary.md` を参照。
 
 4 階層: **運営(Operator) → 代理店(Agency) → 飲食店オーナー(Owner) → 来店客(Customer・匿名)**。
 Store（店舗）は Owner が所有する独立エンティティ（1 オーナー:N 店舗）。来店客は匿名集計のみで、識別エンティティを持たない。
@@ -23,6 +23,14 @@ erDiagram
     stores ||--o{ survey_review_link_tallies : aggregates
     survey_aspects ||--o{ survey_aspect_tallies : classifies
     survey_aspects ||--o{ survey_concern_tallies : classifies
+    stores ||--o{ survey_structured_material_tallies : aggregates
+    survey_categories ||--o{ survey_category_facets : allows
+    survey_facets ||--o{ survey_category_facets : "allowed in"
+    stores ||--o| store_survey_configs : "survey config of"
+    store_survey_configs ||--o{ store_survey_category_settings : overrides
+    survey_categories ||--o{ store_survey_category_settings : "overridden by"
+    store_survey_configs ||--o{ store_survey_targets : registers
+    survey_categories ||--o{ store_survey_targets : "target category"
     stores ||--o{ oauth_tokens : "future authorizes"
     stores ||--o{ daily_summaries : "summarized as"
     stores ||--o{ summary_deliveries : "delivered to"
@@ -54,6 +62,13 @@ erDiagram
 | survey_concern_tallies | id (uuid) | (store_id, period_month, aspect_code) unique | store_id → stores, aspect_code → survey_aspects | 気になった点の観点別の匿名集計カウンタ（`0008`） |
 | survey_material_tallies | id (uuid) | (store_id, period_month, aspect_count, concern_count, has_comment) unique | store_id → stores | 素材の厚み（良かった点の選択数×気になった点の選択数×一言の有無）の匿名集計カウンタ |
 | survey_review_link_tallies | id (uuid) | (store_id, period_month) unique | store_id → stores | 投稿導線の押下件数の匿名集計カウンタ（`0014`） |
+| survey_categories | code (text) | (code, allows_targets) unique（複合 FK の参照先） | — | structured survey の大カテゴリ（共有定数・seed SoT・`0015`） |
+| survey_facets | code (text) | — | — | structured survey の評価ポイント（共有定数・seed SoT・`0015`） |
+| survey_category_facets | (category_code, facet_code, scope) | — | category_code → survey_categories, facet_code → survey_facets | Category × Facet の許可関係。scope は `category`（料理全体 → 味）/ `target`（刺身盛り合わせ → 味）（共有定数・seed SoT・`0015`） |
+| store_survey_configs | store_id (uuid) | — | store_id → stores | structured survey の店舗別設定のルート。`structured_enabled`（既定 false）・`revision`（既定 1）（`0015`） |
+| store_survey_category_settings | (store_id, category_code) | — | store_id → store_survey_configs, category_code → survey_categories | カテゴリの表示 / 非表示・並び順の店舗別 override（`0015`） |
+| store_survey_targets | id (uuid) | (store_id, category_code, label) 部分一意（active のみ） | store_id → store_survey_configs, (category_code, category_allows_targets) → survey_categories(code, allows_targets) | 店舗が登録する料理名・ドリンク名（identity は UUID・非表示は soft delete・`0015`） |
+| survey_structured_material_tallies | id (uuid) | (store_id, period_month, 極性ごとの group / target / facet の個数 6 列, has_comment) unique | store_id → stores | structured survey の素材の厚みの匿名集計カウンタ（`0015`） |
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
 | daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
 | summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 通知記録（店舗×日付で一意。その日に通知を送ったか、送らなかったならなぜかを 1 行で表す・`retry_key` で冪等再送・TS 書込） |
@@ -72,8 +87,12 @@ erDiagram
 - `survey_material_tallies`（`review-acquisition`・`0006`）は回答 1 件の「素材の厚み」を観点の **選択数** と一言の **有無** だけで数える。`0008` で気になった点の **選択数**（`concern_count`）を自然キーへ加えた（既存行は 0）。一言の本文は列として存在しない（Req 5.1/5.3）。既存 tallies と同じく `created_at` を持たず、時刻も残さない。
 - `survey_concern_tallies`（`review-acquisition`・`0008`・Issue #221）は気になった点を `survey_aspect_tallies` と同じ形で数える。**極性は表で分ける**（同じ表に混ぜると「良かった点別件数」の意味が壊れる）。観点は同じ `survey_aspects` を参照し、`created_at` を持たない。
 - `survey_review_link_tallies`（`review-acquisition`・`0014`・Issue #401）は投稿導線の押下を店舗×月の **件数** だけで数える。数えるのは下書き画面の押下のうち、回答の後にだけ発行される sessionToken で検証できたものだけである。重複を区別するための token も押下の時刻も保存しない（重複は端末の側で、1 回の画面表示につき最初の押下だけを送ることで抑える）。Google への投稿そのものは観測できないので、この件数は投稿数ではない。
+- **structured survey（`0015`・Issue #436）** は legacy の `survey_aspects` と別のレイヤーである。taxonomy 3 表（`survey_categories`・`survey_facets`・`survey_category_facets`）は seed が SoT で実行時 read-only。店舗別の設定は `store_survey_configs` をルートに持ち、**行が無い店舗・`structured_enabled = false` の店舗は legacy survey のまま**（0015 は既存店舗の行を作らない）。有効なカテゴリは override（`store_survey_category_settings`）が無ければ `survey_categories.default_*` を使う。
+- `store_survey_targets` の identity は `id`（UUID）で、名称を変えても変わらない。非表示は `active = false` の soft delete で、表示中の画面から送られた回答の id を壊さない。Target を持てないカテゴリへの行は `(category_code, category_allows_targets) → survey_categories(code, allows_targets)` の複合 FK が拒否する。`category_allows_targets` はこの FK を成立させるためだけの補助列で、業務のデータではない。常に true の生成列（`GENERATED ALWAYS AS (true) STORED`）なので、呼び手は INSERT でも UPDATE でも値を書けない。客の回答から自動登録しない。
+- 店舗設定 3 表を書くのは店舗オーナーの LIFF 面（store-detail・Issue #437）だけである。どの変更も `store_survey_configs.revision` を同じトランザクションで +1 し（行の更新が設定行のロックを取るので、同じ店舗への変更は直列になる）、**非表示の同名を追加すると、その行を再表示して UUID を引き継ぐ**。オーナーの操作は既存の `audit_logs` へ `survey_target_*`・`survey_targets_reordered`・`survey_category_visibility_updated`（`0016`）として残し、料理名・ドリンク名は写さない。`structured_enabled` はオーナーの操作では変わらない。
+- `survey_structured_material_tallies` は構造化回答 1 件の厚みを個数と一言の有無だけで数える。Target 名・カテゴリや facet の code・一言の本文・時刻は持たない。legacy の `survey_material_tallies` の意味は変えない。星は `survey_rating_tallies` を共通に使う。
 - `rating_snapshots` は追記専用（更新/削除しない）。`subject_kind` で自店/競合を区別し、`place_id` を非正規化保持して競合 churn 後も歴史を自立保持。
-- 共有定数 `categories`・`survey_aspects` は seed（`0002`）が唯一の定義（SoT）。
+- 共有定数 `categories`・`survey_aspects` は seed（`0002`）、`survey_categories`・`survey_facets`・`survey_category_facets` は seed（`0015`）が唯一の定義（SoT）。
 - **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
 - `stores.suspended_at`（`store-suspension`・`0012`・Issue #252）: 店舗の利用停止の時刻（`timestamptz`・任意・既定値なし）。`NULL` = 利用中、値あり = 停止中。停止中の店舗は日次取得（Go）・日次配信（TS）・アンケート・店舗詳細・QR 発行の対象から外れる。取得と配信は同じこの列を読んで対象を決める。`place_status` とは独立で `ck_place_confirmed` に触れず、停止・再開は店舗の身元・オーナー／代理店との関係・匿名集計・日次データを変えない。書込は dashboard-api の停止・再開の操作（運営は全店・代理店は担当店舗）だけで、監査 action は `store_suspended` / `store_resumed`。

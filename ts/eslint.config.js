@@ -76,6 +76,9 @@ export default tseslint.config(
       'apps/store-detail/lib/trend-view.ts',
       'apps/store-detail/lib/trend-scale.ts',
       'apps/store-detail/lib/competitor-filter.ts',
+      // アンケート設定画面（Issue #437）の契約と通信。どちらもクライアントに同梱される。
+      'apps/store-detail/lib/survey-settings-contract.ts',
+      'apps/store-detail/lib/survey-settings-client.ts',
     ],
     ignores: ['apps/store-detail/app/**/route.ts'],
     rules: {
@@ -87,7 +90,7 @@ export default tseslint.config(
               name: '@fwlm/db',
               allowTypeImports: true,
               message:
-                'クライアントに同梱されるファイルからは型の import のみ（値 import は pg をバンドルへ持ち込む）。整形関数は @fwlm/db/daily-summary から取り込む。',
+                'クライアントに同梱されるファイルからは型の import のみ（値 import は pg をバンドルへ持ち込む）。整形関数は @fwlm/db/daily-summary、アンケート設定の入力規則は @fwlm/db/survey-settings-rules から取り込む。',
             },
           ],
         },
@@ -95,10 +98,10 @@ export default tseslint.config(
     },
   },
   {
-    // `@fwlm/db/daily-summary` はクライアントにも同梱されるため、値の import を 1 つも持たせない
-    // （型の import だけを許す）。ここに値 import が入ると、上の規則が許したサブパス経由で
-    // 同じ混入が起きる。
-    files: ['packages/db/src/daily-summary.ts'],
+    // `@fwlm/db/daily-summary` と `@fwlm/db/survey-settings-rules`（Issue #437・アンケート設定の入力規則）は
+    // クライアントにも同梱されるため、値の import を 1 つも持たせない（型の import だけを許す）。ここに
+    // 値 import が入ると、上の規則が許したサブパス経由で同じ混入が起きる。
+    files: ['packages/db/src/daily-summary.ts', 'packages/db/src/survey-settings-rules.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',
