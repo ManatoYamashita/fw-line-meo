@@ -29,6 +29,9 @@ afterEach(cleanup);
 const tsRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const appsDir = join(tsRoot, 'apps');
 
+/** 面のソースを置くディレクトリ。store-detail は src を持たず app と lib に置くので、src だけでは漏れる。 */
+const APP_SOURCE_DIRS = ['src', 'app', 'lib'] as const;
+
 /** 成功の表示の目印。部品の変種・状態色のユーティリティ・Toast の種類・CSS の成功色の参照。 */
 const SUCCESS_SIGNALS: readonly RegExp[] = [
   /variant=["']success["']/,
@@ -81,7 +84,7 @@ const SUCCESS_DISPLAYS: ReadonlyArray<{ readonly file: string; readonly cue: Cue
   },
 ];
 
-/** apps/<app>/src 配下のソース（.ts / .tsx / .css）を再帰的に列挙する。 */
+/** 面のソース（.ts / .tsx / .css）を再帰的に列挙する。 */
 function listSources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -90,10 +93,14 @@ function listSources(dir: string): string[] {
   });
 }
 
-function filesWithSuccessSignals(): string[] {
+function appSourceRoots(): string[] {
   return readdirSync(appsDir)
-    .map((app) => join(appsDir, app, 'src'))
-    .filter((src) => existsSync(src))
+    .flatMap((app) => APP_SOURCE_DIRS.map((dir) => join(appsDir, app, dir)))
+    .filter((root) => existsSync(root));
+}
+
+function filesWithSuccessSignals(): string[] {
+  return appSourceRoots()
     .flatMap(listSources)
     .filter((path) => {
       const source = readFileSync(path, 'utf8');
@@ -128,6 +135,11 @@ describe('成功の表示の棚卸し', () => {
         '<Alert variant="success" role={undefined}>\n  <AlertDescription>a</AlertDescription>\n</Alert>' +
         '<Alert variant="destructive"><AlertDescription>b</AlertDescription></Alert>';
       expect(successAlertBlocks(source)).toEqual(['\n  <AlertDescription>a</AlertDescription>\n']);
+    });
+
+    it('src を持たない面（store-detail の app と lib）も走査している', () => {
+      const roots = appSourceRoots().map((root) => relative(tsRoot, root).split('\\').join('/'));
+      expect(roots).toEqual(expect.arrayContaining(['apps/store-detail/app', 'apps/store-detail/lib']));
     });
 
     it('面のソースから少なくとも 1 件拾えている（空振りしていない）', () => {

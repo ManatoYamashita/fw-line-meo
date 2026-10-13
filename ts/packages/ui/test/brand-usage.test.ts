@@ -26,12 +26,15 @@ function listSources(dir: string): string[] {
   });
 }
 
+/** 面のソースを置くディレクトリ。store-detail は src を持たず app と lib に置くので、src だけでは漏れる。 */
+const APP_SOURCE_DIRS = ['src', 'app', 'lib'] as const;
+
 function scannedRoots(): string[] {
   const apps = join(tsRoot, 'apps');
   return [
     ...readdirSync(apps)
-      .map((app) => join(apps, app, 'src'))
-      .filter((src) => existsSync(src)),
+      .flatMap((app) => APP_SOURCE_DIRS.map((dir) => join(apps, app, dir)))
+      .filter((root) => existsSync(root)),
     join(tsRoot, 'packages', 'ui', 'src'),
   ];
 }
@@ -44,6 +47,11 @@ describe('ブランド色を文字色に使わない', () => {
     expect(hits('className="fill-brand"')).toBe(false);
     expect(hits('  background-color: var(--color-brand);')).toBe(false);
     expect(hits('/brand-icon.png')).toBe(false);
+  });
+
+  it('src を持たない面（store-detail の app と lib）も走査している', () => {
+    const roots = scannedRoots().map((root) => relative(tsRoot, root).split('\\').join('/'));
+    expect(roots).toEqual(expect.arrayContaining(['apps/store-detail/app', 'apps/store-detail/lib']));
   });
 
   it('面と共有部品のソースに、ブランド色を文字色とする指定が無い', () => {
