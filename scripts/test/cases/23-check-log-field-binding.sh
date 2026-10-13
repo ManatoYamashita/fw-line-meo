@@ -465,3 +465,17 @@ EOF
 fx_run check-log-field-binding
 expect_red '事象名「demo.shadowed_logger」を出しますが'
 t_end
+
+t_begin 'check-log-field-binding: for-ofの局所宣言でimport名を隠したloggerも照合する'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/shadowed-loop.ts <<'EOF'
+import { toast } from 'sonner';
+toast.error('入力内容をご確認ください。');
+export function run(loggers: Array<{ error(event: string): void }>): void {
+  for (const toast of loggers) toast.error('demo.loop_logger');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.loop_logger」を出しますが'
+t_end

@@ -159,7 +159,8 @@ ui_notification_receivers() {
       for (binding in candidates) {
         # 引数・局所宣言など同名の binding があり得るファイルでは除外しない（fail-closed）。
         shadow = "(^|[[:space:]({,:])" binding "[[:space:]]*[:),=}]"
-        if (source !~ shadow) print binding
+        declaration = "(^|[^a-zA-Z0-9_])(const|let|var)[[:space:]]+" binding "([^a-zA-Z0-9_]|$)"
+        if (source !~ shadow && source !~ declaration) print binding
       }
     }
   ' "$1" | sort -u
