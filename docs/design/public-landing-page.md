@@ -79,7 +79,7 @@ LINE認証やGoogleへの実投稿、店舗別の本番データは今回の実�
 
 | 素材（survey-web/public 配下） | 出典 | 寸法 |
 | --- | --- | --- |
-| `ogp.webp` | 既存の製品OGP画像 | 1200 × 630 |
+| `ogp.webp` | 既存の製品OGP画像（配色は `docs/design/line-green-palette.md` の「画像」） | 1200 × 630 |
 | `screenshots/survey.png` | 実際のアンケート回答画面 | 780 × 1548 |
 | `screenshots/draft.png` | 実際の口コミ下書き画面 | 780 × 1252 |
 
