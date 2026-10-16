@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, within, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { announcedText, ownText } from './live-region';
 import { expectListSkeleton } from './list-skeleton';
@@ -770,5 +770,12 @@ describe('招待コードページ: 意匠の適用', () => {
     expect(issue.getAttribute('type')).toBe('button');
     fireEvent.click(issue);
     expect(api.issueInviteCode).toHaveBeenCalledTimes(1);
+    // 発行の処理が終わる（案内が出て押しボタンが処理中でなくなる）まで待つ。待たずに抜けると、
+    // 遅れて解決する取得のモックがテスト環境の破棄後に状態を更新し、未処理の拒否として CI を赤にする。
+    // 案内が出ると押しボタンは描き直されるので、上で掴んだ要素ではなく毎回引き直して見る。
+    await scope.findByText('NEWCODE9', { selector: 'strong' });
+    await waitFor(() =>
+      expect(scope.getByRole('button', { name: '発行' }).getAttribute('aria-busy')).toBe('false'),
+    );
   });
 });
