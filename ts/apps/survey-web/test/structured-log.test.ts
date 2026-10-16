@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   logFabricationResidual,
   logFactualityResidual,
+  logStructuredDraftFailed,
+  logStructuredDraftResult,
+  logStructuredDraftRetry,
   logSurveyPageViewed,
   logSurveyResponseSubmitted,
   logSurveyReviewLinkOpened,
@@ -112,6 +115,58 @@ describe('logFabricationResidual', () => {
       }),
     );
     output.mockRestore();
+  });
+});
+
+// Issue #439: structured の下書きの作り直し・generation error。匿名の metadata（失格の種類・claim の件数）だけを載せる。
+describe('structured の下書きの作り直し・generation error', () => {
+  it('失格の種類（並び順を固定）と claim の件数だけを出し、下書き・一言・料理名は載せない', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    logStructuredDraftRetry(writeStructuredLog, ['unselectedTarget', 'commentLinkage'], 3);
+    logStructuredDraftFailed(writeStructuredLog, 'gate', ['commentLinkage'], 3);
+
+    expect(info).toHaveBeenCalledWith(
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_retry', residualClaims: 'commentLinkage,unselectedTarget', claimCount: 3 }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      JSON.stringify({ severity: 'WARNING', event: 'survey-web.structured_draft_failed', residualClaims: 'commentLinkage', claimCount: 3, reason: 'gate' }),
+    );
+    info.mockRestore();
+    warn.mockRestore();
+  });
+
+  it('最終の結果（ローカル検証用）は決まった形の reason と残った種類・claim の件数だけを出す', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    logStructuredDraftResult(
+      writeStructuredLog,
+      {
+        result: 'llm',
+        attempts: 3,
+        acceptedAttempt: 3,
+        history: [
+          { attempt: 1, generationFailed: false, factuality: ['cause', 'ungrounded'] },
+          { attempt: 2, generationFailed: true, factuality: [] },
+          { attempt: 3, generationFailed: false, factuality: [] },
+        ],
+      },
+      6,
+    );
+    logStructuredDraftResult(
+      writeStructuredLog,
+      { result: 'generation_error', attempts: 3, acceptedAttempt: null, history: [1, 2, 3].map((attempt) => ({ attempt, generationFailed: false, factuality: ['cause'] })) },
+      6,
+    );
+    expect(info).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'a1=cause+ungrounded;a2=generation;a3=ok', claimCount: 6, reason: 'llm:attempts=3:accepted=3' }),
+    );
+    expect(info).toHaveBeenNthCalledWith(
+      2,
+      JSON.stringify({ severity: 'INFO', event: 'survey-web.structured_draft_result', residualClaims: 'a1=cause;a2=cause;a3=cause', claimCount: 6, reason: 'generation_error:attempts=3:accepted=none' }),
+    );
+    info.mockRestore();
   });
 });
 

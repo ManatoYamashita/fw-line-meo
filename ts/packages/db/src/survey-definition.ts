@@ -1,0 +1,218 @@
+import { createHash } from 'node:crypto';
+import type { Queryable } from './pool.js';
+
+// structured survey の客向けの有効な定義（Issue #436・Issue #441 の PR1）。
+//
+// 店舗の設定（store_survey_configs / store_survey_category_settings / store_survey_targets）と
+// taxonomy（survey_categories / survey_facets / survey_category_facets・seed が SoT）を合成して、
+// その店舗の客に見せてよいものだけを返す。カテゴリ・facet の code はコード内に列挙しない
+// （write-boundary.md の共有定数の規律）。
+//
+// **legacy survey の経路（listSurveyAspects・survey_aspects）とは独立である。** 設定行の無い店舗・
+// structured_enabled = false の店舗は `{ mode: 'legacy' }` だけを返し、legacy の画面・回答は
+// これまでどおり survey_aspects を使う。
+
+/** 評価ポイント 1 つ（Category 全体用・Target 用のどちらでも同じ形）。 */
+export interface SurveyFacetOption {
+  code: string;
+  label: string;
+  sortOrder: number;
+}
+
+/** 店舗が登録した具体的な料理・ドリンク。**identity は id（UUID）であって label ではない。** */
+export interface SurveyTargetOption {
+  id: string;
+  label: string;
+  sortOrder: number;
+}
+
+/** 客に見せる 1 カテゴリ。店舗で非表示にしたカテゴリはここに現れない。 */
+export interface SurveyCategoryDefinition {
+  code: string;
+  label: string;
+  sortOrder: number;
+  allowsTargets: boolean;
+  /** Target を選ばずに付けられる facet（例: 料理全体 → 味）。 */
+  categoryFacets: SurveyFacetOption[];
+  /** Target に付けられる facet（例: 刺身盛り合わせ → 味）。Target を持てないカテゴリでは空。 */
+  targetFacets: SurveyFacetOption[];
+  /** active な Target だけ。Target を持てないカテゴリでは空。 */
+  targets: SurveyTargetOption[];
+}
+
+export interface LegacySurveyDefinition {
+  mode: 'legacy';
+}
+
+export interface StructuredSurveyDefinition {
+  mode: 'structured';
+  /** 表示時の設定の版。structured survey の pageToken へ署名し、送信時に照合する。 */
+  revision: number;
+  categories: SurveyCategoryDefinition[];
+}
+
+export type StoreSurveyDefinition = LegacySurveyDefinition | StructuredSurveyDefinition;
+
+interface DefinitionRow {
+  revision: string;
+  categories: SurveyCategoryDefinition[];
+}
+
+// **1 文で読む。** 設定の版・カテゴリ・Target を別々の文で読むと、間に店舗が設定を変えたとき
+// 「新しい revision と古い Target」の組を返しうる（pool は文ごとに別の接続を使いうる）。
+// 1 文なら同じスナップショットを見るので、返す revision と中身が必ず対応する。
+//
+// 並び順はすべて決定的にする: カテゴリは有効な sort_order → code、facet は sort_order → code、
+// Target は sort_order → created_at → id。
+//
+// revision は bigint なので text で受けて数値へ戻す（pg は int8 を文字列で返す）。
+const DEFINITION_SQL = `
+WITH cfg AS (
+  SELECT revision
+  FROM store_survey_configs
+  WHERE store_id = $1 AND structured_enabled
+),
+cats AS (
+  SELECT c.code, c.label, c.allows_targets,
+         COALESCE(o.sort_order, c.default_sort_order) AS sort_order
+  FROM survey_categories c
+  LEFT JOIN store_survey_category_settings o
+    ON o.store_id = $1 AND o.category_code = c.code
+  WHERE COALESCE(o.enabled, c.default_enabled)
+)
+SELECT
+  cfg.revision::text AS revision,
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'code', cats.code,
+      'label', cats.label,
+      'sortOrder', cats.sort_order,
+      'allowsTargets', cats.allows_targets,
+      'categoryFacets', COALESCE((
+        SELECT json_agg(json_build_object('code', f.code, 'label', f.label, 'sortOrder', cf.sort_order)
+                        ORDER BY cf.sort_order, f.code)
+        FROM survey_category_facets cf
+        JOIN survey_facets f ON f.code = cf.facet_code
+        WHERE cf.category_code = cats.code AND cf.scope = 'category'
+      ), '[]'::json),
+      'targetFacets', COALESCE((
+        SELECT json_agg(json_build_object('code', f.code, 'label', f.label, 'sortOrder', cf.sort_order)
+                        ORDER BY cf.sort_order, f.code)
+        FROM survey_category_facets cf
+        JOIN survey_facets f ON f.code = cf.facet_code
+        WHERE cats.allows_targets AND cf.category_code = cats.code AND cf.scope = 'target'
+      ), '[]'::json),
+      'targets', COALESCE((
+        SELECT json_agg(json_build_object('id', t.id, 'label', t.label, 'sortOrder', t.sort_order)
+                        ORDER BY t.sort_order, t.created_at, t.id)
+        FROM store_survey_targets t
+        WHERE cats.allows_targets AND t.store_id = $1 AND t.category_code = cats.code AND t.active
+      ), '[]'::json)
+    ) ORDER BY cats.sort_order, cats.code)
+    FROM cats
+  ), '[]'::json) AS categories
+FROM cfg
+`;
+
+/**
+ * structured survey の表（0015）や権限（infra/sql/grants.sql）がまだ無いことを示す PostgreSQL のエラーコード。
+ *
+ *   42P01 undefined_table          … 0015 を当てる前（表が無い）
+ *   42501 insufficient_privilege   … 0015 を当てたが grants.sql を当て直す前（`GRANT ... ON ALL TABLES` は付与の
+ *                                    時点の表にしか効かない）
+ *
+ * DEFINITION_SQL が触るのは structured survey の表（store_survey_configs・store_survey_category_settings・
+ * store_survey_targets・survey_categories・survey_facets・survey_category_facets）だけなので、この 2 つはその
+ * 表の準備が済んでいないことを高い精度で示す。接続の失敗・タイムアウト・その他の SQL の誤りは含めない。
+ */
+export const STRUCTURED_SCHEMA_UNAVAILABLE_CODES = ['42P01', '42501'] as const;
+export type StructuredSchemaUnavailableCode = (typeof STRUCTURED_SCHEMA_UNAVAILABLE_CODES)[number];
+
+function structuredSchemaUnavailableCode(error: unknown): StructuredSchemaUnavailableCode | null {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return (STRUCTURED_SCHEMA_UNAVAILABLE_CODES as readonly unknown[]).includes(code)
+    ? (code as StructuredSchemaUnavailableCode)
+    : null;
+}
+
+export interface ReadStoreSurveyDefinitionOptions {
+  /**
+   * structured survey の表・権限が無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）ときに legacy として扱うか。
+   * **既定は false**（投げる）。true にしてよいのは、migration の前にコードが動く一時的な互換期間・緊急時だけで、
+   * structured の店舗を 1 件でも有効にする前に必ず false に戻す（PR #443 の追加レビュー）。有効化の後に権限の乱れ・
+   * 表の削除・grants の破損が起きたとき、structured の店舗が黙って legacy に化けるのを防ぐため。
+   */
+  readonly allowStructuredSchemaFallback?: boolean;
+  /**
+   * structured survey の表・権限が無いため legacy として扱ったときに呼ばれる（記録は呼び手が決める）。渡すのは
+   * エラーコードだけで、店舗 ID・エラーの本文は渡さない。
+   */
+  readonly onStructuredSchemaUnavailable?: (code: StructuredSchemaUnavailableCode) => void;
+}
+
+/**
+ * 店舗の有効なアンケート定義を返す。
+ *
+ * - 設定行が無い・structured_enabled = false → `{ mode: 'legacy' }`（既定。既存店舗はすべてこれ）
+ * - structured_enabled = true → 表示するカテゴリ（非表示を除く）・facet・active な Target と revision
+ * - structured survey の表・権限がまだ無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）
+ *     - 既定: 投げる（呼び手は 5xx）
+ *     - `allowStructuredSchemaFallback: true` のときだけ `{ mode: 'legacy' }`
+ *
+ * 最後の分岐の legacy は、migration 0015 / 0016 と grants.sql を本番へ当てる前にコードが動く **一時的な互換期間**
+ * の逃げ道である（PR #443 のレビュー）。その状態の本番に structured の店舗は存在しえない（設定の表そのものが無い）
+ * ので、legacy として扱っても意味は変わらない。ただし structured の店舗を有効にした後に同じエラーが出たら、それは
+ * 権限・表の事故であって、legacy へ落とすと structured の店舗が黙って別のアンケートに化ける。そのため明示的に
+ * 有効にしたときだけ使う（既定は投げる）。**どちらでも、それ以外のエラー（接続・タイムアウト・SQL の誤り）は投げる。**
+ * 正規の手順は migration → grants → 確認 → デプロイで、この逃げ道を使わない（db/migrations/0015 の冒頭・infra/README.md）。
+ *
+ * 店舗の存在・place 確定・利用停止の判定はしない（呼び手が findStoreForSurvey で行う）。
+ */
+export async function readStoreSurveyDefinition(
+  db: Queryable,
+  storeId: string,
+  options: ReadStoreSurveyDefinitionOptions = {},
+): Promise<StoreSurveyDefinition> {
+  let res: { rows: DefinitionRow[] };
+  try {
+    res = await db.query<DefinitionRow>(DEFINITION_SQL, [storeId]);
+  } catch (error) {
+    const code = structuredSchemaUnavailableCode(error);
+    if (code === null || options.allowStructuredSchemaFallback !== true) throw error;
+    options.onStructuredSchemaUnavailable?.(code);
+    return { mode: 'legacy' };
+  }
+  const row = res.rows[0];
+  if (!row) return { mode: 'legacy' };
+  const revision = Number(row.revision);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error(`store_survey_configs.revision is out of range: ${row.revision}`);
+  }
+  return { mode: 'structured', revision, categories: row.categories };
+}
+
+/**
+ * 有効な定義の指紋（Issue #438）。客が見た定義の **意味** が同じかを、送信時に確かめるための値。
+ *
+ * store_survey_configs.revision は店舗設定の変更しか表せず、全店舗共通の taxonomy（survey_categories・
+ * survey_facets・survey_category_facets）を変える migration を見逃す。指紋は、客の画面に出るもの
+ * そのものから決定的に導くので、どちらの変更でも変わる。含めるもの（並び順は配列の順そのもの）:
+ *   - 表示するカテゴリの code・名前・Target を持てるか・並び
+ *   - カテゴリ全体用 / Target 用の facet の code・名前・並び（Category × Facet の対応）
+ *   - active な Target の UUID・名前・並び
+ * 含めないもの: revision（別に照合する）と、数値の sort_order（並びが同じなら意味は同じ）。
+ *
+ * 出力は SHA-256 の base64url（43 文字）。pageToken へ署名し、送信時に同じ読み取りの結果から計算し直して
+ * 照合する（呼び手は readStoreSurveyDefinition を 1 回だけ呼び、その結果を照合・検証・解決へ渡すこと）。
+ */
+export function surveyDefinitionFingerprint(definition: StructuredSurveyDefinition): string {
+  const canonical = definition.categories.map((c) => [
+    c.code,
+    c.label,
+    c.allowsTargets,
+    c.categoryFacets.map((f) => [f.code, f.label]),
+    c.targetFacets.map((f) => [f.code, f.label]),
+    c.targets.map((t) => [t.id, t.label]),
+  ]);
+  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('base64url');
+}

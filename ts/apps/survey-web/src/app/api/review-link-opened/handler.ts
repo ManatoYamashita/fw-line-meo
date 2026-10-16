@@ -9,7 +9,8 @@ import { logSurveyReviewLinkOpened, type SurveyLogger } from '../../../lib/struc
 //
 // 数えるのは token を検証できた押下だけで、記録するのは storeId だけである。
 // - 下書き画面は sessionToken を送る。これは /api/responses の後にしか発行されないので、
-//   「実際の回答の後の押下」を証明する
+//   「実際の回答の後の押下」を証明する。legacy の v1（tokens.verify）と structured の v2（tokens.verifyStructured・
+//   再生成で試行を進めたものを含む）のどちらも同じ意味の証明として受ける（PR #443）
 // - 回答済み画面（24 時間以内の再訪）は pageToken を送る。これが証明するのは「ページが配信された」
 //   ことまでで、信頼水準は表示件数（survey_page_viewed）と同じである
 // どちらも HMAC を検証するので、ページを経由せず API だけを叩いた押下は数えない。
@@ -60,11 +61,16 @@ export async function handleReviewLinkOpened(req: Request, deps: ReviewLinkDeps)
   return status(204);
 }
 
-/** その店舗の回答で発行された sessionToken なら `session`、その店舗向けの pageToken なら `page`。 */
+/**
+ * その店舗の回答で発行された sessionToken（legacy の v1・structured の v2）なら `session`、その店舗向けの pageToken なら
+ * `page`。どれも署名と期限を検証し、token の店舗と送られた storeId が一致するものだけを受ける。
+ */
 function verifyProof(tokens: SessionTokenService, token: string, storeId: string): Proof | null {
   if (storeId === '' || token === '') return null;
   const session = tokens.verify(token);
   if (session.ok && session.value.storeId === storeId) return 'session';
+  const structured = tokens.verifyStructured(token);
+  if (structured.ok && structured.value.storeId === storeId) return 'session';
   if (tokens.verifyPage(token, storeId).ok) return 'page';
   return null;
 }

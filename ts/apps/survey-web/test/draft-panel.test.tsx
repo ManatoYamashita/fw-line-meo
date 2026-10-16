@@ -10,6 +10,8 @@ import type { DraftPanelProps } from '../src/app/s/[storeId]/types';
 import { announcedText, ownText } from './live-region';
 
 const URL = 'https://search.google.com/local/writereview?placeid=ChIJ';
+/** 再生成中の押しボタンの文言（三点リーダは U+2026）。 */
+const REGENERATING_BUTTON = '別の文章を作成しています…';
 
 function props(over: Partial<DraftPanelProps> = {}): DraftPanelProps {
   return {
@@ -77,15 +79,34 @@ describe('DraftPanel', () => {
     expect((screen.getByRole('button', { name: /別の文章を生成/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('生成中は「生成中…」を表示し再生成を無効化（3.6）', () => {
+  it('生成中は押しボタン自身が「別の文章を作成しています…」に変わり、無効・処理中になる（3.6）', () => {
     render(<DraftPanel {...props({ regenerating: true })} />);
-    expect(screen.getByText('生成中…')).toBeDefined();
-    expect((screen.getByRole('button', { name: /別の文章を生成/ }) as HTMLButtonElement).disabled).toBe(true);
+    const button = screen.getByRole('button', { name: REGENERATING_BUTTON }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    // 図形は押しボタンの中で装飾として回る（状態は文言で伝える）。
+    expect(button.querySelector('[data-slot="spinner"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByText(GENERATING)).toBeDefined();
+    expect(screen.queryByRole('button', { name: /別の文章を生成/ })).toBeNull();
+  });
+
+  it('生成失敗の再試行も、生成中は「別の文章を作成しています…」に変わり無効になる', () => {
+    render(<DraftPanel {...props({ generationFailed: true, regenerating: true })} />);
+    const button = screen.getByRole('button', { name: REGENERATING_BUTTON }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('生成中でないときの押しボタンは処理中ではない', () => {
+    render(<DraftPanel {...props()} />);
+    const button = screen.getByRole('button', { name: /別の文章を生成（残り3回）/ });
+    expect(button.getAttribute('aria-busy')).toBe('false');
+    expect(button.querySelector('[data-slot="spinner"]')).toBeNull();
   });
 
   it('生成失敗時は失敗メッセージ＋再試行＋投稿導線を表示する（3.9）', () => {
     render(<DraftPanel {...props({ generationFailed: true })} />);
-    expect(screen.getByRole('alert').textContent).toContain('失敗');
+    expect(screen.getByText(/下書きの生成に失敗/).textContent).toContain('失敗');
     expect(screen.getByRole('button', { name: /もう一度生成/ })).toBeDefined();
     expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
   });
@@ -124,10 +145,8 @@ describe('DraftPanel', () => {
 
 // ---- ここから ui-airbnb-surfaces task 4.2 が追加した検証 ----
 
-/** 生成中の文言。三点リーダは U+2026。既存検証（`getByText('生成中…')`）と同じ値を指す。 */
-const GENERATING = '生成中…';
-const COPIED = 'コピーしました。投稿画面に貼り付けてください。';
-const MANUAL = '自動コピーできませんでした。上の文章を選択して手動でコピーしてください。';
+/** 生成中に読み上げ領域へ出す補足。処理中の図形と「作成しています…」は押しボタンの側が持つ。 */
+const GENERATING = '回答内容をもとに文章を作成しています';
 const FAILED = '下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。';
 
 function classesOf(element: Element): string[] {
@@ -184,6 +203,7 @@ function theLiveRegion(): HTMLElement {
  */
 function theNoticeBody(): HTMLElement | null {
   const children = Array.from(theLiveRegion().children);
+  if (children.length === 0) return document.querySelector('[data-slot="alert"]');
   expect(children.length, `通知の中身が ${children.length} 個あります（0 個か 1 個）`).toBeLessThanOrEqual(1);
   return (children[0] as HTMLElement | undefined) ?? null;
 }
@@ -292,14 +312,14 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     // 強い側は失われていないこと（同じ箇条書きのもう半分）。
     cleanup();
     render(<DraftPanel {...props({ generationFailed: true })} />);
-    expect(screen.queryAllByRole('alert'), '中断させる通知の個数').toHaveLength(1);
+    expect(screen.queryAllByRole('alert'), '結果の読み上げは Toast が担う').toHaveLength(0);
   });
 
   it('コピー後に再生成しても読み上げ領域は 1 つのまま（生成中が勝つ）', async () => {
     const { rerender } = render(<DraftPanel {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: /コピー/ }));
     expect(await screen.findByText(/コピーしました/)).toBeDefined();
-    expect(announcedText(theLiveRegion()), 'コピー直後の読み上げ文字列').toBe(COPIED);
+    expect(announcedText(theLiveRegion()), 'コピー直後の読み上げ文字列').toBe('');
 
     // `draft` は変えない。着手前の実装はここで領域が 2 つ並んだ（`copyState` が idle へ戻らない）。
     rerender(<DraftPanel {...props({ regenerating: true })} />);
@@ -326,10 +346,10 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     expect(announcedText(theLiveRegion()), '生成中の読み上げ文字列').toBe(GENERATING);
   });
 
-  it('処理中の図形は装飾として添えられている（aria-hidden）', () => {
+  it('処理中の図形は押しボタンに装飾として添えられ、読み上げ領域には入らない（aria-hidden）', () => {
     render(<DraftPanel {...props({ regenerating: true })} />);
-    const region = theLiveRegion();
-    const spinner = region.querySelector('[data-slot="spinner"]');
+    expect(theLiveRegion().querySelector('[data-slot="spinner"]'), '図形が読み上げ領域の中で二重に回っています').toBeNull();
+    const spinner = screen.getByRole('button', { name: REGENERATING_BUTTON }).querySelector('[data-slot="spinner"]');
     // **否定の前に非空アンカーを置く。** 図形を掴めていないと下の判定は空振りする。
     expect(spinner, '処理中の図形を掴めていません').not.toBeNull();
     expect(
@@ -340,22 +360,22 @@ describe('下書きパネル: 読み上げ領域の単一性（着手前は無�
     cleanup();
     render(<DraftPanel {...props()} />);
     expect(
-      theLiveRegion().querySelector('[data-slot="spinner"]'),
+      document.querySelector('[data-slot="spinner"]'),
       '生成中でないのに処理中の図形が描かれています',
     ).toBeNull();
   });
 
-  it('コピー結果の 2 通りが同じ読み上げ領域に載る', async () => {
+  it('コピー結果は画面内の読み上げ領域に重ねない（Toast が通知する）', async () => {
     render(<DraftPanel {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: /コピー/ }));
     expect(await screen.findByText(/コピーしました/)).toBeDefined();
-    expect(announcedText(theLiveRegion()), '自動コピー成功時の読み上げ文字列').toBe(COPIED);
+    expect(announcedText(theLiveRegion()), '自動コピー成功時の読み上げ文字列').toBe('');
 
     cleanup();
     vi.stubGlobal('navigator', {});
     render(<DraftPanel {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: /コピー/ }));
-    expect(announcedText(theLiveRegion()), '手動コピー案内時の読み上げ文字列').toBe(MANUAL);
+    expect(announcedText(theLiveRegion()), '手動コピー案内時の読み上げ文字列').toBe('');
   });
 
   // design.md「Error Handling」の割り当て: 成功の通知は成功の変種、処理中は図形。
@@ -469,7 +489,9 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     for (const over of [{ regenerationsLeft: 0 }, { regenerating: true }]) {
       cleanup();
       render(<DraftPanel {...props(over)} />);
-      const button = screen.getByRole('button', { name: /別の文章を生成/ }) as HTMLButtonElement;
+      const button = screen.getByRole('button', {
+        name: 'regenerating' in over ? REGENERATING_BUTTON : /別の文章を生成/,
+      }) as HTMLButtonElement;
       const where = JSON.stringify(over);
       expect(button.hasAttribute('disabled'), `${where}: disabled 属性がありません`).toBe(true);
       expect(button.disabled, `${where}: 無効になっていません`).toBe(true);
@@ -519,10 +541,11 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     }
   });
 
-  it('生成失敗の通知は部品を通り、読み上げ強度が中断のまま', () => {
+  it('生成失敗の案内は部品を通り、Toastと二重に読み上げない', () => {
     render(<DraftPanel {...props({ generationFailed: true })} />);
-    const alerts = screen.queryAllByRole('alert');
-    expect(alerts, '危険の通知の個数が 1 つではありません').toHaveLength(1);
+    const alerts = document.querySelectorAll<HTMLElement>('[data-slot="alert"]');
+    expect(alerts, '危険の案内の個数が 1 つではありません').toHaveLength(1);
+    expect(alerts[0]!.getAttribute('role')).toBeNull();
     const alert = alerts[0]!;
     expect(alert.getAttribute('data-slot'), '通知が部品を通っていません').toBe('alert');
     expect(

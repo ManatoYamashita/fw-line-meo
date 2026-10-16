@@ -1,9 +1,17 @@
-import { getPool, findStoreForSurvey, listSurveyAspects, incrementTallies } from '@fwlm/db';
+import {
+  getPool,
+  findStoreForSurvey,
+  listSurveyAspects,
+  incrementTallies,
+  incrementStructuredTallies,
+} from '@fwlm/db';
+import { createDefaultStructuredDrafts } from '../../../lib/draft/structured/default-realizer';
 import { createDefaultDraftGenerator } from '../../../lib/draft/generator';
 import { createClientKey } from '../../../lib/client-key';
 import { createRateLimiter } from '../../../lib/rate-limit';
 import { createSessionTokenService } from '../../../lib/session-token';
 import { logFabricationResidual, logFactualityResidual, writeStructuredLog } from '../../../lib/structured-log';
+import { createSurveyDefinitionReader } from '../../../lib/survey-definition-reader';
 import { handleResponses, type ResponsesDeps } from './handler';
 import { correlationIdFromHeaders, supportCodeFromCorrelationId, withCorrelation } from '@fwlm/observability';
 
@@ -34,6 +42,15 @@ async function buildDeps(): Promise<ResponsesDeps> {
     incrementTallies: async (input) => {
       await incrementTallies(await getPool(), input);
     },
+    // 表示（s/[storeId]/page.tsx）と同じ読み方・同じ設定。42P01 / 42501 を legacy として扱うのは
+    // STRUCTURED_SCHEMA_COMPAT_FALLBACK=1（完全一致）で明示的に有効にしたときだけ（記録つき）。既定・pilot・本運用では
+    // 無効で、42P01 / 42501 も投げて 5xx になる（lib/survey-definition-reader.ts）。
+    readDefinition: createSurveyDefinitionReader(getPool, writeStructuredLog),
+    incrementStructuredTallies: async (input) => {
+      await incrementStructuredTallies(await getPool(), input);
+    },
+    // structured の下書きは Natural LLM Realizer（Issue #439）。legacy の生成器とは分ける。
+    structuredDrafts: await createDefaultStructuredDrafts(),
     clientKey: createClientKey(),
     log: writeStructuredLog,
   };

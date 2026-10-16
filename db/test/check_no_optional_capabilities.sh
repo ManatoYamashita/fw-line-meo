@@ -197,7 +197,12 @@ if [ -n "$ts_hits" ]; then
 fi
 echo "PASS (B2): TS ソースにオプトアウト・競合調整のエクスポート関数/識別子は存在しない（走査 ${#TS_SCAN_DIRS[@]} ディレクトリ）"
 
-echo ">> [absence-check] (B3) store-detail の app/api 配下に detail 以外の（＝書込の疑いがある）ルートが無いこと（R4.2 の構造的担保の再確認）"
+echo ">> [absence-check] (B3) store-detail の app/api 配下に、宣言した以外の（＝書込の疑いがある）ルートが無いこと（R4.2 の構造的担保の再確認）"
+# 詳細データ（競合・評価・推移）の閲覧は /api/detail の GET だけである（R4.2）。Issue #437 で、店舗オーナーが
+# 自店のアンケート設定を書く /api/survey-settings 配下の 6 ルートを、明示的にここへ足した。書けるのはアンケート
+# 設定 3 表と監査記録だけで、DB の列単位の権限（db/test/check_structured_survey_privileges.sh）が別の層で強制する。
+# 各ルートが公開する HTTP メソッドは ts/apps/store-detail/test/survey-settings-route.db.test.ts が固定する。
+# **競合の再抽出・配信停止の経路はこの 6 本に含まれない**（(B2) の識別子の走査も store-detail を見続ける）。
 API_DIR="${ROOT}/ts/apps/store-detail/app/api"
 [ -d "$API_DIR" ] || fail "走査面 ts/apps/store-detail/app/api がありません（走査の前提が崩れています）"
 
@@ -209,6 +214,12 @@ while IFS= read -r route_path; do
     route_count=$((route_count + 1))
     case "$route_path" in
         */api/detail/route.ts) ;;
+        */api/survey-settings/route.ts) ;;
+        */api/survey-settings/targets/route.ts) ;;
+        */api/survey-settings/targets/order/route.ts) ;;
+        */api/survey-settings/targets/\[targetId\]/route.ts) ;;
+        */api/survey-settings/targets/\[targetId\]/disable/route.ts) ;;
+        */api/survey-settings/categories/\[categoryCode\]/route.ts) ;;
         *) unexpected_routes="${unexpected_routes}${route_path} " ;;
     esac
 done <<EOF
@@ -219,9 +230,9 @@ if [ "$route_count" -eq 0 ]; then
     fail "ts/apps/store-detail/app/api 配下に route.ts が 1 件もありません（走査の前提が崩れています）"
 fi
 if [ -n "$unexpected_routes" ]; then
-    fail "store-detail に /api/detail 以外のルートが見つかりました（読取専用の前提が崩れていないか要確認）: ${unexpected_routes}"
+    fail "store-detail に宣言していないルートが見つかりました（詳細データは読取専用・書けるのはアンケート設定だけ、の前提が崩れていないか要確認）: ${unexpected_routes}"
 fi
-echo "PASS (B3): store-detail の API ルートは読取専用の /api/detail のみ（route.ts ${route_count} 件）"
+echo "PASS (B3): store-detail の API ルートは /api/detail（読取専用）と /api/survey-settings 配下の宣言済み 6 本だけ（route.ts ${route_count} 件）"
 
 echo ">> [absence-check] (B4) オーナー・客向けの面が店舗の停止を書く識別子を参照しないこと（store-suspension 6.4, 8.1, 8.4）"
 # 店舗の停止を書いてよいのは運営・代理店の面（dashboard-api）だけである。オーナー・客向けの面が

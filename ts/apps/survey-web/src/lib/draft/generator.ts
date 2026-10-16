@@ -257,7 +257,11 @@ function isRetryable(error: unknown): boolean {
   return status === 429 || (status >= 500 && status < 600);
 }
 
-function toApiError(error: unknown): DraftError {
+/**
+ * 生成 API の例外を DraftError（API_ERROR・取れれば HTTP ステータス）へ畳む。structured の Realizer
+ * （structured/realizer.ts）も同じ分類で記録するので export する（generation_failed の errorKind・status を揃える）。
+ */
+export function toApiError(error: unknown): DraftError {
   const status = getHttpStatus(error);
   return status === undefined ? { kind: 'API_ERROR' } : { kind: 'API_ERROR', status };
 }

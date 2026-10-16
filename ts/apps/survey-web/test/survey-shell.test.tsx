@@ -72,7 +72,7 @@ function renderShell() {
     <SurveyShell
       storeId={STORE}
       storeName="テスト店"
-      aspects={[{ code: 'taste', label: '味' }]}
+      survey={{ mode: 'legacy', aspects: [{ code: 'taste', label: '味' }] }}
       pageToken="PT"
       googleReviewUrl="https://review/ChIJ"
     />,
@@ -240,7 +240,7 @@ describe('SurveyShell', () => {
     stubFetch({ '/api/responses': { ok: false, body: { error: { code: 'RATE_LIMITED' } } } });
     renderShell();
     fireEvent.click(screen.getByTestId('submit'));
-    expect(await screen.findByRole('alert')).toBeDefined();
+    expect(await screen.findByText(/送信に失敗しました/)).toBeDefined();
     expect(screen.getByTestId('submit')).toBeDefined(); // フォーム維持
     expect(screen.queryByTestId('draft')).toBeNull();
   });
@@ -304,7 +304,7 @@ function theNotice(): HTMLElement {
 function expectNoticeThroughComponent(
   notice: HTMLElement,
   variant: 'success' | 'destructive',
-  role: 'status' | 'alert',
+  role: 'status' | 'alert' | null,
   text: string,
 ): void {
   expect(notice.getAttribute('data-slot'), '通知が部品を通っていません').toBe('alert');
@@ -394,7 +394,7 @@ describe('回答済み画面と回答フェーズ: 通知が部品を通る（�
 
   it('送信失敗の通知は危険の変種の通知部品で描かれる（design.md「Error Handling」）', async () => {
     await renderSubmitFailure();
-    expectNoticeThroughComponent(theNotice(), 'destructive', 'alert', SUBMIT_FAILED);
+    expectNoticeThroughComponent(theNotice(), 'destructive', null, SUBMIT_FAILED);
   });
 
   // 変種を取り違えると役割も一緒にずれる。片側だけを書くと取り違えが素通りするので、
@@ -412,7 +412,7 @@ describe('回答済み画面と回答フェーズ: 通知が部品を通る（�
     localStorage.clear();
 
     await renderSubmitFailure();
-    expect(screen.queryAllByRole('alert'), '送信失敗の中断させる通知').toHaveLength(1);
+    expect(screen.queryAllByRole('alert'), '結果は Toast が読み上げる').toHaveLength(0);
     expect(
       screen.queryAllByRole('status'),
       '送信失敗が穏やかな読み上げで出ています（中断させる必要があります）',

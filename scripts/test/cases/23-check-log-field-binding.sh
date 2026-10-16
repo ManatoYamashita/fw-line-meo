@@ -401,3 +401,81 @@ fx_run check-log-field-binding
 expect_red '事象名「demo.optional_sink_unregistered」を出しますが'
 expect_red '事象名「demo.optional_logger_unregistered」を出しますが'
 t_end
+
+# Sonner の UI 通知はログの事象ではない。受信側の import binding で区別する（#450）。
+t_begin 'check-log-field-binding: 共有Toastの通知文言をログとして数えない'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/notice.tsx <<'EOF'
+import { toast } from '@fwlm/ui/components/app-toaster';
+toast.error('入力内容をご確認ください。');
+toast.info('変更を確認してください。');
+EOF
+fx_run check-log-field-binding
+expect_green
+expect_output_matches '実装の事象名 1 件'
+t_end
+
+t_begin 'check-log-field-binding: Sonnerの複数行importと別名も通知として扱う'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/notice.tsx <<'EOF'
+import {
+  toast as notice,
+} from "sonner";
+notice.error?.('通信に失敗しました。');
+EOF
+fx_run check-log-field-binding
+expect_green
+expect_output_matches '実装の事象名 1 件'
+t_end
+
+t_begin 'check-log-field-binding: Toastと同じファイルのログは引き続き照合する'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/notice.tsx <<'EOF'
+import { toast } from '@fwlm/ui/components/app-toaster';
+toast.error('入力内容をご確認ください。');
+deps.logger.error('demo.still_unregistered');
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.still_unregistered」を出しますが'
+t_end
+
+t_begin 'check-log-field-binding: importされていないtoastという名前は除外しない'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/logging.ts <<'EOF'
+toast.error('demo.named_toast_logger');
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.named_toast_logger」を出しますが'
+t_end
+
+t_begin 'check-log-field-binding: import名を引数で隠したloggerを除外しない'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/shadowed.ts <<'EOF'
+import { toast } from 'sonner';
+toast.error('入力内容をご確認ください。');
+export function run(toast: { error(event: string): void }): void {
+  toast.error('demo.shadowed_logger');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.shadowed_logger」を出しますが'
+t_end
+
+t_begin 'check-log-field-binding: for-ofの局所宣言でimport名を隠したloggerも照合する'
+fx_guard check-log-field-binding
+lfb_fixture
+fx_write ts/apps/demo/src/shadowed-loop.ts <<'EOF'
+import { toast } from 'sonner';
+toast.error('入力内容をご確認ください。');
+export function run(loggers: Array<{ error(event: string): void }>): void {
+  for (const toast of loggers) toast.error('demo.loop_logger');
+}
+EOF
+fx_run check-log-field-binding
+expect_red '事象名「demo.loop_logger」を出しますが'
+t_end

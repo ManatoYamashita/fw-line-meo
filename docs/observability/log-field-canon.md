@@ -4,6 +4,10 @@
 
 本書は、6 実行面が出す記録について **「ある意味の情報が、どの実行面でどの名前になるか」と「その名前を変えられるか」** を定める唯一の正典である。実装と本書の乖離は `scripts/check-log-field-canon.sh` と `scripts/check-log-field-binding.sh` が機械検証する。
 
+Sonner と共有 Toast が画面に表示する操作結果はログではなく、通知の文言を本書へ登録しない（#450）。
+照合ガードはその named import を識別して通知呼び出しを区別する。同じファイルの logger は引き続き照合し、
+import 名が引数・局所宣言などで隠され得る場合は通知として除外しない。
+
 ## 読み方と守るべき規律
 
 - **全実行面で同一の文字列へ統一することはできない。** 本番の集計指標が参照する表記（camelCase）と、既存 spec が要求仕様として名指しする表記（snake_case）が、それぞれ別の流儀で固定されている。したがって本書は「意味 → 各実行面での名前」の対応として定める
@@ -55,7 +59,8 @@
 | 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
 |---|---|---|---|---|---|
 | 事後検証で残った未選択観点 | `violatedAspects` | 該当なし | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 観点の識別子のみ。下書き本文・一言・生成指示は載せない |
-| 事後検証で残った来店前の期待・「無かった」の断定 | `residualClaims` | 該当なし | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 分類名（`expectation` / `absence:<分類>`）のみ（Issue #413）。下書き本文・一言・生成指示は載せない |
+| 事後検証で残った来店前の期待・「無かった」の断定 | `residualClaims` | 該当なし | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 分類名（`expectation` / `absence:<分類>`）のみ（Issue #413）。structured の下書きの作り直し・fallback（Issue #439）では、hard gate の失格の種類の頭の名前を並べる。下書き本文・一言・生成指示は載せない |
+| structured の下書きの claim の件数 | `claimCount` | 該当なし | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 回答から作った claim（言ってよい意味）の件数だけ（Issue #439）。素材の厚みと作り直し・fallback の関係を見るための匿名の数で、Target 名・facet・一言は載せない |
 
 ### 1.5 店舗詳細面に固有の項目
 
@@ -147,16 +152,22 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `survey_page_viewed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 本番の集計指標がこの文字列で絞り込む（`infra/modules/guardrails/main.tf` の `survey_funnel`） |
 | `survey_response_submitted` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 同上 |
 | `survey_review_link_opened` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | **変更禁止**: 同上。投稿導線の押下（Issue #137）。token を検証できた押下だけを記録する |
-| `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62）。**変更禁止**: 本番の集計指標がこの文字列で生成失敗を数え、1 件でも出ればアラートが鳴る（`infra/modules/guardrails/main.tf` の `generation_failures`・Issue #394）。ラベルに写すのは `errorKind` と `status` だけである |
-| `generation_safety_blocked` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
+| `generation_failed` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | 本番障害の調査で参照された実績がある（#62）。**変更禁止**: 本番の集計指標がこの文字列で生成失敗を数え、1 件でも出ればアラートが鳴る（`infra/modules/guardrails/main.tf` の `generation_failures`・Issue #394）。ラベルに写すのは `errorKind` と `status` だけである。structured の下書き（Natural LLM Realizer）も、**全試行で生成そのものが失敗し、その中に API_ERROR か INVALID_OUTPUT が 1 件でもあるとき**に同じ事象・同じ項目で 1 件だけ出す（PR #443・`aggregateGenerationErrors`。API_ERROR が 1 件でもあれば API_ERROR で、`status` は API_ERROR がすべて同じ値のときだけ載せる。無ければ INVALID_OUTPUT。試行の順番に依らない）。factuality の hard gate の失格では出さない（`survey-web.structured_draft_failed` の `reason: gate`） |
+| `generation_safety_blocked` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | structured の下書きは、**全試行が安全性による遮断（SAFETY_BLOCKED）だったときだけ** この事象で 1 件出す（PR #443・`aggregateGenerationErrors`）。API_ERROR・INVALID_OUTPUT が 1 件でも混ざれば `generation_failed` になる |
 | `factuality_residual` | survey-web | 既存 | `ts/apps/survey-web/src/lib/structured-log.ts` | |
 | `fabrication_residual` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | 事後検証（Issue #413）で作り直しても残った来店前の期待と「無かった」の断定。`factuality_residual` の意味（未選択の観点だけ）を変えないため事象名を分けた。項目は `residualClaims` だけである |
+| `survey-web.structured_draft_retry` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | structured の下書き（Natural LLM Realizer・Issue #439）の 1 回目が hard gate を通らず作り直した。項目は `residualClaims`（失格の種類の頭の名前を並べたもの）と `claimCount` だけで、下書き・一言・料理名は載せない |
+| `survey-web.structured_draft_result` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | **ローカル検証用**（`STRUCTURED_DRAFT_DEBUG_LOG=1` のときだけ出る・本番では配線しない）。structured の下書きの最終の結果。項目は `reason`（`llm:attempts=2:accepted=2` の形。結果は llm か generation_error で、本番の経路で fallback は出ない）と `residualClaims`（試行ごとの種類・`a1=cause;a2=ok` の形）・`claimCount` だけで、本文は載せない |
+| `survey-web.structured_draft_failed` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | structured の下書きを最大回数（3 回）まで作れなかった（generation error・Issue #439）。safe fallback の文は返していない。項目は `reason`（`gate` = 最後の試行まで hard gate を通らなかった／`generation` = すべて生成そのものの失敗）と `residualClaims`・`claimCount` だけで、本文は載せない |
+| `survey-web.structured_schema_unavailable` | survey-web | 新規 | `ts/apps/survey-web/src/lib/structured-log.ts` | structured survey の表・権限がまだ無い（PostgreSQL の `42P01` undefined_table / `42501` insufficient_privilege）ため、アンケートの表示と回答を legacy として扱った（PR #443）。互換の逃げ道を `STRUCTURED_SCHEMA_COMPAT_FALLBACK=1` で明示的に有効にしている間だけ出る（既定は無効で、その場合は 5xx になりこの事象は出ない。正規の手順では 0 件）。項目は `errorKind`（エラーコード）だけで、店舗 ID・エラーの本文は載せない |
 | `tally_failed` | survey-web | 既存 | `ts/apps/survey-web/src/app/api/responses/handler.ts` | 集計の失敗は客へ転嫁しない（要件 5.4 の思想）。記録だけ残す |
 | `review_link_tally_failed` | survey-web | 新規 | `ts/apps/survey-web/src/app/api/review-link-opened/handler.ts` | 投稿導線の押下の月次集計（`survey_review_link_tallies`・Issue #401）への加算の失敗。`tally_failed` と同じく客へ転嫁せず記録だけ残す。項目は持たない。同じ要求の `survey_review_link_opened` は加算より先に出るので、両者の乖離が集計障害の検知になる |
 | `store-detail.config_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.pool_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
 | `store-detail.query_error` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
-| `store-detail.store_hint_ignored` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | |
+| `store-detail.store_hint_ignored` | store-detail | 既存 | `ts/apps/store-detail/app/api/detail/route.ts` | アンケート設定 API（`ts/apps/store-detail/lib/survey-settings-api.ts`・Issue #437）も、認可済み集合の外のヒントを無視したときに同じ事象名・同じ項目で出す |
+| `store-detail.survey_settings_error` | store-detail | 新規 | `ts/apps/store-detail/lib/survey-settings-api.ts` | アンケート設定 API（Issue #437）の 500。設定の欠落・接続の失敗（`ts/apps/store-detail/lib/survey-settings-route.ts`）と、読み書きの失敗をまとめる。項目は `errorKind` と、設定の欠落のときの `configKey` だけである（料理名・ドリンク名・入力値は載せない） |
+| `store-detail.audit_log_failed` | store-detail | 新規 | `ts/apps/store-detail/lib/survey-settings-api.ts` | 店舗オーナーのアンケート設定の変更（Issue #437）の監査記録（`audit_logs`）の書込の失敗。設定の変更は巻き戻さず、応答も変更の結果どおりに返す（`dashboard-api.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 | `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している。**変更禁止**: トークン発行が通った実行でしか出ないため、本番の集計指標がこの文字列で LINE の資格情報の生死を数える（`infra/modules/guardrails/main.tf` の `line_token_issued_runs`・Issue #139） |
 | `delivery-job.token_issue_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | LINE のトークン発行に失敗したとき（Issue #139）。直後に `delivery-job.fatal` も出るが、そちらは対象抽出（DB）の失敗と同じ事象名なので LINE の失敗だけを数えられない。**変更禁止**: 本番の集計指標がこの文字列で絞り込む（`line_token_issue_failures`）。項目は `errorKind` と、状態コードがあれば `status` だけである |
 | `daily-batch.run` | daily-batch | 新規 | `go/cmd/daily-batch/main.go` | 日次バッチの実行サマリー行（Issue #139）。**変更禁止**: 本番の集計指標がこの文字列と `fetch_ok` / `stores_total` で Places の生死を数える（`places_fetch_ok_runs` / `places_fetch_eligible_runs`） |

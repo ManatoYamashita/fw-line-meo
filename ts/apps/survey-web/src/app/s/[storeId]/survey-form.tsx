@@ -1,8 +1,10 @@
 'use client';
+import { toast } from '@fwlm/ui/components/app-toaster';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
+import { Spinner } from '@fwlm/ui/components/spinner';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
 import { Textarea } from '@fwlm/ui/components/textarea';
 import type { AspectOption, SurveyAnswer, SurveyFormProps } from './types';
@@ -46,9 +48,18 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
   const [comment, setComment] = useState('');
   const [showStarError, setShowStarError] = useState(false);
 
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!submitting) { setSlow(false); return; }
+    const timer = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(timer);
+  }, [submitting]);
+
   function submit(): void {
+    if (submitting) return;
     if (star === null) {
       setShowStarError(true);
+      toast.error('満足度を選択してください。');
       return;
     }
     const aspectCodes = [...good];
@@ -90,7 +101,7 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
         {showStarError && (
           // 読み上げ役割（進行中の読み上げを中断するライブリージョン）は変種から部品が決める。
           // 面の側で役割を手書きすると、部品の分岐と二重管理になる。
-          <Alert variant="destructive">
+          <Alert variant="destructive" role={undefined}>
             <AlertDescription>満足度を選択してください</AlertDescription>
           </Alert>
         )}
@@ -129,9 +140,10 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
       </label>
 
       {/* 客向け面の主操作は拡大の区分で全幅（正典 7.9 / 7.10）。寸法の実値は部品の側が持つ。 */}
-      <Button size="lg" className="w-full" type="submit" disabled={submitting}>
-        送信する
+      <Button size="lg" className="w-full" type="submit" disabled={submitting} aria-busy={submitting}>
+        {submitting ? <><Spinner aria-hidden aria-label="" />口コミ文を作成しています…</> : '送信する'}
       </Button>
+      <p role="status">{submitting ? slow ? '少し時間がかかっています。画面を閉じずにこのままお待ちください' : '回答内容をもとに文章を作成しています' : ''}</p>
     </form>
   );
 }

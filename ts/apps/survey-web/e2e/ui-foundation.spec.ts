@@ -25,14 +25,14 @@ const TRANSPARENT = /^rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*0\s*\)$/;
 // 余裕を持たせても実行時間は増えない。
 //
 // **この値は安全弁であって設計値ではない。** 上限に達して打ち切られると、その先の要素は
-// フォーカス可視性を一度も検査されないまま緑になる。検証面の操作可能要素は Issue #52 と #57 の
-// 双方が追加しており、実測の巡回数は `/ui-check` が 21・回答画面が 13（従来の上限 24 に対し
-// 余裕は 3 しかなかった）。打ち切りが起きていないこと自体を各テストの末尾で assert し、
-// 部品を足し続けたときに静かに検査対象が減る事故を防ぐ。
+// フォーカス可視性を一度も検査されないまま緑になる。実測の巡回数は `/ui-check` が 26・
+// 回答画面が 19 である（回答画面は観点の数に比例して増える）。打ち切りが起きていないこと自体を
+// 各テストの末尾で assert し（`expectTraversalNotTruncated`）、部品を足し続けたときに静かに
+// 検査対象が減る事故を防ぐ。
 //
 // 注意: 巡回数を DOM の tabbable 要素数から見積もってはならない。Base UI の RadioGroup は
 // roving tabindex で群全体が 1 停止になり、Checkbox が内部に持つ隠し input は巡回に乗らない。
-// 素朴に数えると 30 になるが実際は 21 である（この見積もり違いを実際に踏んだ）。
+// 素朴に数えると実際の停止数より多くなる。
 const MAX_TAB_STEPS = 48;
 
 /** 通常文字の WCAG 2.1 AA 基準（Requirements 5.2）。 */
@@ -874,6 +874,26 @@ function readFocusIndicator(page: Page): Promise<FocusIndicator | null> {
   });
 }
 
+/**
+ * Tab 巡回が上限 `MAX_TAB_STEPS` で打ち切られていないことを確かめる。
+ *
+ * 上限に達したとき、巡回の最後の Tab で焦点はすでに次の行き先へ移っている。その行き先が
+ * 頁本体（要素が尽きた）なら、上限ちょうどの停止数を巡回し切っただけで打ち切りではない。
+ * 件数だけで判定すると、この場合を打ち切りと取り違える。
+ */
+async function expectTraversalNotTruncated(
+  page: Page,
+  checked: readonly string[],
+  trail: string,
+): Promise<void> {
+  const truncated = checked.length >= MAX_TAB_STEPS && (await readFocusIndicator(page)) !== null;
+  expect(
+    truncated,
+    `巡回が上限（${MAX_TAB_STEPS}）で打ち切られた。上限より先の操作可能要素は` +
+      `フォーカス可視性を検査されていない。${trail}`,
+  ).toBe(false);
+}
+
 // requirements 5.3: キーボードフォーカス時に視認可能なフォーカス表示を提示する。
 test('キーボードでたどった操作可能要素すべてに可視フォーカス表示が出る', async ({ page }) => {
   await openSurveySurface(page);
@@ -907,6 +927,10 @@ test('キーボードでたどった操作可能要素すべてに可視フォ�
   // 空振り緑の防止: 星5個＋一言 textarea＋送信ボタンまで実際にたどれていること。
   const trail = `たどれた操作可能要素: ${checked.join(', ')}`;
   expect(checked.length, trail).toBeGreaterThanOrEqual(7);
+  // 打ち切りの検出は到達の検査より前に置く。「送信する」が最後の停止である間は、打ち切りが
+  // 到達の検査で先に落ち、原因が読めない。「送信する」より後ろに要素が増えたときは、到達して
+  // いても上限より先が検査されていない。
+  await expectTraversalNotTruncated(page, checked, trail);
   expect(
     checked.some((w) => w.includes('送信する')),
     trail,
@@ -964,12 +988,8 @@ test('@fwlm/ui の対話的部品すべてに可視フォーカス表示が出�
   const trail = `たどれた操作可能要素: ${checked.join(', ')}`;
   expect(checked.length, trail).toBeGreaterThanOrEqual(10);
   // 打ち切りの検出: 上限で止まった場合、その先の要素は一度も検査されないまま緑になる。
-  // 検証面へ部品を足し続けると静かに起こるので、上限に触れたこと自体を失敗として扱う。
-  expect(
-    checked.length,
-    `巡回が上限（${MAX_TAB_STEPS}）で打ち切られた。上限より先の操作可能要素は` +
-      `フォーカス可視性を検査されていない。${trail}`,
-  ).toBeLessThan(MAX_TAB_STEPS);
+  // 検証面へ部品を足し続けると静かに起こるので、打ち切られたこと自体を失敗として扱う。
+  await expectTraversalNotTruncated(page, checked, trail);
   expect(
     checked.some((w) => w.includes('破壊的なボタン')),
     `destructive variant に到達していない。${trail}`,
@@ -1233,25 +1253,24 @@ test.describe('動き低減設定が有効な環境', () => {
     const measured = await (async () => {
       try {
         await page.getByRole('button', { name: /別の文章を生成/ }).click();
-        await expect(page.locator('[role="status"] [data-slot="spinner"]')).toBeVisible();
+        // 処理中の図形と文言は再生成の押しボタン自身が持つ（読み上げ領域には補足の文だけを出す）。
+        await expect(page.locator('button[aria-busy="true"] [data-slot="spinner"]')).toBeVisible();
         return await page.evaluate(() => {
-          const region = document.querySelector('[role="status"]');
-          if (region === null) return null;
-          const spinner = region.querySelector('[data-slot="spinner"]');
+          const button = document.querySelector('button[aria-busy="true"]');
+          if (button === null) return null;
+          const spinner = button.querySelector('[data-slot="spinner"]');
           const icon = spinner === null ? null : spinner.querySelector('svg');
           // 文言は「直下のテキストノード」であることが要る。図形の読み上げ名へ畳むと
           // 部品内部の読み上げ専用要素へ落ち、動きの低減が要求されていない環境で見えなくなる。
           const range = document.createRange();
           const own: string[] = [];
           let width = 0;
-          for (const paragraph of Array.from(region.querySelectorAll('p'))) {
-            for (const node of Array.from(paragraph.childNodes)) {
-              const text = (node.textContent ?? '').trim();
-              if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
-                own.push(text);
-                range.selectNodeContents(node);
-                width = Math.max(width, range.getBoundingClientRect().width);
-              }
+          for (const node of Array.from(button.childNodes)) {
+            const text = (node.textContent ?? '').trim();
+            if (node.nodeType === Node.TEXT_NODE && text.length > 0) {
+              own.push(text);
+              range.selectNodeContents(node);
+              width = Math.max(width, range.getBoundingClientRect().width);
             }
           }
           return {
@@ -1268,7 +1287,7 @@ test.describe('動き低減設定が有効な環境', () => {
     })();
 
     // 空振り防止: 領域と図形を実際に掴めていること。掴めていないと以下はすべて空の比較になる。
-    expect(measured, '本番の下書き画面に読み上げ領域が無い').not.toBeNull();
+    expect(measured, '本番の下書き画面に処理中の押しボタンが無い').not.toBeNull();
     const cue = measured as NonNullable<typeof measured>;
     expect(cue.spinnerPresent, '処理中の図形を掴めていない（再生成が始まっていない疑い）').toBe(
       true,
@@ -1278,7 +1297,7 @@ test.describe('動き低減設定が有効な環境', () => {
       cue.ownText,
       `処理中の文言が直下のテキストノードとして置かれていない（実測「${cue.ownText}」）。` +
         '図形の読み上げ名へ畳むと、動きの低減が要求されていない環境で文言が見えなくなる',
-    ).toBe('生成中…');
+    ).toBe('別の文章を作成しています…');
     expect(
       cue.width,
       `処理中の文言が実描画で ${cue.width}px しかない（可視化されていない）`,
@@ -2221,7 +2240,7 @@ test('本番画面の通知に変種の状態色が実描画で届いている',
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   await page.getByRole('button', { name: /コピー/ }).click();
-  await expect(page.getByText(/コピーしました/)).toBeVisible();
+  await expect(page.locator('[data-slot="alert"]').getByText(/コピーしました/)).toBeVisible();
 
   const successAlert = page.locator('[data-slot="alert"]');
   await expect(successAlert, '下書き画面に成功の通知が 1 つに解決されていない').toHaveCount(1);

@@ -1,7 +1,8 @@
 import type { DraftGenerator } from '../../../lib/draft/generator';
 import { pickVariation } from '../../../lib/draft/prompt';
 import type { RateLimiter } from '../../../lib/rate-limit';
-import type { SessionTokenService } from '../../../lib/session-token';
+import type { SessionTokenService, StructuredSessionPayload } from '../../../lib/session-token';
+import type { StructuredDraftPort } from '../../../lib/draft/structured-draft';
 import type { SurveyStoreView } from '../responses/handler';
 import { jsonError, jsonOk } from '../../../lib/http';
 import { REGEN_MAX } from '../../../lib/limits';
@@ -22,6 +23,8 @@ export interface DraftsDeps {
   generator: DraftGenerator;
   rateLimiter: RateLimiter;
   findStore: (id: string) => Promise<SurveyStoreView | null>;
+  /** structured survey の再生成（Natural LLM Realizer・Issue #439）。 */
+  structuredDrafts: StructuredDraftPort;
   clientKey: (req: Request) => string;
   log: SurveyLogger;
   supportCode?: string;
@@ -40,6 +43,17 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
   }
   const obj = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const sessionToken = typeof obj.sessionToken === 'string' ? obj.sessionToken : '';
+
+  // structured の sessionToken（v: 2・Issue #439）は structured の再生成へ。legacy の検証（v: 1）は v: 2 を通さないので、
+  // 先に分岐する。legacy の経路はこの分岐の後で従来どおり。
+  // verifyStructured の EXPIRED は署名と v: 2 の形を確かめた後にしか返らない（＝本物の structured の token の期限切れ）。
+  // legacy の検証へ流すと v: 2 を INVALID と読んで TOKEN_INVALID に化けるので、ここで返す。INVALID のときだけ legacy の
+  // token の可能性として legacy の検証へ進む。
+  const structured = deps.tokens.verifyStructured(sessionToken);
+  if (structured.ok) return handleStructuredDrafts(req, structured.value, deps);
+  if (structured.error === 'EXPIRED') {
+    return error(deps, 400, 'TOKEN_EXPIRED', 'お手数ですが最初から回答し直してください');
+  }
 
   const verified = deps.tokens.verify(sessionToken);
   if (!verified.ok) {
@@ -84,6 +98,43 @@ export async function handleDrafts(req: Request, deps: DraftsDeps): Promise<Resp
     generation: 'ok',
     draft: gen.value,
     sessionToken: token,
+    regenerationsLeft: REGEN_MAX - nextAttempt,
+  });
+}
+
+/**
+ * structured の再生成（Issue #439）。sessionToken に封入した素材（回答時点の Target の名前の snapshot）から作り直す。
+ * 集計には触れない。上限・店舗の可否・レート制限は legacy と同じ規則。生成器が下書きを返せなかった（claim の無い
+ * 素材・最大回数まで作れなかった generation error）ときは生成失敗として返し、試行は消費しない。生成器の内部の
+ * 作り直し（最大 3 回）は 1 回の再生成として数える。
+ */
+async function handleStructuredDrafts(req: Request, payload: StructuredSessionPayload, deps: DraftsDeps): Promise<Response> {
+  if (!deps.rateLimiter.check(deps.clientKey(req))) {
+    return error(deps, 429, 'RATE_LIMITED', '時間をおいて再度お試しください');
+  }
+  const { storeId, structured, attempt } = payload;
+  const store = await deps.findStore(storeId);
+  if (!store || store.placeStatus !== 'confirmed' || store.suspendedAt !== null) {
+    return error(deps, 404, 'STORE_NOT_AVAILABLE', 'このアンケートは現在利用できません');
+  }
+  if (attempt >= REGEN_MAX) {
+    return error(deps, 409, 'REGEN_LIMIT', '再生成の上限に達しました。編集してご利用ください');
+  }
+  // 初回と同じ生成をもう一度行う（構成を変える指示は足さない。前回の下書きは受け取らず、渡さない）。
+  const prepared = await deps.structuredDrafts.prepare(structured);
+  if (prepared.kind !== 'draft') {
+    // 生成そのものが全試行で失敗した（API の障害・残高切れ等）ときは、legacy と同じ generation_failed /
+    // generation_safety_blocked で記録し、既存の監視（infra/modules/guardrails の generation_failures）へ乗せる。
+    // factuality の hard gate の失格（reason: gate）は API の障害ではないので記録しない。
+    if (prepared.kind === 'failed' && prepared.generationError !== undefined) logGenerationFailure(deps.log, prepared.generationError);
+    const token = deps.tokens.signStructured({ storeId, structured, attempt });
+    return jsonOk({ generation: 'failed', draft: null, sessionToken: token, regenerationsLeft: REGEN_MAX - attempt });
+  }
+  const nextAttempt = attempt + 1;
+  return jsonOk({
+    generation: 'ok',
+    draft: prepared.draft,
+    sessionToken: deps.tokens.signStructured({ storeId, structured, attempt: nextAttempt }),
     regenerationsLeft: REGEN_MAX - nextAttempt,
   });
 }

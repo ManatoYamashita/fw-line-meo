@@ -4,6 +4,8 @@
 #  - 実テーブルが db/ERD.md に出現（Req 11.1, 11.2）
 #  - write-boundary.md の書込所有テーブルに infra/sql/grants.sql で該当層 SA への DML GRANT があること
 #  - 走査したテーブルが 1 件以上あること（空振り防止・Issue #156）
+#  - 書込面の DML 付与を後続の Issue へ保留したテーブル（下の PENDING_WRITE_GRANTS）は、**どの SA にも
+#    DML GRANT が無いこと**・write-boundary.md の行がその Issue を名指していること（Issue #436）
 #
 # 既定: apple/container で一時 postgres を起動し migrations を適用して実テーブル一覧を取得。
 # 既存 DB を使う場合: MANAGE_CONTAINER=0 かつ PSQL_EXEC を設定（例: MANAGE_CONTAINER=0 PSQL_EXEC=psql、PG* 環境変数で接続）。
@@ -47,7 +49,7 @@ tables=$($PSQL_EXEC -tAq -c "SELECT table_name FROM information_schema.tables WH
 # TS 層 SA / Go 層 SA への DML（INSERT を含む GRANT）文を抽出する。
 # TS 層は複数 SA（line_webhook/survey/dashboard の共有文＋delivery の最小権限文）に
 # DML が分かれるため、いずれかの TS 層 SA への GRANT に現れれば「TS 層に付与済み」とみなす
-# （detail は読取専用で DML を持たないため対象外）。
+# （detail は店舗オーナーのアンケート設定 3 表と監査記録に限って列を絞った DML を持つ・Issue #437）。
 # grep の一致件数を stdout へ返す。**無一致（exit 1）は 0 件として正常に返し、評価不能
 # （exit 2 以上）はその終了コードのまま返す**（Issue #162）。
 #
@@ -73,7 +75,7 @@ if [ "$grant_rc" -gt 1 ]; then
     exit 1
 fi
 ts_rc=0
-ts_dml="$(printf '%s\n' "$grants_dml" | grep -E ':"(line_webhook|survey|dashboard|delivery)"')" || ts_rc=$?
+ts_dml="$(printf '%s\n' "$grants_dml" | grep -E ':"(line_webhook|survey|dashboard|delivery|detail)"')" || ts_rc=$?
 if [ "$ts_rc" -gt 1 ]; then
     echo "FAIL: TS 層 SA への DML GRANT を走査できません（grep exit=${ts_rc}）"
     exit 1
@@ -84,6 +86,24 @@ if [ "$go_rc" -gt 1 ]; then
     echo "FAIL: Go 層 SA への DML GRANT を走査できません（grep exit=${go_rc}）"
     exit 1
 fi
+
+# 書込責任層は宣言したが、**書込面（どの SA に書かせるか）を後続の Issue で決める**テーブル。
+# 形式: `<テーブル>|<Issue 番号>`。structured survey の店舗設定 3 表（0015）は #436 の時点でここへ載せ、
+# 店舗オーナーの書込面を #437 で store-detail SA へ列を絞って付与したので外した（いまは保留の表が無い）。
+# ここに載せた表は
+#   (1) 所有層への DML GRANT を要求しない代わりに、**どの SA への DML GRANT も在ってはならない**
+#       （書込面を決めないまま付与が紛れ込むのを赤にする。付与したらこの表から外す）
+#   (2) write-boundary.md の行が `#<Issue>` を名指していること（保留の理由と追跡先を正典に残す）
+#   (3) 実在するテーブルであること（消えた表の宣言を残さない）
+# を検証する。
+PENDING_WRITE_GRANTS=()
+pending_issue() {   # $1 = テーブル名 → 保留なら Issue 番号を stdout へ返す（保留でなければ空）
+    for pe in ${PENDING_WRITE_GRANTS[@]+"${PENDING_WRITE_GRANTS[@]}"}; do
+        if [ "${pe%%|*}" = "$1" ]; then printf '%s\n' "${pe#*|}"; return 0; fi
+    done
+    return 0
+}
+pending_seen=""
 
 bq='`'; fail=0; n=0
 
@@ -126,6 +146,26 @@ while IFS= read -r t; do
     fi
     layer="$(printf '%s\n' "$layer_line" | awk -F'|' '{print $3}')"
 
+    issue="$(pending_issue "$t")"
+    if [ -n "$issue" ]; then
+        pending_seen="$pending_seen $t"
+        any_rc=0
+        any="$(printf '%s\n' "$grants_dml" | count_matches -w "$t")" || any_rc=$?
+        if [ "$any_rc" -ne 0 ]; then
+            echo "FAIL: DML GRANT を走査できません（grep exit=${any_rc}・テーブル '$t'）"; fail=1
+        elif [ "$any" -ne 0 ]; then
+            echo "FAIL: '$t' は書込面の付与を #${issue} へ保留していますが、grants.sql に DML GRANT があります（付与したなら check_docs.sh の PENDING_WRITE_GRANTS から外してください）"; fail=1
+        fi
+        ref_rc=0
+        ref="$(printf '%s\n' "$layer_line" | count_matches -F "#${issue}")" || ref_rc=$?
+        if [ "$ref_rc" -ne 0 ]; then
+            echo "FAIL: write-boundary.md の行を走査できません（grep exit=${ref_rc}・テーブル '$t'）"; fail=1
+        elif [ "$ref" -eq 0 ]; then
+            echo "FAIL: '$t' の write-boundary.md の行が保留先の #${issue} を名指していません"; fail=1
+        fi
+        continue
+    fi
+
     # 件数判定にする。`printf | grep -q` は最初の一致で抜けるため上流が EPIPE で 141 になり、
     # pipefail がそれを伝播する（入力サイズ依存の偽陽性・Issue #117 / #162）。
     case "$layer" in
@@ -155,6 +195,13 @@ done <<< "$tables"
 # 「接続先に migrations が当たっていない」「別の DB を指した」という**検査の前提が崩れた状態**を、
 # CI の緑がお墨付きにしてしまう。違反 0 件と対象 0 件は別物である。
 # 実測（Issue #156 の作業時）: 空の DB を指すと `OK: … 0 テーブル …` / exit 0 を返した。
+for pe in ${PENDING_WRITE_GRANTS[@]+"${PENDING_WRITE_GRANTS[@]}"}; do
+    case " $pending_seen " in
+        *" ${pe%%|*} "*) ;;
+        *) echo "FAIL: PENDING_WRITE_GRANTS の '${pe%%|*}' は実在するテーブルではありません（宣言を外してください）"; fail=1 ;;
+    esac
+done
+
 if [ "$n" -eq 0 ]; then
     echo "FAIL: public に BASE TABLE が 1 件もありません（接続先に migrations が当たっていない可能性。検査の前提が崩れています）"
     fail=1
