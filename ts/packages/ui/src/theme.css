@@ -15,10 +15,12 @@
 
 /* --- Tailwind v4 デザイントークン（@fwlm/design-tokens と同値） --- */
 @theme {
-  /* Colors（design-tokens colors） */
-  --color-brand: #FF385C;
-  --color-primary: #E00B41;
-  --color-primary-hover: #B30934;
+  /* Colors（design-tokens colors）
+   * brand は LINE Green で、白背景に対して大きい文字の 3:1 にも届かない。装飾とアイコンにだけ使い、
+   * 文字色には使わない（test/brand-usage.test.ts が面の側を照合する）。 */
+  --color-brand: #06C755;
+  --color-primary: #047733;
+  --color-primary-hover: #035F29;
   --color-primary-foreground: #FFFFFF;
   --color-text: #222222;
   --color-text-body: #3F3F3F;
@@ -28,7 +30,9 @@
   --color-surface-strong: #F2F2F2;
   /* 成功色はアクション色と共有しない。共有していると、アクション色を暖色系へ変えた瞬間に
    * 成功通知が危険通知と同系色になる。色相の変化は輝度を変えないため、コントラスト比を見る
-   * どのガードにも掛からず CI 全緑で通る（design-tokens の test/colors.test.ts が塞ぐ）。 */
+   * どのガードにも掛からず CI 全緑で通る（design-tokens の test/colors.test.ts が塞ぐ）。
+   * 値を分けていても、いまのアクション色とは色だけでは見分けられないので、成功の表示は印と文言を
+   * 必ず伴う（test/success-cue.test.tsx が全件を照合する）。 */
   --color-success: #15803D;
   --color-destructive: #B32505;
   --color-destructive-foreground: #FFFFFF;

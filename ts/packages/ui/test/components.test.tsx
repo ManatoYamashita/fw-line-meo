@@ -559,12 +559,52 @@ describe('Alert — 通知（成功 / エラー）の役割と変種（Requireme
     expect(success).toBeDefined();
     expect(destructive).toBeDefined();
 
-    // 成功はブランド色をそのまま文字色にしない（#FF385C は白背景で 3.52:1 = AA 非準拠）。
+    // 成功はブランド色をそのまま文字色にしない（#06C755 は白背景で 2.26:1 = 大きい文字の 3:1 にも届かない）。
     // アクション色からも独立した成功専用トークン（--color-success）経由の text-success を使う。
     expect(classesOf(success!)).toContain('text-success');
     expect(classesOf(success!)).not.toContain('text-brand');
     expect(classesOf(destructive!)).toContain('text-destructive');
     expect(classesOf(success!)).not.toBe(classesOf(destructive!));
+  });
+
+  // 成功色はアクション色と色だけでは見分けられない（design-tokens の ColorTokens.success）。成功の通知が
+  // リンクや押しボタンの文字と同じ色に見えるので、成功であることは印と文言で示す。印を呼び出し側に任せると
+  // 付け忘れた箇所だけが色でしか成功を伝えないので、部品が描く。
+  it('success は成功の印を部品が描き、文言と並べる（色以外の手がかり）', () => {
+    render(
+      <Alert variant="success">
+        <AlertDescription>店舗情報を保存しました</AlertDescription>
+      </Alert>,
+    );
+
+    const alert = renderedAlerts()[0]!;
+    const icon = alert.querySelector('[data-slot="success-icon"]');
+    expect(icon, '成功の通知に印がありません').not.toBeNull();
+    // 直下の svg でなければ has-[>svg] の段組みが働かず、印と文言が縦に積まれる。
+    expect(icon!.tagName.toLowerCase()).toBe('svg');
+    expect(icon!.parentElement).toBe(alert);
+    expect(alert.firstElementChild).toBe(icon);
+    // 印は文言と同じことを言う装飾なので読み上げない。読み上げは文言が担う。
+    expect(icon!.getAttribute('aria-hidden')).toBe('true');
+    expect(alert.textContent).toBe('店舗情報を保存しました');
+    // 印の色は親の状態色を受け継ぐ（印だけ別の色にしない）。
+    expect(classesOf(alert)).toContain('*:[svg]:text-current');
+  });
+
+  it('既定と destructive には成功の印を描かない（成功以外を成功に見せない）', () => {
+    render(
+      <>
+        <Alert>
+          <AlertDescription>お知らせ</AlertDescription>
+        </Alert>
+        <Alert variant="destructive">
+          <AlertDescription>失敗</AlertDescription>
+        </Alert>
+      </>,
+    );
+    for (const alert of renderedAlerts()) {
+      expect(alert.querySelector('[data-slot="success-icon"]')).toBeNull();
+    }
   });
 
   it('success / destructive は説明文にも同じ状態色を渡す（PR #56 レビュー指摘1）', () => {

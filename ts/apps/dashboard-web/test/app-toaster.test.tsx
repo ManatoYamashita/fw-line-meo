@@ -3,6 +3,7 @@
 // 幅で右上・右下を切り替えていた版は、利用者からは画面によって通知の場所が変わって見えた（2026-09-27）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
+import type { ReactElement } from 'react';
 
 const toasterProps = vi.fn();
 vi.mock('sonner', () => ({
@@ -43,5 +44,30 @@ describe('AppToaster の置き場', () => {
     expect(toasterProps).toHaveBeenLastCalledWith(expect.objectContaining({ position: 'bottom-right' }));
     // 幅で切り替える作りに戻すと、描き始めと描き終わりで場所が変わる。問い合わせ自体が無いことを固定する。
     expect(queries).toEqual([]);
+  });
+});
+
+// 成功の Toast は、本文を本文色で描き、状態をアイコンとにじみと文言で示す（design-language 7.5）。
+// にじみの色（成功色）はアクション色と色だけでは見分けられないので、成功のアイコンが必ず要る。
+// Sonner はアイコンを差し替えると既定のアイコンを描かないため、渡したものが描かれるものの全てである。
+describe('AppToaster の成功のアイコン', () => {
+  function icons(): Record<string, ReactElement> {
+    render(<AppToaster />);
+    return (toasterProps.mock.lastCall![0] as { icons: Record<string, ReactElement> }).icons;
+  }
+
+  it('成功の Toast に読み上げないアイコンを渡し、失敗の Toast とは別の形にする', () => {
+    const { success, error } = icons();
+    expect(success, '成功の Toast にアイコンがありません').toBeDefined();
+    const { container: successIcon } = render(success!);
+    const svg = successIcon.querySelector('svg');
+    expect(svg, '成功のアイコンが svg を描いていません').not.toBeNull();
+    expect(svg!.getAttribute('aria-hidden')).toBe('true');
+
+    const { container: errorIcon } = render(error!);
+    expect(
+      successIcon.querySelector('svg path')!.getAttribute('d'),
+      '成功と失敗のアイコンが同じ形です。形の違いが状態を伝える手がかりの 1 つである',
+    ).not.toBe(errorIcon.querySelector('svg path')!.getAttribute('d'));
   });
 });

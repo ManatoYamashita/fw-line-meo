@@ -4,6 +4,7 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "../lib/utils"
+import { SuccessIcon } from "./success-icon"
 
 const alertVariants = cva(
   "group/alert relative grid w-full gap-0.5 rounded-lg border px-2.5 py-2 text-left text-sm has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
@@ -15,7 +16,11 @@ const alertVariants = cva(
         // text-success 経由で参照する。**アクション色は参照しない。** 参照していると、
         // アクション色を暖色系へ差し替えた瞬間に成功通知が危険通知と同系色になる
         // （色相の変化は輝度を変えないためコントラスト比を見るガードには掛からない）。
-        // ブランド色をそのまま文字色にすると白背景で約 3.52:1 となり WCAG AA を割るため使わない。
+        // ブランド色は白背景で約 2.26:1 しかなく、文字色には使えない。
+        //
+        // 成功色はアクション色と色相がほぼ同じで、色だけではリンクや押しボタンの文字と見分けられない。
+        // 成功であることは部品が必ず描く印（SuccessIcon）と文言で示す。印を呼び出し側に任せると、
+        // 付け忘れた箇所だけが色でしか成功を伝えない状態になる。
         //
         // 説明文への指定が必要な理由: AlertDescription は自身に text-muted-foreground を持つ。
         // したがって親に状態色を置くだけでは説明文へ届かず、子孫指定で明示的に渡さない限り
@@ -61,6 +66,7 @@ const alertRoleByVariant = {
 function Alert({
   className,
   variant,
+  children,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
@@ -71,7 +77,11 @@ function Alert({
       role={alertRoleByVariant[variant ?? "default"]}
       className={cn(alertVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {/* 直下の svg として置く。has-[>svg] の段組みが印の列と文言の列を分ける。 */}
+      {variant === "success" && <SuccessIcon />}
+      {children}
+    </div>
   )
 }
 

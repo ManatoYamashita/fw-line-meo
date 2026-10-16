@@ -60,9 +60,9 @@ describe('colors（Web 意味役割）', () => {
   });
 
   it('brand（装飾用）と primary（アクション用）は分離されている', () => {
-    // 意匠の出典のブランド色そのもの。白文字と約 3.52:1 で AA に届かないため装飾専用であり、
-    // アクション色には出典の押下時の色を採る（colors.test.ts が両者の比を機械検証する）。
-    expect(colors.brand).toBe('#FF385C');
+    // LINE Green そのもの。白文字と約 2.26:1 で大きい文字の 3:1 にも届かないため装飾専用であり、
+    // アクション色にはその各成分を 0.6 倍した暗い緑を採る（colors.test.ts が両者の比を機械検証する）。
+    expect(colors.brand).toBe('#06C755');
     expect(colors.primary).not.toBe(colors.brand);
   });
 
