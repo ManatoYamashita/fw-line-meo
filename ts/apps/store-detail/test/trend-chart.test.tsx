@@ -411,8 +411,16 @@ const CHART_COLOR_CLASSES = [
   'text-muted-foreground',
 ] as const;
 
-/** `text-` で始まるが色ではないクラス: 文字サイズの段（text-xs〜text-2xl）と揃え。 */
-const TEXT_SIZE_STEPS: ReadonlySet<string> = new Set(['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl']);
+/** `text-` で始まるが色ではないクラス: 文字サイズの段（text-xs〜text-2xl と text-display）と揃え。 */
+const TEXT_SIZE_STEPS: ReadonlySet<string> = new Set([
+  'text-xs',
+  'text-sm',
+  'text-base',
+  'text-lg',
+  'text-xl',
+  'text-2xl',
+  'text-display',
+]);
 const TEXT_ALIGNMENTS: ReadonlySet<string> = new Set([
   'text-left',
   'text-center',
