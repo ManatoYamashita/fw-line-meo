@@ -15,9 +15,8 @@
 //
 // 色が見分けられるようになっても（成功色を色相で分けても）、この要求は外さない。
 // 色覚の特性によっては色相の差も見えないためである。
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -36,17 +35,12 @@ vi.mock('sonner', () => ({
 
 import { Alert, AlertDescription, AlertTitle } from '../src/components/alert';
 import { AppToaster } from '../src/components/app-toaster';
+import { appSourceRoots, fromTsRoot, listSources, tsRoot } from './support/app-sources';
 
 afterEach(() => {
   cleanup();
   toasterProps.mockClear();
 });
-
-const tsRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const appsDir = join(tsRoot, 'apps');
-
-/** 面のソースを置くディレクトリ。store-detail は src を持たず app と lib に置くので、src だけでは漏れる。 */
-const APP_SOURCE_DIRS = ['src', 'app', 'lib'] as const;
 
 /** 成功の表示の目印。部品の変種・状態色のユーティリティ・Toast の種類・CSS の成功色の参照。 */
 const SUCCESS_SIGNALS: readonly RegExp[] = [
@@ -105,21 +99,6 @@ function rootLayoutOf(file: string): string {
   return found;
 }
 
-/** 面のソース（.ts / .tsx / .css）を再帰的に列挙する。 */
-function listSources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return listSources(path);
-    return /\.(?:tsx?|css)$/.test(name) ? [path] : [];
-  });
-}
-
-function appSourceRoots(): string[] {
-  return readdirSync(appsDir)
-    .flatMap((app) => APP_SOURCE_DIRS.map((dir) => join(appsDir, app, dir)))
-    .filter((root) => existsSync(root));
-}
-
 function filesWithSuccessSignals(): string[] {
   return appSourceRoots()
     .flatMap(listSources)
@@ -127,7 +106,7 @@ function filesWithSuccessSignals(): string[] {
       const source = readFileSync(path, 'utf8');
       return SUCCESS_SIGNALS.some((signal) => signal.test(source));
     })
-    .map((path) => relative(tsRoot, path).split('\\').join('/'))
+    .map(fromTsRoot)
     .sort();
 }
 
@@ -159,7 +138,7 @@ describe('成功の表示の棚卸し', () => {
     });
 
     it('src を持たない面（store-detail の app と lib）も走査している', () => {
-      const roots = appSourceRoots().map((root) => relative(tsRoot, root).split('\\').join('/'));
+      const roots = appSourceRoots().map(fromTsRoot);
       expect(roots).toEqual(expect.arrayContaining(['apps/store-detail/app', 'apps/store-detail/lib']));
     });
 

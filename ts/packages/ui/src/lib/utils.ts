@@ -7,9 +7,13 @@
 // この 2 段構えが無いと、className による上書きが「両方のクラスが残って順序依存で決まる」
 // 不安定な挙動になる。
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
 
 export type { ClassValue };
+
+// tailwind-merge は Tailwind 既定に無い文字サイズの段を知らず、`text-display` を文字色として扱う。
+// そのままだと `cn('text-display', 'text-muted-foreground')` が巨大表示の段を黙って落とす。
+const twMerge = extendTailwindMerge({ extend: { theme: { text: ['display'] } } });
 
 /** 複数の class 値を結合し、競合する Tailwind ユーティリティを後勝ちで解決した文字列を返す。 */
 export function cn(...inputs: ClassValue[]): string {

@@ -243,6 +243,7 @@ CSS では数値スケールで指定し、上の表は LINE Flex Message など
 | `lg` | `1.125rem` | `text-lg` | 18 |
 | `xl` | `1.25rem` | `text-xl` | 20 |
 | `2xl` | `1.5rem` | `text-2xl` | 24 |
+| `display` | `4rem` | `text-display` | 64 |
 
 フォントはシステム日本語スタックを使う。原典のフォントは商用ライセンスであり、
 原典が代替として挙げる書体は日本語字形を持たない。
@@ -292,20 +293,18 @@ spec 側に審議の記録ができた時点で由来欄だけを差し替え、
 行の重畳時の面塗りは付けない。行自体が押せないため、誤った可動感を与えるからである。
 由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
 
-### 7.3 巨大表示の寸法は暫定である
+### 7.3 巨大表示はプロダクト全体で 1 箇所
 
-**巨大な数値表示は store-detail の順位数値に置き、§6 の文字サイズの最大段（`text-2xl`・`1.5rem`）で描く。**
-原典が「システム唯一の大声」と呼ぶものをプロダクト全体を通して守るための表示だが、その意図が
-求める大きさに足る段は文字サイズのスケールに存在しない。段を足すのはトークン層の変更であり、
-面へ意匠を当てる作業の境界を超えるため、暫定として最大段で代用する。
+**巨大な数値表示は store-detail の順位数値だけに置き、§6 の `display`（`text-display`・`4rem`）で描く。**
+原典が「システム唯一の大声」と呼ぶ表示であり、寸法は原典の評価値の表示（64px）に揃えた。
+主見出し（`2xl`・`1.5rem`）の約 2.7 倍であり、寸法そのもので他のどの文字とも区別できる。
 
-**この段は主見出しと同じ寸法である。** したがって「プロダクト全体で 1 箇所」という一意性は、
-暫定の間は寸法では表せない。ここでは一意性を主張しない。足りる段が入った時点で本文の寸法と
-面の実装を差し替え、そのときに一意性の主張を復活させる。段の追加は
-[#185](https://github.com/ManatoYamashita/fw-line-meo/issues/185) で追う。
-客向けアンケートでは集計値を見せる対象が無いため、この表示を置かない。
-由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)（暫定の寸法は
-`.kiro/specs/ui-airbnb-surfaces/design.md` の「第 0 段階: 正典の追記」）
+**`display` を使うのはプロダクト全体でこの 1 箇所だけである。** 2 箇所目に置くと「唯一」ではなくなり、
+どちらも大声として読めなくなる。行間は `leading-none` で詰める。本文の行間を継ぐと、数字の上下に
+大きな空きが出るためである。客向けアンケートでは集計値を見せる対象が無いため、この表示を置かない。
+LINE 面の写像は §7.13 にある。
+由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)・
+[#185](https://github.com/ManatoYamashita/fw-line-meo/issues/185)
 
 ### 7.4 ブランド色は 1 画面 1〜2 箇所まで
 
@@ -735,6 +734,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 | 星は押しボタン役割と押下状態で掴まれる | `ts/apps/survey-web/test/survey-form.test.tsx` |
 | LINE のメッセージ組立は本文要素の添字で検証される | `ts/apps/line-webhook/test/line/messages.test.ts` |
 | Flex の構造はスナップショットが固定する | `ts/apps/line-webhook/test/report/comparison.test.ts`, `ts/apps/line-webhook/test/report/new-reviews.test.ts` |
+| Web の巨大表示（`text-display`）は店舗詳細の順位数値で 1 件だけである | `ts/packages/ui/test/display-usage.test.ts` |
 | LINE の巨大表示は比較レポートのバブルで 1 件だけである | `ts/apps/line-webhook/test/report/comparison.test.ts` |
 | LINE のオンボーディング 4 バブルは同じ内側余白を宣言する | `ts/apps/line-webhook/test/line/messages.test.ts` |
 | 部品固有のユーティリティをアプリ層に literal で書くと別パッケージのテストが落ちる | `ts/packages/ui/test/app-integration.test.ts` |
@@ -801,10 +801,11 @@ SC 1.4.11 を満たす段まで引き上げてある。
 **ブランド色は文字に使えない。** ページ背景に対して 2.256 であり、大きい文字の 3:1 にも届かない。
 LINE Green そのものを文字で見せることはできず、文字にはアクション色を使う（§7.4）。
 
-**文字サイズには「トークンから生成 CSS へ」の突き合わせが存在しない。** 名前空間の網羅ガードは
+**文字サイズには「トークンから生成 CSS へ」の突き合わせがほぼ存在しない。** 名前空間の網羅ガードは
 theme.css の宣言側しか見ないため、アプリ層がトークンに無い段を使っても赤くならない。
-唯一の例外は `@layer base` の見出しが使う段で、これはトークン参照であることと実寸があることの
-両方を要求される。
+例外は 2 つある。`@layer base` の見出しが使う段は、トークン参照であることと実寸があることの
+両方を要求される。巨大表示の段 `display` は、生成 CSS の値がトークンと一致することを
+`ts/packages/ui/test/token-scales.test.ts` が 3 面で確かめる。
 
 ---
 

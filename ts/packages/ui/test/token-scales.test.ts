@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { radius, shadow, spacing } from '@fwlm/design-tokens';
+import { radius, shadow, spacing, typography } from '@fwlm/design-tokens';
 import {
   APPS,
   compileStockBaseline,
@@ -341,6 +341,13 @@ const RADIUS_PROBES = [
 const SHADOW_PROBES = ['shadow-raised'] as const;
 
 /**
+ * 名前付きの文字サイズの段（正典 §7.3 の巨大表示）。影の段と同じく越境衝突の対照ではなく、
+ * 生成を強制してトークン値との突き合わせを成立させるために置く。Tailwind は参照されない
+ * テーマ変数を出力しないので、宣言しただけの段は生成 CSS に現れない。
+ */
+const TEXT_PROBES = ['text-display'] as const;
+
+/**
  * 同名上書きの対照。theme.css がこれらの名前空間を意図的に上書きしているが、
  * ユーティリティが読む**変数名は変わらない**ため越境衝突にはならない。
  * 誤検出が起きればここが真っ先に落ちる。
@@ -353,6 +360,7 @@ const PROBES: readonly string[] = [
   ...NAMED_SPACING_PROBES,
   ...RADIUS_PROBES,
   ...SHADOW_PROBES,
+  ...TEXT_PROBES,
   ...SAME_NAME_OVERRIDE_PROBES,
 ];
 
@@ -373,7 +381,7 @@ const PROBED_NAMESPACES: Readonly<Record<string, readonly string[]>> = {
   '--radius': [...RADIUS_PROBES],
   '--shadow': [...SHADOW_PROBES],
   '--spacing': [...NUMERIC_SPACING_PROBES, ...NAMED_SPACING_PROBES, ...SIZE_PROBES],
-  '--text': ['text-xs', 'text-2xl'],
+  '--text': ['text-xs', 'text-2xl', ...TEXT_PROBES],
 };
 
 /**
@@ -466,6 +474,19 @@ describe.each(APPS)('$packageName のトークンスケール', (app) => {
         `${app.packageName}: 名前付き余白ユーティリティが生成されています（${generated.join(', ')}）。` +
           '余白は数値スケール（p-4 等）で指定してください',
       ).toEqual([]);
+    });
+  });
+
+  describe('名前付きの文字サイズの段（正典 §7.3）', () => {
+    it('text-display が --text-display を読み、生成 CSS の値がトークンと一致する', () => {
+      expect(resolveUtility(current, 'text-display')).toEqual({
+        kind: 'themeVar',
+        variable: '--text-display',
+      });
+      const emitted = [...current.matchAll(/--text-display:\s*([^;]+);/g)].map((match) =>
+        (match[1] ?? '').trim(),
+      );
+      expect(emitted, `${app.packageName}: --text-display の生成値`).toEqual([typography.scale.display]);
     });
   });
 

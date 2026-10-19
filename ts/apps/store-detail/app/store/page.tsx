@@ -56,7 +56,7 @@
 //
 // 意匠（ui-airbnb-surfaces task 3.2 / 3.3）:
 //   順位の巨大表示・自店の評価・新着・競合をカードへ寄せ、推移を表の部品へ移す。
-//   巨大表示の段は docs/design/design-language.md の 7.3 節（暫定であることも同節が持つ）、
+//   巨大表示の段（プロダクト全体で 1 箇所）は docs/design/design-language.md の 7.3 節、
 //   前日比を色ではなく矢印で示す判断は 7.7 節、表を表のまま装飾する判断は 7.2 節が正典であり、
 //   ここでは結論も数値も転記せず参照する。追加した部品も <div> / <span> / 表要素しか描かない。
 //
@@ -478,9 +478,9 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
         <Heading level={2}>今日のポジション（{summary.summaryDate}）</Heading>
         <Card>
           <CardContent className="flex flex-col gap-4">
-            {/* 順位の数値だけを巨大表示にする（正典 7.3 節）。段は 6 節の文字サイズの最大段であり、
-             * 面の側は任意の値を持たない。**暫定であり、この段は主見出しと同じ寸法である**ため、
-             * 「プロダクト全体で 1 箇所」という一意性はここでは主張しない（追跡は Issue #185）。
+            {/* 順位の数値だけを巨大表示にする（正典 7.3 節）。段は 6 節の `display` で、プロダクト全体で
+             * この 1 箇所だけが使う。面の側は任意の値を持たない。行間を詰めるのは、本文の行間を
+             * そのまま継ぐと巨大な数字の上下に大きな空きが出るためである。
              *
              * 前日比は `formatRankDiff` が返す上下の矢印を伴う文言をそのまま置く（正典 7.7 節）。
              * Badge に分離しても矢印と文言を残すため、増減を色だけで伝えない。 */}
@@ -494,7 +494,7 @@ function SummarySection({ summary }: { readonly summary: StoreDetailSummary | nu
                     <span className="font-medium">{SELF_UNRATED_RANK_TEXT}</span>
                   ) : summary.rank !== null && summary.rankTotal !== null ? (
                     <>
-                      <span className="text-2xl font-bold tabular-nums">{summary.rank}</span>
+                      <span className="text-display leading-none font-bold tabular-nums">{summary.rank}</span>
                       <span>位</span>
                     </>
                   ) : (

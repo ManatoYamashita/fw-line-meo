@@ -163,9 +163,9 @@ describe('帰属表示の書式（Places API ポリシー・Requirements 1.6, 8.
 });
 
 describe('typography', () => {
-  it('fontSans とサイズ階層（xs〜2xl・rem）を定義する', () => {
+  it('fontSans とサイズ階層（xs〜2xl と display・rem）を定義する', () => {
     expect(typography.fontSans).toContain('sans-serif');
-    const sizes = ['xs', 'sm', 'base', 'lg', 'xl', '2xl'] as const;
+    const sizes = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', 'display'] as const;
     expect(Object.keys(typography.scale).sort()).toEqual([...sizes].sort());
     for (const size of sizes) {
       expect(typography.scale[size]).toMatch(REM_VALUE);

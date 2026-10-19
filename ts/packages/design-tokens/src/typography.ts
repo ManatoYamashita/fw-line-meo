@@ -6,8 +6,11 @@
 export interface TypographyTokens {
   /** サンセリフ基本フォントスタック（日本語システムフォント）。 */
   readonly fontSans: string;
-  /** フォントサイズ階層（rem）。 */
-  readonly scale: Readonly<Record<'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl', string>>;
+  /**
+   * フォントサイズ階層（rem）。`display` はプロダクト全体で 1 箇所だけの巨大表示（店舗詳細の順位数値）の段。
+   * `3xl` 以上の名前にしないのは、Tailwind 既定の同名の段を上書きすると既定クラスの意味が静かに変わるため。
+   */
+  readonly scale: Readonly<Record<'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | 'display', string>>;
 }
 
 export const typography: TypographyTokens = {
@@ -20,5 +23,6 @@ export const typography: TypographyTokens = {
     lg: '1.125rem',
     xl: '1.25rem',
     '2xl': '1.5rem',
+    display: '4rem',
   },
 };

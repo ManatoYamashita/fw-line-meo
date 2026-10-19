@@ -1434,19 +1434,19 @@ describe('store detail page', () => {
       inspectHeadings('店舗選択待ち');
     });
 
-    it('順位の数値を文字サイズの最大段で描き、任意の値を書かない（Req 1.3, 4.7）', async () => {
+    it('順位の数値を巨大表示の段で描き、任意の値を書かない（Req 1.3, 4.7）', async () => {
       stubFetch({ ok: true, status: 200, body: mockResult });
       const { container } = render(<StorePage />);
       await waitFor(() => {
         expect(screen.getByText('データ提供: Google Maps')).toBeDefined();
       });
 
-      const display = screen.getByText('近隣5店中').parentElement!.querySelector('.text-2xl')!;
+      const display = screen.getByText('近隣5店中').parentElement!.querySelector('.text-display')!;
       expect(display.closest('dd')?.textContent).toContain('前日比: ↑ 上昇');
       expect(ownText(display)).toBe('2');
       // **集合の完全一致で固定する。** 包含では `text-[64px]` のような任意値や色ユーティリティを
-      // 後ろへ足す改変が通る。段は正典 7.3 節が指す 6 節の最大段であり、面は値を持たない。
-      expect(classTokens(display)).toEqual(['text-2xl', 'font-bold', 'tabular-nums']);
+      // 後ろへ足す改変が通る。段は正典 7.3 節が指す 6 節の `display` であり、面は値を持たない。
+      expect(classTokens(display)).toEqual(['text-display', 'leading-none', 'font-bold', 'tabular-nums']);
 
       // 完了条件「巨大表示に任意の値を書いていない」を、巨大表示だけでなく**面が自分で書く
       // 要素すべて**へ広げる。走査から外すのは `data-slot` を持つ要素（＝共通部品の描く要素）で、
