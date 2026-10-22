@@ -37,10 +37,14 @@ const AG = 'f1111111-1111-1111-1111-111111111111';
 const RICHMENU_COMPLETED_ID = 'f1-richmenu-completed';
 const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 const INVITE_CODE = 'F1SHARED01';
+// 入力の揺れ（小文字・前後の空白・改行・全角）の検証専用のコード。上のシナリオは INVITE_CODE を無効化するので分ける。
+const CASED_INVITE_CODE = 'F1CASED02';
 
 const USER1 = 'Uf1-invite-owner-1';
 const USER2 = 'Uf1-invite-owner-2';
 const USER3 = 'Uf1-invite-owner-3';
+const USER4 = 'Uf1-invite-owner-4';
+const USER5 = 'Uf1-invite-owner-5';
 
 // LINE/Google の外部 API を叩かないフェイク（本テストは招待コード段階のみを駆動するため
 // searchCandidates は呼ばれない想定。呼ばれた場合はテストの前提が崩れているため明確に失敗させる）。
@@ -70,6 +74,30 @@ function text(lineUserId: string, replyToken: string, body: string): InboundEven
   return { kind: 'text', lineUserId, replyToken, text: body };
 }
 
+function createHandlers(pool: Awaited<ReturnType<typeof getPool>>, messenger: LineMessenger) {
+  const identification = createStoreIdentificationService({ pool, places: createUnusedPlaces() });
+  return createConversationHandlers({
+    db: pool,
+    pool,
+    sessions: { getOrCreateSession, updateSession },
+    owners: { findOwnerByLineUserId, createOwner },
+    inviteCodes: { findActiveInviteCode },
+    identification,
+    messenger,
+    now: () => new Date(),
+    // 補助的処理の成否の記録。内容の検証は conversation.test.ts が担う。
+    logger: { info: vi.fn(), warn: vi.fn() },
+    lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+    liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+    createOwnerRouter: createStoreIdentifiedOwnerRouterFactory({
+      db: pool,
+      sessions: { getOrCreateSession, updateSession },
+      lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
+      liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
+    }),
+  });
+}
+
 describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統合検証 (DB)', () => {
   beforeAll(async () => {
     const pool = await getPool();
@@ -83,6 +111,10 @@ describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統�
       AG,
       INVITE_CODE,
     ]);
+    await pool.query('INSERT INTO agency_invite_codes (agency_id, code) VALUES ($1, $2)', [
+      AG,
+      CASED_INVITE_CODE,
+    ]);
   });
 
   afterAll(async () => {
@@ -95,27 +127,7 @@ describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統�
     async () => {
       const pool = await getPool();
       const messenger = createFakeMessenger();
-      const identification = createStoreIdentificationService({ pool, places: createUnusedPlaces() });
-      const handlers = createConversationHandlers({
-        db: pool,
-        pool,
-        sessions: { getOrCreateSession, updateSession },
-        owners: { findOwnerByLineUserId, createOwner },
-        inviteCodes: { findActiveInviteCode },
-        identification,
-        messenger,
-        now: () => new Date(),
-        // 補助的処理の成否の記録。内容の検証は conversation.test.ts が担う。
-        logger: { info: vi.fn(), warn: vi.fn() },
-        lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
-        liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
-        createOwnerRouter: createStoreIdentifiedOwnerRouterFactory({
-          db: pool,
-          sessions: { getOrCreateSession, updateSession },
-          lineRichMenuCompletedId: RICHMENU_COMPLETED_ID,
-          liffStoreDetailUrl: LIFF_STORE_DETAIL_URL,
-        }),
-      });
+      const handlers = createHandlers(pool, messenger);
 
       // --- 1. 有効コードでの owner 作成（Req 2.1）＋ CHECK 制約検証（Req 2.4） ---
       await handlers.handleEvent(follow(USER1, 'reply-f1-1a'));
@@ -196,4 +208,28 @@ describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統�
       expect(messenger.reply).toHaveBeenCalledTimes(6);
     },
   );
+
+  it.each([
+    ['小文字・前後の空白・末尾の改行', USER4, ' f1cased02\n'],
+    ['全角英数・全角スペース', USER5, 'ｆ１ｃａｓｅｄ０２\u3000'],
+  ])('%s の入力でも、実 DB の大文字のコードに解決して登録へ進む', async (_label, lineUserId, input) => {
+    const pool = await getPool();
+    const messenger = createFakeMessenger();
+    const handlers = createHandlers(pool, messenger);
+
+    await handlers.handleEvent(follow(lineUserId, `reply-${lineUserId}-a`));
+    await handlers.handleEvent(text(lineUserId, `reply-${lineUserId}-b`, input));
+
+    expect(messenger.reply).toHaveBeenNthCalledWith(2, `reply-${lineUserId}-b`, [
+      buildStoreNameInputGuidanceMessage(),
+    ]);
+    const owner = await findOwnerByLineUserId(pool, lineUserId);
+    expect(owner?.agency_id).toBe(AG);
+    const session = await pool.query<{ stage: string; invite_failures: number }>(
+      'SELECT stage, invite_failures FROM onboarding_sessions WHERE line_user_id = $1',
+      [lineUserId],
+    );
+    expect(session.rows[0]?.stage).toBe('await_store_name');
+    expect(session.rows[0]?.invite_failures).toBe(0);
+  });
 });

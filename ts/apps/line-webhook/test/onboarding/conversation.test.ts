@@ -514,6 +514,114 @@ describe('createConversationHandlers', () => {
     );
   });
 
+  describe('招待コードの入力の揺れ（前後の空白・改行・全角・小文字）', () => {
+    it.each([
+      ['前後の空白と末尾の改行・小文字', ' abcd2345\n'],
+      ['全角英数', 'ＡＢＣＤ２３４５'],
+      ['全角スペースと CRLF', '\u3000ABCD2345\r\n'],
+    ])('%s の入力は正準形で照合され、登録へ進む', async (_label, input) => {
+      const session = baseSession({ invite_failures: 2 });
+      const { deps, sessionsFake, ownersFake, inviteCodesFake } = buildDeps({
+        session,
+        validCodes: { ABCD2345: { agencyId: AGENCY_ID } },
+      });
+
+      await createConversationHandlers(deps).handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-norm-1',
+        text: input,
+      });
+
+      expect(inviteCodesFake.findCalls).toEqual(['ABCD2345']);
+      expect(ownersFake.createOwnerCalls).toHaveLength(1);
+      expect(sessionsFake.updateCalls[0]?.patch.stage).toBe('await_store_name');
+      expect(sessionsFake.updateCalls[0]?.patch.inviteFailures).toBe(0);
+    });
+
+    it('揃えても一致しない入力は従来どおり失敗に数える（照合は 1 回だけ）', async () => {
+      const session = baseSession({ invite_failures: 1 });
+      const { deps, sessionsFake, ownersFake, inviteCodesFake } = buildDeps({
+        session,
+        validCodes: { ABCD2345: { agencyId: AGENCY_ID } },
+      });
+
+      await createConversationHandlers(deps).handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-norm-2',
+        text: ' wrong999\n',
+      });
+
+      expect(inviteCodesFake.findCalls).toEqual(['WRONG999']);
+      expect(ownersFake.createOwnerCalls).toHaveLength(0);
+      expect(sessionsFake.updateCalls).toHaveLength(1);
+      expect(sessionsFake.updateCalls[0]?.patch.inviteFailures).toBe(2);
+      expect(sessionsFake.updateCalls[0]?.patch.lockedUntil).toBeUndefined();
+    });
+
+    it('揃えても一致しない入力が連続 5 回目ならロックする（閾値・期間は不変）', async () => {
+      const session = baseSession({ invite_failures: 4 });
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session,
+        validCodes: { ABCD2345: { agencyId: AGENCY_ID } },
+      });
+
+      await createConversationHandlers(deps).handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-norm-3',
+        text: 'ｗｒｏｎｇ９９９',
+      });
+
+      const patch = sessionsFake.updateCalls[0]!.patch;
+      expect(patch.inviteFailures).toBe(5);
+      expect(patch.lockedUntil).toBeInstanceOf(Date);
+      expect(patch.lockedUntil!.getTime()).toBe(FIXED_NOW.getTime() + 10 * 60 * 1000);
+      const [message] = messenger.replies[0]?.messages ?? [];
+      expect((message as { text: string }).text).toContain('停止');
+    });
+
+    it('ロック中は、揃えれば一致する入力でも照合しない', async () => {
+      const lockedUntil = new Date(FIXED_NOW.getTime() + 5 * 60 * 1000);
+      const session = baseSession({ invite_failures: 5, locked_until: lockedUntil });
+      const { deps, sessionsFake, inviteCodesFake, ownersFake } = buildDeps({
+        session,
+        validCodes: { ABCD2345: { agencyId: AGENCY_ID } },
+      });
+
+      await createConversationHandlers(deps).handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-norm-4',
+        text: ' abcd2345\n',
+      });
+
+      expect(inviteCodesFake.findCalls).toHaveLength(0);
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      expect(ownersFake.createOwnerCalls).toHaveLength(0);
+    });
+
+    it('店名入力待ちの段階のテキストは揃えない（店名検索へ生の値が届く）', async () => {
+      const session = baseSession({ stage: 'await_store_name', owner_id: 'owner-1' });
+      const { deps, identificationFake, inviteCodesFake } = buildDeps({
+        session,
+        searchOutcome: { kind: 'empty' },
+      });
+      const raw = ' ｔｅｓｔ食堂\u3000cafe\n';
+
+      await createConversationHandlers(deps).handleEvent({
+        kind: 'text',
+        lineUserId: 'U1',
+        replyToken: 'rt-norm-5',
+        text: raw,
+      });
+
+      expect(identificationFake.searchCalls).toEqual([raw]);
+      expect(inviteCodesFake.findCalls).toHaveLength(0);
+    });
+  });
+
   describe('店名検索段階（await_store_name）のテキスト入力', () => {
     it('検索で候補が見つかる → セッションに候補を保存し stage は await_store_name のまま・カルーセル reply（Req 3.1）', async () => {
       const candidates = storeCandidates(3);
