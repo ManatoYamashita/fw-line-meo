@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="640" height="640">
+  <!--
+    LINE 公式アカウントのプロフィール画像の生成元（Issue #466）。
+    各アプリの apple-icon.png（180×180）を写し取ったもので、座標はその 180px の格子で書いてある。
+    色と寸法の実測は Issue #466、書き出しの手順は assets/README.md にある。
+  -->
+  <rect width="180" height="180" fill="#FFFFFF"/>
+  <!-- 本体。上端は屋根の下に隠れる -->
+  <rect x="33" y="74" width="114" height="76" rx="8" fill="#ADDCB4"/>
+  <!-- 棒グラフ（左から淡い・中間・濃い） -->
+  <rect x="68" y="118" width="12" height="17" rx="2" fill="#7DCD8B"/>
+  <rect x="84" y="110" width="12" height="25" rx="2" fill="#28BA56"/>
+  <rect x="100" y="98" width="12" height="37" rx="2" fill="#00B64C"/>
+  <!-- 屋根。左右の濃い緑と中央の淡い帯の 3 枚で、下端はそれぞれ丸く垂れる -->
+  <path d="M72,28 L54,28 Q48,28 45,32 L24,64 L24,76 A21.5,14 0 0 0 67,76 Z" fill="#00B64C"/>
+  <path d="M72,28 L108,28 L113,76 A23,14 0 0 1 67,76 Z" fill="#C2E4C7"/>
+  <path d="M108,28 L126,28 Q132,28 135,32 L156,64 L156,76 A21.5,14 0 0 1 113,76 Z" fill="#00B64C"/>
+</svg>

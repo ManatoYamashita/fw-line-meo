@@ -22,10 +22,12 @@ const BRAND_IMAGE: readonly RegExp[] = [
   /^[^/]+\/public\/brand-icon\.png$/,
   /^[^/]+\/public\/screenshots\/[^/]+\.png$/,
   /^[^/]+\/assets\/richmenu-[^/]+\.png$/,
+  // LINE 公式アカウントのプロフィール画像。生成元の SVG と、書き出した PNG（Issue #466）
+  /^[^/]+\/assets\/line-oa-profile\.(?:svg|png)$/,
 ];
 
 /** いまの件数。画像を足したら、リンクを張ってこの数も増やす。 */
-const EXPECTED_COUNT = 18;
+const EXPECTED_COUNT = 20;
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -58,6 +60,8 @@ describe('assets/ のリンク', () => {
     expect(hits('dashboard-web/public/ogp.webp')).toBe(true);
     expect(hits('survey-web/public/screenshots/draft.png')).toBe(true);
     expect(hits('line-webhook/assets/richmenu-completed.png')).toBe(true);
+    expect(hits('line-webhook/assets/line-oa-profile.svg')).toBe(true);
+    expect(hits('line-webhook/assets/line-oa-profile.png')).toBe(true);
     // Google の規定どおりの素材は対象外。
     expect(hits('dashboard-web/public/google-g-logo.png')).toBe(false);
     expect(hits('survey-web/test/fixtures/icon.png')).toBe(false);

@@ -9,7 +9,7 @@
 
 リンクが切れたり、新しい画像にリンクを張り忘れたりすると、`ts/packages/design-tokens/test/brand-assets.test.ts` が落ちる（Issue #463）。
 
-## 一覧（18 点）
+## 一覧（20 点）
 
 | ここ | 本物 | 寸法 | 使われ方 |
 |---|---|---|---|
@@ -20,6 +20,8 @@
 | `icon/dashboard-web-icon.png` | `ts/apps/dashboard-web/src/app/icon.png` | 64×64 | 管理用ダッシュボードのタブのアイコン |
 | `icon/dashboard-web-apple-icon.png` | `ts/apps/dashboard-web/src/app/apple-icon.png` | 180×180 | 同、ホーム画面のアイコン |
 | `icon/dashboard-web-brand-icon.png` | `ts/apps/dashboard-web/public/brand-icon.png` | 64×64 | 管理用ダッシュボードの帯とログイン画面のワードマークのアイコン |
+| `icon/line-oa-profile.svg` | `ts/apps/line-webhook/assets/line-oa-profile.svg` | 180×180 の格子（書き出しは 640×640） | アイコンの生成元のベクター画像。各アプリの `apple-icon.png` を写し取ったもの |
+| `icon/line-oa-profile.png` | `ts/apps/line-webhook/assets/line-oa-profile.png` | 640×640 | LINE 公式アカウントのプロフィール画像（LINE Official Account Manager の［プロフィール］で上げる） |
 | `ogp/survey-web-ogp.jpg` | `ts/apps/survey-web/public/ogp.jpg` | 1200×630 | QR口コミ支援のリンクを共有したときの画像 |
 | `ogp/survey-web-ogp.webp` | `ts/apps/survey-web/public/ogp.webp` | 1200×630 | 同（WebP 版。公開トップの画面にも載せている） |
 | `ogp/store-detail-ogp.jpg` | `ts/apps/store-detail/public/ogp.jpg` | 1200×630 | 店舗詳細のリンクを共有したときの画像 |
@@ -49,4 +51,18 @@ git status   # 変わるのは ts/apps/... の本物のほうで、assets/ は�
 - 色の決め方は `docs/design/line-green-palette.md` の「画像」にある。リッチメニューの生成元の HTML は `ts/apps/line-webhook/assets/source/` にある
 - 新しい画像を足したら、ここにリンクを張り（`ln -s ../../ts/apps/<面>/<場所> assets/<種類>/<名前>`）、上の表と検査の件数を増やす
 
-リポジトリの外にあるもの: LINE 公式アカウントのプロフィール画像（640×640）は LINE Official Account Manager の［プロフィール］で設定する。リポジトリには無い。
+## LINE 公式アカウントのプロフィール画像を書き出す
+
+生成元は `icon/line-oa-profile.svg`（Issue #466）。形と色は各アプリの `apple-icon.png` を写し取ったもので、180px に縮めて元と比べると、画素の差の平均は 2.78/255、48 を超えて違う画素は 2.05% だった（差は輪郭の 1〜2px に集まる）。SVG を直したら、Chrome で 640×640 に書き出し直す。
+
+```bash
+cd ts/apps/line-webhook/assets
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu \
+  --hide-scrollbars --force-device-scale-factor=1 --default-background-color=FFFFFFFF \
+  --window-size=640,640 --screenshot="$PWD/line-oa-profile.png" "file://$PWD/line-oa-profile.svg"
+```
+
+- 書き出した `line-oa-profile.png` を、LINE Official Account Manager の［プロフィール］から上げる（2025 年 8 月 6 日から、プロフィール画像の設定は［アカウント設定］ではなく［プロフィール］の中にある）
+- 一度変えると 1 時間は変え直せない。友だちの数が一定以上だと自分では変えられず、LINE への問い合わせが要る（LINE 公式アカウントガイドライン）
+- 上げたあとの画像は、Messaging API の `GET /v2/bot/info` が返す `pictureUrl` で確かめられる
+- 色は `#00B64C`（屋根の左右・右の棒）・`#C2E4C7`（屋根の中央の帯）・`#ADDCB4`（本体）・`#7DCD8B` / `#28BA56`（左・中の棒）。いまのアイコンの実際の色であり、トークンの `brand`（`#06C755`）とは少し違う
