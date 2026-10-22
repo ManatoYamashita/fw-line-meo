@@ -482,9 +482,11 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     const pool = await getPool();
     const otherOperatorEmail = 'f5-create-op2-agency@example.com';
     const missingEmail = 'f5-create-missing-agency@example.com';
+    const operatorId = await operatorSelfId();
     const createdAuditCount = async (): Promise<number> => {
       const res = await pool.query<{ n: number }>(
-        "SELECT count(*)::int AS n FROM audit_logs WHERE action = 'dashboard_user_created'",
+        "SELECT count(*)::int AS n FROM audit_logs WHERE action = 'dashboard_user_created' AND actor_id = $1",
+        [operatorId],
       );
       return res.rows[0]?.n ?? 0;
     };
