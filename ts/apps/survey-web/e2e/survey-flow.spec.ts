@@ -165,3 +165,83 @@ test('回答済み画面で投稿導線を押すと、pageToken つきの押下�
   expect(body.storeId).toBe(STORE_ID);
   expect(tokenKind(body.token ?? '')).toBe('page');
 });
+
+// PR #470: コピー直後の Toast（右下・6 秒）が「Google のクチコミ欄を開く」を覆わないこと。
+// 320×568 では着手前、Toast の上端（460）がリンク（512–560）にかぶさり、表示中は押せなかった。
+// 見た目ではなく、リンクの中心に何があるか（elementFromPoint）と、その座標を実際に押したときに
+// 投稿画面が開いて押下の通知が 1 回だけ飛ぶことまでを、3 つの画面の大きさで確かめる。
+// 生成完了の Toast が残っている間にコピーする（Toast が 2 枚積み重なる、厳しい側の状態）。
+const TOAST_SIZES = [
+  { width: 320, height: 568, ip: '198.51.100.71' },
+  { width: 375, height: 667, ip: '198.51.100.72' },
+  { width: 390, height: 844, ip: '198.51.100.73' },
+] as const;
+const COPIED_TOAST = 'コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。';
+
+for (const size of TOAST_SIZES) {
+  test.describe(`${size.width}×${size.height}`, () => {
+    // 流量制限の鍵（X-Forwarded-For の末尾）を大きさごとに分け、ほかのテストと枠を取り合わない。
+    test.use({ viewport: { width: size.width, height: size.height }, extraHTTPHeaders: { 'x-forwarded-for': size.ip } });
+
+    test('コピーの Toast の表示中も「Google のクチコミ欄を開く」を押せ、押下の通知は 1 回だけ', async ({ page, context }) => {
+      await context.route(/search\.google\.com/, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>review</p>' }));
+      const notices: string[] = [];
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname === '/api/review-link-opened') notices.push(request.url());
+      });
+
+      await openSurveySurface(page);
+      await page.getByRole('button', { name: '星5' }).click();
+      await page.getByRole('button', { name: '送信する' }).click();
+      await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.resolve() } });
+      });
+
+      await page.getByRole('button', { name: '文章をコピー' }).click();
+      const toast = page.locator('[data-sonner-toast]').filter({ hasText: COPIED_TOAST });
+      await expect(toast).toBeVisible();
+
+      const link = page.getByRole('link', { name: 'Google のクチコミ欄を開く' });
+      // リンクの中心で一番上にある要素が、リンク自身（かその中身）であること。画面送りが落ち着くまで待つ。
+      await expect
+        .poll(() =>
+          link.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            const x = box.left + box.width / 2;
+            const y = box.top + box.height / 2;
+            if (y < 0 || y > window.innerHeight) return 'offscreen';
+            const top = document.elementFromPoint(x, y);
+            return top !== null && (top === element || element.contains(top)) ? 'link' : (top?.closest('[data-sonner-toast]') ? 'toast' : String(top?.tagName));
+          }),
+        )
+        .toBe('link');
+      // 並びの最後の再生成も覆われない（375×667 では着手前、再生成が Toast の下にあった）。
+      expect(
+        await page.getByRole('button', { name: /別の文章を生成/ }).evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return top !== null && (top === element || element.contains(top));
+        }),
+        '再生成が Toast に覆われています',
+      ).toBe(true);
+      // 確かめている間も Toast は出たままである（Toast が消えたから押せた、ではない）。
+      await expect(toast).toBeVisible();
+
+      // その座標を実際に押す（スクロールさせない・force なし）。
+      const box = await link.boundingBox();
+      expect(box, 'リンクの矩形が取れません').not.toBeNull();
+      const firstPopup = context.waitForEvent('page');
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await (await firstPopup).close();
+      await expect.poll(() => notices.length).toBe(1);
+
+      // 部品の側の押下（locator.click・force なし）でも開く。通知は最初の押下だけなので増えない。
+      const secondPopup = context.waitForEvent('page');
+      await link.click();
+      await (await secondPopup).close();
+      await page.waitForTimeout(300);
+      expect(notices).toHaveLength(1);
+    });
+  });
+}

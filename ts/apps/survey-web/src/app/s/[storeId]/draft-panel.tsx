@@ -7,6 +7,7 @@ import { Button, buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import { Textarea } from '@fwlm/ui/components/textarea';
+import { liftNeeded, settledToastTop } from '../../../lib/toast-clearance';
 import type { DraftPanelProps } from './types';
 
 // 下書きパネル（葉コンポーネント）。生成中表示・編集・再生成トリガー・コピー・投稿導線を担う。
@@ -37,6 +38,11 @@ export function DraftPanel({
   const copyingRef = useRef(false);
   const [slow, setSlow] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  // 操作の並びを Toast より上へ送るために、パネルの下に足す余白（px）。送る先の余地が無いと
+  // 送れないので、送る量と同じだけ足す（PR #470・lib/toast-clearance.ts）。
+  const [toastRoom, setToastRoom] = useState(0);
+  const [pendingLift, setPendingLift] = useState(0);
   const noteId = useId();
 
   // 再生成で新しい下書きが届いたら編集内容を更新する（再生成は上書き）。同じ文面が届いた成功も
@@ -44,13 +50,44 @@ export function DraftPanel({
   useEffect(() => {
     setText(draft);
     setCopyState('idle');
+    setToastRoom(0);
   }, [draft, draftRevision]);
+
+  // 余白が描かれた後で画面を送る（余白が無いうちに送ると、送れる量が足りない）。
+  useEffect(() => {
+    if (pendingLift <= 0) return;
+    const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollBy({ top: pendingLift, behavior: reduce ? 'auto' : 'smooth' });
+    setPendingLift(0);
+  }, [pendingLift]);
 
   useEffect(() => {
     if (!regenerating && !copying) { setSlow(false); return; }
     const timer = setTimeout(() => setSlow(true), 8000);
     return () => clearTimeout(timer);
   }, [regenerating, copying]);
+
+  // コピーの結果の Toast が、次に押す「Google のクチコミ欄を開く」と再生成を覆わないようにする。
+  // Toast の置き場（右下・design-language 7.5）と表示時間は共通の Toaster のまま変えず、
+  // 覆われる位置にあるときだけ、操作の並びが Toast の上に来るよう画面を送る。
+  // Toast は通知の呼び出しの後に描かれるので、描かれるまで数フレーム待ってから測る。
+  function keepActionsAboveToasts(): void {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
+    let frames = 0;
+    const measure = (): void => {
+      const toastTop = settledToastTop(document);
+      // Toast が描かれ、Sonner が積み重ねの量を書き終えるまで待つ（描かれた次のフレームで測る）。
+      if (toastTop === null && frames < 30) { frames += 1; window.requestAnimationFrame(measure); return; }
+      if (frames < 2) { frames += 1; window.requestAnimationFrame(measure); return; }
+      const actions = actionsRef.current;
+      if (!actions) return;
+      const lift = liftNeeded(actions.getBoundingClientRect().bottom, toastTop);
+      if (lift <= 0) return;
+      setToastRoom((room) => Math.max(room, lift));
+      setPendingLift(lift);
+    };
+    window.requestAnimationFrame(measure);
+  }
 
   function finishCopy(): void {
     copyingRef.current = false;
@@ -74,6 +111,7 @@ export function DraftPanel({
         () => {
           setCopyState('copied');
           toast.success(COPIED_MESSAGE);
+          keepActionsAboveToasts();
         },
         () => showManualFallback(),
       ).finally(finishCopy);
@@ -88,6 +126,7 @@ export function DraftPanel({
     toast.error('自動コピーできませんでした。文章を選択して手動でコピーしてください。');
     const el = textareaRef.current;
     if (el) { el.focus(); el.select(); }
+    keepActionsAboveToasts();
   }
 
   // 投稿導線（全状態・全評価で同一。ゲーティングをしない）。
@@ -216,7 +255,7 @@ export function DraftPanel({
           setCopyState('idle');
         }}
       />
-      <div className="flex flex-col gap-3">
+      <div ref={actionsRef} className="flex flex-col gap-3">
         {/* 客向け面の主操作は拡大の区分で全幅（正典 7.9 / 7.10）。寸法の実値は部品の側が持つ。
             コピー → 投稿画面を開く、の順に客が押す 2 つの操作を並べる（Requirement 4.1）。
             主ボタンはコピーしかしないので「投稿する」と名乗らない。再生成はその後ろに置く。 */}
@@ -237,6 +276,8 @@ export function DraftPanel({
         </Button>
       </div>
       {notification}
+      {/* Toast の上へ操作を送るための余地（keepActionsAboveToasts）。装飾なので読み上げない。 */}
+      {toastRoom > 0 ? <div aria-hidden="true" data-slot="toast-room" style={{ height: toastRoom }} /> : null}
     </section>
   );
 }

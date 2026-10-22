@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { Alert } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -707,5 +707,88 @@ describe('下書きパネル: コピーと投稿画面を開く操作を順に�
     fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
     await screen.findByText(COPIED);
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+// ---- ここから PR #470: コピーの結果の Toast が「Google のクチコミ欄を開く」を覆わないようにする ----
+//
+// 320×568 の実測では、コピー直後の Toast（上端 460）がリンク（512–560）に 6 秒かぶさり押せなかった。
+// Toast の置き場（右下）と表示時間は共通の Toaster のまま変えず、この面が画面を送る。
+// jsdom は配置を計算しないので、Sonner 2 の DOM の形と矩形を差し込んで確かめる。実寸の確認は
+// E2E（action-feedback.spec.ts）が 3 つの画面の大きさで行う。
+
+function fakeToaster(bottom: number, toastHeight: number): void {
+  const ol = document.createElement('ol');
+  ol.setAttribute('data-sonner-toaster', 'true');
+  ol.setAttribute('data-y-position', 'bottom');
+  ol.getBoundingClientRect = () => ({ bottom, top: bottom, left: 0, right: 0, width: 0, height: 0, x: 0, y: bottom, toJSON: () => ({}) });
+  const li = document.createElement('li');
+  li.setAttribute('data-sonner-toast', '');
+  li.dataset.removed = 'false';
+  li.dataset.visible = 'true';
+  li.style.setProperty('--offset', '0px');
+  Object.defineProperty(li, 'offsetHeight', { value: toastHeight });
+  ol.append(li);
+  document.body.append(ol);
+}
+
+function placeActions(bottom: number): void {
+  const actions = screen.getByRole('button', { name: COPY_BUTTON }).parentElement!;
+  actions.getBoundingClientRect = () => ({ bottom, top: bottom - 168, left: 0, right: 0, width: 0, height: 168, x: 0, y: 0, toJSON: () => ({}) });
+}
+
+describe('下書きパネル: コピーの結果の Toast が操作を覆わない（PR #470）', () => {
+  beforeEach(() => {
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-sonner-toaster]').forEach((el) => el.remove());
+  });
+
+  it.each([
+    ['成功', () => stubClipboard(vi.fn().mockResolvedValue(undefined))],
+    ['失敗', () => stubClipboard(vi.fn().mockRejectedValue(new Error('denied')))],
+  ] as const)('コピー%sの Toast が操作の並びに重なるなら、並びが Toast の上に来るまで画面を送り、送る余地を足す', async (_, arrange) => {
+    arrange();
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92); // 落ち着いた上端は 460
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+
+    const lift = 620 + 12 - 460;
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: lift, behavior: 'smooth' }));
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    const room = document.querySelector<HTMLElement>('[data-slot="toast-room"]');
+    expect(room, '送る余地が足されていません').not.toBeNull();
+    expect(room!.style.height).toBe(`${lift}px`);
+    expect(room!.getAttribute('aria-hidden')).toBe('true');
+    // 導線そのものは変えない（出し分けない・同じリンク）。
+    expect(screen.getAllByRole('link', { name: REVIEW_LINK })).toHaveLength(1);
+  });
+
+  it('重ならないとき（広い画面）は画面を送らず、余地も足さない', async () => {
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(828, 73); // 390×844 の実測: 上端 755
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(COPIED);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-slot="toast-room"]')).toBeNull();
+  });
+
+  it('動きを減らす設定では、滑らかに送らずに一度で送る', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query, addEventListener() {}, removeEventListener() {} }));
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 172, behavior: 'auto' }));
   });
 });
