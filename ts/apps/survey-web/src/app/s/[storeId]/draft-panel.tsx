@@ -123,7 +123,11 @@ export function DraftPanel({
       copyToastRef.current = null;
       releaseToastRoom();
     };
-    copyToastRef.current = toast[kind](message, { onAutoClose: release, onDismiss: release }) ?? null;
+    const options = { onAutoClose: release, onDismiss: release };
+    // 成功の Toast は toast.success と書き下す（成功の表示の棚卸し packages/ui/test/success-cue.test.tsx が
+    // この呼び出しを数える）。
+    const id = kind === 'success' ? toast.success(message, options) : toast.error(message, options);
+    copyToastRef.current = id ?? null;
   }
 
   // 余白のうち、画面を動かさずに外せる分（いま見えている位置より下の余地）だけを外す。

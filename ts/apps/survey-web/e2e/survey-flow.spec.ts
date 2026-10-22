@@ -203,28 +203,22 @@ for (const size of TOAST_SIZES) {
       await expect(toast).toBeVisible();
 
       const link = page.getByRole('link', { name: 'Google のクチコミ欄を開く' });
-      // リンクの中心で一番上にある要素が、リンク自身（かその中身）であること。画面送りが落ち着くまで待つ。
-      await expect
-        .poll(() =>
-          link.evaluate((element) => {
-            const box = element.getBoundingClientRect();
-            const x = box.left + box.width / 2;
-            const y = box.top + box.height / 2;
-            if (y < 0 || y > window.innerHeight) return 'offscreen';
-            const top = document.elementFromPoint(x, y);
-            return top !== null && (top === element || element.contains(top)) ? 'link' : (top?.closest('[data-sonner-toast]') ? 'toast' : String(top?.tagName));
-          }),
-        )
-        .toBe('link');
-      // 並びの最後の再生成も覆われない（375×667 では着手前、再生成が Toast の下にあった）。
-      expect(
-        await page.getByRole('button', { name: /別の文章を生成/ }).evaluate((element) => {
+      // リンクと、並びの最後の再生成の中心で一番上にある要素が、それぞれ自身（かその中身）であること
+      // （375×667 では着手前、再生成が Toast の下にあった）。画面は滑らかに送られ、上にあるリンクが
+      // 先に Toast から出るので、両方を同時に満たすまで待つ（リンクだけを待つと送りの途中で測る）。
+      const regenerate = page.getByRole('button', { name: /別の文章を生成/ });
+      const topmost = (locator: typeof link) =>
+        locator.evaluate((element) => {
           const box = element.getBoundingClientRect();
-          const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-          return top !== null && (top === element || element.contains(top));
-        }),
-        '再生成が Toast に覆われています',
-      ).toBe(true);
+          const x = box.left + box.width / 2;
+          const y = box.top + box.height / 2;
+          if (y < 0 || y > window.innerHeight) return 'offscreen';
+          const top = document.elementFromPoint(x, y);
+          return top !== null && (top === element || element.contains(top)) ? 'self' : (top?.closest('[data-sonner-toast]') ? 'toast' : String(top?.tagName));
+        });
+      await expect
+        .poll(async () => ({ link: await topmost(link), regenerate: await topmost(regenerate) }))
+        .toEqual({ link: 'self', regenerate: 'self' });
       // 確かめている間も Toast は出たままである（Toast が消えたから押せた、ではない）。
       await expect(toast).toBeVisible();
 
