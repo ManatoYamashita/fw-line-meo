@@ -38,7 +38,15 @@ const RICHMENU_COMPLETED_ID = 'f1-richmenu-completed';
 const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 const INVITE_CODE = 'F1SHARED01';
 // 入力の揺れ（小文字・前後の空白・改行・全角）の検証専用のコード。上のシナリオは INVITE_CODE を無効化するので分ける。
-const CASED_INVITE_CODE = 'F1CASED02';
+// 照合仕様の正常系を発行される形の値で確かめるため、発行形式（dashboard-api の invite-code-gen.ts の 31 字集合・8 字）に合わせる。
+const CASED_INVITE_CODE = 'F7KQ2MXR';
+const ISSUED_CODE_FORMAT = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/;
+const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
+
+/** 半角の英数字を全角へ（U+FF01〜U+FF5E は ASCII の 0x21〜0x7E から 0xFEE0 ずれた位置にある）。 */
+function toFullWidth(text: string): string {
+  return text.replace(/[!-~]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0xfee0));
+}
 
 const USER1 = 'Uf1-invite-owner-1';
 const USER2 = 'Uf1-invite-owner-2';
@@ -210,9 +218,12 @@ describe.skipIf(!process.env.DATABASE_URL)('招待コード〜owner作成の統�
   );
 
   it.each([
-    ['小文字・前後の空白・末尾の改行', USER4, ' f1cased02\n'],
-    ['全角英数・全角スペース', USER5, 'ｆ１ｃａｓｅｄ０２\u3000'],
+    ['小文字・前後の空白・末尾の改行', USER4, ` ${CASED_INVITE_CODE.toLowerCase()}\n`],
+    ['全角英数（小文字）・全角スペース', USER5, `${toFullWidth(CASED_INVITE_CODE.toLowerCase())}${IDEOGRAPHIC_SPACE}`],
   ])('%s の入力でも、実 DB の大文字のコードに解決して登録へ進む', async (_label, lineUserId, input) => {
+    expect(CASED_INVITE_CODE).toMatch(ISSUED_CODE_FORMAT);
+    // 入力が実際に揺れている（そのままでは完全一致しない）ことを確かめ、テストの空振りを防ぐ。
+    expect(input).not.toBe(CASED_INVITE_CODE);
     const pool = await getPool();
     const messenger = createFakeMessenger();
     const handlers = createHandlers(pool, messenger);
