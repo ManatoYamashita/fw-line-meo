@@ -15,6 +15,12 @@ import type { DraftPanelProps } from './types';
 
 type CopyState = 'idle' | 'copied' | 'manual';
 
+// 投稿導線の文言。コピーの案内がリンクを名前で指すので、1 箇所で持つ。
+const REVIEW_LINK_LABEL = 'Google のクチコミ欄を開く';
+// コピー成功後の案内（Toast と画面内の通知で同じ文言）。コピーだけでは投稿画面は開かないので、
+// 次に押すリンクを名前で指す（Requirement 4.1・4.2）。
+const COPIED_MESSAGE = `コピーしました。「${REVIEW_LINK_LABEL}」から投稿画面を開き、本文欄に貼り付けてください。`;
+
 export function DraftPanel({
   draft,
   draftRevision,
@@ -67,7 +73,7 @@ export function DraftPanel({
       clipboard.writeText(text).then(
         () => {
           setCopyState('copied');
-          toast.success('コピーしました。投稿画面に貼り付けてください。');
+          toast.success(COPIED_MESSAGE);
         },
         () => showManualFallback(),
       ).finally(finishCopy);
@@ -90,6 +96,11 @@ export function DraftPanel({
   // 遷移であることが伝わらなくなるためである。寸法の実値はここに書かない。
   //
   // 押下はシェルへ知らせるだけで、遷移は止めない（Issue #137・Requirement 5.8）。
+  //
+  // コピーとは別の押下にする（Requirement 4.1 の解釈）。コピーの後に自動で開く形は採らない:
+  // LINE 内ブラウザで別タブを開いたときの挙動が一次情報で確かめられず、遷移した後にコピーの失敗が
+  // 分かっても戻って復旧できず、コピーの完了を待ってから開く遷移はジェスチャーの外になるためである。
+  // コピーの成否でも出し分けない（失敗しても手動でコピーしたあとに開ける）。
   const reviewLink = (
     <a
       className={cn(buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full' }))}
@@ -98,7 +109,7 @@ export function DraftPanel({
       rel="noopener noreferrer"
       onClick={() => onReviewLinkOpen()}
     >
-      Google のクチコミを書く
+      {REVIEW_LINK_LABEL}
     </a>
   );
 
@@ -128,11 +139,13 @@ export function DraftPanel({
       </div>
       {regenerating || copying ? null : copyState === 'copied' ? (
         <Alert variant="success" role={undefined}>
-          <AlertDescription>コピーしました。投稿画面に貼り付けてください。</AlertDescription>
+          <AlertDescription>{COPIED_MESSAGE}</AlertDescription>
         </Alert>
       ) : copyState === 'manual' ? (
         <Alert role={undefined}>
-          <AlertDescription>自動コピーできませんでした。上の文章を選択して手動でコピーしてください。</AlertDescription>
+          <AlertDescription>
+            {`自動コピーできませんでした。上の文章を選択して手動でコピーしたあと、「${REVIEW_LINK_LABEL}」から投稿画面を開けます。`}
+          </AlertDescription>
         </Alert>
       ) : null}
     </>
@@ -204,10 +217,13 @@ export function DraftPanel({
         }}
       />
       <div className="flex flex-col gap-3">
-        {/* 客向け面の主操作は拡大の区分で全幅（正典 7.9 / 7.10）。寸法の実値は部品の側が持つ。 */}
+        {/* 客向け面の主操作は拡大の区分で全幅（正典 7.9 / 7.10）。寸法の実値は部品の側が持つ。
+            コピー → 投稿画面を開く、の順に客が押す 2 つの操作を並べる（Requirement 4.1）。
+            主ボタンはコピーしかしないので「投稿する」と名乗らない。再生成はその後ろに置く。 */}
         <Button size="lg" className="w-full" type="button" onClick={handleCopy} disabled={copying || regenerating} aria-busy={copying}>
-          {copying ? <><Spinner aria-hidden aria-label="" />コピー中…</> : 'コピーして投稿する'}
+          {copying ? <><Spinner aria-hidden aria-label="" />コピー中…</> : '文章をコピー'}
         </Button>
+        {reviewLink}
         <Button
           variant="outline"
           size="lg"
@@ -221,7 +237,6 @@ export function DraftPanel({
         </Button>
       </div>
       {notification}
-      {reviewLink}
     </section>
   );
 }

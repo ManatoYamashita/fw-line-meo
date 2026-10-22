@@ -212,7 +212,7 @@ test.describe('structured の送信中・下書き・再生成', () => {
     await submitButton(page).click();
     await expect(page.getByText('下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。')).toBeVisible();
     await expect(page.getByRole('button', { name: 'もう一度生成する' })).toBeEnabled();
-    await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeVisible();
     await expect(page.getByLabel('口コミ下書き')).toHaveCount(0);
   });
 
@@ -240,10 +240,10 @@ test.describe('structured の送信中・下書き・再生成', () => {
     await expect(failedToast).toHaveAttribute('data-type', 'error');
     await expect(draft).toBeVisible();
     await expect(draft).toHaveValue('自分の言葉に直した文章です。');
-    await expect(page.getByRole('button', { name: 'コピーして投稿する' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: '文章をコピー' })).toBeEnabled();
     await expect(regenerateButton(page)).toHaveText('別の文章を生成（残り3回）');
     await expect(regenerateButton(page)).toBeEnabled();
-    await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeVisible();
     await expect(page.getByText('下書きの生成に失敗しました。再試行するか、そのまま投稿画面へお進みください。')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'もう一度生成する' })).toHaveCount(0);
     await page.unroute('**/api/drafts');

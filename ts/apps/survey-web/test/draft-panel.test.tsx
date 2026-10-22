@@ -108,14 +108,14 @@ describe('DraftPanel', () => {
     render(<DraftPanel {...props({ generationFailed: true })} />);
     expect(screen.getByText(/下書きの生成に失敗/).textContent).toContain('失敗');
     expect(screen.getByRole('button', { name: /もう一度生成/ })).toBeDefined();
-    expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
+    expect(screen.getByRole('link', { name: /クチコミ欄を開く/ }).getAttribute('href')).toBe(URL);
   });
 
   it('投稿導線は全状態で表示され star 分岐が無い（4.4・ゲーティング不在）', () => {
     const { rerender } = render(<DraftPanel {...props()} />);
-    expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
+    expect(screen.getByRole('link', { name: /クチコミ欄を開く/ }).getAttribute('href')).toBe(URL);
     rerender(<DraftPanel {...props({ generationFailed: true })} />);
-    expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
+    expect(screen.getByRole('link', { name: /クチコミ欄を開く/ }).getAttribute('href')).toBe(URL);
   });
 
   it('draft prop 変更（再生成到着）で textarea が更新される', () => {
@@ -131,7 +131,7 @@ describe('DraftPanel', () => {
     for (const generationFailed of [false, true]) {
       const onReviewLinkOpen = vi.fn();
       render(<DraftPanel {...props({ generationFailed, onReviewLinkOpen })} />);
-      const link = screen.getByRole('link', { name: /クチコミを書く/ });
+      const link = screen.getByRole('link', { name: /クチコミ欄を開く/ });
 
       // fireEvent.click は preventDefault されると false を返す
       expect(fireEvent.click(link)).toBe(true);
@@ -530,7 +530,7 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     ]) {
       cleanup();
       render(<DraftPanel {...props(branch.over)} />);
-      const links = screen.getAllByRole('link', { name: /クチコミを書く/ });
+      const links = screen.getAllByRole('link', { name: /クチコミ欄を開く/ });
       expect(links, `${branch.label}: 投稿導線の個数が 1 つではありません`).toHaveLength(1);
       const link = links[0]!;
       expect(link.getAttribute('class'), `${branch.label}: 投稿導線の見た目`).toBe(expected);
@@ -633,3 +633,79 @@ describe('下書きパネル: 由来の明示と推敲の促し（Issue #179）'
 // 「説明を足しても操作要素とリンクの個数が変わらない」ことは、上の
 // 「操作要素とリンクの個数は分岐ごとに固定されている（Requirements 3.3）」が既に押しボタン 2 件・
 // リンク 1 件で固定している。同じことを 2 箇所で見る層は、片方が腐ったときに腐ったと言えない。
+
+// ---- ここから「文章をコピー」と「Google のクチコミ欄を開く」を順に並べる変更が追加した検証 ----
+//
+// 着手前は主ボタンの文言が「コピーして投稿する」で、押してもコピーしかしなかった。投稿画面への
+// リンクは再生成と通知の後ろ、パネルの最下部にあった。Requirement 4.1 の導線は、客が順に行う
+// 2 つの操作（コピー → 投稿画面を開く）として 1 つの導線を成す。自動遷移はしない。
+
+const COPY_BUTTON = '文章をコピー';
+const REVIEW_LINK = 'Google のクチコミ欄を開く';
+/** コピー成功後の画面内の案内。次に押すリンクを名前で指す。 */
+const COPIED = 'コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。';
+const MANUAL = '自動コピーできませんでした。上の文章を選択して手動でコピーしたあと、「Google のクチコミ欄を開く」から投稿画面を開けます。';
+
+function precedes(a: Element, b: Element): boolean {
+  return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe('下書きパネル: コピーと投稿画面を開く操作を順に並べる（Requirement 4.1）', () => {
+  it('推敲の案内 → 文章をコピー → Google のクチコミ欄を開く → 再生成 の順に描く', () => {
+    render(<DraftPanel {...props()} />);
+    const note = screen.getByText(
+      (_, element) => element?.tagName === 'P' && (element.textContent ?? '').includes(REVISION_PROMPT),
+    );
+    const copy = screen.getByRole('button', { name: COPY_BUTTON });
+    const link = screen.getByRole('link', { name: REVIEW_LINK });
+    const regenerate = screen.getByRole('button', { name: /別の文章を生成/ });
+    expect(precedes(note, copy), '推敲の案内がコピーより後にあります（4.7）').toBe(true);
+    expect(precedes(copy, link), '投稿画面を開くリンクがコピーより前にあります').toBe(true);
+    expect(precedes(link, regenerate), '再生成が投稿画面を開くリンクより前にあります').toBe(true);
+  });
+
+  it('主ボタンはコピーだけを名乗る（押しても遷移しないため「投稿する」と書かない）', () => {
+    render(<DraftPanel {...props()} />);
+    expect(screen.getByRole('button', { name: COPY_BUTTON }).textContent).toBe(COPY_BUTTON);
+    expect(screen.queryByRole('button', { name: /投稿/ })).toBeNull();
+  });
+
+  it('コピー成功後の案内は、次に押すリンクの名前で投稿までの手順を伝える', async () => {
+    render(<DraftPanel {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    const copied = await screen.findByText(COPIED);
+    expect(copied.closest('[data-slot="alert"]'), '案内が通知の部品を通っていません').not.toBeNull();
+    // 成功しても導線は同じリンクのまま（コピー状態で出し分けない）。
+    expect(screen.getAllByRole('link', { name: REVIEW_LINK })).toHaveLength(1);
+  });
+
+  it.each([
+    ['rejected', () => stubClipboard(vi.fn().mockRejectedValue(new Error('denied')))],
+    ['unavailable', () => vi.stubGlobal('navigator', {})],
+  ] as const)('コピーに失敗しても（%s）投稿画面を開くリンクは表示され、押せて、案内がそれを指す（4.6）', async (_, arrange) => {
+    arrange();
+    const onReviewLinkOpen = vi.fn();
+    render(<DraftPanel {...props({ onReviewLinkOpen })} />);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    expect(await screen.findByText(MANUAL)).toBeDefined();
+
+    const link = screen.getByRole('link', { name: REVIEW_LINK });
+    expect(link.getAttribute('href')).toBe(URL);
+    expect(link.getAttribute('aria-disabled')).toBeNull();
+    expect(fireEvent.click(link), 'リンクの既定の遷移が止められています').toBe(true);
+    expect(onReviewLinkOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('リンクを押してもコピーはせず、コピーを押しても window.open で遷移しない（自動遷移なし）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    render(<DraftPanel {...props()} />);
+    expect(fireEvent.click(screen.getByRole('link', { name: REVIEW_LINK }))).toBe(true);
+    expect(writeText).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(COPIED);
+    expect(open).not.toHaveBeenCalled();
+  });
+});

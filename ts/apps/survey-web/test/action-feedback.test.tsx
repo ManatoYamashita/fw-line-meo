@@ -10,8 +10,8 @@ beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 const response = (generation = 'ok') => new Response(JSON.stringify({ generation, draft: generation === 'ok' ? '下書きの文章' : null, sessionToken: 'token', regenerationsLeft: 3 }));
 const renderShell = () => render(<SurveyShell storeId="store" storeName="店" survey={{ mode: 'legacy', aspects: [] }} pageToken="page" googleReviewUrl="https://example.com/review" />);
-const submit = () => {
-  fireEvent.click(screen.getByRole('button', { name: '星3' }));
+const submit = (star = 3) => {
+  fireEvent.click(screen.getByRole('button', { name: `星${star}` }));
   fireEvent.click(screen.getByRole('button', { name: '送信する' }));
 };
 const renderPanel = () => render(<DraftPanel draft="編集中の文章" generationFailed={false} regenerationsLeft={3} googleReviewUrl="https://example.com/review" onRegenerate={() => {}} onReviewLinkOpen={() => {}} regenerating={false} />);
@@ -38,7 +38,7 @@ describe('回答・再生成の通知（#450）', () => {
       expect(notices.success).not.toHaveBeenCalled();
       expect(JSON.stringify(notices.error.mock.calls)).not.toContain('internal message');
     }
-    if (kind === 'failed') expect(screen.getByRole('link', { name: 'Google のクチコミを書く' })).toBeDefined();
+    if (kind === 'failed') expect(screen.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeDefined();
     if (kind.includes('error')) expect((screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -55,7 +55,7 @@ describe('回答・再生成の通知（#450）', () => {
     expect(busy.disabled).toBe(true); fireEvent.click(busy);
     expect(fetch).toHaveBeenCalledTimes(1);
     await act(async () => { if (kind === 'network error') reject(new Error('internal message')); else resolve(response(kind)); });
-    expect(screen.getByRole('link', { name: 'Google のクチコミを書く' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeDefined();
     if (kind === 'ok') expect(notices.success).toHaveBeenCalledExactlyOnceWith('別の口コミ文を作成しました。');
     else { expect(notices.error).toHaveBeenCalledTimes(1); expect(notices.success).not.toHaveBeenCalled(); }
     if (kind === 'network error') expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('下書きの文章');
@@ -74,9 +74,9 @@ describe('回答・再生成の通知（#450）', () => {
     await act(async () => {});
     expect(fetch).toHaveBeenCalledTimes(1);
     expect((screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement).value).toBe('自分で直した文章');
-    expect((screen.getByRole('button', { name: 'コピーして投稿する' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: '文章をコピー' }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole('button', { name: /別の文章を生成（残り3回）/ }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByRole('link', { name: 'Google のクチコミを書く' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeDefined();
     expect(notices.error).toHaveBeenCalledTimes(1);
     expect(notices.success).not.toHaveBeenCalled();
     expect(screen.queryByText(/下書きの生成に失敗しました。再試行するか/)).toBeNull();
@@ -134,27 +134,60 @@ describe('コピーの通知（#450）', () => {
     const writeText = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'コピーして投稿する' }));
+    fireEvent.click(screen.getByRole('button', { name: '文章をコピー' }));
     expect(writeText).toHaveBeenCalledExactlyOnceWith('編集中の文章');
     const busy = screen.getByRole('button', { name: 'コピー中…' }) as HTMLButtonElement;
     expect(busy.disabled).toBe(true); fireEvent.click(busy);
     expect(notices.success).not.toHaveBeenCalled();
     await act(async () => { finish(); });
-    expect(notices.success).toHaveBeenCalledTimes(1);
+    // 成功の通知は、次に押すリンクの名前で投稿までの手順を伝える（コピーだけでは投稿画面は開かない）。
+    expect(notices.success).toHaveBeenCalledExactlyOnceWith('コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。');
     expect(screen.getByRole('status').textContent).toBe('');
-    expect((screen.getByRole('button', { name: 'コピーして投稿する' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: '文章をコピー' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it.each(['rejected', 'throws', 'unavailable'])('%s: Toastと手動コピーへ復帰する', async (kind) => {
     const writeText = kind === 'throws' ? vi.fn(() => { throw new Error('internal'); }) : vi.fn().mockRejectedValue(new Error('internal'));
     vi.stubGlobal('navigator', kind === 'unavailable' ? {} : { clipboard: { writeText } });
     renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'コピーして投稿する' }));
+    fireEvent.click(screen.getByRole('button', { name: '文章をコピー' }));
     await act(async () => {});
     expect(notices.error).toHaveBeenCalledTimes(1);
     expect(notices.success).not.toHaveBeenCalled();
     expect(screen.getByText(/上の文章を選択して手動でコピー/)).toBeDefined();
     expect(document.activeElement).toBe(screen.getByLabelText('口コミ下書き'));
-    expect((screen.getByRole('button', { name: 'コピーして投稿する' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: '文章をコピー' }) as HTMLButtonElement).disabled).toBe(false);
+    // コピーに失敗しても投稿画面を開く導線は消さない（手動でコピーしたあとに開ける）。
+    expect(screen.getByRole('link', { name: 'Google のクチコミ欄を開く' }).getAttribute('href')).toBe('https://example.com/review');
+  });
+});
+
+// Requirement 4.4: 星の値で導線を出し分けない（レビューゲーティングをしない）。
+describe('星の値によらず同じ導線（4.4）', () => {
+  async function actionsAfterSubmit(star: number) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response()));
+    renderShell(); submit(star);
+    await act(async () => {});
+    const actions = [...document.querySelectorAll('section button, section a')].map((el) => ({
+      tag: el.tagName,
+      name: (el.textContent ?? '').trim(),
+      href: el.getAttribute('href'),
+      target: el.getAttribute('target'),
+      className: el.getAttribute('class'),
+    }));
+    cleanup();
+    localStorage.clear();
+    return actions;
+  }
+
+  it('星1と星5で、コピー・投稿画面を開くリンク・再生成の並びと見た目が一致する', async () => {
+    const low = await actionsAfterSubmit(1);
+    const high = await actionsAfterSubmit(5);
+    expect(low.map((a) => a.name), '星1の操作の並び').toEqual([
+      '文章をコピー',
+      'Google のクチコミ欄を開く',
+      '別の文章を生成（残り3回）',
+    ]);
+    expect(high, '星1と星5で導線が食い違っています').toEqual(low);
   });
 });

@@ -24,7 +24,7 @@ async function openReviewLinkAndCaptureNotice(page: Page) {
   await page.context().route(/search\.google\.com/, (route) => route.abort());
   const response = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/review-link-opened');
   const popup = page.context().waitForEvent('page');
-  await page.getByRole('link', { name: /クチコミを書く/ }).click();
+  await page.getByRole('link', { name: /クチコミ欄を開く/ }).click();
   const res = await response;
   await (await popup).close();
   const body = JSON.parse(res.request().postData() ?? '{}') as { storeId?: string; token?: string };
@@ -61,7 +61,7 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
   await page.getByRole('button', { name: /コピー/ }).click();
   await expect(page.locator('[data-slot="alert"]').getByText(/コピーしました/)).toBeVisible();
 
-  const link = page.getByRole('link', { name: /クチコミを書く/ });
+  const link = page.getByRole('link', { name: /クチコミ欄を開く/ });
   await expect(link).toHaveAttribute('href', WRITEREVIEW);
 });
 
@@ -72,7 +72,7 @@ test('低評価（星1）でも同一の投稿導線が表示される', async (
   await page.getByRole('button', { name: '送信する' }).click();
 
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
 // 素材の集め方を評価で分岐させない（Requirement 2.11・Issue #221）。
@@ -118,7 +118,7 @@ test('星1 で気になった点を選んで送信すると、送信に載って
   expect(body.concernCodes).toEqual(['service']);
 
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
 // 回答完了後の再訪は回答済み画面＋投稿導線（localStorage・24h）。
@@ -130,7 +130,7 @@ test('回答済みで再訪すると回答済み画面と投稿導線が出る',
 
   await page.reload();
   await expect(page.getByText(/ご回答ありがとうございました/)).toBeVisible();
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
 // 投稿導線の押下の観測（Issue #137・Requirement 5.7 / 5.8）。実 token を実サーバーが検証する経路を通す。
@@ -142,7 +142,7 @@ test('下書き画面で投稿導線を押すと、sessionToken つきの押下�
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   // 通知を足しても、投稿導線は Google の投稿画面への直リンクのまま（自サーバーを経由しない）
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 
   const { status, body } = await openReviewLinkAndCaptureNotice(page);
 
