@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 import { openStructuredSurvey } from './fixtures/structured';
 import { openSurveySurface } from './fixtures/surfaces';
 
-// structured survey の回答の段階と下書きの段階の振る舞い（材料の数え方・折り畳み・送信中・再生成・生成失敗）と、
+// structured survey の回答の段階と下書きの段階の振る舞い（材料の数え方・極性の表示と折り畳み・送信中・再生成・生成失敗）と、
 // legacy の再生成。structured-survey.spec.ts は 1 本の通しの流れを持ち、ここはその途中の分岐を 1 つずつ固定する。
 //
 // 送信と再生成は実際の /api/responses・/api/drafts（実 DB・Gemini は mock-gemini.mjs）へ届く。処理中の表示を観測する
@@ -16,9 +16,8 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.setExtraHTTPHeaders({ 'X-Forwarded-For': `e2e-structured-behavior-${testInfo.testId}` });
 });
 
-const positive = (page: Page) => page.getByRole('region', { name: '良かったところを教えてください' });
+const positive = (page: Page) => page.getByRole('region', { name: '良かったところ（任意）' });
 const concern = (page: Page) => page.getByRole('region', { name: '気になったところ（任意）' });
-const concernToggle = (page: Page) => page.getByRole('button', { name: /^気になったところ（任意）/ });
 const commentToggle = (page: Page) => page.getByRole('button', { name: /^その他の感想（任意）/ });
 const commentBox = (page: Page) => page.getByRole('textbox', { name: 'その他に伝えたいことがあれば入力してください' });
 const submitButton = (page: Page) => page.getByRole('button', { name: /^口コミ文を(作る|作成しています…)$/ });
@@ -94,7 +93,6 @@ test.describe('structured の材料の数え方（2 件以上で口コミ文を�
     await positive(page).getByRole('group', { name: '料理' }).getByRole('checkbox', { name: '量' }).click();
     await expect(submitButton(page)).toBeDisabled();
 
-    await concernToggle(page).click();
     await concern(page).getByRole('button', { name: 'ドリンク' }).click();
     await concern(page).getByRole('group', { name: 'ドリンク' }).getByRole('checkbox', { name: '種類' }).click();
     await expect(submitButton(page)).toBeEnabled();
@@ -108,33 +106,46 @@ test.describe('structured の材料の数え方（2 件以上で口コミ文を�
   });
 });
 
-test.describe('structured の折り畳み（畳んでも選んだ内容・入力は残る）', () => {
-  test('気になったところとその他の感想を畳んでも、選択・入力は保持され、送信にも載る', async ({ page }) => {
+test.describe('structured の極性の表示と、その他の感想の折り畳み（Issue #460）', () => {
+  test('良かったところと気になったところは同じ形で最初から札を出し、どちらも畳めない', async ({ page }) => {
+    await openStructuredSurvey(page);
+    const positiveHeading = positive(page).getByRole('heading', { level: 2 });
+    const concernHeading = concern(page).getByRole('heading', { level: 2 });
+    await expect(positiveHeading).toHaveText('良かったところ（任意）');
+    await expect(concernHeading).toHaveText('気になったところ（任意）');
+    expect(await concernHeading.getAttribute('class')).toBe(await positiveHeading.getAttribute('class'));
+    // 見た目の大きさも同じ（class だけでなく計算後の文字サイズ・太さ・色で確かめる）。
+    const style = (h: typeof positiveHeading) =>
+      h.evaluate((e) => {
+        const c = getComputedStyle(e);
+        return [c.fontSize, c.fontWeight, c.color].join('|');
+      });
+    expect(await style(concernHeading)).toBe(await style(positiveHeading));
+    // 両側とも、最初からカテゴリの札が見える（開閉の押しボタンを押さずに選べる）。
+    await expect(positive(page).getByRole('button', { name: '料理' })).toBeVisible();
+    await expect(concern(page).getByRole('button', { name: '料理' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^(良かった|気になった)ところ/ })).toHaveCount(0);
+    // 共通の案内は 1 つで、両方の領域が説明として指す。
+    const note = page.getByText('良かったところ・気になったところの、どちらからでも選べます。両方を埋める必要はありません。');
+    await expect(note).toHaveCount(1);
+    const noteId = await note.getAttribute('id');
+    expect(noteId).toBeTruthy();
+    for (const region of [positive(page), concern(page)]) {
+      expect((await region.getAttribute('aria-describedby'))?.split(' ')).toContain(noteId);
+    }
+  });
+
+  test('気になったところで選び、その他の感想を畳んでも、選択・入力は保持され、送信にも載る', async ({ page }) => {
     await openStructuredSurvey(page);
     await page.getByRole('button', { name: '星2' }).click();
 
-    // 気になったところは最初は畳まれている。
-    await expect(concernToggle(page)).toHaveAttribute('aria-expanded', 'false');
-    await concernToggle(page).click();
-    await expect(concernToggle(page)).toHaveAttribute('aria-expanded', 'true');
     await concern(page).getByRole('button', { name: '接客・提供' }).click();
     const service = concern(page).getByRole('group', { name: '接客・提供' });
     await service.getByRole('checkbox').nth(0).click();
     await service.getByRole('checkbox').nth(1).click();
-
-    // 畳むと件数だけが出て、開き直すと選んだまま。
-    await concernToggle(page).click();
-    await expect(concernToggle(page)).toHaveAttribute('aria-expanded', 'false');
-    await expect(concernToggle(page)).toContainText('2件選択済み');
     await expect(submitButton(page)).toBeEnabled();
-    // 開き直すと、畳む前に開いていたカテゴリも開いたまま戻る。
-    await concernToggle(page).click();
-    await expect(concern(page).getByRole('button', { name: '接客・提供' })).toHaveAttribute('aria-expanded', 'true');
-    await expect(service.getByRole('checkbox').nth(0)).toBeChecked();
-    await expect(service.getByRole('checkbox').nth(1)).toBeChecked();
-    await concernToggle(page).click();
 
-    // その他の感想も、畳んで開き直しても入力が残る。
+    // その他の感想は、畳んで開き直しても入力が残る。
     await expect(commentBox(page)).toHaveCount(0);
     await commentToggle(page).click();
     await commentBox(page).fill('少し待ちました');
@@ -145,7 +156,7 @@ test.describe('structured の折り畳み（畳んでも選んだ内容・入力
     await expect(commentBox(page)).toHaveValue('少し待ちました');
     await commentToggle(page).click();
 
-    // 両方を畳んだまま送信しても、選択と一言が載る。
+    // その他の感想を畳んだまま送信しても、選択と一言が載る。
     const request = page.waitForRequest((r) => r.url().endsWith('/api/responses') && r.method() === 'POST');
     await submitAndWaitForDraft(page);
     const body = (await request).postDataJSON() as { concernSelections: { facetCodes: string[] }[]; comment?: string };
@@ -264,7 +275,6 @@ test.describe('structured の送信中・下書き・再生成', () => {
     await noAi('回答の画面');
     await page.getByRole('button', { name: '星4' }).click();
     await pickTwoPositives(page);
-    await concernToggle(page).click();
     await commentToggle(page).click();
     await noAi('回答の画面（すべて開いた）');
     const held = await holdRequests(page, '/api/responses');

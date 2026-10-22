@@ -14,7 +14,7 @@ import { openStructuredSurvey } from './fixtures/structured';
 const SCROLL_REGIONS = 1;
 const SCROLL_REGIONS_COMMENT_CLOSED = 0;
 
-const positive = (page: Page) => page.getByRole('region', { name: '良かったところを教えてください' });
+const positive = (page: Page) => page.getByRole('region', { name: '良かったところ（任意）' });
 const concern = (page: Page) => page.getByRole('region', { name: '気になったところ（任意）' });
 
 test.describe('structured survey（客向け）', () => {
@@ -35,9 +35,7 @@ test.describe('structured survey（客向け）', () => {
       '✓ 料理：料理全体：量／刺身盛り合わせ：味／焼き鳥5種盛り',
     );
 
-    // 気になったところ: 同じ刺身盛り合わせ → 味（矛盾として扱わない）。
-    // 気になったところは最初は畳まれている。入口を押して開く。
-    await page.getByRole('button', { name: /^気になったところ（任意）/ }).click();
+    // 気になったところ: 同じ刺身盛り合わせ → 味（矛盾として扱わない）。良かったところと同じく最初から札が出ている。
     await concern(page).getByRole('button', { name: '料理' }).click();
     const concernFood = concern(page).getByRole('group', { name: '料理' });
     await concernFood.getByRole('checkbox', { name: '刺身盛り合わせ' }).click();
@@ -82,7 +80,6 @@ test.describe('structured survey（客向け）', () => {
     await page.getByRole('button', { name: '星2' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
-    await page.getByRole('button', { name: /^気になったところ（任意）/ }).click();
     await concern(page).getByRole('button', { name: '接客・提供' }).click();
     const submitButton = page.getByRole('button', { name: '口コミ文を作る' });
     await expect(submitButton).toBeDisabled();
