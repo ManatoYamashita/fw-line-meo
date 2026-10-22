@@ -245,3 +245,55 @@ for (const size of TOAST_SIZES) {
     });
   });
 }
+
+// コピーに失敗したときの主な操作は、選択済みの文章を手動でコピーすること。Toast の上へ操作を
+// 送る処理が、選択された入力欄を画面の外へ追い出したり、フォーカスや選択を外したりしないこと。
+test.describe('320×568 のコピー失敗', () => {
+  test.use({ viewport: { width: 320, height: 568 }, extraHTTPHeaders: { 'x-forwarded-for': '198.51.100.74' } });
+
+  test('入力欄はフォーカスと全文の選択を保ったまま画面に見え、リンクも押せる', async ({ page }) => {
+    await openSurveySurface(page);
+    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('button', { name: '送信する' }).click();
+    const draft = page.getByLabel('口コミ下書き');
+    await expect(draft).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
+    });
+
+    await page.getByRole('button', { name: '文章をコピー' }).click();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '自動コピーできませんでした' })).toBeVisible();
+    // 画面送りが落ち着くまで待つ（リンクが Toast の上に出る）。
+    const link = page.getByRole('link', { name: 'Google のクチコミ欄を開く' });
+    await expect
+      .poll(() =>
+        link.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return top !== null && (top === element || element.contains(top));
+        }),
+      )
+      .toBe(true);
+
+    const state = await draft.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement;
+      const box = textarea.getBoundingClientRect();
+      const style = getComputedStyle(textarea);
+      const firstLineY = box.top + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.lineHeight) / 2;
+      return {
+        focused: document.activeElement === textarea,
+        selection: [textarea.selectionStart, textarea.selectionEnd, textarea.value.length],
+        top: box.top,
+        bottom: box.bottom,
+        viewport: window.innerHeight,
+        firstLineHit: document.elementFromPoint(box.left + 24, firstLineY) === textarea,
+      };
+    });
+    expect(state.focused, '入力欄からフォーカスが外れています').toBe(true);
+    expect(state.selection[0]).toBe(0);
+    expect(state.selection[1], '全文の選択が外れています').toBe(state.selection[2]);
+    expect(state.top, '入力欄の上端が画面の上へ出ています').toBeGreaterThanOrEqual(0);
+    expect(state.bottom, '入力欄の下端が画面の下へ出ています').toBeLessThanOrEqual(state.viewport);
+    expect(state.firstLineHit, '文章の 1 行目が見えていません（長押しの起点にできません）').toBe(true);
+  });
+});

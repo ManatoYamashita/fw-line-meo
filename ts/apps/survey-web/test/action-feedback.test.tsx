@@ -141,7 +141,7 @@ describe('コピーの通知（#450）', () => {
     expect(notices.success).not.toHaveBeenCalled();
     await act(async () => { finish(); });
     // 成功の通知は、次に押すリンクの名前で投稿までの手順を伝える（コピーだけでは投稿画面は開かない）。
-    expect(notices.success).toHaveBeenCalledExactlyOnceWith('コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。');
+    expect(notices.success).toHaveBeenCalledExactlyOnceWith('コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。', expect.objectContaining({ onAutoClose: expect.any(Function) }));
     expect(screen.getByRole('status').textContent).toBe('');
     expect((screen.getByRole('button', { name: '文章をコピー' }) as HTMLButtonElement).disabled).toBe(false);
   });

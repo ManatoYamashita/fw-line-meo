@@ -20,6 +20,8 @@ type CopyState = 'idle' | 'copied' | 'manual';
 const REVIEW_LINK_LABEL = 'Google のクチコミ欄を開く';
 // コピー成功後の案内（Toast と画面内の通知で同じ文言）。コピーだけでは投稿画面は開かないので、
 // 次に押すリンクを名前で指す（Requirement 4.1・4.2）。
+// コピーに失敗したときに、入力欄の上端を画面の上端から残す幅（px）。
+const TEXTAREA_KEEP_TOP = 8;
 const COPIED_MESSAGE = `コピーしました。「${REVIEW_LINK_LABEL}」から投稿画面を開き、本文欄に貼り付けてください。`;
 
 export function DraftPanel({
@@ -39,10 +41,15 @@ export function DraftPanel({
   const [slow, setSlow] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  // 操作の並びを Toast より上へ送るために、パネルの下に足す余白（px）。送る先の余地が無いと
-  // 送れないので、送る量と同じだけ足す（PR #470・lib/toast-clearance.ts）。
+  // 操作の並びを Toast より上へ送るために、パネルの下に足す余白（px）。送り先の余地が足りない
+  // ときに、足りない分だけ足す。コピーの Toast が閉じたら、画面を動かさずに外せる分を外す
+  // （PR #470・lib/toast-clearance.ts）。
   const [toastRoom, setToastRoom] = useState(0);
   const [pendingLift, setPendingLift] = useState(0);
+  const roomTriesRef = useRef(0);
+  // 表示中のコピーの結果の Toast。次のコピーでは前のものを閉じてから出す（積み重ねて操作を
+  // 押し上げ続けない）。
+  const copyToastRef = useRef<string | number | null>(null);
   const noteId = useId();
 
   // 再生成で新しい下書きが届いたら編集内容を更新する（再生成は上書き）。同じ文面が届いた成功も
@@ -53,13 +60,22 @@ export function DraftPanel({
     setToastRoom(0);
   }, [draft, draftRevision]);
 
-  // 余白が描かれた後で画面を送る（余白が無いうちに送ると、送れる量が足りない）。
+  // 送り先の余地を確かめてから画面を送る。足りなければ足りない分だけ余白を足し、描かれた後で
+  // もう一度確かめる（面の最小の高さに空きがあると、足した余白がそのまま余地にならないため）。
   useEffect(() => {
     if (pendingLift <= 0) return;
+    const root = document.documentElement;
+    const deficit = Math.ceil(window.scrollY + pendingLift - (root.scrollHeight - window.innerHeight));
+    if (deficit > 0 && roomTriesRef.current < 3) {
+      roomTriesRef.current += 1;
+      setToastRoom((room) => room + deficit);
+      return;
+    }
+    roomTriesRef.current = 0;
     const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     window.scrollBy({ top: pendingLift, behavior: reduce ? 'auto' : 'smooth' });
     setPendingLift(0);
-  }, [pendingLift]);
+  }, [pendingLift, toastRoom]);
 
   useEffect(() => {
     if (!regenerating && !copying) { setSlow(false); return; }
@@ -71,7 +87,12 @@ export function DraftPanel({
   // Toast の置き場（右下・design-language 7.5）と表示時間は共通の Toaster のまま変えず、
   // 覆われる位置にあるときだけ、操作の並びが Toast の上に来るよう画面を送る。
   // Toast は通知の呼び出しの後に描かれるので、描かれるまで数フレーム待ってから測る。
-  function keepActionsAboveToasts(): void {
+  //
+  // コピーに失敗したときの主な操作は、選択済みの文章を手動でコピーすることである。そのため
+  // 失敗時は、入力欄の上端が画面に残る範囲でしか送らない（文字を拡大した画面などで、入力欄が
+  // 画面の上へ消えるのを防ぐ）。その範囲で送り切れなければ、Toast が消えるまでリンクが
+  // 覆われることを許す（手動でコピーした後に押す操作なので、急がない）。
+  function keepActionsAboveToasts(outcome: 'copied' | 'manual'): void {
     if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
     let frames = 0;
     const measure = (): void => {
@@ -81,12 +102,34 @@ export function DraftPanel({
       if (frames < 2) { frames += 1; window.requestAnimationFrame(measure); return; }
       const actions = actionsRef.current;
       if (!actions) return;
-      const lift = liftNeeded(actions.getBoundingClientRect().bottom, toastTop);
+      let lift = liftNeeded(actions.getBoundingClientRect().bottom, toastTop);
+      if (outcome === 'manual' && textareaRef.current) {
+        lift = Math.min(lift, Math.max(0, Math.floor(textareaRef.current.getBoundingClientRect().top) - TEXTAREA_KEEP_TOP));
+      }
       if (lift <= 0) return;
-      setToastRoom((room) => Math.max(room, lift));
       setPendingLift(lift);
     };
     window.requestAnimationFrame(measure);
+  }
+
+  // コピーの結果の Toast を出す。前の結果の Toast は閉じる。閉じたら余白を戻す。
+  function showCopyToast(kind: 'success' | 'error', message: string): void {
+    if (copyToastRef.current !== null) toast.dismiss(copyToastRef.current);
+    const release = (closed: { id: string | number }): void => {
+      if (closed.id !== copyToastRef.current) return;
+      copyToastRef.current = null;
+      releaseToastRoom();
+    };
+    copyToastRef.current = toast[kind](message, { onAutoClose: release, onDismiss: release }) ?? null;
+  }
+
+  // 余白のうち、画面を動かさずに外せる分（いま見えている位置より下の余地）だけを外す。
+  // 全部を外すと、送った位置にいる客の画面が跳ねて、押そうとしていた操作が動いてしまう。
+  function releaseToastRoom(): void {
+    if (typeof window === 'undefined') return;
+    const root = document.documentElement;
+    const slack = Math.max(0, Math.floor(root.scrollHeight - window.innerHeight - window.scrollY));
+    setToastRoom((room) => Math.max(0, room - slack));
   }
 
   function finishCopy(): void {
@@ -110,8 +153,8 @@ export function DraftPanel({
       clipboard.writeText(text).then(
         () => {
           setCopyState('copied');
-          toast.success(COPIED_MESSAGE);
-          keepActionsAboveToasts();
+          showCopyToast('success', COPIED_MESSAGE);
+          keepActionsAboveToasts('copied');
         },
         () => showManualFallback(),
       ).finally(finishCopy);
@@ -123,10 +166,10 @@ export function DraftPanel({
 
   function showManualFallback(): void {
     setCopyState('manual');
-    toast.error('自動コピーできませんでした。文章を選択して手動でコピーしてください。');
+    showCopyToast('error', '自動コピーできませんでした。文章を選択して手動でコピーしてください。');
     const el = textareaRef.current;
     if (el) { el.focus(); el.select(); }
-    keepActionsAboveToasts();
+    keepActionsAboveToasts('manual');
   }
 
   // 投稿導線（全状態・全評価で同一。ゲーティングをしない）。

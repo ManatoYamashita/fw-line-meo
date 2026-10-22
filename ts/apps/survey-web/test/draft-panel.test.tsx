@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
+import { toast } from '@fwlm/ui/components/app-toaster';
 import { Alert } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -737,23 +738,46 @@ function placeActions(bottom: number): void {
   actions.getBoundingClientRect = () => ({ bottom, top: bottom - 168, left: 0, right: 0, width: 0, height: 168, x: 0, y: 0, toJSON: () => ({}) });
 }
 
+function placeTextarea(top: number): void {
+  const textarea = screen.getByLabelText('口コミ下書き');
+  textarea.getBoundingClientRect = () => ({ top, bottom: top + 256, left: 0, right: 0, width: 0, height: 256, x: 0, y: top, toJSON: () => ({}) });
+}
+
+/** 足した余白の高さ（無ければ 0）。 */
+function roomHeight(): number {
+  const room = document.querySelector<HTMLElement>('[data-slot="toast-room"]');
+  return room ? Number.parseFloat(room.style.height) : 0;
+}
+
+/**
+ * jsdom は配置を計算しないので、文書の高さを「画面の高さ＋余地 base＋足した余白」として与える。
+ * base は面にもともとある、画面より下の余地（px）。
+ */
+function modelDocument(base: number): void {
+  Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, get: () => window.innerHeight + base + roomHeight() });
+}
+
 describe('下書きパネル: コピーの結果の Toast が操作を覆わない（PR #470）', () => {
   beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
+    modelDocument(0);
   });
   afterEach(() => {
     document.querySelectorAll('[data-sonner-toaster]').forEach((el) => el.remove());
+    Reflect.deleteProperty(document.documentElement, 'scrollHeight');
+    vi.restoreAllMocks();
   });
 
   it.each([
     ['成功', () => stubClipboard(vi.fn().mockResolvedValue(undefined))],
     ['失敗', () => stubClipboard(vi.fn().mockRejectedValue(new Error('denied')))],
-  ] as const)('コピー%sの Toast が操作の並びに重なるなら、並びが Toast の上に来るまで画面を送り、送る余地を足す', async (_, arrange) => {
+  ] as const)('コピー%sの Toast が操作の並びに重なるなら、並びが Toast の上に来るまで画面を送り、足りない余地だけを足す', async (_, arrange) => {
     arrange();
     const scrollBy = vi.fn();
     vi.stubGlobal('scrollBy', scrollBy);
     render(<DraftPanel {...props()} />);
     placeActions(620);
+    placeTextarea(180); // 320×568 の実測
     fakeToaster(552, 92); // 落ち着いた上端は 460
     fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
 
@@ -762,10 +786,22 @@ describe('下書きパネル: コピーの結果の Toast が操作を覆わな�
     expect(scrollBy).toHaveBeenCalledTimes(1);
     const room = document.querySelector<HTMLElement>('[data-slot="toast-room"]');
     expect(room, '送る余地が足されていません').not.toBeNull();
-    expect(room!.style.height).toBe(`${lift}px`);
+    expect(roomHeight()).toBe(lift);
     expect(room!.getAttribute('aria-hidden')).toBe('true');
     // 導線そのものは変えない（出し分けない・同じリンク）。
     expect(screen.getAllByRole('link', { name: REVIEW_LINK })).toHaveLength(1);
+  });
+
+  it('面にもともと余地があれば、余白は足さずに送る', async () => {
+    modelDocument(400);
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 172, behavior: 'smooth' }));
+    expect(roomHeight()).toBe(0);
   });
 
   it('重ならないとき（広い画面）は画面を送らず、余地も足さない', async () => {
@@ -790,5 +826,86 @@ describe('下書きパネル: コピーの結果の Toast が操作を覆わな�
     fakeToaster(552, 92);
     fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
     await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 172, behavior: 'auto' }));
+  });
+
+  // コピーに失敗したときの主な操作は、選択済みの文章を手動でコピーすること。
+  it('失敗時は、入力欄の上端が画面に残る範囲でしか送らず、フォーカスと全文の選択を保つ', async () => {
+    stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props({ draft: '選択されたままの下書き' })} />);
+    placeActions(620);
+    placeTextarea(100); // 文字を拡大した画面などで、入力欄が高い位置にある
+    fakeToaster(552, 92); // 送りたい量は 172
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 100 - 8, behavior: 'smooth' }));
+    const textarea = screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(textarea);
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, textarea.value.length]);
+  });
+
+  it('失敗時に入力欄がすでに画面の上端近くなら、送らない', async () => {
+    stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    placeTextarea(4);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(/上の文章を選択して手動でコピー/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('続けてコピーしたら、前の結果の Toast を閉じてから出す（積み重ねて押し上げ続けない）', async () => {
+    const dismiss = vi.spyOn(toast, 'dismiss');
+    const success = vi.spyOn(toast, 'success');
+    render(<DraftPanel {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(COPIED);
+    const firstId = success.mock.results[0]!.value as string | number;
+    expect(dismiss).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(success).toHaveBeenCalledTimes(2));
+    expect(dismiss).toHaveBeenCalledExactlyOnceWith(firstId);
+  });
+
+  it('コピーの Toast が閉じたら、画面を動かさずに外せる余白を外す', async () => {
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    const success = vi.spyOn(toast, 'success');
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalled());
+    expect(roomHeight()).toBe(172);
+
+    // jsdom の scrollBy は stub なので scrollY は 0 のまま。いま見えている位置より下の余地は
+    // 余白ぶんすべてなので、全部外しても画面は動かない。
+    const id = success.mock.results[0]!.value as string | number;
+    const options = success.mock.calls[0]![1] as { onAutoClose: (t: { id: string | number }) => void };
+    act(() => options.onAutoClose({ id }));
+    expect(roomHeight()).toBe(0);
+  });
+
+  it('送った位置にいるときは、閉じても画面が跳ねない分の余白を残す', async () => {
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    const success = vi.spyOn(toast, 'success');
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalled());
+
+    vi.stubGlobal('scrollY', 150); // 172 送ったうちの 150 の位置にいる
+    const id = success.mock.results[0]!.value as string | number;
+    const options = success.mock.calls[0]![1] as { onDismiss: (t: { id: string | number }) => void };
+    act(() => options.onDismiss({ id }));
+    expect(roomHeight(), '外すと画面が跳ねます').toBe(150);
   });
 });
