@@ -113,7 +113,10 @@ export function DraftPanel({
   }
 
   // コピーの結果の Toast を出す。前の結果の Toast は閉じる。閉じたら余白を戻す。
-  function showCopyToast(kind: 'success' | 'error', message: string): void {
+  // 引数は文言を先に置く。記録の水準名（error など）を先に、文字列を次に渡す呼び出しの形は、
+  // 記録の正典ガード（scripts/check-log-field-binding.sh）に構造化ログとして読まれ、文言が
+  // 事象名と誤認される。
+  function showCopyToast(message: string, kind: 'success' | 'error'): void {
     if (copyToastRef.current !== null) toast.dismiss(copyToastRef.current);
     const release = (closed: { id: string | number }): void => {
       if (closed.id !== copyToastRef.current) return;
@@ -153,7 +156,7 @@ export function DraftPanel({
       clipboard.writeText(text).then(
         () => {
           setCopyState('copied');
-          showCopyToast('success', COPIED_MESSAGE);
+          showCopyToast(COPIED_MESSAGE, 'success');
           keepActionsAboveToasts('copied');
         },
         () => showManualFallback(),
@@ -166,7 +169,7 @@ export function DraftPanel({
 
   function showManualFallback(): void {
     setCopyState('manual');
-    showCopyToast('error', '自動コピーできませんでした。文章を選択して手動でコピーしてください。');
+    showCopyToast('自動コピーできませんでした。文章を選択して手動でコピーしてください。', 'error');
     const el = textareaRef.current;
     if (el) { el.focus(); el.select(); }
     keepActionsAboveToasts('manual');
