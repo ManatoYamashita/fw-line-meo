@@ -160,6 +160,50 @@
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
   - _Depends: 3.1, 4.3, 4.4, 4.5, 5.1, 5.2, 6.1, 6.2_
 
+## 7. 招待コードの記録（Requirement 8・Issue #486）
+
+> 前提: 本番の migration 適用は自動ではない。`0017` を書くイメージより先に本番へ適用しないと、オーナー登録がすべて失敗する（design.md「Migration Strategy」）。7.5 の順序を崩さないこと。
+> PR #472（招待コード入力の正規化・line-webhook）と照合経路が隣接する。7.3 の着手前に #472 の状態を確かめ、マージ済みなら取り込んでから始める。
+
+- [ ] 7.1 migration 0017（owners.invite_code_id）と DB アサーション・文書
+  - `0017_owner_invite_code.sql`: `agency_invite_codes` に `ux_agency_invite_codes_agency_id UNIQUE (agency_id, id)`、`owners` に `invite_code_id uuid`（NULL 許容）と複合 FK `fk_owners_invite_code_same_agency (agency_id, invite_code_id) → agency_invite_codes (agency_id, id) ON DELETE RESTRICT`。既存行を書き換える UPDATE を持たない
+  - `db/test/assertions/51_owner_invite_code.sql`: NULL の行を作れる／同じ代理店のコードで作れる／別の代理店のコードは FK 違反で拒否（`GET STACKED DIAGNOSTICS ... CONSTRAINT_NAME` で制約名まで確かめる）／参照中のコードは削除できない／コードの無効化後も `invite_code_id` は変わらない
+  - `db/ERD.md`（関係図に `agency_invite_codes ||--o{ owners`・`owners` の FK 欄と注記）と `db/write-boundary.md`（`owners` 行に `invite_code_id`・TS 書込）を更新。`grants.sql` と `30_compliance.sql` の表 allowlist は新テーブルが無いので変更不要（変更不要であることを本タスクで確認する）
+  - 完了状態: native postgres（Implementation Notes の正典レシピ）で全 migration の適用・全 assertions・`check_docs.sh` が緑。別代理店のコードを拒否する assertion について、複合 FK を単独の FK（`invite_code_id → agency_invite_codes(id)`）に置き換える変異で赤になることを実測する
+  - _Requirements: 8.2, 8.3, 8.4_
+  - _Boundary: db migrations, db docs_
+
+- [ ] 7.2 `@fwlm/db` の契約変更（照合の id・作成の必須 id・一覧の記録）
+  - `findActiveInviteCode` が `{ id, agencyId }` を返す（照合の条件は不変）。`CreateOwnerInput` に `inviteCodeId: string` を**必須**で足し、`createOwner` の INSERT へ `invite_code_id` を加える。`OwnerRow`・`OWNER_COLUMNS` を 0017 に同期する（教訓: migration 追加は Row 型の同期まで含める）
+  - `listOwnersByAgency` が `agency_invite_codes` を LEFT JOIN し、`OwnerListItem.inviteCode`（`{ id, code, disabled } | null`）を返す
+  - 既存の `createOwner` 呼び出し（`@fwlm/db`・store-identification・dashboard-api・line-webhook の各 `*.db.test.ts`）を、フィクスチャのコード行を用意したうえで `inviteCodeId` 付きへ直す
+  - 完了状態: `*.db.test.ts` で「照合が id を返す・無効化済みは null」「作成した行の `invite_code_id` が渡した id と一致」「一覧で記録ありは `{ id, code, disabled }`・記録なしは `null`・無効化後のコードは `disabled: true`」が緑。新規の UUID prefix は既存と衝突しない値を使う
+  - _Requirements: 8.1, 8.3, 8.5_
+  - _Boundary: @fwlm/db_
+  - _Depends: 7.1_
+
+- [ ] 7.3 (P) line-webhook: 照合したコードの id をオーナー作成へ渡す
+  - `conversation.ts` の `InviteCodesAccessor` / `OwnersAccessor` の型を 7.2 の契約へ合わせ、`handleValidInviteCode` の `createOwner` へ `inviteCodeId: activeCode.id` を渡す。トランザクション境界・段階遷移・応答・監査ログ `owner_created` は変えない
+  - 完了状態: 単体テストで `createOwner` が `inviteCodeId: activeCode.id` で呼ばれること、`invite-code-integration.db.test.ts` で実際に登録したオーナーの `invite_code_id` が送信したコードの行の id と一致すること、セッション更新を失敗させたときにオーナー行が残らないことが緑。`CreateOwnerInput.inviteCodeId` を省略可能にする変異で line-webhook の型検査が赤になることを実測する
+  - _Requirements: 8.1, 8.2_
+  - _Boundary: line-webhook onboarding_
+  - _Depends: 7.2_
+
+- [ ] 7.4 (P) dashboard-api / dashboard-web: GET /owners の応答に記録を載せる
+  - GET /owners の応答 `OwnerListItem` に `inviteCode` を通す（エンドポイント・認可・スコープは不変）。design.md の contract 表と `@fwlm/db` 追加アクセサの型を同じタスクで更新する
+  - dashboard-web の `lib/types.ts` のオーナー型と、E2E の API スタブ（`e2e/fixtures/api.ts`）のオーナー応答に `inviteCode` を足す（記録あり・記録なしの両方の行を置く）。画面への表示は代理店詳細画面の要件で扱い、本タスクでは描画を変えない
+  - 完了状態: `app.request` 経由の試験で、GET /owners が記録ありのオーナーに `inviteCode` を、記録の無いオーナーに `null` を返すことが緑。dashboard-web の型検査・既存の描画テスト・E2E が回帰なしで緑
+  - _Requirements: 8.5_
+  - _Boundary: dashboard-api owners-list, dashboard-web types, e2e fixtures_
+  - _Depends: 7.2_
+
+- [ ] 7.5 全体検証と本番の適用順
+  - `make ts-lint`／`make ts-test`／`make ts-test-db`／`make go-test`／db assertions／`check_docs.sh` を実行し全緑を確認する（Go 側は `owners` を直接 INSERT するフィクスチャを持つので、NULL 許容の列で回帰しないことを確かめる）
+  - 本番の順序: (1) マージ前に `0017` を本番へ適用し、`information_schema.columns` と `pg_constraint` で列と 2 制約の存在を確かめる → (2) マージ → (3) deploy の結果を自分で確認する（line-webhook・dashboard-api のイメージ差し替え）→ (4) 本番の新しいオーナー登録で `invite_code_id` が埋まることを確かめる（登録が無ければ、確認待ちとして追跡先を Issue に記録する）
+  - 完了状態: 上記コマンドがすべて終了コード 0、本番の適用・確認結果が PR / Issue #486 に記録されている
+  - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
+  - _Depends: 7.1, 7.2, 7.3, 7.4_
+
 ## Implementation Notes
 <!-- 実装中に得られた横断的な知見をここに追記する -->
 - 環境: docker/apple-container 不在。DB スキーマ検証（`make db-migrate`/`db-test`/`db-verify-docs` 相当）は native postgres で代替する。正典レシピ: `ts/scripts/with-test-db.sh bash -c 'for f in db/test/assertions/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done; MANAGE_CONTAINER=0 PSQL_EXEC="psql" db/test/check_docs.sh'`（with-test-db.sh が native postgres 起動＋全 migrations 適用＋PG 環境変数 export を行う）。TS の `*.db.test.ts` は `make ts-test-db` でそのまま可。
