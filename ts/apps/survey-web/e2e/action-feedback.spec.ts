@@ -31,15 +31,15 @@ for (const failed of [false, true]) {
     const toast = page.locator('[data-sonner-toast]').filter({ hasText: failed ? '下書きの生成に失敗しました' : '口コミ文を作成しました' });
     await expect(toast).toBeVisible();
     await expect(toast).toHaveAttribute('data-type', failed ? 'error' : 'success');
-    await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeVisible();
     if (!failed) {
       await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } }));
-      await page.getByRole('button', { name: 'コピーして投稿する' }).click();
+      await page.getByRole('button', { name: '文章をコピー' }).click();
       await expect(page.locator('[data-sonner-toast]').filter({ hasText: '自動コピーできませんでした' })).toBeVisible();
       await expect(page.getByLabel('口コミ下書き')).toBeFocused();
       await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.resolve() } }));
-      await page.getByRole('button', { name: 'コピーして投稿する' }).click();
-      await expect(page.locator('[data-sonner-toast]').filter({ hasText: 'コピーしました。投稿画面に貼り付けてください。' })).toBeVisible();
+      await page.getByRole('button', { name: '文章をコピー' }).click();
+      await expect(page.locator('[data-sonner-toast]').filter({ hasText: 'コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。' })).toBeVisible();
     }
     await expectNoAxeViolations(page);
     await page.evaluate(() => { document.documentElement.style.zoom = '2'; });

@@ -213,7 +213,7 @@ export function SurveyShell({ storeId, storeName, survey, pageToken, googleRevie
           rel="noopener noreferrer"
           onClick={() => notifyReviewLinkOnce(pageToken)}
         >
-          Google のクチコミを書く
+          Google のクチコミ欄を開く
         </a>
       </section>
     );

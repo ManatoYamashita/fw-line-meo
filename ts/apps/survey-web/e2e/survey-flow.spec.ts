@@ -24,7 +24,7 @@ async function openReviewLinkAndCaptureNotice(page: Page) {
   await page.context().route(/search\.google\.com/, (route) => route.abort());
   const response = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/review-link-opened');
   const popup = page.context().waitForEvent('page');
-  await page.getByRole('link', { name: /クチコミを書く/ }).click();
+  await page.getByRole('link', { name: /クチコミ欄を開く/ }).click();
   const res = await response;
   await (await popup).close();
   const body = JSON.parse(res.request().postData() ?? '{}') as { storeId?: string; token?: string };
@@ -61,7 +61,7 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
   await page.getByRole('button', { name: /コピー/ }).click();
   await expect(page.locator('[data-slot="alert"]').getByText(/コピーしました/)).toBeVisible();
 
-  const link = page.getByRole('link', { name: /クチコミを書く/ });
+  const link = page.getByRole('link', { name: /クチコミ欄を開く/ });
   await expect(link).toHaveAttribute('href', WRITEREVIEW);
 });
 
@@ -72,7 +72,7 @@ test('低評価（星1）でも同一の投稿導線が表示される', async (
   await page.getByRole('button', { name: '送信する' }).click();
 
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
 // 素材の集め方を評価で分岐させない（Requirement 2.11・Issue #221）。
@@ -118,7 +118,7 @@ test('星1 で気になった点を選んで送信すると、送信に載って
   expect(body.concernCodes).toEqual(['service']);
 
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
 // 回答完了後の再訪は回答済み画面＋投稿導線（localStorage・24h）。
@@ -130,7 +130,7 @@ test('回答済みで再訪すると回答済み画面と投稿導線が出る',
 
   await page.reload();
   await expect(page.getByText(/ご回答ありがとうございました/)).toBeVisible();
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 });
 
 // 投稿導線の押下の観測（Issue #137・Requirement 5.7 / 5.8）。実 token を実サーバーが検証する経路を通す。
@@ -142,7 +142,7 @@ test('下書き画面で投稿導線を押すと、sessionToken つきの押下�
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   // 通知を足しても、投稿導線は Google の投稿画面への直リンクのまま（自サーバーを経由しない）
-  await expect(page.getByRole('link', { name: /クチコミを書く/ })).toHaveAttribute('href', WRITEREVIEW);
+  await expect(page.getByRole('link', { name: /クチコミ欄を開く/ })).toHaveAttribute('href', WRITEREVIEW);
 
   const { status, body } = await openReviewLinkAndCaptureNotice(page);
 
@@ -164,4 +164,130 @@ test('回答済み画面で投稿導線を押すと、pageToken つきの押下�
   expect(status).toBe(204);
   expect(body.storeId).toBe(STORE_ID);
   expect(tokenKind(body.token ?? '')).toBe('page');
+});
+
+// PR #470: コピー直後の Toast（右下・6 秒）が「Google のクチコミ欄を開く」を覆わないこと。
+// 320×568 では着手前、Toast の上端（460）がリンク（512–560）にかぶさり、表示中は押せなかった。
+// 見た目ではなく、リンクの中心に何があるか（elementFromPoint）と、その座標を実際に押したときに
+// 投稿画面が開いて押下の通知が 1 回だけ飛ぶことまでを、3 つの画面の大きさで確かめる。
+// 生成完了の Toast が残っている間にコピーする（Toast が 2 枚積み重なる、厳しい側の状態）。
+const TOAST_SIZES = [
+  { width: 320, height: 568, ip: '198.51.100.71' },
+  { width: 375, height: 667, ip: '198.51.100.72' },
+  { width: 390, height: 844, ip: '198.51.100.73' },
+] as const;
+const COPIED_TOAST = 'コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。';
+
+for (const size of TOAST_SIZES) {
+  test.describe(`${size.width}×${size.height}`, () => {
+    // 流量制限の鍵（X-Forwarded-For の末尾）を大きさごとに分け、ほかのテストと枠を取り合わない。
+    test.use({ viewport: { width: size.width, height: size.height }, extraHTTPHeaders: { 'x-forwarded-for': size.ip } });
+
+    test('コピーの Toast の表示中も「Google のクチコミ欄を開く」を押せ、押下の通知は 1 回だけ', async ({ page, context }) => {
+      await context.route(/search\.google\.com/, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>review</p>' }));
+      const notices: string[] = [];
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname === '/api/review-link-opened') notices.push(request.url());
+      });
+
+      await openSurveySurface(page);
+      await page.getByRole('button', { name: '星5' }).click();
+      await page.getByRole('button', { name: '送信する' }).click();
+      await expect(page.getByLabel('口コミ下書き')).toBeVisible();
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.resolve() } });
+      });
+
+      await page.getByRole('button', { name: '文章をコピー' }).click();
+      const toast = page.locator('[data-sonner-toast]').filter({ hasText: COPIED_TOAST });
+      await expect(toast).toBeVisible();
+
+      const link = page.getByRole('link', { name: 'Google のクチコミ欄を開く' });
+      // リンクと、並びの最後の再生成の中心で一番上にある要素が、それぞれ自身（かその中身）であること
+      // （375×667 では着手前、再生成が Toast の下にあった）。画面は滑らかに送られ、上にあるリンクが
+      // 先に Toast から出るので、両方を同時に満たすまで待つ（リンクだけを待つと送りの途中で測る）。
+      const regenerate = page.getByRole('button', { name: /別の文章を生成/ });
+      const topmost = (locator: typeof link) =>
+        locator.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const x = box.left + box.width / 2;
+          const y = box.top + box.height / 2;
+          if (y < 0 || y > window.innerHeight) return 'offscreen';
+          const top = document.elementFromPoint(x, y);
+          return top !== null && (top === element || element.contains(top)) ? 'self' : (top?.closest('[data-sonner-toast]') ? 'toast' : String(top?.tagName));
+        });
+      await expect
+        .poll(async () => ({ link: await topmost(link), regenerate: await topmost(regenerate) }))
+        .toEqual({ link: 'self', regenerate: 'self' });
+      // 確かめている間も Toast は出たままである（Toast が消えたから押せた、ではない）。
+      await expect(toast).toBeVisible();
+
+      // その座標を実際に押す（スクロールさせない・force なし）。
+      const box = await link.boundingBox();
+      expect(box, 'リンクの矩形が取れません').not.toBeNull();
+      const firstPopup = context.waitForEvent('page');
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await (await firstPopup).close();
+      await expect.poll(() => notices.length).toBe(1);
+
+      // 部品の側の押下（locator.click・force なし）でも開く。通知は最初の押下だけなので増えない。
+      const secondPopup = context.waitForEvent('page');
+      await link.click();
+      await (await secondPopup).close();
+      await page.waitForTimeout(300);
+      expect(notices).toHaveLength(1);
+    });
+  });
+}
+
+// コピーに失敗したときの主な操作は、選択済みの文章を手動でコピーすること。Toast の上へ操作を
+// 送る処理が、選択された入力欄を画面の外へ追い出したり、フォーカスや選択を外したりしないこと。
+test.describe('320×568 のコピー失敗', () => {
+  test.use({ viewport: { width: 320, height: 568 }, extraHTTPHeaders: { 'x-forwarded-for': '198.51.100.74' } });
+
+  test('入力欄はフォーカスと全文の選択を保ったまま画面に見え、リンクも押せる', async ({ page }) => {
+    await openSurveySurface(page);
+    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('button', { name: '送信する' }).click();
+    const draft = page.getByLabel('口コミ下書き');
+    await expect(draft).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
+    });
+
+    await page.getByRole('button', { name: '文章をコピー' }).click();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: '自動コピーできませんでした' })).toBeVisible();
+    // 画面送りが落ち着くまで待つ（リンクが Toast の上に出る）。
+    const link = page.getByRole('link', { name: 'Google のクチコミ欄を開く' });
+    await expect
+      .poll(() =>
+        link.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return top !== null && (top === element || element.contains(top));
+        }),
+      )
+      .toBe(true);
+
+    const state = await draft.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement;
+      const box = textarea.getBoundingClientRect();
+      const style = getComputedStyle(textarea);
+      const firstLineY = box.top + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.lineHeight) / 2;
+      return {
+        focused: document.activeElement === textarea,
+        selection: [textarea.selectionStart, textarea.selectionEnd, textarea.value.length],
+        top: box.top,
+        bottom: box.bottom,
+        viewport: window.innerHeight,
+        firstLineHit: document.elementFromPoint(box.left + 24, firstLineY) === textarea,
+      };
+    });
+    expect(state.focused, '入力欄からフォーカスが外れています').toBe(true);
+    expect(state.selection[0]).toBe(0);
+    expect(state.selection[1], '全文の選択が外れています').toBe(state.selection[2]);
+    expect(state.top, '入力欄の上端が画面の上へ出ています').toBeGreaterThanOrEqual(0);
+    expect(state.bottom, '入力欄の下端が画面の下へ出ています').toBeLessThanOrEqual(state.viewport);
+    expect(state.firstLineHit, '文章の 1 行目が見えていません（長押しの起点にできません）').toBe(true);
+  });
 });

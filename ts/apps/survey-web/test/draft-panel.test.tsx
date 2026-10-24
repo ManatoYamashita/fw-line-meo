@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
+import { toast } from '@fwlm/ui/components/app-toaster';
 import { Alert } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
 import { cn } from '@fwlm/ui/lib/utils';
@@ -108,14 +109,14 @@ describe('DraftPanel', () => {
     render(<DraftPanel {...props({ generationFailed: true })} />);
     expect(screen.getByText(/下書きの生成に失敗/).textContent).toContain('失敗');
     expect(screen.getByRole('button', { name: /もう一度生成/ })).toBeDefined();
-    expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
+    expect(screen.getByRole('link', { name: /クチコミ欄を開く/ }).getAttribute('href')).toBe(URL);
   });
 
   it('投稿導線は全状態で表示され star 分岐が無い（4.4・ゲーティング不在）', () => {
     const { rerender } = render(<DraftPanel {...props()} />);
-    expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
+    expect(screen.getByRole('link', { name: /クチコミ欄を開く/ }).getAttribute('href')).toBe(URL);
     rerender(<DraftPanel {...props({ generationFailed: true })} />);
-    expect(screen.getByRole('link', { name: /クチコミを書く/ }).getAttribute('href')).toBe(URL);
+    expect(screen.getByRole('link', { name: /クチコミ欄を開く/ }).getAttribute('href')).toBe(URL);
   });
 
   it('draft prop 変更（再生成到着）で textarea が更新される', () => {
@@ -131,7 +132,7 @@ describe('DraftPanel', () => {
     for (const generationFailed of [false, true]) {
       const onReviewLinkOpen = vi.fn();
       render(<DraftPanel {...props({ generationFailed, onReviewLinkOpen })} />);
-      const link = screen.getByRole('link', { name: /クチコミを書く/ });
+      const link = screen.getByRole('link', { name: /クチコミ欄を開く/ });
 
       // fireEvent.click は preventDefault されると false を返す
       expect(fireEvent.click(link)).toBe(true);
@@ -530,7 +531,7 @@ describe('下書きパネル: 部品を通っていることと正典 docs/desig
     ]) {
       cleanup();
       render(<DraftPanel {...props(branch.over)} />);
-      const links = screen.getAllByRole('link', { name: /クチコミを書く/ });
+      const links = screen.getAllByRole('link', { name: /クチコミ欄を開く/ });
       expect(links, `${branch.label}: 投稿導線の個数が 1 つではありません`).toHaveLength(1);
       const link = links[0]!;
       expect(link.getAttribute('class'), `${branch.label}: 投稿導線の見た目`).toBe(expected);
@@ -633,3 +634,278 @@ describe('下書きパネル: 由来の明示と推敲の促し（Issue #179）'
 // 「説明を足しても操作要素とリンクの個数が変わらない」ことは、上の
 // 「操作要素とリンクの個数は分岐ごとに固定されている（Requirements 3.3）」が既に押しボタン 2 件・
 // リンク 1 件で固定している。同じことを 2 箇所で見る層は、片方が腐ったときに腐ったと言えない。
+
+// ---- ここから「文章をコピー」と「Google のクチコミ欄を開く」を順に並べる変更が追加した検証 ----
+//
+// 着手前は主ボタンの文言が「コピーして投稿する」で、押してもコピーしかしなかった。投稿画面への
+// リンクは再生成と通知の後ろ、パネルの最下部にあった。Requirement 4.1 の導線は、客が順に行う
+// 2 つの操作（コピー → 投稿画面を開く）として 1 つの導線を成す。自動遷移はしない。
+
+const COPY_BUTTON = '文章をコピー';
+const REVIEW_LINK = 'Google のクチコミ欄を開く';
+/** コピー成功後の画面内の案内。次に押すリンクを名前で指す。 */
+const COPIED = 'コピーしました。「Google のクチコミ欄を開く」から投稿画面を開き、本文欄に貼り付けてください。';
+const MANUAL = '自動コピーできませんでした。上の文章を選択して手動でコピーしたあと、「Google のクチコミ欄を開く」から投稿画面を開けます。';
+
+function precedes(a: Element, b: Element): boolean {
+  return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe('下書きパネル: コピーと投稿画面を開く操作を順に並べる（Requirement 4.1）', () => {
+  it('推敲の案内 → 文章をコピー → Google のクチコミ欄を開く → 再生成 の順に描く', () => {
+    render(<DraftPanel {...props()} />);
+    const note = screen.getByText(
+      (_, element) => element?.tagName === 'P' && (element.textContent ?? '').includes(REVISION_PROMPT),
+    );
+    const copy = screen.getByRole('button', { name: COPY_BUTTON });
+    const link = screen.getByRole('link', { name: REVIEW_LINK });
+    const regenerate = screen.getByRole('button', { name: /別の文章を生成/ });
+    expect(precedes(note, copy), '推敲の案内がコピーより後にあります（4.7）').toBe(true);
+    expect(precedes(copy, link), '投稿画面を開くリンクがコピーより前にあります').toBe(true);
+    expect(precedes(link, regenerate), '再生成が投稿画面を開くリンクより前にあります').toBe(true);
+  });
+
+  it('主ボタンはコピーだけを名乗る（押しても遷移しないため「投稿する」と書かない）', () => {
+    render(<DraftPanel {...props()} />);
+    expect(screen.getByRole('button', { name: COPY_BUTTON }).textContent).toBe(COPY_BUTTON);
+    expect(screen.queryByRole('button', { name: /投稿/ })).toBeNull();
+  });
+
+  it('コピー成功後の案内は、次に押すリンクの名前で投稿までの手順を伝える', async () => {
+    render(<DraftPanel {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    const copied = await screen.findByText(COPIED);
+    expect(copied.closest('[data-slot="alert"]'), '案内が通知の部品を通っていません').not.toBeNull();
+    // 成功しても導線は同じリンクのまま（コピー状態で出し分けない）。
+    expect(screen.getAllByRole('link', { name: REVIEW_LINK })).toHaveLength(1);
+  });
+
+  it.each([
+    ['rejected', () => stubClipboard(vi.fn().mockRejectedValue(new Error('denied')))],
+    ['unavailable', () => vi.stubGlobal('navigator', {})],
+  ] as const)('コピーに失敗しても（%s）投稿画面を開くリンクは表示され、押せて、案内がそれを指す（4.6）', async (_, arrange) => {
+    arrange();
+    const onReviewLinkOpen = vi.fn();
+    render(<DraftPanel {...props({ onReviewLinkOpen })} />);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    expect(await screen.findByText(MANUAL)).toBeDefined();
+
+    const link = screen.getByRole('link', { name: REVIEW_LINK });
+    expect(link.getAttribute('href')).toBe(URL);
+    expect(link.getAttribute('aria-disabled')).toBeNull();
+    expect(fireEvent.click(link), 'リンクの既定の遷移が止められています').toBe(true);
+    expect(onReviewLinkOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('リンクを押してもコピーはせず、コピーを押しても window.open で遷移しない（自動遷移なし）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    render(<DraftPanel {...props()} />);
+    expect(fireEvent.click(screen.getByRole('link', { name: REVIEW_LINK }))).toBe(true);
+    expect(writeText).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(COPIED);
+    expect(open).not.toHaveBeenCalled();
+  });
+});
+
+// ---- ここから PR #470: コピーの結果の Toast が「Google のクチコミ欄を開く」を覆わないようにする ----
+//
+// 320×568 の実測では、コピー直後の Toast（上端 460）がリンク（512–560）に 6 秒かぶさり押せなかった。
+// Toast の置き場（右下）と表示時間は共通の Toaster のまま変えず、この面が画面を送る。
+// jsdom は配置を計算しないので、Sonner 2 の DOM の形と矩形を差し込んで確かめる。実寸の確認は
+// E2E（action-feedback.spec.ts）が 3 つの画面の大きさで行う。
+
+function fakeToaster(bottom: number, toastHeight: number): void {
+  const ol = document.createElement('ol');
+  ol.setAttribute('data-sonner-toaster', 'true');
+  ol.setAttribute('data-y-position', 'bottom');
+  ol.getBoundingClientRect = () => ({ bottom, top: bottom, left: 0, right: 0, width: 0, height: 0, x: 0, y: bottom, toJSON: () => ({}) });
+  const li = document.createElement('li');
+  li.setAttribute('data-sonner-toast', '');
+  li.dataset.removed = 'false';
+  li.dataset.visible = 'true';
+  li.style.setProperty('--offset', '0px');
+  Object.defineProperty(li, 'offsetHeight', { value: toastHeight });
+  ol.append(li);
+  document.body.append(ol);
+}
+
+function placeActions(bottom: number): void {
+  const actions = screen.getByRole('button', { name: COPY_BUTTON }).parentElement!;
+  actions.getBoundingClientRect = () => ({ bottom, top: bottom - 168, left: 0, right: 0, width: 0, height: 168, x: 0, y: 0, toJSON: () => ({}) });
+}
+
+function placeTextarea(top: number): void {
+  const textarea = screen.getByLabelText('口コミ下書き');
+  textarea.getBoundingClientRect = () => ({ top, bottom: top + 256, left: 0, right: 0, width: 0, height: 256, x: 0, y: top, toJSON: () => ({}) });
+}
+
+/** 足した余白の高さ（無ければ 0）。 */
+function roomHeight(): number {
+  const room = document.querySelector<HTMLElement>('[data-slot="toast-room"]');
+  return room ? Number.parseFloat(room.style.height) : 0;
+}
+
+/**
+ * jsdom は配置を計算しないので、文書の高さを「画面の高さ＋余地 base＋足した余白」として与える。
+ * base は面にもともとある、画面より下の余地（px）。
+ */
+function modelDocument(base: number): void {
+  Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, get: () => window.innerHeight + base + roomHeight() });
+}
+
+describe('下書きパネル: コピーの結果の Toast が操作を覆わない（PR #470）', () => {
+  beforeEach(() => {
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
+    modelDocument(0);
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-sonner-toaster]').forEach((el) => el.remove());
+    Reflect.deleteProperty(document.documentElement, 'scrollHeight');
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['成功', () => stubClipboard(vi.fn().mockResolvedValue(undefined))],
+    ['失敗', () => stubClipboard(vi.fn().mockRejectedValue(new Error('denied')))],
+  ] as const)('コピー%sの Toast が操作の並びに重なるなら、並びが Toast の上に来るまで画面を送り、足りない余地だけを足す', async (_, arrange) => {
+    arrange();
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    placeTextarea(180); // 320×568 の実測
+    fakeToaster(552, 92); // 落ち着いた上端は 460
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+
+    const lift = 620 + 12 - 460;
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: lift, behavior: 'smooth' }));
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    const room = document.querySelector<HTMLElement>('[data-slot="toast-room"]');
+    expect(room, '送る余地が足されていません').not.toBeNull();
+    expect(roomHeight()).toBe(lift);
+    expect(room!.getAttribute('aria-hidden')).toBe('true');
+    // 導線そのものは変えない（出し分けない・同じリンク）。
+    expect(screen.getAllByRole('link', { name: REVIEW_LINK })).toHaveLength(1);
+  });
+
+  it('面にもともと余地があれば、余白は足さずに送る', async () => {
+    modelDocument(400);
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 172, behavior: 'smooth' }));
+    expect(roomHeight()).toBe(0);
+  });
+
+  it('重ならないとき（広い画面）は画面を送らず、余地も足さない', async () => {
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(828, 73); // 390×844 の実測: 上端 755
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(COPIED);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-slot="toast-room"]')).toBeNull();
+  });
+
+  it('動きを減らす設定では、滑らかに送らずに一度で送る', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query, addEventListener() {}, removeEventListener() {} }));
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 172, behavior: 'auto' }));
+  });
+
+  // コピーに失敗したときの主な操作は、選択済みの文章を手動でコピーすること。
+  it('失敗時は、入力欄の上端が画面に残る範囲でしか送らず、フォーカスと全文の選択を保つ', async () => {
+    stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props({ draft: '選択されたままの下書き' })} />);
+    placeActions(620);
+    placeTextarea(100); // 文字を拡大した画面などで、入力欄が高い位置にある
+    fakeToaster(552, 92); // 送りたい量は 172
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+
+    await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 100 - 8, behavior: 'smooth' }));
+    const textarea = screen.getByLabelText('口コミ下書き') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(textarea);
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, textarea.value.length]);
+  });
+
+  it('失敗時に入力欄がすでに画面の上端近くなら、送らない', async () => {
+    stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    placeTextarea(4);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(/上の文章を選択して手動でコピー/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('続けてコピーしたら、前の結果の Toast を閉じてから出す（積み重ねて押し上げ続けない）', async () => {
+    const dismiss = vi.spyOn(toast, 'dismiss');
+    const success = vi.spyOn(toast, 'success');
+    render(<DraftPanel {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await screen.findByText(COPIED);
+    const firstId = success.mock.results[0]!.value as string | number;
+    expect(dismiss).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(success).toHaveBeenCalledTimes(2));
+    expect(dismiss).toHaveBeenCalledExactlyOnceWith(firstId);
+  });
+
+  it('コピーの Toast が閉じたら、画面を動かさずに外せる余白を外す', async () => {
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    const success = vi.spyOn(toast, 'success');
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalled());
+    expect(roomHeight()).toBe(172);
+
+    // jsdom の scrollBy は stub なので scrollY は 0 のまま。いま見えている位置より下の余地は
+    // 余白ぶんすべてなので、全部外しても画面は動かない。
+    const id = success.mock.results[0]!.value as string | number;
+    const options = success.mock.calls[0]![1] as { onAutoClose: (t: { id: string | number }) => void };
+    act(() => options.onAutoClose({ id }));
+    expect(roomHeight()).toBe(0);
+  });
+
+  it('送った位置にいるときは、閉じても画面が跳ねない分の余白を残す', async () => {
+    const scrollBy = vi.fn();
+    vi.stubGlobal('scrollBy', scrollBy);
+    const success = vi.spyOn(toast, 'success');
+    render(<DraftPanel {...props()} />);
+    placeActions(620);
+    fakeToaster(552, 92);
+    fireEvent.click(screen.getByRole('button', { name: COPY_BUTTON }));
+    await waitFor(() => expect(scrollBy).toHaveBeenCalled());
+
+    vi.stubGlobal('scrollY', 150); // 172 送ったうちの 150 の位置にいる
+    const id = success.mock.results[0]!.value as string | number;
+    const options = success.mock.calls[0]![1] as { onDismiss: (t: { id: string | number }) => void };
+    act(() => options.onDismiss({ id }));
+    expect(roomHeight(), '外すと画面が跳ねます').toBe(150);
+  });
+});

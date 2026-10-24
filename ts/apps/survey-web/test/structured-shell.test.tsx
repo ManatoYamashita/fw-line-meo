@@ -73,7 +73,7 @@ describe('SurveyShell × structured（Issue #438）', () => {
     const fetchMock = stubFetch(200, { mode: 'structured', generation: 'unavailable', draft: null });
     renderShell();
     fireEvent.click(screen.getByTestId('structured-submit'));
-    const link = await screen.findByRole('link', { name: 'Google のクチコミを書く' });
+    const link = await screen.findByRole('link', { name: 'Google のクチコミ欄を開く' });
     expect(link.getAttribute('href')).toBe('https://review/ChIJ');
     expect(screen.getByText('テスト店へのご回答ありがとうございました。')).toBeDefined();
     const [url, init] = fetchMock.mock.calls[0]!;
@@ -95,7 +95,7 @@ describe('SurveyShell × structured（Issue #438）', () => {
     renderShell();
     fireEvent.click(screen.getByTestId('structured-submit'));
     expect(await screen.findByDisplayValue('刺身盛り合わせがおいしかったです。')).toBeDefined();
-    expect(screen.getByRole('link', { name: /Google のクチコミを書く/ }).getAttribute('href')).toBe('https://review/ChIJ');
+    expect(screen.getByRole('link', { name: /Google のクチコミ欄を開く/ }).getAttribute('href')).toBe('https://review/ChIJ');
     expect(screen.getByRole('button', { name: /別の文章を生成（残り3回）/ })).toBeDefined();
   });
 
@@ -112,7 +112,7 @@ describe('SurveyShell × structured（Issue #438）', () => {
       await screen.findByText(/アンケート内容が更新されました。ページを再読み込みして、もう一度回答してください。/),
     ).toBeDefined();
     expect(screen.getByRole('button', { name: 'ページを再読み込みする' })).toBeDefined();
-    expect(screen.queryByRole('link', { name: 'Google のクチコミを書く' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeNull();
     expect(screen.getByTestId('structured-submit')).toBeDefined();
   });
 

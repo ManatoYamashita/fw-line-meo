@@ -2276,9 +2276,9 @@ test('客向け主操作が 48px / 16px の可視寸法で描画される', asyn
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
 
   const draftActions = [
-    page.getByRole('button', { name: 'コピーして投稿する' }),
+    page.getByRole('button', { name: '文章をコピー' }),
     page.getByRole('button', { name: /別の文章を生成/ }),
-    page.getByRole('link', { name: 'Google のクチコミを書く' }),
+    page.getByRole('link', { name: 'Google のクチコミ欄を開く' }),
   ];
   for (const action of draftActions) {
     const rendered = await action.evaluate((element) => {
