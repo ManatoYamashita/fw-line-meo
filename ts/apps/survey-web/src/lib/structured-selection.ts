@@ -186,7 +186,10 @@ export function countMaterials(state: EvidenceState, definition: StructuredSurve
   return countPolarityMaterials(state.positive, definition) + countPolarityMaterials(state.concern, definition);
 }
 
-/** 1 つの極性の回答材料の数（数え方は countMaterials と同じ）。折り畳んだ極性に「N件選択済み」を出すのに使う。 */
-export function countPolarityMaterials(evidence: PolarityEvidence, definition: StructuredSurveyDefinition): number {
+/**
+ * 1 つの極性の回答材料の数（数え方は countMaterials と同じ）。countMaterials の内訳としてだけ使う。
+ * 以前は畳んだ極性に「N件選択済み」を出すのに画面からも使っていたが、極性を畳まなくなったので公開しない（Issue #460）。
+ */
+function countPolarityMaterials(evidence: PolarityEvidence, definition: StructuredSurveyDefinition): number {
   return countSelectionGroupMaterials(toSelectionGroups(evidence, definition));
 }
