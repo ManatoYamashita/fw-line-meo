@@ -25,6 +25,9 @@
 --     gbp_locations, gbp_sessions（gbp-post-review-reply 0013・GBP 連携の身元と会話セッション）
 --     （ただし stores.suspended_at を書けるのは dashboard_api だけ。line_webhook / survey_web の
 --     stores の INSERT・UPDATE は suspended_at を除く列単位の付与・store-suspension）
+--     （同じく owners の解除の列 line_unlinked_at・menu_pending_line_user_id と、既存の行の
+--     line_user_id を書けるのは dashboard_api だけ。line_webhook / survey_web の owners の
+--     INSERT・UPDATE は列単位の付与・owner-line-unlink）
 --   Go 層（daily_batch）→ DML on competitors, rating_snapshots, daily_summaries
 --     （daily_summaries は competitive-daily-summary 0004・INSERT/UPDATE は同日再実行の
 --     ON CONFLICT DO UPDATE、DELETE は 30日超パージ。go/internal/repo/summaries.go 参照）
@@ -98,6 +101,24 @@ GRANT
   INSERT (id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at),
   UPDATE (id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at)
   ON stores
+  TO :"line_webhook", :"survey";
+
+-- オーナーの LINE 連携の解除（owner-line-unlink・Issue #487）を書けるのは dashboard だけにする。
+-- line_webhook と survey はオーナー・客の面を持つため、解除の列を書けるとオーナー自身による解除・
+-- 配信停止の手段をどこに足しても DB が受け付けてしまう（owner-line-unlink Requirement 8.1, 8.3）。
+-- 上の stores と同じく、owners の INSERT・UPDATE をテーブル単位で剥がしてから列を列挙して与え直す。
+--   - line_user_id は INSERT だけ（オーナーの作成で書く。既存の行の LINE ユーザー ID は書き換えない）
+--   - line_unlinked_at・menu_pending_line_user_id は INSERT も UPDATE も与えない
+--   - taken_over_by_owner_id は UPDATE だけ（引継ぎで line-webhook が書く。CHECK により解除済みの行に
+--     しか値を持てないので、配信を止める手段にはならない）
+-- DELETE と SELECT はテーブル単位のまま残す。owners に列を足したら、ここの列挙へも足すこと
+-- （db/test/check_owner_line_privileges.sh が足し忘れを赤にする。解除・配信停止に関わる列なら列挙へ
+-- 足さず、検査の個別の期待へ加える）。本番へ再適用するときの付与者の注意は上の stores と同じ。
+REVOKE INSERT, UPDATE ON owners FROM :"line_webhook", :"survey";
+GRANT
+  INSERT (id, agency_id, line_user_id, display_name, onboarding_status, created_at, delivery_hour),
+  UPDATE (id, agency_id, display_name, onboarding_status, created_at, delivery_hour, taken_over_by_owner_id)
+  ON owners
   TO :"line_webhook", :"survey";
 
 -- 監査記録は TS 層が追記する。証跡の改変を防ぐため UPDATE/DELETE は付与しない。

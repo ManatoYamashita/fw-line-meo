@@ -8,7 +8,7 @@
   - migrations をクリーンに適用でき、既存の db/test の assertions と smoke が緑のまま。不正な組み合わせ（ID も解除時刻も無い行など）の更新が CHECK で拒否される assertion が赤→緑で確認できる
   - _Requirements: 1.6, 2.6, 4.1, 7.4_
 
-- [ ] 1.2 オーナーの面から解除の列を書けなくする列単位の権限と、その検査を足す
+- [x] 1.2 オーナーの面から解除の列を書けなくする列単位の権限と、その検査を足す
   - line-webhook と客向け Web のロールから `owners` の INSERT・UPDATE をテーブル単位で剥がし、解除の列を除いた列だけを与え直す（引継ぎ先は UPDATE のみ与える）
   - 実ロールを作って権限を問う検査スクリプトを足し、db/test の実行装置の RUN 表へ登録する
   - 検査が緑。line-webhook のロールへ LINE ユーザー ID の UPDATE を戻す変異で検査が赤になることを実測し、PR に記録できる形で残す
@@ -189,3 +189,4 @@
 
 ## Implementation Notes
 - 1.1: db/ERD.md の監査の種別数の記述（「18 値」）は 0016 の時点で既に古い。8.2 で 28 値へ直す。
+- 1.2: db/test の宣言網羅ガードは git ls-files で数えるので、新しい db/test/*.sh はステージしてから回す。RUN 表に足したら scripts/test/cases/98 の 3 か所（スタブ・件数・空にする sed）も直す。
