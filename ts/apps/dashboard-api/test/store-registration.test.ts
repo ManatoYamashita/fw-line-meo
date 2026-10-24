@@ -42,9 +42,19 @@ function searchDeps(
   return {
     auth: authOf(user),
     searchCandidates: () => Promise.resolve({ kind: 'found', candidates: [CANDIDATE] }),
+    listRegisteredPlaceIds: () => Promise.resolve(new Set<string>()),
     ...over,
   };
 }
+
+const OTHER_CANDIDATE: StoreCandidate = {
+  placeId: 'ChIJtest-place-456',
+  name: 'テスト食堂 駅前店',
+  address: '東京都品川区4-5-6',
+  latitude: 35.61,
+  longitude: 139.71,
+  types: ['restaurant'],
+};
 
 describe('handleStoreSearch', () => {
   it('認証なしは 401（unauthenticated 封筒）', async () => {
@@ -103,7 +113,7 @@ describe('handleStoreSearch', () => {
       body: { query: '  テスト食堂  ' },
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ candidates: [CANDIDATE] });
+    expect(await res.json()).toEqual({ candidates: [{ ...CANDIDATE, alreadyRegistered: false }] });
     // トリム済みの店名で検索する
     expect(searchCandidates).toHaveBeenCalledWith('テスト食堂');
   });
@@ -115,6 +125,75 @@ describe('handleStoreSearch', () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ candidates: [] });
+  });
+
+  it('登録済みの照合結果を候補ごとの alreadyRegistered に写し、照合は 1 回だけ全候補の placeId で行う（Issue #485）', async () => {
+    const listRegisteredPlaceIds = vi.fn((_placeIds: readonly string[]) =>
+      Promise.resolve(new Set([OTHER_CANDIDATE.placeId])),
+    );
+    const res = await handleStoreSearch(
+      searchDeps({
+        searchCandidates: () =>
+          Promise.resolve({ kind: 'found', candidates: [CANDIDATE, OTHER_CANDIDATE] }),
+        listRegisteredPlaceIds,
+      }),
+      { authorization: 'Bearer tok', body: { query: 'テスト食堂' } },
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { candidates: Array<Record<string, unknown>> };
+    expect(json.candidates.map((c) => [c.placeId, c.alreadyRegistered])).toEqual([
+      [CANDIDATE.placeId, false],
+      [OTHER_CANDIDATE.placeId, true],
+    ]);
+    expect(listRegisteredPlaceIds).toHaveBeenCalledTimes(1);
+    expect(listRegisteredPlaceIds).toHaveBeenCalledWith([CANDIDATE.placeId, OTHER_CANDIDATE.placeId]);
+  });
+
+  it('応答の候補は候補の項目と alreadyRegistered だけを持ち、オーナー・代理店などの店舗情報を足さない（Issue #485）', async () => {
+    // adapter が余分な項目を付けて返しても、応答へ素通りさせない。
+    const leaky = { ...CANDIDATE, ownerId: 'o-other', agencyId: 'ag-other', storeId: 's-other' };
+    const res = await handleStoreSearch(
+      searchDeps({
+        searchCandidates: () => Promise.resolve({ kind: 'found', candidates: [leaky] }),
+        listRegisteredPlaceIds: () => Promise.resolve(new Set([CANDIDATE.placeId])),
+      }),
+      { authorization: 'Bearer tok', body: { query: 'テスト' } },
+    );
+    const json = (await res.json()) as { candidates: Array<Record<string, unknown>> };
+    expect(Object.keys(json.candidates[0]!).sort()).toEqual(
+      ['address', 'alreadyRegistered', 'latitude', 'longitude', 'name', 'placeId', 'types'].sort(),
+    );
+  });
+
+  it('登録済みの照合に失敗したら、未登録で埋めずに検索全体を 500 で失敗させる（Issue #485）', async () => {
+    const log = vi.fn();
+    const res = await handleStoreSearch(
+      searchDeps({
+        listRegisteredPlaceIds: () => Promise.reject(new Error('connection refused')),
+      }),
+      { authorization: 'Bearer tok', body: { query: '秘密の店名' }, log },
+    );
+    expect(res.status).toBe(500);
+    const json = await readJson<ErrorEnvelope>(res);
+    expect(json.error.code).toBe('internal');
+    expect(json).not.toHaveProperty('candidates');
+    // 失敗は記録するが、検索の語・placeId・例外の文言は載せない。
+    expect(log).toHaveBeenCalledWith('error', 'dashboard-api.registered_place_lookup_failed', {});
+    const logged = JSON.stringify(log.mock.calls);
+    expect(logged).not.toContain('秘密の店名');
+    expect(logged).not.toContain(CANDIDATE.placeId);
+    expect(logged).not.toContain('connection refused');
+  });
+
+  it('empty・error では登録済みの照合を呼ばない（Issue #485）', async () => {
+    for (const kind of ['empty', 'error'] as const) {
+      const listRegisteredPlaceIds = vi.fn(() => Promise.resolve(new Set<string>()));
+      await handleStoreSearch(
+        searchDeps({ searchCandidates: () => Promise.resolve({ kind }), listRegisteredPlaceIds }),
+        { authorization: 'Bearer tok', body: { query: 'テスト' } },
+      );
+      expect(listRegisteredPlaceIds, kind).not.toHaveBeenCalled();
+    }
   });
 
   it('error は 502（places_error・日本語の再試行案内）（3.6）', async () => {

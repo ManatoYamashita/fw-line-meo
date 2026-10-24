@@ -7,6 +7,7 @@ import type {
   OwnerListItem,
   StoreCandidate,
   StoreListItem,
+  StoreSearchResult,
   StoreSuspensionState,
 } from './types';
 
@@ -332,14 +333,24 @@ export async function getCategories(options: ApiClientOptions = {}): Promise<Api
 export async function searchStores(
   query: string,
   options: ApiClientOptions = {},
-): Promise<ApiResult<StoreCandidate[]>> {
-  const result = await apiFetch<{ candidates: StoreCandidate[] }>('/stores/search', {
-    ...options,
-    method: 'POST',
-    body: { query },
-  });
+): Promise<ApiResult<StoreSearchResult[]>> {
+  const result = await apiFetch<{ candidates: (StoreCandidate & { alreadyRegistered: boolean })[] }>(
+    '/stores/search',
+    {
+      ...options,
+      method: 'POST',
+      body: { query },
+    },
+  );
   if (!result.ok) return result;
-  return { ok: true, value: result.value.candidates };
+  // 登録済みの注釈を候補本体から外して持つ（Issue #485）。確定には候補本体だけを verbatim で送る。
+  return {
+    ok: true,
+    value: result.value.candidates.map(({ alreadyRegistered, ...candidate }) => ({
+      candidate,
+      alreadyRegistered,
+    })),
+  };
 }
 
 // POST /stores: 選択候補を確定登録。候補はサーバー側で再検証されるため、検索応答をそのまま verbatim で送る。

@@ -95,6 +95,23 @@ describe('店舗系 API クライアント', () => {
     expect(JSON.parse(String(init.body))).toEqual({ query: '鳥貴族' });
   });
 
+  it('searchStores は登録済みの注釈を候補本体から外して持つ（Issue #485）', async () => {
+    const candidate = {
+      placeId: 'p1',
+      name: '店A',
+      address: '東京都',
+      latitude: 35.6,
+      longitude: 139.7,
+      types: ['restaurant'],
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { candidates: [{ ...candidate, alreadyRegistered: true }] }));
+    const result = await searchStores('店A', { getToken: async () => 't', fetchImpl });
+    expect(result).toEqual({ ok: true, value: [{ candidate, alreadyRegistered: true }] });
+    if (result.ok) expect(result.value[0]!.candidate).not.toHaveProperty('alreadyRegistered');
+  });
+
   it('searchStores は 502 places_error を { ok:false, code } に写す', async () => {
     const fetchImpl = vi
       .fn()

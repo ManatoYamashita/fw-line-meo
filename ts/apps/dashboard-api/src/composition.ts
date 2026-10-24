@@ -6,6 +6,7 @@ import {
   readStoreReviewFunnel,
   linkAuthSubjectByEmail,
   listStoresWithStatus,
+  listRegisteredPlaceIds,
   setStoreCategory,
   setStoreSuspension,
   findAgencyName,
@@ -138,6 +139,7 @@ export function buildAppDeps({ config, verifier, structuredLog }: CompositionInp
       search: {
         auth: authDeps,
         searchCandidates: (query) => storeIdentification.searchCandidates(query),
+        listRegisteredPlaceIds: async (placeIds) => listRegisteredPlaceIds(await getPool(), placeIds),
       },
       register: {
         auth: authDeps,
