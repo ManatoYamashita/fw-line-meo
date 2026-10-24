@@ -66,7 +66,7 @@ export interface SessionsAccessor {
 
 export interface OwnersAccessor {
   findOwnerByLineUserId(db: Queryable, lineUserId: string): Promise<OwnerRow | null>;
-  // 入力は @fwlm/db の CreateOwnerInput をそのまま使う（agency-dashboard Req 8.1・#486）。
+  // 入力は @fwlm/db の CreateOwnerInput をそのまま使う（agency-dashboard Req 8.1・Issue #486）。
   // ここで独自の狭い型を書くと、メソッド構文の引数は双変に検査されるため、正典側で必須にした
   // inviteCodeId を渡し忘れても型検査を通ってしまう（7.2 で実測）。
   createOwner(db: Queryable, input: CreateOwnerInput): Promise<OwnerRow>;
