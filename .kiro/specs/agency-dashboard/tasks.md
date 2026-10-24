@@ -182,7 +182,7 @@
   - _Boundary: @fwlm/db_
   - _Depends: 7.1_
 
-- [ ] 7.3 (P) line-webhook: 照合したコードの id をオーナー作成へ渡す
+- [x] 7.3 (P) line-webhook: 照合したコードの id をオーナー作成へ渡す
   - `conversation.ts` の `InviteCodesAccessor` / `OwnersAccessor` の型を 7.2 の契約へ合わせ、`handleValidInviteCode` の `createOwner` へ `inviteCodeId: activeCode.id` を渡す。トランザクション境界・段階遷移・応答・監査ログ `owner_created` は変えない
   - 完了状態: 単体テストで `createOwner` が `inviteCodeId: activeCode.id` で呼ばれること、`invite-code-integration.db.test.ts` で実際に登録したオーナーの `invite_code_id` が送信したコードの行の id と一致すること、セッション更新を失敗させたときにオーナー行が残らないことが緑。`CreateOwnerInput.inviteCodeId` を省略可能にする変異で line-webhook の型検査が赤になることを実測する
   - _Requirements: 8.1, 8.2_
@@ -228,3 +228,6 @@
 - 7.2 → 7.4: dashboard-api の `owners-list.ts` の `toJson` は `inviteCode` を落とす（GET /owners の応答に載せるのは 7.4）。
 - 7.2 → 7.5: `OWNER_COLUMNS` が `invite_code_id` を読むので、`findOwnerByLineUserId`／`findOwnerById` を通る line-webhook の全イベントが 0017 に依存する。本番は 0017 の適用が先（逆順だと Webhook がすべて失敗する）。なお `OWNER_COLUMNS` が `delivery_hour` を選ばないのに `OwnerRow` が持つ食い違いは 7.2 より前からある（範囲外）。
 - 7.2: 一括の `pnpm -C ts run test` は負荷で無関係なタイムアウト（store-detail `trend-scale`・dashboard-web `store-review-funnel`・line-webhook `report/stores.test.ts`）を出すことがある。差分に無いファイルなら単独で流し直して判定する。
+- 7.3: 型の網は、受け口（`OwnersAccessor.createOwner`）の入力を `CreateOwnerInput` にそろえて成立した。「呼び出しから `inviteCodeId` を消す」変異で `conversation.ts` の呼び出し箇所が TS2345 で赤になる。対照として受け口を旧来の狭い独自型へ戻すと、src は型エラーを出さない（7.2 の見立てどおり）。タスク本文の「省略可能にする変異」は、この変異で代替した。
+- 7.3: **失敗を差し込む試験は、狙った経路に着いたことを引数で固定する。** 招待コードの無効な経路も同じ `updateSession` を呼ぶため、「例外が出た・オーナー行が 0 件」だけでは、照合に失敗しても緑だった（存在しないコードを送る変異で実測・レビューで発見）。差し込む関数を名前付きの spy にし、`stage: 'await_store_name'` と `ownerId` を持つ呼び出しで 1 回だけ呼ばれたこと、その `ownerId` の行が残っていないことを確かめる形にした。
+- 7.3 → #472 の取り込み: #472（招待コード入力の正規化・未マージ）が足す単体試験の `validCodes`（例 `{ ABCD2345: { agencyId: AGENCY_ID } }`）は `id` を持たないため、本ブランチと統合すると line-webhook の型検査が赤になる。取り込み時にその試験データへ `id: INVITE_CODE_ID` を足す。src の衝突は無い（#472 が変える照合の行に 7.3 の差分は触れていない）。
