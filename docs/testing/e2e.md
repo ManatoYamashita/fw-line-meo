@@ -185,4 +185,5 @@ PROJECT_ID=gen-fw-line-meo make e2e-prod-checks
 
 - `.github/workflows/ts-ci.yml` — 自動層の CI
 - `docs/architecture.md` §4 — オンボーディングから口コミ獲得までの流れ
+- `docs/testing/action-feedback-device-check.md` — アンケート設定・客向け操作の処理中表示と Toast の実機確認（Issue #450）
 - `infra/README.md` §3（本番 DB への接続）・§7-3（日次ジョブの手動実行）・§8（外部 API 実疎通）・§11-4（相関 ID からログを束ねる）
