@@ -49,7 +49,13 @@ function readyAgency() {
   });
 }
 
-const owner = { id: 'o1', displayName: '山田オーナー', onboardingStatus: 'pending', createdAt: '2026-01-01T00:00:00Z' };
+const owner = {
+  id: 'o1',
+  displayName: '山田オーナー',
+  onboardingStatus: 'pending',
+  createdAt: '2026-01-01T00:00:00Z',
+  inviteCode: null,
+};
 const candidate = {
   placeId: 'p1',
   name: '鳥貴族 渋谷店',

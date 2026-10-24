@@ -30,12 +30,21 @@ export interface StoreSuspensionState {
   suspendedAt: string | null;
 }
 
+// オーナーの登録に用いられた招待コード（agency-dashboard Req 8.5）。disabled は登録後に無効化されたか。
+export interface OwnerInviteCodeRecord {
+  id: string;
+  code: string;
+  disabled: boolean;
+}
+
 // GET /owners の 1 件（登録対象オーナー選択用）。
 export interface OwnerListItem {
   id: string;
   displayName: string | null;
   onboardingStatus: OnboardingStatus;
   createdAt: string;
+  /** null = 記録なし（招待コードを記録し始める前の登録）。推定で埋めない（Req 8.4）。 */
+  inviteCode: OwnerInviteCodeRecord | null;
 }
 
 // GET /agencies の 1 件（operator 専用）。

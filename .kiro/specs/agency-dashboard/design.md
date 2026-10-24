@@ -411,7 +411,7 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 |--------|----------|---------|--------------------|--------|
 | GET | /me | — | `{ user: { role, agencyId, agencyName, displayName } }` | 401, 403(unregistered/disabled) |
 | GET | /stores | `?agencyId=`（operator のみ有効） | `{ stores: StoreListItem[] }` | 401, 403 |
-| GET | /owners | `?agencyId=`（operator は必須） | `{ owners: OwnerListItem[] }` | 400(operator の agencyId 未指定), 401, 403 |
+| GET | /owners | `?agencyId=`（operator は必須） | `{ owners: OwnerListItem[] }`（各オーナーに登録に用いた招待コード `inviteCode: { id, code, disabled } \| null`・null = 記録なし・Issue #486） | 400(operator の agencyId 未指定), 401, 403 |
 | GET | /categories | — | `{ categories: { code, label }[] }` | 401, 403 |
 | POST | /stores/search | `{ query: string }` | `{ candidates: StoreCandidate[] }`（最大10・0件は空配列で 200） | 400, 401, 403, 502(places_error) |
 | POST | /stores | `{ ownerId, candidate: StoreCandidate, categoryCode? }` | `{ storeId }` | 400, 401, 403, 409(place_already_registered) |
@@ -470,7 +470,7 @@ export interface StoreListItem {
 export function listStoresWithStatus(db: Queryable, filter: { agencyId?: string }): Promise<StoreListItem[]>;
 
 // owners.ts
-export interface OwnerListItem { id: string; displayName: string | null; onboardingStatus: OnboardingStatus; createdAt: Date; }
+export interface OwnerListItem { id: string; displayName: string | null; onboardingStatus: OnboardingStatus; createdAt: Date; inviteCode: OwnerInviteCodeRecord | null; } // inviteCode は Issue #486（Requirement 8.5）
 export function listOwnersByAgency(db: Queryable, agencyId: string): Promise<OwnerListItem[]>;
 export function findOwnerWithAgency(db: Queryable, ownerId: string): Promise<{ id: string; agencyId: string } | null>;
 

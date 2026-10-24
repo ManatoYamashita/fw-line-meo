@@ -125,12 +125,23 @@ export const INVITE_CODES = [
   },
 ] as const;
 
+// 招待コードの記録（agency-dashboard Req 8.5）は、記録ありと記録なし（null）の両方の行を置く。
 export const OWNERS = [
   {
     id: '33333333-3333-3333-3333-333333333333',
     displayName: 'オーナー太郎',
     onboardingStatus: 'store_identified',
-    createdAt: '2026-08-01T09:00:00.000Z',
+    // 登録に用いたコード（INVITE_CODES[0]）の発行より後に登録した形にそろえる。
+    createdAt: '2026-08-12T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+  },
+  {
+    // STORES[1] のオーナーと同一人物（表示名の無いオーナー）。
+    id: '33333333-3333-3333-3333-333333333334',
+    displayName: null,
+    onboardingStatus: 'pending',
+    createdAt: '2026-07-01T09:00:00.000Z',
+    inviteCode: null,
   },
 ] as const;
 

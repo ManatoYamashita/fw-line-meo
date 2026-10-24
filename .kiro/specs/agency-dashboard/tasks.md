@@ -189,7 +189,7 @@
   - _Boundary: line-webhook onboarding_
   - _Depends: 7.2_
 
-- [ ] 7.4 (P) dashboard-api / dashboard-web: GET /owners の応答に記録を載せる
+- [x] 7.4 (P) dashboard-api / dashboard-web: GET /owners の応答に記録を載せる
   - GET /owners の応答 `OwnerListItem` に `inviteCode` を通す（エンドポイント・認可・スコープは不変）。design.md の contract 表と `@fwlm/db` 追加アクセサの型を同じタスクで更新する
   - dashboard-web の `lib/types.ts` のオーナー型と、E2E の API スタブ（`e2e/fixtures/api.ts`）のオーナー応答に `inviteCode` を足す（記録あり・記録なしの両方の行を置く）。画面への表示は代理店詳細画面の要件で扱い、本タスクでは描画を変えない
   - 完了状態: `app.request` 経由の試験で、GET /owners が記録ありのオーナーに `inviteCode` を、記録の無いオーナーに `null` を返すことが緑。dashboard-web の型検査・既存の描画テスト・E2E が回帰なしで緑
@@ -231,3 +231,6 @@
 - 7.3: 型の網は、受け口（`OwnersAccessor.createOwner`）の入力を `CreateOwnerInput` にそろえて成立した。「呼び出しから `inviteCodeId` を消す」変異で `conversation.ts` の呼び出し箇所が TS2345 で赤になる。対照として受け口を旧来の狭い独自型へ戻すと、src は型エラーを出さない（7.2 の見立てどおり）。タスク本文の「省略可能にする変異」は、この変異で代替した。
 - 7.3: **失敗を差し込む試験は、狙った経路に着いたことを引数で固定する。** 招待コードの無効な経路も同じ `updateSession` を呼ぶため、「例外が出た・オーナー行が 0 件」だけでは、照合に失敗しても緑だった（存在しないコードを送る変異で実測・レビューで発見）。差し込む関数を名前付きの spy にし、`stage: 'await_store_name'` と `ownerId` を持つ呼び出しで 1 回だけ呼ばれたこと、その `ownerId` の行が残っていないことを確かめる形にした。
 - 7.3 → #472 の取り込み: #472（招待コード入力の正規化・未マージ）が足す単体試験の `validCodes`（例 `{ ABCD2345: { agencyId: AGENCY_ID } }`）は `id` を持たないため、本ブランチと統合すると line-webhook の型検査が赤になる。取り込み時にその試験データへ `id: INVITE_CODE_ID` を足す。src の衝突は無い（#472 が変える照合の行に 7.3 の差分は触れていない）。
+- 7.4: **このシェルは `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` が Aside を指すので、E2E は `env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH bash scripts/run-e2e-local.sh --only surfaces` で流す。** 素で流すと試験は全件通るのに、worker が 300 秒で強制終了されて exit 1 になる（#381 の Aside の crashpad の居残り・98 + 23 passed のまま赤）。付属 Chromium では 73〜135 秒で緑。
+- 7.4: **app コードのコメントに前置きなしの `#486` を書くと `check-design-tokens.sh` が色の直書きとして赤にする**（7.3 の `conversation.ts` で発生し、7.4 のレビューで発見・`33a3be2` で「Issue #486」に修正）。タスク単位の試験では見えないので、コミットの前に ts-ci が呼ぶ `scripts/check-*` を一通り流す（`grep -ohE 'scripts/check-[a-z0-9-]+\.(sh|py)' .github/workflows/ts-ci.yml` で一覧が取れる・33 本）。
+- 7.4: GET /owners の応答は `inviteCode` を参照のまま渡さず 3 項目（id・code・disabled）だけを写す。レビューの指摘で足した防御だが、当初は試験が無く参照渡しへ戻す変異が緑だった。DAL が余分な項目を返す場合の試験を足し、その変異で赤になることを確かめて閉じた（指摘への修正にも、それを赤にできる試験を付ける）。E2E スタブの OWNERS は `as const` で web の型に縛られていない（タスク外として記録のみ）。
