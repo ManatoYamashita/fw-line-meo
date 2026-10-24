@@ -60,7 +60,8 @@ function OwnerStoresCell({ owner, stores }: { owner: OwnerListItem; stores: Owne
     <ul role="list" className="flex flex-col gap-1.5">
       {owned.map((store) => (
         <li key={store.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span>{store.name}</span>
+          {/* 横並びの子なので、長い店名がセルを押し広げないよう縮められるようにする（正典 §6）。 */}
+          <span className="min-w-0">{store.name}</span>
           <Badge variant="outline">{PLACE_STATUS_LABEL[store.placeStatus]}</Badge>
           {store.suspendedAt !== null && (
             <Badge variant="secondary">{STORE_SUSPENSION_LABEL.suspended}</Badge>

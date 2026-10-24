@@ -265,7 +265,8 @@ function RegisteredCandidate({ candidate }: { candidate: StoreCandidate }) {
     <Card size="sm">
       <CardContent className="flex flex-col gap-1">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span>{candidate.name}</span>
+          {/* 横並びの子なので、長い店名が面を押し広げないよう縮められるようにする（正典 §6）。 */}
+          <span className="min-w-0">{candidate.name}</span>
           <Badge variant="outline">登録済み</Badge>
         </span>
         <span className="text-xs">（{candidate.address}）</span>
@@ -580,7 +581,11 @@ function RegisterWizard() {
           </Heading>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <p>{ownerTargetText(selected)}</p>
+            {/* 横並びの子は既定で中身の最小幅より縮まない。文節で改行する規則（正典 §6）のもとでは、
+              * 長い代理店名（カタカナの複合語は 1 文節）がその最小幅になり、狭い画面で面を押し広げる
+              * （CI の字幅で 320px 幅のとき右端 400px まで伸びた）。min-w-0 で縮め、入りきらない文節だけを
+              * 非常時の折り返しに任せる。 */}
+            <p className="min-w-0">{ownerTargetText(selected)}</p>
             {/* 戻っても一覧と開いていた区画はそのまま（取り直さない）。状態はウィザードの側にある。 */}
             <Button type="button" variant="outline" onClick={() => goToStep('owner')}>
               オーナーを選び直す
