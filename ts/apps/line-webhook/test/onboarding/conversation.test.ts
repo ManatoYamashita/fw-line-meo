@@ -86,6 +86,8 @@ function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     created_at: FIXED_NOW,
     // スキーマ既定（0004 マイグレーション）。OwnerRow で必須のためヘルパで満たす。
     delivery_hour: 7,
+    // 0017（#486）。登録に用いた招待コード。null = 記録なし。
+    invite_code_id: null,
     ...overrides,
   };
 }

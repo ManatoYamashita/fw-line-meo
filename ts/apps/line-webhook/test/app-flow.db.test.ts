@@ -43,6 +43,7 @@ import { buildPreparingNotice } from '../src/report/builders/notices.js';
 // 他ファイルと衝突しない専用 UUID プレフィックス（f0）。DATABASE_URL 無しは skip。
 const OP = 'f0000000-0000-0000-0000-000000000000';
 const AG = 'f0000000-0000-0000-0000-000000000001';
+const INVITE_CODE_ID = 'f0000000-0000-0000-0000-0000000486c1';
 
 const CHANNEL_SECRET = 'f0-test-channel-secret';
 const WRONG_CHANNEL_SECRET = 'f0-wrong-channel-secret';
@@ -170,7 +171,8 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       OP,
       'app-flow代理店',
     ]);
-    await pool.query('INSERT INTO agency_invite_codes (agency_id, code) VALUES ($1, $2)', [
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      INVITE_CODE_ID,
       AG,
       INVITE_CODE,
     ]);
@@ -354,7 +356,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
 
       // 代理店による登録を再現する: オーナーと店名入力待ちの段階を作り、confirmStore で確定店舗を作る
       // （確定店舗の作成とオーナーの store_identified への遷移は、confirmStore の同じトランザクションで行われる）。
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: userId });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId: userId });
       await getOrCreateSession(pool, userId);
       await updateSession(pool, userId, { stage: 'await_store_name', ownerId: owner.id });
       const confirmed = await createStoreIdentificationService({ pool, places }).confirmStore(owner.id, storeCandidate);
@@ -544,7 +546,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       const places = createFakePlaces({ kind: 'empty' });
       const app = buildApp({ messenger, places, pool });
 
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: userId });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId: userId });
       await pool.query(`UPDATE owners SET onboarding_status = 'store_identified' WHERE id = $1`, [owner.id]);
       await pool.query(
         `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at)

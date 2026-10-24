@@ -173,7 +173,7 @@
   - _Requirements: 8.2, 8.3, 8.4_
   - _Boundary: db migrations, db docs_
 
-- [ ] 7.2 `@fwlm/db` の契約変更（照合の id・作成の必須 id・一覧の記録）
+- [x] 7.2 `@fwlm/db` の契約変更（照合の id・作成の必須 id・一覧の記録）
   - `findActiveInviteCode` が `{ id, agencyId }` を返す（照合の条件は不変）。`CreateOwnerInput` に `inviteCodeId: string` を**必須**で足し、`createOwner` の INSERT へ `invite_code_id` を加える。`OwnerRow`・`OWNER_COLUMNS` を 0017 に同期する（教訓: migration 追加は Row 型の同期まで含める）
   - `listOwnersByAgency` が `agency_invite_codes` を LEFT JOIN し、`OwnerListItem.inviteCode`（`{ id, code, disabled } | null`）を返す
   - 既存の `createOwner` 呼び出し（`@fwlm/db`・store-identification・dashboard-api・line-webhook の各 `*.db.test.ts`）を、フィクスチャのコード行を用意したうえで `inviteCodeId` 付きへ直す
@@ -223,3 +223,8 @@
 - 6.3 **手動検証フック（本番 go-live 前に必須・PR に転記すること）**: (1) **Identity Platform の Google プロバイダ有効化状態を確認**（tf に `default_supported_idp_config` 未定義の Open Question。未有効ならコンソール有効化、必要なら gcp-infra-foundation へ tf 追記）。(2) **gmail アカウントでの初回ログイン→リンク→再ログインで UID 安定**を実機確認。(3) **Google Workspace 独自ドメインのメールでの同フロー**（research 案B の最重要前提＝Workspace は untrusted provider のため自動統合が公式保証外。email_verified=true でのリンク動作を実機で確認）。(4) デプロイ順序: migration 0005 を本番適用 → `infra/sql/grants.sql` は変更不要 → tf apply（dashboard-web サービス作成・dashboard-api env 追加）→ GitHub `vars.NEXT_PUBLIC_*`（API_BASE_URL/FIREBASE_*）と tfvars `dashboard_web_origin`（相互参照する両 Cloud Run URL）を設定 → image デプロイ。(5) 初代運営 `dashboard_users`（auth_subject NULL・email 付き保留行）は SQL/seed で投入（鶏卵回避）。
 - 7.1: **migration は 1 本ずつ `BEGIN;` … `COMMIT;` で囲む**（0001〜0016 はすべて自前で持ち、`db/test/run.sh` は `-1` を付けずにその前提で流す）。0017 は当初これを欠いており、途中の文が失敗すると列だけが残って FK が無い状態になり、再実行も 1 文目で落ちる形だった（レビューで発見・同名制約を先に置く実験で再現と是正を実測）。この慣習を機械で検査するガードは無く、スイートは欠いたままでも全緑だった。
 - 7.1: このマシンの bash は `/bin/bash` 3.2 のみで、`db/test/check_structured_survey_privileges.sh`（#437）は `mapfile` で落ちる。`run-db-test-suites.sh` の NG がこの 1 件だけなら環境要因（`mapfile` の代用関数を入れた写しでは 768 件 PASS をレビューで確認）。CI（ubuntu・bash 5）では走る。変異で検査の効き目を測った結果: 単独 FK・FK 無し・DEFERRABLE・制約名違い→51c、CASCADE・SET NULL→51d、NO ACTION→51f、MATCH FULL・NOT NULL・既定値→51a が赤。
+- 7.2: **JOIN を足した読み出しの試験は、結合先の行を同じ親に 2 件以上置き、親の件数を実数と厳密に比べる。** 代理店のコードが 1 本だけのフィクスチャでは、`listOwnersByAgency` の結合キーを `c.agency_id = o.agency_id` に誤っても行が増えず全件緑だった（レビューで実測）。記録に使わない 2 本目のコードと件数・id の一意性の assert で赤になる。
+- 7.2 → 7.3: **line-webhook の `OwnersAccessor.createOwner` はメソッド構文で独自の狭い入力型を持つため、引数の双変性で `inviteCodeId` を渡さなくても型検査を通る**（7.2 の時点で実測。実行時は undefined が NULL として送られ、会話経由のオーナーは記録なしになる）。7.3 ではアクセサの入力型を `@fwlm/db` の `CreateOwnerInput` に揃える。網の実測は「呼び出しから `inviteCodeId` を消す」変異で取る（design の試験 5 にある「省略可能にする変異」は実装側の引数が広がるだけで、構造上 line-webhook では赤にならない）。
+- 7.2 → 7.4: dashboard-api の `owners-list.ts` の `toJson` は `inviteCode` を落とす（GET /owners の応答に載せるのは 7.4）。
+- 7.2 → 7.5: `OWNER_COLUMNS` が `invite_code_id` を読むので、`findOwnerByLineUserId`／`findOwnerById` を通る line-webhook の全イベントが 0017 に依存する。本番は 0017 の適用が先（逆順だと Webhook がすべて失敗する）。なお `OWNER_COLUMNS` が `delivery_hour` を選ばないのに `OwnerRow` が持つ食い違いは 7.2 より前からある（範囲外）。
+- 7.2: 一括の `pnpm -C ts run test` は負荷で無関係なタイムアウト（store-detail `trend-scale`・dashboard-web `store-review-funnel`・line-webhook `report/stores.test.ts`）を出すことがある。差分に無いファイルなら単独で流し直して判定する。

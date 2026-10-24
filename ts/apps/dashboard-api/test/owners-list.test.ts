@@ -14,6 +14,7 @@ function owner(over: Partial<OwnerListItem> = {}): OwnerListItem {
     displayName: 'オーナー太郎',
     onboardingStatus: 'pending',
     createdAt: CREATED_AT,
+    inviteCode: null,
     ...over,
   };
 }
