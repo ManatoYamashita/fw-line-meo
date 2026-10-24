@@ -15,6 +15,7 @@ import type {
   TransactionClient,
 } from '@fwlm/store-identification';
 import { decodePostback } from './stages.js';
+import { normalizeInviteCodeInput } from './invite-code-input.js';
 import { linkCompletedMenu, tryAuditLog } from '../owner/completed-menu.js';
 import { isStoreIdentified, type StoreIdentifiedOwnerRouterFactory } from '../owner/router.js';
 import {
@@ -259,7 +260,8 @@ async function handleText(
     return;
   }
 
-  const activeCode = await deps.inviteCodes.findActiveInviteCode(deps.db, event.text);
+  // 入力の揺れ（前後の空白・改行・全角・小文字）だけを揃えて照合する。揃えても一致しなければ下で失敗に数える。
+  const activeCode = await deps.inviteCodes.findActiveInviteCode(deps.db, normalizeInviteCodeInput(event.text));
 
   if (!activeCode) {
     await handleInvalidInviteCode(deps, event, session);
