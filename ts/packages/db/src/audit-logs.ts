@@ -12,7 +12,7 @@ export type AuditTargetType =
 /**
  * 監査記録の action の正典。
  *
- * DB の `audit_logs.action` の CHECK（`ck_audit_logs_action`・migration 0009 で命名、0016 で 25 値へ作り直し）と同じ集合を持つ。
+ * DB の `audit_logs.action` の CHECK（`ck_audit_logs_action`・migration 0009 で命名、0017 で 28 値へ作り直し）と同じ集合を持つ。
  * 一致は `test/audit-logs.db.test.ts` が実 DB の制約定義と照合して固定する。action を足すときは、
  * CHECK を作り直す migration とこの配列を同時に変える。片方だけを変えると、型が許す値の INSERT が
  * CHECK 違反で落ちるか、型が許さない値を DB だけが受け付ける状態になる。
@@ -49,6 +49,12 @@ export const AUDIT_LOG_ACTIONS = [
   'survey_target_enabled',
   'survey_targets_reordered',
   'survey_category_visibility_updated',
+  // owner-line-unlink（Issue #487・0017）: 運営・代理店がオーナーの LINE の紐づけを解除した（対象は
+  // owner）、新しいオーナーが解除済みオーナーの店舗を引き継いだ（対象は旧 owner）、引き継いだ店舗
+  // 1 つずつ（対象は store）。
+  'owner_line_unlinked',
+  'owner_stores_taken_over',
+  'store_taken_over',
 ] as const;
 
 export type AuditLogAction = (typeof AUDIT_LOG_ACTIONS)[number];
