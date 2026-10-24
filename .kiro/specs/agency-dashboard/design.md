@@ -601,7 +601,7 @@ ALTER TABLE owners
 - **新しい行に値を必須とする DB 制約は置かない。** `CHECK (invite_code_id IS NOT NULL) NOT VALID` は既存行を検査しないが、既存行を UPDATE するたびに検査されるので、記録なしのオーナーの状態遷移（`markOwnerStoreIdentified` 等）が失敗する。また、`owners` を直接 INSERT する試験のフィクスチャ（TS・Go・cross-runtime・e2e の seed）が一斉に壊れる。新しい行の記録は `CreateOwnerInput.inviteCodeId` の必須型と DB テストで担保する。
 - **`ON DELETE RESTRICT`（8.3）。** コードの無効化は `disabled_at` だけで行い、物理削除の経路は無い。将来できても、記録が参照するコードは消せない。
 - **書込責任は TS リアルタイム応答層**（`owners` と同じ）。`db/write-boundary.md` の `owners` 行に `invite_code_id`（`0017`・#486）を書き足す。テーブルは増えないので書込境界の照合（`check_docs.sh`）の対象は変わらない。`grants.sql` は表単位の付与なので変更不要。
-- `db/ERD.md`: 関係図に `agency_invite_codes ||--o{ owners : "registered with"` を足し、`owners` の FK 欄と注記に `invite_code_id`（NULL = 0017 より前の登録・同じ代理店のコードに限る複合 FK）を書く。
+- `db/ERD.md`: 関係図に `agency_invite_codes |o--o{ owners : "registered with"`（記録なしのオーナーがいるので 0 か 1）を足し、`owners` の FK 欄と注記に `invite_code_id`（NULL = 0017 より前の登録・同じ代理店のコードに限る複合 FK）を書く。
 - `db/test/assertions/51_owner_invite_code.sql`: NULL の行を作れる／同じ代理店のコードで作れる／別の代理店のコードは FK 違反で拒否される／参照中のコードは削除できない／コードを無効化しても行の `invite_code_id` は変わらない、を検証する。
 
 ### Domain Model（差分のみ）
