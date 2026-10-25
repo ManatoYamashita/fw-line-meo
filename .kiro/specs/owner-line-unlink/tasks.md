@@ -23,7 +23,7 @@
   - _Boundary: AbsenceCheckB5_
   - _Depends: 1.1_
 
-- [ ] 1.4 オーナーの行の型を連携状態に合わせ、旧 LINE ID の消費箇所を直す
+- [x] 1.4 オーナーの行の型を連携状態に合わせ、旧 LINE ID の消費箇所を直す
   - オーナーの行の LINE ユーザー ID を「無いことがある」型にし、新しい 3 列を型と読み出しの列に加える
   - 型検査が示す消費箇所を直す: GBP の通知は ID が無ければ送らない、完了後メニューの一括張り直しは解除済みを抽出しない
   - 全ワークスペースの型検査と既存の試験が緑。GBP の通知が解除済みオーナーへ送られないこと、一括張り直しの抽出に解除済みが含まれないことを試験で確かめる
@@ -191,3 +191,4 @@
 - 1.1: db/ERD.md の監査の種別数の記述（「18 値」）は 0016 の時点で既に古い。8.2 で 28 値へ直す。
 - 1.2: db/test の宣言網羅ガードは git ls-files で数えるので、新しい db/test/*.sh はステージしてから回す。RUN 表に足したら scripts/test/cases/98 の 3 か所（スタブ・件数・空にする sed）も直す。
 - 1.3: (B5) は line-webhook/src・survey-web/src・store-detail/{app,lib} で `line_unlinked_at`・`menu_pending_line_user_id` を `=` で比べる SQL も赤にする。これらの列で行を引く SQL は @fwlm/db の DAL に置く。
+- 1.4: delivery-job の targets.ts は宛先の型を OwnerRow を通さず string で宣言している。タスク 7 で述語と型を直す。

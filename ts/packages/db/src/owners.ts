@@ -2,7 +2,8 @@ import type { Queryable } from './pool.js';
 import type { OnboardingStatus, OwnerListItem, OwnerRow } from './types.js';
 
 const OWNER_COLUMNS =
-  'id, agency_id, line_user_id, display_name, onboarding_status, created_at';
+  'id, agency_id, line_user_id, display_name, onboarding_status, created_at, ' +
+  'line_unlinked_at, menu_pending_line_user_id, taken_over_by_owner_id';
 
 export interface CreateOwnerInput {
   agencyId: string;

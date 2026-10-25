@@ -9,8 +9,9 @@
 //   載るため、本モジュールは受け取った生値を結果へ持ち出さない（handleOauthCallback へ渡すのみ）。
 // - HTML へ埋め込む値（店舗名）は必ずエスケープする。埋め込み口は `page()` の 1 箇所に閉じ、
 //   文字列連結で HTML を組む他の経路を作らない。
-// - **Push はベストエフォート**。通知先が解決できない・LINE が失敗しても callback の HTTP 応答は
-//   落とさない（ブラウザ側の HTML が最後の伝達手段になるため、案内は HTML 側にも必ず含める）。
+// - **Push はベストエフォート**。通知先が解決できない・オーナーが LINE の紐づけを解除済み・LINE が
+//   失敗しても callback の HTTP 応答は落とさない（ブラウザ側の HTML が最後の伝達手段になるため、
+//   案内は HTML 側にも必ず含める）。
 // - 応答ステータスは design「API Contract」に従う: 200（結果の提示）/ 400（state 不正）/ 500（内部失敗）。
 
 import type { Queryable } from '@fwlm/db';
@@ -29,9 +30,10 @@ export interface GbpCallbackNotifier {
 /**
  * 通知先（LINE userId）の解決に必要な最小面。
  * `@fwlm/db` の `findOwnerById`（OwnerRow を返す）をそのまま渡せるよう行の列名で受ける。
+ * 解除済みのオーナーは LINE ユーザー ID を持たない（null）ので、その場合は通知しない（owner-line-unlink Req 4.5）。
  */
 export interface GbpCallbackOwnerLookup {
-  findOwnerById(db: Queryable, ownerId: string): Promise<{ line_user_id: string } | null>;
+  findOwnerById(db: Queryable, ownerId: string): Promise<{ line_user_id: string | null } | null>;
 }
 
 /**
@@ -323,6 +325,16 @@ export function createGbpOauthCallbackRoute(deps: GbpOauthCallbackDeps): GbpOaut
       const owner = await deps.owners.findOwnerById(deps.db, input.ownerId);
       if (owner === null) {
         deps.logger.warn('gbp oauth callback: owner not found; push notification skipped', {
+          kind: input.kind,
+          ownerId: input.ownerId,
+        });
+        return;
+      }
+      if (owner.line_user_id === null) {
+        // 解除済みのオーナー（owner-line-unlink Req 4.5）。解除済みのオーナーを宛先として何も送らない。
+        // 解除した元の LINE アカウントは別の人が使っている場合もあるため、元の ID を探して送ることもしない。
+        // HTML の案内は従来どおり返る。
+        deps.logger.warn('gbp oauth callback: owner line unlinked; push notification skipped', {
           kind: input.kind,
           ownerId: input.ownerId,
         });

@@ -86,6 +86,10 @@ function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     created_at: FIXED_NOW,
     // スキーマ既定（0004 マイグレーション）。OwnerRow で必須のためヘルパで満たす。
     delivery_hour: 7,
+    // 連携中（0017 の 3 列はすべて null）。
+    line_unlinked_at: null,
+    menu_pending_line_user_id: null,
+    taken_over_by_owner_id: null,
     ...overrides,
   };
 }

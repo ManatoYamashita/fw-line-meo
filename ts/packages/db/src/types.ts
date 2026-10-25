@@ -59,12 +59,20 @@ export interface AgencyRow {
 export interface OwnerRow {
   id: string;
   agency_id: string;
-  line_user_id: string;
+  // 0017: 解除済みのオーナーは LINE ユーザー ID を持たない（null）。連携中は必ず値を持つ
+  // （ck_owner_line_link: line_unlinked_at が null ⇔ line_user_id が値を持つ）。
+  line_user_id: string | null;
   display_name: string | null;
   onboarding_status: OnboardingStatus;
   created_at: Date;
   // 0004: 配信時刻（JST・時単位・0-23・デフォルト 7）。
   delivery_hour: number;
+  // 0017: 解除の時刻。null = 連携中、値あり = 解除済み。
+  line_unlinked_at: Date | null;
+  // 0017: 解除した元の LINE ユーザー ID のうち、完了後メニューをまだ外せていないもの。外せたら null。
+  menu_pending_line_user_id: string | null;
+  // 0017: 解除済みのオーナーの店舗を引き継いだオーナー。引継ぎが無ければ null。
+  taken_over_by_owner_id: string | null;
 }
 
 export interface StoreRow {

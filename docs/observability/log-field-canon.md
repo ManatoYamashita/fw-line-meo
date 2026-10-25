@@ -194,6 +194,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line push failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/line/client.ts` | LINE push API の非 2xx 応答。オーナーへの通知を妨げず記録する。LINE ユーザー ID は載せない |
 | `gbp oauth callback: owner unknown; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner を特定できず、push 通知を省略した場合 |
 | `gbp oauth callback: owner not found; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が見つからず、push 通知を省略した場合 |
+| `gbp oauth callback: owner line unlinked; push notification skipped` | line-webhook | 新規 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が LINE の紐づけを解除済み（LINE ユーザー ID を持たない）で、push 通知を省略した場合（owner-line-unlink Req 4.5）。項目は結果種別と `ownerId` だけで、解除した元の LINE ユーザー ID は載せない |
 | `gbp oauth callback: push notification failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback 後の push 通知に失敗した場合 |
 | `gbp oauth callback: unexpected failure while handling callback` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の想定外例外 |
 | `gbp: handleGbpPostback failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP postback 処理の想定外例外 |

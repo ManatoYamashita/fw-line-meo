@@ -61,6 +61,9 @@ function owner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     onboarding_status: 'store_identified',
     created_at: FIXED_NOW,
     delivery_hour: 7,
+    line_unlinked_at: null,
+    menu_pending_line_user_id: null,
+    taken_over_by_owner_id: null,
     ...overrides,
   };
 }
