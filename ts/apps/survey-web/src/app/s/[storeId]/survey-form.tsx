@@ -1,12 +1,14 @@
 'use client';
 import { toast } from '@fwlm/ui/components/app-toaster';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import { Checkbox } from '@fwlm/ui/components/checkbox';
 import { Textarea } from '@fwlm/ui/components/textarea';
+import type { Star } from '../../../lib/domain';
+import { StarRating } from './star-rating';
 import type { AspectOption, SurveyAnswer, SurveyFormProps } from './types';
 
 // 回答フォーム（葉コンポーネント）。星評価（必須）・良かった点（複数選択）・気になった点（複数選択）・
@@ -20,7 +22,6 @@ import type { AspectOption, SurveyAnswer, SurveyFormProps } from './types';
 // 評価で扱いを分ける導線になる。
 
 const COMMENT_MAX = 200;
-const STARS = [1, 2, 3, 4, 5] as const;
 
 // 一言欄の記入例（Issue #137 段階1）。素材が薄い回答ほど AI 下書きの事実性が崩れることを
 // Issue #132 で実測しており（具体的な一言がある素材は逸脱 0/20）、材料を増やす方が是正を層として
@@ -42,11 +43,13 @@ function toggled(prev: ReadonlySet<string>, code: string): Set<string> {
 }
 
 export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
-  const [star, setStar] = useState<number | null>(null);
+  const [star, setStar] = useState<Star | null>(null);
   const [good, setGood] = useState<Set<string>>(new Set());
   const [concerns, setConcerns] = useState<Set<string>>(new Set());
   const [comment, setComment] = useState('');
   const [showStarError, setShowStarError] = useState(false);
+  const starLegendId = useId();
+  const starErrorId = useId();
 
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -80,28 +83,20 @@ export function SurveyForm({ aspects, onSubmit, submitting }: SurveyFormProps) {
       }}
     >
       <fieldset className="space-y-2">
-        <legend className="mb-2 text-lg font-semibold">満足度（必須）</legend>
-        {STARS.map((n) => (
-          <button
-            className={`min-h-11 min-w-11 px-1 text-4xl leading-none transition-colors duration-150 ${
-              star !== null && n <= star ? 'text-foreground' : 'text-muted-foreground'
-            }`}
-            type="button"
-            key={n}
-            aria-label={`星${n}`}
-            aria-pressed={star === n}
-            onClick={() => {
-              setStar(n);
-              setShowStarError(false);
-            }}
-          >
-            {star !== null && n <= star ? '★' : '☆'}
-          </button>
-        ))}
+        <legend id={starLegendId} className="mb-2 text-lg font-semibold">満足度（必須）</legend>
+        <StarRating
+          value={star}
+          labelledBy={starLegendId}
+          describedBy={showStarError ? starErrorId : undefined}
+          onChange={(n) => {
+            setStar(n);
+            setShowStarError(false);
+          }}
+        />
         {showStarError && (
           // 読み上げ役割（進行中の読み上げを中断するライブリージョン）は変種から部品が決める。
           // 面の側で役割を手書きすると、部品の分岐と二重管理になる。
-          <Alert variant="destructive" role={undefined}>
+          <Alert id={starErrorId} variant="destructive" role={undefined}>
             <AlertDescription>満足度を選択してください</AlertDescription>
           </Alert>
         )}
