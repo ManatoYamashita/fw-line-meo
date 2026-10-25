@@ -169,6 +169,19 @@ describe.skipIf(!process.env.DATABASE_URL)('survey settings API (DB)', () => {
       expect(res.body.stores).toEqual([{ storeId: STORE, name: '設定 API 店' }]);
     });
 
+    it('全店公開（SURVEY_FORCE_STRUCTURED=1）では、店舗の設定が OFF でも公開中として返す（未公開の案内を出さない）', async () => {
+      vi.stubEnv('SURVEY_FORCE_STRUCTURED', '1');
+      try {
+        const res = await call(READ, { method: 'GET' });
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ storeId: STORE, structuredEnabled: true });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      // 戻すと店舗の設定どおり（OFF）に戻る。
+      expect((await call(READ, { method: 'GET' })).body).toMatchObject({ structuredEnabled: false });
+    });
+
     it('本文に他店の storeId を入れても、書き込むのは認証から決まった自店だけ', async () => {
       const before = await revisionOf(OTHER_STORE);
       const res = await call(ADD, {
