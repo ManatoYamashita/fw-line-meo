@@ -387,6 +387,7 @@ interface OwnerListItem {
 function listOwners(db: Queryable, agencyId: string | null): Promise<OwnerListItem[]>;
 ```
 - 応答に LINE ユーザー ID を含めない（運営・代理店の画面にも出さない）
+- `OwnerListItem` は上記に加えて、agency-dashboard Req 8（Issue #486）が足した `inviteCode: { id, code, disabled } | null` を同じ意味のまま持ち続ける。4.4 で `GET /owners` を `listOwners` へ切り替えても #486 の契約を落とさないため。`listOwnersByAgency` は 4.4 まで `listOwners(db, agencyId)` へ委ねて残す
 
 ### `@fwlm/store-identification`
 

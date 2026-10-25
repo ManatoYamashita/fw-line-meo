@@ -38,7 +38,7 @@
   - 実 DB 試験で、解除後に店舗・集計・停止状態・代理店が変わらないこと、二重の解除が「変化なし」になること、失敗時に解除前のままであることが確かめられる
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 1.6, 1.7, 3.3, 4.2, 5.5_
 
-- [ ] 2.2 (P) 連携状態つきのオーナー一覧を実装する
+- [x] 2.2 (P) 連携状態つきのオーナー一覧を実装する
   - 代理店の指定が無ければ全代理店、あれば当該代理店のオーナーを返す
   - 各行に担当代理店名・連携状態・メニュー未解除・確定済み店舗の名前・引継ぎ先（表示名）を含め、LINE ユーザー ID は含めない
   - 既存の代理店別の一覧関数は 4.4 で呼び出し元を切り替えるまで残し、各タスクの時点で全ワークスペースの型検査が緑のままにする
@@ -193,3 +193,5 @@
 - 1.3: (B5) は line-webhook/src・survey-web/src・store-detail/{app,lib} で `line_unlinked_at`・`menu_pending_line_user_id` を `=` で比べる SQL も赤にする。これらの列で行を引く SQL は @fwlm/db の DAL に置く。
 - 1.4: delivery-job の targets.ts は宛先の型を OwnerRow を通さず string で宣言している。タスク 7 で述語と型を直す。
 - 2.1: unlinkOwnerLine が menuTarget を返してから LINE を呼ぶまでの間に元のアカウントが再登録すると、新しいオーナーの個別メニューを外しうる。4.3 と 6.1 で扱う。
+- 2026-10-25: main（#491・#490）を取り込み、本 spec の migration を 0018 へ送った。owners.invite_code_id（#486）は line_webhook・survey に INSERT だけを与える。createOwner は inviteCodeId 必須。
+- 2.2: listOwners は #486 の inviteCode を保つ。GET /owners の応答は dashboard-api の toJson が項目を明示して写すので、4.4 でそこへ新しい項目を足す。

@@ -15,6 +15,12 @@ function owner(over: Partial<OwnerListItem> = {}): OwnerListItem {
     onboardingStatus: 'pending',
     createdAt: CREATED_AT,
     inviteCode: null,
+    agencyId: 'ag1',
+    agencyName: '代理店A',
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
     ...over,
   };
 }
