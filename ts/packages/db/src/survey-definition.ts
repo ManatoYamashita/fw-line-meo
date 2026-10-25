@@ -123,8 +123,10 @@ FROM cfg
  *                                    時点の表にしか効かない）
  *
  * DEFINITION_SQL が触るのは structured survey の表（store_survey_configs・store_survey_category_settings・
- * store_survey_targets・survey_categories・survey_facets・survey_category_facets）だけなので、この 2 つはその
- * 表の準備が済んでいないことを高い精度で示す。接続の失敗・タイムアウト・その他の SQL の誤りは含めない。
+ * store_survey_targets・survey_categories・survey_facets・survey_category_facets）と、全店公開（forceStructured）で
+ * 設定行の無い店舗も拾うための stores である。stores は 0001 からあり、survey-web は店舗の表示（findStoreForSurvey）で
+ * 毎回読んでいるので、この 2 つは実際には structured の表の準備が済んでいないことを高い精度で示す。
+ * 接続の失敗・タイムアウト・その他の SQL の誤りは含めない。
  */
 export const STRUCTURED_SCHEMA_UNAVAILABLE_CODES = ['42P01', '42501'] as const;
 export type StructuredSchemaUnavailableCode = (typeof STRUCTURED_SCHEMA_UNAVAILABLE_CODES)[number];
