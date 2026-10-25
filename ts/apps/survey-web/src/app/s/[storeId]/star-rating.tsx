@@ -246,9 +246,10 @@ export function StarRating({ value, onChange, labelledBy, describedBy }: StarRat
       className="group inline-flex"
       onKeyDown={handleKeyDown}
     >
+      {/* 上の余白は吹き出しの居場所（持ち上がり 6px ＋吹き出しの高さ 28px）。 */}
       <div
         ref={rowRef}
-        className="relative inline-flex touch-pan-y select-none items-end pt-10 [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none]"
+        className="relative inline-flex touch-pan-y select-none items-end pt-9 [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none]"
         onPointerEnter={handlePointerEnter}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
