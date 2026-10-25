@@ -39,7 +39,7 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
   await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
 
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
 
   const draft = page.getByLabel('口コミ下書き');
@@ -68,7 +68,7 @@ test('客が回答し下書きをコピーして Google 投稿画面リンクへ
 // 低評価でも同一の投稿導線（レビューゲーティング不在の証明）。
 test('低評価（星1）でも同一の投稿導線が表示される', async ({ page }) => {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星1' }).click();
+  await page.getByRole('radio', { name: /^星1：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
 
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
@@ -94,9 +94,9 @@ test('設問の見出しと観点の並びは星の値で変わらない', async
   // 2 つの群は同じ観点を同じ順序で持つ（Requirement 2.4・同じ重みで尋ねる）
   expect(before.concern).toEqual(before.good);
 
-  await page.getByRole('button', { name: '星1' }).click();
+  await page.getByRole('radio', { name: /^星1：/ }).click();
   expect(await snapshot()).toEqual(before);
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   expect(await snapshot()).toEqual(before);
 });
 
@@ -105,7 +105,7 @@ test('設問の見出しと観点の並びは星の値で変わらない', async
 // （silent drop）。画面の見た目だけでは検出できない。
 test('星1 で気になった点を選んで送信すると、送信に載って同一の投稿導線が表示される', async ({ page }) => {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星1' }).click();
+  await page.getByRole('radio', { name: /^星1：/ }).click();
   await page.getByRole('group', { name: '気になった点' }).getByRole('checkbox', { name: '接客' }).click();
 
   const posted = page.waitForRequest(
@@ -124,7 +124,7 @@ test('星1 で気になった点を選んで送信すると、送信に載って
 // 回答完了後の再訪は回答済み画面＋投稿導線（localStorage・24h）。
 test('回答済みで再訪すると回答済み画面と投稿導線が出る', async ({ page }) => {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星4' }).click();
+  await page.getByRole('radio', { name: /^星4：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
 
@@ -138,7 +138,7 @@ test('回答済みで再訪すると回答済み画面と投稿導線が出る',
 // ここでしか確かめられない（例: クライアントが送る本文の形とサーバーが読む形のずれ）。
 test('下書き画面で投稿導線を押すと、sessionToken つきの押下の通知が受理され、リンクは直リンクのまま', async ({ page }) => {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星3' }).click();
+  await page.getByRole('radio', { name: /^星3：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   // 通知を足しても、投稿導線は Google の投稿画面への直リンクのまま（自サーバーを経由しない）
@@ -153,7 +153,7 @@ test('下書き画面で投稿導線を押すと、sessionToken つきの押下�
 
 test('回答済み画面で投稿導線を押すと、pageToken つきの押下の通知が受理される', async ({ page }) => {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   await page.reload();
@@ -191,7 +191,7 @@ for (const size of TOAST_SIZES) {
       });
 
       await openSurveySurface(page);
-      await page.getByRole('button', { name: '星5' }).click();
+      await page.getByRole('radio', { name: /^星5：/ }).click();
       await page.getByRole('button', { name: '送信する' }).click();
       await expect(page.getByLabel('口コミ下書き')).toBeVisible();
       await page.evaluate(() => {
@@ -247,7 +247,7 @@ test.describe('320×568 のコピー失敗', () => {
 
   test('入力欄はフォーカスと全文の選択を保ったまま画面に見え、リンクも押せる', async ({ page }) => {
     await openSurveySurface(page);
-    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('radio', { name: /^星5：/ }).click();
     await page.getByRole('button', { name: '送信する' }).click();
     const draft = page.getByLabel('口コミ下書き');
     await expect(draft).toBeVisible();

@@ -56,7 +56,7 @@ async function submitAndWaitForDraft(page: Page) {
 test.describe('structured の材料の数え方（2 件以上で口コミ文を作れる）', () => {
   test('0 件・一言だけ・カテゴリを開いただけは押せず、Target と facet は二重に数えない。2 件で押せる', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
     await expect(submitButton(page)).toBeDisabled();
     await expect(page.getByText('感想を2つ以上選ぶと口コミ文を作れます')).toBeVisible();
 
@@ -89,7 +89,7 @@ test.describe('structured の材料の数え方（2 件以上で口コミ文を�
   test('良かったところ 1 件と気になったところ 1 件で作れる（320px 幅でも操作できる）', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 720 });
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星3' }).click();
+    await page.getByRole('radio', { name: /^星3：/ }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('group', { name: '料理' }).getByRole('checkbox', { name: '量' }).click();
     await expect(submitButton(page)).toBeDisabled();
@@ -111,7 +111,7 @@ test.describe('structured の材料の数え方（2 件以上で口コミ文を�
 test.describe('structured の折り畳み（畳んでも選んだ内容・入力は残る）', () => {
   test('気になったところとその他の感想を畳んでも、選択・入力は保持され、送信にも載る', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星2' }).click();
+    await page.getByRole('radio', { name: /^星2：/ }).click();
 
     // 気になったところは最初は畳まれている。
     await expect(concernToggle(page)).toHaveAttribute('aria-expanded', 'false');
@@ -158,7 +158,7 @@ test.describe('structured の折り畳み（畳んでも選んだ内容・入力
 test.describe('structured の送信中・下書き・再生成', () => {
   test('送信中は押しボタンが処理中になり、二重に送らない', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('radio', { name: /^星5：/ }).click();
     await pickTwoPositives(page);
 
     const held = await holdRequests(page, '/api/responses');
@@ -179,7 +179,7 @@ test.describe('structured の送信中・下書き・再生成', () => {
 
   test('「別の文章を生成」は処理中を示し、成功すると残り回数が減る', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
     await pickTwoPositives(page);
     await submitAndWaitForDraft(page);
     await expect(page.getByLabel('口コミ下書き')).toHaveValue(/刺身盛り合わせの味が良かったです。/);
@@ -200,7 +200,7 @@ test.describe('structured の送信中・下書き・再生成', () => {
 
   test('初回の生成に失敗したら、失敗の案内・もう一度生成する・投稿導線を出す', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
     await pickTwoPositives(page);
     await page.route('**/api/responses', (route) =>
       route.fulfill({
@@ -218,7 +218,7 @@ test.describe('structured の送信中・下書き・再生成', () => {
 
   test('表示中の下書きがある再生成の失敗は、編集済みの文章と操作を残し、回数も減らさない。もう一度押すと成功する', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
     await pickTwoPositives(page);
     await submitAndWaitForDraft(page);
     const draft = page.getByLabel('口コミ下書き');
@@ -262,7 +262,7 @@ test.describe('structured の送信中・下書き・再生成', () => {
     };
     await openStructuredSurvey(page);
     await noAi('回答の画面');
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
     await pickTwoPositives(page);
     await concernToggle(page).click();
     await commentToggle(page).click();
@@ -280,7 +280,7 @@ test.describe('structured の送信中・下書き・再生成', () => {
 test.describe('legacy の下書きと再生成', () => {
   test('legacy の回答から下書きを作り、「別の文章を生成」で残り回数が減る', async ({ page }) => {
     await openSurveySurface(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
     await page.getByRole('button', { name: '送信する' }).click();
     const draft = page.getByLabel('口コミ下書き');
     await expect(draft).toHaveValue('E2E モックの口コミ下書きです。');

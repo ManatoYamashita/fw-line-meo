@@ -156,7 +156,7 @@ export function StarRating({ value, onChange, labelledBy, describedBy }: StarRat
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      // 捕捉できない環境でも、列の上で離せば確定できる。
+      // swallowed-exception: intentional — 捕捉できない環境でも、列の上で離せば確定できる。
     }
     st.current.pointerId = e.pointerId;
     st.current.pressing = true;
