@@ -1,4 +1,4 @@
--- 0017_owner_line_unlink.sql
+-- 0018_owner_line_unlink.sql
 -- オーナーの LINE 紐づけの解除と店舗の引継ぎ（owner-line-unlink・Issue #487）: owners に連携状態を
 -- 表す 3 列と不変条件の CHECK を足し、解除・引継ぎの監査 action 3 値を ck_audit_logs_action へ足す。
 --
@@ -117,7 +117,7 @@ ALTER TABLE audit_logs
       'survey_target_enabled',
       'survey_targets_reordered',
       'survey_category_visibility_updated',
-      -- owner-line-unlink（Issue #487・0017）
+      -- owner-line-unlink（Issue #487・0018）
       'owner_line_unlinked',
       'owner_stores_taken_over',
       'store_taken_over'

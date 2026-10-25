@@ -10,6 +10,8 @@
 #   - line_unlinked_at・menu_pending_line_user_id は INSERT も UPDATE も与えない
 #   - taken_over_by_owner_id は UPDATE だけ（引継ぎで line-webhook が書く。CHECK により解除済みの行にしか
 #     値を持てないので、配信を止める手段にはならない）
+#   - invite_code_id は INSERT だけ（オーナーの作成で登録に用いた招待コードを書く・agency-dashboard
+#     Req 8.1。登録の記録なので、作成の後に書き換えさせない）
 # としている。
 #
 # なぜ grants.sql を実際に適用して問うのか: 文字列の照合では「テーブル単位の付与が残っていて列の絞りが
@@ -22,7 +24,8 @@
 #   - line_webhook・survey: line_user_id を UPDATE できない（INSERT はできる）
 #   - line_webhook・survey: line_unlinked_at・menu_pending_line_user_id を INSERT も UPDATE もできない
 #   - line_webhook・survey: taken_over_by_owner_id を INSERT できない（UPDATE はできる）
-#   - line_webhook・survey: 上の 4 列以外の owners の**全列**を INSERT・UPDATE できる
+#   - line_webhook・survey: invite_code_id を UPDATE できない（INSERT はできる）
+#   - line_webhook・survey: 上の 5 列以外の owners の**全列**を INSERT・UPDATE できる
 #     （列の列挙は grants.sql への直書きなので、owners に列を足して列挙へ足し忘れると赤になる。
 #     足す列が解除・配信停止に関わるなら、列挙へ足さずにこの検査の個別の期待へ加えること）
 #   - batch・delivery・detail: 解除の 3 列を UPDATE できない
@@ -67,7 +70,7 @@ fi
 
 # 個別に期待を持つ列。走査（P3）はこれ以外の列を「INSERT・UPDATE とも書ける」と期待する。
 UNLINK_COLUMNS=(line_user_id line_unlinked_at menu_pending_line_user_id)
-SPECIAL_COLUMNS=(line_user_id line_unlinked_at menu_pending_line_user_id taken_over_by_owner_id)
+SPECIAL_COLUMNS=(line_user_id line_unlinked_at menu_pending_line_user_id taken_over_by_owner_id invite_code_id)
 
 # ---------------------------------------------------------------------------
 # (P0) 走査の前提: ロールを作れること・個別に期待を持つ列が存在すること
@@ -84,11 +87,11 @@ fi
 
 OWNERS_COLUMNS_SQL="SELECT attname FROM pg_attribute WHERE attrelid = to_regclass('public.owners') AND attnum > 0 AND NOT attisdropped"
 
-echo ">> [owner-line-privilege-check] (P0) owners に連携状態の列が存在すること（走査の前提）"
+echo ">> [owner-line-privilege-check] (P0) owners に個別に期待を持つ列が存在すること（走査の前提）"
 for column in "${SPECIAL_COLUMNS[@]}"; do
     has_column="$(q "SELECT count(*) FROM (${OWNERS_COLUMNS_SQL}) c WHERE attname = '${column}';")"
     if [ "$has_column" != '1' ]; then
-        echo "FAIL: owners.${column} がありません（migration 0017 が未適用です。走査の前提が崩れています）" >&2
+        echo "FAIL: owners.${column} がありません（migration 0017・0018 が未適用です。走査の前提が崩れています）" >&2
         exit 1
     fi
 done
@@ -169,6 +172,7 @@ for key in line_webhook survey; do
     expect_priv "$key" menu_pending_line_user_id INSERT f
     expect_priv "$key" menu_pending_line_user_id UPDATE f
     expect_priv "$key" taken_over_by_owner_id INSERT f
+    expect_priv "$key" invite_code_id UPDATE f
 done
 for key in batch delivery detail; do
     for column in "${UNLINK_COLUMNS[@]}"; do
@@ -179,10 +183,11 @@ done
 # ---------------------------------------------------------------------------
 # (P2) オーナーの作成と引継ぎに要る書込は残っていること
 # ---------------------------------------------------------------------------
-echo ">> [owner-line-privilege-check] (P2) オーナーの作成で LINE ユーザー ID を、引継ぎで引継ぎ先を書けること"
+echo ">> [owner-line-privilege-check] (P2) オーナーの作成で LINE ユーザー ID と招待コードを、引継ぎで引継ぎ先を書けること"
 for key in line_webhook survey; do
     expect_priv "$key" line_user_id INSERT t
     expect_priv "$key" taken_over_by_owner_id UPDATE t
+    expect_priv "$key" invite_code_id INSERT t
 done
 
 # ---------------------------------------------------------------------------

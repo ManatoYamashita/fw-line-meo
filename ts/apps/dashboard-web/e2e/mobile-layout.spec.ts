@@ -135,7 +135,14 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     panelCells: 1,
     mustOverflow: { 393: ['利用者一覧'], 320: ['利用者一覧'] },
   },
+  // Issue #485: オーナー選択が表を持った（見出し 5 列＋3 人 × 5 列）。
   店舗登録: {
+    navControls: 6,
+    measuredCells: 20,
+    panelCells: 0,
+    mustOverflow: { 393: [], 320: [] },
+  },
+  店舗登録の検索結果: {
     navControls: 6,
     measuredCells: 0,
     panelCells: 0,
@@ -149,7 +156,7 @@ test('宣言の面が検証面の一覧と一致する', () => {
     '面を足したら LAYOUT にも足す（宣言の無い面は beforeEach で止まる）',
   ).toEqual(Object.keys(LAYOUT));
   // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-  expect(Object.keys(LAYOUT)).toHaveLength(8);
+  expect(Object.keys(LAYOUT)).toHaveLength(9);
 });
 
 for (const surface of DASHBOARD_SURFACES) {

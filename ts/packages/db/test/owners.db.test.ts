@@ -5,6 +5,7 @@ import { findOwnerByLineUserId, createOwner, markOwnerStoreIdentified } from '..
 // 他ファイルと衝突しない専用 UUID プレフィックス（e1/e2）。
 const OP = 'e1111111-1111-1111-1111-111111111111';
 const AG = 'e2222222-2222-2222-2222-222222222222';
+const CODE = 'e2222222-2222-2222-2222-2222222486c1';
 
 describe.skipIf(!process.env.DATABASE_URL)('owners accessors (DB)', () => {
   beforeAll(async () => {
@@ -14,6 +15,12 @@ describe.skipIf(!process.env.DATABASE_URL)('owners accessors (DB)', () => {
       AG,
       OP,
       'owners代理店',
+    ]);
+    // オーナー作成には登録に用いた招待コードが要る（owners.invite_code_id・0017・#486）。
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      CODE,
+      AG,
+      'OWNERSCODE1',
     ]);
   });
 
@@ -31,6 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)('owners accessors (DB)', () => {
       const pool = await getPool();
       const owner = await createOwner(pool, {
         agencyId: AG,
+        inviteCodeId: CODE,
         lineUserId: 'U-owners-1',
         displayName: 'テストオーナー',
       });
@@ -45,14 +53,14 @@ describe.skipIf(!process.env.DATABASE_URL)('owners accessors (DB)', () => {
 
     it('displayName を省略すると null で作成される', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-owners-2' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-owners-2' });
       expect(owner.display_name).toBeNull();
     });
 
     it('同一 line_user_id を二重作成すると一意制約違反になる', async () => {
       const pool = await getPool();
       await expect(
-        createOwner(pool, { agencyId: AG, lineUserId: 'U-owners-1' }),
+        createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-owners-1' }),
       ).rejects.toThrow();
     });
   });
@@ -60,7 +68,7 @@ describe.skipIf(!process.env.DATABASE_URL)('owners accessors (DB)', () => {
   describe('markOwnerStoreIdentified', () => {
     it('onboarding_status を store_identified に遷移させる', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-owners-3' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-owners-3' });
       expect(owner.onboarding_status).toBe('pending');
 
       await markOwnerStoreIdentified(pool, owner.id);

@@ -87,7 +87,7 @@ describe.skipIf(!process.env.DATABASE_URL)('relinkCompletedMenu の抽出（実 
          VALUES ($1, $2, $3, 'store_identified')`,
         [OWNER_LINKED, AG, LINE_USER_LINKED],
       );
-      // 解除済み: LINE ユーザー ID を持たず、店舗特定済みの段階のまま残る（Migration0017 の状態の表）。
+      // 解除済み: LINE ユーザー ID を持たず、店舗特定済みの段階のまま残る（Migration0018 の状態の表）。
       await client.query(
         `INSERT INTO owners
            (id, agency_id, line_user_id, onboarding_status, line_unlinked_at, menu_pending_line_user_id)

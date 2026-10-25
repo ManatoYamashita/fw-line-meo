@@ -111,12 +111,14 @@ GRANT
 --   - line_unlinked_at・menu_pending_line_user_id は INSERT も UPDATE も与えない
 --   - taken_over_by_owner_id は UPDATE だけ（引継ぎで line-webhook が書く。CHECK により解除済みの行に
 --     しか値を持てないので、配信を止める手段にはならない）
+--   - invite_code_id は INSERT だけ（オーナーの作成で登録に用いた招待コードを書く・agency-dashboard
+--     Req 8.1。登録の記録なので、作成の後に書き換える経路を持たない）
 -- DELETE と SELECT はテーブル単位のまま残す。owners に列を足したら、ここの列挙へも足すこと
 -- （db/test/check_owner_line_privileges.sh が足し忘れを赤にする。解除・配信停止に関わる列なら列挙へ
 -- 足さず、検査の個別の期待へ加える）。本番へ再適用するときの付与者の注意は上の stores と同じ。
 REVOKE INSERT, UPDATE ON owners FROM :"line_webhook", :"survey";
 GRANT
-  INSERT (id, agency_id, line_user_id, display_name, onboarding_status, created_at, delivery_hour),
+  INSERT (id, agency_id, line_user_id, display_name, onboarding_status, created_at, delivery_hour, invite_code_id),
   UPDATE (id, agency_id, display_name, onboarding_status, created_at, delivery_hour, taken_over_by_owner_id)
   ON owners
   TO :"line_webhook", :"survey";

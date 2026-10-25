@@ -221,9 +221,11 @@ describe.skipIf(!process.env.DATABASE_URL)('agency-dashboard accessors (DB)', ()
       expect(nowDisabled?.disabled).toBe(true);
     });
 
-    it('既存 findActiveInviteCode は無改変で有効コードを解決する（回帰なし）', async () => {
+    it('findActiveInviteCode は有効コードを解決し、コードの行の id を添える（照合の条件は不変・#486 で id を追加）', async () => {
       const pool = await getPool();
-      expect(await findActiveInviteCode(pool, 'F3AG1ACT')).toEqual({ agencyId: AG_A1 });
+      const active = (await listInviteCodes(pool, AG_A1)).find((c) => c.code === 'F3AG1ACT');
+      expect(active).toBeDefined();
+      expect(await findActiveInviteCode(pool, 'F3AG1ACT')).toEqual({ id: active?.id, agencyId: AG_A1 });
       expect(await findActiveInviteCode(pool, 'F3AG1DIS')).toBeNull();
     });
   });

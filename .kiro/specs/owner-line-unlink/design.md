@@ -99,14 +99,14 @@ graph TB
 | Frontend | Next.js（dashboard-web・既存版）＋ `@fwlm/ui` | オーナー一覧の画面と解除のダイアログ | 新しい依存なし |
 | Backend | Hono（dashboard-api・既存版） | `POST /owners/:id/unlink`・`GET /owners` の拡張 | 新しい依存なし |
 | Backend | Node 24 の `fetch` | LINE のトークン発行と DELETE | `@line/bot-sdk` は足さない（既存 2 アプリと同じ） |
-| Data | PostgreSQL 15+（Cloud SQL） | migration 0017（列・CHECK・監査の action） | `infra/sql/grants.sql` の列単位 GRANT |
+| Data | PostgreSQL 15+（Cloud SQL） | migration 0018（列・CHECK・監査の action） | `infra/sql/grants.sql` の列単位 GRANT |
 | Infrastructure | Terraform（run-services） | dashboard-api へ `LINE_CHANNEL_ID` と `line-channel-secret` を配線 | 新しい secret の枠は無い |
 
 ## File Structure Plan
 
 ### New Files
 ```
-db/migrations/0017_owner_line_unlink.sql          # owners の列・CHECK、ck_audit_logs_action の 28 値での作り直し
+db/migrations/0018_owner_line_unlink.sql          # owners の列・CHECK、ck_audit_logs_action の 28 値での作り直し
 db/test/check_owner_line_privileges.sh            # owners の列単位 GRANT を実ロールで検証
 ts/packages/db/src/owner-line-link.ts             # 解除・メニュー未解除の消去・引継ぎの DAL
 ts/packages/db/test/owner-line-link.db.test.ts    # 上記の実 DB 試験
@@ -219,7 +219,7 @@ stateDiagram-v2
 | 1.3 | 範囲外・不存在の同一視 | OwnerLineUnlinkHandler, OwnerLineLinkRepo | 404 `not_found` | 解除の操作 |
 | 1.4 | 確認ダイアログ | OwnerLineUnlinkControl | — | — |
 | 1.5 | 解除済みへの解除は成功 | OwnerLineLinkRepo | `unchanged` | 解除の操作 |
-| 1.6 | 店舗・履歴を消さない | OwnerLineLinkRepo, Migration0017 | `owners` だけを更新 | — |
+| 1.6 | 店舗・履歴を消さない | OwnerLineLinkRepo, Migration0018 | `owners` だけを更新 | — |
 | 1.7 | 失敗時は解除前のまま | OwnerLineLinkRepo, OwnerLineUnlinkControl | 1 トランザクション・500 | — |
 | 2.1–2.4 | 連携状態の表示と操作 | OwnersListHandler, OwnersPage, OwnerLineUnlinkControl | `GET /owners` | — |
 | 2.5 | 店舗登録のオーナー選択で区別 | StoresNewPage（変更） | `OwnerListItem.lineLink` | — |
@@ -246,7 +246,7 @@ stateDiagram-v2
 | 6.10 | line-onboarding 4.4 の改訂 | 文書 | — | — |
 | 7.1, 7.3 | 解除の監査 | OwnerLineUnlinkHandler | `owner_line_unlinked` | 解除の操作 |
 | 7.2 | 引継ぎの監査 | ConversationHandlers | `owner_stores_taken_over`, `store_taken_over` | 確定と引継ぎ |
-| 7.4 | 既存の種別を失わない | Migration0017 | `ck_audit_logs_action` 28 値 | — |
+| 7.4 | 既存の種別を失わない | Migration0018 | `ck_audit_logs_action` 28 値 | — |
 | 8.1, 8.3 | オーナー自身の解除の不在 | GrantsOwnerColumns, AbsenceCheckB5 | 列単位 GRANT, 識別子の走査 | — |
 | 8.2 | ブロックで変えない | EventDispatcher（既存・変更なし） | unfollow を無視 | — |
 | 8.4 | 変異で検出力を確かめる | OwnerLinePrivilegesCheck, AbsenceCheckB5 | 実施記録 | — |
@@ -256,7 +256,7 @@ stateDiagram-v2
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |-----------|--------------|--------|--------------|------------------|-----------|
-| Migration0017 | Data | 列・CHECK・監査の action | 1.6, 4.1, 7.4 | — | State |
+| Migration0018 | Data | 列・CHECK・監査の action | 1.6, 4.1, 7.4 | — | State |
 | GrantsOwnerColumns | Data | オーナーの面から解除の列を剥がす | 8.1, 8.3 | grants.sql (P0) | — |
 | OwnerLineLinkRepo | `@fwlm/db` | 解除・未解除の消去・引継ぎの DAL | 1.1–1.3, 1.5–1.7, 3.3, 4.2, 5.5, 6.1, 6.3, 6.6 | Postgres (P0) | Service, State |
 | OwnersRepo（変更） | `@fwlm/db` | 連携状態つきのオーナー一覧 | 2.1, 2.5, 2.6 | Postgres (P0) | Service |
@@ -271,7 +271,7 @@ stateDiagram-v2
 
 ### Data
 
-#### Migration0017
+#### Migration0018
 
 | Field | Detail |
 |-------|--------|
@@ -299,7 +299,7 @@ stateDiagram-v2
 
 #### GrantsOwnerColumns（`infra/sql/grants.sql`）
 - `REVOKE INSERT, UPDATE ON owners FROM :"line_webhook", :"survey";` を先に行い、次を与え直す
-  - `INSERT (id, agency_id, line_user_id, display_name, onboarding_status, created_at, delivery_hour)`
+  - `INSERT (id, agency_id, line_user_id, display_name, onboarding_status, created_at, delivery_hour, invite_code_id)`（invite_code_id は #486 の 0017 で足された登録の記録。INSERT だけを与える）
   - `UPDATE (id, agency_id, display_name, onboarding_status, created_at, delivery_hour, taken_over_by_owner_id)`
 - line_webhook・survey は `line_user_id` を UPDATE できず、`line_unlinked_at`・`menu_pending_line_user_id` を INSERT も UPDATE もできない。`taken_over_by_owner_id` は引継ぎ（line-webhook）が書くので UPDATE だけを与える。これは配信を止める列ではなく、CHECK により解除済みの行にしか値を持てない。dashboard はテーブル単位の権限のまま
 - line-webhook が `owners` に書くのは `createOwner`（INSERT）と `markOwnerStoreIdentified`（`onboarding_status` の UPDATE）だけなので、既存の動作は変わらない
@@ -536,7 +536,7 @@ interface OwnerLineUnlinkResponse {
 - 不変条件: 連携中のオーナーは LINE ユーザー ID を 1 つ持ち、同じ ID を持つ連携中のオーナーは 1 人だけ。解除済みのオーナーは ID を持たない。引継ぎは同じ代理店の中でだけ起こる
 
 ### Logical Data Model
-- `owners`: 上記 3 列（Migration0017）。`stores.owner_id`・`audit_logs`・`gbp_sessions.owner_id` の参照先として行は残り続ける
+- `owners`: 上記 3 列（Migration0018）。`stores.owner_id`・`audit_logs`・`gbp_sessions.owner_id` の参照先として行は残り続ける
 - `onboarding_sessions`: 解除時に元の ID の行を削除する（PK = `line_user_id`）
 - `summary_deliveries.line_user_id`: 送信時の宛先の記録として変えない
 
@@ -598,7 +598,7 @@ interface OwnerLineUnlinkResponse {
 
 ```mermaid
 graph LR
-    A[migration 0017 適用 マージ前] --> A2[手作業の切り離し行を解除済みへ移す]
+    A[migration 0018 適用 マージ前] --> A2[手作業の切り離し行を解除済みへ移す]
     A2 --> B[grants.sql 再適用 マージ前]
     B --> C[本番の列 CHECK 列権限を照会]
     C --> D[tf apply で dashboard-api に LINE の env と secret]
@@ -606,7 +606,7 @@ graph LR
     E --> F[検証用アカウントで解除と引継ぎを確認]
 ```
 
-- Step A は旧コードと互換なので、実装 PR のマージより先に当てる（マージが自動デプロイを起動するため）。番号 0017 は提出直前に open PR と照合する
+- Step A は旧コードと互換なので、実装 PR のマージより先に当てる（マージが自動デプロイを起動するため）。番号 0018 は提出直前に open PR と照合する
 - **Step A の直後に、2026-10-24 の手作業の切り離しを正規の状態へ移す（一回限り）。** 本番の `owners` に `line_user_id LIKE 'detached-%'` の行が残っていれば、それは CHECK の上では「連携中」で、店舗を引き継げず、配信ジョブが存在しない宛先へ push を試み続ける。照会で件数と対象を確かめてから、`line_user_id = NULL`・`line_unlinked_at = 当日の時刻`・`menu_pending_line_user_id = NULL`（メニューは手作業で外し済み）へ更新し、更新件数を DO ブロックで照会の件数と突き合わせる。退避は 2026-10-24 の手順と同じく `row_to_json` で手元へ取る。0 件ならこの手順は何もしない（撮影後に手で戻した場合）。手順は `docs/testing/e2e.md` に載せ、実施の記録を Issue #487 に残す
 - Step B は付与者が一致しないと REVOKE が警告だけで空振りする（store-suspension の教訓）。Step C で、line_webhook・survey が `line_user_id` を UPDATE できないことを `has_column_privilege` で確かめるまで Step E へ進まない
 - Step D は**イメージより先**に入れる。新しい dashboard-api は `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET` が無いと起動時に落ちる（memory `deploy-pipeline-coverage-guards`）。旧イメージは未知の env を無視する

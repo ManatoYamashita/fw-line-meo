@@ -1,4 +1,4 @@
-import type { OnboardingStatus, OwnerListItem } from '@fwlm/db';
+import type { OnboardingStatus, OwnerInviteCodeRecord, OwnerListItem } from '@fwlm/db';
 import { authenticate, type AuthDeps } from './auth.js';
 import { resolveAgencyScope } from './scope.js';
 import { jsonError } from './http.js';
@@ -27,6 +27,8 @@ export interface OwnerListItemJson {
   displayName: string | null;
   onboardingStatus: OnboardingStatus;
   createdAt: string; // ISO 8601
+  // 登録に用いた招待コード。null = 記録なし（0017 より前の登録）で、推定で埋めない（agency-dashboard Req 8.4, 8.5）。
+  inviteCode: OwnerInviteCodeRecord | null;
 }
 
 export async function handleOwnersList(
@@ -70,5 +72,10 @@ function toJson(item: OwnerListItem): OwnerListItemJson {
     displayName: item.displayName,
     onboardingStatus: item.onboardingStatus,
     createdAt: item.createdAt.toISOString(),
+    // DAL の型に項目が増えても応答へ混ざらないよう、返す 3 項目だけを写す。
+    inviteCode:
+      item.inviteCode === null
+        ? null
+        : { id: item.inviteCode.id, code: item.inviteCode.code, disabled: item.inviteCode.disabled },
   };
 }

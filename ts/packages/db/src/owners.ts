@@ -2,11 +2,17 @@ import type { Queryable } from './pool.js';
 import type { OnboardingStatus, OwnerListItem, OwnerRow } from './types.js';
 
 const OWNER_COLUMNS =
-  'id, agency_id, line_user_id, display_name, onboarding_status, created_at, ' +
+  'id, agency_id, line_user_id, display_name, onboarding_status, created_at, invite_code_id, ' +
   'line_unlinked_at, menu_pending_line_user_id, taken_over_by_owner_id';
 
 export interface CreateOwnerInput {
   agencyId: string;
+  /**
+   * 登録に用いた招待コードの行の id（agency-dashboard Req 8.1）。findActiveInviteCode の結果から渡す。
+   * 必須にしてある。省略可能にすると、owners を作る経路を足したときに書き忘れても型検査を通り、
+   * 導入後の登録なのに「記録なし」になる。
+   */
+  inviteCodeId: string;
   lineUserId: string;
   displayName?: string | null;
 }
@@ -39,14 +45,16 @@ export async function findOwnerById(db: Queryable, ownerId: string): Promise<Own
 /**
  * 有効な招待コード検証後に owner を新規作成する（Req 2.1）。
  * agency_id は非 null 必須（呼び出し側の型で強制・DB の NOT NULL とあわせて Req 2.4 を構造保証）。
+ * 登録に用いた招待コードを同じ INSERT で invite_code_id に書く（agency-dashboard Req 8.1）。
+ * 代理店と食い違うコードは複合 FK fk_owners_invite_code_same_agency が拒否する（Req 8.2）。
  * onboarding_status は列デフォルト 'pending' のまま作成される。
  */
 export async function createOwner(db: Queryable, input: CreateOwnerInput): Promise<OwnerRow> {
   const res = await db.query<OwnerRow>(
-    `INSERT INTO owners (agency_id, line_user_id, display_name)
-     VALUES ($1, $2, $3)
+    `INSERT INTO owners (agency_id, invite_code_id, line_user_id, display_name)
+     VALUES ($1, $2, $3, $4)
      RETURNING ${OWNER_COLUMNS}`,
-    [input.agencyId, input.lineUserId, input.displayName ?? null],
+    [input.agencyId, input.inviteCodeId, input.lineUserId, input.displayName ?? null],
   );
   const row = res.rows[0];
   if (!row) throw new Error('createOwner: insert did not return a row');
@@ -63,6 +71,8 @@ export async function markOwnerStoreIdentified(db: Queryable, ownerId: string): 
 /**
  * ダッシュボードの店舗登録でオーナーを選ぶための一覧（agency-dashboard spec・Req 2.1）。
  * 指定代理店に属する owner のみを作成日時の降順で返す（他代理店は漏れない）。
+ * 登録に用いられた招待コードを inviteCode として添える。記録の無いオーナー（0017 より前の登録）は
+ * null で、推定で埋めない（Req 8.4, 8.5）。無効化されたコードも結びつきは残り、disabled: true で返す（Req 8.3）。
  */
 export async function listOwnersByAgency(
   db: Queryable,
@@ -73,9 +83,16 @@ export async function listOwnersByAgency(
     display_name: string | null;
     onboarding_status: OnboardingStatus;
     created_at: Date;
+    invite_code_id: string | null;
+    invite_code: string | null;
+    invite_code_disabled_at: Date | null;
   }>(
-    `SELECT id, display_name, onboarding_status, created_at
-       FROM owners WHERE agency_id = $1 ORDER BY created_at DESC`,
+    `SELECT o.id, o.display_name, o.onboarding_status, o.created_at,
+            o.invite_code_id, c.code AS invite_code, c.disabled_at AS invite_code_disabled_at
+       FROM owners o
+       LEFT JOIN agency_invite_codes c ON c.id = o.invite_code_id
+      WHERE o.agency_id = $1
+      ORDER BY o.created_at DESC`,
     [agencyId],
   );
   return res.rows.map((row) => ({
@@ -83,6 +100,14 @@ export async function listOwnersByAgency(
     displayName: row.display_name,
     onboardingStatus: row.onboarding_status,
     createdAt: row.created_at,
+    inviteCode:
+      row.invite_code_id !== null && row.invite_code !== null
+        ? {
+            id: row.invite_code_id,
+            code: row.invite_code,
+            disabled: row.invite_code_disabled_at !== null,
+          }
+        : null,
   }));
 }
 

@@ -28,6 +28,8 @@ const ST_CONFIRMED = 'b7000000-0000-0000-0000-000000000031';
 const ST_SUSPENDED = 'b7000000-0000-0000-0000-000000000032';
 const ST_PENDING = 'b7000000-0000-0000-0000-000000000033';
 const MISSING = 'b7000000-0000-0000-0000-0000000000ff';
+// 再登録に用いる AG1 の招待コード（createOwner は登録に用いたコードを必須で受け取る）
+const CODE_AG1 = 'b7000000-0000-0000-0000-000000000041';
 
 const LINE_OP = 'U-owner-line-link-op';
 const LINE_AG = 'U-owner-line-link-ag';
@@ -232,6 +234,11 @@ describe.skipIf(!process.env.DATABASE_URL)('owner-line-link DAL (DB)', () => {
       'INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3), ($4, $2, $5)',
       [AG1, OP, '解除代理店1', AG2, '解除代理店2'],
     );
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      CODE_AG1,
+      AG1,
+      'B7UNLINK',
+    ]);
     await pool.query(
       `INSERT INTO owners (id, agency_id, line_user_id, display_name, onboarding_status)
        VALUES ($1, $8, $9, '運営で解除', 'active'),
@@ -388,7 +395,11 @@ describe.skipIf(!process.env.DATABASE_URL)('owner-line-link DAL (DB)', () => {
     const first = await unlinkOwnerLine(pool, { ownerId: OW_REUSED, agencyId: null });
     expect(first).toEqual({ kind: 'changed', ownerId: OW_REUSED, menuTarget: LINE_REUSED });
     // 同じ LINE アカウントが招待コードから再登録し、新しいオーナーとして連携中になる
-    const reRegistered = await createOwner(pool, { agencyId: AG1, lineUserId: LINE_REUSED });
+    const reRegistered = await createOwner(pool, {
+      agencyId: AG1,
+      inviteCodeId: CODE_AG1,
+      lineUserId: LINE_REUSED,
+    });
     const holderBefore = await ownerRow(reRegistered.id);
 
     const second = await unlinkOwnerLine(pool, { ownerId: OW_REUSED, agencyId: null });

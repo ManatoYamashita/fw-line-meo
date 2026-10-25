@@ -1,4 +1,4 @@
--- assertions 4.1: オーナーの LINE 連携状態（owner-line-unlink・Issue #487・migration 0017）
+-- assertions 4.1: オーナーの LINE 連携状態（owner-line-unlink・Issue #487・migration 0018）
 -- owners の連携状態は 3 列（line_unlinked_at・menu_pending_line_user_id・taken_over_by_owner_id）と
 -- line_user_id の組で表し、次の 3 つの CHECK が不変条件を構造で保証する。
 --   ck_owner_line_link    … 解除時刻が無いこと ⇔ LINE ユーザー ID があること
@@ -231,7 +231,7 @@ BEGIN
         'survey_target_enabled',
         'survey_targets_reordered',
         'survey_category_visibility_updated',
-        -- owner-line-unlink（Issue #487・0017）
+        -- owner-line-unlink（Issue #487・0018）
         'owner_line_unlinked',
         'owner_stores_taken_over',
         'store_taken_over'

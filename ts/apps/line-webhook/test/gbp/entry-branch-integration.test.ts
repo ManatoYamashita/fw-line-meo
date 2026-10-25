@@ -297,6 +297,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
     onboarding_status: 'store_identified',
     created_at: NOW,
     delivery_hour: 7,
+    invite_code_id: null,
     line_unlinked_at: null,
     menu_pending_line_user_id: null,
     taken_over_by_owner_id: null,

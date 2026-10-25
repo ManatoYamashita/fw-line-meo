@@ -583,6 +583,37 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
     expect(methods).toContain('POST');
   });
 
+  // --- GET /owners の招待コードの記録（agency-dashboard Req 8.5・#486）---
+  // 実物の listOwnersByAgency（LEFT JOIN）から応答の JSON までを通し、記録の有無が応答で区別できることを観測する。
+  it('GET /owners は登録に用いた招待コードを返し、記録の無いオーナーは null を返す（Req 8.5）', async () => {
+    const pool = await getPool();
+    const code = 'f5000000-0000-0000-0000-0000000486c1';
+    const recordedOwner = 'f5000000-0000-0000-0000-0000000486a1';
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      code,
+      AG1,
+      'F5ROUTE4',
+    ]);
+    await pool.query(
+      'INSERT INTO owners (id, agency_id, line_user_id, invite_code_id) VALUES ($1, $2, $3, $4)',
+      [recordedOwner, AG1, 'U-routes-486', code],
+    );
+    try {
+      const app = buildApp();
+      const res = await app.request(`/owners?agencyId=${AG1}`, { method: 'GET', headers: h(OP_TOKEN) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { owners: { id: string; inviteCode: unknown }[] };
+      const byId = new Map(body.owners.map((o) => [o.id, o.inviteCode]));
+      expect(byId.get(recordedOwner)).toEqual({ id: code, code: 'F5ROUTE4', disabled: false });
+      // beforeAll の OW1 は invite_code_id を書かずに作った行（0017 より前の登録と同じ形）。
+      expect(byId.has(OW1)).toBe(true);
+      expect(byId.get(OW1)).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM owners WHERE id = $1', [recordedOwner]);
+      await pool.query('DELETE FROM agency_invite_codes WHERE id = $1', [code]);
+    }
+  });
+
   // --- POST /dashboard-users/:id/update（dashboard-user-edit #259）---
   // 実物の認証解決（findByAuthSubject）・保護付き更新（updateDashboardUserGuarded）・監査（createAuditLog）を
   // 通して、ルートの配線と、更新後の権限が次の要求から効くことを観測する。

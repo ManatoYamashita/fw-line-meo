@@ -14,6 +14,7 @@ function owner(over: Partial<OwnerListItem> = {}): OwnerListItem {
     displayName: 'オーナー太郎',
     onboardingStatus: 'pending',
     createdAt: CREATED_AT,
+    inviteCode: null,
     ...over,
   };
 }
@@ -101,8 +102,46 @@ describe('handleOwnersList', () => {
           displayName: 'オーナー太郎',
           onboardingStatus: 'pending',
           createdAt: '2026-07-01T12:34:56.000Z',
+          inviteCode: null,
         },
       ],
+    });
+  });
+
+  it('登録に用いた招待コードの記録を返し、記録の無いオーナーは null のまま返す（agency-dashboard Req 8.5・#486）', async () => {
+    const recorded = owner({
+      id: '66666666-6666-6666-6666-666666666666',
+      inviteCode: { id: '77777777-7777-7777-7777-777777777777', code: 'ABCD2345', disabled: true },
+    });
+    const legacy = owner({ inviteCode: null });
+    const res = await handleOwnersList(deps({ listOwners: () => Promise.resolve([recorded, legacy]) }, AG), req());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { owners: { id: string; inviteCode: unknown }[] };
+    expect(body.owners.map((o) => [o.id, o.inviteCode])).toEqual([
+      [
+        '66666666-6666-6666-6666-666666666666',
+        { id: '77777777-7777-7777-7777-777777777777', code: 'ABCD2345', disabled: true },
+      ],
+      ['55555555-5555-5555-5555-555555555555', null],
+    ]);
+  });
+
+  it('招待コードの記録は id・code・disabled の 3 項目だけを返す（DAL の型に項目が増えても応答へ混ぜない）', async () => {
+    // DAL が将来の項目を持った記録を返した場合を模す（型の外の項目なので as で渡す）。
+    const withExtra = owner({
+      inviteCode: {
+        id: '77777777-7777-7777-7777-777777777777',
+        code: 'ABCD2345',
+        disabled: false,
+        agencyId: 'ag1',
+      } as OwnerListItem['inviteCode'],
+    });
+    const res = await handleOwnersList(deps({ listOwners: () => Promise.resolve([withExtra]) }, AG), req());
+    const body = (await res.json()) as { owners: { inviteCode: unknown }[] };
+    expect(body.owners[0]?.inviteCode).toEqual({
+      id: '77777777-7777-7777-7777-777777777777',
+      code: 'ABCD2345',
+      disabled: false,
     });
   });
 });

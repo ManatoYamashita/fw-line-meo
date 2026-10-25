@@ -35,6 +35,7 @@ erDiagram
     stores ||--o{ daily_summaries : "summarized as"
     stores ||--o{ summary_deliveries : "delivered to"
     agencies ||--o{ agency_invite_codes : issues
+    agency_invite_codes |o--o{ owners : "registered with"
     owners ||--o{ onboarding_sessions : "progress of"
     audit_logs }o..|| operators : "actor (dashboard user)"
     audit_logs }o..|| agencies : "actor (dashboard user)"
@@ -50,7 +51,7 @@ erDiagram
 |---|---|---|---|---|
 | operators | id (uuid) | — | — | 運営（apex テナント・第1層） |
 | agencies | id (uuid) | — | operator_id → operators | 代理店（第2層） |
-| owners | id (uuid) | line_user_id (unique) | agency_id → agencies | 飲食店オーナー（第3層・LINE ユーザ） |
+| owners | id (uuid) | line_user_id (unique) | agency_id → agencies, (agency_id, invite_code_id) → agency_invite_codes | 飲食店オーナー（第3層・LINE ユーザ） |
 | stores | id (uuid) | place_id (確定時のみ部分一意) | owner_id → owners, category_code → categories | 店舗（Owner 所有・1:N） |
 | dashboard_users | id (uuid) | auth_subject (unique), email (自然キー・lower(email) 部分一意) | operator_id → operators, agency_id → agencies | ダッシュボード認証主体（運営/代理店・RBAC）。`disabled_at` で無効化（agency-dashboard・0005） |
 | categories | code (text) | — | — | 店舗ジャンル（共有定数・seed SoT） |
@@ -72,7 +73,7 @@ erDiagram
 | oauth_tokens | id (uuid) | (store_id, provider) unique | store_id → stores | 将来の GBP OAuth トークン格納枠（店舗単位・第2フェーズ） |
 | daily_summaries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 日次サマリー（店舗×日付で一意の確定「配信素材」・生成後は不変・再実行時は全置換・Go 書込） |
 | summary_deliveries | id (bigint identity) | (store_id, summary_date) unique | store_id → stores | 通知記録（店舗×日付で一意。その日に通知を送ったか、送らなかったならなぜかを 1 行で表す・`retry_key` で冪等再送・TS 書込） |
-| agency_invite_codes | id (uuid) | code (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
+| agency_invite_codes | id (uuid) | code (unique), (agency_id, id) (unique) | agency_id → agencies | 代理店招待コード（共有・disabled_at で失効。Req 2.5） |
 | onboarding_sessions | line_user_id (text) | — | owner_id → owners | LINE オンボーディング会話の進捗（owner 誕生前から存在） |
 | line_webhook_events | webhook_event_id (text) | — | — | Webhook イベント重複排除（Req 5.4） |
 | audit_logs | id (uuid) | — | 多相 actor/target（ID は UUID、参照先は `actor_type` / `target_type` で解釈） | 運営・代理店・オーナーの書込操作の追記型監査記録（`customer` は存在しない） |
@@ -93,7 +94,7 @@ erDiagram
 - `survey_structured_material_tallies` は構造化回答 1 件の厚みを個数と一言の有無だけで数える。Target 名・カテゴリや facet の code・一言の本文・時刻は持たない。legacy の `survey_material_tallies` の意味は変えない。星は `survey_rating_tallies` を共通に使う。
 - `rating_snapshots` は追記専用（更新/削除しない）。`subject_kind` で自店/競合を区別し、`place_id` を非正規化保持して競合 churn 後も歴史を自立保持。
 - 共有定数 `categories`・`survey_aspects` は seed（`0002`）、`survey_categories`・`survey_facets`・`survey_category_facets` は seed（`0015`）が唯一の定義（SoT）。
-- **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを保証（NULL を含む行＝operator/self は MATCH SIMPLE で非適用）。
+- **複合 FK による境界強制**: `dashboard_users(operator_id, agency_id) → agencies(operator_id, id)` で agency が当該 operator 配下であることを、`rating_snapshots(store_id, competitor_id) → competitors(store_id, id)` で競合が当該店舗のものであることを、`owners(agency_id, invite_code_id) → agency_invite_codes(agency_id, id)` で登録に用いたコードがオーナーと同じ代理店のものであることを保証（NULL を含む行＝operator/self/記録なしのオーナーは MATCH SIMPLE で非適用）。
 - `stores`: `confirmed ⇔ place_id present`（`ck_place_confirmed`）。pending は place_id 未確定（NULL）。
 - `stores.suspended_at`（`store-suspension`・`0012`・Issue #252）: 店舗の利用停止の時刻（`timestamptz`・任意・既定値なし）。`NULL` = 利用中、値あり = 停止中。停止中の店舗は日次取得（Go）・日次配信（TS）・アンケート・店舗詳細・QR 発行の対象から外れる。取得と配信は同じこの列を読んで対象を決める。`place_status` とは独立で `ck_place_confirmed` に触れず、停止・再開は店舗の身元・オーナー／代理店との関係・匿名集計・日次データを変えない。書込は dashboard-api の停止・再開の操作（運営は全店・代理店は担当店舗）だけで、監査 action は `store_suspended` / `store_resumed`。
 - `daily_summaries`（Go 書込）と `summary_deliveries`（TS 書込）は `competitive-daily-summary` spec で追加。両テーブルとも `stores` に対する `(store_id, summary_date)` 一意制約を持ち、日次バッチ（Go）→ 配信ジョブ（TS）のパイプラインで `daily_summaries` を TS が read → `summary_deliveries` へ結果を書込む、というクロス言語 seam を構成する（`db/write-boundary.md` 参照）。
@@ -111,6 +112,7 @@ erDiagram
 - `owners.delivery_hour`（`competitive-daily-summary`・`0004`）: 日次サマリー配信時刻（時単位・デフォルト 7・0-23）。`owners` は既存 TS 境界のため書込責任は変わらず TS。
 - `onboarding_sessions`: `stage='await_invite_code' ⇔ owner_id IS NULL`（`ck_session_owner_stage`）。owner 誕生前の LINE ユーザー状態も本表が唯一保持する。
 - `agency_invite_codes`: `code` は代理店ごとに共有・使い回し可能（`disabled_at` が無効化するまで複数オーナーが同一コードで登録できる。Req 2.5）。
+- `owners.invite_code_id`（`agency-dashboard` Requirement 8・`0017`・Issue #486）: オーナーの登録に用いられた招待コード（`uuid`・任意・既定値なし）。`NULL` = 記録なし（`0017` より前の登録）で、推定で埋めない。値は同じ代理店のコードに限る（`fk_owners_invite_code_same_agency`）。参照されているコードは `ON DELETE RESTRICT` で削除できず、無効化（`disabled_at`）しても結びつきは変わらない。書くのは line-webhook のオーナー登録だけ（TS）。
 - `audit_logs`: 正本はDB。`actor_type` は `operator` / `agency` / `owner` のENUMのみで、顧客を監査主体にできない。
   ダッシュボード操作の `actor_id` は `dashboard_users.id`、LINE オンボーディング操作の `actor_id` は `owners.id`。
   `target_type` / `target_id` も業務エンティティの UUID を記録し、`line_user_id` や認証 subject は保持しない。

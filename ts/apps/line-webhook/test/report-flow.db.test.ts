@@ -74,6 +74,7 @@ import { createSignatureVerifier } from '../src/webhook/signature.js';
 
 const OP = 'c9000000-0000-0000-0000-000000000001';
 const AG = 'c9000000-0000-0000-0000-000000000002';
+const INVITE_CODE_ID = 'c9000000-0000-0000-0000-0000000486c1';
 
 const CHANNEL_SECRET = 'c9-test-channel-secret';
 const RICHMENU_COMPLETED_ID = 'c9-richmenu-completed';
@@ -356,6 +357,12 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
     const pool = await getPool();
     await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [OP, 'レポート通し試験運営']);
     await pool.query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [AG, OP, 'レポート通し試験代理店']);
+    // オーナー作成には登録に用いた招待コードが要る（owners.invite_code_id・0017・#486）。
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      INVITE_CODE_ID,
+      AG,
+      'C9REPORT486',
+    ]);
 
     singleStoreId = await seedCompletedOwnerWithStores(SINGLE_USER, [
       candidate('ChIJ_c9_report_single', SINGLE_STORE_NAME),
@@ -414,7 +421,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
    */
   async function seedCompletedOwnerWithStores(lineUserId: string, candidates: readonly StoreCandidate[]): Promise<string[]> {
     const pool = await getPool();
-    const owner = await createOwner(pool, { agencyId: AG, lineUserId });
+    const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId });
     await getOrCreateSession(pool, lineUserId);
     await updateSession(pool, lineUserId, { stage: 'completed', ownerId: owner.id });
     const identification = createStoreIdentificationService({ pool, places: createFakePlaces({ kind: 'empty' }) });
@@ -900,7 +907,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
      */
     async function seedAgencyRegisteredOwner(lineUserId: string, storeCandidate: StoreCandidate): Promise<string> {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId });
       await getOrCreateSession(pool, lineUserId);
       await updateSession(pool, lineUserId, { stage: 'await_store_name', ownerId: owner.id });
       const outcome = await createStoreIdentificationService({
