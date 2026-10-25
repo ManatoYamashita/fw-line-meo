@@ -8,7 +8,7 @@
 # **値・整形方式・棚卸しの網羅**をガードする。
 #
 # 検証すること:
-#   1. 固定オフセット 5 実装を列挙し、いずれも正確に +09:00（32,400 秒）である
+#   1. 固定オフセット 6 実装を列挙し、いずれも正確に +09:00（32,400 秒）である
 #   2. 各用途が宣言した整形方式（UTC getter / UTC 0時への再構成）を保っている
 #   3. SQL の Asia/Tokyo 月境界も棚卸しへ載り、宣言した式が実在する
 #   4. 実装候補 → 宣言、宣言 → 実装を両方向で照合し、6つ目の列挙漏れを赤にする
@@ -32,6 +32,7 @@ EXPECTED_OFFSET_SECONDS=32400
 # せず、`AT TIME ZONE 'Asia/Tokyo'` の宣言と棚卸しだけを守る。
 IMPLEMENTATIONS=(
   'ts-iso-date|ts/apps/store-detail/lib/data.ts|JST_OFFSET_MS|milliseconds'
+  'ts-iso-date-of|ts/apps/dashboard-web/src/lib/jst-date.ts|JST_OFFSET_MS|milliseconds'
   'ts-components-date-hour|ts/apps/delivery-job/src/index.ts|JST_OFFSET_MS|milliseconds'
   'ts-components-date|ts/apps/line-webhook/src/report/handler.ts|JST_OFFSET_MS|milliseconds'
   'ts-review-time|ts/apps/line-webhook/src/report/builders/new-reviews.ts|JST_OFFSET_MINUTES|minutes'
@@ -303,6 +304,10 @@ for entry in "${IMPLEMENTATIONS[@]}"; do
   case "$kind" in
     ts-iso-date)
       require_literal_once "$path" 'new Date(Date.now() + JST_OFFSET_MS).toISOString().slice(0, 10)' 'JST 暦日の ISO 整形' || fail=1
+      ;;
+    ts-iso-date-of)
+      # 与えた時刻の JST 暦日（Issue #485・管理ダッシュボードの作成日の表示）。
+      require_literal_once "$path" 'return new Date(time + JST_OFFSET_MS).toISOString().slice(0, 10);' '時刻の JST 暦日の ISO 整形' || fail=1
       ;;
     ts-components-date-hour)
       require_literal_once "$path" 'const jst = new Date(now.getTime() + JST_OFFSET_MS);' 'JST への時刻移動' || fail=1

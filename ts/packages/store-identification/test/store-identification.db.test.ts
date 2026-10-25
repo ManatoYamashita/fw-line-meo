@@ -8,6 +8,7 @@ import type { SearchOutcome, PlacesSearchAdapter } from '../src/places-search.js
 // 他ファイルと衝突しない専用 UUID プレフィックス（e7）。DATABASE_URL 無しは skip。
 const OP = 'e7777777-7777-7777-7777-777777777770';
 const AG = 'e7777777-7777-7777-7777-777777777771';
+const CODE = 'e7777777-7777-7777-7777-7777777486c1';
 const NON_EXISTENT_OWNER_ID = 'e7777777-7777-7777-7777-77777777ffff';
 
 function candidate(placeId: string, name = 'テスト店舗'): StoreCandidate {
@@ -35,6 +36,12 @@ describe.skipIf(!process.env.DATABASE_URL)('StoreIdentificationService (DB)', ()
       AG,
       OP,
       'store-ident代理店',
+    ]);
+    // オーナー作成には登録に用いた招待コードが要る（owners.invite_code_id・0017・#486）。
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      CODE,
+      AG,
+      'IDENTCODE1',
     ]);
   });
 
@@ -73,7 +80,7 @@ describe.skipIf(!process.env.DATABASE_URL)('StoreIdentificationService (DB)', ()
   describe('confirmStore', () => {
     it('store 作成（confirmed・place_id）と owner の store_identified 遷移を単一 TX で行う（Req 4.2）', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-ident-1' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-ident-1' });
       const service = createStoreIdentificationService({
         pool,
         places: stubPlaces({ kind: 'empty' }),
@@ -96,8 +103,8 @@ describe.skipIf(!process.env.DATABASE_URL)('StoreIdentificationService (DB)', ()
 
     it('同一 place_id を別オーナーが確定しようとすると place_already_registered（Req 4.4）で、2 人目の owner 状態は変わらない', async () => {
       const pool = await getPool();
-      const ownerA = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-ident-2a' });
-      const ownerB = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-ident-2b' });
+      const ownerA = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-ident-2a' });
+      const ownerB = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-ident-2b' });
       const service = createStoreIdentificationService({
         pool,
         places: stubPlaces({ kind: 'empty' }),
@@ -120,7 +127,7 @@ describe.skipIf(!process.env.DATABASE_URL)('StoreIdentificationService (DB)', ()
 
     it('同一オーナーが同一 place_id を2回確定しようとしても（連打・遅延再送）冪等に confirmed を返す（PR #15 レビュー是正）', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-ident-3' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-ident-3' });
       const service = createStoreIdentificationService({
         pool,
         places: stubPlaces({ kind: 'empty' }),

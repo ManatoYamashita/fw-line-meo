@@ -177,6 +177,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
     return handleStoreSearch(deps.storeRegistration.search, {
       authorization: authHeader(c),
       body: parsed.body,
+      log: c.get('correlationLog'),
     });
   });
 

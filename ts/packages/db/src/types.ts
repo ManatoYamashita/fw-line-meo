@@ -65,6 +65,8 @@ export interface OwnerRow {
   created_at: Date;
   // 0004: 配信時刻（JST・時単位・0-23・デフォルト 7）。
   delivery_hour: number;
+  // 0017: 登録に用いられた招待コード。null = 記録なし（0017 より前の登録・agency-dashboard Req 8.4）。
+  invite_code_id: string | null;
 }
 
 export interface StoreRow {
@@ -301,11 +303,20 @@ export interface StoreListItem {
 }
 
 // 代理店配下オーナー一覧の 1 行。
+// オーナーの登録に用いられた招待コード（agency-dashboard Req 8.5）。disabled は登録後に無効化されたか。
+export interface OwnerInviteCodeRecord {
+  id: string;
+  code: string;
+  disabled: boolean;
+}
+
 export interface OwnerListItem {
   id: string;
   displayName: string | null;
   onboardingStatus: OnboardingStatus;
   createdAt: Date;
+  /** null = 記録なし（0017 より前の登録）。推定で埋めない（Req 8.4）。 */
+  inviteCode: OwnerInviteCodeRecord | null;
 }
 
 // 招待コード一覧・作成・無効化の戻り型（disabled = disabled_at IS NOT NULL）。

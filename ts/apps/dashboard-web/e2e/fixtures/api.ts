@@ -125,12 +125,62 @@ export const INVITE_CODES = [
   },
 ] as const;
 
+/**
+ * 店舗登録のオーナー選択（Issue #485）が表で出すオーナー。STORES の 2 店舗の持ち主 2 人に、店舗を持たない
+ * 1 人を足す。表示名の無いオーナー（「（表示名なし）」と作成日で区別する）と、店舗 0 件の案内
+ * （「登録済みの店舗はありません」）を実描画の監査へ載せるためである。
+ * 招待コードの記録（agency-dashboard Req 8.5）は、記録ありと記録なし（null）の両方の行を置く。
+ */
 export const OWNERS = [
   {
     id: '33333333-3333-3333-3333-333333333333',
     displayName: 'オーナー太郎',
     onboardingStatus: 'store_identified',
-    createdAt: '2026-08-01T09:00:00.000Z',
+    // 登録に用いたコード（INVITE_CODES[0]）の発行より後に登録した形にそろえる。
+    createdAt: '2026-08-12T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+  },
+  {
+    // STORES[1] のオーナーと同一人物（表示名の無いオーナー）。招待コードの記録を始める前の登録の形。
+    id: '33333333-3333-3333-3333-333333333334',
+    displayName: null,
+    onboardingStatus: 'store_identified',
+    createdAt: '2026-08-02T09:00:00.000Z',
+    inviteCode: null,
+  },
+  {
+    // 同じコードで複数のオーナーが登録できる（Req 2.5）ので、オーナー太郎と同じコードの記録を持つ。
+    id: '33333333-3333-3333-3333-333333333335',
+    displayName: '佐藤 花子',
+    onboardingStatus: 'pending',
+    createdAt: '2026-08-20T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+  },
+] as const;
+
+/**
+ * 店名検索の候補（Issue #485）。未登録 1 件と登録済み 1 件。登録済みの候補は押しボタンにならず
+ * 「登録済み」のラベルと理由の文で描かれるので、その形も実描画の監査と幅の実測へ載せる。
+ * 名前は面を最も横へ広げる側（LONG_STORE_NAME）を登録済みに置く。
+ */
+export const SEARCH_CANDIDATES = [
+  {
+    placeId: 'ChIJ-e2e-unregistered',
+    name: 'スターバックス コーヒー 中目黒駅前店',
+    address: '東京都目黒区上目黒1-1-1',
+    latitude: 35.644,
+    longitude: 139.699,
+    types: ['cafe'],
+    alreadyRegistered: false,
+  },
+  {
+    placeId: 'ChIJ-e2e-registered',
+    name: LONG_STORE_NAME,
+    address: '東京都目黒区青葉台2-19-23',
+    latitude: 35.649,
+    longitude: 139.694,
+    types: ['cafe'],
+    alreadyRegistered: true,
   },
 ] as const;
 
@@ -148,6 +198,7 @@ const RESPONSES: Record<string, unknown> = {
   '/dashboard-users': { users: DASHBOARD_USERS },
   '/invite-codes': { inviteCodes: INVITE_CODES },
   '/categories': { categories: CATEGORIES },
+  '/stores/search': { candidates: SEARCH_CANDIDATES },
 };
 
 /**
@@ -515,6 +566,46 @@ export async function openStoreSuspendDialog(page: Page): Promise<void> {
 }
 
 /**
+ * 店舗登録を運営で開き、**オーナーの表が実際に描けている**ことを先に固定する（Issue #485）。
+ *
+ * 代理店が 1 件なので区画は開いた状態で始まる。前提 assert は区画の中の表と行の数で置く。
+ * 区画が閉じたまま・取得が失敗したままの画面には違反が出ようがない。
+ */
+export async function openStoreRegistrationOwners(page: Page): Promise<void> {
+  await stubDashboardApi(page);
+  await page.goto('/stores/new');
+  await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
+  const region = page.getByRole('region', { name: `${AGENCIES[0].name} のオーナー` });
+  await expect(region.getByRole('table')).toBeVisible();
+  await expect(region.getByRole('row')).toHaveCount(OWNERS.length + 1);
+}
+
+/**
+ * 店舗登録でオーナーを選び、店名検索の結果（登録済みの候補を含む）が描けた状態で止める（Issue #485）。
+ *
+ * `goto` は持たない。開く手順は `openStoreRegistrationOwners` に一本化する。前提 assert は、
+ * 未登録の候補の押しボタンと、登録済みの候補の理由の文の両方で置く（片方だけでは、登録済みの
+ * 候補が押しボタンのまま描かれる退行や、候補が出ない状態を監査して緑にしうる）。
+ * 検索の成功は Toast でも知らせる。狭い画面では下部中央に出て候補に重なるので、閉じてから返す。
+ */
+export async function openStoreSearchResults(page: Page): Promise<void> {
+  await openStoreRegistrationOwners(page);
+  await page.getByRole('button', { name: `${OWNERS[0].displayName}を選ぶ`, exact: true }).click();
+  await expect(page.getByRole('heading', { level: 2, name: '店名検索' })).toBeFocused();
+  await page.getByLabel('店名').fill('スターバックス');
+  await page.getByRole('button', { name: '検索', exact: true }).click();
+  const [unregistered, registered] = SEARCH_CANDIDATES;
+  await expect(
+    page.getByRole('button', { name: `${unregistered.name}（${unregistered.address}）`, exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('この店舗はすでに登録されています')).toBeVisible();
+  await expect(page.getByRole('button', { name: new RegExp(registered.address) })).toHaveCount(0);
+  await waitForToastsSettled(page);
+  await dismissToasts(page);
+}
+
+/**
  * 自動 a11y 監査だけが回す、一覧の上に重なる後続状態（store-suspension Issue #252）。
  *
  * **`DASHBOARD_SURFACES` へは入れない。** あの一覧は横スクロールと携帯端末の幅の配置の実測も
@@ -562,7 +653,7 @@ export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
 ];
 
 /**
- * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す。**
+ * 管理ダッシュボードの検証対象 9 面。**面を足したらここへ足す。**
  *
  * 自動で拾うのは自動 a11y 監査（`a11y-audit.spec.ts`）と携帯端末の幅の配置の実測
  * （`mobile-layout.spec.ts`。面ごとの宣言 `LAYOUT` にも足すこと）である。横スクロールの実測
@@ -622,13 +713,15 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: openUserEditPanel,
   },
   {
+    // 運営で開く。代理店が 1 件なので、その区画は開いた状態で始まる（Issue #485）。
+    // 「運営が区画を開いた状態」はこの面が受け持つ。オーナーの表（見出し行＋3 人）が出るまで待つ。
     where: '店舗登録',
-    open: async (page) => {
-      await stubDashboardApi(page);
-      await page.goto('/stores/new');
-      await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
-      await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
-      await expect(page.getByRole('combobox').first()).toBeVisible();
-    },
+    open: openStoreRegistrationOwners,
+  },
+  {
+    // 店名検索の結果は店舗登録の中で進む後続状態である。同じ URL の後続状態は、面として明示
+    // しない限り一度も監査されない（QR パネル・編集パネルと同じ罠・Issue #485）。
+    where: '店舗登録の検索結果',
+    open: openStoreSearchResults,
   },
 ];

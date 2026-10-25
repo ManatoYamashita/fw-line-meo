@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
+import type {
+  ActiveInviteCode,
+  CreateOwnerInput,
+  OnboardingSessionRow,
+  OwnerRow,
+  Queryable,
+  SessionPatch,
+  StoreCandidate,
+} from '@fwlm/db';
 import {
   createConversationHandlers,
   type ConversationDeps,
@@ -40,6 +48,8 @@ import type { ReportReadsAccessor } from '../../src/report/handler.js';
 
 const FIXED_NOW = new Date('2026-07-11T00:00:00.000Z');
 const AGENCY_ID = 'agency-1';
+// 照合した招待コードの行の id（agency-dashboard Req 8.1・#486）。
+const INVITE_CODE_ID = 'invite-code-1';
 const RICHMENU_COMPLETED_ID = 'richmenu-completed-1';
 const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 
@@ -86,6 +96,8 @@ function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     created_at: FIXED_NOW,
     // スキーマ既定（0004 マイグレーション）。OwnerRow で必須のためヘルパで満たす。
     delivery_hour: 7,
+    // 0017（#486）。登録に用いた招待コード。null = 記録なし。
+    invite_code_id: null,
     ...overrides,
   };
 }
@@ -123,10 +135,10 @@ function createFakeSessionsAccessor(initial: OnboardingSessionRow): {
 
 function createFakeOwnersAccessor(existingOwner: OwnerRow | null): {
   accessor: OwnersAccessor;
-  createOwnerCalls: { db: Queryable; input: unknown }[];
+  createOwnerCalls: { db: Queryable; input: CreateOwnerInput }[];
   findCalls: string[];
 } {
-  const createOwnerCalls: { db: Queryable; input: unknown }[] = [];
+  const createOwnerCalls: { db: Queryable; input: CreateOwnerInput }[] = [];
   // 照会の回数。会話の入口の 1 回だけであることを確かめる（line-on-demand-report design.md「Performance」）。
   const findCalls: string[] = [];
   const accessor: OwnersAccessor = {
@@ -136,13 +148,17 @@ function createFakeOwnersAccessor(existingOwner: OwnerRow | null): {
     },
     async createOwner(db, input) {
       createOwnerCalls.push({ db, input });
-      return baseOwner({ agency_id: input.agencyId, line_user_id: input.lineUserId });
+      return baseOwner({
+        agency_id: input.agencyId,
+        line_user_id: input.lineUserId,
+        invite_code_id: input.inviteCodeId,
+      });
     },
   };
   return { accessor, createOwnerCalls, findCalls };
 }
 
-function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: string }>): {
+function createFakeInviteCodesAccessor(validCodes: Record<string, ActiveInviteCode>): {
   accessor: InviteCodesAccessor;
   findCalls: string[];
 } {
@@ -264,7 +280,7 @@ function createFakeRouterFactory(): {
 function buildDeps(overrides: {
   session: OnboardingSessionRow;
   existingOwner?: OwnerRow | null;
-  validCodes?: Record<string, { agencyId: string }>;
+  validCodes?: Record<string, ActiveInviteCode>;
   now?: Date;
   searchOutcome?: SearchOutcome;
   confirmOutcome?: ConfirmOutcome;
@@ -360,7 +376,7 @@ describe('createConversationHandlers', () => {
       const session = baseSession({ invite_failures: 2 });
       const { deps, sessionsFake, ownersFake, poolFake, messenger } = buildDeps({
         session,
-        validCodes: { VALIDCODE: { agencyId: AGENCY_ID } },
+        validCodes: { VALIDCODE: { id: INVITE_CODE_ID, agencyId: AGENCY_ID } },
       });
       const handlers = createConversationHandlers(deps);
 
@@ -372,10 +388,11 @@ describe('createConversationHandlers', () => {
       };
       await handlers.handleEvent(event);
 
-      // owner 作成
+      // owner 作成。照合したコードの行の id を、登録に用いたコードとして同じ作成で渡す（agency-dashboard Req 8.1）。
       expect(ownersFake.createOwnerCalls).toHaveLength(1);
       expect(ownersFake.createOwnerCalls[0]?.input).toMatchObject({
         agencyId: AGENCY_ID,
+        inviteCodeId: INVITE_CODE_ID,
         lineUserId: 'U1',
       });
 
@@ -471,7 +488,7 @@ describe('createConversationHandlers', () => {
       const session = baseSession({ invite_failures: 5, locked_until: lockedUntil });
       const { deps, sessionsFake, inviteCodesFake, messenger } = buildDeps({
         session,
-        validCodes: { VALIDCODE: { agencyId: AGENCY_ID } },
+        validCodes: { VALIDCODE: { id: INVITE_CODE_ID, agencyId: AGENCY_ID } },
       });
       const handlers = createConversationHandlers(deps);
 
@@ -1351,7 +1368,7 @@ describe('店舗特定済みオーナーの振り分け（line-on-demand-report 
       const h = buildDeps({
         session: sessionAt(stage),
         existingOwner: storeIdentified,
-        validCodes: { ABCD1234: { agencyId: AGENCY_ID } },
+        validCodes: { ABCD1234: { id: INVITE_CODE_ID, agencyId: AGENCY_ID } },
         searchOutcome: { kind: 'found', candidates: storeCandidates(2) },
       });
 

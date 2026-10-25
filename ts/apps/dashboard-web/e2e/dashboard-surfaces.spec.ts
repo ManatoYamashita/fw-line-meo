@@ -25,9 +25,9 @@ import { POSTER_CAUTION, POSTER_INVITATION, PROHIBITED_EXAMPLES } from '../src/l
 // 前提: `E2E_STUB_IDP=1` と `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3199` を与えて
 // ビルドしたものに対して走らせる（playwright.config.ts の説明）。
 //
-// 捲れる領域の宣言件数は面ごとに異なる。表を持つ 5 面は表の容器で 1 件（task 2.3 / 2.4 / 2.5）、
-// 表を持たない面（ログイン・店舗登録）は 0 件である（店舗登録の候補一覧は押しボタンの並びであって
-// 表ではない）。**帯はどの面でも 0 件である**（Issue #283 で 2 段へ改めた・下の宣言を参照）。
+// 捲れる領域の宣言件数は面ごとに異なる。表を持つ面は表の容器で 1 件（task 2.3 / 2.4 / 2.5）、
+// 表を持たない面（ログイン・店舗登録の検索結果）は 0 件である（候補一覧は押しボタンの並びであって
+// 表ではない）。店舗登録のオーナー選択は Issue #485 で表を持った。**帯はどの面でも 0 件である**（Issue #283 で 2 段へ改めた・下の宣言を参照）。
 // 宣言と実測が食い違えば赤くなり、宣言の更新が強制される。**それが件数宣言の本来の働きである。**
 // （task 2.3 / 2.4 / 2.5 では実際にそう起きた: 宣言 1 に対して実測 2 で赤くなり、下の宣言を書き足した。）
 
@@ -63,7 +63,7 @@ const NAV_SCROLL_REGIONS = 0;
 // ページ全体を横に溢れさせない」と定めており、これは事故ではなく設計どおりの 1 件である。
 // 容器は表の外側にあり、内側を免除しても容器自身の右端は依然として端末幅と比べられる。
 //
-// **面ごとに足す。** 表を持たない面（ログイン・店舗登録）はこれを足さない。
+// **面ごとに足す。** 表を持たない面（ログイン・店舗登録の検索結果）はこれを足さない。
 const TABLE_SCROLL_REGIONS = 1;
 
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
@@ -499,14 +499,20 @@ test.describe('モバイルビューポートの利用者管理の編集パネ�
 // 店舗登録は Issue #186 の**最後の 1 面**であり、task 5.2 が `@fwlm/ui` の `Select` へ移して
 // 是正した。是正前は素の `<select>` が最長の選択肢の幅まで伸びて 472px（端末幅 393px）だった。
 //
-// **この面には表が無い。** 候補一覧は押しボタンの並びであって `TableContainer` を通らないので、
-// 捲れる領域は 0 件である。表を持つ面と件数が違うのはそのためであり、書き写しの誤りではない。
+// Issue #485 でオーナー選択が表（`TableContainer`）を持ったので、オーナー選択の段の捲れる領域は 1 件である。
+// 検索結果の段は表を持たない（候補一覧は押しボタンと登録済みの札の並び）ので 0 件のまま。
 //
 // 是正を検出したのは「既知の溢れ」の 2 枚の網の**両方**である（下の「畳んだ理由」を参照）。
 test('モバイルビューポートの店舗登録で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('店舗登録').open(page);
+  // オーナーの表の容器 1 件（帯は捲れる領域を持たない）。
+  await expectNoHorizontalScroll(page, '店舗登録', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+test('モバイルビューポートの店舗登録の検索結果で横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('店舗登録の検索結果').open(page);
   // 0 件（表も捲れる帯も持たない）。
-  await expectNoHorizontalScroll(page, '店舗登録', NAV_SCROLL_REGIONS);
+  await expectNoHorizontalScroll(page, '店舗登録の検索結果', NAV_SCROLL_REGIONS);
 });
 
 test('モバイルビューポートのログイン画面で横スクロールが発生しない', async ({ page }) => {
@@ -516,6 +522,8 @@ test('モバイルビューポートのログイン画面で横スクロール�
 
 // Issue #286: 縦積みの Field は FieldLabel と制御を直接隣接させる。FieldLabel が下側へ広げた
 // 操作領域によって、見た目の間隔も押せることを管理面の実物で測る。
+// Issue #485: 店舗登録のオーナー選択の段は選択欄（代理店）を持たなくなり、検索結果の段の店名の
+// 記入欄が加わった（14 - 1 + 1）。
 const STACKED_FIELD_VISIT_TOTAL = 14;
 
 test('管理面の縦積み Field は、ラベルと制御の間に反応しない帯を残さない', async ({ page }) => {
@@ -524,7 +532,7 @@ test('管理面の縦積み Field は、ラベルと制御の間に反応しな�
 
   // ログイン面を途中に挟むと、認証を外す fixture が後続にも残る。Field を実際に持つ 5 面だけを、
   // 認証済みの入口から開く（一覧に存在しない面名は surfaceByName が即時に失敗させる）。
-  for (const where of ['代理店管理', '招待コード', '利用者管理', '利用者管理の編集パネル', '店舗登録']) {
+  for (const where of ['代理店管理', '招待コード', '利用者管理', '利用者管理の編集パネル', '店舗登録の検索結果']) {
     const surface = surfaceByName(where);
     await surface.open(page);
     const labels = page.locator(
@@ -603,13 +611,14 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
     招待コード: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     利用者管理: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     '利用者管理の編集パネル': NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
-    店舗登録: NAV_SCROLL_REGIONS,
+    店舗登録: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    店舗登録の検索結果: NAV_SCROLL_REGIONS,
   };
 
   test('宣言が検証面の一覧と一致する', () => {
     expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(REGIONS));
     // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-    expect(Object.keys(REGIONS)).toHaveLength(8);
+    expect(Object.keys(REGIONS)).toHaveLength(9);
   });
 
   for (const surface of DASHBOARD_SURFACES) {

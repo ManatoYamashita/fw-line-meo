@@ -62,7 +62,13 @@ describe('店舗系 API クライアント', () => {
 
   it('getOwners は { owners } をアンラップする', async () => {
     const owners = [
-      { id: 'o1', displayName: 'オーナー1', onboardingStatus: 'active', createdAt: '2026-01-01T00:00:00Z' },
+      {
+        id: 'o1',
+        displayName: 'オーナー1',
+        onboardingStatus: 'active',
+        createdAt: '2026-01-01T00:00:00Z',
+        inviteCode: { id: 'c1', code: 'ABCD2345', disabled: false },
+      },
     ];
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { owners }));
     const result = await getOwners({}, { getToken: async () => 't', fetchImpl });
@@ -93,6 +99,23 @@ describe('店舗系 API クライアント', () => {
     const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body))).toEqual({ query: '鳥貴族' });
+  });
+
+  it('searchStores は登録済みの注釈を候補本体から外して持つ（Issue #485）', async () => {
+    const candidate = {
+      placeId: 'p1',
+      name: '店A',
+      address: '東京都',
+      latitude: 35.6,
+      longitude: 139.7,
+      types: ['restaurant'],
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { candidates: [{ ...candidate, alreadyRegistered: true }] }));
+    const result = await searchStores('店A', { getToken: async () => 't', fetchImpl });
+    expect(result).toEqual({ ok: true, value: [{ candidate, alreadyRegistered: true }] });
+    if (result.ok) expect(result.value[0]!.candidate).not.toHaveProperty('alreadyRegistered');
   });
 
   it('searchStores は 502 places_error を { ok:false, code } に写す', async () => {

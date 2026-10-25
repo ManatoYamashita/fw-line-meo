@@ -8,8 +8,8 @@ import {
   expectToastsSettled,
 } from './fixtures/api';
 
-// 管理ダッシュボード 8 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを、
-// Issue #259 で利用者の編集パネルを追加）と、一覧の上に重なる後続状態の監査（Issue #252 で
+// 管理ダッシュボード 9 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを、
+// Issue #259 で利用者の編集パネルを、Issue #485 で店舗登録の検索結果を追加）と、一覧の上に重なる後続状態の監査（Issue #252 で
 // 停止の確認ダイアログを、Issue #342 で操作失敗 Toast を追加）。
 //
 // 横スクロール実測（dashboard-surfaces.spec.ts）と同じ面定義を使う。面が本体を描けている

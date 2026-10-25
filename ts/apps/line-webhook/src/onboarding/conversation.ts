@@ -1,5 +1,7 @@
 import type {
+  ActiveInviteCode,
   AuditLogger,
+  CreateOwnerInput,
   OnboardingSessionRow,
   OwnerRow,
   Queryable,
@@ -64,14 +66,14 @@ export interface SessionsAccessor {
 
 export interface OwnersAccessor {
   findOwnerByLineUserId(db: Queryable, lineUserId: string): Promise<OwnerRow | null>;
-  createOwner(
-    db: Queryable,
-    input: { agencyId: string; lineUserId: string; displayName?: string | null },
-  ): Promise<OwnerRow>;
+  // 入力は @fwlm/db の CreateOwnerInput をそのまま使う（agency-dashboard Req 8.1・Issue #486）。
+  // ここで独自の狭い型を書くと、メソッド構文の引数は双変に検査されるため、正典側で必須にした
+  // inviteCodeId を渡し忘れても型検査を通ってしまう（7.2 で実測）。
+  createOwner(db: Queryable, input: CreateOwnerInput): Promise<OwnerRow>;
 }
 
 export interface InviteCodesAccessor {
-  findActiveInviteCode(db: Queryable, code: string): Promise<{ agencyId: string } | null>;
+  findActiveInviteCode(db: Queryable, code: string): Promise<ActiveInviteCode | null>;
 }
 
 /** 補助的処理の成否を記録する契約。事象名で識別する。 */
@@ -303,7 +305,7 @@ async function handleInvalidInviteCode(
 async function handleValidInviteCode(
   deps: ConversationDeps,
   event: Extract<InboundEvent, { kind: 'text' }>,
-  activeCode: { agencyId: string },
+  activeCode: ActiveInviteCode,
 ): Promise<void> {
   const profile = await deps.messenger.getProfile(event.lineUserId);
   const displayName = profile?.displayName ?? null;
@@ -316,8 +318,11 @@ async function handleValidInviteCode(
   try {
     await client.query('BEGIN');
 
+    // 登録に用いたコードを同じ INSERT で記録する（agency-dashboard Req 8.1）。代理店とコードは同じ照合結果の
+    // 行から取るので食い違わない。食い違えば owners の複合 FK が拒否する（Req 8.2）。
     newOwner = await deps.owners.createOwner(client, {
       agencyId: activeCode.agencyId,
+      inviteCodeId: activeCode.id,
       lineUserId: event.lineUserId,
       displayName,
     });
