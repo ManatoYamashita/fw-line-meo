@@ -293,6 +293,9 @@ sequenceDiagram
 | 3.9 | 登録済み Place の拒否 | ConfirmOutcome place_already_registered → 409 | 同上 |
 | 3.10 | オーナーを店舗特定済みへ遷移 | confirmStore TX 内 markOwnerStoreIdentified | 同上 |
 | 3.11 | Google 公式手段のみで候補取得 | PlacesSearchAdapter 単一実装（FieldMask 固定） | Allowed Dependencies |
+| 3.12 | オーナー選択で登録済み店舗を提示 | stores/new（OwnerRosterTable）, lib/agency-roster（GET /owners と GET /stores の並行取得・groupStoresByOwner） | 取得失敗を 0 件と提示しない |
+| 3.13 | 登録済みの検索候補を選択不可で提示 | POST /stores/search の `alreadyRegistered`（listRegisteredPlaceIds・1 回の照合）, stores/new | 照合失敗は 500。確定時の 409（3.9）は残す |
+| 3.14 | 検索以降の段で登録先のオーナーを提示 | stores/new（登録先の表示・「オーナーを選び直す」） | 一覧と開閉状態はウィザード側で保持 |
 | 4.1 | 代理店の担当店舗一覧 | GET /stores, stores/page | listStoresWithStatus |
 | 4.2 | 運営は全店舗＋代理店識別 | 同上（agencyName 同梱） | 同上 |
 | 4.3 | 店舗特定・競合設定ステータス表示 | listStoresWithStatus（place_status＋competitors EXISTS） | 同上 |
@@ -413,7 +416,7 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 | GET | /stores | `?agencyId=`（operator のみ有効） | `{ stores: StoreListItem[] }` | 401, 403 |
 | GET | /owners | `?agencyId=`（operator は必須） | `{ owners: OwnerListItem[] }`（各オーナーに登録に用いた招待コード `inviteCode: { id, code, disabled } \| null`・null = 記録なし・Issue #486） | 400(operator の agencyId 未指定), 401, 403 |
 | GET | /categories | — | `{ categories: { code, label }[] }` | 401, 403 |
-| POST | /stores/search | `{ query: string }` | `{ candidates: StoreCandidate[] }`（最大10・0件は空配列で 200） | 400, 401, 403, 502(places_error) |
+| POST | /stores/search | `{ query: string }` | `{ candidates: (StoreCandidate & { alreadyRegistered: boolean })[] }`（最大10・0件は空配列で 200。`alreadyRegistered` は `stores.place_id` に同値があれば true で停止中の店舗を含む。どの店舗・オーナー・代理店かは返さない・Issue #485） | 400, 401, 403, 500(internal・登録済みの照合の失敗), 502(places_error) |
 | POST | /stores | `{ ownerId, candidate: StoreCandidate, categoryCode? }` | `{ storeId }` | 400, 401, 403, 409(place_already_registered) |
 | GET | /invite-codes | `?agencyId=`（operator は必須） | `{ inviteCodes: InviteCodeItem[] }` | 400(operator の agencyId 未指定), 401, 403 |
 | POST | /invite-codes | `{ agencyId? }`（agency は省略＝自代理店・operator は必須） | `{ inviteCode: InviteCodeItem }` | 400, 401, 403, 500 |
@@ -426,6 +429,7 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 
 - エラー封筒は既存 `jsonError` の `{ error: { code, message } }` に統一。message は日本語（7.3, 7.4）。
 - 検索の `empty`（0件）は 200＋空配列で返す（UI が 3.5 の再検索案内を出す）。`error` のみ 502。
+- 検索の `found` だけ、候補の placeId を 1 回の問い合わせ（`listRegisteredPlaceIds`・読み取りのみで書込境界は不変）で照合する。照合に失敗したら未登録で埋めずに 500 を返す。`empty`・`error` では照合しない（Issue #485）。
 - POST /stores のサーバー側検証: `ownerId` がスコープ内 agency 配下であること（2.3, 2.4）、`candidate` の形状検証、`categoryCode` は categories に存在するコードのみ（無指定可）。
 - POST /stores の `categoryCode` 反映は、凍結 TX 契約 `confirmStore`（stores INSERT confirmed ＋ owner 遷移）の**外**で行う best-effort 更新（`@fwlm/db` の `setStoreCategory`）。設定に失敗しても登録本体は成立済みのため 201 を維持し、storeId のみログに記録する（category は Go バッチ側にフォールバックがあるメタデータであり、Req 3.8/3.10 の中核＝Place 紐付け確定と owner 遷移は単一 TX で担保される）。
 - オーナー選択・招待コード操作は「具体的な 1 代理店」を要するため、operator のスコープ all をそのまま流用せず `agencyId` の明示指定を必須とする（未指定は 400 `validation_failed`）。運営は全代理店を横断ビューではなく代理店セレクタで 1 代理店ずつ操作する（5.4 を満たす採用 UX）。
