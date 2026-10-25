@@ -206,6 +206,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `dashboard-api.invite_code_issue_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/composition.ts` | 現行は事象名も識別子も持たず、どの対象の失敗か判定できない |
 | `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 | `dashboard-api.review_funnel_read_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/review-funnel.ts` | QR パネルの実績（Issue #401）の読み出しの失敗。応答は 500。項目は `storeId` だけで、件数も例外の文言も載せない |
+| `dashboard-api.registered_place_lookup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/store-registration.ts` | 店名検索の候補の登録済み照合（Issue #485）の失敗。検索全体を 500 で失敗させる（未登録で埋めない）。項目を持たない。検索の語と候補の `placeId` は検索の語を推定できるため載せない |
 
 ---
 

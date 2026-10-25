@@ -57,6 +57,15 @@ export interface StoreCandidate {
   types: readonly string[];
 }
 
+// POST /stores/search の候補 1 件を画面側で持つ形（Issue #485）。
+// 応答の `alreadyRegistered` は「検索の注釈」であり、確定に送る候補（StoreCandidate）とは分けて持つ。
+// 型の上で混ぜると、注釈を確定の要求へ載せる経路が生まれる（サーバーは捨てるが、契約として混ぜない）。
+export interface StoreSearchResult {
+  candidate: StoreCandidate;
+  // stores.place_id に同じ値があれば true（停止中の店舗も含む）。どの代理店の店舗かは返らない。
+  alreadyRegistered: boolean;
+}
+
 // GET /categories の 1 件（seed が単一情報源）。
 export interface Category {
   code: string;

@@ -224,6 +224,26 @@ export async function listStoresWithStatus(
 }
 
 /**
+ * 与えた Place ID のうち、既に店舗として登録されているものを返す（Issue #485）。
+ *
+ * 店名検索の候補に「登録済み」を付けるための照合で、候補（最大 10 件）を 1 回の問い合わせで
+ * まとめて引く。停止中の店舗も登録済みとして返す。`ux_stores_place_id` は停止中の店舗も含むので、
+ * 確定すれば 409 になるためである。どの店舗・どのオーナーの行かは返さない（代理店ロールへ
+ * 他代理店の情報を出さない）。読み取りだけなので書込境界は変わらない。空配列は問い合わせない。
+ */
+export async function listRegisteredPlaceIds(
+  db: Queryable,
+  placeIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (placeIds.length === 0) return new Set();
+  const res = await db.query<{ place_id: string }>(
+    'SELECT place_id FROM stores WHERE place_id = ANY($1::text[])',
+    [[...placeIds]],
+  );
+  return new Set(res.rows.map((row) => row.place_id));
+}
+
+/**
  * 店舗のカテゴリを設定する（店舗登録の後追い設定・design「registerStore 合成」参照）。
  * confirmStore の凍結 TX 契約の外で呼ばれる best-effort 更新のため、
  * 失敗時の扱い（登録本体を失敗させない）は呼び出し側が決める。

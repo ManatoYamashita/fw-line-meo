@@ -47,7 +47,7 @@ function fakeAppDeps(): AppDeps {
     owners: { auth, listOwners: notCalled },
     categories: { auth, listCategories: notCalled },
     storeRegistration: {
-      search: { auth, searchCandidates: notCalled },
+      search: { auth, searchCandidates: notCalled, listRegisteredPlaceIds: notCalled },
       register: {
         auth,
         findOwner: notCalled,
