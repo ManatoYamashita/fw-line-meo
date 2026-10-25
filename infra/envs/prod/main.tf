@@ -108,8 +108,8 @@ module "run_services" {
         # 1 つの鍵を分け合うので、この env はイメージより先に入れる（infra/README.md §9-2-d）。
         SURVEY_TRUSTED_PROXY_IPS = google_compute_global_address.survey_web.address
         # Issue #441: 客向け新アンケートを全店に公開（店舗別の OFF / 設定行なしより優先）。
-        # 1 -> 0 に戻して対象 2 サービスへ Terraform を再適用すれば即座に従来の分岐へ戻せる。
-        SURVEY_FORCE_STRUCTURED  = "1"
+        # 1 -> 0 に戻して対象 2 サービスへ Terraform を再適用すれば即座に従来の分岐へ戻せる（手順は infra/README.md §3）。
+        SURVEY_FORCE_STRUCTURED = "1"
       }
     }
     "dashboard-api" = {
@@ -143,7 +143,7 @@ module "run_services" {
       secret_env     = {}
       env = {
         LIFF_CHANNEL_ID     = var.liff_channel_id
-        NEXT_PUBLIC_LIFF_ID   = var.liff_id
+        NEXT_PUBLIC_LIFF_ID = var.liff_id
         # 客向けの全店公開と同じ状態を店舗側設定の案内にも反映する。
         SURVEY_FORCE_STRUCTURED = "1"
       }
