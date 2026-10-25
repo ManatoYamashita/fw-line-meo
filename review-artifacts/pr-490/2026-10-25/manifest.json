@@ -1,0 +1,71 @@
+{
+  "tested_commit": "46f083ddf9e21c96ec0f00a8c99dfa21aad19f02",
+  "recorded_at_jst": "2026-10-25T12:43:27.844173+09:00",
+  "command": "CI=true bash scripts/run-e2e-local.sh --only surfaces",
+  "exit_code": 0,
+  "passed": 133,
+  "skipped": 4,
+  "failed": 0,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3057,
+      "sha256": "e78cc6f67b077f8fea7f2d71332d9719b5b62228434b03e7048062f96178c0d9"
+    },
+    {
+      "path": "capture/fixtures/pr490-evidence.ts",
+      "bytes": 501,
+      "sha256": "ecb28208f71b2fe48d83f4182a83dfb9e97cfa1941fde972539148c6bfa5d1dc"
+    },
+    {
+      "path": "capture/pr490-evidence.spec.ts",
+      "bytes": 2367,
+      "sha256": "9996703e3417ac4a028fb1a675bf79c74779103da4be331f7e9ec616a263d289"
+    },
+    {
+      "path": "dashboard-web-last-run.json",
+      "bytes": 45,
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "path": "e2e-surfaces.log",
+      "bytes": 48655,
+      "sha256": "f7f4ceb127fe7d85ae6334865e20621480791eac26a1ff76bb0c378e8d2fe0a3"
+    },
+    {
+      "path": "screenshots/agency-owners-desktop-1280.png",
+      "bytes": 59546,
+      "sha256": "a6974ae50c45216acbf9b8e94591a9d9a26e6581f44ae40f1909e453187d265b"
+    },
+    {
+      "path": "screenshots/agency-search-desktop-1280.png",
+      "bytes": 37663,
+      "sha256": "8d5497e3b3dc709c792649645e17414064f6e9182e7982367728adb6ed8811e9"
+    },
+    {
+      "path": "screenshots/operator-owners-desktop-1280.png",
+      "bytes": 67762,
+      "sha256": "d3319133b60f909145503a5e23546920d31d5b7a8f03faa8333542b2f2281619"
+    },
+    {
+      "path": "screenshots/operator-owners-mobile-320.png",
+      "bytes": 46753,
+      "sha256": "12c0958df0aff180bab4a2f442ad358c45cf12a96702e99a32a449c8c2077411"
+    },
+    {
+      "path": "screenshots/operator-search-desktop-1280.png",
+      "bytes": 62224,
+      "sha256": "2f33e3db1961b8cca6e6b6bb6767153dacfe980f2208e9a0379728e0df66f35b"
+    },
+    {
+      "path": "screenshots/operator-search-mobile-320.png",
+      "bytes": 54947,
+      "sha256": "ed00cbac043e9671f7b1890045e98b6766764cec3085c8881ff8804da105f9e4"
+    },
+    {
+      "path": "store-detail-last-run.json",
+      "bytes": 45,
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    }
+  ]
+}

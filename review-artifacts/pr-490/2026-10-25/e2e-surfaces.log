@@ -1,0 +1,508 @@
+
+==================================================================
+>> 準備（選んだ層: surfaces）
+==================================================================
+-- node v24.19.0・pnpm 10.33.2
+Scope: all 15 workspace projects
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+╭ Warning ─────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   Ignored build scripts: @firebase/util@1.15.1, @google/genai@1.52.0,        │
+│   protobufjs@7.6.5, sharp@0.34.5.                                            │
+│   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+│   to run scripts.                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Done in 1.4s using pnpm v10.33.2
+
+> fw-line-meo-ts@0.0.0 build /workspace/fw-line-meo/ts
+> pnpm -r build
+
+Scope: 14 of 15 workspace projects
+packages/db build$ tsc -p tsconfig.json
+packages/design-tokens build$ tsc -p tsconfig.json
+packages/design-tokens build: Done
+packages/gemini build$ tsc -p tsconfig.json
+packages/db build: Done
+packages/line-report build$ tsc -p tsconfig.json
+packages/gemini build: Done
+packages/observability build$ tsc -p tsconfig.json
+packages/line-report build: Done
+packages/observability build: Done
+apps/delivery-job build$ tsc -p tsconfig.json
+packages/store-identification build$ tsc -p tsconfig.json
+packages/store-identification build: Done
+apps/delivery-job build: Done
+apps/dashboard-api build$ tsc -p tsconfig.json
+apps/dashboard-web build$ next build
+apps/dashboard-web build: Attention: Next.js now collects completely anonymous telemetry regarding usage.
+apps/dashboard-web build: This information is used to shape Next.js' roadmap and prioritize features.
+apps/dashboard-web build: You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+apps/dashboard-web build: https://nextjs.org/telemetry
+apps/dashboard-web build: ▲ Next.js 16.2.10 (Turbopack)
+apps/dashboard-web build:   Creating an optimized production build ...
+apps/dashboard-api build: Done
+apps/line-webhook build$ tsc -p tsconfig.json && tsc -p tsconfig.scripts.json
+apps/line-webhook build: Done
+apps/store-detail build$ next build
+apps/store-detail build: Attention: Next.js now collects completely anonymous telemetry regarding usage.
+apps/store-detail build: This information is used to shape Next.js' roadmap and prioritize features.
+apps/store-detail build: You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+apps/store-detail build: https://nextjs.org/telemetry
+apps/store-detail build: ▲ Next.js 16.2.10 (Turbopack)
+apps/store-detail build:   Creating an optimized production build ...
+apps/dashboard-web build: ✓ Compiled successfully in 21.2s
+apps/dashboard-web build:   Running TypeScript ...
+apps/store-detail build: ✓ Compiled successfully in 20.9s
+apps/store-detail build:   Running TypeScript ...
+apps/dashboard-web build:   Finished TypeScript in 14.9s ...
+apps/dashboard-web build:   Collecting page data using 2 workers ...
+apps/dashboard-web build:   Generating static pages using 2 workers (0/12) ...
+apps/dashboard-web build:   Generating static pages using 2 workers (3/12) 
+apps/dashboard-web build:   Generating static pages using 2 workers (6/12) 
+apps/dashboard-web build:   Generating static pages using 2 workers (9/12) 
+apps/dashboard-web build: ✓ Generating static pages using 2 workers (12/12) in 913ms
+apps/dashboard-web build:   Finalizing page optimization ...
+apps/dashboard-web build: Route (app)
+apps/dashboard-web build: ┌ ○ /
+apps/dashboard-web build: ├ ○ /_not-found
+apps/dashboard-web build: ├ ○ /admin/agencies
+apps/dashboard-web build: ├ ○ /admin/users
+apps/dashboard-web build: ├ ○ /apple-icon.png
+apps/dashboard-web build: ├ ○ /health
+apps/dashboard-web build: ├ ○ /icon.png
+apps/dashboard-web build: ├ ○ /invite-codes
+apps/dashboard-web build: ├ ○ /login
+apps/dashboard-web build: ├ ○ /stores
+apps/dashboard-web build: └ ○ /stores/new
+apps/dashboard-web build: ○  (Static)  prerendered as static content
+apps/dashboard-web build: Done
+apps/survey-web build$ next build
+apps/survey-web build: Attention: Next.js now collects completely anonymous telemetry regarding usage.
+apps/survey-web build: This information is used to shape Next.js' roadmap and prioritize features.
+apps/survey-web build: You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+apps/survey-web build: https://nextjs.org/telemetry
+apps/survey-web build: ▲ Next.js 16.2.10 (Turbopack)
+apps/survey-web build:   Creating an optimized production build ...
+apps/store-detail build:   Finished TypeScript in 11.4s ...
+apps/store-detail build:   Collecting page data using 2 workers ...
+apps/store-detail build:   Generating static pages using 2 workers (0/7) ...
+apps/store-detail build:   Generating static pages using 2 workers (1/7) 
+apps/store-detail build:   Generating static pages using 2 workers (3/7) 
+apps/store-detail build:   Generating static pages using 2 workers (5/7) 
+apps/store-detail build: ✓ Generating static pages using 2 workers (7/7) in 304ms
+apps/store-detail build:   Finalizing page optimization ...
+apps/store-detail build: Route (app)
+apps/store-detail build: ┌ ○ /_not-found
+apps/store-detail build: ├ ƒ /api/detail
+apps/store-detail build: ├ ƒ /api/survey-settings
+apps/store-detail build: ├ ƒ /api/survey-settings/categories/[categoryCode]
+apps/store-detail build: ├ ƒ /api/survey-settings/targets
+apps/store-detail build: ├ ƒ /api/survey-settings/targets/[targetId]
+apps/store-detail build: ├ ƒ /api/survey-settings/targets/[targetId]/disable
+apps/store-detail build: ├ ƒ /api/survey-settings/targets/order
+apps/store-detail build: ├ ○ /apple-icon.png
+apps/store-detail build: ├ ○ /health
+apps/store-detail build: ├ ○ /icon.png
+apps/store-detail build: ├ ○ /store
+apps/store-detail build: └ ○ /store/survey-settings
+apps/store-detail build: ○  (Static)   prerendered as static content
+apps/store-detail build: ƒ  (Dynamic)  server-rendered on demand
+apps/store-detail build: Done
+apps/survey-web build: ✓ Compiled successfully in 16.9s
+apps/survey-web build:   Running TypeScript ...
+apps/survey-web build:   Finished TypeScript in 10.2s ...
+apps/survey-web build:   Collecting page data using 2 workers ...
+apps/survey-web build:   Generating static pages using 2 workers (0/9) ...
+apps/survey-web build:   Generating static pages using 2 workers (2/9) 
+apps/survey-web build:   Generating static pages using 2 workers (4/9) 
+apps/survey-web build:   Generating static pages using 2 workers (6/9) 
+apps/survey-web build: ✓ Generating static pages using 2 workers (9/9) in 451ms
+apps/survey-web build:   Finalizing page optimization ...
+apps/survey-web build: Route (app)
+apps/survey-web build: ┌ ○ /
+apps/survey-web build: ├ ○ /_not-found
+apps/survey-web build: ├ ƒ /api/drafts
+apps/survey-web build: ├ ƒ /api/responses
+apps/survey-web build: ├ ƒ /api/review-link-opened
+apps/survey-web build: ├ ○ /apple-icon.png
+apps/survey-web build: ├ ○ /health
+apps/survey-web build: ├ ○ /icon.png
+apps/survey-web build: ├ ○ /robots.txt
+apps/survey-web build: ├ ƒ /s/[storeId]
+apps/survey-web build: ├ ○ /sitemap.xml
+apps/survey-web build: └ ○ /ui-check
+apps/survey-web build: ○  (Static)   prerendered as static content
+apps/survey-web build: ƒ  (Dynamic)  server-rendered on demand
+apps/survey-web build: Done
+Downloading Chrome for Testing 149.0.7827.55 (playwright chromium v1228) from https://cdn.playwright.dev/builds/cft/149.0.7827.55/linux64/chrome-linux64.zip
+|                                                                                |   0% of 177 MiB
+|■■■■■■■■                                                                        |  10% of 177 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 177 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 177 MiB
+Chrome for Testing 149.0.7827.55 (playwright chromium v1228) downloaded to /home/agent/.cache/ms-playwright/chromium-1228
+Downloading FFmpeg (playwright ffmpeg v1011) from https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+Error: Download failed: server returned code 403 body 'Domain forbidden'. URL: https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+    at IncomingMessage.handleError (/workspace/fw-line-meo/ts/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/lib/coreBundle.js:27916:23)
+    at IncomingMessage.emit (node:events:521:24)
+    at endReadableNT (node:internal/streams/readable:1736:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+Downloading FFmpeg (playwright ffmpeg v1011) from https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+Error: Download failed: server returned code 403 body 'Domain forbidden'. URL: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+    at IncomingMessage.handleError (/workspace/fw-line-meo/ts/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/lib/coreBundle.js:27916:23)
+    at IncomingMessage.emit (node:events:521:24)
+    at endReadableNT (node:internal/streams/readable:1736:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+Downloading FFmpeg (playwright ffmpeg v1011) from https://cdn.playwright.dev/builds/ffmpeg/1011/ffmpeg-linux.zip
+|                                                                                |   0% of 2.3 MiB
+|■■■■■■■■                                                                        |  10% of 2.3 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 2.3 MiB
+FFmpeg (playwright ffmpeg v1011) downloaded to /home/agent/.cache/ms-playwright/ffmpeg-1011
+Downloading Chrome Headless Shell 149.0.7827.55 (playwright chromium-headless-shell v1228) from https://cdn.playwright.dev/builds/cft/149.0.7827.55/linux64/chrome-headless-shell-linux64.zip
+|                                                                                |   0% of 114.2 MiB
+|■■■■■■■■                                                                        |  10% of 114.2 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 114.2 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 114.2 MiB
+Chrome Headless Shell 149.0.7827.55 (playwright chromium-headless-shell v1228) downloaded to /home/agent/.cache/ms-playwright/chromium_headless_shell-1228
+
+==================================================================
+>> [surfaces]
+==================================================================
+-- IdP をスタブへ差し替えてビルドします（API の起点: http://127.0.0.1:3199）
+
+> @fwlm/dashboard-web@0.0.0 build /workspace/fw-line-meo/ts/apps/dashboard-web
+> next build
+
+▲ Next.js 16.2.10 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 8.2s
+  Running TypeScript ...
+  Finished TypeScript in 8.1s ...
+  Collecting page data using 2 workers ...
+  Generating static pages using 2 workers (0/12) ...
+  Generating static pages using 2 workers (3/12) 
+  Generating static pages using 2 workers (6/12) 
+  Generating static pages using 2 workers (9/12) 
+✓ Generating static pages using 2 workers (12/12) in 299ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /admin/agencies
+├ ○ /admin/users
+├ ○ /apple-icon.png
+├ ○ /health
+├ ○ /icon.png
+├ ○ /invite-codes
+├ ○ /login
+├ ○ /stores
+└ ○ /stores/new
+
+
+○  (Static)  prerendered as static content
+
+
+> @fwlm/store-detail@0.0.0 build /workspace/fw-line-meo/ts/apps/store-detail
+> next build
+
+▲ Next.js 16.2.10 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 9.1s
+  Running TypeScript ...
+  Finished TypeScript in 6.5s ...
+  Collecting page data using 2 workers ...
+  Generating static pages using 2 workers (0/7) ...
+  Generating static pages using 2 workers (1/7) 
+  Generating static pages using 2 workers (3/7) 
+  Generating static pages using 2 workers (5/7) 
+✓ Generating static pages using 2 workers (7/7) in 189ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /_not-found
+├ ƒ /api/detail
+├ ƒ /api/survey-settings
+├ ƒ /api/survey-settings/categories/[categoryCode]
+├ ƒ /api/survey-settings/targets
+├ ƒ /api/survey-settings/targets/[targetId]
+├ ƒ /api/survey-settings/targets/[targetId]/disable
+├ ƒ /api/survey-settings/targets/order
+├ ○ /apple-icon.png
+├ ○ /health
+├ ○ /icon.png
+├ ○ /store
+└ ○ /store/survey-settings
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+[WebServer] (node:6732) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:6745) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+Running 114 tests using 1 worker
+
+(node:6764) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓    1 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 店舗一覧が WCAG A/AA の自動監査を通る (1.4s)
+  ✓    2 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 店舗一覧の QR パネルが WCAG A/AA の自動監査を通る (2.5s)
+  ✓    3 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 代理店管理が WCAG A/AA の自動監査を通る (964ms)
+  ✓    4 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › ログインが WCAG A/AA の自動監査を通る (842ms)
+  ✓    5 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 招待コードが WCAG A/AA の自動監査を通る (950ms)
+  ✓    6 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 利用者管理が WCAG A/AA の自動監査を通る (1.1s)
+  ✓    7 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 利用者管理の編集パネルが WCAG A/AA の自動監査を通る (1.3s)
+  ✓    8 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 店舗登録が WCAG A/AA の自動監査を通る (1.1s)
+  ✓    9 [mobile-chromium] › e2e/a11y-audit.spec.ts:26:3 › 店舗登録の検索結果が WCAG A/AA の自動監査を通る (2.5s)
+  ✓   10 [mobile-chromium] › e2e/a11y-audit.spec.ts:37:3 › 店舗一覧の停止の確認ダイアログが WCAG A/AA の自動監査を通る (1.4s)
+  ✓   11 [mobile-chromium] › e2e/a11y-audit.spec.ts:52:3 › ログインの保存領域エラー通知が WCAG A/AA の自動監査を通る (2.2s)
+  ✓   12 [mobile-chromium] › e2e/a11y-audit.spec.ts:52:3 › QR 発行の成功通知が WCAG A/AA の自動監査を通る (2.0s)
+  ✓   13 [mobile-chromium] › e2e/a11y-audit.spec.ts:63:1 › 監査対象の面が 1 件も生成されていない状態で緑にならない (2ms)
+  ✓   14 [mobile-chromium] › e2e/a11y-audit.spec.ts:67:1 › 重なる後続状態の監査が 1 件も生成されていない状態で緑にならない (1ms)
+  ✓   15 [mobile-chromium] › e2e/a11y-audit.spec.ts:71:1 › 操作結果の通知状態の監査が 1 件も生成されていない状態で緑にならない (1ms)
+  ✓   16 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:69:1 › モバイルビューポートの店舗一覧で横スクロールが発生しない (367ms)
+  ✓   17 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:100:3 › 店舗一覧の停止と再開 › 確認をキャンセルすると停止は送られず、利用中のまま残る (576ms)
+  ✓   18 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:116:3 › 店舗一覧の停止と再開 › 停止 → 確認 → 停止中の表示と QR 発行の消失 → 再開で元に戻る (761ms)
+  ✓   19 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:185:3 › 店頭掲示の印刷 › 印刷時は掲示面だけが残り、不可の例と操作要素は紙に出ない (1.9s)
+  ✓   20 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:233:3 › 店頭掲示の印刷 › 掲示面を持たない面の印刷を壊さない（規則の入口が閉じている） (328ms)
+  ✓   21 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:247:3 › 店頭掲示の印刷 › 印刷時は掲示面が版面の左端から始まり、幅も版面と一致する (1.3s)
+  ✓   22 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:272:3 › 店頭掲示の印刷 › 掲示面のある面では外側が箱ごと畳まれる（白紙のページを後続させない） (1.3s)
+  ✓   23 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:300:1 › QR Drawer は右端に固定され、viewport 内に収まる (1.8s)
+  ✓   24 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:313:1 › QR Drawer に対象店舗の QR・URL・注意事項を表示し、同じ URL をコピーする (1.4s)
+  ✓   25 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:331:1 › QR Drawer は閉じる・Escape・背面押下で閉じ、発行元へ焦点を戻す (2.0s)
+  ✓   26 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:354:1 › QR Drawer は狭い画面で内部スクロールし、reduced motion を尊重する (960ms)
+  ✓   27 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:373:1 › モバイルビューポートの QR パネルで横スクロールが発生しない (1.3s)
+  ✓   28 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:384:1 › モバイルビューポートの代理店管理で横スクロールが発生しない (313ms)
+  ✓   29 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:395:1 › モバイルビューポートの招待コードで横スクロールが発生しない (392ms)
+  ✓   30 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:405:1 › モバイルビューポートの利用者管理で横スクロールが発生しない (343ms)
+  ✓   31 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:412:1 › モバイルビューポートの利用者管理の編集パネルで横スクロールが発生しない (488ms)
+  ✓   32 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:459:3 › モバイルビューポートの利用者管理の編集パネルは捲り容器の見えている矩形に収まる › 編集の押下で捲れた状態と、捲り位置 0 の状態の両方で、カードと操作要素が見えている (488ms)
+  ✓   33 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:480:3 › モバイルビューポートの利用者管理の編集パネルは捲り容器の見えている矩形に収まる › Tab で保存へ焦点を載せたとき、保存が見えている (611ms)
+  ✓   34 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:506:1 › モバイルビューポートの店舗登録で横スクロールが発生しない (404ms)
+  ✓   35 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:512:1 › モバイルビューポートの店舗登録の検索結果で横スクロールが発生しない (1.8s)
+  ✓   36 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:518:1 › モバイルビューポートのログイン画面で横スクロールが発生しない (302ms)
+  ✓   37 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:529:1 › 管理面の縦積み Field は、ラベルと制御の間に反応しない帯を残さない (3.9s)
+  ✓   38 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:618:3 › 幅 320 でもページ全体が横へはみ出さない › 宣言が検証面の一覧と一致する (1ms)
+  ✓   39 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の店舗一覧で横スクロールが発生しない (393ms)
+  ✓   40 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の店舗一覧の QR パネルで横スクロールが発生しない (1.8s)
+  ✓   41 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の代理店管理で横スクロールが発生しない (387ms)
+  ✓   42 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 のログインで横スクロールが発生しない (264ms)
+  ✓   43 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の招待コードで横スクロールが発生しない (377ms)
+  ✓   44 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の利用者管理で横スクロールが発生しない (364ms)
+  ✓   45 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の利用者管理の編集パネルで横スクロールが発生しない (452ms)
+  ✓   46 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の店舗登録で横スクロールが発生しない (402ms)
+  ✓   47 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:625:5 › 幅 320 でもページ全体が横へはみ出さない › 幅 320 の店舗登録の検索結果で横スクロールが発生しない (1.9s)
+  ✓   48 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:641:5 › 操作結果の Toast のにじみは左上の角にあり、文字と重ならない › 成功（QR の発行） (1.5s)
+  ✓   49 [mobile-chromium] › e2e/dashboard-surfaces.spec.ts:641:5 › 操作結果の Toast のにじみは左上の角にあり、文字と重ならない › 失敗（ログインの保存領域） (832ms)
+  ✓   50 [mobile-chromium] › e2e/mobile-layout.spec.ts:153:1 › 宣言の面が検証面の一覧と一致する (1ms)
+  ✓   51 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗一覧（幅 393） › [R1] 店舗一覧（幅 393）: 一覧表のセルが縦に並んでいない (385ms)
+  ✓   52 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗一覧（幅 393） › [R2] 店舗一覧（幅 393）: 帯の操作要素すべてに捲らずに届く (393ms)
+  ✓   53 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗一覧（幅 393） › [R3] 店舗一覧（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (930ms)
+  ✓   54 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗一覧（幅 320） › [R1] 店舗一覧（幅 320）: 一覧表のセルが縦に並んでいない (423ms)
+  ✓   55 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗一覧（幅 320） › [R2] 店舗一覧（幅 320）: 帯の操作要素すべてに捲らずに届く (384ms)
+  ✓   56 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗一覧（幅 320） › [R3] 店舗一覧（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (895ms)
+  ✓   57 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗一覧の QR パネル（幅 393） › [R1] 店舗一覧の QR パネル（幅 393）: 一覧表のセルが縦に並んでいない (1.4s)
+  -   58 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗一覧の QR パネル（幅 393） › [R2] 店舗一覧の QR パネル（幅 393）: 帯の操作要素すべてに捲らずに届く
+  -   59 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗一覧の QR パネル（幅 393） › [R3] 店舗一覧の QR パネル（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある
+  ✓   60 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗一覧の QR パネル（幅 320） › [R1] 店舗一覧の QR パネル（幅 320）: 一覧表のセルが縦に並んでいない (1.9s)
+  -   61 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗一覧の QR パネル（幅 320） › [R2] 店舗一覧の QR パネル（幅 320）: 帯の操作要素すべてに捲らずに届く
+  -   62 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗一覧の QR パネル（幅 320） › [R3] 店舗一覧の QR パネル（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある
+  ✓   63 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 代理店管理（幅 393） › [R1] 代理店管理（幅 393）: 一覧表のセルが縦に並んでいない (396ms)
+  ✓   64 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 代理店管理（幅 393） › [R2] 代理店管理（幅 393）: 帯の操作要素すべてに捲らずに届く (376ms)
+  ✓   65 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 代理店管理（幅 393） › [R3] 代理店管理（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (745ms)
+  ✓   66 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 代理店管理（幅 320） › [R1] 代理店管理（幅 320）: 一覧表のセルが縦に並んでいない (378ms)
+  ✓   67 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 代理店管理（幅 320） › [R2] 代理店管理（幅 320）: 帯の操作要素すべてに捲らずに届く (360ms)
+  ✓   68 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 代理店管理（幅 320） › [R3] 代理店管理（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (712ms)
+  ✓   69 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › ログイン（幅 393） › [R1] ログイン（幅 393）: 一覧表のセルが縦に並んでいない (273ms)
+  ✓   70 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › ログイン（幅 393） › [R2] ログイン（幅 393）: 帯の操作要素すべてに捲らずに届く (311ms)
+  ✓   71 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › ログイン（幅 393） › [R3] ログイン（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (257ms)
+  ✓   72 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › ログイン（幅 320） › [R1] ログイン（幅 320）: 一覧表のセルが縦に並んでいない (281ms)
+  ✓   73 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › ログイン（幅 320） › [R2] ログイン（幅 320）: 帯の操作要素すべてに捲らずに届く (283ms)
+  ✓   74 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › ログイン（幅 320） › [R3] ログイン（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (282ms)
+  ✓   75 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 招待コード（幅 393） › [R1] 招待コード（幅 393）: 一覧表のセルが縦に並んでいない (386ms)
+  ✓   76 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 招待コード（幅 393） › [R2] 招待コード（幅 393）: 帯の操作要素すべてに捲らずに届く (406ms)
+  ✓   77 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 招待コード（幅 393） › [R3] 招待コード（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (777ms)
+  ✓   78 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 招待コード（幅 320） › [R1] 招待コード（幅 320）: 一覧表のセルが縦に並んでいない (373ms)
+  ✓   79 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 招待コード（幅 320） › [R2] 招待コード（幅 320）: 帯の操作要素すべてに捲らずに届く (395ms)
+  ✓   80 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 招待コード（幅 320） › [R3] 招待コード（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (804ms)
+  ✓   81 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 利用者管理（幅 393） › [R1] 利用者管理（幅 393）: 一覧表のセルが縦に並んでいない (347ms)
+  ✓   82 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 利用者管理（幅 393） › [R2] 利用者管理（幅 393）: 帯の操作要素すべてに捲らずに届く (368ms)
+  ✓   83 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 利用者管理（幅 393） › [R3] 利用者管理（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (938ms)
+  ✓   84 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 利用者管理（幅 320） › [R1] 利用者管理（幅 320）: 一覧表のセルが縦に並んでいない (390ms)
+  ✓   85 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 利用者管理（幅 320） › [R2] 利用者管理（幅 320）: 帯の操作要素すべてに捲らずに届く (363ms)
+  ✓   86 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 利用者管理（幅 320） › [R3] 利用者管理（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (853ms)
+  ✓   87 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 利用者管理の編集パネル（幅 393） › [R1] 利用者管理の編集パネル（幅 393）: 一覧表のセルが縦に並んでいない (521ms)
+  ✓   88 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 利用者管理の編集パネル（幅 393） › [R2] 利用者管理の編集パネル（幅 393）: 帯の操作要素すべてに捲らずに届く (468ms)
+  ✓   89 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 利用者管理の編集パネル（幅 393） › [R3] 利用者管理の編集パネル（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (1.5s)
+  ✓   90 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 利用者管理の編集パネル（幅 320） › [R1] 利用者管理の編集パネル（幅 320）: 一覧表のセルが縦に並んでいない (474ms)
+  ✓   91 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 利用者管理の編集パネル（幅 320） › [R2] 利用者管理の編集パネル（幅 320）: 帯の操作要素すべてに捲らずに届く (456ms)
+  ✓   92 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 利用者管理の編集パネル（幅 320） › [R3] 利用者管理の編集パネル（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (1.3s)
+  ✓   93 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗登録（幅 393） › [R1] 店舗登録（幅 393）: 一覧表のセルが縦に並んでいない (393ms)
+  ✓   94 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗登録（幅 393） › [R2] 店舗登録（幅 393）: 帯の操作要素すべてに捲らずに届く (493ms)
+  ✓   95 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗登録（幅 393） › [R3] 店舗登録（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (992ms)
+  ✓   96 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗登録（幅 320） › [R1] 店舗登録（幅 320）: 一覧表のセルが縦に並んでいない (412ms)
+  ✓   97 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗登録（幅 320） › [R2] 店舗登録（幅 320）: 帯の操作要素すべてに捲らずに届く (388ms)
+  ✓   98 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗登録（幅 320） › [R3] 店舗登録（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (881ms)
+  ✓   99 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗登録の検索結果（幅 393） › [R1] 店舗登録の検索結果（幅 393）: 一覧表のセルが縦に並んでいない (1.8s)
+  ✓  100 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗登録の検索結果（幅 393） › [R2] 店舗登録の検索結果（幅 393）: 帯の操作要素すべてに捲らずに届く (1.9s)
+  ✓  101 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗登録の検索結果（幅 393） › [R3] 店舗登録の検索結果（幅 393）: 溢れた捲り容器の端に捲れる手がかりがある (1.8s)
+  ✓  102 [mobile-chromium] › e2e/mobile-layout.spec.ts:176:7 › 店舗登録の検索結果（幅 320） › [R1] 店舗登録の検索結果（幅 320）: 一覧表のセルが縦に並んでいない (1.4s)
+  ✓  103 [mobile-chromium] › e2e/mobile-layout.spec.ts:200:7 › 店舗登録の検索結果（幅 320） › [R2] 店舗登録の検索結果（幅 320）: 帯の操作要素すべてに捲らずに届く (1.8s)
+  ✓  104 [mobile-chromium] › e2e/mobile-layout.spec.ts:251:7 › 店舗登録の検索結果（幅 320） › [R3] 店舗登録の検索結果（幅 320）: 溢れた捲り容器の端に捲れる手がかりがある (1.8s)
+  ✓  105 [mobile-chromium] › e2e/mobile-layout.spec.ts:398:7 › 利用者管理の編集パネル（幅 320） › [R4] 利用者管理の編集パネル（幅 320）: 捲り位置によらず捲り容器の見えている矩形に収まる (914ms)
+  ✓  106 [mobile-chromium] › e2e/mobile-layout.spec.ts:461:5 › 代理店ロールの店舗一覧（幅 393） › [R2] 代理店ロールの帯（幅 393）: 操作要素すべてに捲らずに届く (323ms)
+  ✓  107 [mobile-chromium] › e2e/mobile-layout.spec.ts:461:5 › 代理店ロールの店舗一覧（幅 320） › [R2] 代理店ロールの帯（幅 320）: 操作要素すべてに捲らずに届く (342ms)
+  ✓  108 [mobile-chromium] › e2e/mobile-layout.spec.ts:501:3 › 検出の空振り対照 › [R1 対照] 列を細らせると、その列のセルだけが縦並びとして検出される (1.1s)
+  ✓  109 [mobile-chromium] › e2e/mobile-layout.spec.ts:520:3 › 検出の空振り対照 › [R2 対照] 帯のリンクを押し出すと届かないと判定され、覆いを載せると当たらなくなる (1.2s)
+  ✓  110 [mobile-chromium] › e2e/mobile-layout.spec.ts:559:3 › 検出の空振り対照 › [R3 対照] 端に描いた背景だけが、その端の帯の差として現れる (1.9s)
+  ✓  111 [mobile-chromium] › e2e/mobile-layout.spec.ts:595:3 › 行直下のパネルの検出の空振り対照 › [R4 対照] 包みの追従を外すと、捲り切った状態で見えない部分が現れる (473ms)
+  ✓  112 [mobile-chromium] › e2e/pr490-evidence.spec.ts:15:3 › PR490 evidence: operator desktop-1280 (2.1s)
+  ✓  113 [mobile-chromium] › e2e/pr490-evidence.spec.ts:15:3 › PR490 evidence: operator mobile-320 (1.9s)
+  ✓  114 [mobile-chromium] › e2e/pr490-evidence.spec.ts:31:1 › PR490 evidence: agency desktop-1280 (2.4s)
+
+  4 skipped
+  110 passed (1.9m)
+[WebServer] (node:8241) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:8255) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+Running 23 tests using 1 worker
+
+(node:8274) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [mobile-chromium] › e2e/a11y-audit.spec.ts:93:1 › 11 の表示状態が WCAG A/AA の自動監査を通る (12.6s)
+  ✓   2 [mobile-chromium] › e2e/store-surface.spec.ts:117:1 › 11 の表示状態を 2 つの幅で回り、どれもページ全体が横に溢れず、捲れる領域は状態ごとの宣言と一致する (5.5s)
+  ✓   3 [mobile-chromium] › e2e/store-surface.spec.ts:322:1 › 検索欄から Tab で期間の群へ移り、矢印キーで 7日 を選ぶと、見出しが追随し、焦点の輪郭が切れずに描かれる (1.7s)
+  ✓   4 [mobile-chromium] › e2e/store-surface.spec.ts:388:1 › 期間と指標の札の行と、検索欄の Field が 44px 以上の高さを持ち、その領域を押すと部品が反応する (974ms)
+  ✓   5 [mobile-chromium] › e2e/store-surface.spec.ts:577:1 › 目盛りの帯の幅が、目盛りの文字に追随する (494ms)
+  ✓   6 [mobile-chromium] › e2e/store-surface.spec.ts:630:1 › グラフの文字（目盛り・日付・現在値）の算出サイズが、320px と Pixel 5 相当で等しい (520ms)
+  ✓   7 [mobile-chromium] › e2e/store-surface.spec.ts:652:1 › モバイルビューポートの店舗詳細で横スクロールが発生しない (331ms)
+  ✓   8 [mobile-chromium] › e2e/store-surface.spec.ts:657:1 › 320px 幅でも指標・競合比較・推移要約がクリップされない (337ms)
+  ✓   9 [mobile-chromium] › e2e/store-surface.spec.ts:669:1 › 320px 幅で推移表のクチコミ数 2274 の末尾まで見え、200% 文字では表だけを横にたどれる (513ms)
+  ✓  10 [mobile-chromium] › e2e/store-surface.spec.ts:735:1 › 「表示期間の変化」の 3 組が、容器の幅に応じて段を変える (475ms)
+  ✓  11 [mobile-chromium] › e2e/store-surface.spec.ts:798:1 › 空状態の案内が、狭い幅で行の長さをそろえて分かれる (379ms)
+  ✓  12 [mobile-chromium] › e2e/store-surface.spec.ts:831:1 › 主要数値と競合の比較軸を説明リストとして描く (351ms)
+  ✓  13 [mobile-chromium] › e2e/store-surface.spec.ts:859:1 › 今日のポジションは見出しと内容を近接させ、各グループを明確に離す (338ms)
+  ✓  14 [mobile-chromium] › e2e/store-surface.spec.ts:901:1 › 帰属表示の実描画の色と大きさが、Places のポリシーが定める値の中にある (381ms)
+  ✓  15 [mobile-chromium] › e2e/store-surface.spec.ts:917:1 › 新着クチコミの各行から、Google Maps 上の元の口コミへ辿れる (383ms)
+  ✓  16 [mobile-chromium] › e2e/survey-settings-feedback.spec.ts:5:1 › 遅延中の追加表示からToastへ進み、通信失敗後も入力と再試行を保つ（#450） (1.5s)
+  ✓  17 [mobile-chromium] › e2e/survey-settings.spec.ts:19:3 › アンケート設定（LIFF 面） › 携帯の幅と 320px で、40 文字の名前を含めて横スクロールしない (355ms)
+  ✓  18 [mobile-chromium] › e2e/survey-settings.spec.ts:30:3 › アンケート設定（LIFF 面） › 携帯の幅で、料理名の追加・並び替え・名前の変更・非表示・再表示ができる (2.1s)
+  ✓  19 [mobile-chromium] › e2e/survey-settings.spec.ts:70:3 › アンケート設定（LIFF 面） › 空欄と 41 文字は送らずに、その場で直し方を出す (1.1s)
+  ✓  20 [mobile-chromium] › e2e/survey-settings.spec.ts:81:3 › アンケート設定（LIFF 面） › ドリンク名を追加できる（料理と同じ操作・ドリンクの節に入る） (476ms)
+  ✓  21 [mobile-chromium] › e2e/survey-settings.spec.ts:92:3 › アンケート設定（LIFF 面） › 表示中が上限（10 件）に達すると、追加と再表示を止めて直し方を出す (1.5s)
+  ✓  22 [mobile-chromium] › e2e/survey-settings.spec.ts:113:3 › アンケート設定（LIFF 面） › オーナーは structured の有効・無効を変えられない（切り替えの操作が無く、送らない） (776ms)
+  ✓  23 [mobile-chromium] › e2e/survey-settings.spec.ts:139:3 › アンケート設定（LIFF 面） › 自動 a11y 監査（既定の表示と、名前の変更中） (1.9s)
+
+  23 passed (39.1s)
+-- 2 画面を通常のビルドへ戻します
+
+> @fwlm/dashboard-web@0.0.0 build /workspace/fw-line-meo/ts/apps/dashboard-web
+> next build
+
+▲ Next.js 16.2.10 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 24.2s
+  Running TypeScript ...
+  Finished TypeScript in 10.4s ...
+  Collecting page data using 2 workers ...
+  Generating static pages using 2 workers (0/12) ...
+  Generating static pages using 2 workers (3/12) 
+  Generating static pages using 2 workers (6/12) 
+  Generating static pages using 2 workers (9/12) 
+✓ Generating static pages using 2 workers (12/12) in 405ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /admin/agencies
+├ ○ /admin/users
+├ ○ /apple-icon.png
+├ ○ /health
+├ ○ /icon.png
+├ ○ /invite-codes
+├ ○ /login
+├ ○ /stores
+└ ○ /stores/new
+
+
+○  (Static)  prerendered as static content
+
+
+> @fwlm/store-detail@0.0.0 build /workspace/fw-line-meo/ts/apps/store-detail
+> next build
+
+▲ Next.js 16.2.10 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 8.3s
+  Running TypeScript ...
+  Finished TypeScript in 7.6s ...
+  Collecting page data using 2 workers ...
+  Generating static pages using 2 workers (0/7) ...
+  Generating static pages using 2 workers (1/7) 
+  Generating static pages using 2 workers (3/7) 
+  Generating static pages using 2 workers (5/7) 
+✓ Generating static pages using 2 workers (7/7) in 190ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /_not-found
+├ ƒ /api/detail
+├ ƒ /api/survey-settings
+├ ƒ /api/survey-settings/categories/[categoryCode]
+├ ƒ /api/survey-settings/targets
+├ ƒ /api/survey-settings/targets/[targetId]
+├ ƒ /api/survey-settings/targets/[targetId]/disable
+├ ƒ /api/survey-settings/targets/order
+├ ○ /apple-icon.png
+├ ○ /health
+├ ○ /icon.png
+├ ○ /store
+└ ○ /store/survey-settings
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+==================================================================
+>> E2E 自動層の結果（検査したコミット: 46f083d・追跡下の未コミット変更: 0 件）
+==================================================================
+  PASS  surfaces         250s  
+  WARN: 検査したコミットは origin/main（394c27c・最後に fetch した時点）と異なります。
+        本番のコミットの証拠にするなら、run-e2e-prod-checks.sh で本番のコミットの CI 結果を確かめてください
+OK: 選んだ層はすべて緑です
