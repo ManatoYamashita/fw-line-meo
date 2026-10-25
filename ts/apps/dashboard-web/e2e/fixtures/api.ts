@@ -129,25 +129,32 @@ export const INVITE_CODES = [
  * 店舗登録のオーナー選択（Issue #485）が表で出すオーナー。STORES の 2 店舗の持ち主 2 人に、店舗を持たない
  * 1 人を足す。表示名の無いオーナー（「（表示名なし）」と作成日で区別する）と、店舗 0 件の案内
  * （「登録済みの店舗はありません」）を実描画の監査へ載せるためである。
+ * 招待コードの記録（agency-dashboard Req 8.5）は、記録ありと記録なし（null）の両方の行を置く。
  */
 export const OWNERS = [
   {
     id: '33333333-3333-3333-3333-333333333333',
     displayName: 'オーナー太郎',
     onboardingStatus: 'store_identified',
-    createdAt: '2026-08-01T09:00:00.000Z',
+    // 登録に用いたコード（INVITE_CODES[0]）の発行より後に登録した形にそろえる。
+    createdAt: '2026-08-12T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
   },
   {
+    // STORES[1] のオーナーと同一人物（表示名の無いオーナー）。招待コードの記録を始める前の登録の形。
     id: '33333333-3333-3333-3333-333333333334',
     displayName: null,
     onboardingStatus: 'store_identified',
     createdAt: '2026-08-02T09:00:00.000Z',
+    inviteCode: null,
   },
   {
+    // 同じコードで複数のオーナーが登録できる（Req 2.5）ので、オーナー太郎と同じコードの記録を持つ。
     id: '33333333-3333-3333-3333-333333333335',
     displayName: '佐藤 花子',
     onboardingStatus: 'pending',
     createdAt: '2026-08-20T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
   },
 ] as const;
 

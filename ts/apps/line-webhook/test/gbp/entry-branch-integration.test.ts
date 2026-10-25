@@ -297,6 +297,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
     onboarding_status: 'store_identified',
     created_at: NOW,
     delivery_hour: 7,
+    invite_code_id: null,
   };
 
   const router = createStoreIdentifiedOwnerRouter({

@@ -2,6 +2,8 @@ import type { Queryable } from './pool.js';
 import type { AgencyInviteCodeRow, InviteCodeItem } from './types.js';
 
 export interface ActiveInviteCode {
+  /** コードの行の id。オーナー登録で owners.invite_code_id に書く（agency-dashboard Req 8.1）。 */
+  id: string;
   agencyId: string;
 }
 
@@ -14,13 +16,13 @@ export async function findActiveInviteCode(
   db: Queryable,
   code: string,
 ): Promise<ActiveInviteCode | null> {
-  const res = await db.query<{ agency_id: string }>(
-    'SELECT agency_id FROM agency_invite_codes WHERE code = $1 AND disabled_at IS NULL',
+  const res = await db.query<{ id: string; agency_id: string }>(
+    'SELECT id, agency_id FROM agency_invite_codes WHERE code = $1 AND disabled_at IS NULL',
     [code],
   );
   const row = res.rows[0];
   if (!row) return null;
-  return { agencyId: row.agency_id };
+  return { id: row.id, agencyId: row.agency_id };
 }
 
 const INVITE_CODE_COLUMNS = 'id, agency_id, code, disabled_at, created_at';

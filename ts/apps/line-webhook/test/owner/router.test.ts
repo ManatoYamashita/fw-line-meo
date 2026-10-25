@@ -61,6 +61,8 @@ function owner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     onboarding_status: 'store_identified',
     created_at: FIXED_NOW,
     delivery_hour: 7,
+    // 0017（#486）。登録に用いた招待コード。null = 記録なし。
+    invite_code_id: null,
     ...overrides,
   };
 }

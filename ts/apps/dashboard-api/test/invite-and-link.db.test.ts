@@ -171,8 +171,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       // ダッシュボード発行コードが LINE オンボーディングの解決経路で使える
       // （findActiveInviteCode が同一代理店を返す）。これがクロス spec の使用可能性を実証する。
+      // 返す id は発行したコードの行の id で、オーナー登録が owners.invite_code_id へ書く値になる（#486）。
       const resolved = await findActiveInviteCode(pool, inviteCode.code);
-      expect(resolved).toEqual({ agencyId: AG_A });
+      expect(resolved).toEqual({ id: inviteCode.id, agencyId: AG_A });
 
       // (2) 無効化（Req 5.3）。operator は対象代理店の明示指定が必要。
       const disabled = await post(app, OP_TOKEN, `/invite-codes/${inviteCode.id}/disable`, {

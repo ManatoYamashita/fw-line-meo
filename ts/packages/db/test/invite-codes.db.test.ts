@@ -7,6 +7,7 @@ import { createOwner } from '../src/owners.js';
 const OP = 'e3333333-3333-3333-3333-333333333333';
 const AG1 = 'e4444444-4444-4444-4444-444444444444';
 const AG2 = 'e4444444-4444-4444-4444-444444444445';
+const ACTIVE_CODE_ID = 'e4444444-4444-4444-4444-4444444486c1';
 
 describe.skipIf(!process.env.DATABASE_URL)('invite-codes accessors (DB)', () => {
   beforeAll(async () => {
@@ -23,8 +24,8 @@ describe.skipIf(!process.env.DATABASE_URL)('invite-codes accessors (DB)', () => 
       'invite代理店2',
     ]);
     await pool.query(
-      `INSERT INTO agency_invite_codes (agency_id, code) VALUES ($1, $2)`,
-      [AG1, 'ACTIVE001'],
+      `INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)`,
+      [ACTIVE_CODE_ID, AG1, 'ACTIVE001'],
     );
     await pool.query(
       `INSERT INTO agency_invite_codes (agency_id, code, disabled_at) VALUES ($1, $2, now())`,
@@ -36,10 +37,10 @@ describe.skipIf(!process.env.DATABASE_URL)('invite-codes accessors (DB)', () => 
     await closePool();
   });
 
-  it('有効なコードは紐付く agencyId を返す', async () => {
+  it('有効なコードはコードの行の id と紐付く agencyId を返す', async () => {
     const pool = await getPool();
     const result = await findActiveInviteCode(pool, 'ACTIVE001');
-    expect(result).toEqual({ agencyId: AG1 });
+    expect(result).toEqual({ id: ACTIVE_CODE_ID, agencyId: AG1 });
   });
 
   it('disabled_at 済みのコードは null（無効）', async () => {
@@ -55,15 +56,15 @@ describe.skipIf(!process.env.DATABASE_URL)('invite-codes accessors (DB)', () => 
   it('同一コードで複数オーナーを登録できる（コードは使い切りにならない・Req 2.5）', async () => {
     const pool = await getPool();
     const first = await findActiveInviteCode(pool, 'ACTIVE001');
-    expect(first).toEqual({ agencyId: AG1 });
-    await createOwner(pool, { agencyId: AG1, lineUserId: 'U-invite-owner-1' });
+    expect(first).toEqual({ id: ACTIVE_CODE_ID, agencyId: AG1 });
+    await createOwner(pool, { agencyId: AG1, inviteCodeId: ACTIVE_CODE_ID, lineUserId: 'U-invite-owner-1' });
 
     // 1 人目登録後も同じコードは有効なまま
     const second = await findActiveInviteCode(pool, 'ACTIVE001');
-    expect(second).toEqual({ agencyId: AG1 });
-    await createOwner(pool, { agencyId: AG1, lineUserId: 'U-invite-owner-2' });
+    expect(second).toEqual({ id: ACTIVE_CODE_ID, agencyId: AG1 });
+    await createOwner(pool, { agencyId: AG1, inviteCodeId: ACTIVE_CODE_ID, lineUserId: 'U-invite-owner-2' });
 
     const third = await findActiveInviteCode(pool, 'ACTIVE001');
-    expect(third).toEqual({ agencyId: AG1 });
+    expect(third).toEqual({ id: ACTIVE_CODE_ID, agencyId: AG1 });
   });
 });

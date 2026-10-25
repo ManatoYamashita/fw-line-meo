@@ -62,7 +62,13 @@ describe('店舗系 API クライアント', () => {
 
   it('getOwners は { owners } をアンラップする', async () => {
     const owners = [
-      { id: 'o1', displayName: 'オーナー1', onboardingStatus: 'active', createdAt: '2026-01-01T00:00:00Z' },
+      {
+        id: 'o1',
+        displayName: 'オーナー1',
+        onboardingStatus: 'active',
+        createdAt: '2026-01-01T00:00:00Z',
+        inviteCode: { id: 'c1', code: 'ABCD2345', disabled: false },
+      },
     ];
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { owners }));
     const result = await getOwners({}, { getToken: async () => 't', fetchImpl });

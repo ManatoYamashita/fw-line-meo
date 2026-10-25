@@ -160,6 +160,50 @@
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
   - _Depends: 3.1, 4.3, 4.4, 4.5, 5.1, 5.2, 6.1, 6.2_
 
+## 7. 招待コードの記録（Requirement 8・Issue #486）
+
+> 前提: 本番の migration 適用は自動ではない。`0017` を書くイメージより先に本番へ適用しないと、オーナー登録がすべて失敗する（design.md「Migration Strategy」）。7.5 の順序を崩さないこと。
+> PR #472（招待コード入力の正規化・line-webhook）と照合経路が隣接する。7.3 の着手前に #472 の状態を確かめ、マージ済みなら取り込んでから始める。
+
+- [x] 7.1 migration 0017（owners.invite_code_id）と DB アサーション・文書
+  - `0017_owner_invite_code.sql`: `agency_invite_codes` に `ux_agency_invite_codes_agency_id UNIQUE (agency_id, id)`、`owners` に `invite_code_id uuid`（NULL 許容）と複合 FK `fk_owners_invite_code_same_agency (agency_id, invite_code_id) → agency_invite_codes (agency_id, id) ON DELETE RESTRICT`。既存行を書き換える UPDATE を持たない
+  - `db/test/assertions/51_owner_invite_code.sql`: NULL の行を作れる／同じ代理店のコードで作れる／別の代理店のコードは FK 違反で拒否（`GET STACKED DIAGNOSTICS ... CONSTRAINT_NAME` で制約名まで確かめる）／参照中のコードは削除できない／コードの無効化後も `invite_code_id` は変わらない
+  - `db/ERD.md`（関係図に `agency_invite_codes |o--o{ owners`・`owners` の FK 欄と注記）と `db/write-boundary.md`（`owners` 行に `invite_code_id`・TS 書込）を更新。`grants.sql` と `30_compliance.sql` の表 allowlist は新テーブルが無いので変更不要（変更不要であることを本タスクで確認する）
+  - 完了状態: native postgres（Implementation Notes の正典レシピ）で全 migration の適用・全 assertions・`check_docs.sh` が緑。別代理店のコードを拒否する assertion について、複合 FK を単独の FK（`invite_code_id → agency_invite_codes(id)`）に置き換える変異で赤になることを実測する
+  - _Requirements: 8.2, 8.3, 8.4_
+  - _Boundary: db migrations, db docs_
+
+- [x] 7.2 `@fwlm/db` の契約変更（照合の id・作成の必須 id・一覧の記録）
+  - `findActiveInviteCode` が `{ id, agencyId }` を返す（照合の条件は不変）。`CreateOwnerInput` に `inviteCodeId: string` を**必須**で足し、`createOwner` の INSERT へ `invite_code_id` を加える。`OwnerRow`・`OWNER_COLUMNS` を 0017 に同期する（教訓: migration 追加は Row 型の同期まで含める）
+  - `listOwnersByAgency` が `agency_invite_codes` を LEFT JOIN し、`OwnerListItem.inviteCode`（`{ id, code, disabled } | null`）を返す
+  - 既存の `createOwner` 呼び出し（`@fwlm/db`・store-identification・dashboard-api・line-webhook の各 `*.db.test.ts`）を、フィクスチャのコード行を用意したうえで `inviteCodeId` 付きへ直す
+  - 完了状態: `*.db.test.ts` で「照合が id を返す・無効化済みは null」「作成した行の `invite_code_id` が渡した id と一致」「一覧で記録ありは `{ id, code, disabled }`・記録なしは `null`・無効化後のコードは `disabled: true`」が緑。新規の UUID prefix は既存と衝突しない値を使う
+  - _Requirements: 8.1, 8.3, 8.5_
+  - _Boundary: @fwlm/db_
+  - _Depends: 7.1_
+
+- [x] 7.3 (P) line-webhook: 照合したコードの id をオーナー作成へ渡す
+  - `conversation.ts` の `InviteCodesAccessor` / `OwnersAccessor` の型を 7.2 の契約へ合わせ、`handleValidInviteCode` の `createOwner` へ `inviteCodeId: activeCode.id` を渡す。トランザクション境界・段階遷移・応答・監査ログ `owner_created` は変えない
+  - 完了状態: 単体テストで `createOwner` が `inviteCodeId: activeCode.id` で呼ばれること、`invite-code-integration.db.test.ts` で実際に登録したオーナーの `invite_code_id` が送信したコードの行の id と一致すること、セッション更新を失敗させたときにオーナー行が残らないことが緑。`CreateOwnerInput.inviteCodeId` を省略可能にする変異で line-webhook の型検査が赤になることを実測する
+  - _Requirements: 8.1, 8.2_
+  - _Boundary: line-webhook onboarding_
+  - _Depends: 7.2_
+
+- [x] 7.4 (P) dashboard-api / dashboard-web: GET /owners の応答に記録を載せる
+  - GET /owners の応答 `OwnerListItem` に `inviteCode` を通す（エンドポイント・認可・スコープは不変）。design.md の contract 表と `@fwlm/db` 追加アクセサの型を同じタスクで更新する
+  - dashboard-web の `lib/types.ts` のオーナー型と、E2E の API スタブ（`e2e/fixtures/api.ts`）のオーナー応答に `inviteCode` を足す（記録あり・記録なしの両方の行を置く）。画面への表示は代理店詳細画面の要件で扱い、本タスクでは描画を変えない
+  - 完了状態: `app.request` 経由の試験で、GET /owners が記録ありのオーナーに `inviteCode` を、記録の無いオーナーに `null` を返すことが緑。dashboard-web の型検査・既存の描画テスト・E2E が回帰なしで緑
+  - _Requirements: 8.5_
+  - _Boundary: dashboard-api owners-list, dashboard-web types, e2e fixtures_
+  - _Depends: 7.2_
+
+- [ ] 7.5 全体検証と本番の適用順
+  - `make ts-lint`／`make ts-test`／`make ts-test-db`／`make go-test`／db assertions／`check_docs.sh` を実行し全緑を確認する（Go 側は `owners` を直接 INSERT するフィクスチャを持つので、NULL 許容の列で回帰しないことを確かめる）
+  - 本番の順序: (1) マージ前に `0017` を本番へ適用し、`information_schema.columns` と `pg_constraint` で列と 2 制約の存在を確かめる → (2) マージ → (3) deploy の結果を自分で確認する（line-webhook・dashboard-api のイメージ差し替え）→ (4) 本番の新しいオーナー登録で `invite_code_id` が埋まることを確かめる（登録が無ければ、確認待ちとして追跡先を Issue に記録する）
+  - 完了状態: 上記コマンドがすべて終了コード 0、本番の適用・確認結果が PR / Issue #486 に記録されている
+  - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
+  - _Depends: 7.1, 7.2, 7.3, 7.4_
+
 ## Implementation Notes
 <!-- 実装中に得られた横断的な知見をここに追記する -->
 - 環境: docker/apple-container 不在。DB スキーマ検証（`make db-migrate`/`db-test`/`db-verify-docs` 相当）は native postgres で代替する。正典レシピ: `ts/scripts/with-test-db.sh bash -c 'for f in db/test/assertions/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done; MANAGE_CONTAINER=0 PSQL_EXEC="psql" db/test/check_docs.sh'`（with-test-db.sh が native postgres 起動＋全 migrations 適用＋PG 環境変数 export を行う）。TS の `*.db.test.ts` は `make ts-test-db` でそのまま可。
@@ -177,3 +221,17 @@
 - 6.3 全体受け入れ結果（全緑）: `make ts-lint`✅ / `make ts-test`（160 passed）✅ / `make ts-test-db`（183 passed・native postgres）✅ / db assertions 全 PASS ✅ / `make db-verify-docs`（17 テーブル整合・grants 整合）✅ / `terraform -chdir=infra/envs/prod validate`（Success）✅ / 7.2 来店客系テーブル参照なし ✅ / build 全緑（backend chain＋dashboard-web/store-detail/survey-web を個別 build で確認・check-next-public-buildargs 緑）✅。**注意: このマシンはディスク逼迫のため `make ts-build`（全 Next app 同時 build）が ENOSPC で失敗する。回避策=非 Next（tsc）を先に build → Next app を1つずつ build して都度 `rm -rf ts/apps/*/.next`。CI/Cloud Build（十分なディスク）では通常どおり `make ts-build` 可**。
 - validate-impl 後の掃除（GO 判定・Warning 是正）: (a) 合成根 index.ts の inline SQL 3箇所を @fwlm/db の小アクセサ（`setStoreCategory`/`findAgencyName`/`findDashboardUserDisplayName`）へ移設（DI 複製テスト2ファイルも同期・直接 db テスト4件追加）。(b) `DashboardUserRow` を 0005 DDL（auth_subject NULL 許容・email・disabled_at）へ同期（design Modified Files で計画済みだった未実施分）。(c) design.md へ実装時決定を還流: contract 表の 400 拡張（GET /owners・GET/POST /invite-codes の operator agencyId 必須）・disable の body `{agencyId?}` 契約・best-effort category の明文化・File Structure Plan 補記（categories.ts / lib/types.ts）・30_compliance.sql スコープ修正の記録。**教訓: migration 追加タスクは types.ts の対応 Row 型同期を完了条件に含める。API 契約を実装中に拡張したら design.md contract 表を同一タスクで更新する（tasks.md 記録だけでは validate-impl で DRIFT 扱い）**。
 - 6.3 **手動検証フック（本番 go-live 前に必須・PR に転記すること）**: (1) **Identity Platform の Google プロバイダ有効化状態を確認**（tf に `default_supported_idp_config` 未定義の Open Question。未有効ならコンソール有効化、必要なら gcp-infra-foundation へ tf 追記）。(2) **gmail アカウントでの初回ログイン→リンク→再ログインで UID 安定**を実機確認。(3) **Google Workspace 独自ドメインのメールでの同フロー**（research 案B の最重要前提＝Workspace は untrusted provider のため自動統合が公式保証外。email_verified=true でのリンク動作を実機で確認）。(4) デプロイ順序: migration 0005 を本番適用 → `infra/sql/grants.sql` は変更不要 → tf apply（dashboard-web サービス作成・dashboard-api env 追加）→ GitHub `vars.NEXT_PUBLIC_*`（API_BASE_URL/FIREBASE_*）と tfvars `dashboard_web_origin`（相互参照する両 Cloud Run URL）を設定 → image デプロイ。(5) 初代運営 `dashboard_users`（auth_subject NULL・email 付き保留行）は SQL/seed で投入（鶏卵回避）。
+- 7.1: **migration は 1 本ずつ `BEGIN;` … `COMMIT;` で囲む**（0001〜0016 はすべて自前で持ち、`db/test/run.sh` は `-1` を付けずにその前提で流す）。0017 は当初これを欠いており、途中の文が失敗すると列だけが残って FK が無い状態になり、再実行も 1 文目で落ちる形だった（レビューで発見・同名制約を先に置く実験で再現と是正を実測）。この慣習を機械で検査するガードは無く、スイートは欠いたままでも全緑だった。
+- 7.1: このマシンの bash は `/bin/bash` 3.2 のみで、`db/test/check_structured_survey_privileges.sh`（#437）は `mapfile` で落ちる。`run-db-test-suites.sh` の NG がこの 1 件だけなら環境要因（`mapfile` の代用関数を入れた写しでは 768 件 PASS をレビューで確認）。CI（ubuntu・bash 5）では走る。変異で検査の効き目を測った結果: 単独 FK・FK 無し・DEFERRABLE・制約名違い→51c、CASCADE・SET NULL→51d、NO ACTION→51f、MATCH FULL・NOT NULL・既定値→51a が赤。
+- 7.2: **JOIN を足した読み出しの試験は、結合先の行を同じ親に 2 件以上置き、親の件数を実数と厳密に比べる。** 代理店のコードが 1 本だけのフィクスチャでは、`listOwnersByAgency` の結合キーを `c.agency_id = o.agency_id` に誤っても行が増えず全件緑だった（レビューで実測）。記録に使わない 2 本目のコードと件数・id の一意性の assert で赤になる。
+- 7.2 → 7.3: **line-webhook の `OwnersAccessor.createOwner` はメソッド構文で独自の狭い入力型を持つため、引数の双変性で `inviteCodeId` を渡さなくても型検査を通る**（7.2 の時点で実測。実行時は undefined が NULL として送られ、会話経由のオーナーは記録なしになる）。7.3 ではアクセサの入力型を `@fwlm/db` の `CreateOwnerInput` に揃える。網の実測は「呼び出しから `inviteCodeId` を消す」変異で取る（design の試験 5 にある「省略可能にする変異」は実装側の引数が広がるだけで、構造上 line-webhook では赤にならない）。
+- 7.2 → 7.4: dashboard-api の `owners-list.ts` の `toJson` は `inviteCode` を落とす（GET /owners の応答に載せるのは 7.4）。
+- 7.2 → 7.5: `OWNER_COLUMNS` が `invite_code_id` を読むので、`findOwnerByLineUserId`／`findOwnerById` を通る line-webhook の全イベントが 0017 に依存する。本番は 0017 の適用が先（逆順だと Webhook がすべて失敗する）。なお `OWNER_COLUMNS` が `delivery_hour` を選ばないのに `OwnerRow` が持つ食い違いは 7.2 より前からある（範囲外）。
+- 7.2: 一括の `pnpm -C ts run test` は負荷で無関係なタイムアウト（store-detail `trend-scale`・dashboard-web `store-review-funnel`・line-webhook `report/stores.test.ts`）を出すことがある。差分に無いファイルなら単独で流し直して判定する。
+- 7.3: 型の網は、受け口（`OwnersAccessor.createOwner`）の入力を `CreateOwnerInput` にそろえて成立した。「呼び出しから `inviteCodeId` を消す」変異で `conversation.ts` の呼び出し箇所が TS2345 で赤になる。対照として受け口を旧来の狭い独自型へ戻すと、src は型エラーを出さない（7.2 の見立てどおり）。タスク本文の「省略可能にする変異」は、この変異で代替した。
+- 7.3: **失敗を差し込む試験は、狙った経路に着いたことを引数で固定する。** 招待コードの無効な経路も同じ `updateSession` を呼ぶため、「例外が出た・オーナー行が 0 件」だけでは、照合に失敗しても緑だった（存在しないコードを送る変異で実測・レビューで発見）。差し込む関数を名前付きの spy にし、`stage: 'await_store_name'` と `ownerId` を持つ呼び出しで 1 回だけ呼ばれたこと、その `ownerId` の行が残っていないことを確かめる形にした。
+- 7.3 → #472 の取り込み: #472（招待コード入力の正規化・未マージ）が足す単体試験の `validCodes`（例 `{ ABCD2345: { agencyId: AGENCY_ID } }`）は `id` を持たないため、本ブランチと統合すると line-webhook の型検査が赤になる。取り込み時にその試験データへ `id: INVITE_CODE_ID` を足す。src の衝突は無い（#472 が変える照合の行に 7.3 の差分は触れていない）。
+- 7.4: **このシェルは `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` が Aside を指すので、E2E は `env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH bash scripts/run-e2e-local.sh --only surfaces` で流す。** 素で流すと試験は全件通るのに、worker が 300 秒で強制終了されて exit 1 になる（#381 の Aside の crashpad の居残り・98 + 23 passed のまま赤）。付属 Chromium では 73〜135 秒で緑。
+- 7.4: **app コードのコメントに前置きなしの `#486` を書くと `check-design-tokens.sh` が色の直書きとして赤にする**（7.3 の `conversation.ts` で発生し、7.4 のレビューで発見・`33a3be2` で「Issue #486」に修正）。タスク単位の試験では見えないので、コミットの前に ts-ci が呼ぶ `scripts/check-*` を一通り流す（`grep -ohE 'scripts/check-[a-z0-9-]+\.(sh|py)' .github/workflows/ts-ci.yml` で一覧が取れる・33 本）。
+- 7.4: GET /owners の応答は `inviteCode` を参照のまま渡さず 3 項目（id・code・disabled）だけを写す。レビューの指摘で足した防御だが、当初は試験が無く参照渡しへ戻す変異が緑だった。DAL が余分な項目を返す場合の試験を足し、その変異で赤になることを確かめて閉じた（指摘への修正にも、それを赤にできる試験を付ける）。E2E スタブの OWNERS は `as const` で web の型に縛られていない（タスク外として記録のみ）。
+- 7.5（進行中・2026-10-25）: main（1519b5f）へ載せ直した後のローカルの全体の検証は緑（build・typecheck・lint・全 14 パッケージの試験・Go・ts-ci のガード 33 本・番号ガード。DB スイートの赤は 7.1 の bash 3.2 の `mapfile` 1 件のみ）。PR #491 を作成。**残りは本番の手順**: マージ前に 0017 を本番へ適用して列と 2 制約を確認 → マージ → deploy の確認 → 本番の新しいオーナー登録で `invite_code_id` が埋まることの確認。完了の印はこれらが済んでから付ける。
