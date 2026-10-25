@@ -15,7 +15,7 @@
   - _Requirements: 8.1, 8.3, 8.4_
   - _Boundary: GrantsOwnerColumns, OwnerLinePrivilegesCheck_
 
-- [ ] 1.3 (P) オーナー・客の面に解除を書く識別子が無いことの不在検査 (B5) を足す
+- [x] 1.3 (P) オーナー・客の面に解除を書く識別子が無いことの不在検査 (B5) を足す
   - 店舗の停止の不在検査 (B4) と同じ走査面・同じ「走査 0 件は赤」の規律で、解除の DAL 名と解除の列への代入を検出する
   - line-webhook の既存の個別メニュー操作の名前に誤検出しない
   - 不在検査が緑。line-webhook の実装へ解除の DAL の呼び出しを足す変異で赤になることを実測し、記録を残す
@@ -190,3 +190,4 @@
 ## Implementation Notes
 - 1.1: db/ERD.md の監査の種別数の記述（「18 値」）は 0016 の時点で既に古い。8.2 で 28 値へ直す。
 - 1.2: db/test の宣言網羅ガードは git ls-files で数えるので、新しい db/test/*.sh はステージしてから回す。RUN 表に足したら scripts/test/cases/98 の 3 か所（スタブ・件数・空にする sed）も直す。
+- 1.3: (B5) は line-webhook/src・survey-web/src・store-detail/{app,lib} で `line_unlinked_at`・`menu_pending_line_user_id` を `=` で比べる SQL も赤にする。これらの列で行を引く SQL は @fwlm/db の DAL に置く。
