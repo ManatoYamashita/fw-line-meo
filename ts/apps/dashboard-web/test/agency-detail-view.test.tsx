@@ -356,6 +356,20 @@ describe('代理店詳細: 取得と 4 区分（Req 9.2・9.3・9.4・9.5）', (
     expect(owners.getByText('記録なし（この機能より前の登録）')).toBeTruthy();
   });
 
+  it('店舗の表に場所の確定状態と利用中・停止中を出す（9.2）', async () => {
+    ready('operator');
+    resolveAll();
+    render(<AgencyDetailView agencyId={AGENCY_ID} />);
+    const stores = within(await screen.findByRole('region', { name: '店舗' }));
+    const cellsOf = (name: string) =>
+      within(stores.getAllByRole('row').find((r) => within(r).queryByText(name, { exact: true }) !== null)!)
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent);
+    expect(cellsOf('太郎食堂')).toEqual(['太郎食堂', '記録あり太郎', '確定済み', '利用中']);
+    expect(cellsOf('太郎食堂 駅前店')).toEqual(['太郎食堂 駅前店', '記録あり太郎', '確定済み', '停止中']);
+    expect(cellsOf('次郎食堂')).toEqual(['次郎食堂', '記録なし次郎', '未確定', '利用中']);
+  });
+
   it('ブロックを区別しない旨をオーナーの区分に明示する（9.5）', async () => {
     ready('operator');
     resolveAll();
