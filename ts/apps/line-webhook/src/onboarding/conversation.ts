@@ -89,7 +89,9 @@ export interface ConversationDeps {
   owners: OwnersAccessor;
   inviteCodes: InviteCodesAccessor;
   // 店名検索・店舗確定（タスク 3.1 で構築済み・会話非依存のサービス）。
-  identification: StoreIdentificationService;
+  // 確定はオンボーディング専用の confirmStoreForOnboarding だけを使う（owner-line-unlink 6.1・6.2）。管理画面の
+  // 店舗登録用の confirmStore は解除済みオーナーからの引継ぎを扱わないので、会話の依存に含めない。
+  identification: Pick<StoreIdentificationService, 'searchCandidates' | 'confirmStoreForOnboarding'>;
   messenger: LineMessenger;
   /**
    * 補助的処理の成否を記録する（Issue #228 タスク 4）。事象名は正典が定めるものを使う。
@@ -509,11 +511,18 @@ async function handleSelectCandidate(
 
 /**
  * Req 4.2: 確定 postback。セッションに保存された「実際に提示された候補」（session.candidates と
- * selected_index から導出）をそのまま StoreIdentificationService.confirmStore に渡す
+ * selected_index から導出）をそのまま StoreIdentificationService.confirmStoreForOnboarding に渡す
  * （再検索・再取得は行わない＝提示内容と確定内容の不一致を防ぐ）。
  * Req 4.4: 既に他オーナーへ登録済みの Place は確定を行わず、運営への問い合わせ案内を返す。
  * stage は据え置く（候補自体が確定不能と判明しただけで、要件は「確定を行わず案内する」のみを
  * 求めており stage 変更を要求しないため。ユーザーはやり直す postback で再検索に戻れる）。
+ * 引継ぎの拒否（所有者が連携中・解除済みでも代理店が違う）も同じ結果で返るので、同じ案内になる
+ * （owner-line-unlink 6.4, 6.5）。
+ *
+ * owner-line-unlink 6.2・7.2: 解除済みオーナーの店舗を引き継いだ（taken_over）ときは、通常の確定と同じ
+ * 後処理（段階を completed・onboarding_completed の監査・完了の案内・完了後メニュー）を行い、加えて
+ * 旧オーナーを対象にした owner_stores_taken_over と、移した店舗ごとの store_taken_over を監査に残す。
+ * 主体はどれも新しいオーナーである。監査の失敗は警告を残して握る（tryAuditLog）。
  */
 async function handleConfirm(
   deps: ConversationDeps,
@@ -531,32 +540,51 @@ async function handleConfirm(
     return;
   }
 
-  const outcome = await deps.identification.confirmStore(session.owner_id, candidate);
+  const outcome = await deps.identification.confirmStoreForOnboarding(session.owner_id, candidate);
 
   if (outcome.kind === 'place_already_registered') {
     await deps.messenger.reply(event.replyToken, [buildPlaceAlreadyRegisteredMessage()]);
     return;
   }
 
+  const ownerId = session.owner_id;
   await deps.sessions.updateSession(deps.db, event.lineUserId, { stage: 'completed' });
   await tryAuditLog(deps, {
     actorType: 'owner',
-    actorId: session.owner_id,
+    actorId: ownerId,
     action: 'onboarding_completed',
     targetType: 'store',
     targetId: outcome.storeId,
   });
+  if (outcome.kind === 'taken_over') {
+    await tryAuditLog(deps, {
+      actorType: 'owner',
+      actorId: ownerId,
+      action: 'owner_stores_taken_over',
+      targetType: 'owner',
+      targetId: outcome.previousOwnerId,
+    });
+    for (const movedStoreId of outcome.movedStoreIds) {
+      await tryAuditLog(deps, {
+        actorType: 'owner',
+        actorId: ownerId,
+        action: 'store_taken_over',
+        targetType: 'store',
+        targetId: movedStoreId,
+      });
+    }
+  }
   await deps.messenger.reply(event.replyToken, [buildCompletionMessage(deps.liffStoreDetailUrl)]);
 
   // Req 6.3: 完了時にリッチメニューを完了後メニューへ即時切り替える。
-  // owner の状態遷移（onboarding_status='store_identified'）はすでに confirmStore 内の
+  // owner の状態遷移（onboarding_status='store_identified'）はすでに confirmStoreForOnboarding 内の
   // トランザクションで commit 済みであり、この呼び出しはそれに付随するベストエフォートな
   // UX 補助動作（LINE 側のリッチメニュー割り当て）に過ぎない。ここで失敗しても
   // 巻き戻すべきトランザクションは存在せず、また reply は既に送信済みのため、
   // handleEvent 全体を失敗させない（design.md「LineMessenger」の reply 失敗時の扱いと同じ「例外にしない」方針）。
   // リンクと成否の記録（成功も失敗も記録し、記録は業務処理の外側で行う）は、店舗特定済みオーナーの振り分け口の
   // メニュー照合と同じ関数（owner/completed-menu.ts）で行う。この関数は例外を投げない。
-  await linkCompletedMenu(deps, event.lineUserId, session.owner_id);
+  await linkCompletedMenu(deps, event.lineUserId, ownerId);
 }
 
 /** Req 4.5: 確認段階での取りやめ。店名入力からやり直せる状態に戻す。 */

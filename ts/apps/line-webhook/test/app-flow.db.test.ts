@@ -11,6 +11,7 @@ import {
   findStoreByPlaceId,
   recordWebhookEventOnce,
   createAuditLog,
+  unlinkOwnerLine,
 } from '@fwlm/db';
 import type { StoreCandidate } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
@@ -26,6 +27,7 @@ import {
   buildCandidateCarouselMessage,
   buildConfirmationMessage,
   buildCompletionMessage,
+  buildPlaceAlreadyRegisteredMessage,
   buildStatusGuidanceMessage,
 } from '../src/line/messages.js';
 import { encodeReportPostback } from '@fwlm/line-report';
@@ -599,4 +601,133 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(suspensionAudits.rowCount).toBe(0);
     },
   );
+
+  // owner-line-unlink 6.2・7.2: 解除済みオーナーの店舗と同じ Place を、同じ代理店の新しいオーナーが確定すると、
+  // 会話はオンボーディング専用の確定で引継ぎを受け、通常の確定と同じ完了を返し、3 種の監査を実 DB に残す。
+  // 解除から同じ LINE アカウントで再オンボーディングする通しの流れは 9.2 の結合試験が持つ。ここでは確定の
+  // postback だけを実 HTTP で通し、会話と実のサービスの配線を確かめる。
+  describe('オンボーディングの確定での引継ぎ（owner-line-unlink 6.2, 6.4, 6.5, 7.2）', () => {
+    async function seedAwaitingConfirmation(
+      pool: Awaited<ReturnType<typeof getPool>>,
+      userId: string,
+      selected: StoreCandidate,
+    ) {
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId: userId });
+      await getOrCreateSession(pool, userId);
+      await updateSession(pool, userId, {
+        stage: 'await_confirmation',
+        ownerId: owner.id,
+        candidates: [selected],
+        selectedIndex: 0,
+      });
+      return owner;
+    }
+
+    function confirmRequest(app: ReturnType<typeof createApp>, userId: string, replyToken: string, eventId: string) {
+      const body = postbackBody(userId, replyToken, eventId, encodePostback({ kind: 'confirm' }));
+      return app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(body, CHANNEL_SECRET) },
+        body,
+      });
+    }
+
+    it('同じ代理店の解除済みオーナーの全店舗を引き継ぎ、完了の案内と完了後メニューを出し、3 種の監査を残す', async () => {
+      const pool = await getPool();
+      const previousUserId = 'Uf0-takeover-previous';
+      const newUserId = 'Uf0-takeover-new';
+      const confirmedStoreId = 'f0000000-0000-0000-0000-0000000487a1';
+      const suspendedStoreId = 'f0000000-0000-0000-0000-0000000487a2';
+      const selected = candidate({ placeId: 'ChIJ_f0_takeover_0', name: '引継ぎ食堂 本店' });
+      const messenger = createFakeMessenger();
+      const app = buildApp({ messenger, places: createFakePlaces({ kind: 'empty' }), pool });
+
+      const previous = await createOwner(pool, {
+        agencyId: AG,
+        inviteCodeId: INVITE_CODE_ID,
+        lineUserId: previousUserId,
+      });
+      await pool.query(`UPDATE owners SET onboarding_status = 'store_identified' WHERE id = $1`, [previous.id]);
+      await pool.query(
+        `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at)
+         VALUES ($1, $3, '引継ぎ食堂 本店', 'ChIJ_f0_takeover_0', 'confirmed', NULL),
+                ($2, $3, '引継ぎ食堂 支店', 'ChIJ_f0_takeover_1', 'confirmed', now())`,
+        [confirmedStoreId, suspendedStoreId, previous.id],
+      );
+      expect((await unlinkOwnerLine(pool, { ownerId: previous.id, agencyId: null })).kind).toBe('changed');
+
+      const owner = await seedAwaitingConfirmation(pool, newUserId, selected);
+
+      const res = await confirmRequest(app, newUserId, 'reply-f0-takeover', 'f0-evt-takeover-confirm');
+      expect(res.status).toBe(200);
+
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenCalledWith('reply-f0-takeover', [buildCompletionMessage(LIFF_STORE_DETAIL_URL)]);
+      expect(messenger.linkRichMenu).toHaveBeenCalledTimes(1);
+      expect(messenger.linkRichMenu).toHaveBeenCalledWith(newUserId, RICHMENU_COMPLETED_ID);
+
+      expect((await findOwnerByLineUserId(pool, newUserId))?.onboarding_status).toBe('store_identified');
+      const session = await getOrCreateSession(pool, newUserId);
+      expect(session.stage).toBe('completed');
+      const stores = await pool.query<{ id: string; owner_id: string }>(
+        'SELECT id, owner_id FROM stores WHERE id = ANY($1::uuid[]) ORDER BY id',
+        [[confirmedStoreId, suspendedStoreId]],
+      );
+      expect(stores.rows).toEqual([
+        { id: confirmedStoreId, owner_id: owner.id },
+        { id: suspendedStoreId, owner_id: owner.id },
+      ]);
+
+      const audits = await pool.query<{ actor_type: string; action: string; target_type: string; target_id: string }>(
+        `SELECT actor_type, action, target_type, target_id
+           FROM audit_logs
+          WHERE actor_id = $1
+            AND action IN ('onboarding_completed', 'owner_stores_taken_over', 'store_taken_over')
+          ORDER BY action, target_id`,
+        [owner.id],
+      );
+      expect(audits.rows).toEqual([
+        { actor_type: 'owner', action: 'onboarding_completed', target_type: 'store', target_id: confirmedStoreId },
+        { actor_type: 'owner', action: 'owner_stores_taken_over', target_type: 'owner', target_id: previous.id },
+        { actor_type: 'owner', action: 'store_taken_over', target_type: 'store', target_id: confirmedStoreId },
+        { actor_type: 'owner', action: 'store_taken_over', target_type: 'store', target_id: suspendedStoreId },
+      ]);
+    });
+
+    it('所有者が連携中の Place は引き継がず、既存の登録済みの案内を返し、監査を残さない', async () => {
+      const pool = await getPool();
+      const holderUserId = 'Uf0-takeover-linked-holder';
+      const newUserId = 'Uf0-takeover-rejected';
+      const holderStoreId = 'f0000000-0000-0000-0000-0000000487b1';
+      const selected = candidate({ placeId: 'ChIJ_f0_takeover_linked', name: '連携中食堂' });
+      const messenger = createFakeMessenger();
+      const app = buildApp({ messenger, places: createFakePlaces({ kind: 'empty' }), pool });
+
+      const holder = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId: holderUserId });
+      await pool.query(`UPDATE owners SET onboarding_status = 'store_identified' WHERE id = $1`, [holder.id]);
+      await pool.query(
+        `INSERT INTO stores (id, owner_id, name, place_id, place_status)
+         VALUES ($1, $2, '連携中食堂', 'ChIJ_f0_takeover_linked', 'confirmed')`,
+        [holderStoreId, holder.id],
+      );
+
+      const owner = await seedAwaitingConfirmation(pool, newUserId, selected);
+
+      const res = await confirmRequest(app, newUserId, 'reply-f0-takeover-rejected', 'f0-evt-takeover-rejected');
+      expect(res.status).toBe(200);
+
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenCalledWith('reply-f0-takeover-rejected', [buildPlaceAlreadyRegisteredMessage()]);
+      expect(messenger.linkRichMenu).not.toHaveBeenCalled();
+      expect((await findOwnerByLineUserId(pool, newUserId))?.onboarding_status).toBe('pending');
+      expect((await findStoreByPlaceId(pool, selected.placeId))?.owner_id).toBe(holder.id);
+
+      const audits = await pool.query(
+        `SELECT 1 FROM audit_logs
+          WHERE actor_id = $1 OR target_id = $2`,
+        [owner.id, holder.id],
+      );
+      expect(audits.rowCount).toBe(0);
+    });
+  });
 });

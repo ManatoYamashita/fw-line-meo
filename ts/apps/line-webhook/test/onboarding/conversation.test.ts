@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type {
   ActiveInviteCode,
+  AuditLogInput,
   CreateOwnerInput,
   OnboardingSessionRow,
   OwnerRow,
@@ -19,12 +20,14 @@ import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessenger, LineMessage } from '../../src/line/client.js';
 import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type {
-  ConfirmOutcome,
+  ConfirmForOnboardingOutcome,
   StoreIdentificationService,
 } from '@fwlm/store-identification';
 import type { SearchOutcome } from '@fwlm/store-identification';
 import { encodePostback } from '../../src/onboarding/stages.js';
 import {
+  buildCompletionMessage,
+  buildPlaceAlreadyRegisteredMessage,
   buildStatusGuidanceMessage,
   buildConfirmationMessage as buildConfirmationMessageForAssertion,
   buildGreetingMessage,
@@ -177,34 +180,31 @@ function createFakeInviteCodesAccessor(validCodes: Record<string, ActiveInviteCo
 }
 
 // タスク 3.1 で構築済みの StoreIdentificationService のフェイク実装。
-// searchCandidates/confirmStore の戻り値をテストごとに差し替えられるようにし、
-// confirmStore に渡された引数（ownerId・candidate）を記録して「セッションに保存された
+// searchCandidates/confirmStoreForOnboarding の戻り値をテストごとに差し替えられるようにし、
+// confirmStoreForOnboarding に渡された引数（ownerId・candidate）を記録して「セッションに保存された
 // 実際に提示済みの候補」がそのまま渡されたことを検証できるようにする。
+// 会話が使うのはオンボーディング専用の確定だけである（owner-line-unlink 6.2）。管理画面の店舗登録用の
+// confirmStore は会話の依存に含まれないので、フェイクも持たない。
 function createFakeIdentificationService(config: {
   // 呼び出し側が undefined を素通しするため、キーの省略と明示的な undefined の双方を許す
   // （exactOptionalPropertyTypes 下では両者が別物になる）。
   searchOutcome?: SearchOutcome | undefined;
-  confirmOutcome?: ConfirmOutcome | undefined;
+  confirmOutcome?: ConfirmForOnboardingOutcome | undefined;
 }): {
-  service: StoreIdentificationService;
+  service: Pick<StoreIdentificationService, 'searchCandidates' | 'confirmStoreForOnboarding'>;
   searchCalls: string[];
   confirmCalls: { ownerId: string; candidate: StoreCandidate }[];
 } {
   const searchCalls: string[] = [];
   const confirmCalls: { ownerId: string; candidate: StoreCandidate }[] = [];
-  const service: StoreIdentificationService = {
+  const service: Pick<StoreIdentificationService, 'searchCandidates' | 'confirmStoreForOnboarding'> = {
     async searchCandidates(storeName: string) {
       searchCalls.push(storeName);
       return config.searchOutcome ?? { kind: 'empty' };
     },
-    async confirmStore(ownerId: string, candidate: StoreCandidate) {
+    async confirmStoreForOnboarding(ownerId: string, candidate: StoreCandidate) {
       confirmCalls.push({ ownerId, candidate });
       return config.confirmOutcome ?? { kind: 'confirmed', storeId: 'store-1' };
-    },
-    // 会話はまだ confirmStore を使う（オンボーディング専用の確定への切り替えは owner-line-unlink 6.2）。
-    // 呼ばれたら試験の前提が崩れているので、黙って成功させずに失敗させる。
-    async confirmStoreForOnboarding() {
-      throw new Error('confirmStoreForOnboarding is not wired into the conversation yet');
     },
   };
   return { service, searchCalls, confirmCalls };
@@ -303,7 +303,7 @@ function buildDeps(overrides: {
   validCodes?: Record<string, ActiveInviteCode>;
   now?: Date;
   searchOutcome?: SearchOutcome;
-  confirmOutcome?: ConfirmOutcome;
+  confirmOutcome?: ConfirmForOnboardingOutcome;
   messenger?: ReturnType<typeof createFakeMessenger>;
   /** 省略すると偽の振り分け口（routerFake）を使う。 */
   createOwnerRouter?: StoreIdentifiedOwnerRouterFactory;
@@ -1006,7 +1006,7 @@ describe('createConversationHandlers', () => {
       expect(logger.info).not.toHaveBeenCalledWith('line-webhook.richmenu_linked');
     });
 
-    it('確定 → confirmStore が session 由来の ownerId・candidate で呼ばれ、完了 reply・stage は completed（Req 4.2）', async () => {
+    it('確定 → confirmStoreForOnboarding が session 由来の ownerId・candidate で呼ばれ、完了 reply・stage は completed（Req 4.2）', async () => {
       const candidates = storeCandidates(3);
       const session = baseSession({
         stage: 'await_confirmation',
@@ -1109,6 +1109,165 @@ describe('createConversationHandlers', () => {
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { type: string }).type).toBe('flex');
       expect((message as { altText: string }).altText).toContain('確定できませんでした');
+    });
+
+    it('確定 → place_already_registered の案内は既存の登録済みの案内そのもので、監査を残さない（owner-line-unlink 6.4, 6.5）', async () => {
+      // 引継ぎの拒否（所有者が連携中・解除済みでも代理店が違う）は、オンボーディング専用の確定が
+      // place_already_registered で返す。会話は既存の登録済みの案内をそのまま返す。
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'place_already_registered' },
+      });
+      const audits: AuditLogInput[] = [];
+      deps.auditLog = async (input) => {
+        audits.push(input);
+      };
+      const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-rejected',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(messenger.replies).toEqual([
+        { replyToken: 'rt-rejected', messages: [buildPlaceAlreadyRegisteredMessage()] },
+      ]);
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      expect(linkRichMenuSpy).not.toHaveBeenCalled();
+      expect(audits).toEqual([]);
+    });
+
+    it('確定 → confirmed は onboarding_completed だけを監査に残し、引継ぎの監査を残さない', async () => {
+      const { deps } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+      });
+      const audits: AuditLogInput[] = [];
+      deps.auditLog = async (input) => {
+        audits.push(input);
+      };
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-confirmed-audit',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(audits.map((a) => a.action)).toEqual(['onboarding_completed', 'rich_menu_linked']);
+    });
+
+    describe('引継ぎ（taken_over・owner-line-unlink 6.2, 7.2）', () => {
+      const TAKEN_OVER: ConfirmForOnboardingOutcome = {
+        kind: 'taken_over',
+        storeId: 'store-confirmed',
+        previousOwnerId: 'owner-previous',
+        movedStoreIds: ['store-older', 'store-confirmed', 'store-suspended'],
+      };
+
+      function takeoverDeps(messenger?: ReturnType<typeof createFakeMessenger>) {
+        const built = buildDeps({
+          session: baseSession({
+            stage: 'await_confirmation',
+            owner_id: 'owner-new',
+            candidates: storeCandidates(2),
+            selected_index: 1,
+          }),
+          confirmOutcome: TAKEN_OVER,
+          ...(messenger ? { messenger } : {}),
+        });
+        const audits: AuditLogInput[] = [];
+        built.deps.auditLog = async (input) => {
+          audits.push(input);
+        };
+        return { ...built, audits };
+      }
+
+      it('通常の確定と同じく段階を completed にし、完了の案内を返し、完了後メニューを張る（6.2）', async () => {
+        const { deps, sessionsFake, identificationFake, messenger } = takeoverDeps();
+        const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+        const handlers = createConversationHandlers(deps);
+
+        await handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-taken-over',
+          data: encodePostback({ kind: 'confirm' }),
+        });
+
+        expect(identificationFake.confirmCalls).toEqual([
+          { ownerId: 'owner-new', candidate: storeCandidates(2)[1] },
+        ]);
+        expect(sessionsFake.updateCalls.map((call) => call.patch)).toEqual([{ stage: 'completed' }]);
+        expect(messenger.replies).toEqual([
+          { replyToken: 'rt-taken-over', messages: [buildCompletionMessage(LIFF_STORE_DETAIL_URL)] },
+        ]);
+        expect(linkRichMenuSpy).toHaveBeenCalledTimes(1);
+        expect(linkRichMenuSpy).toHaveBeenCalledWith('U1', RICHMENU_COMPLETED_ID);
+      });
+
+      it('完了・旧オーナーを対象にした引継ぎ・移した店舗ごとの引継ぎの 3 種を、新しいオーナーを主体に監査へ残す（7.2）', async () => {
+        const { deps, audits } = takeoverDeps();
+        const handlers = createConversationHandlers(deps);
+
+        await handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-taken-over-audit',
+          data: encodePostback({ kind: 'confirm' }),
+        });
+
+        const actor = { actorType: 'owner', actorId: 'owner-new' } as const;
+        expect(audits).toEqual([
+          { ...actor, action: 'onboarding_completed', targetType: 'store', targetId: 'store-confirmed' },
+          { ...actor, action: 'owner_stores_taken_over', targetType: 'owner', targetId: 'owner-previous' },
+          { ...actor, action: 'store_taken_over', targetType: 'store', targetId: 'store-older' },
+          { ...actor, action: 'store_taken_over', targetType: 'store', targetId: 'store-confirmed' },
+          { ...actor, action: 'store_taken_over', targetType: 'store', targetId: 'store-suspended' },
+          { ...actor, action: 'rich_menu_linked', targetType: 'owner', targetId: 'owner-new' },
+        ]);
+      });
+
+      it('監査の記録が失敗しても、完了の案内と完了後メニューは変わらず、警告を残す', async () => {
+        const { deps, messenger, logger } = takeoverDeps();
+        deps.auditLog = async () => {
+          throw new Error('audit sink unavailable');
+        };
+        const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+        const handlers = createConversationHandlers(deps);
+
+        await expect(
+          handlers.handleEvent({
+            kind: 'postback',
+            lineUserId: 'U1',
+            replyToken: 'rt-taken-over-audit-fails',
+            data: encodePostback({ kind: 'confirm' }),
+          }),
+        ).resolves.toBeUndefined();
+
+        expect(messenger.replies).toEqual([
+          {
+            replyToken: 'rt-taken-over-audit-fails',
+            messages: [buildCompletionMessage(LIFF_STORE_DETAIL_URL)],
+          },
+        ]);
+        expect(linkRichMenuSpy).toHaveBeenCalledWith('U1', RICHMENU_COMPLETED_ID);
+        expect(logger.warn).toHaveBeenCalledWith('line-webhook.audit_log_failed', { errorKind: 'Error' });
+      });
     });
 
     it('取りやめ（restart）→ await_store_name へ戻り、候補・選択インデックスはクリアされる（Req 4.5）', async () => {
