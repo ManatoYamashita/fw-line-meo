@@ -581,7 +581,7 @@ export interface OwnerListItem {
 
 - `app/admin/agencies/[agencyId]/page.tsx`（サーバー部品）: `PageProps<'/admin/agencies/[agencyId]'>` の `params` を `await` して `agencyId` を取り出し、`AuthGuard`・`TopNav`・`AgencyDetailView` へ文字列で渡す。`'use client'` にして `useParams()` で読む形は採らない（ルートの引数の型を失う）。`generateStaticParams` は書かない（`output: 'standalone'` の動的レンダリング）。dashboard-web で最初の動的ルートになる
 - `app/admin/agencies/[agencyId]/agency-detail-view.tsx`（クライアント部品）: 取得・状態・描画。API は別オリジンの Cloud Run で、Firebase の ID トークンをクライアントが付ける構成なので、取得はクライアント側で行う（既存の面と同じ）
-- `lib/agency-detail.ts`（純粋関数）: `isAgencyId`（UUID の形）・`usersOfAgency`（GET /dashboard-users の全件を `agencyId` で絞る）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
+- `lib/agency-detail.ts`（純粋関数）: `toAgencyId`（UUID の形なら小文字へ正規化して返し、形でなければ null。取得・存在判定・絞り込みはすべてこの値を使う。API の id は小文字なので、素の経路の値を厳密一致で比べると大文字の URL で区分が割れる）・`usersOfAgency`（GET /dashboard-users の全件を `agencyId` で絞る）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
 
 **取得と状態（9.6・9.7）**
 
@@ -711,7 +711,7 @@ ALTER TABLE owners
 
 ### 代理店詳細の試験（Requirement 9・Issue #486）
 
-1. `lib/agency-detail.ts`（単体）: `isAgencyId` の形の判定、`usersOfAgency` が他代理店と運営を含めない、`ownersByInviteCode` が記録なしのオーナーをどのコードにも入れない、`unrecordedOwnerCount`
+1. `lib/agency-detail.ts`（単体）: `toAgencyId` の形の判定と小文字への正規化、`usersOfAgency` が他代理店と運営を含めない、`ownersByInviteCode` が記録なしのオーナーをどのコードにも入れない、`unrecordedOwnerCount`
 2. `AgencyDetailView`（描画）: 代理店ロールで API を 1 本も呼ばない（9.9）／5 本を同時に発行する／形の不正な id は API を呼ばずに「見つかりません」・一覧に無い id は区分も件数も描かない（9.6）／区分ごとの失敗で他の区分が残り、失敗した区分と件数を 0 と出さない・再読み込みでその区分だけを取り直す（9.7）／0 件の案内（9.8）／記録なしのオーナー（9.4）／ブロックの注記（9.5）／`TableContainer` の名前が重複しない／書込の API を呼ばない（9.10）
 3. `OwnerRosterTable`: `showInviteCode` のときだけ列が増え、渡さないときの描画は変わらない（`stores-new-page.test.tsx` も緑のまま）
 4. `TopNav`: 詳細の経路で「代理店管理」に `"true"`、一覧で `"page"`、`/stores/new` で「店舗一覧」が現在地にならない

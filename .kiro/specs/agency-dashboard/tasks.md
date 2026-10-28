@@ -217,8 +217,8 @@
   - _Requirements: 9.2, 9.4_
   - _Boundary: dashboard-web components, lib/status-labels, invite-codes page, admin/users page_
 
-- [ ] 8.2 (P) 代理店詳細の純粋関数（`lib/agency-detail.ts`）
-  - `isAgencyId`（UUID の形）・`usersOfAgency`（GET /dashboard-users の全件から `agencyId` が一致する行だけ・運営の行は含めない）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
+- [x] 8.2 (P) 代理店詳細の純粋関数（`lib/agency-detail.ts`）
+  - `toAgencyId`（UUID の形なら小文字へ正規化・形でなければ null）・`usersOfAgency`（GET /dashboard-users の全件から `agencyId` が一致する行だけ・運営の行は含めない）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
   - 完了状態: 単体テストで、他代理店と運営の利用者が混ざらないこと、記録なしのオーナーがどのコードにも入らないこと（9.4）、形の不正な id を弾くことが緑
   - _Requirements: 9.2, 9.4, 9.6_
   - _Boundary: dashboard-web lib_
@@ -281,3 +281,4 @@
 - 7.4: **app コードのコメントに前置きなしの `#486` を書くと `check-design-tokens.sh` が色の直書きとして赤にする**（7.3 の `conversation.ts` で発生し、7.4 のレビューで発見・`33a3be2` で「Issue #486」に修正）。タスク単位の試験では見えないので、コミットの前に ts-ci が呼ぶ `scripts/check-*` を一通り流す（`grep -ohE 'scripts/check-[a-z0-9-]+\.(sh|py)' .github/workflows/ts-ci.yml` で一覧が取れる・33 本）。
 - 7.4: GET /owners の応答は `inviteCode` を参照のまま渡さず 3 項目（id・code・disabled）だけを写す。レビューの指摘で足した防御だが、当初は試験が無く参照渡しへ戻す変異が緑だった。DAL が余分な項目を返す場合の試験を足し、その変異で赤になることを確かめて閉じた（指摘への修正にも、それを赤にできる試験を付ける）。E2E スタブの OWNERS は `as const` で web の型に縛られていない（タスク外として記録のみ）。
 - 7.5（進行中・2026-10-25）: main（1519b5f）へ載せ直した後のローカルの全体の検証は緑（build・typecheck・lint・全 14 パッケージの試験・Go・ts-ci のガード 33 本・番号ガード。DB スイートの赤は 7.1 の bash 3.2 の `mapfile` 1 件のみ）。PR #491 を作成。**残りは本番の手順**: マージ前に 0017 を本番へ適用して列と 2 制約を確認 → マージ → deploy の確認 → 本番の新しいオーナー登録で `invite_code_id` が埋まることの確認。完了の印はこれらが済んでから付ける。
+- 8.2: **経路の値の大小は、判定と比較で同じ正規化を通す。** 形の判定で大小を許したまま、利用者の絞り込みを素の値の厳密一致で書いていた（レビューで発見）。API の id は小文字なので、大文字の URL で利用者の区分だけが偽の 0 件になる。`toAgencyId` で小文字へ正規化して全経路で使う形にした。あわせて、**大小を試す入力には英字を含める**: 試験の id が `22222222-…` と数字だけで `toUpperCase()` が値を変えず、大小の試験が空振りしていた（小文字化を外す変異で赤が 1 件しか出ないことで発見）。
