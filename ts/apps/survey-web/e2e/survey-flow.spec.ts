@@ -219,6 +219,27 @@ for (const size of TOAST_SIZES) {
       await expect
         .poll(async () => ({ link: await topmost(link), regenerate: await topmost(regenerate) }))
         .toEqual({ link: 'self', regenerate: 'self' });
+      // **画面の送りが止まるまで待ってから測り直す（Issue #492）。** 上の待ちは送りの途中でも抜ける。
+      // 実測（320×568 と 375×667 で各 3 回）では、6 回とも抜けた後もまだ送られていて、送りが抜けた後に
+      // 始まる回もあった（scrollY 150 → 309）。送りの途中で矩形を測って座標を押すと、リンクの元の位置へ
+      // 下の再生成が上がってきて、そちらを押してしまう（新しいタブが開かず 30 秒で時間切れになる）。
+      // 送りは Toast を測ってから数フレーム後に始まるので、短い静止では止まったと見誤る。500ms 動かないことを条件にする。
+      const scrollSamples: number[] = [];
+      await expect
+        .poll(
+          async () => {
+            scrollSamples.push(await page.evaluate(() => Math.round(window.scrollY)));
+            const recent = scrollSamples.slice(-6);
+            return recent.length === 6 && recent.every((y) => y === recent[0]);
+          },
+          { message: '画面の送りが止まらない', intervals: [100], timeout: 10_000 },
+        )
+        .toBe(true);
+      await expect
+        .poll(async () => ({ link: await topmost(link), regenerate: await topmost(regenerate) }), {
+          message: '画面の送りが止まった後に、リンクか再生成が Toast に覆われている',
+        })
+        .toEqual({ link: 'self', regenerate: 'self' });
       // 確かめている間も Toast は出たままである（Toast が消えたから押せた、ではない）。
       await expect(toast).toBeVisible();
 
