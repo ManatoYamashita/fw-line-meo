@@ -127,7 +127,7 @@
   - _Requirements: 6.2, 6.4, 6.5, 7.2_
   - _Depends: 3.1, 6.1_
 
-- [ ] 7. (P) delivery-job: 解除済みオーナーの店舗を配信の対象から外す
+- [x] 7. (P) delivery-job: 解除済みオーナーの店舗を配信の対象から外す
   - 配信の対象と、集計が無い日の見送りの対象の 2 つの抽出に、解除済みでない条件を足す
   - 実 DB 試験で、解除済みオーナーの店舗がどちらの抽出にも出ず、通知記録が増えないこと、引き継いだ店舗が新しいオーナーの宛先で抽出されることが確かめられる
   - _Requirements: 4.5, 5.2, 5.3, 5.4, 6.7_
@@ -205,3 +205,4 @@
 - 5.2: ナビにオーナー一覧を足したので、e2e/mobile-layout.spec.ts の帯の操作要素の数を運営 7・代理店 5 に改めた。幅 1024px（lg の境目）で運営のナビの余りは約 5px しかなく、E2E はこの幅を測っていない（9.3 で網を検討）。解除は成功したが一覧の取り直しに失敗した場合、行は連携中のまま残り再読み込みを促す。
 - 6.1: line-webhook の unlinkRichMenu は 404 を成功とし、ID の形の検査を持つ（dashboard-api の line-richmenu.ts と同じ。片方だけ変えない）。安全網で外せてもメニュー未解除の印は消さない。
 - 6.2: 会話の依存は Pick<StoreIdentificationService, searchCandidates | confirmStoreForOnboarding> に絞り、会話から confirmStore を呼べない。引継ぎの後、旧オーナーは店舗特定済みのまま 0 店になる（LINE ID を持たないので振り分けには来ない）。
+- 7: delivery-job の試験の配信時刻は、targets.db が 9・11・12 時、index.e2e が 13・14・15 時、cross-runtime が 17 時を使う。厳密な件数検査は時刻の重複に弱い。
