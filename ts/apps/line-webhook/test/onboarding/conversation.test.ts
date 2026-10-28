@@ -201,6 +201,11 @@ function createFakeIdentificationService(config: {
       confirmCalls.push({ ownerId, candidate });
       return config.confirmOutcome ?? { kind: 'confirmed', storeId: 'store-1' };
     },
+    // 会話はまだ confirmStore を使う（オンボーディング専用の確定への切り替えは owner-line-unlink 6.2）。
+    // 呼ばれたら試験の前提が崩れているので、黙って成功させずに失敗させる。
+    async confirmStoreForOnboarding() {
+      throw new Error('confirmStoreForOnboarding is not wired into the conversation yet');
+    },
   };
   return { service, searchCalls, confirmCalls };
 }

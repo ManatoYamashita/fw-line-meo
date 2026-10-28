@@ -52,8 +52,8 @@
   - 実 DB 試験で、付け替え後も店舗の ID・停止状態・日次データ・集計が残り、旧オーナーの引継ぎ先が新しいオーナーを指す
   - _Requirements: 2.6, 6.1, 6.3, 6.6_
 
-- [ ] 3. オンボーディングの確定での引継ぎ
-- [ ] 3.1 オンボーディング専用の確定を実装する
+- [x] 3. オンボーディングの確定での引継ぎ
+- [x] 3.1 オンボーディング専用の確定を実装する
   - 所有者が無ければ新規に確定し、自分なら成功、解除済みかつ同じ代理店なら全店舗を引き継ぎ、それ以外は登録済みとして拒否する。確定・付け替え・状態遷移は 1 トランザクション
   - 並行の挿入で一意制約に当たったときは 1 回だけやり直す
   - 既存の確定（管理画面の店舗登録が使う）の振る舞いは変えない
@@ -196,3 +196,4 @@
 - 2026-10-25: main（#491・#490）を取り込み、本 spec の migration を 0018 へ送った。owners.invite_code_id（#486）は line_webhook・survey に INSERT だけを与える。createOwner は inviteCodeId 必須。
 - 2.2: listOwners は #486 の inviteCode を保つ。GET /owners の応答は dashboard-api の toJson が項目を明示して写すので、4.4 でそこへ新しい項目を足す。
 - 2.3: lockPlaceHolder / moveAllStores は BEGIN 済みの接続を渡す。施錠するのは owners の行（店舗の行ではない）。grants.sql の文を取り出す試験ヘルパーが 2 ファイルに重複しているので、3 つ目が出たら共通化する。
+- 3.1: line-webhook の test/onboarding/conversation.test.ts のフェイクに、呼ばれたら例外を投げる confirmStoreForOnboarding を置いた。6.2 で切り替えるときに作り直す。
