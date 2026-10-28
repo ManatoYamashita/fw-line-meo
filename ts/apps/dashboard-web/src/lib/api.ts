@@ -4,6 +4,7 @@ import type {
   Category,
   DashboardUserItem,
   InviteCodeItem,
+  OwnerLineUnlinkResult,
   OwnerListItem,
   StoreCandidate,
   StoreListItem,
@@ -189,7 +190,8 @@ export async function resumeStore(
   return postStoreSuspension(input.id, 'resume', options);
 }
 
-// GET /owners: 登録対象オーナー一覧。agency は無指定で自代理店、operator は agencyId 指定が必須（未指定は API が 400）。
+// GET /owners: オーナー一覧。agency は無指定で自代理店（他代理店の指定は API が 403）、
+// operator は agencyId 未指定で全代理店・指定で絞り込み（owner-line-unlink で「未指定は 400」から変更）。
 export async function getOwners(
   params: { agencyId?: string } = {},
   options: ApiClientOptions = {},
@@ -200,6 +202,22 @@ export async function getOwners(
   );
   if (!result.ok) return result;
   return { ok: true, value: result.value.owners };
+}
+
+// POST /owners/:id/unlink: オーナーと LINE の紐づけを解除し、元の LINE アカウントの完了後メニューを外す
+// （owner-line-unlink Req 1.1, 3.1, 3.2）。既に解除済みで未解除の印が残るオーナーへ送ると、状態を変えずに
+// メニューだけを外し直す（Req 3.4）。本文は送らない（範囲は利用者の役割からサーバーが決める）。
+// 200 は { owner, menu } をそのまま返す（menu が結果の本体なので owner だけへアンラップしない）。
+// 範囲外・不存在・不正な id はどれも同じ本文の 404(not_found)（Req 1.3）。code はそのまま返し、
+// 利用者向けの文言への写像は表示層が持つ。
+export async function unlinkOwnerLine(
+  input: { id: string },
+  options: ApiClientOptions = {},
+): Promise<ApiResult<OwnerLineUnlinkResult>> {
+  return apiFetch<OwnerLineUnlinkResult>(`/owners/${encodeURIComponent(input.id)}/unlink`, {
+    ...options,
+    method: 'POST',
+  });
 }
 
 // GET /agencies: 代理店一覧（operator 専用。agency ロールは API が 403）。

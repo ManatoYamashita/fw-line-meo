@@ -139,6 +139,12 @@ export const OWNERS = [
     // 登録に用いたコード（INVITE_CODES[0]）の発行より後に登録した形にそろえる。
     createdAt: '2026-08-12T09:00:00.000Z',
     inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    // 確定済み店舗の名前だけが載る（STORES[0] は確定済み）。
+    storeNames: [LONG_STORE_NAME],
+    takenOverBy: null,
   },
   {
     // STORES[1] のオーナーと同一人物（表示名の無いオーナー）。招待コードの記録を始める前の登録の形。
@@ -147,6 +153,12 @@ export const OWNERS = [
     onboardingStatus: 'store_identified',
     createdAt: '2026-08-02T09:00:00.000Z',
     inviteCode: null,
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    // STORES[1] は店舗特定の前（pending）なので、確定済み店舗の名前には載らない。
+    storeNames: [],
+    takenOverBy: null,
   },
   {
     // 同じコードで複数のオーナーが登録できる（Req 2.5）ので、オーナー太郎と同じコードの記録を持つ。
@@ -155,6 +167,11 @@ export const OWNERS = [
     onboardingStatus: 'pending',
     createdAt: '2026-08-20T09:00:00.000Z',
     inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
   },
 ] as const;
 

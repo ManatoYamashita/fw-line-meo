@@ -92,7 +92,7 @@
   - _Depends: 2.2_
 
 - [ ] 5. dashboard-web: オーナーの画面
-- [ ] 5.1 API クライアントと型をオーナーの解除と一覧の拡張に合わせる
+- [x] 5.1 API クライアントと型をオーナーの解除と一覧の拡張に合わせる
   - 一覧の取得で代理店の指定を省けるようにし、新しい項目を型に足す。解除の呼び出しを足す
   - クライアントの試験で、要求の形と応答の読み取り（メニューの結果の 3 値を含む）が確かめられる
   - _Requirements: 2.1, 3.2_
@@ -201,3 +201,4 @@
 - 4.2: dashboard-api は LINE_CHANNEL_ID・LINE_CHANNEL_SECRET が無いと起動しない。本番は 8.1 の env を新しいイメージより先に apply する。composition.ts の Pick は 4.3 で広げる。
 - 4.3: 記録の項目は design の httpStatus ではなく正典の status。印の消去の失敗は errorKind pending_clear_failed。合成ルートは必須の lineFetch を受ける（試験は refuseLineFetch）。解除の確定から LINE を呼ぶまでの競合の窓は再確認を足さずに残した（ハンドラのコメント参照）。
 - 4.4: GET /owners は運営の代理店未指定で全件。dashboard-web の src/lib/api.ts の「未指定は 400」のコメントと web の型は 5.1、agency-dashboard の design.md・tasks.md に残る listOwnersByAgency と 400 の記述は 8.2 で直す。
+- 5.1: test/stores-new-page.test.tsx と test/agency-roster.test.ts の owner の試験データは型の注釈が無く、新しい項目を持たない。5.3 で lineLink を足し satisfies OwnerListItem を付ける。
