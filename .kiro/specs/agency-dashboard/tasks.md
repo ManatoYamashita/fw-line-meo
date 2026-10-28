@@ -204,6 +204,52 @@
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
   - _Depends: 7.1, 7.2, 7.3, 7.4_
 
+## 8. 代理店ごとの詳細の閲覧（Requirement 9・Issue #486）
+
+> 前提: API・DB は変えない（dashboard-web だけの変更）。7.5 の本番での記録の確認とは独立に進めてよい。
+> 共用部品（`OwnerRosterTable`・`TopNav`・`status-labels.ts`）は店舗登録（3.12–3.14）と他の面も使う。8.1 は既存の面の描画を変えないことを完了状態に含める。
+
+- [x] 8.1 共用部品の拡張（表示語・オーナーの表・現在地）
+  - `lib/status-labels.ts` に「有効／無効」の表示語を足し、`app/invite-codes/page.tsx`・`app/admin/users/page.tsx` が直接書いている同じ語をここから引くように置き換える（語は変えない）
+  - `components/owner-roster-table.tsx` に省略可能な `showInviteCode?: boolean` を足す。`true` のときだけ「招待コード」の列を作成日の後に描く（記録あり＝コード・無効のコードには「無効」のラベル・`null` ＝「記録なし（この機能より前の登録）」・`wrap="none"`）
+  - `components/top-nav.tsx` の現在地の判定を「完全一致は `aria-current="page"`。どれにも完全一致しないときは `href + '/'` で始まる最も長い項目に `aria-current="true"`」に変え、下線を `aria-[current=true]` からも出す（全リンクの class は同一のまま・正典 §7.8）
+  - 完了状態: `OwnerRosterTable` の単体テストで、`showInviteCode` のときだけ列が増え、3 通り（記録あり・無効のコード・記録なし）が出ること。`top-nav.test.tsx` で、`/admin/agencies/<id>` では「代理店管理」が `"true"`、`/admin/agencies` では `"page"`、`/stores/new` では「店舗一覧」が現在地にならないこと。`stores-new-page.test.tsx`・`invite-codes-page.test.tsx`・`admin-users-page.test.tsx` が変更なしで緑（既存の面の描画が変わっていない）。前方一致を「最も長い項目」に限らない変異で `/stores/new` の試験が赤になることを実測する
+  - _Requirements: 9.2, 9.4_
+  - _Boundary: dashboard-web components, lib/status-labels, invite-codes page, admin/users page_
+
+- [x] 8.2 (P) 代理店詳細の純粋関数（`lib/agency-detail.ts`）
+  - `toAgencyId`（UUID の形なら小文字へ正規化・形でなければ null）・`usersOfAgency`（GET /dashboard-users の全件から `agencyId` が一致する行だけ・運営の行は含めない）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
+  - 完了状態: 単体テストで、他代理店と運営の利用者が混ざらないこと、記録なしのオーナーがどのコードにも入らないこと（9.4）、形の不正な id を弾くことが緑
+  - _Requirements: 9.2, 9.4, 9.6_
+  - _Boundary: dashboard-web lib_
+
+- [x] 8.3 代理店詳細の画面（`/admin/agencies/[agencyId]`）
+  - `app/admin/agencies/[agencyId]/page.tsx`（サーバー部品・`PageProps` の `params` を `await`）と `agency-detail-view.tsx`（クライアント部品）。取得・状態・描画は design.md「代理店詳細」に従う: 代理店ロールは API を呼ばない／UUID の形でなければ API を呼ばない／5 本を同時に発行／存在は GET /agencies で判定し判定まで区分を描かない／区分ごとの状態と再読み込み／GET /stores を店舗の区分とオーナーの表の両方に使う／概要の件数（`loading`・`error` を 0 と出さない）／ブロックの注記／記録なしのオーナーの件数／書込の API を呼ばない
+  - 完了状態: 描画の単体テストで design.md「代理店詳細の試験」2 の各項目が緑。存在しない代理店で区分も件数も描かないことについて、存在判定を外す変異（GET /agencies を待たずに区分を描く）で赤になることを実測する
+  - _Requirements: 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.10_
+  - _Boundary: dashboard-web app/admin/agencies/[agencyId]_
+  - _Depends: 8.1, 8.2_
+
+- [x] 8.4 (P) 代理店管理の一覧から詳細へのリンク
+  - `app/admin/agencies/page.tsx` の代理店名のセルを `next/link` で詳細へのリンクにする。リンクの文字は代理店名そのもの。行全体は押せるようにしない（§7.2）
+  - 完了状態: 一覧の描画テストで、代理店名が `/admin/agencies/<id>` へのリンクになり、行に押せる役割が付かないことが緑。既存の一覧の契約（表の捲れる領域 1 件など）が緑のまま
+  - _Requirements: 9.1_
+  - _Boundary: dashboard-web app/admin/agencies/page_
+
+- [x] 8.5 E2E の面の追加
+  - `e2e/fixtures/api.ts` のスタブに、詳細で使う行（記録あり・記録なしのオーナー、無効のコード、停止中の店舗、無効の利用者）が揃っていることを確かめ、足りなければ足す。詳細を開く手順（表が実際に描けたことを前提として assert する）を足し、`DASHBOARD_SURFACES` へ詳細を足す（捲れる領域は表の容器 4 件として宣言する）
+  - 完了状態: `bash scripts/run-e2e-local.sh --only surfaces` が緑（横の溢れ・携帯の幅・a11y 監査に詳細が載る）。宣言を 3 件に変える変異で赤になることを実測する
+  - _Requirements: 9.2, 9.7_
+  - _Boundary: dashboard-web e2e_
+  - _Depends: 8.3, 8.4_
+
+- [ ] 8.6 全体検証とデプロイの確認
+  - `make ts-lint`／`make ts-test`／dashboard-web の型検査（`next typegen` を含む）／`bash scripts/run-e2e-local.sh --only surfaces`／静的ガード（`check-design-tokens.sh`・`check-jst-offset-consistency.sh` ほか ts-ci が回すもの）を実行し全緑を確認する
+  - マージ後に deploy の結果を自分で確かめ（dashboard-web のイメージ差し替え）、本番で運営として 1 代理店の詳細を開き、4 区分と件数が出ることを確かめる
+  - 完了状態: 上記コマンドがすべて終了コード 0、本番での確認結果が PR / Issue #486 に記録されている
+  - _Requirements: 9.1–9.10_
+  - _Depends: 8.1, 8.2, 8.3, 8.4, 8.5_
+
 ## Implementation Notes
 <!-- 実装中に得られた横断的な知見をここに追記する -->
 - 環境: docker/apple-container 不在。DB スキーマ検証（`make db-migrate`/`db-test`/`db-verify-docs` 相当）は native postgres で代替する。正典レシピ: `ts/scripts/with-test-db.sh bash -c 'for f in db/test/assertions/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done; MANAGE_CONTAINER=0 PSQL_EXEC="psql" db/test/check_docs.sh'`（with-test-db.sh が native postgres 起動＋全 migrations 適用＋PG 環境変数 export を行う）。TS の `*.db.test.ts` は `make ts-test-db` でそのまま可。
@@ -235,3 +281,6 @@
 - 7.4: **app コードのコメントに前置きなしの `#486` を書くと `check-design-tokens.sh` が色の直書きとして赤にする**（7.3 の `conversation.ts` で発生し、7.4 のレビューで発見・`33a3be2` で「Issue #486」に修正）。タスク単位の試験では見えないので、コミットの前に ts-ci が呼ぶ `scripts/check-*` を一通り流す（`grep -ohE 'scripts/check-[a-z0-9-]+\.(sh|py)' .github/workflows/ts-ci.yml` で一覧が取れる・33 本）。
 - 7.4: GET /owners の応答は `inviteCode` を参照のまま渡さず 3 項目（id・code・disabled）だけを写す。レビューの指摘で足した防御だが、当初は試験が無く参照渡しへ戻す変異が緑だった。DAL が余分な項目を返す場合の試験を足し、その変異で赤になることを確かめて閉じた（指摘への修正にも、それを赤にできる試験を付ける）。E2E スタブの OWNERS は `as const` で web の型に縛られていない（タスク外として記録のみ）。
 - 7.5（進行中・2026-10-25）: main（1519b5f）へ載せ直した後のローカルの全体の検証は緑（build・typecheck・lint・全 14 パッケージの試験・Go・ts-ci のガード 33 本・番号ガード。DB スイートの赤は 7.1 の bash 3.2 の `mapfile` 1 件のみ）。PR #491 を作成。**残りは本番の手順**: マージ前に 0017 を本番へ適用して列と 2 制約を確認 → マージ → deploy の確認 → 本番の新しいオーナー登録で `invite_code_id` が埋まることの確認。完了の印はこれらが済んでから付ける。
+- 8.2: **経路の値の大小は、判定と比較で同じ正規化を通す。** 形の判定で大小を許したまま、利用者の絞り込みを素の値の厳密一致で書いていた（レビューで発見）。API の id は小文字なので、大文字の URL で利用者の区分だけが偽の 0 件になる。`toAgencyId` で小文字へ正規化して全経路で使う形にした。あわせて、**大小を試す入力には英字を含める**: 試験の id が `22222222-…` と数字だけで `toUpperCase()` が値を変えず、大小の試験が空振りしていた（小文字化を外す変異で赤が 1 件しか出ないことで発見）。
+- 8.3: **「判定まで描かない」は、判定の取得を保留した状態で試験する。** 最後の状態（見つかりません）まで `findBy` で待つ試験は、判定の前に区分を描いて後で消す退行を捕まえない（レビューで発見）。`getAgencies` を解決しない約束で保留し、他の 4 本が届いた後に区分が無いことを表明した。また**件数を並べる面の fixture は各件数を互いに違う値にする**（2・2・2 だと、ある件数を別の区分から数える取り違えが緑で通る）。
+- 8.5: **面ごとに要る状態は、共有の fixture を変えずにスタブの引数で注入する**（`stubDashboardApi` の `suspendedStoreIds`）。注入した状態が画面まで届いたことは、面を開く手順の前提の表明で確かめる。当初は共有の `STORES` を汚すのを避けて停止中の店舗を省き、「単体試験が覆う」と説明していたが、単体試験は値を置くだけで表明していなかった（レビューで発見）。`mustOverflow` は部分集合の主張なので、空のままにせず、全表を宣言して失敗させ、実測（`label=scrollWidth/clientWidth`）を取ってから決める。手元の E2E はシェルの `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`（Aside）を外して流す。Aside のままだと全件緑でもワーカーの終了で止まって exit 1 になり（docs/testing/e2e.md #381）、途中の試験も 13〜17 分止まった。付属の Chromium では 116 件を 40 秒で流せた。

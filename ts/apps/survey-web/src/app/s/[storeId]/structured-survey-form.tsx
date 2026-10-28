@@ -10,6 +10,7 @@ import { Spinner } from '@fwlm/ui/components/spinner';
 import { Textarea } from '@fwlm/ui/components/textarea';
 import type { Polarity, StructuredSurveyAnswer } from '../../../lib/structured-answer';
 import type { Star } from '../../../lib/domain';
+import { StarRating } from './star-rating';
 import {
   EMPTY_EVIDENCE,
   MIN_MATERIALS,
@@ -44,7 +45,6 @@ import {
 //     折り畳んだカテゴリには選んだ内容の要約を出す（料理 10 件・ドリンク 10 件でも画面が巨大にならない）。
 
 const COMMENT_MAX = 200;
-const STARS = [1, 2, 3, 4, 5] as const;
 // 一言欄の記入例。肯定と否定を 1 つずつにする（良かったことの例だけでは、低評価の客が書きにくくなる・
 // survey-form.tsx の COMMENT_PLACEHOLDER と同じ判断）。
 const COMMENT_PLACEHOLDER = '例）窓側の席が落ち着いた／提供まで少し待った';
@@ -74,6 +74,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
   const [commentOpen, setCommentOpen] = useState(false);
   const [slow, setSlow] = useState(false);
   const starErrorId = useId();
+  const starLegendId = useId();
   const commentPanelId = useId();
   const submitNoteId = useId();
   // 口コミ文を作るには、星に加えて独立した回答材料が MIN_MATERIALS 件要る（良かったところ・気になったところの合計）。
@@ -123,24 +124,16 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
       }}
     >
       <fieldset className="space-y-2" aria-describedby={showStarError ? starErrorId : undefined}>
-        <legend className="mb-2 text-lg font-semibold">今回の満足度（必須）</legend>
-        {STARS.map((n) => (
-          <button
-            className={`min-h-11 min-w-11 px-1 text-4xl leading-none transition-colors duration-150 ${
-              star !== null && n <= star ? 'text-foreground' : 'text-muted-foreground'
-            }`}
-            type="button"
-            key={n}
-            aria-label={`星${n}`}
-            aria-pressed={star === n}
-            onClick={() => {
-              setStar(n);
-              setShowStarError(false);
-            }}
-          >
-            {star !== null && n <= star ? '★' : '☆'}
-          </button>
-        ))}
+        <legend id={starLegendId} className="mb-2 text-lg font-semibold">今回の満足度（必須）</legend>
+        <StarRating
+          value={star}
+          labelledBy={starLegendId}
+          describedBy={showStarError ? starErrorId : undefined}
+          onChange={(n) => {
+            setStar(n);
+            setShowStarError(false);
+          }}
+        />
         {showStarError && (
           <Alert id={starErrorId} variant="destructive" role={undefined}>
             <AlertDescription>満足度を選択してください</AlertDescription>
