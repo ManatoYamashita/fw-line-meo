@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import type { OwnerListItem } from '../src/lib/types';
 import { announcedText, ownText } from './live-region';
 import { chooseOption } from './deferred-mocks';
 
@@ -55,7 +56,12 @@ const owner = {
   onboardingStatus: 'pending',
   createdAt: '2026-01-01T00:00:00Z',
   inviteCode: null,
-};
+  agencyName: '代理店A',
+  lineLink: 'linked',
+  menuUnlinkPending: false,
+  storeNames: [],
+  takenOverBy: null,
+} satisfies OwnerListItem;
 const candidate = {
   placeId: 'p1',
   name: '鳥貴族 渋谷店',
@@ -965,7 +971,25 @@ const owner2 = {
   onboardingStatus: 'store_identified',
   // JST では 2026-03-01（UTC の日付をそのまま出すと 2026-02-28 になる）。
   createdAt: '2026-02-28T16:00:00Z',
-};
+  inviteCode: null,
+  agencyName: '代理店A',
+  lineLink: 'linked',
+  menuUnlinkPending: false,
+  storeNames: [],
+  takenOverBy: null,
+} satisfies OwnerListItem;
+
+// LINE の連携を解除したオーナー（owner-line-unlink Req 2.5）。引継ぎ先とメニュー未解除を併せ持つ形にし、
+// 印がそれらの補足ではなく連携状態そのものから付くことを確かめる。
+const unlinkedOwner = {
+  ...owner,
+  id: 'o3',
+  displayName: '佐藤オーナー',
+  onboardingStatus: 'active',
+  lineLink: 'unlinked',
+  menuUnlinkPending: true,
+  takenOverBy: { ownerId: 'o9', displayName: '鈴木オーナー' },
+} satisfies OwnerListItem;
 
 const agencyA = { id: 'a1', operatorId: 'op', name: '代理店A', createdAt: '2026-01-01T00:00:00Z' };
 const agencyB = { id: 'a2', operatorId: 'op', name: '代理店B', createdAt: '2026-01-01T00:00:00Z' };
@@ -1219,6 +1243,48 @@ describe('店舗登録ウィザード: オーナー選択の一覧（Issue #485�
     toggleAgency(scope, '代理店B');
     const details = detailsOf(scope, '代理店B');
     expect(await within(details).findByText(/対象オーナーがいません/)).toBeTruthy();
+  });
+});
+
+describe('店舗登録ウィザード: 解除済みのオーナーの印（owner-line-unlink Req 2.5）', () => {
+  /** 表の本体の行のうち、その表示名のオーナーの行。 */
+  function rowOf(table: HTMLElement, name: string): HTMLElement {
+    return within(table)
+      .getAllByRole('row')
+      .find((row) => row.textContent?.includes(name))!;
+  }
+
+  it('解除済みのオーナーの行に「LINE 解除済み」を文字で添え、選ぶ押しボタンの読み上げ名にも含める。連携中には付けない', async () => {
+    api.getOwners.mockResolvedValue({ ok: true, value: [owner, unlinkedOwner] });
+    render(<StoreRegisterPage />);
+    const scope = within(await screen.findByRole('main'));
+    const table = await scope.findByRole('table');
+
+    // 解除済み: 色ではなく文字で示し、危険の色を使わない（解除は異常ではなく状態）。
+    const unlinkedRow = rowOf(table, '佐藤オーナー');
+    const mark = within(unlinkedRow).getByText('LINE 解除済み');
+    // 既定の variant（ブランド色）は各行に使わない決まりなので、outline に固定する。
+    expect(mark.getAttribute('data-variant')).toBe('outline');
+    // 印は連携状態そのものから付ける。オーナー一覧の補足（メニュー未解除・引継ぎ先）はここへ持ち込まない。
+    expect(unlinkedRow.textContent).not.toMatch(/メニュー未解除|引継ぎ先/);
+    expect(
+      within(unlinkedRow).getByRole('button', { name: '佐藤オーナー（LINE 解除済み）を選ぶ' }),
+    ).toBeTruthy();
+
+    // 連携中: 印も読み上げ名の添え書きも無い。
+    const linkedRow = rowOf(table, '山田オーナー');
+    expect(linkedRow.textContent).not.toMatch(/解除済み/);
+    expect(within(linkedRow).getByRole('button', { name: '山田オーナーを選ぶ' })).toBeTruthy();
+  });
+
+  it('解除済みのオーナーも選べる（区別して示すだけで、選択は止めない）', async () => {
+    api.getOwners.mockResolvedValue({ ok: true, value: [owner, unlinkedOwner] });
+    render(<StoreRegisterPage />);
+    const scope = within(await screen.findByRole('main'));
+    const choose = await scope.findByRole('button', { name: '佐藤オーナー（LINE 解除済み）を選ぶ' });
+    expect(choose.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(choose);
+    expect(await scope.findByRole('heading', { level: 2, name: '店名検索' })).toBeTruthy();
   });
 });
 
