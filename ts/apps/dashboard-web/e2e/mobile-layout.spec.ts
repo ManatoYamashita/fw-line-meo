@@ -90,14 +90,14 @@ interface SurfaceLayout {
  */
 const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
   店舗一覧: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 18,
     panelCells: 0,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   '店舗一覧の QR パネル': {
     modalOverlay: true,
-    navControls: 6,
+    navControls: 7,
     // 店舗一覧の 18 件に、パネルの中の実績の表（Issue #401）の 8 件を足した数。内訳は列見出し 2
     // （今月・先月）・行見出し 2（回答・投稿画面へ進んだ回数）・データセル 4。角の見出し「項目」は
     // 読み上げ専用で描かれないので、空のセルへ数える。Drawer は Portal 内にあり行内セルは無い。
@@ -106,7 +106,7 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   代理店管理: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 4,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
@@ -118,32 +118,32 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     mustOverflow: { 393: [], 320: [] },
   },
   招待コード: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 11,
     panelCells: 0,
     mustOverflow: { 393: ['招待コード'], 320: ['招待コード'] },
   },
   利用者管理: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 18,
     panelCells: 0,
     mustOverflow: { 393: ['利用者一覧'], 320: ['利用者一覧'] },
   },
   '利用者管理の編集パネル': {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 18,
     panelCells: 1,
     mustOverflow: { 393: ['利用者一覧'], 320: ['利用者一覧'] },
   },
   // Issue #485: オーナー選択が表を持った（見出し 5 列＋3 人 × 5 列）。
   店舗登録: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 20,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
   },
   店舗登録の検索結果: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 0,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
@@ -450,7 +450,7 @@ for (const { probe, widths } of PANEL_CASES) {
 
 // --- 代理店ロールの帯（1 段目が最も広い状態）---------------------------------------------
 //
-// 検証面の fixture は運営ロールで開く。案内リンクは運営が 5 本・代理店が 3 本なので 2 段目は
+// 検証面の fixture は運営ロールで開く。案内リンクは運営が 6 本・代理店が 4 本なので 2 段目は
 // 運営が最悪値だが、**1 段目は代理店の方が広い**（ロールの表示が「運営」より 1 字長い）。
 // 包含関係にならないので、代理店ロールの帯も測る。
 
@@ -468,8 +468,8 @@ for (const width of WIDTHS) {
         report.texts.map((text) => text.text),
         '代理店ロールで開けていない（ロールの表示が「代理店」でない）',
       ).toContain('代理店');
-      // 管理メニュー 2 件が消えるので、リンク 3 本 + ログアウト 1 件。
-      expect(report.controls.length, '帯の操作要素の数が宣言と違う').toBe(4);
+      // 管理メニュー 2 件が消えるので、リンク 4 本 + ログアウト 1 件。
+      expect(report.controls.length, '帯の操作要素の数が宣言と違う').toBe(5);
       expect(
         report.controls.filter((control) => !control.inside).map((control) => control.name),
         `幅 ${width} で、捲らないと届かない帯の操作要素がある`,

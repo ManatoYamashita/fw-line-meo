@@ -1,4 +1,4 @@
-import type { OnboardingStatus, PlaceStatus } from './types';
+import type { OnboardingStatus, OwnerLineLink, PlaceStatus } from './types';
 
 // 状態の表示語の対応表（Issue #485）。店舗一覧（/stores）・店舗登録（/stores/new）・代理店詳細（Issue #486）の
 // 3 面が同じ語を使う。面ごとに文字列を書くと、片方だけを直したときに同じ状態が面によって違う語で
@@ -27,3 +27,10 @@ export const STORE_SUSPENSION_LABEL = {
 export function storeSuspensionLabel(suspendedAt: string | null): string {
   return suspendedAt === null ? STORE_SUSPENSION_LABEL.active : STORE_SUSPENSION_LABEL.suspended;
 }
+
+// オーナーと LINE の連携状態（owner-line-unlink Req 2.1）。解除済みに添える補足（メニュー未解除・引継ぎ先）は
+// owner-roster-table.tsx の ownerLineLinkLabel が組み立てる。
+export const OWNER_LINE_LINK_LABEL: Readonly<Record<OwnerLineLink, string>> = {
+  linked: '連携中',
+  unlinked: '解除済み',
+};

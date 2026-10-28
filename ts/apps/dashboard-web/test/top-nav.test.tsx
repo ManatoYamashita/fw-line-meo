@@ -63,6 +63,17 @@ describe('トップナビの管理メニュー（Req 6.5）', () => {
     expect(nav.getByRole('link', { name: '利用者管理' }).getAttribute('href')).toBe('/admin/users');
   });
 
+  // オーナー一覧（owner-line-unlink Req 2.1）は運営・代理店の両方が見る。代理店は自代理店のオーナーだけが並ぶ。
+  it('運営・代理店のどちらにもオーナー一覧への案内を出す', () => {
+    for (const role of ['operator', 'agency'] as const) {
+      ready(role);
+      render(<TopNav />);
+      const nav = within(screen.getByRole('navigation'));
+      expect(nav.getByRole('link', { name: 'オーナー一覧' }).getAttribute('href'), role).toBe('/owners');
+      cleanup();
+    }
+  });
+
   it('agency は代理店管理・利用者管理リンクを見ない', () => {
     ready('agency');
     render(<TopNav />);
@@ -98,6 +109,7 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
   it('現在地の印はちょうど 1 つで、その経路と読み上げ名が現在の経路と一致する', () => {
     const cases = [
       { pathname: '/invite-codes', label: '招待コード' },
+      { pathname: '/owners', label: 'オーナー一覧' },
       // 判定を前方一致にすると、この経路では /stores も現在地になり印が 2 つになる。
       { pathname: '/stores/new', label: '店舗登録' },
     ];
@@ -162,7 +174,7 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
     ready('operator');
     render(<TopNav />);
     expect(screen.getAllByRole('navigation')).toHaveLength(1);
-    expect(navLinks()).toHaveLength(5);
+    expect(navLinks()).toHaveLength(6);
     // ワードマークをリンクにするとリンクの個数が増え、個数を固定した構造契約が壊れる（Req 3.3）。
     expect(screen.getByText('Firstweb 集客AIアシスタント').closest('a')).toBeNull();
 
@@ -171,7 +183,7 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
     ready('agency');
     render(<TopNav />);
     expect(screen.getAllByRole('navigation')).toHaveLength(1);
-    expect(navLinks()).toHaveLength(3);
+    expect(navLinks()).toHaveLength(4);
     expect(screen.getByText('Firstweb 集客AIアシスタント').closest('a')).toBeNull();
   });
 });

@@ -17,6 +17,8 @@ import { Wordmark } from './wordmark';
 const NAV_ITEMS: readonly { href: string; label: string; operatorOnly: boolean }[] = [
   { href: '/stores', label: '店舗一覧', operatorOnly: false },
   { href: '/stores/new', label: '店舗登録', operatorOnly: false },
+  // オーナーと LINE の連携状態、解除・外し直しの操作（owner-line-unlink Req 2.1）。代理店は自代理店のオーナーだけを見る。
+  { href: '/owners', label: 'オーナー一覧', operatorOnly: false },
   { href: '/invite-codes', label: '招待コード', operatorOnly: false },
   { href: '/admin/agencies', label: '代理店管理', operatorOnly: true },
   { href: '/admin/users', label: '利用者管理', operatorOnly: true },
