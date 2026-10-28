@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool } from '../src/pool.js';
 import { listStoresWithStatus, setStoreCategory } from '../src/stores.js';
-import { listOwnersByAgency, findOwnerWithAgency } from '../src/owners.js';
+import { listOwners, findOwnerWithAgency } from '../src/owners.js';
 import { createAgency, listAgencies, findAgencyName } from '../src/agencies.js';
 import { listCategories } from '../src/categories.js';
 import {
@@ -129,10 +129,10 @@ describe.skipIf(!process.env.DATABASE_URL)('agency-dashboard accessors (DB)', ()
     });
   });
 
-  describe('listOwnersByAgency / findOwnerWithAgency', () => {
+  describe('listOwners / findOwnerWithAgency', () => {
     it('自代理店のオーナーのみ返す（Req 2.1）', async () => {
       const pool = await getPool();
-      const owners = await listOwnersByAgency(pool, AG_A1);
+      const owners = await listOwners(pool, AG_A1);
       const ids = owners.map((o) => o.id);
       expect(ids).toEqual(expect.arrayContaining([OWN_A1_1, OWN_A1_2]));
       expect(ids).not.toContain(OWN_A2_1); // AG_A2 のオーナーは漏れない

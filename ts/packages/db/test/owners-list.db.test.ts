@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool } from '../src/pool.js';
-import { listOwners, listOwnersByAgency } from '../src/owners.js';
+import { listOwners } from '../src/owners.js';
 import type { OwnerListItem } from '../src/types.js';
 
 // 連携状態つきのオーナー一覧（owner-line-unlink Requirement 2.1, 2.5, 2.6・Issue #487）。
@@ -253,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
     expect(taker.takenOverBy).toBeNull();
   });
 
-  it('登録に用いた招待コードの記録を listOwnersByAgency と同じ形で返す（agency-dashboard Req 8.5 の維持）', async () => {
+  it('登録に用いた招待コードの記録を { id, code, disabled } の形で返す（agency-dashboard Req 8.5 の維持）', async () => {
     const pool = await getPool();
     const items = await listOwners(pool, AG1);
     expect(byId(items, OW_NEW).inviteCode).toEqual({
@@ -279,10 +279,5 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
     for (const lineUserId of ALL_LINE_IDS) {
       expect(serialized).not.toContain(lineUserId);
     }
-  });
-
-  it('既存の代理店別の一覧（listOwnersByAgency）は listOwners の代理店指定と同じ結果を返す', async () => {
-    const pool = await getPool();
-    expect(await listOwnersByAgency(pool, AG1)).toEqual(await listOwners(pool, AG1));
   });
 });

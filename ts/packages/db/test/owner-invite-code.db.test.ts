@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPool, closePool } from '../src/pool.js';
 import { findActiveInviteCode } from '../src/invite-codes.js';
-import { createOwner, findOwnerByLineUserId, listOwnersByAgency } from '../src/owners.js';
+import { createOwner, findOwnerByLineUserId, listOwners } from '../src/owners.js';
 
 // オーナーの登録に用いられた招待コードの記録（agency-dashboard Requirement 8・Issue #486・migration 0017）。
 // 共有テスト DB での衝突回避のため専用 UUID プレフィックス（48600000）と専用のコード・LINE ユーザー ID を用いる。
@@ -86,10 +86,10 @@ describe.skipIf(!process.env.DATABASE_URL)('owner invite code record (DB)', () =
     });
   });
 
-  describe('listOwnersByAgency（8.5 の読出）', () => {
+  describe('listOwners の代理店指定（8.5 の読出）', () => {
     it('記録ありは { id, code, disabled }、記録なしは null を返す', async () => {
       const pool = await getPool();
-      const owners = await listOwnersByAgency(pool, AG_A);
+      const owners = await listOwners(pool, AG_A);
 
       // 1 オーナー 1 行。代理店のコードの本数に応じて行が増えないこと（結合キーの誤りを止める）。
       const raw = await pool.query<{ n: string }>('SELECT count(*) AS n FROM owners WHERE agency_id = $1', [AG_A]);
@@ -109,7 +109,7 @@ describe.skipIf(!process.env.DATABASE_URL)('owner invite code record (DB)', () =
       await pool.query('UPDATE agency_invite_codes SET disabled_at = now() WHERE id = $1', [codeA]);
       expect(await findActiveInviteCode(pool, 'OIC486A1')).toBeNull();
 
-      const owners = await listOwnersByAgency(pool, AG_A);
+      const owners = await listOwners(pool, AG_A);
       const recorded = owners.find((o) => o.displayName === '486記録ありオーナー');
       expect(recorded?.inviteCode).toEqual({ id: codeA, code: 'OIC486A1', disabled: true });
     });

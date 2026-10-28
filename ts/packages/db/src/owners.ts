@@ -151,19 +151,6 @@ export async function listOwners(
 }
 
 /**
- * ダッシュボードの店舗登録でオーナーを選ぶための一覧（agency-dashboard spec・Req 2.1, 8.5）。
- * 指定代理店に属する owner のみを作成日時の降順で返す（他代理店は漏れない）。
- * listOwners の代理店指定と同じ結果を返す。呼び出し元を listOwners へ切り替えるまで
- * （owner-line-unlink タスク 4.4）残す。
- */
-export async function listOwnersByAgency(
-  db: Queryable,
-  agencyId: string,
-): Promise<OwnerListItem[]> {
-  return listOwners(db, agencyId);
-}
-
-/**
  * owner の所属代理店を引く（店舗登録時のスコープ検証用・Req 2.4）。不在は null。
  */
 export async function findOwnerWithAgency(

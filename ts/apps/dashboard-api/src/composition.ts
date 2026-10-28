@@ -11,7 +11,7 @@ import {
   setStoreSuspension,
   findAgencyName,
   findDashboardUserDisplayName,
-  listOwnersByAgency,
+  listOwners,
   unlinkOwnerLine,
   clearOwnerMenuPending,
   findOwnerWithAgency,
@@ -150,7 +150,7 @@ export function buildAppDeps({ config, verifier, lineFetch, structuredLog }: Com
     },
     owners: {
       auth: authDeps,
-      listOwners: async (agencyId) => listOwnersByAgency(await getPool(), agencyId),
+      listOwners: async (agencyId) => listOwners(await getPool(), agencyId),
     },
     categories: {
       auth: authDeps,

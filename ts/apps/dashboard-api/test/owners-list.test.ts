@@ -83,12 +83,19 @@ describe('handleOwnersList', () => {
     expect(listOwners).toHaveBeenCalledWith('ag2');
   });
 
-  it('operator の agencyId 未指定は 400（オーナー選択には代理店の指定が必要）で、listOwners は呼ばれない', async () => {
+  it('operator の agencyId 未指定は全代理店のオーナー一覧で、listOwners へ null を渡す（owner-line-unlink Req 2.1）', async () => {
     const listOwners = vi.fn(() => Promise.resolve([owner()]));
     const res = await handleOwnersList(deps({ listOwners }), req());
-    expect(res.status).toBe(400);
-    expect((await readJson<ErrorEnvelope>(res)).error.code).toBe('validation_failed');
-    expect(listOwners).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(listOwners).toHaveBeenCalledTimes(1);
+    expect(listOwners).toHaveBeenCalledWith(null);
+  });
+
+  it('agency が自代理店を明示しても自代理店のオーナー一覧（従来どおり自代理店に束縛する）', async () => {
+    const listOwners = vi.fn(() => Promise.resolve([owner()]));
+    const res = await handleOwnersList(deps({ listOwners }, AG), req({ agencyId: 'ag1' }));
+    expect(res.status).toBe(200);
+    expect(listOwners).toHaveBeenCalledWith('ag1');
   });
 
   it('0 件は 200 で空配列（UI が 3.3 の案内を出す・404 にしない）', async () => {
@@ -109,8 +116,92 @@ describe('handleOwnersList', () => {
           onboardingStatus: 'pending',
           createdAt: '2026-07-01T12:34:56.000Z',
           inviteCode: null,
+          agencyName: '代理店A',
+          lineLink: 'linked',
+          menuUnlinkPending: false,
+          storeNames: [],
+          takenOverBy: null,
         },
       ],
+    });
+  });
+
+  it('連携状態・メニュー未解除・店舗名・引継ぎ先・担当代理店名を返す（owner-line-unlink Req 2.1, 2.5, 2.6）', async () => {
+    const unlinked = owner({
+      id: '88888888-8888-8888-8888-888888888888',
+      displayName: '解除済みオーナー',
+      agencyName: '代理店B',
+      lineLink: 'unlinked',
+      menuUnlinkPending: true,
+      storeNames: ['店舗1', '店舗2'],
+      takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: '新オーナー' },
+    });
+    const takenOverWithoutName = owner({
+      lineLink: 'unlinked',
+      takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: null },
+    });
+    const res = await handleOwnersList(
+      deps({ listOwners: () => Promise.resolve([unlinked, takenOverWithoutName]) }),
+      req(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { owners: Record<string, unknown>[] };
+    expect(body.owners[0]).toEqual({
+      id: '88888888-8888-8888-8888-888888888888',
+      displayName: '解除済みオーナー',
+      onboardingStatus: 'pending',
+      createdAt: '2026-07-01T12:34:56.000Z',
+      inviteCode: null,
+      agencyName: '代理店B',
+      lineLink: 'unlinked',
+      menuUnlinkPending: true,
+      storeNames: ['店舗1', '店舗2'],
+      takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: '新オーナー' },
+    });
+    expect(body.owners[1]?.['takenOverBy']).toEqual({
+      ownerId: '99999999-9999-9999-9999-999999999999',
+      displayName: null,
+    });
+  });
+
+  it('DAL の行に LINE ユーザー ID などの項目が増えても応答へ混ぜない（項目を明示して写す）', async () => {
+    // DAL が将来の項目を持った行を返した場合を模す（型の外の項目なので as で渡す）。
+    const withExtra = {
+      ...owner({
+        lineLink: 'unlinked',
+        menuUnlinkPending: true,
+        takenOverBy: {
+          ownerId: '99999999-9999-9999-9999-999999999999',
+          displayName: '新オーナー',
+          lineUserId: 'U0123456789abcdef0123456789abcdef',
+        } as OwnerListItem['takenOverBy'],
+      }),
+      lineUserId: 'U0123456789abcdef0123456789abcdef',
+      menuPendingLineUserId: 'Ufedcba9876543210fedcba9876543210',
+    } as OwnerListItem;
+    const res = await handleOwnersList(deps({ listOwners: () => Promise.resolve([withExtra]) }), req());
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('U0123456789abcdef0123456789abcdef');
+    expect(text).not.toContain('Ufedcba9876543210fedcba9876543210');
+    const body = JSON.parse(text) as { owners: Record<string, unknown>[] };
+    expect(Object.keys(body.owners[0] ?? {}).sort()).toEqual(
+      [
+        'agencyName',
+        'createdAt',
+        'displayName',
+        'id',
+        'inviteCode',
+        'lineLink',
+        'menuUnlinkPending',
+        'onboardingStatus',
+        'storeNames',
+        'takenOverBy',
+      ].sort(),
+    );
+    expect(body.owners[0]?.['takenOverBy']).toEqual({
+      ownerId: '99999999-9999-9999-9999-999999999999',
+      displayName: '新オーナー',
     });
   });
 
