@@ -11,7 +11,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 const response = (generation = 'ok') => new Response(JSON.stringify({ generation, draft: generation === 'ok' ? '下書きの文章' : null, sessionToken: 'token', regenerationsLeft: 3 }));
 const renderShell = () => render(<SurveyShell storeId="store" storeName="店" survey={{ mode: 'legacy', aspects: [] }} pageToken="page" googleReviewUrl="https://example.com/review" />);
 const submit = (star = 3) => {
-  fireEvent.click(screen.getByRole('button', { name: `星${star}` }));
+  fireEvent.click(screen.getByRole('radio', { name: new RegExp(`^星${star}：`) }));
   fireEvent.click(screen.getByRole('button', { name: '送信する' }));
 };
 const renderPanel = () => render(<DraftPanel draft="編集中の文章" generationFailed={false} regenerationsLeft={3} googleReviewUrl="https://example.com/review" onRegenerate={() => {}} onReviewLinkOpen={() => {}} regenerating={false} />);

@@ -15,7 +15,7 @@ for (const failed of [false, true]) {
       await pending;
       await route.fulfill({ json: { generation: failed ? 'failed' : 'ok', draft: failed ? null : '料理の味と量が良かったです。', sessionToken: 'test-session', regenerationsLeft: 3 } });
     });
-    await page.getByRole('button', { name: '星3' }).click();
+    await page.getByRole('radio', { name: /^星3：/ }).click();
     const positive = page.getByRole('region', { name: '良かったところを教えてください' });
     await positive.getByRole('button', { name: '料理' }).click();
     await positive.getByRole('checkbox', { name: '味', exact: true }).first().click();
