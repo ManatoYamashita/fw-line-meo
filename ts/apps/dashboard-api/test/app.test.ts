@@ -128,6 +128,8 @@ describe('loadConfig', () => {
     SURVEY_BASE_URL: 'https://survey.example',
     DASHBOARD_WEB_ORIGIN: 'https://dash.example',
     PLACES_API_KEY: 'places-key',
+    LINE_CHANNEL_ID: '1234567890',
+    LINE_CHANNEL_SECRET: 'dummy-line-channel-secret',
     PORT: '9090',
   };
 
@@ -136,6 +138,8 @@ describe('loadConfig', () => {
     expect(config.surveyBaseUrl).toBe('https://survey.example');
     expect(config.corsOrigin).toBe('https://dash.example');
     expect(config.placesApiKey).toBe('places-key');
+    expect(config.lineChannelId).toBe('1234567890');
+    expect(config.lineChannelSecret).toBe('dummy-line-channel-secret');
     expect(config.port).toBe(9090);
   });
 
@@ -153,6 +157,24 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ SURVEY_BASE_URL: 'https://survey.example', DASHBOARD_WEB_ORIGIN: 'https://dash.example' }),
     ).toThrow(/PLACES_API_KEY/);
+  });
+
+  // 解除したオーナーの LINE アカウントから個別メニューを外すために、LINE の資格情報を必須にする
+  // （owner-line-unlink Requirement 3.1）。欠落したまま起動して解除のたびにメニュー操作が
+  // 失敗するのではなく、起動時に止めて気づけるようにする。
+  it('LINE_CHANNEL_ID 欠落は明示エラー', () => {
+    expect(() => loadConfig({ ...fullEnv, LINE_CHANNEL_ID: undefined })).toThrow(/^LINE_CHANNEL_ID is required$/);
+  });
+
+  it('LINE_CHANNEL_SECRET 欠落は明示エラー', () => {
+    expect(() => loadConfig({ ...fullEnv, LINE_CHANNEL_SECRET: undefined })).toThrow(
+      /^LINE_CHANNEL_SECRET is required$/,
+    );
+  });
+
+  it('LINE の資格情報が空文字なら欠落として扱う', () => {
+    expect(() => loadConfig({ ...fullEnv, LINE_CHANNEL_ID: '' })).toThrow(/^LINE_CHANNEL_ID is required$/);
+    expect(() => loadConfig({ ...fullEnv, LINE_CHANNEL_SECRET: '' })).toThrow(/^LINE_CHANNEL_SECRET is required$/);
   });
 });
 

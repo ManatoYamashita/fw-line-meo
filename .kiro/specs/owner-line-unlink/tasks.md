@@ -69,7 +69,7 @@
   - _Requirements: 3.1, 3.4_
   - _Boundary: LineRichMenuAdapter_
 
-- [ ] 4.2 dashboard-api の設定に LINE の資格情報を必須として足す
+- [x] 4.2 dashboard-api の設定に LINE の資格情報を必須として足す
   - チャネル ID とチャネルシークレットを起動時に検証し、欠落は明示エラーで止める
   - spec の env 宣言表（店舗 QR 発行の手順）と、env を組み立てる既存の試験に 2 値（ダミー）を足す
   - env 名ガードと dashboard-api の既存の試験が緑で、欠落時に起動が失敗することを試験で確かめる
@@ -198,3 +198,4 @@
 - 2.3: lockPlaceHolder / moveAllStores は BEGIN 済みの接続を渡す。施錠するのは owners の行（店舗の行ではない）。grants.sql の文を取り出す試験ヘルパーが 2 ファイルに重複しているので、3 つ目が出たら共通化する。
 - 3.1: line-webhook の test/onboarding/conversation.test.ts のフェイクに、呼ばれたら例外を投げる confirmStoreForOnboarding を置いた。6.2 で切り替えるときに作り直す。
 - 4.1: LINE ユーザー ID の形（^U[0-9a-f]{32}$）に合わない値は通信せず invalid_user_id で返す（`all` が既定リッチメニューの解除のパスに届くため。レビューの指摘で追加し design も改訂）。4.3 の記録の errorKind にもこの値が入りうる。
+- 4.2: dashboard-api は LINE_CHANNEL_ID・LINE_CHANNEL_SECRET が無いと起動しない。本番は 8.1 の env を新しいイメージより先に apply する。composition.ts の Pick は 4.3 で広げる。

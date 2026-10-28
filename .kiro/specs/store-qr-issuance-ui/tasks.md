@@ -177,6 +177,8 @@ Section 1–5 は `review-acquisition` Requirement 1 の未充足部分（UI 側
 | `SURVEY_BASE_URL` | `ts/apps/dashboard-api/src/config.ts` | QR が符号化する客向け URL の基点 |
 | `DASHBOARD_WEB_ORIGIN` | 同上 | `next dev` の origin（既定 `http://localhost:3000`） |
 | `PLACES_API_KEY` | 同上 | Places API (New) の実キー |
+| `LINE_CHANNEL_ID` | 同上 | ダミーでよい（例 `0000000000`）。オーナーの紐づけ解除で個別メニューを外すときだけ使う（owner-line-unlink）。ダミーのままだとメニューの操作は失敗として表示される |
+| `LINE_CHANNEL_SECRET` | 同上 | ダミーでよい（例 `dummy-line-channel-secret`）。用途は `LINE_CHANNEL_ID` と同じ |
 | `DATABASE_URL` | `ts/packages/db/src/pool.ts` | `postgres:///fwlm_dev`。未設定だと Cloud SQL IAM 接続へ倒れる |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `ts/apps/dashboard-api/src/index.ts` の `initializeApp()`（ADC） | firebase-admin の ID トークン検証に要る |
 | `PORT` | `ts/apps/dashboard-api/src/config.ts` | 省略時 8080 |

@@ -112,6 +112,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
         SURVEY_BASE_URL: 'https://survey.example',
         DASHBOARD_WEB_ORIGIN: 'https://dash.example',
         PLACES_API_KEY: 'test-places-key',
+        LINE_CHANNEL_ID: '1234567890',
+        LINE_CHANNEL_SECRET: 'dummy-line-channel-secret',
       });
       const pool = await getPool();
       await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [OP1, 'f7運営']);
