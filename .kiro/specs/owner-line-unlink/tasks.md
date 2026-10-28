@@ -113,7 +113,7 @@
   - _Depends: 5.1_
 
 - [ ] 6. line-webhook: 再開の安全網と引継ぎ
-- [ ] 6.1 Messenger に個別メニューの解除を足し、未登録の友だち追加で外す
+- [x] 6.1 Messenger に個別メニューの解除を足し、未登録の友だち追加で外す
   - 既存のリンクと同じトークン・同じ非 2xx の扱いで個別リンクを外す操作を足す
   - オーナーが引けない LINE アカウントの友だち追加で、挨拶の応答の後に個別リンクを外し、失敗は事象を記録して握る。事象名を観測の正典へ登録する
   - 会話の試験で、未登録の友だち追加で挨拶が返った後に解除が呼ばれ、解除の失敗が応答を壊さないことが確かめられる
@@ -203,3 +203,4 @@
 - 4.4: GET /owners は運営の代理店未指定で全件。dashboard-web の src/lib/api.ts の「未指定は 400」のコメントと web の型は 5.1、agency-dashboard の design.md・tasks.md に残る listOwnersByAgency と 400 の記述は 8.2 で直す。
 - 5.1: test/stores-new-page.test.tsx と test/agency-roster.test.ts の owner の試験データは型の注釈が無く、新しい項目を持たない。5.3 で lineLink を足し satisfies OwnerListItem を付ける。
 - 5.2: ナビにオーナー一覧を足したので、e2e/mobile-layout.spec.ts の帯の操作要素の数を運営 7・代理店 5 に改めた。幅 1024px（lg の境目）で運営のナビの余りは約 5px しかなく、E2E はこの幅を測っていない（9.3 で網を検討）。解除は成功したが一覧の取り直しに失敗した場合、行は連携中のまま残り再読み込みを促す。
+- 6.1: line-webhook の unlinkRichMenu は 404 を成功とし、ID の形の検査を持つ（dashboard-api の line-richmenu.ts と同じ。片方だけ変えない）。安全網で外せてもメニュー未解除の印は消さない。

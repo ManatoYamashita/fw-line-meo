@@ -210,10 +210,15 @@ function createFakeIdentificationService(config: {
   return { service, searchCalls, confirmCalls };
 }
 
-function createFakeMessenger(): LineMessenger & { replies: { replyToken: string; messages: readonly LineMessage[] }[] } {
+function createFakeMessenger(): LineMessenger & {
+  replies: { replyToken: string; messages: readonly LineMessage[] }[];
+  unlinks: string[];
+} {
   const replies: { replyToken: string; messages: readonly LineMessage[] }[] = [];
+  const unlinks: string[] = [];
   return {
     replies,
+    unlinks,
     async reply(replyToken, messages) {
       replies.push({ replyToken, messages });
     },
@@ -226,6 +231,12 @@ function createFakeMessenger(): LineMessenger & { replies: { replyToken: string;
     },
     async linkRichMenu() {
       // 未使用（タスク 3.4 の対象）。
+    },
+    async unlinkRichMenu(lineUserId) {
+      // 次のマクロタスクまで待ってから記録する。呼出元が完了を待たずに進めた（fire-and-forget）場合、
+      // handleEvent が解決した時点でまだ記録されていないので、試験がそれを検出できる。
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      unlinks.push(lineUserId);
     },
     async startLoading() {
       // 未使用（Issue #307・呼出元は app.ts の onEvent ラッパーであり、conversation.ts 自身は
@@ -357,6 +368,8 @@ describe('createConversationHandlers', () => {
       const [message] = messenger.replies[0]?.messages ?? [];
       expect(message?.type).toBe('text');
       expect((message as { text: string }).text).toContain('招待コード');
+      // owner-line-unlink Requirement 3.1: 未登録の友だち追加では、同じ LINE アカウントの個別メニューを外す。
+      expect(messenger.unlinks).toEqual(['U1']);
     });
 
     it('既存オーナーの再友だち追加 → owner を重複作成せず、現在の段階の精密な案内を再送する（Req 1.2/5.2）', async () => {
@@ -377,6 +390,99 @@ describe('createConversationHandlers', () => {
       // タスク 3.4: 汎用の「ご登録いただいています」ではなく、await_store_name に実際に
       // 入った際に送信したのと同一の文言（buildStoreNameInputGuidanceMessage）を再送する。
       expect(message).toEqual(buildStoreNameInputGuidanceMessage());
+      // オーナーを引けた LINE アカウントのメニューは外さない（外すのは未登録のときだけ）。
+      expect(messenger.unlinks).toEqual([]);
+    });
+  });
+
+  // owner-line-unlink Requirement 3.1・4.1（design.md「ConversationHandlers（変更）」）。
+  // 解除した元の LINE アカウントは、オーナーを引けない（未登録と同じ）。ブロック中で解除の時点に外せなかった
+  // 完了後メニューが残らないよう、未登録の友だち追加では挨拶の後に個別メニューのリンクを外す（安全網）。
+  describe('未登録の友だち追加での個別メニューの解除（owner-line-unlink Requirement 3.1）', () => {
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('挨拶の Reply を送り終えてから、同じ LINE アカウントの個別メニューを外し、何も警告しない', async () => {
+      const messenger = createFakeMessenger();
+      const order: string[] = [];
+      messenger.reply = async (replyToken, messages) => {
+        order.push(`reply:start:${replyToken}`);
+        await tick();
+        messenger.replies.push({ replyToken, messages });
+        order.push('reply:end');
+      };
+      messenger.unlinkRichMenu = async (lineUserId) => {
+        order.push(`unlink:start:${lineUserId}`);
+        await tick();
+        order.push('unlink:end');
+      };
+      const { deps, logger } = buildDeps({ session: baseSession(), existingOwner: null, messenger });
+
+      await createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' });
+
+      // Reply トークンの期限は短いので、外す処理は Reply の完了を待ってから始める。外す処理の完了まで待つ。
+      expect(order).toEqual(['reply:start:rt-1', 'reply:end', 'unlink:start:U1', 'unlink:end']);
+      expect(messenger.replies).toEqual([{ replyToken: 'rt-1', messages: [buildGreetingMessage()] }]);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('外す処理が失敗しても handleEvent は投げず、挨拶は送信済みのまま、失敗を例外の種別だけで記録する', async () => {
+      const messenger = createFakeMessenger();
+      class LineUnlinkSimulatedError extends Error {}
+      messenger.unlinkRichMenu = vi.fn(async () => {
+        await tick();
+        throw new LineUnlinkSimulatedError('unlink failed (simulated LINE API error)');
+      });
+      const { deps, logger } = buildDeps({ session: baseSession(), existingOwner: null, messenger });
+
+      await expect(
+        createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' }),
+      ).resolves.toBeUndefined();
+
+      expect(messenger.unlinkRichMenu).toHaveBeenCalledTimes(1);
+      expect(messenger.replies).toEqual([{ replyToken: 'rt-1', messages: [buildGreetingMessage()] }]);
+      // 項目は例外の種別だけ。LINE ユーザー ID・例外の本文は載せない。
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('line-webhook.richmenu_unlink_failed', {
+        errorKind: 'LineUnlinkSimulatedError',
+      });
+    });
+
+    it('外す処理の失敗の記録が投げても、handleEvent は投げない（Reply の後なので 2 回目の Reply を誘わない）', async () => {
+      const messenger = createFakeMessenger();
+      messenger.unlinkRichMenu = async () => {
+        throw new Error('unlink failed');
+      };
+      const { deps, logger } = buildDeps({ session: baseSession(), existingOwner: null, messenger });
+      logger.warn = vi.fn(() => {
+        throw new Error('logger failed');
+      });
+
+      await expect(
+        createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' }),
+      ).resolves.toBeUndefined();
+      expect(messenger.replies).toHaveLength(1);
+    });
+
+    it('オーナーを引けたアカウントは、会話が招待コード待ちの段階でも外さない', async () => {
+      const { deps, messenger } = buildDeps({ session: baseSession(), existingOwner: baseOwner() });
+
+      await createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' });
+
+      expect(messenger.replies).toEqual([{ replyToken: 'rt-1', messages: [buildGreetingMessage()] }]);
+      expect(messenger.unlinks).toEqual([]);
+    });
+
+    it.each<readonly [string, InboundEvent]>([
+      ['テキスト', { kind: 'text', lineUserId: 'U1', replyToken: 'rt-1', text: 'こんにちは' }],
+      ['スタンプなど', { kind: 'unsupported', lineUserId: 'U1', replyToken: 'rt-1' }],
+      ['再開の postback', { kind: 'postback', lineUserId: 'U1', replyToken: 'rt-1', data: encodePostback({ kind: 'resume' }) }],
+    ])('未登録のアカウントでも、友だち追加以外（%s）では外さない', async (_label, event) => {
+      const { deps, messenger } = buildDeps({ session: baseSession(), existingOwner: null });
+
+      await createConversationHandlers(deps).handleEvent(event);
+
+      expect(messenger.replies).toHaveLength(1);
+      expect(messenger.unlinks).toEqual([]);
     });
   });
 
@@ -1390,6 +1496,8 @@ describe('店舗特定済みオーナーの振り分け（line-on-demand-report 
       expect(h.identificationFake.confirmCalls).toEqual([]);
       expect(h.inviteCodesFake.findCalls).toEqual([]);
       expect(h.ownersFake.createOwnerCalls).toEqual([]);
+      // 店舗特定済みのオーナーの友だち追加でも、会話は個別メニューを外さない（owner-line-unlink Requirement 3.1）。
+      expect(h.messenger.unlinks).toEqual([]);
       // 会話は段階を読まない（段階は振り分け口が 1 回だけ読む）。オーナーの照会は入口の 1 回だけ。
       expect(h.sessionsFake.getCalls).toEqual([]);
       expect(h.sessionsFake.updateCalls).toEqual([]);

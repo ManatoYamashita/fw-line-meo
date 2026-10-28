@@ -205,6 +205,9 @@ function setup(options: SetupOptions = {}) {
       links.push({ lineUserId, richMenuId });
       if (options.linkError) throw options.linkError;
     },
+    async unlinkRichMenu() {
+      throw new Error('the router must not unlink the rich menu（外すのは未登録の友だち追加の会話だけ）');
+    },
     async startLoading() {
       throw new Error('the router must not call startLoading（Issue #307・app.ts の onEvent ラッパーの責務）');
     },
@@ -615,6 +618,9 @@ describe('createStoreIdentifiedOwnerRouterFactory', () => {
       },
       async linkRichMenu() {
         throw new Error('a completed session with a report request must not relink');
+      },
+      async unlinkRichMenu() {
+        throw new Error('the router must not unlink the rich menu（外すのは未登録の友だち追加の会話だけ）');
       },
       async startLoading() {
         throw new Error('the router must not call startLoading（Issue #307・app.ts の onEvent ラッパーの責務）');

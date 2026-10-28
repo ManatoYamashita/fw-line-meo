@@ -145,6 +145,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
       return null;
     },
     async linkRichMenu() {},
+    async unlinkRichMenu() {},
     async startLoading() {},
   };
 

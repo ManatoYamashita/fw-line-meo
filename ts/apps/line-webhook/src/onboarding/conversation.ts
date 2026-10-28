@@ -17,7 +17,7 @@ import type {
   TransactionClient,
 } from '@fwlm/store-identification';
 import { decodePostback } from './stages.js';
-import { linkCompletedMenu, tryAuditLog } from '../owner/completed-menu.js';
+import { errorKindOf, linkCompletedMenu, tryAuditLog } from '../owner/completed-menu.js';
 import { isStoreIdentified, type StoreIdentifiedOwnerRouterFactory } from '../owner/router.js';
 import {
   buildCandidateCarouselMessage,
@@ -189,8 +189,18 @@ async function handleFollow(
 ): Promise<void> {
   const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
-  if (!existingOwner || session.stage === 'await_invite_code') {
+  if (!existingOwner) {
     // Req 1.1: 未登録ユーザーの友だち追加 → 挨拶＋招待コード入力案内。stage は据え置き（await_invite_code）。
+    await deps.messenger.reply(event.replyToken, [buildGreetingMessage()]);
+    // owner-line-unlink Requirement 3.1・4.1: 紐づけを解除した元の LINE アカウントもここへ来る（オーナーを引けない）。
+    // ブロック中で解除の時点に外せなかった完了後メニューが残らないよう、個別メニューのリンクを外す（安全網）。
+    await unlinkMenuOfUnregisteredUser(deps, event.lineUserId);
+    return;
+  }
+
+  if (session.stage === 'await_invite_code') {
+    // オーナーを引けるのに段階が招待コード待ちのまま（段階とオーナーの状態の食い違い）。案内は未登録と同じ挨拶にする。
+    // オーナーを引けたアカウントなので、メニューは外さない。
     await deps.messenger.reply(event.replyToken, [buildGreetingMessage()]);
     return;
   }
@@ -199,6 +209,35 @@ async function handleFollow(
   // 応じた精密な次の手順を再送する（resume postback・段階外入力 fallback と同じ
   // buildStageGuidanceMessage を再利用し、「進捗に応じた案内」の文言を三重化しない）。
   await deps.messenger.reply(event.replyToken, [buildStageGuidanceMessage(session)]);
+}
+
+/**
+ * 未登録の LINE アカウントの個別リッチメニューのリンクを外す（owner-line-unlink Requirement 3.1、
+ * design.md「ConversationHandlers（変更）」）。**例外を投げない。**
+ *
+ * 呼出元は挨拶の Reply を送った後に呼ぶ。Reply トークンの期限は短いので先に応答し、外す処理はその後に待つ。
+ * ここで投げると、エラー境界（app.ts）が使用済みの replyToken で 2 回目の Reply を試みる。外せなかったことは
+ * 事象 line-webhook.richmenu_unlink_failed に例外の種別だけで残す（LINE ユーザー ID・例外の本文は載せない）。
+ *
+ * DB は書かない。dashboard-api が持つメニュー未解除の印（owners.menu_pending_line_user_id）は、ここで外せても
+ * 消さない（その列を書くのは dashboard-api の責務。印が残る間は管理画面から外し直せる）。
+ *
+ * オーナーの照会（handleEvent の入口）から外すまでの間に、同じアカウントがオンボーディングを完了して完了後メニューを
+ * 張られると、そのメニューを外しうる。完了には招待コード・店名・候補の選択・確定の操作が要り、この間（Reply の
+ * 直後）に収まらないので、再照会は足さない。仮に外れても既定のメニュー（オンボーディング用）に戻るだけで、
+ * その再開の postback や友だち追加で、振り分け口のメニュー照合（owner/router.ts）が張り直す。
+ */
+async function unlinkMenuOfUnregisteredUser(deps: ConversationDeps, lineUserId: string): Promise<void> {
+  try {
+    await deps.messenger.unlinkRichMenu(lineUserId);
+  } catch (err) {
+    try {
+      deps.logger.warn('line-webhook.richmenu_unlink_failed', { errorKind: errorKindOf(err) });
+    } catch {
+      // swallowed-exception: intentional — 記録の手段自身の失敗を業務処理へ伝えない。Reply は済んでおり、
+      // 投げるとエラー境界が 2 回目の Reply を試みる。記録できないことを理由に、利用者に見える振る舞いを変えない。
+    }
+  }
 }
 
 /**

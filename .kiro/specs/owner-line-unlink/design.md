@@ -505,7 +505,7 @@ interface OwnerLineUnlinkResponse {
 #### ConversationHandlers（変更）
 - `handleConfirm` は `confirmStoreForOnboarding` を呼ぶ。`taken_over` は `confirmed` と同じ後処理（段階を `completed`・`onboarding_completed` の監査・完了の案内・`linkCompletedMenu`）を行い（6.2）、加えて `owner_stores_taken_over`（対象: 旧オーナー）と、移した店舗ごとの `store_taken_over`（対象: 店舗）を `tryAuditLog` で残す（7.2）。主体は新しいオーナー
 - `handleFollow` で入口のオーナーが null のとき（未登録・解除済みの元のアカウント）、挨拶の Reply の後に `unlinkRichMenu` を呼ぶ。失敗は `line-webhook.richmenu_unlink_failed` を残して握る（Reply の後なので投げない）。ブロック中で解除が効かなかった元のアカウントに、完了後メニューが残らないようにする安全網である（3.1）
-- `LineMessenger.unlinkRichMenu(lineUserId): Promise<void>` を足す（既存の `linkRichMenu` と同じトークン・同じ非 2xx の扱い）
+- `LineMessenger.unlinkRichMenu(lineUserId): Promise<void>` を足す（既存の `linkRichMenu` と同じトークン・同じ非 2xx の扱い）。ただし 404 は成功とし、`^U[0-9a-f]{32}$` に合わない ID は通信せずに例外とする（LineRichMenuAdapter と同じ理由。6.1 で追加）。安全網で外せても `menu_pending_line_user_id` は消さない（line-webhook は解除の列を書かない。管理画面の外し直しが 404 を成功として印を消す）
 
 #### GbpCallback・relink-completed-menu（変更）
 - `callback.ts`: `owner.line_user_id` が null なら push しない（4.5）
