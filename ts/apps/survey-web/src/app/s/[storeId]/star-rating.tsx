@@ -3,8 +3,8 @@
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import type { Star } from '../../../lib/domain';
 
-// 満足度の星（Issue #492）。React Bits の Peek Rating（https://reactbits.dev/c/micro/peek-rating・
-// MIT + Commons Clause）を移植し、この面の規律に合わせて次を改めた。
+// 満足度の星（Issue #492）。React Bits の Peek Rating（https://reactbits.dev/c/micro/peek-rating）を移植し、
+// この面の規律に合わせて次を改めた。
 //   - 依存を足さない。原作の @hugeicons/* の代わりに星を inline SVG で描く。
 //   - 色はデザイントークンだけを使う。選択済みはブランド色で塗り、アクション色で縁取る。ブランド色は
 //     白背景に対して 3:1 に届かないため、状態を示す図形の境界（WCAG 1.4.11）は縁が担う。
@@ -15,6 +15,13 @@ import type { Star } from '../../../lib/domain';
 //   - 動き低減の打ち消しをクラスで書かない（正典 docs/design/design-language.md §7.11）。色の遷移は
 //     theme.css の base 層が一括で抑える。持ち上がりと確定時のポップは inline の transform と
 //     Web Animations で描くため CSS の抑制が届かず、JS で prefers-reduced-motion を見て止める。
+//
+// 移植元のライセンス（MIT + Commons Clause）は、著作権表示と許諾文をコピーや主要部分に同梱することを
+// 条件にしている。許諾文の全文は docs/third-party/LICENSE-react-bits に原文のまま置いた。この部品を別の場所へ
+// 写すときは、下の著作権表示と全文への参照も一緒に写すこと。
+//   Copyright (c) 2026 David Haz
+//   移植元: https://github.com/DavidHDev/react-bits の src/ts-tailwind/Micro/PeekRating/PeekRating.tsx
+//   （取得コミット e12c22192ac7b4b452c5e2feb9b586d74765d696・2026-10-29 取得）
 
 /** 星ごとの言葉。吹き出しと読み上げ名に使う。並びは星 1〜5。 */
 export const STAR_LABELS = ['不満', 'やや不満', 'ふつう', '満足', 'とても満足'] as const;
