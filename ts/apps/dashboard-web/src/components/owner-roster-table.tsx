@@ -12,6 +12,7 @@ import {
 import { storesOfOwner, type OwnerStoresLoad } from '../lib/agency-roster';
 import { formatJstDate } from '../lib/jst-date';
 import {
+  ENABLED_STATE_LABEL,
   ONBOARDING_STATUS_LABEL,
   PLACE_STATUS_LABEL,
   STORE_SUSPENSION_LABEL,
@@ -29,6 +30,8 @@ import type { OwnerListItem } from '../lib/types';
 
 const NO_DISPLAY_NAME = '（表示名なし）';
 const UNKNOWN_DATE = '不明';
+// 招待コードの記録が無いオーナー（記録を始める前の登録）。推定のコードで埋めない（agency-dashboard Req 8.4・9.4）。
+const NO_INVITE_CODE_RECORD = '記録なし（この機能より前の登録）';
 
 /** 表に出すオーナーの名前。表示名が無ければ「（表示名なし）」（id は利用者に意味が無いので出さない）。 */
 export function ownerDisplayLabel(owner: OwnerListItem): string {
@@ -72,16 +75,38 @@ function OwnerStoresCell({ owner, stores }: { owner: OwnerListItem; stores: Owne
   );
 }
 
+/**
+ * 登録に用いた招待コード（Issue #486・agency-dashboard Req 9.2）。コードは分けて読むと意味が崩れるので
+ * 呼び出し側のセルで折り返さない。無効化されたコードでも記録は消えない（Req 8.3）ので、「無効」を添えて出す。
+ */
+function OwnerInviteCodeCell({ owner }: { owner: OwnerListItem }) {
+  if (owner.inviteCode === null) {
+    return <span className="text-muted-foreground">{NO_INVITE_CODE_RECORD}</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span>{owner.inviteCode.code}</span>
+      {owner.inviteCode.disabled && <Badge variant="outline">{ENABLED_STATE_LABEL.disabled}</Badge>}
+    </span>
+  );
+}
+
 export function OwnerRosterTable({
   label,
   owners,
   stores,
+  showInviteCode = false,
   renderAction,
 }: {
   /** 表の捲れる領域の名前（支援技術へ領域として公開する）。 */
   label: string;
   owners: readonly OwnerListItem[];
   stores: OwnerStoresLoad;
+  /**
+   * 登録に用いた招待コードの列を作成日の後に描く（代理店詳細・Issue #486）。既定は描かない（店舗登録の描画を変えない）。
+   * 列ごとの引数が 3 つ目に達したら、列の定義を配列で受ける形への置き換えを検討する。
+   */
+  showInviteCode?: boolean;
   /** 行の末尾に置く操作。渡したときだけ「操作」の列を描く。 */
   renderAction?: (owner: OwnerListItem) => ReactNode;
 }) {
@@ -95,6 +120,7 @@ export function OwnerRosterTable({
             <TableHeaderCell>状態</TableHeaderCell>
             <TableHeaderCell>登録済みの店舗</TableHeaderCell>
             <TableHeaderCell>作成日</TableHeaderCell>
+            {showInviteCode && <TableHeaderCell>招待コード</TableHeaderCell>}
             {renderAction !== undefined && <TableHeaderCell>操作</TableHeaderCell>}
           </TableRow>
         </TableHead>
@@ -109,6 +135,11 @@ export function OwnerRosterTable({
                 <OwnerStoresCell owner={owner} stores={stores} />
               </TableCell>
               <TableCell wrap="none">{formatJstDate(owner.createdAt) ?? UNKNOWN_DATE}</TableCell>
+              {showInviteCode && (
+                <TableCell wrap="none">
+                  <OwnerInviteCodeCell owner={owner} />
+                </TableCell>
+              )}
               {renderAction !== undefined && (
                 <TableCell wrap="none">{renderAction(owner)}</TableCell>
               )}

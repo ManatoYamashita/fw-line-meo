@@ -141,7 +141,80 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
     const borderColorTokens = tokens.filter((token) =>
       /(^|:)border-(?:b-|y-)?[a-z]+$/.test(token),
     );
-    expect(borderColorTokens).toEqual(['border-transparent', 'aria-[current=page]:border-current']);
+    // 下位の経路の現在地（aria-current="true"・Issue #486）も同じ下線で示す。
+    expect(borderColorTokens).toEqual([
+      'border-transparent',
+      'aria-[current=page]:border-current',
+      'aria-[current=true]:border-current',
+    ]);
+  });
+
+  describe('下位の経路の現在地（Issue #486・代理店詳細）', () => {
+    // 印（aria-current の値を問わない）を持つリンクを返す。値ごとに数えると、"page" と "true" が
+    // 同時に付く退行（印が 2 つ）を見落とす。
+    function markedLinks() {
+      const links = navLinks();
+      expect(links.length).toBeGreaterThan(0);
+      return links.filter((link) => link.hasAttribute('aria-current'));
+    }
+
+    it('代理店詳細では「代理店管理」が現在地（"true"）で、印はそれ 1 つだけ', () => {
+      ready('operator');
+      at('/admin/agencies/22222222-2222-2222-2222-222222222222');
+      render(<TopNav />);
+      const marked = markedLinks();
+      expect(marked).toHaveLength(1);
+      expect(marked[0]?.textContent).toBe('代理店管理');
+      // その画面そのものではないので "page" にしない。
+      expect(marked[0]?.getAttribute('aria-current')).toBe('true');
+    });
+
+    it('代理店管理の一覧そのものでは従来どおり "page"', () => {
+      ready('operator');
+      at('/admin/agencies');
+      render(<TopNav />);
+      const marked = markedLinks();
+      expect(marked).toHaveLength(1);
+      expect(marked[0]?.textContent).toBe('代理店管理');
+      expect(marked[0]?.getAttribute('aria-current')).toBe('page');
+    });
+
+    it('店舗登録では「店舗一覧」を下位の現在地にしない（完全一致する項目が優先）', () => {
+      ready('operator');
+      at('/stores/new');
+      render(<TopNav />);
+      const marked = markedLinks();
+      expect(marked).toHaveLength(1);
+      expect(marked[0]?.textContent).toBe('店舗登録');
+      expect(marked[0]?.getAttribute('aria-current')).toBe('page');
+    });
+
+    it('下位の候補が複数あるときは最も長い項目を現在地にする', () => {
+      ready('operator');
+      // 架空の経路。/stores と /stores/new の両方の下位に当たるので、長い /stores/new を選ぶ。
+      at('/stores/new/confirm');
+      render(<TopNav />);
+      const marked = markedLinks();
+      expect(marked).toHaveLength(1);
+      expect(marked[0]?.textContent).toBe('店舗登録');
+      expect(marked[0]?.getAttribute('aria-current')).toBe('true');
+    });
+
+    it('下位の現在地でもリンクの class は全リンクで同一（下線は属性からだけ出る）', () => {
+      ready('operator');
+      at('/admin/agencies/22222222-2222-2222-2222-222222222222');
+      render(<TopNav />);
+      const links = navLinks();
+      expect(links.length).toBeGreaterThan(0);
+      expect(new Set(links.map((link) => link.getAttribute('class') ?? '')).size).toBe(1);
+    });
+
+    it('どの項目の下位でもない経路では印を付けない', () => {
+      ready('operator');
+      at('/login');
+      render(<TopNav />);
+      expect(markedLinks()).toHaveLength(0);
+    });
   });
 
   it('ログアウトは帯の中でただ 1 つの押しボタンで、押すと signOut が 1 回呼ばれる', () => {

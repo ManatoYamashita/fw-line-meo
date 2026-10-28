@@ -209,7 +209,7 @@
 > 前提: API・DB は変えない（dashboard-web だけの変更）。7.5 の本番での記録の確認とは独立に進めてよい。
 > 共用部品（`OwnerRosterTable`・`TopNav`・`status-labels.ts`）は店舗登録（3.12–3.14）と他の面も使う。8.1 は既存の面の描画を変えないことを完了状態に含める。
 
-- [ ] 8.1 共用部品の拡張（表示語・オーナーの表・現在地）
+- [x] 8.1 共用部品の拡張（表示語・オーナーの表・現在地）
   - `lib/status-labels.ts` に「有効／無効」の表示語を足し、`app/invite-codes/page.tsx`・`app/admin/users/page.tsx` が直接書いている同じ語をここから引くように置き換える（語は変えない）
   - `components/owner-roster-table.tsx` に省略可能な `showInviteCode?: boolean` を足す。`true` のときだけ「招待コード」の列を作成日の後に描く（記録あり＝コード・無効のコードには「無効」のラベル・`null` ＝「記録なし（この機能より前の登録）」・`wrap="none"`）
   - `components/top-nav.tsx` の現在地の判定を「完全一致は `aria-current="page"`。どれにも完全一致しないときは `href + '/'` で始まる最も長い項目に `aria-current="true"`」に変え、下線を `aria-[current=true]` からも出す（全リンクの class は同一のまま・正典 §7.8）
