@@ -230,7 +230,7 @@
   - _Boundary: dashboard-web app/admin/agencies/[agencyId]_
   - _Depends: 8.1, 8.2_
 
-- [ ] 8.4 (P) 代理店管理の一覧から詳細へのリンク
+- [x] 8.4 (P) 代理店管理の一覧から詳細へのリンク
   - `app/admin/agencies/page.tsx` の代理店名のセルを `next/link` で詳細へのリンクにする。リンクの文字は代理店名そのもの。行全体は押せるようにしない（§7.2）
   - 完了状態: 一覧の描画テストで、代理店名が `/admin/agencies/<id>` へのリンクになり、行に押せる役割が付かないことが緑。既存の一覧の契約（表の捲れる領域 1 件など）が緑のまま
   - _Requirements: 9.1_
