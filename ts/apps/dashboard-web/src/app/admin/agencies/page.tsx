@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { EmptyState } from '@fwlm/ui/components/empty-state';
@@ -190,8 +191,15 @@ function AgenciesView() {
             <TableBody>
               {list.agencies.map((agency) => (
                 <TableRow key={agency.id}>
-                  {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。 */}
-                  <TableCell wrap="prose">{agency.name}</TableCell>
+                  {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。
+                    * 代理店名は詳細へのリンクにする（Issue #486・Req 9.1）。行そのものは押せるようにしない
+                    * （正典 §7.2。押せない一覧の行と見分けが付かず、誤った可動感を与える）。
+                    * リンクと分かる手がかりは下線で付ける。色で示すと行の数だけブランド色が並ぶ（§7.4）。 */}
+                  <TableCell wrap="prose">
+                    <Link href={`/admin/agencies/${agency.id}`} className="underline underline-offset-4">
+                      {agency.name}
+                    </Link>
+                  </TableCell>
                   <TableCell wrap="none">{agency.createdAt}</TableCell>
                 </TableRow>
               ))}

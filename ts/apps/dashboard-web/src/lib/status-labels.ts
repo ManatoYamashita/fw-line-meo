@@ -23,6 +23,17 @@ export const STORE_SUSPENSION_LABEL = {
   suspended: '停止中',
 } as const;
 
+// 有効か無効か（招待コード・ダッシュボードの利用者）。無効は異常ではなく状態なので、危険の色を伴わせない。
+export const ENABLED_STATE_LABEL = {
+  enabled: '有効',
+  disabled: '無効',
+} as const;
+
+/** 無効化済みか（disabled）から有効・無効の表示語を引く。 */
+export function enabledStateLabel(disabled: boolean): string {
+  return disabled ? ENABLED_STATE_LABEL.disabled : ENABLED_STATE_LABEL.enabled;
+}
+
 /** 停止時刻（null は利用中）から利用状況の表示語を引く。 */
 export function storeSuspensionLabel(suspendedAt: string | null): string {
   return suspendedAt === null ? STORE_SUSPENSION_LABEL.active : STORE_SUSPENSION_LABEL.suspended;

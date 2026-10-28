@@ -38,6 +38,7 @@ import {
   getDashboardUsers,
   type DashboardRole,
 } from '../../../lib/api';
+import { enabledStateLabel } from '../../../lib/status-labels';
 import type { AgencyItem, DashboardUserItem } from '../../../lib/types';
 
 // 利用者一覧の取得状態（7.4: 失敗時にデータを偽装しない）。
@@ -513,7 +514,7 @@ function UsersView() {
                     </TableCell>
                     {/* 有効/無効の状態（Req 6.4）。招待コードの同じ列と同じく素の語のまま置く。
                       * 装飾で包むと同一役割が面をまたいで 2 通りに描かれ、Req 1.2 が壊れる。 */}
-                    <TableCell wrap="none">{user.disabled ? '無効' : '有効'}</TableCell>
+                    <TableCell wrap="none">{enabledStateLabel(user.disabled)}</TableCell>
                     <TableCell>
                       {/* 押しボタンが 2 つ並ぶ行があるので、間隔を容器が持つ（編集パネルの押しボタンの並びと
                         * 同じ段）。狭い幅では折り返し、列を押し広げない。 */}

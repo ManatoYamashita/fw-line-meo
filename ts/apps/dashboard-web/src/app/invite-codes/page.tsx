@@ -28,6 +28,7 @@ import {
 } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
 import { disableInviteCode, getAgencies, getInviteCodes, issueInviteCode } from '../../lib/api';
+import { enabledStateLabel } from '../../lib/status-labels';
 import type { AgencyItem, InviteCodeItem } from '../../lib/types';
 
 // 招待コード一覧の取得状態（7.4: 失敗時にデータを偽装しない）。
@@ -275,7 +276,7 @@ function InviteCodesView() {
                         * コードは手で書き写す値なので、区切りの位置で割らずに 1 行で出す。 */}
                       <TableCell wrap="none">{code.code}</TableCell>
                       {/* 有効/無効バッジ（Req 5.1） */}
-                      <TableCell wrap="none">{code.disabled ? '無効' : '有効'}</TableCell>
+                      <TableCell wrap="none">{enabledStateLabel(code.disabled)}</TableCell>
                       <TableCell wrap="none">{code.createdAt}</TableCell>
                       <TableCell>
                         {/* 無効化は有効な行にのみ提供する（Req 5.3。API は冪等） */}
