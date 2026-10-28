@@ -39,7 +39,7 @@ test.describe('全店公開（SURVEY_FORCE_STRUCTURED=1）', () => {
   for (const star of [1, 5]) {
     test(`星${star}: 気になったところを開いて良かったところと両方選び、下書き・コピー・再生成・Google の導線まで進む`, async ({ page }) => {
       await openForcedSurvey(page, NO_CONFIG_STORE.id, NO_CONFIG_STORE.name);
-      await page.getByRole('button', { name: `星${star}` }).click();
+      await page.getByRole('radio', { name: new RegExp(`^星${star}：`) }).click();
 
       // 星を選んでも、気になったところは畳まれたまま（星の値で出し分けない）。
       await expect(concernToggle(page)).toHaveAttribute('aria-expanded', 'false');
