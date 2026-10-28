@@ -213,6 +213,7 @@ sequenceDiagram
 | 2.9 | 24h 再回答抑止 | answered-flag.ts, SurveyPage | localStorage | 回答フロー |
 | 2.10 | 個人特定手段なし | answered-flag.ts | — | セキュリティ節 |
 | 2.11 | 設問は評価で分岐しない | SurveyForm（評価分岐なし） | 星の選択前後で設問の集合と順序が不変（E2E で固定） | 回答フロー |
+| 2.12 | 良かった点・気になった点を同じ形で常に出す（Issue #460） | StructuredSurveyForm（`PolaritySection` は強弱・極性の開閉を持たない） | 両側の見出しが同じ要素・同じ class、初期から両側のカテゴリ札を表示、共通の案内を両 section の `aria-describedby` が指す（ユニットテスト・E2E で固定） | 回答フロー |
 | 3.1 | 素材のみから生成（星・良かった点・気になった点・一言） | ResponsesAPI, PromptBuilder | 生成入力契約 | 回答フロー |
 | 3.2 | 素材外の事実禁止 | PromptBuilder, DraftGenerator | systemInstruction＋出力検証 | — |
 | 3.3 | 語彙・構成の多様性 | PromptBuilder | 変動要素注入＋temperature | — |

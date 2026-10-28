@@ -61,25 +61,20 @@ function setup(def = definition()) {
   return { onSubmit };
 }
 
-const POSITIVE_TITLE = '良かったところを教えてください';
+const POSITIVE_TITLE = '良かったところ（任意）';
 const CONCERN_TITLE = '気になったところ（任意）';
+const POLARITY_HINT = '当てはまるものがあれば選んでください';
+const POLARITY_NOTE = '良かったところ・気になったところの、どちらからでも選べます。両方を埋める必要はありません。';
 const COMMENT_TOGGLE = /^その他の感想（任意）/;
 const COMMENT_LABEL = 'その他に伝えたいことがあれば入力してください';
-const CONCERN_TOGGLE = /^気になったところ（任意）/;
 const SUBMIT = '口コミ文を作る';
 const SUBMITTING = '口コミ文を作成しています…';
 
 const section = (name: string) => within(screen.getByRole('region', { name }));
 const positive = () => section(POSITIVE_TITLE);
-const concernToggle = () => screen.getByRole('button', { name: CONCERN_TOGGLE });
-/** 気になったところ（最初は畳まれている）。畳まれていれば開いてから返す。 */
-const concern = () => {
-  if (concernToggle().getAttribute('aria-expanded') === 'false') fireEvent.click(concernToggle());
-  return section(CONCERN_TITLE);
-};
-/** 領域の中のカテゴリの押しボタン（気になったところの開閉の押しボタンを除く）。 */
-const categoryButtons = (where: ReturnType<typeof within>): HTMLElement[] =>
-  where.getAllByRole('button').filter((b: HTMLElement) => b !== concernToggle());
+const concern = () => section(CONCERN_TITLE);
+/** 領域の中のカテゴリの押しボタン（両側とも、極性そのものを開閉する押しボタンは持たない）。 */
+const categoryButtons = (where: ReturnType<typeof within>): HTMLElement[] => where.getAllByRole('button');
 const commentToggle = () => screen.getByRole('button', { name: COMMENT_TOGGLE });
 
 function star(n: number): void {
@@ -109,9 +104,7 @@ describe('StructuredSurveyForm', () => {
   it('初期表示: 星・良かったところ・気になったところ・一言。カテゴリは定義の順に、どちらの極性にも同じものを出す', () => {
     setup();
     expect(screen.getByRole('group', { name: '今回の満足度（必須）' })).toBeDefined();
-    // 気になったところは最初は畳まれていて、カテゴリを出さない。
-    expect(concernToggle().getAttribute('aria-expanded')).toBe('false');
-    expect(categoryButtons(section(CONCERN_TITLE))).toEqual([]);
+    // 両側とも最初からカテゴリの札を出す（どちらの極性も畳まない・Issue #460）。
     for (const where of [positive(), concern()]) {
       const names = categoryButtons(where).map((b) => b.textContent);
       expect(names).toEqual(['料理', '接客・提供']);
@@ -282,16 +275,69 @@ describe('StructuredSurveyForm', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('良かったところが主の見出し、気になったところは任意と分かる入口として最初から見える', () => {
+  it('良かったところと気になったところは、同じ要素・同じ class の見出しで、同じ補足を持つ（強弱を付けない・Issue #460）', () => {
     setup();
     const positiveHeading = screen.getByRole('heading', { name: POSITIVE_TITLE });
     const concernHeading = screen.getByRole('heading', { name: CONCERN_TITLE });
-    expect(concernHeading.textContent).toContain('（任意）');
-    // 気になったところは折り畳まない: カテゴリの押しボタンが最初から操作できる。
-    expect(categoryButtons(concern()).map((b) => b.textContent)).toEqual(['料理', '接客・提供']);
-    // 見出しの強さで優先度を付ける（主の方が強い）。
-    expect(positiveHeading.className).toContain('text-xl');
-    expect(concernHeading.className).not.toContain('text-xl');
+    expect(positiveHeading.tagName).toBe('H2');
+    expect(concernHeading.tagName).toBe(positiveHeading.tagName);
+    expect(concernHeading.className).toBe(positiveHeading.className);
+    expect(concernHeading.className).not.toBe('');
+    // 見出しの中に押しボタンを置かない（片側だけが開閉の入口になる形にしない）。
+    expect(within(positiveHeading).queryByRole('button')).toBeNull();
+    expect(within(concernHeading).queryByRole('button')).toBeNull();
+    // 補足は両側とも同じ文言。
+    expect(positive().getByText(POLARITY_HINT)).toBeDefined();
+    expect(concern().getByText(POLARITY_HINT)).toBeDefined();
+  });
+
+  it('2 つの領域の直前に共通の案内を 1 つ出し、両方の領域が説明として指す', () => {
+    setup();
+    const notes = screen.getAllByText(POLARITY_NOTE);
+    expect(notes).toHaveLength(1);
+    const noteId = notes[0]!.id;
+    expect(noteId).not.toBe('');
+    for (const name of [POSITIVE_TITLE, CONCERN_TITLE]) {
+      const region = screen.getByRole('region', { name });
+      expect(region.getAttribute('aria-describedby')?.split(' ')).toContain(noteId);
+    }
+    // 案内は良かったところの前にある（並び: 案内 → 良かったところ → 気になったところ）。
+    const positiveRegion = screen.getByRole('region', { name: POSITIVE_TITLE });
+    expect(notes[0]!.compareDocumentPosition(positiveRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 「選ばなくてもかまいません」とは書かない（送信には材料が 2 件要るので事実に反する）。
+    expect(document.body.textContent).not.toContain('選ばなくてもかまいません');
+  });
+
+  it('並びは 星 → 良かったところ → 気になったところ → その他の感想 → 作る押しボタン', () => {
+    setup();
+    const order = [
+      screen.getByRole('group', { name: '今回の満足度（必須）' }),
+      screen.getByRole('region', { name: POSITIVE_TITLE }),
+      screen.getByRole('region', { name: CONCERN_TITLE }),
+      commentToggle(),
+      submitButton(),
+    ];
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it('星の値で画面の構成を変えない（見出し・カテゴリの札・案内が星 1 と星 5 で同じ）', () => {
+    const snapshot = () => ({
+      headings: screen.getAllByRole('heading').map((h) => `${h.tagName}|${h.className}|${h.textContent}`),
+      regions: screen.getAllByRole('region').map((r) => r.getAttribute('aria-describedby')),
+      positive: categoryButtons(positive()).map((b) => b.textContent),
+      concern: categoryButtons(concern()).map((b) => b.textContent),
+      buttons: screen.getAllByRole('button').filter((b) => !/^星\d$/.test(b.getAttribute('aria-label') ?? '')).length,
+    });
+    setup();
+    const initial = snapshot();
+    star(1);
+    const low = snapshot();
+    star(5);
+    const high = snapshot();
+    expect(low).toEqual(initial);
+    expect(high).toEqual(initial);
   });
 
   it('一言欄は押すと開き、閉じて開き直しても入力は消えず、閉じたままでも送信に載る', () => {
@@ -414,13 +460,17 @@ describe('StructuredSurveyForm: 口コミ文を作るには感想が 2 件要る
     expect(submitButton().disabled).toBe(false);
   });
 
-  it('気になったところ 2 件だけでも押せる', () => {
-    setup();
+  it('気になったところ 2 件だけでも押せ、送信できる（件数の規則は極性に依らない）', () => {
+    const { onSubmit } = setup();
     star(2);
     openCategory(concern(), '接客・提供');
     fireEvent.click(concern().getByRole('checkbox', { name: '接客の丁寧さ' }));
+    expect(submitButton().disabled).toBe(true);
+    expect(note()).toBe('あと1つ選ぶと口コミ文を作れます');
     fireEvent.click(concern().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
     expect(submitButton().disabled).toBe(false);
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith({ star: 2, positiveSelections: [], concernSelections: [SERVICE_BOTH] });
   });
 
   it('Target とその facet は 1 件として数える（二重に数えない）', () => {
@@ -492,61 +542,34 @@ describe('StructuredSurveyForm: 口コミ文を作るには感想が 2 件要る
   });
 });
 
-describe('StructuredSurveyForm: 気になったところ・その他の感想の開閉', () => {
-  it('気になったところは最初は畳まれ、押すと concern の UI が開き、押し直すと畳まれる', () => {
+describe('StructuredSurveyForm: 開閉はその他の感想だけ', () => {
+  it('良かったところ・気になったところは畳めない（開閉の押しボタンを持たない）', () => {
     setup();
-    const toggle = concernToggle();
-    expect(toggle.textContent).toContain('気になったところ（任意）');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-controls')).toBeNull();
-    // 入口は見出しとして見え、領域の名前は件数を含まない見出しの文言。
-    expect(screen.getByRole('heading', { name: CONCERN_TITLE })).toBeDefined();
-
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    const body = document.getElementById(toggle.getAttribute('aria-controls')!);
-    expect(body).not.toBeNull();
-    expect(body!.textContent).toContain('当てはまるものがあれば選んでください');
-    expect(within(body!).getByRole('button', { name: '料理' })).toBeDefined();
-    expect(toggle.textContent).toContain('閉じる');
-
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(categoryButtons(section(CONCERN_TITLE))).toEqual([]);
+    expect(screen.queryByRole('button', { name: /^良かったところ/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^気になったところ/ })).toBeNull();
+    // 開閉の押しボタン（aria-expanded を持つもの）のうち、カテゴリの札以外は「その他の感想」だけ。
+    const toggles = screen
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-expanded'))
+      .filter((b) => !categoryButtons(positive()).includes(b) && !categoryButtons(concern()).includes(b));
+    expect(toggles).toEqual([commentToggle()]);
   });
 
-  it('気になったところで選んでから畳んでも選択は残り、件数を添え、2 件の下限に数え、開き直すと選択が見える', () => {
+  it('気になったところで選んだ内容は、別のカテゴリを開いても残り、2 件の下限に数え、送信に載る', () => {
     const { onSubmit } = setup();
     star(3);
     openCategory(concern(), '接客・提供');
     fireEvent.click(concern().getByRole('checkbox', { name: '接客の丁寧さ' }));
     fireEvent.click(concern().getByRole('checkbox', { name: '料理・ドリンクの提供' }));
-
-    fireEvent.click(concernToggle());
-    expect(concernToggle().getAttribute('aria-expanded')).toBe('false');
-    expect(concernToggle().textContent).toContain('2件選択済み');
-    // 畳んだ concern の 2 件だけで下限を満たす。
+    openCategory(concern(), '料理');
+    expect(concern().getByRole('list', { name: '気になったところで選んだ内容' }).textContent).toContain('接客・提供');
     expect(submitButton().disabled).toBe(false);
-
-    fireEvent.click(concernToggle());
-    expect(concernToggle().textContent).not.toContain('選択済み');
-    const checkbox = concern().getByRole('checkbox', { name: '接客の丁寧さ' });
-    expect(checkbox.getAttribute('aria-checked')).toBe('true');
-
-    fireEvent.click(concernToggle());
     submit();
     expect(onSubmit).toHaveBeenCalledWith({
       star: 3,
       positiveSelections: [],
       concernSelections: [{ categoryCode: 'service_delivery', facetCodes: ['service_courtesy', 'serving'] }],
     });
-  });
-
-  it('何も選ばずに畳んだら件数を添えない', () => {
-    setup();
-    concern();
-    fireEvent.click(concernToggle());
-    expect(concernToggle().textContent).not.toContain('選択済み');
   });
 
   it('その他の感想は最初は畳まれ、入力して畳んでも残り「入力済み」を添え、開き直すと入力が見える', () => {
@@ -566,12 +589,12 @@ describe('StructuredSurveyForm: 気になったところ・その他の感想の
     expect((screen.getByRole('textbox', { name: COMMENT_LABEL }) as HTMLTextAreaElement).value).toBe('窓側の席が落ち着いた');
   });
 
-  it('最初の画面は、星・良かったところ・2 つの任意の入口・作る押しボタンだけ', () => {
+  it('最初の画面は、星・良かったところと気になったところのカテゴリの札・その他の感想の入口・作る押しボタンだけ', () => {
     setup();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(categoryButtons(section(CONCERN_TITLE))).toEqual([]);
     expect(categoryButtons(positive()).map((b) => b.textContent)).toEqual(['料理', '接客・提供']);
+    expect(categoryButtons(concern()).map((b) => b.textContent)).toEqual(['料理', '接客・提供']);
     expect(submitButton()).toBeDefined();
   });
 });

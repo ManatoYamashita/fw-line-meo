@@ -15,7 +15,6 @@ import {
   MIN_MATERIALS,
   categoryEvidence,
   countMaterials,
-  countPolarityMaterials,
   hasEvidence,
   summarizeCategory,
   summaryText,
@@ -33,7 +32,20 @@ import {
 //   - **星だけが必須。** 星の値で設問・カテゴリ・良かったところ / 気になったところを出し分けない。
 //   - **開くことは回答ではない。** カテゴリ・Target の展開状態（open）は画面の状態で、回答の意味（evidence・
 //     lib/structured-selection.ts）とは別に持つ。開いて何も選ばずに閉じても、送信には何も入らない。
-//   - 良かったところ / 気になったところは同じ定義・同じ部品で描く。同じ選択が両方に在ってもエラーにしない。
+//   - 良かったところ / 気になったところは同じ定義・同じ部品・**同じ形**で描く。同じ選択が両方に在ってもエラーにしない。
+//     見出し（同じ要素・同じ class）・補足・初期の開閉・カテゴリの札の段を両側で揃え、片側だけを畳む・見出しを弱める・
+//     小さくする・灰色にする・後ろへ回すことをしない（気になったところを折り畳まない＝低評価の声を隠す UI にしない）。
+//     「埋めなくてよい」ことは片側にだけ付けず、2 つの領域の直前に共通の案内として 1 つ出し、両方が説明として指す。
+//     並びは 星 → 良かったところ → 気になったところ → その他の感想 → 作る押しボタン で固定し、星の値で変えない。
+//     この判断の区別（Issue #460・.kiro/specs/review-acquisition/requirements.md の要件 2 受入基準 12）:
+//       (1) Google 公式ポリシー（マップのユーザー投稿コンテンツに関するポリシー「評価の操作」・
+//           support.google.com/contributionpolicy/answer/7400114。2026-10-22 に日英 9 行を Issue #460 の記録と照合）は、
+//           依頼の画面での表示の強弱・初期の開閉に**直接は言及していない**。
+//       (2) ただし否定側だけを弱める形は "Discourage or prohibit negative reviews, or selectively solicit positive
+//           reviews" と読まれる余地があり、許可の条件 "without … attempting to influence the rating or the contents of
+//           the review" を満たすと立証しにくい（この画面の回答だけから下書きが作られ、Google の投稿欄へ貼られる）。
+//       (3) だから、これは**本プロジェクトの自主基準**として対称な形を採る。公式ポリシーの違反と断定しているのではない。
+//     開閉を持つのは極性に依らない「その他の感想」（自由記述）だけで、この基準の外にある。
 //   - 未選択を「なし」と読まない。文言も「問題なし」「特になし」のような意味を付けない。
 //   - カテゴリ・facet・Target の名前と並びは定義（DB の taxonomy と店舗設定）だけから取る。画面に列挙しない。
 //   - 各極性で大きく開くカテゴリは 1 つ、カテゴリの中で詳しく開く Target も 1 つ。別のものを開いても選択は残り、
@@ -44,6 +56,8 @@ const STARS = [1, 2, 3, 4, 5] as const;
 // 一言欄の記入例。肯定と否定を 1 つずつにする（良かったことの例だけでは、低評価の客が書きにくくなる・
 // survey-form.tsx の COMMENT_PLACEHOLDER と同じ判断）。
 const COMMENT_PLACEHOLDER = '例）窓側の席が落ち着いた／提供まで少し待った';
+// 良かったところ・気になったところの補足。両側で同じ文言にする（片側だけを「任意の補助」に見せない・Issue #460）。
+const POLARITY_HINT = '当てはまるものがあれば選んでください';
 
 // 選択の札（チェックボックスを包むラベル）。legacy の観点の札と同じ寸法・枠にする（survey-form.tsx）。
 // 選んだ札は枠・面・字の太さでも示す（スマホで一覧したとき、小さなチェック印だけでは見落とすため）。
@@ -72,6 +86,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
   const starErrorId = useId();
   const commentPanelId = useId();
   const submitNoteId = useId();
+  const polarityNoteId = useId();
   // 口コミ文を作るには、星に加えて独立した回答材料が MIN_MATERIALS 件要る（良かったところ・気になったところの合計）。
   // 数えるのは送信される evidence だけで、カテゴリを開いただけ・星・一言は数えない（lib/structured-selection.ts）。
   const materials = countMaterials(evidence, definition);
@@ -144,28 +159,36 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
         )}
       </fieldset>
 
-      {/* 良かったところを主の入力として常に開き、気になったところは任意の補助として最初は畳む（必要な人だけ開く）。
-          畳んでも入口は常に見え、選んだ内容は消えずに送信・件数に含まれる。部品・操作・回答の意味は同じ。 */}
-      <PolaritySection
-        polarity="positive"
-        emphasis="primary"
-        title="良かったところを教えてください"
-        hint="当てはまるものをいくつでも選べます"
-        summaryLabel="良かったところで選んだ内容"
-        definition={definition}
-        evidence={evidence}
-        onChange={setEvidence}
-      />
-      <PolaritySection
-        polarity="concern"
-        emphasis="secondary"
-        title="気になったところ（任意）"
-        hint="当てはまるものがあれば選んでください"
-        summaryLabel="気になったところで選んだ内容"
-        definition={definition}
-        evidence={evidence}
-        onChange={setEvidence}
-      />
+      {/* 良かったところ・気になったところは同じ形で常に出す（冒頭の「守ること」・Issue #460）。どちらも埋めなくて
+          よいことは、片側にだけ書かず、直前の共通の案内で両側に同じだけ伝える。「選ばなくてもかまいません」とは
+          書かない（口コミ文を作るには材料が MIN_MATERIALS 件要るので事実に反する）。 */}
+      <div className="space-y-4">
+        <p id={polarityNoteId} className="text-sm text-muted-foreground">
+          良かったところ・気になったところの、どちらからでも選べます。両方を埋める必要はありません。
+        </p>
+        <div className="space-y-10">
+          <PolaritySection
+            polarity="positive"
+            title="良かったところ（任意）"
+            hint={POLARITY_HINT}
+            describedBy={polarityNoteId}
+            summaryLabel="良かったところで選んだ内容"
+            definition={definition}
+            evidence={evidence}
+            onChange={setEvidence}
+          />
+          <PolaritySection
+            polarity="concern"
+            title="気になったところ（任意）"
+            hint={POLARITY_HINT}
+            describedBy={polarityNoteId}
+            summaryLabel="気になったところで選んだ内容"
+            definition={definition}
+            evidence={evidence}
+            onChange={setEvidence}
+          />
+        </div>
+      </div>
 
       {/* 一言は任意。タップだけで回答できることを優先し、最初は開く押しボタンだけを出す。 */}
       <div className="space-y-2">
@@ -263,10 +286,10 @@ function materialCountingNote(definition: StructuredSurveyDefinition): string {
 
 interface PolaritySectionProps {
   polarity: Polarity;
-  /** 見た目の優先度。primary = 良かったところ（主の入力）、secondary = 気になったところ（任意の補助）。 */
-  emphasis: 'primary' | 'secondary';
   title: string;
   hint: string;
+  /** 両側に共通の案内の id（領域の説明として指す）。 */
+  describedBy: string;
   /** 折り畳んだカテゴリの要約一覧の読み上げ名。 */
   summaryLabel: string;
   definition: StructuredSurveyDefinition;
@@ -274,11 +297,12 @@ interface PolaritySectionProps {
   onChange: (next: EvidenceState) => void;
 }
 
+// 極性ごとに強弱・開閉の引数を持たない（両側を同じ形で描くことを、部品の形で固定する・Issue #460）。
 function PolaritySection({
   polarity,
-  emphasis,
   title,
   hint,
+  describedBy,
   summaryLabel,
   definition,
   evidence,
@@ -286,106 +310,76 @@ function PolaritySection({
 }: PolaritySectionProps) {
   // 画面の展開状態（回答の意味ではない）。極性ごとに独立し、開いているカテゴリは 1 つまで。
   const [openCategory, setOpenCategory] = useState<string | null>(null);
-  // 極性そのものの開閉（secondary だけが畳める）。畳んでも evidence はフォームが持つので消えない。
-  // この部品は畳んでもマウントされたままなので、開き直したときに開いていたカテゴリも戻る。
-  const collapsible = emphasis === 'secondary';
-  const [expanded, setExpanded] = useState(!collapsible);
   const headingId = `${polarity}-heading`;
-  const bodyId = `${polarity}-body`;
-  const selectedCount = collapsible ? countPolarityMaterials(evidence[polarity], definition) : 0;
   const summaries = definition.categories
     .map((category) => ({ category, selected: categoryEvidence(evidence, polarity, category.code) }))
     .filter(({ category, selected }) => category.code !== openCategory && hasEvidence(selected));
 
   return (
-    <section
-      className="space-y-3"
-      aria-labelledby={headingId}
-    >
-      {collapsible ? (
-        // 見出しの中に開閉の押しボタンを置く（見出しで移動したとき、その場で開ける）。領域の名前は件数を含まない
-        // 見出しの文言だけにする。
-        <h2 className="text-base font-medium">
-          <DisclosureToggle
-            label={title}
-            labelId={headingId}
-            open={expanded}
-            controls={bodyId}
-            status={selectedCount > 0 ? `${selectedCount}件選択済み` : null}
-            onToggle={() => setExpanded(!expanded)}
-          />
+    <section className="space-y-3" aria-labelledby={headingId} aria-describedby={describedBy}>
+      <div>
+        <h2 id={headingId} className="text-lg font-semibold">
+          {title}
         </h2>
-      ) : (
-        <div>
-          <h2 id={headingId} className="text-xl font-bold">
-            {title}
-          </h2>
-          <p className="text-sm text-muted-foreground">{hint}</p>
-        </div>
+        <p className="text-sm text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {definition.categories.map((category) => {
+          const open = openCategory === category.code;
+          const selected = hasEvidence(categoryEvidence(evidence, polarity, category.code));
+          return (
+            <Button
+              key={category.code}
+              type="button"
+              variant={open ? 'secondary' : 'outline'}
+              // 選択済みのカテゴリは枠でも示す（✓ と読み上げに加えて、閉じた状態でも一目で分かるように）。
+              className={selected ? 'border-primary font-semibold' : undefined}
+              aria-expanded={open}
+              aria-controls={open ? panelId(polarity, category.code) : undefined}
+              onClick={() => setOpenCategory(open ? null : category.code)}
+            >
+              {/* 選択済みは印と読み上げの両方で示す（色だけにしない）。印は読み上げから隠し、読み上げ名は
+                  「料理（選択あり）」にする。 */}
+              {selected ? <span aria-hidden="true">✓ </span> : null}
+              {category.label}
+              {selected ? <span className="sr-only">（選択あり）</span> : null}
+            </Button>
+          );
+        })}
+      </div>
+      {summaries.length === 0 ? null : (
+        <ul className="space-y-1 text-sm" aria-label={summaryLabel}>
+          {summaries.map(({ category, selected }) => (
+            <li key={category.code}>
+              ✓ {category.label}：{summaryText(summarizeCategory(selected, category), category)}
+            </li>
+          ))}
+        </ul>
       )}
-      {expanded ? (
-        <div id={bodyId} className="space-y-3">
-          {collapsible ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
-          <div className="flex flex-wrap gap-2">
-            {definition.categories.map((category) => {
-              const open = openCategory === category.code;
-              const selected = hasEvidence(categoryEvidence(evidence, polarity, category.code));
-              return (
-                <Button
-                  key={category.code}
-                  type="button"
-                  variant={open ? 'secondary' : 'outline'}
-                  // 選択済みのカテゴリは枠でも示す（✓ と読み上げに加えて、閉じた状態でも一目で分かるように）。
-                  className={selected ? 'border-primary font-semibold' : undefined}
-                  aria-expanded={open}
-                  aria-controls={open ? panelId(polarity, category.code) : undefined}
-                  onClick={() => setOpenCategory(open ? null : category.code)}
-                >
-                  {/* 選択済みは印と読み上げの両方で示す（色だけにしない）。印は読み上げから隠し、読み上げ名は
-                      「料理（選択あり）」にする。 */}
-                  {selected ? <span aria-hidden="true">✓ </span> : null}
-                  {category.label}
-                  {selected ? <span className="sr-only">（選択あり）</span> : null}
-                </Button>
-              );
-            })}
-          </div>
-          {summaries.length === 0 ? null : (
-            <ul className="space-y-1 text-sm" aria-label={summaryLabel}>
-              {summaries.map(({ category, selected }) => (
-                <li key={category.code}>
-                  ✓ {category.label}：{summaryText(summarizeCategory(selected, category), category)}
-                </li>
-              ))}
-            </ul>
-          )}
-          {definition.categories
-            .filter((category) => category.code === openCategory)
-            .map((category) => (
-              <CategoryPanel
-                key={category.code}
-                polarity={polarity}
-                category={category}
-                evidence={evidence}
-                onChange={onChange}
-              />
-            ))}
-        </div>
-      ) : null}
+      {definition.categories
+        .filter((category) => category.code === openCategory)
+        .map((category) => (
+          <CategoryPanel
+            key={category.code}
+            polarity={polarity}
+            category={category}
+            evidence={evidence}
+            onChange={onChange}
+          />
+        ))}
     </section>
   );
 }
 
 // --- 任意の項目の開閉 ------------------------------------------------------------------------
 
+// 開閉を持つのは「その他の感想」だけ（良かったところ・気になったところは畳まない・冒頭の「守ること」）。
 interface DisclosureToggleProps {
   label: string;
-  /** label の文言を包む要素の id（領域の名前として指すとき）。 */
-  labelId?: string;
   open: boolean;
   /** 開いているときに出る中身の id。 */
   controls: string;
-  /** 畳んでいるときに添える状態（「2件選択済み」「入力済み」）。無ければ null。 */
+  /** 畳んでいるときに添える状態（「入力済み」）。無ければ null。 */
   status: string | null;
   onToggle: () => void;
 }
@@ -393,7 +387,7 @@ interface DisclosureToggleProps {
 // 押しボタン部品の寸法区分（固定の高さ・折り返さない）では狭い画面で文言がはみ出すので、素の要素で描く。
 // 焦点の指標は theme.css の :focus-visible が全要素に当てる。ラベルは折り返さない（「（任意）」だけが次の行に割れない）。開閉は ＋／− の印だけに頼らず、aria-expanded と
 // 文言（開いているときの「閉じる」・畳んでいるときの状態）でも伝える。印は読み上げから隠す。
-function DisclosureToggle({ label, labelId, open, controls, status, onToggle }: DisclosureToggleProps) {
+function DisclosureToggle({ label, open, controls, status, onToggle }: DisclosureToggleProps) {
   return (
     <button
       type="button"
@@ -403,7 +397,7 @@ function DisclosureToggle({ label, labelId, open, controls, status, onToggle }: 
       onClick={onToggle}
     >
       <span aria-hidden="true">{open ? '−' : '＋'}</span>
-      <span id={labelId} className="whitespace-nowrap">
+      <span className="whitespace-nowrap">
         {label}
       </span>
       {open ? (
