@@ -62,7 +62,7 @@
   - _Depends: 2.3_
 
 - [ ] 4. dashboard-api: 解除の操作と一覧
-- [ ] 4.1 (P) 個別リッチメニューの解除だけを行う LINE アダプタを実装する
+- [x] 4.1 (P) 個別リッチメニューの解除だけを行う LINE アダプタを実装する
   - 呼び出しごとにトークンを発行して個別リンクを外し、2xx と 404 を成功、それ以外とトークン発行・通信の失敗を種別つきの失敗として返す。例外を投げない
   - 通信は注入された取得関数と時間制限を使い、記録に応答本文・トークン・LINE ユーザー ID を載せない
   - 単体試験で、応答の各種と時間切れが期待どおりの結果に写り、外部へ通信しない
@@ -197,3 +197,4 @@
 - 2.2: listOwners は #486 の inviteCode を保つ。GET /owners の応答は dashboard-api の toJson が項目を明示して写すので、4.4 でそこへ新しい項目を足す。
 - 2.3: lockPlaceHolder / moveAllStores は BEGIN 済みの接続を渡す。施錠するのは owners の行（店舗の行ではない）。grants.sql の文を取り出す試験ヘルパーが 2 ファイルに重複しているので、3 つ目が出たら共通化する。
 - 3.1: line-webhook の test/onboarding/conversation.test.ts のフェイクに、呼ばれたら例外を投げる confirmStoreForOnboarding を置いた。6.2 で切り替えるときに作り直す。
+- 4.1: LINE ユーザー ID の形（^U[0-9a-f]{32}$）に合わない値は通信せず invalid_user_id で返す（`all` が既定リッチメニューの解除のパスに届くため。レビューの指摘で追加し design も改訂）。4.3 の記録の errorKind にもこの値が入りうる。

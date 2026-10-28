@@ -440,7 +440,7 @@ interface StoreIdentificationService {
 ```typescript
 type UnlinkRichMenuResult =
   | { ok: true }
-  | { ok: false; errorKind: 'token_failed' | 'http_error' | 'network_error'; httpStatus: number | null };
+  | { ok: false; errorKind: 'invalid_user_id' | 'token_failed' | 'http_error' | 'network_error'; httpStatus: number | null };
 
 interface LineRichMenuAdapter {
   unlinkUserRichMenu(lineUserId: string): Promise<UnlinkRichMenuResult>;
@@ -455,6 +455,7 @@ function createLineRichMenuAdapter(deps: {
 ```
 - 2xx と 404 を `ok: true` とする（個別リンクが無いユーザーへの応答が文書化されていないため、外し直しが永久に終わらない事態を避ける）。この仮定は本番の確認（9.2）で GET の 404 とともに実測する
 - トークンは呼び出しごとに発行し、キャッシュしない。例外を投げず、結果の型で返す
+- LINE ユーザー ID の形（`^U[0-9a-f]{32}$`）に合わない値は、トークンを発行する前に `invalid_user_id` で返す。`encodeURIComponent` は `all`・`..` を通し、`/v2/bot/user/all/richmenu` は既定リッチメニューの解除という別の操作である。解除以外の操作を持たない方針（Security Considerations）をパスの組み立てでも保つ（4.1 のレビューで追加）
 - `fetch` は注入する。試験は偽の `fetch`（または合成ルートで偽のアダプタ）を渡し、`api.line.me` へ出ない
 - 応答本文・トークン・LINE ユーザー ID を記録しない
 
