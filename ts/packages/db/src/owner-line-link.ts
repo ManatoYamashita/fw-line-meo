@@ -4,6 +4,8 @@ import type { Queryable, TransactionCapable } from './pool.js';
 // 解除の列（line_user_id の NULL 化・line_unlinked_at・menu_pending_line_user_id）を書くのは
 // dashboard-api（運営・代理店の操作）だけである。オーナーの面（line-webhook・客向け Web）は列単位の
 // GRANT でこれらの列を書けず、不在検査 (B5) がこのモジュールの識別子の利用も検出する。
+// 末尾の lockPlaceHolder・moveAllStores は引継ぎ（オンボーディングの確定）で line-webhook が使う。
+// これらが書くのは owners.taken_over_by_owner_id と stores.owner_id だけで、解除の列には触れない。
 
 export interface UnlinkOwnerLineInput {
   ownerId: string;
@@ -139,4 +141,101 @@ export async function clearOwnerMenuPending(
         AND menu_pending_line_user_id = $2`,
     [input.ownerId, input.lineUserId],
   );
+}
+
+/** Place の店舗と、施錠したその所有者（lockPlaceHolder の戻り値）。 */
+export interface PlaceHolder {
+  storeId: string;
+  ownerId: string;
+  /** 所有者の代理店 */
+  agencyId: string;
+  /** 所有者が解除済み（line_unlinked_at あり）か */
+  unlinked: boolean;
+}
+
+// 施錠の後に所有者が変わっていたとき、新しい所有者を施錠し直す回数の上限。所有者が変わるのは
+// 並行の引継ぎが確定したときだけで、引継ぎ先は連携中なので続けて引き継がれることは通常無い。
+const LOCK_PLACE_HOLDER_MAX_ATTEMPTS = 3;
+
+/**
+ * Place の店舗の所有者を、呼び出し側が開いたトランザクションの中で施錠して読む（Req 6.1, 6.6）。
+ *
+ * 所有者のオーナーの行を FOR UPDATE で押さえ、押さえた後に Place の店舗の所有者を読み直す。
+ * 同じ解除済みオーナーの店舗を 2 つの接続がほぼ同時に確定すると、後着は先着の確定までその行の
+ * 施錠を待ち、読み直しで「引き継いだ連携中のオーナー」を所有者として得る（呼び出し側はそれを
+ * 登録済みとして拒否する）。読み直した所有者が施錠した行と違えば、新しい所有者を施錠し直す。
+ *
+ * Place の店舗が無ければ null を返す（確定済みの店舗は ux_stores_place_id により Place ごとに
+ * 高々 1 行）。tx は BEGIN 済みの接続でなければならない。自動コミットの接続では施錠が文の終わりで
+ * 外れ、並行の確定を直列化できない。
+ */
+export async function lockPlaceHolder(tx: Queryable, placeId: string): Promise<PlaceHolder | null> {
+  const storeOf = async (): Promise<{ id: string; owner_id: string } | null> => {
+    const res = await tx.query<{ id: string; owner_id: string }>(
+      'SELECT id, owner_id FROM stores WHERE place_id = $1',
+      [placeId],
+    );
+    return res.rows[0] ?? null;
+  };
+
+  let store = await storeOf();
+  for (let attempt = 0; attempt < LOCK_PLACE_HOLDER_MAX_ATTEMPTS; attempt += 1) {
+    if (!store) return null;
+    const locked = await tx.query<{ id: string; agency_id: string; unlinked: boolean }>(
+      `SELECT id, agency_id, line_unlinked_at IS NOT NULL AS unlinked
+         FROM owners
+        WHERE id = $1::uuid
+          FOR UPDATE`,
+      [store.owner_id],
+    );
+    const owner = locked.rows[0];
+    // 施錠の後に読み直す。施錠を待つ間に並行の引継ぎが確定していれば、所有者が変わっている。
+    const current = await storeOf();
+    if (owner && current && current.owner_id === owner.id) {
+      return {
+        storeId: current.id,
+        ownerId: owner.id,
+        agencyId: owner.agency_id,
+        unlinked: owner.unlinked,
+      };
+    }
+    store = current;
+  }
+  throw new Error(`place holder kept changing while locking: ${placeId}`);
+}
+
+/**
+ * 旧オーナーの全店舗（確定済み・未確定・停止中）を新しいオーナーへ移し、旧オーナーの引継ぎ先を
+ * 新しいオーナーにして、移した店舗 ID を作成順に返す（Req 2.6, 6.1, 6.3）。
+ *
+ * 呼び出し側が開いたトランザクションの中で、lockPlaceHolder で旧オーナーの行を施錠した後に呼ぶ。
+ * 書き換えるのは owners.taken_over_by_owner_id と stores.owner_id だけで、店舗の ID・Place の確定
+ * 状態・停止状態・ほかの列と、店舗 ID を指す日次データ・匿名集計・配信記録には触れない（Req 6.3）。
+ *
+ * 旧オーナーが連携中か、新しいオーナーが旧オーナー自身なら ck_owner_taken_over に当たって例外を
+ * 投げる（呼び出し側はロールバックする）。この判定は CHECK に委ね、ここで重ねて書かない。
+ * 旧オーナーが存在しなければ例外を投げる。
+ */
+export async function moveAllStores(
+  tx: Queryable,
+  input: { fromOwnerId: string; toOwnerId: string },
+): Promise<readonly string[]> {
+  // 先に引継ぎ先を書く。CHECK に当たるとき、店舗を書き換える前に失敗させる。
+  const owner = await tx.query(
+    'UPDATE owners SET taken_over_by_owner_id = $2::uuid WHERE id = $1::uuid',
+    [input.fromOwnerId, input.toOwnerId],
+  );
+  if ((owner.rowCount ?? 0) === 0) {
+    throw new Error(`owner not found: ${input.fromOwnerId}`);
+  }
+  const moved = await tx.query<{ id: string }>(
+    `WITH moved AS (
+       UPDATE stores SET owner_id = $2::uuid
+        WHERE owner_id = $1::uuid
+       RETURNING id, created_at
+     )
+     SELECT id FROM moved ORDER BY created_at, id`,
+    [input.fromOwnerId, input.toOwnerId],
+  );
+  return moved.rows.map((r) => r.id);
 }
