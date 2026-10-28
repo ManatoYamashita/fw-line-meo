@@ -12,6 +12,8 @@ import {
   findAgencyName,
   findDashboardUserDisplayName,
   listOwnersByAgency,
+  unlinkOwnerLine,
+  clearOwnerMenuPending,
   findOwnerWithAgency,
   listCategories,
   listAgencies,
@@ -37,6 +39,7 @@ import type { AppDeps } from './app.js';
 import type { DashboardApiConfig } from './config.js';
 import type { AuthDeps, TokenVerifier } from './auth.js';
 import { createUniqueInviteCode, generateInviteCode } from './invite-code-gen.js';
+import { createLineRichMenuAdapter } from './line-richmenu.js';
 import type { RegisterStoreInput } from './store-registration.js';
 
 
@@ -46,13 +49,23 @@ import type { RegisterStoreInput } from './store-registration.js';
 // 配線を複製しないので、ここでの引数の取り違えや監査の配線漏れはテストと型検査が捕まえる。
 
 export interface CompositionInput {
-  config: Pick<DashboardApiConfig, 'placesApiKey' | 'corsOrigin' | 'surveyBaseUrl'>;
+  config: Pick<
+    DashboardApiConfig,
+    'placesApiKey' | 'corsOrigin' | 'surveyBaseUrl' | 'lineChannelId' | 'lineChannelSecret'
+  >;
   // ID トークンの検証（本番は firebase-admin・テストはモック）。
   verifier: TokenVerifier;
+  // LINE のアダプタが使う取得関数（本番は Node の fetch・テストは偽物）。試験から api.line.me へ
+  // 通信しないよう、LINE だけはここで注入する。必須にして、配線の落としを型検査で捕まえる。
+  lineFetch: typeof fetch;
   structuredLog: Sink;
 }
 
-export function buildAppDeps({ config, verifier, structuredLog }: CompositionInput): AppDeps {
+// LINE への 1 回の通信（トークン発行・個別リンクの DELETE のそれぞれ）に許す時間。解除は管理画面の
+// 操作の応答を待たせるので、日次配信（delivery-job の 10 秒）より短くする。最悪でも 2 回分で 10 秒に収まる。
+const LINE_REQUEST_TIMEOUT_MS = 5_000;
+
+export function buildAppDeps({ config, verifier, lineFetch, structuredLog }: CompositionInput): AppDeps {
   // 認証依存（全業務ハンドラと qr 経路で共有）。
   // 認可の真実は Postgres（dashboard_users）にのみ置く（Firebase カスタムクレームは使わない）。
   const authDeps: AuthDeps = {
@@ -67,6 +80,14 @@ export function buildAppDeps({ config, verifier, structuredLog }: CompositionInp
   const storeIdentification = createStoreIdentificationService({
     pool: { connect: async () => (await getPool()).connect() },
     places,
+  });
+
+  // 個別リッチメニューのリンクを外すだけの LINE アダプタ（owner-line-unlink）。push を含むほかの操作は持たない。
+  const lineRichMenu = createLineRichMenuAdapter({
+    channelId: config.lineChannelId,
+    channelSecret: config.lineChannelSecret,
+    fetch: lineFetch,
+    timeoutMs: LINE_REQUEST_TIMEOUT_MS,
   });
 
   // registerStore 合成（2.3 handoff）: 凍結契約 confirmStore（stores INSERT confirmed →
@@ -155,6 +176,16 @@ export function buildAppDeps({ config, verifier, structuredLog }: CompositionInp
       // 範囲の判定と状態の更新を 1 文で行う DAL。範囲外・不存在はどちらも not_found。
       setSuspension: async (input) => setStoreSuspension(await getPool(), input),
       // store_suspended / store_resumed は migration 0012 の CHECK が受け付ける。本番では 0012 をこのコードより先に当てる。
+      auditLog: async (input) => createAuditLog(await getPool(), input),
+    },
+    ownerLineUnlink: {
+      auth: authDeps,
+      // 範囲の判定・施錠・解除・会話の行の削除を 1 トランザクションで行う DAL。範囲外・不存在はどちらも not_found。
+      // getPool() の戻り値 Pool は TransactionCapable（connect を持つ）に構造適合する。
+      unlinkOwnerLine: async (input) => unlinkOwnerLine(await getPool(), input),
+      clearMenuPending: async (input) => clearOwnerMenuPending(await getPool(), input),
+      lineRichMenu,
+      // owner_line_unlinked は migration 0018 の CHECK が受け付ける。本番では 0018 をこのコードより先に当てる。
       auditLog: async (input) => createAuditLog(await getPool(), input),
     },
     inviteCodes: {

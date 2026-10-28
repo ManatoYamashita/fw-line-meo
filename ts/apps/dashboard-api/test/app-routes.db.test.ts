@@ -3,6 +3,7 @@ import { getPool, closePool, findStoreWithAgency } from '@fwlm/db';
 import { createApp } from '../src/app.js';
 import type { TokenVerifier } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 import { loadConfig, type DashboardApiConfig } from '../src/config.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で dashboard-api の全ルート配線・認可マトリクス・CORS を
@@ -65,7 +66,7 @@ const verifier: TokenVerifier = {
 
 function buildApp(): ReturnType<typeof createApp> {
   // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 function h(bearer?: string, origin?: string): Record<string, string> {

@@ -483,7 +483,7 @@ interface OwnerLineUnlinkResponse {
 ```
 - 手順: 認証 → UUID の事前ガード（不正形式は 404）→ `resolveAgencyScope` → `unlinkOwnerLine` → `changed` なら `recordAudit(owner_line_unlinked)` → `menuTarget` があれば `unlinkUserRichMenu` → 成功なら `clearOwnerMenuPending` → 応答
 - `menu` は `menuTarget` が null なら `not_needed`、LINE が成功し印を消せたら `removed`、それ以外は `failed`（`menuUnlinkPending: true`）
-- 事象: 成功は `dashboard-api.richmenu_unlinked`、失敗は `dashboard-api.richmenu_unlink_failed`（項目は `errorKind`・`httpStatus` だけ）。Issue #228 に倣い、成功も失敗も記録する
+- 事象: 成功は `dashboard-api.richmenu_unlinked`、失敗は `dashboard-api.richmenu_unlink_failed`（項目は `errorKind`・`status` だけ。状態コードは記録の正典の既存の項目名 `status` に載せる。LINE で外せたのに印の消去が DB で失敗したときは errorKind `pending_clear_failed` で記録し、応答は `failed` とする）。Issue #228 に倣い、成功も失敗も記録する
 - 監査の失敗は `recordAudit` が警告を残して握る（#250）
 - 404 の本文は範囲外と不存在で同一（1.3）
 

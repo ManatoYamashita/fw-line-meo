@@ -75,7 +75,7 @@
   - env 名ガードと dashboard-api の既存の試験が緑で、欠落時に起動が失敗することを試験で確かめる
   - _Requirements: 3.1_
 
-- [ ] 4.3 解除と外し直しのルートを実装し、合成ルートへ配線する
+- [x] 4.3 解除と外し直しのルートを実装し、合成ルートへ配線する
   - 認証・UUID の事前ガード・範囲の決定の後に解除を行い、状態が変わったときだけ監査を残し、メニュー操作の対象があれば LINE アダプタを呼んで成功時に未解除の印を消す
   - 応答はオーナーの連携状態とメニューの結果（外した・失敗・不要）を返し、範囲外と不存在は同じ 404 にする
   - メニューの成否を事象として記録し、事象名を観測の正典へ登録する
@@ -199,3 +199,4 @@
 - 3.1: line-webhook の test/onboarding/conversation.test.ts のフェイクに、呼ばれたら例外を投げる confirmStoreForOnboarding を置いた。6.2 で切り替えるときに作り直す。
 - 4.1: LINE ユーザー ID の形（^U[0-9a-f]{32}$）に合わない値は通信せず invalid_user_id で返す（`all` が既定リッチメニューの解除のパスに届くため。レビューの指摘で追加し design も改訂）。4.3 の記録の errorKind にもこの値が入りうる。
 - 4.2: dashboard-api は LINE_CHANNEL_ID・LINE_CHANNEL_SECRET が無いと起動しない。本番は 8.1 の env を新しいイメージより先に apply する。composition.ts の Pick は 4.3 で広げる。
+- 4.3: 記録の項目は design の httpStatus ではなく正典の status。印の消去の失敗は errorKind pending_clear_failed。合成ルートは必須の lineFetch を受ける（試験は refuseLineFetch）。解除の確定から LINE を呼ぶまでの競合の窓は再確認を足さずに残した（ハンドラのコメント参照）。

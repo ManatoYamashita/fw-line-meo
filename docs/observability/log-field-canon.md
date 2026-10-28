@@ -208,6 +208,8 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 | `dashboard-api.review_funnel_read_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/review-funnel.ts` | QR パネルの実績（Issue #401）の読み出しの失敗。応答は 500。項目は `storeId` だけで、件数も例外の文言も載せない |
 | `dashboard-api.registered_place_lookup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/store-registration.ts` | 店名検索の候補の登録済み照合（Issue #485）の失敗。検索全体を 500 で失敗させる（未登録で埋めない）。項目を持たない。検索の語と候補の `placeId` は検索の語を推定できるため載せない |
+| `dashboard-api.richmenu_unlinked` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/owner-line-unlink.ts` | オーナーの LINE の紐づけの解除・外し直し（owner-line-unlink・Issue #487）で、元の LINE アカウントの完了後メニューの個別リンクを外し、メニュー未解除の印を消せた場合。補助的処理の**成功**（`line-webhook.richmenu_linked` と同じ理由で成功も記録する）。項目を持たない。LINE ユーザー ID は載せない |
+| `dashboard-api.richmenu_unlink_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/owner-line-unlink.ts` | 上の操作の**失敗**。解除は取り消さず、応答は 200 の `menu: failed` で、印が残るので画面から外し直せる。項目は `errorKind`（`invalid_user_id`・`token_failed`・`http_error`・`network_error`、LINE では外せたが印を消せなかった `pending_clear_failed`）と、LINE が応答した場合の `status` だけである。LINE ユーザー ID・応答本文・トークンは載せない |
 
 ---
 

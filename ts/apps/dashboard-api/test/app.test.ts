@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createApp, clampSize, type AppDeps } from '../src/app.js';
 import { loadConfig, parseCorsOrigins } from '../src/config.js';
 import type { QrDeps } from '../src/qr.js';
@@ -57,6 +57,13 @@ function fakeAppDeps(): AppDeps {
       },
     },
     storeSuspension: { auth, setSuspension: notCalled, auditLog: notCalled },
+    ownerLineUnlink: {
+      auth,
+      unlinkOwnerLine: notCalled,
+      clearMenuPending: notCalled,
+      lineRichMenu: { unlinkUserRichMenu: notCalled },
+      auditLog: notCalled,
+    },
     inviteCodes: {
       list: { auth, listInviteCodes: notCalled },
       issue: { auth, issueCode: notCalled, auditLog: notCalled },
@@ -106,6 +113,33 @@ describe('dashboard-api app', () => {
       });
       expect(res.status, action).toBe(401);
     }
+  });
+
+  it('オーナーの解除のルートが POST で配線され、認証なしは 401 を返す', async () => {
+    const res = await app().request('/owners/44444444-4444-4444-4444-444444444444/unlink', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('オーナーの解除で DB が失敗したら 500 を返し、LINE を呼ばない（owner-line-unlink Req 1.7）', async () => {
+    const deps = fakeAppDeps();
+    const unlinkUserRichMenu = vi.fn(() => Promise.resolve({ ok: true as const }));
+    deps.ownerLineUnlink = {
+      auth: {
+        ...stubAuth(),
+        findUser: () =>
+          Promise.resolve({ id: 'u1', role: 'operator', operatorId: 'op1', agencyId: null, disabled: false }),
+      },
+      unlinkOwnerLine: () => Promise.reject(new Error('connection refused')),
+      clearMenuPending: () => Promise.resolve(),
+      lineRichMenu: { unlinkUserRichMenu },
+      auditLog: () => Promise.resolve(),
+    };
+    const res = await createApp(deps).request('/owners/44444444-4444-4444-4444-444444444444/unlink', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer t' },
+    });
+    expect(res.status).toBe(500);
+    expect(unlinkUserRichMenu).not.toHaveBeenCalled();
   });
 });
 
