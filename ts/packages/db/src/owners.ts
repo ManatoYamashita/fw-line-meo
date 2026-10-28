@@ -111,6 +111,7 @@ export async function listOwners(
             COALESCE(
               (SELECT array_agg(s.name ORDER BY s.created_at, s.id)
                  FROM stores s
+                -- serviceable-predicate: display-only（オーナー一覧に店舗名を示すだけで、取得・配信・発行の可否を決めない。停止中の店舗も確定済みなら名前を出す）
                 WHERE s.owner_id = o.id AND s.place_status = 'confirmed'),
               ARRAY[]::text[]
             ) AS store_names,
