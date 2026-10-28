@@ -33,6 +33,7 @@
 - `@fwlm/db` への追加アクセサ（店舗一覧・オーナー一覧・代理店・利用者・招待コード・カテゴリ）
 - migration `0005_agency_dashboard.sql`（`dashboard_users` への列追加）と関連ドキュメント（ERD・write-boundary）・DB テスト
 - migration `0017_owner_invite_code.sql`（`owners.invite_code_id` の追加・Requirement 8・Issue #486）と、それを書く・読むための契約変更（`@fwlm/db` の `createOwner` / `findActiveInviteCode` / `listOwnersByAgency`、line-webhook の `createOwner` 呼び出し 1 箇所への id の受け渡し）
+- 代理店詳細画面（`/admin/agencies/[agencyId]`・Requirement 9・Issue #486）と、そのために共用部品（`OwnerRosterTable`・`TopNav`・状態の表示語）へ足す変更
 - 自サービスの CI/デプロイ配線（`push-images.sh`・`deploy.yml`・`infra/envs/prod/main.tf` への dashboard-web / dashboard-api エントリ追加）
 
 ### Out of Boundary
@@ -59,6 +60,8 @@
 - dashboard-api のエラー封筒（`{error:{code,message}}`）変更 → dashboard-web・QR 利用箇所
 - `owners` を作る経路の追加、または `createOwner` / `findActiveInviteCode` の契約変更 → `line-onboarding` の再検証必須（新しい経路が `invite_code_id` を書かないと、導入後の登録なのに「記録なし」になる・8.1）
 - `agency_invite_codes` の物理削除の導入 → Requirement 8.3 の再検証必須（記録が参照するコードは `ON DELETE RESTRICT` で消せない）
+- `OwnerRosterTable` の列・引数の変更 → 店舗登録（3.12）と代理店詳細（9.2）の両方の再検証必須（同じ部品を 2 面が使う）
+- GET /owners・GET /stores・GET /invite-codes が、存在しない代理店の指定に空配列以外（404 など）を返すようにする変更 → 代理店詳細の存在判定（9.6）の再検証
 
 ## Architecture
 
@@ -196,6 +199,8 @@ db/test/assertions/50_agency_dashboard.sql # 0005 の制約検証
 - `.github/workflows/deploy.yml` — 両サービスの image-only 反映追加・build-arg 用 vars 受け渡し
 - `infra/envs/prod/main.tf`（+ `variables.tf`） — `dashboard-web` サービス追加・dashboard-api の env（`DASHBOARD_WEB_ORIGIN`・`PLACES_API_KEY` secret）追加
 
+- **代理店詳細（Requirement 9・Issue #486）**: 新規 `ts/apps/dashboard-web/src/app/admin/agencies/[agencyId]/page.tsx`・`agency-detail-view.tsx`・`src/lib/agency-detail.ts`。変更 `src/app/admin/agencies/page.tsx`（代理店名をリンクに）・`src/components/owner-roster-table.tsx`（`showInviteCode`）・`src/components/top-nav.tsx`（下位の経路の現在地）・`src/lib/status-labels.ts`（有効／無効）と、その語を使う `src/app/invite-codes/page.tsx`・`src/app/admin/users/page.tsx`・E2E の `e2e/fixtures/api.ts`。API・DB は変えない
+
 > `db/write-boundary.md` は新テーブルなしのため表の変更不要（`dashboard_users` 等は TS 層登録済み）。`make db-verify-docs` の通過は必須。
 
 ## System Flows
@@ -318,7 +323,17 @@ sequenceDiagram
 | 8.2 | 同じ代理店のコードに限る | `0017` の複合 FK `(agency_id, invite_code_id) → agency_invite_codes(agency_id, id)` | DB が別代理店のコードを拒否 |
 | 8.3 | 無効化で結びつきを失わない | `disabled_at` のみの無効化（既存）＋ FK の `ON DELETE RESTRICT` | 参照中のコードは消せない |
 | 8.4 | 既存オーナーを推定で埋めない | `0017` は列を足すだけで UPDATE を持たない | 既存行は NULL のまま |
-| 8.5 | 記録の有無を区別して提示 | `listOwnersByAgency` の `inviteCode`（`null` = 記録なし）→ GET /owners | 画面への表示は代理店詳細画面（その要件の追加時に設計する） |
+| 8.5 | 記録の有無を区別して提示 | `listOwnersByAgency` の `inviteCode`（`null` = 記録なし）→ GET /owners | 画面への表示は代理店詳細（9.2・9.4） |
+| 9.1 | 一覧から代理店の詳細へ | admin/agencies/page（代理店名のセルを `next/link`） | `/admin/agencies/[agencyId]` |
+| 9.2 | 4 区分の提示 | AgencyDetailView, OwnerRosterTable（`showInviteCode`）, lib/agency-detail | GET /dashboard-users・/owners・/stores・/invite-codes |
+| 9.3 | 4 つの件数 | AgencyDetailView の概要（`dl`） | 区分の取得結果から数える |
+| 9.4 | 記録なしを推定で埋めない | OwnerRosterTable の招待コードの列（`null` →「記録なし」）, `ownersByInviteCode` | 逆引きは記録のある行だけを使う |
+| 9.5 | ブロックを区別しない旨の明示 | AgencyDetailView のオーナーの区分の注記 | — |
+| 9.6 | 存在しない代理店 | AgencyDetailView（UUID の形の検査・GET /agencies での存在判定） | 判定までは区分を描かない |
+| 9.7 | 区分ごとの失敗と再取得 | AgencyDetailView の区分ごとの状態 | 失敗を 0 件と提示しない（7.4） |
+| 9.8 | 0 件の区分 | AgencyDetailView（`EmptyState`） | — |
+| 9.9 | 代理店ロールに管理情報を出さない | AgencyDetailView の operator 判定（API を呼ばない）, admin.ts の operator 限定（GET /dashboard-users・/agencies） | 6.5・2.3 |
+| 9.10 | 閲覧のみ | AgencyDetailView に書込の API 呼び出しを置かない | — |
 
 ## Components and Interfaces
 
@@ -555,6 +570,49 @@ export interface OwnerListItem {
 - **admin/agencies・admin/users**: operator 専用（agency ロールにはナビ非表示＋アクセス時 403 案内）。利用者登録フォームは role・（agency 時のみ）所属代理店・email・表示名（6.1–6.5）。
 - 全 UI 文言は日本語（7.3）。API 失敗時は取得済みデータを偽装せずエラー案内（7.4）。
 
+#### 代理店詳細（Requirement 9・Issue #486）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 運営が代理店ごとに、ダッシュボードの利用者・オーナー・店舗・招待コードを 1 画面で見る（閲覧のみ） |
+| Requirements | 9.1–9.10（表示は 8.5 も満たす） |
+
+**経路とファイル**
+
+- `app/admin/agencies/[agencyId]/page.tsx`（サーバー部品）: `PageProps<'/admin/agencies/[agencyId]'>` の `params` を `await` して `agencyId` を取り出し、`AuthGuard`・`TopNav`・`AgencyDetailView` へ文字列で渡す。`'use client'` にして `useParams()` で読む形は採らない（ルートの引数の型を失う）。`generateStaticParams` は書かない（`output: 'standalone'` の動的レンダリング）。dashboard-web で最初の動的ルートになる
+- `app/admin/agencies/[agencyId]/agency-detail-view.tsx`（クライアント部品）: 取得・状態・描画。API は別オリジンの Cloud Run で、Firebase の ID トークンをクライアントが付ける構成なので、取得はクライアント側で行う（既存の面と同じ）
+- `lib/agency-detail.ts`（純粋関数）: `isAgencyId`（UUID の形）・`usersOfAgency`（GET /dashboard-users の全件を `agencyId` で絞る）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
+
+**取得と状態（9.6・9.7）**
+
+- 代理店ロールでは何も取得しない（9.9）。一覧（`admin/agencies/page`）と同じ「この画面は運営のみ利用できます。」だけを描く
+- `agencyId` が UUID の形でなければ API を呼ばずに「見つかりません」（9.6）
+- それ以外は 5 本を**同時に発行する**（直列にしない）: `getAgencies()`・`getDashboardUsers()`・`getOwners({ agencyId })`・`getStores({ agencyId })`・`getInviteCodes({ agencyId })`。応答は届いた順に区分の状態へ書く
+- 区分ごとの状態は `{ kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; value }`。代理店は `'loading' | 'error' | 'not_found' | 'ready'`
+- **代理店の存在は GET /agencies の結果だけで判定する。** 存在しない代理店を指定しても、GET /owners・GET /stores・GET /invite-codes は空配列を返しうる（スコープ解決は存在を確かめない）。そのため代理店が `ready` になるまで、区分も件数も描かない（9.6）。代理店が `error` のときは画面の危険の通知と再読み込みだけを描く
+- 区分の失敗はその区分の中に危険の通知と「もう一度読み込む」を出し、その区分の取得だけをやり直す（9.7）
+- GET /stores の結果は、店舗の区分と `OwnerRosterTable` の `stores`（`groupStoresByOwner` で振り分けたもの）の両方に使う。同じ API を 2 回呼ばない。`lib/agency-roster.ts` の `loadAgencyRoster` は使わない（オーナーの失敗で店舗ごと失敗にする作りで、区分ごとの状態と合わない）
+- オーナーの区分は、オーナーが `ready` かつ店舗が `loading` でない時点で描く。店舗が `error` なら `OwnerRosterTable` へ `{ kind: 'error' }` を渡す（「登録済みの店舗はありません」と出さない・3.12 と同じ形）
+- 招待コードの区分の「登録したオーナー」の列は、オーナーが `error` なら「読み込めませんでした」と出す（0 人と出さない）
+
+**描画**
+
+- 構造: 「代理店管理へ戻る」のリンク → h1（代理店名）→ 作成日 → 概要（`dl`: 利用者・オーナー・店舗・有効な招待コードの件数・9.3）→ h2 の区分 4 つ（ダッシュボードの利用者・オーナー・店舗・招待コード）
+- 戻る導線は普通の `Link` にし、`<nav>` で包まない（ナビゲーション領域が帯と合わせて 2 つになる）。区分の `<section>` に名前を付けない（名前を持つ `section` は領域になり、表の捲れる領域と合わせて領域が増える）
+- 4 つの表は `@fwlm/ui` の `Table` 一式で描き、`TableContainer` の `label` は区分名にして面の中で重複させない。列の折り返しは正典 §7.18 の語彙（メール＝`anywhere`、名前＝`prose`、状態・日付・コード＝`none`）
+- オーナーの表は `OwnerRosterTable` に `showInviteCode` を渡す（下記）。区分の上に「LINE の友だち登録を解除（ブロック）したオーナーも、区別せずに表示しています。」の注記（9.5）
+- 招待コードの表の下に、記録の無いオーナーがいれば「招待コードの記録がないオーナーが {N} 人います（この機能より前の登録）」（9.4）
+- 0 件の区分は `EmptyState`（9.8）。件数の項目は、区分が `loading` なら「読み込み中」、`error` なら「読み込めませんでした」（0 と出さない）
+- 状態は文字のラベル（`Badge` の `secondary` / `outline`）。無効・停止中に危険の色を使わない。日付は `formatJstDate`
+- 書込の API を一切呼ばない（9.10）。招待コードの区分に、招待コードの画面へのリンクを添える
+
+**共用部品への変更**
+
+- `components/owner-roster-table.tsx`: 省略可能な `showInviteCode?: boolean` を足す。`true` のときだけ「招待コード」の列を作成日の後に描く（記録あり＝コード、無効のコードは「無効」のラベルを添える、`null` ＝「記録なし（この機能より前の登録）」）。渡さない呼び出し（店舗登録）の描画は変えない。列ごとの引数が 3 つ目に達したら、列の定義を配列で受ける形への置き換えを検討する
+- `components/top-nav.tsx`: 現在地の判定を「完全一致は `aria-current="page"`。どの項目にも完全一致しないときは、`href + '/'` で始まる最も長い項目に `aria-current="true"`」に変える。`/stores/new` は自分の項目に完全一致するので、`/stores` の項目は現在地にならない（印が 1 つの一意性を保つ）。下線は `aria-[current=page]` と `aria-[current=true]` の両方から出し、全リンクの class は同一のまま（正典 §7.8）
+- `lib/status-labels.ts`: 「有効／無効」の表示語を足す。招待コード・利用者管理の画面が直接書いている同じ語もここから引くように置き換える（語は変えない）
+- `app/admin/agencies/page.tsx`: 代理店名のセルを詳細へのリンクにする。行全体は押せるようにしない（§7.2）
+
 ## Data Models
 
 ### Physical Data Model — migration `0005_agency_dashboard.sql`
@@ -650,6 +708,15 @@ ALTER TABLE owners
 3. line-webhook（`invite-code-integration.db.test.ts`）: 実 DB で登録したオーナーの `invite_code_id` が、送信したコードの行の id と一致する。セッション更新を失敗させたとき、オーナー行も記録も残らない（8.1 の「一方だけ」）
 4. dashboard-api（`app.request`）: GET /owners の応答に `inviteCode` が載り、記録の無いオーナーは `null` になる（8.5）
 5. 型: `CreateOwnerInput` から `inviteCodeId` を外す・省略可能にする変異で、line-webhook の型検査が赤になることを実測する（必須型が 8.1 の主な網なので、網が効いていることを確かめる）
+
+### 代理店詳細の試験（Requirement 9・Issue #486）
+
+1. `lib/agency-detail.ts`（単体）: `isAgencyId` の形の判定、`usersOfAgency` が他代理店と運営を含めない、`ownersByInviteCode` が記録なしのオーナーをどのコードにも入れない、`unrecordedOwnerCount`
+2. `AgencyDetailView`（描画）: 代理店ロールで API を 1 本も呼ばない（9.9）／5 本を同時に発行する／形の不正な id は API を呼ばずに「見つかりません」・一覧に無い id は区分も件数も描かない（9.6）／区分ごとの失敗で他の区分が残り、失敗した区分と件数を 0 と出さない・再読み込みでその区分だけを取り直す（9.7）／0 件の案内（9.8）／記録なしのオーナー（9.4）／ブロックの注記（9.5）／`TableContainer` の名前が重複しない／書込の API を呼ばない（9.10）
+3. `OwnerRosterTable`: `showInviteCode` のときだけ列が増え、渡さないときの描画は変わらない（`stores-new-page.test.tsx` も緑のまま）
+4. `TopNav`: 詳細の経路で「代理店管理」に `"true"`、一覧で `"page"`、`/stores/new` で「店舗一覧」が現在地にならない
+5. 代理店管理の一覧: 代理店名がリンクになり、行全体は押せない
+6. E2E: スタブの応答に、記録あり・記録なしのオーナー、無効のコード、停止中の店舗、無効の利用者を含める。詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足し、捲れる領域は表の容器 4 件として宣言する
 
 ### E2E / 手動検証（validation hooks）
 
