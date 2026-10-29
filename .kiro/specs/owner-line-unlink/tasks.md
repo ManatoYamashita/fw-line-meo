@@ -135,7 +135,7 @@
   - _Depends: 1.4_
 
 - [ ] 8. 配線と文書の整合
-- [ ] 8.1 (P) dashboard-api へ LINE の資格情報を配線する
+- [x] 8.1 (P) dashboard-api へ LINE の資格情報を配線する
   - dashboard-api の Cloud Run の設定に、チャネルシークレット（既存の secret）とチャネル ID を足す
   - シークレットの宣言の照合と、デプロイ対象の照合のガードが緑
   - _Requirements: 3.1_
@@ -206,3 +206,4 @@
 - 6.1: line-webhook の unlinkRichMenu は 404 を成功とし、ID の形の検査を持つ（dashboard-api の line-richmenu.ts と同じ。片方だけ変えない）。安全網で外せてもメニュー未解除の印は消さない。
 - 6.2: 会話の依存は Pick<StoreIdentificationService, searchCandidates | confirmStoreForOnboarding> に絞り、会話から confirmStore を呼べない。引継ぎの後、旧オーナーは店舗特定済みのまま 0 店になる（LINE ID を持たないので振り分けには来ない）。
 - 7: delivery-job の試験の配信時刻は、targets.db が 9・11・12 時、index.e2e が 13・14・15 時、cross-runtime が 17 時を使う。厳密な件数検査は時刻の重複に弱い。
+- 8.1: dashboard-api の LINE_CHANNEL_SECRET・LINE_CHANNEL_ID は新しいイメージより先に terraform apply する（起動時に必須）。loadConfig の必須 env と tf の配線を照合する常設のガードは無い（Issue 候補）。

@@ -363,7 +363,7 @@ CFG
 - 課金と副作用: read-only の Place Details 1 回。`X-Goog-FieldMask` を `id` だけに絞ると最安の Essentials SKU に収まる（`go/internal/places/client.go` の 2 種のマスクは使わない）。
 - `<PLACE_ID>` は本番 `stores.place_id` の実値を使う（§3 の Auth Proxy 経由 `psql` で取得）。
 
-### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / 機能1 配信）
+### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / dashboard-api / 機能1 配信）
 
 ```bash
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
@@ -382,7 +382,7 @@ CFG
 - **チャネルシークレットもトークンも argv へ置かない**（§8-1 と同じ理由）。本文は `--data @-` で標準入力から、トークンは `-K -` で設定として渡す。
 - 課金と副作用: **なし。`/v2/bot/info` は read-only であり、メッセージを一切送信しない。**
 - **push / multicast / broadcast を実疎通に使ってはならない。** 実送信は受信者への迷惑であり、無料メッセージ通数枠を消費する。トークンが発行できて `/v2/bot/info` が 200 を返せば、チャネル資格情報の正当性は証明できる。
-- **チャネルアクセストークンの枠は存在しない**（Issue #141 で撤去済み）。送信側の 2 消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts`）はどちらもチャネル ID とシークレットから stateless token を都度発行するため、長期トークンを Secret Manager に置く必要が無い。したがって `line-channel-secret` の正当性が証明できれば、LINE 送信系の資格情報はすべて証明できている。
+- **チャネルアクセストークンの枠は存在しない**（Issue #141 で撤去済み）。3 つの消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts` / `ts/apps/dashboard-api/src/line-richmenu.ts`）はいずれもチャネル ID とシークレットから stateless token を都度発行するため、長期トークンを Secret Manager に置く必要が無い。したがって `line-channel-secret` の正当性が証明できれば、LINE 送信系の資格情報はすべて証明できている。
 
 ### 8-4. 記録の更新
 
