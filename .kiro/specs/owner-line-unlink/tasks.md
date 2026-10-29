@@ -156,7 +156,7 @@
   - _Requirements: 5.1, 5.2, 5.3_
   - _Depends: 7_
 
-- [ ] 9.2 解除から再オンボーディング・引継ぎまでを line-webhook の結合試験で通す
+- [x] 9.2 解除から再オンボーディング・引継ぎまでを line-webhook の結合試験で通す
   - 解除の後、元の LINE アカウントの友だち追加・メッセージで最初の案内が出て、会話が持ち越されず、レポートの要求も店舗詳細の認可も解除前の店舗を返さないこと
   - 同じアカウントで招待コード→同じ Place の確定で引き継ぎ、店舗詳細と管理画面の店舗一覧が新しいオーナーの店舗として返すこと。ブロックで連携状態が変わらないこと
   - 結合試験が緑
@@ -209,3 +209,4 @@
 - 8.1: dashboard-api の LINE_CHANNEL_SECRET・LINE_CHANNEL_ID は新しいイメージより先に terraform apply する（起動時に必須）。loadConfig の必須 env と tf の配線を照合する常設のガードは無い（Issue 候補）。
 - 8.2: db/test/check_docs.sh は表単位で、列・CHECK・書き手の記述漏れを検出しない。ERD の列の機械照合は Issue 候補。
 - 9.1: cross-runtime の固定識別子は c7…-015（オーナー）と c7…-005（店舗）まで使用済み。配信の述語を外す変異は、記録 0 行ではなく対象件数の表明（3 件）が赤にする（summary_deliveries.line_user_id の NOT NULL で記録が書けないため）。
+- 9.2: 店舗詳細の認可は store-detail の route.db.test.ts で、引継ぎの状態を DAL の組（lockPlaceHolder・moveAllStores・markOwnerStoreIdentified）で作って確かめる。確定の引継ぎの分岐が書く列を増やしたら、この試験も追従させる。unfollow は dispatch で捨てられるので、Req 8.2 の試験は回帰ガードとして効く。
