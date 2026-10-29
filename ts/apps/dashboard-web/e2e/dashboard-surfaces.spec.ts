@@ -784,7 +784,7 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
   test('宣言が検証面の一覧と一致する', () => {
     expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(REGIONS));
     // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-    expect(Object.keys(REGIONS)).toHaveLength(10);
+    expect(Object.keys(REGIONS)).toHaveLength(11);
   });
 
   for (const surface of DASHBOARD_SURFACES) {

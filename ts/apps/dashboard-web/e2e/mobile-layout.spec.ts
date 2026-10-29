@@ -112,11 +112,12 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     mustOverflow: { 393: [], 320: [] },
   },
   // Issue #486: 代理店詳細は表を 4 つ持つ。セルは見出しとデータの合計で、利用者（3 列 × 見出し＋1 人）・
-  // オーナー（招待コードを含む 5 列 × 見出し＋3 人）・店舗（4 列 × 見出し＋2 店）・招待コード（4 列 ×
-  // 見出し＋2 件）の 6 + 20 + 12 + 12。
+  // オーナー（招待コードを含む 5 列 × 見出し＋5 人）・店舗（4 列 × 見出し＋2 店）・招待コード（4 列 ×
+  // 見出し＋2 件）の 6 + 30 + 12 + 12。オーナーの試験データには owner-line-unlink（Issue #487）で解除済みの
+  // 2 人が足され、帯には「オーナー一覧」が足されている（運営の帯の操作要素は 7）。
   代理店詳細: {
-    navControls: 6,
-    measuredCells: 50,
+    navControls: 7,
+    measuredCells: 60,
     panelCells: 0,
     // 実測（2026-10-28）: 幅 393 では利用者の表（3 列）だけが収まり（361/361）、オーナー 731・店舗 424・
     // 招待コード 472（容器 361）が溢れる。幅 320 では 4 つとも溢れる。
@@ -178,7 +179,7 @@ test('宣言の面が検証面の一覧と一致する', () => {
     '面を足したら LAYOUT にも足す（宣言の無い面は beforeEach で止まる）',
   ).toEqual(Object.keys(LAYOUT));
   // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-  expect(Object.keys(LAYOUT)).toHaveLength(10);
+  expect(Object.keys(LAYOUT)).toHaveLength(11);
 });
 
 for (const surface of DASHBOARD_SURFACES) {

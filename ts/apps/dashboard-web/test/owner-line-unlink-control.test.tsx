@@ -188,6 +188,25 @@ describe('OwnerLineUnlinkControl — 解除の確認（1.4）', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('成功の文言には読み上げない成功の印が添えられ、結果の前の空の領域には印を置かない', async () => {
+    unlinkMock.mockResolvedValue(ok('removed'));
+    renderControl(LINKED);
+    const region = () => screen.getAllByRole('status').find((node) => node.tagName === 'P')!;
+    expect(region().querySelector('[data-slot="success-icon"]')).toBeNull();
+    // 空の領域は余白を持たない（:empty が効く）ことの前提。印だけが残ると行の高さが変わる。
+    expect(region().childNodes).toHaveLength(0);
+
+    fireEvent.click(within(await openConfirm()).getByRole('button', { name: '解除する' }));
+
+    await waitFor(() => expect(region().textContent).toBe(`${OWNER_NAME} の LINE の連携を解除しました。`));
+    const icon = region().querySelector('[data-slot="success-icon"]');
+    expect(icon, '成功の文言に印が添えられていません').not.toBeNull();
+    expect(icon!.tagName.toLowerCase()).toBe('svg');
+    expect(icon!.getAttribute('aria-hidden')).toBe('true');
+    // 印は文言の前に置く（文言だけが先に目に入ると、色でしか成功を区別できない）。
+    expect(region().firstElementChild).toBe(icon);
+  });
+
   it('外すメニューが無かったとき（not_needed）も解除の成功として告げる', async () => {
     unlinkMock.mockResolvedValue(ok('not_needed'));
     renderControl(LINKED);

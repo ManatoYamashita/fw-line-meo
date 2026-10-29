@@ -8,8 +8,8 @@ import {
   expectToastsSettled,
 } from './fixtures/api';
 
-// 管理ダッシュボード 10 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを、
-// Issue #259 で利用者の編集パネルを、Issue #485 で店舗登録の検索結果を、owner-line-unlink でオーナー一覧を追加）と、
+// 管理ダッシュボード 11 面の自動 a11y 監査（Issue #53・Issue #179 で QR パネルを、
+// Issue #259 で利用者の編集パネルを、Issue #485 で店舗登録の検索結果を、Issue #486 で代理店詳細を、owner-line-unlink でオーナー一覧を追加）と、
 // 一覧の上に重なる後続状態の監査（Issue #252 で停止の確認ダイアログを、Issue #342 で操作失敗 Toast を、
 // owner-line-unlink で解除の確認ダイアログとメニューを外せなかった通知を追加）。
 //
