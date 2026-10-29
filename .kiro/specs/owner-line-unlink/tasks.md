@@ -150,7 +150,7 @@
   - _Depends: 1.1_
 
 - [ ] 9. 検証
-- [ ] 9.1 言語をまたいで、解除済みオーナーの店舗が取得され配信されないことを固定する
+- [x] 9.1 言語をまたいで、解除済みオーナーの店舗が取得され配信されないことを固定する
   - 固定日の行で、日次取得が解除済みオーナーの店舗の日次サマリーを作り、配信がそれを送らず記録も残さないことを確かめる
   - cross-runtime の試験が緑で、述語を外す変異で赤になる
   - _Requirements: 5.1, 5.2, 5.3_
@@ -208,3 +208,4 @@
 - 7: delivery-job の試験の配信時刻は、targets.db が 9・11・12 時、index.e2e が 13・14・15 時、cross-runtime が 17 時を使う。厳密な件数検査は時刻の重複に弱い。
 - 8.1: dashboard-api の LINE_CHANNEL_SECRET・LINE_CHANNEL_ID は新しいイメージより先に terraform apply する（起動時に必須）。loadConfig の必須 env と tf の配線を照合する常設のガードは無い（Issue 候補）。
 - 8.2: db/test/check_docs.sh は表単位で、列・CHECK・書き手の記述漏れを検出しない。ERD の列の機械照合は Issue 候補。
+- 9.1: cross-runtime の固定識別子は c7…-015（オーナー）と c7…-005（店舗）まで使用済み。配信の述語を外す変異は、記録 0 行ではなく対象件数の表明（3 件）が赤にする（summary_deliveries.line_user_id の NOT NULL で記録が書けないため）。
