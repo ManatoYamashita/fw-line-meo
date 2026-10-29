@@ -21,7 +21,7 @@ const EXEMPT: Readonly<Record<string, string>> = {
 };
 
 /** 包んでいる検査ファイルの数。実測へ合わせて宣言を書き換える改変を素通りさせないため literal で持つ。 */
-const EXPECTED_DEFERRED = 10;
+const EXPECTED_DEFERRED = 11;
 
 function apiMockStatements(source: string): string[] {
   const statements: string[] = [];

@@ -295,6 +295,11 @@ export interface StubOptions {
    * 尽きた後と未指定は `removed`（外せた）。外す対象が無い要求（解除済みで印も無い）は数えない。
    */
   readonly menuUnlinkOutcomes?: readonly ('removed' | 'failed')[];
+  /**
+   * 停止中として返す店舗の ID（既定は STORES の値のまま）。共有の STORES を書き換えずに、
+   * 停止中の描画を要る面（代理店詳細・Issue #486）だけで出すためにある。
+   */
+  readonly suspendedStoreIds?: readonly string[];
 }
 
 /**
@@ -323,7 +328,10 @@ export async function stubDashboardApi(page: Page, options: StubOptions = {}): P
     options.me === undefined ? RESPONSES : { ...RESPONSES, '/me': { user: options.me } };
   // 店舗 ID → 停止時刻。初期値は STORES の値で、停止・再開の POST だけが書き換える。
   const suspendedAt = new Map<string, string | null>(
-    STORES.map((store) => [store.id, store.suspendedAt]),
+    STORES.map((store) => [
+      store.id,
+      options.suspendedStoreIds?.includes(store.id) === true ? SUSPENDED_AT : store.suspendedAt,
+    ]),
   );
   // オーナー ID → 連携状態とメニュー未解除の印。初期値は OWNERS の値で、解除の POST だけが書き換える。
   const lineLinks = new Map<string, { lineLink: 'linked' | 'unlinked'; menuUnlinkPending: boolean }>(
@@ -790,6 +798,40 @@ export async function openOwnerMenuFailure(page: Page): Promise<void> {
 }
 
 /**
+ * 代理店詳細（Issue #486・agency-dashboard Requirement 9）を運営で開き、**4 区分の表が実際に描けた**
+ * ことを先に固定する。
+ *
+ * スタブは `agencyId` を見ずに同じ応答を返す。代理店は 1 件なので、その代理店の詳細として全行がそろう
+ * （利用者は運営と代理店の 2 件から代理店の 1 件だけに絞られる）。前提 assert は区分ごとの表の行数で
+ * 置く。存在判定の待ち・取得の失敗のままの画面を監査して緑にしないためである。
+ */
+export async function openAgencyDetail(page: Page): Promise<void> {
+  // 停止中の店舗を 1 件含めて返す（停止中の表示を監査と幅の実測に載せる。共有の STORES は変えない）。
+  const suspended = STORES[1];
+  await stubDashboardApi(page, { suspendedStoreIds: [suspended.id] });
+  await page.goto(`/admin/agencies/${AGENCIES[0].id}`);
+  await expect(page.getByRole('heading', { level: 1, name: AGENCIES[0].name })).toBeVisible();
+  const rows: readonly [string, number][] = [
+    ['ダッシュボードの利用者', DASHBOARD_USERS.filter((user) => user.agencyId === AGENCIES[0].id).length],
+    ['オーナー', OWNERS.length],
+    ['店舗', STORES.length],
+    ['招待コード', INVITE_CODES.length],
+  ];
+  for (const [name, count] of rows) {
+    // 見出し行 1 ＋ データ行。0 件だと表が出ず、ここで止まる（空の面を監査しない）。
+    expect(count, name).toBeGreaterThan(0);
+    await expect(page.getByRole('region', { name }).getByRole('row')).toHaveCount(count + 1);
+  }
+  // スタブの停止中が画面まで届いたこと（店舗の表の利用状況の列）。届いていなければ停止中の描画を
+  // 一度も監査しないまま緑になる。
+  const suspendedRow = page
+    .getByRole('region', { name: '店舗' })
+    .getByRole('row')
+    .filter({ hasText: suspended.name });
+  await expect(suspendedRow.getByText('停止中', { exact: true })).toBeVisible();
+}
+
+/**
  * 自動 a11y 監査だけが回す、一覧の上に重なる後続状態（store-suspension Issue #252）。
  *
  * **`DASHBOARD_SURFACES` へは入れない。** あの一覧は横スクロールと携帯端末の幅の配置の実測も
@@ -875,6 +917,11 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: async (page) => {
       await openListSurface(page, '/admin/agencies', '代理店管理', 2);
     },
+  },
+  {
+    // 代理店管理の一覧から進む詳細（Issue #486）。表を 4 つ持つ（利用者・オーナー・店舗・招待コード）。
+    where: '代理店詳細',
+    open: openAgencyDetail,
   },
   {
     where: 'ログイン',

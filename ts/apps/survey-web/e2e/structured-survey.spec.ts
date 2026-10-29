@@ -20,7 +20,7 @@ const concern = (page: Page) => page.getByRole('region', { name: '気になっ�
 test.describe('structured survey（客向け）', () => {
   test('星・料理・Target・facet・気になったところ・一言を選んで送信し、structured の下書きの画面へ進む', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
 
     // 良かったところ: 料理を開く → 料理全体の「量」・刺身盛り合わせ → 味・焼き鳥5種盛り（Target だけ）。
     await positive(page).getByRole('button', { name: '料理' }).click();
@@ -79,7 +79,7 @@ test.describe('structured survey（客向け）', () => {
 
   test('カテゴリを開いて閉じただけでは数えず押せない。気になったところ 2 件だけで口コミ文を作れる', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星2' }).click();
+    await page.getByRole('radio', { name: /^星2：/ }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await page.getByRole('button', { name: /^気になったところ（任意）/ }).click();

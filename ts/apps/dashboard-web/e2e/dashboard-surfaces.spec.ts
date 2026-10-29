@@ -538,6 +538,13 @@ test('モバイルビューポートの代理店管理で横スクロールが�
   await expectNoHorizontalScroll(page, '代理店管理', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
+// 代理店詳細（Issue #486）は区分ごとに表を 4 つ持つ（利用者・オーナー・店舗・招待コード）。
+test('モバイルビューポートの代理店詳細で横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('代理店詳細').open(page);
+  // 表の容器 4 件（帯は捲れる領域を持たない）。
+  await expectNoHorizontalScroll(page, '代理店詳細', NAV_SCROLL_REGIONS + 4 * TABLE_SCROLL_REGIONS);
+});
+
 // 招待コードは task 2.4 まで下の「既知の溢れ」に登録されていた。素の `<select>` を
 // `@fwlm/ui` の `Select`（`w-full min-w-0` を持つ）へ移して溢れが解消したため、通常の面へ戻した。
 // **移動は自発ではなく強制である。** 是正した状態で走らせると 網 1 が
@@ -764,6 +771,7 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
     店舗一覧: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     '店舗一覧の QR パネル': NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     代理店管理: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    代理店詳細: NAV_SCROLL_REGIONS + 4 * TABLE_SCROLL_REGIONS,
     ログイン: 0,
     招待コード: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     利用者管理: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,

@@ -29,7 +29,24 @@ const NAV_ITEMS: readonly { href: string; label: string; operatorOnly: boolean }
 // 片方だけが付く状態を作らない」と定めており、条件分岐を class 側に持たないことで構造的にそれを満たす。
 // 罫の色は currentColor（リンク自身の文字色）を借りるため、面の側に置く色を 1 件も増やさない。
 const NAV_LINK_CLASS =
-  'inline-flex items-center border-b-2 border-transparent py-2 text-sm font-medium whitespace-nowrap aria-[current=page]:border-current';
+  'inline-flex items-center border-b-2 border-transparent py-2 text-sm font-medium whitespace-nowrap aria-[current=page]:border-current aria-[current=true]:border-current';
+
+/**
+ * 帯の現在地（Issue #486）。経路に完全一致する項目があればそれを `"page"` にする。どれにも完全一致しない
+ * ときだけ、`href + '/'` で始まる最も長い項目をその下位の画面の現在地として `"true"` にする
+ * （代理店詳細 /admin/agencies/<id> の「代理店管理」）。完全一致を先に見るので、/stores/new では
+ * 自分の項目だけが現在地になり、/stores は下位として印を受けない（印は常に高々 1 つ）。
+ */
+function currentNavHref(
+  pathname: string,
+  hrefs: readonly string[],
+): { href: string; value: 'page' | 'true' } | null {
+  if (hrefs.includes(pathname)) return { href: pathname, value: 'page' };
+  const parents = hrefs.filter((href) => pathname.startsWith(`${href}/`));
+  if (parents.length === 0) return null;
+  const longest = parents.reduce((a, b) => (b.length > a.length ? b : a));
+  return { href: longest, value: 'true' };
+}
 
 // ロール表示名（日本語・Req 7.3）。利用者管理画面にも同義の関数があるが、面をまたぐ共通化は
 // 本タスクの境界外であり、語彙だけを揃える。
@@ -67,6 +84,10 @@ export function TopNav() {
 
   const isOperator = me.role === 'operator';
   const items = NAV_ITEMS.filter((item) => !item.operatorOnly || isOperator);
+  const current = currentNavHref(
+    pathname,
+    items.map((item) => item.href),
+  );
 
   return (
     // 狭い画面（lg 未満）は 3 段に組む。1 段目はワードマークだけ（全幅）、2 段目の右にロールとログアウト、
@@ -86,11 +107,11 @@ export function TopNav() {
       <ul className="col-span-2 row-start-3 flex flex-wrap items-center gap-x-6 gap-y-2 pb-2 lg:min-w-0 lg:flex-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0">
         {items.map((item) => (
           <li key={item.href}>
-            {/* 現在地の判定は経路の完全一致で行う。前方一致にすると /stores/new で /stores も
-                現在地になり、印が 1 つという一意性が壊れる。 */}
+            {/* 現在地の判定は完全一致を優先し、下位の画面だけ最も長い前方一致で補う（currentNavHref）。
+                素の前方一致にすると /stores/new で /stores も現在地になり、印が 1 つという一意性が壊れる。 */}
             <Link
               href={item.href}
-              aria-current={pathname === item.href ? 'page' : undefined}
+              aria-current={current?.href === item.href ? current.value : undefined}
               className={NAV_LINK_CLASS}
             >
               {item.label}

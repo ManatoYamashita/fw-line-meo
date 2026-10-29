@@ -897,7 +897,7 @@ async function expectTraversalNotTruncated(
 // requirements 5.3: キーボードフォーカス時に視認可能なフォーカス表示を提示する。
 test('キーボードでたどった操作可能要素すべてに可視フォーカス表示が出る', async ({ page }) => {
   await openSurveySurface(page);
-  const firstStar = page.getByRole('button', { name: '星1' });
+  const firstStar = page.getByRole('radio', { name: /^星1：/ });
   await expect(firstStar).toBeVisible();
 
   // 先頭の操作可能要素へキーボードで入る（プログラム的 focus では :focus-visible が付かない）。
@@ -924,9 +924,12 @@ test('キーボードでたどった操作可能要素すべてに可視フォ�
     await page.keyboard.press('Tab');
   }
 
-  // 空振り緑の防止: 星5個＋一言 textarea＋送信ボタンまで実際にたどれていること。
+  // 空振り緑の防止: 星の群＋観点の選択＋一言 textarea＋送信ボタンまで実際にたどれていること。
   const trail = `たどれた操作可能要素: ${checked.join(', ')}`;
   expect(checked.length, trail).toBeGreaterThanOrEqual(7);
+  // 星は radiogroup なので Tab の停止は群に 1 つだけ（群の中は矢印キーで移る・Issue #492）。
+  // 5 個すべてに止まるなら、ロービング tabindex が崩れて Tab の手数が 4 回増えている。
+  expect(checked.filter((w) => w.includes('(星')), trail).toHaveLength(1);
   // 打ち切りの検出は到達の検査より前に置く。「送信する」が最後の停止である間は、打ち切りが
   // 到達の検査で先に落ち、原因が読めない。「送信する」より後ろに要素が増えたときは、到達して
   // いても上限より先が検査されていない。
@@ -1239,7 +1242,7 @@ test.describe('動き低減設定が有効な環境', () => {
       '動き低減が模擬されていない文脈で実行されている（抑制規則が適用対象外になり空振りする）',
     ).toBe(true);
 
-    await page.getByRole('button', { name: '星5' }).click();
+    await page.getByRole('radio', { name: /^星5：/ }).click();
     await page.getByRole('button', { name: '送信する' }).click();
     await expect(page.getByLabel('口コミ下書き')).toBeVisible();
     // 応答が速いと描画計測前に生成が終わるため、測定中は再生成リクエストを保留する。
@@ -2078,7 +2081,7 @@ test('本番の回答画面と下書き画面の版面が名前付きスケー�
   // 下書き画面は同じページの状態遷移で描かれる。版面を作り直していないこと（＝下書き側に
   // 面固有の器が生えていないこと）まで見る。生えていれば data-slot は 2 件になるか、
   // 版面の段が食い違う。
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
 
@@ -2091,135 +2094,138 @@ test('本番の回答画面と下書き画面の版面が名前付きスケー�
   expectShellSane(drafting, '下書き画面', viewport.width, allowedPadding);
 });
 
-// 要件 1.2 / 4.1 / 4.4 / 正典 7.1: 星は選択済みを本文色、未選択を補足色で描く。
+interface StarGlyphPaint {
+  /** 字形の点灯状態（data-lit）。 */
+  lit: string | null;
+  fill: MeasuredColor;
+  stroke: MeasuredColor;
+}
+
+// 星の字形（SVG）の塗りと縁を実測する。readRenderedLayers と同じく canvas に流して書式非依存の
+// sRGB と不透明度を得る。塗らない星の fill は透明（alpha 0）として返る。
+function readStarGlyph(star: Locator): Promise<StarGlyphPaint> {
+  return star.locator('svg').evaluate((glyph) => {
+    const style = getComputedStyle(glyph);
+    const context = document.createElement('canvas').getContext('2d');
+    if (context === null) throw new Error('canvas の 2d コンテキストを取得できません');
+    const measure = (value: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = '#000000';
+      context.fillStyle = value;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      return {
+        hex: `#${[red, green, blue]
+          .map((channel) => (channel ?? 0).toString(16).padStart(2, '0'))
+          .join('')}`.toUpperCase(),
+        alpha: (alpha ?? 0) / 255,
+      };
+    };
+    return { lit: glyph.getAttribute('data-lit'), fill: measure(style.fill), stroke: measure(style.stroke) };
+  });
+}
+
+// 要件 1.2 / 4.1 / 4.4 / 正典 7.1: 選択済みの星はブランド色で塗りアクション色で縁取り、
+// 未選択の星は塗らずに補足色の縁だけを描く（Issue #492）。
 //
 // jsdom 側（survey-form.test.tsx）はクラス集合を固定しているが、クラスが付いていることと
 // その色が描かれることは別問題である。意味論変数の付け替えや @theme の割当を誤れば、
 // クラス名は無傷のまま色だけが別の役割へ移る。ここは実際に描かれた色を測る。
 test('本番の回答画面の星が選択済みと未選択で異なる実描画色を持つ', async ({ page }) => {
   await openSurveySurface(page);
-  const third = page.getByRole('button', { name: '星3' });
+  const third = page.getByRole('radio', { name: /^星3：/ });
   await expect(third).toBeVisible();
   const background = await readPageBackground(page);
 
   await third.click();
+  await expect(third, '押した星が選択状態にならない').toHaveAttribute('aria-checked', 'true');
 
   // **落ち着くまで待つ。** 状態を示す色は遷移して変わるため（正典 7.11）、押した直後に読むと
-  // 選択済みも未選択もほぼ遷移前の色のままで、「2 色が異なる」の対偶が偽で成立する
-  // （実測で踏んだ: 押した直後の 5 個は #6A6A6A / #6A6A6A / #686868 / #6A6A6A / #6A6A6A）。
-  //
-  // **待ちの条件へ期待する色を書かない。** 期待値で待つと、色の表明がこの待ちに吸収されて、
-  // 下に並べた個別の表明（アクション色でないこと・罫線色でないこと）が一度も発火しなくなる。
-  // 遷移の長さも書かない（正典 7.11 の数値をここへ転記することになる）。
-  // 2 回続けて同じ色が読めた時点で遷移は終わっている、という条件だけで待つ。
+  // 遷移前の色が混ざる。期待する色では待たない（下の個別の表明が待ちに吸収されて発火しなくなる）。
+  // 2 回続けて同じ塗りと縁が読めた時点で遷移は終わっている、という条件だけで待つ。
   let previous: string | null = null;
   await expect
     .poll(
       async () => {
-        const current = (await readRenderedColors(third)).color;
-        const settled = current !== null && current === previous;
+        const { fill, stroke } = await readStarGlyph(third);
+        const current = `${fill.hex}/${fill.alpha}/${stroke.hex}/${stroke.alpha}`;
+        const settled = current === previous;
         previous = current;
         return settled;
       },
-      {
-        message: '押した星の色が落ち着かない（状態の色遷移が終わらない）',
-        timeout: 5_000,
-      },
+      { message: '押した星の色が落ち着かない（状態の色遷移が終わらない）', timeout: 5_000 },
     )
     .toBe(true);
 
-  // **走査対象も 2 群の分け方も DOM から導く**（要件 7.4）。星の番号を並べた固定長の配列から
-  // 群を作ると、要素が 1 つも描かれていなくても配列の長さは定数のままで、非空の確認が
-  // 「長さ 3 は 0 より大きい」という常に真の表明に退化する。
-  //
-  // 分ける鍵に **字形** を使うのは、それが状態の区別を色だけに委ねていないことの確認を兼ねる
-  // ためである（要件 4.7）。字形が状態で変わらなくなれば、どちらかの群が空になって赤くなる。
-  const starButtons = page.getByRole('button', { name: /^星\d+$/ });
-  const total = await starButtons.count();
+  // **走査対象も 2 群の分け方も DOM から導く**（要件 7.4）。分ける鍵に字形の点灯状態を使うのは、
+  // 状態の区別を色だけに委ねていない（塗るか縁だけか）ことの確認を兼ねるためである（要件 4.7）。
+  const stars = page.getByRole('radio', { name: /^星\d+：/ });
+  const total = await stars.count();
   expect(total, '回答画面の星を 1 つも掴めていない（面が星を描いていない）').toBeGreaterThan(0);
 
-  const measured: { name: string; glyph: string; color: string }[] = [];
+  const measured: (StarGlyphPaint & { name: string })[] = [];
   for (let index = 0; index < total; index += 1) {
-    const button = starButtons.nth(index);
-    const name = (await button.getAttribute('aria-label')) ?? `星（${index}番目）`;
-    const rendered = await readRenderedColors(button);
-    expect(rendered.color, `${name} の色を実測できない`).not.toBeNull();
-    measured.push({
-      name,
-      glyph: ((await button.textContent()) ?? '').trim(),
-      color: rendered.color as string,
-    });
+    const star = stars.nth(index);
+    const name = (await star.getAttribute('aria-label')) ?? `星（${index}番目）`;
+    measured.push({ name, ...(await readStarGlyph(star)) });
   }
+  const trail = measured.map((s) => `${s.name}=${s.lit}`).join(', ');
+  const selected = measured.filter((star) => star.lit === 'true');
+  const unselected = measured.filter((star) => star.lit === 'false');
+  expect(selected.length, `選択済みの星を 1 つも掴めていない（${trail}）`).toBeGreaterThan(0);
+  expect(unselected.length, `未選択の星を 1 つも掴めていない（${trail}）`).toBeGreaterThan(0);
 
-  const selected = measured.filter((star) => star.glyph === '★');
-  const unselected = measured.filter((star) => star.glyph === '☆');
-  expect(
-    selected.length,
-    `選択済みの星を 1 つも掴めていない（実測した字形: ${measured.map((s) => s.glyph).join('')}）。` +
-      '状態の区別が字形に現れていない',
-  ).toBeGreaterThan(0);
-  expect(
-    unselected.length,
-    `未選択の星を 1 つも掴めていない（実測した字形: ${measured.map((s) => s.glyph).join('')}）。` +
-      '状態の区別が字形に現れていない',
-  ).toBeGreaterThan(0);
+  const only = (values: string[], what: string): string => {
+    const set = new Set(values);
+    expect(set.size, `${what}が 1 色に解決されていない（${[...set].join(' / ')}）`).toBe(1);
+    return [...set][0] as string;
+  };
+  // 選択済みは塗りも縁も不透明。未選択は塗らない（透明）。
+  for (const star of selected) {
+    expect(star.fill.alpha, `${star.name} が塗られていない`).toBe(1);
+    expect(star.stroke.alpha, `${star.name} の縁が不透明でない`).toBe(1);
+  }
+  for (const star of unselected) {
+    expect(star.fill.alpha, `${star.name} が塗られている（未選択は縁だけ）`).toBe(0);
+    expect(star.stroke.alpha, `${star.name} の縁が不透明でない`).toBe(1);
+  }
+  const selectedFill = only(selected.map((s) => s.fill.hex), '選択済みの塗り');
+  const selectedStroke = only(selected.map((s) => s.stroke.hex), '選択済みの縁');
+  const unselectedStroke = only(unselected.map((s) => s.stroke.hex), '未選択の縁');
 
-  const selectedColors = new Set(selected.map((star) => star.color));
-  const unselectedColors = new Set(unselected.map((star) => star.color));
-  expect(
-    selectedColors.size,
-    `選択済みの星が 1 色に解決されていない（${[...selectedColors].join(' / ')}）`,
-  ).toBe(1);
-  expect(
-    unselectedColors.size,
-    `未選択の星が 1 色に解決されていない（${[...unselectedColors].join(' / ')}）`,
-  ).toBe(1);
-
-  const [selectedColor] = [...selectedColors] as [string];
-  const [unselectedColor] = [...unselectedColors] as [string];
-
-  expect(
-    selectedColor,
-    `選択済み（${selectedColor}）と未選択（${unselectedColor}）が同じ色で描かれている。` +
-      '評価の状態が見た目から読み取れない',
-  ).not.toBe(unselectedColor);
-
-  // 正典 7.1 が名指しで禁じた退行を、下の等値の表明より **先に** 置く。等値を先に置くと
+  // 正典 7.1 が退けた色を、下の等値の表明より **先に** 置く。等値を先に置くと
   // これらは等値から論理的に導かれるだけの死んだ表明になり、どの改変でも発火しない。
-  for (const [role, value] of [
-    ['選択済み', selectedColor],
-    ['未選択', unselectedColor],
-  ] as const) {
-    expect(
-      value,
-      `${role}の星がアクション色（${colors.primary}）で描かれている。` +
-        '星が押しボタンやリンクと同じ色になり、満足度の評価が操作の対象に見える退行で、正典 7.1 が名指しで禁じている',
-    ).not.toBe(colors.primary);
-  }
   expect(
-    unselectedColor,
-    `未選択の星が装飾用の罫線色（${colors.border}）で描かれている。` +
-      '罫線色は情報を持たない装飾であり、状態を伝える字形の色には足りない（正典 7.1）',
+    selectedFill,
+    `選択済みの星がアクション色（${colors.primary}）で塗られている。押しボタンと同じ色の面になり、評価が操作の対象に見える（正典 7.1）`,
+  ).not.toBe(colors.primary);
+  expect(
+    selectedStroke,
+    `選択済みの星の縁がブランド色（${colors.brand}）で描かれている。白背景に対して 3:1 に届かず、図形の境界を担えない（正典 7.1）`,
+  ).not.toBe(colors.brand);
+  expect(
+    unselectedStroke,
+    `未選択の星が装飾用の罫線色（${colors.border}）で描かれている。状態を伝える字形の色には足りない（正典 7.1）`,
   ).not.toBe(colors.border);
   expect(
-    unselectedColor,
-    `未選択の星が識別用の枠色（${colors.borderInteractive}）で描かれている。` +
-      'この色は変数参照専用であり、文字色のユーティリティとしては使わない（正典 7.1）',
+    unselectedStroke,
+    `未選択の星が識別用の枠色（${colors.borderInteractive}）で描かれている。この色は変数参照専用である（正典 7.1）`,
   ).not.toBe(colors.borderInteractive);
 
-  expect(selectedColor, '選択済みの星が本文色で描かれていない（正典 7.1）').toBe(colors.text);
-  expect(unselectedColor, '未選択の星が補足色で描かれていない（正典 7.1）').toBe(colors.textMuted);
+  expect(selectedFill, '選択済みの星がブランド色で塗られていない（正典 7.1）').toBe(colors.brand);
+  expect(selectedStroke, '選択済みの星がアクション色で縁取られていない（正典 7.1）').toBe(colors.primary);
+  expect(unselectedStroke, '未選択の星が補足色で縁取られていない（正典 7.1）').toBe(colors.textMuted);
 
-  // 2 色とも本文として読めること。未選択が薄すぎれば「☆ が見えない」になる。
+  // 星の形を見分けるのは縁である。どちらの縁も、状態を示す図形の 3:1（WCAG 1.4.11）を満たす。
   for (const [role, value] of [
-    ['選択済み', selectedColor],
-    ['未選択', unselectedColor],
+    ['選択済み', selectedStroke],
+    ['未選択', unselectedStroke],
   ] as const) {
     const ratio = contrastRatio(value, background);
     expect(
       ratio,
-      `${role}の星 ${value} on ${background} → ${ratio.toFixed(3)}:1（要求 ${AA_NORMAL_TEXT_RATIO}:1）`,
-    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_RATIO);
+      `${role}の星の縁 ${value} on ${background} → ${ratio.toFixed(3)}:1（要求 ${NON_TEXT_RATIO}:1）`,
+    ).toBeGreaterThanOrEqual(NON_TEXT_RATIO);
   }
 });
 
@@ -2236,7 +2242,7 @@ test('本番画面の通知に変種の状態色が実描画で届いている',
 
   // 成功の通知: 下書き画面でコピーすると成功の通知が出る。
   // 星を押した時点で上の必須の通知は消えるので、通知は常に 1 つに解決される。
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   await page.getByRole('button', { name: /コピー/ }).click();
@@ -2271,7 +2277,7 @@ test('客向け主操作が 48px / 16px の可視寸法で描画される', asyn
   expect(answering.height, '回答画面の主操作が 48px で描画されていない').toBe(48);
   expect(answering.fontSize, '回答画面の主操作が 16px で描画されていない').toBe('16px');
 
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await submit.click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
 
@@ -2423,7 +2429,7 @@ test('モバイルビューポートの回答画面で横スクロールが発�
 // requirements 3.3: 下書き画面（生成テキスト・投稿導線を含む主要画面）でも同様。
 test('モバイルビューポートの下書き画面で横スクロールが発生しない', async ({ page }) => {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
   // 捲れる領域は下書きの `<textarea>` の 1 つ。
