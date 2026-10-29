@@ -600,16 +600,16 @@ interface OwnerLineUnlinkResponse {
 
 ```mermaid
 graph LR
-    A[migration 0018 適用 マージ前] --> A2[手作業の切り離し行を解除済みへ移す]
-    A2 --> B[grants.sql 再適用 マージ前]
+    A[migration 0018 適用 マージ前] --> B[grants.sql 再適用 マージ前]
     B --> C[本番の列 CHECK 列権限を照会]
     C --> D[tf apply で dashboard-api に LINE の env と secret]
     D --> E[PR をマージし自動デプロイ]
-    E --> F[検証用アカウントで解除と引継ぎを確認]
+    E --> A2[手作業の切り離し行を解除済みへ移す デプロイの後]
+    A2 --> F[検証用アカウントで解除と引継ぎを確認]
 ```
 
 - Step A は旧コードと互換なので、実装 PR のマージより先に当てる（マージが自動デプロイを起動するため）。番号 0018 は提出直前に open PR と照合する
-- **Step A の直後に、2026-10-24 の手作業の切り離しを正規の状態へ移す（一回限り）。** 本番の `owners` に `line_user_id LIKE 'detached-%'` の行が残っていれば、それは CHECK の上では「連携中」で、店舗を引き継げず、配信ジョブが存在しない宛先へ push を試み続ける。照会で件数と対象を確かめてから、`line_user_id = NULL`・`line_unlinked_at = 当日の時刻`・`menu_pending_line_user_id = NULL`（メニューは手作業で外し済み）へ更新し、更新件数を DO ブロックで照会の件数と突き合わせる。退避は 2026-10-24 の手順と同じく `row_to_json` で手元へ取る。0 件ならこの手順は何もしない（撮影後に手で戻した場合）。手順は `docs/testing/e2e.md` に載せ、実施の記録を Issue #487 に残す
+- **Step E のデプロイを確かめた後に、2026-10-24 の手作業の切り離しを正規の状態へ移す（一回限り）。** 旧コードのうちに移すと、旧 delivery-job は解除済みを対象から外す述語を持たないので、配信時刻のたびにその店舗の配信の予約が `summary_deliveries.line_user_id` の NOT NULL で失敗する（手順書の作成で発見・2026-10-29）。移す前の `detached-` の行は CHECK の上では連携中として有効なので、A〜E の間に残しておいてよい。 本番の `owners` に `line_user_id LIKE 'detached-%'` の行が残っていれば、それは CHECK の上では「連携中」で、店舗を引き継げず、配信ジョブが存在しない宛先へ push を試み続ける。照会で件数と対象を確かめてから、`line_user_id = NULL`・`line_unlinked_at = 当日の時刻`・`menu_pending_line_user_id = NULL`（メニューは手作業で外し済み）へ更新し、更新件数を DO ブロックで照会の件数と突き合わせる。退避は 2026-10-24 の手順と同じく `row_to_json` で手元へ取る。0 件ならこの手順は何もしない（撮影後に手で戻した場合）。手順は `docs/testing/e2e.md` に載せ、実施の記録を Issue #487 に残す
 - Step B は付与者が一致しないと REVOKE が警告だけで空振りする（store-suspension の教訓）。Step C で、line_webhook・survey が `line_user_id` を UPDATE できないことを `has_column_privilege` で確かめるまで Step E へ進まない
 - Step D は**イメージより先**に入れる。新しい dashboard-api は `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET` が無いと起動時に落ちる（memory `deploy-pipeline-coverage-guards`）。旧イメージは未知の env を無視する
 - Step F（9.1–9.3）: 検証用テナント（memory `prod-e2e-leaves-permanent-tenant`）の運営自身のアカウントを解除し、最初の案内と `GET /v2/bot/user/{userId}/richmenu` の 404 を確かめる。続けて同じ Place を確定し直し、店舗詳細画面に店舗が出ることを確かめる。結果を `docs/testing/e2e.md` の手順に沿って Issue #487 に記録する

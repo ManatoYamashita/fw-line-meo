@@ -124,6 +124,7 @@ PROJECT_ID=gen-fw-line-meo make e2e-prod-checks
 ### 4-4. オンボーディング（任意）
 
 完了済みの LINE アカウントでは、オンボーディングをやり直せない（完了した段階は、どの入力にも同じ案内を返すだけである）。未登録の LINE アカウントが要る。
+owner-line-unlink（Issue #487）のデプロイ後は、運営・代理店がオーナー一覧でそのアカウントの LINE の連携を解除すれば、同じアカウントで最初からやり直せる。解除とやり直しを本番で確かめる手順は 5-8. にある。解除するたびにオーナーの行が 1 つ増え、消す経路は無いので、オンボーディングを見るためだけに解除を繰り返さない。
 
 1. 公式アカウントのトークにスタンプを 1 つ送り、返信で状態を確かめる。テキストは送らない。招待コードの段階では、テキストはすべて間違った招待コードとして数えられ、5 回で 10 分ロックされる
 2. 運営アカウントで、検証用の代理店を選んで `/invite-codes` から招待コードを発行する
@@ -181,7 +182,411 @@ PROJECT_ID=gen-fw-line-meo make e2e-prod-checks
 - 各層・各手順の結果
 - 見つけた不具合の Issue 番号
 
-## 5. 関連
+## 5. オーナーの LINE 連携の解除の公開と実測（Issue #487）
+
+owner-line-unlink（`.kiro/specs/owner-line-unlink/`）を本番へ出し、効いたことを確かめる手順である。順序は design.md の Migration Strategy のとおりで、入れ替えない。
+A〜D は実装 PR のマージより前に行い、A2 はデプロイを確かめた後に行う。main の ts-ci が緑になると `deploy.yml` が自動でデプロイするので、マージの後に当てると、新しいコードが無い列・権限・env を読む（新しい dashboard-api は LINE の env が無いと起動しない）。
+
+| Step | 何をするか | いつ | 節 |
+|---|---|---|---|
+| A | migration `0018` を当てる | マージ前 | 5-2 |
+| B | `infra/sql/grants.sql` を当て直す | マージ前 | 5-3 |
+| C | 本番の列・CHECK・列権限を照会する | マージ前 | 5-4 |
+| D | dashboard-api に LINE のチャネル ID とチャネルシークレットを渡す（Terraform） | マージ前・イメージより先 | 5-5 |
+| E | 照会の結果を Issue #487 に記録してからマージし、デプロイを確かめる | C・D の後 | 5-6 |
+| A2 | 2026-10-24 に手作業で切り離した行（`detached-` 接頭辞）を解除済みへ移す（一回限り） | E のデプロイを確かめた後・F の前 | 5-7 |
+| F | 検証用のアカウントで解除と引継ぎを実測する | E の後 | 5-8 |
+
+記録の雛形は 5-9. にある。
+
+### 5-1. 始める前に
+
+- 作業はこの PR のブランチ（head）の checkout で行う。`0018`、`grants.sql` の owners の列単位の付与、dashboard-api の env の配線は、マージまで main に無い
+- `0018` の番号が open PR と重ならないことを確かめる（下のコマンドで、この PR 以外の番号が出ないこと）。番号のガードは main しか見ない
+- 接続は `infra/README.md` §3 の Auth Proxy（ポート 15432）で行い、`cloudsql.iam_authentication` が `on` であることを確かめてから流す。ユーザーは表の所有者（`postgres`）である。`ALTER TABLE` は所有者でないと実行できず、`REVOKE` は付与した本人でないと効かない
+- 本番の識別子（オーナー・店舗・代理店の id）は先頭 8 文字までしか記録しない。LINE ユーザー ID は先頭 8 文字も Issue・PR に書かない（リポジトリは公開されている）
+- A からマージまでの間、`prod-schema-drift`（6 時間ごと）は `0018` の列と制約を「migration に無い本番対象」として赤にし、追跡 Issue（ラベル `prod-schema-drift`）を立てる。main の migration にまだ無いからで、想定どおりである。マージ後の次の実行で閉じる。A からマージまでを 1 日のうちに終える
+- A2 はデプロイの後に行う。移した行は `line_user_id` が NULL になり、旧 delivery-job は解除済みを対象から外す述語を持たないので、配信時刻のたびにその店舗の配信の予約で失敗する（`summary_deliveries.line_user_id` は NOT NULL）。移す前の `detached-` の行は `0018` の CHECK の上では連携中として有効なので、A〜E の間に残しておいてよい
+
+```bash
+gh pr list --repo ManatoYamashita/fw-line-meo --state open --json number,files \
+  --jq '.[] | select(any(.files[]; .path | startswith("db/migrations/0018"))) | .number'
+```
+
+### 5-2. Step A: migration 0018 を当てる
+
+まず、`db/migrations` の全番号が本番に当たっていて、足りないのが `0018` の対象だけであることを確かめる。`0017`（#486）は適用済みのはずである。照合は `prod-schema-drift` と同じスクリプトを、このブランチの migration で流して行う（読むのは本番の catalog の名前だけで、表の行は読まない）。手元の postgres は本番と同じ 16 系であること（版が違うと catalog の行がずれる）。
+
+```bash
+# §3 の PGPASSWORD を export したシェルで流す。一時 DB はこのブランチの migration を当てた正解側に使う
+ts/scripts/with-test-db.sh bash -c 'PROJECT_ID=gen-fw-line-meo EXPECTED_DATABASE_URL="$DATABASE_URL" \
+  PROD_DATABASE_URL="postgresql://postgres@127.0.0.1:15432/fwlm" bash scripts/check-prod-schema-drift.sh'
+```
+
+当てる前の期待は exit 1 で、「本番に存在しない対象」が次の 7 件だけ、「migration に無い本番対象」が 0 件であること。
+
+- 列（owners）: `line_unlinked_at`・`menu_pending_line_user_id`・`taken_over_by_owner_id`
+- 制約（owners）: `ck_owner_line_link`・`ck_owner_menu_pending`・`ck_owner_taken_over`・`owners_taken_over_by_owner_id_fkey`
+
+ほかの対象が足りなければ、先行の migration の適用漏れである。`0018` を当てずに止める（`grants.sql` は全表を前提にするので、漏れがあると 5-3. で全付与が巻き戻る）。
+
+続けて `0018` の冒頭のコメントにある事前確認を流し、当てる。
+
+```bash
+psql -X -At <<'SQL'
+SELECT conname FROM pg_constraint WHERE conrelid = 'audit_logs'::regclass AND contype = 'c';
+SELECT count(*) FROM owners WHERE line_user_id IS NULL;
+SELECT count(*) FROM pg_constraint
+ WHERE conrelid = 'owners'::regclass
+   AND conname IN ('ck_owner_line_link', 'ck_owner_menu_pending', 'ck_owner_taken_over');
+SQL
+# 期待: ck_audit_logs_action の 1 行 / 0 / 0
+
+psql -X -v ON_ERROR_STOP=1 -f db/migrations/0018_owner_line_unlink.sql
+# 期待: BEGIN / ALTER TABLE / ALTER TABLE / COMMIT
+```
+
+当てた後に、冒頭のコメントの「適用の確認」を流す。owners の 4 列がすべて `is_nullable = YES`、owners の CHECK に 3 本、`ck_audit_logs_action` の定義に `owner_line_unlinked`・`owner_stores_taken_over`・`store_taken_over` が入っていること。最後に上の照合をもう一度流し、`OK: 本番スキーマは db/migrations 適用後の catalog と一致しています` が出ること（exit 0）。
+
+### 5-3. Step B: grants.sql を当て直す
+
+当てるのはこのブランチの `infra/sql/grants.sql` である。owners の INSERT に `invite_code_id` を含む版でなければならない（含まない版を当てると、新しいオーナーの登録が `permission denied` で失敗する）。
+
+PostgreSQL の `REVOKE` は自分が付与した権限しか剥がせず、剥がせなくても警告で終わり、`ON_ERROR_STOP` では止まらない（store-suspension で得た教訓）。当てる前に、owners の現行の付与者が接続ユーザーと一致することを確かめる。`information_schema.role_table_grants` は付与者か被付与者が自分の行しか見せないので、`pg_class` の ACL を直接読む。
+
+```bash
+grep -c 'delivery_hour, invite_code_id' infra/sql/grants.sql   # 期待: 1
+
+psql -X <<'SQL'
+SELECT DISTINCT g.rolname AS grantor, current_user AS me
+  FROM pg_class c
+ CROSS JOIN LATERAL aclexplode(c.relacl) a
+  JOIN pg_roles g ON g.oid = a.grantor
+  JOIN pg_roles e ON e.oid = a.grantee
+ WHERE c.oid = 'public.owners'::regclass
+   AND a.privilege_type IN ('INSERT', 'UPDATE')
+   AND e.rolname IN ('sa-line-webhook@gen-fw-line-meo.iam', 'sa-survey-web@gen-fw-line-meo.iam');
+SQL
+# 期待: 1 行で grantor と me が同じ。違えば止めて、付与者のユーザーで繋ぎ直す
+
+LOG="$BACKUP_DIR/grants-apply.log"
+psql -X -v ON_ERROR_STOP=1 -f infra/sql/grants.sql > "$LOG" 2>&1; echo "exit=$?"
+grep -c 'WARNING' "$LOG"
+# 期待: exit=0 / 0。WARNING が 1 件でもあれば（no privileges could be revoked など）失敗として扱い、C へ進まない
+```
+
+### 5-4. Step C: 本番の列・CHECK・列権限を照会する
+
+CI の権限の検査（`db/test/check_owner_line_privileges.sh`）は superuser で流れるので、付与者の食い違いを再現できない。本番ではこの照会が唯一の確認である。line-webhook・客向け Web のどちらかが `line_user_id` を UPDATE できる結果なら、マージにも解除の操作にも進まず、付与者を合わせて 5-3. からやり直す。
+
+```bash
+psql -X <<'SQL'
+WITH checks(role_name, col, priv, want) AS (
+  SELECT r, c.col, c.priv, c.want
+    FROM unnest(ARRAY['sa-line-webhook@gen-fw-line-meo.iam', 'sa-survey-web@gen-fw-line-meo.iam']) AS r
+   CROSS JOIN (VALUES
+     ('line_user_id',              'INSERT', true),
+     ('line_user_id',              'UPDATE', false),
+     ('line_unlinked_at',          'INSERT', false),
+     ('line_unlinked_at',          'UPDATE', false),
+     ('menu_pending_line_user_id', 'INSERT', false),
+     ('menu_pending_line_user_id', 'UPDATE', false),
+     ('taken_over_by_owner_id',    'INSERT', false),
+     ('taken_over_by_owner_id',    'UPDATE', true),
+     ('invite_code_id',            'INSERT', true),
+     ('invite_code_id',            'UPDATE', false),
+     ('onboarding_status',         'UPDATE', true)
+   ) AS c(col, priv, want)
+  UNION ALL
+  SELECT 'sa-dashboard-api@gen-fw-line-meo.iam', c, 'UPDATE', true
+    FROM unnest(ARRAY['line_user_id', 'line_unlinked_at', 'menu_pending_line_user_id']) AS c
+)
+SELECT role_name, col, priv, want,
+       has_column_privilege(role_name, 'public.owners', col, priv) AS got,
+       has_column_privilege(role_name, 'public.owners', col, priv) = want AS ok
+  FROM checks
+ ORDER BY role_name, col, priv;
+
+-- テーブル単位の INSERT・UPDATE が剥がれていること（残っていると列の絞りが効かない）
+SELECT r,
+       has_table_privilege(r, 'public.owners', 'INSERT') AS table_insert,
+       has_table_privilege(r, 'public.owners', 'UPDATE') AS table_update
+  FROM unnest(ARRAY['sa-line-webhook@gen-fw-line-meo.iam', 'sa-survey-web@gen-fw-line-meo.iam']) AS r;
+SQL
+```
+
+期待: 1 つ目は 25 行で `ok` がすべて `t`。2 つ目は 2 行で、どちらも `f`・`f`。列と CHECK は 5-2. の「適用の確認」の結果を使う。
+
+### 5-5. Step D: dashboard-api に LINE の設定を入れる（イメージより先）
+
+新しい dashboard-api は `LINE_CHANNEL_ID`・`LINE_CHANNEL_SECRET` が無いと起動時に落ちる。旧イメージは知らない env を無視するので、env を先に入れる。CI が替えるのはイメージだけで、env は Terraform が持つ（`infra/README.md` §5）。
+
+- apply はこのブランチの checkout から行う（main の宣言にはまだ env が無い）。マージまでの間に、main の checkout から dashboard-api を apply しない（env が外れ、マージ後のイメージが起動できなくなる）
+- 素の `make tf-apply` を打たず、`-target` で 2 つに絞る（`infra/README.md` §10-0 の「apply の作法」。`module.guardrails` を巻き込まないため）。保存した plan は当てない
+- Terraform は ADC の資格情報で動く（gcloud のアカウントとは別の主体である）
+
+```bash
+# 1. 進行中のデプロイが無いこと（in_progress / queued が無い）
+gh run list --repo ManatoYamashita/fw-line-meo --workflow deploy-prod --limit 3
+
+# 2. plan。差分がこの 2 つだけであることを、属性まで下りて読む
+terraform -chdir=infra/envs/prod plan \
+  -target='module.run_services.google_cloud_run_v2_service.svc["dashboard-api"]' \
+  -target='module.run_services.google_secret_manager_secret_iam_member.accessor["dashboard-api.LINE_CHANNEL_SECRET"]'
+
+# 3. 同じ -target で apply
+terraform -chdir=infra/envs/prod apply \
+  -target='module.run_services.google_cloud_run_v2_service.svc["dashboard-api"]' \
+  -target='module.run_services.google_secret_manager_secret_iam_member.accessor["dashboard-api.LINE_CHANNEL_SECRET"]'
+```
+
+plan の期待: `line-channel-secret` への dashboard-api の SA の accessor が 1 つ追加、dashboard-api のサービスが in-place の変更で、env に `LINE_CHANNEL_ID`（値）と `LINE_CHANNEL_SECRET`（`secret_key_ref`）が足されるだけ。イメージは差分に出ない（`ignore_changes`）。ほかの差分が出たら当てずに読む。
+サービスの更新が secret の権限で失敗したときは、IAM の反映待ちである。数分おいて同じ apply をもう一度流す。
+
+当てた後の確認（値は出さず、env の名前だけを読む）:
+
+```bash
+gcloud run services describe dashboard-api --project gen-fw-line-meo --region asia-northeast1 \
+  --format='value(status.latestReadyRevisionName,status.latestCreatedRevisionName)'
+gcloud run services describe dashboard-api --project gen-fw-line-meo --region asia-northeast1 \
+  --format='value(spec.template.spec.containers[0].env[].name)'
+```
+
+期待: 1 つ目の 2 つの名前が同じ（新しいリビジョンが旧イメージのまま Ready）。2 つ目に `LINE_CHANNEL_ID` と `LINE_CHANNEL_SECRET` がある。dashboard-web の `/stores` が従来どおり開くこと。
+
+### 5-6. Step E: 記録してからマージし、デプロイを確かめる
+
+1. 5-2.〜5-5. の結果を 5-9. の雛形で Issue #487 に記録する。記録してからマージする（Req 9.1）
+2. PR をマージする。`gh run list --repo ManatoYamashita/fw-line-meo --workflow deploy-prod --limit 3` で、マージしたコミットの deploy-prod が success になるまで待つ（PR には出ないので自分で見る）
+3. `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks` の 1 が PASS で、デプロイ待ちの WARN が出ていないこと
+4. 5-5. の 1 つ目の `gcloud` で、dashboard-api の新しいリビジョンが Ready であること（起動に失敗すると 2 つの名前が食い違う）
+5. dashboard-web の「オーナー一覧」（`/owners`）が開くこと。続けて 5-7. の A2 を行う
+
+### 5-7. Step A2: 手作業で切り離した行を解除済みへ移す（一回限り・デプロイの後）
+
+5-6. でデプロイを確かめた後に行う（理由は 5-1.）。新しい delivery-job は解除済みのオーナーの店舗を配信の対象から外すので、移した行の配信は失敗せずに止まる。
+
+2026-10-24 に、オンボーディングの撮り直しのため、運営自身のオーナーの `line_user_id` を `'detached-YYYYMMDD:' || 元の ID` へ書き換えた。この行は `0018` の CHECK の上では「連携中」に見えるので、店舗を引き継げず、配信は存在しない宛先へ push を試み続ける。正規の「解除済み」へ移す。
+
+- `menu_pending_line_user_id` は NULL にする。個別メニューは 2026-10-24 に手作業で外し済みで、元のアカウントはその後に新しいオーナーとして登録し直している。印を残すと、外し直しの操作が新しいオーナーのメニューを外す余地を作り、個人に紐づく識別子も必要以上に残る
+- `line_unlinked_at` は変換した時刻（`now()`）にする。`taken_over_by_owner_id` は NULL のままにする（まだ誰も引き継いでいない）
+- 会話（`onboarding_sessions`）は 2026-10-24 に消してある。残っていれば記録と状態が食い違っているので、消さずに止める（同じ LINE ユーザー ID の会話は、登録し直した新しいオーナーのものでありうる）
+- 監査記録は書かない（アプリの操作ではない）。実施の記録は Issue #487 に残す
+
+1. 照会する。件数（N）を控える。0 件なら（撮影の後に手で戻した場合）この節の 2〜4 を飛ばし、0 件だったことを記録する
+
+   ```bash
+   psql -X <<'SQL'
+   SELECT count(*) AS detached FROM owners WHERE line_user_id LIKE 'detached-%';
+   -- 接頭辞は 'detached-YYYYMMDD:' の 18 文字までだけを出す（元の LINE ユーザー ID は出さない）
+   SELECT left(o.id::text, 8) AS owner8,
+          left(o.line_user_id, 18) AS prefix,
+          o.onboarding_status,
+          o.delivery_hour,
+          o.line_unlinked_at,
+          o.menu_pending_line_user_id IS NOT NULL AS pending,
+          (SELECT count(*) FROM stores s WHERE s.owner_id = o.id) AS stores,
+          (SELECT count(*) FROM onboarding_sessions os WHERE os.owner_id = o.id) AS sessions
+     FROM owners o
+    WHERE o.line_user_id LIKE 'detached-%'
+    ORDER BY o.created_at;
+   SQL
+   ```
+
+   期待: `prefix` がすべて `detached-20261024:`、`line_unlinked_at` が空、`pending` が `f`、`sessions` が 0。`delivery_hour` は記録に使わない（デプロイの後なので配信の失敗にならない）
+
+2. 退避する。行には元の LINE ユーザー ID が入っているので、リポジトリの外に置き、Issue・PR・リポジトリへ貼らない
+
+   ```bash
+   BACKUP_DIR="$HOME/fwlm-prod-backup/487"
+   mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
+   psql -X -At -v ON_ERROR_STOP=1 \
+     -c "SELECT row_to_json(o) FROM owners o WHERE line_user_id LIKE 'detached-%' ORDER BY created_at" \
+     > "$BACKUP_DIR/owners-detached.jsonl"
+   chmod 600 "$BACKUP_DIR/owners-detached.jsonl"
+   wc -l < "$BACKUP_DIR/owners-detached.jsonl"   # 期待: N
+   ```
+
+3. 移す。`expected` には 1 で控えた N を手で書く。照会から変わっていれば、DO ブロックが例外を投げてトランザクションごと戻る（`ON_ERROR_STOP` で psql が止まり、COMMIT まで届かない）
+
+   ```bash
+   psql -X -v ON_ERROR_STOP=1 -v expected=<N> <<'SQL'
+   BEGIN;
+   -- psql の変数は $$ の中へ展開されないので、トランザクション内の設定値として DO ブロックへ渡す
+   SELECT set_config('fwlm.expected_detached', :'expected', true);
+   DO $$
+   DECLARE
+     want      integer := current_setting('fwlm.expected_detached')::integer;
+     remaining integer;
+     sessions  integer;
+     updated   integer;
+   BEGIN
+     SELECT count(*) INTO remaining FROM owners WHERE line_user_id LIKE 'detached-%';
+     IF remaining <> want THEN
+       RAISE EXCEPTION '切り離し行が % 件あります（照会では % 件）。照会からやり直してください', remaining, want;
+     END IF;
+     SELECT count(*) INTO sessions
+       FROM onboarding_sessions os JOIN owners o ON o.id = os.owner_id
+      WHERE o.line_user_id LIKE 'detached-%';
+     IF sessions <> 0 THEN
+       RAISE EXCEPTION '切り離し行のオーナーに会話が % 件残っています。記録と食い違うので止めます', sessions;
+     END IF;
+     UPDATE owners
+        SET line_user_id = NULL,
+            line_unlinked_at = now(),
+            menu_pending_line_user_id = NULL
+      WHERE line_user_id LIKE 'detached-%';
+     GET DIAGNOSTICS updated = ROW_COUNT;
+     IF updated <> want THEN
+       RAISE EXCEPTION '更新が % 件でした（照会では % 件）', updated, want;
+     END IF;
+     RAISE NOTICE '解除済みへ移した行: % 件', updated;
+   END
+   $$;
+   COMMIT;
+   SQL
+   ```
+
+   期待: `NOTICE:  解除済みへ移した行: N 件` と `COMMIT`。3 列を 1 文で書くので、`ck_owner_line_link`・`ck_owner_menu_pending` を途中で破らない
+
+4. 確かめる。まだ解除の操作はデプロイされていないので、解除済みのオーナーは移した行だけのはずである
+
+   ```bash
+   psql -X <<'SQL'
+   SELECT count(*) AS detached_left FROM owners WHERE line_user_id LIKE 'detached-%';
+   SELECT left(id::text, 8) AS owner8,
+          line_user_id IS NULL AS no_line_id,
+          line_unlinked_at IS NOT NULL AS unlinked,
+          menu_pending_line_user_id IS NULL AS no_pending,
+          taken_over_by_owner_id IS NULL AS not_taken_over
+     FROM owners
+    WHERE line_unlinked_at IS NOT NULL
+    ORDER BY created_at;
+   SQL
+   ```
+
+   期待: `detached_left` が 0。2 つ目は 1 の `owner8` と同じ N 行で、4 列がすべて `t`
+
+### 5-8. Step F: 解除と引継ぎを実測する（Req 9.2・9.3・2.6）
+
+使うのは 4-1. の検証用テナント（スモークテスト代理店）にいる、運営自身の LINE アカウントのオーナーである。実クライアントのオーナーでは試さない。解除すると、そのオーナーの店舗の日次の通知と詳細画面は、引き継ぐまで止まる。
+引き継ぐと新しいオーナーの行が 1 つ増え、解除済みのオーナーは店舗 0 件で残る。どちらも消す経路は無いので、この手順は必要なときだけ行う。
+
+前提:
+
+- 5-7. まで終わっていること
+- 同じ代理店の有効な招待コードがあること。無ければ運営アカウントで `/invite-codes` から発行する（引継ぎは同じ代理店の招待コードでしか起きない）
+- 検証するオーナーの店舗の Place を控えておくこと（店名で候補に出せること）
+
+1. 対象のオーナーを決め、その LINE ユーザー ID をシェルの変数にだけ持つ（画面にも記録にも出さない）。宛先は推測せず、プロフィールの表示名で自分のアカウントであることを確かめる
+
+   ```bash
+   OWNER_ID='<検証するオーナーの id（全桁。手元だけで使う）>'
+   VERIFY_UID="$(psql -X -At -v owner_id="$OWNER_ID" <<'SQL'
+   SELECT line_user_id FROM owners WHERE id = :'owner_id' AND line_user_id IS NOT NULL;
+   SQL
+   )"
+   printf '%s' "$VERIFY_UID" | grep -cE '^U[0-9a-f]{32}$'   # 期待: 1
+
+   # チャネルアクセストークンは infra/README.md §8-3 と同じ方法で TOKEN に発行する（シークレットを argv に置かない）
+   # URL も設定として渡し、LINE ユーザー ID を argv に置かない
+   curl -sS -K - <<CFG | sed -n 's/.*"displayName":"\([^"]*\)".*/\1/p'
+   url = "https://api.line.me/v2/bot/profile/${VERIFY_UID}"
+   header = "Authorization: Bearer ${TOKEN}"
+   CFG
+   # 期待: 自分の LINE の表示名
+
+   # 解除の前の個別メニュー（完了後メニューが張られている）
+   curl -sS -o /dev/null -w '%{http_code}\n' -K - <<CFG
+   url = "https://api.line.me/v2/bot/user/${VERIFY_UID}/richmenu"
+   header = "Authorization: Bearer ${TOKEN}"
+   CFG
+   # 期待: 200
+   ```
+
+2. 運営アカウントで dashboard-web の「オーナー一覧」（`/owners`）を開き、対象の行の「LINE の連携を解除」を押す。確認ダイアログの 3 点を読み、「解除する」を押す
+   - 期待: 「<名前> の LINE の連携を解除しました。」と出て、行が「解除済み」になる
+   - 「メニューを外せませんでした」と出て「解除済み（メニュー未解除）」になったら、「メニューを外し直す」を押す。外し直しで済んだことも記録する
+3. 個別メニューが外れたことと、DB の状態を確かめる
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' -K - <<CFG
+   url = "https://api.line.me/v2/bot/user/${VERIFY_UID}/richmenu"
+   header = "Authorization: Bearer ${TOKEN}"
+   CFG
+   # 期待: 404（個別メニューが無い。トークには既定のオンボーディング用メニューが出る）
+
+   psql -X -v owner_id="$OWNER_ID" -v uid="$VERIFY_UID" <<'SQL'
+   SELECT line_user_id IS NULL AS no_line_id,
+          line_unlinked_at IS NOT NULL AS unlinked,
+          menu_pending_line_user_id IS NULL AS no_pending
+     FROM owners WHERE id = :'owner_id';
+   SELECT count(*) AS sessions FROM onboarding_sessions WHERE line_user_id = :'uid';
+   SQL
+   # 期待: t / t / t、sessions は 0
+   ```
+
+4. スマホの LINE で、公式アカウントのトークにスタンプを 1 つ送る。テキストは送らない（4-4. の 1 と同じ理由）
+   - 期待: 「友だち追加ありがとうございます。」で始まり、招待コードの送信を求める案内が返る（Req 9.2）
+5. 招待コードを送る → 店名を送る → 候補から同じ Place を選ぶ → 確定する
+   - 期待: 「登録が完了しました」のメッセージが届き、リッチメニューが完了版に切り替わる。1 の 2 つ目の `curl` をもう一度流して 200 になる
+6. リッチメニューの「詳細を見る」で LIFF を開き、引き継いだ店舗が出ることを確かめる（Req 9.3）
+7. 運営アカウントで「オーナー一覧」を再読み込みする
+   - 期待: 解除したオーナーが「解除済み（引継ぎ先: <新しいオーナー>）」、新しいオーナーが「連携中」と出る（Req 2.6）。`/stores` では店舗のオーナーが新しいオーナーになっている
+8. DB で引継ぎを確かめる
+
+   ```bash
+   psql -X -v owner_id="$OWNER_ID" -v uid="$VERIFY_UID" <<'SQL'
+   SELECT left(o.id::text, 8) AS owner8,
+          o.line_user_id IS NOT NULL AS linked,
+          o.onboarding_status,
+          left(o.taken_over_by_owner_id::text, 8) AS taken_over_by8,
+          (SELECT count(*) FROM stores s WHERE s.owner_id = o.id) AS stores
+     FROM owners o
+    WHERE o.id = :'owner_id' OR o.line_user_id = :'uid'
+    ORDER BY o.created_at;
+   SELECT action, count(*)
+     FROM audit_logs
+    WHERE action IN ('owner_line_unlinked', 'owner_stores_taken_over', 'store_taken_over')
+      AND occurred_at >= now() - interval '2 hours'
+    GROUP BY action ORDER BY action;
+   SQL
+   ```
+
+   期待: 1 行目（解除したオーナー）は `linked` が `f`、`taken_over_by8` が 2 行目の `owner8`、`stores` が 0。2 行目（新しいオーナー）は `linked` が `t`、`store_identified`、`stores` が引き継いだ件数。監査は `owner_line_unlinked` 1・`owner_stores_taken_over` 1・`store_taken_over` が引き継いだ店舗の件数。監査の書込はベストエフォート（#250）なので、欠けていても引継ぎの不合格にはしないが、欠けたことを記録する
+
+9. 終わったら変数を消す: `unset VERIFY_UID OWNER_ID TOKEN SECRET`
+
+翌朝の配信の時刻を過ぎたら、3. の装置の 6 で、引き継いだ店舗の配信が新しいオーナーに対して記録されていること（失敗が 0 件であること）を確かめてもよい。
+
+### 5-9. 記録（Issue #487）
+
+識別子は先頭 8 文字まで、LINE ユーザー ID と LINE の表示名は書かない。退避したファイルの中身は貼らない。
+
+```markdown
+## 本番適用の記録（owner-line-unlink 10.1）
+- 実施日・実施者:
+- 作業したコミット（PR の head・先頭 8 文字）:
+- A: 適用前の照合 missing=7（0018 の 3 列・4 制約のみ）/ extra=0 → 0018 適用 → 照合 OK（expected=<n> / production=<n>）
+- B: 付与者と接続ユーザーが一致 / grants.sql exit=0・WARNING 0 件
+- C: 列権限 25 件すべて ok / テーブル単位の INSERT・UPDATE はどちらも f / CHECK 3 本・監査 action 28 値
+- D: plan は accessor 1 追加・dashboard-api 1 変更のみ / 新リビジョン Ready / env に LINE_CHANNEL_ID・LINE_CHANNEL_SECRET
+- E: PR #<n> をマージ / deploy-prod success / 本番コミット <8 文字> / e2e-prod-checks の 1 PASS / /owners が開く
+- A2: 切り離し行 <N> 件（接頭辞 detached-20261024:・会話 0 件）/ 退避 <N> 行（手元のみ）/ 更新 <N> 件 / 残り 0 件 / 対象 owner: <owner8>, ... / /owners で解除済み
+
+## 解除と引継ぎの実測（owner-line-unlink 10.2）
+- 実施日・実施者:
+- 対象: 解除したオーナー <owner8> / 新しいオーナー <owner8> / 店舗 <store8>
+- 解除前の個別メニュー: 200
+- 解除: 画面の通知 / 一覧「解除済み」/ 個別メニュー 404 / 会話 0 件（メニュー未解除になったか: いいえ / はい→外し直しの結果）
+- 最初の案内: スタンプに招待コードの案内が返った
+- 引継ぎ: 完了メッセージ / 個別メニュー 200 / 店舗詳細に店舗が出た / 一覧「解除済み（引継ぎ先: …）」・新しいオーナー「連携中」
+- DB: 旧 stores 0・taken_over_by が新オーナー / 新 store_identified・stores <件数>
+- 監査: owner_line_unlinked <n> / owner_stores_taken_over <n> / store_taken_over <n>
+- 見つけた不具合の Issue:
+```
+
+## 6. 関連
 
 - `.github/workflows/ts-ci.yml` — 自動層の CI
 - `docs/architecture.md` §4 — オンボーディングから口コミ獲得までの流れ

@@ -181,6 +181,8 @@ psql -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.s
   - 緊急（Terraform を待てないとき）: `gcloud run services update survey-web --project gen-fw-line-meo --region asia-northeast1 --update-env-vars SURVEY_FORCE_STRUCTURED=0`（store-detail も同じ）。**Terraform との乖離が残るので、直後に `main.tf` を `"0"` にして apply し、宣言を合わせる**（合わせないと次の apply が `1` へ戻す）
   - 切り戻しのコミット・apply の日時を #441 に記録する
 
+- **オーナーの LINE 連携の解除（Issue #487）の `0018`**: これもマージの前に当てる。`0018` の後に一回限りのデータの変換（2026-10-24 に手作業で切り離した `detached-` 行を解除済みへ移す）、`infra/sql/grants.sql` の当て直し（owners の列単位の付与・付与者の照合）、列権限の照会、dashboard-api への LINE の env の apply（イメージより先）が続く。手順と期待値は `docs/testing/e2e.md` §5 にまとめてあり、ここには書き写さない。
+
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。ロール名は `:project` から組み立てるため、**この既定値が GCP プロジェクト ID であること**が前提になる（2026-08-24 まで既定が DB 名の `fwlm` になっており、上のコマンドは `role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックしていた・PR #144 で是正）。
 
 ---
