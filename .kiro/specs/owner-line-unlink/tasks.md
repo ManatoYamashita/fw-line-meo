@@ -149,7 +149,7 @@
   - _Boundary: docs_
   - _Depends: 1.1_
 
-- [ ] 9. 検証
+- [x] 9. 検証
 - [x] 9.1 言語をまたいで、解除済みオーナーの店舗が取得され配信されないことを固定する
   - 固定日の行で、日次取得が解除済みオーナーの店舗の日次サマリーを作り、配信がそれを送らず記録も残さないことを確かめる
   - cross-runtime の試験が緑で、述語を外す変異で赤になる
@@ -163,7 +163,7 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 6.2, 6.8, 6.9, 8.2_
   - _Depends: 2.1, 6.2_
 
-- [ ] 9.3 管理画面の E2E とアクセシビリティ監査にオーナーの画面を加える
+- [x] 9.3 管理画面の E2E とアクセシビリティ監査にオーナーの画面を加える
   - 画面の E2E で、解除して行が解除済みになる経路と、メニューの失敗のスタブで外し直しの操作が出る経路を通す
   - アクセシビリティ監査の面にオーナー一覧と、明示的に開いた解除のダイアログを加える
   - 自動層（`make e2e` の surfaces）が緑
@@ -210,3 +210,4 @@
 - 8.2: db/test/check_docs.sh は表単位で、列・CHECK・書き手の記述漏れを検出しない。ERD の列の機械照合は Issue 候補。
 - 9.1: cross-runtime の固定識別子は c7…-015（オーナー）と c7…-005（店舗）まで使用済み。配信の述語を外す変異は、記録 0 行ではなく対象件数の表明（3 件）が赤にする（summary_deliveries.line_user_id の NOT NULL で記録が書けないため）。
 - 9.2: 店舗詳細の認可は store-detail の route.db.test.ts で、引継ぎの状態を DAL の組（lockPlaceHolder・moveAllStores・markOwnerStoreIdentified）で作って確かめる。確定の引継ぎの分岐が書く列を増やしたら、この試験も追従させる。unfollow は dispatch で捨てられるので、Req 8.2 の試験は回帰ガードとして効く。
+- 9.3: 手元のシェルは PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH を Aside に向けており、run-e2e-local.sh はこれを外さない。E2E は env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH を付けて付属 Chromium で流す。幅 1024px の運営のナビの R2 は余りが約 5px で、CI の Linux の字幅で赤になりうる（赤なら top-nav の間隔を詰める）。

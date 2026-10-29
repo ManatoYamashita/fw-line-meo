@@ -135,10 +135,11 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     panelCells: 1,
     mustOverflow: { 393: ['利用者一覧'], 320: ['利用者一覧'] },
   },
-  // Issue #485: オーナー選択が表を持った（見出し 5 列＋3 人 × 5 列）。
+  // Issue #485: オーナー選択が表を持った（見出し 5 列＋オーナー × 5 列）。owner-line-unlink で
+  // 解除済みのオーナー 2 人を fixture へ足したので 5 人（解除済みの印も描かれる）。
   店舗登録: {
     navControls: 7,
-    measuredCells: 20,
+    measuredCells: 30,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
   },
@@ -148,6 +149,13 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
   },
+  // owner-line-unlink: 見出し 5 列＋5 人 × 5 列。
+  オーナー一覧: {
+    navControls: 7,
+    measuredCells: 29,
+    panelCells: 0,
+    mustOverflow: { 393: ['オーナー一覧'], 320: ['オーナー一覧'] },
+  },
 };
 
 test('宣言の面が検証面の一覧と一致する', () => {
@@ -156,7 +164,7 @@ test('宣言の面が検証面の一覧と一致する', () => {
     '面を足したら LAYOUT にも足す（宣言の無い面は beforeEach で止まる）',
   ).toEqual(Object.keys(LAYOUT));
   // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-  expect(Object.keys(LAYOUT)).toHaveLength(9);
+  expect(Object.keys(LAYOUT)).toHaveLength(10);
 });
 
 for (const surface of DASHBOARD_SURFACES) {
@@ -481,6 +489,47 @@ for (const width of WIDTHS) {
     });
   });
 }
+
+// --- 1 段組みの最も狭い幅の帯（owner-line-unlink tasks 5.2 の注記）--------------------------
+//
+// 帯は幅 1024px（lg）から 1 段に組む。オーナー一覧の案内を足したことで、運営の帯の 1 段目の余りは
+// 手元の字幅で約 5px しかない。上の 393・320 は 3 段組みの側しか測らないので、1 段組みが最も窮屈になる
+// この幅で、運営（案内が最も多い）の帯の操作要素すべてに届き、重なりが無いことを測る。
+// 字幅は環境で変わる（CI の Linux と手元の macOS）。ここが CI でだけ赤くなるなら、それは実在の溢れである。
+test.describe('1 段組みの最も狭い幅（1024）の運営の帯', () => {
+  const width = 1024;
+  test.use({ viewport: { width, height: 800 } });
+
+  test(`[R2] 運営の帯（幅 ${width}）: 操作要素すべてに捲らずに届き、重ならない`, async ({ page }) => {
+    const surface = DASHBOARD_SURFACES.find((candidate) => candidate.where === 'オーナー一覧');
+    if (surface === undefined) throw new Error('fixture 未定義の面: オーナー一覧');
+    await surface.open(page);
+    await expectLayoutWidth(page, width);
+
+    const report = await readNavReach(page, width);
+    expect(report.controls.length, '帯の操作要素の数が宣言と違う').toBe(LAYOUT['オーナー一覧']!.navControls);
+    expect(
+      report.controls.filter((control) => !control.inside).map((control) => control.name),
+      `幅 ${width} で、捲らないと届かない帯の操作要素がある`,
+    ).toEqual([]);
+    expect(
+      report.controls.filter((control) => !control.insideNav).map((control) => control.name),
+      `幅 ${width} で、帯の箱からはみ出した操作要素がある（1 段に収まらず折り返している）`,
+    ).toEqual([]);
+    expect(
+      report.controls.filter((control) => !control.hit).map((control) => control.name),
+      '見えている位置を指しても当たらない操作要素がある',
+    ).toEqual([]);
+    expect(
+      report.texts.filter((text) => !text.inside).map((text) => text.text),
+      '帯の中で切れている文字がある',
+    ).toEqual([]);
+    expect(report.overlapItems, '交差を調べた項目が少なすぎる（走査が空振りしている）').toBeGreaterThanOrEqual(
+      LAYOUT['オーナー一覧']!.navControls + 3,
+    );
+    expect(report.overlaps, `幅 ${width} で、帯の中の要素どうしが重なっている`).toEqual([]);
+  });
+});
 
 // --- 空振り対照 -------------------------------------------------------------------------
 //

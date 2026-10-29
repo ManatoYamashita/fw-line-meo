@@ -3,9 +3,14 @@ import { deviceWidthOf, expectNoHorizontalScroll } from '@fwlm/e2e-support/viewp
 
 import {
   DASHBOARD_SURFACES,
+  OWNERS,
   STORES,
   openLoginStorageFailureToast,
+  openOwnerList,
   openStoreQrPanelWithToast,
+  ownerRetryButtonName,
+  ownerRow,
+  ownerUnlinkButtonName,
 } from './fixtures/api';
 import {
   expectPanelInsideScrollport,
@@ -171,6 +176,152 @@ test.describe('店舗一覧の停止と再開', () => {
       ),
       '停止・再開の途中で文書が再読み込みされた（Requirement 2.4）',
     ).toBe(true);
+  });
+});
+
+// --- オーナーの LINE の連携の解除（owner-line-unlink Req 1.4, 2.1–2.4, 3.2, 3.3） -------------
+//
+// 解除は確認を経てだけ成立し（1.4）、成功すると画面を再読み込みせずに行の表示が解除済みへ変わる（2.4）。
+// 解除済みの行は一覧に残り（2.3）、メニューを外し終えていれば操作を持たない。メニューを外せなかった
+// ときは、解除は取り消さずにそのことを示し（3.2）、同じ行に外し直しの操作が出る（3.3）。
+//
+// API は fixtures が状態つきで差し替える（解除の POST が以後の `/owners` を書き換える）。メニューの
+// 失敗は `menuUnlinkOutcomes` で起こす。画面が読み直した一覧に解除が現れることまでを測る。
+
+/** 解除の POST を数える。押していない操作が送られていないことを確かめるために使う。 */
+function countUnlinkPosts(page: Page): { readonly paths: string[] } {
+  const seen = { paths: [] as string[] };
+  page.on('request', (request) => {
+    if (request.method() !== 'POST') return;
+    const path = new URL(request.url()).pathname;
+    if (/^\/owners\/[^/]+\/unlink$/.test(path)) seen.paths.push(path);
+  });
+  return seen;
+}
+
+/** 文書の再読み込みが起きていないことの印を置く（Requirement 2.4）。再読み込みされれば消える。 */
+async function markSameDocument(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as unknown as { __e2eSameDocument?: boolean }).__e2eSameDocument = true;
+  });
+}
+
+async function isSameDocument(page: Page): Promise<boolean> {
+  return page.evaluate(() => (window as unknown as { __e2eSameDocument?: boolean }).__e2eSameDocument === true);
+}
+
+test.describe('オーナー一覧の LINE の連携の解除', () => {
+  const target = OWNERS[0];
+  const others = [OWNERS[2], OWNERS[3], OWNERS[4]] as const;
+  const unlinkName = ownerUnlinkButtonName(target.displayName);
+  const retryName = ownerRetryButtonName(target.displayName);
+  const dialogName = `${target.displayName} の LINE の連携を解除しますか？`;
+
+  test('確認をキャンセルすると解除は送られず、連携中のまま残る', async ({ page }) => {
+    const posts = countUnlinkPosts(page);
+    await openOwnerList(page);
+    const row = ownerRow(page, target.displayName);
+
+    await row.getByRole('button', { name: unlinkName, exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: dialogName });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'キャンセル', exact: true }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText('連携中', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: unlinkName, exact: true })).toBeVisible();
+    expect(posts.paths, 'キャンセルしたのに解除が送られた').toEqual([]);
+  });
+
+  test('解除 → 確認 → 行が解除済みになり、一覧に残って操作が消える', async ({ page }) => {
+    const posts = countUnlinkPosts(page);
+    await openOwnerList(page);
+    await markSameDocument(page);
+    const row = ownerRow(page, target.displayName);
+
+    // 解除は確認を求め、起きることを 3 点で示す（1.4）。
+    await row.getByRole('button', { name: unlinkName, exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: dialogName });
+    await expect(dialog).toBeVisible();
+    for (const consequence of ['変化通知が届かなくなり', '消えずに残ります', '引き継げます']) {
+      await expect(dialog, `確認に「${consequence}」が示されていない`).toContainText(consequence);
+    }
+    expect(posts.paths, '確認の前に解除が送られた').toEqual([]);
+    await dialog.getByRole('button', { name: '解除する', exact: true }).click();
+
+    // 解除済みの表示へ変わり、行は一覧に残る（2.1・2.3・2.4）。メニューも外せたので操作は消える（2.3）。
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText('解除済み', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button')).toHaveCount(0);
+    await expect(row.getByRole('status')).toHaveText(`${target.displayName} の LINE の連携を解除しました。`);
+    await expect(row.getByRole('alert')).toHaveCount(0);
+    // 押した操作が消えたので、焦点は結果の文言へ移る（文書の先頭へ落とさない）。
+    await expect(row.getByRole('status')).toBeFocused();
+    await expect(page.getByRole('row')).toHaveCount(OWNERS.length + 1);
+    // 他のオーナーの行は巻き込まない。
+    await expect(ownerRow(page, others[0].displayName).getByText('連携中', { exact: true })).toBeVisible();
+    await expect(
+      ownerRow(page, others[1].displayName).getByRole('button', {
+        name: ownerRetryButtonName(others[1].displayName),
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(ownerRow(page, others[2].displayName).getByText('解除済み', { exact: true })).toBeVisible();
+
+    expect(posts.paths).toEqual([`/owners/${target.id}/unlink`]);
+    expect(await isSameDocument(page), '解除の途中で文書が再読み込みされた（Requirement 2.4）').toBe(true);
+  });
+
+  test('メニューを外せないと、解除は完了したまま外し直しの操作が出て、外し直すと消える', async ({ page }) => {
+    const posts = countUnlinkPosts(page);
+    // 1 回目（解除）だけメニューを外せず、2 回目（外し直し）は外せる。
+    await openOwnerList(page, { menuUnlinkOutcomes: ['failed', 'removed'] });
+    await markSameDocument(page);
+    const row = ownerRow(page, target.displayName);
+
+    await row.getByRole('button', { name: unlinkName, exact: true }).click();
+    await page
+      .getByRole('alertdialog', { name: dialogName })
+      .getByRole('button', { name: '解除する', exact: true })
+      .click();
+
+    // 解除は取り消さず（3.2）、メニュー未解除の印と外し直しの操作を出す（3.3）。
+    await expect(row.getByText('解除済み（メニュー未解除）', { exact: true })).toBeVisible();
+    const retryButton = row.getByRole('button', { name: retryName, exact: true });
+    await expect(retryButton).toBeVisible();
+    await expect(row.getByRole('alert')).toContainText('連携は解除しました。LINE のメニューは外せませんでした。');
+    // 解除の成功だけを告げる文言は出さない。
+    await expect(row.getByRole('status')).toHaveText('');
+    // 解除と外し直しは同じ押しボタンなので、焦点は押した位置に留まる。
+    await expect(retryButton).toBeFocused();
+
+    // 外し直しは確認なしで送られ、外せたら操作が消える（3.3・2.3）。
+    await retryButton.click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(row.getByText('解除済み', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button')).toHaveCount(0);
+    await expect(row.getByRole('status')).toHaveText(`${target.displayName} の LINE のメニューを外しました。`);
+    await expect(row.getByRole('alert')).toHaveCount(0);
+    await expect(row.getByRole('status')).toBeFocused();
+
+    expect(posts.paths).toEqual([`/owners/${target.id}/unlink`, `/owners/${target.id}/unlink`]);
+    expect(await isSameDocument(page), '解除・外し直しの途中で文書が再読み込みされた（Requirement 2.4）').toBe(true);
+  });
+
+  test('外し直しを続けて失敗しても、外し直しの操作が残る', async ({ page }) => {
+    const pending = OWNERS[3];
+    const posts = countUnlinkPosts(page);
+    await openOwnerList(page, { menuUnlinkOutcomes: ['failed'] });
+    const row = ownerRow(page, pending.displayName);
+    const retryButton = row.getByRole('button', { name: ownerRetryButtonName(pending.displayName), exact: true });
+
+    await retryButton.click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(row.getByRole('alert')).toContainText('LINE のメニューを外せませんでした。');
+    await expect(row.getByText('解除済み（メニュー未解除・引継ぎ先: オーナー太郎）')).toBeVisible();
+    await expect(retryButton).toBeVisible();
+    await expect(retryButton).toBeFocused();
+    expect(posts.paths).toEqual([`/owners/${pending.id}/unlink`]);
   });
 });
 
@@ -515,6 +666,12 @@ test('モバイルビューポートの店舗登録の検索結果で横スク�
   await expectNoHorizontalScroll(page, '店舗登録の検索結果', NAV_SCROLL_REGIONS);
 });
 
+test('モバイルビューポートのオーナー一覧で横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('オーナー一覧').open(page);
+  // 表の容器 1 件（帯は捲れる領域を持たない）。
+  await expectNoHorizontalScroll(page, 'オーナー一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
 test('モバイルビューポートのログイン画面で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('ログイン').open(page);
   await expectNoHorizontalScroll(page, 'ログイン', 0);
@@ -613,12 +770,13 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
     '利用者管理の編集パネル': NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     店舗登録: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     店舗登録の検索結果: NAV_SCROLL_REGIONS,
+    オーナー一覧: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
   };
 
   test('宣言が検証面の一覧と一致する', () => {
     expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(REGIONS));
     // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-    expect(Object.keys(REGIONS)).toHaveLength(9);
+    expect(Object.keys(REGIONS)).toHaveLength(10);
   });
 
   for (const surface of DASHBOARD_SURFACES) {
