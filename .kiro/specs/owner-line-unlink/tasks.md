@@ -134,14 +134,14 @@
   - _Boundary: DeliveryTargets_
   - _Depends: 1.4_
 
-- [ ] 8. 配線と文書の整合
+- [x] 8. 配線と文書の整合
 - [x] 8.1 (P) dashboard-api へ LINE の資格情報を配線する
   - dashboard-api の Cloud Run の設定に、チャネルシークレット（既存の secret）とチャネル ID を足す
   - シークレットの宣言の照合と、デプロイ対象の照合のガードが緑
   - _Requirements: 3.1_
   - _Boundary: infra_
 
-- [ ] 8.2 (P) ER 図と書込境界の文書をスキーマに合わせ、関連 spec を改訂する
+- [x] 8.2 (P) ER 図と書込境界の文書をスキーマに合わせ、関連 spec を改訂する
   - ER 図と書込境界に新しい列と、dashboard-api が解除時に `owners`・会話の行を書くこと、line-webhook が引継ぎで店舗の所有者と引継ぎ先を書くことを記す
   - line-onboarding の Requirement 4.4 を、解除済みオーナーの店舗を同じ代理店から確定した場合の引継ぎを含めて改訂し、agency-dashboard の設計にオーナー一覧の契約変更を注記する
   - ER 図に新しい列と不変条件の注記が現れ、スキーマ文書の整合の機械検証（表単位）が緑
@@ -207,3 +207,4 @@
 - 6.2: 会話の依存は Pick<StoreIdentificationService, searchCandidates | confirmStoreForOnboarding> に絞り、会話から confirmStore を呼べない。引継ぎの後、旧オーナーは店舗特定済みのまま 0 店になる（LINE ID を持たないので振り分けには来ない）。
 - 7: delivery-job の試験の配信時刻は、targets.db が 9・11・12 時、index.e2e が 13・14・15 時、cross-runtime が 17 時を使う。厳密な件数検査は時刻の重複に弱い。
 - 8.1: dashboard-api の LINE_CHANNEL_SECRET・LINE_CHANNEL_ID は新しいイメージより先に terraform apply する（起動時に必須）。loadConfig の必須 env と tf の配線を照合する常設のガードは無い（Issue 候補）。
+- 8.2: db/test/check_docs.sh は表単位で、列・CHECK・書き手の記述漏れを検出しない。ERD の列の機械照合は Issue 候補。

@@ -11,8 +11,8 @@
 | `operators` | TS リアルタイム応答層 | 運営テナントの登録（ダッシュボード） |
 | `agencies` | TS リアルタイム応答層 | 代理店登録（ダッシュボード） |
 | `dashboard_users` | TS リアルタイム応答層 | 運営/代理店アカウント登録（ダッシュボード） |
-| `owners` | TS リアルタイム応答層 | LINE オンボーディング（Webhook）。`delivery_hour`（`competitive-daily-summary`・`0004`）は通知を送る時刻。LINE 上で変える手段は提供しない（`line-on-demand-report`・#256）ので、既定の 7 時のまま運用する。`invite_code_id`（`agency-dashboard`・`0017`・#486）は登録に用いられた招待コードで、書くのはオーナー登録の時点の LINE オンボーディングだけ（NULL = `0017` より前の登録・後から埋めない） |
-| `stores` | TS リアルタイム応答層 | 店舗特定オンボーディング（Webhook/LIFF）。`suspended_at`（`store-suspension`・`0012`・Issue #252）は利用停止の時刻（NULL = 利用中）で、書くのは dashboard-api の停止・再開の操作（運営・代理店）だけ。LINE 応答・客向け Web・Go 日次バッチは読むだけで書かない |
+| `owners` | TS リアルタイム応答層 | LINE オンボーディング（Webhook）。`delivery_hour`（`competitive-daily-summary`・`0004`）は通知を送る時刻。LINE 上で変える手段は提供しない（`line-on-demand-report`・#256）ので、既定の 7 時のまま運用する。`invite_code_id`（`agency-dashboard`・`0017`・#486）は登録に用いられた招待コードで、書くのはオーナー登録の時点の LINE オンボーディングだけ（NULL = `0017` より前の登録・後から埋めない）。LINE の紐づけ（`owner-line-unlink`・`0018`・Issue #487）: 解除（`line_user_id` を NULL に・`line_unlinked_at`・`menu_pending_line_user_id`）を書くのは dashboard-api の解除の操作（運営・担当代理店）だけで、同じトランザクションで `onboarding_sessions` の行を消す。引継ぎ先 `taken_over_by_owner_id` を書くのは line-webhook のオンボーディングの確定（引継ぎ）だけ。line-webhook・客向け Web の SA の INSERT・UPDATE は列単位の付与で、`line_user_id` は INSERT だけ・解除の 2 列は書けない（`db/test/check_owner_line_privileges.sh`） |
+| `stores` | TS リアルタイム応答層 | 店舗特定オンボーディング（Webhook/LIFF）。`suspended_at`（`store-suspension`・`0012`・Issue #252）は利用停止の時刻（NULL = 利用中）で、書くのは dashboard-api の停止・再開の操作（運営・代理店）だけ。LINE 応答・客向け Web・Go 日次バッチは読むだけで書かない。`owner_id` は、解除済みオーナーの店舗と同じ Place を同じ代理店の招待コードで確定したとき、line-webhook がそのオーナーの全店舗について新しいオーナーへ付け替える（引継ぎ・`owner-line-unlink`・Issue #487）。店舗の ID・Place・停止状態は変えない |
 | `survey_rating_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_aspect_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（匿名集計加算） |
 | `survey_concern_tallies` | TS リアルタイム応答層 | 客向けアンケート Web（気になった点の匿名集計加算・`0008`） |
@@ -25,7 +25,7 @@
 | `oauth_tokens` | TS リアルタイム応答層 | 第2フェーズ・GBP OAuth フロー（MVP 非運用） |
 | `summary_deliveries` | TS リアルタイム応答層 | `competitive-daily-summary`／`line-on-demand-report`: TS 配信ジョブの通知記録。店舗×日の 1 行に、送った結果だけでなく送らなかった理由（`skipped_*`）も記録する・`retry_key` で冪等再送（`0004`・status の 7 値は `0010`） |
 | `agency_invite_codes` | TS リアルタイム応答層 | 代理店招待コード（運営が事前発行・LINE オンボーディングが検証） |
-| `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook） |
+| `onboarding_sessions` | TS リアルタイム応答層 | LINE オンボーディング会話の進捗保持（Webhook）。オーナーの紐づけの解除では dashboard-api が元の LINE ユーザー ID とそのオーナーの行を削除する（`owner-line-unlink`・Issue #487） |
 | `line_webhook_events` | TS リアルタイム応答層 | LINE Webhook イベント重複排除（Webhook） |
 | `audit_logs` | TS リアルタイム応答層 | 運営・代理店・オーナーによる業務書込操作の追記型監査記録。`customer` は主体にしない |
 | `gbp_locations` | TS リアルタイム応答層 | `gbp-post-review-reply`: OAuth 連携成立時の GBP 身元（account/location・placeId 突合結果）保存・解除時削除（`0013`） |
