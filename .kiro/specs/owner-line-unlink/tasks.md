@@ -212,3 +212,4 @@
 - 9.2: 店舗詳細の認可は store-detail の route.db.test.ts で、引継ぎの状態を DAL の組（lockPlaceHolder・moveAllStores・markOwnerStoreIdentified）で作って確かめる。確定の引継ぎの分岐が書く列を増やしたら、この試験も追従させる。unfollow は dispatch で捨てられるので、Req 8.2 の試験は回帰ガードとして効く。
 - 9.3: 手元のシェルは PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH を Aside に向けており、run-e2e-local.sh はこれを外さない。E2E は env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH を付けて付属 Chromium で流す。幅 1024px の運営のナビの R2 は余りが約 5px で、CI の Linux の字幅で赤になりうる（赤なら top-nav の間隔を詰める）。
 - 10.1/10.2（文書）: 本番の手順は docs/testing/e2e.md §5（A→B→C→D→E→A2→F）。detached- 行の移行（A2）はデプロイの後に行う（旧 delivery-job が NULL の宛先で毎回失敗するため）。本番での実行と Issue #487 への記録は未了。
+- 全体検証: grants.sql を検証用ロールへ当てる試験（owner-takeover・survey-settings-privileges）は並行実行で tuple concurrently updated を起こす。権限の書き換えは test/support/grants-lock.ts のアドバイザリロックで直列にする。

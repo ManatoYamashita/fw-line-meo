@@ -6,6 +6,7 @@ import { getPool, closePool } from '../src/pool.js';
 import type { Queryable, TransactionCapable } from '../src/pool.js';
 import { lockPlaceHolder, moveAllStores } from '../src/owner-line-link.js';
 import { incrementTallies } from '../src/tallies.js';
+import { withGrantsLock } from './support/grants-lock.js';
 
 // 引継ぎのための所有者の施錠と全店舗の付け替え（owner-line-unlink task 2.3・Req 2.6, 6.1, 6.3, 6.6）。
 // 他ファイルと DB を共有するため、衝突しない専用 UUID プレフィックス（b9）と place_id を使う。
@@ -271,11 +272,13 @@ describe.skipIf(!process.env.DATABASE_URL)('owner-line-link 引継ぎの施錠�
 
   afterAll(async () => {
     const pool = await getPool();
-    for (const key of ROLE_KEYS) {
-      const role = roleName(key);
-      await pool.query(`DROP OWNED BY "${role}"`).catch(() => undefined);
-      await pool.query(`DROP ROLE IF EXISTS "${role}"`).catch(() => undefined);
-    }
+    await withGrantsLock(pool, async (db) => {
+      for (const key of ROLE_KEYS) {
+        const role = roleName(key);
+        await db.query(`DROP OWNED BY "${role}"`).catch(() => undefined);
+        await db.query(`DROP ROLE IF EXISTS "${role}"`).catch(() => undefined);
+      }
+    });
     await closePool();
   });
 
@@ -415,7 +418,9 @@ describe.skipIf(!process.env.DATABASE_URL)('owner-line-link 引継ぎの施錠�
     await pool.query(`GRANT "${roleName('line_webhook')}" TO CURRENT_USER`);
     const statements = grantStatements();
     expect(statements.length).toBeGreaterThan(5);
-    for (const sql of statements) await pool.query(sql);
+    await withGrantsLock(pool, async (db) => {
+      for (const sql of statements) await db.query(sql);
+    });
 
     const moved = await inTransaction(
       pool,
