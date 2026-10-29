@@ -60,9 +60,10 @@
 --   → ck_owner_line_link・ck_owner_menu_pending・ck_owner_taken_over の 3 行があること。
 --   SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_audit_logs_action';
 --   → 定義に owner_line_unlinked・owner_stores_taken_over・store_taken_over が入っていること。
--- 適用の直後に、2026-10-24 の手作業の切り離し行（line_user_id LIKE 'detached-%'）を解除済みへ移す
--- 一回限りの手順がある（design.md の Migration Strategy・docs/testing/e2e.md）。本 migration は
--- データを書き換えない。
+-- 2026-10-24 の手作業の切り離し行（line_user_id LIKE 'detached-%'）を解除済みへ移す一回限りの手順が
+-- あるが、適用の直後には行わず、実装 PR のデプロイを確かめた後に行う。旧 delivery-job は解除済みの
+-- オーナーを配信の対象から外さないので、先に移すと宛先が NULL の配信の予約で失敗する（design.md の
+-- Migration Strategy・docs/testing/e2e.md §5-7）。本 migration はデータを書き換えない。
 --
 -- ロールバック: NOT NULL を戻す逆操作は解除済みのオーナーが 1 人でもいると失敗し、旧 25 値の CHECK へ
 -- 戻す逆操作は解除・引継ぎの監査行が 1 行でもあると失敗する。コードを戻しても本 migration は

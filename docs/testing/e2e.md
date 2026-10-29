@@ -213,6 +213,13 @@ gh pr list --repo ManatoYamashita/fw-line-meo --state open --json number,files \
   --jq '.[] | select(any(.files[]; .path | startswith("db/migrations/0018"))) | .number'
 ```
 
+ログと退避の置き場所を、リポジトリの外に先に作る。5-3. の当て直しのログと 5-7. の退避はここへ入る。
+
+```bash
+BACKUP_DIR="$HOME/fwlm-prod-backup/487"
+mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
+```
+
 ### 5-2. Step A: migration 0018 を当てる
 
 まず、`db/migrations` の全番号が本番に当たっていて、足りないのが `0018` の対象だけであることを確かめる。`0017`（#486）は適用済みのはずである。照合は `prod-schema-drift` と同じスクリプトを、このブランチの migration で流して行う（読むのは本番の catalog の名前だけで、表の行は読まない）。手元の postgres は本番と同じ 16 系であること（版が違うと catalog の行がずれる）。
@@ -360,7 +367,7 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 2. PR をマージする。`gh run list --repo ManatoYamashita/fw-line-meo --workflow deploy-prod --limit 3` で、マージしたコミットの deploy-prod が success になるまで待つ（PR には出ないので自分で見る）
 3. `PROJECT_ID=gen-fw-line-meo make e2e-prod-checks` の 1 が PASS で、デプロイ待ちの WARN が出ていないこと
 4. 5-5. の 1 つ目の `gcloud` で、dashboard-api の新しいリビジョンが Ready であること（起動に失敗すると 2 つの名前が食い違う）
-5. dashboard-web の「オーナー一覧」（`/owners`）が開くこと。続けて 5-7. の A2 を行う
+5. dashboard-web の「オーナー一覧」（`/owners`）が開くこと。5-9. の E の行を Issue #487 に追記し、続けて 5-7. の A2 を行う
 
 ### 5-7. Step A2: 手作業で切り離した行を解除済みへ移す（一回限り・デプロイの後）
 
@@ -391,6 +398,10 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
     WHERE o.line_user_id LIKE 'detached-%'
     ORDER BY o.created_at;
    SQL
+
+   # 移す行の id を控える（オーナーの id は秘密ではない）。4 で、移した行だけを照会するのに使う
+   DETACHED_IDS="$(psql -X -At -c "SELECT coalesce(string_agg(id::text, ',' ORDER BY created_at), '') FROM owners WHERE line_user_id LIKE 'detached-%'")"
+   printf '%s' "$DETACHED_IDS" | tr ',' '\n' | grep -c .   # 期待: N
    ```
 
    期待: `prefix` がすべて `detached-20261024:`、`line_unlinked_at` が空、`pending` が `f`、`sessions` が 0。`delivery_hour` は記録に使わない（デプロイの後なので配信の失敗にならない）
@@ -398,6 +409,7 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 2. 退避する。行には元の LINE ユーザー ID が入っているので、リポジトリの外に置き、Issue・PR・リポジトリへ貼らない
 
    ```bash
+   # 5-1. で作った BACKUP_DIR を使う。マージを挟んで別のシェルで流すときのために、同じ定義を繰り返す（流し直しても害は無い）
    BACKUP_DIR="$HOME/fwlm-prod-backup/487"
    mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
    psql -X -At -v ON_ERROR_STOP=1 \
@@ -449,23 +461,32 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 
    期待: `NOTICE:  解除済みへ移した行: N 件` と `COMMIT`。3 列を 1 文で書くので、`ck_owner_line_link`・`ck_owner_menu_pending` を途中で破らない
 
-4. 確かめる。まだ解除の操作はデプロイされていないので、解除済みのオーナーは移した行だけのはずである
+4. 確かめる。解除の操作は 5-6. でデプロイ済みなので、解除済みのオーナーには画面で解除された行も混ざりうる。移した行は 1 で控えた id で絞って照会し、それ以外の解除済みは別に出す
 
    ```bash
-   psql -X <<'SQL'
+   psql -X -v ids="$DETACHED_IDS" <<'SQL'
    SELECT count(*) AS detached_left FROM owners WHERE line_user_id LIKE 'detached-%';
+   -- 移した行（1 で控えた id）
    SELECT left(id::text, 8) AS owner8,
           line_user_id IS NULL AS no_line_id,
           line_unlinked_at IS NOT NULL AS unlinked,
           menu_pending_line_user_id IS NULL AS no_pending,
           taken_over_by_owner_id IS NULL AS not_taken_over
      FROM owners
+    WHERE id = ANY (string_to_array(:'ids', ',')::uuid[])
+    ORDER BY created_at;
+   -- 移した行以外の解除済み（5-6. のデプロイの後に画面で解除されたもの）
+   SELECT left(id::text, 8) AS owner8, line_unlinked_at
+     FROM owners
     WHERE line_unlinked_at IS NOT NULL
+      AND NOT (id = ANY (string_to_array(:'ids', ',')::uuid[]))
     ORDER BY created_at;
    SQL
    ```
 
-   期待: `detached_left` が 0。2 つ目は 1 の `owner8` と同じ N 行で、4 列がすべて `t`
+   期待: `detached_left` が 0。2 つ目は 1 の `owner8` と同じ N 行で、4 列がすべて `t`。3 つ目は、5-6. から A2 まで（F の前）に誰も解除していなければ 0 行である。行が出たら、それは 5-6. の後に画面で解除されたオーナーで、移し損ねではない。`owner8` と `line_unlinked_at` を記録する
+
+5. 結果を 5-9. の A2 の行で Issue #487 に追記する（0 件で 2〜4 を飛ばしたときは、0 件だったことを書く）
 
 ### 5-8. Step F: 解除と引継ぎを実測する（Req 9.2・9.3・2.6）
 
@@ -476,9 +497,9 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 
 - 5-7. まで終わっていること
 - 同じ代理店の有効な招待コードがあること。無ければ運営アカウントで `/invite-codes` から発行する（引継ぎは同じ代理店の招待コードでしか起きない）
-- 検証するオーナーの店舗の Place を控えておくこと（店名で候補に出せること）
+- 5 で確定し直す Place は、検証するオーナー（1 の `OWNER_ID`）が持つ確定済みの店舗の Place であること（店名で候補に出せること）。別の Place を選ぶと、引継ぎの判定（`lockPlaceHolder`）はその Place の店舗の所有者を見るので、所有者が同じ代理店の解除済みのオーナー（5-7. で移した行など）なら、検証と無関係なそのオーナーの全店舗を引き継いでしまう。店舗の無い Place なら、引継ぎではなく新しい店舗の登録になる
 
-1. 対象のオーナーを決め、その LINE ユーザー ID をシェルの変数にだけ持つ（画面にも記録にも出さない）。宛先は推測せず、プロフィールの表示名で自分のアカウントであることを確かめる
+1. 対象のオーナーを決め、その LINE ユーザー ID をシェルの変数にだけ持つ（画面にも記録にも出さない）。宛先は推測せず、プロフィールの表示名で自分のアカウントであることを確かめる。あわせて、そのオーナーが確定済みの店舗を持つことを確かめる
 
    ```bash
    OWNER_ID='<検証するオーナーの id（全桁。手元だけで使う）>'
@@ -487,6 +508,18 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
    SQL
    )"
    printf '%s' "$VERIFY_UID" | grep -cE '^U[0-9a-f]{32}$'   # 期待: 1
+   # 3・8 の psql は \getenv でこの値を環境変数から読む（psql の -v に渡すと argv に載る）。\getenv は psql 15 以上
+   export VERIFY_UID
+
+   # 確定済みの店舗。5 ではここに出た店舗の Place を選ぶ（オーナーの id・店名は秘密ではないが、記録には先頭 8 文字だけを書く）
+   psql -X -v owner_id="$OWNER_ID" <<'SQL'
+   SELECT left(s.id::text, 8) AS store8, s.name
+     FROM stores s
+    WHERE s.owner_id = :'owner_id'
+      AND s.place_status = 'confirmed'
+    ORDER BY s.created_at;
+   SQL
+   # 期待: 1 行以上。0 行なら引継ぎを確かめられないので、別のオーナーを選ぶ
 
    # チャネルアクセストークンは infra/README.md §8-3 と同じ方法で TOKEN に発行する（シークレットを argv に置かない）
    # URL も設定として渡し、LINE ユーザー ID を argv に置かない
@@ -504,6 +537,8 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
    # 期待: 200
    ```
 
+   この手順で発行するトークン（`/oauth2/v3/token` のステートレスなチャネルアクセストークン）は約 15 分で失効する（`.claude/skills/messaging-api/references/channel-token.md` の Stateless Channel Access Token）。2〜6 の画面の操作を挟むと、3・5 の `curl` の時点で切れていることがある。どの `curl` でも 401 が返ったら（表示名を読む `curl` は何も出さなくなる）、`infra/README.md` §8-3 と同じ方法で TOKEN を発行し直して同じ `curl` を流し直す。401 を 404（メニューが外れた）や失敗と読まない
+
 2. 運営アカウントで dashboard-web の「オーナー一覧」（`/owners`）を開き、対象の行の「LINE の連携を解除」を押す。確認ダイアログの 3 点を読み、「解除する」を押す
    - 期待: 「<名前> の LINE の連携を解除しました。」と出て、行が「解除済み」になる
    - 「メニューを外せませんでした」と出て「解除済み（メニュー未解除）」になったら、「メニューを外し直す」を押す。外し直しで済んだことも記録する
@@ -516,7 +551,8 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
    CFG
    # 期待: 404（個別メニューが無い。トークには既定のオンボーディング用メニューが出る）
 
-   psql -X -v owner_id="$OWNER_ID" -v uid="$VERIFY_UID" <<'SQL'
+   psql -X -v owner_id="$OWNER_ID" <<'SQL'
+   \getenv uid VERIFY_UID
    SELECT line_user_id IS NULL AS no_line_id,
           line_unlinked_at IS NOT NULL AS unlinked,
           menu_pending_line_user_id IS NULL AS no_pending
@@ -528,7 +564,7 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 
 4. スマホの LINE で、公式アカウントのトークにスタンプを 1 つ送る。テキストは送らない（4-4. の 1 と同じ理由）
    - 期待: 「友だち追加ありがとうございます。」で始まり、招待コードの送信を求める案内が返る（Req 9.2）
-5. 招待コードを送る → 店名を送る → 候補から同じ Place を選ぶ → 確定する
+5. 招待コードを送る → 店名を送る → 候補から 1 の照会に出た店舗の Place を選ぶ → 確定する（前提のとおり、別の Place を選ばない）
    - 期待: 「登録が完了しました」のメッセージが届き、リッチメニューが完了版に切り替わる。1 の 2 つ目の `curl` をもう一度流して 200 になる
 6. リッチメニューの「詳細を見る」で LIFF を開き、引き継いだ店舗が出ることを確かめる（Req 9.3）
 7. 運営アカウントで「オーナー一覧」を再読み込みする
@@ -536,7 +572,8 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 8. DB で引継ぎを確かめる
 
    ```bash
-   psql -X -v owner_id="$OWNER_ID" -v uid="$VERIFY_UID" <<'SQL'
+   psql -X -v owner_id="$OWNER_ID" <<'SQL'
+   \getenv uid VERIFY_UID
    SELECT left(o.id::text, 8) AS owner8,
           o.line_user_id IS NOT NULL AS linked,
           o.onboarding_status,
@@ -562,6 +599,7 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 ### 5-9. 記録（Issue #487）
 
 識別子は先頭 8 文字まで、LINE ユーザー ID と LINE の表示名は書かない。退避したファイルの中身は貼らない。
+A〜D の行はマージの前に記録する（5-6. の 1）。E と A2 の行はマージの後に、同じ Issue へ追記する（A2 は 5-7. の 4 を終えてから）。
 
 ```markdown
 ## 本番適用の記録（owner-line-unlink 10.1）
@@ -571,8 +609,8 @@ gcloud run services describe dashboard-api --project gen-fw-line-meo --region as
 - B: 付与者と接続ユーザーが一致 / grants.sql exit=0・WARNING 0 件
 - C: 列権限 25 件すべて ok / テーブル単位の INSERT・UPDATE はどちらも f / CHECK 3 本・監査 action 28 値
 - D: plan は accessor 1 追加・dashboard-api 1 変更のみ / 新リビジョン Ready / env に LINE_CHANNEL_ID・LINE_CHANNEL_SECRET
-- E: PR #<n> をマージ / deploy-prod success / 本番コミット <8 文字> / e2e-prod-checks の 1 PASS / /owners が開く
-- A2: 切り離し行 <N> 件（接頭辞 detached-20261024:・会話 0 件）/ 退避 <N> 行（手元のみ）/ 更新 <N> 件 / 残り 0 件 / 対象 owner: <owner8>, ... / /owners で解除済み
+- E（マージ後に追記）: PR #<n> をマージ / deploy-prod success / 本番コミット <8 文字> / e2e-prod-checks の 1 PASS / /owners が開く
+- A2（マージ後に追記）: 切り離し行 <N> 件（接頭辞 detached-20261024:・会話 0 件）/ 退避 <N> 行（手元のみ）/ 更新 <N> 件 / 残り 0 件 / 対象 owner: <owner8>, ... / 移した行以外の解除済み <0 件、または owner8 と解除の時刻> / /owners で解除済み
 
 ## 解除と引継ぎの実測（owner-line-unlink 10.2）
 - 実施日・実施者:
