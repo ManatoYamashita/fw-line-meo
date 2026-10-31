@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { getPool, closePool } from '@fwlm/db';
+import { getPool, closePool, moveAllStores, unlinkOwnerLine } from '@fwlm/db';
 import type { Queryable } from '@fwlm/db';
 import { queryDeliveryTargets, queryOwnersDueWithoutSummary } from '../src/targets.js';
 
@@ -488,5 +488,164 @@ describe.skipIf(!process.env.DATABASE_URL)('targets (DB) — 評価の無い店�
       { name: '競合ニ', rating: 4.0, reviewCount: 30, starDiff: 0.3 },
       { name: '競合サン', rating: null, reviewCount: 0, starDiff: null },
     ]);
+  });
+});
+
+// owner-line-unlink（Issue #487）: 解除済みオーナーの店舗を配信の対象から外す（4.5・5.2–5.4）。
+// 引き継いだ店舗は、新しいオーナーの宛先で抽出する（6.7）。通知記録が増えないことは、配信の実行全体を通す
+// index.e2e.test.ts の同名の describe で確かめる（記録を書くのは抽出ではなく実行の側であるため）。
+//
+// 解除は実際の書込経路（@fwlm/db の unlinkOwnerLine）で行い、引継ぎは moveAllStores で行う。
+// 解除済みの店舗ごとに、解除済みでないことだけが異なる対照の店舗を置き、除外の理由が解除であることを示す。
+// 上の describe と日付・時刻・識別子を分け、互いの件数検査を汚さない（配信時刻 12 時はほかの試験が使わない）。
+const UNLINK_OP = 'a2000000-0000-0000-0000-000000000001';
+const UNLINK_AG = 'a2000000-0000-0000-0000-000000000002';
+const OW_UNLINKED_WITH_SUMMARY = 'a2000000-0000-0000-0000-000000000011'; // 解除済み・当日summary有・未記録 → 除外
+const OW_LINKED_WITH_SUMMARY = 'a2000000-0000-0000-0000-000000000012'; // 上の対照（連携中）→ 対象
+const OW_UNLINKED_NO_SUMMARY = 'a2000000-0000-0000-0000-000000000013'; // 解除済み・当日summary無 → skip候補からも除外
+const OW_LINKED_NO_SUMMARY = 'a2000000-0000-0000-0000-000000000014'; // 上の対照（連携中）→ skip候補
+const OW_UNLINKED_AFTER_SUMMARY = 'a2000000-0000-0000-0000-000000000015'; // 集計の作成後に解除 → 除外（5.4）
+const OW_TAKEN_OVER_FROM = 'a2000000-0000-0000-0000-000000000016'; // 解除して店舗を引き継がれる旧オーナー
+const OW_TAKEN_OVER_TO = 'a2000000-0000-0000-0000-000000000017'; // 引き継ぐ新しいオーナー（店舗を持たずに始まる）
+const ST_UNLINKED_WITH_SUMMARY = 'b2000000-0000-0000-0000-000000000011';
+const ST_LINKED_WITH_SUMMARY = 'b2000000-0000-0000-0000-000000000012';
+const ST_UNLINKED_NO_SUMMARY = 'b2000000-0000-0000-0000-000000000013';
+const ST_LINKED_NO_SUMMARY = 'b2000000-0000-0000-0000-000000000014';
+const ST_UNLINKED_AFTER_SUMMARY = 'b2000000-0000-0000-0000-000000000015';
+const ST_TAKEN_OVER_WITH_SUMMARY = 'b2000000-0000-0000-0000-000000000016';
+const ST_TAKEN_OVER_NO_SUMMARY = 'b2000000-0000-0000-0000-000000000017';
+const UNLINK_HOUR = 12;
+const UNLINK_DAY = '2026-07-14';
+
+describe.skipIf(!process.env.DATABASE_URL)('targets (DB) — 解除済みオーナーの店舗（owner-line-unlink）', () => {
+  /** 範囲を運営（全オーナー）にして解除する。解除が実際に起きたこと（changed）を確かめる。 */
+  async function unlink(ownerId: string): Promise<void> {
+    const pool = await getPool();
+    const outcome = await unlinkOwnerLine(pool, { ownerId, agencyId: null });
+    expect(outcome.kind).toBe('changed');
+  }
+
+  beforeAll(async () => {
+    const pool = await getPool();
+    await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [UNLINK_OP, '解除配信運営']);
+    await pool.query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [
+      UNLINK_AG,
+      UNLINK_OP,
+      '解除配信代理店',
+    ]);
+
+    for (const ownerId of [
+      OW_UNLINKED_WITH_SUMMARY,
+      OW_LINKED_WITH_SUMMARY,
+      OW_UNLINKED_NO_SUMMARY,
+      OW_LINKED_NO_SUMMARY,
+      OW_UNLINKED_AFTER_SUMMARY,
+      OW_TAKEN_OVER_FROM,
+      OW_TAKEN_OVER_TO,
+    ]) {
+      await pool.query(
+        'INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, $4, $5)',
+        [ownerId, UNLINK_AG, `U-${ownerId}`, 'store_identified', UNLINK_HOUR],
+      );
+    }
+
+    const stores: Array<[string, string]> = [
+      [ST_UNLINKED_WITH_SUMMARY, OW_UNLINKED_WITH_SUMMARY],
+      [ST_LINKED_WITH_SUMMARY, OW_LINKED_WITH_SUMMARY],
+      [ST_UNLINKED_NO_SUMMARY, OW_UNLINKED_NO_SUMMARY],
+      [ST_LINKED_NO_SUMMARY, OW_LINKED_NO_SUMMARY],
+      [ST_UNLINKED_AFTER_SUMMARY, OW_UNLINKED_AFTER_SUMMARY],
+      [ST_TAKEN_OVER_WITH_SUMMARY, OW_TAKEN_OVER_FROM],
+      [ST_TAKEN_OVER_NO_SUMMARY, OW_TAKEN_OVER_FROM],
+    ];
+    for (const [storeId, ownerId] of stores) {
+      await pool.query(
+        'INSERT INTO stores (id, owner_id, name, place_id, place_status) VALUES ($1, $2, $3, $4, $5)',
+        [storeId, ownerId, `店舗 ${storeId}`, `places/${storeId}`, 'confirmed'],
+      );
+    }
+
+    for (const storeId of [
+      ST_UNLINKED_WITH_SUMMARY,
+      ST_LINKED_WITH_SUMMARY,
+      ST_UNLINKED_AFTER_SUMMARY,
+      ST_TAKEN_OVER_WITH_SUMMARY,
+    ]) {
+      await pool.query(
+        `INSERT INTO daily_summaries (store_id, summary_date, status, rank, rank_total, rating, review_count, new_review_count)
+         VALUES ($1, $2, 'ready', 1, 3, '4.5', 100, 0)`,
+        [storeId, UNLINK_DAY],
+      );
+    }
+
+    // 集計の作成後から配信時刻までの間の解除（OW_UNLINKED_AFTER_SUMMARY）と引継ぎは、各試験の中で行う。
+    await unlink(OW_UNLINKED_WITH_SUMMARY);
+    await unlink(OW_UNLINKED_NO_SUMMARY);
+  });
+
+  afterAll(async () => {
+    await closePool();
+  });
+
+  it('当日の集計があり配信時刻に達した未記録の店舗でも、オーナーが解除済みなら配信の対象にせず、連携中の対照は対象にする（4.5・5.2）', async () => {
+    const pool = await getPool();
+    const storeIds = (await queryDeliveryTargets(pool, UNLINK_HOUR, UNLINK_DAY)).map((t) => t.storeId);
+
+    expect(storeIds).not.toContain(ST_UNLINKED_WITH_SUMMARY);
+    expect(storeIds).toContain(ST_LINKED_WITH_SUMMARY);
+  });
+
+  it('当日の集計が無く配信時刻に達した店舗でも、オーナーが解除済みなら見送りの記録の対象にせず、連携中の対照は対象にする（5.3）', async () => {
+    const pool = await getPool();
+    const storeIds = (await queryOwnersDueWithoutSummary(pool, UNLINK_HOUR, UNLINK_DAY)).map((c) => c.storeId);
+
+    expect(storeIds).not.toContain(ST_UNLINKED_NO_SUMMARY);
+    expect(storeIds).toContain(ST_LINKED_NO_SUMMARY);
+  });
+
+  it('集計の作成後から配信時刻までの間に解除されたオーナーの店舗も、配信の対象にしない（5.4）', async () => {
+    const pool = await getPool();
+    // 解除の前は対象である（除外の理由が解除であることを示す）。
+    const beforeIds = (await queryDeliveryTargets(pool, UNLINK_HOUR, UNLINK_DAY)).map((t) => t.storeId);
+    expect(beforeIds).toContain(ST_UNLINKED_AFTER_SUMMARY);
+
+    await unlink(OW_UNLINKED_AFTER_SUMMARY);
+
+    const afterIds = (await queryDeliveryTargets(pool, UNLINK_HOUR, UNLINK_DAY)).map((t) => t.storeId);
+    expect(afterIds).not.toContain(ST_UNLINKED_AFTER_SUMMARY);
+  });
+
+  it('引き継いだ店舗は、2 つの抽出のどちらでも新しいオーナーの宛先で返す（6.7）', async () => {
+    const pool = await getPool();
+    await unlink(OW_TAKEN_OVER_FROM);
+
+    // 解除の後・引継ぎの前は、どちらの抽出にも出ない。
+    const unlinkedReady = (await queryDeliveryTargets(pool, UNLINK_HOUR, UNLINK_DAY)).map((t) => t.storeId);
+    const unlinkedSkip = (await queryOwnersDueWithoutSummary(pool, UNLINK_HOUR, UNLINK_DAY)).map((c) => c.storeId);
+    expect(unlinkedReady).not.toContain(ST_TAKEN_OVER_WITH_SUMMARY);
+    expect(unlinkedSkip).not.toContain(ST_TAKEN_OVER_NO_SUMMARY);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const moved = await moveAllStores(client, { fromOwnerId: OW_TAKEN_OVER_FROM, toOwnerId: OW_TAKEN_OVER_TO });
+      await client.query('COMMIT');
+      expect([...moved].sort()).toEqual([ST_TAKEN_OVER_WITH_SUMMARY, ST_TAKEN_OVER_NO_SUMMARY].sort());
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const target = (await queryDeliveryTargets(pool, UNLINK_HOUR, UNLINK_DAY)).find(
+      (t) => t.storeId === ST_TAKEN_OVER_WITH_SUMMARY,
+    );
+    expect(target?.lineUserId).toBe(`U-${OW_TAKEN_OVER_TO}`);
+
+    const candidate = (await queryOwnersDueWithoutSummary(pool, UNLINK_HOUR, UNLINK_DAY)).find(
+      (c) => c.storeId === ST_TAKEN_OVER_NO_SUMMARY,
+    );
+    expect(candidate?.lineUserId).toBe(`U-${OW_TAKEN_OVER_TO}`);
   });
 });

@@ -187,6 +187,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
 | `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンク（`onboarding/conversation.ts`）と、店舗特定済みオーナーの振り分け口のメニュー照合（`owner/router.ts`・line-on-demand-report）の両方が、この出典の同じ関数を呼んで出す |
 | `line-webhook.richmenu_link_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**失敗**。リンクの失敗は例外にせず、記録だけを残す（出典のコメントが明記）。振り分け口の照合では、応答は済んでいて会話の段階を変えない（次の操作で再び張る） |
+| `line-webhook.richmenu_unlink_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/onboarding/conversation.ts` | オーナーを引けない LINE アカウント（未登録・紐づけを解除した元のアカウント）の友だち追加で、挨拶の Reply の後に個別リッチメニューのリンクを外せなかった場合（owner-line-unlink・Issue #487 の安全網）。Reply の後なので例外にせず、記録だけを残す。外せた場合は記録しない（未登録の友だち追加のたびに出るため。解除の操作の成否は `dashboard-api.richmenu_unlinked` / `dashboard-api.richmenu_unlink_failed` が記録する）。LINE が 404 を返した場合は外すリンクが無い状態として成功に数え、ここへは出さない。項目は `errorKind` だけである。**LINE ユーザー ID・例外の本文は載せない** |
 | `line-webhook.audit_log_failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 監査記録（`audit_logs`）の書込の失敗。会話の監査記録（オーナーの作成・オンボーディングの完了）も、出典の同じ関数で書く。業務処理は巻き戻さない。項目は `errorKind` だけである |
 | `line-webhook.session_stage_update_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/router.ts` | 振り分け口が完了後メニューを張れた後、会話の段階を completed に揃える更新に失敗した場合。応答は済んでいるので例外にしない。段階が completed でないままなので、次の操作で再び張って揃え直す。項目は `errorKind` だけである |
 | `line-webhook.report_replied` | line-webhook | 新規 | `ts/apps/line-webhook/src/report/handler.ts` | レポート要求への応答。Reply を送った後に、応答ごとに 1 件出す。項目は `reportKind` と `reportOutcome` だけである。例外で終わった要求は出さない（`line-webhook.dispatch_failed` が記録する） |
@@ -194,6 +195,7 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line push failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/line/client.ts` | LINE push API の非 2xx 応答。オーナーへの通知を妨げず記録する。LINE ユーザー ID は載せない |
 | `gbp oauth callback: owner unknown; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner を特定できず、push 通知を省略した場合 |
 | `gbp oauth callback: owner not found; push notification skipped` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が見つからず、push 通知を省略した場合 |
+| `gbp oauth callback: owner line unlinked; push notification skipped` | line-webhook | 新規 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の owner が LINE の紐づけを解除済み（LINE ユーザー ID を持たない）で、push 通知を省略した場合（owner-line-unlink Req 4.5）。項目は結果種別と `ownerId` だけで、解除した元の LINE ユーザー ID は載せない |
 | `gbp oauth callback: push notification failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback 後の push 通知に失敗した場合 |
 | `gbp oauth callback: unexpected failure while handling callback` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/callback.ts` | OAuth callback の想定外例外 |
 | `gbp: handleGbpPostback failed` | line-webhook | 既存 | `ts/apps/line-webhook/src/gbp/flows.ts` | GBP postback 処理の想定外例外 |
@@ -207,6 +209,8 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `dashboard-api.audit_log_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/audit.ts` | 監査記録（`audit_logs`）の書込の失敗（Issue #250）。業務の書込は巻き戻さず、応答も業務の結果どおりに返す（`line-webhook.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 | `dashboard-api.review_funnel_read_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/review-funnel.ts` | QR パネルの実績（Issue #401）の読み出しの失敗。応答は 500。項目は `storeId` だけで、件数も例外の文言も載せない |
 | `dashboard-api.registered_place_lookup_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/store-registration.ts` | 店名検索の候補の登録済み照合（Issue #485）の失敗。検索全体を 500 で失敗させる（未登録で埋めない）。項目を持たない。検索の語と候補の `placeId` は検索の語を推定できるため載せない |
+| `dashboard-api.richmenu_unlinked` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/owner-line-unlink.ts` | オーナーの LINE の紐づけの解除・外し直し（owner-line-unlink・Issue #487）で、元の LINE アカウントの完了後メニューの個別リンクを外し、メニュー未解除の印を消せた場合。補助的処理の**成功**（`line-webhook.richmenu_linked` と同じ理由で成功も記録する）。項目を持たない。LINE ユーザー ID は載せない |
+| `dashboard-api.richmenu_unlink_failed` | dashboard-api | 新規 | `ts/apps/dashboard-api/src/owner-line-unlink.ts` | 上の操作の**失敗**。解除は取り消さず、応答は 200 の `menu: failed` で、印が残るので画面から外し直せる。項目は `errorKind`（`invalid_user_id`・`token_failed`・`http_error`・`network_error`、LINE では外せたが印を消せなかった `pending_clear_failed`）と、LINE が応答した場合の `status` だけである。LINE ユーザー ID・応答本文・トークンは載せない |
 
 ---
 

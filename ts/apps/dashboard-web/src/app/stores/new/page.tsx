@@ -19,6 +19,7 @@ import { notifyActionError, notifyActionInfo, notifyActionSuccess } from '../../
 import { loadAgencyRoster, loadStoresByOwner, type OwnerStoresLoad } from '../../../lib/agency-roster';
 import { useAuth } from '../../../lib/auth-context';
 import { getAgencies, getCategories, registerStore, searchStores } from '../../../lib/api';
+import { OWNER_LINE_LINK_LABEL } from '../../../lib/status-labels';
 import type {
   AgencyItem,
   Category,
@@ -106,6 +107,18 @@ const STORE_LOAD_ERROR_TEXT =
 // 選択可能オーナーが 0 件のとき、招待コード先行の必要を案内する（Req 3.3）。
 const NO_OWNERS_TEXT =
   '対象オーナーがいません。オーナーが先に LINE で招待コード入力を済ませる必要があります。';
+// LINE の連携を解除したオーナーに添える印（owner-line-unlink Req 2.5）。この表には「LINE の連携」の列が
+// 無いので、状態の語（オーナー一覧と同じ語）に何の解除かを前置する。解除済みでも選択は止めない。
+const LINE_UNLINKED_MARK = `LINE ${OWNER_LINE_LINK_LABEL.unlinked}`;
+
+/**
+ * オーナーの「選ぶ」の読み上げ名。解除済みのオーナーは印を添え、見た目の印と読み上げを揃える（Req 2.5）。
+ * 見た目の「選ぶ」は名前の末尾に含める（WCAG 2.5.3）。
+ */
+function ownerChoiceName(owner: OwnerListItem): string {
+  const mark = owner.lineLink === 'unlinked' ? `（${LINE_UNLINKED_MARK}）` : '';
+  return `${ownerDistinctLabel(owner)}${mark}を選ぶ`;
+}
 
 /**
  * 5 段階の進行。現在地を支援技術と視覚の両方へ、**同じ判定から**提示する。
@@ -231,17 +244,18 @@ function OwnerRoster({
         stores={state.stores}
         renderAction={(owner) => (
           // **行全体は押せるようにしない**（正典 §7.2）。選択と前進はこの押しボタンが兼ねる。
-          // 読み上げ名は「{表示名}を選ぶ」。見た目の「選ぶ」を名前の末尾に含める（WCAG 2.5.3）。
+          // 読み上げ名は「{表示名}を選ぶ」（解除済みは印を添える・ownerChoiceName）。
+          // 見た目の「選ぶ」を名前の末尾に含める（WCAG 2.5.3）。
           // 「選ぶ」だけが並ぶと行を区別できない。表示名を視覚的に隠した子要素で前置する形は採らない。
           // 隠す要素は絶対配置でブロック化し、名前の算出が区切りの空白を挟んで「…を 選ぶ」へ変わる
           // （実測で確認した。候補の押しボタンが aria-label で名前を固定しているのと同じ理由）。
-          <Button
-            type="button"
-            aria-label={`${ownerDistinctLabel(owner)}を選ぶ`}
-            onClick={() => onSelect(owner)}
-          >
-            選ぶ
-          </Button>
+          // 解除済みの印は文字で示し、色だけで伝えない。解除は異常ではなく状態なので危険の色を使わない。
+          <div className="flex items-center gap-2">
+            {owner.lineLink === 'unlinked' && <Badge variant="outline">{LINE_UNLINKED_MARK}</Badge>}
+            <Button type="button" aria-label={ownerChoiceName(owner)} onClick={() => onSelect(owner)}>
+              選ぶ
+            </Button>
+          </div>
         )}
       />
     </div>

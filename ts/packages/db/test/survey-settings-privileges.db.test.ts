@@ -13,6 +13,7 @@ import {
   type SurveySettingsChange,
 } from '../src/survey-settings.js';
 import { createAuditLog } from '../src/audit-logs.js';
+import { withGrantsLock } from './support/grants-lock.js';
 
 // store-detail の SA に与えた権限だけで、店舗オーナーのアンケート設定の DAL が実際に動くか（Issue #437）。
 //
@@ -97,7 +98,9 @@ describe.skipIf(!process.env.DATABASE_URL)('survey settings DAL × grants.sql（
     await pool.query(`GRANT "${roleName('detail')}" TO CURRENT_USER`);
     const statements = grantStatements();
     expect(statements.length).toBeGreaterThan(5);
-    for (const sql of statements) await pool.query(sql);
+    await withGrantsLock(pool, async (db) => {
+      for (const sql of statements) await db.query(sql);
+    });
     detail = asRole(roleName('detail'), pool);
 
     await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [OP, '権限設定運営']);
@@ -115,11 +118,13 @@ describe.skipIf(!process.env.DATABASE_URL)('survey settings DAL × grants.sql（
 
   afterAll(async () => {
     const pool = await getPool();
-    for (const key of ROLE_KEYS) {
-      const role = roleName(key);
-      await pool.query(`DROP OWNED BY "${role}"`).catch(() => undefined);
-      await pool.query(`DROP ROLE IF EXISTS "${role}"`).catch(() => undefined);
-    }
+    await withGrantsLock(pool, async (db) => {
+      for (const key of ROLE_KEYS) {
+        const role = roleName(key);
+        await db.query(`DROP OWNED BY "${role}"`).catch(() => undefined);
+        await db.query(`DROP ROLE IF EXISTS "${role}"`).catch(() => undefined);
+      }
+    });
     await closePool();
   });
 

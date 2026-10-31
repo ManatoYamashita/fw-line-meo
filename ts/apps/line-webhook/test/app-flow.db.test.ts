@@ -11,6 +11,9 @@ import {
   findStoreByPlaceId,
   recordWebhookEventOnce,
   createAuditLog,
+  unlinkOwnerLine,
+  listStoresWithStatus,
+  listOwners,
 } from '@fwlm/db';
 import type { StoreCandidate } from '@fwlm/db';
 import { createApp, type AppDeps } from '../src/app.js';
@@ -22,10 +25,12 @@ import type { LineMessenger } from '../src/line/client.js';
 import type { PlacesSearchAdapter, SearchOutcome } from '@fwlm/store-identification';
 import {
   buildGreetingMessage,
+  buildInvalidInviteCodeMessage,
   buildStoreNameInputGuidanceMessage,
   buildCandidateCarouselMessage,
   buildConfirmationMessage,
   buildCompletionMessage,
+  buildPlaceAlreadyRegisteredMessage,
   buildStatusGuidanceMessage,
 } from '../src/line/messages.js';
 import { encodeReportPostback } from '@fwlm/line-report';
@@ -158,6 +163,7 @@ function createFakeMessenger(profiles: Record<string, string | undefined> = {}):
       return displayName ? { displayName } : null;
     }),
     linkRichMenu: vi.fn(async (): Promise<void> => {}),
+    unlinkRichMenu: vi.fn(async (): Promise<void> => {}),
     startLoading: vi.fn(async (): Promise<void> => {}),
   };
 }
@@ -598,4 +604,377 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
       expect(suspensionAudits.rowCount).toBe(0);
     },
   );
+
+  // owner-line-unlink 6.2・7.2: 解除済みオーナーの店舗と同じ Place を、同じ代理店の新しいオーナーが確定すると、
+  // 会話はオンボーディング専用の確定で引継ぎを受け、通常の確定と同じ完了を返し、3 種の監査を実 DB に残す。
+  // 解除から同じ LINE アカウントで再オンボーディングする通しの流れは 9.2 の結合試験が持つ。ここでは確定の
+  // postback だけを実 HTTP で通し、会話と実のサービスの配線を確かめる。
+  describe('オンボーディングの確定での引継ぎ（owner-line-unlink 6.2, 6.4, 6.5, 7.2）', () => {
+    async function seedAwaitingConfirmation(
+      pool: Awaited<ReturnType<typeof getPool>>,
+      userId: string,
+      selected: StoreCandidate,
+    ) {
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId: userId });
+      await getOrCreateSession(pool, userId);
+      await updateSession(pool, userId, {
+        stage: 'await_confirmation',
+        ownerId: owner.id,
+        candidates: [selected],
+        selectedIndex: 0,
+      });
+      return owner;
+    }
+
+    function confirmRequest(app: ReturnType<typeof createApp>, userId: string, replyToken: string, eventId: string) {
+      const body = postbackBody(userId, replyToken, eventId, encodePostback({ kind: 'confirm' }));
+      return app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(body, CHANNEL_SECRET) },
+        body,
+      });
+    }
+
+    it('同じ代理店の解除済みオーナーの全店舗を引き継ぎ、完了の案内と完了後メニューを出し、3 種の監査を残す', async () => {
+      const pool = await getPool();
+      const previousUserId = 'Uf0-takeover-previous';
+      const newUserId = 'Uf0-takeover-new';
+      const confirmedStoreId = 'f0000000-0000-0000-0000-0000000487a1';
+      const suspendedStoreId = 'f0000000-0000-0000-0000-0000000487a2';
+      const selected = candidate({ placeId: 'ChIJ_f0_takeover_0', name: '引継ぎ食堂 本店' });
+      const messenger = createFakeMessenger();
+      const app = buildApp({ messenger, places: createFakePlaces({ kind: 'empty' }), pool });
+
+      const previous = await createOwner(pool, {
+        agencyId: AG,
+        inviteCodeId: INVITE_CODE_ID,
+        lineUserId: previousUserId,
+      });
+      await pool.query(`UPDATE owners SET onboarding_status = 'store_identified' WHERE id = $1`, [previous.id]);
+      await pool.query(
+        `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at)
+         VALUES ($1, $3, '引継ぎ食堂 本店', 'ChIJ_f0_takeover_0', 'confirmed', NULL),
+                ($2, $3, '引継ぎ食堂 支店', 'ChIJ_f0_takeover_1', 'confirmed', now())`,
+        [confirmedStoreId, suspendedStoreId, previous.id],
+      );
+      expect((await unlinkOwnerLine(pool, { ownerId: previous.id, agencyId: null })).kind).toBe('changed');
+
+      const owner = await seedAwaitingConfirmation(pool, newUserId, selected);
+
+      const res = await confirmRequest(app, newUserId, 'reply-f0-takeover', 'f0-evt-takeover-confirm');
+      expect(res.status).toBe(200);
+
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenCalledWith('reply-f0-takeover', [buildCompletionMessage(LIFF_STORE_DETAIL_URL)]);
+      expect(messenger.linkRichMenu).toHaveBeenCalledTimes(1);
+      expect(messenger.linkRichMenu).toHaveBeenCalledWith(newUserId, RICHMENU_COMPLETED_ID);
+
+      expect((await findOwnerByLineUserId(pool, newUserId))?.onboarding_status).toBe('store_identified');
+      const session = await getOrCreateSession(pool, newUserId);
+      expect(session.stage).toBe('completed');
+      const stores = await pool.query<{ id: string; owner_id: string }>(
+        'SELECT id, owner_id FROM stores WHERE id = ANY($1::uuid[]) ORDER BY id',
+        [[confirmedStoreId, suspendedStoreId]],
+      );
+      expect(stores.rows).toEqual([
+        { id: confirmedStoreId, owner_id: owner.id },
+        { id: suspendedStoreId, owner_id: owner.id },
+      ]);
+
+      const audits = await pool.query<{ actor_type: string; action: string; target_type: string; target_id: string }>(
+        `SELECT actor_type, action, target_type, target_id
+           FROM audit_logs
+          WHERE actor_id = $1
+            AND action IN ('onboarding_completed', 'owner_stores_taken_over', 'store_taken_over')
+          ORDER BY action, target_id`,
+        [owner.id],
+      );
+      expect(audits.rows).toEqual([
+        { actor_type: 'owner', action: 'onboarding_completed', target_type: 'store', target_id: confirmedStoreId },
+        { actor_type: 'owner', action: 'owner_stores_taken_over', target_type: 'owner', target_id: previous.id },
+        { actor_type: 'owner', action: 'store_taken_over', target_type: 'store', target_id: confirmedStoreId },
+        { actor_type: 'owner', action: 'store_taken_over', target_type: 'store', target_id: suspendedStoreId },
+      ]);
+    });
+
+    it('所有者が連携中の Place は引き継がず、既存の登録済みの案内を返し、監査を残さない', async () => {
+      const pool = await getPool();
+      const holderUserId = 'Uf0-takeover-linked-holder';
+      const newUserId = 'Uf0-takeover-rejected';
+      const holderStoreId = 'f0000000-0000-0000-0000-0000000487b1';
+      const selected = candidate({ placeId: 'ChIJ_f0_takeover_linked', name: '連携中食堂' });
+      const messenger = createFakeMessenger();
+      const app = buildApp({ messenger, places: createFakePlaces({ kind: 'empty' }), pool });
+
+      const holder = await createOwner(pool, { agencyId: AG, inviteCodeId: INVITE_CODE_ID, lineUserId: holderUserId });
+      await pool.query(`UPDATE owners SET onboarding_status = 'store_identified' WHERE id = $1`, [holder.id]);
+      await pool.query(
+        `INSERT INTO stores (id, owner_id, name, place_id, place_status)
+         VALUES ($1, $2, '連携中食堂', 'ChIJ_f0_takeover_linked', 'confirmed')`,
+        [holderStoreId, holder.id],
+      );
+
+      const owner = await seedAwaitingConfirmation(pool, newUserId, selected);
+
+      const res = await confirmRequest(app, newUserId, 'reply-f0-takeover-rejected', 'f0-evt-takeover-rejected');
+      expect(res.status).toBe(200);
+
+      expect(messenger.reply).toHaveBeenCalledTimes(1);
+      expect(messenger.reply).toHaveBeenCalledWith('reply-f0-takeover-rejected', [buildPlaceAlreadyRegisteredMessage()]);
+      expect(messenger.linkRichMenu).not.toHaveBeenCalled();
+      expect((await findOwnerByLineUserId(pool, newUserId))?.onboarding_status).toBe('pending');
+      expect((await findStoreByPlaceId(pool, selected.placeId))?.owner_id).toBe(holder.id);
+
+      const audits = await pool.query(
+        `SELECT 1 FROM audit_logs
+          WHERE actor_id = $1 OR target_id = $2`,
+        [owner.id, holder.id],
+      );
+      expect(audits.rowCount).toBe(0);
+    });
+  });
+
+  // owner-line-unlink 9.2: 解除から、同じ LINE アカウントの再オンボーディングと引継ぎまでを、実 HTTP・実 DB で通す。
+  // 解除は管理画面の経路が使う DAL（unlinkOwnerLine）を直接呼ぶ（dashboard-api の HTTP 層の検証は
+  // dashboard-api の試験が持つ）。店舗詳細画面の認可（Req 4.3, 6.8）は store-detail の route.db.test.ts が、
+  // この流れが作る DB の形（オーナーの行の LINE ユーザー ID と stores.owner_id）に対して確かめる。
+  describe('解除から同じ LINE アカウントでの再オンボーディング・引継ぎまで（owner-line-unlink 4.1–4.4, 6.2, 6.9, 8.2）', () => {
+    const userId = 'Uf0-reonboard-same-account';
+    const suspendedStoreId = 'f0000000-0000-0000-0000-0000000487c1';
+    const pendingStoreId = 'f0000000-0000-0000-0000-0000000487c2';
+    const placeCandidate = candidate({ placeId: 'ChIJ_f0_reonboard_0', name: '再登録食堂 本店' });
+
+    // 連携の状態を表す列（Req 8.2 でブロックの前後を比べる対象）と、会話の行。
+    async function linkStateOf(pool: Awaited<ReturnType<typeof getPool>>, ownerIds: readonly string[]) {
+      const res = await pool.query<{
+        id: string;
+        line_user_id: string | null;
+        line_unlinked_at: Date | null;
+        menu_pending_line_user_id: string | null;
+        taken_over_by_owner_id: string | null;
+        onboarding_status: string;
+      }>(
+        `SELECT id, line_user_id, line_unlinked_at, menu_pending_line_user_id, taken_over_by_owner_id, onboarding_status
+           FROM owners
+          WHERE id = ANY($1::uuid[])
+          ORDER BY id`,
+        [ownerIds],
+      );
+      return res.rows;
+    }
+
+    async function sessionRowsOf(pool: Awaited<ReturnType<typeof getPool>>) {
+      const res = await pool.query<{
+        stage: string;
+        owner_id: string | null;
+        candidates: unknown;
+        selected_index: number | null;
+        invite_failures: number;
+        locked_until: Date | null;
+      }>(
+        `SELECT stage, owner_id, candidates, selected_index, invite_failures, locked_until
+           FROM onboarding_sessions
+          WHERE line_user_id = $1`,
+        [userId],
+      );
+      return res.rows;
+    }
+
+    function unfollowBody(webhookEventId: string): string {
+      // LINE の unfollow は replyToken を持たない（ブロック後は応答できない）。
+      return JSON.stringify({
+        destination: 'Uxxxxbotxxxx',
+        events: [{ type: 'unfollow', source: { type: 'user', userId }, webhookEventId }],
+      });
+    }
+
+    async function send(app: ReturnType<typeof createApp>, body: string): Promise<void> {
+      const res = await app.request('/webhook', {
+        method: 'POST',
+        headers: { 'x-line-signature': sign(body, CHANNEL_SECRET) },
+        body,
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const reportData = encodeReportPostback({ kind: 'new_reviews', storeId: null, page: 0 });
+
+    it(
+      '解除後の友だち追加・メッセージ・レポートの要求は最初の案内に戻って解除前の店舗を返さず、同じアカウントが' +
+        '招待コードから同じ Place を確定すると全店舗を引き継ぎ、ブロックは連携の状態を変えない',
+      async () => {
+        const pool = await getPool();
+        const places = createFakePlaces({ kind: 'found', candidates: [placeCandidate] });
+        const messenger = createFakeMessenger({ [userId]: '再登録太郎' });
+        const app = buildApp({ messenger, places, pool });
+
+        // --- 1. 解除前: 同じアカウントが通常のオンボーディングで店舗を確定する ---
+        await send(app, followBody(userId, 'reply-f0-re-0a', 'f0-evt-re-follow-0'));
+        await send(app, textBody(userId, 'reply-f0-re-0b', 'f0-evt-re-invite-0', INVITE_CODE));
+        await send(app, textBody(userId, 'reply-f0-re-0c', 'f0-evt-re-search-0', '再登録食堂'));
+        await send(
+          app,
+          postbackBody(userId, 'reply-f0-re-0d', 'f0-evt-re-select-0', encodePostback({ kind: 'select_candidate', index: 0 })),
+        );
+        await send(app, postbackBody(userId, 'reply-f0-re-0e', 'f0-evt-re-confirm-0', encodePostback({ kind: 'confirm' })));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-0e', [buildCompletionMessage(LIFF_STORE_DETAIL_URL)]);
+
+        const previous = await findOwnerByLineUserId(pool, userId);
+        expect(previous?.onboarding_status).toBe('store_identified');
+        if (!previous) throw new Error('解除前のオーナーが作られていない');
+        const confirmedStore = await findStoreByPlaceId(pool, placeCandidate.placeId);
+        expect(confirmedStore?.owner_id).toBe(previous.id);
+        if (!confirmedStore) throw new Error('解除前の店舗が確定されていない');
+
+        // 代理店の登録で増えた店舗（停止中の確定済み・未確定）を、同じオーナーに持たせる。引継ぎは全店舗を移す（Req 6.1）。
+        await pool.query(
+          `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at)
+           VALUES ($1, $3, '再登録食堂 支店', 'ChIJ_f0_reonboard_1', 'confirmed', '2026-09-01T00:00:00Z'),
+                  ($2, $3, '再登録食堂 準備中', NULL, 'pending', NULL)`,
+          [suspendedStoreId, pendingStoreId, previous.id],
+        );
+        const allStoreIds = [confirmedStore.id, suspendedStoreId, pendingStoreId];
+
+        // 解除前は、レポートの要求に解除前の店舗の名前で応える（解除後の比較の対照）。
+        await send(app, postbackBody(userId, 'reply-f0-re-0f', 'f0-evt-re-report-0', reportData));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-0f', [
+          buildPreparingNotice({ storeName: placeCandidate.name }),
+        ]);
+
+        // 解除前の会話は、完了の段階と提示した候補を持っている（持ち越されれば解除後の応答が変わる）。
+        expect(await sessionRowsOf(pool)).toEqual([
+          expect.objectContaining({ stage: 'completed', owner_id: previous.id, selected_index: 0 }),
+        ]);
+
+        // Req 8.2: 連携中にブロックしても、連携の状態は変わらない。
+        const linkedBefore = await linkStateOf(pool, [previous.id]);
+        await send(app, unfollowBody('f0-evt-re-unfollow-0'));
+        expect(await linkStateOf(pool, [previous.id])).toEqual(linkedBefore);
+        expect(linkedBefore[0]?.line_user_id).toBe(userId);
+        expect(linkedBefore[0]?.line_unlinked_at).toBeNull();
+
+        // --- 2. 解除 ---
+        const unlinked = await unlinkOwnerLine(pool, { ownerId: previous.id, agencyId: AG });
+        expect(unlinked).toEqual({ kind: 'changed', ownerId: previous.id, menuTarget: userId });
+        // Req 4.2: 会話の行は解除と同じトランザクションで消え、段階・候補・失敗回数を持ち越さない。
+        expect(await sessionRowsOf(pool)).toEqual([]);
+
+        // Req 8.2: 解除済みのアカウントがブロックしても、解除済みのまま（連携中へ戻らない）。
+        const unlinkedBefore = await linkStateOf(pool, [previous.id]);
+        expect(unlinkedBefore[0]).toMatchObject({ line_user_id: null, menu_pending_line_user_id: userId });
+        expect(unlinkedBefore[0]?.line_unlinked_at).toBeInstanceOf(Date);
+        await send(app, unfollowBody('f0-evt-re-unfollow-1'));
+        expect(await linkStateOf(pool, [previous.id])).toEqual(unlinkedBefore);
+
+        // --- 3. 解除後の元の LINE アカウント ---
+        vi.mocked(messenger.reply).mockClear();
+        vi.mocked(messenger.linkRichMenu).mockClear();
+        vi.mocked(messenger.unlinkRichMenu).mockClear();
+        vi.mocked(places.searchCandidates).mockClear();
+
+        // Req 4.1: 友だち追加（ブロック解除）で招待コードの入力を求める最初の案内を返し、個別メニューを外し直す（安全網）。
+        await send(app, followBody(userId, 'reply-f0-re-1a', 'f0-evt-re-follow-1'));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-1a', [buildGreetingMessage()]);
+        expect(messenger.unlinkRichMenu).toHaveBeenCalledWith(userId);
+        // Req 4.2: 新しい会話は最初の段階から始まる。
+        expect(await sessionRowsOf(pool)).toEqual([
+          {
+            stage: 'await_invite_code',
+            owner_id: null,
+            candidates: null,
+            selected_index: null,
+            invite_failures: 0,
+            locked_until: null,
+          },
+        ]);
+
+        // Req 4.4: 残った完了後メニューからのレポートの要求にも、解除前の店舗を含めず最初の案内を返す。
+        await send(app, postbackBody(userId, 'reply-f0-re-1b', 'f0-evt-re-report-1', reportData));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-1b', [buildGreetingMessage()]);
+
+        // Req 4.1, 4.2: メッセージは招待コードとして照合される（完了の段階を持ち越していれば、ステータス案内になる）。
+        // 店名に見えても検索しない。失敗の回数は 0 から数える。
+        await send(app, textBody(userId, 'reply-f0-re-1c', 'f0-evt-re-text-1', '再登録食堂'));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-1c', [buildInvalidInviteCodeMessage()]);
+        expect(places.searchCandidates).not.toHaveBeenCalled();
+        expect(await sessionRowsOf(pool)).toEqual([expect.objectContaining({ stage: 'await_invite_code', invite_failures: 1 })]);
+
+        // 解除後の応答のどれにも、解除前の店舗の名前は出ない。完了後メニューも張らない。
+        expect(JSON.stringify(vi.mocked(messenger.reply).mock.calls)).not.toContain('再登録食堂');
+        expect(messenger.linkRichMenu).not.toHaveBeenCalled();
+        expect((await findOwnerByLineUserId(pool, userId))).toBeNull();
+
+        // --- 4. 同じアカウントで招待コード → 同じ Place の確定 → 引継ぎ ---
+        await send(app, textBody(userId, 'reply-f0-re-2a', 'f0-evt-re-invite-2', INVITE_CODE));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-2a', [buildStoreNameInputGuidanceMessage()]);
+        const successor = await findOwnerByLineUserId(pool, userId);
+        expect(successor).toMatchObject({ agency_id: AG, onboarding_status: 'pending' });
+        if (!successor) throw new Error('再登録のオーナーが作られていない');
+        expect(successor.id).not.toBe(previous.id);
+
+        await send(app, textBody(userId, 'reply-f0-re-2b', 'f0-evt-re-search-2', '再登録食堂'));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-2b', [buildCandidateCarouselMessage([placeCandidate])]);
+        await send(
+          app,
+          postbackBody(userId, 'reply-f0-re-2c', 'f0-evt-re-select-2', encodePostback({ kind: 'select_candidate', index: 0 })),
+        );
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-2c', [buildConfirmationMessage(placeCandidate)]);
+
+        // Req 6.2: 通常の確定と同じく、完了の案内と完了後メニューを提供する。
+        await send(app, postbackBody(userId, 'reply-f0-re-2d', 'f0-evt-re-confirm-2', encodePostback({ kind: 'confirm' })));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-2d', [buildCompletionMessage(LIFF_STORE_DETAIL_URL)]);
+        expect(messenger.linkRichMenu).toHaveBeenCalledTimes(1);
+        expect(messenger.linkRichMenu).toHaveBeenCalledWith(userId, RICHMENU_COMPLETED_ID);
+        expect((await sessionRowsOf(pool))[0]?.stage).toBe('completed');
+
+        // 全店舗（確定済み・停止中・未確定）が、店舗 ID・停止状態・確定状態を保ったまま新しいオーナーへ移る。
+        const stores = await pool.query<{ id: string; owner_id: string; place_status: string; suspended: boolean }>(
+          `SELECT id, owner_id, place_status, suspended_at IS NOT NULL AS suspended
+             FROM stores WHERE id = ANY($1::uuid[]) ORDER BY id`,
+          [allStoreIds],
+        );
+        expect(stores.rows).toEqual(
+          [
+            { id: confirmedStore.id, owner_id: successor.id, place_status: 'confirmed', suspended: false },
+            { id: suspendedStoreId, owner_id: successor.id, place_status: 'confirmed', suspended: true },
+            { id: pendingStoreId, owner_id: successor.id, place_status: 'pending', suspended: false },
+          ].sort((a, b) => a.id.localeCompare(b.id)),
+        );
+        const [previousAfter, successorAfter] = [
+          (await linkStateOf(pool, [previous.id]))[0],
+          (await linkStateOf(pool, [successor.id]))[0],
+        ];
+        expect(previousAfter).toMatchObject({ line_user_id: null, taken_over_by_owner_id: successor.id });
+        expect(successorAfter).toMatchObject({ line_user_id: userId, onboarding_status: 'store_identified' });
+
+        // Req 6.9: 管理画面の店舗一覧（GET /stores が読む listStoresWithStatus）は、引き継いだ店舗を新しいオーナーの店舗として返す。
+        const listed = (await listStoresWithStatus(pool, { agencyId: AG })).filter((s) => allStoreIds.includes(s.id));
+        expect(listed.map((s) => [s.id, s.ownerId]).sort()).toEqual(allStoreIds.map((id) => [id, successor.id]).sort());
+        expect(listed.every((s) => s.ownerDisplayName === '再登録太郎')).toBe(true);
+        // オーナー一覧（GET /owners）は、旧オーナーを解除済み・引継ぎ先つきで、新しいオーナーを連携中・店舗つきで返す（Req 2.6）。
+        const ownersListed = await listOwners(pool, AG);
+        expect(ownersListed.find((o) => o.id === previous.id)).toMatchObject({
+          lineLink: 'unlinked',
+          storeNames: [],
+          takenOverBy: { ownerId: successor.id, displayName: '再登録太郎' },
+        });
+        expect(ownersListed.find((o) => o.id === successor.id)).toMatchObject({
+          lineLink: 'linked',
+          storeNames: ['再登録食堂 本店', '再登録食堂 支店'],
+          takenOverBy: null,
+        });
+
+        // 引き継いだアカウントのレポートの要求は、引き継いだ店舗で応える。
+        await send(app, postbackBody(userId, 'reply-f0-re-2e', 'f0-evt-re-report-2', reportData));
+        expect(messenger.reply).toHaveBeenLastCalledWith('reply-f0-re-2e', [
+          buildPreparingNotice({ storeName: placeCandidate.name }),
+        ]);
+
+        // Req 8.2: 引き継いだ後のブロックも、どちらのオーナーの連携の状態も変えない。
+        const takenOverBefore = await linkStateOf(pool, [previous.id, successor.id]);
+        await send(app, unfollowBody('f0-evt-re-unfollow-2'));
+        expect(await linkStateOf(pool, [previous.id, successor.id])).toEqual(takenOverBefore);
+      },
+    );
+  });
 });

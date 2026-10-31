@@ -3,6 +3,7 @@ import { getPool, closePool } from '@fwlm/db';
 import { createApp } from '../src/app.js';
 import type { TokenVerifier } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で QR RBAC マトリクスを app.request 経由で検証。
 // firebase-admin のみモック（Bearer トークン文字列＝uid とみなす）。DATABASE_URL 無しは skip。
@@ -18,11 +19,13 @@ const S_PENDING = 'ffffffff-0000-0000-0000-000000000008'; // AG1・pending
 const S_SUSP = 'ffffffff-0000-0000-0000-000000000009'; // AG1・confirmed（停止・再開を SQL で切り替える）
 
 
-// 合成根へ渡す設定（loadConfig を通さず、使う 3 項目だけを与える）。
+// 合成根へ渡す設定（loadConfig を通さず、合成根が使う項目だけを与える）。
 const config = {
   placesApiKey: 'test-places-key',
   corsOrigin: 'https://dash.example',
   surveyBaseUrl: 'https://survey.example',
+  lineChannelId: '1234567890',
+  lineChannelSecret: 'dummy-line-channel-secret',
 };
 
 // firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
@@ -32,7 +35,7 @@ const verifier: TokenVerifier = {
 
 function buildApp(): ReturnType<typeof createApp> {
   // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 async function qr(app: ReturnType<typeof createApp>, storeId: string, bearer?: string): Promise<Response> {

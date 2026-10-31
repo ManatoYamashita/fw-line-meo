@@ -6,6 +6,7 @@ import { handleMe, type MeDeps } from './me.js';
 import { handleStoresList, type StoresListDeps } from './stores-list.js';
 import { handleStoreSuspension, type StoreSuspensionDeps } from './store-suspension.js';
 import { handleOwnersList, type OwnersListDeps } from './owners-list.js';
+import { handleOwnerLineUnlink, type OwnerLineUnlinkDeps } from './owner-line-unlink.js';
 import { handleCategories, type CategoriesDeps } from './categories.js';
 import {
   handleStoreSearch,
@@ -58,6 +59,8 @@ export interface AppDeps {
   };
   // 店舗の停止・再開（store-suspension）。1 つの依存を両ルートで共有する。
   storeSuspension: StoreSuspensionDeps;
+  // オーナーの LINE の紐づけの解除と、メニューの外し直し（owner-line-unlink）。
+  ownerLineUnlink: OwnerLineUnlinkDeps;
   inviteCodes: {
     list: InviteCodesListDeps;
     issue: InviteCodeIssueDeps;
@@ -208,6 +211,19 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       id: c.req.param('id'),
       direction: 'resume',
+      log: c.get('correlationLog'),
+    }),
+  );
+
+  // --- オーナーの LINE の紐づけの解除（body 不要。対象は :id・範囲は認証ユーザーの役割から決める）。 ---
+  // 解除と、メニューの外し直しを同じルートで受ける（既に解除済みなら状態を変えずにメニューだけを外し直す）。
+  // 状態を変える操作なので POST のサブパスで表し、CORS の許可メソッドは GET/POST のまま変えない。
+  // 解除の DB の失敗はハンドラが例外のまま返し、ここで 500 になる。
+
+  app.post('/owners/:id/unlink', (c) =>
+    handleOwnerLineUnlink(deps.ownerLineUnlink, {
+      authorization: authHeader(c),
+      id: c.req.param('id'),
       log: c.get('correlationLog'),
     }),
   );

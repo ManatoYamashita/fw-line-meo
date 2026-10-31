@@ -34,6 +34,11 @@ function owner(id: string, inviteCodeId: string | null): OwnerListItem {
     onboardingStatus: 'pending',
     createdAt: '2026-10-01T00:00:00.000Z',
     inviteCode: inviteCodeId === null ? null : { id: inviteCodeId, code: `CODE-${inviteCodeId}`, disabled: false },
+    agencyName: '代理店A',
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
   };
 }
 

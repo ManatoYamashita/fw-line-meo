@@ -18,7 +18,7 @@ import {
   PLACE_STATUS_LABEL,
   storeSuspensionLabel,
 } from '../src/lib/status-labels';
-import type { StoreListItem } from '../src/lib/types';
+import type { OwnerListItem, StoreListItem } from '../src/lib/types';
 
 // 1 代理店ぶんの「オーナー＋店舗」の共用部品（Issue #485・代理店詳細 #486 と共用）。
 
@@ -44,7 +44,18 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-const OWNER = { id: 'o1', displayName: '山田', onboardingStatus: 'pending', createdAt: '2026-01-01T00:00:00Z' };
+const OWNER = {
+  id: 'o1',
+  displayName: '山田',
+  onboardingStatus: 'pending',
+  createdAt: '2026-01-01T00:00:00Z',
+  inviteCode: null,
+  agencyName: '代理店A',
+  lineLink: 'linked',
+  menuUnlinkPending: false,
+  storeNames: [],
+  takenOverBy: null,
+} satisfies OwnerListItem;
 
 describe('groupStoresByOwner', () => {
   it('店舗をオーナーごとに振り分け、1 オーナーの複数店舗を API の並び順のまま持つ', () => {

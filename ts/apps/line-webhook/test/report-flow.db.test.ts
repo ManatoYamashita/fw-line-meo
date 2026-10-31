@@ -284,6 +284,7 @@ function createFakeMessenger(): LineMessenger {
     push: vi.fn(async (): Promise<void> => {}),
     getProfile: vi.fn(async () => null),
     linkRichMenu: vi.fn(async (): Promise<void> => {}),
+    unlinkRichMenu: vi.fn(async (): Promise<void> => {}),
     startLoading: vi.fn(async (): Promise<void> => {}),
   };
 }
@@ -416,7 +417,7 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook report flow (DB)', () =
 
   /**
    * オンボーディングを終えたオーナー（段階 completed）を作り、候補ごとに confirmStore で確定店舗を作る
-   * （確定店舗の作成とオーナーの store_identified への遷移は、本番と同じ confirmStore のトランザクションで行う）。
+   * （確定店舗の作成とオーナーの store_identified への遷移は、店舗登録（dashboard-api）と同じ confirmStore のトランザクションで行う。LINE の確定は confirmStoreForOnboarding を使う）。
    * 確定店舗の ID を作成順に返す。
    */
   async function seedCompletedOwnerWithStores(lineUserId: string, candidates: readonly StoreCandidate[]): Promise<string[]> {

@@ -2,6 +2,7 @@
 // Requirement 4.3: 完了案内 reply の送信手段（MessageBuilders が組み立てたメッセージをそのまま渡す）。
 // Requirement 5.5: 5秒応答予算に食い込ませない（トークン発行は初回のみ・以降はメモリキャッシュ）。
 // Requirement 6.3: 完了時のリッチメニュー個別リンク（即時反映）。
+// owner-line-unlink Requirement 3.1: 個別リンクの解除（未登録の友だち追加の安全網・onboarding/conversation.ts）。
 // Requirement 7.2: getProfile は displayName のみを契約として返す（他フィールドは構造的に落とす）。
 //
 // stateless channel access token（有効 ~15分・発行無制限）を LINE_CHANNEL_ID＋SECRET で
@@ -29,6 +30,12 @@ export interface LineMessenger {
   push(lineUserId: string, messages: readonly LineMessage[]): Promise<void>;
   getProfile(lineUserId: string): Promise<{ displayName: string } | null>;
   linkRichMenu(lineUserId: string, richMenuId: string): Promise<void>;
+  /**
+   * LINE ユーザーの個別リッチメニューのリンクを外す（owner-line-unlink Requirement 3.1）。
+   * 外すと、そのユーザーには既定リッチメニュー（未登録の利用者と同じメニュー）が表示される。
+   * トークンと非 2xx の扱いは linkRichMenu と同じ（非 2xx は例外）。ただし 404 は外すリンクが無い状態として成功とする。
+   */
+  unlinkRichMenu(lineUserId: string): Promise<void>;
   /**
    * 処理中であることを示す入力中アニメーションを表示する（Issue #307）。1:1 チャット限定。
    * `loadingSeconds` は 5〜60。ボットが新しいメッセージを送るか、この秒数が経つと自動的に消える。
@@ -67,6 +74,8 @@ const PUSH_URL = 'https://api.line.me/v2/bot/message/push';
 const PROFILE_URL_BASE = 'https://api.line.me/v2/bot/profile';
 const USER_URL_BASE = 'https://api.line.me/v2/bot/user';
 const LOADING_START_URL = 'https://api.line.me/v2/bot/chat/loading/start';
+// LINE のユーザー ID の形（Webhook の source.userId）。unlinkRichMenu がパスを組み立てる前に確かめる。
+const LINE_USER_ID_PATTERN = /^U[0-9a-f]{32}$/;
 
 // startLoading はベストエフォートの補助表示であり、reply 経路（5秒応答目標）を巻き込んで
 // 遅らせてはならない。places-search.ts と同じ AbortController の規律で上限を切る
@@ -217,6 +226,35 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
       }
     },
 
+    // 契約の根拠: .claude/skills/messaging-api/references/rich-menu.md「Per-user Rich Menu」と
+    // @line/bot-sdk の生成型（MessagingApiClient.unlinkRichMenuIdFromUser）。
+    // `DELETE https://api.line.me/v2/bot/user/{userId}/richmenu`。
+    //
+    // - 404 は成功として扱う。個別リンクが無いユーザーへの応答が文書化されておらず、dashboard-api の
+    //   LineRichMenuAdapter（line-richmenu.ts）と同じ判断に揃える。未登録の友だち追加のたびに呼ぶので、
+    //   リンクの無いユーザーを失敗として数えると記録が雑音で埋まる。
+    // - LINE ユーザー ID の形に合わない値は、トークンの発行も含めて通信せずに例外を投げる。encodeURIComponent は
+    //   `all` や `..` を通し、`DELETE /v2/bot/user/all/richmenu` は既定リッチメニューの解除という別の操作である
+    //   （全ての未登録の利用者からメニューが消える）。ID は Webhook の source.userId からしか来ないが、
+    //   パスの組み立てで別の操作へ届かないことを、呼び出し元に依らずここで保つ。
+    // - 例外の文言には状態コードだけを載せ、LINE ユーザー ID は載せない。
+    async unlinkRichMenu(lineUserId: string): Promise<void> {
+      if (!LINE_USER_ID_PATTERN.test(lineUserId)) {
+        throw new Error('LineMessenger: unlinkRichMenu refused a value that is not a LINE user ID');
+      }
+
+      const accessToken = await getAccessToken();
+
+      const response = await deps.fetch(`${USER_URL_BASE}/${encodeURIComponent(lineUserId)}/richmenu`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`LineMessenger: unlinkRichMenu failed with status ${response.status}`);
+      }
+    },
+
     async startLoading(lineUserId: string, loadingSeconds: number): Promise<void> {
       const accessToken = await getAccessToken();
 
@@ -248,6 +286,7 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
         push: (lineUserId, messages) => messenger.push(lineUserId, messages),
         getProfile: (lineUserId) => messenger.getProfile(lineUserId),
         linkRichMenu: (lineUserId, richMenuId) => messenger.linkRichMenu(lineUserId, richMenuId),
+        unlinkRichMenu: (lineUserId) => messenger.unlinkRichMenu(lineUserId),
         startLoading: (lineUserId, loadingSeconds) => messenger.startLoading(lineUserId, loadingSeconds),
         withLogger: (nextLogger) => withLineMessengerLogger(messenger, nextLogger),
       };

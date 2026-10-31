@@ -90,14 +90,14 @@ interface SurfaceLayout {
  */
 const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
   店舗一覧: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 18,
     panelCells: 0,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   '店舗一覧の QR パネル': {
     modalOverlay: true,
-    navControls: 6,
+    navControls: 7,
     // 店舗一覧の 18 件に、パネルの中の実績の表（Issue #401）の 8 件を足した数。内訳は列見出し 2
     // （今月・先月）・行見出し 2（回答・投稿画面へ進んだ回数）・データセル 4。角の見出し「項目」は
     // 読み上げ専用で描かれないので、空のセルへ数える。Drawer は Portal 内にあり行内セルは無い。
@@ -106,17 +106,18 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   代理店管理: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 4,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
   },
   // Issue #486: 代理店詳細は表を 4 つ持つ。セルは見出しとデータの合計で、利用者（3 列 × 見出し＋1 人）・
-  // オーナー（招待コードを含む 5 列 × 見出し＋3 人）・店舗（4 列 × 見出し＋2 店）・招待コード（4 列 ×
-  // 見出し＋2 件）の 6 + 20 + 12 + 12。
+  // オーナー（招待コードを含む 5 列 × 見出し＋5 人）・店舗（4 列 × 見出し＋2 店）・招待コード（4 列 ×
+  // 見出し＋2 件）の 6 + 30 + 12 + 12。オーナーの試験データには owner-line-unlink（Issue #487）で解除済みの
+  // 2 人が足され、帯には「オーナー一覧」が足されている（運営の帯の操作要素は 7）。
   代理店詳細: {
-    navControls: 6,
-    measuredCells: 50,
+    navControls: 7,
+    measuredCells: 60,
     panelCells: 0,
     // 実測（2026-10-28）: 幅 393 では利用者の表（3 列）だけが収まり（361/361）、オーナー 731・店舗 424・
     // 招待コード 472（容器 361）が溢れる。幅 320 では 4 つとも溢れる。
@@ -132,35 +133,43 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     mustOverflow: { 393: [], 320: [] },
   },
   招待コード: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 11,
     panelCells: 0,
     mustOverflow: { 393: ['招待コード'], 320: ['招待コード'] },
   },
   利用者管理: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 18,
     panelCells: 0,
     mustOverflow: { 393: ['利用者一覧'], 320: ['利用者一覧'] },
   },
   '利用者管理の編集パネル': {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 18,
     panelCells: 1,
     mustOverflow: { 393: ['利用者一覧'], 320: ['利用者一覧'] },
   },
-  // Issue #485: オーナー選択が表を持った（見出し 5 列＋3 人 × 5 列）。
+  // Issue #485: オーナー選択が表を持った（見出し 5 列＋オーナー × 5 列）。owner-line-unlink で
+  // 解除済みのオーナー 2 人を fixture へ足したので 5 人（解除済みの印も描かれる）。
   店舗登録: {
-    navControls: 6,
-    measuredCells: 20,
+    navControls: 7,
+    measuredCells: 30,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
   },
   店舗登録の検索結果: {
-    navControls: 6,
+    navControls: 7,
     measuredCells: 0,
     panelCells: 0,
     mustOverflow: { 393: [], 320: [] },
+  },
+  // owner-line-unlink: 見出し 5 列＋5 人 × 5 列。
+  オーナー一覧: {
+    navControls: 7,
+    measuredCells: 29,
+    panelCells: 0,
+    mustOverflow: { 393: ['オーナー一覧'], 320: ['オーナー一覧'] },
   },
 };
 
@@ -170,7 +179,7 @@ test('宣言の面が検証面の一覧と一致する', () => {
     '面を足したら LAYOUT にも足す（宣言の無い面は beforeEach で止まる）',
   ).toEqual(Object.keys(LAYOUT));
   // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-  expect(Object.keys(LAYOUT)).toHaveLength(10);
+  expect(Object.keys(LAYOUT)).toHaveLength(11);
 });
 
 for (const surface of DASHBOARD_SURFACES) {
@@ -464,7 +473,7 @@ for (const { probe, widths } of PANEL_CASES) {
 
 // --- 代理店ロールの帯（1 段目が最も広い状態）---------------------------------------------
 //
-// 検証面の fixture は運営ロールで開く。案内リンクは運営が 5 本・代理店が 3 本なので 2 段目は
+// 検証面の fixture は運営ロールで開く。案内リンクは運営が 6 本・代理店が 4 本なので 2 段目は
 // 運営が最悪値だが、**1 段目は代理店の方が広い**（ロールの表示が「運営」より 1 字長い）。
 // 包含関係にならないので、代理店ロールの帯も測る。
 
@@ -482,8 +491,8 @@ for (const width of WIDTHS) {
         report.texts.map((text) => text.text),
         '代理店ロールで開けていない（ロールの表示が「代理店」でない）',
       ).toContain('代理店');
-      // 管理メニュー 2 件が消えるので、リンク 3 本 + ログアウト 1 件。
-      expect(report.controls.length, '帯の操作要素の数が宣言と違う').toBe(4);
+      // 管理メニュー 2 件が消えるので、リンク 4 本 + ログアウト 1 件。
+      expect(report.controls.length, '帯の操作要素の数が宣言と違う').toBe(5);
       expect(
         report.controls.filter((control) => !control.inside).map((control) => control.name),
         `幅 ${width} で、捲らないと届かない帯の操作要素がある`,
@@ -495,6 +504,47 @@ for (const width of WIDTHS) {
     });
   });
 }
+
+// --- 1 段組みの最も狭い幅の帯（owner-line-unlink tasks 5.2 の注記）--------------------------
+//
+// 帯は幅 1024px（lg）から 1 段に組む。オーナー一覧の案内を足したことで、運営の帯の 1 段目の余りは
+// 手元の字幅で約 5px しかない。上の 393・320 は 3 段組みの側しか測らないので、1 段組みが最も窮屈になる
+// この幅で、運営（案内が最も多い）の帯の操作要素すべてに届き、重なりが無いことを測る。
+// 字幅は環境で変わる（CI の Linux と手元の macOS）。ここが CI でだけ赤くなるなら、それは実在の溢れである。
+test.describe('1 段組みの最も狭い幅（1024）の運営の帯', () => {
+  const width = 1024;
+  test.use({ viewport: { width, height: 800 } });
+
+  test(`[R2] 運営の帯（幅 ${width}）: 操作要素すべてに捲らずに届き、重ならない`, async ({ page }) => {
+    const surface = DASHBOARD_SURFACES.find((candidate) => candidate.where === 'オーナー一覧');
+    if (surface === undefined) throw new Error('fixture 未定義の面: オーナー一覧');
+    await surface.open(page);
+    await expectLayoutWidth(page, width);
+
+    const report = await readNavReach(page, width);
+    expect(report.controls.length, '帯の操作要素の数が宣言と違う').toBe(LAYOUT['オーナー一覧']!.navControls);
+    expect(
+      report.controls.filter((control) => !control.inside).map((control) => control.name),
+      `幅 ${width} で、捲らないと届かない帯の操作要素がある`,
+    ).toEqual([]);
+    expect(
+      report.controls.filter((control) => !control.insideNav).map((control) => control.name),
+      `幅 ${width} で、帯の箱からはみ出した操作要素がある（1 段に収まらず折り返している）`,
+    ).toEqual([]);
+    expect(
+      report.controls.filter((control) => !control.hit).map((control) => control.name),
+      '見えている位置を指しても当たらない操作要素がある',
+    ).toEqual([]);
+    expect(
+      report.texts.filter((text) => !text.inside).map((text) => text.text),
+      '帯の中で切れている文字がある',
+    ).toEqual([]);
+    expect(report.overlapItems, '交差を調べた項目が少なすぎる（走査が空振りしている）').toBeGreaterThanOrEqual(
+      LAYOUT['オーナー一覧']!.navControls + 3,
+    );
+    expect(report.overlaps, `幅 ${width} で、帯の中の要素どうしが重なっている`).toEqual([]);
+  });
+});
 
 // --- 空振り対照 -------------------------------------------------------------------------
 //

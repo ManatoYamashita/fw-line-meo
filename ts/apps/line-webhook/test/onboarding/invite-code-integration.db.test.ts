@@ -61,6 +61,7 @@ function createFakeMessenger(): LineMessenger {
     push: vi.fn(async (): Promise<void> => {}),
     getProfile: vi.fn(async () => null),
     linkRichMenu: vi.fn(async (): Promise<void> => {}),
+    unlinkRichMenu: vi.fn(async (): Promise<void> => {}),
     startLoading: vi.fn(async (): Promise<void> => {}),
   };
 }

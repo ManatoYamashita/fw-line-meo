@@ -181,6 +181,8 @@ psql -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.s
   - 緊急（Terraform を待てないとき）: `gcloud run services update survey-web --project gen-fw-line-meo --region asia-northeast1 --update-env-vars SURVEY_FORCE_STRUCTURED=0`（store-detail も同じ）。**Terraform との乖離が残るので、直後に `main.tf` を `"0"` にして apply し、宣言を合わせる**（合わせないと次の apply が `1` へ戻す）
   - 切り戻しのコミット・apply の日時を #441 に記録する
 
+- **オーナーの LINE 連携の解除（Issue #487）の `0018`**: これもマージの前に当てる。マージの前には `0018` に続けて、`infra/sql/grants.sql` の当て直し（owners の列単位の付与・付与者の照合）、列権限の照会、dashboard-api への LINE の env の apply（イメージより先）を行う。一回限りのデータの変換（2026-10-24 に手作業で切り離した `detached-` 行を解除済みへ移す）は、マージの後にデプロイを確かめてから行う。旧 delivery-job は解除済みのオーナーを配信の対象から外さないので、先に移すと、宛先が NULL の配信の予約で失敗し続ける。手順と期待値は `docs/testing/e2e.md` §5 にまとめてあり、ここには書き写さない。
+
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。ロール名は `:project` から組み立てるため、**この既定値が GCP プロジェクト ID であること**が前提になる（2026-08-24 まで既定が DB 名の `fwlm` になっており、上のコマンドは `role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックしていた・PR #144 で是正）。
 
 ---
@@ -400,7 +402,7 @@ CFG
 - 課金と副作用: read-only の Place Details 1 回。`X-Goog-FieldMask` を `id` だけに絞ると最安の Essentials SKU に収まる（`go/internal/places/client.go` の 2 種のマスクは使わない）。
 - `<PLACE_ID>` は本番 `stores.place_id` の実値を使う（§3 の Auth Proxy 経由 `psql` で取得）。
 
-### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / 機能1 配信）
+### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / dashboard-api / 機能1 配信）
 
 ```bash
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
@@ -419,7 +421,7 @@ CFG
 - **チャネルシークレットもトークンも argv へ置かない**（§8-1 と同じ理由）。本文は `--data @-` で標準入力から、トークンは `-K -` で設定として渡す。
 - 課金と副作用: **なし。`/v2/bot/info` は read-only であり、メッセージを一切送信しない。**
 - **push / multicast / broadcast を実疎通に使ってはならない。** 実送信は受信者への迷惑であり、無料メッセージ通数枠を消費する。トークンが発行できて `/v2/bot/info` が 200 を返せば、チャネル資格情報の正当性は証明できる。
-- **チャネルアクセストークンの枠は存在しない**（Issue #141 で撤去済み）。送信側の 2 消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts`）はどちらもチャネル ID とシークレットから stateless token を都度発行するため、長期トークンを Secret Manager に置く必要が無い。したがって `line-channel-secret` の正当性が証明できれば、LINE 送信系の資格情報はすべて証明できている。
+- **チャネルアクセストークンの枠は存在しない**（Issue #141 で撤去済み）。3 つの消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts` / `ts/apps/dashboard-api/src/line-richmenu.ts`）はいずれもチャネル ID とシークレットから stateless token を都度発行するため、長期トークンを Secret Manager に置く必要が無い。したがって `line-channel-secret` の正当性が証明できれば、LINE 送信系の資格情報はすべて証明できている。
 
 ### 8-4. 記録の更新
 

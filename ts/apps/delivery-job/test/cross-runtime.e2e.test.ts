@@ -23,6 +23,12 @@
 // 取得も集計も行わない。配信の段は、同じ店舗を対象にも見送りの候補にもせず、通知記録を 1 行も残さない
 // ことを確かめる（集計が無い店舗なので、見送りの候補の述語が停止を見ていなければ skipped_no_summary が残る）。
 //
+// owner-line-unlink（tasks 9.1・Requirements 5.1, 5.2, 5.3）で、LINE の紐づけを解除したオーナーの店舗を足した。
+// Go の段はこの店舗を通常どおり取得し、比較可能で新着のある当日の集計を作る。配信の段は、同じ店舗へ送らず、
+// 通知記録（送信・失敗・見送り）を 1 行も残さないことを確かめる。配信の対象の述語が解除を見ていなければ、
+// 宛先（line_user_id）が無いので記録の書き込みが summary_deliveries.line_user_id の NOT NULL で落ちて個別の
+// エラーになる。記録は残らないので、この変異を赤にするのは記録 0 行の表明ではなく対象件数の表明（3 件）である。
+//
 // 実行方法: db/test/cross_runtime_steps.sh が
 //   1. Go 側テスト（go test ./internal/batch/... -run TestCrossRuntimeContract）を先に実行し、
 //   2. 直後に本ファイルを CROSS_RUNTIME_GO_SEEDED=1 付きで実行する
@@ -53,6 +59,10 @@ const UNRATED_LINE_USER_ID = 'U-cross-runtime-unrated';
 // 停止中の店舗（store-suspension tasks 7.1）。
 const SUSPENDED_STORE_ID = 'c7100000-0000-0000-0000-000000000004';
 const SUSPENDED_LINE_USER_ID = 'U-cross-runtime-suspended';
+// LINE の紐づけを解除したオーナーの店舗（owner-line-unlink tasks 9.1）。元の LINE ユーザー ID は
+// line_user_id には無く、メニュー未解除の印（menu_pending_line_user_id）にだけ残る。
+const UNLINKED_STORE_ID = 'c7100000-0000-0000-0000-000000000005';
+const UNLINKED_ORIGINAL_LINE_USER_ID = 'U-cross-runtime-unlinked';
 const CROSS_RUNTIME_DELIVERY_HOUR = 17;
 const TODAY = '2026-07-12';
 // resolveJstNow(NOW) === { hour: 17, date: '2026-07-12' }（UTC 8時 = JST 17時）。
@@ -298,8 +308,9 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
       expect(summary.currentJstHour).toBe(CROSS_RUNTIME_DELIVERY_HOUR);
       expect(summary.summaryDate).toBe(TODAY);
       expect(summary.reportMenuReady).toBe(true);
-      // この配信時刻を使うのは Go 側が seed した 4 店舗だけである（他の試験ファイルは 7・9・10・11・14）。
-      // そのうち停止中の 1 店舗は対象にも見送りの候補にもならないので、対象は 3 件である。
+      // この配信時刻を使うのは Go 側が seed した 5 店舗だけである（他の試験ファイルは 9・10・11・12・13・14・15）。
+      // そのうち停止中の 1 店舗と、解除済みオーナーの 1 店舗は対象にも見送りの候補にもならないので、
+      // 対象は 3 件である。
       expect(summary.targetsTotal).toBe(3);
       // 当日の集計が無い店舗は停止中の 1 店舗だけであり、それを見送りとして数えない（store-suspension 4.3）。
       expect(summary.skipped).toBe(0);
@@ -391,6 +402,47 @@ describe.skipIf(!process.env.DATABASE_URL || !goSideRan)(
       );
       expect(suspendedDeliveryRes.rows[0]?.n).toBe(0);
       expect(pushedTo).not.toContain(SUSPENDED_LINE_USER_ID);
+
+      // --- 解除済みオーナーの店舗（owner-line-unlink 5.1, 5.2, 5.3）: Go は取得を続けて当日の集計を作り、
+      // 配信はそれを送らず、送信・失敗・見送りのいずれの記録も残さない。前提（確定済み・停止中でない・
+      // オーナーが解除済み・同じ配信時刻・当日の集計が比較可能で新着あり）を先に確かめ、不在の表明が
+      // 「送る理由の無い店舗だったから」という別の理由で空振りしないようにする。
+      const unlinkedStoreRes = await pool.query<{
+        suspended: boolean;
+        line_user_id: string | null;
+        unlinked: boolean;
+        delivery_hour: number;
+        status: string | null;
+        rank_total: number | null;
+        new_review_count: number | null;
+      }>(
+        `SELECT s.suspended_at IS NOT NULL AS suspended, o.line_user_id,
+                o.line_unlinked_at IS NOT NULL AS unlinked, o.delivery_hour,
+                ds.status, ds.rank_total, ds.new_review_count
+           FROM stores s
+           JOIN owners o ON o.id = s.owner_id
+           LEFT JOIN daily_summaries ds ON ds.store_id = s.id AND ds.summary_date = $2
+          WHERE s.id = $1 AND s.place_status = 'confirmed'`,
+        [UNLINKED_STORE_ID, TODAY],
+      );
+      expect(unlinkedStoreRes.rows).toEqual([
+        {
+          suspended: false,
+          line_user_id: null,
+          unlinked: true,
+          delivery_hour: CROSS_RUNTIME_DELIVERY_HOUR,
+          status: 'ready',
+          rank_total: 2,
+          new_review_count: 3,
+        },
+      ]);
+      const unlinkedDeliveryRes = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM summary_deliveries WHERE store_id = $1`,
+        [UNLINKED_STORE_ID],
+      );
+      expect(unlinkedDeliveryRes.rows[0]?.n).toBe(0);
+      // 元の LINE ユーザー ID へも送らない。宛先の無い送信（to が null）も、上の「送ったのは 1 通だけ」が退ける。
+      expect(pushedTo).not.toContain(UNLINKED_ORIGINAL_LINE_USER_ID);
     });
   },
 );

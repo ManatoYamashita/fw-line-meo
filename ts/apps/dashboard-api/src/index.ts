@@ -27,6 +27,6 @@ const verifier: TokenVerifier = {
   },
 };
 
-const app = createApp(buildAppDeps({ config, verifier, structuredLog: writeStructuredLog }));
+const app = createApp(buildAppDeps({ config, verifier, lineFetch: fetch, structuredLog: writeStructuredLog }));
 
 serve({ fetch: app.fetch, port: config.port });

@@ -14,6 +14,7 @@ import { formatJstDate } from '../lib/jst-date';
 import {
   ENABLED_STATE_LABEL,
   ONBOARDING_STATUS_LABEL,
+  OWNER_LINE_LINK_LABEL,
   PLACE_STATUS_LABEL,
   STORE_SUSPENSION_LABEL,
 } from '../lib/status-labels';
@@ -34,8 +35,26 @@ const UNKNOWN_DATE = '不明';
 const NO_INVITE_CODE_RECORD = '記録なし（この機能より前の登録）';
 
 /** 表に出すオーナーの名前。表示名が無ければ「（表示名なし）」（id は利用者に意味が無いので出さない）。 */
-export function ownerDisplayLabel(owner: OwnerListItem): string {
+export function ownerDisplayLabel(owner: Pick<OwnerListItem, 'displayName'>): string {
   return owner.displayName ?? NO_DISPLAY_NAME;
+}
+
+/**
+ * LINE の連携状態の表示（owner-line-unlink Req 2.1, 2.6, 3.3）。
+ *
+ * 連携中は「連携中」、解除済みは「解除済み」に、メニューを外せていないこと（3.3）と店舗を引き継いだ
+ * オーナー（2.6）を括弧で添える。両方に当たるときは両方を並べ、片方を落とさない。
+ */
+export function ownerLineLinkLabel(
+  owner: Pick<OwnerListItem, 'lineLink' | 'menuUnlinkPending' | 'takenOverBy'>,
+): string {
+  if (owner.lineLink === 'linked') return OWNER_LINE_LINK_LABEL.linked;
+  const notes: string[] = [];
+  if (owner.menuUnlinkPending) notes.push('メニュー未解除');
+  if (owner.takenOverBy !== null) notes.push(`引継ぎ先: ${ownerDisplayLabel(owner.takenOverBy)}`);
+  return notes.length === 0
+    ? OWNER_LINE_LINK_LABEL.unlinked
+    : `${OWNER_LINE_LINK_LABEL.unlinked}（${notes.join('・')}）`;
 }
 
 /**
@@ -43,7 +62,7 @@ export function ownerDisplayLabel(owner: OwnerListItem): string {
  *
  * 表示名が無いオーナー同士は「（表示名なし）」だけでは区別できないので、作成日を添える。
  */
-export function ownerDistinctLabel(owner: OwnerListItem): string {
+export function ownerDistinctLabel(owner: Pick<OwnerListItem, 'displayName' | 'createdAt'>): string {
   if (owner.displayName !== null) return owner.displayName;
   return `（表示名なし・${formatJstDate(owner.createdAt) ?? UNKNOWN_DATE} 作成）`;
 }

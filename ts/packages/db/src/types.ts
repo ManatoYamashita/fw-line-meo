@@ -59,7 +59,9 @@ export interface AgencyRow {
 export interface OwnerRow {
   id: string;
   agency_id: string;
-  line_user_id: string;
+  // 0018: 解除済みのオーナーは LINE ユーザー ID を持たない（null）。連携中は必ず値を持つ
+  // （ck_owner_line_link: line_unlinked_at が null ⇔ line_user_id が値を持つ）。
+  line_user_id: string | null;
   display_name: string | null;
   onboarding_status: OnboardingStatus;
   created_at: Date;
@@ -67,6 +69,12 @@ export interface OwnerRow {
   delivery_hour: number;
   // 0017: 登録に用いられた招待コード。null = 記録なし（0017 より前の登録・agency-dashboard Req 8.4）。
   invite_code_id: string | null;
+  // 0018: 解除の時刻。null = 連携中、値あり = 解除済み。
+  line_unlinked_at: Date | null;
+  // 0018: 解除した元の LINE ユーザー ID のうち、完了後メニューをまだ外せていないもの。外せたら null。
+  menu_pending_line_user_id: string | null;
+  // 0018: 解除済みのオーナーの店舗を引き継いだオーナー。引継ぎが無ければ null。
+  taken_over_by_owner_id: string | null;
 }
 
 export interface StoreRow {
@@ -302,7 +310,6 @@ export interface StoreListItem {
   createdAt: Date;
 }
 
-// 代理店配下オーナー一覧の 1 行。
 // オーナーの登録に用いられた招待コード（agency-dashboard Req 8.5）。disabled は登録後に無効化されたか。
 export interface OwnerInviteCodeRecord {
   id: string;
@@ -310,6 +317,11 @@ export interface OwnerInviteCodeRecord {
   disabled: boolean;
 }
 
+// オーナーと LINE アカウントの連携状態（owner-line-unlink）。line_unlinked_at IS NULL が linked。
+export type OwnerLineLink = 'linked' | 'unlinked';
+
+// オーナー一覧の 1 行（agency-dashboard Req 2.1, 8.5・owner-line-unlink Req 2.1, 2.5, 2.6）。
+// LINE ユーザー ID（line_user_id・menu_pending_line_user_id）は運営・代理店の画面にも出さないため持たない。
 export interface OwnerListItem {
   id: string;
   displayName: string | null;
@@ -317,6 +329,15 @@ export interface OwnerListItem {
   createdAt: Date;
   /** null = 記録なし（0017 より前の登録）。推定で埋めない（Req 8.4）。 */
   inviteCode: OwnerInviteCodeRecord | null;
+  agencyId: string;
+  agencyName: string;
+  lineLink: OwnerLineLink;
+  /** 解除した元の LINE アカウントから完了後メニューをまだ外せていない（menu_pending_line_user_id あり） */
+  menuUnlinkPending: boolean;
+  /** 確定済み店舗（place_status='confirmed'）の名前（作成順）。停止中の店舗も含む */
+  storeNames: readonly string[];
+  /** 店舗を引き継いだオーナー（owner-line-unlink Req 2.6）。引継ぎが無ければ null */
+  takenOverBy: { ownerId: string; displayName: string | null } | null;
 }
 
 // 招待コード一覧・作成・無効化の戻り型（disabled = disabled_at IS NOT NULL）。

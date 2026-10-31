@@ -349,6 +349,115 @@ describe('createLineMessenger', () => {
     });
   });
 
+  describe('unlinkRichMenu（owner-line-unlink Requirement 3.1）', () => {
+    // LINE のユーザー ID の形（U に続く 16 進 32 桁）。形に合わない値は通信せずに拒む（下の試験）。
+    const LINE_USER_ID = `U${'0123456789abcdef'.repeat(2)}`;
+
+    function unlinkCallsOf(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit][] {
+      return fetchMock.mock.calls.filter(([url]) => url !== TOKEN_URL) as [string, RequestInit][];
+    }
+
+    it('個別リンクの解除のエンドポイントへ、リンクと同じトークンで DELETE する', async () => {
+      const fetchMock = routingFetchMock(() => emptyResponse(200));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await messenger.linkRichMenu(LINE_USER_ID, 'richmenu-completed-1');
+      await messenger.unlinkRichMenu(LINE_USER_ID);
+
+      const calls = unlinkCallsOf(fetchMock);
+      expect(calls).toHaveLength(2);
+      const [url, init] = calls[1] as [string, RequestInit];
+      expect(url).toBe(`https://api.line.me/v2/bot/user/${LINE_USER_ID}/richmenu`);
+      expect(init.method).toBe('DELETE');
+      const headers = init.headers as Record<string, string>;
+      expect(headers.Authorization).toBe('Bearer stateless-token-1');
+      // トークンはリンクと共有のキャッシュから取る（発行は 1 回だけ）。
+      expect(fetchMock.mock.calls.filter(([u]) => u === TOKEN_URL)).toHaveLength(1);
+    });
+
+    it('404 は外すリンクが無い状態として成功で返す', async () => {
+      const fetchMock = routingFetchMock(() => jsonResponse(404, {}));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await expect(messenger.unlinkRichMenu(LINE_USER_ID)).resolves.toBeUndefined();
+      expect(unlinkCallsOf(fetchMock)).toHaveLength(1);
+    });
+
+    it.each([400, 401, 403, 429, 500])('404 以外の非 2xx（%i）はリンクと同じく例外を投げる', async (status) => {
+      const fetchMock = routingFetchMock(() => jsonResponse(status, {}));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await expect(messenger.unlinkRichMenu(LINE_USER_ID)).rejects.toThrow(`status ${status}`);
+    });
+
+    it('例外の文言に LINE ユーザー ID を載せない', async () => {
+      const fetchMock = routingFetchMock(() => jsonResponse(500, {}));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      const error = await messenger.unlinkRichMenu(LINE_USER_ID).then(
+        () => null,
+        (err: unknown) => err,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(LINE_USER_ID);
+    });
+
+    it.each([
+      ['all（既定リッチメニューの解除のパスに届く）', 'all'],
+      ['親を指す区画', '..'],
+      ['大文字の 16 進', `U${'0123456789ABCDEF'.repeat(2)}`],
+      ['桁の足りない ID', 'Uabc123'],
+      ['空文字', ''],
+    ])('LINE ユーザー ID の形に合わない値（%s）は、トークンの発行も含めて通信せずに例外を投げる', async (_label, lineUserId) => {
+      const fetchMock = routingFetchMock(() => emptyResponse(200));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await expect(messenger.unlinkRichMenu(lineUserId)).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('リクエスト単位のロガーを適用した Messenger からも呼べる', async () => {
+      const fetchMock = routingFetchMock(() => emptyResponse(200));
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+      });
+
+      await messenger.withLogger?.(fakeLogger()).unlinkRichMenu(LINE_USER_ID);
+
+      const calls = unlinkCallsOf(fetchMock);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.[1].method).toBe('DELETE');
+    });
+  });
+
   describe('startLoading（Issue #307）', () => {
     it('chatId・loadingSeconds を JSON body に、正しいエンドポイントへ POST する', async () => {
       const fetchMock = routingFetchMock(() => emptyResponse(200));

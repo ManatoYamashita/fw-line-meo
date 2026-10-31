@@ -39,8 +39,8 @@ interface HarnessOptions {
   result?: OauthCallbackResult;
   /** handleOauthCallback 自体が throw する（想定外の内部障害）。 */
   callbackError?: Error;
-  /** owners 参照の結果（既定は LINE_USER_ID を返す）。 */
-  owner?: { line_user_id: string } | null;
+  /** owners 参照の結果（既定は LINE_USER_ID を返す）。line_user_id が null は解除済みのオーナー。 */
+  owner?: { line_user_id: string | null } | null;
   /** push が失敗する（LINE 側障害・ブロック等）。 */
   pushError?: Error;
 }
@@ -272,6 +272,50 @@ describe('createGbpOauthCallbackRoute — Push はベストエフォート', () 
     expect(harness.pushes).toEqual([]);
     expect(harness.warnLogs.length).toBe(1);
   });
+});
+
+describe('createGbpOauthCallbackRoute — 解除済みのオーナー（owner-line-unlink Req 4.5）', () => {
+  // 解除済みのオーナーは LINE ユーザー ID を持たない（line_user_id が null）。通知を送る経路が
+  // 無いので Push を試みず、HTML の応答は解除の有無にかかわらず従来の契約どおり返す。
+  const cases: readonly { result: OauthCallbackResult; status: number; html: string }[] = [
+    {
+      result: { kind: 'linked', ownerId: OWNER, storeId: STORE, storeName: STORE_NAME },
+      status: 200,
+      html: '連携が完了しました',
+    },
+    { result: { kind: 'denied', ownerId: OWNER, storeId: STORE }, status: 200, html: '連携は完了していません' },
+    {
+      result: { kind: 'no_permission', ownerId: OWNER, storeId: STORE },
+      status: 200,
+      html: '管理権限がありませんでした',
+    },
+    {
+      result: { kind: 'error', ownerId: OWNER, storeId: STORE, reason: 'token_exchange_failed' },
+      status: 500,
+      html: '連携を完了できませんでした',
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(`${testCase.result.kind}: Push を試みず、HTML は従来どおり返す`, async () => {
+      const harness = createHarness({ result: testCase.result, owner: { line_user_id: null } });
+      const route = createGbpOauthCallbackRoute(harness.deps);
+
+      const res = await route({ code: AUTH_CODE, state: STATE });
+
+      expect(res.status).toBe(testCase.status);
+      expect(res.html).toContain(testCase.html);
+      expect(harness.ownerLookups).toEqual([OWNER]);
+      expect(harness.pushes).toEqual([]);
+      expect(harness.errorLogs).toEqual([]);
+      expect(harness.warnLogs).toEqual([
+        {
+          message: 'gbp oauth callback: owner line unlinked; push notification skipped',
+          meta: { kind: testCase.result.kind, ownerId: OWNER },
+        },
+      ]);
+    });
+  }
 });
 
 describe('createGbpOauthCallbackRoute — 内部障害', () => {

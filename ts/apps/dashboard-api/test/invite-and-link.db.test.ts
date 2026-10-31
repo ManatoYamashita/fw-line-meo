@@ -3,6 +3,7 @@ import { getPool, closePool, findActiveInviteCode, createPendingDashboardUser } 
 import { createApp } from '../src/app.js';
 import type { TokenVerifier, VerifiedToken } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 import { loadConfig, type DashboardApiConfig } from '../src/config.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で、配線済み dashboard-api の 2 つの横断的不変条件を
@@ -73,7 +74,7 @@ const verifier: TokenVerifier = {
 
 function buildApp(): ReturnType<typeof createApp> {
   // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 async function get(app: ReturnType<typeof createApp>, bearer: string, path: string): Promise<Response> {
@@ -112,6 +113,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
         SURVEY_BASE_URL: 'https://survey.example',
         DASHBOARD_WEB_ORIGIN: 'https://dash.example',
         PLACES_API_KEY: 'test-places-key',
+        LINE_CHANNEL_ID: '1234567890',
+        LINE_CHANNEL_SECRET: 'dummy-line-channel-secret',
       });
       const pool = await getPool();
       await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [OP1, 'f7運営']);

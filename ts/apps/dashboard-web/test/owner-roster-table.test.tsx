@@ -16,6 +16,11 @@ const OWNERS: OwnerListItem[] = [
     onboardingStatus: 'store_identified',
     createdAt: '2026-10-01T00:00:00.000Z',
     inviteCode: { id: 'c-active', code: 'ABCD-EFGH-JKLM', disabled: false },
+    agencyName: '代理店A',
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
   },
   {
     id: 'o-disabled-code',
@@ -23,6 +28,11 @@ const OWNERS: OwnerListItem[] = [
     onboardingStatus: 'active',
     createdAt: '2026-10-02T00:00:00.000Z',
     inviteCode: { id: 'c-disabled', code: 'MNOP-QRST-UVWX', disabled: true },
+    agencyName: '代理店A',
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
   },
   {
     id: 'o-unrecorded',
@@ -30,6 +40,11 @@ const OWNERS: OwnerListItem[] = [
     onboardingStatus: 'pending',
     createdAt: '2026-09-01T00:00:00.000Z',
     inviteCode: null,
+    agencyName: '代理店A',
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
   },
 ];
 

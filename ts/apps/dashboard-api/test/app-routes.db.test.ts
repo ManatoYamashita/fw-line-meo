@@ -3,6 +3,7 @@ import { getPool, closePool, findStoreWithAgency } from '@fwlm/db';
 import { createApp } from '../src/app.js';
 import type { TokenVerifier } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 import { loadConfig, type DashboardApiConfig } from '../src/config.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で dashboard-api の全ルート配線・認可マトリクス・CORS を
@@ -65,7 +66,7 @@ const verifier: TokenVerifier = {
 
 function buildApp(): ReturnType<typeof createApp> {
   // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 function h(bearer?: string, origin?: string): Record<string, string> {
@@ -212,6 +213,8 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       SURVEY_BASE_URL: 'https://survey.example',
       DASHBOARD_WEB_ORIGIN: DASH_ORIGIN,
       PLACES_API_KEY: 'test-places-key',
+      LINE_CHANNEL_ID: '1234567890',
+      LINE_CHANNEL_SECRET: 'dummy-line-channel-secret',
     });
     const pool = await getPool();
     await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [OP1, 'ルート運営']);
@@ -584,7 +587,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
   });
 
   // --- GET /owners の招待コードの記録（agency-dashboard Req 8.5・#486）---
-  // 実物の listOwnersByAgency（LEFT JOIN）から応答の JSON までを通し、記録の有無が応答で区別できることを観測する。
+  // 実物の listOwners（LEFT JOIN）から応答の JSON までを通し、記録の有無が応答で区別できることを観測する。
   it('GET /owners は登録に用いた招待コードを返し、記録の無いオーナーは null を返す（Req 8.5）', async () => {
     const pool = await getPool();
     const code = 'f5000000-0000-0000-0000-0000000486c1';
@@ -612,6 +615,91 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       await pool.query('DELETE FROM owners WHERE id = $1', [recordedOwner]);
       await pool.query('DELETE FROM agency_invite_codes WHERE id = $1', [code]);
     }
+  });
+
+  // --- GET /owners の連携状態（owner-line-unlink Req 2.1, 2.5, 2.6・タスク 4.4）---
+  // 本番と同じ合成根から実物の listOwners を通し、運営の代理店未指定が全代理店になること、代理店の利用者が
+  // 自代理店に束縛されること、連携状態の項目が応答に載り LINE ユーザー ID が載らないことを観測する。
+  describe('GET /owners の連携状態（owner-line-unlink）', () => {
+    // AG2 に属する解除済みのオーナー。店舗は OW2 へ引き継がれた形（taken_over_by_owner_id = OW2）にする。
+    const UNLINKED_OWNER = 'f5000000-0000-0000-0000-0000000487a1';
+
+    interface OwnerJsonObs {
+      id: string;
+      agencyName: string;
+      lineLink: string;
+      menuUnlinkPending: boolean;
+      storeNames: string[];
+      takenOverBy: { ownerId: string; displayName: string | null } | null;
+    }
+
+    beforeAll(async () => {
+      await (
+        await getPool()
+      ).query(
+        `INSERT INTO owners (id, agency_id, line_user_id, display_name, onboarding_status,
+                             line_unlinked_at, menu_pending_line_user_id, taken_over_by_owner_id)
+         VALUES ($1, $2, NULL, '解除済み', 'active', now(), $3, $4)`,
+        [UNLINKED_OWNER, AG2, 'U-routes-487-pending', OW2],
+      );
+    });
+
+    afterAll(async () => {
+      await (await getPool()).query('DELETE FROM owners WHERE id = $1', [UNLINKED_OWNER]);
+    });
+
+    it('運営の代理店未指定は 400 ではなく全代理店のオーナーを連携状態つきで返し、LINE ユーザー ID を含めない', async () => {
+      const app = buildApp();
+      const res = await app.request('/owners', { method: 'GET', headers: h(OP_TOKEN) });
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      // フィクスチャの LINE ユーザー ID（連携中の line_user_id・未解除の印）はどれも応答に現れない。
+      expect(text).not.toContain('U-routes-');
+      const owners = (JSON.parse(text) as { owners: OwnerJsonObs[] }).owners;
+      const byId = new Map(owners.map((o) => [o.id, o]));
+      expect(byId.get(OW1)).toMatchObject({
+        agencyName: 'ルート代理店1',
+        lineLink: 'linked',
+        menuUnlinkPending: false,
+        storeNames: ['店1'],
+        takenOverBy: null,
+      });
+      expect(byId.get(OW2)).toMatchObject({ agencyName: 'ルート代理店2', lineLink: 'linked', storeNames: ['店2'] });
+      expect(byId.get(UNLINKED_OWNER)).toMatchObject({
+        agencyName: 'ルート代理店2',
+        lineLink: 'unlinked',
+        menuUnlinkPending: true,
+        storeNames: [],
+        takenOverBy: { ownerId: OW2, displayName: null },
+      });
+    });
+
+    it('運営の代理店指定はその代理店のオーナーだけを返す', async () => {
+      const app = buildApp();
+      const res = await app.request(`/owners?agencyId=${AG2}`, { method: 'GET', headers: h(OP_TOKEN) });
+      expect(res.status).toBe(200);
+      const owners = ((await res.json()) as { owners: OwnerJsonObs[] }).owners;
+      const ids = owners.map((o) => o.id);
+      expect(ids).toContain(OW2);
+      expect(ids).toContain(UNLINKED_OWNER);
+      expect(ids).not.toContain(OW1);
+      expect(owners.every((o) => o.agencyName === 'ルート代理店2')).toBe(true);
+    });
+
+    it('代理店の利用者は代理店未指定でも自代理店に束縛され、他の代理店の指定は 403', async () => {
+      const app = buildApp();
+      const res = await app.request('/owners', { method: 'GET', headers: h(AG1_TOKEN) });
+      expect(res.status).toBe(200);
+      const owners = ((await res.json()) as { owners: OwnerJsonObs[] }).owners;
+      const ids = owners.map((o) => o.id);
+      expect(ids).toContain(OW1);
+      expect(ids).not.toContain(OW2);
+      expect(ids).not.toContain(UNLINKED_OWNER);
+      expect(owners.every((o) => o.agencyName === 'ルート代理店1')).toBe(true);
+
+      const other = await app.request(`/owners?agencyId=${AG2}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      expect(other.status).toBe(403);
+    });
   });
 
   // --- POST /dashboard-users/:id/update（dashboard-user-edit #259）---

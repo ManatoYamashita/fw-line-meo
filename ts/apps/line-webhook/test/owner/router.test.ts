@@ -63,6 +63,9 @@ function owner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     delivery_hour: 7,
     // 0017（#486）。登録に用いた招待コード。null = 記録なし。
     invite_code_id: null,
+    line_unlinked_at: null,
+    menu_pending_line_user_id: null,
+    taken_over_by_owner_id: null,
     ...overrides,
   };
 }
@@ -201,6 +204,9 @@ function setup(options: SetupOptions = {}) {
       timeline.push('link');
       links.push({ lineUserId, richMenuId });
       if (options.linkError) throw options.linkError;
+    },
+    async unlinkRichMenu() {
+      throw new Error('the router must not unlink the rich menu（外すのは未登録の友だち追加の会話だけ）');
     },
     async startLoading() {
       throw new Error('the router must not call startLoading（Issue #307・app.ts の onEvent ラッパーの責務）');
@@ -612,6 +618,9 @@ describe('createStoreIdentifiedOwnerRouterFactory', () => {
       },
       async linkRichMenu() {
         throw new Error('a completed session with a report request must not relink');
+      },
+      async unlinkRichMenu() {
+        throw new Error('the router must not unlink the rich menu（外すのは未登録の友だち追加の会話だけ）');
       },
       async startLoading() {
         throw new Error('the router must not call startLoading（Issue #307・app.ts の onEvent ラッパーの責務）');

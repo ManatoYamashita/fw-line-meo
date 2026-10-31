@@ -117,13 +117,19 @@ module "run_services" {
       needs_cloudsql = true
       # agency-dashboard: 店舗登録フローが Places 検索をサーバー側で実行するため
       # PLACES_API_KEY を注入（batch_job と同一の places-api-key secret）。
+      # owner-line-unlink（Issue #487）: LINE の連携を解除したオーナーのアカウントから個別リッチメニューを
+      # 外すため、line-webhook と同じチャネル ID とチャネルシークレットを渡す（stateless token の発行に使う）。
+      # dashboard-api はこの 2 つが無いと起動しない（config.ts の loadConfig）ので、この env は
+      # それを読むイメージより先に apply する。
       secret_env = {
-        PLACES_API_KEY = module.secrets.secret_ids["places-api-key"]
+        PLACES_API_KEY      = module.secrets.secret_ids["places-api-key"]
+        LINE_CHANNEL_SECRET = module.secrets.secret_ids["line-channel-secret"]
       }
       env = {
         SURVEY_BASE_URL = var.survey_base_url
         # agency-dashboard: CORS 許可元（単一オリジン・design.md Security）。dashboard-web の Cloud Run URL。
         DASHBOARD_WEB_ORIGIN = var.dashboard_web_origin
+        LINE_CHANNEL_ID      = var.line_channel_id
       }
     }
     # agency-dashboard: 運営・代理店向け Next.js UI（ゼロスケール公開 Web・design.md「Infra」）。

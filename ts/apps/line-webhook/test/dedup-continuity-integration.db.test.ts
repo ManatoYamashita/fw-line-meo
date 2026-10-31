@@ -123,6 +123,7 @@ function createFakeMessenger(profiles: Record<string, string | undefined> = {}):
       return displayName ? { displayName } : null;
     }),
     linkRichMenu: vi.fn(async (): Promise<void> => {}),
+    unlinkRichMenu: vi.fn(async (): Promise<void> => {}),
     startLoading: vi.fn(async (): Promise<void> => {}),
   };
 }
