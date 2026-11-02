@@ -197,7 +197,7 @@
   - _Boundary: dashboard-api owners-list, dashboard-web types, e2e fixtures_
   - _Depends: 7.2_
 
-- [ ] 7.5 全体検証と本番の適用順
+- [x] 7.5 全体検証と本番の適用順
   - `make ts-lint`／`make ts-test`／`make ts-test-db`／`make go-test`／db assertions／`check_docs.sh` を実行し全緑を確認する（Go 側は `owners` を直接 INSERT するフィクスチャを持つので、NULL 許容の列で回帰しないことを確かめる）
   - 本番の順序: (1) マージ前に `0017` を本番へ適用し、`information_schema.columns` と `pg_constraint` で列と 2 制約の存在を確かめる → (2) マージ → (3) deploy の結果を自分で確認する（line-webhook・dashboard-api のイメージ差し替え）→ (4) 本番の新しいオーナー登録で `invite_code_id` が埋まることを確かめる（登録が無ければ、確認待ちとして追跡先を Issue に記録する）
   - 完了状態: 上記コマンドがすべて終了コード 0、本番の適用・確認結果が PR / Issue #486 に記録されている
@@ -243,7 +243,7 @@
   - _Boundary: dashboard-web e2e_
   - _Depends: 8.3, 8.4_
 
-- [ ] 8.6 全体検証とデプロイの確認
+- [x] 8.6 全体検証とデプロイの確認
   - `make ts-lint`／`make ts-test`／dashboard-web の型検査（`next typegen` を含む）／`bash scripts/run-e2e-local.sh --only surfaces`／静的ガード（`check-design-tokens.sh`・`check-jst-offset-consistency.sh` ほか ts-ci が回すもの）を実行し全緑を確認する
   - マージ後に deploy の結果を自分で確かめ（dashboard-web のイメージ差し替え）、本番で運営として 1 代理店の詳細を開き、4 区分と件数が出ることを確かめる
   - 完了状態: 上記コマンドがすべて終了コード 0、本番での確認結果が PR / Issue #486 に記録されている
