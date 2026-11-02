@@ -171,7 +171,7 @@
   - _Depends: 5.2_
 
 - [ ] 10. 本番
-- [ ] 10.1 マージ前に本番のスキーマ・権限・設定を整え、デプロイの後にデータを移す
+- [x] 10.1 マージ前に本番のスキーマ・権限・設定を整え、デプロイの後にデータを移す
   - 手作業で切り離した行の変換手順（照会・退避・更新・件数の突き合わせ）を E2E の手順書へ先に載せる
   - migration 0018 を当てる。手作業で切り離した行（`detached-` 接頭辞）の退避と解除済みへの移行は、旧 delivery-job の配信の失敗を避けるためデプロイを確かめた後に行い、件数を突き合わせる（手順書 §5-7）
   - 権限の定義を再適用し、line-webhook と客向け Web のロールが LINE ユーザー ID を UPDATE できないことを本番で照会する
@@ -180,7 +180,7 @@
   - _Requirements: 9.1_
   - _Depends: 1.1, 1.2, 8.1_
 
-- [ ] 10.2 本番で解除と引継ぎを実測する
+- [x] 10.2 本番で解除と引継ぎを実測する
   - 検証用のアカウントを解除し、最初の案内が出ることと、個別メニューの取得が 404 になることを確かめる
   - 同じアカウントで同じ Place を確定し直し、店舗詳細画面に店舗が出ること、オーナー一覧に引継ぎ先が出ることを確かめる
   - 手順を E2E の手順書に載せ、結果を Issue #487 に記録する
@@ -211,5 +211,5 @@
 - 9.1: cross-runtime の固定識別子は c7…-015（オーナー）と c7…-005（店舗）まで使用済み。配信の述語を外す変異は、記録 0 行ではなく対象件数の表明（3 件）が赤にする（summary_deliveries.line_user_id の NOT NULL で記録が書けないため）。
 - 9.2: 店舗詳細の認可は store-detail の route.db.test.ts で、引継ぎの状態を DAL の組（lockPlaceHolder・moveAllStores・markOwnerStoreIdentified）で作って確かめる。確定の引継ぎの分岐が書く列を増やしたら、この試験も追従させる。unfollow は dispatch で捨てられるので、Req 8.2 の試験は回帰ガードとして効く。
 - 9.3: 手元のシェルは PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH を Aside に向けており、run-e2e-local.sh はこれを外さない。E2E は env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH を付けて付属 Chromium で流す。幅 1024px の運営のナビの R2 は余りが約 5px で、CI の Linux の字幅で赤になりうる（赤なら top-nav の間隔を詰める）。
-- 10.1/10.2（文書）: 本番の手順は docs/testing/e2e.md §5（A→B→C→D→E→A2→F）。detached- 行の移行（A2）はデプロイの後に行う（旧 delivery-job が NULL の宛先で毎回失敗するため）。本番での実行と Issue #487 への記録は未了。
+- 10.1/10.2（文書）: 本番の手順は docs/testing/e2e.md §5（A→B→C→D→E→A2→F）。detached- 行の移行（A2）はデプロイの後に行う（旧 delivery-job が NULL の宛先で毎回失敗するため）。本番での実行は 2026-10-31（A〜D・E・A2）と 2026-11-02（F）に済み、Issue #487 に記録した。F は、新しい列単位の権限のもとでの createOwner と引継ぎの書き込みが本番で初めて通った実測も兼ねる。
 - 全体検証: grants.sql を検証用ロールへ当てる試験（owner-takeover・survey-settings-privileges）は並行実行で tuple concurrently updated を起こす。権限の書き換えは test/support/grants-lock.ts のアドバイザリロックで直列にする。
