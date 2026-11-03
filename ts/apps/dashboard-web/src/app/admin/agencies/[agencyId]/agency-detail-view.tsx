@@ -8,6 +8,8 @@ import { EmptyState } from '@fwlm/ui/components/empty-state';
 import { Heading } from '@fwlm/ui/components/heading';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { Spinner } from '@fwlm/ui/components/spinner';
+import { textLinkVariants } from '@fwlm/ui/components/text-link';
+import { cn } from '@fwlm/ui/lib/utils';
 import {
   Table,
   TableBody,
@@ -210,7 +212,7 @@ export function AgencyDetailView({ agencyId: rawAgencyId }: { agencyId: string }
 
   const backLink = (
     // パンくずを nav で包まない（ナビゲーション領域が帯と合わせて 2 つになる）。
-    <Link href="/admin/agencies" className="self-start text-sm">
+    <Link href="/admin/agencies" className={cn(textLinkVariants(), 'self-start text-sm')}>
       代理店管理へ戻る
     </Link>
   );
@@ -279,7 +281,9 @@ export function AgencyDetailView({ agencyId: rawAgencyId }: { agencyId: string }
         {users.kind === 'ready' && users.value.length === 0 && (
           <EmptyState>
             <p>この代理店のダッシュボード利用者はいません。</p>
-            <Link href="/admin/users">利用者管理へ</Link>
+            <Link href="/admin/users" className={textLinkVariants()}>
+              利用者管理へ
+            </Link>
           </EmptyState>
         )}
         {users.kind === 'ready' && users.value.length > 0 && (
@@ -405,7 +409,7 @@ export function AgencyDetailView({ agencyId: rawAgencyId }: { agencyId: string }
             )}
           </>
         )}
-        <Link href="/invite-codes" className="self-start text-sm">
+        <Link href="/invite-codes" className={cn(textLinkVariants(), 'self-start text-sm')}>
           招待コードの発行・無効化は招待コードの画面で行います
         </Link>
       </Section>

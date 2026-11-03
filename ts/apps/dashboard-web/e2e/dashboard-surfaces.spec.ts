@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { deviceWidthOf, expectNoHorizontalScroll } from '@fwlm/e2e-support/viewport';
 
 import {
+  AGENCIES,
   DASHBOARD_SURFACES,
   OWNERS,
   STORES,
@@ -791,6 +792,60 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
     test(`幅 320 の${surface.where}で横スクロールが発生しない`, async ({ page }) => {
       await surface.open(page);
       await expectNoHorizontalScroll(page, `${surface.where}（320px）`, REGIONS[surface.where]!);
+    });
+  }
+});
+
+// 本文中の文字のリンクの下線（Issue #503・design-language 7.21）。
+//
+// 見た目の指定が付いていることは test/text-link-usage.test.ts がソースで確かめる。ここでは、その指定が
+// 生成 CSS に出て**実際に下線が描かれている**ことを測る。クラスが付いていても、Tailwind が走査の範囲外の
+// クラスを生成しなければ、下線は描かれないまま単体試験は緑になる。
+//
+// 押しボタンの見た目のリンクは、枠（buttonVariants の基底は 1px の枠を持つ）か面の塗りで見分けて除く。
+// 帯の案内リンクは main の外にあるので数えない（現在地の罫は 7.8 の網が受け持つ）。
+test.describe('本文中の文字のリンクに下線が描かれる', () => {
+  // 下線を確かめた文字のリンクの数。0 件の面で緑になっても、それは何も測っていない。
+  // 実測へ合わせて宣言を書き換える改変を素通りさせないため、合計を literal で持つ。
+  const TEXT_LINKS: Readonly<Record<string, number>> = {
+    店舗一覧: 0,
+    '店舗一覧の QR パネル': 0,
+    代理店管理: AGENCIES.length,
+    代理店詳細: 2,
+    ログイン: 0,
+    招待コード: 0,
+    利用者管理: 0,
+    '利用者管理の編集パネル': 0,
+    店舗登録: 0,
+    店舗登録の検索結果: 0,
+    オーナー一覧: 0,
+  };
+
+  test('宣言が検証面の一覧と一致する', () => {
+    expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(TEXT_LINKS));
+    expect(Object.values(TEXT_LINKS).reduce((sum, count) => sum + count, 0)).toBe(3);
+  });
+
+  for (const surface of DASHBOARD_SURFACES) {
+    test(`${surface.where}の文字のリンクに下線が描かれる`, async ({ page }) => {
+      await surface.open(page);
+      const links = await page.getByRole('main').locator('a').evaluateAll((elements) =>
+        elements.map((element) => {
+          const style = getComputedStyle(element);
+          return {
+            name: element.textContent?.trim() ?? '',
+            underline: style.textDecorationLine.split(' ').includes('underline'),
+            buttonLike:
+              Number.parseFloat(style.borderTopWidth) > 0 || style.backgroundColor !== 'rgba(0, 0, 0, 0)',
+          };
+        }),
+      );
+      const textLinks = links.filter((link) => !link.buttonLike);
+      expect(
+        textLinks.filter((link) => !link.underline).map((link) => link.name),
+        '下線の無い文字のリンク',
+      ).toEqual([]);
+      expect(textLinks).toHaveLength(TEXT_LINKS[surface.where]!);
     });
   }
 });

@@ -12,6 +12,8 @@ import { Input } from '@fwlm/ui/components/input';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { Select } from '@fwlm/ui/components/select';
 import { Spinner } from '@fwlm/ui/components/spinner';
+import { textLinkVariants } from '@fwlm/ui/components/text-link';
+import { cn } from '@fwlm/ui/lib/utils';
 import { AuthGuard } from '../../../components/auth-guard';
 import { OwnerRosterTable, ownerDistinctLabel } from '../../../components/owner-roster-table';
 import { TopNav } from '../../../components/top-nav';
@@ -651,7 +653,9 @@ function RegisterWizard() {
             <Alert>
               <AlertDescription>
                 見つかった店舗はすべて登録済みです。店名の表記を変えて検索するか、
-                <Link href="/stores">店舗一覧</Link>
+                <Link href="/stores" className={textLinkVariants()}>
+                  店舗一覧
+                </Link>
                 で確認してください。
               </AlertDescription>
             </Alert>
@@ -793,7 +797,9 @@ function RegisterWizard() {
             登録が完了しました
           </Heading>
           <p>店舗を登録しました。</p>
-          <Link href="/stores">店舗一覧へ戻る</Link>
+          <Link href="/stores" className={cn(textLinkVariants(), 'self-start')}>
+            店舗一覧へ戻る
+          </Link>
         </section>
       )}
     </PageShell>

@@ -52,6 +52,8 @@ import {
   TableHeaderCell,
   TableRow,
 } from '../src/components/table';
+import { textLinkVariants } from '../src/components/text-link';
+import { cn } from '../src/lib/utils';
 import { Textarea } from '../src/components/textarea';
 
 // jsdom 25 は PointerEvent を実装していない。一方 Base UI の Checkbox は、キーボード/クリックの
@@ -1976,5 +1978,17 @@ describe('押しボタンの寸法区分は文字とアイコンで対になる'
       `${text} は ${textStep! * 4}px、${icon} は ${iconStep! * 4}px で高さが揃っていません。` +
         '同じ段を指す 2 つの区分が役割によって別の高さで描かれると、尺度として使えません',
     ).toBe(textStep);
+  });
+});
+
+describe('文字のリンクの見た目（Issue #503・design-language.md 7.21）', () => {
+  it('手がかりは下線と下線の間隔だけで、色・太さ・寸法を持たない', () => {
+    // 色を持たせた文字はワードマークの面の役割に限る（7.4）。寸法や太さは置かれた文から継ぐ。
+    expect(textLinkVariants().split(' ').sort()).toEqual(['underline', 'underline-offset-4']);
+  });
+
+  it('呼び出し側の配置のクラスと合わせても、下線が残る', () => {
+    const classes = cn(textLinkVariants(), 'self-start text-sm').split(' ');
+    expect(classes).toEqual(expect.arrayContaining(['underline', 'underline-offset-4', 'self-start', 'text-sm']));
   });
 });

@@ -58,6 +58,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@fwlm/ui/components/table';
+import { textLinkVariants } from '@fwlm/ui/components/text-link';
 import { Textarea } from '@fwlm/ui/components/textarea';
 
 export const metadata: Metadata = {
@@ -349,6 +350,15 @@ export default function UiCheckPage() {
       </TableContainer>
 
       <EmptyState>表示できる項目はありません</EmptyState>
+
+      {/* 文字のリンク（§7.21）。焦点の輪郭と、補足の色の文の中での下線の実描画を測る的にする。 */}
+      <p className="text-sm text-muted-foreground">
+        詳しくは
+        <a href="/ui-check" className={textLinkVariants()}>
+          部品の検証面
+        </a>
+        を見てください。
+      </p>
 
       {/* 選択部品。非フォーカス時の枠の実描画色を測る的にする。 */}
       <Field>
