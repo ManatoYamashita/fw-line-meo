@@ -46,10 +46,18 @@ const pool = await getPool();
 
 const placesAdapter = createPlacesSearchAdapter({ apiKey: config.placesApiKey, fetch });
 
+// LINE への 1 回の通信（トークン発行・reply・push など）に許す時間（Issue #499）。応答が止まった LINE を
+// 待ち続けて Webhook の処理を塞がないための上限で、dashboard-api の LINE アダプタ（composition.ts）と揃える。
+// Webhook の 2 秒の応答目標（.claude/skills/messaging-api/references/webhook-events.md）に収めるための値ではない。
+// 処理は同期で、2 秒を超えた分は再配信と冪等化で救う設計（line-onboarding design.md）なので、遅くても届く
+// reply は打ち切らず、止まった通信だけを有限の時間で終わらせる。
+const LINE_REQUEST_TIMEOUT_MS = 5_000;
+
 const lineMessenger = createLineMessenger({
   channelId: config.lineChannelId,
   channelSecret: config.lineChannelSecret,
   fetch,
+  requestTimeoutMs: LINE_REQUEST_TIMEOUT_MS,
   logger: {
     warn: (event, fields) => {
       writeStructuredLog('warn', event, fields);

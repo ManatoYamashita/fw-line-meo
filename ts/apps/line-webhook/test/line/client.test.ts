@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createLineMessenger, type LineMessage } from '../../src/line/client.js';
+import { createLineMessenger, LineRequestTimeoutError, type LineMessage } from '../../src/line/client.js';
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
 const REPLY_URL = 'https://api.line.me/v2/bot/message/reply';
+// 試験で渡す通信の時間制限（Issue #499）。値そのものは合成ルート（src/index.ts）が決める。
+const REQUEST_TIMEOUT_MS = 5000;
 
 function jsonResponse(status: number, body: unknown): Response {
   return {
@@ -56,6 +58,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'test-channel-secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.reply('reply-token-1', [{ type: 'text', text: 'hello' }]);
@@ -84,6 +87,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.reply('reply-token-1', [{ type: 'text', text: 'hi' }]);
@@ -125,6 +129,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.reply('reply-token-1', [{ type: 'text', text: 'hi' }]);
@@ -156,6 +161,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.reply('reply-token-1', [{ type: 'text', text: 'hi' }]);
@@ -178,6 +184,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.reply('reply-token-xyz', [
@@ -209,6 +216,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
       const message: LineMessage = {
         type: 'text',
@@ -237,6 +245,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger,
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(
@@ -266,6 +275,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       const profile = await messenger.getProfile('Uabc123');
@@ -285,6 +295,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.getProfile('Uabc123');
@@ -307,6 +318,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(messenger.getProfile('Ublocked')).resolves.toBeNull();
@@ -321,6 +333,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.linkRichMenu('Uabc123', 'richmenu-completed-1');
@@ -343,6 +356,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(messenger.linkRichMenu('Uabc123', 'richmenu-1')).rejects.toThrow();
@@ -364,6 +378,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.linkRichMenu(LINE_USER_ID, 'richmenu-completed-1');
@@ -387,6 +402,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(messenger.unlinkRichMenu(LINE_USER_ID)).resolves.toBeUndefined();
@@ -400,6 +416,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(messenger.unlinkRichMenu(LINE_USER_ID)).rejects.toThrow(`status ${status}`);
@@ -412,6 +429,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       const error = await messenger.unlinkRichMenu(LINE_USER_ID).then(
@@ -435,6 +453,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(messenger.unlinkRichMenu(lineUserId)).rejects.toThrow();
@@ -448,6 +467,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.withLogger?.(fakeLogger()).unlinkRichMenu(LINE_USER_ID);
@@ -466,6 +486,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await messenger.startLoading('Uabc123', 20);
@@ -488,6 +509,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       await expect(messenger.startLoading('Uabc123', 20)).rejects.toThrow();
@@ -509,6 +531,7 @@ describe('createLineMessenger', () => {
         channelSecret: 'secret',
         fetch: fetchMock,
         logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       const pending = messenger.startLoading('Uabc123', 20);
@@ -520,6 +543,134 @@ describe('createLineMessenger', () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       await expect(pending).rejects.toThrow();
+    });
+  });
+  describe('通信の時間制限（Issue #499）', () => {
+    // 呼び出し先の URL が一致したら、打ち切られるまで応答しない fetch。打ち切られたときは、実際の fetch と同じく
+    // AbortError で reject する（LineRequestTimeoutError への変換は client.ts の責務）。
+    function hangingFetch(hangs: (url: string) => boolean): ReturnType<typeof vi.fn> {
+      return vi.fn(async (rawUrl: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const url = String(rawUrl);
+        if (hangs(url)) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted', 'AbortError'));
+            });
+          });
+        }
+        if (url === TOKEN_URL) {
+          return jsonResponse(200, { token_type: 'Bearer', access_token: 'stateless-token-1', expires_in: 900 });
+        }
+        if (url.startsWith('https://api.line.me/v2/bot/profile/')) {
+          return jsonResponse(200, { displayName: 'テスト太郎' });
+        }
+        return emptyResponse(200);
+      });
+    }
+
+    const USER_ID = `U${'0'.repeat(32)}`;
+    const MESSAGES: readonly LineMessage[] = [{ type: 'text', text: 'hello' }];
+
+    // 時間制限の対象の操作と、止める通信の URL の組。トークン発行は reply の内側で起きるので reply で叩く。
+    const cases: ReadonlyArray<{
+      name: string;
+      hangs: (url: string) => boolean;
+      call: (messenger: ReturnType<typeof createLineMessenger>) => Promise<unknown>;
+    }> = [
+      { name: 'トークン発行', hangs: (url) => url === TOKEN_URL, call: (m) => m.reply('reply-token-1', MESSAGES) },
+      { name: 'reply', hangs: (url) => url === REPLY_URL, call: (m) => m.reply('reply-token-1', MESSAGES) },
+      { name: 'push', hangs: (url) => url.endsWith('/message/push'), call: (m) => m.push(USER_ID, MESSAGES) },
+      { name: 'getProfile', hangs: (url) => url.includes('/bot/profile/'), call: (m) => m.getProfile(USER_ID) },
+      {
+        name: 'linkRichMenu',
+        hangs: (url) => url.includes('/richmenu/richmenu-1'),
+        call: (m) => m.linkRichMenu(USER_ID, 'richmenu-1'),
+      },
+      {
+        name: 'unlinkRichMenu',
+        hangs: (url) => url.endsWith('/richmenu'),
+        call: (m) => m.unlinkRichMenu(USER_ID),
+      },
+    ];
+
+    it.each(cases)('$name の応答が時間制限を超えると打ち切り、LineRequestTimeoutError を投げる', async ({ hangs, call }) => {
+      const fetchMock = hangingFetch(hangs);
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: fetchMock,
+        logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+      });
+
+      const pending = call(messenger);
+      // 打ち切りが起きる時点では誰も pending を待っていないので、先に握って unhandled rejection を避ける。
+      pending.catch(() => {});
+
+      // 止めた通信が実際に呼ばれたこと（別の経路の失敗で緑にならないこと）を確かめてから時間を進める。
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock.mock.calls.some(([url]) => hangs(String(url)))).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+      const err = await pending.then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(LineRequestTimeoutError);
+      // 記録は例外のクラス名を errorKind に載せる（app.ts・owner/completed-menu.ts の errorKindOf）。
+      expect((err as Error).constructor.name).toBe('LineRequestTimeoutError');
+    });
+
+    it('時間制限の直前までは打ち切らない', async () => {
+      let settled = false;
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: hangingFetch((url) => url === REPLY_URL),
+        logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+      });
+
+      const pending = messenger.reply('reply-token-1', MESSAGES).finally(() => {
+        settled = true;
+      });
+      pending.catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).rejects.toBeInstanceOf(LineRequestTimeoutError);
+    });
+
+    it('応答が返ったらタイマーを残さない', async () => {
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: routingFetchMock(() => emptyResponse(200)),
+        logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+      });
+
+      await messenger.reply('reply-token-1', MESSAGES);
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('時間切れ以外の通信の失敗は、変換せずそのまま投げる', async () => {
+      const networkError = new TypeError('fetch failed');
+      const messenger = createLineMessenger({
+        channelId: 'id',
+        channelSecret: 'secret',
+        fetch: routingFetchMock(() => {
+          throw networkError;
+        }),
+        logger: fakeLogger(),
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+      });
+
+      await expect(messenger.reply('reply-token-1', MESSAGES)).rejects.toBe(networkError);
     });
   });
 });
