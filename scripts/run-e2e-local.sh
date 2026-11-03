@@ -45,6 +45,8 @@ SURVEY_DIR="${TS_DIR}/apps/survey-web"
 SEED_SQL="${SURVEY_DIR}/e2e/seed.sql"
 # structured survey の店舗（Issue #438）。seed.sql の後に当てる（運営・代理店・オーナーを共有する）。
 STRUCTURED_SEED_SQL="${SURVEY_DIR}/e2e/structured-seed.sql"
+# 全店公開（Issue #441）の店舗（設定行なし・個別 OFF）。structured-seed.sql の後に当てる。
+GLOBAL_ROLLOUT_SEED_SQL="${SURVEY_DIR}/e2e/global-rollout-seed.sql"
 MOCK_GEMINI="${SURVEY_DIR}/e2e/mock-gemini.mjs"
 LHCI_CONFIG_REL='perf/lighthouserc.json'
 WITH_TEST_DB="${TS_DIR}/scripts/with-test-db.sh"
@@ -70,6 +72,7 @@ inside_db() {
     # PGHOST / PGUSER / PGDATABASE は with-test-db.sh が export 済み。
     psql -v ON_ERROR_STOP=1 -q -f "$SEED_SQL" >/dev/null
     psql -v ON_ERROR_STOP=1 -q -f "$STRUCTURED_SEED_SQL" >/dev/null
+    psql -v ON_ERROR_STOP=1 -q -f "$GLOBAL_ROLLOUT_SEED_SQL" >/dev/null
     export SESSION_SIGNING_KEY='e2e-local-signing-key'
     export GEMINI_API_KEY='e2e-local-dummy-key'
     case "$layer" in

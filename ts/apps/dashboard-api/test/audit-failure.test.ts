@@ -20,9 +20,10 @@ import {
 import { handleInviteCodeDisable, handleInviteCodeIssue } from '../src/invite-codes.js';
 import { handleStoreRegister } from '../src/store-registration.js';
 import { handleStoreSuspension } from '../src/store-suspension.js';
+import { handleOwnerLineUnlink } from '../src/owner-line-unlink.js';
 
 // Issue #250: 監査記録の書込が失敗しても、確定済みの業務の書込をエラー応答へ変えない。
-// 監査を書く 9 経路すべてで、監査が reject する依存を注入し、次の 3 点を確かめる。
+// 監査を書く経路すべてで、監査が reject する依存を注入し、次の 3 点を確かめる。
 //   - 応答は監査が成功したときと同じ（状態コードと本文）
 //   - 業務の書込は 1 回だけ呼ばれている（握った後に再実行しない）
 //   - 警告 dashboard-api.audit_log_failed が 1 件、action と対象の識別子つきで残る
@@ -135,6 +136,25 @@ const paths: AuditPath[] = [
     status: 200,
     action: 'store_resumed',
     targetId: STORE_ID,
+  },
+  {
+    name: 'POST /owners/:id/unlink（オーナーの LINE の紐づけの解除）',
+    // メニュー操作の対象が無い解除。LINE を呼ばないので、記録は監査の失敗の警告だけになる。
+    writeResult: { kind: 'changed', ownerId: OWNER_ID, menuTarget: null },
+    run: (write, auditLog, log) =>
+      handleOwnerLineUnlink(
+        {
+          auth: authDeps(OP),
+          unlinkOwnerLine: write,
+          clearMenuPending: () => Promise.resolve(),
+          lineRichMenu: { unlinkUserRichMenu: () => Promise.resolve({ ok: true }) },
+          auditLog,
+        },
+        { authorization: auth, id: OWNER_ID, log },
+      ),
+    status: 200,
+    action: 'owner_line_unlinked',
+    targetId: OWNER_ID,
   },
   {
     name: 'POST /invite-codes（招待コードの発行）',
@@ -263,7 +283,7 @@ describe('監査記録の失敗は確定済みの業務の書込をエラー応�
   });
 
   it('対象の経路を漏れなく数えている（監査を書く経路を足したら、この表へも足す）', () => {
-    expect(paths).toHaveLength(10);
+    expect(paths).toHaveLength(11);
   });
 
   it('利用者の更新で監査が 2 件のとき、1 件目が失敗しても 2 件目を書き、応答は 200', async () => {

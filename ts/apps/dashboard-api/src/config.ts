@@ -7,6 +7,11 @@ export interface DashboardApiConfig {
   corsOrigin: string | readonly string[];
   // Places API (New) の API キー（PlacesSearchAdapter が使用）。
   placesApiKey: string;
+  // LINE Messaging API のチャネル ID とチャネルシークレット。解除したオーナーの LINE アカウントから
+  // 個別リッチメニューを外すときに、ステートレスなチャネルアクセストークンを発行するために使う
+  // （owner-line-unlink Requirement 3.1・line-richmenu.ts）。line-webhook と同じ env 名で受ける。
+  lineChannelId: string;
+  lineChannelSecret: string;
   port: number;
 }
 
@@ -20,10 +25,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DashboardApiCo
   if (!placesApiKey) {
     throw new Error('PLACES_API_KEY is required');
   }
+  const lineChannelId = env.LINE_CHANNEL_ID;
+  if (!lineChannelId) {
+    throw new Error('LINE_CHANNEL_ID is required');
+  }
+  const lineChannelSecret = env.LINE_CHANNEL_SECRET;
+  if (!lineChannelSecret) {
+    throw new Error('LINE_CHANNEL_SECRET is required');
+  }
   return {
     surveyBaseUrl,
     corsOrigin,
     placesApiKey,
+    lineChannelId,
+    lineChannelSecret,
     port: Number(env.PORT ?? '8080'),
   };
 }

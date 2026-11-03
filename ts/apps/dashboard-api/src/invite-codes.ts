@@ -189,7 +189,8 @@ type SingleAgencyResult =
   | { ok: false; response: Response };
 
 // スコープ解決＋「具体的な 1 代理店」の要求。招待コードは代理店単位のため all は許さず、
-// operator の agencyId 未指定は 400 とする（owners-list の GET /owners と同じ判断・5.4）。
+// operator の agencyId 未指定は 400 とする（5.4）。GET /owners も当初は同じ判断だったが、
+// owner-line-unlink で未指定を全代理店の一覧へ改めたため、いまは招待コードだけの判断である。
 function scopeToSingleAgency(
   user: DashboardUserIdentity,
   requestedAgencyId: string | undefined,

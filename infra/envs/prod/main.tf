@@ -107,6 +107,9 @@ module "run_services" {
         # （Issue #344・ts/apps/survey-web/src/lib/client-key.ts）。未設定だとロードバランサ経由の客全員が
         # 1 つの鍵を分け合うので、この env はイメージより先に入れる（infra/README.md §9-2-d）。
         SURVEY_TRUSTED_PROXY_IPS = google_compute_global_address.survey_web.address
+        # Issue #441: 客向け新アンケートを全店に公開（店舗別の OFF / 設定行なしより優先）。
+        # 1 -> 0 に戻して対象 2 サービスへ Terraform を再適用すれば即座に従来の分岐へ戻せる（手順は infra/README.md §3）。
+        SURVEY_FORCE_STRUCTURED = "1"
       }
     }
     "dashboard-api" = {
@@ -114,13 +117,19 @@ module "run_services" {
       needs_cloudsql = true
       # agency-dashboard: 店舗登録フローが Places 検索をサーバー側で実行するため
       # PLACES_API_KEY を注入（batch_job と同一の places-api-key secret）。
+      # owner-line-unlink（Issue #487）: LINE の連携を解除したオーナーのアカウントから個別リッチメニューを
+      # 外すため、line-webhook と同じチャネル ID とチャネルシークレットを渡す（stateless token の発行に使う）。
+      # dashboard-api はこの 2 つが無いと起動しない（config.ts の loadConfig）ので、この env は
+      # それを読むイメージより先に apply する。
       secret_env = {
-        PLACES_API_KEY = module.secrets.secret_ids["places-api-key"]
+        PLACES_API_KEY      = module.secrets.secret_ids["places-api-key"]
+        LINE_CHANNEL_SECRET = module.secrets.secret_ids["line-channel-secret"]
       }
       env = {
         SURVEY_BASE_URL = var.survey_base_url
         # agency-dashboard: CORS 許可元（単一オリジン・design.md Security）。dashboard-web の Cloud Run URL。
         DASHBOARD_WEB_ORIGIN = var.dashboard_web_origin
+        LINE_CHANNEL_ID      = var.line_channel_id
       }
     }
     # agency-dashboard: 運営・代理店向け Next.js UI（ゼロスケール公開 Web・design.md「Infra」）。
@@ -141,6 +150,8 @@ module "run_services" {
       env = {
         LIFF_CHANNEL_ID     = var.liff_channel_id
         NEXT_PUBLIC_LIFF_ID = var.liff_id
+        # 客向けの全店公開と同じ状態を店舗側設定の案内にも反映する。
+        SURVEY_FORCE_STRUCTURED = "1"
       }
     }
   }

@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { OnboardingSessionRow, OwnerRow, Queryable, SessionPatch, StoreCandidate } from '@fwlm/db';
+import type {
+  ActiveInviteCode,
+  AuditLogInput,
+  CreateOwnerInput,
+  OnboardingSessionRow,
+  OwnerRow,
+  Queryable,
+  SessionPatch,
+  StoreCandidate,
+} from '@fwlm/db';
 import {
   createConversationHandlers,
   type ConversationDeps,
@@ -11,12 +20,14 @@ import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { LineMessenger, LineMessage } from '../../src/line/client.js';
 import type { ConnectablePool, TransactionClient } from '@fwlm/store-identification';
 import type {
-  ConfirmOutcome,
+  ConfirmForOnboardingOutcome,
   StoreIdentificationService,
 } from '@fwlm/store-identification';
 import type { SearchOutcome } from '@fwlm/store-identification';
 import { encodePostback } from '../../src/onboarding/stages.js';
 import {
+  buildCompletionMessage,
+  buildPlaceAlreadyRegisteredMessage,
   buildStatusGuidanceMessage,
   buildConfirmationMessage as buildConfirmationMessageForAssertion,
   buildGreetingMessage,
@@ -40,6 +51,8 @@ import type { ReportReadsAccessor } from '../../src/report/handler.js';
 
 const FIXED_NOW = new Date('2026-07-11T00:00:00.000Z');
 const AGENCY_ID = 'agency-1';
+// 照合した招待コードの行の id（agency-dashboard Req 8.1・#486）。
+const INVITE_CODE_ID = 'invite-code-1';
 const RICHMENU_COMPLETED_ID = 'richmenu-completed-1';
 const LIFF_STORE_DETAIL_URL = 'https://liff.line.me/test-liff-id';
 
@@ -86,6 +99,12 @@ function baseOwner(overrides: Partial<OwnerRow> = {}): OwnerRow {
     created_at: FIXED_NOW,
     // スキーマ既定（0004 マイグレーション）。OwnerRow で必須のためヘルパで満たす。
     delivery_hour: 7,
+    // 0017（#486）。登録に用いた招待コード。null = 記録なし。
+    invite_code_id: null,
+    // 連携中（0018 の 3 列はすべて null）。
+    line_unlinked_at: null,
+    menu_pending_line_user_id: null,
+    taken_over_by_owner_id: null,
     ...overrides,
   };
 }
@@ -123,10 +142,10 @@ function createFakeSessionsAccessor(initial: OnboardingSessionRow): {
 
 function createFakeOwnersAccessor(existingOwner: OwnerRow | null): {
   accessor: OwnersAccessor;
-  createOwnerCalls: { db: Queryable; input: unknown }[];
+  createOwnerCalls: { db: Queryable; input: CreateOwnerInput }[];
   findCalls: string[];
 } {
-  const createOwnerCalls: { db: Queryable; input: unknown }[] = [];
+  const createOwnerCalls: { db: Queryable; input: CreateOwnerInput }[] = [];
   // 照会の回数。会話の入口の 1 回だけであることを確かめる（line-on-demand-report design.md「Performance」）。
   const findCalls: string[] = [];
   const accessor: OwnersAccessor = {
@@ -136,13 +155,17 @@ function createFakeOwnersAccessor(existingOwner: OwnerRow | null): {
     },
     async createOwner(db, input) {
       createOwnerCalls.push({ db, input });
-      return baseOwner({ agency_id: input.agencyId, line_user_id: input.lineUserId });
+      return baseOwner({
+        agency_id: input.agencyId,
+        line_user_id: input.lineUserId,
+        invite_code_id: input.inviteCodeId,
+      });
     },
   };
   return { accessor, createOwnerCalls, findCalls };
 }
 
-function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: string }>): {
+function createFakeInviteCodesAccessor(validCodes: Record<string, ActiveInviteCode>): {
   accessor: InviteCodesAccessor;
   findCalls: string[];
 } {
@@ -157,27 +180,29 @@ function createFakeInviteCodesAccessor(validCodes: Record<string, { agencyId: st
 }
 
 // タスク 3.1 で構築済みの StoreIdentificationService のフェイク実装。
-// searchCandidates/confirmStore の戻り値をテストごとに差し替えられるようにし、
-// confirmStore に渡された引数（ownerId・candidate）を記録して「セッションに保存された
+// searchCandidates/confirmStoreForOnboarding の戻り値をテストごとに差し替えられるようにし、
+// confirmStoreForOnboarding に渡された引数（ownerId・candidate）を記録して「セッションに保存された
 // 実際に提示済みの候補」がそのまま渡されたことを検証できるようにする。
+// 会話が使うのはオンボーディング専用の確定だけである（owner-line-unlink 6.2）。管理画面の店舗登録用の
+// confirmStore は会話の依存に含まれないので、フェイクも持たない。
 function createFakeIdentificationService(config: {
   // 呼び出し側が undefined を素通しするため、キーの省略と明示的な undefined の双方を許す
   // （exactOptionalPropertyTypes 下では両者が別物になる）。
   searchOutcome?: SearchOutcome | undefined;
-  confirmOutcome?: ConfirmOutcome | undefined;
+  confirmOutcome?: ConfirmForOnboardingOutcome | undefined;
 }): {
-  service: StoreIdentificationService;
+  service: Pick<StoreIdentificationService, 'searchCandidates' | 'confirmStoreForOnboarding'>;
   searchCalls: string[];
   confirmCalls: { ownerId: string; candidate: StoreCandidate }[];
 } {
   const searchCalls: string[] = [];
   const confirmCalls: { ownerId: string; candidate: StoreCandidate }[] = [];
-  const service: StoreIdentificationService = {
+  const service: Pick<StoreIdentificationService, 'searchCandidates' | 'confirmStoreForOnboarding'> = {
     async searchCandidates(storeName: string) {
       searchCalls.push(storeName);
       return config.searchOutcome ?? { kind: 'empty' };
     },
-    async confirmStore(ownerId: string, candidate: StoreCandidate) {
+    async confirmStoreForOnboarding(ownerId: string, candidate: StoreCandidate) {
       confirmCalls.push({ ownerId, candidate });
       return config.confirmOutcome ?? { kind: 'confirmed', storeId: 'store-1' };
     },
@@ -185,10 +210,15 @@ function createFakeIdentificationService(config: {
   return { service, searchCalls, confirmCalls };
 }
 
-function createFakeMessenger(): LineMessenger & { replies: { replyToken: string; messages: readonly LineMessage[] }[] } {
+function createFakeMessenger(): LineMessenger & {
+  replies: { replyToken: string; messages: readonly LineMessage[] }[];
+  unlinks: string[];
+} {
   const replies: { replyToken: string; messages: readonly LineMessage[] }[] = [];
+  const unlinks: string[] = [];
   return {
     replies,
+    unlinks,
     async reply(replyToken, messages) {
       replies.push({ replyToken, messages });
     },
@@ -201,6 +231,12 @@ function createFakeMessenger(): LineMessenger & { replies: { replyToken: string;
     },
     async linkRichMenu() {
       // 未使用（タスク 3.4 の対象）。
+    },
+    async unlinkRichMenu(lineUserId) {
+      // 次のマクロタスクまで待ってから記録する。呼出元が完了を待たずに進めた（fire-and-forget）場合、
+      // handleEvent が解決した時点でまだ記録されていないので、試験がそれを検出できる。
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      unlinks.push(lineUserId);
     },
     async startLoading() {
       // 未使用（Issue #307・呼出元は app.ts の onEvent ラッパーであり、conversation.ts 自身は
@@ -264,10 +300,10 @@ function createFakeRouterFactory(): {
 function buildDeps(overrides: {
   session: OnboardingSessionRow;
   existingOwner?: OwnerRow | null;
-  validCodes?: Record<string, { agencyId: string }>;
+  validCodes?: Record<string, ActiveInviteCode>;
   now?: Date;
   searchOutcome?: SearchOutcome;
-  confirmOutcome?: ConfirmOutcome;
+  confirmOutcome?: ConfirmForOnboardingOutcome;
   messenger?: ReturnType<typeof createFakeMessenger>;
   /** 省略すると偽の振り分け口（routerFake）を使う。 */
   createOwnerRouter?: StoreIdentifiedOwnerRouterFactory;
@@ -332,6 +368,8 @@ describe('createConversationHandlers', () => {
       const [message] = messenger.replies[0]?.messages ?? [];
       expect(message?.type).toBe('text');
       expect((message as { text: string }).text).toContain('招待コード');
+      // owner-line-unlink Requirement 3.1: 未登録の友だち追加では、同じ LINE アカウントの個別メニューを外す。
+      expect(messenger.unlinks).toEqual(['U1']);
     });
 
     it('既存オーナーの再友だち追加 → owner を重複作成せず、現在の段階の精密な案内を再送する（Req 1.2/5.2）', async () => {
@@ -352,6 +390,99 @@ describe('createConversationHandlers', () => {
       // タスク 3.4: 汎用の「ご登録いただいています」ではなく、await_store_name に実際に
       // 入った際に送信したのと同一の文言（buildStoreNameInputGuidanceMessage）を再送する。
       expect(message).toEqual(buildStoreNameInputGuidanceMessage());
+      // オーナーを引けた LINE アカウントのメニューは外さない（外すのは未登録のときだけ）。
+      expect(messenger.unlinks).toEqual([]);
+    });
+  });
+
+  // owner-line-unlink Requirement 3.1・4.1（design.md「ConversationHandlers（変更）」）。
+  // 解除した元の LINE アカウントは、オーナーを引けない（未登録と同じ）。ブロック中で解除の時点に外せなかった
+  // 完了後メニューが残らないよう、未登録の友だち追加では挨拶の後に個別メニューのリンクを外す（安全網）。
+  describe('未登録の友だち追加での個別メニューの解除（owner-line-unlink Requirement 3.1）', () => {
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('挨拶の Reply を送り終えてから、同じ LINE アカウントの個別メニューを外し、何も警告しない', async () => {
+      const messenger = createFakeMessenger();
+      const order: string[] = [];
+      messenger.reply = async (replyToken, messages) => {
+        order.push(`reply:start:${replyToken}`);
+        await tick();
+        messenger.replies.push({ replyToken, messages });
+        order.push('reply:end');
+      };
+      messenger.unlinkRichMenu = async (lineUserId) => {
+        order.push(`unlink:start:${lineUserId}`);
+        await tick();
+        order.push('unlink:end');
+      };
+      const { deps, logger } = buildDeps({ session: baseSession(), existingOwner: null, messenger });
+
+      await createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' });
+
+      // Reply トークンの期限は短いので、外す処理は Reply の完了を待ってから始める。外す処理の完了まで待つ。
+      expect(order).toEqual(['reply:start:rt-1', 'reply:end', 'unlink:start:U1', 'unlink:end']);
+      expect(messenger.replies).toEqual([{ replyToken: 'rt-1', messages: [buildGreetingMessage()] }]);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('外す処理が失敗しても handleEvent は投げず、挨拶は送信済みのまま、失敗を例外の種別だけで記録する', async () => {
+      const messenger = createFakeMessenger();
+      class LineUnlinkSimulatedError extends Error {}
+      messenger.unlinkRichMenu = vi.fn(async () => {
+        await tick();
+        throw new LineUnlinkSimulatedError('unlink failed (simulated LINE API error)');
+      });
+      const { deps, logger } = buildDeps({ session: baseSession(), existingOwner: null, messenger });
+
+      await expect(
+        createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' }),
+      ).resolves.toBeUndefined();
+
+      expect(messenger.unlinkRichMenu).toHaveBeenCalledTimes(1);
+      expect(messenger.replies).toEqual([{ replyToken: 'rt-1', messages: [buildGreetingMessage()] }]);
+      // 項目は例外の種別だけ。LINE ユーザー ID・例外の本文は載せない。
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('line-webhook.richmenu_unlink_failed', {
+        errorKind: 'LineUnlinkSimulatedError',
+      });
+    });
+
+    it('外す処理の失敗の記録が投げても、handleEvent は投げない（Reply の後なので 2 回目の Reply を誘わない）', async () => {
+      const messenger = createFakeMessenger();
+      messenger.unlinkRichMenu = async () => {
+        throw new Error('unlink failed');
+      };
+      const { deps, logger } = buildDeps({ session: baseSession(), existingOwner: null, messenger });
+      logger.warn = vi.fn(() => {
+        throw new Error('logger failed');
+      });
+
+      await expect(
+        createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' }),
+      ).resolves.toBeUndefined();
+      expect(messenger.replies).toHaveLength(1);
+    });
+
+    it('オーナーを引けたアカウントは、会話が招待コード待ちの段階でも外さない', async () => {
+      const { deps, messenger } = buildDeps({ session: baseSession(), existingOwner: baseOwner() });
+
+      await createConversationHandlers(deps).handleEvent({ kind: 'follow', lineUserId: 'U1', replyToken: 'rt-1' });
+
+      expect(messenger.replies).toEqual([{ replyToken: 'rt-1', messages: [buildGreetingMessage()] }]);
+      expect(messenger.unlinks).toEqual([]);
+    });
+
+    it.each<readonly [string, InboundEvent]>([
+      ['テキスト', { kind: 'text', lineUserId: 'U1', replyToken: 'rt-1', text: 'こんにちは' }],
+      ['スタンプなど', { kind: 'unsupported', lineUserId: 'U1', replyToken: 'rt-1' }],
+      ['再開の postback', { kind: 'postback', lineUserId: 'U1', replyToken: 'rt-1', data: encodePostback({ kind: 'resume' }) }],
+    ])('未登録のアカウントでも、友だち追加以外（%s）では外さない', async (_label, event) => {
+      const { deps, messenger } = buildDeps({ session: baseSession(), existingOwner: null });
+
+      await createConversationHandlers(deps).handleEvent(event);
+
+      expect(messenger.replies).toHaveLength(1);
+      expect(messenger.unlinks).toEqual([]);
     });
   });
 
@@ -360,7 +491,7 @@ describe('createConversationHandlers', () => {
       const session = baseSession({ invite_failures: 2 });
       const { deps, sessionsFake, ownersFake, poolFake, messenger } = buildDeps({
         session,
-        validCodes: { VALIDCODE: { agencyId: AGENCY_ID } },
+        validCodes: { VALIDCODE: { id: INVITE_CODE_ID, agencyId: AGENCY_ID } },
       });
       const handlers = createConversationHandlers(deps);
 
@@ -372,10 +503,11 @@ describe('createConversationHandlers', () => {
       };
       await handlers.handleEvent(event);
 
-      // owner 作成
+      // owner 作成。照合したコードの行の id を、登録に用いたコードとして同じ作成で渡す（agency-dashboard Req 8.1）。
       expect(ownersFake.createOwnerCalls).toHaveLength(1);
       expect(ownersFake.createOwnerCalls[0]?.input).toMatchObject({
         agencyId: AGENCY_ID,
+        inviteCodeId: INVITE_CODE_ID,
         lineUserId: 'U1',
       });
 
@@ -471,7 +603,7 @@ describe('createConversationHandlers', () => {
       const session = baseSession({ invite_failures: 5, locked_until: lockedUntil });
       const { deps, sessionsFake, inviteCodesFake, messenger } = buildDeps({
         session,
-        validCodes: { VALIDCODE: { agencyId: AGENCY_ID } },
+        validCodes: { VALIDCODE: { id: INVITE_CODE_ID, agencyId: AGENCY_ID } },
       });
       const handlers = createConversationHandlers(deps);
 
@@ -874,7 +1006,7 @@ describe('createConversationHandlers', () => {
       expect(logger.info).not.toHaveBeenCalledWith('line-webhook.richmenu_linked');
     });
 
-    it('確定 → confirmStore が session 由来の ownerId・candidate で呼ばれ、完了 reply・stage は completed（Req 4.2）', async () => {
+    it('確定 → confirmStoreForOnboarding が session 由来の ownerId・candidate で呼ばれ、完了 reply・stage は completed（Req 4.2）', async () => {
       const candidates = storeCandidates(3);
       const session = baseSession({
         stage: 'await_confirmation',
@@ -977,6 +1109,165 @@ describe('createConversationHandlers', () => {
       const [message] = messenger.replies[0]?.messages ?? [];
       expect((message as { type: string }).type).toBe('flex');
       expect((message as { altText: string }).altText).toContain('確定できませんでした');
+    });
+
+    it('確定 → place_already_registered の案内は既存の登録済みの案内そのもので、監査を残さない（owner-line-unlink 6.4, 6.5）', async () => {
+      // 引継ぎの拒否（所有者が連携中・解除済みでも代理店が違う）は、オンボーディング専用の確定が
+      // place_already_registered で返す。会話は既存の登録済みの案内をそのまま返す。
+      const { deps, sessionsFake, messenger } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'place_already_registered' },
+      });
+      const audits: AuditLogInput[] = [];
+      deps.auditLog = async (input) => {
+        audits.push(input);
+      };
+      const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-rejected',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(messenger.replies).toEqual([
+        { replyToken: 'rt-rejected', messages: [buildPlaceAlreadyRegisteredMessage()] },
+      ]);
+      expect(sessionsFake.updateCalls).toHaveLength(0);
+      expect(linkRichMenuSpy).not.toHaveBeenCalled();
+      expect(audits).toEqual([]);
+    });
+
+    it('確定 → confirmed は onboarding_completed だけを監査に残し、引継ぎの監査を残さない', async () => {
+      const { deps } = buildDeps({
+        session: baseSession({
+          stage: 'await_confirmation',
+          owner_id: 'owner-1',
+          candidates: storeCandidates(1),
+          selected_index: 0,
+        }),
+        confirmOutcome: { kind: 'confirmed', storeId: 'store-1' },
+      });
+      const audits: AuditLogInput[] = [];
+      deps.auditLog = async (input) => {
+        audits.push(input);
+      };
+      const handlers = createConversationHandlers(deps);
+
+      await handlers.handleEvent({
+        kind: 'postback',
+        lineUserId: 'U1',
+        replyToken: 'rt-confirmed-audit',
+        data: encodePostback({ kind: 'confirm' }),
+      });
+
+      expect(audits.map((a) => a.action)).toEqual(['onboarding_completed', 'rich_menu_linked']);
+    });
+
+    describe('引継ぎ（taken_over・owner-line-unlink 6.2, 7.2）', () => {
+      const TAKEN_OVER: ConfirmForOnboardingOutcome = {
+        kind: 'taken_over',
+        storeId: 'store-confirmed',
+        previousOwnerId: 'owner-previous',
+        movedStoreIds: ['store-older', 'store-confirmed', 'store-suspended'],
+      };
+
+      function takeoverDeps(messenger?: ReturnType<typeof createFakeMessenger>) {
+        const built = buildDeps({
+          session: baseSession({
+            stage: 'await_confirmation',
+            owner_id: 'owner-new',
+            candidates: storeCandidates(2),
+            selected_index: 1,
+          }),
+          confirmOutcome: TAKEN_OVER,
+          ...(messenger ? { messenger } : {}),
+        });
+        const audits: AuditLogInput[] = [];
+        built.deps.auditLog = async (input) => {
+          audits.push(input);
+        };
+        return { ...built, audits };
+      }
+
+      it('通常の確定と同じく段階を completed にし、完了の案内を返し、完了後メニューを張る（6.2）', async () => {
+        const { deps, sessionsFake, identificationFake, messenger } = takeoverDeps();
+        const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+        const handlers = createConversationHandlers(deps);
+
+        await handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-taken-over',
+          data: encodePostback({ kind: 'confirm' }),
+        });
+
+        expect(identificationFake.confirmCalls).toEqual([
+          { ownerId: 'owner-new', candidate: storeCandidates(2)[1] },
+        ]);
+        expect(sessionsFake.updateCalls.map((call) => call.patch)).toEqual([{ stage: 'completed' }]);
+        expect(messenger.replies).toEqual([
+          { replyToken: 'rt-taken-over', messages: [buildCompletionMessage(LIFF_STORE_DETAIL_URL)] },
+        ]);
+        expect(linkRichMenuSpy).toHaveBeenCalledTimes(1);
+        expect(linkRichMenuSpy).toHaveBeenCalledWith('U1', RICHMENU_COMPLETED_ID);
+      });
+
+      it('完了・旧オーナーを対象にした引継ぎ・移した店舗ごとの引継ぎの 3 種を、新しいオーナーを主体に監査へ残す（7.2）', async () => {
+        const { deps, audits } = takeoverDeps();
+        const handlers = createConversationHandlers(deps);
+
+        await handlers.handleEvent({
+          kind: 'postback',
+          lineUserId: 'U1',
+          replyToken: 'rt-taken-over-audit',
+          data: encodePostback({ kind: 'confirm' }),
+        });
+
+        const actor = { actorType: 'owner', actorId: 'owner-new' } as const;
+        expect(audits).toEqual([
+          { ...actor, action: 'onboarding_completed', targetType: 'store', targetId: 'store-confirmed' },
+          { ...actor, action: 'owner_stores_taken_over', targetType: 'owner', targetId: 'owner-previous' },
+          { ...actor, action: 'store_taken_over', targetType: 'store', targetId: 'store-older' },
+          { ...actor, action: 'store_taken_over', targetType: 'store', targetId: 'store-confirmed' },
+          { ...actor, action: 'store_taken_over', targetType: 'store', targetId: 'store-suspended' },
+          { ...actor, action: 'rich_menu_linked', targetType: 'owner', targetId: 'owner-new' },
+        ]);
+      });
+
+      it('監査の記録が失敗しても、完了の案内と完了後メニューは変わらず、警告を残す', async () => {
+        const { deps, messenger, logger } = takeoverDeps();
+        deps.auditLog = async () => {
+          throw new Error('audit sink unavailable');
+        };
+        const linkRichMenuSpy = vi.spyOn(messenger, 'linkRichMenu');
+        const handlers = createConversationHandlers(deps);
+
+        await expect(
+          handlers.handleEvent({
+            kind: 'postback',
+            lineUserId: 'U1',
+            replyToken: 'rt-taken-over-audit-fails',
+            data: encodePostback({ kind: 'confirm' }),
+          }),
+        ).resolves.toBeUndefined();
+
+        expect(messenger.replies).toEqual([
+          {
+            replyToken: 'rt-taken-over-audit-fails',
+            messages: [buildCompletionMessage(LIFF_STORE_DETAIL_URL)],
+          },
+        ]);
+        expect(linkRichMenuSpy).toHaveBeenCalledWith('U1', RICHMENU_COMPLETED_ID);
+        expect(logger.warn).toHaveBeenCalledWith('line-webhook.audit_log_failed', { errorKind: 'Error' });
+      });
     });
 
     it('取りやめ（restart）→ await_store_name へ戻り、候補・選択インデックスはクリアされる（Req 4.5）', async () => {
@@ -1351,7 +1642,7 @@ describe('店舗特定済みオーナーの振り分け（line-on-demand-report 
       const h = buildDeps({
         session: sessionAt(stage),
         existingOwner: storeIdentified,
-        validCodes: { ABCD1234: { agencyId: AGENCY_ID } },
+        validCodes: { ABCD1234: { id: INVITE_CODE_ID, agencyId: AGENCY_ID } },
         searchOutcome: { kind: 'found', candidates: storeCandidates(2) },
       });
 
@@ -1364,6 +1655,8 @@ describe('店舗特定済みオーナーの振り分け（line-on-demand-report 
       expect(h.identificationFake.confirmCalls).toEqual([]);
       expect(h.inviteCodesFake.findCalls).toEqual([]);
       expect(h.ownersFake.createOwnerCalls).toEqual([]);
+      // 店舗特定済みのオーナーの友だち追加でも、会話は個別メニューを外さない（owner-line-unlink Requirement 3.1）。
+      expect(h.messenger.unlinks).toEqual([]);
       // 会話は段階を読まない（段階は振り分け口が 1 回だけ読む）。オーナーの照会は入口の 1 回だけ。
       expect(h.sessionsFake.getCalls).toEqual([]);
       expect(h.sessionsFake.updateCalls).toEqual([]);

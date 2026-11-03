@@ -83,7 +83,7 @@ const categoryButtons = (where: ReturnType<typeof within>): HTMLElement[] =>
 const commentToggle = () => screen.getByRole('button', { name: COMMENT_TOGGLE });
 
 function star(n: number): void {
-  fireEvent.click(screen.getByRole('button', { name: `星${n}` }));
+  fireEvent.click(screen.getByRole('radio', { name: new RegExp(`^星${n}：`) }));
 }
 function submit(): void {
   fireEvent.click(screen.getByRole('button', { name: SUBMIT }));

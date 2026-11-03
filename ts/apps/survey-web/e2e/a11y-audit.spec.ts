@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { expectNoAxeViolations } from '@fwlm/e2e-support/a11y';
 
 import { openComponentCatalog, openDraftingSurface, openSurveySurface } from './fixtures/surfaces';
@@ -36,5 +36,10 @@ test('客向け回答画面が WCAG A/AA の自動監査を通る', async ({ pag
 
 test('客向け下書き画面が WCAG A/AA の自動監査を通る', async ({ page }) => {
   await openDraftingSurface(page);
+  // 下書きを作った知らせの Toast も監査の対象に入れる。監査は動きが終わるまで待つので
+  // （Issue #492）、待つ間に Toast が消えていれば、その文字は監査されないまま緑になる。
+  const toast = page.locator('[data-sonner-toast]').filter({ hasText: '口コミ文を作成しました。' });
+  await expect(toast, '下書きを作った知らせの Toast が出ていない').toBeVisible();
   await expectNoAxeViolations(page);
+  await expect(toast, '監査の間に Toast が消え、その文字が監査されていない').toBeVisible();
 });

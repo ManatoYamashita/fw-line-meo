@@ -8,7 +8,8 @@
 // 手順（design.md のスクリプトの契約）:
 //   1. `--to` のメニューがレポート 3 導線を持つことを確かめる（`exposesAllReportActions`）。
 //      満たさなければ **誰にも張らずに** 非ゼロで終わる。押しても答えの返らない面を配らないため
-//   2. `owners.onboarding_status = 'store_identified'` の LINE ユーザーを読む
+//   2. `owners.onboarding_status = 'store_identified'` の LINE ユーザーを読む（解除済みのオーナーは除く・
+//      owner-line-unlink Requirement 3.5）
 //   3. 各オーナーへ個別リンクを張り、照会とプロフィールの照会で 4 つに分ける
 //   4. 分類ごとの件数と、到達不能・不一致・判定不能のユーザーの先頭 8 文字を出す
 //   5. `--delete-old` があり、不一致と判定不能が 0 件のときに限り旧メニューを削除する
@@ -245,10 +246,17 @@ async function relinkOwner(
 /**
  * 店舗特定済みオーナーの LINE ユーザーを読む（読み出しのみ。この経路は DB へ書かない）。
  * 並びを固定するのは、途中で止まったときに同じ順で流し直せるようにするためである。
+ *
+ * 解除済みのオーナー（line_unlinked_at が値を持つ）は抽出しない（owner-line-unlink Requirement 3.5）。
+ * 解除済みのオーナーは店舗特定済みの段階のまま残るが、完了後メニューを張る相手ではない。
+ * 解除済みは LINE ユーザー ID を持たない（ck_owner_line_link）ので後段の絞り込みでも落ちるが、
+ * 「解除済みを対象にしない」ことを抽出の条件として明示する。
  */
 async function listStoreIdentifiedLineUserIds(db: Queryable): Promise<string[]> {
   const result = await db.query<StoreIdentifiedOwnerRow>(
-    `SELECT line_user_id FROM owners WHERE onboarding_status = 'store_identified' ORDER BY created_at, id`,
+    `SELECT line_user_id FROM owners
+      WHERE onboarding_status = 'store_identified' AND line_unlinked_at IS NULL
+      ORDER BY created_at, id`,
   );
   const lineUserIds: string[] = [];
   for (const row of result.rows) {
