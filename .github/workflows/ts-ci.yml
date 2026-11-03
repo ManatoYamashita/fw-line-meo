@@ -234,6 +234,13 @@ jobs:
         # env ではなく、散文の CORS_ORIGIN（存在しないと教えるための記述）まで叩くため
         # （read-only grep 検証・node 不要）。
         run: bash scripts/check-spec-env-names.sh
+      - name: 'Cloud Run の env 配線ガード（Issue #500・実装の必須 env と Terraform の配線の両方向照合）'
+        # loadConfig に必須の env を足しても、Terraform への配線を忘れたまま CI は緑で通り、
+        # 新しいイメージは本番で初めて「X is required」で起動に失敗する。必須であることを
+        # エラーで自己申告する形から必須 env を抜き出し、tf の配線と両方向で照合する。
+        # デプロイ対象の正典（check-deploy-image-coverage.sh --print-targets）の全件に、
+        # 照合するか外すかの宣言を要求する（read-only grep 検証・node 不要）。
+        run: bash scripts/check-run-env-wiring.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
