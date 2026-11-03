@@ -2,6 +2,8 @@
 # Docs ↔ schema 整合チェック:
 #  - 実テーブルが db/write-boundary.md のマッピング表行にちょうど 1 回出現＝書込責任層が単一（Req 9.1, 9.4）
 #  - 実テーブルが db/ERD.md に出現（Req 11.1, 11.2）
+#  - db/ERD.md の「列一覧」の節が、実テーブルごとに 1 行ずつあり、列の集合が実スキーマと一致する
+#    （両方向・Issue #501。表の名前の出現だけでは、migration で列を変えても文書のずれが緑で通った）
 #  - write-boundary.md の書込所有テーブルに infra/sql/grants.sql で該当層 SA への DML GRANT があること
 #  - 走査したテーブルが 1 件以上あること（空振り防止・Issue #156）
 #  - 書込面の DML 付与を後続の Issue へ保留したテーブル（下の PENDING_WRITE_GRANTS）は、**どの SA にも
@@ -202,10 +204,73 @@ for pe in ${PENDING_WRITE_GRANTS[@]+"${PENDING_WRITE_GRANTS[@]}"}; do
     esac
 done
 
+# --- ERD.md の列一覧と実スキーマの列の照合（Issue #501） ---
+# 照合の相手は ERD.md の「## 列一覧」の節の表に限る。散文や凡例の列名は数えない（説明のための
+# 部分的な言及で、全列を並べる場所ではないため）。列名はバッククォートで囲んだものだけを拾う。
+# 抽出は awk で行う。grep の無一致（exit 1）を pipefail と set -e の下で扱わずに済ませるため。
+erd_col_rows="$(awk '/^## 列一覧/ { f = 1; next } f && /^## / { exit } f && /^\| [a-z_][a-z0-9_]* \| / { print }' "$ERD")"
+actual_cols="$($PSQL_EXEC -tAq -c "SELECT c.table_name || '|' || c.column_name FROM information_schema.columns c JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE' ORDER BY 1;")"
+
+# ERD の表の行から、テーブル $1 の列名を 1 行 1 件で出す（並びは問わないので整列する）。
+erd_columns_of() {
+    printf '%s\n' "$erd_col_rows" | awk -F'|' -v t="$1" '
+        { name = $2; gsub(/^ +| +$/, "", name) }
+        name == t {
+            s = $3
+            while (match(s, /`[a-z_][a-z0-9_]*`/)) {
+                print substr(s, RSTART + 1, RLENGTH - 2)
+                s = substr(s, RSTART + RLENGTH)
+            }
+        }' | sort
+}
+actual_columns_of() {
+    printf '%s\n' "$actual_cols" | awk -F'|' -v t="$1" '$1 == t { print $2 }' | sort
+}
+
+col_tables=0
+col_total=0
+if [ -z "$erd_col_rows" ]; then
+    echo "FAIL: ERD.md の「## 列一覧」の節に表の行が 1 件もありません（節の見出しか表の書式が変わった可能性があります）"
+    fail=1
+else
+    while IFS= read -r t; do
+        [ -z "$t" ] && continue
+        rows="$(printf '%s\n' "$erd_col_rows" | awk -F'|' -v t="$t" '{ name = $2; gsub(/^ +| +$/, "", name) } name == t' | awk 'END { print NR }')"
+        if [ "$rows" -ne 1 ]; then
+            echo "FAIL: '$t' は ERD.md の列一覧に ${rows} 行（期待 1）"; fail=1; continue
+        fi
+        col_tables=$((col_tables + 1))
+        doc_cols="$(erd_columns_of "$t")"
+        act_cols="$(actual_columns_of "$t")"
+        col_total=$((col_total + $(printf '%s\n' "$act_cols" | awk 'NF { c++ } END { print c + 0 }')))
+        missing="$(comm -23 <(printf '%s\n' "$act_cols") <(printf '%s\n' "$doc_cols") | awk 'NF' | paste -sd ' ' -)"
+        extra="$(comm -13 <(printf '%s\n' "$act_cols") <(printf '%s\n' "$doc_cols") | awk 'NF' | paste -sd ' ' -)"
+        if [ -n "$missing" ]; then
+            echo "FAIL: '$t' の列 ${missing} が ERD.md の列一覧にありません（migration で足した列を文書へ載せてください）"; fail=1
+        fi
+        if [ -n "$extra" ]; then
+            echo "FAIL: ERD.md の列一覧の '$t' に、実スキーマに無い列 ${extra} があります（消した・改名した列の取り残しです）"; fail=1
+        fi
+    done <<< "$tables"
+
+    # 逆向き: 列一覧の行が実在するテーブルを指していること（消した表の行を残さない）。
+    while IFS= read -r doc_t; do
+        [ -z "$doc_t" ] && continue
+        case "
+${tables}
+" in
+            *"
+${doc_t}
+"*) ;;
+            *) echo "FAIL: ERD.md の列一覧の '${doc_t}' は実在するテーブルではありません（消した表の取り残しです）"; fail=1 ;;
+        esac
+    done <<< "$(printf '%s\n' "$erd_col_rows" | awk -F'|' '{ name = $2; gsub(/^ +| +$/, "", name); print name }')"
+fi
+
 if [ "$n" -eq 0 ]; then
     echo "FAIL: public に BASE TABLE が 1 件もありません（接続先に migrations が当たっていない可能性。検査の前提が崩れています）"
     fail=1
 fi
 
-if [ "$fail" -eq 0 ]; then echo "OK: docs と schema と grants.sql が整合（${n} テーブル・書込境界は各 1 所有・所有層へ DML GRANT あり）"; fi
+if [ "$fail" -eq 0 ]; then echo "OK: docs と schema と grants.sql が整合（${n} テーブル・書込境界は各 1 所有・所有層へ DML GRANT あり・ERD の列一覧 ${col_tables} テーブル ${col_total} 列）"; fi
 exit $fail

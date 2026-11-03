@@ -81,6 +81,43 @@ erDiagram
 | gbp_locations | id (uuid) | store_id (unique) | store_id → stores | GBP 上の身元（account/location リソース名・突合時点の place_id・投稿可否。店舗 1:1・TS 書込） |
 | gbp_sessions | id (uuid) | owner_id (unique) | owner_id → owners, store_id → stores | GBP 会話セッション（flow×stage・payload・draft・期限付き。owner 単位に高々 1 つ・TS 書込） |
 
+## 列一覧（実スキーマと機械照合）
+
+表ごとの列を、定義順にすべて並べる。`db/test/check_docs.sh` が、migration を当てた実スキーマの列と両方向で照合する（Issue #501）。列を足す・消す・改名する migration は、同じ PR でこの表を直すこと。列の意味・制約は上のエンティティ一覧と下の凡例に書く。
+
+| テーブル | 列（定義順） |
+|---|---|
+| agencies | `id`・`operator_id`・`name`・`created_at` |
+| agency_invite_codes | `id`・`agency_id`・`code`・`disabled_at`・`created_at` |
+| audit_logs | `id`・`actor_type`・`actor_id`・`action`・`target_type`・`target_id`・`occurred_at` |
+| categories | `code`・`label` |
+| competitors | `id`・`store_id`・`place_id`・`name`・`latitude`・`longitude`・`active`・`created_at` |
+| daily_summaries | `id`・`store_id`・`summary_date`・`status`・`rank`・`rank_total`・`rank_prev`・`rating`・`review_count`・`rating_prev`・`review_count_prev`・`new_review_count`・`new_reviews`・`competitors`・`created_at`・`google_maps_reviews_uri` |
+| dashboard_users | `id`・`role`・`operator_id`・`agency_id`・`auth_subject`・`display_name`・`created_at`・`email`・`disabled_at` |
+| gbp_locations | `id`・`store_id`・`account_name`・`location_name`・`place_id`・`can_operate_local_post`・`linked_at` |
+| gbp_sessions | `id`・`owner_id`・`store_id`・`flow`・`stage`・`payload`・`draft_text`・`expires_at`・`updated_at` |
+| line_webhook_events | `webhook_event_id`・`received_at` |
+| oauth_tokens | `id`・`store_id`・`provider`・`token_ref`・`scopes`・`expires_at`・`created_at` |
+| onboarding_sessions | `line_user_id`・`stage`・`owner_id`・`candidates`・`selected_index`・`invite_failures`・`locked_until`・`created_at`・`updated_at` |
+| operators | `id`・`name`・`created_at` |
+| owners | `id`・`agency_id`・`line_user_id`・`display_name`・`onboarding_status`・`created_at`・`delivery_hour`・`invite_code_id`・`line_unlinked_at`・`menu_pending_line_user_id`・`taken_over_by_owner_id` |
+| rating_snapshots | `id`・`store_id`・`subject_kind`・`competitor_id`・`place_id`・`captured_on`・`rating`・`review_count`・`rank`・`created_at` |
+| store_survey_category_settings | `store_id`・`category_code`・`enabled`・`sort_order` |
+| store_survey_configs | `store_id`・`structured_enabled`・`revision`・`updated_at` |
+| store_survey_targets | `id`・`store_id`・`category_code`・`category_allows_targets`・`label`・`active`・`sort_order`・`created_at`・`updated_at` |
+| stores | `id`・`owner_id`・`category_code`・`name`・`latitude`・`longitude`・`place_id`・`place_status`・`created_at`・`suspended_at` |
+| summary_deliveries | `id`・`store_id`・`summary_date`・`line_user_id`・`status`・`retry_key`・`line_request_id`・`error_detail`・`delivered_at`・`created_at` |
+| survey_aspect_tallies | `id`・`store_id`・`period_month`・`aspect_code`・`count` |
+| survey_aspects | `code`・`label` |
+| survey_categories | `code`・`label`・`allows_targets`・`default_enabled`・`default_sort_order` |
+| survey_category_facets | `category_code`・`facet_code`・`scope`・`sort_order` |
+| survey_concern_tallies | `id`・`store_id`・`period_month`・`aspect_code`・`count` |
+| survey_facets | `code`・`label` |
+| survey_material_tallies | `id`・`store_id`・`period_month`・`aspect_count`・`has_comment`・`count`・`concern_count` |
+| survey_rating_tallies | `id`・`store_id`・`period_month`・`star`・`count` |
+| survey_review_link_tallies | `id`・`store_id`・`period_month`・`count` |
+| survey_structured_material_tallies | `id`・`store_id`・`period_month`・`positive_group_count`・`concern_group_count`・`positive_target_count`・`concern_target_count`・`positive_facet_count`・`concern_facet_count`・`has_comment`・`count` |
+
 ## 凡例・補足
 
 - 全階層 FK（agencies.operator_id / owners.agency_id / stores.owner_id）は **NOT NULL・ON DELETE RESTRICT**。親欠落の子は作成不可、誤削除は拒否。
