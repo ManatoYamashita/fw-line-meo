@@ -20,7 +20,7 @@ COPY packages/ui/package.json packages/ui/
 COPY apps/survey-web/package.json apps/survey-web/
 RUN pnpm install --frozen-lockfile
 
-# --- ビルド（@fwlm/db と @fwlm/observability を tsc、survey-web を next build standalone） ---
+# --- ビルド（@fwlm/db・@fwlm/observability・@fwlm/design-tokens を tsc、survey-web を next build standalone） ---
 FROM base AS build
 WORKDIR /repo
 # deps ステージ全体をコピー（pnpm はパッケージ単位で node_modules を持つため、
@@ -30,6 +30,10 @@ COPY --from=deps /repo ./
 COPY . .
 RUN pnpm -C packages/db run build
 RUN pnpm -C packages/observability run build
+# @fwlm/design-tokens は実行時には使わない（dev 依存）が、型の宣言を dist に持つ。
+# Next.js 16.4 の next build は tsc で tsconfig の対象全体（e2e の spec を含む）を型検査するため、
+# e2e/ui-foundation.spec.ts が読む型をここで生成しておく（Issue #508）。
+RUN pnpm -C packages/design-tokens run build
 RUN pnpm -C apps/survey-web run build
 
 # --- 実行（standalone 最小成果物のみ） ---
