@@ -14,7 +14,7 @@
   "dependencies": {
     "@fwlm/ui": "workspace:*",
     "firebase": "^12",
-    "next": "^16",
+    "next": "^16.4.4",
     "react": "^19",
     "react-dom": "^19",
     "sonner": "^2.0.8"
