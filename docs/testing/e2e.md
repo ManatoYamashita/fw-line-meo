@@ -30,6 +30,15 @@ bash scripts/run-e2e-local.sh --only survey,lighthouse    # 一部だけ
 
 前提は pnpm、Homebrew の postgres（initdb / pg_ctl / psql）、go、lsof、Chrome である。コンテナランタイムは要らない。
 
+> Windows でのローカル E2E（#469）: 現行 `scripts/run-e2e-local.sh` は `lsof` と
+> PostgreSQL の Unix ソケット起動を使うため、**ネイティブの PowerShell / Git Bash での動作を保証しない**。
+> Windows から流すときは WSL2 の Linux 環境に Node 24・pnpm・PostgreSQL・Go・`lsof`・
+> Playwright の Chromium をインストールし、**WSL2 内の Linux ファイルシステムに clone** して
+> 上記コマンドを実行することを推奨する。`/mnt/c` 上の Windows checkout を共有すると、
+> 改行・ファイル権限・シンボリックリンクなどの挙動が Linux CI とずれる場合がある。
+> これは Windows ネイティブをサポートしたという記述ではなく、ローカル実行環境の推奨である。
+
+
 Playwright は既定で付属の Chromium を使う。**ローカルでも付属 Chromium で流すこと。** `make e2e` は差し替えの有無にかかわらず、流す前に付属 Chromium を入れる（入っていれば何もしない）。そのため実行装置から流す限り、差し替えてもダウンロードは省けない。CI も付属 Chromium を使う。
 
 インストール済みのブラウザで流したいときは、`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` に実行ファイルのパスを渡す。付属 Chromium のダウンロードを省くための仕組みで、CI（`CI` が立っている環境）ではこの変数を無視する。判定は `@fwlm/e2e-support/browser` の 1 箇所にあり、3 面の `playwright.config.ts` が共有している。差し替えたブラウザには `--disable-gpu` を渡し、付属 Chromium と同じソフトウェア描画に寄せている。それでも付属 Chromium と同じ結果にはならない。2026-09-27 に surfaces 層を流した結果は次のとおり（#381）。

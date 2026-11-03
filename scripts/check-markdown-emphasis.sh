@@ -96,7 +96,8 @@ fi
 found=''
 while IFS= read -r md_rel; do
   [ -n "$md_rel" ] || continue
-  found="${found}${ROOT}/${md_rel}
+  # Node へ渡すのは git が返した相対パス。Git Bash の /d/... は Windows Node で開けない（#469）。
+  found="${found}${md_rel}
 "
 done <<EOF
 $( (cd "$ROOT" && git -c core.quotePath=false ls-files --cached -- '*.md') 2>/dev/null | sort )
@@ -111,7 +112,7 @@ EOF
 targets=''
 while IFS= read -r md_path; do
   [ -n "$md_path" ] || continue
-  case "${md_path#$ROOT/}" in
+  case "$md_path" in
     .agents/skills/_shared/*) ;;
     .claude/skills/* | .agents/skills/*) continue ;;
   esac
@@ -125,8 +126,11 @@ EOF
 #   V<TAB>相対パス<TAB>行<TAB>種別(open|close|unclosed)<TAB>抜粋
 #   C<TAB>検査ファイル数<TAB>検査した強調対の数
 # 出力の整形は bash 側で行い、既存ガードと ERROR 書式を揃える。
-report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
+# Node の process.cwd() は Windows ではドライブ付きのネイティブ表記を返す。
+# Git Bash の /d/... は Windows Node の fs から開けないため、CWD 由来のパスを渡す（#469）。
+report="$(printf '%s' "$targets" | MD_ROOT="$(cd "$ROOT" && node -p 'process.cwd()')" node -e "
   const fs = require(\"fs\");
+  const path = require(\"path\");
   const ROOT = process.env.MD_ROOT;
   const FENCE = /^\s*(\`{3,}|~{3,})(.*)$/;
   const INDENTED = /^(?: {4}|\t)/;
@@ -165,7 +169,8 @@ report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
     let fenceLen = 0;
     let inList = false;
     let prevQuote = null;
-    const lines = text.split(\"\n\");
+    // CRLF の作業ツリーでも fenced block の意味を LF と一致させる（#469）。
+    const lines = text.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const raw = lines[i];
       const fm = raw.match(FENCE);
@@ -225,9 +230,11 @@ report="$(printf '%s' "$targets" | MD_ROOT="$ROOT" node -e "
     let pairs = 0;
     const out = [];
     for (const file of files) {
-      const rel = file.startsWith(ROOT + \"/\") ? file.slice(ROOT.length + 1) : file;
+      const rel = file;
       let text;
-      try { text = fs.readFileSync(file, \"utf8\"); } catch (e) { continue; }
+      // 読めないパスを黙って skip すると、検査件数だけ増えて誤って緑になる（#469）。
+      try { text = fs.readFileSync(path.join(ROOT, rel), \"utf8\"); }
+      catch (e) { throw new Error(\"Markdown を読めません: \" + rel + \" (\" + e.code + \")\"); }
       for (const blk of blocks(text)) {
         const joined = blk.map((b) => b.text).join(\"\n\");
         // ブロック内オフセット → 元ファイルの行番号
