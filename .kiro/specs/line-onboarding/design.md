@@ -394,6 +394,7 @@ function handleEvent(deps: ConversationDeps, event: InboundEvent): Promise<void>
 **Responsibilities & Constraints**
 - LINE・会話・セッションの概念に依存しない（引数は ownerId と候補のみ）
 - `confirmStore` は単一トランザクション: stores INSERT（`place_status='confirmed'`・place_id 設定）→ `owners.onboarding_status='store_identified'` 更新。`ux_stores_place_id` UNIQUE 違反（競合レース含む）は `place_already_registered` に正規化
+- 改訂（`owner-line-unlink`・Issue #487・Requirement 4.4 の改訂）: LINE の会話の確定は `confirmStore` ではなく、同じサービスに足した `confirmStoreForOnboarding` を使う。登録済みの Place の所有者が解除済みで同じ代理店のときは、その全店舗を引き継いで `taken_over` を返し、それ以外の登録済みは従来どおり `place_already_registered` を返す。`confirmStore` の振る舞いは変えず、管理ダッシュボードの店舗登録が使い続ける（契約の正典は `.kiro/specs/owner-line-unlink/design.md` の OnboardingConfirm）
 
 ##### Service Interface
 

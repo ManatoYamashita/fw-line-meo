@@ -9,6 +9,7 @@ export * from './dashboard-users.js';
 export * from './tallies.js';
 export * from './delivery-settings.js';
 export * from './owners.js';
+export * from './owner-line-link.js';
 export * from './invite-codes.js';
 export * from './agencies.js';
 export * from './categories.js';

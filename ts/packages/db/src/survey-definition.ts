@@ -9,7 +9,7 @@ import type { Queryable } from './pool.js';
 // （write-boundary.md の共有定数の規律）。
 //
 // **legacy survey の経路（listSurveyAspects・survey_aspects）とは独立である。** 設定行の無い店舗・
-// structured_enabled = false の店舗は `{ mode: 'legacy' }` だけを返し、legacy の画面・回答は
+// structured_enabled = false の店舗は通常 `{ mode: 'legacy' }` を返す（全店公開時は forceStructured が優先）。legacy の画面・回答は
 // これまでどおり survey_aspects を使う。
 
 /** 評価ポイント 1 つ（Category 全体用・Target 用のどちらでも同じ形）。 */
@@ -68,9 +68,10 @@ interface DefinitionRow {
 // revision は bigint なので text で受けて数値へ戻す（pg は int8 を文字列で返す）。
 const DEFINITION_SQL = `
 WITH cfg AS (
-  SELECT revision
-  FROM store_survey_configs
-  WHERE store_id = $1 AND structured_enabled
+  SELECT COALESCE(sc.revision, 1) AS revision
+  FROM stores s
+  LEFT JOIN store_survey_configs sc ON sc.store_id = s.id
+  WHERE s.id = $1 AND ($2::boolean OR sc.structured_enabled IS TRUE)
 ),
 cats AS (
   SELECT c.code, c.label, c.allows_targets,
@@ -122,8 +123,10 @@ FROM cfg
  *                                    時点の表にしか効かない）
  *
  * DEFINITION_SQL が触るのは structured survey の表（store_survey_configs・store_survey_category_settings・
- * store_survey_targets・survey_categories・survey_facets・survey_category_facets）だけなので、この 2 つはその
- * 表の準備が済んでいないことを高い精度で示す。接続の失敗・タイムアウト・その他の SQL の誤りは含めない。
+ * store_survey_targets・survey_categories・survey_facets・survey_category_facets）と、全店公開（forceStructured）で
+ * 設定行の無い店舗も拾うための stores である。stores は 0001 からあり、survey-web は店舗の表示（findStoreForSurvey）で
+ * 毎回読んでいるので、この 2 つは実際には structured の表の準備が済んでいないことを高い精度で示す。
+ * 接続の失敗・タイムアウト・その他の SQL の誤りは含めない。
  */
 export const STRUCTURED_SCHEMA_UNAVAILABLE_CODES = ['42P01', '42501'] as const;
 export type StructuredSchemaUnavailableCode = (typeof STRUCTURED_SCHEMA_UNAVAILABLE_CODES)[number];
@@ -136,6 +139,8 @@ function structuredSchemaUnavailableCode(error: unknown): StructuredSchemaUnavai
 }
 
 export interface ReadStoreSurveyDefinitionOptions {
+  /** 全店公開スイッチ。true のとき設定行の有無や個別 OFF にかかわらず structured を返す。切り戻しは false にするだけ。 */
+  readonly forceStructured?: boolean;
   /**
    * structured survey の表・権限が無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）ときに legacy として扱うか。
    * **既定は false**（投げる）。true にしてよいのは、migration の前にコードが動く一時的な互換期間・緊急時だけで、
@@ -153,8 +158,9 @@ export interface ReadStoreSurveyDefinitionOptions {
 /**
  * 店舗の有効なアンケート定義を返す。
  *
- * - 設定行が無い・structured_enabled = false → `{ mode: 'legacy' }`（既定。既存店舗はすべてこれ）
- * - structured_enabled = true → 表示するカテゴリ（非表示を除く）・facet・active な Target と revision
+ * - 通常: 設定行が無い・structured_enabled = false → `{ mode: 'legacy' }`、true → structured
+ * - 全店公開 forceStructured=true: 設定行なし・false の店舗も structured（版は未設定なら 1）
+ * - structured では表示カテゴリ（非表示を除く）・facet・active な Target と revision を返す
  * - structured survey の表・権限がまだ無い（STRUCTURED_SCHEMA_UNAVAILABLE_CODES）
  *     - 既定: 投げる（呼び手は 5xx）
  *     - `allowStructuredSchemaFallback: true` のときだけ `{ mode: 'legacy' }`
@@ -175,7 +181,7 @@ export async function readStoreSurveyDefinition(
 ): Promise<StoreSurveyDefinition> {
   let res: { rows: DefinitionRow[] };
   try {
-    res = await db.query<DefinitionRow>(DEFINITION_SQL, [storeId]);
+    res = await db.query<DefinitionRow>(DEFINITION_SQL, [storeId, options.forceStructured === true]);
   } catch (error) {
     const code = structuredSchemaUnavailableCode(error);
     if (code === null || options.allowStructuredSchemaFallback !== true) throw error;

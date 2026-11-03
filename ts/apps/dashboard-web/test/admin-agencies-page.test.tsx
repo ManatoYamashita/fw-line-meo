@@ -519,3 +519,41 @@ describe('代理店管理ページ: 意匠の適用', () => {
     expect(api.createAgency).toHaveBeenCalledWith({ name: '新代理店' });
   });
 });
+
+describe('代理店管理ページ: 詳細へのリンク（Issue #486・agency-dashboard Req 9.1）', () => {
+  it('代理店名がその代理店の詳細へのリンクになり、リンクの読み上げ名は代理店名そのもの', async () => {
+    ready('operator');
+    api.getAgencies.mockResolvedValue({
+      ok: true,
+      value: [agencyAlpha, { ...agencyAlpha, id: 'a2', name: '代理店ベータ' }],
+    });
+    render(<AdminAgenciesPage />);
+    const scope = within(await screen.findByRole('main'));
+    await scope.findByText('代理店アルファ');
+    const table = within(scope.getByRole('table'));
+    const links = table.getAllByRole('link');
+    // 1 行に 1 本だけ（行の数と同じ）。
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['代理店アルファ', '/admin/agencies/a1'],
+      ['代理店ベータ', '/admin/agencies/a2'],
+    ]);
+  });
+
+  it('リンクは代理店名のセルの中だけで、行そのものは押せない（正典 §7.2）', async () => {
+    ready('operator');
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    render(<AdminAgenciesPage />);
+    const scope = within(await screen.findByRole('main'));
+    const link = await scope.findByRole('link', { name: '代理店アルファ' });
+    const [, row] = scope.getAllByRole('row');
+    expect(row).toBeDefined();
+    // 行に押せる役割と焦点を持たせない。React の onClick は DOM の属性に出ないので、ここでは
+    // 押下の処理の有無までは見ていない（役割と焦点が無ければ、キーボードでも支援技術でも押せない）。
+    expect(row!.getAttribute('role')).toBeNull();
+    expect(row!.hasAttribute('tabindex')).toBe(false);
+    // リンクは代理店名のセル（先頭のセル）の中にあり、作成日時のセルには無い。
+    const cells = within(row!).getAllByRole('cell');
+    expect(cells[0]!.contains(link)).toBe(true);
+    expect(within(cells[1]!).queryByRole('link')).toBeNull();
+  });
+});

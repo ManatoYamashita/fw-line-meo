@@ -53,7 +53,7 @@ export async function openComponentCatalog(page: Page): Promise<void> {
 export async function openSurveySurface(page: Page): Promise<void> {
   await page.goto(`/s/${STORE_ID}`);
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-  await expect(page.getByRole('button', { name: '星5' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: /^星5：/ })).toBeVisible();
 }
 
 /**
@@ -75,7 +75,7 @@ export async function openSurveySurface(page: Page): Promise<void> {
  */
 export async function openDraftingSurface(page: Page): Promise<void> {
   await openSurveySurface(page);
-  await page.getByRole('button', { name: '星5' }).click();
+  await page.getByRole('radio', { name: /^星5：/ }).click();
   await page.getByRole('button', { name: '送信する' }).click();
   await expect(page.getByLabel('口コミ下書き')).toBeVisible();
 }
