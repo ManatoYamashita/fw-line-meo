@@ -6,6 +6,7 @@ import { createSessionTokenService } from '../src/lib/session-token';
 import {
   createSurveyDefinitionReader,
   structuredSchemaCompatFallbackEnabled,
+  surveyForceStructuredEnabled,
 } from '../src/lib/survey-definition-reader';
 import { ok } from '../src/lib/result';
 
@@ -69,6 +70,26 @@ describe('逃げ道の有効 / 無効は STRUCTURED_SCHEMA_COMPAT_FALLBACK=1 の
     [{ STRUCTURED_SCHEMA_COMPAT_FALLBACK: '1 ' }, false],
   ] as const)('%j → %s', (env, expected) => {
     expect(structuredSchemaCompatFallbackEnabled(env)).toBe(expected);
+  });
+});
+
+describe('全店公開スイッチ SURVEY_FORCE_STRUCTURED', () => {
+  it.each([
+    [{ SURVEY_FORCE_STRUCTURED: '1' }, true],
+    [{}, false],
+    [{ SURVEY_FORCE_STRUCTURED: '0' }, false],
+    [{ SURVEY_FORCE_STRUCTURED: 'true' }, false],
+    [{ SURVEY_FORCE_STRUCTURED: ' 1' }, false],
+    [{ SURVEY_FORCE_STRUCTURED: '1 ' }, false],
+  ] as const)('%j → %s（文字列 1 だけ有効）', (env, expected) => {
+    expect(surveyForceStructuredEnabled(env)).toBe(expected);
+  });
+
+  it('全店公開と schema 互換 fallback を同時には有効にできない', () => {
+    expect(() => createSurveyDefinitionReader(failingDb(pgError('42P01')), vi.fn(), {
+      SURVEY_FORCE_STRUCTURED: '1',
+      STRUCTURED_SCHEMA_COMPAT_FALLBACK: '1',
+    })).toThrow('SURVEY_FORCE_STRUCTURED=1 cannot be combined with STRUCTURED_SCHEMA_COMPAT_FALLBACK=1');
   });
 });
 

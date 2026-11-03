@@ -46,6 +46,11 @@ import (
 //     無ければ当日の集計が作られる状態にしたうえで、Run の後に当日のスナップショットも集計も無く、
 //     対象店舗数に数えられないことを確かめる。TS の配信の段は、同じ店舗に通知記録（送信も見送りも）が
 //     無いことを確かめる。取得と配信が同じ `stores.suspended_at` を参照していることを 2 言語で固定する。
+//   - unlinkedStoreID（owner-line-unlink tasks 9.1・Requirements 5.1, 5.2, 5.3）: LINE の紐づけを解除した
+//     オーナー（line_user_id が NULL・line_unlinked_at あり）の、確定済みで停止中でない店舗。日次取得は
+//     オーナーの連携状態を見ないので、この店舗も通常どおり取得し、比較可能で新着のある当日の集計を作る
+//     ことをここで確かめる。TS の配信の段は、同じ店舗へ送らず、通知記録（送信・失敗・見送り）を 1 行も
+//     残さないことを確かめる。集計が「送れば通知が出る」形なので、配信の述語が解除を見ていなければ赤になる。
 //
 // line-on-demand-report（tasks 2.5）で、line-webhook のレポート用の読み出し
 // （ts/apps/line-webhook/test/cross-runtime.e2e.test.ts）が読む 2 つの形を足した。
@@ -88,10 +93,18 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		suspendedOwnerID = "c7000000-0000-0000-0000-000000000014"
 		suspendedStoreID = "c7100000-0000-0000-0000-000000000004"
 
+		// LINE の紐づけを解除したオーナーの店舗（owner-line-unlink tasks 9.1）。delivery-job の
+		// cross-runtime.e2e.test.ts が同じ識別子で通知記録の不在を確かめるので、変更する場合は両ファイルを揃える。
+		unlinkedOwnerID = "c7000000-0000-0000-0000-000000000015"
+		unlinkedStoreID = "c7100000-0000-0000-0000-000000000005"
+
 		readyLineUserID     = "U-cross-runtime-ready"
 		nocompLineUserID    = "U-cross-runtime-nocomp"
 		unratedLineUserID   = "U-cross-runtime-unrated"
 		suspendedLineUserID = "U-cross-runtime-suspended"
+		// 解除済みオーナーの元の LINE ユーザー ID。line_user_id には無く、メニュー未解除の印
+		// （menu_pending_line_user_id）にだけ残る。TS の段は、この ID へも送らないことを確かめる。
+		unlinkedOriginalLineUserID = "U-cross-runtime-unlinked"
 
 		// クロスランタイム契約テスト専用の配信時刻。task 4.4 の index.e2e.test.ts が hour=14 を、
 		// targets.db.test.ts が hour=9/10 を使うため、本テストは衝突しない hour=17 を使う
@@ -140,8 +153,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			return
 		}
 		cleanupCtx := context.Background()
-		storeIDs := []string{readyStoreID, nocompStoreID, unratedStoreID, suspendedStoreID}
-		ownerIDs := []string{readyOwnerID, nocompOwnerID, unratedOwnerID, suspendedOwnerID}
+		storeIDs := []string{readyStoreID, nocompStoreID, unratedStoreID, suspendedStoreID, unlinkedStoreID}
+		ownerIDs := []string{readyOwnerID, nocompOwnerID, unratedOwnerID, suspendedOwnerID, unlinkedOwnerID}
 		cleanupExec := func(sql string, args ...any) {
 			if _, err := pool.Exec(cleanupCtx, sql, args...); err != nil {
 				t.Logf("cross-runtime cleanup: %s failed: %v", sql, err)
@@ -170,6 +183,12 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	// （skipped_no_summary）が残る状態にするためである。
 	mustExec(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, 'active', $4)`,
 		suspendedOwnerID, agencyID, suspendedLineUserID, crossRuntimeDeliveryHour)
+	// 解除済みのオーナーも同じ配信時刻にする。TS の段で、解除の述語が無ければ通知が出る状態にするためである。
+	// 解除の操作は dashboard-api の責務なので、ここでは解除後の行の形（line_user_id は NULL・解除時刻は
+	// 固定日の前日・元の ID はメニュー未解除の印にだけ残る）を直接書く（ck_owner_line_link を満たす）。
+	mustExec(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour, line_unlinked_at, menu_pending_line_user_id)
+		VALUES ($1, $2, NULL, 'active', $3, '2026-07-11T12:00:00+09:00', $4)`,
+		unlinkedOwnerID, agencyID, crossRuntimeDeliveryHour, unlinkedOriginalLineUserID)
 
 	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（競合あり）', 35.5, 139.5, $3, 'confirmed')`,
@@ -185,6 +204,9 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status, suspended_at)
 		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（停止中）', 35.8, 139.8, $3, 'confirmed', '2026-07-11T12:00:00+09:00')`,
 		suspendedStoreID, suspendedOwnerID, "cross-runtime-suspended-self")
+	mustExec(`INSERT INTO stores (id, owner_id, category_code, name, latitude, longitude, place_id, place_status)
+		VALUES ($1, $2, 'ramen', 'クロスランタイム店舗（解除済みオーナー）', 35.9, 139.9, $3, 'confirmed')`,
+		unlinkedStoreID, unlinkedOwnerID, "cross-runtime-unlinked-self")
 
 	// readyStore: 競合3件を事前固定（extraction をバイパスし、決定的な place_id を確保する）。
 	// 3件目は Google の評価が無い店（クチコミ 0 件・Issue #255）で、比較集合に入らず jsonb に null で
@@ -227,6 +249,14 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		t.Fatalf("seed suspended competitor: %v", err)
 	}
 
+	// unlinkedStore: 評価を持つ競合 1 件を事前固定する。当日の集計は比較可能（rank_total = 2）になる。
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competitors (store_id, place_id, name, latitude, longitude, active)
+		VALUES ($1, $2, $3, 35.9001, 139.9001, true)
+	`, unlinkedStoreID, "cross-runtime-unlinked-comp-1", "解除店の競合"); err != nil {
+		t.Fatalf("seed unlinked competitor: %v", err)
+	}
+
 	now := time.Date(2026, 7, 12, 6, 0, 0, 0, jst)
 	today := jstDateAsUTC(now)
 	yesterday := today.AddDate(0, 0, -1)
@@ -254,6 +284,14 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 		PlaceID: "cross-runtime-suspended-self", CapturedOn: yesterday, Rating: f64(4.1), ReviewCount: 40, Rank: intPtr(1),
 	}); err != nil {
 		t.Fatalf("seed suspendedStore yesterday self snapshot: %v", err)
+	}
+
+	// unlinkedStore にも前日の自店スナップショットを置く。当日の集計は新着 3 件を持ち、配信の述語が解除を
+	// 見ていなければ変化の通知が出る形になる（TS の段の不在の表明が空振りしないようにする）。
+	if err := repo.WriteSelfSnapshot(ctx, pool, unlinkedStoreID, repo.SnapshotWrite{
+		PlaceID: "cross-runtime-unlinked-self", CapturedOn: yesterday, Rating: f64(4.0), ReviewCount: 60, Rank: intPtr(1),
+	}); err != nil {
+		t.Fatalf("seed unlinkedStore yesterday self snapshot: %v", err)
 	}
 
 	// 30 日の窓（line-on-demand-report・Req 6.7）: 基準日の 29 日前（30 日目）と 30 日前（31 日目）の行を、
@@ -319,6 +357,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	// 別の理由で緑にならないようにするためである。
 	server.details["cross-runtime-suspended-self"] = operational(4.3, 44, "クロスランタイム店舗（停止中）")
 	server.details["cross-runtime-suspended-comp-1"] = operational(3.9, 30, "停止店の競合")
+	server.details["cross-runtime-unlinked-self"] = operational(4.2, 63, "クロスランタイム店舗（解除済みオーナー）")
+	server.details["cross-runtime-unlinked-comp-1"] = operational(3.7, 25, "解除店の競合")
 
 	deps := newDeps(t, pool, server, now)
 
@@ -326,8 +366,8 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.FetchOK < 3 {
-		t.Errorf("FetchOK = %d, want >= 3 (all three cross-runtime stores fetched)", result.FetchOK)
+	if result.FetchOK < 4 {
+		t.Errorf("FetchOK = %d, want >= 4 (the four unsuspended cross-runtime stores fetched, including the unlinked owner's store)", result.FetchOK)
 	}
 
 	// --- readyStore: status/rank/JSONB shape の直接検証（Go 側の自己整合性チェック。
@@ -519,6 +559,35 @@ func TestCrossRuntimeContract_GoWritesReadableSummaries(t *testing.T) {
 			result.StoresTotal, confirmedTotal-suspendedConfirmed, confirmedTotal, suspendedConfirmed)
 	}
 
-	t.Logf("cross-runtime Go half complete: readyStoreID=%s nocompStoreID=%s unratedStoreID=%s suspendedStoreID=%s summary_date=%s delivery_hour=%d",
-		readyStoreID, nocompStoreID, unratedStoreID, suspendedStoreID, today.Format(time.DateOnly), crossRuntimeDeliveryHour)
+	// --- unlinkedStore: 解除済みオーナーの店舗も取得を続け、当日の集計を作る（owner-line-unlink 5.1）---
+	// 前提の確認: オーナーが解除済みのまま（line_user_id は NULL・解除時刻あり）で、店舗は確定済みかつ
+	// 停止中でないこと。ここが崩れると、以下の表明は「連携中の店舗を取得した」ことの確認に化ける。
+	if n := countRows(t, ctx, pool, `
+		SELECT count(*) FROM stores s JOIN owners o ON o.id = s.owner_id
+		 WHERE s.id = $1 AND s.place_status = 'confirmed' AND s.suspended_at IS NULL
+		   AND o.line_user_id IS NULL AND o.line_unlinked_at IS NOT NULL`, unlinkedStoreID); n != 1 {
+		t.Fatalf("unlinkedStore confirmed & unsuspended rows owned by an unlinked owner = %d, want 1", n)
+	}
+	if n := countRows(t, ctx, pool, `SELECT count(*) FROM rating_snapshots WHERE store_id = $1 AND captured_on = $2`,
+		unlinkedStoreID, today); n != 2 {
+		t.Errorf("unlinkedStore rating_snapshots on %s = %d, want 2 (self + 1 competitor; the unlinked owner's store keeps being fetched)",
+			today.Format(time.DateOnly), n)
+	}
+	var unlinkedStatus string
+	var unlinkedRank, unlinkedRankTotal, unlinkedNewReviewCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT status, rank, rank_total, new_review_count
+		FROM daily_summaries WHERE store_id = $1 AND summary_date = $2
+	`, unlinkedStoreID, today).Scan(&unlinkedStatus, &unlinkedRank, &unlinkedRankTotal, &unlinkedNewReviewCount); err != nil {
+		t.Fatalf("select unlinkedStore daily_summary (the unlinked owner's store must still get a summary): %v", err)
+	}
+	// 比較可能（母数 2）で新着 3 件（63 - 60）。配信の段が「比較できない・変化が無い」という別の理由で
+	// 送らないのではなく、解除を理由に送らないことを見分けるための形である。
+	if unlinkedStatus != "ready" || unlinkedRank != 1 || unlinkedRankTotal != 2 || unlinkedNewReviewCount != 3 {
+		t.Errorf("unlinkedStore status/rank/total/new = %s/%d/%d/%d, want ready/1/2/3",
+			unlinkedStatus, unlinkedRank, unlinkedRankTotal, unlinkedNewReviewCount)
+	}
+
+	t.Logf("cross-runtime Go half complete: readyStoreID=%s nocompStoreID=%s unratedStoreID=%s suspendedStoreID=%s unlinkedStoreID=%s summary_date=%s delivery_hour=%d",
+		readyStoreID, nocompStoreID, unratedStoreID, suspendedStoreID, unlinkedStoreID, today.Format(time.DateOnly), crossRuntimeDeliveryHour)
 }

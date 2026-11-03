@@ -144,6 +144,45 @@ psql -v ON_ERROR_STOP=1 -f infra/sql/grants.sql   # IAM ロール名は grants.s
   - 無効（既定・未設定）のとき、`42P01` / `42501` は 5xx になる。接続・タイムアウトなど他の失敗は、有効・無効にかかわらず失敗する
   - Cloud Run の env は Terraform 専権（§5）。有効にする場合も Terraform で一時的に足し、外すのも Terraform で行う
 
+- **新アンケートの全店公開と切り戻し（Issue #441・`SURVEY_FORCE_STRUCTURED`）**: survey-web と store-detail の env `SURVEY_FORCE_STRUCTURED=1`（`1` との完全一致だけを有効と読む）で、設定行の無い店舗・個別 OFF の店舗を含む全店舗（新規店舗も）に structured survey を出す。店舗別の `structured_enabled` は書き換えない。値は `infra/envs/prod/main.tf` の `run_services` の 2 サービスの `env` にある。
+  - **main への統合だけでは切り替わらない。** `deploy-prod` が替えるのはイメージだけで、env は Terraform の apply で入る。逆に、フラグを読むコードがデプロイされる前に env だけ入れても何も変わらない
+  - `STRUCTURED_SCHEMA_COMPAT_FALLBACK=1` と同時には使えない。両方が `1` だと survey-web の定義の読み取りが起動時に例外で止まる（表・権限の事故で全店舗が黙って旧画面へ戻るのを防ぐため）。公開の前に fallback が未設定であることを確かめる
+  - DB の migration は要らない（0015・0016・grants は上の手順で適用済みであること）
+  - 公開の瞬間・切り戻しの瞬間に回答中だった客は、送信が 409（「アンケート内容が更新されました。ページを再読み込みして…」）になる。再読み込みすれば新しい画面で回答できる
+  - **apply は §10-0 の「apply の作法」に従い、`-target` で 2 サービスに絞る**（`module.guardrails` を巻き込まないため・素の `make tf-apply` を打たない）。統合したコミットの `deploy-prod` が終わってから plan を作り、保存した plan は当てない
+
+  ```bash
+  # 0. 前提の読み取り確認（変更しない）
+  gh run list --repo ManatoYamashita/fw-line-meo --workflow deploy-prod --limit 3   # 統合したコミットが success
+  for s in survey-web store-detail; do
+    gcloud run services describe "$s" --project gen-fw-line-meo --region asia-northeast1 \
+      --format='value(spec.template.spec.containers[0].env)' | tr ';' '\n' | grep -E 'SURVEY_FORCE_STRUCTURED|STRUCTURED_SCHEMA_COMPAT_FALLBACK'
+  done   # 公開前は何も出ないこと（fallback が無いこと）
+
+  # 1. plan: 差分が 2 サービスの env に SURVEY_FORCE_STRUCTURED = "1" が足されるだけであることを読む
+  terraform -chdir=infra/envs/prod plan \
+    -target='module.run_services.google_cloud_run_v2_service.svc["survey-web"]' \
+    -target='module.run_services.google_cloud_run_v2_service.svc["store-detail"]'
+
+  # 2. 承認後、同じ -target で apply
+  terraform -chdir=infra/envs/prod apply \
+    -target='module.run_services.google_cloud_run_v2_service.svc["survey-web"]' \
+    -target='module.run_services.google_cloud_run_v2_service.svc["store-detail"]'
+  ```
+
+  公開後の確認（本物の Google クチコミは投稿しない。確認の回答も匿名集計に 1 件ずつ加算される）:
+  1. 上の `gcloud run services describe` で、2 サービスの新しいリビジョンに `SURVEY_FORCE_STRUCTURED=1` が入り、トラフィック 100% であること
+  2. 運営の検証用店舗の `/s/{storeId}` で、星 → 「良かったところ」が開いている → 「気になったところ（任意）」が畳まれている → 開いて選べる → 口コミ文を作る → 再生成 → コピー、まで進むこと。星 1 と星 5 で Google のクチコミ欄へのリンクが同じであること
+  3. 設定行の無い店舗・個別 OFF の店舗も同じ画面になること（料理名を登録した店舗はその名前が出ること）
+  4. 店舗詳細のアンケート設定に、未公開の案内（「…新しいアンケートの準備ができしだいお客様の画面に表示されます。」）が出ないこと
+
+  **切り戻し**（DB の設定・集計は消さない。新アンケートで加算された集計はそのまま残る）:
+  - 正規: `main.tf` の 2 サービスの `SURVEY_FORCE_STRUCTURED` を `"0"` にし、上と同じ `-target` で plan → apply する。店舗別の `structured_enabled` に従う元の分岐へ戻る（個別に ON の検証用店舗だけが新アンケートのまま）
+  - 緊急（Terraform を待てないとき）: `gcloud run services update survey-web --project gen-fw-line-meo --region asia-northeast1 --update-env-vars SURVEY_FORCE_STRUCTURED=0`（store-detail も同じ）。**Terraform との乖離が残るので、直後に `main.tf` を `"0"` にして apply し、宣言を合わせる**（合わせないと次の apply が `1` へ戻す）
+  - 切り戻しのコミット・apply の日時を #441 に記録する
+
+- **オーナーの LINE 連携の解除（Issue #487）の `0018`**: これもマージの前に当てる。マージの前には `0018` に続けて、`infra/sql/grants.sql` の当て直し（owners の列単位の付与・付与者の照合）、列権限の照会、dashboard-api への LINE の env の apply（イメージより先）を行う。一回限りのデータの変換（2026-10-24 に手作業で切り離した `detached-` 行を解除済みへ移す）は、マージの後にデプロイを確かめてから行う。旧 delivery-job は解除済みのオーナーを配信の対象から外さないので、先に移すと、宛先が NULL の配信の予約で失敗し続ける。手順と期待値は `docs/testing/e2e.md` §5 にまとめてあり、ここには書き写さない。
+
 - `infra/sql/grants.sql` は IAM DB ユーザー（`sa-*@gen-fw-line-meo.iam`）へ `db/write-boundary.md` と整合する GRANT を付与する版管理ファイル。手順書内に生 SQL を埋め込まない（再現性）。ロール名は `:project` から組み立てるため、**この既定値が GCP プロジェクト ID であること**が前提になる（2026-08-24 まで既定が DB 名の `fwlm` になっており、上のコマンドは `role "sa-line-webhook@fwlm.iam" does not exist` で全 GRANT がロールバックしていた・PR #144 で是正）。
 
 ---
@@ -363,7 +402,7 @@ CFG
 - 課金と副作用: read-only の Place Details 1 回。`X-Goog-FieldMask` を `id` だけに絞ると最安の Essentials SKU に収まる（`go/internal/places/client.go` の 2 種のマスクは使わない）。
 - `<PLACE_ID>` は本番 `stores.place_id` の実値を使う（§3 の Auth Proxy 経由 `psql` で取得）。
 
-### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / 機能1 配信）
+### 8-3. line-messaging: 配信とオンボーディング（delivery-job / line-webhook / dashboard-api / 機能1 配信）
 
 ```bash
 SECRET="$(gcloud secrets versions access latest --secret=line-channel-secret --project=gen-fw-line-meo)"
@@ -382,7 +421,7 @@ CFG
 - **チャネルシークレットもトークンも argv へ置かない**（§8-1 と同じ理由）。本文は `--data @-` で標準入力から、トークンは `-K -` で設定として渡す。
 - 課金と副作用: **なし。`/v2/bot/info` は read-only であり、メッセージを一切送信しない。**
 - **push / multicast / broadcast を実疎通に使ってはならない。** 実送信は受信者への迷惑であり、無料メッセージ通数枠を消費する。トークンが発行できて `/v2/bot/info` が 200 を返せば、チャネル資格情報の正当性は証明できる。
-- **チャネルアクセストークンの枠は存在しない**（Issue #141 で撤去済み）。送信側の 2 消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts`）はどちらもチャネル ID とシークレットから stateless token を都度発行するため、長期トークンを Secret Manager に置く必要が無い。したがって `line-channel-secret` の正当性が証明できれば、LINE 送信系の資格情報はすべて証明できている。
+- **チャネルアクセストークンの枠は存在しない**（Issue #141 で撤去済み）。3 つの消費者（`ts/apps/delivery-job/src/line.ts` / `ts/apps/line-webhook/src/line/client.ts` / `ts/apps/dashboard-api/src/line-richmenu.ts`）はいずれもチャネル ID とシークレットから stateless token を都度発行するため、長期トークンを Secret Manager に置く必要が無い。したがって `line-channel-secret` の正当性が証明できれば、LINE 送信系の資格情報はすべて証明できている。
 
 ### 8-4. 記録の更新
 

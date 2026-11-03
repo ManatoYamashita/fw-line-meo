@@ -46,7 +46,7 @@ CI ガード（すべて read-only・各項目のコマンドで単体実行可�
 - `scripts/check-monitoring-coverage.sh` — Cloud Run サービス監視の構造検証（Issue #230・ts-ci）。5xx のポリシーが**サービス名を述語に持たない**こと（持つと「サービスを足したとき忘れる」余地が生まれる・#151 と同型）、遅延監視の列挙がデプロイ正典に実在すること、**ログベース指標が数える event 名をそのサービス（ジョブの指標は `push-images.sh` の Dockerfile 対応が指すソース木）が実際に出力していること**、アラートを持たない指標の読み手宣言（`analytics-only` / `ci-read`・後者は読み手のスクリプトが指標名を書いていることまで照合）、通知先と `auto_close` の接続を検証する。**GCP へ一切アクセスしない**
 - `scripts/check-monitoring-drift.sh` — 本番の監視構成と宣言の乖離検証（Issue #230・`monitoring-drift` ワークフローが 6 時間ごとに実行）。`PROJECT_ID` 必須。宣言（`guardrails/main.tf`）と本番（alert policy の display_name / ログベース指標）を**両方向**で照合する。**ログを 1 行も読まない**（指標の存在確認は Monitoring の `metricDescriptors` を使う。`gcloud logging metrics list` に必要な `logging.logMetrics.*` は `roles/monitoring.viewer` に含まれず、代わりに `roles/logging.viewer` を付けると CI がログ本文を読めるようになるため）。`PROD_MONITORING_SNAPSHOT` に TSV を渡せば gcloud を叩かずに任意の状態を再現できる
 - `scripts/check-prod-schema-drift.sh` — migration を使い捨て PostgreSQL へ実適用した後の catalog と本番 `pg_catalog` を照合（Issue #251・`prod-schema-drift` ワークフローが 6 時間ごとに実行）。本番側は専用 IAM DB user で対象名だけを読み、表の行は読まない。`EXPECTED_SCHEMA_SNAPSHOT` / `PROD_SCHEMA_SNAPSHOT` で任意の TSV 状態を注入できる。データだけを変える migration の内容は検査対象外
-- `scripts/check-jst-offset-consistency.sh` — JST の固定 `+09:00` と整形方式の整合検証（Issue #299・ts-ci）。TS 4 実装（暦日 3・投稿時刻 1）と Go 1 実装の値が 32,400 秒に一致すること、SQL の `AT TIME ZONE 'Asia/Tokyo'`、宣言と実装候補の双方向一致を検証する。宣言済みファイルへ 2 つ目の候補を足すときは既存の固定値を再利用し、独立させるなら別ファイルとして登録する。**テストコードは本番の時刻決定権を持たないため走査対象外**。外部サービス・実行時刻・実行環境の TZ へ依存しない
+- `scripts/check-jst-offset-consistency.sh` — JST の固定 `+09:00` と整形方式の整合検証（Issue #299・ts-ci）。TS 5 実装（暦日 4・投稿時刻 1）と Go 1 実装の値が 32,400 秒に一致すること、SQL の `AT TIME ZONE 'Asia/Tokyo'`、宣言と実装候補の双方向一致を検証する。宣言済みファイルへ 2 つ目の候補を足すときは既存の固定値を再利用し、独立させるなら別ファイルとして登録する。**テストコードは本番の時刻決定権を持たないため走査対象外**。外部サービス・実行時刻・実行環境の TZ へ依存しない
 - `scripts/check-db-test-ci-coverage.sh` — `db/test` の検査資産が CI から実行されていることの機械強制（Issue #156）。実行装置 `scripts/run-db-test-suites.sh` が **`push` / `pull_request` で発火するワークフローの非コメント行から**参照されていること、`db/test/*.sh` がすべて実行装置の RUN 表か SKIP 表に宣言されていること（SKIP は Issue 番号必須・実体の存在も照合）を検証する。**DB へ一切接続しない**ので checkout 直後の grep ガード群に並べてある
 - `scripts/report-ci-issue.sh` — 追跡 Issue の起票／コメント／自動クローズ。`REPORT_CI_ISSUE_DRY_RUN=1` で書き込みを伴わず検証できる
 
@@ -78,6 +78,11 @@ Cloud Run（Webhook/客向けWeb/ダッシュボードAPI・ゼロスケール�
 
 実装時にこれらに反するコードを書いてはならない:
 - **レビューゲーティング禁止**: 高評価のみ Google へ誘導し低評価を隠す導線は Google 規約違反。低評価客も同一導線で Google 投稿へ誘導する。
+- **「気になったところ」の見せ方（Issue #460 の判断）**: 客向けの新アンケート（structured survey）は、「良かったところ」を最初から開き、「気になったところ」は入口「気になったところ（任意）」だけを出して最初は畳む。入口の見出しは良かったところの見出しより一段弱い（PR #443 の `d5fac00`・`9dfde67` の形のまま）。Google の原文（`support.google.com/contributionpolicy/answer/7400114`「評価の操作」）が販売者に禁じるのは、否定的なクチコミを妨げること・肯定的なクチコミを選択的に募ること・特定のコンテンツを含めるよう依頼することで、**入力欄の開閉や強弱については許可も禁止も述べていない**。この形は Google が許可したものではなく、次の条件を満たすことを前提にプロダクトとして採用した判断である。条件のどれかを崩す変更は #460 の判断の外にあるので、原文に当たって判断し直す:
+  - 星の値で、設問・カテゴリ・開閉の初期状態・Google への投稿導線を変えない
+  - 入口は星の値にかかわらず常に見え、1 回の操作で開き、良かったところと同じ定義・同じ部品で選べる
+  - 畳んでも選んだ内容は消えず、送信・匿名集計・AI 下書きへそのまま入る（不満の事実を薄めない）
+  - 否定側を消す・灰色にする・今より小さくする・「その他の感想」より後ろへ回す、は採らない（2026-10-11 の定例で出た案。#460 で採用を決めたのは現行の形だけである）
 - **Google クチコミは客本人が投稿**: API 代理投稿は規約違反。システムの責務は「下書き生成 → 客がコピペして貼る」まで。
 - **スクレイピング禁止**: 競合データは Google Places API のみ（従量課金を許容）。
 - **客の個人情報を一切取得しない**: アンケート回答は **Place 単位の匿名集計のみ** 保持。個別回答の永続保存は行わない。

@@ -16,7 +16,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { closePool, getPool } from '@fwlm/db';
+import { closePool, getPool, moveAllStores, unlinkOwnerLine } from '@fwlm/db';
 import type { LogFields } from '@fwlm/observability';
 import { encodeReportPostback } from '@fwlm/line-report';
 import { LineClient } from '../src/line.js';
@@ -579,5 +579,181 @@ describe.skipIf(!process.env.DATABASE_URL)('delivery-job index.ts — 通知の�
       [ST_MENU_NOT_READY, TODAY],
     );
     expect(notReadyRow.rows[0]?.status).toBe('skipped_menu_unavailable');
+  });
+});
+
+// --- owner-line-unlink（Issue #487）: 解除済みオーナーの店舗には送らず、記録も残さない ------------
+//
+// 配信の実行全体（準備判定 → 抽出 → 予約 → 判定 → push → 記録）を通し、解除済みオーナーの店舗について
+// 送信も失敗も見送りも summary_deliveries に残らないこと（4.5・5.2・5.3）と、引き継いだ店舗が新しい
+// オーナーの宛先へ届くこと（6.7）を確かめる。抽出の述語そのものは targets.db.test.ts の同名の describe が見る。
+//
+// 解除は実際の書込経路（@fwlm/db の unlinkOwnerLine）、引継ぎは moveAllStores で行う。
+// 配信時刻 13 時・日付 2026-07-15 はほかの試験が使わないので、実行サマリーの件数を厳密に比べられる。
+const UNLINK_OP = 'f2000000-0000-0000-0000-000000000001';
+const UNLINK_AG = 'f2000000-0000-0000-0000-000000000002';
+const OW_UNLINKED_READY = 'f2000000-0000-0000-0000-000000000011'; // 解除済み・変化のある当日の集計あり
+const OW_UNLINKED_NO_SUMMARY = 'f2000000-0000-0000-0000-000000000012'; // 解除済み・当日の集計なし
+const OW_LINKED_CONTROL = 'f2000000-0000-0000-0000-000000000013'; // 連携中の対照（変化のある当日の集計あり）
+const OW_TAKEN_OVER_FROM = 'f2000000-0000-0000-0000-000000000014'; // 解除して店舗を引き継がれる旧オーナー
+const OW_TAKEN_OVER_TO = 'f2000000-0000-0000-0000-000000000015'; // 引き継ぐ新しいオーナー
+const ST_UNLINKED_READY = 'f2100000-0000-0000-0000-000000000001';
+const ST_UNLINKED_NO_SUMMARY = 'f2100000-0000-0000-0000-000000000002';
+const ST_LINKED_CONTROL = 'f2100000-0000-0000-0000-000000000003';
+const ST_TAKEN_OVER = 'f2100000-0000-0000-0000-000000000004';
+const UNLINK_HOUR = 13;
+const UNLINK_DAY = '2026-07-15';
+// resolveJstNow(UNLINK_NOW) === { hour: 13, date: '2026-07-15' }（UTC 4時 = JST 13時）。
+const UNLINK_NOW = new Date('2026-07-15T04:00:00Z');
+
+describe.skipIf(!process.env.DATABASE_URL)('delivery-job index.ts — 解除済みオーナーの店舗（owner-line-unlink）', () => {
+  let server: FakeServer;
+
+  beforeAll(async () => {
+    const pool = await getPool();
+    await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [UNLINK_OP, '解除E2E運営']);
+    await pool.query('INSERT INTO agencies (id, operator_id, name) VALUES ($1, $2, $3)', [
+      UNLINK_AG,
+      UNLINK_OP,
+      '解除E2E代理店',
+    ]);
+
+    for (const ownerId of [
+      OW_UNLINKED_READY,
+      OW_UNLINKED_NO_SUMMARY,
+      OW_LINKED_CONTROL,
+      OW_TAKEN_OVER_FROM,
+      OW_TAKEN_OVER_TO,
+    ]) {
+      await pool.query(
+        'INSERT INTO owners (id, agency_id, line_user_id, onboarding_status, delivery_hour) VALUES ($1, $2, $3, $4, $5)',
+        [ownerId, UNLINK_AG, lineUserId(ownerId), 'store_identified', UNLINK_HOUR],
+      );
+    }
+
+    const stores: Array<[string, string]> = [
+      [ST_UNLINKED_READY, OW_UNLINKED_READY],
+      [ST_UNLINKED_NO_SUMMARY, OW_UNLINKED_NO_SUMMARY],
+      [ST_LINKED_CONTROL, OW_LINKED_CONTROL],
+      [ST_TAKEN_OVER, OW_TAKEN_OVER_FROM],
+    ];
+    for (const [storeId, ownerId] of stores) {
+      await pool.query(
+        'INSERT INTO stores (id, owner_id, name, place_id, place_status) VALUES ($1, $2, $3, $4, $5)',
+        [storeId, ownerId, `解除E2E店舗 ${storeId}`, `places/e2e-${storeId}`, 'confirmed'],
+      );
+    }
+
+    // 変化があった日（新着 2 件・比較可能）の形。連携中なら送られる集計である。
+    for (const storeId of [ST_UNLINKED_READY, ST_LINKED_CONTROL, ST_TAKEN_OVER]) {
+      await pool.query(
+        `INSERT INTO daily_summaries
+           (store_id, summary_date, status, rank, rank_total, rank_prev, rating, review_count, rating_prev, review_count_prev, new_review_count)
+         VALUES ($1, $2, 'ready', 1, 3, 1, '4.5', 102, '4.5', 100, 2)`,
+        [storeId, UNLINK_DAY],
+      );
+    }
+    // ST_UNLINKED_NO_SUMMARY は当日の集計を持たない（連携中なら skipped_no_summary が記録される形）。
+
+    for (const ownerId of [OW_UNLINKED_READY, OW_UNLINKED_NO_SUMMARY, OW_TAKEN_OVER_FROM]) {
+      const outcome = await unlinkOwnerLine(pool, { ownerId, agencyId: null });
+      expect(outcome.kind).toBe('changed');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await moveAllStores(client, { fromOwnerId: OW_TAKEN_OVER_FROM, toOwnerId: OW_TAKEN_OVER_TO });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // 偽の LINE: 完了後メニューは準備済みで、全オーナーが既に完了後メニューを張っている形にする。
+    server = await startFakeLineServer((record, res) => {
+      const url = record.url ?? '';
+      if (url === '/oauth2/v3/token') {
+        respondJson(res, 200, { token_type: 'Bearer', access_token: 'e2e-unlink-token', expires_in: 900 });
+        return;
+      }
+      if (record.method === 'GET' && url === `/v2/bot/richmenu/${COMPLETED_RICH_MENU_ID}`) {
+        respondJson(res, 200, readyRichMenuBody());
+        return;
+      }
+      if (record.method === 'GET' && url.startsWith('/v2/bot/user/') && url.endsWith('/richmenu')) {
+        respondJson(res, 200, { richMenuId: COMPLETED_RICH_MENU_ID });
+        return;
+      }
+      if (url === '/v2/bot/message/push') {
+        const to = (JSON.parse(record.body) as { to: unknown }).to;
+        respondJson(res, 200, { sentMessages: [{ id: '1' }] }, { 'X-Line-Request-Id': `req-${String(to)}` });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    await closePool();
+  });
+
+  it('解除済みオーナーの店舗には送らず通知記録も増やさず、引き継いだ店舗は新しいオーナーへ送る（4.5・5.2・5.3・6.7）', async () => {
+    const pool = await getPool();
+    const summary = await runDeliveryJob({
+      pool,
+      lineClient: new LineClient(
+        { channelId: 'test-channel-id', channelSecret: 'test-channel-secret' },
+        {
+          apiBaseUrl: server.url,
+          tokenEndpoint: `${server.url}/oauth2/v3/token`,
+          pushEndpoint: `${server.url}/v2/bot/message/push`,
+          backoffBaseMs: 5,
+          backoffMaxMs: 50,
+        },
+      ),
+      completedRichMenuId: COMPLETED_RICH_MENU_ID,
+      now: () => UNLINK_NOW,
+      logger: createCapturingLogger().logger,
+    });
+
+    expect(summary.currentJstHour).toBe(UNLINK_HOUR);
+    expect(summary.summaryDate).toBe(UNLINK_DAY);
+    // 対象は連携中の対照と引き継いだ店舗の 2 件だけ。解除済みの 2 店は配信可能にも見送りにも数えない。
+    expect(summary.targetsTotal).toBe(2);
+    expect(summary.delivered).toBe(2);
+    expect(summary.failed).toBe(0);
+    expect(summary.skipped).toBe(0);
+
+    // 解除済みオーナーの店舗には、送信・失敗・見送りのいずれの記録も無い。
+    const unlinkedRows = await pool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM summary_deliveries WHERE store_id = ANY($1::uuid[])',
+      [[ST_UNLINKED_READY, ST_UNLINKED_NO_SUMMARY]],
+    );
+    expect(Number(unlinkedRows.rows[0]?.n)).toBe(0);
+
+    // 引き継いだ店舗の記録は、新しいオーナーの宛先で残る。
+    const takenOver = await pool.query<{ status: string; line_user_id: string }>(
+      'SELECT status, line_user_id FROM summary_deliveries WHERE store_id = $1 AND summary_date = $2',
+      [ST_TAKEN_OVER, UNLINK_DAY],
+    );
+    expect(takenOver.rows).toEqual([{ status: 'delivered', line_user_id: lineUserId(OW_TAKEN_OVER_TO) }]);
+
+    // push の宛先は連携中の 2 オーナーだけで、解除前の LINE ユーザー ID へは送らない。
+    const pushedTo = server.requests
+      .filter((r) => r.url === '/v2/bot/message/push')
+      .map((r) => (JSON.parse(r.body) as { to: unknown }).to);
+    expect([...pushedTo].sort()).toEqual([lineUserId(OW_LINKED_CONTROL), lineUserId(OW_TAKEN_OVER_TO)].sort());
+    // メニューの照会を含め、解除前の LINE ユーザー ID を使う呼び出しは 1 件も無い。
+    for (const ownerId of [OW_UNLINKED_READY, OW_UNLINKED_NO_SUMMARY, OW_TAKEN_OVER_FROM]) {
+      const previousId = lineUserId(ownerId);
+      expect(server.requests.filter((r) => (r.url ?? '').includes(previousId) || r.body.includes(previousId))).toEqual(
+        [],
+      );
+    }
   });
 });
