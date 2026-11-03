@@ -738,6 +738,25 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 上限を超えると効かなくなるためである）。行の分け方は部品が持ち、面は書かない。
 由来: [#286](https://github.com/ManatoYamashita/fw-line-meo/issues/286) の項目 2・3・5
 
+### 7.21 本文中の文字のリンクは下線で示す
+
+**押しボタンの形を持たない文字のリンクには、`@fwlm/ui` の `textLinkVariants` で下線を付ける。色は付けない。**
+Tailwind の Preflight はリンクの下線を消し、色も周りの文から継がせる。何も指定しない文字のリンクは
+周りの文と同じ見た目になり、押せることが分からない。手がかりを色で付けないのは、色を持たせた文字が
+ワードマークの面の役割に限られるためである（§7.4）。一覧の行の数だけ色の付いた文字が並ぶ形にもならない。
+下線は、状態を色だけに委ねないという要求もそのまま満たす。
+
+**見た目はリンクごとに書かず、部品の 1 か所で決める。** リンクごとに下線のクラスを書く形では、
+書き忘れたリンクだけが素の文に戻る（#503 では 5 か所がこの状態で、本番の目視で初めて気づいた）。
+下線のクラスを直書きしたリンクも同じ扱いにする。直書きを認めると、見た目を 1 か所で決める意味が無くなる。
+
+**例外は 2 つだけである。** 押しボタンの見た目を持つリンク（`buttonVariants`）は、押しボタンの形そのものが
+手がかりになるので下線を付けない。帯の案内リンクは現在地を下線の罫で示すので、文字の下線を重ねない（§7.8）。
+通知（`Alert`）と記入欄の説明（`FieldDescription`）は、中のリンクに下線を付ける指定を部品の側で持つが、
+管理ダッシュボードではそこに置くリンクにも `textLinkVariants` を付ける。規則を 1 つに保ち、検査の側で
+「どの部品の中にあるか」を見分けずに済ませるためである。
+由来: [#503](https://github.com/ManatoYamashita/fw-line-meo/issues/503)
+
 ---
 
 ## 8. 面を組む前に読む構造契約
@@ -792,6 +811,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 | `spinner.tsx` | `Spinner` | 処理中の表示 |
 | `success-icon.tsx` | `SuccessIcon` | 成功の印。Alert の成功の変種が描き、部品を使わない成功の表示も文言の前に置く。読み上げない |
 | `table.tsx` | `Table`, `TableBody`, `TableCell`, `TableContainer`, `TableDetailRow`, `TableHead`, `TableHeaderCell`, `TableRow` | 一覧表。容器がカード化と、キーボードで焦点を得られる横溢れの捲りと、捲れる側の端の濃淡を担う。セルは折り返しの規則を語彙から選び、詳細行は行の直下のパネルを見えている幅に留める（§7.18） |
+| `text-link.tsx` | `textLinkVariants` | 本文中の文字のリンクの見た目。下線だけで示し、色は持たない（§7.21） |
 | `textarea.tsx` | `Textarea` | 複数行入力 |
 
 ---
@@ -862,6 +882,8 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.20 内容で幅が決まる箱に固定幅を与えない（目盛りの帯） | `ts/apps/store-detail/e2e/store-surface.spec.ts` | 目盛りの帯の幅が、目盛りの文字に追随する |
 | 7.20 段組みの境目を容器の幅で切る（期間の要約） | `ts/apps/store-detail/e2e/store-surface.spec.ts` | 3 組が、容器の幅に応じて段を変える |
 | 7.20 中央寄せの短い案内は行の長さをそろえる | `ts/apps/store-detail/e2e/store-surface.spec.ts` | 空状態の案内が、狭い幅で行の長さをそろえて分かれる |
+| 7.21 文字のリンクの見た目（部品の中身） | `ts/packages/ui/test/components.test.tsx` | 文字のリンクの見た目 |
+| 7.21 管理ダッシュボードのリンクが見た目の指定を必ず持つ | `ts/apps/dashboard-web/test/text-link-usage.test.ts` | 文字のリンクか押しボタンの見た目を必ず持つ |
 | 7.8 帯の段組み | `ts/apps/dashboard-web/test/top-nav.test.tsx` | 帯の段組み（7.8 節 |
 | 7.8 帯の実描画（全リンクに捲らずに届く） | `ts/apps/dashboard-web/e2e/mobile-layout.spec.ts` | 帯の操作要素すべてに捲らずに届く |
 | 選択済みの面をアクション色で塗る部品のエラー指標 | `ts/packages/ui/test/contrast-usage.test.ts` | 選択済みの面をアクション色で塗る部品のエラー指標 |

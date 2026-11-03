@@ -10,6 +10,7 @@ import { Heading } from '@fwlm/ui/components/heading';
 import { Input } from '@fwlm/ui/components/input';
 import { PageShell } from '@fwlm/ui/components/page-shell';
 import { Spinner } from '@fwlm/ui/components/spinner';
+import { textLinkVariants } from '@fwlm/ui/components/text-link';
 import {
   Table,
   TableBody,
@@ -196,7 +197,7 @@ function AgenciesView() {
                     * （正典 §7.2。押せない一覧の行と見分けが付かず、誤った可動感を与える）。
                     * リンクと分かる手がかりは下線で付ける。色で示すと行の数だけブランド色が並ぶ（§7.4）。 */}
                   <TableCell wrap="prose">
-                    <Link href={`/admin/agencies/${agency.id}`} className="underline underline-offset-4">
+                    <Link href={`/admin/agencies/${agency.id}`} className={textLinkVariants()}>
                       {agency.name}
                     </Link>
                   </TableCell>
