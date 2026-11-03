@@ -47,12 +47,17 @@ jobs:
     # workflow_run 経由はテスト成功時のみ。workflow_dispatch（手動）は無条件で実行。
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      # 本番を巻き戻すデプロイを止めたか（Issue #512）。notify がこれを見て、止めた run で追跡 Issue を動かさない。
+      rollback: ${{ steps.rollback.outputs.rollback }}
     steps:
       - name: Checkout（検証済みコミットを反映）
         uses: actions/checkout@v5
         with:
           # workflow_run 時は ts-ci が緑になった正確な commit を反映する。
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # 巻き戻りの判定（Issue #512）は、本番で動いているコミットとの新旧を git の履歴で比べる。
+          fetch-depth: 0
 
       - name: TAG を確定（git 短SHA・push と反映で一致させる）
         id: meta
@@ -107,7 +112,27 @@ jobs:
           fi
           echo "OK: gcloud はデプロイ SA のアクセストークンを使います（以後 OIDC へ往復しません）。"
 
+      # ts-ci の完了順が逆になると、古いコミットのデプロイが後から走り、本番を巻き戻す（Issue #512・
+      # 2026-11-03 に実測）。本番のどれかの対象が、出そうとしているコミットより新しいコミットを指していれば、
+      # このデプロイを止める。同じコミットの出し直し（rerun・手動実行）は止めない。
+      - name: '本番を巻き戻すデプロイを止める（Issue #512）'
+        id: rollback
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          bash scripts/deploy-rollback-guard.sh --candidate "$(git rev-parse HEAD)" | tee "$RUNNER_TEMP/rollback.log"
+          if grep -q '^SKIP:' "$RUNNER_TEMP/rollback.log"; then
+            {
+              echo '## デプロイを止めました（本番の巻き戻りを防ぐため・Issue #512）'
+              echo
+              grep '^SKIP:' "$RUNNER_TEMP/rollback.log"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=deploy-prod::本番を巻き戻すデプロイを止めました（Issue #512）。詳細は run のサマリーを見てください。"
+          fi
+
       - name: Build & push 7 images（store-detail / dashboard-web は NEXT_PUBLIC_* を build-arg で焼き込み）
+        if: steps.rollback.outputs.rollback != 'true'
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: asia-northeast1
@@ -124,6 +149,7 @@ jobs:
         run: scripts/push-images.sh
 
       - name: Reflect images to Cloud Run（image-only update・契約遵守）
+        if: steps.rollback.outputs.rollback != 'true'
         env:
           IMAGE_BASE: asia-northeast1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/fwlm
           TAG: ${{ steps.meta.outputs.tag }}
@@ -153,6 +179,7 @@ jobs:
             --region=asia-northeast1 --project="${PROJECT_ID}"
 
       - name: 'Placeholder 稼働検出（Issue #33 再発防止・デプロイ漏れサービスを fail させる）'
+        if: steps.rollback.outputs.rollback != 'true'
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
         # Cloud Run 初期作成イメージ（cloudrun/container/hello）のまま稼働しているサービスは
@@ -209,11 +236,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          # 巻き戻りを防ぐために止めた run（Issue #512）。デプロイしていないので、復旧の証拠にも失敗にもしない。
+          DEPLOY_ROLLBACK_SKIPPED: ${{ needs.deploy.outputs.rollback }}
           # deploy ジョブが checkout するのと同じ commit（workflow_run 時は ts-ci が緑になった
           # commit であり、main の HEAD とは限らない）。
           DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
+          if [ "$DEPLOY_ROLLBACK_SKIPPED" = 'true' ]; then
+            echo "OK: 本番を巻き戻すデプロイを止めた run のため通知しません（Issue #512）。"
+            exit 0
+          fi
           # skipped（ts-ci が緑でないため deploy 自体を実行しなかった）と cancelled は
           # デプロイの失敗ではないので通知しない。
           case "$DEPLOY_RESULT" in
