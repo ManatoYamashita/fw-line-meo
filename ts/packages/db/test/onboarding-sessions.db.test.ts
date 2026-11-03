@@ -6,6 +6,7 @@ import { createOwner } from '../src/owners.js';
 // 他ファイルと衝突しない専用 UUID プレフィックス（e5/e6）。
 const OP = 'e5555555-5555-5555-5555-555555555555';
 const AG = 'e6666666-6666-6666-6666-666666666666';
+const CODE = 'e6666666-6666-6666-6666-6666666486c1';
 
 describe.skipIf(!process.env.DATABASE_URL)('onboarding-sessions accessors (DB)', () => {
   beforeAll(async () => {
@@ -15,6 +16,12 @@ describe.skipIf(!process.env.DATABASE_URL)('onboarding-sessions accessors (DB)',
       AG,
       OP,
       'session代理店',
+    ]);
+    // オーナー作成には登録に用いた招待コードが要る（owners.invite_code_id・0017・#486）。
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      CODE,
+      AG,
+      'SESSCODE1',
     ]);
   });
 
@@ -58,7 +65,7 @@ describe.skipIf(!process.env.DATABASE_URL)('onboarding-sessions accessors (DB)',
     it('owner 作成に合わせて stage と owner_id を同時に遷移できる（CHECK 制約整合）', async () => {
       const pool = await getPool();
       await getOrCreateSession(pool, 'U-session-owner');
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-session-owner' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-session-owner' });
 
       await updateSession(pool, 'U-session-owner', {
         stage: 'await_store_name',

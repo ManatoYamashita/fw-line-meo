@@ -179,6 +179,8 @@ export async function handleSurveySettings(
     const settings = await readStoreSurveySettings(deps.pool, store.id);
     const body: SurveySettingsResponse = {
       ...settings,
+      // 全店公開は survey-web と同じ SURVEY_FORCE_STRUCTURED=1。未公開の誤案内を出さない。
+      structuredEnabled: process.env.SURVEY_FORCE_STRUCTURED === '1' || settings.structuredEnabled,
       storeId: store.id,
       storeName: store.name,
       stores: toStoreRefs(stores),

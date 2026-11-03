@@ -72,6 +72,11 @@ interface PreviousSummaryColumns {
  */
 type ReadyTargetRow = DailySummaryRow & {
   readonly store_name: string;
+  /**
+   * `owners.line_user_id` は列としては NULL を許す（解除済みのオーナー・Issue #487）。抽出の述語
+   * `o.line_unlinked_at IS NULL` と CHECK `ck_owner_line_link`（`line_unlinked_at` が NULL であることと
+   * `line_user_id` が非 NULL であることが一致する）により、この抽出が返す行では常に非 NULL である。
+   */
   readonly owner_line_user_id: string;
   readonly previous_summary: PreviousSummaryColumns | null;
 };
@@ -114,6 +119,11 @@ function assertValidHour(currentJSTHour: number): void {
  * 間に停止された店舗は当日の行を持ちうるので、この述語で外す（4.2）。再開すれば（`suspended_at` が
  * NULL に戻れば）通常どおり対象になる（4.4）。
  *
+ * LINE の紐づけを解除したオーナー（`owners.line_unlinked_at` が非 NULL・Issue #487）の店舗は対象にしない
+ * （owner-line-unlink 5.2）。解除済みのオーナーには宛先が無い。抽出は配信の実行時に行うので、日次サマリーの
+ * 作成後から配信時刻までの間に解除されたオーナーの店舗も外れる（5.4）。店舗を引き継いだ後は
+ * `stores.owner_id` が新しいオーナーを指すので、この JOIN のまま新しいオーナーの宛先で抽出される（6.7）。
+ *
  * `summaryDate` は 'YYYY-MM-DD' 形式（PostgreSQL の date 列と比較可能な文字列）。
  */
 export async function queryDeliveryTargets(
@@ -144,6 +154,7 @@ export async function queryDeliveryTargets(
         AND o.delivery_hour = $2
         AND s.place_status = 'confirmed'
         AND s.suspended_at IS NULL
+        AND o.line_unlinked_at IS NULL
         AND sd.id IS NULL`,
     [summaryDate, currentJSTHour],
   );
@@ -170,6 +181,10 @@ export async function queryDeliveryTargets(
  * 停止中の店舗（`stores.suspended_at` が非 NULL・Issue #252）は skip 候補にもしない。停止中の店舗には
  * 送信の記録も、いかなる理由の見送りの記録も残さない（store-suspension 4.3）。停止中の店舗は日次取得の
  * 対象から外れて当日の集計を持たないため、この述語が無いと毎日 skipped_no_summary が記録される。
+ *
+ * LINE の紐づけを解除したオーナーの店舗も skip 候補にしない。解除済みオーナーの店舗には、送信・失敗・
+ * 見送りのいずれの記録も残さない（owner-line-unlink 5.3）。解除済みオーナーの店舗は日次取得を続けるので
+ * （5.1）通常は当日の集計を持ち、こちらに来るのは日次取得に失敗した日である。
  */
 export async function queryOwnersDueWithoutSummary(
   pool: Queryable,
@@ -178,6 +193,8 @@ export async function queryOwnersDueWithoutSummary(
 ): Promise<SkippedNoSummaryTarget[]> {
   assertValidHour(currentJSTHour);
 
+  // line_user_id は述語 `o.line_unlinked_at IS NULL` と CHECK `ck_owner_line_link` により非 NULL である
+  // （ReadyTargetRow の owner_line_user_id と同じ理由）。
   const res = await pool.query<{ store_id: string; line_user_id: string }>(
     `SELECT s.id AS store_id, o.line_user_id
        FROM stores s
@@ -189,6 +206,7 @@ export async function queryOwnersDueWithoutSummary(
       WHERE o.delivery_hour = $2
         AND s.place_status = 'confirmed'
         AND s.suspended_at IS NULL
+        AND o.line_unlinked_at IS NULL
         AND ds.id IS NULL
         AND sd.id IS NULL`,
     [summaryDate, currentJSTHour],

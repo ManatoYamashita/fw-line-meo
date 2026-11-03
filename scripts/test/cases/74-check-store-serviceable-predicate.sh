@@ -2,7 +2,7 @@
 #
 # 本ガードは、確定店舗を選ぶ判定（確定の判定 A）を持つ本番コードのファイルごとに、
 # 「停止中でない」の判定（停止の判定 B）が A 以上の件数あることを要求する。表示だけの A は
-# ガード本体に宣言した 1 件の除外印でだけ数えから外せる。
+# ガード本体に宣言した除外印（店舗一覧の表示とオーナー一覧の店舗名の 2 件）でだけ数えから外せる。
 #
 # fixture は現行ツリーの形を縮めて写す。Go の 2 つのクエリ、店舗一覧画面の表示だけの判定と
 # QR ボタンの判定、LIFF の読み出し（JSDoc と SQL の `--` コメントが A を引用する）、
@@ -65,6 +65,14 @@ export function availability(store: SurveyStore | null): 'available' | 'unavaila
   }
   return 'available';
 }
+EOF
+
+  # オーナー一覧の店舗名（owner-line-unlink）。表示だけの判定で、SQL の `--` コメントの印で外す。
+  fx_write ts/packages/db/src/owners.ts <<'EOF'
+export const listOwnersSql = `
+      SELECT array_agg(s.name) FROM stores s
+      -- serviceable-predicate: display-only（オーナー一覧に店舗名を示すだけで、利用可否を決めない）
+      WHERE s.owner_id = o.id AND s.place_status = 'confirmed'`;
 EOF
 
   fx_write ts/packages/db/src/other.ts <<'EOF'
@@ -134,7 +142,8 @@ fx_run check-store-serviceable-predicate
 expect_green
 # **件数まで固定する。** コメント行・テスト・生成物の除外が崩れると A の総数が増え、
 # 空のファイルの扱いが崩れると走査ファイル数が変わる。
-expect_output_matches 'OK: 確定の判定 6 件（うち display-only の印 1 件）/ 停止の判定 5 件 / 走査 5 ファイル（空のファイル 1 件を除く）— 印の無い確定の判定を持つ 4 ファイルすべて'
+expect_output_matches 'OK: 確定の判定 7 件（うち display-only の印 2 件）/ 停止の判定 5 件 / 走査 6 ファイル（空のファイル 1 件を除く）— 印の無い確定の判定を持つ 4 ファイルすべて'
+expect_output_matches '^  ts/packages/db/src/owners\.ts: 確定の判定 1（印 1）/ 停止の判定 0$'
 expect_output_matches '^  ts/apps/store-detail/lib/liff-auth\.ts: 確定の判定 1（印 0）/ 停止の判定 1$'
 expect_output_matches '^  ts/apps/dashboard-web/src/app/stores/page\.tsx: 確定の判定 2（印 1）/ 停止の判定 1$'
 expect_output_matches '^  ts/apps/survey-web/src/app/s/\[storeId\]/page-data\.ts: 確定の判定 1（印 0）/ 停止の判定 1$'
@@ -188,7 +197,7 @@ sp_fixture
 sp_mutate ts/apps/dashboard-web/src/app/stores/page.tsx "s|^(        \{store\.placeStatus === 'confirmed' &&)|        {/* ${SP_MARKER} */}\n\$1|"
 sp_expect_fixture_count ts/apps/dashboard-web/src/app/stores/page.tsx 'serviceable-predicate: display-only' 2
 fx_run check-store-serviceable-predicate
-expect_red 'display-only の印の数が宣言と食い違っています（宣言 1 件・実際 2 件）'
+expect_red 'display-only の印の数が宣言と食い違っています（宣言 2 件・実際 3 件）'
 # 2 件の A がどちらも印で外れるため、このファイルの件数の不足は起きない（原因を取り違えない）。
 expect_absent '停止の判定が足りないファイルがあります'
 t_end
@@ -198,7 +207,7 @@ sp_fixture
 sp_mutate ts/apps/dashboard-web/src/app/stores/page.tsx "s/^.*\Q${SP_MARKER}\E.*\n//"
 sp_expect_fixture_count ts/apps/dashboard-web/src/app/stores/page.tsx 'serviceable-predicate' 0
 fx_run check-store-serviceable-predicate
-expect_red 'display-only の印の数が宣言と食い違っています（宣言 1 件・実際 0 件）'
+expect_red 'display-only の印の数が宣言と食い違っています（宣言 2 件・実際 1 件）'
 expect_output_matches '^  ts/apps/dashboard-web/src/app/stores/page\.tsx: 印の無い確定の判定 2 件に対し、停止の判定 1 件$'
 t_end
 

@@ -3,6 +3,7 @@ import { getPool, closePool, incrementReviewLinkTally, incrementTallies } from '
 import { createApp } from '../src/app.js';
 import type { TokenVerifier } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 import { readJson } from './support/json.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で QR パネルの実績（Issue #401）を app.request 経由で検証する。
@@ -25,6 +26,8 @@ const config = {
   placesApiKey: 'test-places-key',
   corsOrigin: 'https://dash.example',
   surveyBaseUrl: 'https://survey.example',
+  lineChannelId: '1234567890',
+  lineChannelSecret: 'dummy-line-channel-secret',
 };
 
 const verifier: TokenVerifier = {
@@ -32,7 +35,7 @@ const verifier: TokenVerifier = {
 };
 
 function buildApp(): ReturnType<typeof createApp> {
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 async function funnel(storeId: string, bearer?: string): Promise<Response> {

@@ -40,6 +40,7 @@
 - **Findings**:
   - `navigator.clipboard.writeText` は HTTPS 必須・iOS Safari はジェスチャー内**同期**呼び出し必須（await を挟むと NotAllowedError）。失敗時は「選択可能テキスト＋再コピー」フォールバックが定石（2 度目は純ジェスチャーで成功）。
   - 本設計は下書きを表示済み state から同期コピーするため制約に自然適合。`document.execCommand('copy')` を最終フォールバックに残す。
+    - 注記（実装時の判断）: `execCommand('copy')` のフォールバックは**採用しなかった**。`writeText` が使えない・失敗したときは、下書きの入力欄を選択状態にして手動でコピーしてもらう（Req 4.6）。投稿画面を開くリンクはコピーの成否によらず表示する。
   - QR: npm `qrcode@1.5.4`（MIT・PNG/SVG・依存 3・枯れて安定）が実質標準。zero-dep 代替 `uqr` は PNG 非対応。印刷用途（非 IT の代理店・チラシ）には PNG が安全。
   - Next.js 最新安定は **16.2.x**。`output: 'standalone'` は現役の推奨セルフホスト構成（Cloud Run の `PORT` 注入と整合。Dockerfile で `public/`・`.next/static` の明示コピーが必要）。
 - **Implications**: コピー UI は「生成完了後のみ活性」設計とし、非同期後の writeText を構造的に排除する。

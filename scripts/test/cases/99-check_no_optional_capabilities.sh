@@ -5,7 +5,9 @@
 # Requirement 3.10（オーナー自身が配信を停止する手段を提供しない・2026-09-23 Issue #252 で改訂）
 # という **能力の不在** である。store-suspension（Issue #252）で運営・代理店による店舗の利用停止
 # （stores.suspended_at）が入ったため、同 spec の Requirement 8.1・8.3・8.4 に合わせて
-# (A1) の照合先へ stores を、(B2) の走査面へ survey-web を足し、(B4) を新設した。
+# (A1) の照合先へ stores を、(B2) の走査面へ survey-web を足し、(B4) を新設した。owner-line-unlink
+# （Issue #487）で運営・代理店によるオーナーの LINE 連携の解除が入ったため、同 spec の
+# Requirement 8.1・8.3・8.4 に合わせて (B5) を新設した。
 # #158 (a) で ts-ci へ載せた際、「読めなかったから緑」の経路を塞ぐ fail-closed 分岐を 5 系統
 # 新設した。ところが **その分岐には回帰テストが無かった**。手動注入で一度発火を確認しただけで、
 # `|| true` や `2>/dev/null` が再導入されても、`[ -d ]` が消えても、`--exclude` が外れても、
@@ -130,6 +132,33 @@ EOF
 export const sql = 'SELECT id FROM stores WHERE id = $1 AND suspended_at IS NULL';
 export const isSuspended = (row: { suspended_at: Date | null }) => row.suspended_at !== null || row.suspended_at == undefined;
 EOF
+  # **運営・代理店による LINE 連携の解除は許容する（owner-line-unlink Requirement 8.3）ことの対照。**
+  # 解除を書く DAL（@fwlm/db の owner-line-link.ts）と、それを呼ぶ dashboard-api は (B5) の走査面では
+  # ない。ここへ解除の DAL 名と解除の列への代入を置いても緑でなければならない。@fwlm/db は (B2) の
+  # 走査面なので、(B2) の語彙がこれを誤検出しないことも同時に固定される。
+  fx_write ts/packages/db/src/owner-line-link.ts <<'EOF'
+export async function unlinkOwnerLine(db: unknown, input: { ownerId: string }) {
+  return `UPDATE owners SET line_user_id = NULL, line_unlinked_at = now(), menu_pending_line_user_id = line_user_id`;
+}
+export async function clearOwnerMenuPending(db: unknown, ownerId: string) {
+  return `UPDATE owners SET menu_pending_line_user_id = NULL WHERE id = $1`;
+}
+EOF
+  fx_write ts/apps/dashboard-api/src/owners.ts <<'EOF'
+import { unlinkOwnerLine, clearOwnerMenuPending } from '@fwlm/db';
+export const unlink = unlinkOwnerLine;
+export const clearPending = clearOwnerMenuPending;
+EOF
+  # **line-webhook の個別メニュー操作と、連携状態を読むだけの参照は (B5) に当たらないことの対照。**
+  # unlinkRichMenu（owner-line-unlink 6.1 で足す LINE の個別リンクの解除）は unlinkOwnerLine とは
+  # 別の識別子である。連携状態の列は IS NULL・比較で読むのは正当で、代入の形だけを書込として数える。
+  fx_write ts/apps/line-webhook/src/menu.ts <<'EOF'
+export async function onFollow(messenger: { unlinkRichMenu(id: string): Promise<void> }, lineUserId: string) {
+  await messenger.unlinkRichMenu(lineUserId);
+}
+export const sql = 'SELECT id FROM owners WHERE line_user_id = $1 AND line_unlinked_at IS NULL AND menu_pending_line_user_id IS NOT NULL';
+export const isUnlinked = (row: { line_unlinked_at: Date | null }) => row.line_unlinked_at !== null || row.line_unlinked_at == undefined;
+EOF
   fx_write ts/apps/store-detail/app/page.tsx <<'EOF'
 export default function Page() { return null; }
 EOF
@@ -200,7 +229,13 @@ expect_output_matches 'PASS \(B2\): .*（走査 6 ディレクトリ）'
 # route.ts は /api/detail と、アンケート設定（Issue #437）の宣言済み 6 本の計 7 件。B4 の走査ファイルも、
 # store-detail/app 配下の 6 本ぶん増える。
 expect_output_matches 'PASS \(B3\): .*（route\.ts 7 件）'
-expect_output_matches 'PASS \(B4\): .*（走査 4 ディレクトリ・12 ファイル）'
+# line-webhook の menu.ts（(B5) の対照）の 1 件を含めて 13 ファイル。(B5) は (B4) と同じ走査面を見る。
+expect_output_matches 'PASS \(B4\): .*（走査 4 ディレクトリ・13 ファイル）'
+expect_output_matches 'PASS \(B5\): .*（走査 4 ディレクトリ・13 ファイル）'
+# 対照が合成ツリーに実在することを確かめる。消えていると「誤検出しない」を何も確かめない。
+cnoc_expect_mutated ts/apps/line-webhook/src/menu.ts 'messenger.unlinkRichMenu(lineUserId)'
+cnoc_expect_mutated ts/apps/line-webhook/src/menu.ts 'line_unlinked_at IS NULL'
+cnoc_expect_mutated ts/packages/db/src/owner-line-link.ts 'line_unlinked_at = now()'
 t_end
 
 t_begin 'check-no-optional-capabilities: DATABASE_URL が無ければ無言終了しない'
@@ -328,6 +363,58 @@ expect_red 'オーナー・客向けの面に店舗の停止を書く識別子�
 expect_output_matches 'store-detail/lib/pause\.ts'
 t_end
 
+t_begin 'check-no-optional-capabilities: LINE 応答が解除の DAL を呼ぶと赤（owner-line-unlink 8.1・8.2）'
+# **ブロック・友だち追加の処理からオーナーの紐づけを外す実装の形そのものである。** オーナー自身の
+# 操作で解除が起きると、それはオーナー自身が配信を止める手段になる。
+cnoc_fixture
+fx_write ts/apps/line-webhook/src/handlers/unfollow.ts <<'EOF'
+import { unlinkOwnerLine } from '@fwlm/db';
+export async function onUnfollow(pool: unknown, ownerId: string) {
+  await unlinkOwnerLine(pool, { ownerId });
+}
+EOF
+cnoc_expect_mutated ts/apps/line-webhook/src/handlers/unfollow.ts 'unlinkOwnerLine(pool'
+cnoc_run
+expect_red 'オーナー・客向けの面に LINE 連携の解除を書く識別子が見つかりました'
+expect_output_matches 'line-webhook/src/handlers/unfollow\.ts'
+expect_output_matches 'PASS \(B4\)'
+t_end
+
+t_begin 'check-no-optional-capabilities: 客向け Web が line_unlinked_at へ代入すると赤（owner-line-unlink 8.1・書込の形は SQL でも検出する）'
+cnoc_fixture
+fx_write ts/apps/survey-web/src/unlink.ts <<'EOF'
+export const sql = 'UPDATE owners SET LINE_UNLINKED_AT = now() WHERE id = $1';
+EOF
+cnoc_expect_mutated ts/apps/survey-web/src/unlink.ts 'SET LINE_UNLINKED_AT = now()'
+cnoc_run
+expect_red 'オーナー・客向けの面に LINE 連携の解除を書く識別子が見つかりました'
+expect_output_matches 'survey-web/src/unlink\.ts'
+t_end
+
+t_begin 'check-no-optional-capabilities: store-detail が LINE ユーザー ID を NULL にすると赤（owner-line-unlink 8.1）'
+cnoc_fixture
+fx_write ts/apps/store-detail/lib/detach.ts <<'EOF'
+export const sql = 'UPDATE owners SET line_user_id = NULL WHERE id = $1';
+EOF
+cnoc_expect_mutated ts/apps/store-detail/lib/detach.ts 'SET line_user_id = NULL'
+cnoc_run
+expect_red 'オーナー・客向けの面に LINE 連携の解除を書く識別子が見つかりました'
+expect_output_matches 'store-detail/lib/detach\.ts'
+t_end
+
+t_begin 'check-no-optional-capabilities: store-detail がメニュー未解除の印を消す関数・代入を持つと赤（owner-line-unlink 8.1）'
+cnoc_fixture
+fx_write ts/apps/store-detail/app/pending.ts <<'EOF'
+export const clear = (id: string) => clearOwnerMenuPending(id);
+export const sql = 'UPDATE owners SET menu_pending_line_user_id = $2 WHERE id = $1';
+EOF
+cnoc_expect_mutated ts/apps/store-detail/app/pending.ts 'clearOwnerMenuPending(id)'
+cnoc_run
+expect_red 'オーナー・客向けの面に LINE 連携の解除を書く識別子が見つかりました'
+expect_output_matches 'store-detail/app/pending\.ts:1:'
+expect_output_matches 'store-detail/app/pending\.ts:2:'
+t_end
+
 t_begin 'check-no-optional-capabilities: store-detail に detail 以外のルートが生えると赤（R4.2）'
 cnoc_fixture
 fx_write ts/apps/store-detail/app/api/optout/route.ts <<'EOF'
@@ -439,4 +526,12 @@ cnoc_fixture
 cnoc_run grepfail 'setStoreSuspension'
 expect_red 'オーナー・客向けの面を走査できません（grep exit=2）'
 expect_output_matches 'PASS \(B3\)'
+t_end
+
+t_begin 'check-no-optional-capabilities: B5 の走査が評価不能（exit 2）なら赤'
+# (B4) の走査は通し、(B5) の走査だけを落とす（(B4) の照合語は unlinkOwnerLine を含まない）。
+cnoc_fixture
+cnoc_run grepfail 'unlinkOwnerLine'
+expect_red '(B5) オーナー・客向けの面を走査できません（grep exit=2）'
+expect_output_matches 'PASS \(B4\)'
 t_end

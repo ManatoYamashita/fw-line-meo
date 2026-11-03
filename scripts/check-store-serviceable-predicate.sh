@@ -45,10 +45,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # --- 表示だけの判定の除外印の宣言（書き換えるとレビューに差分が出る） -----------------
-# 印の総数。店舗一覧の「確定済み／未確定」の表示だけが該当する（design.md PredicateGuard）。
-EXPECTED_DISPLAY_ONLY_MARKERS=1
+# 印の総数。店舗一覧の「確定済み／未確定」の表示（store-suspension design.md PredicateGuard）と、
+# オーナー一覧の店舗名の表示（owner-line-unlink design.md OwnersRepo・停止中も確定済みなら名前を出す）が該当する。
+EXPECTED_DISPLAY_ONLY_MARKERS=2
 # 印を置いてよいファイル（リポジトリ相対パス）。
-DISPLAY_ONLY_MARKER_FILES=('ts/apps/dashboard-web/src/app/stores/page.tsx')
+DISPLAY_ONLY_MARKER_FILES=('ts/apps/dashboard-web/src/app/stores/page.tsx' 'ts/packages/db/src/owners.ts')
 
 if ! (cd "$ROOT" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
   echo "ERROR: ${ROOT} は git work tree ではありません。" >&2

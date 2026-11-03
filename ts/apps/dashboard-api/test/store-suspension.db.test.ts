@@ -3,6 +3,7 @@ import { getPool, closePool } from '@fwlm/db';
 import { createApp } from '../src/app.js';
 import type { TokenVerifier } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で停止・再開のルートを app.request 経由で検証する
 // （store-suspension Req 1.1–1.5, 7.1–7.3）。firebase-admin のみモック（Bearer 文字列＝uid とみなす）。
@@ -25,11 +26,13 @@ const OP_TOKEN = 'd7-op-uid';
 const AG1_TOKEN = 'd7-ag1-uid';
 
 
-// 合成根へ渡す設定（loadConfig を通さず、使う 3 項目だけを与える）。
+// 合成根へ渡す設定（loadConfig を通さず、合成根が使う項目だけを与える）。
 const config = {
   placesApiKey: 'test-places-key',
   corsOrigin: 'https://dash.example',
   surveyBaseUrl: 'https://survey.example',
+  lineChannelId: '1234567890',
+  lineChannelSecret: 'dummy-line-channel-secret',
 };
 
 // firebase-admin を隔離した TokenVerifier のモック（Bearer 文字列をそのまま uid とみなす）。
@@ -39,7 +42,7 @@ const verifier: TokenVerifier = {
 
 function buildApp(): ReturnType<typeof createApp> {
   // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 async function post(path: string, bearer: string): Promise<Response> {

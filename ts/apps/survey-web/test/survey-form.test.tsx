@@ -35,6 +35,11 @@ function inGroup(name: string) {
   return within(screen.getByRole('group', { name }));
 }
 
+/** 星を 1 つ掴む。読み上げ名は「星N：言葉」なので番号の前方一致で引く。 */
+function pickStar(n: number): HTMLElement {
+  return screen.getByRole('radio', { name: new RegExp(`^星${n}：`) });
+}
+
 function setup(submitting = false) {
   const onSubmit = vi.fn();
   render(<SurveyForm aspects={ASPECTS} onSubmit={onSubmit} submitting={submitting} />);
@@ -44,7 +49,7 @@ function setup(submitting = false) {
 describe('SurveyForm', () => {
   it('星のみで送信できる（aspectCodes 空）', () => {
     const { onSubmit } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '星5' }));
+    fireEvent.click(pickStar(5));
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
     expect(onSubmit).toHaveBeenCalledWith({ star: 5, aspectCodes: [], concernCodes: [] });
   });
@@ -59,7 +64,7 @@ describe('SurveyForm', () => {
 
   it('星＋良かった点＋一言を送信する', () => {
     const { onSubmit } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '星4' }));
+    fireEvent.click(pickStar(4));
     fireEvent.click(inGroup('良かった点').getByRole('checkbox', { name: '味' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'おいしい' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
@@ -73,7 +78,7 @@ describe('SurveyForm', () => {
 
   it('良かった点は選択・解除できる', () => {
     const { onSubmit } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '星3' }));
+    fireEvent.click(pickStar(3));
     const taste = inGroup('良かった点').getByRole('checkbox', { name: '味' });
     fireEvent.click(taste); // 選択
     fireEvent.click(taste); // 解除
@@ -104,7 +109,7 @@ describe('SurveyForm', () => {
 
   it('空白のみの一言は comment を含めない', () => {
     const { onSubmit } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '星5' }));
+    fireEvent.click(pickStar(5));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
     expect(onSubmit).toHaveBeenCalledWith({ star: 5, aspectCodes: [], concernCodes: [] });
@@ -114,7 +119,7 @@ describe('SurveyForm', () => {
 
   it('気になった点を選んで送信できる（良かった点とは別の群）', () => {
     const { onSubmit } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '星1' }));
+    fireEvent.click(pickStar(1));
     fireEvent.click(inGroup('気になった点').getByRole('checkbox', { name: '接客' }));
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
     expect(onSubmit).toHaveBeenCalledWith({ star: 1, aspectCodes: [], concernCodes: ['service'] });
@@ -122,7 +127,7 @@ describe('SurveyForm', () => {
 
   it('同じ観点を良かった点と気になった点の両方で選べる（互いの選択を消さない）', () => {
     const { onSubmit } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '星3' }));
+    fireEvent.click(pickStar(3));
     fireEvent.click(inGroup('良かった点').getByRole('checkbox', { name: '味' }));
     fireEvent.click(inGroup('気になった点').getByRole('checkbox', { name: '味' }));
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
@@ -147,9 +152,9 @@ describe('SurveyForm', () => {
     const legends = () => screen.getAllByRole('group').map((g) => g.querySelector('legend')?.textContent);
     const before = legends();
     expect(before).toEqual(['満足度（必須）', '良かった点', '気になった点']);
-    fireEvent.click(screen.getByRole('button', { name: '星1' }));
+    fireEvent.click(pickStar(1));
     expect(legends()).toEqual(before);
-    fireEvent.click(screen.getByRole('button', { name: '星5' }));
+    fireEvent.click(pickStar(5));
     expect(legends()).toEqual(before);
   });
 
@@ -166,36 +171,34 @@ describe('SurveyForm', () => {
   });
 });
 
-/** 星の読み上げ名の正典。順序に依存しない集合として比較する。 */
-const STAR_NAMES = ['星1', '星2', '星3', '星4', '星5'] as const;
+/**
+ * 星の読み上げ名の正典（Issue #492）。番号に言葉を添える。順序に依存しない集合として比較する。
+ * 部品の STAR_LABELS から組み立てずに書き写すのは、部品側の言葉の改変をここで捕まえるため。
+ */
+const STAR_NAMES = ['星1：不満', '星2：やや不満', '星3：ふつう', '星4：満足', '星5：とても満足'] as const;
 
 /** 星をすべて掴む。読み上げ名の前方一致で拾うので、余分な星が増えれば件数に現れる。 */
 function allStars(): HTMLElement[] {
-  return screen.getAllByRole('button', { name: /^星/ });
+  return screen.getAllByRole('radio', { name: /^星/ });
 }
 
 function classesOf(element: Element): string[] {
   return (element.getAttribute('class') ?? '').split(/\s+/).filter((value) => value.length > 0);
 }
 
-/** 正典 7.1 が星に使わないと定めた色。実値ではなく「使わない」という判断がここの対象である。 */
-const FORBIDDEN_STAR_INK = ['text-primary', 'text-border'] as const;
-
-/** 星ごとの読み上げ名と、その時点のユーティリティの控え（後の再描画で書き換わらない写し）。 */
-function starPaint(): { name: string | null; utilities: string[] }[] {
-  return allStars().map((star) => ({
-    name: star.getAttribute('aria-label'),
-    utilities: classesOf(star),
-  }));
+/** 星の字形（SVG）。塗りと縁の色はここに付く。 */
+function glyphOf(star: HTMLElement): SVGSVGElement {
+  const glyph = star.querySelector('svg');
+  if (glyph === null) throw new Error(`${star.getAttribute('aria-label')} の字形を掴めません`);
+  return glyph;
 }
 
-/** 本文色・補足色の有無だけを取り出す（順序つきで丸ごと比較するため）。 */
-function inkAndMuted({ name, utilities }: { name: string | null; utilities: string[] }) {
-  return {
-    name,
-    ink: utilities.includes('text-foreground'),
-    muted: utilities.includes('text-muted-foreground'),
-  };
+/** 星ごとの読み上げ名と、その時点の点灯状態（後の再描画で書き換わらない写し）。 */
+function starLit(): { name: string | null; lit: string | null }[] {
+  return allStars().map((star) => ({
+    name: star.getAttribute('aria-label'),
+    lit: glyphOf(star).getAttribute('data-lit'),
+  }));
 }
 
 // 意匠の適用（ui-airbnb-surfaces task 4.1）が壊しうる契約を、件数と集合で固定する
@@ -218,35 +221,37 @@ function inkAndMuted({ name, utilities }: { name: string | null; utilities: stri
 //   (c) **星の個数だけ**は既存が一切縛っていなかったこと。既存は「星4 が在る」等の包含しか
 //       要求しておらず、6 個目の星も押下状態の多重化も素通りする
 describe('回答フォーム: 着手前から在った契約（意匠の適用で壊しうる）', () => {
-  it('星は 5 個ちょうどで、読み上げ名の集合が 星1〜星5 と相等する', () => {
+  it('星は 5 個ちょうどで、読み上げ名の集合が 星1〜星5 の言葉つきの名前と相等する', () => {
     setup();
     // 包含（1〜5 がすべて在る）。改名・欠落を落とす。
     for (const name of STAR_NAMES) {
-      expect(screen.getByRole('button', { name }), `${name} を掴めません`).toBeTruthy();
+      expect(screen.getByRole('radio', { name }), `${name} を掴めません`).toBeTruthy();
     }
     // 逆向きの包含（余分が無い）。包含だけでは 6 個目の星が素通りする。
     expect(allStars(), '星の個数が 5 個ではありません').toHaveLength(STAR_NAMES.length);
+    // 5 個は 1 つの radiogroup に属し、群の名前は設問の見出しである。
+    const group = screen.getByRole('radiogroup', { name: '満足度（必須）' });
+    expect(within(group).getAllByRole('radio'), '群の中の星が 5 個ではありません').toHaveLength(STAR_NAMES.length);
   });
 
-  it('星 3 を押すと押下状態はちょうど 1 個で、字形は ★ が 3 個・☆ が 2 個になる', () => {
+  it('星 3 を押すと選択状態はちょうど 1 個で、塗りは 3 個・縁だけが 2 個になる', () => {
     setup();
-    fireEvent.click(screen.getByRole('button', { name: '星3' }));
+    fireEvent.click(pickStar(3));
 
     const stars = allStars();
     expect(stars, '星の個数が 5 個ではありません').toHaveLength(STAR_NAMES.length);
 
-    // 押下状態は「いま何個目を選んだか」を伝えるものなので、真になるのは 1 個だけである。
-    // 塗りの範囲（n <= star）と取り違えると 3 個が押下状態になり、支援技術には
+    // 選択状態は「いま何個目を選んだか」を伝えるものなので、真になるのは 1 個だけである。
+    // 塗りの範囲（n <= star）と取り違えると 3 個が選択状態になり、支援技術には
     // 「3 つ選ばれている」と読まれる。
-    const pressed = stars
-      .filter((star) => star.getAttribute('aria-pressed') === 'true')
+    const checked = stars
+      .filter((star) => star.getAttribute('aria-checked') === 'true')
       .map((star) => star.getAttribute('aria-label'));
-    expect(pressed, '押下状態の星が 1 個ではありません').toEqual(['星3']);
+    expect(checked, '選択状態の星が 1 個ではありません').toEqual(['星3：ふつう']);
 
-    // 色だけに頼らない区別（Requirement 4.7）。字形が状態を持つことを固定する。
-    const glyphs = stars.map((star) => star.textContent);
-    expect(glyphs.filter((glyph) => glyph === '★'), `字形: ${glyphs.join('')}`).toHaveLength(3);
-    expect(glyphs.filter((glyph) => glyph === '☆'), `字形: ${glyphs.join('')}`).toHaveLength(2);
+    // 色だけに頼らない区別（Requirement 4.7）。塗るか縁だけかという形の差が状態を持つことを、
+    // 順序つきで固定する（塗りの向きが反転する改変 n >= star を落とす）。
+    expect(starLit().map(({ lit }) => lit), '星 3 を押した後の点灯').toEqual(['true', 'true', 'true', 'false', 'false']);
   });
 
   it('記入欄はちょうど 1 つで、複数行入力の部品を通っている', () => {
@@ -299,43 +304,41 @@ describe('回答フォーム: 正典 docs/design/design-language.md を守るガ
 
     // **否定の前に非空アンカーを置く。** 星を 1 つも掴めていないと、以下の
     // 「禁じられた色を持たない」はすべて空振りしたまま緑になる。
-    const unselected = starPaint();
-    expect(unselected, '星を 1 つも掴めていません').toHaveLength(STAR_NAMES.length);
+    const glyphs = allStars().map(glyphOf);
+    expect(glyphs, '星を 1 つも掴めていません').toHaveLength(STAR_NAMES.length);
 
-    // 押す前。5 個すべてが補足色で、本文色は 1 つも無い。
-    expect(unselected.map(inkAndMuted), '押す前の星の色').toEqual(
-      STAR_NAMES.map((name) => ({ name, ink: false, muted: true })),
+    // 点灯していない星は塗らずに補足色の縁だけ、点灯した星はブランド色で塗りアクション色で縁取る。
+    // 状態の切り替えは字形の data-lit が担い、色はその変種として 5 個すべてが同じ組を持つ。
+    for (const glyph of glyphs) {
+      const utilities = classesOf(glyph);
+      for (const required of [
+        'fill-transparent',
+        'stroke-muted-foreground',
+        'data-[lit=true]:fill-brand',
+        'data-[lit=true]:stroke-primary',
+      ]) {
+        expect(utilities, `字形の色の組: ${utilities.join(' ')}`).toContain(required);
+      }
+    }
+
+    // 分岐の両端。押す前は 5 個とも消灯、星 3 を押した後は 1〜3 が点灯・4〜5 が消灯。
+    expect(starLit(), '押す前の点灯').toEqual(STAR_NAMES.map((name) => ({ name, lit: 'false' })));
+    fireEvent.click(pickStar(3));
+    expect(starLit(), '星 3 を押した後の点灯').toEqual(
+      STAR_NAMES.map((name, i) => ({ name, lit: String(i < 3) })),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '星3' }));
-
-    const selected = starPaint();
-    expect(selected, '押した後に星を 1 つも掴めていません').toHaveLength(STAR_NAMES.length);
-
-    // 押した後。選択済み（1〜3）は本文色、未選択（4〜5）は補足色。
-    // 順序も固定する。塗りの向きが反転する改変（n >= star）を落とすため。
-    expect(selected.map(inkAndMuted), '星 3 を押した後の星の色').toEqual([
-      { name: '星1', ink: true, muted: false },
-      { name: '星2', ink: true, muted: false },
-      { name: '星3', ink: true, muted: false },
-      { name: '星4', ink: false, muted: true },
-      { name: '星5', ink: false, muted: true },
-    ]);
-
-    // 正典 7.1 が名指しで退けた 2 色が、どちらの分岐にも現れないこと。
-    //   アクション色 — 星が押しボタンやリンクと同じ色になり、満足度の評価が操作の対象に見える
-    //   罫線色       — 純装飾として定義された色で、状態を伝える字形の色には足りない
-    for (const phase of [
-      { label: '押す前', paints: unselected },
-      { label: '押した後', paints: selected },
-    ]) {
-      for (const { name, utilities } of phase.paints) {
-        for (const forbidden of FORBIDDEN_STAR_INK) {
-          expect(utilities, `${phase.label}の ${name}: ${utilities.join(' ')}`).not.toContain(
-            forbidden,
-          );
-        }
-      }
+    // 正典 7.1 が退けた色が、変種の有無を問わず現れないこと。
+    //   アクション色の塗り — 星が押しボタンと同じ色の面になり、評価が操作の対象に見える
+    //   ブランド色の縁     — 白背景に対して 3:1 に届かず、図形の境界（WCAG 1.4.11）を担えない
+    //   罫線色             — 純装飾として定義された色で、状態を伝える字形の色には足りない
+    //   文字色の指定       — 字形は SVG で描くので、文字色は塗りにも縁にも届かない
+    const FORBIDDEN = /^(?:fill-primary|stroke-brand|fill-border|stroke-border|text-[a-z-]+)$/;
+    for (const glyph of allStars().map(glyphOf)) {
+      const offenders = classesOf(glyph)
+        .map((utility) => utility.replace(/^data-\[lit=true\]:/, ''))
+        .filter((utility) => FORBIDDEN.test(utility));
+      expect(offenders, `字形のユーティリティ: ${classesOf(glyph).join(' ')}`).toEqual([]);
     }
   });
 
@@ -369,16 +372,89 @@ describe('回答フォーム: 正典 docs/design/design-language.md を守るガ
     expect(stars, '星を 1 つも掴めていません').toHaveLength(STAR_NAMES.length);
 
     for (const star of stars) {
-      const utilities = classesOf(star).join(' ');
-      const where = `${star.getAttribute('aria-label')}: ${utilities}`;
+      const glyph = classesOf(glyphOf(star)).join(' ');
+      const where = `${star.getAttribute('aria-label')}: ${glyph}`;
       // 遷移させる性質を名指しする。まとめて指定すると後から足した性質が巻き込まれる。
-      expect(utilities, where).toContain('transition-colors');
-      expect(utilities, where).toContain('duration-150');
-      expect(utilities, where).not.toContain('transition-all');
-      // 押下の沈み込みは押しボタンの部品が持つ。縮小を重ねると同じ役割が 2 通りになる。
-      expect(utilities, where).not.toContain('scale');
-      // 動き低減の打ち消しは theme.css の @layer base が一括で効かせる。面の側には書かない。
-      expect(utilities, where).not.toContain('motion-reduce');
+      expect(glyph, where).toContain('transition-colors');
+      expect(glyph, where).toContain('duration-150');
+      expect(glyph, where).not.toContain('transition-all');
+
+      // 星の部分木のどこにも、縮小のユーティリティと動き低減の打ち消しを書かない。
+      // 持ち上がりと確定時のポップは指の追従として inline の transform で描き、動き低減は
+      // 部品が JS で判定する（正典 7.11 の例外）。クラスで書くと、押下の沈み込みと同じ役割が
+      // 2 通りになるか、theme.css の @layer base の一括抑制と二重管理になる。
+      const subtree = [star, ...star.querySelectorAll('*')].flatMap(classesOf);
+      expect(subtree.filter((utility) => /(?:^|:)scale-/.test(utility)), where).toEqual([]);
+      expect(subtree.filter((utility) => utility.includes('motion-reduce')), where).toEqual([]);
     }
+  });
+});
+
+// 星の操作（Issue #492）。radiogroup としてキーボードで選べ、支援技術の仮想クリック
+// （pointer を伴わない click）でも確定すること。原作の Peek Rating は pointerup とキーボードでしか
+// 確定しないため、click の受け口が消えると VoiceOver などから選べなくなる。
+describe('回答フォーム: 星の操作', () => {
+  /** いま Tab で星の群へ入ったときに焦点を受ける星（tabIndex が 0 の星）の読み上げ名。 */
+  const tabStops = () =>
+    allStars()
+      .filter((star) => star.tabIndex === 0)
+      .map((star) => star.getAttribute('aria-label'));
+  const checkedName = () =>
+    allStars()
+      .filter((star) => star.getAttribute('aria-checked') === 'true')
+      .map((star) => star.getAttribute('aria-label'));
+
+  it('Tab で入れる星は 1 個だけ。未選択では先頭、選択後は選んだ星', () => {
+    setup();
+    expect(tabStops(), '未選択の Tab の入口').toEqual(['星1：不満']);
+    fireEvent.click(pickStar(4));
+    expect(tabStops(), '星 4 を選んだ後の Tab の入口').toEqual(['星4：満足']);
+  });
+
+  it('矢印キー・Home・End で選び、選んだ星へ焦点が移る。先頭より前へは戻らない（取り消さない）', () => {
+    const { onSubmit } = setup();
+    const group = screen.getByRole('radiogroup', { name: '満足度（必須）' });
+    const press = (key: string, expected: string) => {
+      fireEvent.keyDown(document.activeElement ?? group, { key });
+      expect(checkedName(), `${key} の後の選択`).toEqual([expected]);
+      expect(document.activeElement?.getAttribute('aria-label'), `${key} の後の焦点`).toBe(expected);
+    };
+
+    pickStar(1).focus();
+    press('ArrowRight', '星1：不満');
+    press('ArrowRight', '星2：やや不満');
+    press('End', '星5：とても満足');
+    press('ArrowLeft', '星4：満足');
+    press('Home', '星1：不満');
+    press('ArrowLeft', '星1：不満');
+
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+    expect(onSubmit).toHaveBeenCalledWith({ star: 1, aspectCodes: [], concernCodes: [] });
+  });
+
+  it('pointer を伴わない click で確定し、同じ星をもう一度押しても取り消さない', () => {
+    const { onSubmit } = setup();
+    // fireEvent.click は detail 0 の click（支援技術の仮想クリックと同じ形）を送る。
+    fireEvent.click(pickStar(2));
+    fireEvent.click(pickStar(2));
+    expect(checkedName()).toEqual(['星2：やや不満']);
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+    expect(onSubmit).toHaveBeenCalledWith({ star: 2, aspectCodes: [], concernCodes: [] });
+  });
+
+  it('必須の案内は星の群から説明として参照され、星を選ぶと消える', () => {
+    setup();
+    const group = screen.getByRole('radiogroup', { name: '満足度（必須）' });
+    expect(group.getAttribute('aria-required')).toBe('true');
+    expect(group.hasAttribute('aria-describedby'), '案内が出る前から説明を参照しています').toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+    const describedBy = group.getAttribute('aria-describedby');
+    expect(describedBy, '案内が群から参照されていません').not.toBeNull();
+    expect(document.getElementById(describedBy!)?.textContent).toBe('満足度を選択してください');
+
+    fireEvent.click(pickStar(5));
+    expect(group.hasAttribute('aria-describedby')).toBe(false);
+    expect(screen.queryByText('満足度を選択してください')).toBeNull();
   });
 });
