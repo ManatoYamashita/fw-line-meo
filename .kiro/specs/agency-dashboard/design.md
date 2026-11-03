@@ -32,11 +32,13 @@
 - `ts/packages/store-identification`（新規共有パッケージ）の創設と、line-webhook の import 差し替え
 - `@fwlm/db` への追加アクセサ（店舗一覧・オーナー一覧・代理店・利用者・招待コード・カテゴリ）
 - migration `0005_agency_dashboard.sql`（`dashboard_users` への列追加）と関連ドキュメント（ERD・write-boundary）・DB テスト
+- migration `0017_owner_invite_code.sql`（`owners.invite_code_id` の追加・Requirement 8・Issue #486）と、それを書く・読むための契約変更（`@fwlm/db` の `createOwner` / `findActiveInviteCode` / `listOwnersByAgency`（`owner-line-unlink` 4.4 で `listOwners` へ置き換え）、line-webhook の `createOwner` 呼び出し 1 箇所への id の受け渡し）
+- 代理店詳細画面（`/admin/agencies/[agencyId]`・Requirement 9・Issue #486）と、そのために共用部品（`OwnerRosterTable`・`TopNav`・状態の表示語）へ足す変更
 - 自サービスの CI/デプロイ配線（`push-images.sh`・`deploy.yml`・`infra/envs/prod/main.tf` への dashboard-web / dashboard-api エントリ追加）
 
 ### Out of Boundary
 
-- 招待コードの検証・消費（オーナー紐付け）: `line-onboarding` の所有。本 spec は発行・無効化・表示のみ
+- 招待コードの検証・消費（オーナー紐付け）: `line-onboarding` の所有。本 spec は発行・無効化・表示のみ。ただし Requirement 8 の記録は登録の時点でしか取れないため、会話フロー（段階・案内文・ロック・トランザクション境界）は変えずに、既存の `createOwner` 呼び出しへ検証済みのコードの id を渡す変更だけを本 spec が行う
 - 競合の自動選定・日次指標取得: `competitive-daily-summary`（Go バッチ）の所有。本 spec は `competitors` を read するのみ（書込禁止）
 - Identity Platform 基盤（`infra/modules/auth`）と Cloud Run モジュール自体の変更: `gcp-infra-foundation` の所有。本 spec は `envs/prod` のサービスエントリ追加のみ
 - 客向け機能（survey-web / store-detail）・LINE Webhook の会話フロー
@@ -56,6 +58,10 @@
 - `@fwlm/store-identification` の契約（`SearchOutcome` / `ConfirmOutcome`）変更 → line-webhook の再検証必須
 - `agency_invite_codes` の有効判定（`disabled_at`）の意味変更 → `line-onboarding` の再検証必須
 - dashboard-api のエラー封筒（`{error:{code,message}}`）変更 → dashboard-web・QR 利用箇所
+- `owners` を作る経路の追加、または `createOwner` / `findActiveInviteCode` の契約変更 → `line-onboarding` の再検証必須（新しい経路が `invite_code_id` を書かないと、導入後の登録なのに「記録なし」になる・8.1）
+- `agency_invite_codes` の物理削除の導入 → Requirement 8.3 の再検証必須（記録が参照するコードは `ON DELETE RESTRICT` で消せない）
+- `OwnerRosterTable` の列・引数の変更 → 店舗登録（3.12）と代理店詳細（9.2）の両方の再検証必須（同じ部品を 2 面が使う）
+- GET /owners・GET /stores・GET /invite-codes が、存在しない代理店の指定に空配列以外（404 など）を返すようにする変更 → 代理店詳細の存在判定（9.6）の再検証
 
 ## Architecture
 
@@ -184,7 +190,7 @@ db/test/assertions/50_agency_dashboard.sql # 0005 の制約検証
 - `ts/packages/db/src/types.ts` — `DashboardUserRow` に `email`/`disabled_at`、一覧用型の追加
 - `ts/packages/db/src/dashboard-users.ts` — `findByAuthSubject` の disabled 対応、`linkAuthSubjectByEmail`・`createPendingDashboardUser`・`listDashboardUsers`・`disableDashboardUser`・`findDashboardUserDisplayName`（/me 用の単一取得）
 - `ts/packages/db/src/stores.ts` — `listStoresWithStatus`（JOIN＋competitors EXISTS）・`setStoreCategory`（registerStore の best-effort category 反映用）
-- `ts/packages/db/src/owners.ts` — `listOwnersByAgency`・`findOwnerWithAgency`
+- `ts/packages/db/src/owners.ts` — `listOwnersByAgency`・`findOwnerWithAgency`（`listOwnersByAgency` は `owner-line-unlink` 4.4 で `listOwners` へ置き換えた。下の GET /owners の注記を参照）
 - `ts/packages/db/src/invite-codes.ts` — `listInviteCodes`・`createInviteCode`・`disableInviteCode`
 - `ts/packages/db/src/index.ts` — 新規 re-export
 - `db/ERD.md` — `dashboard_users` の属性追記
@@ -192,6 +198,8 @@ db/test/assertions/50_agency_dashboard.sql # 0005 の制約検証
 - `scripts/push-images.sh` — `dashboard-api`・`dashboard-web` イメージ登録（BUILD_ARGS に NEXT_PUBLIC_* 一式）
 - `.github/workflows/deploy.yml` — 両サービスの image-only 反映追加・build-arg 用 vars 受け渡し
 - `infra/envs/prod/main.tf`（+ `variables.tf`） — `dashboard-web` サービス追加・dashboard-api の env（`DASHBOARD_WEB_ORIGIN`・`PLACES_API_KEY` secret）追加
+
+- **代理店詳細（Requirement 9・Issue #486）**: 新規 `ts/apps/dashboard-web/src/app/admin/agencies/[agencyId]/page.tsx`・`agency-detail-view.tsx`・`src/lib/agency-detail.ts`。変更 `src/app/admin/agencies/page.tsx`（代理店名をリンクに）・`src/components/owner-roster-table.tsx`（`showInviteCode`）・`src/components/top-nav.tsx`（下位の経路の現在地）・`src/lib/status-labels.ts`（有効／無効）と、その語を使う `src/app/invite-codes/page.tsx`・`src/app/admin/users/page.tsx`・E2E の `e2e/fixtures/api.ts`。API・DB は変えない
 
 > `db/write-boundary.md` は新テーブルなしのため表の変更不要（`dashboard_users` 等は TS 層登録済み）。`make db-verify-docs` の通過は必須。
 
@@ -290,6 +298,9 @@ sequenceDiagram
 | 3.9 | 登録済み Place の拒否 | ConfirmOutcome place_already_registered → 409 | 同上 |
 | 3.10 | オーナーを店舗特定済みへ遷移 | confirmStore TX 内 markOwnerStoreIdentified | 同上 |
 | 3.11 | Google 公式手段のみで候補取得 | PlacesSearchAdapter 単一実装（FieldMask 固定） | Allowed Dependencies |
+| 3.12 | オーナー選択で登録済み店舗を提示 | stores/new（OwnerRosterTable）, lib/agency-roster（GET /owners と GET /stores の並行取得・groupStoresByOwner） | 取得失敗を 0 件と提示しない |
+| 3.13 | 登録済みの検索候補を選択不可で提示 | POST /stores/search の `alreadyRegistered`（listRegisteredPlaceIds・1 回の照合）, stores/new | 照合失敗は 500。確定時の 409（3.9）は残す |
+| 3.14 | 検索以降の段で登録先のオーナーを提示 | stores/new（登録先の表示・「オーナーを選び直す」） | 一覧と開閉状態はウィザード側で保持 |
 | 4.1 | 代理店の担当店舗一覧 | GET /stores, stores/page | listStoresWithStatus |
 | 4.2 | 運営は全店舗＋代理店識別 | 同上（agencyName 同梱） | 同上 |
 | 4.3 | 店舗特定・競合設定ステータス表示 | listStoresWithStatus（place_status＋competitors EXISTS） | 同上 |
@@ -308,6 +319,21 @@ sequenceDiagram
 | 7.2 | 来店客情報を扱わない | データモデル上、客のエンティティに一切触れない | — |
 | 7.3 | 全画面・案内文が日本語 | dashboard-web 全 UI・エラーメッセージ | — |
 | 7.4 | 内部障害時の正直なエラー表示 | jsonError（500）＋api.ts の失敗時 UI | 成功表示の偽装をしない |
+| 8.1 | 登録と同時に招待コードを記録 | `findActiveInviteCode`（id を返す）→ `createOwner`（`inviteCodeId` 必須） | 既存のオーナー作成 TX の同じ INSERT 1 文で書く |
+| 8.2 | 同じ代理店のコードに限る | `0017` の複合 FK `(agency_id, invite_code_id) → agency_invite_codes(agency_id, id)` | DB が別代理店のコードを拒否 |
+| 8.3 | 無効化で結びつきを失わない | `disabled_at` のみの無効化（既存）＋ FK の `ON DELETE RESTRICT` | 参照中のコードは消せない |
+| 8.4 | 既存オーナーを推定で埋めない | `0017` は列を足すだけで UPDATE を持たない | 既存行は NULL のまま |
+| 8.5 | 記録の有無を区別して提示 | `listOwnersByAgency`（現 `listOwners`・owner-line-unlink 4.4）の `inviteCode`（`null` = 記録なし）→ GET /owners | 画面への表示は代理店詳細（9.2・9.4） |
+| 9.1 | 一覧から代理店の詳細へ | admin/agencies/page（代理店名のセルを `next/link`） | `/admin/agencies/[agencyId]` |
+| 9.2 | 4 区分の提示 | AgencyDetailView, OwnerRosterTable（`showInviteCode`）, lib/agency-detail | GET /dashboard-users・/owners・/stores・/invite-codes |
+| 9.3 | 4 つの件数 | AgencyDetailView の概要（`dl`） | 区分の取得結果から数える |
+| 9.4 | 記録なしを推定で埋めない | OwnerRosterTable の招待コードの列（`null` →「記録なし」）, `ownersByInviteCode` | 逆引きは記録のある行だけを使う |
+| 9.5 | ブロックを区別しない旨の明示 | AgencyDetailView のオーナーの区分の注記 | — |
+| 9.6 | 存在しない代理店 | AgencyDetailView（UUID の形の検査・GET /agencies での存在判定） | 判定までは区分を描かない |
+| 9.7 | 区分ごとの失敗と再取得 | AgencyDetailView の区分ごとの状態 | 失敗を 0 件と提示しない（7.4） |
+| 9.8 | 0 件の区分 | AgencyDetailView（`EmptyState`） | — |
+| 9.9 | 代理店ロールに管理情報を出さない | AgencyDetailView の operator 判定（API を呼ばない）, admin.ts の operator 限定（GET /dashboard-users・/agencies） | 6.5・2.3 |
+| 9.10 | 閲覧のみ | AgencyDetailView に書込の API 呼び出しを置かない | — |
 
 ## Components and Interfaces
 
@@ -403,9 +429,9 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 |--------|----------|---------|--------------------|--------|
 | GET | /me | — | `{ user: { role, agencyId, agencyName, displayName } }` | 401, 403(unregistered/disabled) |
 | GET | /stores | `?agencyId=`（operator のみ有効） | `{ stores: StoreListItem[] }` | 401, 403 |
-| GET | /owners | `?agencyId=`（operator は必須） | `{ owners: OwnerListItem[] }` | 400(operator の agencyId 未指定), 401, 403 |
+| GET | /owners | `?agencyId=`（operator は任意・未指定は全代理店。agency は自代理店に束縛） | `{ owners: OwnerListItem[] }`（各オーナーに登録に用いた招待コード `inviteCode: { id, code, disabled } \| null`・null = 記録なし・Issue #486。連携状態などの項目は下の注記） | 401, 403 |
 | GET | /categories | — | `{ categories: { code, label }[] }` | 401, 403 |
-| POST | /stores/search | `{ query: string }` | `{ candidates: StoreCandidate[] }`（最大10・0件は空配列で 200） | 400, 401, 403, 502(places_error) |
+| POST | /stores/search | `{ query: string }` | `{ candidates: (StoreCandidate & { alreadyRegistered: boolean })[] }`（最大10・0件は空配列で 200。`alreadyRegistered` は `stores.place_id` に同値があれば true で停止中の店舗を含む。どの店舗・オーナー・代理店かは返さない・Issue #485） | 400, 401, 403, 500(internal・登録済みの照合の失敗), 502(places_error) |
 | POST | /stores | `{ ownerId, candidate: StoreCandidate, categoryCode? }` | `{ storeId }` | 400, 401, 403, 409(place_already_registered) |
 | GET | /invite-codes | `?agencyId=`（operator は必須） | `{ inviteCodes: InviteCodeItem[] }` | 400(operator の agencyId 未指定), 401, 403 |
 | POST | /invite-codes | `{ agencyId? }`（agency は省略＝自代理店・operator は必須） | `{ inviteCode: InviteCodeItem }` | 400, 401, 403, 500 |
@@ -417,10 +443,12 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 | POST | /dashboard-users/:id/disable | — | `{ user: DashboardUserItem }` | 401, 403, 404 |
 
 - エラー封筒は既存 `jsonError` の `{ error: { code, message } }` に統一。message は日本語（7.3, 7.4）。
+- **GET /owners の契約変更（`owner-line-unlink` 4.4・Issue #487）**: 当初は operator の `agencyId` 未指定を 400 としていた（tasks.md 2.3 の決定）。オーナー一覧の画面で運営が全代理店のオーナーを見るため、未指定は全代理店のオーナーを返すように改めた。agency の扱い（自代理店に束縛・他代理店の指定は 403）と、スコープ拒否をデータアクセスより前に行うこと（2.3）は変えない。応答の各オーナーには `agencyName`（担当代理店の名前）・`lineLink`（`linked` / `unlinked`）・`menuUnlinkPending`（解除した元の LINE アカウントから完了後メニューをまだ外せていない）・`storeNames`（確定済み店舗の名前・停止中を含む）・`takenOverBy`（店舗を引き継いだオーナーの `{ ownerId, displayName }` または null）を足した。LINE ユーザー ID は応答に含めない。既存の項目は変えていないので、店舗登録のオーナー選択（3.1・3.2）は従来どおり呼べる（運営は代理店を選んだ後にその `agencyId` を指定し、agency は無指定で自代理店）。DAL は `listOwnersByAgency(db, agencyId)` を `listOwners(db, agencyId | null)`（`null` = 全代理店）へ置き換えた。契約の正典は `.kiro/specs/owner-line-unlink/design.md` の dashboard-api の節にある
 - 検索の `empty`（0件）は 200＋空配列で返す（UI が 3.5 の再検索案内を出す）。`error` のみ 502。
+- 検索の `found` だけ、候補の placeId を 1 回の問い合わせ（`listRegisteredPlaceIds`・読み取りのみで書込境界は不変）で照合する。照合に失敗したら未登録で埋めずに 500 を返す。`empty`・`error` では照合しない（Issue #485）。
 - POST /stores のサーバー側検証: `ownerId` がスコープ内 agency 配下であること（2.3, 2.4）、`candidate` の形状検証、`categoryCode` は categories に存在するコードのみ（無指定可）。
 - POST /stores の `categoryCode` 反映は、凍結 TX 契約 `confirmStore`（stores INSERT confirmed ＋ owner 遷移）の**外**で行う best-effort 更新（`@fwlm/db` の `setStoreCategory`）。設定に失敗しても登録本体は成立済みのため 201 を維持し、storeId のみログに記録する（category は Go バッチ側にフォールバックがあるメタデータであり、Req 3.8/3.10 の中核＝Place 紐付け確定と owner 遷移は単一 TX で担保される）。
-- オーナー選択・招待コード操作は「具体的な 1 代理店」を要するため、operator のスコープ all をそのまま流用せず `agencyId` の明示指定を必須とする（未指定は 400 `validation_failed`）。運営は全代理店を横断ビューではなく代理店セレクタで 1 代理店ずつ操作する（5.4 を満たす採用 UX）。
+- 招待コード操作は「具体的な 1 代理店」を要するため、operator のスコープ all をそのまま流用せず `agencyId` の明示指定を必須とする（未指定は 400 `validation_failed`）。店舗登録のオーナー選択も、ウィザードで代理店を選んでからその `agencyId` を付けて呼ぶ。運営は全代理店を横断ビューではなく代理店セレクタで 1 代理店ずつ操作する（5.4 を満たす採用 UX）。ただし GET /owners は owner-line-unlink 4.4（Issue #487）から、operator が `agencyId` を省くと 400 ではなく全代理店のオーナーを返す（上の「GET /owners の契約変更」の注記を参照）。
 - 無効化系は disable エンドポイント（DELETE 非採用）。既無効への再実行は現状値を返し冪等。
 
 #### invite-code-gen（`src/invite-code-gen.ts`）
@@ -462,8 +490,10 @@ export interface StoreListItem {
 export function listStoresWithStatus(db: Queryable, filter: { agencyId?: string }): Promise<StoreListItem[]>;
 
 // owners.ts
-export interface OwnerListItem { id: string; displayName: string | null; onboardingStatus: OnboardingStatus; createdAt: Date; }
+export interface OwnerListItem { id: string; displayName: string | null; onboardingStatus: OnboardingStatus; createdAt: Date; inviteCode: OwnerInviteCodeRecord | null; } // inviteCode は Issue #486（Requirement 8.5）
 export function listOwnersByAgency(db: Queryable, agencyId: string): Promise<OwnerListItem[]>;
+// owner-line-unlink 4.4（Issue #487）で listOwnersByAgency は listOwners(db, agencyId: string | null)（null = 全代理店）へ置き換え、
+// OwnerListItem に agencyId・agencyName・lineLink・menuUnlinkPending・storeNames・takenOverBy を足した（正典は owner-line-unlink/design.md）
 export function findOwnerWithAgency(db: Queryable, ownerId: string): Promise<{ id: string; agencyId: string } | null>;
 
 // dashboard-users.ts
@@ -487,6 +517,36 @@ export function listCategories(db: Queryable): Promise<{ code: string; label: st
 ```
 
 - Invariants: `findByAuthSubject` の既存呼び出し元（qr 経路）は `disabled: true` を拒否に写像する。`disableInviteCode`/`disableDashboardUser` はスコープ列（agency_id / operator_id）を WHERE に含め、DAL 層でも越権を遮断する（2.3 の二重防御）。
+
+#### 招待コードの記録（Requirement 8・Issue #486）
+
+| Field | Detail |
+|-------|--------|
+| Intent | オーナー登録に使われた招待コードを、登録と同じ INSERT で `owners.invite_code_id` に書き、一覧で読めるようにする |
+| Requirements | 8.1–8.5 |
+
+**Contracts**: Service [x] / API [x]
+
+```typescript
+// invite-codes.ts（戻り値に id を足す。照合の条件 `code = $1 AND disabled_at IS NULL` は変えない）
+export interface ActiveInviteCode { id: string; agencyId: string; }
+export function findActiveInviteCode(db: Queryable, code: string): Promise<ActiveInviteCode | null>;
+
+// owners.ts（inviteCodeId は必須。省略可能にすると、書き忘れた新しい経路が型検査を素通りする）
+export interface CreateOwnerInput { agencyId: string; inviteCodeId: string; lineUserId: string; displayName?: string | null; }
+export interface OwnerInviteCodeRecord { id: string; code: string; disabled: boolean; }
+export interface OwnerListItem {
+  id: string; displayName: string | null; onboardingStatus: OnboardingStatus; createdAt: Date;
+  inviteCode: OwnerInviteCodeRecord | null;   // null = 記録なし（0017 より前の登録）
+}
+```
+
+- **書込（8.1）**: line-webhook の `handleValidInviteCode` が受け取る `activeCode` は、`findActiveInviteCode` が返した `{ id, agencyId }` になる。既存のトランザクション（`createOwner` → `updateSession`）の中で、`createOwner` へ `inviteCodeId: activeCode.id` を渡す。代理店とコードは 1 行の INSERT で同時に書くので、「オーナーはあるが記録が無い」状態は導入後の登録では生まれない。トランザクション境界・段階遷移・応答は変えない
+- **同じ代理店に限る（8.2）**: `agencyId` と `inviteCodeId` は同じ照合結果の行から取るので、アプリは食い違いを作らない。食い違いを作る経路が将来できても、`0017` の複合 FK が拒否する
+- **照合と書込の間の無効化**: 照合は既存どおりトランザクションの外で行う。照合の直後にコードが無効化されても、登録は成立し、記録はそのコードを指す。登録に実際に使われたのはそのコードなので、記録として正しい（8.3 と同じ考え方）。この競合で登録を拒否する変更は 8 の範囲外であり、行わない
+- **読出（8.5）**: `listOwnersByAgency` は `agency_invite_codes` を `owners.invite_code_id` で LEFT JOIN し、記録が無ければ `inviteCode: null` を返す。GET /owners の応答形は `OwnerListItem` を増やすだけで、エンドポイント・認可・スコープ（2.1）は変えない（その後 `owner-line-unlink` 4.4 で、アクセサを `listOwners` へ置き換え、運営の代理店未指定を全件に改めた。結合と `inviteCode` の意味は同じ）。代理店ロールが自代理店のオーナーとともに自代理店のコードを読むのは、既存の GET /invite-codes（5.1）と同じ範囲に収まる
+- **推定で埋めない（8.4）**: アクセサにも migration にも、既存行の `invite_code_id` を書く処理を置かない。`null` を「この機能より前の登録」以外の意味で使わない（コードは消せないので、記録の後で `null` に戻る経路は無い）
+- 監査ログ `owner_created` は変えない（対象はオーナーのまま。コードは `owners` の列で辿れる）
 
 ### dashboard-web
 
@@ -513,6 +573,49 @@ export function listCategories(db: Queryable): Promise<{ code: string; label: st
 - **admin/agencies・admin/users**: operator 専用（agency ロールにはナビ非表示＋アクセス時 403 案内）。利用者登録フォームは role・（agency 時のみ）所属代理店・email・表示名（6.1–6.5）。
 - 全 UI 文言は日本語（7.3）。API 失敗時は取得済みデータを偽装せずエラー案内（7.4）。
 
+#### 代理店詳細（Requirement 9・Issue #486）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 運営が代理店ごとに、ダッシュボードの利用者・オーナー・店舗・招待コードを 1 画面で見る（閲覧のみ） |
+| Requirements | 9.1–9.10（表示は 8.5 も満たす） |
+
+**経路とファイル**
+
+- `app/admin/agencies/[agencyId]/page.tsx`（サーバー部品）: `PageProps<'/admin/agencies/[agencyId]'>` の `params` を `await` して `agencyId` を取り出し、`AuthGuard`・`TopNav`・`AgencyDetailView` へ文字列で渡す。`'use client'` にして `useParams()` で読む形は採らない（ルートの引数の型を失う）。`generateStaticParams` は書かない（`output: 'standalone'` の動的レンダリング）。dashboard-web で最初の動的ルートになる
+- `app/admin/agencies/[agencyId]/agency-detail-view.tsx`（クライアント部品）: 取得・状態・描画。API は別オリジンの Cloud Run で、Firebase の ID トークンをクライアントが付ける構成なので、取得はクライアント側で行う（既存の面と同じ）
+- `lib/agency-detail.ts`（純粋関数）: `toAgencyId`（UUID の形なら小文字へ正規化して返し、形でなければ null。取得・存在判定・絞り込みはすべてこの値を使う。API の id は小文字なので、素の経路の値を厳密一致で比べると大文字の URL で区分が割れる）・`usersOfAgency`（GET /dashboard-users の全件を `agencyId` で絞る）・`ownersByInviteCode`（`owner.inviteCode.id` → オーナーの並び。記録なしは入れない）・`unrecordedOwnerCount`
+
+**取得と状態（9.6・9.7）**
+
+- 代理店ロールでは何も取得しない（9.9）。一覧（`admin/agencies/page`）と同じ「この画面は運営のみ利用できます。」だけを描く
+- `agencyId` が UUID の形でなければ API を呼ばずに「見つかりません」（9.6）
+- それ以外は 5 本を**同時に発行する**（直列にしない）: `getAgencies()`・`getDashboardUsers()`・`getOwners({ agencyId })`・`getStores({ agencyId })`・`getInviteCodes({ agencyId })`。応答は届いた順に区分の状態へ書く
+- 区分ごとの状態は `{ kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; value }`。代理店は `'loading' | 'error' | 'not_found' | 'ready'`
+- **代理店の存在は GET /agencies の結果だけで判定する。** 存在しない代理店を指定しても、GET /owners・GET /stores・GET /invite-codes は空配列を返しうる（スコープ解決は存在を確かめない）。そのため代理店が `ready` になるまで、区分も件数も描かない（9.6）。代理店が `error` のときは画面の危険の通知と再読み込みだけを描く
+- 区分の失敗はその区分の中に危険の通知と「もう一度読み込む」を出し、その区分の取得だけをやり直す（9.7）
+- GET /stores の結果は、店舗の区分と `OwnerRosterTable` の `stores`（`groupStoresByOwner` で振り分けたもの）の両方に使う。同じ API を 2 回呼ばない。`lib/agency-roster.ts` の `loadAgencyRoster` は使わない（オーナーの失敗で店舗ごと失敗にする作りで、区分ごとの状態と合わない）
+- オーナーの区分は、オーナーが `ready` かつ店舗が `loading` でない時点で描く。店舗が `error` なら `OwnerRosterTable` へ `{ kind: 'error' }` を渡す（「登録済みの店舗はありません」と出さない・3.12 と同じ形）
+- 招待コードの区分の「登録したオーナー」の列は、オーナーが `error` なら「読み込めませんでした」と出す（0 人と出さない）
+
+**描画**
+
+- 構造: 「代理店管理へ戻る」のリンク → h1（代理店名）→ 作成日 → 概要（`dl`: 利用者・オーナー・店舗・有効な招待コードの件数・9.3）→ h2 の区分 4 つ（ダッシュボードの利用者・オーナー・店舗・招待コード）
+- 戻る導線は普通の `Link` にし、`<nav>` で包まない（ナビゲーション領域が帯と合わせて 2 つになる）。区分の `<section>` に名前を付けない（名前を持つ `section` は領域になり、表の捲れる領域と合わせて領域が増える）
+- 4 つの表は `@fwlm/ui` の `Table` 一式で描き、`TableContainer` の `label` は区分名にして面の中で重複させない。列の折り返しは正典 §7.18 の語彙（メール＝`anywhere`、名前＝`prose`、状態・日付・コード＝`none`）
+- オーナーの表は `OwnerRosterTable` に `showInviteCode` を渡す（下記）。区分の上に「LINE の友だち登録を解除（ブロック）したオーナーも、区別せずに表示しています。」の注記（9.5）
+- 招待コードの表の下に、記録の無いオーナーがいれば「招待コードの記録がないオーナーが {N} 人います（この機能より前の登録）」（9.4）
+- 0 件の区分は `EmptyState`（9.8）。件数の項目は、区分が `loading` なら「読み込み中」、`error` なら「読み込めませんでした」（0 と出さない）
+- 一覧の状態列（有効／無効・店舗特定・利用状況）は、招待コード・利用者管理・店舗一覧と同じく素の語で置く（ui-airbnb-surfaces tasks 2.5 の判断）。`OwnerRosterTable` の中の店舗の付記は 3.12 で確定した `Badge` のまま。いずれも状態を色だけで伝えず、無効・停止中に危険の色を使わない。日付は `formatJstDate`
+- 書込の API を一切呼ばない（9.10）。招待コードの区分に、招待コードの画面へのリンクを添える
+
+**共用部品への変更**
+
+- `components/owner-roster-table.tsx`: 省略可能な `showInviteCode?: boolean` を足す。`true` のときだけ「招待コード」の列を作成日の後に描く（記録あり＝コード、無効のコードは「無効」のラベルを添える、`null` ＝「記録なし（この機能より前の登録）」）。渡さない呼び出し（店舗登録）の描画は変えない。列ごとの引数が 3 つ目に達したら、列の定義を配列で受ける形への置き換えを検討する
+- `components/top-nav.tsx`: 現在地の判定を「完全一致は `aria-current="page"`。どの項目にも完全一致しないときは、`href + '/'` で始まる最も長い項目に `aria-current="true"`」に変える。`/stores/new` は自分の項目に完全一致するので、`/stores` の項目は現在地にならない（印が 1 つの一意性を保つ）。下線は `aria-[current=page]` と `aria-[current=true]` の両方から出し、全リンクの class は同一のまま（正典 §7.8）
+- `lib/status-labels.ts`: 「有効／無効」の表示語を足す。招待コード・利用者管理の画面が直接書いている同じ語もここから引くように置き換える（語は変えない）
+- `app/admin/agencies/page.tsx`: 代理店名のセルを詳細へのリンクにする。行全体は押せるようにしない（§7.2）
+
 ## Data Models
 
 ### Physical Data Model — migration `0005_agency_dashboard.sql`
@@ -538,6 +641,33 @@ CREATE UNIQUE INDEX ux_dashboard_users_email ON dashboard_users (lower(email)) W
 - 無効化は `disabled_at`（`agency_invite_codes` と同一パターン）。物理削除はしない。
 - ERD.md のエンティティ一覧に `email`（自然キー・部分一意）/`disabled_at` を追記。write-boundary.md は表変更なし（新テーブルなし）。
 - `db/test/assertions/50_agency_dashboard.sql`: CHECK 違反（両方 NULL）拒否・email 大文字小文字重複拒否・auth_subject NULL の保留行作成可・二重リンク不可（`WHERE auth_subject IS NULL` の UPDATE が 0 行）を検証。
+
+### Physical Data Model — migration `0017_owner_invite_code.sql`（Requirement 8・Issue #486）
+
+`owners` への列追加と、それを同じ代理店のコードに限る複合 FK（新テーブルなし・既存行の書き換えなし）:
+
+```sql
+-- 複合 FK の参照先。agencies(operator_id, id)・competitors(store_id, id) と同じ形（0001）。
+ALTER TABLE agency_invite_codes
+    ADD CONSTRAINT ux_agency_invite_codes_agency_id UNIQUE (agency_id, id);
+
+ALTER TABLE owners
+    ADD COLUMN invite_code_id uuid;
+
+-- MATCH SIMPLE（既定）なので invite_code_id が NULL の行は検査しない＝既存オーナーは NULL のまま通る（8.4）。
+-- 値があるときは (owners.agency_id, invite_code_id) の組が実在すること＝同じ代理店のコードであること（8.2）。
+ALTER TABLE owners
+    ADD CONSTRAINT fk_owners_invite_code_same_agency
+        FOREIGN KEY (agency_id, invite_code_id)
+        REFERENCES agency_invite_codes (agency_id, id) ON DELETE RESTRICT;
+```
+
+- **NULL 許容で、既存行を埋めない（8.4）。** バックフィルの UPDATE を持たない。
+- **新しい行に値を必須とする DB 制約は置かない。** `CHECK (invite_code_id IS NOT NULL) NOT VALID` は既存行を検査しないが、既存行を UPDATE するたびに検査されるので、記録なしのオーナーの状態遷移（`markOwnerStoreIdentified` 等）が失敗する。また、`owners` を直接 INSERT する試験のフィクスチャ（TS・Go・cross-runtime・e2e の seed）が一斉に壊れる。新しい行の記録は `CreateOwnerInput.inviteCodeId` の必須型と DB テストで担保する。
+- **`ON DELETE RESTRICT`（8.3）。** コードの無効化は `disabled_at` だけで行い、物理削除の経路は無い。将来できても、記録が参照するコードは消せない。
+- **書込責任は TS リアルタイム応答層**（`owners` と同じ）。`db/write-boundary.md` の `owners` 行に `invite_code_id`（`0017`・#486）を書き足す。テーブルは増えないので書込境界の照合（`check_docs.sh`）の対象は変わらない。`grants.sql` は表単位の付与なので変更不要。
+- `db/ERD.md`: 関係図に `agency_invite_codes |o--o{ owners : "registered with"`（記録なしのオーナーがいるので 0 か 1）を足し、`owners` の FK 欄と注記に `invite_code_id`（NULL = 0017 より前の登録・同じ代理店のコードに限る複合 FK）を書く。
+- `db/test/assertions/51_owner_invite_code.sql`: NULL の行を作れる／同じ代理店のコードで作れる／別の代理店のコードは FK 違反で拒否される／参照中のコードは削除できない／コードを無効化しても行の `invite_code_id` は変わらない、を検証する。
 
 ### Domain Model（差分のみ）
 
@@ -572,6 +702,24 @@ CREATE UNIQUE INDEX ux_dashboard_users_email ON dashboard_users (lower(email)) W
 ### DB Assertions（`db/test/assertions/50_agency_dashboard.sql`）
 
 - 0005 の CHECK・部分一意・NULL 許容化の構造検証（Data Models 記載の4項目）
+- 0017 の複合 FK・NULL 許容・削除拒否の構造検証（`51_owner_invite_code.sql`・Data Models 記載の 5 項目）
+
+### 招待コードの記録の試験（Requirement 8・Issue #486）
+
+1. `@fwlm/db`（`*.db.test.ts`）: `findActiveInviteCode` が `id` を返す・無効化済みは null のまま／`createOwner` が `invite_code_id` を書く／`listOwnersByAgency`（現 `listOwners`）が記録ありは `{ id, code, disabled }`、記録なしは `null`、無効化後のコードは `disabled: true` で返す（8.1, 8.3, 8.5）
+2. line-webhook（単体）: 有効なコードの送信で `createOwner` が `inviteCodeId: activeCode.id` で呼ばれる（8.1）
+3. line-webhook（`invite-code-integration.db.test.ts`）: 実 DB で登録したオーナーの `invite_code_id` が、送信したコードの行の id と一致する。セッション更新を失敗させたとき、オーナー行も記録も残らない（8.1 の「一方だけ」）
+4. dashboard-api（`app.request`）: GET /owners の応答に `inviteCode` が載り、記録の無いオーナーは `null` になる（8.5）
+5. 型: `CreateOwnerInput` から `inviteCodeId` を外す・省略可能にする変異で、line-webhook の型検査が赤になることを実測する（必須型が 8.1 の主な網なので、網が効いていることを確かめる）
+
+### 代理店詳細の試験（Requirement 9・Issue #486）
+
+1. `lib/agency-detail.ts`（単体）: `toAgencyId` の形の判定と小文字への正規化、`usersOfAgency` が他代理店と運営を含めない、`ownersByInviteCode` が記録なしのオーナーをどのコードにも入れない、`unrecordedOwnerCount`
+2. `AgencyDetailView`（描画）: 代理店ロールで API を 1 本も呼ばない（9.9）／5 本を同時に発行する／形の不正な id は API を呼ばずに「見つかりません」・一覧に無い id は区分も件数も描かない（9.6）／区分ごとの失敗で他の区分が残り、失敗した区分と件数を 0 と出さない・再読み込みでその区分だけを取り直す（9.7）／0 件の案内（9.8）／記録なしのオーナー（9.4）／ブロックの注記（9.5）／`TableContainer` の名前が重複しない／書込の API を呼ばない（9.10）
+3. `OwnerRosterTable`: `showInviteCode` のときだけ列が増え、渡さないときの描画は変わらない（`stores-new-page.test.tsx` も緑のまま）
+4. `TopNav`: 詳細の経路で「代理店管理」に `"true"`、一覧で `"page"`、`/stores/new` で「店舗一覧」が現在地にならない
+5. 代理店管理の一覧: 代理店名がリンクになり、行全体は押せない
+6. E2E: スタブの応答に、記録あり・記録なしのオーナー、無効のコード、停止中の店舗、無効の利用者を含める。詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足し、捲れる領域は表の容器 4 件として宣言する
 
 ### E2E / 手動検証（validation hooks）
 
@@ -594,6 +742,13 @@ CREATE UNIQUE INDEX ux_dashboard_users_email ON dashboard_users (lower(email)) W
 3. dashboard-api 拡張（デプロイしても既存 QR 経路は後方互換）
 4. dashboard-web 追加 → tf でサービス作成 → push-images / deploy.yml 配線 → NEXT_PUBLIC_* vars 設定
 5. ロールバック: 各段階が独立して後方互換のため、直前イメージへの image-only 巻き戻しで対応。0005 は追加のみで巻き戻し不要
+
+**0017（Requirement 8・Issue #486）の順序**: 本番は **`0017` の適用 → line-webhook / dashboard-api のデプロイ**の順にする。
+
+- 適用が先なら安全: 旧イメージは `invite_code_id` を知らず、INSERT はその列を省くので NULL で通る。適用からデプロイまでの間の登録は「記録なし」になる（この間は短く保つ）
+- **デプロイが先だと、オーナー登録がすべて失敗する**（存在しない列への INSERT）。招待コードを送ったオーナーが登録されない。dashboard-api の GET /owners も JOIN する列が無く 500 になる
+- migration の本番適用は自動ではない（`deploy.yml` はイメージを差し替えるだけで migration を流さない）。マージの前に適用し、`information_schema.columns` と `pg_constraint` で列と 2 つの制約の存在を確かめてからマージする。`prod-schema-drift`（6 時間ごと）も適用漏れを検出するが、デプロイを止めないので、気づくのは登録が壊れた後になりうる
+- ロールバック: イメージを戻しても列は残ってよい（旧イメージは NULL で書く）。`0017` の巻き戻しは不要
 
 ## Open Questions / Risks
 

@@ -103,9 +103,9 @@ SC 1.4.11 の 3:1 を満たすこと、`既知の限界` は 4.5:1 を満たさ�
 | `textMuted` | 1 | `text` | 0.08 | `background` | `#EDEDED` | `#6A6A6A` | 4.620 | AA | 一覧表の捲れる手がかりの濃淡が最も濃い点に載る補足色（§7.18） |
 | `success` | 1 | `surfaceStrong` | 1 | `background` | `#F2F2F2` | `#15803D` | 4.480 | 既知の限界 | 副次面の上の成功文言。現行部品では到達しない（§10） |
 | `primary` | 1 | `surfaceStrong` | 1 | `background` | `#F2F2F2` | `#047733` | 5.081 | AA | 副次面の上のリンク |
-| `primary` | 1 | `background` | 1 | `background` | `#FFFFFF` | `#047733` | 5.688 | AA | ワードマークの面の役割（管理ダッシュボードの帯とログイン画面）と、QR口コミ支援の公開トップの見出し（§7.4） |
-| `text` | 1 | `background` | 1 | `background` | `#FFFFFF` | `#222222` | 15.910 | AA | 店舗詳細の順位の巨大表示と推移グラフの線・点・最新値、客向けアンケートの選択済みの星 |
-| `textMuted` | 1 | `background` | 1 | `background` | `#FFFFFF` | `#6A6A6A` | 5.409 | AA | 客向けアンケートの未選択の星と、店舗詳細の推移グラフの目盛りと日付 |
+| `primary` | 1 | `background` | 1 | `background` | `#FFFFFF` | `#047733` | 5.688 | AA | ワードマークの面の役割（管理ダッシュボードの帯とログイン画面）と、QR口コミ支援の公開トップの見出し（§7.4）、客向けアンケートの選択済みの星の縁（§7.1） |
+| `text` | 1 | `background` | 1 | `background` | `#FFFFFF` | `#222222` | 15.910 | AA | 店舗詳細の順位の巨大表示と推移グラフの線・点・最新値 |
+| `textMuted` | 1 | `background` | 1 | `background` | `#FFFFFF` | `#6A6A6A` | 5.409 | AA | 客向けアンケートの未選択の星の縁と、店舗詳細の推移グラフの目盛りと日付 |
 | `text` | 1 | `primary` | 0.05 | `background` | `#F2F8F5` | `#222222` | 14.789 | AA | 推移の期間と指標の選択済みの札（`has-data-checked:bg-primary/5`） |
 
 ### 2.3 採らなかった原典の色
@@ -273,17 +273,23 @@ system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Hira
 本節へリンクし、結論も数値も転記しない。転記は必ず古びる。由来欄が Issue を指している項目は、
 spec 側に審議の記録ができた時点で由来欄だけを差し替え、結論の本文はここから動かさない。
 
-### 7.1 星は ink で描く
+### 7.1 星はブランド色で塗り、アクション色で縁取る
 
-**星評価は本文色で描く。** 原典が星をインクで描き黄色や琥珀を使わないのはブランド判断であり、
-黄色い星は旅行文脈で安っぽく見えるという理由が原典自身に明記されている。加えて、
-アクション色で塗ると星が押しボタンやリンクと同じ色になり、満足度の評価が操作の対象に見える。琥珀色は生パレット色クラスとして
-`scripts/check-design-tokens.sh` が落とす。未選択は補足色、選択済みは本文色で追加トークンはゼロ。
-罫線色を未選択に使わないのは、罫線色が純装飾として定義された色であり、状態を伝える字形の色には
-足りないためである。識別用の枠色も変数参照専用であり、文字色のユーティリティとしては使わない。
-アフォーダンスはタップ領域と字形差と必須表示で補償する。
+**選択済みの星はブランド色で塗り、アクション色で縁取る。未選択の星は塗らずに補足色で縁取る。**
+星は客向けアンケートで客が最初に触る入力であり、選んだ手応えを面のアクセントとして返す
+（[#492](https://github.com/ManatoYamashita/fw-line-meo/issues/492) で本文色の星から改めた）。
+ブランド色は白背景に対して 3:1 に届かないので、塗りだけでは状態を示す図形の境界（SC 1.4.11）を
+担えない。境界は縁が担い、選択済みはアクション色（5.688:1）、未選択は補足色（5.409:1）で描く。
+縁にブランド色を使わないのはこの理由による。塗りにアクション色を使わないのは、星が押しボタンと
+同じ色の面になり、満足度の評価が操作の対象に見えるためである。状態は塗るか縁だけかという形の差でも
+伝わるので、色だけには頼らない。罫線色を未選択に使わないのは、罫線色が純装飾として定義された色であり、
+状態を伝える字形の色には足りないためである。識別用の枠色も変数参照専用であり、使わない。
+黄色や琥珀は使わない（生パレット色クラスとして `scripts/check-design-tokens.sh` が落とす）。
+5 個の星の群はブランド色の 1 箇所として数える（§7.4）。追加トークンはゼロ。
+字形は文字（★/☆）ではなく SVG で描く。文字の星では塗りと縁を別の色にできないためである。
 由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)（未選択の色の訂正は
-`.kiro/specs/ui-airbnb-surfaces/design.md` の「第 0 段階: 正典の追記」）
+`.kiro/specs/ui-airbnb-surfaces/design.md` の「第 0 段階: 正典の追記」）、
+[#492](https://github.com/ManatoYamashita/fw-line-meo/issues/492)（ブランド色の塗りとアクション色の縁）
 
 ### 7.2 テーブルは表のまま装飾する
 
@@ -402,6 +408,12 @@ R2 が要素どうしの箱の交差で検出する）。原典は狭い画面�
 広がるためである。色に依存しない示し方であることは、
 状態の区別を色だけに委ねないという要求もそのまま満たす。支援技術へは現在地のリンクへ
 `aria-current="page"` を与えて伝える。下線とこの属性は同じ判定から出し、片方だけが付く状態を作らない。
+**帯の項目そのものではない下位の画面**（代理店管理から進む代理店詳細など）では、その親に当たる項目を
+現在地として示し、属性は `aria-current="true"` にする（その画面そのものではないので `"page"` にしない）。
+経路に完全一致する項目があればそれを優先し、どれにも一致しないときだけ、経路の前方に一致する最も長い
+項目を親とする。素の前方一致にすると、店舗登録（`/stores/new`）で店舗一覧（`/stores`）にも印が付き、
+現在地の印が 2 つになる。下線は `"page"` と `"true"` のどちらからも同じ形で出す
+（[#486](https://github.com/ManatoYamashita/fw-line-meo/issues/486)）。
 案内リンクの段でリンクが折り返すときは、折り返した行の間を、下線とそのリンク自身の文字との間より広く取り、
 下線がどの行に属するかを近さで読めるようにする。
 由来: `.kiro/specs/ui-airbnb-surfaces/design.md` の「第 0 段階: 正典の追記」（段組みは
@@ -467,7 +479,17 @@ branding guidelines は G ロゴを規定外の背景へ置くことを禁じ、
 
 **面の側にも部品の側にも、動き低減の打ち消しを書かない。** 抑制は `theme.css` の `@layer base` が
 全面へ一括で効かせている。重ねて書くと二重管理になり、片方だけ古びても誰も検出できない。
-由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)
+
+**例外は満足度の星の 1 箇所だけで、指の位置への追従に限る。** 星をなぞると指の下までの星が
+持ち上がり、指の下の星がわずかに拡大し、離して確定した星が一度だけ弾む
+（`ts/apps/survey-web/src/app/s/[storeId]/star-rating.tsx`）。これは状態の変化ではなく、
+どこで離せば何個になるかを指の動きに合わせて見せる表示であり、確定後の状態の差は色と塗りだけが担う
+（状態を示す色の遷移は上の規則どおり 150ms）。動きは inline の `transform` と Web Animations で描くため
+`@layer base` の一括抑制が届かず、部品が JS で `prefers-reduced-motion` を見て描かない。
+この判定は打ち消しではなく、抑制の届かない経路の抑制なので、上の「打ち消しを書かない」とは衝突しない。
+クラスとしての縮小と `motion-reduce:` は、ここでも書かない。
+由来: [#41](https://github.com/ManatoYamashita/fw-line-meo/issues/41)、
+例外は [#492](https://github.com/ManatoYamashita/fw-line-meo/issues/492)
 
 ### 7.12 LINE 面の意匠は Web 面と別の律で決める
 
@@ -731,7 +753,7 @@ Places API は帰属表示の文字色を 3 値に限り、本文色はそのど
 | store-detail の指標は `dl` / `dt` / `dd` の対応関係を持つ | `ts/apps/store-detail/test/store-page.test.tsx` |
 | ダッシュボードの選択はプログラムによる値変更で操作される | `ts/apps/dashboard-web/test/admin-users-page.test.tsx` |
 | 一覧はセル役割と行要素で掴まれるため、カード化できない | `ts/apps/dashboard-web/test/admin-users-page.test.tsx`, `ts/apps/dashboard-web/test/stores-page.test.tsx` |
-| 星は押しボタン役割と押下状態で掴まれる | `ts/apps/survey-web/test/survey-form.test.tsx` |
+| 星は radiogroup の中の radio 役割と選択状態で掴まれ、読み上げ名は「星N：言葉」である | `ts/apps/survey-web/test/survey-form.test.tsx` |
 | LINE のメッセージ組立は本文要素の添字で検証される | `ts/apps/line-webhook/test/line/messages.test.ts` |
 | Flex の構造はスナップショットが固定する | `ts/apps/line-webhook/test/report/comparison.test.ts`, `ts/apps/line-webhook/test/report/new-reviews.test.ts` |
 | Web の巨大表示（`text-display`）は店舗詳細の順位数値で 1 件だけである | `ts/packages/ui/test/display-usage.test.ts` |
@@ -854,6 +876,7 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.1 星の色（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 星の色を分岐の両端 |
 | 7.10 主操作の寸法区分（客向けアンケート） | `ts/apps/survey-web/test/survey-form.test.tsx` | 主操作の寸法区分 |
 | 7.11 状態変化の遷移（客向けアンケートの星） | `ts/apps/survey-web/test/survey-form.test.tsx` | 状態変化の色遷移 |
+| 7.1 星の操作（radiogroup の Tab の入口・矢印キー・支援技術の仮想クリック） | `ts/apps/survey-web/test/survey-form.test.tsx` | 矢印キー・Home・End で選び |
 | 7.10 寸法区分の面側上書き（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 押しボタンの寸法区分 |
 | 7.10 ラベルを積む行の内側に反応しない帯が無い | `ts/apps/survey-web/e2e/ui-foundation.spec.ts` | ラベルを積む行の内側に、反応しない帯が無い |
 | 7.9 全幅の押しボタン風リンク（下書きパネル） | `ts/apps/survey-web/test/draft-panel.test.tsx` | 投稿導線の見た目 |

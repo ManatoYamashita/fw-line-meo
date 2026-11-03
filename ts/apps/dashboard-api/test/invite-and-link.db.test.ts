@@ -3,6 +3,7 @@ import { getPool, closePool, findActiveInviteCode, createPendingDashboardUser } 
 import { createApp } from '../src/app.js';
 import type { TokenVerifier, VerifiedToken } from '../src/auth.js';
 import { buildAppDeps } from '../src/composition.js';
+import { refuseLineFetch } from './support/line-fetch.js';
 import { loadConfig, type DashboardApiConfig } from '../src/config.js';
 
 // 実 postgres（ts-test-db）＋実 @fwlm/db で、配線済み dashboard-api の 2 つの横断的不変条件を
@@ -73,7 +74,7 @@ const verifier: TokenVerifier = {
 
 function buildApp(): ReturnType<typeof createApp> {
   // 本番と同じ合成根（src/composition.ts）を呼び、verifier だけを差し替える。構造化ログは捨てる。
-  return createApp(buildAppDeps({ config, verifier, structuredLog: () => undefined }));
+  return createApp(buildAppDeps({ config, verifier, lineFetch: refuseLineFetch, structuredLog: () => undefined }));
 }
 
 async function get(app: ReturnType<typeof createApp>, bearer: string, path: string): Promise<Response> {
@@ -112,6 +113,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
         SURVEY_BASE_URL: 'https://survey.example',
         DASHBOARD_WEB_ORIGIN: 'https://dash.example',
         PLACES_API_KEY: 'test-places-key',
+        LINE_CHANNEL_ID: '1234567890',
+        LINE_CHANNEL_SECRET: 'dummy-line-channel-secret',
       });
       const pool = await getPool();
       await pool.query('INSERT INTO operators (id, name) VALUES ($1, $2)', [OP1, 'f7運営']);
@@ -171,8 +174,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       // ダッシュボード発行コードが LINE オンボーディングの解決経路で使える
       // （findActiveInviteCode が同一代理店を返す）。これがクロス spec の使用可能性を実証する。
+      // 返す id は発行したコードの行の id で、オーナー登録が owners.invite_code_id へ書く値になる（#486）。
       const resolved = await findActiveInviteCode(pool, inviteCode.code);
-      expect(resolved).toEqual({ agencyId: AG_A });
+      expect(resolved).toEqual({ id: inviteCode.id, agencyId: AG_A });
 
       // (2) 無効化（Req 5.3）。operator は対象代理店の明示指定が必要。
       const disabled = await post(app, OP_TOKEN, `/invite-codes/${inviteCode.id}/disable`, {

@@ -12,6 +12,12 @@ import { logStructuredSchemaUnavailable, type SurveyLogger } from './structured-
 // 有効中に legacy として扱ったときは、エラーコードだけを記録する（店舗 ID・エラーの本文は載せない）。
 
 export const STRUCTURED_SCHEMA_COMPAT_FALLBACK_ENV = 'STRUCTURED_SCHEMA_COMPAT_FALLBACK';
+export const SURVEY_FORCE_STRUCTURED_ENV = 'SURVEY_FORCE_STRUCTURED';
+
+/** 運用者が明示的に全店舗へ structured を公開したか。未設定・それ以外は既存の店舗設定を使う。 */
+export function surveyForceStructuredEnabled(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  return env[SURVEY_FORCE_STRUCTURED_ENV] === '1';
+}
 
 /** 互換の逃げ道が明示的に有効か（`1` との完全一致だけ）。 */
 export function structuredSchemaCompatFallbackEnabled(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
@@ -24,8 +30,14 @@ export function createSurveyDefinitionReader(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): (storeId: string) => Promise<StoreSurveyDefinition> {
   const allowStructuredSchemaFallback = structuredSchemaCompatFallbackEnabled(env);
+  const forceStructured = surveyForceStructuredEnabled(env);
+  // 強制公開時に schema 不備を黙って旧UIへ戻してはならない。
+  if (forceStructured && allowStructuredSchemaFallback) {
+    throw new Error('SURVEY_FORCE_STRUCTURED=1 cannot be combined with STRUCTURED_SCHEMA_COMPAT_FALLBACK=1');
+  }
   return async (storeId) =>
     readStoreSurveyDefinition(await getDb(), storeId, {
+      forceStructured,
       allowStructuredSchemaFallback,
       onStructuredSchemaUnavailable: (code) => logStructuredSchemaUnavailable(log, code),
     });

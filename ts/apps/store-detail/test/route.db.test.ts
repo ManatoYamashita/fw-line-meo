@@ -19,7 +19,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getPool, closePool } from '@fwlm/db';
+import {
+  getPool,
+  closePool,
+  createOwner,
+  unlinkOwnerLine,
+  lockPlaceHolder,
+  moveAllStores,
+  markOwnerStoreIdentified,
+} from '@fwlm/db';
 
 const OP = 'e8000000-0000-0000-0000-000000000001';
 const AG = 'e8000000-0000-0000-0000-000000000002';
@@ -36,6 +44,14 @@ const ST_VALID = 'e9000000-0000-0000-0000-000000000001';
 const ST_MULTI_A = 'e9000000-0000-0000-0000-000000000002';
 const ST_MULTI_B = 'e9000000-0000-0000-0000-000000000003';
 
+// owner-line-unlink 9.2: 解除と、同じ LINE アカウントによる再登録・引継ぎの前後で認可済み集合を比べる。
+const INVITE_CODE_REONBOARD = 'e8000000-0000-0000-0000-000000000031';
+const OWNER_REONBOARD_PREVIOUS = 'e8000000-0000-0000-0000-000000000021';
+const SUB_REONBOARD = 'Ue8-reonboard-same-account';
+const ST_REONBOARD_A = 'e9000000-0000-0000-0000-000000000011';
+const ST_REONBOARD_B = 'e9000000-0000-0000-0000-000000000012';
+const ST_REONBOARD_SUSPENDED = 'e9000000-0000-0000-0000-000000000013';
+
 const CLIENT_ID = 'test-liff-channel-id-route';
 
 // id_token の値でフェイクサーバーの応答を分岐する（route.ts → liff-auth.ts が渡す id_token をそのまま反映）。
@@ -43,6 +59,7 @@ const TOKEN_VALID = 'token-valid';
 const TOKEN_UNCONFIRMED = 'token-unconfirmed';
 const TOKEN_MULTI = 'token-multi';
 const TOKEN_INVALID = 'token-invalid';
+const TOKEN_REONBOARD = 'token-reonboard';
 
 // route.ts は queryStoreDetail を asOf 省略で呼び、基準日は JST の暦日になる（Issue #268）。
 // 種まきの「今日」も JST の暦日に揃える。UTC の日付で種をまくと、両者が分かれる
@@ -73,6 +90,7 @@ function startFakeVerifyServer(): Promise<FakeServer> {
           [TOKEN_VALID]: SUB_VALID,
           [TOKEN_UNCONFIRMED]: SUB_UNCONFIRMED,
           [TOKEN_MULTI]: SUB_MULTI,
+          [TOKEN_REONBOARD]: SUB_REONBOARD,
         };
         const sub = idToken ? subByToken[idToken] : undefined;
 
@@ -333,6 +351,89 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/detail (DB)', () => {
       const body = (await res.json()) as { storeId: string };
       expect(body.storeId).toBe(ST_VALID);
     });
+  });
+
+  // owner-line-unlink 9.2（Requirements 4.3, 6.8）: 解除した LINE アカウントには解除前の店舗を見せず、閲覧できる
+  // 店舗が無い場合と同じ 404 を返す。同じアカウントが招待コードから再登録し、同じ Place の確定で引き継ぐと、
+  // 引き継いだ全店舗（停止中を除く）が閲覧対象に戻る。
+  // 状態は本番と同じ DAL で作る。解除は管理画面の unlinkOwnerLine、再登録は招待コードの受理と同じ createOwner、
+  // 引継ぎはオンボーディングの確定と同じ lockPlaceHolder・moveAllStores・markOwnerStoreIdentified を 1 つの
+  // トランザクションで行う。会話を通して同じ形の DB（同じ LINE ユーザー ID の新しいオーナーが全店舗を持つ）に
+  // なることは、line-webhook の app-flow.db.test.ts の通しの試験が確かめる。
+  it('解除の後は解除前の店舗を返さず 404、同じアカウントの再登録と引継ぎの後は引き継いだ全店舗を返す', async () => {
+    const pool = await getPool();
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      INVITE_CODE_REONBOARD,
+      AG,
+      'E8REONBOARD',
+    ]);
+    await pool.query(
+      `INSERT INTO owners (id, agency_id, invite_code_id, line_user_id, onboarding_status)
+       VALUES ($1, $2, $3, $4, 'store_identified')`,
+      [OWNER_REONBOARD_PREVIOUS, AG, INVITE_CODE_REONBOARD, SUB_REONBOARD],
+    );
+    await pool.query(
+      `INSERT INTO stores (id, owner_id, name, place_id, place_status, suspended_at, created_at)
+       VALUES ($1, $4, 'route検証・引継ぎA', 'places/route-reonboard-a', 'confirmed', NULL, '2026-07-01T00:00:00Z'),
+              ($2, $4, 'route検証・引継ぎB', 'places/route-reonboard-b', 'confirmed', NULL, '2026-07-02T00:00:00Z'),
+              ($3, $4, 'route検証・引継ぎ停止中', 'places/route-reonboard-c', 'confirmed', now(), '2026-07-03T00:00:00Z')`,
+      [ST_REONBOARD_A, ST_REONBOARD_B, ST_REONBOARD_SUSPENDED, OWNER_REONBOARD_PREVIOUS],
+    );
+    const ownStores = [
+      { storeId: ST_REONBOARD_A, name: 'route検証・引継ぎA' },
+      { storeId: ST_REONBOARD_B, name: 'route検証・引継ぎB' },
+    ];
+    // 404 の比較の物差し: 店舗の無いオーナーの応答（supportCode は要求ごとに変わるので除く）。
+    const errorOf = async (res: Response) => ({ status: res.status, error: ((await res.json()) as { error: unknown }).error });
+    const noStoreResponse = await errorOf(await callGet(`Bearer ${TOKEN_UNCONFIRMED}`));
+    expect(noStoreResponse.status).toBe(404);
+
+    // 解除前（対照）: 連携中のオーナーの店舗が選択肢に出る。
+    const beforeRes = await callGet(`Bearer ${TOKEN_REONBOARD}`);
+    expect(beforeRes.status).toBe(409);
+    expect(((await beforeRes.json()) as { stores: unknown }).stores).toEqual(ownStores);
+
+    // Req 4.3: 解除の後は、店舗の ID をヒントに渡しても、閲覧できる店舗が無い場合と同じ応答になる。
+    const unlinked = await unlinkOwnerLine(pool, { ownerId: OWNER_REONBOARD_PREVIOUS, agencyId: AG });
+    expect(unlinked.kind).toBe('changed');
+    for (const query of [undefined, `storeId=${ST_REONBOARD_A}`]) {
+      const res = await callGet(`Bearer ${TOKEN_REONBOARD}`, query);
+      const text = await res.clone().text();
+      expect(await errorOf(res)).toEqual(noStoreResponse);
+      expect(text).not.toContain('route検証・引継ぎ');
+    }
+
+    // 同じアカウントが招待コードから再登録した直後（店舗の確定の前）も、解除前の店舗は見えない。
+    const successor = await createOwner(pool, {
+      agencyId: AG,
+      inviteCodeId: INVITE_CODE_REONBOARD,
+      lineUserId: SUB_REONBOARD,
+    });
+    expect(await errorOf(await callGet(`Bearer ${TOKEN_REONBOARD}`, `storeId=${ST_REONBOARD_A}`))).toEqual(noStoreResponse);
+
+    // 同じ Place（店舗 A）の確定による引継ぎ。
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const holder = await lockPlaceHolder(client, 'places/route-reonboard-a');
+      expect(holder).toMatchObject({ ownerId: OWNER_REONBOARD_PREVIOUS, unlinked: true, agencyId: AG });
+      await moveAllStores(client, { fromOwnerId: OWNER_REONBOARD_PREVIOUS, toOwnerId: successor.id });
+      await markOwnerStoreIdentified(client, successor.id);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Req 6.8: 引き継いだ全店舗を閲覧対象に含める（停止中の店舗は store-suspension の規則どおり除く）。
+    const afterRes = await callGet(`Bearer ${TOKEN_REONBOARD}`);
+    expect(afterRes.status).toBe(409);
+    expect(((await afterRes.json()) as { stores: unknown }).stores).toEqual(ownStores);
+    const pickedB = await callGet(`Bearer ${TOKEN_REONBOARD}`, `storeId=${ST_REONBOARD_B}`);
+    expect(pickedB.status).toBe(200);
+    expect(((await pickedB.json()) as { storeId: string }).storeId).toBe(ST_REONBOARD_B);
   });
 });
 

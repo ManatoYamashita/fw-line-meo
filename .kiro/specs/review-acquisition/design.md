@@ -186,8 +186,8 @@ sequenceDiagram
         S-->>C: 200 sessionToken 必ず発行（generation ok なら draft 同梱 / failed なら draft なし）
         C->>S: POST /api/drafts（sessionToken）※再試行・再生成とも本経路（集計に触れない）
         S-->>C: draft + token（attempt は生成成功時のみ +1）
-        C->>C: 編集 → コピー（ジェスチャー内同期 writeText）
-        C->>C: Google 投稿画面を開く（writereview URL）
+        C->>C: 編集 → 「文章をコピー」（ジェスチャー内同期 writeText）
+        C->>C: 客が「Google のクチコミ欄を開く」を押す（writereview URL・コピーとは別の押下）
         C-)S: POST /api/review-link-opened（sendBeacon・token 同梱・結果を待たない）
     end
 ```
@@ -222,7 +222,7 @@ sequenceDiagram
 | 3.7 | 下書き編集可 | DraftPanel | 編集可能 textarea | — |
 | 3.8 | 再生成 3 回まで | SessionToken, DraftsAPI | attempt 封入・409 | 回答フロー |
 | 3.9 | 失敗時再試行＋導線維持 | DraftPanel, DraftGenerator, SessionToken | generation failed 応答＋/api/drafts 再試行＋SSR 済み URL | 回答フロー |
-| 4.1 | コピー＋遷移導線 | DraftPanel | UI 契約 | 回答フロー |
+| 4.1 | コピー＋遷移導線（客が順に押す 2 つの操作。自動遷移しない） | DraftPanel | 「文章をコピー」の押しボタンの直下に「Google のクチコミ欄を開く」のリンク（writereview への直リンク・`target="_blank"`）、その後ろに再生成。コピーの成否・星の値で出し分けない | 回答フロー |
 | 4.2 | 最新全文コピー＋完了明示 | DraftPanel | 同期 writeText | 回答フロー |
 | 4.3 | Place の投稿画面へ | google-review-url.ts | writereview URL | 回答フロー |
 | 4.4 | 全評価同一導線 | DraftPanel（評価分岐なし） | — | — |

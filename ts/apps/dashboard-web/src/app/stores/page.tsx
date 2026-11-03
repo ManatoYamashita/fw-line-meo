@@ -32,6 +32,7 @@ import { TopNav } from '../../components/top-nav';
 import { notifyActionWarning } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
 import { getStores } from '../../lib/api';
+import { PLACE_STATUS_LABEL } from '../../lib/status-labels';
 import type { StoreListItem } from '../../lib/types';
 import { StoreSuspensionControl } from './store-suspension-control';
 
@@ -189,8 +190,10 @@ function StoresView() {
                       <TableCell wrap="prose">{store.name}</TableCell>
                       {/* 店舗特定バッジ（Req 4.3） */}
                       <TableCell wrap="none">
+                        {/* 表示語は状態語の対応表から引く（Issue #485）。判定はここに残し、停止の述語ガード
+                          * （check-store-serviceable-predicate.sh）が宣言する表示だけの印の行き先を保つ。 */}
                         {/* serviceable-predicate: display-only（店舗特定の状態を文字で示すだけで、発行や取得の可否を決めない） */}
-                        {store.placeStatus === 'confirmed' ? '確定済み' : '未確定'}
+                        {store.placeStatus === 'confirmed' ? PLACE_STATUS_LABEL.confirmed : PLACE_STATUS_LABEL.pending}
                       </TableCell>
                       {/* 競合設定バッジ（Req 4.3・変更手段は提供しない = 表示のみ Req 4.5） */}
                       <TableCell wrap="none">

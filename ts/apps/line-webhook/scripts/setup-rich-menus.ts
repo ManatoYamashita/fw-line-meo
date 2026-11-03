@@ -7,7 +7,7 @@
 //   割り当てる配線のみを担う。実際の「進捗に応じた案内」自体は ConversationHandlers
 //   （タスク 3.4 で実装済みの postback ハンドラ）が担当する。
 // Requirement 6.3（前提）: 店舗特定済みへの遷移時、常設メニューを完了後の案内に切り替える。
-//   実際の個別リンク（linkRichMenu）は ConversationHandlers が confirmStore 完了時に
+//   実際の個別リンク（linkRichMenu）は ConversationHandlers が確定（confirmStoreForOnboarding）の完了時に
 //   LINE_RICHMENU_COMPLETED_ID を用いて行う（タスク 3.4/4.2 で配線済み）。
 //   本スクリプトは「完了後」メニューを作成し、その richMenuId を出力するところまでを担う
 //   （運用者がその値を LINE_RICHMENU_COMPLETED_ID に設定する）。
@@ -196,7 +196,7 @@ export async function setupRichMenus(deps: SetupRichMenusDeps): Promise<SetupRic
   const completedRichMenuId = await createCompletedRichMenu(deps, accessToken);
 
   // Requirement 6.1: オンボーディング用メニューを全ユーザーのデフォルトに設定する。
-  // 完了後メニューは per-user リンク専用（confirmStore 完了時に ConversationHandlers が
+  // 完了後メニューは per-user リンク専用（確定（confirmStoreForOnboarding）の完了時に ConversationHandlers が
   // linkRichMenu で個別に切り替える。design.md stateDiagram 参照）であり、デフォルトにはしない。
   await setDefaultRichMenu(deps, accessToken, onboardingRichMenuId);
 

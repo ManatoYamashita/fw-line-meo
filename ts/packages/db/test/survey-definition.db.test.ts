@@ -102,6 +102,31 @@ describe.skipIf(!process.env.DATABASE_URL)('readStoreSurveyDefinition (DB)', () 
     expect(await readStoreSurveyDefinition(await getPool(), DISABLED)).toEqual({ mode: 'legacy' });
   });
 
+  it('全店公開を有効にすると、設定行なし・個別OFF・ONのどれも structured（設定未作成は revision 1）', async () => {
+    const pool = await getPool();
+    for (const id of [NO_CONFIG, DISABLED, DEFAULTS]) {
+      const def = await readStoreSurveyDefinition(pool, id, { forceStructured: true });
+      expect(def.mode).toBe('structured');
+      if (def.mode === 'structured') {
+        expect(def.revision).toBe(1);
+        expect(def.categories.map((c) => c.code)).toContain('food');
+      }
+    }
+    // 個別の設定内容や Target を落とさない。
+    const disabled = await readStoreSurveyDefinition(pool, DISABLED, { forceStructured: true });
+    expect(disabled.mode).toBe('structured');
+    if (disabled.mode === 'structured') {
+      expect(disabled.categories.find((c) => c.code === 'food')?.targets.map((t) => t.label))
+        .toContain('登録済みだが無効');
+    }
+  });
+
+  it('全店公開でも存在しない店舗は structured の定義を返さない', async () => {
+    expect(await readStoreSurveyDefinition(
+      await getPool(), 'a4360000-0000-4000-8000-0000000000ff', { forceStructured: true },
+    )).toEqual({ mode: 'legacy' });
+  });
+
   it('存在しない店舗も legacy（店舗の可否は呼び手が判定する）', async () => {
     const def = await readStoreSurveyDefinition(
       await getPool(),

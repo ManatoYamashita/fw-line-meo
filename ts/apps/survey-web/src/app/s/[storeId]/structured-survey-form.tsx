@@ -10,6 +10,7 @@ import { Spinner } from '@fwlm/ui/components/spinner';
 import { Textarea } from '@fwlm/ui/components/textarea';
 import type { Polarity, StructuredSurveyAnswer } from '../../../lib/structured-answer';
 import type { Star } from '../../../lib/domain';
+import { StarRating } from './star-rating';
 import {
   EMPTY_EVIDENCE,
   MIN_MATERIALS,
@@ -34,13 +35,16 @@ import {
 //   - **開くことは回答ではない。** カテゴリ・Target の展開状態（open）は画面の状態で、回答の意味（evidence・
 //     lib/structured-selection.ts）とは別に持つ。開いて何も選ばずに閉じても、送信には何も入らない。
 //   - 良かったところ / 気になったところは同じ定義・同じ部品で描く。同じ選択が両方に在ってもエラーにしない。
+//   - **気になったところを最初は畳み、見出しを一段弱くするのは Issue #460 で採用を決めた形である**（Google の原文は
+//     入力欄の開閉・強弱に許可も禁止も述べていない。採用の条件は CLAUDE.md「『気になったところ』の見せ方」）。入口は
+//     星の値にかかわらず常に出し、畳んでも選んだ内容は消さずに送信・件数・下書きへ入れる。星の値で開閉の初期状態を
+//     変えない。否定側を消す・灰色にする・今より小さくする・後ろへ回す変更は、この判断の外にある。
 //   - 未選択を「なし」と読まない。文言も「問題なし」「特になし」のような意味を付けない。
 //   - カテゴリ・facet・Target の名前と並びは定義（DB の taxonomy と店舗設定）だけから取る。画面に列挙しない。
 //   - 各極性で大きく開くカテゴリは 1 つ、カテゴリの中で詳しく開く Target も 1 つ。別のものを開いても選択は残り、
 //     折り畳んだカテゴリには選んだ内容の要約を出す（料理 10 件・ドリンク 10 件でも画面が巨大にならない）。
 
 const COMMENT_MAX = 200;
-const STARS = [1, 2, 3, 4, 5] as const;
 // 一言欄の記入例。肯定と否定を 1 つずつにする（良かったことの例だけでは、低評価の客が書きにくくなる・
 // survey-form.tsx の COMMENT_PLACEHOLDER と同じ判断）。
 const COMMENT_PLACEHOLDER = '例）窓側の席が落ち着いた／提供まで少し待った';
@@ -70,6 +74,7 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
   const [commentOpen, setCommentOpen] = useState(false);
   const [slow, setSlow] = useState(false);
   const starErrorId = useId();
+  const starLegendId = useId();
   const commentPanelId = useId();
   const submitNoteId = useId();
   // 口コミ文を作るには、星に加えて独立した回答材料が MIN_MATERIALS 件要る（良かったところ・気になったところの合計）。
@@ -119,24 +124,16 @@ export function StructuredSurveyForm({ definition, onSubmit, submitting }: Struc
       }}
     >
       <fieldset className="space-y-2" aria-describedby={showStarError ? starErrorId : undefined}>
-        <legend className="mb-2 text-lg font-semibold">今回の満足度（必須）</legend>
-        {STARS.map((n) => (
-          <button
-            className={`min-h-11 min-w-11 px-1 text-4xl leading-none transition-colors duration-150 ${
-              star !== null && n <= star ? 'text-foreground' : 'text-muted-foreground'
-            }`}
-            type="button"
-            key={n}
-            aria-label={`星${n}`}
-            aria-pressed={star === n}
-            onClick={() => {
-              setStar(n);
-              setShowStarError(false);
-            }}
-          >
-            {star !== null && n <= star ? '★' : '☆'}
-          </button>
-        ))}
+        <legend id={starLegendId} className="mb-2 text-lg font-semibold">今回の満足度（必須）</legend>
+        <StarRating
+          value={star}
+          labelledBy={starLegendId}
+          describedBy={showStarError ? starErrorId : undefined}
+          onChange={(n) => {
+            setStar(n);
+            setShowStarError(false);
+          }}
+        />
         {showStarError && (
           <Alert id={starErrorId} variant="destructive" role={undefined}>
             <AlertDescription>満足度を選択してください</AlertDescription>
