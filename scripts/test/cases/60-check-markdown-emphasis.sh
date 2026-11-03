@@ -45,6 +45,42 @@ else
 fi
 t_end
 
+# Issue #469: Git Bash と Windows Node のパス形式差、および CRLF の fence を回帰固定する。
+t_begin 'check-markdown-emphasis: CRLF の Markdown でもコードフェンスを読み飛ばす（#469）'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  (cd "$FX" && node -e 'const fs = require("fs"); const p = "docs/normal.md"; fs.writeFileSync(p, fs.readFileSync(p, "utf8").replace(/\r?\n/g, "\r\n"));')
+  fx_run check-markdown-emphasis
+  expect_green
+  expect_output_matches '1 ファイル / [1-9][0-9]* 強調対'
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 別の作業ディレクトリからでも相対パスを解決する（#469）'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_track_now
+  OUT="$(cd "$FX/docs" && bash ../scripts/check-markdown-emphasis.sh 2>&1)" && RC=0 || RC=$?
+  expect_green
+  expect_output_matches '1 ファイル / [1-9][0-9]* 強調対'
+fi
+t_end
+
+t_begin 'check-markdown-emphasis: 追跡済み Markdown を読めない場合は黙って緑にしない（#469）'
+if ! fx_has_node; then
+  t_skip 'node コマンドが無い'
+else
+  mde_fixture
+  fx_track_now
+  rm "$FX/docs/normal.md"
+  OUT="$(cd "$FX" && bash scripts/check-markdown-emphasis.sh 2>&1)" && RC=0 || RC=$?
+  expect_red 'Markdown を読めません'
+fi
+t_end
 t_begin 'check-markdown-emphasis: 対にならない ** を検出する'
 if ! fx_has_node; then
   t_skip 'node コマンドが無い'

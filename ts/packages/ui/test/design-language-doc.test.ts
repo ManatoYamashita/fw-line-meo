@@ -96,7 +96,8 @@ interface MaskedMarkdown {
  * 単純なトグルにすると ```` で開いたフェンスを内側の ``` が閉じ、以降が本文として解析される。
  */
 function maskFences(markdown: string): MaskedMarkdown {
-  const lines = markdown.split('\n');
+  // Git Bash の checkout が CRLF でも、フェンスの抽出と行数が LF と一致するようにする（#469）。
+  const lines = markdown.split(/\r?\n/);
   const body: string[] = [];
   const fences: string[] = [];
   let opener: string | null = null;
@@ -393,6 +394,13 @@ describe('抽出器の自己検証（Issue #60 の規律）', () => {
       expect(() => maskFences('````\n```\ntext\n```\n')).toThrow(/閉じていません/);
     });
 
+    it('CRLF の作業ツリーでも LF と同じフェンス・表・行数を抽出する（#469）', () => {
+      const lf = '```\nsystem-ui, Meiryo\n```\n| 段 | 値 |\n|---|---|\n| `sm` | `1rem` |\n';
+      const crlf = lf.replace(/\n/g, '\r\n');
+      expect(maskFences(crlf)).toEqual(maskFences(lf));
+      expect(maskFences(crlf).fences).toEqual(['system-ui, Meiryo']);
+      expect(parseTables(maskFences(crlf).body)).toHaveLength(1);
+    });
     it('フェンスの中身を取り出せる（取りこぼし）', () => {
       expect(maskFences('```\nsystem-ui, Meiryo\n```\n').fences).toEqual(['system-ui, Meiryo']);
     });

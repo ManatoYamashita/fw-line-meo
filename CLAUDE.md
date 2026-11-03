@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **fw-line-meo** = 飲食店向け LINE 一元管理アプリ（LINE Restaurant Manager）。
 ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジション把握・Google クチコミ獲得促進・（将来）GBP 投稿を完結できるサービス。
 
-現状は **要件定義・提案フェーズ完了直後／実装コード未着手** のリポジトリ。一次情報源は以下:
+現状は **MVP の実装が main にあり、GCP の本番へデプロイして運用している** リポジトリ。実装は LINE Webhook・客向けアンケート Web・店舗詳細（LIFF）・代理店ダッシュボード（Web と API）・配信ジョブ（TypeScript）と、日次バッチ（Go）である（デプロイ対象の正典は `scripts/check-deploy-image-coverage.sh --print-targets`）。構造化アンケートは店舗ごとの設定で既定は無効（#441）、第2フェーズ（GBP API・OAuth）は MVP に含めない（下の「MVP スコープ境界」）。設計判断の一次情報源は以下:
 - `requirements.md` — 要件定義書（全設計判断の根拠。章番号で参照される。版と改訂履歴は同書の冒頭にだけ持つ）
 - `docs/proposal.md` — クライアント合意用の提案書（機能A/B/C = 機能3/1/2 の対応に注意）
 - `README.md` — 技術スタック要約
