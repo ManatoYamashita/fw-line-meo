@@ -53,6 +53,8 @@ Playwright は既定で付属の Chromium を使う。**ローカルでも付属
 
 Google Chrome の R3 の赤は、#378 で Aside に起きたものと症状が同じである（原因は切り分けていない）。#378 では、GPU で描かせると同じ状態を描き直すたびに濃淡や罫線の色が 1/255 揺れ、画素差で測る検査（dashboard-web の `mobile-layout.spec.ts` の R3）が散発的に落ちた（GPU で描かせた Aside で 11〜18%）。Aside は `--disable-gpu` で揺れが止まったが、Chrome では付けても赤が残る。**画素の一致を前提にする検査がローカルでだけ落ちるときは、まず変数を外して付属 Chromium で流し直す**（`env -u PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH make e2e`）。
 
+`make e2e`（`scripts/run-e2e-local.sh`）は、シェルに `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` が設定されていれば、**既定で外して付属 Chromium で流し**、外したことを 1 行表示する（#502）。差し替えたブラウザのまま流したいときは `E2E_KEEP_BROWSER_PATH=1` を付ける（指す先が実行できるファイルでなければ止まる）。`playwright test` を直接打つときは装置を通らないので、従来どおり `env -u` で外すこと。
+
 手で流すと踏む罠は、実行装置の側で扱っている。
 
 - node 24 未満なら nvm の v24 へ切り替える（`ts/package.json` の engines。版が違うとバンドル容量が CI とずれる）

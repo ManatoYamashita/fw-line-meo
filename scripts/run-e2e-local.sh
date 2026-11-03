@@ -25,11 +25,15 @@
 #     seed の店舗の回答画面であることを perf/verify-lhr.mjs で確かめる（CI の lighthouse ジョブと
 #     同じ判定を呼ぶ。判定を 2 箇所に持たない・Issue #264）
 #   - 最後に、検査したコミットを表示する（本番のコミットとの突き合わせは run-e2e-prod-checks.sh）
+#   - シェルの PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH は既定で外し、付属 Chromium で流す（Issue #502）。
+#     差し替えたブラウザは Aside で終了処理が止まり（全件緑でも exit 1）、Chrome では画素の検査が揺れる
+#     （docs/testing/e2e.md）。残したいときは E2E_KEEP_BROWSER_PATH=1 を付ける
 #
 # 使い方:
 #   bash scripts/run-e2e-local.sh                            # 全層
 #   bash scripts/run-e2e-local.sh --only survey,lighthouse   # 一部だけ
 #   make e2e
+#   bash scripts/run-e2e-local.sh --prepare-only             # シェルの env の掃除までで止める（自己テスト用）
 #
 # 前提: pnpm・postgres（Homebrew または apt。initdb / pg_ctl / psql）・go・lsof・Chrome（Lighthouse 用）。
 # 最初の失敗で止めず、選んだ層をすべて流してから結果を集約する。1 層でも赤なら exit 1、引数の誤りは exit 2。
@@ -99,6 +103,7 @@ fi
 
 # --- 引数 ---------------------------------------------------------------------------------
 selected=()
+prepare_only=0
 add_layers() {
     local csv="$1" name known layer
     local -a requested
@@ -129,6 +134,10 @@ while [ $# -gt 0 ]; do
             ;;
         --only=*)
             add_layers "${1#--only=}"
+            shift
+            ;;
+        --prepare-only)
+            prepare_only=1
             shift
             ;;
         -h|--help)
@@ -179,6 +188,33 @@ for var in NODE_OPTIONS E2E_BASE_URL E2E_STORE_ID E2E_STUB_IDP NEXT_PUBLIC_API_B
         unset "$var"
     fi
 done
+
+# 差し替えたブラウザ（Issue #502）。この変数は、インストール済みのブラウザで流してダウンロードを省くための
+# 仕組みで（@fwlm/e2e-support/browser）、意図して使う人もいるので、外す理由と残し方を表示する。
+# 手元のシェルが Aside を指したままだと、全件緑でも exit 1 になり、赤の原因が実装か環境かを毎回
+# 切り分け直すことになる（#381・#378・#384）。
+if declare -p PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH >/dev/null 2>&1; then
+    if [ "${E2E_KEEP_BROWSER_PATH:-}" = 1 ]; then
+        # 残すと決めたのに実行できないファイルを指していると、Playwright は層ごとに起動の失敗を出し、
+        # 原因（変数の指す先）が分かりにくい。ここで止めて知らせる。
+        if [ ! -x "$PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" ]; then
+            echo "ERROR: E2E_KEEP_BROWSER_PATH=1 ですが、PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH（${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}）は実行できるファイルではありません" >&2
+            exit 2
+        fi
+        echo "-- E2E_KEEP_BROWSER_PATH=1 なので、PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH（${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}）を残します。付属 Chromium と結果が一致しないことがあります（docs/testing/e2e.md）"
+    else
+        echo "-- シェルに設定されていた PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH（${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}）を、この実行では外し、付属 Chromium で流します。残すときは E2E_KEEP_BROWSER_PATH=1 を付けてください（理由は docs/testing/e2e.md）"
+        unset PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+    fi
+fi
+
+if [ "$prepare_only" -eq 1 ]; then
+    # 掃除の結果だけを出して止める。自己テスト（scripts/test/cases/97-run-e2e-local.sh）が、どの変数が
+    # この先の層へ渡るかを確かめるために使う。
+    echo "PREPARED: PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH-<未設定>}"
+    echo "OK: シェルの env の掃除まで終えました（--prepare-only なので層は流しません）。"
+    exit 0
+fi
 
 ensure_node24() {
     local major candidate='' dir
