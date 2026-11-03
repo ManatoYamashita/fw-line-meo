@@ -6,6 +6,7 @@ import { createOwner } from '../src/owners.js';
 // 他ファイルと衝突しない専用 UUID プレフィックス（e8/e9）。
 const OP = 'e8888888-8888-8888-8888-888888888888';
 const AG = 'e9999999-9999-9999-9999-999999999999';
+const CODE = 'e9999999-9999-9999-9999-9999999486c1';
 
 describe.skipIf(!process.env.DATABASE_URL)('stores onboarding accessors (DB)', () => {
   beforeAll(async () => {
@@ -15,6 +16,12 @@ describe.skipIf(!process.env.DATABASE_URL)('stores onboarding accessors (DB)', (
       AG,
       OP,
       'store代理店',
+    ]);
+    // オーナー作成には登録に用いた招待コードが要る（owners.invite_code_id・0017・#486）。
+    await pool.query('INSERT INTO agency_invite_codes (id, agency_id, code) VALUES ($1, $2, $3)', [
+      CODE,
+      AG,
+      'STORECODE1',
     ]);
   });
 
@@ -32,7 +39,7 @@ describe.skipIf(!process.env.DATABASE_URL)('stores onboarding accessors (DB)', (
   describe('createConfirmedStore / findStoreByPlaceId', () => {
     it('confirmed 状態・place_id 設定済みの店舗を作成する（Req 4.2）', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-owner-1' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-owner-1' });
 
       const store = await createConfirmedStore(pool, {
         ownerId: owner.id,
@@ -52,7 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)('stores onboarding accessors (DB)', (
 
     it('同一 place_id で 2 店舗目を作成すると一意制約違反になる（Req 4.4 の下地）', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-owner-2' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-owner-2' });
 
       await expect(
         createConfirmedStore(pool, {
@@ -65,7 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)('stores onboarding accessors (DB)', (
 
     it('categoryCode を省略しても作成できる', async () => {
       const pool = await getPool();
-      const owner = await createOwner(pool, { agencyId: AG, lineUserId: 'U-store-owner-3' });
+      const owner = await createOwner(pool, { agencyId: AG, inviteCodeId: CODE, lineUserId: 'U-store-owner-3' });
 
       const store = await createConfirmedStore(pool, {
         ownerId: owner.id,

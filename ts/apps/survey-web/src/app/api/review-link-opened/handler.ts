@@ -4,7 +4,7 @@ import { logSurveyReviewLinkOpened, type SurveyLogger } from '../../../lib/struc
 
 // 投稿導線の押下の通知を受ける（Issue #137・Requirement 5.7）。依存注入でテスト可能にする。
 //
-// 客の端末は「Google のクチコミを書く」を押した瞬間に sendBeacon でここへ投げ、結果を待たない
+// 客の端末は「Google のクチコミ欄を開く」を押した瞬間に sendBeacon でここへ投げ、結果を待たない
 // （Requirement 5.8）。したがって応答は誰も読まない。本文を持たず、状態コードだけを返す。
 //
 // 数えるのは token を検証できた押下だけで、記録するのは storeId だけである。

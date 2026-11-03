@@ -354,6 +354,8 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/seed.sql
           # structured survey の店舗（Issue #438・seed.sql の店舗とは別）。e2e/structured-survey.spec.ts が使う。
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/structured-seed.sql
+          # 全店公開（Issue #441）の店舗（設定行なし・個別 OFF）。e2e/global-rollout.spec.ts が使う。
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ts/apps/survey-web/e2e/global-rollout-seed.sql
       - name: install Playwright browsers
         run: pnpm -C ts --filter @fwlm/survey-web exec playwright install --with-deps chromium
       - name: E2E（QR→回答→下書き→コピー→writereview）

@@ -20,7 +20,7 @@ const concern = (page: Page) => page.getByRole('region', { name: '気になっ�
 test.describe('structured survey（客向け）', () => {
   test('星・料理・Target・facet・気になったところ・一言を選んで送信し、structured の下書きの画面へ進む', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星4' }).click();
+    await page.getByRole('radio', { name: /^星4：/ }).click();
 
     // 良かったところ: 料理を開く → 料理全体の「量」・刺身盛り合わせ → 味・焼き鳥5種盛り（Target だけ）。
     await positive(page).getByRole('button', { name: '料理' }).click();
@@ -72,14 +72,14 @@ test.describe('structured survey（客向け）', () => {
     await expect(draft).toHaveValue(/刺身盛り合わせの温度・状態が気になりました。/);
     await expect(draft).toHaveValue(/焼き鳥5種盛りが良かったです。/);
     // legacy と同じ導線（コピー・Google の投稿・再生成）を出す。
-    await expect(page.getByRole('button', { name: 'コピーして投稿する' })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Google のクチコミを書く/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: '文章をコピー' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Google のクチコミ欄を開く/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /別の文章を生成（残り\d+回）/ })).toBeVisible();
   });
 
   test('カテゴリを開いて閉じただけでは数えず押せない。気になったところ 2 件だけで口コミ文を作れる', async ({ page }) => {
     await openStructuredSurvey(page);
-    await page.getByRole('button', { name: '星2' }).click();
+    await page.getByRole('radio', { name: /^星2：/ }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await positive(page).getByRole('button', { name: '料理' }).click();
     await page.getByRole('button', { name: /^気になったところ（任意）/ }).click();
@@ -101,7 +101,7 @@ test.describe('structured survey（客向け）', () => {
     expect(body).toMatchObject({ star: 2, positiveSelections: [] });
     expect(body.concernSelections).toHaveLength(1);
     expect(body.concernSelections[0]!.facetCodes).toHaveLength(2);
-    await expect(page.getByRole('link', { name: 'Google のクチコミを書く' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeVisible();
   });
 
   test('携帯の幅と 320px で、料理と Target を開いた状態でも横スクロールしない', async ({ page }) => {

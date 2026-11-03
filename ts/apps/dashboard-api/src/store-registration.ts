@@ -7,11 +7,13 @@ import type { Sink } from '@fwlm/observability';
 
 // POST /stores/search・POST /stores の中核ロジック（依存注入でテスト可能・ルート配線は app 側の責務）。
 // 店舗登録フロー（design「店舗登録（オンボーディング代行）」）:
-//   検索: 認証 → query 検証 → PlacesSearchAdapter 委譲 → found/empty/error の封筒化（3.4, 3.5, 3.6）
+//   検索: 認証 → query 検証 → PlacesSearchAdapter 委譲 → 登録済みの照合 → found/empty/error の封筒化
+//         （3.4, 3.5, 3.6, 3.13）
 //   確定: 認証 → body/candidate 形状再検証 → owner 解決 → スコープ検証 → カテゴリ検証 → 登録（2.3, 2.4, 3.7–3.10）
 // candidate はサーバー側に保持せず、クライアントが確定リクエストに載せて返す設計のため、
 // 確定時に必ずサーバーが形状・スコープを再検証する（design のシーケンス図ノート）。
 // プライバシー規律: 検索クエリ（店名）はログに出さない（line-webhook と同じ・design「Monitoring」）。
+// 候補の placeId もログに出さない（検索の語を推定できるため）。
 
 // --- POST /stores/search ---
 
@@ -20,12 +22,23 @@ export interface StoreSearchDeps {
   // PlacesSearchAdapter.searchCandidates（@fwlm/store-identification）委譲。
   // 最大 10 件・FieldMask・タイムアウトは adapter 側の凍結契約が強制する。
   searchCandidates: (query: string) => Promise<SearchOutcome>;
+  // listRegisteredPlaceIds（@fwlm/db）委譲（Issue #485）。候補のうち既に登録済みの placeId を
+  // 1 回の問い合わせで返す。停止中の店舗も含む（確定すれば 409 になるため）。
+  listRegisteredPlaceIds: (placeIds: readonly string[]) => Promise<ReadonlySet<string>>;
 }
 
 export interface StoreSearchRequest {
   authorization: string | undefined;
   // ルート層でパースした JSON body（形状は本ハンドラが検証する）。
   body: unknown;
+  log?: Sink;
+}
+
+// 検索応答の候補 1 件（Issue #485）。確定に送る候補（StoreCandidate）に、登録済みかの注釈だけを足す。
+// **どのオーナー・どの代理店の店舗かは返さない。** 代理店ロールへ他代理店の情報を出さないためで、
+// 登録済みであること自体は確定時の 409 で既に分かる（新しく漏れる情報は無い）。
+export interface StoreSearchCandidateJson extends StoreCandidate {
+  alreadyRegistered: boolean;
 }
 
 export async function handleStoreSearch(
@@ -49,10 +62,30 @@ export async function handleStoreSearch(
   }
 
   // 3. 検索委譲。empty（0件）は 200 + 空配列（UI が 3.5 の再検索案内を出す）。error のみ 502。
+  //    empty・error では登録済みの照合をしない（外部 API が何も返さないのに DB を叩かない）。
   const outcome = await deps.searchCandidates(query);
   switch (outcome.kind) {
-    case 'found':
-      return jsonOk(200, { candidates: outcome.candidates });
+    case 'found': {
+      // 4. 登録済みの照合（Issue #485・3.13）。**失敗したら検索全体を失敗にする。** 分からないものを
+      //    「未登録」（false）で埋めて返すと、登録済みの店舗を選べる候補として見せる偽装になる。
+      let registered: ReadonlySet<string>;
+      try {
+        registered = await deps.listRegisteredPlaceIds(
+          outcome.candidates.map((candidate) => candidate.placeId),
+        );
+      } catch {
+        // 検索の語も placeId も出さない（冒頭のプライバシー規律）。
+        req.log?.('error', 'dashboard-api.registered_place_lookup_failed', {});
+        return jsonError(
+          500,
+          'internal',
+          '店舗候補の検索に失敗しました。時間をおいて再試行してください',
+        );
+      }
+      return jsonOk(200, {
+        candidates: outcome.candidates.map((candidate) => toSearchCandidateJson(candidate, registered)),
+      });
+    }
     case 'empty':
       return jsonOk(200, { candidates: [] });
     case 'error':
@@ -163,6 +196,22 @@ export async function handleStoreRegister(
         'この店舗（Place）は既に登録されています',
       );
   }
+}
+
+// 候補を応答の形へ写す。項目を明示して組み立て、adapter 側が項目を増やしても応答へ素通りさせない。
+function toSearchCandidateJson(
+  candidate: StoreCandidate,
+  registered: ReadonlySet<string>,
+): StoreSearchCandidateJson {
+  return {
+    placeId: candidate.placeId,
+    name: candidate.name,
+    address: candidate.address,
+    latitude: candidate.latitude,
+    longitude: candidate.longitude,
+    types: candidate.types,
+    alreadyRegistered: registered.has(candidate.placeId),
+  };
 }
 
 // --- 入力検証（クライアント由来の unknown を狭める。any は使わない）---

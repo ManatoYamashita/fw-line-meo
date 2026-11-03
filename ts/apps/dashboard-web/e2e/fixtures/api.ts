@@ -33,7 +33,7 @@ export const ME = {
 /**
  * 代理店ロールの利用者（Issue #283）。
  *
- * 帯の案内リンクは運営の 5 本から 3 本へ減るが、**ロールの表示は「運営」より 1 字長い**ので、
+ * 帯の案内リンクは運営の 6 本から 4 本へ減るが、**ロールの表示は「運営」より 1 字長い**ので、
  * 帯の 1 段目は代理店の方が広い。運営だけを測ると包含関係にならないため、この口を持つ。
  */
 export const AGENCY_ME = {
@@ -125,12 +125,111 @@ export const INVITE_CODES = [
   },
 ] as const;
 
+/**
+ * 店舗登録のオーナー選択（Issue #485）が表で出すオーナー。STORES の 2 店舗の持ち主 2 人に、店舗を持たない
+ * 1 人を足す。表示名の無いオーナー（「（表示名なし）」と作成日で区別する）と、店舗 0 件の案内
+ * （「登録済みの店舗はありません」）を実描画の監査へ載せるためである。
+ * 招待コードの記録（agency-dashboard Req 8.5）は、記録ありと記録なし（null）の両方の行を置く。
+ *
+ * オーナー一覧（owner-line-unlink）のために、LINE の連携を解除した 2 人を足す（メニュー未解除で引継ぎ済みの
+ * 1 人と、メニューも外し終えた 1 人）。連携状態の 3 つの形を同じ一覧に描かせ、店舗登録の表にも
+ * 解除済みの印（Req 2.5）を載せる。**解除の E2E は先頭（連携中）を対象にする**ので、並びを変えないこと。
+ */
 export const OWNERS = [
   {
     id: '33333333-3333-3333-3333-333333333333',
     displayName: 'オーナー太郎',
     onboardingStatus: 'store_identified',
-    createdAt: '2026-08-01T09:00:00.000Z',
+    // 登録に用いたコード（INVITE_CODES[0]）の発行より後に登録した形にそろえる。
+    createdAt: '2026-08-12T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    // 確定済み店舗の名前だけが載る（STORES[0] は確定済み）。
+    storeNames: [LONG_STORE_NAME],
+    takenOverBy: null,
+  },
+  {
+    // STORES[1] のオーナーと同一人物（表示名の無いオーナー）。招待コードの記録を始める前の登録の形。
+    id: '33333333-3333-3333-3333-333333333334',
+    displayName: null,
+    onboardingStatus: 'store_identified',
+    createdAt: '2026-08-02T09:00:00.000Z',
+    inviteCode: null,
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    // STORES[1] は店舗特定の前（pending）なので、確定済み店舗の名前には載らない。
+    storeNames: [],
+    takenOverBy: null,
+  },
+  {
+    // 同じコードで複数のオーナーが登録できる（Req 2.5）ので、オーナー太郎と同じコードの記録を持つ。
+    id: '33333333-3333-3333-3333-333333333335',
+    displayName: '佐藤 花子',
+    onboardingStatus: 'pending',
+    createdAt: '2026-08-20T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'linked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
+  },
+  {
+    // LINE の連携を解除したが完了後メニューを外せておらず、店舗を別のオーナーへ引き継がれた形
+    // （owner-line-unlink Req 2.6, 3.3）。連携状態の表示が最も長くなり、行の操作は外し直しになる。
+    // 引継ぎで店舗は移っているので、確定済み店舗の名前は持たない。
+    id: '33333333-3333-3333-3333-333333333336',
+    displayName: '鈴木 一郎',
+    onboardingStatus: 'store_identified',
+    createdAt: '2026-08-05T09:00:00.000Z',
+    inviteCode: { id: INVITE_CODES[0].id, code: INVITE_CODES[0].code, disabled: INVITE_CODES[0].disabled },
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'unlinked',
+    menuUnlinkPending: true,
+    storeNames: [],
+    takenOverBy: { ownerId: '33333333-3333-3333-3333-333333333333', displayName: 'オーナー太郎' },
+  },
+  {
+    // 解除済みでメニューも外し終えた形。行は一覧に残り、操作を持たない（Req 2.3）。
+    id: '33333333-3333-3333-3333-333333333337',
+    displayName: '高橋 次郎',
+    onboardingStatus: 'store_identified',
+    createdAt: '2026-08-06T09:00:00.000Z',
+    inviteCode: null,
+    agencyName: LONG_AGENCY_NAME,
+    lineLink: 'unlinked',
+    menuUnlinkPending: false,
+    storeNames: [],
+    takenOverBy: null,
+  },
+] as const;
+
+/**
+ * 店名検索の候補（Issue #485）。未登録 1 件と登録済み 1 件。登録済みの候補は押しボタンにならず
+ * 「登録済み」のラベルと理由の文で描かれるので、その形も実描画の監査と幅の実測へ載せる。
+ * 名前は面を最も横へ広げる側（LONG_STORE_NAME）を登録済みに置く。
+ */
+export const SEARCH_CANDIDATES = [
+  {
+    placeId: 'ChIJ-e2e-unregistered',
+    name: 'スターバックス コーヒー 中目黒駅前店',
+    address: '東京都目黒区上目黒1-1-1',
+    latitude: 35.644,
+    longitude: 139.699,
+    types: ['cafe'],
+    alreadyRegistered: false,
+  },
+  {
+    placeId: 'ChIJ-e2e-registered',
+    name: LONG_STORE_NAME,
+    address: '東京都目黒区青葉台2-19-23',
+    latitude: 35.649,
+    longitude: 139.694,
+    types: ['cafe'],
+    alreadyRegistered: true,
   },
 ] as const;
 
@@ -148,6 +247,7 @@ const RESPONSES: Record<string, unknown> = {
   '/dashboard-users': { users: DASHBOARD_USERS },
   '/invite-codes': { inviteCodes: INVITE_CODES },
   '/categories': { categories: CATEGORIES },
+  '/stores/search': { candidates: SEARCH_CANDIDATES },
 };
 
 /**
@@ -184,6 +284,24 @@ const SUSPENSION_PATH = /^\/stores\/([^/]+)\/(suspend|resume)$/;
 /** 停止の操作で置く停止時刻。値そのものは画面に出ないので、固定値でよい。 */
 const SUSPENDED_AT = '2026-09-23T09:00:00.000Z';
 
+/** LINE の連携の解除と、メニューの外し直しのエンドポイント（owner-line-unlink）。捕獲はオーナー ID。 */
+const OWNER_UNLINK_PATH = /^\/owners\/([^/]+)\/unlink$/;
+
+export interface StubOptions {
+  /** `/me` の差し替え（ロールを変えるときだけ渡す）。 */
+  readonly me?: unknown;
+  /**
+   * LINE の解除で、メニューを外しに行った回の結果を先頭から順に返す（owner-line-unlink Req 3.2）。
+   * 尽きた後と未指定は `removed`（外せた）。外す対象が無い要求（解除済みで印も無い）は数えない。
+   */
+  readonly menuUnlinkOutcomes?: readonly ('removed' | 'failed')[];
+  /**
+   * 停止中として返す店舗の ID（既定は STORES の値のまま）。共有の STORES を書き換えずに、
+   * 停止中の描画を要る面（代理店詳細・Issue #486）だけで出すためにある。
+   */
+  readonly suspendedStoreIds?: readonly string[];
+}
+
 /**
  * dashboard-api への呼び出しを固定 fixture で置き換える。
  *
@@ -197,19 +315,30 @@ const SUSPENDED_AT = '2026-09-23T09:00:00.000Z';
  * 「停止すると表示が変わる」ことを測れない（押下の後に画面が推測で表示を書き換える退行も、
  * 読み直しを省く退行も、固定値の一覧では区別が付かない）。状態は呼び出しごと（＝ページごと）に
  * 持ち、テストの間で漏れない。
+ *
+ * **オーナーの LINE の連携も同じ理由で状態を持つ**（owner-line-unlink）。解除の POST がオーナーの
+ * 連携状態とメニュー未解除の印を書き換え、以後の `/owners` はその状態を返す。応答の形と、
+ * メニューを外しに行くかの判定は dashboard-api の owner-line-unlink.ts に合わせる（連携中なら解除して
+ * 外しに行く・解除済みで印が残っていれば外し直す・どちらでもなければ `not_needed`）。
  */
-export async function stubDashboardApi(
-  page: Page,
-  options: { readonly me?: unknown } = {},
-): Promise<void> {
+export async function stubDashboardApi(page: Page, options: StubOptions = {}): Promise<void> {
   // ロールの差し替えは `/me` の 1 件だけを覆う。表全体を作り替えると、覆ったつもりで
   // 他の応答まで変わっていたときに気づけない。
   const responses: Record<string, unknown> =
     options.me === undefined ? RESPONSES : { ...RESPONSES, '/me': { user: options.me } };
   // 店舗 ID → 停止時刻。初期値は STORES の値で、停止・再開の POST だけが書き換える。
   const suspendedAt = new Map<string, string | null>(
-    STORES.map((store) => [store.id, store.suspendedAt]),
+    STORES.map((store) => [
+      store.id,
+      options.suspendedStoreIds?.includes(store.id) === true ? SUSPENDED_AT : store.suspendedAt,
+    ]),
   );
+  // オーナー ID → 連携状態とメニュー未解除の印。初期値は OWNERS の値で、解除の POST だけが書き換える。
+  const lineLinks = new Map<string, { lineLink: 'linked' | 'unlinked'; menuUnlinkPending: boolean }>(
+    OWNERS.map((owner) => [owner.id, { lineLink: owner.lineLink, menuUnlinkPending: owner.menuUnlinkPending }]),
+  );
+  // メニューを外しに行った回の結果。先頭から消費する（呼び出し側の配列は書き換えない）。
+  const menuOutcomes = [...(options.menuUnlinkOutcomes ?? [])];
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -253,10 +382,37 @@ export async function stubDashboardApi(
       });
       return;
     }
+    const unlink = OWNER_UNLINK_PATH.exec(path);
+    if (unlink !== null && request.method() === 'POST') {
+      const id = decodeURIComponent(unlink[1]!);
+      const current = lineLinks.get(id);
+      if (current === undefined) {
+        // 範囲外・不存在は同じ 404（Requirement 1.3）。fixture の取りこぼしとは別の封筒にする。
+        await route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'not_found', message: 'オーナーが見つかりません' } }),
+        });
+        return;
+      }
+      // 連携中なら解除してメニューを外しに行く。解除済みなら、印が残っているときだけ外し直す（1.5・3.3）。
+      const hasMenuTarget = current.lineLink === 'linked' || current.menuUnlinkPending;
+      const menu = hasMenuTarget ? (menuOutcomes.shift() ?? 'removed') : 'not_needed';
+      const next = { lineLink: 'unlinked' as const, menuUnlinkPending: menu === 'failed' };
+      lineLinks.set(id, next);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ owner: { id, ...next }, menu }),
+      });
+      return;
+    }
     const body =
       path === '/stores' && request.method() === 'GET'
         ? { stores: STORES.map((store) => ({ ...store, suspendedAt: suspendedAt.get(store.id) })) }
-        : responses[path];
+        : path === '/owners' && request.method() === 'GET'
+          ? { owners: OWNERS.map((owner) => ({ ...owner, ...lineLinks.get(owner.id) })) }
+          : responses[path];
     if (body === undefined) {
       await route.fulfill({
         status: 404,
@@ -515,6 +671,167 @@ export async function openStoreSuspendDialog(page: Page): Promise<void> {
 }
 
 /**
+ * 店舗登録を運営で開き、**オーナーの表が実際に描けている**ことを先に固定する（Issue #485）。
+ *
+ * 代理店が 1 件なので区画は開いた状態で始まる。前提 assert は区画の中の表と行の数で置く。
+ * 区画が閉じたまま・取得が失敗したままの画面には違反が出ようがない。
+ */
+export async function openStoreRegistrationOwners(page: Page): Promise<void> {
+  await stubDashboardApi(page);
+  await page.goto('/stores/new');
+  await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
+  const region = page.getByRole('region', { name: `${AGENCIES[0].name} のオーナー` });
+  await expect(region.getByRole('table')).toBeVisible();
+  await expect(region.getByRole('row')).toHaveCount(OWNERS.length + 1);
+}
+
+/**
+ * 店舗登録でオーナーを選び、店名検索の結果（登録済みの候補を含む）が描けた状態で止める（Issue #485）。
+ *
+ * `goto` は持たない。開く手順は `openStoreRegistrationOwners` に一本化する。前提 assert は、
+ * 未登録の候補の押しボタンと、登録済みの候補の理由の文の両方で置く（片方だけでは、登録済みの
+ * 候補が押しボタンのまま描かれる退行や、候補が出ない状態を監査して緑にしうる）。
+ * 検索の成功は Toast でも知らせる。狭い画面では下部中央に出て候補に重なるので、閉じてから返す。
+ */
+export async function openStoreSearchResults(page: Page): Promise<void> {
+  await openStoreRegistrationOwners(page);
+  await page.getByRole('button', { name: `${OWNERS[0].displayName}を選ぶ`, exact: true }).click();
+  await expect(page.getByRole('heading', { level: 2, name: '店名検索' })).toBeFocused();
+  await page.getByLabel('店名').fill('スターバックス');
+  await page.getByRole('button', { name: '検索', exact: true }).click();
+  const [unregistered, registered] = SEARCH_CANDIDATES;
+  await expect(
+    page.getByRole('button', { name: `${unregistered.name}（${unregistered.address}）`, exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('この店舗はすでに登録されています')).toBeVisible();
+  await expect(page.getByRole('button', { name: new RegExp(registered.address) })).toHaveCount(0);
+  await waitForToastsSettled(page);
+  await dismissToasts(page);
+}
+
+/**
+ * オーナー一覧の行（オーナー名のセルの完全一致で絞る）。表示名を持つオーナーだけを対象にする。
+ *
+ * **行の文字列の部分一致で絞らない。** 引継ぎ済みの行は連携状態の列に引継ぎ先の名前を持つので
+ * （「引継ぎ先: オーナー太郎」）、部分一致では引継ぎ先のオーナーの行と 2 行に当たる。
+ */
+export function ownerRow(page: Page, displayName: string) {
+  return page.getByRole('row').filter({ has: page.getByRole('cell', { name: displayName, exact: true }) });
+}
+
+/** オーナーの行の解除の押しボタンの読み上げ名（owner-line-unlink-control.tsx の actionName と同じ形）。 */
+export function ownerUnlinkButtonName(displayName: string): string {
+  return `${displayName} の LINE の連携を解除`;
+}
+
+/** オーナーの行の外し直しの押しボタンの読み上げ名。 */
+export function ownerRetryButtonName(displayName: string): string {
+  return `${displayName} のメニューを外し直す`;
+}
+
+/**
+ * オーナー一覧を開き、**3 つの行の形が実際に描けている**ことを先に固定する（owner-line-unlink Req 2.1–2.3, 3.3）。
+ *
+ * 行の数だけでは、連携状態の列や操作の列が描けていない（取得の型が変わって全行が同じ形に倒れた）
+ * 状態を区別できない。連携中の解除・解除済みの外し直し・操作の無い解除済みの 3 つを名指しで固定する。
+ * 操作の無い行の検査は否定方向なので、同じ行の連携状態の表示（肯定方向）と対で置く。
+ */
+export async function openOwnerList(page: Page, options: StubOptions = {}): Promise<void> {
+  const [linked, , , pending, unlinked] = OWNERS;
+  await stubDashboardApi(page, options);
+  await page.goto('/owners');
+  await expect(page.getByRole('heading', { level: 1, name: 'オーナー一覧' })).toBeVisible();
+  await expect(page.getByRole('table')).toBeVisible();
+  await expect(page.getByRole('row')).toHaveCount(OWNERS.length + 1);
+  // 行の絞り込みが 1 行ずつに当たること（2 行に当たると、行の中の検査が別の行を読んでも通りうる）。
+  for (const owner of [linked, pending, unlinked]) {
+    await expect(ownerRow(page, owner.displayName), `${owner.displayName} の行が 1 行に定まらない`).toHaveCount(1);
+  }
+  await expect(
+    ownerRow(page, linked.displayName).getByRole('button', { name: ownerUnlinkButtonName(linked.displayName), exact: true }),
+  ).toBeVisible();
+  await expect(ownerRow(page, pending.displayName).getByText('解除済み（メニュー未解除・引継ぎ先: オーナー太郎）')).toBeVisible();
+  await expect(
+    ownerRow(page, pending.displayName).getByRole('button', { name: ownerRetryButtonName(pending.displayName), exact: true }),
+  ).toBeVisible();
+  await expect(ownerRow(page, unlinked.displayName).getByText('解除済み', { exact: true })).toBeVisible();
+  await expect(ownerRow(page, unlinked.displayName).getByRole('button')).toHaveCount(0);
+}
+
+/**
+ * オーナー一覧から解除の確認ダイアログを開き、**ダイアログが実際に描けている**ことを先に固定する
+ * （owner-line-unlink Req 1.4）。
+ *
+ * `goto` は持たない。開く手順は `openOwnerList` に一本化する（`openStoreSuspendDialog` と同じ規律）。
+ * 前提 assert はダイアログにしか無い要素（alertdialog の役割と名前・確認の 3 点・確定の押しボタン）で置く。
+ */
+export async function openOwnerUnlinkDialog(page: Page): Promise<void> {
+  const target = OWNERS[0];
+  await openOwnerList(page);
+  await ownerRow(page, target.displayName)
+    .getByRole('button', { name: ownerUnlinkButtonName(target.displayName), exact: true })
+    .click();
+  const dialog = page.getByRole('alertdialog', { name: `${target.displayName} の LINE の連携を解除しますか？` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('listitem')).toHaveCount(3);
+  await expect(dialog.getByRole('button', { name: '解除する', exact: true })).toBeVisible();
+}
+
+/**
+ * LINE のメニューを外せないスタブで解除まで進め、**メニュー未解除の結果が描けた状態**で止める
+ * （owner-line-unlink Req 3.2, 3.3）。
+ *
+ * 前提 assert は、行の表示が解除済み（メニュー未解除）へ変わったこと・同じ行に外し直しの操作が出たこと・
+ * 解除は完了したがメニューを外せなかったことを告げる文言の 3 つ。警告の Toast が現れ終わるまで待つ。
+ */
+export async function openOwnerMenuFailure(page: Page): Promise<void> {
+  const target = OWNERS[0];
+  await openOwnerList(page, { menuUnlinkOutcomes: ['failed'] });
+  const row = ownerRow(page, target.displayName);
+  await row.getByRole('button', { name: ownerUnlinkButtonName(target.displayName), exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '解除する', exact: true }).click();
+  await expect(row.getByText('解除済み（メニュー未解除）', { exact: true })).toBeVisible();
+  await expect(row.getByRole('button', { name: ownerRetryButtonName(target.displayName), exact: true })).toBeVisible();
+  await expect(row.getByRole('alert')).toContainText('連携は解除しました。LINE のメニューは外せませんでした。');
+  await waitForToastsSettled(page);
+}
+
+/**
+ * 代理店詳細（Issue #486・agency-dashboard Requirement 9）を運営で開き、**4 区分の表が実際に描けた**
+ * ことを先に固定する。
+ *
+ * スタブは `agencyId` を見ずに同じ応答を返す。代理店は 1 件なので、その代理店の詳細として全行がそろう
+ * （利用者は運営と代理店の 2 件から代理店の 1 件だけに絞られる）。前提 assert は区分ごとの表の行数で
+ * 置く。存在判定の待ち・取得の失敗のままの画面を監査して緑にしないためである。
+ */
+export async function openAgencyDetail(page: Page): Promise<void> {
+  // 停止中の店舗を 1 件含めて返す（停止中の表示を監査と幅の実測に載せる。共有の STORES は変えない）。
+  const suspended = STORES[1];
+  await stubDashboardApi(page, { suspendedStoreIds: [suspended.id] });
+  await page.goto(`/admin/agencies/${AGENCIES[0].id}`);
+  await expect(page.getByRole('heading', { level: 1, name: AGENCIES[0].name })).toBeVisible();
+  const rows: readonly [string, number][] = [
+    ['ダッシュボードの利用者', DASHBOARD_USERS.filter((user) => user.agencyId === AGENCIES[0].id).length],
+    ['オーナー', OWNERS.length],
+    ['店舗', STORES.length],
+    ['招待コード', INVITE_CODES.length],
+  ];
+  for (const [name, count] of rows) {
+    // 見出し行 1 ＋ データ行。0 件だと表が出ず、ここで止まる（空の面を監査しない）。
+    expect(count, name).toBeGreaterThan(0);
+    await expect(page.getByRole('region', { name }).getByRole('row')).toHaveCount(count + 1);
+  }
+  // スタブの停止中が画面まで届いたこと（店舗の表の利用状況の列）。届いていなければ停止中の描画を
+  // 一度も監査しないまま緑になる。
+  const suspendedRow = page
+    .getByRole('region', { name: '店舗' })
+    .getByRole('row')
+    .filter({ hasText: suspended.name });
+  await expect(suspendedRow.getByText('停止中', { exact: true })).toBeVisible();
+}
+
+/**
  * 自動 a11y 監査だけが回す、一覧の上に重なる後続状態（store-suspension Issue #252）。
  *
  * **`DASHBOARD_SURFACES` へは入れない。** あの一覧は横スクロールと携帯端末の幅の配置の実測も
@@ -535,6 +852,13 @@ export const OVERLAY_SURFACES: readonly OverlaySurface[] = [
   {
     where: '店舗一覧の停止の確認ダイアログ',
     open: openStoreSuspendDialog,
+    selector: '[role="alertdialog"]',
+  },
+  {
+    // オーナー一覧の行から開く後続状態（owner-line-unlink Req 1.4）。一覧の URL だけを監査しても、
+    // 確認の 3 点を持つダイアログは一度も監査されない。
+    where: 'オーナー一覧の解除の確認ダイアログ',
+    open: openOwnerUnlinkDialog,
     selector: '[role="alertdialog"]',
   },
 ];
@@ -559,10 +883,17 @@ export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
     open: openStoreQrPanelWithToast,
     selector: '[data-sonner-toast]',
   },
+  {
+    // 解除は完了したがメニューを外せなかった状態（owner-line-unlink Req 3.2）。行の中の警告と
+    // 外し直しの操作は面全体の監査が、警告の Toast は絞った監査が受け持つ。
+    where: 'オーナー一覧のメニューを外せなかった通知',
+    open: openOwnerMenuFailure,
+    selector: '[data-sonner-toast]',
+  },
 ];
 
 /**
- * 管理ダッシュボードの検証対象 8 面。**面を足したらここへ足す。**
+ * 管理ダッシュボードの検証対象 10 面。**面を足したらここへ足す。**
  *
  * 自動で拾うのは自動 a11y 監査（`a11y-audit.spec.ts`）と携帯端末の幅の配置の実測
  * （`mobile-layout.spec.ts`。面ごとの宣言 `LAYOUT` にも足すこと）である。横スクロールの実測
@@ -586,6 +917,11 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: async (page) => {
       await openListSurface(page, '/admin/agencies', '代理店管理', 2);
     },
+  },
+  {
+    // 代理店管理の一覧から進む詳細（Issue #486）。表を 4 つ持つ（利用者・オーナー・店舗・招待コード）。
+    where: '代理店詳細',
+    open: openAgencyDetail,
   },
   {
     where: 'ログイン',
@@ -622,13 +958,21 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     open: openUserEditPanel,
   },
   {
+    // 運営で開く。代理店が 1 件なので、その区画は開いた状態で始まる（Issue #485）。
+    // 「運営が区画を開いた状態」はこの面が受け持つ。オーナーの表（見出し行＋5 人）が出るまで待つ。
     where: '店舗登録',
-    open: async (page) => {
-      await stubDashboardApi(page);
-      await page.goto('/stores/new');
-      await expect(page.getByRole('heading', { level: 1, name: '店舗登録' })).toBeVisible();
-      await expect(page.getByRole('heading', { level: 2, name: 'オーナー選択' })).toBeVisible();
-      await expect(page.getByRole('combobox').first()).toBeVisible();
-    },
+    open: openStoreRegistrationOwners,
+  },
+  {
+    // 店名検索の結果は店舗登録の中で進む後続状態である。同じ URL の後続状態は、面として明示
+    // しない限り一度も監査されない（QR パネル・編集パネルと同じ罠・Issue #485）。
+    where: '店舗登録の検索結果',
+    open: openStoreSearchResults,
+  },
+  {
+    // オーナーと LINE の連携状態の一覧（owner-line-unlink Req 2.1–2.4, 2.6, 3.3）。連携中・解除済みで
+    // メニュー未解除かつ引継ぎ済み・解除済みで操作なし、の 3 つの行の形を同時に描く。
+    where: 'オーナー一覧',
+    open: openOwnerList,
   },
 ];

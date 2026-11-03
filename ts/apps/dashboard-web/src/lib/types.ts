@@ -30,12 +30,46 @@ export interface StoreSuspensionState {
   suspendedAt: string | null;
 }
 
-// GET /owners の 1 件（登録対象オーナー選択用）。
+// オーナーの登録に用いられた招待コード（agency-dashboard Req 8.5）。disabled は登録後に無効化されたか。
+export interface OwnerInviteCodeRecord {
+  id: string;
+  code: string;
+  disabled: boolean;
+}
+
+// オーナーと LINE の連携状態（owner-line-unlink Req 2.1）。LINE ユーザー ID そのものは応答に含まれない。
+export type OwnerLineLink = 'linked' | 'unlinked';
+
+// GET /owners の 1 件（店舗登録のオーナー選択と、オーナー一覧の画面が使う）。
+// 契約の正典は dashboard-api の owners-list.ts（OwnerListItemJson）。
 export interface OwnerListItem {
   id: string;
   displayName: string | null;
   onboardingStatus: OnboardingStatus;
   createdAt: string;
+  /** null = 記録なし（招待コードを記録し始める前の登録）。推定で埋めない（Req 8.4）。 */
+  inviteCode: OwnerInviteCodeRecord | null;
+  // 担当代理店の名前（運営が全代理店のオーナーを見るときに区別する・owner-line-unlink Req 2.1）。
+  agencyName: string;
+  // LINE との連携状態（owner-line-unlink Req 2.1, 2.5）。
+  lineLink: OwnerLineLink;
+  // 解除した元の LINE アカウントから完了後メニューをまだ外せていない（owner-line-unlink Req 3.2, 3.3）。
+  menuUnlinkPending: boolean;
+  // 確定済み店舗の名前（作成順）。
+  storeNames: string[];
+  // 店舗を引き継いだオーナー（owner-line-unlink Req 2.6）。引継ぎが無ければ null。
+  takenOverBy: { ownerId: string; displayName: string | null } | null;
+}
+
+// POST /owners/:id/unlink のメニューの結果（owner-line-unlink Req 3.1, 3.2）。
+// removed = 外した、failed = 外せなかった（解除は確定済み）、not_needed = 外す対象が無かった。
+export type MenuUnlinkResult = 'removed' | 'failed' | 'not_needed';
+
+// POST /owners/:id/unlink の 200 応答（契約の正典は dashboard-api の owner-line-unlink.ts）。
+// menu が failed のときだけ menuUnlinkPending が true になり、画面は「メニューを外し直す」を出す。
+export interface OwnerLineUnlinkResult {
+  owner: { id: string; lineLink: 'unlinked'; menuUnlinkPending: boolean };
+  menu: MenuUnlinkResult;
 }
 
 // GET /agencies の 1 件（operator 専用）。
@@ -55,6 +89,15 @@ export interface StoreCandidate {
   latitude: number;
   longitude: number;
   types: readonly string[];
+}
+
+// POST /stores/search の候補 1 件を画面側で持つ形（Issue #485）。
+// 応答の `alreadyRegistered` は「検索の注釈」であり、確定に送る候補（StoreCandidate）とは分けて持つ。
+// 型の上で混ぜると、注釈を確定の要求へ載せる経路が生まれる（サーバーは捨てるが、契約として混ぜない）。
+export interface StoreSearchResult {
+  candidate: StoreCandidate;
+  // stores.place_id に同じ値があれば true（停止中の店舗も含む）。どの代理店の店舗かは返らない。
+  alreadyRegistered: boolean;
 }
 
 // GET /categories の 1 件（seed が単一情報源）。

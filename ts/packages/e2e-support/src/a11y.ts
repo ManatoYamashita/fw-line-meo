@@ -108,8 +108,52 @@ async function neutralizeScrollCue(page: Page): Promise<void> {
   });
 }
 
+/** 有限の動きが終わるのを待つ上限（ms）。Toast の出現（約 400ms）より十分に長く取る。 */
+const SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * 有限の動き（CSS の遷移・アニメーション・Web Animations）が終わるまで待つ（Issue #492）。
+ *
+ * axe の `color-contrast` は祖先の不透明度を合成して実効色を求めるので、フェードイン中の要素を
+ * 測ると、利用者が読む状態ではない途中の色で違反になる。実例として、下書き画面の Toast
+ * （「口コミ文を作成しました。」）を不透明度 0.58 の途中で測り、本文色が #808080・比 3.94:1 として
+ * 落ちた。下書き画面が出た瞬間に Toast のフェードインが始まるため、画面へ着くのが速いほど当たる
+ * （main の CI は 1.3 秒台で偶然外れ、PR #493 で 0.8 秒台になって 2 回とも当たった。main を手元で
+ * 流しても同じく落ちることを確かめてある）。
+ *
+ * **無限の動き（読み込みの回転表示など）は待たない。** 終わらないものを待つと必ず上限で止まる。
+ * 上限に達しても動いているものが残れば、名前を出して赤にする（待たずに測るより、測れないことを
+ * 知らせる方を取る）。
+ */
+async function settleFiniteAnimations(page: Page): Promise<void> {
+  const unsettled = await page.evaluate(async (timeoutMs) => {
+    const running = () =>
+      document
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation.playState === 'running' && animation.effect?.getComputedTiming().endTime !== Infinity,
+        );
+    const deadline = performance.now() + timeoutMs;
+    // 1 つ終わる間に別の動きが始まりうるので、残りが無くなるまで繰り返す。
+    while (running().length > 0 && performance.now() < deadline) {
+      await Promise.race([
+        Promise.allSettled(running().map((animation) => animation.finished)),
+        new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - performance.now()))),
+      ]);
+    }
+    return running().map((animation) => {
+      if (animation instanceof CSSTransition) return `transition:${animation.transitionProperty}`;
+      if (animation instanceof CSSAnimation) return `animation:${animation.animationName}`;
+      return `web-animation:${animation.id || '(無名)'}`;
+    });
+  }, SETTLE_TIMEOUT_MS);
+  expect(unsettled, `${SETTLE_TIMEOUT_MS}ms 待っても終わらない動きがあり、途中の色を監査することになります`).toEqual([]);
+}
+
 /**
  * ページ（または `selector` 配下）へ axe を当て、WCAG A/AA の違反がゼロであることを表明する。
+ * 監査の前に有限の動きが終わるのを待つ（settleFiniteAnimations）。
  *
  * `disableRules` は「今は直せないが検出はされている」ものを通すための逃げ道になりうるため、
  * 使う場合は必ず理由と追跡 Issue をコメントで残すこと。既定では 1 件も無効化しない。
@@ -119,6 +163,7 @@ export async function expectNoAxeViolations(
   options: { readonly selector?: string; readonly disableRules?: readonly string[] } = {},
 ): Promise<void> {
   await neutralizeScrollCue(page);
+  await settleFiniteAnimations(page);
   let builder = new AxeBuilder({ page }).withTags([...WCAG_AA_TAGS]);
   if (options.selector !== undefined) builder = builder.include(options.selector);
   if (options.disableRules !== undefined && options.disableRules.length > 0) {

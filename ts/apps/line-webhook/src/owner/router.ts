@@ -67,8 +67,11 @@ export interface StoreIdentifiedOwnerRouter {
 }
 
 /**
- * 店舗特定済みのオーナーか。確定店舗を作るのは confirmStore だけで、同じトランザクションでオーナーを
- * store_identified にするので、「確定店舗を 1 店以上持つ」と同値である（代理店による登録の経路も含む）。
+ * 店舗特定済みのオーナーか。確定店舗を作る（または引き継ぐ）のは confirmStore と confirmStoreForOnboarding だけで、
+ * どちらも同じトランザクションでオーナーを store_identified にするので、LINE ユーザー ID から引けるオーナーについては
+ * 「確定店舗を 1 店以上持つ」と同値である（代理店による登録の経路と、解除済みオーナーからの引継ぎも含む）。
+ * 店舗を引き継がれた旧オーナーは store_identified のまま 0 店になるが、解除済みで LINE ユーザー ID を持たないので、
+ * ここへは来ない。
  */
 export function isStoreIdentified(owner: OwnerRow | null): owner is OwnerRow {
   return owner !== null && owner.onboarding_status === 'store_identified';

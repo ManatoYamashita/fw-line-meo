@@ -13,6 +13,16 @@ function defaultAsOf(): string {
 }
 EOF
 
+  fx_write ts/apps/dashboard-web/src/lib/jst-date.ts <<'EOF'
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+export function formatJstDate(iso: string): string | null {
+  const time = Date.parse(iso);
+  if (Number.isNaN(time)) return null;
+  return new Date(time + JST_OFFSET_MS).toISOString().slice(0, 10);
+}
+EOF
+
   fx_write ts/apps/delivery-job/src/index.ts <<'EOF'
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -71,11 +81,11 @@ jst_tree() {
   jst_sources
 }
 
-t_begin 'check-jst-offset-consistency: 5つの固定値・整形方式・SQL zone が揃えば緑'
+t_begin 'check-jst-offset-consistency: 6つの固定値・整形方式・SQL zone が揃えば緑'
 jst_tree
 fx_run check-jst-offset-consistency
 expect_green
-expect_output_matches '固定オフセット 5 実装 / SQL zone 1 実装 / 候補 6 ファイル'
+expect_output_matches '固定オフセット 6 実装 / SQL zone 1 実装 / 候補 7 ファイル'
 t_end
 
 t_begin 'check-jst-offset-consistency: 宣言済みファイル内の2つ目の固定値も赤'
@@ -113,6 +123,15 @@ rm -f "${FX}/go/internal/batch/run.go.bak"
 fx_run check-jst-offset-consistency
 expect_red 'JST の +09:00（32400 秒）と一致しません'
 expect_output_matches 'go/internal/batch/run\.go の固定オフセットは 28800 秒'
+t_end
+
+t_begin 'check-jst-offset-consistency: 時刻の JST 暦日がローカル TZ の整形へ変われば赤（Issue #485）'
+jst_tree
+sed -i.bak 's/new Date(time + JST_OFFSET_MS)\.toISOString()\.slice(0, 10)/new Date(time + JST_OFFSET_MS).toLocaleDateString()/' \
+  "${FX}/ts/apps/dashboard-web/src/lib/jst-date.ts"
+rm -f "${FX}/ts/apps/dashboard-web/src/lib/jst-date.ts.bak"
+fx_run check-jst-offset-consistency
+expect_red '時刻の JST 暦日の ISO 整形は 1 件であるべきですが、0 件です'
 t_end
 
 t_begin 'check-jst-offset-consistency: 宣言された実装ファイルが消えれば赤'
@@ -199,7 +218,7 @@ var testJST = time.FixedZone("JST", 8*60*60)
 EOF
 fx_run check-jst-offset-consistency
 expect_green
-expect_output_matches '候補 6 ファイル'
+expect_output_matches '候補 7 ファイル'
 t_end
 
 t_begin 'check-jst-offset-consistency: grep が評価不能なら無一致として緑へ倒さない'

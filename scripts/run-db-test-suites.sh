@@ -72,6 +72,7 @@ TEST_DIR="${ROOT}/db/test"
 RUN_SCRIPTS=(
     'check_docs.sh'
     'check_no_optional_capabilities.sh'
+    'check_owner_line_privileges.sh'
     'check_store_suspension_privileges.sh'
     'check_structured_survey_privileges.sh'
 )
@@ -193,6 +194,10 @@ for sh_path in "${TEST_DIR}"/*.sh; do
             # export 済みであり、env 無指定の `env bash` がそのまま子へ渡す（#158 (a)）。
             # **節そのものは省かない。** 上のコメントどおりここが env の唯一の情報源なので、
             # 「env が要らないことを確認した」と「書き忘れた」を読み手が区別できる形にしておく。
+            ;;
+        check_owner_line_privileges.sh)
+            # 追加の env は要らない（DATABASE_URL は export 済み）。check_store_suspension_privileges.sh と
+            # 同じくロールを作って grants.sql を当てるので CREATEROLE が要り、ロールは終了時に片付ける。
             ;;
         check_store_suspension_privileges.sh)
             # 追加の env は要らない（DATABASE_URL は export 済み）。ロールを作って infra/sql/grants.sql を

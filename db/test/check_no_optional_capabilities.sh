@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 「能力の不在」検証（competitive-daily-summary task 7.1・Requirements 1.4, 3.10／
-# store-suspension task 6.1・Requirements 6.4, 8.1, 8.3, 8.4, 8.5）。
+# store-suspension task 6.1・Requirements 6.4, 8.1, 8.3, 8.4, 8.5／
+# owner-line-unlink task 1.3・Requirements 8.1, 8.3, 8.4）。
 #
 # 通常の assertion SQL（db/test/assertions/*.sql）は「存在すべきものが存在すること」を検証する。
 # 本スクリプトはその裏返しで「MVP では意図的に提供しない能力が、コード上もスキーマ上も
@@ -11,6 +12,8 @@
 #   - store-suspension Requirement 8.1: オーナー自身が配信や店舗の利用を停止する手段を、LINE 上にも
 #     Web 上にも提供しない。同 8.4: 運営・代理店による停止（stores.suspended_at を dashboard-api
 #     から書く）は、オーナー自身による配信停止と区別して許容する
+#   - owner-line-unlink Requirement 8.1: オーナー自身が紐づけの解除や配信の停止を行う手段を提供しない。
+#     同 8.3: 運営・代理店による解除（owners の連携状態の列を dashboard-api から書く）は許容する
 #
 # 「無いことの証明」は原理的に悉皆的ではあり得ない（未知の実装経路を全て網羅できない）ため、
 # 本スクリプトは design.md/requirements.md の記述から具体的に導ける2系統のチェックに絞る:
@@ -55,6 +58,12 @@
 #   - (B4) を新設し、オーナー・客向けの面が停止を書く識別子を参照しないことを検査する
 # 名前を変えて足された書込の経路は、DB の列単位の権限（db/test/check_store_suspension_privileges.sh）
 # が別の層で検出する（同 8.3）。本検査はコード上の形を見る側である。
+#
+# --- owner-line-unlink（Issue #487・task 1.3）での改訂 ---------------------------------
+# 運営・代理店によるオーナーの LINE 連携の解除（owners.line_user_id を NULL にし、line_unlinked_at・
+# menu_pending_line_user_id を書く）が入ったため、(B5) を新設した。(B4) と同じ走査面で、解除を書く
+# DAL 名と解除の列への代入を検出する。DB の列単位の権限は db/test/check_owner_line_privileges.sh が
+# 別の層で検出する。
 #
 # 使い方: DATABASE_URL を設定して実行する（with-test-db.sh 等が export した接続情報を利用する想定）。
 #   db/test/check_no_optional_capabilities.sh
@@ -282,4 +291,29 @@ if [ -n "$owner_hits" ]; then
 fi
 echo "PASS (B4): オーナー・客向けの面に店舗の停止を書く識別子は存在しない（走査 ${#OWNER_FACING_SCAN_DIRS[@]} ディレクトリ・${owner_file_count} ファイル）"
 
-echo "OK: 能力の不在（競合リスト再抽出・調整手段／オーナー自身による配信停止の手段のいずれも存在しない）を確認しました（R1.4, R3.10・store-suspension 8.1）"
+echo ">> [absence-check] (B5) オーナー・客向けの面がオーナーの LINE 連携の解除を書く識別子を参照しないこと（owner-line-unlink 8.1, 8.3, 8.4）"
+# オーナーの LINE 連携を解除してよいのは運営・代理店の面（dashboard-api）だけである。オーナー・客向けの
+# 面が解除を書くと、それはオーナー自身が配信を止める手段になる（8.1）。LINE 応答の follow / unfollow
+# から紐づけを外すのもこの形である（8.2・ブロックで紐づけの状態を変えない）。解除を書く DAL
+# （@fwlm/db の unlinkOwnerLine・clearOwnerMenuPending）と dashboard-api は走査しない（8.3）。
+#
+# 走査面とその前提（ディレクトリの存在・ディレクトリごとのファイル数 0 を赤）は (B4) と共有する。
+# (B4) と別に列挙すると、片方だけ走査面を広げた・狭めたときに両者の食い違いが見えなくなるためである。
+# 照合は大小を区別しない（SQL の `SET LINE_UNLINKED_AT = ...` を取り逃さないため）。連携状態の列は
+# 読む（`IS NULL`・比較）のは正当なので、line_unlinked_at・menu_pending_line_user_id は代入の形
+# （`=` の直後が `=` でない）だけを、line_user_id は NULL の代入だけを書込として数える（line_user_id は
+# `= $1` の形でオーナーを引くのに使われる）。line-webhook の個別メニュー操作（unlinkRichMenu）は
+# 別の識別子なので当たらない。
+LINE_UNLINK_WRITE_PATTERN='unlinkOwnerLine|clearOwnerMenuPending|line_unlinked_at[[:space:]]*=([^=]|$)|menu_pending_line_user_id[[:space:]]*=([^=]|$)|line_user_id[[:space:]]*=[[:space:]]*null'
+
+unlink_rc=0
+unlink_hits="$(grep -rEni "$LINE_UNLINK_WRITE_PATTERN" ${owner_scan_paths[@]+"${owner_scan_paths[@]}"})" || unlink_rc=$?
+if [ "$unlink_rc" -gt 1 ]; then
+    fail "(B5) オーナー・客向けの面を走査できません（grep exit=${unlink_rc}）。無一致と評価不能を取り違えないため赤にします"
+fi
+if [ -n "$unlink_hits" ]; then
+    fail "オーナー・客向けの面に LINE 連携の解除を書く識別子が見つかりました（解除を書けるのは運営・代理店の面だけ・owner-line-unlink 8.1 違反の疑い）: ${unlink_hits}"
+fi
+echo "PASS (B5): オーナー・客向けの面に LINE 連携の解除を書く識別子は存在しない（走査 ${#OWNER_FACING_SCAN_DIRS[@]} ディレクトリ・${owner_file_count} ファイル）"
+
+echo "OK: 能力の不在（競合リスト再抽出・調整手段／オーナー自身による配信停止・LINE 連携の解除の手段のいずれも存在しない）を確認しました（R1.4, R3.10・store-suspension 8.1・owner-line-unlink 8.1）"

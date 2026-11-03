@@ -36,7 +36,7 @@ vi.mock('../src/app/s/[storeId]/draft-panel', () => ({
       <span data-testid="left">{props.regenerationsLeft}</span>
       <span data-testid="failed">{String(props.generationFailed)}</span>
       <a data-testid="review-link" href={props.googleReviewUrl} onClick={() => props.onReviewLinkOpen()}>
-        Google のクチコミを書く
+        Google のクチコミ欄を開く
       </a>
       <button data-testid="regen" onClick={() => props.onRegenerate()}>
         regen
@@ -134,7 +134,7 @@ describe('SurveyShell: 投稿導線の押下の通知', () => {
     stubFetch({});
     renderShell();
     await screen.findByText(/ご回答ありがとうございました/);
-    const link = screen.getByRole('link', { name: /クチコミを書く/ });
+    const link = screen.getByRole('link', { name: /クチコミ欄を開く/ });
 
     // fireEvent.click は preventDefault されると false を返す
     expect(fireEvent.click(link)).toBe(true);
@@ -162,7 +162,7 @@ describe('SurveyShell: 投稿導線の押下の通知', () => {
     stubFetch({});
     renderShell();
     await screen.findByText(/ご回答ありがとうございました/);
-    const link = screen.getByRole('link', { name: /クチコミを書く/ });
+    const link = screen.getByRole('link', { name: /クチコミ欄を開く/ });
 
     // fireEvent.click は preventDefault されると false を返す
     expect(fireEvent.click(link)).toBe(true);
@@ -219,7 +219,7 @@ describe('SurveyShell', () => {
     stubFetch({});
     renderShell();
     expect(await screen.findByText(/ご回答ありがとうございました/)).toBeDefined();
-    const link = screen.getByRole('link', { name: /クチコミを書く/ });
+    const link = screen.getByRole('link', { name: /クチコミ欄を開く/ });
     expect(link.getAttribute('href')).toBe('https://review/ChIJ');
     // フォームは表示しない
     expect(screen.queryByTestId('submit')).toBeNull();
@@ -431,7 +431,7 @@ describe('回答済み画面: 投稿導線が面をまたいだ相等になる',
     expect(expected, '期待値を算出できていません').not.toBe('');
 
     await renderAnsweredScreen();
-    const answered = reviewLinkShape(screen.getByRole('link', { name: /クチコミを書く/ }));
+    const answered = reviewLinkShape(screen.getByRole('link', { name: /クチコミ欄を開く/ }));
     expect(answered, '回答済み画面の投稿導線が部品の算出結果と一致しません').toEqual({
       tagName: 'A',
       className: expected,
@@ -443,7 +443,7 @@ describe('回答済み画面: 投稿導線が面をまたいだ相等になる',
     localStorage.clear();
 
     await renderRealDraftPanel();
-    const drafting = reviewLinkShape(screen.getByRole('link', { name: /クチコミを書く/ }));
+    const drafting = reviewLinkShape(screen.getByRole('link', { name: /クチコミ欄を開く/ }));
     expect(drafting, '下書き画面の投稿導線が回答済み画面のものと食い違っています').toEqual(answered);
   });
 
@@ -452,7 +452,7 @@ describe('回答済み画面: 投稿導線が面をまたいだ相等になる',
 
     const links = screen.getAllByRole('link');
     expect(links, '回答済み画面のリンクの個数').toHaveLength(1);
-    const named = screen.getAllByRole('link', { name: /クチコミを書く/ });
+    const named = screen.getAllByRole('link', { name: /クチコミ欄を開く/ });
     expect(named, '投稿導線の個数が 1 つではありません').toHaveLength(1);
 
     const link = named[0]!;

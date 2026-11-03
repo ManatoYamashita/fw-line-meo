@@ -82,6 +82,17 @@ const SUCCESS_DISPLAYS: ReadonlyArray<{ readonly file: string; readonly cues: re
       },
     ],
   },
+  {
+    // オーナー一覧の行に置く小さな文言（owner-line-unlink）。店舗の停止と同じく、印を自前で添える。
+    file: 'apps/dashboard-web/src/app/owners/owner-line-unlink-control.tsx',
+    cues: [
+      {
+        kind: 'own',
+        verifiedBy: 'apps/dashboard-web/test/owner-line-unlink-control.test.tsx',
+        testTitle: '成功の文言には読み上げない成功の印が添えられ、結果の前の空の領域には印を置かない',
+      },
+    ],
+  },
 ];
 
 function sitesOf(kind: Cue['kind']): string[] {

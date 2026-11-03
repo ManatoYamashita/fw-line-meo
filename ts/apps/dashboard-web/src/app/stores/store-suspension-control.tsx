@@ -43,6 +43,7 @@ import { SuccessIcon } from '@fwlm/ui/components/success-icon';
 import { notifyActionError, notifyActionSuccess } from '../../lib/action-feedback';
 import { resumeStore, suspendStore, type ApiResult } from '../../lib/api';
 import type { StoreSuspensionState } from '../../lib/types';
+import { STORE_SUSPENSION_LABEL } from '../../lib/status-labels';
 
 export interface StoreSuspensionControlProps {
   store: { id: string; name: string; suspendedAt: string | null };
@@ -133,7 +134,7 @@ export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionCont
     <div className="flex flex-col items-start">
       <div className="flex items-center gap-2">
         <Badge variant={suspended ? 'destructive' : 'secondary'}>
-          {suspended ? '停止中' : '利用中'}
+          {suspended ? STORE_SUSPENSION_LABEL.suspended : STORE_SUSPENSION_LABEL.active}
         </Badge>
         <Button
           ref={buttonRef}
