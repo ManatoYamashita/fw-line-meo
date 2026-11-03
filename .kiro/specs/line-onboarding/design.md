@@ -226,7 +226,7 @@ sequenceDiagram
     W->>L: reply 完了案内 richmenu個別リンク
 ```
 
-処理は同期（reply 完了後に 200 返却・Places 1.5s タイムアウト）。2 秒超過時は LINE の再配信＋冪等化で救済する（research.md Decision 1）。
+処理は同期（reply 完了後に 200 返却・Places 1.5s タイムアウト）。2 秒超過時は LINE の再配信＋冪等化で救済する（research.md Decision 1）。LINE への各通信（トークン発行・reply・push・プロフィール・個別メニューの張り外し）は 5 秒で打ち切り、`LineRequestTimeoutError` を投げる（Issue #499。入力中の表示だけは 2 秒）。止まった LINE を待ち続けて Webhook の処理を塞がないための上限である。
 
 ## Requirements Traceability
 

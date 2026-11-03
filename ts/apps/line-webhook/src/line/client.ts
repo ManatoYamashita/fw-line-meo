@@ -66,6 +66,22 @@ export interface LineMessengerDeps {
   // reply の非2xx（Invalid reply token 等）はここに warn ログを出す。再配信側で救済されるため
   // 例外にはしない（design.md「LineMessenger」の Responsibilities & Constraints）。
   logger: LineMessengerLogger;
+  // LINE への 1 回の通信（トークン発行・reply・push・プロフィール・個別メニューの張り外しのそれぞれ）に
+  // 許す時間（ミリ秒）。応答が止まった LINE を待ち続けて Webhook の処理を塞がないための上限（Issue #499）。
+  // startLoading だけは補助表示なので、これより短い固定の上限（LOADING_START_TIMEOUT_MS）を使う。
+  requestTimeoutMs: number;
+}
+
+/**
+ * LINE への通信が時間制限を超えたことを表す例外（Issue #499）。
+ * 記録は例外のクラス名を errorKind として載せるので、時間切れはこの名前で他の失敗と区別できる。
+ * 文言には URL・LINE ユーザー ID・トークンを載せない。
+ */
+export class LineRequestTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LineMessenger: request timed out after ${timeoutMs}ms`);
+    this.name = 'LineRequestTimeoutError';
+  }
 }
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
@@ -104,6 +120,41 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
   // 有効期限内はこのクロージャ内メモリにキャッシュし、再発行を避ける（research.md Decision 2）。
   let cachedToken: CachedToken | null = null;
 
+  /**
+   * LINE へ 1 回通信し、応答の読み出しまでを `timeoutMs` の内に収める。超えたら通信を打ち切り、
+   * LineRequestTimeoutError を投げる。それ以外の失敗（通信の失敗・handle が投げた例外）はそのまま投げる。
+   * 本文の読み出し（response.json()）も時間制限の内に置くため、handle の終わりまでタイマーを止めない。
+   * AbortSignal.timeout ではなく setTimeout を使うのは、偽のタイマーで試験から進められるようにするため
+   * （startLoading の従来の規律と同じ）。
+   */
+  async function send<T>(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    handle: (response: Response) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const response = await deps.fetch(url, { ...init, signal: controller.signal });
+      return await handle(response);
+    } catch (err) {
+      // 打ち切りの理由は fetch の実装ごとに異なる例外（AbortError など）で届くので、例外の形ではなく
+      // 自分で時間切れを起こしたかどうかで判定する。
+      if (timedOut) {
+        throw new LineRequestTimeoutError(timeoutMs);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function getAccessToken(): Promise<string> {
     const now = Date.now();
     if (cachedToken && cachedToken.expiresAtMs > now) {
@@ -116,17 +167,21 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
       client_secret: deps.channelSecret,
     });
 
-    const response = await deps.fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`LineMessenger: failed to issue channel access token (status ${response.status})`);
-    }
-
-    const parsed = (await response.json()) as RawTokenResponse;
+    const parsed = await send(
+      TOKEN_URL,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      },
+      deps.requestTimeoutMs,
+      async (response) => {
+        if (!response.ok) {
+          throw new Error(`LineMessenger: failed to issue channel access token (status ${response.status})`);
+        }
+        return (await response.json()) as RawTokenResponse;
+      },
+    );
     if (typeof parsed.access_token !== 'string' || typeof parsed.expires_in !== 'number') {
       throw new Error('LineMessenger: unexpected token issuance response shape');
     }
@@ -147,14 +202,19 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     ): Promise<void> {
       const accessToken = await getAccessToken();
 
-      const response = await deps.fetch(REPLY_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+      const response = await send(
+        REPLY_URL,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ replyToken, messages }),
         },
-        body: JSON.stringify({ replyToken, messages }),
-      });
+        deps.requestTimeoutMs,
+        async (res) => res,
+      );
 
       if (!response.ok) {
         // Invalid reply token（400）等。再配信側で救済されるため、呼び出し元の会話フローを
@@ -166,14 +226,19 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     async push(lineUserId: string, messages: readonly LineMessage[]): Promise<void> {
       const accessToken = await getAccessToken();
 
-      const response = await deps.fetch(PUSH_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+      const response = await send(
+        PUSH_URL,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ to: lineUserId, messages }),
         },
-        body: JSON.stringify({ to: lineUserId, messages }),
-      });
+        deps.requestTimeoutMs,
+        async (res) => res,
+      );
 
       if (!response.ok) {
         // ブロック済みユーザー・月次クォータ超過等。呼び出し元（OAuth callback）の応答を
@@ -185,21 +250,30 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     async getProfile(lineUserId: string): Promise<{ displayName: string } | null> {
       const accessToken = await getAccessToken();
 
-      const response = await deps.fetch(`${PROFILE_URL_BASE}/${encodeURIComponent(lineUserId)}`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const parsed = await send(
+        `${PROFILE_URL_BASE}/${encodeURIComponent(lineUserId)}`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+        deps.requestTimeoutMs,
+        async (response): Promise<RawProfileResponse | null> => {
+          if (response.status === 404) {
+            // ブロック・未フォロー等で識別不能（references/user.md）。
+            return null;
+          }
 
-      if (response.status === 404) {
-        // ブロック・未フォロー等で識別不能（references/user.md）。
+          if (!response.ok) {
+            throw new Error(`LineMessenger: getProfile failed with status ${response.status}`);
+          }
+
+          return (await response.json()) as RawProfileResponse;
+        },
+      );
+
+      if (parsed === null) {
         return null;
       }
-
-      if (!response.ok) {
-        throw new Error(`LineMessenger: getProfile failed with status ${response.status}`);
-      }
-
-      const parsed = (await response.json()) as RawProfileResponse;
       if (typeof parsed.displayName !== 'string') {
         throw new Error('LineMessenger: unexpected profile response shape');
       }
@@ -213,12 +287,14 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     async linkRichMenu(lineUserId: string, richMenuId: string): Promise<void> {
       const accessToken = await getAccessToken();
 
-      const response = await deps.fetch(
+      const response = await send(
         `${USER_URL_BASE}/${encodeURIComponent(lineUserId)}/richmenu/${encodeURIComponent(richMenuId)}`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}` },
         },
+        deps.requestTimeoutMs,
+        async (res) => res,
       );
 
       if (!response.ok) {
@@ -245,10 +321,15 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
 
       const accessToken = await getAccessToken();
 
-      const response = await deps.fetch(`${USER_URL_BASE}/${encodeURIComponent(lineUserId)}/richmenu`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await send(
+        `${USER_URL_BASE}/${encodeURIComponent(lineUserId)}/richmenu`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+        deps.requestTimeoutMs,
+        async (res) => res,
+      );
 
       if (!response.ok && response.status !== 404) {
         throw new Error(`LineMessenger: unlinkRichMenu failed with status ${response.status}`);
@@ -258,25 +339,22 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     async startLoading(lineUserId: string, loadingSeconds: number): Promise<void> {
       const accessToken = await getAccessToken();
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), LOADING_START_TIMEOUT_MS);
-
-      try {
-        const response = await deps.fetch(LOADING_START_URL, {
+      const response = await send(
+        LOADING_START_URL,
+        {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ chatId: lineUserId, loadingSeconds }),
-          signal: controller.signal,
-        });
+        },
+        LOADING_START_TIMEOUT_MS,
+        async (res) => res,
+      );
 
-        if (!response.ok) {
-          throw new Error(`LineMessenger: startLoading failed with status ${response.status}`);
-        }
-      } finally {
-        clearTimeout(timer);
+      if (!response.ok) {
+        throw new Error(`LineMessenger: startLoading failed with status ${response.status}`);
       }
     },
 
