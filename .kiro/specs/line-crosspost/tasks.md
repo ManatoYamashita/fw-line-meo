@@ -23,6 +23,8 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
   - _Requirements: 8.3, 8.4, 8.8_
 - [x] 2.6 待ちの取りやめ・24 時間で取りやめ・結果を届けた時刻（`result_notified_at`）と未通知の一覧・写真の quoteToken
   - _Requirements: 5.8, 6.11, 6.12, 7.2_
+- [x] 2.7 実行権の獲得の条件に待ちの期限（DB の時計）を入れる。写真の送った時刻（`line_sent_at`）で差し替えを判定する。送信後の 429 の結果不明の理由
+  - _Requirements: 2.5, 6.3, 6.12_
   - マージ条件: `run-db-test-suites.sh`（smoke・assertions・docs 整合）と `@fwlm/db` の試験が緑。本番への migration の適用は運営の承認の後
 
 ## PR 3: 会話・生成・発信先の共通処理（既定 OFF）
@@ -53,13 +55,15 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
   - _Requirements: 5.8, 5.9_
 - [x] 3.13 障害・同時操作の再現テスト（部分成功・通信切断・結果不明後の再試行・停止・同時操作・通知の失敗）
   - _Requirements: 5.7, 6.1〜6.12, 7.2_
+- [ ] 3.14 第三者レビューの指摘の修正: 記録の許可リスト・写真の送った順・下書きの途中の「投稿の状況」と未通知の結果・最終確認の全文と事実の確認の案内
+  - _Requirements: 2.5, 3.10, 5.3, 7.2, 7.3_
   - マージ条件: line-webhook・delivery-job の typecheck・lint・unit・DB integration が緑。既存の試験の変更は、設定の形の追加（`crosspost: null`）と router の委譲の試験の追加だけであること。本機能 OFF の既存の E2E が緑
 
 ## PR 4: Google の発信先アダプタ（既定 OFF）
 
 - [ ] 4.1 `gbp/client.ts` に `publishLocalPost`（写真の `media[]`・時間制限・送信後の失敗を「結果不明」に分類）を足す。既存の `createLocalPost` は変えない
   - _Requirements: 6.3, 6.10, 9.1_
-- [ ] 4.2 `adapters/google.ts`（availability・写真の条件・分類表。5xx は 503 を含めて結果不明）
+- [ ] 4.2 `adapters/google.ts`（availability・写真の条件・分類表。5xx は 503 を含めて結果不明。送信後の 429 も結果不明）
   - _Requirements: 5.2, 6.2, 6.3, 6.7_
   - マージ条件: 分類表の全行の試験が緑。**GBP API の実疎通は未実施**（#146 の承認待ち）であることを PR に明記
 
@@ -76,4 +80,4 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 - [ ] 8.3 既存の `g_post` の「結果不明」の扱い（research.md §5-1）
 - [ ] 8.4 有効化の前の使いやすさの検証（店主 3〜5 人・research.md Decision 1 の課題表）。特に「文をコピー → 直して送り返す」の編集。結果によって LIFF の編集画面（design.md「将来の拡張」）を足す
 - [ ] 8.5 送信を取り消した写真のメッセージを引用したときの表示の実機確認（research.md Decision 5）
-- [ ] 8.6 429 を「再送してよい失敗」とする扱いの実測（GBP API の承認の後・**本番有効化の前提**・design.md「本番有効化の前に確かめる未確認事項」U1）
+- [ ] 8.6 送信後の 429 の後に投稿が作られていないかの実測（GBP API の承認の後）。安全と分かるまで結果不明のまま（design.md「本番有効化の前に確かめる未確認事項」U1）
