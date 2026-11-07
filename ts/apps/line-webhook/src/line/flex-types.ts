@@ -30,7 +30,17 @@ export interface FlexUriAction {
   readonly uri: string;
 }
 
-export type FlexAction = FlexPostbackAction | FlexUriAction;
+/**
+ * 文字列を端末のクリップボードへ写す（LINE 14.0.0 以降・clipboardText は 1000 字まで・
+ * references/action-objects.md）。一括発信の下書きを店主が自分で直すときに使う（line-crosspost）。
+ */
+export interface FlexClipboardAction {
+  readonly type: 'clipboard';
+  readonly label: string;
+  readonly clipboardText: string;
+}
+
+export type FlexAction = FlexPostbackAction | FlexUriAction | FlexClipboardAction;
 
 // --- Flex の部品（references/flex-message.md「Components」） ---
 

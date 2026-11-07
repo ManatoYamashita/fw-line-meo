@@ -43,9 +43,27 @@ export interface LineMessenger {
    * 自動的に消えないため、reply の方が先に届く並びだと表示が消えずに残る）。
    */
   startLoading(lineUserId: string, loadingSeconds: number): Promise<void>;
+  /**
+   * 利用者が送った画像などの本体を取得する（Content API・line-crosspost Requirement 2.1）。
+   * LINE は保存期間を保証しないので、Webhook を受けたらすぐ取得する。`maxBytes` を超えたら読み止める。
+   * 例外を投げるのはトークンの発行の失敗と時間切れだけで、それ以外は結果の種類で返す。
+   * 一括発信を使わない偽実装では省略可能（省略時、一括発信は写真を受け取れない）。
+   */
+  getMessageContent?(messageId: string, maxBytes: number): Promise<MessageContentResult>;
   /** リクエスト単位のログ出力先を適用する。テスト用の偽実装では省略可能。 */
   withLogger?(logger: LineMessengerLogger): LineMessenger;
 }
+
+/** Content API の結果。本体・Content-Type 以外（応答本文の文言など）は持たない。 */
+export type MessageContentResult =
+  | { kind: 'ok'; bytes: Buffer; contentType: string | null }
+  /** 送信の取り消し・保存期間切れなどで、もう取得できない（404・410）。 */
+  | { kind: 'gone' }
+  /** 本体の準備中（202。動画・音声で起きる）。 */
+  | { kind: 'not_ready' }
+  /** 上限を超えた。 */
+  | { kind: 'too_large' }
+  | { kind: 'error'; status: number };
 
 export interface LineMessengerLogger {
   /** 事象名で識別する。正典 docs/observability/log-field-canon.md に登録済みのものを使う。 */
@@ -90,6 +108,9 @@ const PUSH_URL = 'https://api.line.me/v2/bot/message/push';
 const PROFILE_URL_BASE = 'https://api.line.me/v2/bot/profile';
 const USER_URL_BASE = 'https://api.line.me/v2/bot/user';
 const LOADING_START_URL = 'https://api.line.me/v2/bot/chat/loading/start';
+const CONTENT_URL_BASE = 'https://api-data.line.me/v2/bot/message';
+// Webhook の message.id の形（10 進の数字列）。パスを組み立てる前に確かめる。
+const MESSAGE_ID_PATTERN = /^\d{1,32}$/;
 // LINE のユーザー ID の形（Webhook の source.userId）。unlinkRichMenu がパスを組み立てる前に確かめる。
 const LINE_USER_ID_PATTERN = /^U[0-9a-f]{32}$/;
 
@@ -116,7 +137,10 @@ interface RawProfileResponse {
   displayName?: unknown;
 }
 
-export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
+/** 実装本体（Content API の取得を必ず持つ）。 */
+export type ConcreteLineMessenger = LineMessenger & Required<Pick<LineMessenger, 'getMessageContent'>>;
+
+export function createLineMessenger(deps: LineMessengerDeps): ConcreteLineMessenger {
   // 有効期限内はこのクロージャ内メモリにキャッシュし、再発行を避ける（research.md Decision 2）。
   let cachedToken: CachedToken | null = null;
 
@@ -194,7 +218,7 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
     return cachedToken.accessToken;
   }
 
-  const messenger: LineMessenger = {
+  const messenger: ConcreteLineMessenger = {
     async reply(
       replyToken: string,
       messages: readonly LineMessage[],
@@ -358,6 +382,41 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
       }
     },
 
+    async getMessageContent(messageId: string, maxBytes: number): Promise<MessageContentResult> {
+      if (!MESSAGE_ID_PATTERN.test(messageId)) return { kind: 'gone' };
+      const accessToken = await getAccessToken();
+      return send(
+        `${CONTENT_URL_BASE}/${messageId}/content`,
+        { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
+        deps.requestTimeoutMs,
+        async (response): Promise<MessageContentResult> => {
+          if (response.status === 202) return { kind: 'not_ready' };
+          if (response.status === 404 || response.status === 410) return { kind: 'gone' };
+          if (!response.ok) return { kind: 'error', status: response.status };
+          const declared = Number(response.headers.get('content-length'));
+          if (Number.isFinite(declared) && declared > maxBytes) {
+            await response.body?.cancel();
+            return { kind: 'too_large' };
+          }
+          const chunks: Uint8Array[] = [];
+          let total = 0;
+          const reader = response.body?.getReader();
+          if (!reader) return { kind: 'error', status: response.status };
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > maxBytes) {
+              await reader.cancel();
+              return { kind: 'too_large' };
+            }
+            chunks.push(value);
+          }
+          return { kind: 'ok', bytes: Buffer.concat(chunks), contentType: response.headers.get('content-type') };
+        },
+      );
+    },
+
     withLogger(logger: LineMessengerLogger): LineMessenger {
       return {
         reply: (replyToken, messages) => messenger.reply(replyToken, messages, logger),
@@ -366,6 +425,7 @@ export function createLineMessenger(deps: LineMessengerDeps): LineMessenger {
         linkRichMenu: (lineUserId, richMenuId) => messenger.linkRichMenu(lineUserId, richMenuId),
         unlinkRichMenu: (lineUserId) => messenger.unlinkRichMenu(lineUserId),
         startLoading: (lineUserId, loadingSeconds) => messenger.startLoading(lineUserId, loadingSeconds),
+        getMessageContent: (messageId, maxBytes) => messenger.getMessageContent(messageId, maxBytes),
         withLogger: (nextLogger) => withLineMessengerLogger(messenger, nextLogger),
       };
     },

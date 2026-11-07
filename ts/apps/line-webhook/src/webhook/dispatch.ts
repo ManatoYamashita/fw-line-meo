@@ -16,7 +16,19 @@ export type InboundEvent =
   | { kind: 'postback'; lineUserId: string; replyToken: string; data: string }
   // Requirement 5.3: text 以外の message（スタンプ・画像等）。メッセージ内容自体は
   // 会話層で一切使用しないため保持しない（客・オーナーの送信内容を不必要に持ち回らない）。
-  | { kind: 'unsupported'; lineUserId: string; replyToken: string };
+  // 例外は一括発信（line-crosspost・Issue #494）が有効なときの画像だけで、そのときに限り本体を取得するための
+  // message.id と、まとめて送られた画像の並び（imageSet）を `image` に載せる。本体（画像のバイト列）は持たない。
+  // 一括発信が無効なら `image` は付かず、従来と同じく内容を一切持たない。
+  | { kind: 'unsupported'; lineUserId: string; replyToken: string; image?: InboundImage };
+
+/** 一括発信が有効なときだけ付く、画像メッセージの取得の手掛かり。 */
+export interface InboundImage {
+  messageId: string;
+  /** line = LINE のサーバーにある（Content API で取得できる）。external = 送信者の指定した外部 URL。 */
+  contentProvider: 'line' | 'external';
+  /** まとめて送られたときの並び（index は 1 始まり）。単独なら null。 */
+  imageSet: { id: string; index: number; total: number } | null;
+}
 
 export interface EventDispatcher {
   dispatch(rawWebhookBody: string): Promise<void>;
@@ -27,6 +39,9 @@ export interface EventDispatcherDeps {
   // `ts/packages/db/src/webhook-events.ts` の recordWebhookEventOnce を pool 束縛した関数を注入する想定
   // （実配線はタスク 4.1）。
   recordWebhookEventOnce: (webhookEventId: string) => Promise<boolean>;
+  // 一括発信（line-crosspost）が有効なときだけ true。画像の message.id を `unsupported.image` に載せる。
+  // 省略・false のときは従来どおり（画像の内容を一切持ち回らない）。
+  acceptImages?: boolean;
   // follow/message(text)/postback を委譲する先（ConversationHandlers、タスク 3.x/4.1 で実体を配線）。
   onEvent: (event: InboundEvent) => Promise<void>;
 }
@@ -41,6 +56,9 @@ interface RawLineSource {
 interface RawLineMessage {
   type?: string;
   text?: string;
+  id?: string;
+  contentProvider?: { type?: string };
+  imageSet?: { id?: string; index?: number; total?: number };
 }
 
 interface RawLinePostback {
@@ -68,7 +86,34 @@ interface ParsedInboundEvent {
 
 // 生イベントを InboundEvent に正規化する。冪等化キー（webhookEventId）も併せて返す。
 // 必須フィールド（source.userId・replyToken・webhookEventId）欠落や未知/未対応の型は null。
-function parseEvent(raw: RawLineEvent): ParsedInboundEvent | null {
+const MESSAGE_ID_PATTERN = /^\d{1,32}$/;
+
+function parseImage(message: RawLineMessage | undefined): InboundImage | undefined {
+  if (message?.type !== 'image' || typeof message.id !== 'string' || !MESSAGE_ID_PATTERN.test(message.id)) {
+    return undefined;
+  }
+  const set = message.imageSet;
+  const index = set?.index;
+  const total = set?.total;
+  const imageSet =
+    set !== undefined &&
+    typeof set.id === 'string' &&
+    typeof index === 'number' &&
+    typeof total === 'number' &&
+    Number.isSafeInteger(index) &&
+    Number.isSafeInteger(total) &&
+    index >= 1 &&
+    total >= index
+      ? { id: set.id, index, total }
+      : null;
+  return {
+    messageId: message.id,
+    contentProvider: message.contentProvider?.type === 'external' ? 'external' : 'line',
+    imageSet,
+  };
+}
+
+function parseEvent(raw: RawLineEvent, acceptImages: boolean): ParsedInboundEvent | null {
   const webhookEventId = raw.webhookEventId;
   const lineUserId = raw.source?.userId;
   const replyToken = raw.replyToken;
@@ -86,7 +131,14 @@ function parseEvent(raw: RawLineEvent): ParsedInboundEvent | null {
         // Requirement 5.3: スタンプ・画像等のテキスト以外の message は、黙殺せず
         // unsupported として会話層へ渡す（会話層が現在の段階の案内を再送する）。
         // replyToken 等の欠落は本関数冒頭のガードで既に除外済み（reply 不能な入力は無視）。
-        return { webhookEventId, event: { kind: 'unsupported', lineUserId, replyToken } };
+        const image = acceptImages ? parseImage(raw.message) : undefined;
+        return {
+          webhookEventId,
+          event:
+            image === undefined
+              ? { kind: 'unsupported', lineUserId, replyToken }
+              : { kind: 'unsupported', lineUserId, replyToken, image },
+        };
       }
       const text = raw.message.text;
       if (typeof text !== 'string') {
@@ -115,7 +167,7 @@ export function createEventDispatcher(deps: EventDispatcherDeps): EventDispatche
       const events = body.events ?? [];
 
       for (const raw of events) {
-        const parsed = parseEvent(raw);
+        const parsed = parseEvent(raw, deps.acceptImages === true);
         if (!parsed) {
           continue;
         }

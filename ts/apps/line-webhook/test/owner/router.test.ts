@@ -30,6 +30,8 @@ import { StoreScopedReportError } from '../../src/report/errors.js';
 import type { ReportHandleInput, ReportHandler } from '../../src/report/handler.js';
 import type { InboundEvent } from '../../src/webhook/dispatch.js';
 import type { GbpFlowHandlers } from '../../src/gbp/flows.js';
+import type { CrosspostFlows } from '../../src/crosspost/flows.js';
+import { encodeCrosspostPostback } from '../../src/crosspost/postback.js';
 import { encodeGbpPostback } from '../../src/gbp/postback.js';
 
 type Stage = OnboardingSessionRow['stage'];
@@ -156,6 +158,8 @@ interface SetupOptions {
   readonly withAudit?: boolean;
   /** GBP の会話（gbp-post-review-reply）。省略すると GBP は既定 OFF（Issue #323）。 */
   readonly gbp?: GbpFlowHandlers;
+  /** 一括発信の会話（line-crosspost）。省略すると既定 OFF。 */
+  readonly crosspost?: CrosspostFlows;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -242,6 +246,7 @@ function setup(options: SetupOptions = {}) {
         }),
     lineRichMenuCompletedId: COMPLETED_MENU_ID,
     ...(options.gbp ? { gbp: options.gbp } : {}),
+    ...(options.crosspost ? { crosspost: options.crosspost } : {}),
   };
 
   const router = createStoreIdentifiedOwnerRouter(deps);
@@ -763,3 +768,63 @@ describe('GBP の会話への委譲', () => {
   });
 });
 
+
+describe('一括発信の会話への委譲（line-crosspost・Issue #494）', () => {
+  function fakeCrosspost(result: 'handled' | 'not_handled' = 'handled') {
+    return {
+      handlePostback: vi.fn(async () => result),
+      handleText: vi.fn(async () => result),
+      handleImage: vi.fn(async () => result),
+    } satisfies CrosspostFlows;
+  }
+  const image: InboundEvent = {
+    kind: 'unsupported',
+    lineUserId: LINE_USER_ID,
+    replyToken: REPLY_TOKEN,
+    image: { messageId: '123', contentProvider: 'line', imageSet: null },
+  };
+  const crosspostPostback = postbackEvent(encodeCrosspostPostback({ action: 'x_status' }));
+
+  it('一括発信が引き受けたら、GBP にもステータス案内にも渡さない', async () => {
+    const crosspost = fakeCrosspost();
+    const gbp = {
+      handleGbpPostback: vi.fn(async () => 'handled' as const),
+      handleGbpText: vi.fn(async () => 'handled' as const),
+    } as unknown as GbpFlowHandlers;
+    const h = setup({ crosspost, gbp });
+    await h.handle(textEvent('新メニュー'));
+    await h.handle(image);
+    await h.handle(crosspostPostback);
+    expect(crosspost.handleText).toHaveBeenCalledWith({
+      ownerId: OWNER_ID,
+      lineUserId: LINE_USER_ID,
+      replyToken: REPLY_TOKEN,
+      text: '新メニュー',
+    });
+    expect(crosspost.handleImage).toHaveBeenCalledTimes(1);
+    expect(crosspost.handlePostback).toHaveBeenCalledTimes(1);
+    expect(gbp.handleGbpText).not.toHaveBeenCalled();
+    expect(h.replies).toEqual([]);
+  });
+
+  it('引き受けなければ従来どおり（テキスト・画像はステータス案内）', async () => {
+    const h = setup({ crosspost: fakeCrosspost('not_handled') });
+    await h.handle(image);
+    expectStatusGuidanceOnly(h);
+  });
+
+  it('友だち追加・内容を持たないスタンプは一括発信へ渡さない', async () => {
+    const crosspost = fakeCrosspost();
+    const h = setup({ crosspost });
+    await h.handle(STICKER);
+    expect(crosspost.handleImage).not.toHaveBeenCalled();
+    expect(crosspost.handleText).not.toHaveBeenCalled();
+    expectStatusGuidanceOnly(h);
+  });
+
+  it('既定 OFF なら一括発信の postback もステータス案内として扱う', async () => {
+    const h = setup();
+    await h.handle(crosspostPostback);
+    expectStatusGuidanceOnly(h);
+  });
+});

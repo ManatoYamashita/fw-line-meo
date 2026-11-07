@@ -27,21 +27,21 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 
 ## PR 3: 会話・生成・発信先の共通処理（既定 OFF）
 
-- [ ] 3.1 設定（`CROSSPOST_PILOT_STORE_IDS`・`CROSSPOST_MEDIA_*`・`CROSSPOST_GOOGLE_ENABLED`）。全部あるか全部無いか。無ければ経路を組み立てない
+- [x] 3.1 設定（`CROSSPOST_PILOT_STORE_IDS`・`CROSSPOST_MEDIA_*`・`CROSSPOST_GOOGLE_ENABLED`）。全部あるか全部無いか。無ければ経路を組み立てない
   - _Requirements: 10.1, 10.2, 10.3, 10.4_
-- [ ] 3.2 postback の符号化と復号（`a=x_*`）
+- [x] 3.2 postback の符号化と復号（`a=x_*`）
   - _Requirements: 5.4, 8.1_
-- [ ] 3.3 生成（Instagram・Google）と事実の照合・受理条件
+- [x] 3.3 生成（Instagram・Google）と事実の照合・受理条件
   - _Requirements: 3.1〜3.9, 4.3, 4.4_
-- [ ] 3.4 画像の検証と正規化（sharp・メタデータの除去）・`MediaStore` の境界・LINE の写真の取得
+- [x] 3.4 画像の検証と正規化（sharp・メタデータの除去）・`MediaStore` の境界・LINE の写真の取得
   - _Requirements: 2.1, 2.4, 2.5, 2.6, 2.7, 8.2_
-- [ ] 3.5 発信先アダプタの契約・publisher（承認・実行権の獲得・結果の分類・再試行・確認・期限切れの in_progress）
+- [x] 3.5 発信先アダプタの契約・publisher（承認・実行権の獲得・結果の分類・再試行・確認・期限切れの in_progress）
   - _Requirements: 5.4〜5.7, 6.1〜6.10, 9.1〜9.5_
-- [ ] 3.6 Instagram アダプタ（v1: not_ready）
+- [x] 3.6 Instagram アダプタ（v1: not_ready）
   - _Requirements: 9.4_
-- [ ] 3.7 Flex とテキストの組み立て（確認のカルーセル・投稿先・最終確認・結果・状況）
+- [x] 3.7 Flex とテキストの組み立て（確認のカルーセル・投稿先・最終確認・結果・状況）
   - _Requirements: 4.1, 4.2, 5.1〜5.3, 7.1, 7.3, 7.4, 8.7_
-- [ ] 3.8 会話の状態機械と router・dispatch への配線（OFF のとき何も引き受けない）
+- [x] 3.8 会話の状態機械と router・dispatch への配線（OFF のとき何も引き受けない）
   - _Requirements: 1.1〜1.5, 2.1〜2.10, 4.6, 7.2_
 - [ ] 3.9 承認の後の停止からの再開（同じ承認の押し直し・x_run）と取りやめ（x_drop）
   - _Requirements: 6.11, 6.12_

@@ -141,6 +141,18 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | GBP の失敗の種別 | `gbpErrorKind` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | `GbpApiError`・`GenerationError`・`TokenStoreError` の `kind`。例外のクラス名（`errorKind`）とは別物 |
 | オーナーの識別子 | `ownerId` | 該当なし | 新規 | `ts/apps/line-webhook/src/gbp/logger.ts` | `owners.id`（内部の UUID）。通知先と所有検証の主体を辿るために載せる。LINE ユーザー ID は載せない |
 
+
+### 1.11 一括発信に固有の項目
+
+LINE 起点の一括発信（spec: `.kiro/specs/line-crosspost/`）の記録に使う。投稿文・素材・修正指示・写真・取得用 URL・トークン・LINE ユーザー ID は載せない（`ts/apps/line-webhook/src/crosspost/logger.ts` の冒頭の不変条件）。オーナー・店舗は既存の `ownerId`・`storeId`、閉じた語彙の理由は既存の `reason`、例外のクラス名は既存の `errorKind`、HTTP ステータスは既存の `status` を使う。
+
+| 意味 | 応答層 | 日次バッチ層 | 由来 | 出典 | 備考 |
+|---|---|---|---|---|---|
+| 投稿先 | `crosspostDestination` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 値は `instagram`、`google` のいずれか（`@fwlm/db` の CrosspostDestination） |
+| 投稿先の状態 | `crosspostDeliveryStatus` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | `crosspost_delivery_status` の値。記録の時点で試行が古くなっていた（結果を書けなかった）ときは `superseded` |
+| 試行の回数 | `crosspostAttempt` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 初回を 1 とする整数 |
+| 処理の段階 | `crosspostOperation` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 閉じた語彙（`availability`、`publish`、`reconcile`、`issue_fetch_url`、`fetch_content`、`store_media`、`intake`、`release`、`delete`、`purge`、`notify`、`run_approved`） |
+
 ---
 
 ## 2. 事象名
@@ -183,6 +195,13 @@ GBP 連携（spec: `.kiro/specs/gbp-post-review-reply/`）の記録に使う。�
 | `line-webhook.start_loading_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | 処理中の入力中アニメーション（`chat/loading/start`・Issue #307）の開始に失敗した場合。補助的な UX であり本処理は止めない。**成功は記録しない**（毎イベント発火するため richmenu 系の成功記録とは頻度が桁違いであり、記録の欠落が業務上の不整合につながる性質でもない）。項目は `errorKind` だけである |
 | `line-webhook.gbp_disabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に GBP 連携が無効であることを記録する |
 | `line-webhook.gbp_enabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に GBP 連携が有効であることを記録する |
+| `line-webhook.crosspost_disabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に一括発信が無効（既定 OFF・CROSSPOST_* の env が無い）であることを 1 回記録する（line-crosspost・Issue #494） |
+| `line-webhook.crosspost_enabled` | line-webhook | 新規 | `ts/apps/line-webhook/src/index.ts` | 起動時に一括発信が有効であることを 1 回記録する |
+| `crosspost.delivery_finished` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 投稿先の 1 回の試行の結果。項目は `ownerId`・`storeId`・`crosspostDestination`・`crosspostDeliveryStatus`・`reason`（失敗・結果不明の理由）・`crosspostAttempt` だけ。結果不明・失敗の件数を数える指標の入力に使う予定（有効化の PR で足す） |
+| `crosspost.media_rejected` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 写真を受け付けなかった。`reason` は形式・大きさ・取得できない・一時的な失敗のいずれか。写真の中身は載せない |
+| `crosspost.generation_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 投稿文を作れなかった。`reason` は `@fwlm/gemini` の GenerationError の kind |
+| `crosspost.media_cleanup_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 写真の実体の削除の失敗。置き場の寿命の規則が後で消すので、利用者の操作は止めない |
+| `crosspost.operation_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 想定外の例外。`crosspostOperation` と `errorKind`（例外のクラス名）だけを載せる |
 | `webhook_signature_verification_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | LINE Webhook の署名検証失敗。`webhook_signature_failures` 指標が参照するため変更禁止。記録するのは `reason` と LINE 採番の `lineRequestId` のみ |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
 | `line-webhook.richmenu_linked` | line-webhook | 新規 | `ts/apps/line-webhook/src/owner/completed-menu.ts` | 補助的処理の**成功**。失敗のみを記録すると「記録が無い」が成功と未実行のどちらか判定できない（要件 3.4）。オンボーディング完了時のリンク（`onboarding/conversation.ts`）と、店舗特定済みオーナーの振り分け口のメニュー照合（`owner/router.ts`・line-on-demand-report）の両方が、この出典の同じ関数を呼んで出す |
