@@ -3,6 +3,7 @@ import type { CrosspostDeliveryContext, CrosspostDeliveryRow, CrosspostDraftRow 
 import {
   availableChoices,
   buildConfirmMessage,
+  buildPhotoResendRequiredMessage,
   buildResultMessage,
   buildReviewMessage,
   buildStartMessage,
@@ -136,10 +137,10 @@ describe('crosspost messages の LINE の制約', () => {
     expect(JSON.stringify(confirm[0])).toContain('縦長');
     expect(confirm.flatMap(actions).some((a) => a.data?.startsWith('a=x_ok'))).toBe(true);
     expect(JSON.stringify(confirm)).toContain('写っていないか');
-    // 引用できない写真は、向きを示して送り直しを促す（引用の手掛かりを持たない）
-    const unquoted = buildConfirmMessage({ draft: draft(), storeName: 's', choice: 'google', photo: { width: 100, height: 100, quoteToken: null } });
-    expect(unquoted[0]).not.toHaveProperty('quoteToken');
-    expect(JSON.stringify(unquoted[0])).toContain('送り直して');
+    // 引用できない写真では最終確認そのものを作らず、送り直しを求める（承認のボタンを持たない）
+    const resend = buildPhotoResendRequiredMessage(DRAFT);
+    expect(JSON.stringify(resend)).toContain('写真をもう一度送って');
+    expect(actions(resend).some((a) => a.data?.startsWith('a=x_ok'))).toBe(false);
     // 写真なしは引用のテキストを出さない
     expect(buildConfirmMessage({ draft: draft(), storeName: 's', choice: 'google', photo: null })).toHaveLength(1);
     const review = buildReviewMessage({ draft: draft(), storeName: '森のカフェ', availability: BOTH, hasPhoto: true, googleConnectAvailable: true });
