@@ -12,26 +12,26 @@ BEGIN
     INSERT INTO stores(owner_id, name, place_id, place_status) VALUES (ow, 's90', 'P_90', 'confirmed') RETURNING id INTO s;
 
     -- 既定値: collecting・none・版 0・素材は空
-    INSERT INTO crosspost_drafts(owner_id, store_id, expires_at, purge_after)
-        VALUES (ow, s, now() + interval '1 day', now() + interval '30 day') RETURNING id INTO d1;
+    INSERT INTO crosspost_drafts(owner_id, store_id, expires_at, purge_after, line_started_at)
+        VALUES (ow, s, now() + interval '1 day', now() + interval '30 day', now()) RETURNING id INTO d1;
     PERFORM 1 FROM crosspost_drafts
         WHERE id = d1 AND status = 'collecting' AND input_mode = 'none' AND revision = 0 AND material_text = '';
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: crosspost_drafts defaults not applied'; END IF;
 
     -- 作成中の下書きは owner あたり 1 つ（部分一意索引）
-    BEGIN INSERT INTO crosspost_drafts(owner_id, store_id, expires_at, purge_after)
-            VALUES (ow, s, now() + interval '1 day', now() + interval '30 day');
+    BEGIN INSERT INTO crosspost_drafts(owner_id, store_id, expires_at, purge_after, line_started_at)
+            VALUES (ow, s, now() + interval '1 day', now() + interval '30 day', now());
         RAISE EXCEPTION 'FAIL: second open draft accepted'; EXCEPTION WHEN unique_violation THEN NULL; END;
 
     -- 承認済み・取り消し済みは作成中に数えない（同じ owner でも並べて持てる）
     UPDATE crosspost_drafts SET status = 'canceled' WHERE id = d1;
-    INSERT INTO crosspost_drafts(owner_id, store_id, expires_at, purge_after, status, instagram_text, google_text)
-        VALUES (ow, s, now() + interval '1 day', now() + interval '30 day', 'reviewing', 'IG', 'GG') RETURNING id INTO d2;
+    INSERT INTO crosspost_drafts(owner_id, store_id, expires_at, purge_after, status, instagram_text, google_text, line_started_at)
+        VALUES (ow, s, now() + interval '1 day', now() + interval '30 day', 'reviewing', 'IG', 'GG', now()) RETURNING id INTO d2;
 
     -- 入力モードと投稿先は揃って有無が決まる。確認中でなければ none
     BEGIN UPDATE crosspost_drafts SET input_mode = 'manual' WHERE id = d2;
         RAISE EXCEPTION 'FAIL: input_mode without destination accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
-    BEGIN UPDATE crosspost_drafts SET input_mode = 'ai_revision', input_destination = 'google', status = 'collecting' WHERE id = d2;
+    BEGIN UPDATE crosspost_drafts SET input_mode = 'ai_revision', input_destination = 'google', input_mode_set_at = now(), status = 'collecting' WHERE id = d2;
         RAISE EXCEPTION 'FAIL: input_mode outside reviewing accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
 
     -- 承認は approved_at と approved_revision を伴う

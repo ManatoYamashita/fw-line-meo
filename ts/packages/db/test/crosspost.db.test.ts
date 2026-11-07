@@ -17,6 +17,7 @@ import {
   listRecentCrosspostPosts,
   markStaleCrosspostDeliveries,
   purgeCrosspostRetention,
+  beginCrosspostSend,
   cancelQueuedCrosspostDelivery,
   markCrosspostResultNotified,
   listUnnotifiedCrosspostResults,
@@ -45,6 +46,8 @@ const ALLOWED = [STORE_A1, STORE_A2, STORE_A_SUSPENDED, STORE_A_UNCONFIRMED, STO
 const MAX_ATTEMPTS = 3;
 /** 待ちを実行してよい承認からの時間（line-webhook の QUEUED_RESUME_WINDOW_MS と同じ 24 時間）。 */
 const WINDOW = 24 * 3600_000;
+/** 送信を始めてよい期限の安全余裕（line-webhook の SEND_START_SAFETY_MARGIN_MS と同じ 2 分）。 */
+const MARGIN = 2 * 60_000;
 
 function unwrap<T, E>(res: Result<T, E>): T {
   if (!res.ok) throw new Error(`expected ok Result, got error: ${String(res.error)}`);
@@ -52,6 +55,11 @@ function unwrap<T, E>(res: Result<T, E>): T {
 }
 
 const later = (): Date => new Date(Date.now() + 24 * 3600 * 1000);
+/** 下書きを始めた LINE の時刻（写真・文の既定の送った時刻より前）。 */
+const DRAFT_STARTED = new Date(Date.UTC(2026, 10, 6, 0, 0, 0));
+/** 素材の文を送った LINE の時刻（下書きを始めた後）。 */
+let textClock = Date.UTC(2026, 10, 6, 12, 0, 0);
+const textAt = (): Date => new Date((textClock += 1000));
 const purgeLater = (): Date => new Date(Date.now() + 30 * 24 * 3600 * 1000);
 
 let mediaSeq = 0;
@@ -89,9 +97,10 @@ async function newReviewingDraft(
       allowedStoreIds: ALLOWED,
       expiresAt: later(),
       purgeAfter: purgeLater(),
+      lineStartedAt: DRAFT_STARTED,
     }),
   );
-  unwrap(await appendCrosspostMaterial(pool, { ownerId, draftId: draft.id, text: '新メニューの告知', expiresAt: later() }));
+  unwrap(await appendCrosspostMaterial(pool, { ownerId, draftId: draft.id, text: '新メニューの告知', sentAt: textAt(), expiresAt: later() }));
   const reviewing = await beginCrosspostReview(pool, { ownerId, draftId: draft.id, expiresAt: later() });
   if (!reviewing) throw new Error('beginCrosspostReview failed');
   const saved = await saveCrosspostTexts(pool, {
@@ -157,7 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
   describe('下書きの作成と受け取り', () => {
     it('他のオーナーの店舗・停止中・未確定・指定外の店舗では作らない', async () => {
       const pool = await getPool();
-      const base = { ownerId: OWNER_A, allowedStoreIds: ALLOWED, expiresAt: later(), purgeAfter: purgeLater() };
+      const base = { ownerId: OWNER_A, allowedStoreIds: ALLOWED, expiresAt: later(), purgeAfter: purgeLater(), lineStartedAt: DRAFT_STARTED };
       for (const storeId of [STORE_B1, STORE_A_SUSPENDED, STORE_A_UNCONFIRMED]) {
         expect(await createCrosspostDraft(pool, { ...base, storeId })).toEqual({ ok: false, error: 'STORE_NOT_ELIGIBLE' });
       }
@@ -168,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
 
     it('作成中の下書きは owner あたり 1 つ。2 つ目は OPEN_DRAFT_EXISTS（黙って置き換えない）', async () => {
       const pool = await getPool();
-      const base = { ownerId: OWNER_A, allowedStoreIds: ALLOWED, expiresAt: later(), purgeAfter: purgeLater() };
+      const base = { ownerId: OWNER_A, allowedStoreIds: ALLOWED, expiresAt: later(), purgeAfter: purgeLater(), lineStartedAt: DRAFT_STARTED };
       const first = unwrap(await createCrosspostDraft(pool, { ...base, storeId: STORE_A1 }));
       expect(await createCrosspostDraft(pool, { ...base, storeId: STORE_A2 })).toEqual({
         ok: false,
@@ -191,19 +200,20 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
           allowedStoreIds: ALLOWED,
           expiresAt: later(),
           purgeAfter: purgeLater(),
+      lineStartedAt: DRAFT_STARTED,
         }),
       );
-      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '一通目', expiresAt: later() }));
+      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '一通目', sentAt: textAt(), expiresAt: later() }));
       const second = unwrap(
-        await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '二通目', expiresAt: later() }),
+        await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '二通目', sentAt: textAt(), expiresAt: later() }),
       );
       expect(second.material_text).toBe('一通目\n二通目');
       expect(
-        await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: 'あ'.repeat(1995), expiresAt: later() }),
+        await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: 'あ'.repeat(1995), sentAt: textAt(), expiresAt: later() }),
       ).toEqual({ ok: false, error: 'TOO_LONG' });
       // 他のオーナーは追記できない
       expect(
-        await appendCrosspostMaterial(pool, { ownerId: OWNER_B, draftId: draft.id, text: '乗っ取り', expiresAt: later() }),
+        await appendCrosspostMaterial(pool, { ownerId: OWNER_B, draftId: draft.id, text: '乗っ取り', sentAt: textAt(), expiresAt: later() }),
       ).toEqual({ ok: false, error: 'NOT_COLLECTING' });
       const reread = await getCrosspostDraft(pool, { ownerId: OWNER_A, draftId: draft.id });
       expect(reread?.draft.material_text).toBe('一通目\n二通目');
@@ -218,15 +228,16 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
           allowedStoreIds: ALLOWED,
           expiresAt: later(),
           purgeAfter: purgeLater(),
+      lineStartedAt: DRAFT_STARTED,
         }),
       );
       expect(await beginCrosspostReview(pool, { ownerId: OWNER_A, draftId: draft.id, expiresAt: later() })).toBeNull();
-      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '本日限定', expiresAt: later() }));
+      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '本日限定', sentAt: textAt(), expiresAt: later() }));
       const reviewing = await beginCrosspostReview(pool, { ownerId: OWNER_A, draftId: draft.id, expiresAt: later() });
       expect(reviewing?.status).toBe('reviewing');
       expect(reviewing?.revision).toBe(1);
       expect(
-        await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '遅れて届いた文', expiresAt: later() }),
+        await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '遅れて届いた文', sentAt: textAt(), expiresAt: later() }),
       ).toEqual({ ok: false, error: 'NOT_COLLECTING' });
     });
   });
@@ -241,6 +252,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         expectedRevision: draft.revision,
         mode: 'manual',
         destination: 'google',
+        lineEventAt: textAt(),
         expiresAt: later(),
       });
       expect(moded?.input_mode).toBe('manual');
@@ -623,21 +635,34 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const { deliveryId } = await approvedGoogle();
       await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       await recordCrosspostOutcome(pool, { deliveryId, attempt: 1, outcome: { kind: 'unknown', reason: 'network' } });
-      expect(await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId, posted: false })).toBeNull();
-      const notPosted = await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, posted: false });
+      expect(await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId, posted: false, windowMs: WINDOW })).toBeNull();
+      const notPosted = await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, posted: false, windowMs: WINDOW });
       expect(notPosted?.status).toBe('failed');
       expect(notPosted?.retryable).toBe(true);
       expect(notPosted?.failure_reason).toBe('owner_reported_not_posted');
       // 結果不明でなくなったので、もう一度確定はできない
-      expect(await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, posted: true })).toBeNull();
+      expect(await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, posted: true, windowMs: WINDOW })).toBeNull();
       const retried = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       expect(retried?.attempt_count).toBe(2);
     });
 
-    it('実行中のまま古くなった行は結果不明になる（そのオーナーの行だけ）', async () => {
+    it('送信を始めないまま古くなった実行中の行は、送っていないので再試行できる失敗になる', async () => {
       const pool = await getPool();
       const { deliveryId } = await approvedGoogle();
       await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
+      await pool.query(`UPDATE crosspost_deliveries SET last_attempt_at = now() - interval '10 minutes' WHERE id = $1`, [deliveryId]);
+      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW })).toBe(1);
+      const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
+      expect(ctx?.delivery.status).toBe('failed');
+      expect(ctx?.delivery.failure_reason).toBe('interrupted_before_send');
+      expect(ctx?.delivery.retryable).toBe(true);
+    });
+
+    it('送信を始めた後に古くなった実行中の行は結果不明になる（そのオーナーの行だけ）', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedGoogle();
+      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
+      expect((await beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN })).kind).toBe('started');
       await pool.query(`UPDATE crosspost_deliveries SET last_attempt_at = now() - interval '10 minutes' WHERE id = $1`, [deliveryId]);
       expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_B, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW })).toBe(0);
       expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW })).toBe(1);
@@ -846,6 +871,190 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const status = (await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId }))?.delivery.status;
       if (claimed === null) expect(status).toBe('canceled');
       else expect(status).toBe('in_progress');
+    });
+  });
+
+  describe('下書きの境界（遅れて届いた別の下書きの写真・文を混ぜない・LINE の時刻どうしで比べる）', () => {
+    const lineAt = (sec: number): Date => new Date(DRAFT_STARTED.getTime() + sec * 1000);
+
+    it('下書きを始める前・同じ時刻に送った写真は付けず、後に送った写真は付ける', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const before = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('old', lineAt(-5)), expiresAt: later() });
+      expect(before.kind).toBe('before_draft');
+      const same = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('same', lineAt(0)), expiresAt: later() });
+      expect(same.kind).toBe('before_draft');
+      expect(await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id })).toBeNull();
+      const after = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('new', lineAt(1)), expiresAt: later() });
+      expect(after.kind).toBe('attached');
+    });
+
+    it('下書きを始める前・同じ時刻・時刻不明の文は素材に入れない', async () => {
+      const pool = await getPool();
+      const created = unwrap(
+        await createCrosspostDraft(pool, {
+          ownerId: OWNER_A,
+          storeId: STORE_A1,
+          allowedStoreIds: ALLOWED,
+          expiresAt: later(),
+          purgeAfter: purgeLater(),
+          lineStartedAt: DRAFT_STARTED,
+        }),
+      );
+      for (const sentAt of [lineAt(-1), lineAt(0), null]) {
+        expect(
+          await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: created.id, text: '前の下書きの文', sentAt, expiresAt: later() }),
+        ).toEqual({ ok: false, error: 'NOT_AFTER_START' });
+      }
+      const ok = await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: created.id, text: '新しい文', sentAt: lineAt(1), expiresAt: later() });
+      expect(ok.ok && ok.value.material_text).toBe('新しい文');
+    });
+
+    it('入力モードを切り替える前に送った文では、書き直しを保存しない', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const switchedAt = lineAt(100);
+      const moded = await setCrosspostInputMode(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        mode: 'manual',
+        destination: 'google',
+        lineEventAt: switchedAt,
+        expiresAt: later(),
+      });
+      expect(moded?.input_mode_set_at?.getTime()).toBe(switchedAt.getTime());
+      for (const inputSentAt of [lineAt(99), switchedAt]) {
+        expect(
+          await saveCrosspostTexts(pool, {
+            ownerId: OWNER_A,
+            draftId: draft.id,
+            expectedRevision: draft.revision,
+            texts: { google: '切り替えの前に送った文' },
+            inputSentAt,
+            expiresAt: later(),
+          }),
+        ).toBeNull();
+      }
+      const saved = await saveCrosspostTexts(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        texts: { google: '切り替えの後に送った文' },
+        inputSentAt: lineAt(101),
+        expiresAt: later(),
+      });
+      expect(saved?.google_text).toBe('切り替えの後に送った文');
+      expect(saved?.input_mode_set_at).toBeNull();
+    });
+
+    it('入力モードの切り替えは操作の時刻を要する（時刻不明では切り替えない）', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      expect(
+        await setCrosspostInputMode(pool, {
+          ownerId: OWNER_A,
+          draftId: draft.id,
+          expectedRevision: draft.revision,
+          mode: 'ai_revision',
+          destination: 'instagram',
+          lineEventAt: null,
+          expiresAt: later(),
+        }),
+      ).toBeNull();
+    });
+  });
+
+  describe('外部 API へ送る直前の期限（承認から 24 時間・安全余裕 2 分）', () => {
+    async function claimedAt(approvedAgo: string): Promise<{ deliveryId: string; draftId: string }> {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const approved = await approveCrosspostDraft(pool, { ownerId: OWNER_A, draftId: draft.id, expectedRevision: draft.revision, destinations: ['google'] });
+      if (approved.kind !== 'approved') throw new Error('not approved');
+      const deliveryId = approved.deliveries[0]!.id;
+      expect(await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW })).not.toBeNull();
+      // 獲得の後、送信の前に時間が経った状態にする
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - $2::interval WHERE id = $1`, [draft.id, approvedAgo]);
+      return { deliveryId, draftId: draft.id };
+    }
+
+    it('期限の内なら送信を始めた時刻を書き、送ってよい', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await claimedAt('1 hour');
+      const begun = await beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN });
+      expect(begun.kind).toBe('started');
+      expect(begun.kind === 'started' && begun.delivery.send_started_at).not.toBeNull();
+      // 2 回目は送らせない（同じ試行で二重に送信を始めない）
+      expect((await beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN })).kind).toBe('superseded');
+    });
+
+    it('獲得の後・送信の前に期限（安全余裕を含む）を越えたら、送らずに取りやめる', async () => {
+      const pool = await getPool();
+      for (const ago of ['23 hours 59 minutes', '24 hours 1 second']) {
+        const { deliveryId } = await claimedAt(ago);
+        const begun = await beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN });
+        expect(begun.kind).toBe('expired');
+        const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
+        expect(ctx?.delivery.status).toBe('canceled');
+        expect(ctx?.delivery.send_started_at).toBeNull();
+      }
+    });
+
+    it('安全余裕の手前（23 時間 57 分）は送ってよい', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await claimedAt('23 hours 57 minutes');
+      expect((await beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN })).kind).toBe('started');
+    });
+
+    it('送信を始めた後に期限を越えても、取りやめず結果を記録する（送ったものは取り消さない）', async () => {
+      const pool = await getPool();
+      const { deliveryId, draftId } = await claimedAt('1 hour');
+      expect((await beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN })).kind).toBe('started');
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - interval '25 hours' WHERE id = $1`, [draftId]);
+      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW })).toBe(0);
+      const recorded = await recordCrosspostOutcome(pool, { deliveryId, attempt: 1, outcome: { kind: 'succeeded', externalId: 'p', externalUrl: null } });
+      expect(recorded?.status).toBe('succeeded');
+    });
+
+    it('送信の開始と後始末が同時でも、送信を始めた試行が「未送信」に化けない', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await claimedAt('1 hour');
+      await pool.query(`UPDATE crosspost_deliveries SET last_attempt_at = now() - interval '10 minutes' WHERE id = $1`, [deliveryId]);
+      const [begun] = await Promise.all([
+        beginCrosspostSend(pool, { deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN }),
+        markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW }),
+      ]);
+      const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
+      if (begun.kind === 'started') {
+        // 送信を始めた後に後始末が走ったなら、送ったかもしれないので結果不明か実行中のまま
+        expect(['in_progress', 'unknown']).toContain(ctx?.delivery.status);
+      } else {
+        // 後始末が先なら、送っていない失敗になっていて、送信は始めない
+        expect(begun.kind).toBe('superseded');
+        expect(ctx?.delivery.status).toBe('failed');
+        expect(ctx?.delivery.send_started_at).toBeNull();
+      }
+    });
+
+    it('期限を過ぎた投稿は、再試行も「投稿されていなかった」の後の再試行も獲得できない', async () => {
+      const pool = await getPool();
+      // 再試行できる失敗のまま期限を越えた
+      const a = await claimedAt('1 hour');
+      await beginCrosspostSend(pool, { deliveryId: a.deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN });
+      await recordCrosspostOutcome(pool, { deliveryId: a.deliveryId, attempt: 1, outcome: { kind: 'failed', reason: 'rate_limited', retryable: true } });
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - interval '25 hours' WHERE id = $1`, [a.draftId]);
+      expect(await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId: a.deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW })).toBeNull();
+      await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW });
+      expect((await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId: a.deliveryId }))?.delivery.retryable).toBe(false);
+
+      // 結果不明のまま期限を越え、店主が「投稿されていなかった」と確かめた
+      const b = await claimedAt('1 hour');
+      await beginCrosspostSend(pool, { deliveryId: b.deliveryId, attempt: 1, windowMs: WINDOW, safetyMarginMs: MARGIN });
+      await recordCrosspostOutcome(pool, { deliveryId: b.deliveryId, attempt: 1, outcome: { kind: 'unknown', reason: 'network' } });
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - interval '25 hours' WHERE id = $1`, [b.draftId]);
+      const resolved = await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId: b.deliveryId, posted: false, windowMs: WINDOW });
+      expect(resolved?.status).toBe('failed');
+      expect(resolved?.retryable).toBe(false);
     });
   });
 

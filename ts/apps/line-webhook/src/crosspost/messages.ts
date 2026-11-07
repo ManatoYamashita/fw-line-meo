@@ -224,6 +224,27 @@ export function buildOlderPhotoIgnoredMessage(draftId: string): LineMessage {
   );
 }
 
+export function buildPhotoBeforeDraftMessage(draftId: string): LineMessage {
+  return plain(
+    'この写真は、いまの投稿を作り始める前に送られたものとして届いたため使いません（前の投稿のために送った写真かもしれません）。使う場合は、もう一度送ってください。',
+    collectingReplies(draftId),
+  );
+}
+
+export function buildTextBeforeDraftMessage(draftId: string): LineMessage {
+  return plain(
+    'この文は、いまの投稿を作り始める前に送られたものとして届いたため、下書きには入れていません。入れる場合は、もう一度送ってください。',
+    collectingReplies(draftId),
+  );
+}
+
+export function buildTextBeforeInputModeMessage(draftId: string): LineMessage {
+  return plain(
+    'この文は「自分で書き直す」「AI に直してもらう」を押す前に送られたものとして届いたため、使っていません。直す内容を、もう一度送ってください。',
+    [postback('直すのをやめる', { action: 'x_view', draftId })],
+  );
+}
+
 export function buildAmbiguousPhotoMessage(draftId: string): LineMessage {
   return plain(
     '写真がほぼ同時に届き、どちらを後に送ったか確かめられませんでした。いまは前の写真のままです。使いたい写真を 1 枚だけ、もう一度送ってください。',

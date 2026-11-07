@@ -27,6 +27,13 @@ CREATE TABLE crosspost_drafts (
     -- 確認中に届いたテキストの解釈（none = 反映しない・ai_revision = 修正指示・manual = 店主の書き直し）
     input_mode        crosspost_input_mode NOT NULL DEFAULT 'none',
     input_destination crosspost_destination,
+    -- 入力モードを切り替えた操作（postback）の LINE のイベントの時刻。これより後に送られた文だけを、修正指示・書き直しの
+    -- 文として扱う（切り替えの前に送った文が遅れて届いても、書き直しの文にしない）
+    input_mode_set_at timestamptz,
+    -- 下書きを始めた操作（「投稿」の文・開始の postback）の LINE のイベントの時刻。これより後に送られた写真・文だけを
+    -- この下書きの素材にする（前の下書きの写真・文が遅れて届いても、新しい下書きへ混ぜない）。写真・文の送った時刻と
+    -- 同じ LINE の時計で比べる（DB の時計とは比べない）
+    line_started_at   timestamptz NOT NULL,
     -- 文・写真が変わるたびに +1。最終確認と承認の postback はこの値で縛る（古いカードから投稿させない）
     revision          integer NOT NULL DEFAULT 0,
     -- 店主が送った伝えたいこと（生成の素材）。店主自身の業務の内容で、来店客の情報ではない
@@ -54,6 +61,7 @@ CREATE TABLE crosspost_drafts (
     ),
     CONSTRAINT ck_crosspost_drafts_input CHECK (
         (input_mode = 'none') = (input_destination IS NULL)
+        AND (input_mode = 'none') = (input_mode_set_at IS NULL)
         AND (input_mode = 'none' OR status = 'reviewing')
     ),
     CONSTRAINT ck_crosspost_drafts_purge CHECK (purge_after > created_at)
@@ -126,6 +134,9 @@ CREATE TABLE crosspost_deliveries (
     external_id     text,
     external_url    text,
     last_attempt_at timestamptz,
+    -- この試行が外部 API への送信を始めた時刻（送信の直前に期限を確かめて書く・DB の時計）。NULL の試行は外部へ何も
+    -- 送っていないことが確か（中断しても「結果不明」にせず、未送信として扱える）
+    send_started_at timestamptz,
     finished_at     timestamptz,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
@@ -136,7 +147,7 @@ CREATE TABLE crosspost_deliveries (
         failure_reason IS NULL OR failure_reason IN (
             'not_ready', 'not_linked', 'token_invalid', 'permission_denied', 'rejected',
             'rate_limited', 'upstream_unavailable', 'media_unavailable', 'unsupported_content',
-            'owner_reported_not_posted'
+            'owner_reported_not_posted', 'interrupted_before_send'
         )
     ),
     CONSTRAINT ck_crosspost_deliveries_unknown_reason CHECK (
@@ -151,6 +162,7 @@ CREATE TABLE crosspost_deliveries (
         AND (status = 'failed' OR retryable = false)
         AND ((status IN ('queued', 'in_progress')) = (finished_at IS NULL))
         AND (status = 'queued' OR last_attempt_at IS NOT NULL OR status = 'canceled')
+        AND (status <> 'queued' OR send_started_at IS NULL)
     )
 );
 

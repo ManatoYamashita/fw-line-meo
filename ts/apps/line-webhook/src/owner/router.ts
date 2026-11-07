@@ -119,7 +119,14 @@ async function delegateToGbp(gbp: GbpFlowHandlers, event: InboundEvent, ownerId:
  * GBP より先に渡す。作成中の一括発信の下書きがあるときのテキストは、一括発信の素材・修正として扱う。
  */
 async function delegateToCrosspost(crosspost: CrosspostFlows, event: InboundEvent, ownerId: string): Promise<boolean> {
-  const base = { ownerId, lineUserId: event.lineUserId, replyToken: event.replyToken };
+  // イベントの LINE の時刻（下書きの境界の判定に使う）。画像はイベントの時刻を image.sentAt に持つ。
+  const sentAt =
+    event.kind === 'text' || event.kind === 'postback'
+      ? (event.sentAt ?? null)
+      : event.kind === 'unsupported'
+        ? (event.image?.sentAt ?? null)
+        : null;
+  const base = { ownerId, lineUserId: event.lineUserId, replyToken: event.replyToken, sentAt };
   if (event.kind === 'postback') {
     return (await crosspost.handlePostback({ ...base, data: event.data })) === 'handled';
   }

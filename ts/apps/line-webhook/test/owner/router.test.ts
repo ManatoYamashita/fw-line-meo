@@ -799,6 +799,7 @@ describe('一括発信の会話への委譲（line-crosspost・Issue #494）', (
       ownerId: OWNER_ID,
       lineUserId: LINE_USER_ID,
       replyToken: REPLY_TOKEN,
+      sentAt: null,
       text: '新メニュー',
     });
     expect(crosspost.handleImage).toHaveBeenCalledTimes(1);

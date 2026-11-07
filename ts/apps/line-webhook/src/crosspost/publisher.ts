@@ -27,12 +27,14 @@ import {
   releaseSettledCrosspostMedia,
   resolveUnknownCrosspostDelivery,
   saveCrosspostCheckpoint,
+  beginCrosspostSend,
 } from '@fwlm/db';
 import type { Availability, ContentShape, DestinationAdapter, PublishOutcome } from './adapters/types.js';
 import {
   DESTINATION_ORDER,
   MAX_DELIVERY_ATTEMPTS,
   QUEUED_RESUME_WINDOW_MS,
+  SEND_START_SAFETY_MARGIN_MS,
   STALE_IN_PROGRESS_MS,
   type CrosspostDestination,
 } from './domain.js';
@@ -187,6 +189,25 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
         return;
       }
       media = { fetchUrl, width: ctx.media.width, height: ctx.media.height, byteSize: ctx.media.byte_size };
+    }
+
+    // 外部 API へ送る直前に、もう一度期限を確かめ、送信の開始を記録する（Req 6.12）。写真の URL の準備などで
+    // 獲得から時間が経っても、承認から 24 時間（安全余裕 2 分を引く）を過ぎた投稿は送らない。期限を過ぎていれば
+    // DB の側で取りやめ（canceled）にしてある。記録の後に何かが止まっても、送信を始めた試行は結果不明として扱われる。
+    const begun = await beginCrosspostSend(deps.db, {
+      deliveryId: claimed.id,
+      attempt: claimed.attempt_count,
+      windowMs: QUEUED_RESUME_WINDOW_MS,
+      safetyMarginMs: SEND_START_SAFETY_MARGIN_MS,
+    });
+    if (begun.kind !== 'started') {
+      deps.logger.info('crosspost.delivery_finished', {
+        ...meta,
+        destination: claimed.destination,
+        deliveryStatus: begun.kind === 'expired' ? 'canceled' : 'superseded',
+        attempt: claimed.attempt_count,
+      });
+      return;
     }
 
     const adapter = deps.adapters[claimed.destination];
@@ -372,6 +393,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
         await resolveUnknownCrosspostDelivery(deps.db, {
           ownerId,
           deliveryId,
+          windowMs: QUEUED_RESUME_WINDOW_MS,
           posted: outcome.kind === 'posted',
           ...(outcome.kind === 'posted' ? { externalId: outcome.externalId, externalUrl: outcome.externalUrl } : {}),
         });
@@ -399,7 +421,12 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
     },
 
     async markObserved(ownerId, deliveryId, posted) {
-      const updated = await resolveUnknownCrosspostDelivery(deps.db, { ownerId, deliveryId, posted });
+      const updated = await resolveUnknownCrosspostDelivery(deps.db, {
+        ownerId,
+        deliveryId,
+        posted,
+        windowMs: QUEUED_RESUME_WINDOW_MS,
+      });
       if (updated === null) return null;
       await cleanupMedia(ownerId, updated.draft_id);
       return reload(ownerId, deliveryId);
