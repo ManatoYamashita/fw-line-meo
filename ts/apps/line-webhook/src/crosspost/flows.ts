@@ -447,7 +447,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     try {
       const deliveries = await deps.publisher.runApproved(event.ownerId, draftId);
       marks = marksOf(deliveries.map((ctx) => ctx.delivery));
-      message = buildResultMessage({ storeName, deliveries });
+      message = buildResultMessage({ storeName, deliveries, googleConnectAvailable: deps.googleConnectAvailable });
     } catch (error) {
       deps.logger.error('crosspost.operation_failed', {
         ownerId: event.ownerId,
@@ -643,7 +643,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     storeName: string,
   ): Promise<{ message: LineMessage; marks: ResultMark[] }> {
     const deliveries = await listCrosspostDeliveries(deps.db, { ownerId: event.ownerId, draftId });
-    return { message: buildResultMessage({ storeName, deliveries }), marks: marksOf(deliveries.map((ctx) => ctx.delivery)) };
+    return { message: buildResultMessage({ storeName, deliveries, googleConnectAvailable: deps.googleConnectAvailable }), marks: marksOf(deliveries.map((ctx) => ctx.delivery)) };
   }
 
   async function sendResultForDraft(event: CrosspostEventBase, draftId: string, storeName: string, elapsedMs: number): Promise<void> {

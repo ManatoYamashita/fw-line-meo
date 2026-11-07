@@ -28,6 +28,7 @@ import {
 } from './domain.js';
 import type { IntakeRejection } from './intake.js';
 import type { AvailabilityMap } from './publisher.js';
+import { encodeGbpPostback } from '../gbp/postback.js';
 import { choiceToDestinations, encodeCrosspostPostback, type CrosspostPostback, type DestinationChoice } from './postback.js';
 
 const ALT_TEXT_MAX = 400;
@@ -348,7 +349,12 @@ export function buildReviewMessage(input: {
   );
   if (input.googleConnectAvailable && input.availability.google.kind === 'needs_connection') {
     chooseButtons.push(
-      button({ type: 'postback', label: 'Google と連携する', data: 'a=g_connect', displayText: 'Google と連携する' }),
+      button({
+        type: 'postback',
+        label: 'Google と連携する',
+        data: encodeGbpPostback({ action: 'g_connect' }),
+        displayText: 'Google と連携する',
+      }),
     );
   }
   chooseButtons.push(button(postback('やめる', { action: 'x_cancel', draftId: input.draft.id })));
@@ -585,8 +591,34 @@ function deliveryLines(row: CrosspostDeliveryRow): FlexBoxContent[] {
   }
 }
 
-function deliveryButtons(row: CrosspostDeliveryRow): FlexBoxContent[] {
+function deliveryButtons(
+  row: CrosspostDeliveryRow,
+  relink: { googleConnectAvailable: boolean; storeId: string } | null = null,
+): FlexBoxContent[] {
   const label = DESTINATION_LABELS[row.destination];
+  // Google の連携の期限切れ・未連携は、GBP の会話の連携の入口へ案内する（Req 6.7）。
+  if (relink?.googleConnectAvailable && row.destination === 'google' && row.status === 'failed') {
+    if (row.failure_reason === 'token_invalid') {
+      return [
+        button({
+          type: 'postback',
+          label: 'Google ともう一度連携する',
+          data: encodeGbpPostback({ action: 'g_relink', storeId: relink.storeId }),
+          displayText: 'Google ともう一度連携する',
+        }),
+      ];
+    }
+    if (row.failure_reason === 'not_linked') {
+      return [
+        button({
+          type: 'postback',
+          label: 'Google と連携する',
+          data: encodeGbpPostback({ action: 'g_connect' }),
+          displayText: 'Google と連携する',
+        }),
+      ];
+    }
+  }
   if (row.status === 'failed' && row.retryable && row.attempt_count < MAX_DELIVERY_ATTEMPTS) {
     return [button(postback(`${label}にもう一度投稿`, { action: 'x_retry', deliveryId: row.id }), 'primary')];
   }
@@ -608,10 +640,14 @@ function deliveryButtons(row: CrosspostDeliveryRow): FlexBoxContent[] {
 export function buildResultMessage(input: {
   storeName: string;
   deliveries: readonly CrosspostDeliveryContext[];
+  /** Google の連携の入口（GBP の会話）が使えるか。使えるときだけ再連携のボタンを出す。 */
+  googleConnectAvailable?: boolean;
 }): LineMessage {
   const rows = input.deliveries.map((ctx) => ctx.delivery);
   const allOk = rows.length > 0 && rows.every((row) => row.status === 'succeeded');
-  const buttons = rows.flatMap(deliveryButtons);
+  const buttons = input.deliveries.flatMap((ctx) =>
+    deliveryButtons(ctx.delivery, { googleConnectAvailable: input.googleConnectAvailable === true, storeId: ctx.storeId }),
+  );
   buttons.push(button(postback('投稿の状況', { action: 'x_status' })));
   const summary = rows
     .map((row) => `${DESTINATION_LABELS[row.destination]}: ${STATUS_WORDS[row.status]}`)
@@ -654,7 +690,7 @@ export function buildStatusMessage(
           text(excerpt(post.draft.material_text, 40), { size: 'xs', color: lineColors.caption }),
           ...post.deliveries.flatMap(deliveryLines),
         ],
-        buttons: post.deliveries.flatMap(deliveryButtons).concat([
+        buttons: post.deliveries.flatMap((row) => deliveryButtons(row)).concat([
           button(postback('投稿を作る', { action: 'x_start', storeId: null })),
         ]),
         size: 'kilo',
