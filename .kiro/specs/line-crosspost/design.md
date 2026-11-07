@@ -117,7 +117,7 @@ ts/apps/line-webhook/src/crosspost/
 → 文を送る（何通でも）→ 「受け取りました」       QR: [下書きを作る][やめる]
 → [下書きを作る]
 → 確認のカルーセル（版 r）
-     バブル1 Instagram: 全文・写真あり/なし・使えるか
+     バブル1 Instagram: 全文・写真の有無・使えるか
         [作り直す][AIに直してもらう][自分で書き直す][文をコピー]
      バブル2 Google: 同上
      バブル3 投稿先: [両方に投稿][Instagramだけ][Googleだけ]（使える組み合わせだけ）
@@ -196,7 +196,7 @@ sequenceDiagram
   end
 ```
 
-- 結果の通知: LINE の Messenger は reply の非 2xx を例外にしない（`line/client.ts`）ため、「reply に失敗したら push」は検出できない。代わりに、承認から結果までが 20 秒（`replySafeMs`）を超えたら reply トークンの期限を見込んで push で送る（Req 7.2）。
+- 結果の通知（詳細は下の「結果の通知」）: 承認から結果までが 20 秒（`replySafeMs`）以内なら Reply、超えたら Reply トークンの期限を見込んで Push。届いたかは `replyChecked`・`pushChecked`（LINE が 2xx を返したか）で判定し、Reply が受け付けられなければ Push も試す。どちらも届かなければ「届けた」と記録せず、次の操作で示す（Req 7.2）。既存の `reply`・`push` は従来どおり非 2xx を例外にせず記録だけを残す（ほかの会話の挙動は変えない）。
 - 画像の受け渡し: `webhook/dispatch.ts` は、一括発信が有効なとき（`acceptImages`）だけ、画像の `unsupported` イベントに `image`（`message.id`・`contentProvider`・`imageSet`）を載せる。無効なときは従来どおり内容を持たない。
 - AI への修正指示: 指示はその生成の事実の照合の素材に加える（指示に書かれた事実は使ってよい）。素材の文（`material_text`）へは足さない（「もっと短く」などの指示が、ほかの投稿先の生成の素材に混ざらないため）。
 
@@ -309,7 +309,7 @@ export interface DestinationAdapter {
 ### media / intake（`media.ts`・`intake.ts`）
 - `MediaStore`: `put(bytes, contentType) → { key }`／`issueFetchUrl(key, ttlSeconds) → url`／`delete(key)`。v1 の本番の実装（GCS の非公開バケット・寿命 7 日・取得用 URL の方式）は tasks 6.x。テストは in-memory。
 - 取得: `GET https://api-data.line.me/v2/bot/message/{id}/content`（時間制限・20MB を超えたら読み止める・`contentProvider.type` が `line` のときだけ）。
-- quoteToken: 画像メッセージの `quoteToken` を `crosspost_media.line_quote_token` に保存し、最終確認で引用する（research.md Decision 5）。
+- quoteToken: 画像メッセージの `quoteToken` を `crosspost_media.line_quote_token` に保存し、最終確認で引用する（research.md Decision 5）。**引用の手掛かりが無い写真（quoteToken が無い）では最終確認も承認もしない**。写真を送り直すよう案内する（送り直した写真には quoteToken が付く）。承認（`x_ok`）の側でも同じ条件を確かめる（古いボタン・偽造された postback で、確かめていない写真を公開しない）。
 - 正規化: `Content-Type` とマジックバイトが JPEG／PNG／WebP のいずれか → `sharp` で復号（画素数の上限）→ 向きの補正 → 長辺 1,440px 以内へ縮小（拡大しない）→ sRGB の JPEG（品質 85）。**メタデータは書き出さない**（位置情報を含む EXIF を落とす）。短辺 250px 未満は拒否。
 - 保存: 推測できない名前（UUID）。DB には `storage_key`・寸法・バイト数・SHA-256 だけを持つ。
 - 写真の差し替えは「新しい行を入れて古い行を消す」を 1 トランザクションで行い、古い実体は後で消す。
@@ -406,6 +406,8 @@ crosspost_deliveries(
 | 内部の例外（Reply の前） | 投げる → エラー境界が再試行の案内を 1 回だけ返す（既存） | 変えない |
 
 | 結果を Reply でも Push でも届けられない | 記録しない（`crosspost.notify_failed`） | 結果は DB にあり、次の操作で示す |
+| 写真に引用の手掛かりが無い | 最終確認・承認をせず、写真の送り直しを案内する | 何も投稿しない |
+| 配信ジョブの保存期間の削除の失敗・migration 未適用 | 未適用なら何もしない。失敗は `delivery-job.crosspost_retention_failed` を記録するだけ | 配信の本処理・終了コードは変えない |
 | 承認の後に処理が止まった | 待ちは再開・取りやめを選べる。実行中は 5 分で結果不明 | 上の「承認の後に処理が止まったとき」 |
 
 ### Monitoring
@@ -446,6 +448,20 @@ crosspost_deliveries(
 - 店主の写真から EXIF を除去する。生成 AI へ写真を送らない（Decision 2）。
 - 本文・写真はログに出さない。外部 API のエラー本文は保持しない（分類の値だけ）。
 - 店舗の引継ぎ（`owner-line-unlink`）で `stores.owner_id` が変わった店舗の下書きは、旧オーナーから操作できない（すべての操作で現在の所有を確かめる）。
+
+## 本番有効化の前に確かめる未確認事項
+
+テストは偽の投稿先・偽の LINE で行っており、次は**実 API・実機でしか確かめられない**。モックの成功を確認済みとして扱わない。
+
+| # | 未確認事項 | いまの扱い | 確かめ方・時期 |
+|---|---|---|---|
+| U1 | Google の **429 を「再送してよい失敗」とする扱い**（割り当て超過は処理の前に断られる、という前提） | 再送を許す（`classifyStatus`） | GBP API の承認後、テスト店舗で実測する（tasks 8.6）。前提が崩れたら 429 も結果不明へ移す（表の 1 行） |
+| U2 | Google の 5xx・通信断の後に投稿が作られているか（結果不明の後の照合） | 店主の確認に倒す | `localPosts.list` の実測の後に自動照合を足す（tasks 7.3） |
+| U3 | 写真付きのローカル投稿（`media[].sourceUrl`）の受理と、取得用 URL の方式 | 写真付きは「準備中」 | tasks 6.2 |
+| U4 | 送信を取り消した写真のメッセージを引用したときの表示 | 引用の手掛かりが無い写真では最終確認を出さない（下）。取り消し後の表示は未確認 | 実機確認（tasks 8.5） |
+| U5 | 「文をコピー → 直して送り返す」編集の使いやすさ | v1 の仮説 | 店主 3〜5 人での検証（tasks 8.4） |
+| U6 | HEIC など LINE が送る写真の形式（「オリジナル画質」） | JPEG・PNG・WebP 以外は断る | 実機確認（tasks 8.1） |
+| U7 | Instagram の API 全般（ログイン方式・権限名・上限・コンテナの状態） | アダプタは「準備中」 | 前提資料 §7.5 の技術検証 |
 
 ## Rollout
 1. 本 spec・migration・アクセサ・会話・Google アダプタを既定 OFF でマージ（本番の挙動は変わらない）
