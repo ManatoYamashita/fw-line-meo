@@ -137,7 +137,7 @@ describe('Google の結果の分類（design.md の表）', () => {
     [{ kind: 'rejected', status: 404 }, { kind: 'failed', reason: 'rejected', retryable: false }],
     [{ kind: 'rejected', status: 409 }, { kind: 'failed', reason: 'rejected', retryable: false }],
     [{ kind: 'rejected', status: 429 }, { kind: 'failed', reason: 'rate_limited', retryable: true }],
-    [{ kind: 'rejected', status: 503 }, { kind: 'failed', reason: 'upstream_unavailable', retryable: true }],
+    [{ kind: 'rejected', status: 503 }, { kind: 'unknown', reason: 'upstream_5xx' }],
     [{ kind: 'rejected', status: 500 }, { kind: 'unknown', reason: 'upstream_5xx' }],
     [{ kind: 'rejected', status: 502 }, { kind: 'unknown', reason: 'upstream_5xx' }],
     [{ kind: 'rejected', status: 504 }, { kind: 'unknown', reason: 'upstream_5xx' }],
@@ -147,8 +147,17 @@ describe('Google の結果の分類（design.md の表）', () => {
     expect(classifyLocalPostResult(result)).toEqual(expected);
   });
 
-  it('5xx は 503 を除いて結果不明（送ったかもしれない）', () => {
-    for (const status of [500, 501, 502, 504, 599]) expect(classifyStatus(status).kind).toBe('unknown');
+  it('5xx はすべて結果不明（503 を含む・作成済みの可能性を否定できない）', () => {
+    for (const status of [500, 501, 502, 503, 504, 599]) expect(classifyStatus(status)).toEqual({ kind: 'unknown', reason: 'upstream_5xx' });
+  });
+
+  it('4xx は 429 だけ再送を許し、ほかは再送しない', () => {
+    for (const status of [400, 401, 403, 404, 409, 413, 422]) {
+      const outcome = classifyStatus(status);
+      expect(outcome.kind).toBe('failed');
+      expect(outcome.kind === 'failed' && outcome.retryable).toBe(false);
+    }
+    expect(classifyStatus(429)).toEqual({ kind: 'failed', reason: 'rate_limited', retryable: true });
   });
 });
 

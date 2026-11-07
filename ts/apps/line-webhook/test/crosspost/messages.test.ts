@@ -28,6 +28,7 @@ function draft(overrides: Partial<CrosspostDraftRow> = {}): CrosspostDraftRow {
     google_text: 'Googleの文',
     approved_revision: null,
     approved_at: null,
+    result_notified_at: null,
     expires_at: NOW,
     purge_after: NOW,
     created_at: NOW,
@@ -89,7 +90,9 @@ describe('crosspost messages の LINE の制約', () => {
   const messages: Array<[string, LineMessage]> = [
     ['start', buildStartMessage({ draftId: DRAFT, storeName: '森のカフェ', availability: BOTH })],
     ['review', buildReviewMessage({ draft: draft(), storeName: '森のカフェ', availability: BOTH, hasPhoto: true, googleConnectAvailable: true })],
-    ['confirm', buildConfirmMessage({ draft: draft(), storeName: '森のカフェ', choice: 'both', hasPhoto: true })],
+    ...buildConfirmMessage({ draft: draft(), storeName: '森のカフェ', choice: 'both', photo: { width: 1440, height: 960, quoteToken: 'qt' } }).map(
+      (m, i): [string, LineMessage] => [`confirm-${i}`, m],
+    ),
   ];
 
   it.each(messages)('%s: ボタンのラベルは 40 字・クイックリプライは 20 字・postback は 300 字以内', (_name, message) => {
@@ -123,9 +126,22 @@ describe('crosspost messages の LINE の制約', () => {
   });
 
   it('最終確認だけが承認の postback（x_ok）を持ち、写り込みの注意を出す', () => {
-    const confirm = buildConfirmMessage({ draft: draft(), storeName: '森のカフェ', choice: 'google', hasPhoto: true });
-    expect(actions(confirm).some((a) => a.data?.startsWith('a=x_ok'))).toBe(true);
+    const confirm = buildConfirmMessage({
+      draft: draft(),
+      storeName: '森のカフェ',
+      choice: 'google',
+      photo: { width: 960, height: 1440, quoteToken: 'qt-1' },
+    });
+    expect(confirm[0]).toMatchObject({ type: 'text', quoteToken: 'qt-1' });
+    expect(JSON.stringify(confirm[0])).toContain('縦長');
+    expect(confirm.flatMap(actions).some((a) => a.data?.startsWith('a=x_ok'))).toBe(true);
     expect(JSON.stringify(confirm)).toContain('写っていないか');
+    // 引用できない写真は、向きを示して送り直しを促す（引用の手掛かりを持たない）
+    const unquoted = buildConfirmMessage({ draft: draft(), storeName: 's', choice: 'google', photo: { width: 100, height: 100, quoteToken: null } });
+    expect(unquoted[0]).not.toHaveProperty('quoteToken');
+    expect(JSON.stringify(unquoted[0])).toContain('送り直して');
+    // 写真なしは引用のテキストを出さない
+    expect(buildConfirmMessage({ draft: draft(), storeName: 's', choice: 'google', photo: null })).toHaveLength(1);
     const review = buildReviewMessage({ draft: draft(), storeName: '森のカフェ', availability: BOTH, hasPhoto: true, googleConnectAvailable: true });
     expect(actions(review).some((a) => a.data?.startsWith('a=x_ok'))).toBe(false);
   });

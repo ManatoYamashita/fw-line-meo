@@ -4,7 +4,9 @@
 // 投稿は gbp/client.ts の publishLocalPost（既存の createLocalPost は変えない）。
 //
 // **GBP API は未承認（GBP API の利用申請の Issue 146）で、この分類は実測していない。** 状態コードの意味は HTTP の一般的な意味に依る。
-// 実測で食い違いが出たら、下の classify の表を直す（例: 503 の後に投稿が作られていたなら unknown へ移す）。
+// 判断の規律: **作成済みの可能性を否定できない応答は「結果不明」**にし、自動でも店主の操作でも、確認なしには再送しない。
+// 5xx はすべて結果不明（503 を含む）。503 は「処理していない」ことが多いが、Google が投稿を作った後に 503 を返さない
+// という一次情報は無いので、「失敗（再送してよい）」に倒さない（PR #514 のレビュー指摘）。
 //
 // 結果の分類（design.md の表と 1:1）:
 // | 状況 | 分類 | retryable |
@@ -14,9 +16,8 @@
 // | 送信前の失敗: トークンの取得の一時的な失敗・429 | failed upstream_unavailable / rate_limited | true |
 // | 401・403 | failed permission_denied | false |
 // | 429 | failed rate_limited | true |
-// | 503 | failed upstream_unavailable | true |
 // | その他の 4xx | failed rejected | false |
-// | 500・502・504・その他の 5xx | unknown upstream_5xx | — |
+// | 5xx（500・502・503・504 ほか） | unknown upstream_5xx | — |
 // | 通信の例外 | unknown network（時間切れなら timeout） | — |
 // | 2xx | succeeded | — |
 
@@ -56,10 +57,14 @@ export function classifyNotSent(error: GbpApiError): PublishOutcome {
   }
 }
 
+/**
+ * 送信の後に受け取った HTTP の状態コードの分類。4xx は「Google が要求を受け付けなかった」（投稿は作られていない）、
+ * 5xx は「作られたかどうか分からない」。429 は割り当ての超過による拒否で、処理の前に断られるものとして再送を許す
+ * （GBP API での実測は無い・未確認）。
+ */
 export function classifyStatus(status: number): PublishOutcome {
   if (status === 401 || status === 403) return { kind: 'failed', reason: 'permission_denied', retryable: false };
   if (status === 429) return { kind: 'failed', reason: 'rate_limited', retryable: true };
-  if (status === 503) return { kind: 'failed', reason: 'upstream_unavailable', retryable: true };
   if (status >= 500) return { kind: 'unknown', reason: 'upstream_5xx' };
   return { kind: 'failed', reason: 'rejected', retryable: false };
 }
