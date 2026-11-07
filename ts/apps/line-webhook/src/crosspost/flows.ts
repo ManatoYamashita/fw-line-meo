@@ -150,7 +150,10 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     const open = await getOpenCrosspostDraft(deps.db, ownerId);
     if (open === null) return { kind: 'none' };
     const expired = open.draft.expires_at.getTime() <= now().getTime();
-    if (!expired && open.serviceable) return { kind: 'open', open };
+    // 店舗の所有・利用中に加えて、今も有効化の指定（CROSSPOST_PILOT_STORE_IDS）に含まれることを確かめる。
+    // 指定から外した店舗の作成中の下書きは、ほかに有効な店舗を持つオーナーからも操作させずに閉じる。
+    const serviceable = open.serviceable && deps.pilotStoreIds.includes(open.draft.store_id);
+    if (!expired && serviceable) return { kind: 'open', open };
     const closed = await closeCrosspostDraft(deps.db, {
       ownerId,
       draftId: open.draft.id,

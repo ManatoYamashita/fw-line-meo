@@ -175,6 +175,19 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
     expect((await openDraft())?.status).toBe('collecting');
   });
 
+  it('有効化の指定から外した店舗の作成中の下書きは、ほかの有効な店舗を持っていても操作させずに閉じる', async () => {
+    pilot = [f.store, f.store2];
+    build();
+    await post({ action: 'x_start', storeId: f.store });
+    const draftId = (await openDraft())!.id;
+    await photo('900');
+    pilot = [f.store2];
+    build();
+    expect(await post({ action: 'x_gen', draftId })).toBe('handled');
+    expect(lastReply()).toContain('このボタンでは投稿できません');
+    expect(await openDraft()).toBeNull();
+  });
+
   it('自分で書き直した文は AI を通さずに使い、AI への修正指示は 1 つの投稿先だけを作り直す', async () => {
     await say('投稿');
     const draftId = (await openDraft())!.id;
