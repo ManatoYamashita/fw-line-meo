@@ -13,9 +13,9 @@
 // | 送信前の失敗: 未連携 | failed not_linked | false |
 // | 送信前の失敗: 失効・復号不能 | failed token_invalid | false |
 // | 送信前の失敗: 権限 | failed permission_denied | false |
-// | 送信前の失敗: トークンの取得の一時的な失敗・429 | failed upstream_unavailable / rate_limited | true |
+// | 送信前の失敗: トークンの取得の一時的な失敗・割り当ての超過 | failed upstream_unavailable / rate_limited | true |
 // | 401・403 | failed permission_denied | false |
-// | 429 | failed rate_limited | true |
+// | 送信後の 429 | unknown rate_limited_after_send | — |
 // | その他の 4xx | failed rejected | false |
 // | 5xx（500・502・503・504 ほか） | unknown upstream_5xx | — |
 // | 通信の例外 | unknown network（時間切れなら timeout） | — |
@@ -58,13 +58,16 @@ export function classifyNotSent(error: GbpApiError): PublishOutcome {
 }
 
 /**
- * 送信の後に受け取った HTTP の状態コードの分類。4xx は「Google が要求を受け付けなかった」（投稿は作られていない）、
- * 5xx は「作られたかどうか分からない」。429 は割り当ての超過による拒否で、処理の前に断られるものとして再送を許す
- * （GBP API での実測は無い・未確認）。
+ * 送信の後に受け取った HTTP の状態コードの分類。401・403 とその他の 4xx は「Google が要求を受け付けなかった」
+ * （投稿は作られていない）、5xx は「作られたかどうか分からない」。
+ * **送信後の 429 も結果不明にする**（第三者レビューの指摘）。割り当ての超過は処理の前に断られるのが通常だが、
+ * 非冪等な localPosts.create で重複が起きないことは GBP API で実測しておらず保証が無い。実 API で確かめるまで
+ * 確認なしに再送しない（design.md「本番有効化の前に確かめる未確認事項」U1）。送信の前に断ったもの（not_sent）は
+ * classifyNotSent が扱い、ここには来ない。
  */
 export function classifyStatus(status: number): PublishOutcome {
   if (status === 401 || status === 403) return { kind: 'failed', reason: 'permission_denied', retryable: false };
-  if (status === 429) return { kind: 'failed', reason: 'rate_limited', retryable: true };
+  if (status === 429) return { kind: 'unknown', reason: 'rate_limited_after_send' };
   if (status >= 500) return { kind: 'unknown', reason: 'upstream_5xx' };
   return { kind: 'failed', reason: 'rejected', retryable: false };
 }
