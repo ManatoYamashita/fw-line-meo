@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closePool, getPool, type Queryable } from '@fwlm/db';
-import { runCrosspostRetention } from '../src/crosspost-retention.js';
+import { runCrosspostRetention, runCrosspostRetentionSafely } from '../src/crosspost-retention.js';
 
 // 一括発信の保存期間の削除（line-crosspost Req 8.8）。利用者の操作が無くても、毎時の配信ジョブが消すことを確かめる。
 // 専用 UUID プレフィックス `3a`。
@@ -24,6 +24,34 @@ describe('runCrosspostRetention', () => {
     } as unknown as Queryable;
     expect(await runCrosspostRetention(db, new Date())).toBeNull();
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('runCrosspostRetentionSafely（配信の本処理を巻き込まない）', () => {
+  it('migration 0019 が当たる前の DB では何も記録せず、例外も投げない', async () => {
+    const logs: string[] = [];
+    const db = { query: async () => ({ rows: [{ ok: false }], rowCount: 1 }) } as unknown as Queryable;
+    await expect(runCrosspostRetentionSafely(db, new Date(), (_l, event) => logs.push(event))).resolves.toBeUndefined();
+    expect(logs).toEqual([]);
+  });
+
+  it('削除が失敗しても（権限の不足・接続断）例外を投げず、失敗の種別だけを記録する', async () => {
+    const logs: Array<{ level: string; event: string; fields: Readonly<Record<string, number | string>> }> = [];
+    let calls = 0;
+    const db = {
+      query: async () => {
+        calls += 1;
+        if (calls === 1) return { rows: [{ ok: true }], rowCount: 1 };
+        const err = new Error('permission denied for table crosspost_drafts（本文は記録しない）');
+        err.name = 'DatabaseError';
+        throw err;
+      },
+    } as unknown as Queryable;
+    await expect(
+      runCrosspostRetentionSafely(db, new Date(), (level, event, fields) => logs.push({ level, event, fields })),
+    ).resolves.toBeUndefined();
+    expect(logs).toEqual([{ level: 'warn', event: 'delivery-job.crosspost_retention_failed', fields: { errorKind: 'Error' } }]);
+    expect(JSON.stringify(logs)).not.toContain('permission denied');
   });
 });
 

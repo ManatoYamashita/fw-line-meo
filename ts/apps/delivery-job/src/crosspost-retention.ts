@@ -20,6 +20,25 @@ export interface CrosspostRetentionSummary {
   readonly crosspostPurgedMedia: number;
 }
 
+/**
+ * 配信ジョブの main から呼ぶ形。**例外を投げない**（配信の本処理・終了コードを巻き込まない）。表が無い DB では
+ * 何も記録しない。結果と失敗は渡された記録の口へ出す。
+ */
+export async function runCrosspostRetentionSafely(
+  db: Queryable,
+  now: Date,
+  log: (level: 'info' | 'warn', event: string, fields: Readonly<Record<string, number | string>>) => void,
+): Promise<void> {
+  try {
+    const retention = await runCrosspostRetention(db, now);
+    if (retention !== null) log('info', 'delivery-job.crosspost_retention', { ...retention });
+  } catch (err) {
+    log('warn', 'delivery-job.crosspost_retention_failed', {
+      errorKind: err instanceof Error ? err.constructor.name : 'UnknownError',
+    });
+  }
+}
+
 export async function runCrosspostRetention(db: Queryable, now: Date): Promise<CrosspostRetentionSummary | null> {
   const exists = await db.query<{ ok: boolean }>(
     "SELECT to_regclass('public.crosspost_drafts') IS NOT NULL AND to_regclass('public.crosspost_media') IS NOT NULL AS ok",

@@ -592,6 +592,31 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
       expect(JSON.stringify(second)).toContain('上で引用した写真');
     });
 
+    it('引用の手掛かりが無い写真では、最終確認も承認もせず、送り直しを求める', async () => {
+      await say('投稿');
+      const draftId = (await openDraft())!.id;
+      await say('新作の抹茶パフェ');
+      await flows.handleImage({ ...event(), image: { messageId: '900', contentProvider: 'line', imageSet: null, quoteToken: null } });
+      await post({ action: 'x_gen', draftId });
+      let draft = (await openDraft())!;
+      await post({ action: 'x_conf', draftId, revision: draft.revision, choice: 'google' });
+      expect(lastReply()).toContain('写真をもう一度送って');
+      expect(lastReply()).not.toContain('a=x_ok');
+      // 最終確認を経ない承認（古いボタン・偽造された postback）も断る
+      await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+      expect(lastReply()).toContain('写真をもう一度送って');
+      expect(google.calls).toHaveLength(0);
+      expect((await openDraft())?.status).toBe('reviewing');
+      // 送り直せば（quoteToken つき）最終確認から投稿できる
+      contents.set('904', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      await photo('904');
+      draft = (await openDraft())!;
+      await post({ action: 'x_conf', draftId, revision: draft.revision, choice: 'google' });
+      expect(messenger.replies.at(-1)!.messages[0]).toMatchObject({ quoteToken: 'qt-904' });
+      await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+      expect(google.calls).toHaveLength(1);
+    });
+
     it('写真を差し替えたら、最終確認は新しい写真を引用する', async () => {
       const draft = await reviewingDraft(true);
       contents.set('903', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });

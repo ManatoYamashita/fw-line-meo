@@ -61,6 +61,7 @@ import {
   buildOpenDraftExistsMessage,
   buildPendingResultsIntroMessage,
   buildPhotoRejectedMessage,
+  buildPhotoResendRequiredMessage,
   buildPhotoSetNoticeMessage,
   buildReceivedMessage,
   buildResultMessage,
@@ -176,9 +177,18 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     return { kind: 'closed', reason: expired ? 'expired' : 'unserviceable' };
   }
 
-  async function confirmPhoto(ownerId: string, draftId: string): Promise<{ width: number; height: number; quoteToken: string | null } | null> {
+  /**
+   * 最終確認で示す写真。写真が無ければ none、引用の手掛かり（quoteToken）が無ければ unverifiable
+   * （確かめていない写真は公開しない・Req 5.9）。
+   */
+  async function confirmPhoto(
+    ownerId: string,
+    draftId: string,
+  ): Promise<{ kind: 'none' } | { kind: 'unverifiable' } | { kind: 'quoted'; width: number; height: number; quoteToken: string }> {
     const media = await getCrosspostMedia(deps.db, { ownerId, draftId });
-    return media === null ? null : { width: media.width, height: media.height, quoteToken: media.line_quote_token };
+    if (media === null) return { kind: 'none' };
+    if (media.line_quote_token === null) return { kind: 'unverifiable' };
+    return { kind: 'quoted', width: media.width, height: media.height, quoteToken: media.line_quote_token };
   }
 
   async function hasPhoto(ownerId: string, draftId: string): Promise<boolean> {
@@ -390,6 +400,11 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
 
     const open = await requireReviewing(event, postback.draftId, postback.revision);
     if (open === null) return;
+    // 最終確認を出さない写真（引用できない）は、承認の側でも断る（古いボタン・偽造された postback への備え・Req 5.9）。
+    if ((await confirmPhoto(event.ownerId, open.draft.id)).kind === 'unverifiable') {
+      await reply(event.replyToken, buildPhotoResendRequiredMessage(open.draft.id));
+      return;
+    }
     const destinations = choiceToDestinations(postback.choice);
     const approved = await deps.publisher.approve({
       ownerId: event.ownerId,
@@ -683,13 +698,18 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
           await reply(event.replyToken, buildStaleMessage(open.draft.id));
           return;
         }
+        const photo = await confirmPhoto(event.ownerId, open.draft.id);
+        if (photo.kind === 'unverifiable') {
+          await reply(event.replyToken, buildPhotoResendRequiredMessage(open.draft.id));
+          return;
+        }
         await reply(
           event.replyToken,
           ...buildConfirmMessage({
             draft: open.draft,
             storeName: open.storeName,
             choice: postback.choice,
-            photo: await confirmPhoto(event.ownerId, open.draft.id),
+            photo: photo.kind === 'none' ? null : photo,
           }),
         );
         return;

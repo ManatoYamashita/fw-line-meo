@@ -25,7 +25,7 @@ import type { LogFields } from '@fwlm/observability';
 import { closePool, getPool } from '@fwlm/db';
 import type { DailySummaryRow, Queryable, SummaryDeliveryStatus } from '@fwlm/db';
 
-import { runCrosspostRetention } from './crosspost-retention.js';
+import { runCrosspostRetentionSafely } from './crosspost-retention.js';
 import { recordDeliveryResult, reserveDelivery } from './deliveries.js';
 import { LineClient } from './line.js';
 import type { LinePushResult } from './line.js';
@@ -562,11 +562,12 @@ export async function main(): Promise<void> {
   // 一括発信の保存期間の削除（line-crosspost Req 8.8）。配信の成否と独立に毎回行い、失敗しても配信の終了コードを
   // 変えない（削除は次の回に続く）。配信が致命的に失敗した回でも行う（保存期間を利用者・配信の都合で延ばさない）。
   try {
-    const retention = await runCrosspostRetention(pool, new Date());
-    if (retention !== null) correlationLog('info', 'delivery-job.crosspost_retention', { ...retention });
-  } catch (err) {
-    correlationLog('warn', 'delivery-job.crosspost_retention_failed', {
-      errorKind: err instanceof Error ? err.constructor.name : 'UnknownError',
+    await runCrosspostRetentionSafely(pool, new Date(), (level, event, fields) => {
+      if (event === 'delivery-job.crosspost_retention') {
+        correlationLog(level, 'delivery-job.crosspost_retention', fields);
+      } else {
+        correlationLog(level, 'delivery-job.crosspost_retention_failed', fields);
+      }
     });
   } finally {
     await closePool();

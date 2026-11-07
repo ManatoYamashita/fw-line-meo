@@ -399,17 +399,17 @@ export function describeOrientation(width: number, height: number): string {
   return '正方形に近い';
 }
 
-/** 最終確認で示す写真（店主が送った写真のメッセージの quoteToken と寸法）。 */
+/** 最終確認で示す写真（店主が送った写真のメッセージの quoteToken と寸法）。quoteToken が無い写真は最終確認を出さない。 */
 export interface ConfirmPhoto {
   width: number;
   height: number;
-  quoteToken: string | null;
+  quoteToken: string;
 }
 
 /**
- * 最終確認（Req 5.3, 8.7）。写真があるときは、**店主が送った写真のメッセージそのものを引用する**テキストを
- * 先に置く（quoteToken・公開の URL を作らずに、公開する写真を目で確かめられる）。引用できないとき（外部の画像
- * など）は向きと大きさだけを示し、違う写真なら送り直すよう添える。
+ * 最終確認（Req 5.3, 5.8, 8.7）。写真があるときは、**店主が送った写真のメッセージそのものを引用する**テキストを
+ * 先に置く（quoteToken・公開の URL を作らずに、公開する写真を目で確かめられる）。引用できない写真では、この
+ * メッセージを作らない（flows が buildPhotoResendRequiredMessage を返す・Req 5.9）。
  */
 export function buildConfirmMessage(input: {
   draft: CrosspostDraftRow;
@@ -420,25 +420,14 @@ export function buildConfirmMessage(input: {
   const destinations = choiceToDestinations(input.choice);
   const label = destinations.map((d) => DESTINATION_LABELS[d]).join(' と ');
   const photo = input.photo;
-  const photoLine =
-    photo === null
-      ? '写真: なし'
-      : `写真: ${photo.quoteToken === null ? '' : '上で引用した写真（'}${describeOrientation(photo.width, photo.height)}${photo.quoteToken === null ? '' : '）'}`;
+  const photoLine = photo === null ? '写真: なし' : `写真: 上で引用した写真（${describeOrientation(photo.width, photo.height)}）`;
   const messages: LineMessage[] = [];
   if (photo !== null) {
-    const orientation = describeOrientation(photo.width, photo.height);
-    messages.push(
-      photo.quoteToken === null
-        ? {
-            type: 'text',
-            text: `投稿する写真は 1 枚（${orientation}）です。違う写真のときは、その写真を送り直してから確認し直してください。`,
-          }
-        : {
-            type: 'text',
-            text: `この写真を投稿します（${orientation}）。違う写真のときは、その写真を送り直してから確認し直してください。`,
-            quoteToken: photo.quoteToken,
-          },
-    );
+    messages.push({
+      type: 'text',
+      text: `この写真を投稿します（${describeOrientation(photo.width, photo.height)}）。違う写真のときは、その写真を送り直してから確認し直してください。`,
+      quoteToken: photo.quoteToken,
+    });
   }
   messages.push(
     flex(
@@ -469,6 +458,16 @@ export function buildConfirmMessage(input: {
     ),
   );
   return messages;
+}
+
+/**
+ * 写真を引用できない（引用の手掛かりが無い）ので、最終確認も承認もしない（Req 5.9）。送り直せば引用できる。
+ */
+export function buildPhotoResendRequiredMessage(draftId: string): LineMessage {
+  return plain(
+    '投稿する写真を、このトークの中で確かめられる形で受け取れていません。確かめていない写真は投稿しないため、お手数ですが写真をもう一度送ってから、投稿先を選び直してください。',
+    [postback('下書きを見る', { action: 'x_view', draftId })],
+  );
 }
 
 export function buildStaleMessage(draftId: string | null): LineMessage {
