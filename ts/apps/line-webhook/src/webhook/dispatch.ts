@@ -30,6 +30,11 @@ export interface InboundImage {
   imageSet: { id: string; index: number; total: number } | null;
   /** このメッセージの引用の手掛かり（最終確認で店主が送った写真を引用する）。無ければ null。 */
   quoteToken: string | null;
+  /**
+   * 店主が写真を送った時刻（イベントの timestamp・UNIX ミリ秒）。LINE は「イベントの順序は timestamp で判定する。
+   * 届く順は異なりうる。再配信でも元の時刻を保つ」とする（references/webhook-events.md）。無ければ null。
+   */
+  sentAt: number | null;
 }
 
 export interface EventDispatcher {
@@ -70,6 +75,7 @@ interface RawLinePostback {
 
 interface RawLineEvent {
   type?: string;
+  timestamp?: number;
   replyToken?: string;
   source?: RawLineSource;
   webhookEventId?: string;
@@ -91,7 +97,7 @@ interface ParsedInboundEvent {
 // 必須フィールド（source.userId・replyToken・webhookEventId）欠落や未知/未対応の型は null。
 const MESSAGE_ID_PATTERN = /^\d{1,32}$/;
 
-function parseImage(message: RawLineMessage | undefined): InboundImage | undefined {
+function parseImage(message: RawLineMessage | undefined, timestamp: number | undefined): InboundImage | undefined {
   if (message?.type !== 'image' || typeof message.id !== 'string' || !MESSAGE_ID_PATTERN.test(message.id)) {
     return undefined;
   }
@@ -117,6 +123,7 @@ function parseImage(message: RawLineMessage | undefined): InboundImage | undefin
       typeof message.quoteToken === 'string' && message.quoteToken.length > 0 && message.quoteToken.length <= 512
         ? message.quoteToken
         : null,
+    sentAt: typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null,
   };
 }
 
@@ -138,7 +145,7 @@ function parseEvent(raw: RawLineEvent, acceptImages: boolean): ParsedInboundEven
         // Requirement 5.3: スタンプ・画像等のテキスト以外の message は、黙殺せず
         // unsupported として会話層へ渡す（会話層が現在の段階の案内を再送する）。
         // replyToken 等の欠落は本関数冒頭のガードで既に除外済み（reply 不能な入力は無視）。
-        const image = acceptImages ? parseImage(raw.message) : undefined;
+        const image = acceptImages ? parseImage(raw.message, raw.timestamp) : undefined;
         return {
           webhookEventId,
           event:

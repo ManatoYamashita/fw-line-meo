@@ -21,11 +21,17 @@ export type IntakeRejection =
   /** LINE 以外の場所にある画像（contentProvider が external）。Content API では取得できない。 */
   | 'external'
   /** 取得・保存の一時的な失敗。 */
-  | 'temporary';
+  | 'temporary'
+  /** 送った時刻が分からない（写真の順序を判定できないので、推測で採用しない）。 */
+  | 'unordered';
 
 export type IntakeResult =
   | { kind: 'attached'; draft: CrosspostDraftRow; replaced: boolean }
   | { kind: 'duplicate' }
+  /** いまの写真より前に送られた写真（処理が遅れて後から届いた）。使わない。 */
+  | { kind: 'older' }
+  /** いまの写真と同じ時刻に送られた別の写真。どちらが後か決められないので使わない。 */
+  | { kind: 'ambiguous' }
   | { kind: 'not_open' }
   | { kind: 'rejected'; reason: IntakeRejection };
 
@@ -45,6 +51,8 @@ export interface PhotoIntake {
     messageId: string;
     contentProvider: 'line' | 'external';
     quoteToken: string | null;
+    /** 店主が送った時刻（Webhook のイベントの timestamp・UNIX ミリ秒）。 */
+    sentAt: number | null;
   }): Promise<IntakeResult>;
 }
 
@@ -61,12 +69,13 @@ export function createPhotoIntake(deps: PhotoIntakeDeps): PhotoIntake {
   }
 
   return {
-    async receive({ ownerId, draftId, messageId, contentProvider, quoteToken }) {
+    async receive({ ownerId, draftId, messageId, contentProvider, quoteToken, sentAt }) {
       const reject = (reason: IntakeRejection, status?: number): IntakeResult => {
         deps.logger.warn('crosspost.media_rejected', { ownerId, reason, ...(status !== undefined ? { status } : {}) });
         return { kind: 'rejected', reason };
       };
       if (contentProvider !== 'line') return reject('external');
+      if (sentAt === null) return reject('unordered');
 
       let content: MessageContentResult;
       try {
@@ -107,6 +116,7 @@ export function createPhotoIntake(deps: PhotoIntakeDeps): PhotoIntake {
           media: {
             lineMessageId: messageId,
             lineQuoteToken: quoteToken,
+            lineSentAt: new Date(sentAt),
             storageKey: key,
             contentType: 'image/jpeg',
             width: normalized.value.width,
