@@ -23,7 +23,7 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
   - _Requirements: 8.3, 8.4, 8.8_
 - [x] 2.6 待ちの取りやめ・24 時間で取りやめ・結果を届けた時刻（`result_notified_at`）と未通知の一覧・写真の quoteToken
   - _Requirements: 5.8, 6.11, 6.12, 7.2_
-- [ ] 2.7 実行権の獲得の条件に待ちの期限（DB の時計）を入れる。写真の送った時刻（`line_sent_at`）で差し替えを判定する。送信後の 429 の結果不明の理由
+- [x] 2.7 実行権の獲得の条件に待ちの期限（DB の時計）を入れる。写真の送った時刻（`line_sent_at`）で差し替えを判定する。送信後の 429 の結果不明の理由
   - _Requirements: 2.5, 6.3, 6.12_
   - マージ条件: `run-db-test-suites.sh`（smoke・assertions・docs 整合）と `@fwlm/db` の試験が緑。本番への migration の適用は運営の承認の後
 
