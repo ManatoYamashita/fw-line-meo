@@ -12,20 +12,20 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 
 ## PR 2: データ（migration・アクセサ）
 
-- [ ] 2.1 `0019_line_crosspost.sql`（3 表・4 enum・部分一意索引・CHECK）
+- [x] 2.1 `0019_line_crosspost.sql`（3 表・4 enum・部分一意索引・CHECK）
   - _Requirements: 5.6, 5.7, 6.2, 6.4, 8.1, 8.3, 8.4_
-- [ ] 2.2 `db/write-boundary.md`・`db/ERD.md`（列一覧を含む）・`infra/sql/grants.sql`（line-webhook の SA だけに DML）
+- [x] 2.2 `db/write-boundary.md`・`db/ERD.md`（列一覧を含む）・`infra/sql/grants.sql`（line-webhook の SA だけに DML）
   - _Requirements: 8.1_
-- [ ] 2.3 `@fwlm/db` の `crosspost.ts`（所有の検証を SQL に含める・CAS・期限切れ・保存期間の削除）
+- [x] 2.3 `@fwlm/db` の `crosspost.ts`（所有の検証を SQL に含める・CAS・期限切れ・保存期間の削除）
   - _Requirements: 1.5, 2.8, 2.9, 4.5, 5.5, 5.6, 5.7, 6.1, 6.4, 6.6, 6.8, 6.9, 8.1, 8.4_
-- [ ] 2.4 DB の試験（アクセサの integration・assertions・書き込み権限）
-- [ ] 2.5 保存期間の削除（`purgeCrosspostRetention`）と、配信ジョブの SA への DELETE だけの付与。実際の grants.sql の権限で動くことの試験
+- [x] 2.4 DB の試験（アクセサの integration・assertions・書き込み権限）
+- [x] 2.5 保存期間の削除（`purgeCrosspostRetention`）と、配信ジョブの SA への DELETE だけの付与。実際の grants.sql の権限で動くことの試験
   - _Requirements: 8.3, 8.4, 8.8_
-- [ ] 2.6 待ちの取りやめ・24 時間で取りやめ・結果を届けた時刻（`result_notified_at`）と未通知の一覧・写真の quoteToken
+- [x] 2.6 待ちの取りやめ・24 時間で取りやめ・結果を届けた時刻（`result_notified_at`）と未通知の一覧・写真の quoteToken
   - _Requirements: 5.8, 6.11, 6.12, 7.2_
-- [ ] 2.7 実行権の獲得の条件に待ちの期限（DB の時計）を入れる。写真の送った時刻（`line_sent_at`）で差し替えを判定する。送信後の 429 の結果不明の理由
+- [x] 2.7 実行権の獲得の条件に待ちの期限（DB の時計）を入れる。写真の送った時刻（`line_sent_at`）で差し替えを判定する。送信後の 429 の結果不明の理由
   - _Requirements: 2.5, 6.3, 6.12_
-- [ ] 2.8 下書きの開始・書き直しの選択の LINE の時刻（`line_started_at`・`input_mode_set_at`）と、それより前に送った写真・文を付けない判定。送信の開始（`beginCrosspostSend`・`send_started_at`）と、送信の開始の前に止まったものの扱い（`interrupted_before_send`）
+- [x] 2.8 下書きの開始・書き直しの選択の LINE の時刻（`line_started_at`・`input_mode_set_at`）と、それより前に送った写真・文を付けない判定。送信の開始（`beginCrosspostSend`・`send_started_at`）と、送信の開始の前に止まったものの扱い（`interrupted_before_send`）
   - _Requirements: 2.11, 4.7, 6.11, 6.12_
   - マージ条件: `run-db-test-suites.sh`（smoke・assertions・docs 整合）と `@fwlm/db` の試験が緑。本番への migration の適用は運営の承認の後
 
