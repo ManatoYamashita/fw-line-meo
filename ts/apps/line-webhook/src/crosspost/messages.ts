@@ -33,6 +33,13 @@ import { choiceToDestinations, encodeCrosspostPostback, type CrosspostPostback, 
 
 const ALT_TEXT_MAX = 400;
 
+/**
+ * 生成した文の事実を店主に確かめてもらう案内（Req 3.10）。機械的な照合が見るのは数字・URL・メールアドレス・
+ * 電話番号・宣伝の語・ハッシュタグの語だけで、料理名・食材・産地・人名などの創作は検知できない（design.md「prompts」）。
+ */
+export const FACT_CHECK_NOTICE =
+  'AI が書いた文です。料理名・食材・産地・価格・日付など、伝えていない内容や事実と違うところが無いか、投稿の前に必ず確かめてください。';
+
 function postback(label: string, data: CrosspostPostback, displayText = label): FlexPostbackAction {
   return { type: 'postback', label, data: encodeCrosspostPostback(data), displayText };
 }
@@ -203,10 +210,25 @@ const INTAKE_REJECTION_LABELS: Readonly<Record<IntakeRejection, string>> = {
   gone: '写真を受け取れませんでした（送信が取り消された可能性があります）。もう一度送ってください。',
   external: 'この写真は受け取れませんでした。写真を直接送ってください。',
   temporary: '写真を受け取れませんでした。少し時間をおいて、もう一度送ってください。',
+  unordered: '写真を送った時刻が分からず、ほかの写真との順番を確かめられませんでした。使いたい写真をもう一度送ってください。',
 };
 
 export function buildPhotoRejectedMessage(input: { draftId: string; reason: IntakeRejection }): LineMessage {
   return plain(`${INTAKE_REJECTION_LABELS[input.reason]}\nほかに送った内容はそのまま残っています。`, collectingReplies(input.draftId));
+}
+
+export function buildOlderPhotoIgnoredMessage(draftId: string): LineMessage {
+  return plain(
+    '前に送った写真の処理が後から終わりました。この写真は使わず、あとから送った写真を使います。',
+    collectingReplies(draftId),
+  );
+}
+
+export function buildAmbiguousPhotoMessage(draftId: string): LineMessage {
+  return plain(
+    '写真がほぼ同時に届き、どちらを後に送ったか確かめられませんでした。いまは前の写真のままです。使いたい写真を 1 枚だけ、もう一度送ってください。',
+    collectingReplies(draftId),
+  );
 }
 
 export function buildMaterialTooLongMessage(draftId: string): LineMessage {
@@ -321,7 +343,8 @@ export function buildReviewMessage(input: {
     lines: [
       text(
         choices.length > 0
-          ? '投稿先を選ぶと、最後の確認を出します。まだ投稿はしません。'
+          ? `投稿先を選ぶと、最後の確認を出します。まだ投稿はしません。
+${FACT_CHECK_NOTICE}`
           : 'いまは直接投稿できる投稿先がありません。文をコピーして、それぞれのアプリから投稿できます。',
       ),
       ...DESTINATION_ORDER.map((d) =>
@@ -443,7 +466,12 @@ export function buildConfirmMessage(input: {
         lines: [
           text(`店舗: ${input.storeName}`, { color: lineColors.description }),
           text(photoLine, { color: lineColors.description }),
-          ...destinations.map((d) => text(`${DESTINATION_LABELS[d]}: ${excerpt(destinationText(input.draft, d) ?? '')}`)),
+          // 承認する内容と公開される内容を一致させるため、冒頭ではなく全文を出す（Req 5.3・4.1）。
+          ...destinations.flatMap((d) => [
+            text(`${DESTINATION_LABELS[d]} に投稿する文:`, { bold: true, size: 'xs', color: lineColors.description }),
+            text(destinationText(input.draft, d) ?? ''),
+          ]),
+          text(FACT_CHECK_NOTICE, { size: 'xs', color: lineColors.caption }),
           ...(photo !== null
             ? [text('写真にお客様の顔などが写っていないか、もう一度ご確認ください。', { size: 'xs', color: lineColors.caption })]
             : []),

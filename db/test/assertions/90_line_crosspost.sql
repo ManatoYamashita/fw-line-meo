@@ -43,13 +43,13 @@ BEGIN
         RAISE EXCEPTION 'FAIL: google_text over 1500 accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
 
     -- 写真は 1 下書き 1 枚・JPEG のみ
-    INSERT INTO crosspost_media(draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256)
-        VALUES (d2, 'L1', 'k90-1', 'image/jpeg', 1080, 1080, 100000, repeat('a', 64)) RETURNING id INTO m;
-    BEGIN INSERT INTO crosspost_media(draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256)
-            VALUES (d2, 'L2', 'k90-2', 'image/jpeg', 1080, 1080, 100000, repeat('b', 64));
+    INSERT INTO crosspost_media(draft_id, line_message_id, line_sent_at, storage_key, content_type, width, height, byte_size, sha256)
+        VALUES (d2, 'L1', now(), 'k90-1', 'image/jpeg', 1080, 1080, 100000, repeat('a', 64)) RETURNING id INTO m;
+    BEGIN INSERT INTO crosspost_media(draft_id, line_message_id, line_sent_at, storage_key, content_type, width, height, byte_size, sha256)
+            VALUES (d2, 'L2', now(), 'k90-2', 'image/jpeg', 1080, 1080, 100000, repeat('b', 64));
         RAISE EXCEPTION 'FAIL: second media accepted'; EXCEPTION WHEN unique_violation THEN NULL; END;
-    BEGIN INSERT INTO crosspost_media(draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256)
-            VALUES (d1, 'L3', 'k90-3', 'image/png', 1080, 1080, 100000, repeat('c', 64));
+    BEGIN INSERT INTO crosspost_media(draft_id, line_message_id, line_sent_at, storage_key, content_type, width, height, byte_size, sha256)
+            VALUES (d1, 'L3', now(), 'k90-3', 'image/png', 1080, 1080, 100000, repeat('c', 64));
         RAISE EXCEPTION 'FAIL: png media accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
 
     UPDATE crosspost_drafts SET status = 'approved', approved_at = now(), approved_revision = revision WHERE id = d2;

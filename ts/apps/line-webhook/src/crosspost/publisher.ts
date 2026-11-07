@@ -266,7 +266,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
     await markStaleCrosspostDeliveries(deps.db, {
       ownerId,
       olderThan: new Date(now().getTime() - STALE_IN_PROGRESS_MS),
-      queuedOlderThan: new Date(now().getTime() - QUEUED_RESUME_WINDOW_MS),
+      queuedWindowMs: QUEUED_RESUME_WINDOW_MS,
     });
   }
 
@@ -278,6 +278,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
           deliveryId: ctx.delivery.id,
           mode,
           maxAttempts: MAX_DELIVERY_ATTEMPTS,
+          queuedWindowMs: QUEUED_RESUME_WINDOW_MS,
         });
         if (claimed === null) return; // 他のリクエストが獲得した・状態が変わった
         await execute(ctx, claimed);
@@ -339,6 +340,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
         deliveryId,
         mode: 'retry',
         maxAttempts: MAX_DELIVERY_ATTEMPTS,
+        queuedWindowMs: QUEUED_RESUME_WINDOW_MS,
       });
       if (claimed === null) return { kind: 'not_retryable', delivery: await reload(ownerId, deliveryId) };
       await execute(ctx, claimed);

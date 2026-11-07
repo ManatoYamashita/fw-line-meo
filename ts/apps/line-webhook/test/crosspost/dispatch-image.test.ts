@@ -4,7 +4,7 @@ import { createEventDispatcher, type InboundEvent } from '../../src/webhook/disp
 function body(message: Record<string, unknown>, id = 'evt-image-1'): string {
   return JSON.stringify({
     destination: 'U0',
-    events: [{ type: 'message', replyToken: 'r1', source: { type: 'user', userId: 'U1' }, webhookEventId: id, message }],
+    events: [{ type: 'message', timestamp: 1_700_000_000_123, replyToken: 'r1', source: { type: 'user', userId: 'U1' }, webhookEventId: id, message }],
   });
 }
 
@@ -26,7 +26,7 @@ describe('画像メッセージの正規化（line-crosspost）', () => {
       kind: 'unsupported',
       lineUserId: 'U1',
       replyToken: 'r1',
-      image: { messageId: '456', contentProvider: 'line', imageSet: { id: 'set1', index: 2, total: 3 }, quoteToken: 'q-456' },
+      image: { messageId: '456', contentProvider: 'line', imageSet: { id: 'set1', index: 2, total: 3 }, quoteToken: 'q-456', sentAt: 1_700_000_000_123 },
     });
   });
 
@@ -42,6 +42,6 @@ describe('画像メッセージの正規化（line-crosspost）', () => {
     await dispatcher.dispatch(body({ type: 'image', id: '789', contentProvider: { type: 'external' } }, 'e3'));
     expect(events[0]).toEqual({ kind: 'unsupported', lineUserId: 'U1', replyToken: 'r1' });
     expect(events[1]).toEqual({ kind: 'unsupported', lineUserId: 'U1', replyToken: 'r1' });
-    expect(events[2]).toMatchObject({ image: { messageId: '789', contentProvider: 'external', imageSet: null, quoteToken: null } });
+    expect(events[2]).toMatchObject({ image: { messageId: '789', contentProvider: 'external', imageSet: null, quoteToken: null, sentAt: 1_700_000_000_123 } });
   });
 });

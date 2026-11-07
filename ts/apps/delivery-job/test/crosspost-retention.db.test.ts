@@ -70,9 +70,9 @@ describe.skipIf(!process.env.DATABASE_URL)('runCrosspostRetention (DB)', () => {
       [PURGE, EXPIRED, KEEP, OW, STORE],
     );
     await pool.query(
-      `INSERT INTO crosspost_media (draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256, created_at)
-       VALUES ($1, '1', 'crosspost/3a-expired.jpg', 'image/jpeg', 10, 10, 10, $3, now() - interval '1 day'),
-              ($2, '2', 'crosspost/3a-old.jpg', 'image/jpeg', 10, 10, 10, $3, now() - interval '8 days')`,
+      `INSERT INTO crosspost_media (draft_id, line_message_id, line_sent_at, storage_key, content_type, width, height, byte_size, sha256, created_at)
+       VALUES ($1, '1', now(), 'crosspost/3a-expired.jpg', 'image/jpeg', 10, 10, 10, $3, now() - interval '1 day'),
+              ($2, '2', now(), 'crosspost/3a-old.jpg', 'image/jpeg', 10, 10, 10, $3, now() - interval '8 days')`,
       [EXPIRED, KEEP, 'd'.repeat(64)],
     );
   });

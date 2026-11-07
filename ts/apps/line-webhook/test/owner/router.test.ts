@@ -781,7 +781,7 @@ describe('一括発信の会話への委譲（line-crosspost・Issue #494）', (
     kind: 'unsupported',
     lineUserId: LINE_USER_ID,
     replyToken: REPLY_TOKEN,
-    image: { messageId: '123', contentProvider: 'line', imageSet: null, quoteToken: null },
+    image: { messageId: '123', contentProvider: 'line', imageSet: null, quoteToken: null, sentAt: 1_700_000_000_000 },
   };
   const crosspostPostback = postbackEvent(encodeCrosspostPostback({ action: 'x_status' }));
 

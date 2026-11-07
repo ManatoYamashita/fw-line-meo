@@ -62,6 +62,8 @@ import {
   buildPendingResultsIntroMessage,
   buildPhotoRejectedMessage,
   buildPhotoResendRequiredMessage,
+  buildOlderPhotoIgnoredMessage,
+  buildAmbiguousPhotoMessage,
   buildPhotoSetNoticeMessage,
   buildReceivedMessage,
   buildResultMessage,
@@ -797,13 +799,19 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
   // テキスト・画像
   // ===================================================================
 
-  async function handleOpenText(event: CrosspostEventBase & { text: string }, open: OpenCrosspostDraft): Promise<void> {
+  async function handleOpenText(
+    event: CrosspostEventBase & { text: string },
+    open: OpenCrosspostDraft,
+    pending: PendingResults,
+  ): Promise<void> {
+    // 下書きの応答の前に、届けられなかった投稿の結果を添える（下書きの操作は妨げない・Req 7.2）。
+    const replyDraft = (...messages: LineMessage[]): Promise<void> => replyWithPending(event, pending, ...messages);
     const draft = open.draft;
     const value = event.text.trim();
 
     if (draft.status === 'collecting') {
       if (value.length === 0) {
-        await reply(event.replyToken, buildNeedMaterialMessage(draft.id));
+        await replyDraft(buildNeedMaterialMessage(draft.id));
         return;
       }
       const appended = await appendCrosspostMaterial(deps.db, {
@@ -813,14 +821,12 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         expiresAt: expiresAt(),
       });
       if (!appended.ok) {
-        await reply(
-          event.replyToken,
+        await replyDraft(
           appended.error === 'TOO_LONG' ? buildMaterialTooLongMessage(draft.id) : buildMaterialAfterGenerationMessage(draft.id),
         );
         return;
       }
-      await reply(
-        event.replyToken,
+      await replyDraft(
         buildReceivedMessage({
           draftId: draft.id,
           kind: 'text',
@@ -833,14 +839,14 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
 
     const destination = draft.input_destination;
     if (draft.input_mode === 'none' || destination === null) {
-      await reply(event.replyToken, buildReviewHintMessage(draft.id));
+      await replyDraft(buildReviewHintMessage(draft.id));
       return;
     }
 
     if (draft.input_mode === 'manual') {
       const issue = validateManualText(destination, value);
       if (issue !== null) {
-        await reply(event.replyToken, buildManualTextRejectedMessage({ draftId: draft.id, destination, issue }));
+        await replyDraft(buildManualTextRejectedMessage({ draftId: draft.id, destination, issue }));
         return;
       }
       const saved = await saveCrosspostTexts(deps.db, {
@@ -851,22 +857,27 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         expiresAt: expiresAt(),
       });
       if (saved === null) {
-        await reply(event.replyToken, buildStaleMessage(draft.id));
+        await replyDraft(buildStaleMessage(draft.id));
         return;
       }
-      await reply(event.replyToken, await reviewMessage(event.ownerId, saved, open.storeName));
+      await replyDraft(await reviewMessage(event.ownerId, saved, open.storeName));
       return;
     }
 
     // AI への修正指示（Req 4.3）。指示は、その生成の照合の素材に加える。
     if (value.length === 0) {
-      await reply(event.replyToken, buildInputModeMessage({ draftId: draft.id, destination, mode: 'ai_revision' }));
+      await replyDraft(buildInputModeMessage({ draftId: draft.id, destination, mode: 'ai_revision' }));
       return;
     }
     await generateAndSave(event, draft, open.storeName, [destination], { destination, instruction: value });
   }
 
-  async function handleOpenImage(event: CrosspostEventBase & { image: InboundImage }, open: OpenCrosspostDraft): Promise<void> {
+  async function handleOpenImage(
+    event: CrosspostEventBase & { image: InboundImage },
+    open: OpenCrosspostDraft,
+    pending: PendingResults,
+  ): Promise<void> {
+    const replyDraft = (...messages: LineMessage[]): Promise<void> => replyWithPending(event, pending, ...messages);
     const set = event.image.imageSet;
     if (set !== null && set.index !== 1) {
       // まとめて送られた 2 枚目以降は使わない（1 枚目の受け取りで伝える・Req 2.4）。返信もしない（通知が重ならない）。
@@ -878,16 +889,25 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       messageId: event.image.messageId,
       contentProvider: event.image.contentProvider,
       quoteToken: event.image.quoteToken,
+      sentAt: event.image.sentAt,
     });
     switch (result.kind) {
       case 'rejected':
-        await reply(event.replyToken, buildPhotoRejectedMessage({ draftId: open.draft.id, reason: result.reason }));
+        await replyDraft(buildPhotoRejectedMessage({ draftId: open.draft.id, reason: result.reason }));
         return;
       case 'not_open':
-        await reply(event.replyToken, buildNoOpenDraftMessage());
+        await replyDraft(buildNoOpenDraftMessage());
         return;
       case 'duplicate':
-        await reply(event.replyToken, await currentStateMessage(event.ownerId, open));
+        await replyDraft(await currentStateMessage(event.ownerId, open));
+        return;
+      case 'older':
+        // 処理が遅れて後から届いた、前に送った写真。店主が最後に送った写真を保つ（Req 2.5）。
+        await replyDraft(buildOlderPhotoIgnoredMessage(open.draft.id), await currentStateMessage(event.ownerId, open));
+        return;
+      case 'ambiguous':
+        // 同じ時刻に送られた別の写真。どちらが後かを推測で決めない。使いたい写真を送り直してもらう。
+        await replyDraft(buildAmbiguousPhotoMessage(open.draft.id));
         return;
       case 'attached': {
         const notices: LineMessage[] = [];
@@ -905,7 +925,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
             }),
           );
         }
-        await reply(event.replyToken, ...notices);
+        await replyDraft(...notices);
         return;
       }
     }
@@ -933,16 +953,18 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         await reply(event.replyToken, closedMessage(state.reason));
         return 'handled';
       }
+      // 「投稿の状況」は、下書きの作成中・確認中でも命令として扱う（素材・修正指示・書き直しの文にしない・Req 7.3）。
+      // 下書きは変えない（受け取った素材・文は失われない）。
+      if (STATUS_KEYWORDS.has(event.text.trim())) {
+        await showStatus(event);
+        return 'handled';
+      }
       if (state.kind === 'open') {
-        await handleOpenText(event, state.open);
+        await handleOpenText(event, state.open, await pendingResults(event));
         return 'handled';
       }
       if (START_KEYWORDS.has(event.text.trim())) {
         await start(event, stores, null);
-        return 'handled';
-      }
-      if (STATUS_KEYWORDS.has(event.text.trim())) {
-        await showStatus(event);
         return 'handled';
       }
       // 届けられなかった投稿の結果があれば、どの文への返信でも先に届ける（結果を失わない・Req 7.2）。
@@ -963,7 +985,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         return 'handled';
       }
       if (state.kind === 'none') return 'not_handled';
-      await handleOpenImage(event, state.open);
+      await handleOpenImage(event, state.open, await pendingResults(event));
       return 'handled';
     },
   };

@@ -43,6 +43,8 @@ const STORE_A_UNCONFIRMED = '3ca50000-0000-0000-0000-000000000004';
 const STORE_B1 = '3cb50000-0000-0000-0000-000000000001';
 const ALLOWED = [STORE_A1, STORE_A2, STORE_A_SUSPENDED, STORE_A_UNCONFIRMED, STORE_B1];
 const MAX_ATTEMPTS = 3;
+/** 待ちを実行してよい承認からの時間（line-webhook の QUEUED_RESUME_WINDOW_MS と同じ 24 時間）。 */
+const WINDOW = 24 * 3600_000;
 
 function unwrap<T, E>(res: Result<T, E>): T {
   if (!res.ok) throw new Error(`expected ok Result, got error: ${String(res.error)}`);
@@ -53,10 +55,12 @@ const later = (): Date => new Date(Date.now() + 24 * 3600 * 1000);
 const purgeLater = (): Date => new Date(Date.now() + 30 * 24 * 3600 * 1000);
 
 let mediaSeq = 0;
-function mediaInput(lineMessageId: string): CrosspostMediaInput {
+/** 送った時刻は既定で呼ぶたびに 1 秒ずつ新しくする（後から送った写真）。 */
+function mediaInput(lineMessageId: string, lineSentAt: Date = new Date(Date.UTC(2026, 10, 7, 0, 0, mediaSeq + 1))): CrosspostMediaInput {
   mediaSeq += 1;
   return {
     lineMessageId,
+    lineSentAt,
     lineQuoteToken: `q-${lineMessageId}`,
     storageKey: `crosspost/3c-${mediaSeq}-${lineMessageId}.jpg`,
     contentType: 'image/jpeg',
@@ -283,6 +287,54 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
     });
   });
 
+  describe('写真の送った順', () => {
+    const at = (sec: number): Date => new Date(Date.UTC(2026, 10, 7, 9, 0, sec));
+
+    it('処理が遅れて後から届いた、前に送った写真では差し替えない（店主が最後に送った写真を保つ）', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      // 写真 B（10 秒に送った）の処理が先に終わる
+      const b = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('B', at(10)), expiresAt: later() });
+      if (b.kind !== 'attached') throw new Error(b.kind);
+      // 写真 A（5 秒に送った）の処理が後から終わる
+      const a = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('A', at(5)), expiresAt: later() });
+      expect(a.kind).toBe('older');
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('B');
+      // 差し替えなかったので版は進まない（最終確認は有効のまま）
+      expect(a.kind === 'older' && a.draft.revision).toBe(b.draft.revision);
+    });
+
+    it('後に送った写真は差し替える', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('A', at(5)), expiresAt: later() });
+      const b = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('B', at(10)), expiresAt: later() });
+      expect(b.kind).toBe('attached');
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('B');
+    });
+
+    it('同じ時刻に送られた別の写真は、どちらが後か決められないので差し替えない', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('A', at(7)), expiresAt: later() });
+      const tie = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('B', at(7)), expiresAt: later() });
+      expect(tie.kind).toBe('ambiguous');
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('A');
+    });
+
+    it('処理の完了の順が逆でも、並行して届いても、送った時刻が最も新しい写真が残る', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const inputs = [mediaInput('P3', at(30)), mediaInput('P1', at(10)), mediaInput('P2', at(20))];
+      await Promise.all(
+        inputs.map((media) => attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media, expiresAt: later() })),
+      );
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('P3');
+      const count = await pool.query('SELECT count(*)::int AS n FROM crosspost_media WHERE draft_id = $1', [draft.id]);
+      expect(count.rows[0].n).toBe(1);
+    });
+  });
+
   describe('写真', () => {
     it('同じ LINE のメッセージは重複として扱い、新しい写真は差し替えて古い名前を返す。版を進める', async () => {
       const pool = await getPool();
@@ -485,11 +537,11 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const pool = await getPool();
       const { deliveryId } = await approvedGoogle();
       expect(
-        await claimCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS }),
+        await claimCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
       ).toBeNull();
       const claims = await Promise.all([
-        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS }),
-        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS }),
+        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
+        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
       ]);
       expect(claims.filter((c) => c !== null)).toHaveLength(1);
       const claimed = claims.find((c) => c !== null)!;
@@ -500,7 +552,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
     it('古い試行の結果・checkpoint は書かない', async () => {
       const pool = await getPool();
       const { deliveryId } = await approvedGoogle();
-      const claimed = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+      const claimed = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       expect(claimed).not.toBeNull();
       expect(await saveCrosspostCheckpoint(pool, { deliveryId, attempt: 1, checkpoint: 'container-1' })).toBe(true);
       expect(await saveCrosspostCheckpoint(pool, { deliveryId, attempt: 2, checkpoint: 'stale' })).toBe(false);
@@ -529,10 +581,10 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const { deliveryId } = await approvedGoogle();
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         const mode = attempt === 1 ? 'first' : 'retry';
-        const claimed = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode, maxAttempts: MAX_ATTEMPTS });
+        const claimed = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode, maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
         expect(claimed?.attempt_count).toBe(attempt);
         expect(
-          await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS }),
+          await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
         ).toBeNull();
         await recordCrosspostOutcome(pool, {
           deliveryId,
@@ -541,7 +593,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         });
       }
       expect(
-        await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS }),
+        await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
       ).toBeNull();
     });
 
@@ -553,10 +605,10 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         { kind: 'unknown', reason: 'timeout' } as const,
       ]) {
         const { deliveryId } = await approvedGoogle();
-        await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+        await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
         await recordCrosspostOutcome(pool, { deliveryId, attempt: 1, outcome });
         expect(
-          await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS }),
+          await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
         ).toBeNull();
         await resetCrosspost();
       }
@@ -565,7 +617,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
     it('結果不明は店主の確認で成功か、再試行できる失敗に移る', async () => {
       const pool = await getPool();
       const { deliveryId } = await approvedGoogle();
-      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       await recordCrosspostOutcome(pool, { deliveryId, attempt: 1, outcome: { kind: 'unknown', reason: 'network' } });
       expect(await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId, posted: false })).toBeNull();
       const notPosted = await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, posted: false });
@@ -574,17 +626,17 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       expect(notPosted?.failure_reason).toBe('owner_reported_not_posted');
       // 結果不明でなくなったので、もう一度確定はできない
       expect(await resolveUnknownCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, posted: true })).toBeNull();
-      const retried = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS });
+      const retried = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'retry', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       expect(retried?.attempt_count).toBe(2);
     });
 
     it('実行中のまま古くなった行は結果不明になる（そのオーナーの行だけ）', async () => {
       const pool = await getPool();
       const { deliveryId } = await approvedGoogle();
-      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       await pool.query(`UPDATE crosspost_deliveries SET last_attempt_at = now() - interval '10 minutes' WHERE id = $1`, [deliveryId]);
-      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_B, olderThan: new Date(Date.now() - 5 * 60_000), queuedOlderThan: new Date(Date.now() - 24 * 3600_000) })).toBe(0);
-      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedOlderThan: new Date(Date.now() - 24 * 3600_000) })).toBe(1);
+      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_B, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW })).toBe(0);
+      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW })).toBe(1);
       const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
       expect(ctx?.delivery.status).toBe('unknown');
       expect(ctx?.delivery.unknown_reason).toBe('stale_in_progress');
@@ -618,7 +670,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const deliveryId = approved.deliveries[0]!.id;
       // まだ待ち（queued）なので消さない
       expect(await releaseSettledCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, maxAttempts: MAX_ATTEMPTS })).toEqual([]);
-      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       await recordCrosspostOutcome(pool, {
         deliveryId,
         attempt: 1,
@@ -735,6 +787,64 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
     });
   });
 
+  describe('待ちの実行の期限（承認から 24 時間）', () => {
+    async function approvedQueued(approvedAgo: string): Promise<{ draftId: string; deliveryId: string }> {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const approved = await approveCrosspostDraft(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        destinations: ['google'],
+      });
+      if (approved.kind !== 'approved') throw new Error('not approved');
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - $2::interval WHERE id = $1`, [draft.id, approvedAgo]);
+      return { draftId: draft.id, deliveryId: approved.deliveries[0]!.id };
+    }
+
+    it('期限の直前（23 時間 59 分）は獲得できる', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedQueued('23 hours 59 minutes');
+      const claimed = await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
+      expect(claimed?.status).toBe('in_progress');
+    });
+
+    it('期限の直後（24 時間 1 秒）は、取りやめの確認を経ずに獲得しようとしても獲得できない（公開しない）', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedQueued('24 hours 1 second');
+      expect(
+        await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
+      ).toBeNull();
+      const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
+      expect(ctx?.delivery.status).toBe('queued');
+      expect(ctx?.delivery.attempt_count).toBe(0);
+    });
+
+    it('期限ちょうどの行への獲得と取りやめが同時でも、獲得されて公開されることはない', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedQueued('24 hours');
+      const [claimed, reaped] = await Promise.all([
+        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
+        markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW }),
+      ]);
+      expect(claimed).toBeNull();
+      expect(reaped).toBe(1);
+      expect((await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId }))?.delivery.status).toBe('canceled');
+    });
+
+    it('期限の直前の行への獲得と取りやめが同時なら、どちらか一方だけが成立する', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedQueued('23 hours 59 minutes 59 seconds');
+      const [claimed] = await Promise.all([
+        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
+        markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedWindowMs: WINDOW }),
+      ]);
+      const status = (await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId }))?.delivery.status;
+      if (claimed === null) expect(status).toBe('canceled');
+      else expect(status).toBe('in_progress');
+    });
+  });
+
   describe('待ちの取りやめと結果の通知', () => {
     async function approvedGoogle(): Promise<{ draftId: string; deliveryId: string }> {
       const pool = await getPool();
@@ -755,7 +865,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       expect(await cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId })).toBeNull();
       const canceled = await cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
       expect(canceled?.status).toBe('canceled');
-      expect(await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS })).toBeNull();
+      expect(await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW })).toBeNull();
       expect(await cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId })).toBeNull();
     });
 
@@ -763,7 +873,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const pool = await getPool();
       const { deliveryId } = await approvedGoogle();
       const [claimed, canceled] = await Promise.all([
-        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS }),
+        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW }),
         cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId }),
       ]);
       expect([claimed, canceled].filter((row) => row !== null)).toHaveLength(1);
@@ -777,7 +887,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         await markStaleCrosspostDeliveries(pool, {
           ownerId: OWNER_A,
           olderThan: new Date(Date.now() - 5 * 60_000),
-          queuedOlderThan: new Date(Date.now() - 24 * 3600_000),
+          queuedWindowMs: WINDOW,
         }),
       ).toBe(1);
       const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
@@ -788,7 +898,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const pool = await getPool();
       const { draftId, deliveryId } = await approvedGoogle();
       expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toEqual([]); // まだ終わっていない
-      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS, queuedWindowMs: WINDOW });
       await recordCrosspostOutcome(pool, { deliveryId, attempt: 1, outcome: { kind: 'unknown', reason: 'network' } });
       expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toEqual([
         { draftId, storeName: 'A店1' },

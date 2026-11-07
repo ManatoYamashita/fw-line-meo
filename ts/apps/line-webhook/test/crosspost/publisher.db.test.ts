@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost publisher (DB)', () => {
       const attached = await attachCrosspostMedia(pool, {
         ownerId: f.owner,
         draftId: draft.id,
-        media: { lineMessageId: '100', lineQuoteToken: null, storageKey: key, contentType: 'image/jpeg', width: 1080, height: 1080, byteSize: 9000, sha256: 'b'.repeat(64) },
+        media: { lineMessageId: '100', lineQuoteToken: null, lineSentAt: new Date(), storageKey: key, contentType: 'image/jpeg', width: 1080, height: 1080, byteSize: 9000, sha256: 'b'.repeat(64) },
         expiresAt: later(),
       });
       if (attached.kind !== 'attached') throw new Error(attached.kind);
