@@ -21,6 +21,7 @@ import {
   getCrosspostDelivery,
   getCrosspostMedia,
   listCrosspostDeliveries,
+  cancelQueuedCrosspostDelivery,
   markStaleCrosspostDeliveries,
   recordCrosspostOutcome,
   releaseSettledCrosspostMedia,
@@ -31,6 +32,7 @@ import type { Availability, ContentShape, DestinationAdapter, PublishOutcome } f
 import {
   DESTINATION_ORDER,
   MAX_DELIVERY_ATTEMPTS,
+  QUEUED_RESUME_WINDOW_MS,
   STALE_IN_PROGRESS_MS,
   type CrosspostDestination,
 } from './domain.js';
@@ -78,8 +80,13 @@ export interface CrosspostPublisher {
     revision: number;
     destinations: readonly CrosspostDestination[];
   }): Promise<ApproveResult>;
-  /** 承認の直後に、待ち（queued）の投稿先をすべて実行する。結果の行（表示順）を返す。 */
+  /**
+   * 待ち（queued）の投稿先をすべて実行する。結果の行（表示順）を返す。承認の直後と、承認の後に処理が止まった
+   * 下書きの再開（店主の操作・Req 6.11）の両方で使う。待ちは一度も送っていないので、再開しても重複しない。
+   */
   runApproved(ownerId: string, draftId: string): Promise<CrosspostDeliveryContext[]>;
+  /** 待ちの投稿先を取りやめる（送っていない）。待ちでなければ null。 */
+  cancelQueued(ownerId: string, deliveryId: string): Promise<CrosspostDeliveryContext | null>;
   retry(ownerId: string, deliveryId: string): Promise<RetryResult>;
   reconcile(ownerId: string, deliveryId: string): Promise<ReconcileResult>;
   /** 店主による確認（posted = 投稿されていた）。結果不明でなければ null。 */
@@ -259,6 +266,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
     await markStaleCrosspostDeliveries(deps.db, {
       ownerId,
       olderThan: new Date(now().getTime() - STALE_IN_PROGRESS_MS),
+      queuedOlderThan: new Date(now().getTime() - QUEUED_RESUME_WINDOW_MS),
     });
   }
 
@@ -298,6 +306,8 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
     },
 
     async runApproved(ownerId, draftId) {
+      // 再開の場合に備え、時間が経った待ちは先に取りやめにする（送らない）。
+      await reapStale(ownerId);
       const queued = (await listCrosspostDeliveries(deps.db, { ownerId, draftId })).filter(
         (ctx) => ctx.delivery.status === 'queued',
       );
@@ -377,6 +387,13 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
       await cleanupMedia(ownerId, ctx.delivery.draft_id);
       const after = await reload(ownerId, deliveryId);
       return after === null ? { kind: 'not_unknown', delivery: null } : { kind: 'resolved', delivery: after };
+    },
+
+    async cancelQueued(ownerId, deliveryId) {
+      const canceled = await cancelQueuedCrosspostDelivery(deps.db, { ownerId, deliveryId });
+      if (canceled === null) return null;
+      await cleanupMedia(ownerId, canceled.draft_id);
+      return reload(ownerId, deliveryId);
     },
 
     async markObserved(ownerId, deliveryId, posted) {

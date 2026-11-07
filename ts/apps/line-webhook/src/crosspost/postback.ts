@@ -24,6 +24,10 @@ export type CrosspostPostback =
   | { action: 'x_cancel'; draftId: string }
   | { action: 'x_status' }
   | { action: 'x_retry'; deliveryId: string }
+  /** 待ち（一度も送っていない）の投稿先を今すぐ送る（処理が止まった後の再開・Req 6.11）。 */
+  | { action: 'x_run'; deliveryId: string }
+  /** 待ちの投稿先を取りやめる。 */
+  | { action: 'x_drop'; deliveryId: string }
   | { action: 'x_check'; deliveryId: string }
   | { action: 'x_seen'; deliveryId: string; posted: boolean };
 
@@ -68,6 +72,8 @@ export function encodeCrosspostPostback(postback: CrosspostPostback): string {
       params.set('t', CHOICE_CODES[postback.choice]);
       break;
     case 'x_retry':
+    case 'x_run':
+    case 'x_drop':
     case 'x_check':
       params.set('v', postback.deliveryId);
       break;
@@ -138,6 +144,10 @@ export function decodeCrosspostPostback(data: string): CrosspostPostback | null 
       return { action: 'x_status' };
     case 'x_retry':
       return deliveryId === null ? null : { action: 'x_retry', deliveryId };
+    case 'x_run':
+      return deliveryId === null ? null : { action: 'x_run', deliveryId };
+    case 'x_drop':
+      return deliveryId === null ? null : { action: 'x_drop', deliveryId };
     case 'x_check':
       return deliveryId === null ? null : { action: 'x_check', deliveryId };
     case 'x_seen': {

@@ -81,19 +81,37 @@ export function recordingLogger(): RecordingLogger {
 export interface FakeMessenger {
   replies: Array<{ token: string; messages: readonly LineMessage[] }>;
   pushes: Array<{ to: string; messages: readonly LineMessage[] }>;
+  /** true なら reply を LINE が受け付けなかった（期限切れのトークンなど）として扱う。 */
+  failReply: boolean;
+  /** true なら push を LINE が受け付けなかった（ブロック・上限など）として扱う。 */
+  failPush: boolean;
   reply(token: string, messages: readonly LineMessage[]): Promise<void>;
   push(to: string, messages: readonly LineMessage[]): Promise<void>;
+  replyChecked(token: string, messages: readonly LineMessage[]): Promise<boolean>;
+  pushChecked(to: string, messages: readonly LineMessage[]): Promise<boolean>;
 }
 
 export function fakeMessenger(): FakeMessenger {
   const m: FakeMessenger = {
     replies: [],
     pushes: [],
+    failReply: false,
+    failPush: false,
     async reply(token, messages) {
-      m.replies.push({ token, messages });
+      if (!m.failReply) m.replies.push({ token, messages });
     },
     async push(to, messages) {
+      if (!m.failPush) m.pushes.push({ to, messages });
+    },
+    async replyChecked(token, messages) {
+      if (m.failReply) return false;
+      m.replies.push({ token, messages });
+      return true;
+    },
+    async pushChecked(to, messages) {
+      if (m.failPush) return false;
       m.pushes.push({ to, messages });
+      return true;
     },
   };
   return m;

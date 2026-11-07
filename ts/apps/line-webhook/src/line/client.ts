@@ -17,7 +17,8 @@ import type { QuickReply } from './flex-types.js';
 // 具体的な文言・Flex コンテンツの組み立ては別タスク（MessageBuilders）が担う。
 // テキストのクイックリプライは、レポートの店舗の選択肢（line-on-demand-report の Requirement 3.2）が使う。
 export type LineMessage =
-  | { type: 'text'; text: string; quickReply?: QuickReply }
+  // quoteToken: 過去のメッセージを引用する（一括発信の最終確認で、店主が送った写真を引用する・line-crosspost）。
+  | { type: 'text'; text: string; quickReply?: QuickReply; quoteToken?: string }
   | { type: 'flex'; altText: string; contents: unknown };
 
 export interface LineMessenger {
@@ -50,6 +51,13 @@ export interface LineMessenger {
    * 一括発信を使わない偽実装では省略可能（省略時、一括発信は写真を受け取れない）。
    */
   getMessageContent?(messageId: string, maxBytes: number): Promise<MessageContentResult>;
+  /**
+   * reply と同じだが、LINE が受け付けたか（2xx）を返す。通信の失敗・時間切れも false（例外にしない）。
+   * 届けたかどうかを記録したい呼び出し元（一括発信の結果の通知・line-crosspost Req 7.2）が使う。
+   */
+  replyChecked?(replyToken: string, messages: readonly LineMessage[]): Promise<boolean>;
+  /** push と同じだが、LINE が受け付けたか（2xx）を返す。通信の失敗・時間切れも false。 */
+  pushChecked?(lineUserId: string, messages: readonly LineMessage[]): Promise<boolean>;
   /** リクエスト単位のログ出力先を適用する。テスト用の偽実装では省略可能。 */
   withLogger?(logger: LineMessengerLogger): LineMessenger;
 }
@@ -138,7 +146,8 @@ interface RawProfileResponse {
 }
 
 /** 実装本体（Content API の取得を必ず持つ）。 */
-export type ConcreteLineMessenger = LineMessenger & Required<Pick<LineMessenger, 'getMessageContent'>>;
+export type ConcreteLineMessenger = LineMessenger &
+  Required<Pick<LineMessenger, 'getMessageContent' | 'replyChecked' | 'pushChecked'>>;
 
 export function createLineMessenger(deps: LineMessengerDeps): ConcreteLineMessenger {
   // 有効期限内はこのクロージャ内メモリにキャッシュし、再発行を避ける（research.md Decision 2）。
@@ -218,7 +227,63 @@ export function createLineMessenger(deps: LineMessengerDeps): ConcreteLineMessen
     return cachedToken.accessToken;
   }
 
+  /** reply を送り、LINE が受け付けたかを返す。非 2xx は記録して false。 */
+  async function postReply(
+    replyToken: string,
+    messages: readonly LineMessage[],
+    logger: LineMessengerLogger,
+  ): Promise<boolean> {
+    const accessToken = await getAccessToken();
+    const response = await send(
+      REPLY_URL,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ replyToken, messages }),
+      },
+      deps.requestTimeoutMs,
+      async (res) => res,
+    );
+    if (!response.ok) logger.warn('line-webhook.reply_failed', { status: response.status });
+    return response.ok;
+  }
+
+  /** push を送り、LINE が受け付けたかを返す。非 2xx は記録して false。 */
+  async function postPush(lineUserId: string, messages: readonly LineMessage[]): Promise<boolean> {
+    const accessToken = await getAccessToken();
+    const response = await send(
+      PUSH_URL,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: lineUserId, messages }),
+      },
+      deps.requestTimeoutMs,
+      async (res) => res,
+    );
+    if (!response.ok) deps.logger.warn('line push failed', { status: response.status });
+    return response.ok;
+  }
+
   const messenger: ConcreteLineMessenger = {
+    async replyChecked(replyToken: string, messages: readonly LineMessage[]): Promise<boolean> {
+      try {
+        return await postReply(replyToken, messages, deps.logger);
+      } catch {
+        // swallowed-exception: intentional — 届いたかどうかを値で返す契約。失敗は呼び出し元が記録し、結果を失わない。
+        return false;
+      }
+    },
+
+    async pushChecked(lineUserId: string, messages: readonly LineMessage[]): Promise<boolean> {
+      try {
+        return await postPush(lineUserId, messages);
+      } catch {
+        // swallowed-exception: intentional — 届いたかどうかを値で返す契約（replyChecked と同じ）。
+        return false;
+      }
+    },
+
     async reply(
       replyToken: string,
       messages: readonly LineMessage[],
@@ -426,6 +491,15 @@ export function createLineMessenger(deps: LineMessengerDeps): ConcreteLineMessen
         unlinkRichMenu: (lineUserId) => messenger.unlinkRichMenu(lineUserId),
         startLoading: (lineUserId, loadingSeconds) => messenger.startLoading(lineUserId, loadingSeconds),
         getMessageContent: (messageId, maxBytes) => messenger.getMessageContent(messageId, maxBytes),
+        replyChecked: async (replyToken, messages) => {
+          try {
+            return await postReply(replyToken, messages, logger);
+          } catch {
+            // swallowed-exception: intentional — 届いたかどうかを値で返す契約（上の replyChecked と同じ）。
+            return false;
+          }
+        },
+        pushChecked: (lineUserId, messages) => messenger.pushChecked(lineUserId, messages),
         withLogger: (nextLogger) => withLineMessengerLogger(messenger, nextLogger),
       };
     },

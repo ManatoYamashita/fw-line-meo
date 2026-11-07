@@ -44,6 +44,7 @@ export interface PhotoIntake {
     draftId: string;
     messageId: string;
     contentProvider: 'line' | 'external';
+    quoteToken: string | null;
   }): Promise<IntakeResult>;
 }
 
@@ -60,7 +61,7 @@ export function createPhotoIntake(deps: PhotoIntakeDeps): PhotoIntake {
   }
 
   return {
-    async receive({ ownerId, draftId, messageId, contentProvider }) {
+    async receive({ ownerId, draftId, messageId, contentProvider, quoteToken }) {
       const reject = (reason: IntakeRejection, status?: number): IntakeResult => {
         deps.logger.warn('crosspost.media_rejected', { ownerId, reason, ...(status !== undefined ? { status } : {}) });
         return { kind: 'rejected', reason };
@@ -105,6 +106,7 @@ export function createPhotoIntake(deps: PhotoIntakeDeps): PhotoIntake {
           draftId,
           media: {
             lineMessageId: messageId,
+            lineQuoteToken: quoteToken,
             storageKey: key,
             contentType: 'image/jpeg',
             width: normalized.value.width,

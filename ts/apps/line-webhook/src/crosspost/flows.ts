@@ -17,13 +17,16 @@ import {
   beginCrosspostReview,
   closeCrosspostDraft,
   createCrosspostDraft,
+  getCrosspostDelivery,
   getCrosspostDraft,
   getCrosspostMedia,
   getOpenCrosspostDraft,
   listCrosspostDeliveries,
   listCrosspostEligibleStores,
   listRecentCrosspostPosts,
-  purgeExpiredCrosspostDrafts,
+  listUnnotifiedCrosspostResults,
+  markCrosspostResultNotified,
+  purgeCrosspostRetention,
   saveCrosspostTexts,
   setCrosspostInputMode,
   type CrosspostStoreSummary,
@@ -36,6 +39,7 @@ import {
   DRAFT_RETENTION_MS,
   DRAFT_TTL_MS,
   MAX_SELECTABLE_STORES,
+  MEDIA_RETENTION_MS,
   PURGE_BATCH_SIZE,
   type CrosspostDestination,
 } from './domain.js';
@@ -55,6 +59,7 @@ import {
   buildNoOpenDraftMessage,
   buildNotRetryableMessage,
   buildOpenDraftExistsMessage,
+  buildPendingResultsIntroMessage,
   buildPhotoRejectedMessage,
   buildPhotoSetNoticeMessage,
   buildReceivedMessage,
@@ -88,7 +93,7 @@ export interface CrosspostFlows {
 export interface CrosspostFlowDeps {
   db: Queryable;
   pool: TransactionCapable;
-  messenger: Pick<LineMessenger, 'reply' | 'push'>;
+  messenger: Pick<LineMessenger, 'reply' | 'push' | 'replyChecked' | 'pushChecked'>;
   prompts: CrosspostPrompts;
   publisher: CrosspostPublisher;
   intake: PhotoIntake;
@@ -105,6 +110,10 @@ export interface CrosspostFlowDeps {
 
 /** 開始の合図として受け付ける店主の文（前後の空白は無視）。 */
 const START_KEYWORDS = new Set(['投稿', '投稿する', '投稿を作る']);
+/** 投稿の状況を見る合図として受け付ける店主の文。 */
+const STATUS_KEYWORDS = new Set(['投稿の状況', '投稿の結果']);
+/** 一度の返信で添える、届けていない結果の件数の上限（LINE の 1 回の返信は 5 通まで）。 */
+const MAX_PENDING_RESULTS = 2;
 const DEFAULT_REPLY_SAFE_MS = 20_000;
 
 export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
@@ -132,7 +141,11 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
   /** 保存期間を過ぎた下書きを少しずつ消す（開始の操作のついで）。失敗しても利用者の操作は止めない。 */
   async function purgeQuietly(ownerId: string): Promise<void> {
     try {
-      const purged = await purgeExpiredCrosspostDrafts(deps.db, { now: now(), limit: PURGE_BATCH_SIZE });
+      const purged = await purgeCrosspostRetention(deps.db, {
+        now: now(),
+        mediaOlderThan: new Date(now().getTime() - MEDIA_RETENTION_MS),
+        limit: PURGE_BATCH_SIZE,
+      });
       await deleteMedia(purged.removedStorageKeys, ownerId);
     } catch (error) {
       deps.logger.warn('crosspost.operation_failed', { ownerId, operation: 'purge', errorName: errorNameOf(error) });
@@ -161,6 +174,11 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     });
     if (closed !== null) await deleteMedia(closed.removedStorageKeys, ownerId);
     return { kind: 'closed', reason: expired ? 'expired' : 'unserviceable' };
+  }
+
+  async function confirmPhoto(ownerId: string, draftId: string): Promise<{ width: number; height: number; quoteToken: string | null } | null> {
+    const media = await getCrosspostMedia(deps.db, { ownerId, draftId });
+    return media === null ? null : { width: media.width, height: media.height, quoteToken: media.line_quote_token };
   }
 
   async function hasPhoto(ownerId: string, draftId: string): Promise<boolean> {
@@ -204,26 +222,30 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     requestedStoreId: string | null,
   ): Promise<void> {
     await purgeQuietly(event.ownerId);
+    // 届けられなかった結果があれば、開始の応答に添えて届ける（Req 7.2）。
+    const pending = await pendingResults(event);
     const state = await loadOpen(event.ownerId);
     if (state.kind === 'open') {
       // 同じ店舗を選び直しただけなら、そのまま続ける。違う店舗・指定なしは、続けるか新しく作るかを選ばせる（Req 1.5）。
       if (requestedStoreId !== null && requestedStoreId === state.open.draft.store_id) {
-        await reply(event.replyToken, await currentStateMessage(event.ownerId, state.open));
+        await replyWithPending(event, pending, await currentStateMessage(event.ownerId, state.open));
         return;
       }
-      await reply(
-        event.replyToken,
+      await replyWithPending(
+        event,
+        pending,
         buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId }),
       );
       return;
     }
-    await createAndStart(event, stores, requestedStoreId);
+    await createAndStart(event, stores, requestedStoreId, pending);
   }
 
   async function createAndStart(
     event: CrosspostEventBase,
     stores: readonly CrosspostStoreSummary[],
     requestedStoreId: string | null,
+    pending: PendingResults = NO_PENDING,
   ): Promise<void> {
     const store =
       requestedStoreId !== null
@@ -233,10 +255,10 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
           : undefined;
     if (store === undefined) {
       if (requestedStoreId !== null) {
-        await reply(event.replyToken, buildStaleMessage(null));
+        await replyWithPending(event, pending, buildStaleMessage(null));
         return;
       }
-      await reply(event.replyToken, buildStorePickerMessage(stores));
+      await replyWithPending(event, pending, buildStorePickerMessage(stores));
       return;
     }
 
@@ -251,14 +273,14 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       if (created.error === 'OPEN_DRAFT_EXISTS') {
         const state = await loadOpen(event.ownerId);
         if (state.kind === 'open') {
-          await reply(event.replyToken, buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId: store.id }));
+          await replyWithPending(event, pending, buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId: store.id }));
           return;
         }
       }
-      await reply(event.replyToken, buildStaleMessage(null));
+      await replyWithPending(event, pending, buildStaleMessage(null));
       return;
     }
-    await reply(event.replyToken, await collectingMessage(event.ownerId, created.value, store.name));
+    await replyWithPending(event, pending, await collectingMessage(event.ownerId, created.value, store.name));
   }
 
   // ===================================================================
@@ -354,6 +376,18 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
   // ===================================================================
 
   async function approve(event: CrosspostEventBase, postback: Extract<CrosspostPostback, { action: 'x_ok' }>): Promise<void> {
+    // 同じ版の承認が既に通っている（二重タップ・応答が届かず押し直した・承認の後に処理が止まった）なら、新しく
+    // 承認せず、待ち（一度も送っていない）の投稿先だけを再開する。送信済み・実行中の投稿先は送り直さない（Req 6.11）。
+    const existing = await getCrosspostDraft(deps.db, { ownerId: event.ownerId, draftId: postback.draftId });
+    if (existing !== null && existing.draft.status === 'approved') {
+      if (existing.draft.approved_revision === postback.revision) {
+        await runAndReport(event, existing.draft.id, existing.storeName, existing.draft.store_id);
+        return;
+      }
+      await reply(event.replyToken, buildStaleMessage(null));
+      return;
+    }
+
     const open = await requireReviewing(event, postback.draftId, postback.revision);
     if (open === null) return;
     const destinations = choiceToDestinations(postback.choice);
@@ -365,39 +399,141 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       destinations,
     });
     if (approved.kind !== 'approved') {
+      // 並行した同じ承認が先に通った場合は、上と同じく再開の扱いにする（待ちが無ければ結果を示すだけ）。
+      const raced = await getCrosspostDraft(deps.db, { ownerId: event.ownerId, draftId: open.draft.id });
+      if (raced !== null && raced.draft.status === 'approved' && raced.draft.approved_revision === postback.revision) {
+        await runAndReport(event, raced.draft.id, raced.storeName, raced.draft.store_id);
+        return;
+      }
       await reply(event.replyToken, buildStaleMessage(open.draft.id));
       return;
     }
+    await runAndReport(event, open.draft.id, open.storeName, open.draft.store_id);
+  }
 
-    // ここから先は投げない（承認は確定し、投稿先の状態は DB にある）。
+  /** 待ちの投稿先を実行し、結果を届ける。承認の後なので投げない（投稿先の状態は DB にある）。 */
+  async function runAndReport(event: CrosspostEventBase, draftId: string, storeName: string, storeId: string): Promise<void> {
     const startedAt = now().getTime();
     let message: LineMessage;
+    let marks: ResultMark[] = [];
     try {
-      const deliveries = await deps.publisher.runApproved(event.ownerId, open.draft.id);
-      message = buildResultMessage({ storeName: open.storeName, deliveries });
+      const deliveries = await deps.publisher.runApproved(event.ownerId, draftId);
+      marks = marksOf(deliveries.map((ctx) => ctx.delivery));
+      message = buildResultMessage({ storeName, deliveries });
     } catch (error) {
       deps.logger.error('crosspost.operation_failed', {
         ownerId: event.ownerId,
-        storeId: open.draft.store_id,
+        storeId,
         operation: 'run_approved',
         errorName: errorNameOf(error),
       });
       message = buildStatusMessage(await safeRecent(event.ownerId));
     }
-    await deliver(event, message, now().getTime() - startedAt);
+    await sendResults(event, [message], marks, now().getTime() - startedAt);
   }
 
-  /** 結果を知らせる。時間がかかった（Reply トークンの期限が近い）ときは Push で送る（Req 7.2）。投げない。 */
-  async function deliver(event: CrosspostEventBase, message: LineMessage, elapsedMs: number): Promise<void> {
-    try {
-      if (elapsedMs < replySafeMs) {
-        await deps.messenger.reply(event.replyToken, [message]);
-      } else {
-        await deps.messenger.push(event.lineUserId, [message]);
+  /**
+   * 「この下書きの結果を、この終了時刻のものまで届けた」の記録の単位。時刻は**示した投稿先の行の finished_at の最大**で、
+   * アプリの時計を使わない（DB とアプリの時計のずれ・精度の違いで、届けていない結果を届けたことにしない）。
+   */
+  interface ResultMark {
+    draftId: string;
+    finishedUpTo: Date;
+  }
+
+  /** 示した投稿先の行から記録の単位を作る（終わった行が無ければ記録しない）。 */
+  function marksOf(rows: ReadonlyArray<{ draft_id: string; finished_at: Date | null }>): ResultMark[] {
+    const latest = new Map<string, Date>();
+    for (const row of rows) {
+      if (row.finished_at === null) continue;
+      const prev = latest.get(row.draft_id);
+      if (prev === undefined || row.finished_at.getTime() > prev.getTime()) latest.set(row.draft_id, row.finished_at);
+    }
+    return [...latest].map(([draftId, finishedUpTo]) => ({ draftId, finishedUpTo }));
+  }
+
+  async function recordMarks(ownerId: string, marks: readonly ResultMark[]): Promise<void> {
+    for (const mark of marks) {
+      try {
+        await markCrosspostResultNotified(deps.db, { ownerId, draftIds: [mark.draftId], deliveredAt: mark.finishedUpTo });
+      } catch (error) {
+        // 記録できなくても結果は届いている。次の操作でもう一度示されるだけ（失う方向には倒れない）。
+        deps.logger.warn('crosspost.operation_failed', { ownerId, operation: 'mark_notified', errorName: errorNameOf(error) });
       }
+    }
+  }
+
+  /**
+   * 結果を届け、届いたら記録する（Req 7.1, 7.2）。時間がかかった（Reply トークンの期限が近い）・Reply が受け付けられ
+   * なかったときは Push で送る。どちらも届かなければ記録しない（次の操作・「投稿の状況」で必ず示す）。投げない。
+   */
+  async function sendResults(
+    event: CrosspostEventBase,
+    messages: readonly LineMessage[],
+    marks: readonly ResultMark[],
+    elapsedMs: number,
+  ): Promise<boolean> {
+    let delivered = false;
+    try {
+      if (elapsedMs < replySafeMs) delivered = await replyChecked(event.replyToken, messages);
+      if (!delivered) delivered = await pushChecked(event.lineUserId, messages);
     } catch (error) {
       deps.logger.warn('crosspost.operation_failed', { ownerId: event.ownerId, operation: 'notify', errorName: errorNameOf(error) });
     }
+    if (!delivered) {
+      deps.logger.warn('crosspost.notify_failed', { ownerId: event.ownerId });
+      return false;
+    }
+    await recordMarks(event.ownerId, marks);
+    return true;
+  }
+
+  async function replyChecked(token: string, messages: readonly LineMessage[]): Promise<boolean> {
+    if (deps.messenger.replyChecked) return deps.messenger.replyChecked(token, messages);
+    await deps.messenger.reply(token, messages);
+    return true;
+  }
+
+  async function pushChecked(lineUserId: string, messages: readonly LineMessage[]): Promise<boolean> {
+    if (deps.messenger.pushChecked) return deps.messenger.pushChecked(lineUserId, messages);
+    await deps.messenger.push(lineUserId, messages);
+    return true;
+  }
+
+  interface PendingResults {
+    messages: LineMessage[];
+    marks: ResultMark[];
+  }
+  const NO_PENDING: PendingResults = { messages: [], marks: [] };
+
+  /** 届けられなかった結果（新しい順・上限つき）。読み出しに失敗しても利用者の操作は止めない。 */
+  async function pendingResults(event: CrosspostEventBase): Promise<PendingResults> {
+    try {
+      await deps.publisher.reapStale(event.ownerId);
+      const pending = await listUnnotifiedCrosspostResults(deps.db, { ownerId: event.ownerId, limit: MAX_PENDING_RESULTS });
+      if (pending.length === 0) return NO_PENDING;
+      const messages: LineMessage[] = [buildPendingResultsIntroMessage()];
+      const marks: ResultMark[] = [];
+      for (const item of pending) {
+        const result = await resultForDraft(event, item.draftId, item.storeName);
+        messages.push(result.message);
+        marks.push(...result.marks);
+      }
+      return { messages, marks };
+    } catch (error) {
+      deps.logger.warn('crosspost.operation_failed', { ownerId: event.ownerId, operation: 'pending_results', errorName: errorNameOf(error) });
+      return NO_PENDING;
+    }
+  }
+
+  /** 届けられなかった結果を先に添えて返信する。添えた結果は、届いたときだけ届いたと記録する。 */
+  async function replyWithPending(event: CrosspostEventBase, pending: PendingResults, ...messages: LineMessage[]): Promise<void> {
+    if (pending.messages.length === 0) {
+      await reply(event.replyToken, ...messages);
+      return;
+    }
+    const delivered = await replyChecked(event.replyToken, [...pending.messages, ...messages]);
+    if (delivered) await recordMarks(event.ownerId, pending.marks);
   }
 
   async function safeRecent(ownerId: string): Promise<Awaited<ReturnType<typeof listRecentCrosspostPosts>>> {
@@ -409,9 +545,25 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     }
   }
 
-  async function resultForDraft(event: CrosspostEventBase, draftId: string, storeName: string): Promise<LineMessage> {
+  async function resultForDraft(
+    event: CrosspostEventBase,
+    draftId: string,
+    storeName: string,
+  ): Promise<{ message: LineMessage; marks: ResultMark[] }> {
     const deliveries = await listCrosspostDeliveries(deps.db, { ownerId: event.ownerId, draftId });
-    return buildResultMessage({ storeName, deliveries });
+    return { message: buildResultMessage({ storeName, deliveries }), marks: marksOf(deliveries.map((ctx) => ctx.delivery)) };
+  }
+
+  async function sendResultForDraft(event: CrosspostEventBase, draftId: string, storeName: string, elapsedMs: number): Promise<void> {
+    const result = await resultForDraft(event, draftId, storeName);
+    await sendResults(event, [result.message], result.marks, elapsedMs);
+  }
+
+  /** 直近の投稿の状況（Req 7.3）。示した下書きの結果は届いたと記録する。 */
+  async function showStatus(event: CrosspostEventBase): Promise<void> {
+    await deps.publisher.reapStale(event.ownerId);
+    const posts = await listRecentCrosspostPosts(deps.db, { ownerId: event.ownerId, limit: 5 });
+    await sendResults(event, [buildStatusMessage(posts)], marksOf(posts.flatMap((post) => post.deliveries)), 0);
   }
 
   // ===================================================================
@@ -512,7 +664,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         // 作成中でなければ、承認済みの下書きの結果を出す（他のオーナーの下書きは読めない）。
         const past = await getCrosspostDraft(deps.db, { ownerId: event.ownerId, draftId: postback.draftId });
         if (past !== null && past.draft.status === 'approved') {
-          await reply(event.replyToken, await resultForDraft(event, past.draft.id, past.storeName));
+          await sendResultForDraft(event, past.draft.id, past.storeName, 0);
           return;
         }
         await reply(event.replyToken, state.kind === 'closed' ? closedMessage(state.reason) : buildNoOpenDraftMessage());
@@ -533,11 +685,11 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         }
         await reply(
           event.replyToken,
-          buildConfirmMessage({
+          ...buildConfirmMessage({
             draft: open.draft,
             storeName: open.storeName,
             choice: postback.choice,
-            hasPhoto: await hasPhoto(event.ownerId, open.draft.id),
+            photo: await confirmPhoto(event.ownerId, open.draft.id),
           }),
         );
         return;
@@ -558,11 +710,9 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         return;
       }
 
-      case 'x_status': {
-        await deps.publisher.reapStale(event.ownerId);
-        await reply(event.replyToken, buildStatusMessage(await listRecentCrosspostPosts(deps.db, { ownerId: event.ownerId, limit: 5 })));
+      case 'x_status':
+        await showStatus(event);
         return;
-      }
 
       case 'x_retry': {
         const startedAt = now().getTime();
@@ -571,11 +721,31 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
           await reply(event.replyToken, buildNotRetryableMessage());
           return;
         }
-        await deliver(
-          event,
-          await resultForDraft(event, result.delivery.delivery.draft_id, result.delivery.storeName),
-          now().getTime() - startedAt,
-        );
+        const draftId = result.delivery.delivery.draft_id;
+        await sendResultForDraft(event, draftId, result.delivery.storeName, now().getTime() - startedAt);
+        return;
+      }
+
+      case 'x_run': {
+        // 待ち（一度も送っていない）の投稿先の再開（Req 6.11）。下書きの待ちをまとめて実行する（CAS で重複しない）。
+        await deps.publisher.reapStale(event.ownerId);
+        const ctx = await getCrosspostDelivery(deps.db, { ownerId: event.ownerId, deliveryId: postback.deliveryId });
+        if (ctx === null || ctx.delivery.status !== 'queued') {
+          await reply(event.replyToken, buildNotRetryableMessage());
+          return;
+        }
+        await runAndReport(event, ctx.delivery.draft_id, ctx.storeName, ctx.storeId);
+        return;
+      }
+
+      case 'x_drop': {
+        const canceled = await deps.publisher.cancelQueued(event.ownerId, postback.deliveryId);
+        if (canceled === null) {
+          await reply(event.replyToken, buildNotRetryableMessage());
+          return;
+        }
+        const draftId = canceled.delivery.draft_id;
+        await sendResultForDraft(event, draftId, canceled.storeName, 0);
         return;
       }
 
@@ -585,7 +755,8 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
           await reply(event.replyToken, buildNotRetryableMessage());
           return;
         }
-        await reply(event.replyToken, await resultForDraft(event, result.delivery.delivery.draft_id, result.delivery.storeName));
+        const draftId = result.delivery.delivery.draft_id;
+        await sendResultForDraft(event, draftId, result.delivery.storeName, 0);
         return;
       }
 
@@ -595,7 +766,8 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
           await reply(event.replyToken, buildNotRetryableMessage());
           return;
         }
-        await reply(event.replyToken, await resultForDraft(event, updated.delivery.draft_id, updated.storeName));
+        const draftId = updated.delivery.draft_id;
+        await sendResultForDraft(event, draftId, updated.storeName, 0);
         return;
       }
     }
@@ -685,6 +857,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       draftId: open.draft.id,
       messageId: event.image.messageId,
       contentProvider: event.image.contentProvider,
+      quoteToken: event.image.quoteToken,
     });
     switch (result.kind) {
       case 'rejected':
@@ -746,6 +919,16 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       }
       if (START_KEYWORDS.has(event.text.trim())) {
         await start(event, stores, null);
+        return 'handled';
+      }
+      if (STATUS_KEYWORDS.has(event.text.trim())) {
+        await showStatus(event);
+        return 'handled';
+      }
+      // 届けられなかった投稿の結果があれば、どの文への返信でも先に届ける（結果を失わない・Req 7.2）。
+      const pending = await pendingResults(event);
+      if (pending.messages.length > 0) {
+        await replyWithPending(event, pending);
         return 'handled';
       }
       return 'not_handled';

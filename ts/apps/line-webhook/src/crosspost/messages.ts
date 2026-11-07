@@ -391,40 +391,84 @@ function excerpt(value: string, max = 60): string {
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max).join('')}…`;
 }
 
+/** 写真の向き（店主が取り違えに気づく手掛かり）。 */
+export function describeOrientation(width: number, height: number): string {
+  const ratio = width / height;
+  if (ratio > 1.1) return '横長';
+  if (ratio < 0.9) return '縦長';
+  return '正方形に近い';
+}
+
+/** 最終確認で示す写真（店主が送った写真のメッセージの quoteToken と寸法）。 */
+export interface ConfirmPhoto {
+  width: number;
+  height: number;
+  quoteToken: string | null;
+}
+
+/**
+ * 最終確認（Req 5.3, 8.7）。写真があるときは、**店主が送った写真のメッセージそのものを引用する**テキストを
+ * 先に置く（quoteToken・公開の URL を作らずに、公開する写真を目で確かめられる）。引用できないとき（外部の画像
+ * など）は向きと大きさだけを示し、違う写真なら送り直すよう添える。
+ */
 export function buildConfirmMessage(input: {
   draft: CrosspostDraftRow;
   storeName: string;
   choice: DestinationChoice;
-  hasPhoto: boolean;
-}): LineMessage {
+  photo: ConfirmPhoto | null;
+}): LineMessage[] {
   const destinations = choiceToDestinations(input.choice);
   const label = destinations.map((d) => DESTINATION_LABELS[d]).join(' と ');
-  return flex(
-    `「${input.storeName}」の投稿を ${label} に投稿します。よろしければ「投稿する」を押してください。`,
-    bubble({
-      title: `${label} に投稿します`,
-      lines: [
-        text(`店舗: ${input.storeName}`, { color: lineColors.description }),
-        text(input.hasPhoto ? '写真: あり（1 枚）' : '写真: なし', { color: lineColors.description }),
-        ...destinations.map((d) => text(`${DESTINATION_LABELS[d]}: ${excerpt(destinationText(input.draft, d) ?? '')}`)),
-        ...(input.hasPhoto
-          ? [text('写真にお客様の顔などが写っていないか、もう一度ご確認ください。', { size: 'xs', color: lineColors.caption })]
-          : []),
-        text('「投稿する」を押すと公開されます。', { size: 'xs', color: lineColors.caption }),
-      ],
-      buttons: [
-        button(
-          postback(
-            '投稿する',
-            { action: 'x_ok', draftId: input.draft.id, revision: input.draft.revision, choice: input.choice },
-            `${label}に投稿する`,
+  const photo = input.photo;
+  const photoLine =
+    photo === null
+      ? '写真: なし'
+      : `写真: ${photo.quoteToken === null ? '' : '上で引用した写真（'}${describeOrientation(photo.width, photo.height)}${photo.quoteToken === null ? '' : '）'}`;
+  const messages: LineMessage[] = [];
+  if (photo !== null) {
+    const orientation = describeOrientation(photo.width, photo.height);
+    messages.push(
+      photo.quoteToken === null
+        ? {
+            type: 'text',
+            text: `投稿する写真は 1 枚（${orientation}）です。違う写真のときは、その写真を送り直してから確認し直してください。`,
+          }
+        : {
+            type: 'text',
+            text: `この写真を投稿します（${orientation}）。違う写真のときは、その写真を送り直してから確認し直してください。`,
+            quoteToken: photo.quoteToken,
+          },
+    );
+  }
+  messages.push(
+    flex(
+      `「${input.storeName}」の投稿を ${label} に投稿します。よろしければ「投稿する」を押してください。`,
+      bubble({
+        title: `${label} に投稿します`,
+        lines: [
+          text(`店舗: ${input.storeName}`, { color: lineColors.description }),
+          text(photoLine, { color: lineColors.description }),
+          ...destinations.map((d) => text(`${DESTINATION_LABELS[d]}: ${excerpt(destinationText(input.draft, d) ?? '')}`)),
+          ...(photo !== null
+            ? [text('写真にお客様の顔などが写っていないか、もう一度ご確認ください。', { size: 'xs', color: lineColors.caption })]
+            : []),
+          text('「投稿する」を押すと公開されます。', { size: 'xs', color: lineColors.caption }),
+        ],
+        buttons: [
+          button(
+            postback(
+              '投稿する',
+              { action: 'x_ok', draftId: input.draft.id, revision: input.draft.revision, choice: input.choice },
+              `${label}に投稿する`,
+            ),
+            'primary',
           ),
-          'primary',
-        ),
-        button(postback('戻る', { action: 'x_view', draftId: input.draft.id })),
-      ],
-    }),
+          button(postback('戻る', { action: 'x_view', draftId: input.draft.id })),
+        ],
+      }),
+    ),
   );
+  return messages;
 }
 
 export function buildStaleMessage(draftId: string | null): LineMessage {
@@ -476,11 +520,20 @@ function deliveryLines(row: CrosspostDeliveryRow): FlexBoxContent[] {
           { size: 'xs', color: lineColors.description },
         ),
       ];
-    case 'queued':
     case 'in_progress':
       return [text(`… ${label}: 投稿しています`, { bold: true })];
+    case 'queued':
+      // 承認の直後はすぐ実行するので、結果の表示で待ちのまま見えるのは、処理が止まったときか別の操作の最中である。
+      // 一度も送っていないことは確かなので、店主が選んで再開・取りやめできる（Req 6.11）。
+      return [
+        text(`－ ${label}: まだ送っていません`, { bold: true }),
+        text('処理が途中で止まった可能性があります。今すぐ投稿するか、取りやめるかを選んでください。', {
+          size: 'xs',
+          color: lineColors.description,
+        }),
+      ];
     case 'canceled':
-      return [text(`－ ${label}: 取りやめました`, { bold: true })];
+      return [text(`－ ${label}: 取りやめました（送っていません）`, { bold: true })];
   }
 }
 
@@ -488,6 +541,12 @@ function deliveryButtons(row: CrosspostDeliveryRow): FlexBoxContent[] {
   const label = DESTINATION_LABELS[row.destination];
   if (row.status === 'failed' && row.retryable && row.attempt_count < MAX_DELIVERY_ATTEMPTS) {
     return [button(postback(`${label}にもう一度投稿`, { action: 'x_retry', deliveryId: row.id }), 'primary')];
+  }
+  if (row.status === 'queued') {
+    return [
+      button(postback(`${label}に今すぐ投稿する`, { action: 'x_run', deliveryId: row.id }), 'primary'),
+      button(postback(`${label}への投稿を取りやめる`, { action: 'x_drop', deliveryId: row.id })),
+    ];
   }
   if (row.status === 'unknown') {
     return [
@@ -524,7 +583,7 @@ export function buildResultMessage(input: {
 }
 
 const STATUS_WORDS: Readonly<Record<CrosspostDeliveryRow['status'], string>> = {
-  queued: '投稿しています',
+  queued: 'まだ送っていません',
   in_progress: '投稿しています',
   succeeded: '投稿しました',
   failed: '投稿できませんでした',
@@ -554,6 +613,10 @@ export function buildStatusMessage(
       }),
     ),
   });
+}
+
+export function buildPendingResultsIntroMessage(): LineMessage {
+  return plain('お届けできていなかった投稿の結果です。');
 }
 
 export function buildNotRetryableMessage(): LineMessage {

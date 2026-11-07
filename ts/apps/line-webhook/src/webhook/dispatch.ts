@@ -28,6 +28,8 @@ export interface InboundImage {
   contentProvider: 'line' | 'external';
   /** まとめて送られたときの並び（index は 1 始まり）。単独なら null。 */
   imageSet: { id: string; index: number; total: number } | null;
+  /** このメッセージの引用の手掛かり（最終確認で店主が送った写真を引用する）。無ければ null。 */
+  quoteToken: string | null;
 }
 
 export interface EventDispatcher {
@@ -57,6 +59,7 @@ interface RawLineMessage {
   type?: string;
   text?: string;
   id?: string;
+  quoteToken?: string;
   contentProvider?: { type?: string };
   imageSet?: { id?: string; index?: number; total?: number };
 }
@@ -110,6 +113,10 @@ function parseImage(message: RawLineMessage | undefined): InboundImage | undefin
     messageId: message.id,
     contentProvider: message.contentProvider?.type === 'external' ? 'external' : 'line',
     imageSet,
+    quoteToken:
+      typeof message.quoteToken === 'string' && message.quoteToken.length > 0 && message.quoteToken.length <= 512
+        ? message.quoteToken
+        : null,
   };
 }
 

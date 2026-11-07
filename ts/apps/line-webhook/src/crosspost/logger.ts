@@ -18,6 +18,8 @@ export type CrosspostLogEvent =
   | 'crosspost.generation_failed'
   /** 写真の実体の削除に失敗した（置き場の寿命の規則が後で消す）。 */
   | 'crosspost.media_cleanup_failed'
+  /** 投稿の結果を Reply でも Push でも届けられなかった（結果は DB にあり、次の操作で示す）。 */
+  | 'crosspost.notify_failed'
   /** 想定外の例外（会話の処理・アダプタ・置き場）。 */
   | 'crosspost.operation_failed';
 

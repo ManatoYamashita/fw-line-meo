@@ -1,6 +1,7 @@
 // LINE 起点の一括発信（line-crosspost spec・Issue #494）の共通の型と定数。
 // 状態の正典は DB（migration 0019）で、ここは DB の値をそのまま使う（@fwlm/db の型を再輸出する）。
 
+import { CROSSPOST_MEDIA_RETENTION_MS } from '@fwlm/db';
 import type {
   CrosspostDestination,
   CrosspostFailureReason,
@@ -32,6 +33,15 @@ export const STALE_IN_PROGRESS_MS = 5 * 60 * 1000;
 
 /** 1 回の操作のたびに消す、保存期間を過ぎた下書きの件数の上限。 */
 export const PURGE_BATCH_SIZE = 20;
+
+/**
+ * 承認から、待ち（queued・一度も送っていない）の投稿先の再開を許す時間（Req 6.11）。過ぎたら送らずに取りやめる。
+ * 店主が承認した時点の内容（「本日限定」など）を、時間が経ってから知らないうちに出さないため。
+ */
+export const QUEUED_RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** 写真の保存期間（受け取りから・Req 8.3）。配信ジョブと共有する値（@fwlm/db）。 */
+export const MEDIA_RETENTION_MS = CROSSPOST_MEDIA_RETENTION_MS;
 
 /** 店舗を選ばせるときに出す件数の上限（Flex カルーセルの上限 12 未満・GBP の会話と同じ 10）。 */
 export const MAX_SELECTABLE_STORES = 10;

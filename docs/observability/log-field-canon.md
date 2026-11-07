@@ -82,6 +82,9 @@ import 名が引数・局所宣言などで隠され得る場合は通知とし�
 | 配信に失敗した件数 | `failed` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 対象外として飛ばした件数 | `skipped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 上限超過で送れなかった件数 | `quotaExceeded` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
+| 一括発信の保存期間で消した下書きの件数 | `crosspostPurgedDrafts` | 該当なし | 新規 | `ts/apps/delivery-job/src/crosspost-retention.ts` | 事象 `delivery-job.crosspost_retention` だけが持つ（line-crosspost・Issue #494） |
+| 期限切れの作成中の下書きを消した件数 | `crosspostExpiredDrafts` | 該当なし | 新規 | `ts/apps/delivery-job/src/crosspost-retention.ts` | 同上 |
+| 写真の保存期間で消した写真の行の件数 | `crosspostPurgedMedia` | 該当なし | 新規 | `ts/apps/delivery-job/src/crosspost-retention.ts` | 同上。写真の実体は置き場の寿命の規則が消す |
 | 上限超過で処理を打ち切ったか | `quotaExceededStopped` | 該当なし | 既存 | `ts/apps/delivery-job/src/index.ts` | |
 | 変化が無く送らなかった件数 | `skippedNoChange` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 比較可能だが新着も順位変動も無い日（spec: `.kiro/specs/line-on-demand-report/`） |
 | 比較できず送らなかった件数 | `skippedNotComparable` | 該当なし | 新規 | `ts/apps/delivery-job/src/index.ts` | 当日の集計が比較可能でない日（取得失敗・評価を持つ競合なし・自店未評価） |
@@ -151,7 +154,7 @@ LINE 起点の一括発信（spec: `.kiro/specs/line-crosspost/`）の記録に�
 | 投稿先 | `crosspostDestination` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 値は `instagram`、`google` のいずれか（`@fwlm/db` の CrosspostDestination） |
 | 投稿先の状態 | `crosspostDeliveryStatus` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | `crosspost_delivery_status` の値。記録の時点で試行が古くなっていた（結果を書けなかった）ときは `superseded` |
 | 試行の回数 | `crosspostAttempt` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 初回を 1 とする整数 |
-| 処理の段階 | `crosspostOperation` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 閉じた語彙（`availability`、`publish`、`reconcile`、`issue_fetch_url`、`fetch_content`、`store_media`、`intake`、`release`、`delete`、`purge`、`notify`、`run_approved`） |
+| 処理の段階 | `crosspostOperation` | 該当なし | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 閉じた語彙（`availability`、`publish`、`reconcile`、`issue_fetch_url`、`fetch_content`、`store_media`、`intake`、`release`、`delete`、`purge`、`notify`、`run_approved`、`mark_notified`、`pending_results`） |
 
 ---
 
@@ -181,6 +184,8 @@ LINE 起点の一括発信（spec: `.kiro/specs/line-crosspost/`）の記録に�
 | `store-detail.survey_settings_error` | store-detail | 新規 | `ts/apps/store-detail/lib/survey-settings-api.ts` | アンケート設定 API（Issue #437）の 500。設定の欠落・接続の失敗（`ts/apps/store-detail/lib/survey-settings-route.ts`）と、読み書きの失敗をまとめる。項目は `errorKind` と、設定の欠落のときの `configKey` だけである（料理名・ドリンク名・入力値は載せない） |
 | `store-detail.audit_log_failed` | store-detail | 新規 | `ts/apps/store-detail/lib/survey-settings-api.ts` | 店舗オーナーのアンケート設定の変更（Issue #437）の監査記録（`audit_logs`）の書込の失敗。設定の変更は巻き戻さず、応答も変更の結果どおりに返す（`dashboard-api.audit_log_failed` と同じ規則）。項目は `errorKind`・`auditAction`・`auditTargetId` だけである |
 | `delivery-job.run` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | 実行サマリー。テストが返り値を項目ごとに検証している。**変更禁止**: トークン発行が通った実行でしか出ないため、本番の集計指標がこの文字列で LINE の資格情報の生死を数える（`infra/modules/guardrails/main.tf` の `line_token_issued_runs`・Issue #139） |
+| `delivery-job.crosspost_retention` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | 一括発信の保存期間の削除の件数（毎回・利用者の操作に依存しない保存期間の担保・line-crosspost Req 8.8）。migration 0019 が当たる前の DB では出ない |
+| `delivery-job.crosspost_retention_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | 保存期間の削除の失敗。`errorKind` だけを載せる。配信の終了コードは変えない |
 | `delivery-job.token_issue_failed` | delivery-job | 新規 | `ts/apps/delivery-job/src/index.ts` | LINE のトークン発行に失敗したとき（Issue #139）。直後に `delivery-job.fatal` も出るが、そちらは対象抽出（DB）の失敗と同じ事象名なので LINE の失敗だけを数えられない。**変更禁止**: 本番の集計指標がこの文字列で絞り込む（`line_token_issue_failures`）。項目は `errorKind` と、状態コードがあれば `status` だけである |
 | `daily-batch.run` | daily-batch | 新規 | `go/cmd/daily-batch/main.go` | 日次バッチの実行サマリー行（Issue #139）。**変更禁止**: 本番の集計指標がこの文字列と `fetch_ok` / `stores_total` で Places の生死を数える（`places_fetch_ok_runs` / `places_fetch_eligible_runs`） |
 | `delivery-job.fatal` | delivery-job | 既存 | `ts/apps/delivery-job/src/index.ts` | |
@@ -201,6 +206,7 @@ LINE 起点の一括発信（spec: `.kiro/specs/line-crosspost/`）の記録に�
 | `crosspost.media_rejected` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 写真を受け付けなかった。`reason` は形式・大きさ・取得できない・一時的な失敗のいずれか。写真の中身は載せない |
 | `crosspost.generation_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 投稿文を作れなかった。`reason` は `@fwlm/gemini` の GenerationError の kind |
 | `crosspost.media_cleanup_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 写真の実体の削除の失敗。置き場の寿命の規則が後で消すので、利用者の操作は止めない |
+| `crosspost.notify_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 投稿の結果を Reply でも Push でも届けられなかった。結果は DB にあり、次の操作・「投稿の状況」で示す。`ownerId` だけを載せる |
 | `crosspost.operation_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/crosspost/logger.ts` | 想定外の例外。`crosspostOperation` と `errorKind`（例外のクラス名）だけを載せる |
 | `webhook_signature_verification_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/app.ts` | LINE Webhook の署名検証失敗。`webhook_signature_failures` 指標が参照するため変更禁止。記録するのは `reason` と LINE 採番の `lineRequestId` のみ |
 | `line-webhook.reply_failed` | line-webhook | 新規 | `ts/apps/line-webhook/src/line/client.ts` | |
