@@ -47,6 +47,12 @@ export type CrosspostUnknownReason =
 
 export const CROSSPOST_DESTINATIONS: readonly CrosspostDestination[] = ['instagram', 'google'];
 
+/**
+ * 写真の保存期間（受け取りから・line-crosspost Req 8.3）。line-webhook と配信ジョブの両方が使うので、ここに 1 つだけ置く。
+ * 置き場（GCS）の寿命の規則も同じ 7 日にする（tasks 6.1）。
+ */
+export const CROSSPOST_MEDIA_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** 素材の文の上限（0019 の CHECK と同じ値）。 */
 export const CROSSPOST_MATERIAL_MAX_CHARS = 2000;
 
@@ -904,6 +910,8 @@ export async function cancelQueuedCrosspostDelivery(
 
 /**
  * 結果を店主へ届けられたことを記録する（Req 7.2）。`deliveredAt` 以前に終わった結果が届いたことになる。
+ * `deliveredAt` には、**届けたメッセージに示した投稿先の行の finished_at の最大**を渡す（アプリの時計を使わない。
+ * 時計のずれ・精度の違いで、届けていない結果を届けたことにしないため）。
  */
 export async function markCrosspostResultNotified(
   db: Queryable,
@@ -938,7 +946,8 @@ export async function listUnnotifiedCrosspostResults(
         AND EXISTS (
           SELECT 1 FROM crosspost_deliveries v
            WHERE v.draft_id = d.id AND v.finished_at IS NOT NULL
-             AND v.finished_at > COALESCE(d.result_notified_at, '-infinity'::timestamptz)
+             -- 届けた記録は、示した行の finished_at（JS の Date を経てミリ秒に丸まる）で書く。比べる側もミリ秒にそろえる
+             AND date_trunc('milliseconds', v.finished_at) > COALESCE(d.result_notified_at, '-infinity'::timestamptz)
         )
       ORDER BY d.approved_at DESC, d.id DESC
       LIMIT $2`,
