@@ -19,6 +19,10 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 - [ ] 2.3 `@fwlm/db` の `crosspost.ts`（所有の検証を SQL に含める・CAS・期限切れ・保存期間の削除）
   - _Requirements: 1.5, 2.8, 2.9, 4.5, 5.5, 5.6, 5.7, 6.1, 6.4, 6.6, 6.8, 6.9, 8.1, 8.4_
 - [ ] 2.4 DB の試験（アクセサの integration・assertions・書き込み権限）
+- [ ] 2.5 保存期間の削除（`purgeCrosspostRetention`）と、配信ジョブの SA への DELETE だけの付与。実際の grants.sql の権限で動くことの試験
+  - _Requirements: 8.3, 8.4, 8.8_
+- [ ] 2.6 待ちの取りやめ・24 時間で取りやめ・結果を届けた時刻（`result_notified_at`）と未通知の一覧・写真の quoteToken
+  - _Requirements: 5.8, 6.11, 6.12, 7.2_
   - マージ条件: `run-db-test-suites.sh`（smoke・assertions・docs 整合）と `@fwlm/db` の試験が緑。本番への migration の適用は運営の承認の後
 
 ## PR 3: 会話・生成・発信先の共通処理（既定 OFF）
@@ -39,20 +43,30 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
   - _Requirements: 4.1, 4.2, 5.1〜5.3, 7.1, 7.3, 7.4, 8.7_
 - [ ] 3.8 会話の状態機械と router・dispatch への配線（OFF のとき何も引き受けない）
   - _Requirements: 1.1〜1.5, 2.1〜2.10, 4.6, 7.2_
-  - マージ条件: line-webhook の typecheck・lint・unit・DB integration が緑。既存の試験（GBP・レポート・オンボーディング）に変更が要らないこと。本機能 OFF の既存の E2E が緑
+- [ ] 3.9 承認の後の停止からの再開（同じ承認の押し直し・x_run）と取りやめ（x_drop）
+  - _Requirements: 6.11, 6.12_
+- [ ] 3.10 結果の通知の記録（replyChecked・pushChecked）と、届けられなかった結果の提示・「投稿の状況」の文
+  - _Requirements: 7.2, 7.3_
+- [ ] 3.11 配信ジョブの保存期間の削除（毎時・利用者の操作に依存しない）
+  - _Requirements: 8.8_
+- [ ] 3.12 最終確認での写真の引用（quoteToken）と向きの表示
+  - _Requirements: 5.8_
+- [ ] 3.13 障害・同時操作の再現テスト（部分成功・通信切断・結果不明後の再試行・停止・同時操作・通知の失敗）
+  - _Requirements: 5.7, 6.1〜6.12, 7.2_
+  - マージ条件: line-webhook・delivery-job の typecheck・lint・unit・DB integration が緑。既存の試験の変更は、設定の形の追加（`crosspost: null`）と router の委譲の試験の追加だけであること。本機能 OFF の既存の E2E が緑
 
 ## PR 4: Google の発信先アダプタ（既定 OFF）
 
 - [ ] 4.1 `gbp/client.ts` に `publishLocalPost`（写真の `media[]`・時間制限・送信後の失敗を「結果不明」に分類）を足す。既存の `createLocalPost` は変えない
   - _Requirements: 6.3, 6.10, 9.1_
-- [ ] 4.2 `adapters/google.ts`（availability・写真の条件・分類表）
+- [ ] 4.2 `adapters/google.ts`（availability・写真の条件・分類表。5xx は 503 を含めて結果不明）
   - _Requirements: 5.2, 6.2, 6.3, 6.7_
   - マージ条件: 分類表の全行の試験が緑。**GBP API の実疎通は未実施**（#146 の承認待ち）であることを PR に明記
 
 ## 残る作業（外部の準備が要る・本 spec の次の PR）
 
 - [ ] 5.1 入口: リッチメニューの区画（#354 と合わせて区画名を決める）。パイロットと実演の期間中は差し替えない
-- [ ] 6.1 写真の置き場の本番実装（GCS の非公開バケット・寿命 7 日・Terraform・line-webhook の SA の権限）
+- [ ] 6.1 写真の置き場の本番実装（GCS の非公開バケット・**寿命の規則 7 日（有効化の必須条件）**・Terraform・line-webhook の SA の権限）
 - [ ] 6.2 取得用 URL の方式の決定と実装（署名付き URL か、line-webhook の短命トークンの配信経路か）。**Meta・Google が受け付けるかを実測してから決める**
 - [ ] 7.1 Meta のログイン方式の決定（前提資料 §7.4・§7.5 の技術検証）→ `oauth_provider` の汎用化・Meta の OAuth・認可の解除とデータ削除のコールバック（別 spec）
 - [ ] 7.2 Instagram アダプタの実装（コンテナ → 状態 → 公開・checkpoint の再利用・照合）
@@ -60,3 +74,6 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 - [ ] 8.1 実機確認（iOS・Android: 写真の送信・まとめて送信・クリップボード・Flex の表示・読み上げ）
 - [ ] 8.2 監視（結果不明・失敗の件数のログベース指標とアラート）
 - [ ] 8.3 既存の `g_post` の「結果不明」の扱い（research.md §5-1）
+- [ ] 8.4 有効化の前の使いやすさの検証（店主 3〜5 人・research.md Decision 1 の課題表）。特に「文をコピー → 直して送り返す」の編集。結果によって LIFF の編集画面（design.md「将来の拡張」）を足す
+- [ ] 8.5 送信を取り消した写真のメッセージを引用したときの表示の実機確認（research.md Decision 5）
+- [ ] 8.6 429 を「再送してよい失敗」とする扱いの実測（GBP API の承認の後）

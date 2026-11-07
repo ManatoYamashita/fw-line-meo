@@ -4,7 +4,7 @@
 
 店主が LINE のトークに写真と伝えたいことを送ると、Instagram 用と Google 用の投稿文を下書きし、店主が確認・修正して投稿先を選び、**最終確認で明示的に承認したときだけ**投稿する。投稿先ごとに状態（成功・失敗・結果不明）を持ち、重複投稿を構造的に防ぐ。
 
-画面はトークの中で完結させる（Flex Message・クイックリプライ・クリップボードのアクション）。比較と理由は `research.md` Decision 1。
+画面はトークの中で完結させる（Flex Message・クイックリプライ・クリップボードのアクション）。比較と理由は `research.md` Decision 1。**これは v1 の仮説で、編集の体験の使いやすさは未検証**（有効化の前に店主で検証する・tasks 8.4）。
 
 ### Goals
 - IT に不慣れな店主が、普段の LINE の操作（写真を送る・文を送る・ボタンを押す）だけで、投稿先ごとに確認して投稿できる
@@ -123,10 +123,13 @@ ts/apps/line-webhook/src/crosspost/
      バブル3 投稿先: [両方に投稿][Instagramだけ][Googleだけ]（使える組み合わせだけ）
                      使えない理由と準備の導線（[Google と連携する] など）
 → [両方に投稿]（a=x_conf&d&r&t=both）
-→ 最終確認: 投稿先・各文の冒頭・写真の有無・写り込みの注意  [投稿する][戻る]
+→ 最終確認: 「この写真を投稿します（横長）」と店主が送った写真のメッセージを引用（quoteToken）
+            ＋ 投稿先・各文の冒頭・写真の向き・写り込みの注意  [投稿する][戻る]
 → [投稿する]（a=x_ok&d&r&t=both）   ← 唯一の承認
 → 実行（投稿先ごとに並行・時間制限つき）
-→ 結果: Instagram ✓ / Google ？（結果不明: [Google で確認する] [投稿されていた][投稿されていなかった]）
+→ 結果: Instagram ✓ / Google ？（結果不明: [投稿されていた][投稿されていなかった]）
+   ※ 結果を Reply でも Push でも届けられなかったら、次の操作（どの文への返信でも）で
+     「お届けできていなかった投稿の結果です」と先に示す。「投稿の状況」と送っても見られる
 ```
 
 ### 下書きの状態機械
@@ -160,12 +163,13 @@ stateDiagram-v2
   failed --> in_progress: x_retry（retryable かつ attempt < 3 かつ写真が残っている）
   unknown --> succeeded: 照合で投稿を確認 / 店主が「投稿されていた」
   unknown --> failed: 照合で未投稿を確認 / 店主が「投稿されていなかった」（retryable=true）
-  queued --> canceled: 承認後に投稿先が使えない（連携の解除など）
+  queued --> in_progress: 処理が止まった後の再開（同じ承認の押し直し・x_run・CAS）
+  queued --> canceled: 店主の取りやめ（x_drop）/ 承認から 24 時間を過ぎた
 ```
 
 **不変条件**
 1. 外部 API へ投稿を送るのは `in_progress` を獲得したリクエストだけ（`UPDATE ... WHERE status IN ('queued','failed') ... RETURNING`）。
-2. `succeeded` から出る遷移は無い。`unknown` から `in_progress` へ直接は行けない（必ず確認を挟む）。
+2. `succeeded` から出る遷移は無い。`unknown` から `in_progress` へ直接は行けない（必ず確認を挟む）。`in_progress` から `queued` へ戻る遷移は無い（送ったかもしれないものを「未送信」として再開させない）。
 3. 結果の記録は `WHERE status = 'in_progress' AND attempt_count = <獲得した回数>`。遅れて戻った古い試行が新しい試行の結果を上書きしない。
 
 ### 承認と実行
@@ -188,11 +192,32 @@ sequenceDiagram
       A-->>W: succeeded / failed / unknown
       W->>DB: record (status=in_progress AND attempt=n)
     end
-    W-->>O: reply 結果（失敗したら push）
+    W-->>O: 結果（20 秒以内に終われば reply、超えたら push）
   end
 ```
 
-二重タップ: 2 本目の `x_ok` は承認の UPDATE が 0 行になり、何も投稿しない。LINE の再配信は `webhookEventId` の重複排除で処理前に落ちる。
+- 結果の通知: LINE の Messenger は reply の非 2xx を例外にしない（`line/client.ts`）ため、「reply に失敗したら push」は検出できない。代わりに、承認から結果までが 20 秒（`replySafeMs`）を超えたら reply トークンの期限を見込んで push で送る（Req 7.2）。
+- 画像の受け渡し: `webhook/dispatch.ts` は、一括発信が有効なとき（`acceptImages`）だけ、画像の `unsupported` イベントに `image`（`message.id`・`contentProvider`・`imageSet`）を載せる。無効なときは従来どおり内容を持たない。
+- AI への修正指示: 指示はその生成の事実の照合の素材に加える（指示に書かれた事実は使ってよい）。素材の文（`material_text`）へは足さない（「もっと短く」などの指示が、ほかの投稿先の生成の素材に混ざらないため）。
+
+二重タップ: 2 本目の `x_ok` は承認の UPDATE が 0 行になる。そのとき下書きが **同じ版で承認済み**なら、新しく承認せず「待ちの投稿先の再開」として扱う（実行権は CAS なので、1 本目が実行中・実行済みの投稿先は送らない）。LINE の再配信は `webhookEventId` の重複排除で処理前に落ちる。
+
+### 承認の後に処理が止まったとき（Req 6.11, 6.12）
+
+| 止まった位置 | 残る状態 | 店主の操作 | 送り直すか |
+|---|---|---|---|
+| 承認のトランザクションの前 | 確認中（承認されていない） | もう一度「投稿する」 | 通常の承認 |
+| 承認の後・実行権の獲得の前 | 待ち（queued） | 同じ「投稿する」の押し直し／「投稿の状況」の [今すぐ投稿する]／[取りやめる] | **送る**（一度も送っていないことが確か） |
+| 実行権の獲得の後（外部へ送信中） | 実行中（in_progress）→ 5 分で結果不明 | [投稿されていた]／[投稿されていなかった] → 再試行 | **確認の後だけ** |
+| 結果の記録の後・通知の前 | 成功・失敗・結果不明（通知は未） | 次の操作で結果を示す | 送らない |
+
+待ちの再開は店主の操作があるときだけ行う（自動では再開しない）。承認から 24 時間を過ぎた待ちは、店主の知らないうちに古い内容（「本日限定」など）を出さないよう、送らずに取りやめにする。
+
+### 結果の通知（Req 7.1, 7.2）
+
+1. 承認から結果までが 20 秒以内なら Reply、超えたら Push（Reply トークンの期限への備え）。Reply が受け付けられなければ Push も試す（`replyChecked`・`pushChecked` は LINE が 2xx を返したかを返す）
+2. 届いたら `crosspost_drafts.result_notified_at` に「示した投稿先の行の `finished_at` の最大」を記録する（アプリの時計を使わない）
+3. `finished_at` が記録より新しい投稿先を持つ下書き＝届けていない結果。店主の次の操作（一括発信の有効な店主のどの文・開始・状況の確認）で先に示し、届いたら記録する。届けた結果は二度と割り込ませない
 
 ## Components and Interfaces
 
@@ -244,12 +269,12 @@ export interface DestinationAdapter {
 | 401・403 | failed（permission_denied） | false |
 | 400・404・409・その他の 4xx | failed（rejected） | false |
 | 429 | failed（rate_limited） | true |
-| 503 | failed（upstream_unavailable） | true |
-| 500・502・504・その他の 5xx | **unknown** | — |
+| 5xx（500・502・503・504 ほか） | **unknown** | — |
 | 通信の例外・時間切れ（送信の後か前か分からない） | **unknown** | — |
-| 2xx（本文が読めない場合も） | succeeded（`name` を読めれば externalId） | — |
+| 2xx（本文が読めない場合も） | succeeded（`name` を読めれば externalId、`searchUrl` を読めれば externalUrl） | — |
 
-  503 を「投稿されていない」に分類するのは、HTTP の意味（サービスが要求を処理できない）に依る推定であり、GBP での実測は無い [未確認]。実測で 503 の後に投稿が作られた事例が出たら unknown へ移す（`google.ts` の表を 1 行変えるだけ）。
+  **作成済みの可能性を否定できない応答は結果不明**にする。5xx は 503 を含めてすべて結果不明（Google が投稿を作った後に 5xx を返さないという一次情報は無い）。429 は割り当ての超過による拒否で処理の前に断られるものとして再送を許すが、GBP での実測は無い [未確認]。
+- 再連携の導線: 結果の `token_invalid` には GBP の会話の `g_relink`、`not_linked` には `g_connect` のボタンを出す（GBP の連携が有効なときだけ）。
 - `reconcile`: v1 は持たない（GBP API が未承認で、`localPosts.list` による照合を実測できない）。店主による確認に倒す。
 
 ### Instagram の発信先アダプタ（`adapters/instagram.ts`）
@@ -265,7 +290,8 @@ export interface DestinationAdapter {
 - `approve({ownerId, draftId, revision, destinations})`: 投稿先ごとに `availability` を確かめ、1 つでも `available` でなければ承認しない（`stale_destination`）。承認の UPDATE と deliveries の INSERT を 1 トランザクションで行う。
 - `runDeliveries(draftId)`: `queued`（と再試行で獲得した行）を投稿先ごとに並行で実行する。各実行は `AbortController` で時間制限（Google 15 秒・Instagram 45 秒）。全体を `Promise.allSettled` で待つ。
 - `retry(deliveryId)` / `markObserved(deliveryId, posted)` / `reconcile(deliveryId)`: すべて ownerId を伴う SQL で所有を確かめる。
-- 期限切れの `in_progress`（`last_attempt_at` から 5 分）は、状況の表示・再試行・確認の前に `unknown` へ移す。
+- 期限切れの `in_progress`（`last_attempt_at` から 5 分）は、状況の表示・再試行・確認の前に `unknown` へ移す。承認から 24 時間を過ぎた `queued` は `canceled` へ移す。
+- `cancelQueued(deliveryId)`: 待ちの取りやめ（店主の操作）。
 - 写真の削除: 下書きの全投稿先が `succeeded`・`canceled`・再試行できない `failed` になったら、`MediaStore.delete` を試みる（失敗しても置き場の寿命規則が消す）。
 
 ### prompts（`prompts.ts`）
@@ -283,6 +309,7 @@ export interface DestinationAdapter {
 ### media / intake（`media.ts`・`intake.ts`）
 - `MediaStore`: `put(bytes, contentType) → { key }`／`issueFetchUrl(key, ttlSeconds) → url`／`delete(key)`。v1 の本番の実装（GCS の非公開バケット・寿命 7 日・取得用 URL の方式）は tasks 6.x。テストは in-memory。
 - 取得: `GET https://api-data.line.me/v2/bot/message/{id}/content`（時間制限・20MB を超えたら読み止める・`contentProvider.type` が `line` のときだけ）。
+- quoteToken: 画像メッセージの `quoteToken` を `crosspost_media.line_quote_token` に保存し、最終確認で引用する（research.md Decision 5）。
 - 正規化: `Content-Type` とマジックバイトが JPEG／PNG／WebP のいずれか → `sharp` で復号（画素数の上限）→ 向きの補正 → 長辺 1,440px 以内へ縮小（拡大しない）→ sRGB の JPEG（品質 85）。**メタデータは書き出さない**（位置情報を含む EXIF を落とす）。短辺 250px 未満は拒否。
 - 保存: 推測できない名前（UUID）。DB には `storage_key`・寸法・バイト数・SHA-256 だけを持つ。
 - 写真の差し替えは「新しい行を入れて古い行を消す」を 1 トランザクションで行い、古い実体は後で消す。
@@ -306,7 +333,7 @@ export interface DestinationAdapter {
 | data | 意味 |
 |---|---|
 | `a=x_start[&s=<storeId>]` | 開始（店舗の指定は任意。所有と有効の検証は flows） |
-| `a=x_resume` / `a=x_new&s=<storeId>` | 作成中を続ける／捨てて新しく作る |
+| `a=x_resume` / `a=x_new[&s=<storeId>]` | 作成中を続ける／捨てて新しく作る（店舗の指定が無く複数店舗なら店舗の選択へ） |
 | `a=x_gen&d=<draftId>` | 下書きを作る |
 | `a=x_regen&d&r&k=<ig\|gg>` | k の文を作り直す |
 | `a=x_ai&d&r&k` / `a=x_edit&d&r&k` | AI に直してもらう／自分で書き直す（入力モードへ） |
@@ -316,6 +343,8 @@ export interface DestinationAdapter {
 | `a=x_cancel&d` | やめる |
 | `a=x_status` | 直近の投稿の状況 |
 | `a=x_retry&v=<deliveryId>` | 失敗した投稿先の再試行 |
+| `a=x_run&v=<deliveryId>` | 待ち（一度も送っていない）の投稿先を今すぐ送る（停止の後の再開） |
+| `a=x_drop&v=<deliveryId>` | 待ちの投稿先を取りやめる |
 | `a=x_check&v` | 結果不明の照合 |
 | `a=x_seen&v&y=<1\|0>` | 店主の確認（投稿されていた／いなかった） |
 
@@ -337,6 +366,7 @@ crosspost_drafts(
   revision int ≥ 0, material_text text ≤ 2000 字,
   instagram_text text NULL ≤ 2200 字, google_text text NULL ≤ 1500 字,
   approved_revision int NULL, approved_at timestamptz NULL,
+  result_notified_at timestamptz NULL,   -- 結果を届けた（示した行の finished_at の最大）
   expires_at, purge_after, created_at, updated_at
   CHECK: approved ⇔ approved_at・approved_revision が非 NULL
   CHECK: input_mode = 'none' ⇔ input_destination IS NULL
@@ -345,7 +375,7 @@ UNIQUE INDEX (owner_id) WHERE status IN ('collecting','reviewing')
 
 crosspost_media(
   id uuid PK, draft_id → crosspost_drafts CASCADE UNIQUE（1 下書き 1 枚）,
-  line_message_id text, storage_key text UNIQUE, content_type 'image/jpeg',
+  line_message_id text, line_quote_token text NULL（最終確認の引用）, storage_key text UNIQUE, content_type 'image/jpeg',
   width int > 0, height int > 0, byte_size int > 0, sha256 char(64), created_at
 )
 
@@ -359,9 +389,9 @@ crosspost_deliveries(
 )
 ```
 
-- **書き込み境界**: 3 表とも TS リアルタイム応答層で、DML は **line-webhook の SA だけ**（`infra/sql/grants.sql`）。survey-web・dashboard-api・store-detail には付与しない（客の面・代理店の面から店主の投稿を書けない）。
+- **書き込み境界**: 3 表とも TS リアルタイム応答層で、INSERT・UPDATE は **line-webhook の SA だけ**（`infra/sql/grants.sql`）。survey-web・dashboard-api・store-detail には付与しない（客の面・代理店の面から店主の投稿を書けない）。例外は保存期間の削除で、毎時の配信ジョブの SA に `crosspost_drafts`・`crosspost_media` の **DELETE だけ**を与える（`crosspost_deliveries` は CASCADE。参照の動作は表の所有者の権限で行われることを実ロールで確かめた）。削除は `FOR UPDATE` を使わない（UPDATE の権限を要するため）。
 - **後方互換・ロールバック**: 追加のみ（既存の表・enum を変えない）。戻すときは 3 表と 4 enum を DROP する（本機能が OFF なら行は無い）。アプリは本機能が OFF のとき 3 表を読まない（migration の適用前にデプロイしても既存の経路は壊れない）。
-- **保存期間**: `purge_after` = 作成から 30 日。本機能の操作の度に、期限を過ぎた行を少数ずつ消す（line-webhook が単一の書き手のまま）。写真の実体は置き場の寿命規則（7 日）と、終わった下書きの削除で消える。
+- **保存期間（Req 8.8）**: 下書き・投稿文は `purge_after` = 作成から 30 日、写真の行は受け取りから 7 日、作成中の下書きは `expires_at`（最後の操作から 24 時間）。**毎時の配信ジョブ（`ts/apps/delivery-job/src/crosspost-retention.ts`）が利用者の操作に依存せず消す**（migration が当たる前の DB では何もしない・失敗しても配信の終了コードを変えない）。line-webhook も開始の操作のついでに同じ削除を呼ぶ（冪等）。写真の実体は置き場の寿命の規則（7 日）が上限を保証し、投稿が終わった下書きの写真は line-webhook がすぐ消す。
 
 ## Error Handling
 
@@ -374,6 +404,9 @@ crosspost_deliveries(
 | 投稿先の失敗 | 平易な理由・再試行（retryable のみ）・再連携 | failed |
 | 結果不明 | 「確認できませんでした。自動では投稿し直しません」＋[確認する]／[投稿されていた][投稿されていなかった] | unknown |
 | 内部の例外（Reply の前） | 投げる → エラー境界が再試行の案内を 1 回だけ返す（既存） | 変えない |
+
+| 結果を Reply でも Push でも届けられない | 記録しない（`crosspost.notify_failed`） | 結果は DB にあり、次の操作で示す |
+| 承認の後に処理が止まった | 待ちは再開・取りやめを選べる。実行中は 5 分で結果不明 | 上の「承認の後に処理が止まったとき」 |
 
 ### Monitoring
 - ログは allowlist（`flow`・`destination`・`status`・`failureReason`・`unknownReason`・`attempt`・`durationMs`・`errorKind`）。本文・素材・URL・トークン・LINE ユーザー ID は型として渡せない。
@@ -389,9 +422,20 @@ crosspost_deliveries(
 - publisher: 二重承認・版の不一致・部分成功・時間切れ・遅れて戻った古い試行・期限切れの in_progress・再試行の上限・unknown から直接再試行できないこと
 - flows: 状態ごとのテキストの解釈・期限切れ・やめる・写真の差し替え・無効時に何も引き受けないこと
 
+### 障害・同時操作の再現（`test/crosspost/flows.db.test.ts`）
+- 両方の投稿先の部分成功（Instagram 失敗・Google 成功／Instagram 成功・Google 通信切断）と、失敗した投稿先だけの再試行
+- 通信切断の後に「投稿する」を押し直しても送り直さないこと
+- 結果不明の後の確認（投稿されていた／いなかった）と再試行
+- 承認の直後の停止（待ちのまま）からの再開・取りやめ・24 時間の期限
+- 実行中の停止（実行中のまま）→ 結果不明 → 確認の後だけ途中の到達点で再試行
+- 同時操作: 「投稿する」×2、「投稿する」と「やめる」、再試行×2、再開と押し直し、写真の差し替えと承認
+- 通知の失敗（Reply 失敗 → Push・両方失敗 → 次の操作で示す）と「投稿の状況」
+- 最終確認の写真の引用（差し替えた後は新しい写真を引用する）
+
 ### Integration（DB）
 - アクセサ: 所有の検証（他のオーナーの下書き・投稿先の行に触れない）・部分一意索引・CAS・CHECK 制約
-- 書き込みの権限: line-webhook 以外の SA が 3 表へ書けないこと
+- 書き込みの権限: line-webhook 以外の SA が 3 表へ書けないこと（配信ジョブは DELETE だけ）。保存期間の削除が、実際の grants.sql の配信ジョブの権限だけで動くこと
+- 配信ジョブの保存期間の削除（`ts/apps/delivery-job/test/crosspost-retention.db.test.ts`）
 
 ### E2E
 - 本機能は既定 OFF なので、既存の E2E が変わらないことを確かめる。有効化の前に、テスト用の店舗で LINE の実機確認（iOS・Android の写真送信・クリップボード・Flex の表示）を行う（tasks 8.x）。
