@@ -211,13 +211,15 @@ sequenceDiagram
 | 実行権の獲得の後（外部へ送信中） | 実行中（in_progress）→ 5 分で結果不明 | [投稿されていた]／[投稿されていなかった] → 再試行 | **確認の後だけ** |
 | 結果の記録の後・通知の前 | 成功・失敗・結果不明（通知は未） | 次の操作で結果を示す | 送らない |
 
-待ちの再開は店主の操作があるときだけ行う（自動では再開しない）。承認から 24 時間を過ぎた待ちは、店主の知らないうちに古い内容（「本日限定」など）を出さないよう、送らずに取りやめにする。
+待ちの再開は店主の操作があるときだけ行う（自動では再開しない）。承認から 24 時間を過ぎた待ちは、店主の知らないうちに古い内容（「本日限定」など）を出さないよう、送らずに取りやめにする。期限は**実行権の獲得（`claimCrosspostDelivery`）の UPDATE の条件にも DB の時計で入れる**ので、取りやめの確認（`reapStale`）と獲得の間に期限を越えても公開しない（第三者レビューの指摘）。
 
 ### 結果の通知（Req 7.1, 7.2）
 
 1. 承認から結果までが 20 秒以内なら Reply、超えたら Push（Reply トークンの期限への備え）。Reply が受け付けられなければ Push も試す（`replyChecked`・`pushChecked` は LINE が 2xx を返したかを返す）
 2. 届いたら `crosspost_drafts.result_notified_at` に「示した投稿先の行の `finished_at` の最大」を記録する（アプリの時計を使わない）
 3. `finished_at` が記録より新しい投稿先を持つ下書き＝届けていない結果。店主の次の操作（一括発信の有効な店主のどの文・開始・状況の確認）で先に示し、届いたら記録する。届けた結果は二度と割り込ませない
+4. 下書きの作成中・確認中の文・写真では、まずその入力を下書きへ受け取り、応答の**前に**届けていない結果を添える（最後のメッセージのクイックリプライは下書きの操作のまま・1 回の返信は 5 通まで）。添えた返信が届かなければ記録しない（次の操作に持ち越す）
+5. 「投稿の状況」「投稿の結果」は、下書きの作成中・確認中（自分で書き直す途中を含む）でも命令として扱い、下書きを変えない
 
 ## Components and Interfaces
 
@@ -268,12 +270,13 @@ export interface DestinationAdapter {
 | 送信前の失敗（未連携・トークン失効・ロケーション未解決・暗号） | failed | 失効は false（再連携）／未連携 false |
 | 401・403 | failed（permission_denied） | false |
 | 400・404・409・その他の 4xx | failed（rejected） | false |
-| 429 | failed（rate_limited） | true |
+| 送信後の 429 | **unknown**（rate_limited_after_send） | — |
+| 送信前の割り当ての超過・トークンの取得の一時的な失敗（not_sent） | failed（rate_limited / upstream_unavailable） | true（送っていない） |
 | 5xx（500・502・503・504 ほか） | **unknown** | — |
 | 通信の例外・時間切れ（送信の後か前か分からない） | **unknown** | — |
 | 2xx（本文が読めない場合も） | succeeded（`name` を読めれば externalId、`searchUrl` を読めれば externalUrl） | — |
 
-  **作成済みの可能性を否定できない応答は結果不明**にする。5xx は 503 を含めてすべて結果不明（Google が投稿を作った後に 5xx を返さないという一次情報は無い）。429 は割り当ての超過による拒否で処理の前に断られるものとして再送を許すが、GBP での実測は無い [未確認]。
+  **作成済みの可能性を否定できない応答は結果不明**にする。5xx は 503 を含めてすべて結果不明（Google が投稿を作った後に 5xx を返さないという一次情報は無い）。送信後の 429 も結果不明にする（割り当ての超過は処理の前に断られるのが通常だが、非冪等な作成で重複が起きないことを GBP API で実測しておらず保証が無い・第三者レビューの指摘）。送信の前に断ったもの（`not_sent`）とは区別し、こちらは送っていないので再送してよい。
 - 再連携の導線: 結果の `token_invalid` には GBP の会話の `g_relink`、`not_linked` には `g_connect` のボタンを出す（GBP の連携が有効なときだけ）。
 - `reconcile`: v1 は持たない（GBP API が未承認で、`localPosts.list` による照合を実測できない）。店主による確認に倒す。
 
@@ -304,11 +307,13 @@ export interface DestinationAdapter {
   - 生成の目安: Instagram 600 字・Google 400 字以内（クリップボードの 1000 字に収める）。目安を超えたら不合格
   - **事実の照合**: 出力に現れる数字の並び（全角・漢数字の一部を正規化）・URL・メールアドレス・電話番号・宣伝の語（`無料` `割引` `半額` `先着` `限定` `OFF` `%`・`％`）は、素材（＋修正指示）に現れるものに限る
   - Instagram のハッシュタグの語は、素材か店名に現れる語に限る
+- **保証の範囲**: 機械的な照合が保証するのは上の数字・URL・メールアドレス・電話番号・宣伝の語・ハッシュタグの語だけである。料理名・食材・産地・人名・受賞歴などの創作は、プロンプトで禁じているが**検知できない**（語彙を網羅する照合は誤検知と保守の負担が大きく、作らない）。事実の保証の最後は店主の確認で、確認のカルーセルと最終確認に「AI が書いた文です。料理名・食材・産地・価格・日付など、伝えていない内容や事実と違うところが無いか、投稿の前に必ず確かめてください」を出し、最終確認には投稿する文の**全文**を示す（Req 3.10, 5.3）
 - variation seed は文の形だけを変える候補から選ぶ（CLAUDE.md の AI ガードレール）。
 
 ### media / intake（`media.ts`・`intake.ts`）
 - `MediaStore`: `put(bytes, contentType) → { key }`／`issueFetchUrl(key, ttlSeconds) → url`／`delete(key)`。v1 の本番の実装（GCS の非公開バケット・寿命 7 日・取得用 URL の方式）は tasks 6.x。テストは in-memory。
 - 取得: `GET https://api-data.line.me/v2/bot/message/{id}/content`（時間制限・20MB を超えたら読み止める・`contentProvider.type` が `line` のときだけ）。
+- 送った順: Webhook のイベントの `timestamp`（送った時刻・ミリ秒・再配信でも元の時刻を保つ。LINE は「イベントの順序は timestamp で判定する」とする）を `crosspost_media.line_sent_at` に保存し、`attachCrosspostMedia` は**いまの写真より後に送った写真のときだけ差し替える**（下書きの行を FOR UPDATE で固定して比較と差し替えを直列にする）。前に送った写真が処理の遅れで後から届いたら `older`（差し替えず、その旨を伝える）、同じ時刻の別の写真は `ambiguous`、時刻の無い写真は受け取りで断る（どちらも推測で採用せず送り直しを求める・Req 2.5）。まとめて送られた写真は従来どおり `imageSet.index` が 1 のものだけを使う
 - quoteToken: 画像メッセージの `quoteToken` を `crosspost_media.line_quote_token` に保存し、最終確認で引用する（research.md Decision 5）。**引用の手掛かりが無い写真（quoteToken が無い）では最終確認も承認もしない**。写真を送り直すよう案内する（送り直した写真には quoteToken が付く）。承認（`x_ok`）の側でも同じ条件を確かめる（古いボタン・偽造された postback で、確かめていない写真を公開しない）。
 - 正規化: `Content-Type` とマジックバイトが JPEG／PNG／WebP のいずれか → `sharp` で復号（画素数の上限）→ 向きの補正 → 長辺 1,440px 以内へ縮小（拡大しない）→ sRGB の JPEG（品質 85）。**メタデータは書き出さない**（位置情報を含む EXIF を落とす）。短辺 250px 未満は拒否。
 - 保存: 推測できない名前（UUID）。DB には `storage_key`・寸法・バイト数・SHA-256 だけを持つ。
@@ -375,7 +380,8 @@ UNIQUE INDEX (owner_id) WHERE status IN ('collecting','reviewing')
 
 crosspost_media(
   id uuid PK, draft_id → crosspost_drafts CASCADE UNIQUE（1 下書き 1 枚）,
-  line_message_id text, line_quote_token text NULL（最終確認の引用）, storage_key text UNIQUE, content_type 'image/jpeg',
+  line_message_id text, line_quote_token text NULL（最終確認の引用）, line_sent_at timestamptz（送った時刻・差し替えの順序）,
+  storage_key text UNIQUE, content_type 'image/jpeg',
   width int > 0, height int > 0, byte_size int > 0, sha256 char(64), created_at
 )
 
@@ -383,7 +389,7 @@ crosspost_deliveries(
   id uuid PK, draft_id → crosspost_drafts CASCADE, destination,
   status, body_text text NOT NULL, with_media bool, media_id → crosspost_media SET NULL,
   attempt_count int 0..10, retryable bool, failure_reason text（列挙の CHECK）,
-  unknown_reason text（列挙の CHECK）, checkpoint text, external_id text, external_url text,
+  unknown_reason text（列挙の CHECK: timeout・network・upstream_5xx・rate_limited_after_send・adapter_threw・stale_in_progress）, checkpoint text, external_id text, external_url text,
   last_attempt_at, finished_at, created_at, updated_at
   UNIQUE (draft_id, destination)
 )
@@ -455,7 +461,7 @@ crosspost_deliveries(
 
 | # | 未確認事項 | いまの扱い | 確かめ方・時期 |
 |---|---|---|---|
-| U1 | Google の **429 を「再送してよい失敗」とする扱い**（割り当て超過は処理の前に断られる、という前提） | 再送を許す（`classifyStatus`） | GBP API の承認後、テスト店舗で実測する（tasks 8.6）。前提が崩れたら 429 も結果不明へ移す（表の 1 行） |
+| U1 | Google の**送信後の 429** の後に投稿が作られていないか（作られないなら「再送してよい失敗」へ緩められる） | 結果不明（`rate_limited_after_send`）。店主の確認の後だけ再試行 | GBP API の承認後、テスト店舗で実測する（tasks 8.6）。実測で安全と分かるまで緩めない |
 | U2 | Google の 5xx・通信断の後に投稿が作られているか（結果不明の後の照合） | 店主の確認に倒す | `localPosts.list` の実測の後に自動照合を足す（tasks 7.3） |
 | U3 | 写真付きのローカル投稿（`media[].sourceUrl`）の受理と、取得用 URL の方式 | 写真付きは「準備中」 | tasks 6.2 |
 | U4 | 送信を取り消した写真のメッセージを引用したときの表示 | 引用の手掛かりが無い写真では最終確認を出さない（下）。取り消し後の表示は未確認 | 実機確認（tasks 8.5） |
