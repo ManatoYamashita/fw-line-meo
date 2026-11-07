@@ -38,6 +38,7 @@ import type { LineMessenger } from '../line/client.js';
 import { buildStatusGuidanceMessage } from '../line/messages.js';
 import type { ConversationLogger, SessionsAccessor } from '../onboarding/conversation.js';
 import { decodePostback } from '../onboarding/stages.js';
+import type { CrosspostFlows } from '../crosspost/flows.js';
 import type { GbpFlowHandlers } from '../gbp/flows.js';
 import { isGbpPostbackData } from '../gbp/postback.js';
 import { createReportHandler, type ReportHandler, type ReportReadsAccessor } from '../report/handler.js';
@@ -56,6 +57,8 @@ export interface StoreIdentifiedOwnerRouterDeps {
   readonly lineRichMenuCompletedId: string;
   /** GBP の会話（gbp-post-review-reply）。既定 OFF のときは無い（Issue #323）。 */
   readonly gbp?: GbpFlowHandlers;
+  /** 一括発信の会話（line-crosspost・Issue #494）。既定 OFF のときは無い。 */
+  readonly crosspost?: CrosspostFlows;
 }
 
 export interface StoreIdentifiedOwnerRouter {
@@ -109,6 +112,33 @@ async function delegateToGbp(gbp: GbpFlowHandlers, event: InboundEvent, ownerId:
   return false;
 }
 
+/**
+ * 一括発信の会話へ渡す（line-crosspost・Issue #494）。引き受けて Reply まで済ませたときだけ true を返す。
+ * 一括発信の postback（`x_*`）・テキスト・画像だけを渡す。一括発信は、本機能の有効な店舗を持たないオーナーの
+ * イベントも、作成中の下書きが無いときのテキスト・画像も引き受けない（既存の分岐へ落ちる）。
+ * GBP より先に渡す。作成中の一括発信の下書きがあるときのテキストは、一括発信の素材・修正として扱う。
+ */
+async function delegateToCrosspost(crosspost: CrosspostFlows, event: InboundEvent, ownerId: string): Promise<boolean> {
+  // イベントの LINE の時刻（下書きの境界の判定に使う）。画像はイベントの時刻を image.sentAt に持つ。
+  const sentAt =
+    event.kind === 'text' || event.kind === 'postback'
+      ? (event.sentAt ?? null)
+      : event.kind === 'unsupported'
+        ? (event.image?.sentAt ?? null)
+        : null;
+  const base = { ownerId, lineUserId: event.lineUserId, replyToken: event.replyToken, sentAt };
+  if (event.kind === 'postback') {
+    return (await crosspost.handlePostback({ ...base, data: event.data })) === 'handled';
+  }
+  if (event.kind === 'text') {
+    return (await crosspost.handleText({ ...base, text: event.text })) === 'handled';
+  }
+  if (event.kind === 'unsupported' && event.image !== undefined) {
+    return (await crosspost.handleImage({ ...base, image: event.image })) === 'handled';
+  }
+  return false;
+}
+
 type Attempt = { readonly ok: true } | { readonly ok: false; readonly error: unknown };
 
 async function attempt(run: () => Promise<void>): Promise<Attempt> {
@@ -156,7 +186,10 @@ export function createStoreIdentifiedOwnerRouter(deps: StoreIdentifiedOwnerRoute
       // 段階は Reply の前に読む。Reply の後に読むと、読み出しの失敗を Reply の後に投げることになる。
       const session = await deps.sessions.getOrCreateSession(deps.db, event.lineUserId);
 
-      const handledByGbp = deps.gbp !== undefined && (await delegateToGbp(deps.gbp, event, owner.id));
+      const handledByCrosspost =
+        deps.crosspost !== undefined && (await delegateToCrosspost(deps.crosspost, event, owner.id));
+      const handledByGbp =
+        handledByCrosspost || (deps.gbp !== undefined && (await delegateToGbp(deps.gbp, event, owner.id)));
       if (!handledByGbp) {
         const request = event.kind === 'postback' ? decodeReportPostback(event.data) : null;
         if (request !== null) {
@@ -200,6 +233,10 @@ export interface StoreIdentifiedOwnerRouterFactoryDeps {
   readonly now?: () => Date;
   /** GBP の会話（gbp-post-review-reply）。既定 OFF のときは渡さない（Issue #323）。 */
   readonly gbp?: GbpFlowHandlers;
+  /**
+   * 一括発信の会話を、リクエストのロガーと Messenger で作る（line-crosspost・Issue #494）。既定 OFF のときは渡さない。
+   */
+  readonly createCrosspost?: (scope: StoreIdentifiedOwnerRouterScope) => CrosspostFlows;
 }
 
 /**
@@ -218,6 +255,7 @@ export function createStoreIdentifiedOwnerRouterFactory(
       ...(deps.auditLog ? { auditLog: deps.auditLog } : {}),
       lineRichMenuCompletedId: deps.lineRichMenuCompletedId,
       ...(deps.gbp ? { gbp: deps.gbp } : {}),
+      ...(deps.createCrosspost ? { crosspost: deps.createCrosspost({ logger, messenger }) } : {}),
       reports: createReportHandler({
         db: deps.db,
         messenger,

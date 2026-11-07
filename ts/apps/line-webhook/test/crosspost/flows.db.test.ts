@@ -1,0 +1,1047 @@
+import sharp from 'sharp';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+type Pool = Awaited<ReturnType<typeof getPool>>;
+import { closePool, getCrosspostMedia, getOpenCrosspostDraft, getPool, listRecentCrosspostPosts } from '@fwlm/db';
+import { createCrosspostFlows, type CrosspostEventBase, type CrosspostFlows } from '../../src/crosspost/flows.js';
+import { createPhotoIntake } from '../../src/crosspost/intake.js';
+import { encodeCrosspostPostback, type CrosspostPostback } from '../../src/crosspost/postback.js';
+import { createCrosspostPublisher, type CrosspostPublisher } from '../../src/crosspost/publisher.js';
+import type { MessageContentResult } from '../../src/line/client.js';
+import {
+  clearCrosspost,
+  fakeAdapter,
+  fakeMessenger,
+  fakePrompts,
+  flatten,
+  memoryMediaStore,
+  recordingLogger,
+  seedFixture,
+  type FakeAdapter,
+  type FakeMessenger,
+  type Fixture,
+  type MemoryMediaStore,
+} from './support.js';
+
+describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
+  let pool: Pool;
+  let f: Fixture;
+  let messenger: FakeMessenger;
+  let instagram: FakeAdapter;
+  let google: FakeAdapter;
+  let store: MemoryMediaStore;
+  let prompts: ReturnType<typeof fakePrompts>;
+  let flows: CrosspostFlows;
+  let publisher: CrosspostPublisher;
+  let contents: Map<string, MessageContentResult>;
+  let pilot: string[];
+  let jpeg: Buffer;
+  let seq = 0;
+
+  function build(): void {
+    messenger = fakeMessenger();
+    store = memoryMediaStore(true);
+    prompts = fakePrompts();
+    const logger = recordingLogger();
+    publisher = createCrosspostPublisher({ db: pool, pool, adapters: { instagram, google }, mediaStore: store, logger });
+    flows = createCrosspostFlows({
+      db: pool,
+      pool,
+      messenger,
+      prompts,
+      publisher,
+      intake: createPhotoIntake({
+        pool,
+        mediaStore: store,
+        fetchContent: async (messageId) => contents.get(messageId) ?? { kind: 'gone' },
+        logger,
+      }),
+      mediaStore: store,
+      logger,
+      pilotStoreIds: pilot,
+      googleConnectAvailable: true,
+    });
+  }
+
+  /**
+   * LINE のイベントの時刻（文・postback・写真で共通の 1 本の時計）。呼ぶたびに 1 秒進める（後から送った操作）。
+   * 明示の時刻を使う試験（写真の送った順）は、この時計より後の日付（2026-11-08）を使う。
+   */
+  let lineClock = Date.UTC(2026, 10, 7, 0, 0, 0);
+  const nextLineTime = (): number => (lineClock += 1000);
+  const event = (ownerId = f.owner): CrosspostEventBase => {
+    seq += 1;
+    return { ownerId, lineUserId: 'U-flow', replyToken: `rt-${seq}`, sentAt: nextLineTime() };
+  };
+  const post = (data: CrosspostPostback, ownerId = f.owner) =>
+    flows.handlePostback({ ...event(ownerId), data: encodeCrosspostPostback(data) });
+  const say = (text: string, ownerId = f.owner) => flows.handleText({ ...event(ownerId), text });
+  /** 送った時刻（呼ぶたびに 1 秒ずつ新しくする＝後から送った写真）。 */
+  const photo = (
+    messageId: string,
+    imageSet: { id: string; index: number; total: number } | null = null,
+    sentAt: number = nextLineTime(),
+  ) =>
+    flows.handleImage({
+      ...event(),
+      image: { messageId, contentProvider: 'line', imageSet, quoteToken: `qt-${messageId}`, sentAt },
+    });
+  const lastReply = (): string => flatten(messenger.replies.at(-1)?.messages ?? []);
+  const openDraft = async () => (await getOpenCrosspostDraft(pool, f.owner))?.draft ?? null;
+
+  beforeAll(async () => {
+    pool = await getPool();
+    f = await seedFixture(pool, '3e');
+    jpeg = await sharp({ create: { width: 1200, height: 1200, channels: 3, background: '#6a4' } }).jpeg().toBuffer();
+  });
+
+  beforeEach(async () => {
+    await clearCrosspost(pool, [f.owner, f.otherOwner]);
+    pilot = [f.store];
+    instagram = fakeAdapter('instagram', { kind: 'not_ready' });
+    google = fakeAdapter('google');
+    contents = new Map([['900', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' }]]);
+    build();
+  });
+
+  afterAll(async () => {
+    await clearCrosspost(pool, [f.owner, f.otherOwner]);
+    await closePool();
+  });
+
+  it('本機能の有効な店舗を持たないオーナーのイベントは何も引き受けない', async () => {
+    pilot = [];
+    build();
+    expect(await post({ action: 'x_start', storeId: null })).toBe('not_handled');
+    expect(await say('投稿')).toBe('not_handled');
+    expect(await photo('900')).toBe('not_handled');
+    expect(await say('投稿', f.otherOwner)).toBe('not_handled');
+    expect(messenger.replies).toHaveLength(0);
+  });
+
+  it('作成中の下書きが無いときの文・写真は引き受けない（既存の応答へ落ちる）', async () => {
+    expect(await say('こんにちは')).toBe('not_handled');
+    expect(await photo('900')).toBe('not_handled');
+  });
+
+  it('写真と文を受け取り、下書きを作り、Google だけを選んで最終確認の後に投稿する', async () => {
+    expect(await say('投稿')).toBe('handled');
+    expect(lastReply()).toContain('森のカフェ');
+    expect(lastReply()).toContain('Instagram: 準備中');
+    const draftId = (await openDraft())!.id;
+
+    expect(await say('新作の抹茶パフェ')).toBe('handled');
+    expect(await say('1日20食')).toBe('handled');
+    expect(await photo('900')).toBe('handled');
+    expect(lastReply()).toContain('写真を受け取りました');
+    expect(store.objects.size).toBe(1);
+
+    expect(await post({ action: 'x_gen', draftId })).toBe('handled');
+    expect(prompts.requests[0]!.material.materialText).toBe('新作の抹茶パフェ\n1日20食');
+    expect(prompts.requests[0]!.destinations).toEqual(['instagram', 'google']);
+    const review = lastReply();
+    expect(review).toContain('Instagram 用');
+    expect(review).toContain('Google だけに投稿');
+    expect(review).not.toContain('Instagram と Google に投稿'); // Instagram は準備中
+    expect(review).toContain('"type":"clipboard"');
+
+    const draft = (await openDraft())!;
+    // 投稿先を選んだだけでは投稿しない
+    await post({ action: 'x_conf', draftId, revision: draft.revision, choice: 'google' });
+    expect(lastReply()).toContain('投稿する');
+    expect(google.calls).toHaveLength(0);
+
+    await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+    expect(google.calls).toHaveLength(1);
+    expect(google.calls[0]!.bodyText).toBe('google の文: 新作の抹茶パフェ\n1日20食'.replace('google の文', 'googleの文'));
+    expect(lastReply()).toContain('投稿しました');
+    expect(await openDraft()).toBeNull();
+    expect(store.objects.size).toBe(0); // 投稿が終わった写真は消す
+
+    // 同じ承認のボタンをもう一度押しても投稿しない
+    await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+    expect(google.calls).toHaveLength(1);
+  });
+
+  it('使えない投稿先の選び方・古い版のボタンからは投稿しない', async () => {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    await say('お知らせ');
+    await post({ action: 'x_gen', draftId });
+    const draft = (await openDraft())!;
+
+    await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'both' }); // Instagram は準備中
+    expect(lastReply()).toContain('このボタンでは投稿できません');
+
+    // 最終確認の後に写真を差し替えると版が進み、前の最終確認からは投稿できない
+    await post({ action: 'x_conf', draftId, revision: draft.revision, choice: 'google' });
+    await photo('900');
+    await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+    expect(lastReply()).toContain('このボタンでは投稿できません');
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it('他のオーナーの下書きの ID を送られても、何も変えない', async () => {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    pilot = [f.store, f.otherStore];
+    build();
+    await post({ action: 'x_cancel', draftId }, f.otherOwner);
+    await post({ action: 'x_gen', draftId }, f.otherOwner);
+    expect((await openDraft())?.status).toBe('collecting');
+  });
+
+  it('有効化の指定から外した店舗の作成中の下書きは、ほかの有効な店舗を持っていても操作させずに閉じる', async () => {
+    pilot = [f.store, f.store2];
+    build();
+    await post({ action: 'x_start', storeId: f.store });
+    const draftId = (await openDraft())!.id;
+    await photo('900');
+    pilot = [f.store2];
+    build();
+    expect(await post({ action: 'x_gen', draftId })).toBe('handled');
+    expect(lastReply()).toContain('このボタンでは投稿できません');
+    expect(await openDraft()).toBeNull();
+  });
+
+  it('自分で書き直した文は AI を通さずに使い、AI への修正指示は 1 つの投稿先だけを作り直す', async () => {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    await say('週末限定のケーキ');
+    await post({ action: 'x_gen', draftId });
+    let draft = (await openDraft())!;
+
+    // 手段を選ばずに送った文は反映しない
+    await say('勝手に入らない文');
+    expect(lastReply()).toContain('そのままでは下書きに入りません');
+
+    await post({ action: 'x_edit', draftId, revision: draft.revision, destination: 'google' });
+    await say('  店主が書いた Google の文  ');
+    draft = (await openDraft())!;
+    expect(draft.google_text).toBe('店主が書いた Google の文');
+    const generated = prompts.requests.length;
+
+    await post({ action: 'x_ai', draftId, revision: draft.revision, destination: 'instagram' });
+    await say('もっと短く');
+    draft = (await openDraft())!;
+    expect(prompts.requests).toHaveLength(generated + 1);
+    expect(prompts.requests.at(-1)!.revision).toMatchObject({ destination: 'instagram', instruction: 'もっと短く' });
+    expect(draft.instagram_text).toBe('instagramの直した文（もっと短く）');
+    expect(draft.google_text).toBe('店主が書いた Google の文');
+  });
+
+  it('生成に失敗しても素材を失わず、作り直せる', async () => {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    await say('お知らせ');
+    prompts.fail = true;
+    await post({ action: 'x_gen', draftId });
+    expect(lastReply()).toContain('文を作れませんでした');
+    const draft = (await openDraft())!;
+    expect(draft.material_text).toBe('お知らせ');
+    prompts.fail = false;
+    await post({ action: 'x_regen', draftId, revision: draft.revision, destination: 'google' });
+    expect((await openDraft())!.google_text).toBe('googleの文: お知らせ');
+  });
+
+  it('下書きを作り始めた後に届いた素材の文は黙って捨てず、知らせる', async () => {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    await say('お知らせ');
+    await post({ action: 'x_gen', draftId });
+    await pool.query(`UPDATE crosspost_drafts SET input_mode = 'none' WHERE id = $1`, [draftId]);
+    // collecting でないので追記されない（確認中の文は修正の手段を案内する）
+    await say('遅れて届いた文');
+    expect(lastReply()).toContain('自分で書き直す');
+    expect((await openDraft())!.material_text).toBe('お知らせ');
+  });
+
+  it('まとめて送られた写真は 1 枚目だけを使い、2 枚目以降には返信しない', async () => {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    contents.set('901', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+    const before = messenger.replies.length;
+    expect(await photo('901', { id: 's', index: 2, total: 2 })).toBe('handled');
+    expect(messenger.replies).toHaveLength(before);
+    expect(await photo('900', { id: 's', index: 1, total: 2 })).toBe('handled');
+    expect(lastReply()).toContain('1 枚目の写真だけ');
+    expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId }))?.line_message_id).toBe('900');
+  });
+
+  it('取得できない写真は理由を伝え、ほかの素材を残す', async () => {
+    await say('投稿');
+    await say('お知らせ');
+    await photo('404');
+    expect(lastReply()).toContain('写真を受け取れませんでした');
+    expect((await openDraft())!.material_text).toBe('お知らせ');
+  });
+
+  it('期限切れの下書きは次の操作で閉じ、写真を消す', async () => {
+    await say('投稿');
+    await photo('900');
+    expect(store.objects.size).toBe(1);
+    await pool.query(`UPDATE crosspost_drafts SET expires_at = now() - interval '1 minute' WHERE owner_id = $1`, [f.owner]);
+    expect(await say('続き')).toBe('handled');
+    expect(lastReply()).toContain('時間が経ったため');
+    expect(await openDraft()).toBeNull();
+    expect(store.objects.size).toBe(0);
+  });
+
+  it('やめると写真を消す。作成中があるときの開始は、続けるか新しく作るかを選ばせる', async () => {
+    pilot = [f.store, f.store2];
+    build();
+    await post({ action: 'x_start', storeId: null });
+    expect(lastReply()).toContain('どの店舗の投稿を作りますか');
+    await post({ action: 'x_start', storeId: f.store });
+    await photo('900');
+    await post({ action: 'x_start', storeId: f.store2 });
+    expect(lastReply()).toContain('作成中の投稿があります');
+    await post({ action: 'x_new', storeId: f.store2 });
+    expect((await openDraft())!.store_id).toBe(f.store2);
+    expect(store.objects.size).toBe(0);
+    await post({ action: 'x_cancel', draftId: (await openDraft())!.id });
+    expect(lastReply()).toContain('やめました');
+    expect(await openDraft()).toBeNull();
+  });
+
+  it('結果不明の投稿は自動で送り直さず、店主の確認の後に再試行できる', async () => {
+    google.behaviors = [
+      async () => ({ kind: 'unknown', reason: 'network' }),
+      async () => ({ kind: 'succeeded', externalId: 'g-2', externalUrl: null }),
+    ];
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    await say('お知らせ');
+    await post({ action: 'x_gen', draftId });
+    const draft = (await openDraft())!;
+    await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+    expect(lastReply()).toContain('確認できませんでした');
+    const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+    const deliveryId = recent!.deliveries[0]!.id;
+
+    await post({ action: 'x_retry', deliveryId });
+    expect(lastReply()).toContain('送り直せません');
+    expect(google.calls).toHaveLength(1);
+
+    await post({ action: 'x_seen', deliveryId, posted: false });
+    await post({ action: 'x_retry', deliveryId });
+    expect(google.calls).toHaveLength(2);
+    expect(lastReply()).toContain('投稿しました');
+
+    await post({ action: 'x_status' });
+    expect(lastReply()).toContain('森のカフェ');
+  });
+
+  // ===================================================================
+  // 障害・同時操作の再現（PR #514 のレビューで求められたシナリオ）
+  // ===================================================================
+
+  /** 下書きを確認中まで進め、その時点の下書きを返す（Instagram も使える状態にしておく）。 */
+  async function reviewingDraft(withPhoto = false) {
+    await say('投稿');
+    const draftId = (await openDraft())!.id;
+    await say('新作の抹茶パフェ');
+    if (withPhoto) await photo('900');
+    await post({ action: 'x_gen', draftId });
+    return (await openDraft())!;
+  }
+
+  const deliveriesOf = async (draftId: string) =>
+    (await pool.query<{ destination: string; status: string; attempt_count: number }>(
+      'SELECT destination, status, attempt_count FROM crosspost_deliveries WHERE draft_id = $1 ORDER BY destination',
+      [draftId],
+    )).rows;
+
+  describe('両方の投稿先の部分成功', () => {
+    beforeEach(() => {
+      instagram.availabilityResult = { kind: 'available' };
+    });
+
+    it('Instagram が失敗・Google が成功: 結果を投稿先ごとに示し、再試行は Instagram だけを送る', async () => {
+      instagram.behaviors = [
+        async () => ({ kind: 'failed', reason: 'rate_limited', retryable: true }),
+        async () => ({ kind: 'succeeded', externalId: 'ig-2', externalUrl: null }),
+      ];
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' });
+      expect(lastReply()).toContain('Instagram: 投稿できませんでした');
+      expect(lastReply()).toContain('Google: 投稿しました');
+      const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      const ig = recent!.deliveries.find((d) => d.destination === 'instagram')!;
+      await post({ action: 'x_retry', deliveryId: ig.id });
+      expect(instagram.calls).toHaveLength(2);
+      expect(google.calls).toHaveLength(1);
+      expect(await deliveriesOf(draft.id)).toEqual([
+        { destination: 'instagram', status: 'succeeded', attempt_count: 2 },
+        { destination: 'google', status: 'succeeded', attempt_count: 1 },
+      ]);
+    });
+
+    it('Instagram が成功・Google の通信が切断: Google は結果不明で、押し直しても送り直さない', async () => {
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'network' })];
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' });
+      expect(lastReply()).toContain('Instagram: 投稿しました');
+      expect(lastReply()).toContain('Google: 確認できませんでした');
+      // 応答が届かなかったと思って「投稿する」を押し直しても、どちらにも送り直さない
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' });
+      expect(instagram.calls).toHaveLength(1);
+      expect(google.calls).toHaveLength(1);
+      const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      const gg = recent!.deliveries.find((d) => d.destination === 'google')!;
+      await post({ action: 'x_retry', deliveryId: gg.id });
+      expect(lastReply()).toContain('送り直せません');
+      expect(google.calls).toHaveLength(1);
+    });
+  });
+
+  describe('結果不明の後の再試行', () => {
+    it('「投稿されていた」と確かめたら成功にし、再試行の手段を出さない', async () => {
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'timeout' })];
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      const deliveryId = recent!.deliveries[0]!.id;
+      await post({ action: 'x_seen', deliveryId, posted: true });
+      expect(lastReply()).toContain('Google: 投稿しました');
+      await post({ action: 'x_retry', deliveryId });
+      expect(google.calls).toHaveLength(1);
+    });
+  });
+
+  describe('サーバーの停止', () => {
+    it('承認を記録した直後に止まった（待ちのまま）: 同じ「投稿する」を押し直すと、待ちの投稿先だけを 1 回送る', async () => {
+      instagram.availabilityResult = { kind: 'available' };
+      const draft = await reviewingDraft();
+      // 承認のトランザクションだけが終わり、実行の前にプロセスが止まった状態を作る
+      const approved = await publisher.approve({
+        ownerId: f.owner,
+        storeId: draft.store_id,
+        draftId: draft.id,
+        revision: draft.revision,
+        destinations: ['instagram', 'google'],
+      });
+      expect(approved.kind).toBe('approved');
+      expect((await deliveriesOf(draft.id)).map((d) => d.status)).toEqual(['queued', 'queued']);
+
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' });
+      expect(instagram.calls).toHaveLength(1);
+      expect(google.calls).toHaveLength(1);
+      expect((await deliveriesOf(draft.id)).map((d) => d.status)).toEqual(['succeeded', 'succeeded']);
+    });
+
+    it('待ちのまま止まった投稿は「投稿の状況」から今すぐ投稿・取りやめを選べる', async () => {
+      instagram.availabilityResult = { kind: 'available' };
+      const draft = await reviewingDraft();
+      await publisher.approve({
+        ownerId: f.owner,
+        storeId: draft.store_id,
+        draftId: draft.id,
+        revision: draft.revision,
+        destinations: ['instagram', 'google'],
+      });
+      await post({ action: 'x_status' });
+      expect(lastReply()).toContain('まだ送っていません');
+      expect(lastReply()).toContain('a=x_run');
+      const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      const ig = recent!.deliveries.find((d) => d.destination === 'instagram')!;
+      const gg = recent!.deliveries.find((d) => d.destination === 'google')!;
+      await post({ action: 'x_drop', deliveryId: ig.id });
+      expect(lastReply()).toContain('Instagram: 取りやめました（送っていません）');
+      await post({ action: 'x_run', deliveryId: gg.id });
+      expect(instagram.calls).toHaveLength(0);
+      expect(google.calls).toHaveLength(1);
+      // 取りやめた投稿先は、押し直しても送らない
+      await post({ action: 'x_run', deliveryId: ig.id });
+      expect(instagram.calls).toHaveLength(0);
+    });
+
+    it('承認から 24 時間を過ぎた待ちは、送らずに取りやめにする', async () => {
+      const draft = await reviewingDraft();
+      await publisher.approve({ ownerId: f.owner, storeId: draft.store_id, draftId: draft.id, revision: draft.revision, destinations: ['google'] });
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - interval '25 hours' WHERE id = $1`, [draft.id]);
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      expect(google.calls).toHaveLength(0);
+      expect(lastReply()).toContain('取りやめました（送っていません）');
+    });
+
+    it('投稿の実行中に止まった（実行中のまま）: 結果不明として示し、店主の確認の後だけ途中の到達点で再試行する', async () => {
+      const draft = await reviewingDraft();
+      await publisher.approve({ ownerId: f.owner, storeId: draft.store_id, draftId: draft.id, revision: draft.revision, destinations: ['google'] });
+      // 実行権を獲得し、途中の到達点を保存したところでプロセスが止まった状態
+      await pool.query(
+        `UPDATE crosspost_deliveries SET status = 'in_progress', attempt_count = 1, checkpoint = 'cp-1',
+                last_attempt_at = now() - interval '10 minutes', send_started_at = now() - interval '10 minutes'
+          WHERE draft_id = $1`,
+        [draft.id],
+      );
+      // 押し直しても、実行中だった投稿先は送り直さない（送ったかもしれない）
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      expect(google.calls).toHaveLength(0);
+      expect(lastReply()).toContain('確認できませんでした');
+      const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      const deliveryId = recent!.deliveries[0]!.id;
+      await post({ action: 'x_retry', deliveryId });
+      expect(google.calls).toHaveLength(0);
+      await post({ action: 'x_seen', deliveryId, posted: false });
+      await post({ action: 'x_retry', deliveryId });
+      expect(google.calls).toHaveLength(1);
+      expect(google.calls[0]!.checkpoint).toBe('cp-1');
+    });
+  });
+
+  describe('同時操作', () => {
+    it('「投稿する」を同時に 2 回押しても、投稿先ごとに 1 回だけ送る', async () => {
+      instagram.availabilityResult = { kind: 'available' };
+      const draft = await reviewingDraft();
+      await Promise.all([
+        post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' }),
+        post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' }),
+      ]);
+      expect(instagram.calls).toHaveLength(1);
+      expect(google.calls).toHaveLength(1);
+    });
+
+    it('「投稿する」と「やめる」が同時でも、取り消した下書きを投稿しない（どちらか一方だけが成立する）', async () => {
+      const draft = await reviewingDraft();
+      await Promise.all([
+        post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' }),
+        post({ action: 'x_cancel', draftId: draft.id }),
+      ]);
+      const status = (await pool.query<{ status: string }>('SELECT status FROM crosspost_drafts WHERE id = $1', [draft.id])).rows[0]!.status;
+      if (status === 'canceled') {
+        expect(google.calls).toHaveLength(0);
+        expect(await deliveriesOf(draft.id)).toEqual([]);
+      } else {
+        expect(status).toBe('approved');
+        expect(google.calls).toHaveLength(1);
+      }
+    });
+
+    it('同じ投稿先の再試行・再開を同時に押しても 1 回だけ送る', async () => {
+      google.behaviors = [
+        async () => ({ kind: 'failed', reason: 'upstream_unavailable', retryable: true }),
+        async () => ({ kind: 'succeeded', externalId: 'g-2', externalUrl: null }),
+      ];
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      const [recent] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      const deliveryId = recent!.deliveries[0]!.id;
+      await Promise.all([post({ action: 'x_retry', deliveryId }), post({ action: 'x_retry', deliveryId })]);
+      expect(google.calls).toHaveLength(2);
+
+      // 待ちの再開と「投稿する」の押し直しが同時でも 1 回
+      const second = await reviewingDraft();
+      await publisher.approve({ ownerId: f.owner, storeId: second.store_id, draftId: second.id, revision: second.revision, destinations: ['google'] });
+      const [queued] = await listRecentCrosspostPosts(pool, { ownerId: f.owner, limit: 1 });
+      await Promise.all([
+        post({ action: 'x_run', deliveryId: queued!.deliveries[0]!.id }),
+        post({ action: 'x_ok', draftId: second.id, revision: second.revision, choice: 'google' }),
+      ]);
+      expect(google.calls).toHaveLength(3);
+    });
+
+    it('写真の差し替えと「投稿する」が同時でも、確認した写真と違う写真で投稿しない', async () => {
+      const draft = await reviewingDraft(true);
+      const confirmedMedia = await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draft.id });
+      contents.set('902', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      await Promise.all([
+        post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' }),
+        photo('902'),
+      ]);
+      const rows = await pool.query<{ media_id: string | null; status: string }>(
+        'SELECT media_id, status FROM crosspost_deliveries WHERE draft_id = $1',
+        [draft.id],
+      );
+      if (rows.rows.length === 0) {
+        // 写真の差し替えが先: 版が進み、古い最終確認からは投稿しない
+        expect(google.calls).toHaveLength(0);
+      } else {
+        // 承認が先: 承認した時点の写真（確認した写真）で投稿し、後から届いた写真は使わない
+        expect(google.calls).toHaveLength(1);
+        expect(google.calls[0]!.media?.fetchUrl).toContain(encodeURIComponent(confirmedMedia!.storage_key));
+      }
+    });
+  });
+
+  describe('結果の通知の失敗', () => {
+    it('Reply が届かなければ Push で届け、届いたと記録する', async () => {
+      const draft = await reviewingDraft();
+      messenger.failReply = true;
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      expect(flatten(messenger.pushes.at(-1)?.messages ?? [])).toContain('Google: 投稿しました');
+      messenger.failReply = false;
+      expect(await say('こんにちは')).toBe('not_handled'); // 届いた結果は二度と出さない
+    });
+
+    it('Reply も Push も届かなければ、結果を失わず、次の操作で必ず示す', async () => {
+      const draft = await reviewingDraft();
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      expect(google.calls).toHaveLength(1);
+      messenger.failReply = false;
+      messenger.failPush = false;
+      // 投稿と関係のない文への返信でも、先に届けていない結果を示す
+      expect(await say('こんにちは')).toBe('handled');
+      expect(lastReply()).toContain('お届けできていなかった投稿の結果です');
+      expect(lastReply()).toContain('Google: 投稿しました');
+      // 一度届いたら、次の文は従来どおり（引き受けない）
+      expect(await say('こんにちは')).toBe('not_handled');
+    });
+
+    it('「投稿の状況」と送れば状況を示す', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      expect(await say('投稿の状況')).toBe('handled');
+      expect(lastReply()).toContain('Google: 投稿しました');
+    });
+  });
+
+  describe('最終確認の写真', () => {
+    it('店主が送った写真のメッセージそのものを引用して、公開する写真を示す', async () => {
+      const draft = await reviewingDraft(true);
+      await post({ action: 'x_conf', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      const [first, second] = messenger.replies.at(-1)!.messages;
+      expect(first).toMatchObject({ type: 'text', quoteToken: 'qt-900' });
+      expect(JSON.stringify(first)).toContain('この写真を投稿します');
+      expect(JSON.stringify(second)).toContain('上で引用した写真');
+    });
+
+    it('引用の手掛かりが無い写真では、最終確認も承認もせず、送り直しを求める', async () => {
+      await say('投稿');
+      const draftId = (await openDraft())!.id;
+      await say('新作の抹茶パフェ');
+      await flows.handleImage({ ...event(), image: { messageId: '900', contentProvider: 'line', imageSet: null, quoteToken: null, sentAt: nextLineTime() } });
+      await post({ action: 'x_gen', draftId });
+      let draft = (await openDraft())!;
+      await post({ action: 'x_conf', draftId, revision: draft.revision, choice: 'google' });
+      expect(lastReply()).toContain('写真をもう一度送って');
+      expect(lastReply()).not.toContain('a=x_ok');
+      // 最終確認を経ない承認（古いボタン・偽造された postback）も断る
+      await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+      expect(lastReply()).toContain('写真をもう一度送って');
+      expect(google.calls).toHaveLength(0);
+      expect((await openDraft())?.status).toBe('reviewing');
+      // 送り直せば（quoteToken つき）最終確認から投稿できる
+      contents.set('904', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      await photo('904');
+      draft = (await openDraft())!;
+      await post({ action: 'x_conf', draftId, revision: draft.revision, choice: 'google' });
+      expect(messenger.replies.at(-1)!.messages[0]).toMatchObject({ quoteToken: 'qt-904' });
+      await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+      expect(google.calls).toHaveLength(1);
+    });
+
+    it('写真を差し替えたら、最終確認は新しい写真を引用する', async () => {
+      const draft = await reviewingDraft(true);
+      contents.set('903', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      await photo('903');
+      const replaced = (await openDraft())!;
+      expect(replaced.revision).toBeGreaterThan(draft.revision);
+      await post({ action: 'x_conf', draftId: draft.id, revision: replaced.revision, choice: 'google' });
+      expect(messenger.replies.at(-1)!.messages[0]).toMatchObject({ quoteToken: 'qt-903' });
+    });
+  });
+
+  // ===================================================================
+  // 第三者レビュー（Codex）の指摘の再現
+  // ===================================================================
+
+  describe('写真の送った順（届いた順・処理が終わった順と逆転しても、最後に送った写真を使う）', () => {
+    it('後から送った写真 B の処理が先に終わり、前に送った写真 A が後から届いても、B を使う', async () => {
+      const draft = await reviewingDraft();
+      contents.set('A', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      contents.set('B', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      const sentA = Date.UTC(2026, 10, 8, 9, 0, 1);
+      const sentB = Date.UTC(2026, 10, 8, 9, 0, 2);
+      await photo('B', null, sentB);
+      const afterB = (await openDraft())!;
+      await photo('A', null, sentA);
+      expect(lastReply()).toContain('あとから送った写真を使います');
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draft.id }))?.line_message_id).toBe('B');
+      // 使わなかった写真は置き場に残さない
+      expect(store.objects.size).toBe(1);
+      // 差し替えなかったので、B の最終確認は有効のまま
+      expect((await openDraft())!.revision).toBe(afterB.revision);
+      await post({ action: 'x_conf', draftId: draft.id, revision: afterB.revision, choice: 'google' });
+      expect(messenger.replies.at(-1)!.messages[0]).toMatchObject({ quoteToken: 'qt-B' });
+    });
+
+    it('同じ時刻に送られた 2 枚は推測で選ばず、いまの写真のまま送り直しを求める', async () => {
+      const draft = await reviewingDraft();
+      contents.set('C', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      contents.set('D', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+      const same = Date.UTC(2026, 10, 8, 9, 0, 5);
+      await photo('C', null, same);
+      await photo('D', null, same);
+      expect(lastReply()).toContain('どちらを後に送ったか確かめられませんでした');
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draft.id }))?.line_message_id).toBe('C');
+    });
+
+    it('送った時刻が分からない写真は使わない', async () => {
+      await reviewingDraft();
+      await flows.handleImage({
+        ...event(),
+        image: { messageId: '900', contentProvider: 'line', imageSet: null, quoteToken: 'qt-900', sentAt: null },
+      });
+      expect(lastReply()).toContain('順番を確かめられませんでした');
+      expect(store.objects.size).toBe(0);
+    });
+  });
+
+  describe('「投稿の状況」と未通知の結果（下書きの作成中・確認中）', () => {
+    /** 前の投稿を、Instagram 成功・Google 結果不明で終え、結果を届けられなかった状態にする。 */
+    async function previousPostUndelivered(): Promise<string> {
+      instagram.availabilityResult = { kind: 'available' };
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'network' })];
+      const draft = await reviewingDraft();
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' });
+      messenger.failReply = false;
+      messenger.failPush = false;
+      return draft.id;
+    }
+
+    it('作成中の下書きがあっても「投稿の状況」は命令として働き、素材に入らない', async () => {
+      await say('投稿');
+      await say('週末限定のケーキ');
+      expect(await say('投稿の状況')).toBe('handled');
+      expect(lastReply()).toContain('まだ投稿はありません');
+      expect((await openDraft())!.material_text).toBe('週末限定のケーキ');
+      expect(await say('投稿の結果')).toBe('handled');
+      expect((await openDraft())!.material_text).toBe('週末限定のケーキ');
+    });
+
+    it('自分で書き直す途中でも「投稿の状況」は命令として働き、書き直しの文にしない', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      await say('投稿の状況');
+      const after = (await openDraft())!;
+      expect(after.google_text).toBe(draft.google_text);
+      expect(after.input_mode).toBe('manual'); // 書き直しの入力は待ったまま
+      await say('店主の文');
+      expect((await openDraft())!.google_text).toBe('店主の文');
+    });
+
+    it('部分成功・結果不明の結果が届いていないまま新しい下書きを作っても、結果を失わず、入力も失わない', async () => {
+      await previousPostUndelivered();
+      // 新しい下書きを作り始める（開始の応答に、届けていない結果を先に添える）
+      await say('投稿');
+      const startReply = lastReply();
+      expect(startReply).toContain('お届けできていなかった投稿の結果です');
+      expect(startReply).toContain('Instagram: 投稿しました');
+      expect(startReply).toContain('Google: 確認できませんでした');
+      expect(startReply).toContain('投稿を作ります');
+      // 届いたので、下書きの入力の応答には二度と割り込まない
+      await say('新しいお知らせ');
+      expect(lastReply()).not.toContain('お届けできていなかった');
+      expect((await openDraft())!.material_text).toBe('新しいお知らせ');
+    });
+
+    it('下書きの作成中に未通知の結果ができても、入力を受け取ったうえで結果を先に添え、クイックリプライは下書きの操作のまま', async () => {
+      const previousDraftId = await previousPostUndelivered();
+      // 結果を届けられた扱いにしてから下書きを作り、作成中に「届けていない」状態へ戻す（店主の確認で結果が変わった等）
+      await post({ action: 'x_status' });
+      await say('投稿');
+      await pool.query('UPDATE crosspost_drafts SET result_notified_at = NULL WHERE id = $1', [previousDraftId]);
+
+      await say('今日のおすすめ');
+      const last = messenger.replies.at(-1)!.messages;
+      expect(flatten(last)).toContain('お届けできていなかった投稿の結果です');
+      expect(flatten(last)).toContain('受け取りました');
+      expect(last.at(-1)).toMatchObject({ type: 'text', quickReply: expect.anything() });
+      expect(last.length).toBeLessThanOrEqual(5);
+      expect((await openDraft())!.material_text).toBe('今日のおすすめ');
+      // 届いた後は割り込まない
+      await say('続き');
+      expect(lastReply()).not.toContain('お届けできていなかった');
+      expect((await openDraft())!.material_text).toBe('今日のおすすめ\n続き');
+    });
+
+    it('結果を添えた返信が届かなければ、入力は受け取ったうえで、結果は次の操作に持ち越す', async () => {
+      const previousDraftId = await previousPostUndelivered();
+      await post({ action: 'x_status' });
+      await say('投稿');
+      await pool.query('UPDATE crosspost_drafts SET result_notified_at = NULL WHERE id = $1', [previousDraftId]);
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await say('今日のおすすめ');
+      messenger.failReply = false;
+      messenger.failPush = false;
+      expect((await openDraft())!.material_text).toBe('今日のおすすめ');
+      await say('続き');
+      expect(lastReply()).toContain('お届けできていなかった投稿の結果です');
+    });
+  });
+
+  describe('最終確認の内容（事実の確認）', () => {
+    it('最終確認は投稿する文の全文と、事実を確かめる観点を示す', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_conf', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      expect(lastReply()).toContain(draft.google_text!);
+      expect(lastReply()).toContain('料理名・食材・産地');
+    });
+  });
+
+  // ===================================================================
+  // 第三者レビュー（2 回目）の指摘の再現
+  // ===================================================================
+
+  /** 写真のイベントを、指定した LINE の時刻で処理する（Webhook の処理が遅れた写真の再現に使う）。 */
+  const photoSentAt = (messageId: string, sentAt: number | null) => {
+    if (!contents.has(messageId)) contents.set(messageId, { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+    return flows.handleImage({
+      ...event(),
+      image: { messageId, contentProvider: 'line', imageSet: null, quoteToken: `qt-${messageId}`, sentAt },
+    });
+  };
+  const textSentAt = (text: string, sentAt: number | null) => flows.handleText({ ...event(), sentAt, text });
+
+  describe('別の下書きへの写真・文の混入（Webhook の遅延・順不同・重複）', () => {
+    it('店舗 A の下書きに送った写真の処理が遅れ、A を取り消して店舗 B の下書きを始めた後に届いても、B に付けない', async () => {
+      pilot = [f.store, f.store2];
+      build();
+      await post({ action: 'x_start', storeId: f.store });
+      const draftA = (await openDraft())!;
+      const photoForA = nextLineTime(); // A の作成中に送った（処理は遅れる）
+      await post({ action: 'x_cancel', draftId: draftA.id });
+      await post({ action: 'x_start', storeId: f.store2 });
+      const draftB = (await openDraft())!;
+      expect(draftB.store_id).toBe(f.store2);
+
+      expect(await photoSentAt('late-A', photoForA)).toBe('handled');
+      expect(lastReply()).toContain('作り始める前に送られた');
+      expect(await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draftB.id })).toBeNull();
+      expect(store.objects.size).toBe(0); // 付けなかった写真は置き場に残さない
+
+      // B のために送った写真は受け付ける
+      expect(await photoSentAt('for-B', nextLineTime())).toBe('handled');
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draftB.id }))?.line_message_id).toBe('for-B');
+    });
+
+    it('同じ店舗で下書きを作り直しても、前の下書きの写真・文は新しい下書きに入らない', async () => {
+      await say('投稿');
+      const first = (await openDraft())!;
+      const lateText = nextLineTime();
+      const latePhoto = nextLineTime();
+      await post({ action: 'x_new', storeId: f.store });
+      const second = (await openDraft())!;
+      expect(second.id).not.toBe(first.id);
+
+      await textSentAt('前の下書きの文', lateText);
+      expect(lastReply()).toContain('作り始める前に送られた');
+      await photoSentAt('late', latePhoto);
+      expect((await openDraft())!.material_text).toBe('');
+      expect(await getCrosspostMedia(pool, { ownerId: f.owner, draftId: second.id })).toBeNull();
+
+      await say('新しい下書きの文');
+      expect((await openDraft())!.material_text).toBe('新しい下書きの文');
+    });
+
+    it('写真の処理の完了順が逆転しても、下書きを始めた後に最後に送った写真を使う', async () => {
+      await say('投稿');
+      const draft = (await openDraft())!;
+      const first = nextLineTime();
+      const second = nextLineTime();
+      await photoSentAt('second', second);
+      await photoSentAt('first', first);
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draft.id }))?.line_message_id).toBe('second');
+    });
+
+    it('下書きの開始と同じ時刻・時刻不明の写真と文は使わず、同じ写真の重複イベントは 1 枚として扱う', async () => {
+      const startAt = nextLineTime();
+      await textSentAt('投稿', startAt);
+      const draft = (await openDraft())!;
+      await photoSentAt('same-time', startAt);
+      expect(lastReply()).toContain('作り始める前に送られた');
+      await photoSentAt('no-time', null);
+      expect(lastReply()).toContain('順番を確かめられませんでした');
+      await textSentAt('時刻の無い文', null);
+      expect((await openDraft())!.material_text).toBe('');
+
+      const at = nextLineTime();
+      await photoSentAt('dup', at);
+      await photoSentAt('dup', at);
+      const count = await pool.query('SELECT count(*)::int AS n FROM crosspost_media WHERE draft_id = $1', [draft.id]);
+      expect(count.rows[0].n).toBe(1);
+    });
+
+    it('時刻の分からない「投稿」では下書きを始めない（別の下書きの写真と区別できないため）', async () => {
+      await textSentAt('投稿', null);
+      expect(await openDraft()).toBeNull();
+    });
+
+    it('「自分で書き直す」を押す前に送った文が遅れて届いても、書き直しの文にしない', async () => {
+      const draft = await reviewingDraft();
+      const sentBeforeSwitch = nextLineTime();
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      await textSentAt('押す前に送った文', sentBeforeSwitch);
+      expect(lastReply()).toContain('押す前に送られた');
+      expect((await openDraft())!.google_text).toBe(draft.google_text);
+      await say('押した後に送った文');
+      expect((await openDraft())!.google_text).toBe('押した後に送った文');
+    });
+  });
+
+  describe('未通知の結果を、下書きのどの操作の応答にも添える（共通の送信）', () => {
+    async function undeliveredResult(): Promise<void> {
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'network' })];
+      const done = await reviewingDraft();
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await post({ action: 'x_ok', draftId: done.id, revision: done.revision, choice: 'google' });
+      messenger.failReply = false;
+      messenger.failPush = false;
+      google.behaviors = [async () => ({ kind: 'succeeded', externalId: 'g', externalUrl: null })];
+    }
+    const PENDING = 'お届けできていなかった投稿の結果です';
+
+    it.each([
+      ['AI の修正指示', 'ai'],
+      ['作り直す', 'regen'],
+      ['自分で書き直すの開始', 'edit'],
+      ['下書きの再表示', 'view'],
+      ['写真の差し替え', 'photo'],
+      ['投稿先の選択（最終確認）', 'conf'],
+    ])('%s の応答に、未通知の結果を前に添え、操作も完了する', async (_label, op) => {
+      await undeliveredResult();
+      // 新しい下書きを作る（開始の応答で一度届いてしまうので、作成後に未通知へ戻す）
+      const draft = await reviewingDraft(true);
+      await pool.query(
+        `UPDATE crosspost_drafts SET result_notified_at = NULL WHERE owner_id = $1 AND status = 'approved'`,
+        [f.owner],
+      );
+      switch (op) {
+        case 'ai':
+          await post({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: 'instagram' });
+          // 切り替えの応答で届くので、修正指示の応答で届くことを見るためにもう一度未通知へ戻す
+          await pool.query(`UPDATE crosspost_drafts SET result_notified_at = NULL WHERE owner_id = $1 AND status = 'approved'`, [f.owner]);
+          await say('もっと短く');
+          expect((await openDraft())!.instagram_text).toBe('instagramの直した文（もっと短く）');
+          break;
+        case 'regen':
+          await post({ action: 'x_regen', draftId: draft.id, revision: draft.revision, destination: 'google' });
+          expect((await openDraft())!.revision).toBe(draft.revision + 1);
+          break;
+        case 'edit':
+          await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+          expect((await openDraft())!.input_mode).toBe('manual');
+          break;
+        case 'view':
+          await post({ action: 'x_view', draftId: draft.id });
+          break;
+        case 'photo':
+          contents.set('905', { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' });
+          await photo('905');
+          expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: draft.id }))?.line_message_id).toBe('905');
+          break;
+        case 'conf':
+          await post({ action: 'x_conf', draftId: draft.id, revision: draft.revision, choice: 'google' });
+          break;
+      }
+      const last = messenger.replies.at(-1)!.messages;
+      expect(flatten(last)).toContain(PENDING);
+      expect(flatten(last)).toContain('Google: 確認できませんでした');
+      expect(last.length).toBeLessThanOrEqual(5);
+      // 最終確認では、承認のボタンが最後のメッセージに残る
+      if (op === 'conf') expect(flatten([last.at(-1)!])).toContain('a=x_ok');
+      // 届いたので次の応答には添えない
+      await post({ action: 'x_view', draftId: draft.id });
+      expect(lastReply()).not.toContain(PENDING);
+    });
+
+    it('応答が 5 通の上限に近いときは、入る分だけ添え、残りは次の応答で届ける', async () => {
+      // 届けていない結果を 3 件作る
+      for (let i = 0; i < 3; i += 1) await undeliveredResult();
+      const draft = await reviewingDraft(true);
+      await pool.query(`UPDATE crosspost_drafts SET result_notified_at = NULL WHERE owner_id = $1 AND status = 'approved'`, [f.owner]);
+      // 最終確認は 2 通（写真の引用＋確認）。残りの 3 通に、案内＋結果 2 件が入る
+      await post({ action: 'x_conf', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      const first = messenger.replies.at(-1)!.messages;
+      expect(first).toHaveLength(5);
+      expect(flatten([first.at(-1)!])).toContain('a=x_ok');
+      // 残りの 1 件は次の応答で届く
+      await post({ action: 'x_view', draftId: draft.id });
+      expect(lastReply()).toContain('Google: 確認できませんでした');
+      await post({ action: 'x_view', draftId: draft.id });
+      expect(lastReply()).not.toContain(PENDING);
+    });
+  });
+
+  describe('送信の切り替え（Reply → Push）と通知済みの記録', () => {
+    async function finishedPost(): Promise<string> {
+      const draft = await reviewingDraft();
+      return draft.id;
+    }
+
+    it('Reply が受け付けられれば Push を使わず、通知済みにする', async () => {
+      const draftId = await finishedPost();
+      const draft = (await openDraft())!;
+      await post({ action: 'x_ok', draftId, revision: draft.revision, choice: 'google' });
+      expect(messenger.pushes).toHaveLength(0);
+      expect(await say('こんにちは')).toBe('not_handled');
+    });
+
+    it('Reply が受け付けられなければ Push で同じ内容を送り、通知済みにする（未通知の結果を添えた応答も）', async () => {
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'network' })];
+      const done = await reviewingDraft();
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await post({ action: 'x_ok', draftId: done.id, revision: done.revision, choice: 'google' });
+      messenger.failPush = false;
+      // Reply は失敗し続けるが Push は届く: 下書きの応答と未通知の結果が Push で届く
+      await say('投稿');
+      expect(flatten(messenger.pushes.at(-1)!.messages)).toContain('お届けできていなかった投稿の結果です');
+      expect(flatten(messenger.pushes.at(-1)!.messages)).toContain('投稿を作ります');
+      messenger.failReply = false;
+      await say('次の文');
+      expect(lastReply()).not.toContain('お届けできていなかった');
+    });
+
+    it('Reply も Push も受け付けられなければ通知済みにせず、下書きの操作は完了している', async () => {
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'network' })];
+      const done = await reviewingDraft();
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await post({ action: 'x_ok', draftId: done.id, revision: done.revision, choice: 'google' });
+      await say('投稿');
+      await say('新しい文');
+      messenger.failReply = false;
+      messenger.failPush = false;
+      expect((await openDraft())!.material_text).toBe('新しい文');
+      await say('続き');
+      expect(lastReply()).toContain('お届けできていなかった投稿の結果です');
+    });
+
+    it('Reply が例外を投げても Push に切り替える', async () => {
+      const draft = await reviewingDraft();
+      const original = messenger.replyChecked;
+      messenger.replyChecked = async () => {
+        throw new Error('socket hang up');
+      };
+      try {
+        await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'google' });
+      } finally {
+        messenger.replyChecked = original;
+      }
+      expect(flatten(messenger.pushes.at(-1)!.messages)).toContain('Google: 投稿しました');
+      expect(await say('こんにちは')).toBe('not_handled');
+    });
+
+    it('部分成功と結果不明が混在した結果も、届いたときだけ通知済みにする', async () => {
+      instagram.availabilityResult = { kind: 'available' };
+      google.behaviors = [async () => ({ kind: 'unknown', reason: 'timeout' })];
+      const draft = await reviewingDraft();
+      messenger.failReply = true;
+      messenger.failPush = true;
+      await post({ action: 'x_ok', draftId: draft.id, revision: draft.revision, choice: 'both' });
+      messenger.failReply = false;
+      messenger.failPush = false;
+      await say('投稿の状況');
+      expect(lastReply()).toContain('Instagram: 投稿しました');
+      expect(lastReply()).toContain('Google: 投稿されたか確認できませんでした');
+      expect(await say('こんにちは')).toBe('not_handled');
+    });
+  });
+});
