@@ -1,0 +1,95 @@
+# Research & Gap Analysis: line-crosspost
+
+- 調査日: 2026-11-07
+- 基準: `origin/main` = `df04c59f`（PR #513 のマージ）
+- 関連 Issue: #494（LINE → Instagram）／#479（Instagram → Google の二重投稿解消を保留候補に）／#8（GBP 投稿・返信）／#146（GBP API 利用申請）／#282（OAuth コールバックの独自ドメイン化）／#354（GBP の入口の作り直し）
+- 前提資料（未追跡・ローカル）: `docs/proposals/instagram-integration-prereqs-2026-11/README.md`（第 2 版）、`docs/proposals/feature-roadmap-2026-11/README.md`
+
+記号は前提資料と同じ。**[GitHub]** = このリポジトリで確認、**[公式]** = 公式文書の原文で確認（前提資料の取得日 2026-11-04 のもの。本 spec の作成時には再取得していない）、**[未確認]** = 誰も確かめていない。
+
+## 1. main の現状（再利用できるもの）
+
+| 部品 | 場所 | 再利用のしかた |
+|---|---|---|
+| LINE Webhook の受信・署名検証・`webhookEventId` の重複排除 | `ts/apps/line-webhook/src/webhook/dispatch.ts`・`app.ts`・`@fwlm/db` の `recordWebhookEventOnce` | そのまま使う。重複イベントは処理前に落ちる [GitHub] |
+| 店舗特定済みオーナーの振り分け口 | `ts/apps/line-webhook/src/owner/router.ts` | GBP と同じ「引き受けなければ既存の分岐へ落ちる」委譲点を 1 つ足す |
+| 下書き → 確認 → 承認 → 実行の会話と CAS による排他 | `ts/apps/line-webhook/src/gbp/flows.ts`・`@fwlm/db` の `gbp-sessions.ts` | **形を流用**（条件付き更新で実行権を 1 リクエストだけが得る・承認済みの下書きを失わない）。表は別にする（下 §3） |
+| Gemini の実行核（安全設定・1 回の再試行・出力検証・エラー分類） | `ts/packages/gemini` | そのまま使う |
+| 自由記述のデリミタ隔離・variation seed | `ts/apps/line-webhook/src/gbp/prompts.ts` | 同じ規律で投稿文用のプロンプトを新設（GBP の関数は変えない） |
+| OAuth の state（nonce）・トークンの AES-256-GCM 保管・連携の解除 | `ts/apps/line-webhook/src/gbp/oauth.ts`・`token-store.ts`・`flows.ts` | Google はそのまま使う。Meta は provider の汎用化が要る（第 2 段・本 spec の範囲外） |
+| GBP のローカル投稿 | `ts/apps/line-webhook/src/gbp/client.ts` の `createLocalPost` | Google の発信先アダプタから呼ぶ。写真の付与（`media[]`）と「結果不明」の区別を足す（下 §2） |
+| 既定 OFF の配線（env が無ければ経路を組み立てない） | `ts/apps/line-webhook/src/config.ts`・`index.ts` の `buildGbp` | 同じ形で一括発信の設定を足す |
+| LINE への通信の時間制限 | `ts/apps/line-webhook/src/line/client.ts`（Issue #499） | 画像の取得（Content API）にも同じ `send` の規律を使う |
+| 構造化ログの allowlist | `ts/apps/line-webhook/src/gbp/logger.ts` | 同じ形（本文・トークン・画像を型として渡せない） |
+
+## 2. 既存コードの問題点（本 spec が直す・避けるもの）
+
+1. **GBP の投稿で「結果不明」が「失敗」に混ざっている** [GitHub]。`client.ts` の `send` は `fetch` の例外（ネットワーク断・応答の喪失）を `upstream_error`（status 0）に畳み、`flows.ts` の `handlePostApprove` は失敗として承認待ちへ戻して再試行の導線を出す。`createLocalPost` は非冪等なので、**Google 側で投稿が作られたのに応答だけが失われた場合、店主の再試行で同じ投稿が 2 件になる**。本 spec の発信先アダプタは、送信後の通信断を「結果不明」に分類し、再投稿の前に確認を挟む。既存の GBP 単体の投稿フロー（`g_post`）はこの spec では変えない（下 §5 の未解決事項）。
+2. **GBP クライアントに時間制限が無い** [GitHub]。`send` は `AbortSignal` を渡していない。Google が応答しないと Webhook のリクエストが Cloud Run のタイムアウトまで塞がる。発信先アダプタは呼び出しごとに時間制限を持つ。
+3. **画像メッセージは捨てている** [GitHub]。`dispatch.ts` は text 以外を `unsupported`（内容を保持しない）にしている。一括発信を ON にしたときだけ、画像の `message.id` と `imageSet` を会話層へ渡す。OFF のときの挙動は変えない。
+4. **`gbp_sessions` は GBP 専用で、owner あたり 1 行**（`UNIQUE (owner_id)`・`gbp_flow` は `connect/post/reply`）[GitHub]。写真・発信先ごとの状態・承認後も残る結果を入れる場所が無い。enum を広げると GBP の状態機械の不変条件（`beginGbpSessionExecution` の flow 条件など）に触れるので、**別の表にする**。
+
+## 3. 過去の資料と main の差分
+
+| 資料の記述 | main の事実 | 扱い |
+|---|---|---|
+| #494「トークン更新は日次バッチ（Go 層）が候補」 | `db/write-boundary.md` は `oauth_tokens` の書き込みを TS リアルタイム応答層と定める [GitHub] | 前提資料 §0.1-5 のとおり、更新は TS 側。本 spec は Meta のトークンを扱わない（第 2 段） |
+| 前提資料 §3「`infra/modules/secrets/main.tf` の `secret_ids` 7 件」 | CLAUDE.md は「宣言 6 件の正典」と書く | 本 spec はシークレットを足さないので影響なし。数の食い違いはシークレットを足す PR で `--print-secrets` の実測で確かめる |
+| #354「完了後メニューの下段に『Google 連携』」 | 一括発信は Google と Instagram の両方の入口になる | 前提資料のチェックシート #41 のとおり、区画名を発信先に依存しない名前（例:「投稿を作る」）にするかを、メニュー画像を作る前に決める（Firstweb 確認事項） |
+| ロードマップ「方式 A（Instagram の文を貼る → Google 用の下書き）」 | 本 spec の「コピーして投稿」は LINE で作った文を店主が各アプリへ貼る形で、Instagram から取り込まない | 別物。用語を混同しない |
+| 前提資料 §7.6 PR 1「GCS バケット＋署名付き URL」 | Terraform に `google_storage_bucket` は無い [GitHub] | 写真の置き場は `MediaStore` の境界の裏に置き、GCS の実装と Terraform は別 PR（tasks 6.x）。署名付き URL を Meta・Google が受け付けるかは [未確認]（前提資料チェックシート #17） |
+
+## 4. 設計判断の記録
+
+### Decision 1: 画面の方式 — LINE のトークだけで完結させる（LIFF を v1 に入れない）
+
+比較した 3 案:
+
+| 観点 | A. Flex だけ（トーク内で完結） | B. 入力はトーク・確認と編集は LIFF | C. すべて LIFF |
+|---|---|---|---|
+| 操作回数（写真 1 枚・両方へ投稿） | 開始 1・写真 1・文 1・下書き 1・投稿先 1・最終確認 1 = **6** | 開始 1・写真 1・文 1・下書き 1・LIFF を開く 1・投稿先 1・投稿 1・確認 1 = **8**（LIFF の読み込み待ちが加わる） | 開く 1・写真選択 2〜3・文 1・生成 1・投稿先 1・投稿 1 = 7〜8。写真はファイル選択になる |
+| 写真の入力 | LINE の写真送信をそのまま使える（店主が普段している操作） | 同左 | LIFF のファイル入力。iOS の LINE 内ブラウザでの写真選択は追加の確認が要る [未確認] |
+| 文章の直接編集 | **クリップボードのアクション**（`clipboardText` は 1000 字まで・LINE 14.0.0 以降 [公式: 同梱スキル action-objects.md]）で下書きを写し、入力欄で直して送り返す。または AI に直す指示を出す | textarea で直接 | 同左 |
+| 投稿先ごとの確認 | 発信先ごとに 1 枚のバブル（カルーセル） | 1 画面で並べて比較できる | 同左 |
+| アクセシビリティ | LINE の標準の部品（読み上げ・文字サイズ設定に従う） | 自前の Web。既存の store-detail の a11y 規律に乗れるが、検証面が増える | 同左 |
+| 認証・権限 | Webhook の `source.userId` → owner（既存） | LIFF の ID トークン検証（store-detail に既存）＋新しい書き込み API と列単位の付与 | 同左 |
+| 承認と実行の場所 | line-webhook（GBP のトークン・クライアント・Gemini・LINE の送信がすべてここにある） | 承認を LIFF で取るなら、実行を store-detail に置くか、line-webhook へ API を開く必要がある | 同左 |
+| 保守 | 会話の状態機械 1 つ | 会話＋Web 画面＋API＋2 つのサービスからの書き込み | Web 画面＋API。LINE の写真受信は使わない |
+
+**採用: A（トークだけで完結）**。理由:
+- 店主の操作が最少で、写真の入力が普段の LINE の操作のまま。IT に不慣れな店主にとって「別の画面が開く」ことが最大の離脱点になる（ロードマップ資料の観察と同じ）。
+- 承認・実行・トークン・外部 API を **line-webhook の 1 か所**に閉じられる。書き込み境界と権限の付与が増えない（`crosspost_*` の DML は line-webhook の SA だけ）。
+- 直接編集は、クリップボードのアクション＋送り返しで実現できる。1000 字を超える下書きはコピーできないので、生成の目安字数をそれより小さく取る（Instagram 600 字・Google 400 字を目安。上限は各媒体の受理条件）。
+- **再評価の条件**: パイロットで「直接編集が多い」「並べて比較したい」という声が出たら、B の LIFF 画面を足す。そのとき承認は LINE の最終確認カードに残し（版番号で縛る）、LIFF は文の保存だけを持つ形にすれば、実行の場所を動かさずに済む（design.md「将来の拡張」）。
+
+### Decision 2: 画像を AI に渡さない（v1）
+
+| 観点 | 画像を渡す | 渡さない（採用） |
+|---|---|---|
+| 事実性 | 料理名・食材・「手作り」などを写真から推測して書く余地が生まれる。店主が言っていない事実の創作の主要因になる（#254 の実測と同じ構造: 素材に無い情報を求めると創作する） | 素材は店主の文と店名だけ。数字・割引・URL などは機械的に照合できる |
+| プライバシー | 写真に来店客・従業員が写り込む場合、その画像を外部の生成 AI へ送る（CLAUDE.md の「客の個人情報を一切取得しない」に近づく） | 写真は発信先へ渡すだけ |
+| 費用 | 画像の入力トークンが加わる | 文だけ |
+| 写真の差し替え | 文の作り直しが要る | **文と写真が独立**。写真だけ差し替えても文は有効 |
+
+再評価の条件: 「写真だけ送って文を考えてほしい」という需要が強い場合。そのときも、画像から読んだ内容は「候補」として店主に確認させ、確認されたものだけを素材に入れる。
+
+### Decision 3: 承認の後の内容は凍結し、発信先ごとに状態を持つ
+
+- 承認は `下書き ID・版番号・発信先の集合` を含む postback で受け、**版番号が一致するときだけ**条件付き更新で承認済みにする。最終確認のカードを出した後に文が変わったら、そのカードでは投稿できない（承認した内容と投稿する内容が一致することの構造的な保証）。
+- 承認と同じトランザクションで、発信先ごとの行（`crosspost_deliveries`）に**本文の写し**を作る。再試行・確認はこの写しだけを使い、下書きの編集の影響を受けない。
+- 状態は `queued / in_progress / succeeded / failed / unknown / canceled`。**`unknown`（送ったが結果が分からない）は自動で再投稿しない**。
+
+### Decision 4: 発信先アダプタの境界
+
+- 共通の処理（承認・実行権の獲得・状態遷移・結果の分類・通知）と、媒体固有の API 処理（`DestinationAdapter`）を分ける。
+- アダプタの結果は 4 種類: `succeeded`／`failed`（**投稿されていないことが確か**。`retryable` を伴う）／`unknown`（投稿されたかもしれない）／`checkpoint`（途中の到達点を保存して続ける。Instagram のコンテナ ID）。
+- Instagram はコンテナの作成（公開しない）→ 公開の 2 段で、コンテナ ID を公開の前に永続化すれば、応答を失ってもコンテナの状態（`PUBLISHED` か）で確かめられる [公式: 前提資料 §1.1・Content Publishing]。**ただしログイン方式（Unified／Instagram Login）が決まるまで API のホスト・権限・トークンが決まらない**ので、v1 はアダプタを実装しない（`not_ready` を返すアダプタだけを置く）。
+- Google の `createLocalPost` には冪等キーが無い [GitHub: client.ts の実装・公式文書の再確認は未]。送信後の通信断は `unknown`。確認は「投稿の一覧を読んで本文で照合する」ことが考えられるが、GBP API が未承認で実測できないので、v1 は**店主による確認**（Google マップで見て「投稿されていた／されていなかった」を押す）を用意する。
+
+## 5. 未解決事項（spec の外で決める）
+
+1. 既存の GBP 単体の投稿（`g_post`）も同じ「結果不明」の問題を持つ。一括発信の Google 経路が出来た後、`g_post` を一括発信へ寄せる（入口の統合）か、`g_post` 側にも結果不明を足すかを決める。どちらも GBP が OFF のあいだは利用者に影響しない。
+2. 入口のリッチメニューの区画名と画像（#354・Firstweb 確認）。
+3. Meta のログイン方式・アプリの持ち主・Business Verification（前提資料 §7.4・§7.8）。
+4. 写真への来店客の写り込みの扱い（前提資料チェックシート #34）。v1 は投稿前のカードに注意書きを出す。
+5. AI 生成の表示（`is_ai_generated` は媒体の AI ラベル。キャプションだけの場合の扱いは原文に無い）。v1 は付けない。
