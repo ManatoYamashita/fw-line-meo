@@ -71,8 +71,8 @@ describe.skipIf(!process.env.DATABASE_URL)('一括発信の保存期間の削除
       [DRAFT_PURGE],
     );
     await pool.query(
-      `INSERT INTO crosspost_media (draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256, created_at)
-       VALUES ($1, '1', 'crosspost/3c9-old.jpg', 'image/jpeg', 10, 10, 10, $2, now() - interval '8 days')`,
+      `INSERT INTO crosspost_media (draft_id, line_message_id, line_sent_at, storage_key, content_type, width, height, byte_size, sha256, created_at)
+       VALUES ($1, '1', now(), 'crosspost/3c9-old.jpg', 'image/jpeg', 10, 10, 10, $2, now() - interval '8 days')`,
       [DRAFT_KEEP, 'c'.repeat(64)],
     );
   });

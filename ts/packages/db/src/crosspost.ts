@@ -42,6 +42,7 @@ export type CrosspostUnknownReason =
   | 'timeout'
   | 'network'
   | 'upstream_5xx'
+  | 'rate_limited_after_send'
   | 'adapter_threw'
   | 'stale_in_progress';
 
@@ -83,6 +84,8 @@ export interface CrosspostMediaRow {
   line_message_id: string;
   /** 店主が送った写真のメッセージの quoteToken（最終確認で引用する）。 */
   line_quote_token: string | null;
+  /** 店主が写真を送った時刻（Webhook のイベントの timestamp）。差し替えの順序の判定に使う。 */
+  line_sent_at: Date;
   storage_key: string;
   content_type: string;
   width: number;
@@ -122,7 +125,7 @@ export interface CrosspostStoreSummary {
 const DRAFT_COLUMNS = `id, owner_id, store_id, status, input_mode, input_destination, revision, material_text,
   instagram_text, google_text, approved_revision, approved_at, result_notified_at, expires_at, purge_after, created_at, updated_at`;
 
-const MEDIA_COLUMNS = `id, draft_id, line_message_id, line_quote_token, storage_key, content_type, width, height, byte_size, sha256, created_at`;
+const MEDIA_COLUMNS = `id, draft_id, line_message_id, line_quote_token, line_sent_at, storage_key, content_type, width, height, byte_size, sha256, created_at`;
 
 const DELIVERY_COLUMNS = `id, draft_id, destination, status, body_text, with_media, media_id, attempt_count, retryable,
   failure_reason, unknown_reason, checkpoint, external_id, external_url, last_attempt_at, finished_at,
@@ -473,6 +476,8 @@ export async function extendCrosspostDraft(
 export interface CrosspostMediaInput {
   lineMessageId: string;
   lineQuoteToken: string | null;
+  /** 店主が写真を送った時刻（Webhook のイベントの timestamp）。 */
+  lineSentAt: Date;
   storageKey: string;
   contentType: 'image/jpeg';
   width: number;
@@ -485,6 +490,16 @@ export type AttachMediaOutcome =
   | { kind: 'attached'; draft: CrosspostDraftRow; media: CrosspostMediaRow; replacedStorageKeys: string[] }
   /** 同じ LINE のメッセージの写真が既にある（再配信など）。何も変えていない。 */
   | { kind: 'duplicate'; draft: CrosspostDraftRow; media: CrosspostMediaRow }
+  /**
+   * いまの写真より前に送られた写真（処理が遅れて後から届いた）。店主が最後に送った写真を保つため、差し替えない。
+   * 何も変えていない。
+   */
+  | { kind: 'older'; draft: CrosspostDraftRow; media: CrosspostMediaRow }
+  /**
+   * いまの写真と同じ時刻（ミリ秒）に送られた別の写真。どちらが後かを決められないので、推測で差し替えない。
+   * 何も変えていない（呼び出し側は、使いたい写真を 1 枚だけ送り直すよう求める）。
+   */
+  | { kind: 'ambiguous'; draft: CrosspostDraftRow; media: CrosspostMediaRow }
   /** 作成中でない・他のオーナーの下書き。何も変えていない。 */
   | { kind: 'not_open' };
 
@@ -515,6 +530,14 @@ export async function attachCrosspostMedia(
     if (current && current.line_message_id === input.media.lineMessageId) {
       return { kind: 'duplicate', draft: locked.rows[0], media: current } as const;
     }
+    // 送った順で判定する（届いた順・処理が終わった順ではない）。下書きの行を FOR UPDATE で固定しているので、
+    // 並行して届いた写真の比較と差し替えは直列になる。
+    if (current) {
+      const currentAt = current.line_sent_at.getTime();
+      const incomingAt = input.media.lineSentAt.getTime();
+      if (incomingAt < currentAt) return { kind: 'older', draft: locked.rows[0], media: current } as const;
+      if (incomingAt === currentAt) return { kind: 'ambiguous', draft: locked.rows[0], media: current } as const;
+    }
 
     const removed = await client.query<{ storage_key: string }>(
       'DELETE FROM crosspost_media WHERE draft_id = $1 RETURNING storage_key',
@@ -522,8 +545,8 @@ export async function attachCrosspostMedia(
     );
     const inserted = await client.query<CrosspostMediaRow>(
       `INSERT INTO crosspost_media
-         (draft_id, line_message_id, line_quote_token, storage_key, content_type, width, height, byte_size, sha256)
-       VALUES ($1, $2, $9, $3, $4, $5, $6, $7, $8)
+         (draft_id, line_message_id, line_quote_token, line_sent_at, storage_key, content_type, width, height, byte_size, sha256)
+       VALUES ($1, $2, $9, $10, $3, $4, $5, $6, $7, $8)
        RETURNING ${MEDIA_COLUMNS}`,
       [
         input.draftId,
@@ -535,6 +558,7 @@ export async function attachCrosspostMedia(
         input.media.byteSize,
         input.media.sha256,
         input.media.lineQuoteToken,
+        input.media.lineSentAt,
       ],
     );
     const bumped = await client.query<CrosspostDraftRow>(
@@ -651,6 +675,7 @@ export interface CrosspostDeliveryContext {
 const DELIVERY_CONTEXT_SELECT = `SELECT ${prefixed(DELIVERY_COLUMNS, 'v')},
             d.owner_id AS ctx_owner_id, d.store_id AS ctx_store_id, s.name AS ctx_store_name,
             m.id AS m_id, m.line_message_id AS m_line_message_id, m.line_quote_token AS m_line_quote_token,
+            m.line_sent_at AS m_line_sent_at,
             m.storage_key AS m_storage_key,
             m.content_type AS m_content_type, m.width AS m_width, m.height AS m_height,
             m.byte_size AS m_byte_size, m.sha256 AS m_sha256, m.created_at AS m_created_at
@@ -666,6 +691,7 @@ type DeliveryContextRow = CrosspostDeliveryRow & {
   m_id: string | null;
   m_line_message_id: string | null;
   m_line_quote_token: string | null;
+  m_line_sent_at: Date | null;
   m_storage_key: string | null;
   m_content_type: string | null;
   m_width: number | null;
@@ -683,6 +709,7 @@ function toDeliveryContext(row: DeliveryContextRow): CrosspostDeliveryContext {
     m_id,
     m_line_message_id,
     m_line_quote_token,
+    m_line_sent_at,
     m_storage_key,
     m_content_type,
     m_width,
@@ -700,6 +727,7 @@ function toDeliveryContext(row: DeliveryContextRow): CrosspostDeliveryContext {
           draft_id: delivery.draft_id,
           line_message_id: m_line_message_id!,
           line_quote_token: m_line_quote_token,
+          line_sent_at: m_line_sent_at!,
           storage_key: m_storage_key!,
           content_type: m_content_type!,
           width: m_width!,
@@ -779,7 +807,17 @@ export type ClaimMode =
  */
 export async function claimCrosspostDelivery(
   db: Queryable,
-  input: { ownerId: string; deliveryId: string; mode: ClaimMode; maxAttempts: number },
+  input: {
+    ownerId: string;
+    deliveryId: string;
+    mode: ClaimMode;
+    maxAttempts: number;
+    /**
+     * 待ち（queued）を実行してよい、承認からの時間（ミリ秒）。過ぎた待ちは獲得しない（Req 6.12）。
+     * 判定は DB の時計で、獲得の UPDATE と同じ文の中で行う（取りやめの確認と獲得の間に期限を越えても公開しない）。
+     */
+    queuedWindowMs: number;
+  },
 ): Promise<CrosspostDeliveryRow | null> {
   if (!isUuid(input.ownerId) || !isUuid(input.deliveryId)) return null;
   const res = await db.query<CrosspostDeliveryRow>(
@@ -794,11 +832,12 @@ export async function claimCrosspostDelivery(
         AND s.place_status = 'confirmed' AND s.place_id IS NOT NULL AND s.suspended_at IS NULL
         AND v.attempt_count < $4
         AND (
-          ($3 = 'first' AND v.status = 'queued')
+          ($3 = 'first' AND v.status = 'queued'
+            AND d.approved_at > now() - ($5::bigint * interval '1 millisecond'))
           OR ($3 = 'retry' AND v.status = 'failed' AND v.retryable)
         )
       RETURNING ${prefixed(DELIVERY_COLUMNS, 'v')}`,
-    [input.deliveryId, input.ownerId, input.mode, input.maxAttempts],
+    [input.deliveryId, input.ownerId, input.mode, input.maxAttempts, Math.max(0, Math.trunc(input.queuedWindowMs))],
   );
   return res.rows[0] ?? null;
 }
@@ -861,13 +900,13 @@ export async function recordCrosspostOutcome(
 /**
  * 処理の中断の後始末（そのオーナーの行だけ・Req 6.9, 6.11）。移した件数を返す。
  * - 実行中のまま `olderThan` より前に試行を始めた行を「結果不明」にする（外部へ送ったかもしれない）
- * - 承認から `queuedOlderThan` より前のまま待ち（queued）の行を「取りやめ」にする。待ちは一度も送っていない
+ * - 承認から `queuedWindowMs` を過ぎたまま待ち（queued）の行を「取りやめ」にする（DB の時計で判定・獲得の条件と同じ境界）。待ちは一度も送っていない
  *   ことが確かだが、時間が経った投稿（「本日限定」など）を店主の知らないうちに出さないため、再開を許す時間に
  *   上限を設ける
  */
 export async function markStaleCrosspostDeliveries(
   db: Queryable,
-  input: { ownerId: string; olderThan: Date; queuedOlderThan: Date },
+  input: { ownerId: string; olderThan: Date; queuedWindowMs: number },
 ): Promise<number> {
   if (!isUuid(input.ownerId)) return 0;
   const stale = await db.query(
@@ -883,8 +922,8 @@ export async function markStaleCrosspostDeliveries(
         SET status = 'canceled', finished_at = now(), updated_at = now()
        FROM crosspost_drafts d
       WHERE d.id = v.draft_id AND d.owner_id = $1
-        AND v.status = 'queued' AND d.approved_at < $2`,
-    [input.ownerId, input.queuedOlderThan],
+        AND v.status = 'queued' AND d.approved_at <= now() - ($2::bigint * interval '1 millisecond')`,
+    [input.ownerId, Math.max(0, Math.trunc(input.queuedWindowMs))],
   );
   return (stale.rowCount ?? 0) + (expired.rowCount ?? 0);
 }

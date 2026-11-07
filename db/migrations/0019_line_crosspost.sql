@@ -81,6 +81,9 @@ CREATE TABLE crosspost_media (
     -- LINE の quoteToken。最終確認で店主が送った写真のメッセージそのものを引用し、公開する写真を取り違えない
     -- ために使う（公開の URL を作らずに済む）。秘密の値ではない。無い場合（外部の画像など）は NULL
     line_quote_token text,
+    -- 店主が写真を送った時刻（LINE の Webhook のイベントの timestamp・再配信でも元の時刻を保つ）。届く順・画像の処理が
+    -- 終わる順は送った順と一致しないので、差し替えは「送った時刻がより新しい写真」だけにする
+    line_sent_at    timestamptz NOT NULL,
     -- 置き場の中の名前（推測できない UUID）。URL ではない
     storage_key     text NOT NULL,
     -- 正規化の後の形式。v1 は JPEG だけを保存する
@@ -138,7 +141,7 @@ CREATE TABLE crosspost_deliveries (
     ),
     CONSTRAINT ck_crosspost_deliveries_unknown_reason CHECK (
         unknown_reason IS NULL OR unknown_reason IN (
-            'timeout', 'network', 'upstream_5xx', 'adapter_threw', 'stale_in_progress'
+            'timeout', 'network', 'upstream_5xx', 'rate_limited_after_send', 'adapter_threw', 'stale_in_progress'
         )
     ),
     -- 状態と付随する列の整合。failed は理由を、unknown は理由を必ず持ち、ほかの状態は持たない
