@@ -1,4 +1,4 @@
-# 書き込み境界（Write Boundary）: four-tier-data-model / competitive-daily-summary / review-acquisition / gbp-post-review-reply
+# 書き込み境界（Write Boundary）: four-tier-data-model / competitive-daily-summary / review-acquisition / gbp-post-review-reply / line-crosspost
 
 同一 Cloud SQL を 2 言語（TypeScript リアルタイム応答層 / Go 日次バッチ層）から触るため、**各テーブルの書き込み責任を厳密に 1 つの層へ割り当てる**。読み取りは原則両層に許容。共有定数はマイグレーション seed を単一情報源（SoT）とし、実行時はどちらの層も書き込まない。
 
@@ -30,6 +30,9 @@
 | `audit_logs` | TS リアルタイム応答層 | 運営・代理店・オーナーによる業務書込操作の追記型監査記録。`customer` は主体にしない |
 | `gbp_locations` | TS リアルタイム応答層 | `gbp-post-review-reply`: OAuth 連携成立時の GBP 身元（account/location・placeId 突合結果）保存・解除時削除（`0013`） |
 | `gbp_sessions` | TS リアルタイム応答層 | `gbp-post-review-reply`: GBP 会話フロー（connect/post/reply）の期限付きセッション状態（Webhook・`0013`） |
+| `crosspost_drafts` | TS リアルタイム応答層 | `line-crosspost`（`0019`・Issue #494）: LINE 起点の一括発信の下書き（素材・投稿先ごとの文・版・承認）。**DML は line-webhook の SA だけ**（店主の LINE の会話だけが書く。客向け Web・ダッシュボード・店舗詳細は書けない） |
+| `crosspost_media` | TS リアルタイム応答層 | `line-crosspost`（`0019`）: 下書きの写真の鍵と寸法（実体は非公開の置き場）。**DML は line-webhook の SA だけ** |
+| `crosspost_deliveries` | TS リアルタイム応答層 | `line-crosspost`（`0019`）: 投稿先ごとの状態（承認時の本文の写し・試行・成功／失敗／結果不明）。承認と同じトランザクションで作り、実行権は条件付き更新で 1 リクエストだけが得る。**DML は line-webhook の SA だけ** |
 | `competitors` | Go 日次バッチ層 | Places API による競合探索・churn 更新 |
 | `rating_snapshots` | Go 日次バッチ層 | Places API による毎朝の評価/順位スナップショット |
 | `daily_summaries` | Go 日次バッチ層 | `competitive-daily-summary`: Go 日次バッチによる順位/前日比算出・確定「配信素材」生成（`0004`） |
