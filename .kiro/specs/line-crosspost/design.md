@@ -158,7 +158,9 @@ stateDiagram-v2
   queued --> in_progress: 実行権の獲得（CAS・attempt+1）
   in_progress --> succeeded: アダプタ succeeded
   in_progress --> failed: アダプタ failed（retryable を記録）
-  in_progress --> unknown: アダプタ unknown / 時間切れ / 例外 / 5 分を超えて in_progress
+  in_progress --> unknown: アダプタ unknown / 時間切れ / 例外 / 送信の開始の後 5 分を超えて in_progress
+  in_progress --> failed: 送信の開始の前に 5 分を超えて in_progress（interrupted_before_send・retryable）
+  in_progress --> canceled: 送信の開始の直前に期限切れ（beginCrosspostSend）
   in_progress --> in_progress: checkpoint の保存（状態は変えない）
   failed --> in_progress: x_retry（retryable かつ attempt < 3 かつ写真が残っている）
   unknown --> succeeded: 照合で投稿を確認 / 店主が「投稿されていた」
@@ -208,18 +210,40 @@ sequenceDiagram
 |---|---|---|---|
 | 承認のトランザクションの前 | 確認中（承認されていない） | もう一度「投稿する」 | 通常の承認 |
 | 承認の後・実行権の獲得の前 | 待ち（queued） | 同じ「投稿する」の押し直し／「投稿の状況」の [今すぐ投稿する]／[取りやめる] | **送る**（一度も送っていないことが確か） |
-| 実行権の獲得の後（外部へ送信中） | 実行中（in_progress）→ 5 分で結果不明 | [投稿されていた]／[投稿されていなかった] → 再試行 | **確認の後だけ** |
+| 実行権の獲得の後・送信の開始の記録の前 | 実行中（in_progress・`send_started_at` が NULL）→ 5 分で失敗（`interrupted_before_send`・再試行してよい）。期限を過ぎていれば取りやめ | [もう一度投稿する] | **送る**（送信を始めていないことが確か） |
+| 送信の開始の記録の後（外部へ送信中） | 実行中（in_progress・`send_started_at` あり）→ 5 分で結果不明 | [投稿されていた]／[投稿されていなかった] → 再試行 | **確認の後だけ** |
 | 結果の記録の後・通知の前 | 成功・失敗・結果不明（通知は未） | 次の操作で結果を示す | 送らない |
 
 待ちの再開は店主の操作があるときだけ行う（自動では再開しない）。承認から 24 時間を過ぎた待ちは、店主の知らないうちに古い内容（「本日限定」など）を出さないよう、送らずに取りやめにする。期限は**実行権の獲得（`claimCrosspostDelivery`）の UPDATE の条件にも DB の時計で入れる**ので、取りやめの確認（`reapStale`）と獲得の間に期限を越えても公開しない（第三者レビューの指摘）。
 
+**送信の開始の直前の確認（第三者レビュー 2 回目の指摘）**: 獲得の後、写真の取得用 URL の準備などで時間がかかると、獲得の時点では期限内でも送る時点では期限を過ぎうる。そこで publisher は `adapter.publish` の直前に `beginCrosspostSend` を呼ぶ。これは 1 文の UPDATE で、`status = 'in_progress' AND attempt_count = n AND send_started_at IS NULL` かつ「承認から 24 時間 − 余裕 2 分」以内なら `send_started_at` を DB の時計で記録して `started` を返し、期限を過ぎていれば同じ文で取りやめ（`canceled`）にして `expired` を返す（送っていないことが確かなので取りやめにしてよい）。0 行なら `superseded`（ほかの実行に取られた）で、送らない。余裕 2 分は、`send_started_at` の記録から外部 API が要求を受け取るまでの遅れ（接続・写真の準備の残り）を見込んだもの。
+
+| 確認の位置 | 期限の判定 | 期限を過ぎていたら |
+|---|---|---|
+| 取りやめの確認（`reapStale`・`markStaleCrosspostDeliveries`） | 承認から 24 時間 | 待ちは取りやめ。送信を始めていない実行中も取りやめ。再試行してよい失敗は再試行できなくする |
+| 実行権の獲得（初回・再試行とも） | 承認から 24 時間 | 獲得しない（送らない） |
+| 送信の開始の直前（`beginCrosspostSend`） | 承認から 24 時間 − 2 分 | 取りやめ（送らない） |
+| 結果不明を店主が「投稿されていなかった」と確かめたとき | 承認から 24 時間 | 再試行の手段を出さない（失敗のまま） |
+
+保証の境界: `send_started_at` の記録と外部 API の受信は原子的ではない。記録の後・送信の前に止まったものは、送った可能性を否定できないので結果不明（店主の確認）に倒す。記録の前に止まったものだけを「送っていない」と扱う。
+
 ### 結果の通知（Req 7.1, 7.2）
 
-1. 承認から結果までが 20 秒以内なら Reply、超えたら Push（Reply トークンの期限への備え）。Reply が受け付けられなければ Push も試す（`replyChecked`・`pushChecked` は LINE が 2xx を返したかを返す）
-2. 届いたら `crosspost_drafts.result_notified_at` に「示した投稿先の行の `finished_at` の最大」を記録する（アプリの時計を使わない）
-3. `finished_at` が記録より新しい投稿先を持つ下書き＝届けていない結果。店主の次の操作（一括発信の有効な店主のどの文・開始・状況の確認）で先に示し、届いたら記録する。届けた結果は二度と割り込ませない
-4. 下書きの作成中・確認中の文・写真では、まずその入力を下書きへ受け取り、応答の**前に**届けていない結果を添える（最後のメッセージのクイックリプライは下書きの操作のまま・1 回の返信は 5 通まで）。添えた返信が届かなければ記録しない（次の操作に持ち越す）
-5. 「投稿の状況」「投稿の結果」は、下書きの作成中・確認中（自分で書き直す途中を含む）でも命令として扱い、下書きを変えない
+一括発信の**すべての応答**は `flows.ts` の `respond()` の 1 か所を通る（下書きの操作の案内・最終確認・投稿の結果・状況の確認）。個別の送信の経路は持たない（第三者レビュー 2 回目の指摘: 未通知の結果を添える経路と添えない経路が混在し、Reply の失敗の後の Push も経路ごとに有無が違っていた）。
+
+1. **未通知の結果を前に添える**: `finished_at` が `result_notified_at` より新しい投稿先を持つ下書き＝届けていない結果。応答の**前に**添え、最後のメッセージのクイックリプライは応答のまま残す。1 回の送信は 5 通まで（LINE の上限）で、応答そのものは削らず、入りきらない結果は次の応答に持ち越す（案内の文は、結果と合わせて入るときだけ付ける）。その応答自身が示す下書きの結果は重ねて添えない
+2. **Reply → Push**: 承認から結果までが 20 秒（`replySafeMs`）以内なら Reply、超えたら最初から Push（Reply トークンの期限への備え）。Reply が受け付けられなければ（非 2xx・通信の失敗・例外）同じ内容を Push する。`replyChecked`・`pushChecked` は LINE が 2xx を返したかを返し、例外は「受け付けられなかった」として扱う
+3. **受け付けられたものだけ記録**: Reply か Push が受け付けられたときだけ、`crosspost_drafts.result_notified_at` に「示した投稿先の行の `finished_at` の最大」を記録する（アプリの時計を使わない・`GREATEST` で冪等）。どちらも受け付けられなければ記録せず、次の応答でもう一度示す。応答のもとになった操作（下書きの更新・投稿の実行）は送信の前に終わっており、送信の失敗で巻き戻らない
+4. 下書きの作成中・確認中の文・写真では、まずその入力を下書きへ受け取り、その応答に結果を添える（下書きの操作を妨げない）
+5. 「投稿の状況」「投稿の結果」は、下書きの作成中・確認中（自分で書き直す途中を含む）でも命令として扱い、下書きを変えない。この応答は直近の結果をすべて示すので、未通知の結果を別に添えない
+
+重複のリスク: Reply が実際には届いていたのに時間切れ・通信の失敗で「受け付けられなかった」と判定すると、Push でもう一度届く（同じ内容が 2 回見える）。結果を失うよりも重複を選ぶ。並行した 2 つの応答が同じ未通知の結果を添えた場合も、同じ結果が 2 回見えるだけで記録は壊れない。
+
+結果を添えない例外（応答そのものを送らない、または本機能の外の応答）:
+- 「まとめて送信」の 2 枚目以降の写真（`imageSet.index ≠ 1`）: 応答を送らない（1 枚目の応答で示す）
+- 処理の途中の例外で、エラーの境界が返す「もう一度お試しください」の案内（本機能の DB を読めない場合を含む）
+- 本機能が無効の店主・パイロットの対象外の店主（本機能の応答をしない）
+- LINE の時刻（`timestamp`）が無いイベント: 応答はするが、写真・文は採用しない（Req 2.11）
 
 ## Components and Interfaces
 
@@ -293,7 +317,8 @@ export interface DestinationAdapter {
 - `approve({ownerId, draftId, revision, destinations})`: 投稿先ごとに `availability` を確かめ、1 つでも `available` でなければ承認しない（`stale_destination`）。承認の UPDATE と deliveries の INSERT を 1 トランザクションで行う。
 - `runDeliveries(draftId)`: `queued`（と再試行で獲得した行）を投稿先ごとに並行で実行する。各実行は `AbortController` で時間制限（Google 15 秒・Instagram 45 秒）。全体を `Promise.allSettled` で待つ。
 - `retry(deliveryId)` / `markObserved(deliveryId, posted)` / `reconcile(deliveryId)`: すべて ownerId を伴う SQL で所有を確かめる。
-- 期限切れの `in_progress`（`last_attempt_at` から 5 分）は、状況の表示・再試行・確認の前に `unknown` へ移す。承認から 24 時間を過ぎた `queued` は `canceled` へ移す。
+- 期限切れの `in_progress`（`last_attempt_at` から 5 分）は、状況の表示・再試行・確認の前に、送信を始めていれば（`send_started_at` あり）`unknown` へ、始めていなければ再試行してよい `failed`（`interrupted_before_send`・期限を過ぎていれば `canceled`）へ移す。承認から 24 時間を過ぎた `queued` は `canceled` へ移す。
+- 送信の直前: `adapter.publish` の前に `beginCrosspostSend`（上の「承認の後に処理が止まったとき」）。`started` 以外なら送らない。
 - `cancelQueued(deliveryId)`: 待ちの取りやめ（店主の操作）。
 - 写真の削除: 下書きの全投稿先が `succeeded`・`canceled`・再試行できない `failed` になったら、`MediaStore.delete` を試みる（失敗しても置き場の寿命規則が消す）。
 
@@ -372,9 +397,11 @@ crosspost_drafts(
   instagram_text text NULL ≤ 2200 字, google_text text NULL ≤ 1500 字,
   approved_revision int NULL, approved_at timestamptz NULL,
   result_notified_at timestamptz NULL,   -- 結果を届けた（示した行の finished_at の最大）
+  input_mode_set_at timestamptz NULL,   -- 書き直し・修正指示を選んだ LINE の時刻（Req 4.7）
+  line_started_at timestamptz NOT NULL, -- 下書きを始めた LINE の時刻（Req 2.11）
   expires_at, purge_after, created_at, updated_at
   CHECK: approved ⇔ approved_at・approved_revision が非 NULL
-  CHECK: input_mode = 'none' ⇔ input_destination IS NULL
+  CHECK: input_mode = 'none' ⇔ input_destination IS NULL ⇔ input_mode_set_at IS NULL
 )
 UNIQUE INDEX (owner_id) WHERE status IN ('collecting','reviewing')
 
@@ -390,6 +417,7 @@ crosspost_deliveries(
   status, body_text text NOT NULL, with_media bool, media_id → crosspost_media SET NULL,
   attempt_count int 0..10, retryable bool, failure_reason text（列挙の CHECK）,
   unknown_reason text（列挙の CHECK: timeout・network・upstream_5xx・rate_limited_after_send・adapter_threw・stale_in_progress）, checkpoint text, external_id text, external_url text,
+  send_started_at timestamptz NULL,   -- 外部 API へ送り始めた時刻（DB の時計）。待ちのときは NULL
   last_attempt_at, finished_at, created_at, updated_at
   UNIQUE (draft_id, destination)
 )
@@ -414,7 +442,7 @@ crosspost_deliveries(
 | 結果を Reply でも Push でも届けられない | 記録しない（`crosspost.notify_failed`） | 結果は DB にあり、次の操作で示す |
 | 写真に引用の手掛かりが無い | 最終確認・承認をせず、写真の送り直しを案内する | 何も投稿しない |
 | 配信ジョブの保存期間の削除の失敗・migration 未適用 | 未適用なら何もしない。失敗は `delivery-job.crosspost_retention_failed` を記録するだけ | 配信の本処理・終了コードは変えない |
-| 承認の後に処理が止まった | 待ちは再開・取りやめを選べる。実行中は 5 分で結果不明 | 上の「承認の後に処理が止まったとき」 |
+| 承認の後に処理が止まった | 待ちは再開・取りやめを選べる。実行中は 5 分で、送信の開始の前なら再試行してよい失敗、後なら結果不明 | 上の「承認の後に処理が止まったとき」 |
 
 ### Monitoring
 - ログは allowlist（`flow`・`destination`・`status`・`failureReason`・`unknownReason`・`attempt`・`durationMs`・`errorKind`）。本文・素材・URL・トークン・LINE ユーザー ID は型として渡せない。
@@ -439,6 +467,10 @@ crosspost_deliveries(
 - 同時操作: 「投稿する」×2、「投稿する」と「やめる」、再試行×2、再開と押し直し、写真の差し替えと承認
 - 通知の失敗（Reply 失敗 → Push・両方失敗 → 次の操作で示す）と「投稿の状況」
 - 最終確認の写真の引用（差し替えた後は新しい写真を引用する）
+- 下書きの境界: 新しい下書きの開始の後に、前の下書きのために送った写真・文が遅れて届く（店舗 A → B・同じ店舗で作り直し・処理の完了順の逆転・同じ時刻・時刻が分からない・重複）。正しく後に送った写真は受け付ける
+- 書き直しの入力: 「自分で書き直す」を押す前に送った文が押した後に届く
+- 未通知の結果: AI への修正指示・作り直し・書き直しの開始と終了・表示・写真・投稿先の確認・新しい下書きのどの応答にも添える。5 通の上限。Reply 成功／Reply 失敗・Push 成功／両方失敗／Reply が例外。記録の時刻が示した行の `finished_at` であること
+- 送信の開始の直前の期限: 期限の直前の獲得・獲得と送信の間の期限切れ・写真の準備の遅れ・送信の開始の後の期限切れ・同時の実行・期限の後の再試行と再開
 
 ### Integration（DB）
 - アクセサ: 所有の検証（他のオーナーの下書き・投稿先の行に触れない）・部分一意索引・CAS・CHECK 制約
