@@ -35,7 +35,9 @@ export type CrosspostFailureReason =
   | 'upstream_unavailable'
   | 'media_unavailable'
   | 'unsupported_content'
-  | 'owner_reported_not_posted';
+  | 'owner_reported_not_posted'
+  /** 外部 API へ送る前に処理が中断した（送っていないことが確か）。 */
+  | 'interrupted_before_send';
 
 /** 0019 の CHECK と 1:1。 */
 export type CrosspostUnknownReason =
@@ -64,6 +66,10 @@ export interface CrosspostDraftRow {
   status: CrosspostDraftStatus;
   input_mode: CrosspostInputMode;
   input_destination: CrosspostDestination | null;
+  /** 入力モードを切り替えた操作の LINE の時刻（モードが none なら NULL）。 */
+  input_mode_set_at: Date | null;
+  /** 下書きを始めた操作の LINE の時刻。これより後に送られた写真・文だけを素材にする。 */
+  line_started_at: Date;
   revision: number;
   material_text: string;
   instagram_text: string | null;
@@ -111,6 +117,8 @@ export interface CrosspostDeliveryRow {
   external_id: string | null;
   external_url: string | null;
   last_attempt_at: Date | null;
+  /** この試行が外部 API への送信を始めた時刻（NULL = この試行では何も送っていない）。 */
+  send_started_at: Date | null;
   finished_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -122,13 +130,14 @@ export interface CrosspostStoreSummary {
   name: string;
 }
 
-const DRAFT_COLUMNS = `id, owner_id, store_id, status, input_mode, input_destination, revision, material_text,
+const DRAFT_COLUMNS = `id, owner_id, store_id, status, input_mode, input_destination, input_mode_set_at, line_started_at,
+  revision, material_text,
   instagram_text, google_text, approved_revision, approved_at, result_notified_at, expires_at, purge_after, created_at, updated_at`;
 
 const MEDIA_COLUMNS = `id, draft_id, line_message_id, line_quote_token, line_sent_at, storage_key, content_type, width, height, byte_size, sha256, created_at`;
 
 const DELIVERY_COLUMNS = `id, draft_id, destination, status, body_text, with_media, media_id, attempt_count, retryable,
-  failure_reason, unknown_reason, checkpoint, external_id, external_url, last_attempt_at, finished_at,
+  failure_reason, unknown_reason, checkpoint, external_id, external_url, last_attempt_at, send_started_at, finished_at,
   created_at, updated_at`;
 
 function prefixed(columns: string, alias: string): string {
@@ -228,6 +237,8 @@ export interface CreateCrosspostDraftInput {
   allowedStoreIds: readonly string[];
   expiresAt: Date;
   purgeAfter: Date;
+  /** 下書きを始めた操作（「投稿」の文・開始の postback）の LINE のイベントの時刻。 */
+  lineStartedAt: Date;
 }
 
 /**
@@ -244,8 +255,8 @@ export async function createCrosspostDraft(
   }
   try {
     const res = await db.query<CrosspostDraftRow>(
-      `INSERT INTO crosspost_drafts (owner_id, store_id, expires_at, purge_after)
-       SELECT s.owner_id, s.id, $3, $4
+      `INSERT INTO crosspost_drafts (owner_id, store_id, expires_at, purge_after, line_started_at)
+       SELECT s.owner_id, s.id, $3, $4, $5
          FROM stores s
         WHERE s.id = $2
           AND s.owner_id = $1
@@ -253,7 +264,7 @@ export async function createCrosspostDraft(
           AND s.place_id IS NOT NULL
           AND s.suspended_at IS NULL
        RETURNING ${DRAFT_COLUMNS}`,
-      [input.ownerId, input.storeId, input.expiresAt, input.purgeAfter],
+      [input.ownerId, input.storeId, input.expiresAt, input.purgeAfter, input.lineStartedAt],
     );
     const row = res.rows[0];
     if (!row) return { ok: false, error: 'STORE_NOT_ELIGIBLE' };
@@ -291,7 +302,8 @@ export async function closeCrosspostDraft(
   const res = await db.query<{ draft_id: string; storage_key: string | null }>(
     `WITH closed AS (
        UPDATE crosspost_drafts
-          SET status = 'canceled', input_mode = 'none', input_destination = NULL, updated_at = now()
+          SET status = 'canceled', input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL,
+              updated_at = now()
         WHERE id = $1 AND owner_id = $2
           AND status IN ('collecting', 'reviewing')
           AND ($3::timestamptz IS NULL OR expires_at <= $3::timestamptz)
@@ -314,17 +326,25 @@ export async function closeCrosspostDraft(
   };
 }
 
-export type AppendMaterialError = 'NOT_COLLECTING' | 'TOO_LONG';
+export type AppendMaterialError = 'NOT_COLLECTING' | 'TOO_LONG' | 'NOT_AFTER_START';
 
 /**
  * 素材の文を追記する（受け取り中だけ・合計 2,000 字まで）。追記の前後を改行でつなぐ。
  * 受け取り中でない（下書きを作り始めた後に届いた文など）なら NOT_COLLECTING を返し、何も変えない。
+ * 文を送った LINE の時刻（`sentAt`）が下書きを始めた時刻より後でなければ（前の下書きの文が遅れて届いた・
+ * 同じ時刻・時刻不明）NOT_AFTER_START を返し、何も変えない（別の下書きの素材を混ぜない）。
  */
 export async function appendCrosspostMaterial(
   db: Queryable,
-  input: { ownerId: string; draftId: string; text: string; expiresAt: Date },
+  input: { ownerId: string; draftId: string; text: string; sentAt: Date | null; expiresAt: Date },
 ): Promise<Result<CrosspostDraftRow, AppendMaterialError>> {
   if (!isUuid(input.ownerId) || !isUuid(input.draftId)) return { ok: false, error: 'NOT_COLLECTING' };
+  if (input.sentAt === null) return { ok: false, error: 'NOT_AFTER_START' };
+  const started = await db.query<{ ok: boolean }>(
+    `SELECT line_started_at < $3 AS ok FROM crosspost_drafts WHERE id = $1 AND owner_id = $2`,
+    [input.draftId, input.ownerId, input.sentAt],
+  );
+  if (started.rows[0] && started.rows[0].ok !== true) return { ok: false, error: 'NOT_AFTER_START' };
   const res = await db.query<CrosspostDraftRow & { appended: boolean }>(
     `WITH target AS (
        SELECT id,
@@ -381,6 +401,11 @@ export interface SaveCrosspostTextsInput {
   texts: Partial<Record<CrosspostDestination, string>>;
   /** 修正指示を素材へ足すとき（AI への修正指示は素材として扱う・Req 4.3）。 */
   appendMaterial?: string;
+  /**
+   * 入力モードの文（修正指示・書き直し）から保存するとき、その文を送った LINE の時刻。入力モードを切り替えた
+   * 時刻より後でなければ保存しない（切り替えの前に送った文を、書き直しの文にしない）。
+   */
+  inputSentAt?: Date;
   expiresAt: Date;
 }
 
@@ -406,9 +431,11 @@ export async function saveCrosspostTexts(
             revision = revision + 1,
             input_mode = 'none',
             input_destination = NULL,
+            input_mode_set_at = NULL,
             expires_at = $9,
             updated_at = now()
       WHERE id = $1 AND owner_id = $2 AND status = 'reviewing' AND revision = $3
+        AND ($10::timestamptz IS NULL OR (input_mode_set_at IS NOT NULL AND input_mode_set_at < $10::timestamptz))
         AND ($8::text IS NULL
              OR char_length(material_text) + 1 + char_length($8::text) <= ${CROSSPOST_MATERIAL_MAX_CHARS})
       RETURNING ${DRAFT_COLUMNS}`,
@@ -422,6 +449,7 @@ export async function saveCrosspostTexts(
       google ?? null,
       input.appendMaterial ?? null,
       input.expiresAt,
+      input.inputSentAt ?? null,
     ],
   );
   return res.rows[0] ?? null;
@@ -439,17 +467,31 @@ export async function setCrosspostInputMode(
     expectedRevision: number;
     mode: CrosspostInputMode;
     destination: CrosspostDestination | null;
+    /**
+     * 切り替えた操作（postback）の LINE の時刻。モードが none 以外では必須。これより後に送られた文だけを
+     * 修正指示・書き直しの文として扱う（`saveCrosspostTexts` の `inputSentAt`）。
+     */
+    lineEventAt: Date | null;
     expiresAt: Date;
   },
 ): Promise<CrosspostDraftRow | null> {
   if (!isUuid(input.ownerId) || !isUuid(input.draftId)) return null;
   if ((input.mode === 'none') !== (input.destination === null)) return null;
+  if (input.mode !== 'none' && input.lineEventAt === null) return null;
   const res = await db.query<CrosspostDraftRow>(
     `UPDATE crosspost_drafts
-        SET input_mode = $4, input_destination = $5, expires_at = $6, updated_at = now()
+        SET input_mode = $4, input_destination = $5, input_mode_set_at = $7, expires_at = $6, updated_at = now()
       WHERE id = $1 AND owner_id = $2 AND status = 'reviewing' AND revision = $3
       RETURNING ${DRAFT_COLUMNS}`,
-    [input.draftId, input.ownerId, input.expectedRevision, input.mode, input.destination, input.expiresAt],
+    [
+      input.draftId,
+      input.ownerId,
+      input.expectedRevision,
+      input.mode,
+      input.destination,
+      input.expiresAt,
+      input.mode === 'none' ? null : input.lineEventAt,
+    ],
   );
   return res.rows[0] ?? null;
 }
@@ -500,6 +542,11 @@ export type AttachMediaOutcome =
    * 何も変えていない（呼び出し側は、使いたい写真を 1 枚だけ送り直すよう求める）。
    */
   | { kind: 'ambiguous'; draft: CrosspostDraftRow; media: CrosspostMediaRow }
+  /**
+   * 下書きを始める前（または同じ時刻）に送られた写真。前の下書き・別の店舗の下書きへ送った写真が遅れて届いた
+   * 可能性があるので、この下書きには付けない。何も変えていない。
+   */
+  | { kind: 'before_draft'; draft: CrosspostDraftRow }
   /** 作成中でない・他のオーナーの下書き。何も変えていない。 */
   | { kind: 'not_open' };
 
@@ -521,6 +568,11 @@ export async function attachCrosspostMedia(
       [input.draftId, input.ownerId],
     );
     if (!locked.rows[0]) return { kind: 'not_open' } as const;
+    // 下書きを始めた時刻と、写真を送った時刻を同じ LINE の時計で比べる。始める前・同じ時刻の写真は、別の下書き
+    // （取り消した下書き・別の店舗の下書き）へ送ったものが遅れて届いた可能性を否定できないので付けない。
+    if (input.media.lineSentAt.getTime() <= locked.rows[0].line_started_at.getTime()) {
+      return { kind: 'before_draft', draft: locked.rows[0] } as const;
+    }
 
     const existing = await client.query<CrosspostMediaRow>(
       `SELECT ${MEDIA_COLUMNS} FROM crosspost_media WHERE draft_id = $1`,
@@ -563,7 +615,7 @@ export async function attachCrosspostMedia(
     );
     const bumped = await client.query<CrosspostDraftRow>(
       `UPDATE crosspost_drafts
-          SET revision = revision + 1, input_mode = 'none', input_destination = NULL,
+          SET revision = revision + 1, input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL,
               expires_at = $2, updated_at = now()
         WHERE id = $1
         RETURNING ${DRAFT_COLUMNS}`,
@@ -626,7 +678,7 @@ export async function approveCrosspostDraft(
     const approved = await client.query<CrosspostDraftRow>(
       `UPDATE crosspost_drafts d
           SET status = 'approved', approved_revision = d.revision, approved_at = now(),
-              input_mode = 'none', input_destination = NULL, updated_at = now()
+              input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL, updated_at = now()
          FROM stores s
         WHERE d.id = $1 AND d.owner_id = $2
           AND d.status = 'reviewing' AND d.revision = $3
@@ -813,7 +865,7 @@ export async function claimCrosspostDelivery(
     mode: ClaimMode;
     maxAttempts: number;
     /**
-     * 待ち（queued）を実行してよい、承認からの時間（ミリ秒）。過ぎた待ちは獲得しない（Req 6.12）。
+     * 投稿を実行してよい、承認からの時間（ミリ秒）。過ぎた投稿は初回（queued）も再試行も獲得しない（Req 6.12）。
      * 判定は DB の時計で、獲得の UPDATE と同じ文の中で行う（取りやめの確認と獲得の間に期限を越えても公開しない）。
      */
     queuedWindowMs: number;
@@ -824,16 +876,17 @@ export async function claimCrosspostDelivery(
     `UPDATE crosspost_deliveries v
         SET status = 'in_progress', attempt_count = v.attempt_count + 1, last_attempt_at = now(),
             finished_at = NULL, retryable = false, failure_reason = NULL, unknown_reason = NULL,
-            updated_at = now()
+            send_started_at = NULL, updated_at = now()
        FROM crosspost_drafts d, stores s
       WHERE v.id = $1
         AND d.id = v.draft_id AND d.owner_id = $2 AND d.status = 'approved'
         AND s.id = d.store_id AND s.owner_id = d.owner_id
         AND s.place_status = 'confirmed' AND s.place_id IS NOT NULL AND s.suspended_at IS NULL
         AND v.attempt_count < $4
+        -- 承認から期限（queuedWindowMs）を過ぎた投稿は、初回も再試行も獲得しない（Req 6.12）
+        AND d.approved_at > now() - ($5::bigint * interval '1 millisecond')
         AND (
-          ($3 = 'first' AND v.status = 'queued'
-            AND d.approved_at > now() - ($5::bigint * interval '1 millisecond'))
+          ($3 = 'first' AND v.status = 'queued')
           OR ($3 = 'retry' AND v.status = 'failed' AND v.retryable)
         )
       RETURNING ${prefixed(DELIVERY_COLUMNS, 'v')}`,
@@ -854,6 +907,55 @@ export async function saveCrosspostCheckpoint(
     [input.deliveryId, input.attempt, input.checkpoint],
   );
   return (res.rowCount ?? 0) > 0;
+}
+
+export type BeginSendOutcome =
+  /** 期限の内。send_started_at を書いた。この後に外部 API へ送ってよい。 */
+  | { kind: 'started'; delivery: CrosspostDeliveryRow }
+  /** 期限（安全余裕を引いたもの）を過ぎていて、まだ何も送っていない。取りやめた（canceled）。送ってはならない。 */
+  | { kind: 'expired'; delivery: CrosspostDeliveryRow }
+  /** この試行はもう古い（期限切れで結果不明・取りやめへ移された・送信を始め済み）。送ってはならない。 */
+  | { kind: 'superseded' };
+
+/**
+ * 外部 API へ送る直前に呼ぶ（Req 6.12）。DB の時計で「承認から windowMs − safetyMarginMs 以内」を確かめ、
+ * 期限の内なら send_started_at を書いて started を返す。期限を過ぎていれば、まだ送っていないことが確かなので
+ * 取りやめ（canceled）にして expired を返す。判定と記録は 1 文の UPDATE で行う（並行した獲得・後始末と競合しない）。
+ *
+ * **保証の範囲**: send_started_at を書いた時刻と、外部 API が要求を受け取る時刻の間には、アプリの処理と通信の
+ * 遅延がある。この差は原子的には保証できないので、安全余裕（safetyMarginMs）で吸収する。送信を始めた後に
+ * 期限を過ぎても、取りやめ・再送はしない（結果に従う）。
+ */
+export async function beginCrosspostSend(
+  db: Queryable,
+  input: { deliveryId: string; attempt: number; windowMs: number; safetyMarginMs: number },
+): Promise<BeginSendOutcome> {
+  if (!isUuid(input.deliveryId)) return { kind: 'superseded' };
+  const allowedMs = Math.max(0, Math.trunc(input.windowMs) - Math.max(0, Math.trunc(input.safetyMarginMs)));
+  const res = await db.query<CrosspostDeliveryRow & { started: boolean }>(
+    `WITH target AS (
+       SELECT v.id, d.approved_at > now() - ($3::bigint * interval '1 millisecond') AS in_window
+         FROM crosspost_deliveries v
+         JOIN crosspost_drafts d ON d.id = v.draft_id
+        WHERE v.id = $1 AND v.status = 'in_progress' AND v.attempt_count = $2 AND v.send_started_at IS NULL
+          FOR UPDATE OF v
+     ), updated AS (
+       UPDATE crosspost_deliveries v
+          SET send_started_at = CASE WHEN t.in_window THEN now() ELSE NULL END,
+              status = CASE WHEN t.in_window THEN v.status ELSE 'canceled'::crosspost_delivery_status END,
+              finished_at = CASE WHEN t.in_window THEN NULL ELSE now() END,
+              updated_at = now()
+         FROM target t
+        WHERE v.id = t.id
+       RETURNING ${prefixed(DELIVERY_COLUMNS, 'v')}, t.in_window AS started
+     )
+     SELECT * FROM updated`,
+    [input.deliveryId, input.attempt, allowedMs],
+  );
+  const row = res.rows[0];
+  if (!row) return { kind: 'superseded' };
+  const { started, ...delivery } = row;
+  return started ? { kind: 'started', delivery } : { kind: 'expired', delivery };
 }
 
 export type CrosspostOutcomeRecord =
@@ -899,7 +1001,8 @@ export async function recordCrosspostOutcome(
 
 /**
  * 処理の中断の後始末（そのオーナーの行だけ・Req 6.9, 6.11）。移した件数を返す。
- * - 実行中のまま `olderThan` より前に試行を始めた行を「結果不明」にする（外部へ送ったかもしれない）
+ * - 実行中のまま `olderThan` より前に試行を始めた行は、送信を始めていれば「結果不明」（外部へ送ったかもしれない）、
+ *   始めていなければ「再試行できる失敗」（期限を過ぎていれば取りやめ）にする
  * - 承認から `queuedWindowMs` を過ぎたまま待ち（queued）の行を「取りやめ」にする（DB の時計で判定・獲得の条件と同じ境界）。待ちは一度も送っていない
  *   ことが確かだが、時間が経った投稿（「本日限定」など）を店主の知らないうちに出さないため、再開を許す時間に
  *   上限を設ける
@@ -909,23 +1012,49 @@ export async function markStaleCrosspostDeliveries(
   input: { ownerId: string; olderThan: Date; queuedWindowMs: number },
 ): Promise<number> {
   if (!isUuid(input.ownerId)) return 0;
-  const stale = await db.query(
+  const windowMs = Math.max(0, Math.trunc(input.queuedWindowMs));
+  // 送信を始めていた試行（send_started_at あり）は、送ったかもしれないので結果不明。
+  const startedStale = await db.query(
     `UPDATE crosspost_deliveries v
         SET status = 'unknown', unknown_reason = 'stale_in_progress', finished_at = now(), updated_at = now()
        FROM crosspost_drafts d
       WHERE d.id = v.draft_id AND d.owner_id = $1
-        AND v.status = 'in_progress' AND v.last_attempt_at < $2`,
+        AND v.status = 'in_progress' AND v.last_attempt_at < $2 AND v.send_started_at IS NOT NULL`,
     [input.ownerId, input.olderThan],
   );
+  // 送信を始める前に止まった試行（send_started_at なし）は、外部へ何も送っていないことが確か。期限の内なら
+  // 再試行できる失敗、期限を過ぎていれば取りやめ。
+  const notStartedStale = await db.query(
+    `UPDATE crosspost_deliveries v
+        SET status = CASE WHEN d.approved_at > now() - ($3::bigint * interval '1 millisecond')
+                          THEN 'failed'::crosspost_delivery_status ELSE 'canceled'::crosspost_delivery_status END,
+            failure_reason = CASE WHEN d.approved_at > now() - ($3::bigint * interval '1 millisecond')
+                                  THEN 'interrupted_before_send' ELSE NULL END,
+            retryable = d.approved_at > now() - ($3::bigint * interval '1 millisecond'),
+            finished_at = now(), updated_at = now()
+       FROM crosspost_drafts d
+      WHERE d.id = v.draft_id AND d.owner_id = $1
+        AND v.status = 'in_progress' AND v.last_attempt_at < $2 AND v.send_started_at IS NULL`,
+    [input.ownerId, input.olderThan, windowMs],
+  );
+  // 期限を過ぎた待ちは取りやめ、期限を過ぎた再試行できる失敗は再試行できない失敗にする（獲得の条件と同じ境界）。
   const expired = await db.query(
     `UPDATE crosspost_deliveries v
         SET status = 'canceled', finished_at = now(), updated_at = now()
        FROM crosspost_drafts d
       WHERE d.id = v.draft_id AND d.owner_id = $1
         AND v.status = 'queued' AND d.approved_at <= now() - ($2::bigint * interval '1 millisecond')`,
-    [input.ownerId, Math.max(0, Math.trunc(input.queuedWindowMs))],
+    [input.ownerId, windowMs],
   );
-  return (stale.rowCount ?? 0) + (expired.rowCount ?? 0);
+  const expiredRetry = await db.query(
+    `UPDATE crosspost_deliveries v
+        SET retryable = false, updated_at = now()
+       FROM crosspost_drafts d
+      WHERE d.id = v.draft_id AND d.owner_id = $1
+        AND v.status = 'failed' AND v.retryable AND d.approved_at <= now() - ($2::bigint * interval '1 millisecond')`,
+    [input.ownerId, windowMs],
+  );
+  return (startedStale.rowCount ?? 0) + (notStartedStale.rowCount ?? 0) + (expired.rowCount ?? 0) + (expiredRetry.rowCount ?? 0);
 }
 
 /**
@@ -1007,13 +1136,15 @@ export async function resolveUnknownCrosspostDelivery(
     posted: boolean;
     externalId?: string | null;
     externalUrl?: string | null;
+    /** 投稿を実行してよい承認からの時間。過ぎていれば「投稿されていなかった」でも再試行できない失敗にする。 */
+    windowMs: number;
   },
 ): Promise<CrosspostDeliveryRow | null> {
   if (!isUuid(input.ownerId) || !isUuid(input.deliveryId)) return null;
   const res = await db.query<CrosspostDeliveryRow>(
     `UPDATE crosspost_deliveries v
         SET status = CASE WHEN $3 THEN 'succeeded'::crosspost_delivery_status ELSE 'failed'::crosspost_delivery_status END,
-            retryable = NOT $3,
+            retryable = (NOT $3) AND d.approved_at > now() - ($6::bigint * interval '1 millisecond'),
             failure_reason = CASE WHEN $3 THEN NULL ELSE 'owner_reported_not_posted' END,
             unknown_reason = NULL,
             external_id = COALESCE($4, v.external_id),
@@ -1023,7 +1154,14 @@ export async function resolveUnknownCrosspostDelivery(
        FROM crosspost_drafts d
       WHERE v.id = $1 AND d.id = v.draft_id AND d.owner_id = $2 AND v.status = 'unknown'
       RETURNING ${prefixed(DELIVERY_COLUMNS, 'v')}`,
-    [input.deliveryId, input.ownerId, input.posted, input.externalId ?? null, input.externalUrl ?? null],
+    [
+      input.deliveryId,
+      input.ownerId,
+      input.posted,
+      input.externalId ?? null,
+      input.externalUrl ?? null,
+      Math.max(0, Math.trunc(input.windowMs)),
+    ],
   );
   return res.rows[0] ?? null;
 }

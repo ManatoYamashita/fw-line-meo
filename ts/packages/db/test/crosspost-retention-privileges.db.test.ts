@@ -59,10 +59,10 @@ describe.skipIf(!process.env.DATABASE_URL)('一括発信の保存期間の削除
     await pool.query(`INSERT INTO owners (id, agency_id, line_user_id, onboarding_status) VALUES ($1, $2, 'U-3c9', 'store_identified')`, [OW, AG]);
     await pool.query(`INSERT INTO stores (id, owner_id, name, place_id, place_status) VALUES ($1, $2, '保存期間店', 'P-3c9', 'confirmed')`, [STORE, OW]);
     await pool.query(
-      `INSERT INTO crosspost_drafts (id, owner_id, store_id, status, approved_at, approved_revision, google_text, expires_at, purge_after, created_at)
-       VALUES ($1, $4, $5, 'approved', now() - interval '31 days', 1, 'g', now() - interval '31 days', now() - interval '1 hour', now() - interval '31 days'),
-              ($2, $4, $5, 'canceled', NULL, NULL, NULL, now() - interval '2 days', now() + interval '28 days', now() - interval '2 days'),
-              ($3, $4, $5, 'collecting', NULL, NULL, NULL, now() - interval '1 hour', now() + interval '29 days', now() - interval '1 day')`,
+      `INSERT INTO crosspost_drafts (id, owner_id, store_id, status, approved_at, approved_revision, google_text, expires_at, purge_after, created_at, line_started_at)
+       VALUES ($1, $4, $5, 'approved', now() - interval '31 days', 1, 'g', now() - interval '31 days', now() - interval '1 hour', now() - interval '31 days', now() - interval '31 days'),
+              ($2, $4, $5, 'canceled', NULL, NULL, NULL, now() - interval '2 days', now() + interval '28 days', now() - interval '2 days', now() - interval '2 days'),
+              ($3, $4, $5, 'collecting', NULL, NULL, NULL, now() - interval '1 hour', now() + interval '29 days', now() - interval '1 day', now() - interval '1 day')`,
       [DRAFT_PURGE, DRAFT_KEEP, DRAFT_EXPIRED, OW, STORE],
     );
     await pool.query(
