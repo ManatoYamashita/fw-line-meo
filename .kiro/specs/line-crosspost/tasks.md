@@ -12,11 +12,11 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 
 ## PR 2: データ（migration・アクセサ）
 
-- [ ] 2.1 `0019_line_crosspost.sql`（3 表・4 enum・部分一意索引・CHECK）
+- [x] 2.1 `0019_line_crosspost.sql`（3 表・4 enum・部分一意索引・CHECK）
   - _Requirements: 5.6, 5.7, 6.2, 6.4, 8.1, 8.3, 8.4_
-- [ ] 2.2 `db/write-boundary.md`・`db/ERD.md`（列一覧を含む）・`infra/sql/grants.sql`（line-webhook の SA だけに DML）
+- [x] 2.2 `db/write-boundary.md`・`db/ERD.md`（列一覧を含む）・`infra/sql/grants.sql`（line-webhook の SA だけに DML）
   - _Requirements: 8.1_
-- [ ] 2.3 `@fwlm/db` の `crosspost.ts`（所有の検証を SQL に含める・CAS・期限切れ・保存期間の削除）
+- [x] 2.3 `@fwlm/db` の `crosspost.ts`（所有の検証を SQL に含める・CAS・期限切れ・保存期間の削除）
   - _Requirements: 1.5, 2.8, 2.9, 4.5, 5.5, 5.6, 5.7, 6.1, 6.4, 6.6, 6.8, 6.9, 8.1, 8.4_
 - [ ] 2.4 DB の試験（アクセサの integration・assertions・書き込み権限）
 - [ ] 2.5 保存期間の削除（`purgeCrosspostRetention`）と、配信ジョブの SA への DELETE だけの付与。実際の grants.sql の権限で動くことの試験
