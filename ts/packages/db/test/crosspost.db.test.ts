@@ -382,16 +382,20 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       ).toBe('not_open');
     });
 
-    it('並行して届いた 2 枚の写真は直列になり、行は 1 つだけ残る', async () => {
+    it('並行して届いた 2 枚の写真は直列になり、行は 1 つだけ残る（後に送った写真が残る）', async () => {
       const pool = await getPool();
       const draft = await newReviewingDraft();
+      // p-1 を先に、p-2 を後に送った。処理の順は実行ごとに変わる
       const results = await Promise.all([
         attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('p-1'), expiresAt: later() }),
         attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('p-2'), expiresAt: later() }),
       ]);
-      expect(results.every((r) => r.kind === 'attached')).toBe(true);
+      // p-2 は必ず採用される。p-1 は先に処理されれば採用（後で p-2 に差し替わる）、後に処理されれば older
+      expect(results[1]!.kind).toBe('attached');
+      expect(['attached', 'older']).toContain(results[0]!.kind);
       const count = await pool.query('SELECT count(*)::int AS n FROM crosspost_media WHERE draft_id = $1', [draft.id]);
       expect(count.rows[0].n).toBe(1);
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('p-2');
     });
   });
 
