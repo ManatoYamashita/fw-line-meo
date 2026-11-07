@@ -25,6 +25,8 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
   - _Requirements: 5.8, 6.11, 6.12, 7.2_
 - [ ] 2.7 実行権の獲得の条件に待ちの期限（DB の時計）を入れる。写真の送った時刻（`line_sent_at`）で差し替えを判定する。送信後の 429 の結果不明の理由
   - _Requirements: 2.5, 6.3, 6.12_
+- [ ] 2.8 下書きの開始・書き直しの選択の LINE の時刻（`line_started_at`・`input_mode_set_at`）と、それより前に送った写真・文を付けない判定。送信の開始（`beginCrosspostSend`・`send_started_at`）と、送信の開始の前に止まったものの扱い（`interrupted_before_send`）
+  - _Requirements: 2.11, 4.7, 6.11, 6.12_
   - マージ条件: `run-db-test-suites.sh`（smoke・assertions・docs 整合）と `@fwlm/db` の試験が緑。本番への migration の適用は運営の承認の後
 
 ## PR 3: 会話・生成・発信先の共通処理（既定 OFF）
@@ -57,6 +59,8 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
   - _Requirements: 5.7, 6.1〜6.12, 7.2_
 - [ ] 3.14 第三者レビューの指摘の修正: 記録の許可リスト・写真の送った順・下書きの途中の「投稿の状況」と未通知の結果・最終確認の全文と事実の確認の案内
   - _Requirements: 2.5, 3.10, 5.3, 7.2, 7.3_
+- [ ] 3.15 第三者レビュー 2 回目の指摘の修正: Webhook の時刻による下書きの境界（写真・文・書き直しの文）・すべての応答の 1 か所の送信（未通知の結果・Reply → Push・5 通）・送信の直前の期限の確認
+  - _Requirements: 2.11, 4.7, 6.12, 7.2_
   - マージ条件: line-webhook・delivery-job の typecheck・lint・unit・DB integration が緑。既存の試験の変更は、設定の形の追加（`crosspost: null`）と router の委譲の試験の追加だけであること。本機能 OFF の既存の E2E が緑
 
 ## PR 4: Google の発信先アダプタ（既定 OFF）
