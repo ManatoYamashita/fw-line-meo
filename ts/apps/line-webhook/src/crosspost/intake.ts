@@ -28,6 +28,8 @@ export type IntakeRejection =
 export type IntakeResult =
   | { kind: 'attached'; draft: CrosspostDraftRow; replaced: boolean }
   | { kind: 'duplicate' }
+  /** 下書きを始める前・同じ時刻に送られた写真（別の下書きの写真が遅れて届いた可能性）。使わない。 */
+  | { kind: 'before_draft' }
   /** いまの写真より前に送られた写真（処理が遅れて後から届いた）。使わない。 */
   | { kind: 'older' }
   /** いまの写真と同じ時刻に送られた別の写真。どちらが後か決められないので使わない。 */

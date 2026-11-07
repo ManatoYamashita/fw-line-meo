@@ -12,8 +12,10 @@
 
 export type InboundEvent =
   | { kind: 'follow'; lineUserId: string; replyToken: string }
-  | { kind: 'text'; lineUserId: string; replyToken: string; text: string }
-  | { kind: 'postback'; lineUserId: string; replyToken: string; data: string }
+  // sentAt: イベントの timestamp（UNIX ミリ秒）。一括発信が下書きの境界（始めた後に送られた文か）を判定する。
+  // 無ければ null。省略可能（会話のほかの経路は使わない）。
+  | { kind: 'text'; lineUserId: string; replyToken: string; text: string; sentAt?: number | null }
+  | { kind: 'postback'; lineUserId: string; replyToken: string; data: string; sentAt?: number | null }
   // Requirement 5.3: text 以外の message（スタンプ・画像等）。メッセージ内容自体は
   // 会話層で一切使用しないため保持しない（客・オーナーの送信内容を不必要に持ち回らない）。
   // 例外は一括発信（line-crosspost・Issue #494）が有効なときの画像だけで、そのときに限り本体を取得するための
@@ -97,6 +99,17 @@ interface ParsedInboundEvent {
 // 必須フィールド（source.userId・replyToken・webhookEventId）欠落や未知/未対応の型は null。
 const MESSAGE_ID_PATTERN = /^\d{1,32}$/;
 
+/** 時刻があるときだけ sentAt を載せる（無いときは項目ごと省く・従来のイベントの形を変えない）。 */
+function withSentAt<T extends object>(event: T, timestamp: number | undefined): T & { sentAt?: number } {
+  const at = eventTime(timestamp);
+  return at === null ? event : { ...event, sentAt: at };
+}
+
+/** イベントの timestamp（UNIX ミリ秒）。形が正しくなければ null（推測で補わない）。 */
+function eventTime(timestamp: number | undefined): number | null {
+  return typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
 function parseImage(message: RawLineMessage | undefined, timestamp: number | undefined): InboundImage | undefined {
   if (message?.type !== 'image' || typeof message.id !== 'string' || !MESSAGE_ID_PATTERN.test(message.id)) {
     return undefined;
@@ -123,7 +136,7 @@ function parseImage(message: RawLineMessage | undefined, timestamp: number | und
       typeof message.quoteToken === 'string' && message.quoteToken.length > 0 && message.quoteToken.length <= 512
         ? message.quoteToken
         : null,
-    sentAt: typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null,
+    sentAt: eventTime(timestamp),
   };
 }
 
@@ -158,7 +171,7 @@ function parseEvent(raw: RawLineEvent, acceptImages: boolean): ParsedInboundEven
       if (typeof text !== 'string') {
         return null;
       }
-      return { webhookEventId, event: { kind: 'text', lineUserId, replyToken, text } };
+      return { webhookEventId, event: withSentAt({ kind: 'text', lineUserId, replyToken, text }, raw.timestamp) };
     }
 
     case 'postback': {
@@ -166,7 +179,7 @@ function parseEvent(raw: RawLineEvent, acceptImages: boolean): ParsedInboundEven
       if (typeof data !== 'string') {
         return null;
       }
-      return { webhookEventId, event: { kind: 'postback', lineUserId, replyToken, data } };
+      return { webhookEventId, event: withSentAt({ kind: 'postback', lineUserId, replyToken, data }, raw.timestamp) };
     }
 
     default:

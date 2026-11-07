@@ -40,6 +40,13 @@ export const PURGE_BATCH_SIZE = 20;
  */
 export const QUEUED_RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * 外部 API への送信を始めてよい期限の安全余裕（Req 6.12）。送信の開始を DB に記録してから、外部 API が要求を
+ * 受け取るまでの処理と通信の遅延（投稿先ごとの時間制限は最大 45 秒）を吸収する。承認から
+ * QUEUED_RESUME_WINDOW_MS − この値を過ぎたら、送信を始めない。
+ */
+export const SEND_START_SAFETY_MARGIN_MS = 2 * 60 * 1000;
+
 /** 写真の保存期間（受け取りから・Req 8.3）。配信ジョブと共有する値（@fwlm/db）。 */
 export const MEDIA_RETENTION_MS = CROSSPOST_MEDIA_RETENTION_MS;
 
@@ -84,4 +91,5 @@ export const FAILURE_REASON_LABELS: Readonly<Record<CrosspostFailureReason, stri
   media_unavailable: '写真を投稿先へ渡せませんでした。',
   unsupported_content: 'この写真・文はこの投稿先の条件に合いません。',
   owner_reported_not_posted: '投稿されていなかったことを確かめました。',
+  interrupted_before_send: '送る前に処理が止まりました（投稿先へは送っていません）。',
 };

@@ -54,9 +54,10 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost publisher (DB)', () => {
       allowedStoreIds: [f.store, f.store2],
       expiresAt: later(),
       purgeAfter: new Date(Date.now() + 30 * 86400_000),
+      lineStartedAt: new Date(Date.now() - 3600_000),
     });
     if (!created.ok) throw new Error(created.error);
-    await appendCrosspostMaterial(pool, { ownerId: f.owner, draftId: created.value.id, text: '新作の抹茶パフェ', expiresAt: later() });
+    await appendCrosspostMaterial(pool, { ownerId: f.owner, draftId: created.value.id, text: '新作の抹茶パフェ', sentAt: new Date(Date.now() - 1800_000), expiresAt: later() });
     let draft = (await beginCrosspostReview(pool, { ownerId: f.owner, draftId: created.value.id, expiresAt: later() }))!;
     draft = (await saveCrosspostTexts(pool, {
       ownerId: f.owner,
@@ -253,12 +254,78 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost publisher (DB)', () => {
     await approveBoth(draft, ['google']);
     const [queued] = await listCrosspostDeliveries(pool, { ownerId: f.owner, draftId: draft.id });
     await pool.query(
-      `UPDATE crosspost_deliveries SET status = 'in_progress', attempt_count = 1, last_attempt_at = now() - interval '10 minutes' WHERE id = $1`,
+      `UPDATE crosspost_deliveries SET status = 'in_progress', attempt_count = 1, last_attempt_at = now() - interval '10 minutes',
+              send_started_at = now() - interval '10 minutes' WHERE id = $1`,
       [queued!.delivery.id],
     );
     await publisher.reapStale(f.owner);
     const after = await getCrosspostDelivery(pool, { ownerId: f.owner, deliveryId: queued!.delivery.id });
     expect(after?.delivery.status).toBe('unknown');
     expect(after?.delivery.unknown_reason).toBe('stale_in_progress');
+  });
+
+  describe('外部 API へ送る直前の期限（承認から 24 時間・安全余裕 2 分）', () => {
+    const ageApproval = (draftId: string, ago: string) =>
+      pool.query(`UPDATE crosspost_drafts SET approved_at = now() - $2::interval WHERE id = $1`, [draftId, ago]);
+
+    it('承認から 24 時間以内の通常の送信は、送信の開始を記録してから送る', async () => {
+      const draft = await reviewingDraft();
+      await approveBoth(draft, ['google']);
+      const [result] = await publisher.runApproved(f.owner, draft.id);
+      expect(result!.delivery.status).toBe('succeeded');
+      expect(result!.delivery.send_started_at).not.toBeNull();
+      expect(google.calls).toHaveLength(1);
+    });
+
+    it('実行権の獲得の後、写真の URL の準備に時間がかかって期限を越えたら、送らずに取りやめる', async () => {
+      const draft = await reviewingDraft(true);
+      await approveBoth(draft, ['google']);
+      const original = store.issueFetchUrl.bind(store);
+      store.issueFetchUrl = async (key, ttl) => {
+        // 準備の間に、承認から 23 時間 59 分が経った（安全余裕 2 分の内側）
+        await ageApproval(draft.id, '23 hours 59 minutes');
+        return original(key, ttl);
+      };
+      const [result] = await publisher.runApproved(f.owner, draft.id);
+      expect(google.calls).toHaveLength(0);
+      expect(result!.delivery.status).toBe('canceled');
+      expect(result!.delivery.send_started_at).toBeNull();
+    });
+
+    it('送信を始めた後に期限を越えても、取りやめず結果を記録する', async () => {
+      const draft = await reviewingDraft();
+      await approveBoth(draft, ['google']);
+      google.behaviors = [
+        async () => {
+          await ageApproval(draft.id, '25 hours');
+          return { kind: 'succeeded', externalId: 'late', externalUrl: null };
+        },
+      ];
+      const [result] = await publisher.runApproved(f.owner, draft.id);
+      expect(result!.delivery.status).toBe('succeeded');
+      expect(result!.delivery.external_id).toBe('late');
+    });
+
+    it('期限を過ぎた失敗・結果不明は、再試行・店主の確認の後でも送らない', async () => {
+      google.behaviors = [async () => ({ kind: 'failed', reason: 'upstream_unavailable', retryable: true })];
+      const draft = await reviewingDraft();
+      await approveBoth(draft, ['google']);
+      const [first] = await publisher.runApproved(f.owner, draft.id);
+      expect(first!.delivery.retryable).toBe(true);
+      await ageApproval(draft.id, '25 hours');
+      expect((await publisher.retry(f.owner, first!.delivery.id)).kind).toBe('not_retryable');
+      expect(google.calls).toHaveLength(1);
+      const after = await getCrosspostDelivery(pool, { ownerId: f.owner, deliveryId: first!.delivery.id });
+      expect(after?.delivery.retryable).toBe(false);
+    });
+
+    it('期限判定と並行した実行でも、送信は高々 1 回で、期限を過ぎてから始まらない', async () => {
+      const draft = await reviewingDraft();
+      await approveBoth(draft, ['google']);
+      await Promise.all([publisher.runApproved(f.owner, draft.id), publisher.runApproved(f.owner, draft.id), publisher.reapStale(f.owner)]);
+      expect(google.calls.length).toBeLessThanOrEqual(1);
+      const [ctx] = await listCrosspostDeliveries(pool, { ownerId: f.owner, draftId: draft.id });
+      expect(['succeeded', 'canceled']).toContain(ctx!.delivery.status);
+    });
   });
 });
