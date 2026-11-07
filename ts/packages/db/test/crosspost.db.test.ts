@@ -16,7 +16,10 @@ import {
   listCrosspostEligibleStores,
   listRecentCrosspostPosts,
   markStaleCrosspostDeliveries,
-  purgeExpiredCrosspostDrafts,
+  purgeCrosspostRetention,
+  cancelQueuedCrosspostDelivery,
+  markCrosspostResultNotified,
+  listUnnotifiedCrosspostResults,
   recordCrosspostOutcome,
   releaseSettledCrosspostMedia,
   resolveUnknownCrosspostDelivery,
@@ -54,6 +57,7 @@ function mediaInput(lineMessageId: string): CrosspostMediaInput {
   mediaSeq += 1;
   return {
     lineMessageId,
+    lineQuoteToken: `q-${lineMessageId}`,
     storageKey: `crosspost/3c-${mediaSeq}-${lineMessageId}.jpg`,
     contentType: 'image/jpeg',
     width: 1080,
@@ -579,8 +583,8 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       const { deliveryId } = await approvedGoogle();
       await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
       await pool.query(`UPDATE crosspost_deliveries SET last_attempt_at = now() - interval '10 minutes' WHERE id = $1`, [deliveryId]);
-      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_B, olderThan: new Date(Date.now() - 5 * 60_000) })).toBe(0);
-      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000) })).toBe(1);
+      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_B, olderThan: new Date(Date.now() - 5 * 60_000), queuedOlderThan: new Date(Date.now() - 24 * 3600_000) })).toBe(0);
+      expect(await markStaleCrosspostDeliveries(pool, { ownerId: OWNER_A, olderThan: new Date(Date.now() - 5 * 60_000), queuedOlderThan: new Date(Date.now() - 24 * 3600_000) })).toBe(1);
       const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
       expect(ctx?.delivery.status).toBe('unknown');
       expect(ctx?.delivery.unknown_reason).toBe('stale_in_progress');
@@ -651,11 +655,156 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         expiresAt: later(),
       });
       if (attached.kind !== 'attached') throw new Error(attached.kind);
-      const purged = await purgeExpiredCrosspostDrafts(pool, { now: new Date(Date.now() + 31 * 24 * 3600 * 1000), limit: 100 });
-      expect(purged.deletedDrafts).toBeGreaterThanOrEqual(1);
-      expect(purged.removedStorageKeys).toContain(attached.media.storage_key);
+      // 下書きを承認済みにして、作成中の期限ではなく保存期間で消えることを確かめる
+      await approveCrosspostDraft(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: attached.draft.revision,
+        destinations: ['google'],
+      });
+      const notYet = await purgeCrosspostRetention(pool, { now: new Date(), mediaOlderThan: new Date(0), limit: 100 });
+      expect(notYet.purgedDrafts).toBe(0);
+      const purged = await purgeCrosspostRetention(pool, {
+        now: new Date(Date.now() + 31 * 24 * 3600 * 1000),
+        mediaOlderThan: new Date(0),
+        limit: 100,
+      });
+      expect(purged.purgedDrafts).toBeGreaterThanOrEqual(1);
+      // 下書きごと消した写真の行は CASCADE（実体は置き場の寿命の規則が消す）
+      expect(await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id })).toBeNull();
       expect(await getCrosspostDraft(pool, { ownerId: OWNER_A, draftId: draft.id })).toBeNull();
     });
+
+    it('期限切れの作成中の下書きは、利用者の操作が無くても消える', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const attached = await attachCrosspostMedia(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        media: mediaInput('e-1'),
+        expiresAt: later(),
+      });
+      if (attached.kind !== 'attached') throw new Error(attached.kind);
+      const result = await purgeCrosspostRetention(pool, {
+        now: new Date(Date.now() + 25 * 3600 * 1000),
+        mediaOlderThan: new Date(0),
+        limit: 100,
+      });
+      expect(result.expiredOpenDrafts).toBe(1);
+      const left = await pool.query('SELECT count(*)::int AS n FROM crosspost_media WHERE storage_key = $1', [attached.media.storage_key]);
+      expect(left.rows[0].n).toBe(0);
+      expect(await getOpenCrosspostDraft(pool, OWNER_A)).toBeNull();
+    });
+
+    it('写真の保存期間を過ぎた写真の行は、承認済みの下書きでも消し、作成中の下書きの写真は消さない', async () => {
+      const pool = await getPool();
+      const approvedDraft = await newReviewingDraft();
+      const old = await attachCrosspostMedia(pool, {
+        ownerId: OWNER_A,
+        draftId: approvedDraft.id,
+        media: mediaInput('o-1'),
+        expiresAt: later(),
+      });
+      if (old.kind !== 'attached') throw new Error(old.kind);
+      await approveCrosspostDraft(pool, {
+        ownerId: OWNER_A,
+        draftId: approvedDraft.id,
+        expectedRevision: old.draft.revision,
+        destinations: ['google'],
+      });
+      const openDraft = await newReviewingDraft(OWNER_B, STORE_B1);
+      const fresh = await attachCrosspostMedia(pool, {
+        ownerId: OWNER_B,
+        draftId: openDraft.id,
+        media: mediaInput('o-2'),
+        expiresAt: later(),
+      });
+      if (fresh.kind !== 'attached') throw new Error(fresh.kind);
+      const result = await purgeCrosspostRetention(pool, {
+        now: new Date(),
+        mediaOlderThan: new Date(Date.now() + 1000),
+        limit: 100,
+      });
+      expect(result.purgedMedia).toBe(1);
+      expect(result.removedStorageKeys).toEqual([old.media.storage_key]);
+      expect(await getCrosspostMedia(pool, { ownerId: OWNER_B, draftId: openDraft.id })).not.toBeNull();
+      // 写真の行が消えても、写真付きで承認した事実は残り、送らない
+      const [ctx] = await listCrosspostDeliveries(pool, { ownerId: OWNER_A, draftId: approvedDraft.id });
+      expect(ctx?.delivery.with_media).toBe(true);
+      expect(ctx?.media).toBeNull();
+    });
+  });
+
+  describe('待ちの取りやめと結果の通知', () => {
+    async function approvedGoogle(): Promise<{ draftId: string; deliveryId: string }> {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const approved = await approveCrosspostDraft(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        destinations: ['google'],
+      });
+      if (approved.kind !== 'approved') throw new Error('not approved');
+      return { draftId: draft.id, deliveryId: approved.deliveries[0]!.id };
+    }
+
+    it('待ちの投稿先は取りやめられ、取りやめた後は実行権を獲得できない', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedGoogle();
+      expect(await cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_B, deliveryId })).toBeNull();
+      const canceled = await cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
+      expect(canceled?.status).toBe('canceled');
+      expect(await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS })).toBeNull();
+      expect(await cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId })).toBeNull();
+    });
+
+    it('取りやめと獲得が並行しても、どちらか一方だけが成立する', async () => {
+      const pool = await getPool();
+      const { deliveryId } = await approvedGoogle();
+      const [claimed, canceled] = await Promise.all([
+        claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS }),
+        cancelQueuedCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId }),
+      ]);
+      expect([claimed, canceled].filter((row) => row !== null)).toHaveLength(1);
+    });
+
+    it('承認から時間が経った待ちは、送らずに取りやめにする', async () => {
+      const pool = await getPool();
+      const { draftId, deliveryId } = await approvedGoogle();
+      await pool.query(`UPDATE crosspost_drafts SET approved_at = now() - interval '25 hours' WHERE id = $1`, [draftId]);
+      expect(
+        await markStaleCrosspostDeliveries(pool, {
+          ownerId: OWNER_A,
+          olderThan: new Date(Date.now() - 5 * 60_000),
+          queuedOlderThan: new Date(Date.now() - 24 * 3600_000),
+        }),
+      ).toBe(1);
+      const ctx = await getCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId });
+      expect(ctx?.delivery.status).toBe('canceled');
+    });
+
+    it('届けていない結果を見つけ、届けた記録の後は出さない。後から変わった結果は再び出す', async () => {
+      const pool = await getPool();
+      const { draftId, deliveryId } = await approvedGoogle();
+      expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toEqual([]); // まだ終わっていない
+      await claimCrosspostDelivery(pool, { ownerId: OWNER_A, deliveryId, mode: 'first', maxAttempts: MAX_ATTEMPTS });
+      await recordCrosspostOutcome(pool, { deliveryId, attempt: 1, outcome: { kind: 'unknown', reason: 'network' } });
+      expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toEqual([
+        { draftId, storeName: 'A店1' },
+      ]);
+      expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_B, limit: 5 })).toEqual([]);
+      await markCrosspostResultNotified(pool, { ownerId: OWNER_A, draftIds: [draftId], deliveredAt: new Date(Date.now() + 1000) });
+      expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toEqual([]);
+      await pool.query(
+        `UPDATE crosspost_deliveries SET status = 'succeeded', unknown_reason = NULL, finished_at = now() + interval '1 minute' WHERE id = $1`,
+        [deliveryId],
+      );
+      expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toHaveLength(1);
+    });
+  });
+
+  describe('制約', () => {
 
     it('状態と付随列が食い違う行は CHECK が拒否する', async () => {
       const pool = await getPool();

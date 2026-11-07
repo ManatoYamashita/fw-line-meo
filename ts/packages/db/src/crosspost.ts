@@ -63,6 +63,8 @@ export interface CrosspostDraftRow {
   google_text: string | null;
   approved_revision: number | null;
   approved_at: Date | null;
+  /** 結果を店主へ届けられた最後の時刻（NULL = まだ一度も届けていない）。 */
+  result_notified_at: Date | null;
   expires_at: Date;
   purge_after: Date;
   created_at: Date;
@@ -73,6 +75,8 @@ export interface CrosspostMediaRow {
   id: string;
   draft_id: string;
   line_message_id: string;
+  /** 店主が送った写真のメッセージの quoteToken（最終確認で引用する）。 */
+  line_quote_token: string | null;
   storage_key: string;
   content_type: string;
   width: number;
@@ -110,9 +114,9 @@ export interface CrosspostStoreSummary {
 }
 
 const DRAFT_COLUMNS = `id, owner_id, store_id, status, input_mode, input_destination, revision, material_text,
-  instagram_text, google_text, approved_revision, approved_at, expires_at, purge_after, created_at, updated_at`;
+  instagram_text, google_text, approved_revision, approved_at, result_notified_at, expires_at, purge_after, created_at, updated_at`;
 
-const MEDIA_COLUMNS = `id, draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256, created_at`;
+const MEDIA_COLUMNS = `id, draft_id, line_message_id, line_quote_token, storage_key, content_type, width, height, byte_size, sha256, created_at`;
 
 const DELIVERY_COLUMNS = `id, draft_id, destination, status, body_text, with_media, media_id, attempt_count, retryable,
   failure_reason, unknown_reason, checkpoint, external_id, external_url, last_attempt_at, finished_at,
@@ -462,6 +466,7 @@ export async function extendCrosspostDraft(
 
 export interface CrosspostMediaInput {
   lineMessageId: string;
+  lineQuoteToken: string | null;
   storageKey: string;
   contentType: 'image/jpeg';
   width: number;
@@ -511,8 +516,8 @@ export async function attachCrosspostMedia(
     );
     const inserted = await client.query<CrosspostMediaRow>(
       `INSERT INTO crosspost_media
-         (draft_id, line_message_id, storage_key, content_type, width, height, byte_size, sha256)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (draft_id, line_message_id, line_quote_token, storage_key, content_type, width, height, byte_size, sha256)
+       VALUES ($1, $2, $9, $3, $4, $5, $6, $7, $8)
        RETURNING ${MEDIA_COLUMNS}`,
       [
         input.draftId,
@@ -523,6 +528,7 @@ export async function attachCrosspostMedia(
         input.media.height,
         input.media.byteSize,
         input.media.sha256,
+        input.media.lineQuoteToken,
       ],
     );
     const bumped = await client.query<CrosspostDraftRow>(
@@ -638,7 +644,8 @@ export interface CrosspostDeliveryContext {
 
 const DELIVERY_CONTEXT_SELECT = `SELECT ${prefixed(DELIVERY_COLUMNS, 'v')},
             d.owner_id AS ctx_owner_id, d.store_id AS ctx_store_id, s.name AS ctx_store_name,
-            m.id AS m_id, m.line_message_id AS m_line_message_id, m.storage_key AS m_storage_key,
+            m.id AS m_id, m.line_message_id AS m_line_message_id, m.line_quote_token AS m_line_quote_token,
+            m.storage_key AS m_storage_key,
             m.content_type AS m_content_type, m.width AS m_width, m.height AS m_height,
             m.byte_size AS m_byte_size, m.sha256 AS m_sha256, m.created_at AS m_created_at
        FROM crosspost_deliveries v
@@ -652,6 +659,7 @@ type DeliveryContextRow = CrosspostDeliveryRow & {
   ctx_store_name: string;
   m_id: string | null;
   m_line_message_id: string | null;
+  m_line_quote_token: string | null;
   m_storage_key: string | null;
   m_content_type: string | null;
   m_width: number | null;
@@ -668,6 +676,7 @@ function toDeliveryContext(row: DeliveryContextRow): CrosspostDeliveryContext {
     ctx_store_name,
     m_id,
     m_line_message_id,
+    m_line_quote_token,
     m_storage_key,
     m_content_type,
     m_width,
@@ -684,6 +693,7 @@ function toDeliveryContext(row: DeliveryContextRow): CrosspostDeliveryContext {
           id: m_id,
           draft_id: delivery.draft_id,
           line_message_id: m_line_message_id!,
+          line_quote_token: m_line_quote_token,
           storage_key: m_storage_key!,
           content_type: m_content_type!,
           width: m_width!,
@@ -843,15 +853,18 @@ export async function recordCrosspostOutcome(
 }
 
 /**
- * 実行中のまま `olderThan` より前に試行を始めた行を「結果不明」にする（処理の中断・Req 6.9）。
- * そのオーナーの行だけ。移した件数を返す。
+ * 処理の中断の後始末（そのオーナーの行だけ・Req 6.9, 6.11）。移した件数を返す。
+ * - 実行中のまま `olderThan` より前に試行を始めた行を「結果不明」にする（外部へ送ったかもしれない）
+ * - 承認から `queuedOlderThan` より前のまま待ち（queued）の行を「取りやめ」にする。待ちは一度も送っていない
+ *   ことが確かだが、時間が経った投稿（「本日限定」など）を店主の知らないうちに出さないため、再開を許す時間に
+ *   上限を設ける
  */
 export async function markStaleCrosspostDeliveries(
   db: Queryable,
-  input: { ownerId: string; olderThan: Date },
+  input: { ownerId: string; olderThan: Date; queuedOlderThan: Date },
 ): Promise<number> {
   if (!isUuid(input.ownerId)) return 0;
-  const res = await db.query(
+  const stale = await db.query(
     `UPDATE crosspost_deliveries v
         SET status = 'unknown', unknown_reason = 'stale_in_progress', finished_at = now(), updated_at = now()
        FROM crosspost_drafts d
@@ -859,7 +872,79 @@ export async function markStaleCrosspostDeliveries(
         AND v.status = 'in_progress' AND v.last_attempt_at < $2`,
     [input.ownerId, input.olderThan],
   );
-  return res.rowCount ?? 0;
+  const expired = await db.query(
+    `UPDATE crosspost_deliveries v
+        SET status = 'canceled', finished_at = now(), updated_at = now()
+       FROM crosspost_drafts d
+      WHERE d.id = v.draft_id AND d.owner_id = $1
+        AND v.status = 'queued' AND d.approved_at < $2`,
+    [input.ownerId, input.queuedOlderThan],
+  );
+  return (stale.rowCount ?? 0) + (expired.rowCount ?? 0);
+}
+
+/**
+ * 待ち（queued）の投稿先を取りやめる（店主の操作・一度も送っていないことが確か）。待ちでなければ null。
+ */
+export async function cancelQueuedCrosspostDelivery(
+  db: Queryable,
+  input: { ownerId: string; deliveryId: string },
+): Promise<CrosspostDeliveryRow | null> {
+  if (!isUuid(input.ownerId) || !isUuid(input.deliveryId)) return null;
+  const res = await db.query<CrosspostDeliveryRow>(
+    `UPDATE crosspost_deliveries v
+        SET status = 'canceled', finished_at = now(), updated_at = now()
+       FROM crosspost_drafts d
+      WHERE v.id = $1 AND d.id = v.draft_id AND d.owner_id = $2 AND v.status = 'queued'
+      RETURNING ${prefixed(DELIVERY_COLUMNS, 'v')}`,
+    [input.deliveryId, input.ownerId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/**
+ * 結果を店主へ届けられたことを記録する（Req 7.2）。`deliveredAt` 以前に終わった結果が届いたことになる。
+ */
+export async function markCrosspostResultNotified(
+  db: Queryable,
+  input: { ownerId: string; draftIds: readonly string[]; deliveredAt: Date },
+): Promise<void> {
+  const ids = input.draftIds.filter(isUuid);
+  if (!isUuid(input.ownerId) || ids.length === 0) return;
+  await db.query(
+    `UPDATE crosspost_drafts
+        SET result_notified_at = GREATEST(COALESCE(result_notified_at, '-infinity'::timestamptz), $3::timestamptz),
+            updated_at = now()
+      WHERE owner_id = $1 AND id = ANY($2::uuid[]) AND status = 'approved'`,
+    [input.ownerId, ids, input.deliveredAt],
+  );
+}
+
+/**
+ * まだ店主へ届けていない結果を持つ承認済みの下書き（新しい順）。投稿先の行のどれかが、最後に届けた時刻より
+ * 後に終わっていれば「届けていない」（結果不明の確定・再試行の結果・取りやめを含む）。
+ */
+export async function listUnnotifiedCrosspostResults(
+  db: Queryable,
+  input: { ownerId: string; limit: number },
+): Promise<Array<{ draftId: string; storeName: string }>> {
+  if (!isUuid(input.ownerId)) return [];
+  const limit = Math.min(Math.max(Math.trunc(input.limit) || 1, 1), 5);
+  const res = await db.query<{ id: string; store_name: string }>(
+    `SELECT d.id, s.name AS store_name
+       FROM crosspost_drafts d
+       JOIN stores s ON s.id = d.store_id
+      WHERE d.owner_id = $1 AND d.status = 'approved'
+        AND EXISTS (
+          SELECT 1 FROM crosspost_deliveries v
+           WHERE v.draft_id = d.id AND v.finished_at IS NOT NULL
+             AND v.finished_at > COALESCE(d.result_notified_at, '-infinity'::timestamptz)
+        )
+      ORDER BY d.approved_at DESC, d.id DESC
+      LIMIT $2`,
+    [input.ownerId, limit],
+  );
+  return res.rows.map((row) => ({ draftId: row.id, storeName: row.store_name }));
 }
 
 /**
@@ -920,34 +1005,68 @@ export async function releaseSettledCrosspostMedia(
   return res.rows.map((row) => row.storage_key);
 }
 
+export interface CrosspostRetentionResult {
+  /** 保存期間（purge_after）を過ぎて消した下書き。 */
+  purgedDrafts: number;
+  /** 期限切れのまま残っていた作成中の下書き（写真の行を含めて消した）。 */
+  expiredOpenDrafts: number;
+  /** 写真の保存期間を過ぎて消した写真の行（作成中でない下書きのもの）。 */
+  purgedMedia: number;
+  /**
+   * 写真の保存期間で消した写真の行の置き場の名前（下書きごと消した写真の名前は含まない）。
+   * 実体の削除は置き場の寿命の規則（7 日）が保証し、呼び出し側は任意で早めに消してよい。
+   */
+  removedStorageKeys: string[];
+}
+
 /**
- * 保存期間（purge_after）を過ぎた下書きを、少数ずつ削除する（写真・投稿先の行は CASCADE）。
- * 消した写真の置き場の名前を返す。全オーナーが対象（保存期間の削除は利用者の操作ではない）。
+ * 保存期間の削除（Req 8.3, 8.4, 8.8）。**利用者の操作に依存せず**、毎時の配信ジョブ（delivery-job）が呼ぶ。
+ * line-webhook も開始の操作のついでに呼ぶ（どちらが先でも結果は同じ・冪等）。全オーナーが対象。
+ * 1. 保存期間（purge_after）を過ぎた下書きを消す（写真・投稿先の行は CASCADE）
+ * 2. 期限（expires_at）を過ぎた作成中の下書きを消す（まだ承認していないので投稿先の行は無い）
+ * 3. `mediaOlderThan` より前に受け取った写真の行を消す（作成中の下書きは 2. の期限が先に効く）。
+ *    待ち・結果不明の投稿先が残っていても消す（写真の保存期間を投稿の都合で延ばさない）。その後の再試行は
+ *    写真が無いので送らない（failed・media_unavailable）
+ * 1 回に消す件数に上限がある（多いときは次の回に続く）。
  */
-export async function purgeExpiredCrosspostDrafts(
+export async function purgeCrosspostRetention(
   db: Queryable,
-  input: { now: Date; limit: number },
-): Promise<{ deletedDrafts: number; removedStorageKeys: string[] }> {
-  const limit = Math.min(Math.max(Math.trunc(input.limit) || 1, 1), 100);
-  const res = await db.query<{ id: string; storage_key: string | null }>(
-    `WITH doomed AS (
-       SELECT id FROM crosspost_drafts
-        WHERE purge_after <= $1
-        ORDER BY purge_after
-        LIMIT $2
-        FOR UPDATE SKIP LOCKED
-     ), keys AS (
-       SELECT m.draft_id, m.storage_key FROM crosspost_media m JOIN doomed x ON x.id = m.draft_id
-     ), deleted AS (
-       DELETE FROM crosspost_drafts d USING doomed x WHERE d.id = x.id RETURNING d.id
-     )
-     SELECT de.id, k.storage_key FROM deleted de LEFT JOIN keys k ON k.draft_id = de.id`,
+  input: { now: Date; mediaOlderThan: Date; limit: number },
+): Promise<CrosspostRetentionResult> {
+  const limit = Math.min(Math.max(Math.trunc(input.limit) || 1, 1), 500);
+  // 行ロック（FOR UPDATE）は使わない。配信ジョブの SA は DELETE しか持たず、FOR UPDATE は UPDATE の権限を要する。
+  // 条件は DELETE 自身の WHERE に置く。line-webhook が同じ行を更新中なら DELETE はその完了を待ち、更新後の行で
+  // 条件を評価し直す（期限を延ばした・承認した下書きは消さない）。
+  const drafts = await db.query<{ id: string; reason: 'purge' | 'expired' }>(
+    `DELETE FROM crosspost_drafts d
+      WHERE (d.purge_after <= $1 OR (d.status IN ('collecting', 'reviewing') AND d.expires_at <= $1))
+        AND d.id IN (
+          SELECT id FROM crosspost_drafts
+           WHERE purge_after <= $1 OR (status IN ('collecting', 'reviewing') AND expires_at <= $1)
+           ORDER BY purge_after
+           LIMIT $2
+        )
+      RETURNING d.id, CASE WHEN d.purge_after <= $1 THEN 'purge' ELSE 'expired' END AS reason`,
     [input.now, limit],
   );
-  const ids = new Set(res.rows.map((row) => row.id));
+  // 消した下書きの写真の行は CASCADE で消えた。置き場の名前は呼び出し側で使わない（実体は寿命の規則が消す）。
+  const media = await db.query<{ storage_key: string }>(
+    `DELETE FROM crosspost_media m
+      USING crosspost_drafts d
+      WHERE m.draft_id = d.id
+        AND m.created_at <= $1
+        AND d.status NOT IN ('collecting', 'reviewing')
+        AND m.id IN (SELECT id FROM crosspost_media WHERE created_at <= $1 ORDER BY created_at LIMIT $2)
+      RETURNING m.storage_key`,
+    [input.mediaOlderThan, limit],
+  );
+  const purged = new Set(drafts.rows.filter((r) => r.reason === 'purge').map((r) => r.id));
+  const expired = new Set(drafts.rows.filter((r) => r.reason === 'expired').map((r) => r.id));
   return {
-    deletedDrafts: ids.size,
-    removedStorageKeys: res.rows.flatMap((row) => (row.storage_key === null ? [] : [row.storage_key])),
+    purgedDrafts: purged.size,
+    expiredOpenDrafts: expired.size,
+    purgedMedia: media.rowCount ?? 0,
+    removedStorageKeys: media.rows.map((row) => row.storage_key),
   };
 }
 

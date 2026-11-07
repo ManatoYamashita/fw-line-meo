@@ -3,7 +3,8 @@
 -- 投稿先ごとの状態（crosspost_deliveries）の 3 表を追加する。
 -- PostgreSQL 15+ 互換。すべて追加のみ（既存のテーブル・enum を変えない）。戻すときは 3 表と 4 enum を DROP する
 -- （本機能は既定 OFF で、OFF のあいだアプリはこの 3 表を読まない）。
--- 書き込み境界は db/write-boundary.md（3 表とも TS リアルタイム応答層・DML は line-webhook の SA だけ）。
+-- 書き込み境界は db/write-boundary.md（3 表とも TS リアルタイム応答層）。INSERT・UPDATE は line-webhook の SA だけ。
+-- 保存期間を過ぎた行の削除だけは、利用者の操作に依存しないよう毎時の配信ジョブの SA も行う（DELETE のみ）。
 
 BEGIN;
 
@@ -34,6 +35,9 @@ CREATE TABLE crosspost_drafts (
     google_text       text,
     approved_revision integer,
     approved_at       timestamptz,
+    -- 投稿の結果を店主へ届けられた最後の時刻。投稿先の行の finished_at がこれより新しければ、まだ届けていない
+    -- 結果がある（LINE への通知の失敗で結果を失わない・次の操作で見せる）
+    result_notified_at timestamptz,
     -- 作成中の期限（最後の操作から）。承認・取り消しの後は使わない
     expires_at        timestamptz NOT NULL,
     -- 保存期間。過ぎた行は line-webhook が削除する（写真・投稿先の行は CASCADE）
@@ -61,6 +65,9 @@ CREATE UNIQUE INDEX ux_crosspost_drafts_open_owner
     WHERE status IN ('collecting', 'reviewing');
 CREATE INDEX ix_crosspost_drafts_owner_created ON crosspost_drafts (owner_id, created_at DESC);
 CREATE INDEX ix_crosspost_drafts_purge_after ON crosspost_drafts (purge_after);
+-- 保存期間の削除（配信ジョブ・毎時）が期限切れの作成中の下書きを探す
+CREATE INDEX ix_crosspost_drafts_open_expires ON crosspost_drafts (expires_at)
+    WHERE status IN ('collecting', 'reviewing');
 
 -- ============================================================
 -- 写真（v1 は 1 下書き 1 枚。実体は非公開の置き場で、ここには鍵と寸法だけを持つ）
@@ -71,6 +78,9 @@ CREATE TABLE crosspost_media (
     draft_id        uuid NOT NULL REFERENCES crosspost_drafts(id) ON DELETE CASCADE,
     -- LINE の message.id（同じ写真の重複保存の防止・問い合わせの手掛かり）
     line_message_id text NOT NULL,
+    -- LINE の quoteToken。最終確認で店主が送った写真のメッセージそのものを引用し、公開する写真を取り違えない
+    -- ために使う（公開の URL を作らずに済む）。秘密の値ではない。無い場合（外部の画像など）は NULL
+    line_quote_token text,
     -- 置き場の中の名前（推測できない UUID）。URL ではない
     storage_key     text NOT NULL,
     -- 正規化の後の形式。v1 は JPEG だけを保存する
@@ -84,8 +94,11 @@ CREATE TABLE crosspost_media (
     CONSTRAINT ux_crosspost_media_storage_key UNIQUE (storage_key),
     CONSTRAINT ck_crosspost_media_content_type CHECK (content_type = 'image/jpeg'),
     CONSTRAINT ck_crosspost_media_dimensions CHECK (width > 0 AND height > 0 AND byte_size > 0),
-    CONSTRAINT ck_crosspost_media_sha256 CHECK (sha256 ~ '^[0-9a-f]{64}$')
+    CONSTRAINT ck_crosspost_media_sha256 CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT ck_crosspost_media_quote_token CHECK (line_quote_token IS NULL OR char_length(line_quote_token) BETWEEN 1 AND 512)
 );
+-- 保存期間の削除（配信ジョブ・毎時）が古い写真の行を探す
+CREATE INDEX ix_crosspost_media_created ON crosspost_media (created_at);
 
 -- ============================================================
 -- 投稿先ごとの状態（承認と同じトランザクションで作る・本文は承認の時点の写し）

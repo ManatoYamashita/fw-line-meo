@@ -4,7 +4,9 @@
 # 期待（db/write-boundary.md・design.md「Data Models」）:
 #   - crosspost_drafts・crosspost_media・crosspost_deliveries の INSERT・UPDATE・DELETE を持つのは
 #     line-webhook の SA だけ
-#   - 客向け Web・ダッシュボード API・店舗詳細・日次バッチ・配信ジョブは、3 表とも読むだけ（SELECT）
+#   - 例外: 配信ジョブ（delivery）は保存期間の削除のために crosspost_drafts・crosspost_media の DELETE だけを持つ
+#     （INSERT・UPDATE は持たない・crosspost_deliveries は CASCADE で消えるので直接の DELETE は持たない）
+#   - 客向け Web・ダッシュボード API・店舗詳細・日次バッチは、3 表とも読むだけ（SELECT）
 #
 # なぜ要るか: 3 表は店主の承認と投稿の実行に直結する。ほかの面（客の面・代理店の面）が書けると、
 # アプリにどんな経路を足しても DB が受け付けてしまう。既存の TS 3 SA の一律付与へ足し間違えたときに、
@@ -98,7 +100,11 @@ for t in "${TABLES[@]}"; do
     for key in survey dashboard batch delivery detail; do
         expect "$key" "$t" SELECT t
         for mode in INSERT UPDATE DELETE; do
-            expect "$key" "$t" "$mode" f
+            want=f
+            if [ "$key" = delivery ] && [ "$mode" = DELETE ] && [ "$t" != crosspost_deliveries ]; then
+                want=t
+            fi
+            expect "$key" "$t" "$mode" "$want"
         done
     done
 done
@@ -112,4 +118,4 @@ if [ "$fail_count" -ne 0 ]; then
     echo "NG: line-crosspost の書き込み権限が宣言と食い違っています（${fail_count} 件）" >&2
     exit 1
 fi
-echo "OK: line-crosspost の 3 表を書けるのは line-webhook の SA だけ（${checked} 件）"
+echo "OK: line-crosspost の 3 表を書けるのは line-webhook の SA だけ（配信ジョブは保存期間の削除だけ・${checked} 件）"
