@@ -15,7 +15,7 @@
     "@fwlm/db": "workspace:*",
     "@fwlm/observability": "workspace:*",
     "@fwlm/ui": "workspace:*",
-    "@line/liff": "^2.29.1",
+    "@line/liff": "^2.32.0",
     "next": "^16.4.4",
     "react": "^19",
     "react-dom": "^19"
