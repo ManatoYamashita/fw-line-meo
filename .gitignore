@@ -53,3 +53,7 @@ Thumbs.db
 .terraform.lock.hcl
 *.tfvars
 !*.tfvars.example
+
+# --- AI エージェントのローカル状態 ---
+# Codex アプリが自動生成する環境設定と作業用 worktree（Issue #521）
+.codex/
