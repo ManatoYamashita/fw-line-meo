@@ -292,7 +292,7 @@
   - _Boundary: dashboard-web components（store-suspension-control・owner-line-unlink-control・store-qr-panel・owner-roster-table）と、その import 元（stores/page・owners/page）_
   - _Depends: 9.3_
 
-- [ ] 9.5 店舗の詳細の画面（`/stores/[storeId]`）
+- [x] 9.5 店舗の詳細の画面（`/stores/[storeId]`）
   - `app/stores/[storeId]/page.tsx`（サーバー部品・`PageProps` の `params` を `await`）と `store-detail-view.tsx`（クライアント部品）。取得・状態・描画は design.md「名前からの遷移と店舗・オーナーの詳細」に従う
     - 状態は 4 つ（読み込み中・失敗・見つからない・表示）。形の不正な id は API を呼ばない。404 は概要・操作・QR を描かない
     - 概要の `dl`。担当代理店は運営だけで、`AgencyName` を使う。表示語は添字と関数で引く
@@ -391,3 +391,4 @@
 - 9.2: dashboard-api は `@fwlm/db` の **dist** を読む。共有パッケージの公開面を足した・取り消したときは `rm -rf ts/packages/db/dist && pnpm -C ts/packages/db build` で作り直してから試験する（取り消した `isUuid` が古い dist に残り、作り直さないと緑に見えた）。API のハンドラの UUID の判定は `@fwlm/db` から借りず、`store-suspension.ts` と同じくモジュール内の `UUID_RE` を持つ（9.2 のレビューで境界の外と判定された）
 - 9.3: 型に必須の id の項目を足して既存のスタブへ値を補うときは、同じファイルにある実体の定数（e2e の `AGENCIES[0].id`・`STORES[0].id`、単体試験の `AGENCY`・`'a1'` など）を参照する。仮の文字列（`agency-fixture` など）を置くと、型検査も単体試験も緑のまま、後のタスクでリンク先が存在しない経路として固定される（9.3 のレビューで検出）
 - 9.4: dashboard-web のファイルを移す・改名するときは、旧パスを `git grep` でリポジトリ全体から探し、`pnpm -r test` で全パッケージを流す。`ts/packages/ui/test/success-cue.test.tsx` の `SUCCESS_DISPLAYS` がアプリの成功表示をパスで持っており、dashboard-web の試験だけでは赤に気づけない（9.4 のレビューで検出）。店舗登録の面の 10.7 は `OwnerRosterTable` の既定値に頼っているので、9.7 で「店舗登録のオーナー選択はリンクにならない」を stores/new の試験として assert する
+- 9.5: 店舗の詳細は、停止・再開の部品（自分で状態の札を描く）を「利用状況」の欄に置き、概要に札を重ねて描かない（design の「利用状況の操作」を別ブロックとする記述からの意図した逸脱・レビューで許容）。読み直しの `seq` は防御的で、部品が処理中の再押下を受け付けないため画面の操作からは赤にできない（コードに明記）。「呼ばれない」の実行時 assert は取り込んでいない関数に対して空振りするので、書込の限定は取り込みの宣言そのものを検査する。変異の実験で「no tests」になったら収集エラーなので無効（赤の証拠にしない）

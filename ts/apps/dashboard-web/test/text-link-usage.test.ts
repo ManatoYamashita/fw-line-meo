@@ -21,8 +21,8 @@ const EXEMPT: Readonly<Record<string, string>> = {
 };
 
 /** 見た目の種類ごとのリンクの数。実測へ合わせて宣言を書き換える改変を素通りさせないため literal で持つ。 */
-const EXPECTED = { textLink: 7, button: 3, exempt: 1 } as const;
-const EXPECTED_TOTAL = 11;
+const EXPECTED = { textLink: 8, button: 3, exempt: 1 } as const;
+const EXPECTED_TOTAL = 12;
 
 type LinkTag = { file: string; line: number; tag: string };
 
