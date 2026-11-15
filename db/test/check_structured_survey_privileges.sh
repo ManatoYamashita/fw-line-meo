@@ -142,10 +142,18 @@ expect_column() {
 TALLY_INSERT_COLUMNS=" store_id period_month positive_group_count concern_group_count positive_target_count concern_target_count positive_facet_count concern_facet_count has_comment count "
 # 列は catalog から列挙する（列を足したときに検査から漏れないように）。
 # table_columns <table> — 削除済みでない通常の列を 1 行 1 列で返す。
+# stdin の各行を名前付き配列へ読む（bash 3.2 = macOS 標準には mapfile が無いため。-t 相当で改行を落とす）。
+read_lines_into() {
+    local __name="$1" __line
+    eval "${__name}=()"
+    while IFS= read -r __line; do
+        eval "${__name}+=(\"\${__line}\")"
+    done
+}
 table_columns() {
     q "SELECT attname FROM pg_attribute WHERE attrelid = 'public.${1}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum;" | tr -d '\r'
 }
-mapfile -t TALLY_COLUMNS < <(q "SELECT attname FROM pg_attribute WHERE attrelid = 'public.${TALLY_TABLE}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum;" | tr -d '\r')
+read_lines_into TALLY_COLUMNS < <(q "SELECT attname FROM pg_attribute WHERE attrelid = 'public.${TALLY_TABLE}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum;" | tr -d '\r')
 if [ "${#TALLY_COLUMNS[@]}" -lt 11 ]; then
     echo "FAIL: ${TALLY_TABLE} の列を列挙できません（${#TALLY_COLUMNS[@]} 列。走査の前提が崩れています）" >&2
     exit 1
@@ -248,7 +256,7 @@ done
 
 echo ">> [privilege-check] (S2) taxonomy 3 表は、どの SA も書けない（表単位・列単位とも）"
 for t in "${TAXONOMY_TABLES[@]}"; do
-    mapfile -t cols < <(table_columns "$t")
+    read_lines_into cols < <(table_columns "$t")
     for key in "${ROLE_KEYS[@]}"; do
         for mode in INSERT UPDATE DELETE; do
             expect "$key" "$t" "$mode" f
@@ -278,7 +286,7 @@ config_update_cols() {
     esac
 }
 for t in "${CONFIG_TABLES[@]}"; do
-    mapfile -t cols < <(table_columns "$t")
+    read_lines_into cols < <(table_columns "$t")
     ins="$(config_insert_cols "$t")"
     upd="$(config_update_cols "$t")"
     for key in "${ROLE_KEYS[@]}"; do
@@ -306,7 +314,7 @@ echo ">> [privilege-check] (S4) store-detail は店舗設定 3 表と監査記�
 # 列挙は catalog から行う（表を足したときに検査から漏れないように）。
 DETAIL_WRITABLE=" store_survey_configs store_survey_category_settings store_survey_targets audit_logs "
 AUDIT_INSERT_COLS=" actor_type actor_id action target_type target_id occurred_at "
-mapfile -t ALL_TABLES < <(q "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;" | tr -d '\r')
+read_lines_into ALL_TABLES < <(q "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;" | tr -d '\r')
 if [ "${#ALL_TABLES[@]}" -lt 30 ]; then
     echo "FAIL: public の表を列挙できません（${#ALL_TABLES[@]} 表。走査の前提が崩れています）" >&2
     exit 1
@@ -324,7 +332,7 @@ for t in "${ALL_TABLES[@]}"; do
         note_fail "detail が ${t} のいずれかの列を書けます（店舗設定 3 表と監査記録のほかへ書込を広げていないか）"
     fi
 done
-mapfile -t audit_cols < <(table_columns audit_logs)
+read_lines_into audit_cols < <(table_columns audit_logs)
 for mode in INSERT UPDATE DELETE; do
     expect detail audit_logs "$mode" f
 done
