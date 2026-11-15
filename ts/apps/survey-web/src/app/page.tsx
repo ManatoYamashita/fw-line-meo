@@ -5,7 +5,7 @@ import { PUBLIC_SITE_URL, SITE_NAME } from '../lib/public-site';
 
 const title = '飲食店のGoogle口コミ・QRアンケート支援 | Firstweb 集客AIアシスタント';
 const description =
-  '飲食店のGoogle口コミづくりを、QRアンケートとAIの下書きでサポート。お客様はLINEログイン不要で回答し、内容を確認・編集してご自身で投稿できます。店舗オーナーはLINEで自店と近隣店の状況を確認。運営はFirstweb、開発は新卒グルメ。';
+  '飲食店のGoogle口コミづくりを、QRアンケートとAIの下書きでサポート。お客様はLINEログイン不要で回答し、内容を確認・編集してご自身で投稿できます。店舗オーナーはLINEで自店と近隣店の状況を確認。提供はFirstweb / 新卒グルメ、開発はyamashitamana.to。';
 
 export const metadata: Metadata = {
   metadataBase: new URL(PUBLIC_SITE_URL),
@@ -68,7 +68,11 @@ const structuredData = {
       image: `${PUBLIC_SITE_URL}ogp.jpg`,
       screenshot: [`${PUBLIC_SITE_URL}screenshots/survey.png`, `${PUBLIC_SITE_URL}screenshots/draft.png`],
       publisher: { '@type': 'Organization', name: 'Firstweb', url: 'https://firstweb-works.com/' },
-      creator: { '@type': 'Organization', name: '新卒グルメ' },
+      copyrightHolder: [
+        { '@type': 'Organization', name: 'Firstweb', url: 'https://firstweb-works.com/' },
+        { '@type': 'Organization', name: '新卒グルメ', url: 'https://www.instagram.com/syokufun_gen/' },
+      ],
+      creator: { '@type': 'Person', name: 'yamashitamana.to', url: 'https://www.yamashitamana.to/' },
     },
   ],
 };
@@ -235,19 +239,18 @@ export default function Home() {
         </section>
       </PageShell>
 
-      <footer className="border-t border-border">
-        <PageShell as="div" width="lg" className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4 text-sm text-muted-foreground">
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <p>運営: Firstweb</p>
-            <p>開発: 新卒グルメ</p>
-          </div>
+      {/* クレジット表記は root layout の CreditFooter が全画面へ出す（Issue #523）。ここは運営情報の
+          リンクだけを持つ。footer にしないのは、main の外の footer（contentinfo）を 1 ページに 1 つに
+          保つため。 */}
+      <div className="border-t border-border">
+        <PageShell as="div" width="lg" className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 pb-0 text-sm text-muted-foreground">
           <nav aria-label="運営情報" className="flex flex-wrap gap-x-6 gap-y-2">
             <a href="https://firstweb-works.com/" className="inline-flex min-h-11 items-center underline underline-offset-4">運営サイト</a>
             <a href="https://firstweb-works.com/privacy/" className="inline-flex min-h-11 items-center underline underline-offset-4">プライバシーポリシー</a>
             <a href="https://firstweb-works.com/terms/" className="inline-flex min-h-11 items-center underline underline-offset-4">利用規約</a>
           </nav>
         </PageShell>
-      </footer>
+      </div>
     </>
   );
 }

@@ -87,7 +87,7 @@ test('公開LPがWCAG A/AAの自動監査を通る', async ({ page }) => {
   await expectNoAxeViolations(page);
 });
 
-test('検索用情報と運営・開発の情報がJavaScriptなしのHTMLに含まれる', async ({ browser, baseURL }) => {
+test('検索用情報とクレジット表記がJavaScriptなしのHTMLに含まれる', async ({ browser, baseURL }) => {
   const context = await browser.newContext({ javaScriptEnabled: false, baseURL });
   const page = await context.newPage();
   try {
@@ -98,8 +98,11 @@ test('検索用情報と運営・開発の情報がJavaScriptなしのHTMLに含
     const ogUrl = await page.locator('meta[property="og:url"]').getAttribute('content');
     expect(new URL(ogUrl!).href).toBe('https://review.firstweb-works.com/');
     await expect(page.locator('meta[property="og:image"]').first()).toHaveAttribute('content', 'https://review.firstweb-works.com/ogp.jpg');
-    await expect(page.getByText('運営: Firstweb', { exact: true })).toBeVisible();
-    await expect(page.getByText('開発: 新卒グルメ', { exact: true })).toBeVisible();
+    const credit = page.getByRole('contentinfo');
+    await expect(credit).toHaveCount(1);
+    await expect(credit.getByText('© 2026 Firstweb / 新卒グルメ', { exact: true })).toBeVisible();
+    await expect(credit.getByRole('link', { name: '新卒グルメ' })).toHaveAttribute('href', 'https://www.instagram.com/syokufun_gen/');
+    await expect(credit.getByRole('link', { name: 'yamashitamana.to' })).toHaveAttribute('href', 'https://www.yamashitamana.to/');
     const schema = JSON.parse((await page.locator('script[type="application/ld+json"]').textContent())!);
     expect(schema['@context']).toBe('https://schema.org');
     expect(schema['@graph']).toEqual(expect.arrayContaining([
@@ -107,7 +110,11 @@ test('検索用情報と運営・開発の情報がJavaScriptなしのHTMLに含
       expect.objectContaining({
         '@type': 'SoftwareApplication',
         publisher: expect.objectContaining({ name: 'Firstweb' }),
-        creator: expect.objectContaining({ name: '新卒グルメ' }),
+        copyrightHolder: [
+          expect.objectContaining({ name: 'Firstweb' }),
+          expect.objectContaining({ name: '新卒グルメ', url: 'https://www.instagram.com/syokufun_gen/' }),
+        ],
+        creator: expect.objectContaining({ name: 'yamashitamana.to', url: 'https://www.yamashitamana.to/' }),
       }),
     ]));
   } finally {

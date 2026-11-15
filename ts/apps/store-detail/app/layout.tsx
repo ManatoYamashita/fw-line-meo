@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { AppToaster } from '@fwlm/ui/components/app-toaster';
+import { CreditFooter } from '@fwlm/ui/components/credit-footer';
 import './globals.css';
 
 // OGP の画像 URL を絶対 URL にする基準。未設定だと Next.js は localhost を基準にし、
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           DOM 構造・情報設計・LIFF ロジックは変更しない（本格整備は #43 の責務）。 */}
       <body className="bg-background text-foreground font-sans text-base leading-relaxed antialiased">
         {children}
+        <CreditFooter />
         <AppToaster />
       </body>
     </html>

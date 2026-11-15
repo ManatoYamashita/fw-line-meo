@@ -27,6 +27,12 @@ import userEvent from '@testing-library/user-event';
 import { Alert, AlertDescription, AlertTitle } from '../src/components/alert';
 import { Button } from '../src/components/button';
 import { Checkbox } from '../src/components/checkbox';
+import {
+  CREDIT_COPYRIGHT_PREFIX,
+  CREDIT_DEVELOPER,
+  CREDIT_GOURMET,
+  CreditFooter,
+} from '../src/components/credit-footer';
 import { EmptyState } from '../src/components/empty-state';
 import {
   Field,
@@ -1990,5 +1996,60 @@ describe('文字のリンクの見た目（Issue #503・design-language.md 7.21�
   it('呼び出し側の配置のクラスと合わせても、下線が残る', () => {
     const classes = cn(textLinkVariants(), 'self-start text-sm').split(' ');
     expect(classes).toEqual(expect.arrayContaining(['underline', 'underline-offset-4', 'self-start', 'text-sm']));
+  });
+});
+
+describe('クレジット表記（Issue #523・design-language.md 7.22）', () => {
+  it('main の外の footer として、著作権者と開発者の表記を 1 行で出し、新卒グルメと開発者だけがリンクを持つ', () => {
+    render(<CreditFooter />);
+    const footer = screen.getByRole('contentinfo');
+    expect(footer.textContent).toBe(
+      `${CREDIT_COPYRIGHT_PREFIX} ${CREDIT_GOURMET.label} ・ 開発 ${CREDIT_DEVELOPER.label}`,
+    );
+    const links = within(footer).getAllByRole('link');
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['新卒グルメ', 'https://www.instagram.com/syokufun_gen/'],
+      ['yamashitamana.to', 'https://www.yamashitamana.to/'],
+    ]);
+    // 文字のリンクの見た目は 7.21 の部品で付ける（直書きの下線にしない）。
+    for (const link of links) {
+      expect([...link.classList]).toEqual(expect.arrayContaining(textLinkVariants().split(' ')));
+    }
+  });
+
+  it('表記の正典は決めた文言のまま', () => {
+    expect(`${CREDIT_COPYRIGHT_PREFIX} ${CREDIT_GOURMET.label}`).toBe('© 2026 Firstweb / 新卒グルメ');
+    expect(CREDIT_GOURMET).toEqual({ label: '新卒グルメ', href: 'https://www.instagram.com/syokufun_gen/' });
+    expect(CREDIT_DEVELOPER).toEqual({ label: 'yamashitamana.to', href: 'https://www.yamashitamana.to/' });
+  });
+
+  // 全画面に出すことは、各アプリの root layout が 1 回だけ描画することで保つ。
+  // layout から外す・二重に置く改変をここで止める（画面単位の E2E は面ごとにしか見ないため）。
+  const tsRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const ROOT_LAYOUTS = [
+    'apps/dashboard-web/src/app/layout.tsx',
+    'apps/store-detail/app/layout.tsx',
+    'apps/survey-web/src/app/layout.tsx',
+  ] as const;
+
+  it('Web アプリの root layout は 3 つで、上の列挙と一致する', () => {
+    const found = readdirSync(join(tsRoot, 'apps'))
+      .flatMap((app) => ['src/app/layout.tsx', 'app/layout.tsx'].map((rel) => `apps/${app}/${rel}`))
+      .filter((rel) => {
+        try {
+          readFileSync(join(tsRoot, rel));
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .sort();
+    expect(found).toEqual([...ROOT_LAYOUTS].sort());
+  });
+
+  it.each(ROOT_LAYOUTS)('%s がクレジット表記を 1 回だけ描画する', (rel) => {
+    const source = readFileSync(join(tsRoot, rel), 'utf8');
+    expect(source).toContain("import { CreditFooter } from '@fwlm/ui/components/credit-footer';");
+    expect(source.match(/<CreditFooter\b/g) ?? []).toHaveLength(1);
   });
 });

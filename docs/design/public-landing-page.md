@@ -109,6 +109,11 @@ JavaScriptや独自の拡大モーダルを必要としない。
   flexの文字と矢印の双方へ伝播し、矢印の下に短い線が出ていた。44pxの操作領域と
   既存のフォーカス輪郭は維持する。
 - 運営は「Firstweb」、開発は「新卒グルメ」。フッターとJSON-LDの情報を揃える。
+  （2026-11-15・#523 で改訂。クレジットは全画面共通の `CreditFooter` へ移し、表記は
+  「© 2026 Firstweb / 新卒グルメ ・ 開発 yamashitamana.to」（新卒グルメは Instagram の
+  アカウント、開発者は yamashitamana.to へリンク）。JSON-LD は `copyrightHolder` に
+  Firstweb と新卒グルメ（`url` は同じ Instagram）、`creator` に yamashitamana.to を置き、meta description も同じ事実にそろえる。
+  LP の運営情報のリンク群は main の外の footer を 1 つに保つため div に改めた）
 - 主見出し・title・descriptionで対象と機能（飲食店、Google口コミ、QRアンケート）を伝える。
   WebSite・WebPage・SoftwareApplicationのJSON-LDは初期HTMLに出し、表示内容と一致する
   事実だけを記載する。料金や評価を創作してリッチリザルトの要件を埋めない。

@@ -757,6 +757,21 @@ Tailwind の Preflight はリンクの下線を消し、色も周りの文から
 「どの部品の中にあるか」を見分けずに済ませるためである。
 由来: [#503](https://github.com/ManatoYamashita/fw-line-meo/issues/503)
 
+### 7.22 クレジット表記は root layout の 1 か所から全画面へ出す
+
+**クレジット表記（`© 2026 Firstweb / 新卒グルメ ・ 開発 yamashitamana.to`）は `@fwlm/ui` の `CreditFooter` だけが持ち、
+3 つの Web アプリの root layout がそれぞれ 1 回だけ描画する。** 画面ごとに置く形では、ログイン・エラー・
+新設の画面のように書き忘れた画面だけ表記が欠ける。文言とリンク先は部品の中の定数を正典にする。
+
+**本文より弱く見せる。** 大きさは `text-xs`、色は補足の色にする。店舗詳細の Google の帰属表示は `text-sm`
+でポリシーの色を持つので、クレジットがそれより目立つことは無い。リンクは新卒グルメ（Instagram のアカウント）と
+開発者（yamashitamana.to）の 2 つで、どちらも文字のリンクなので §7.21 の下線を付ける。
+
+**main の外の footer は 1 ページに 1 つに保つ。** `CreditFooter` は main の外の footer として
+contentinfo の目印を担う。面の側で main の外に別の footer を置かない（公開 LP の運営情報のリンク群は
+div で組む）。main の内側の footer（店舗詳細の帰属表示）は目印にならないので、この制約の外にある。
+由来: [#523](https://github.com/ManatoYamashita/fw-line-meo/issues/523)
+
 ---
 
 ## 8. 面を組む前に読む構造契約
@@ -796,6 +811,7 @@ Tailwind の Preflight はリンクの下線を消し、色も周りの文から
 | `button.tsx` | `Button`, `buttonVariants` | 押しボタン |
 | `card.tsx` | `Card`, `CardAction`, `CardContent`, `CardDescription`, `CardFooter`, `CardHeader`, `CardTitle` | 情報の容器 |
 | `checkbox.tsx` | `Checkbox` | 複数選択 |
+| `credit-footer.tsx` | `CREDIT_COPYRIGHT_PREFIX`, `CREDIT_DEVELOPER`, `CREDIT_GOURMET`, `CreditFooter` | 全画面の末尾のクレジット表記。3 アプリの root layout が 1 回だけ描画する（§7.22） |
 | `dialog.tsx` | `Dialog`, `DialogBackdrop`, `DialogClose`, `DialogContent`, `DialogDescription`, `DialogPortal`, `DialogTitle`, `DialogTrigger` | modal ダイアログ（Escape・背面押下で閉じ、閉じた後は起点へ焦点を戻す） |
 | `empty-state.tsx` | `EmptyState` | 一覧が空のときの案内。押しボタンを内包しない |
 | `field.tsx` | `Field`, `FieldContent`, `FieldDescription`, `FieldError`, `FieldGroup`, `FieldLabel`, `FieldLegend`, `FieldSeparator`, `FieldSet`, `FieldTitle` | フォームの構造と検証状態 |
@@ -884,6 +900,7 @@ theme.css の宣言側しか見ないため、アプリ層がトークンに無�
 | 7.20 中央寄せの短い案内は行の長さをそろえる | `ts/apps/store-detail/e2e/store-surface.spec.ts` | 空状態の案内が、狭い幅で行の長さをそろえて分かれる |
 | 7.21 文字のリンクの見た目（部品の中身） | `ts/packages/ui/test/components.test.tsx` | 文字のリンクの見た目 |
 | 7.21 管理ダッシュボードのリンクが見た目の指定を必ず持つ | `ts/apps/dashboard-web/test/text-link-usage.test.ts` | 文字のリンクか押しボタンの見た目を必ず持つ |
+| 7.22 クレジット表記の中身と 3 アプリの root layout からの描画 | `ts/packages/ui/test/components.test.tsx` | クレジット表記 |
 | 7.8 帯の段組み | `ts/apps/dashboard-web/test/top-nav.test.tsx` | 帯の段組み（7.8 節 |
 | 7.8 帯の実描画（全リンクに捲らずに届く） | `ts/apps/dashboard-web/e2e/mobile-layout.spec.ts` | 帯の操作要素すべてに捲らずに届く |
 | 選択済みの面をアクション色で塗る部品のエラー指標 | `ts/packages/ui/test/contrast-usage.test.ts` | 選択済みの面をアクション色で塗る部品のエラー指標 |
