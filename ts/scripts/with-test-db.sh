@@ -91,7 +91,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-as_server_user initdb -D "$PGDATA" -U postgres --auth=trust >/dev/null
+# 文字コードとロケールを呼び出し元の LANG / LC_* から切り離す。継ぐと POSIX では SQL_ASCII になり
+# char_length がバイト数を返して日本語の CHECK が落ち、OS に無いロケール（ja_JP.UTF-8 等）では
+# initdb 自体が失敗する。libc 側は全 OS にある C に固定し、照合と大文字小文字・文字分類は ICU に
+# 任せる（C のままだと upper('ä') や ORDER BY が CI の postgres:16＝en_US.utf8 とずれる）。
+as_server_user initdb -D "$PGDATA" -U postgres --auth=trust \
+  --encoding=UTF8 --locale=C --locale-provider=icu --icu-locale=und >/dev/null
 as_server_user pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
 
 createdb -h "$SOCKDIR" -U postgres "$DBNAME"
