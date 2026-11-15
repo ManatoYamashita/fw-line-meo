@@ -85,7 +85,11 @@ function isRetryable(error: unknown): boolean {
   return status === 429 || (status >= 500 && status < 600);
 }
 
-function toApiError(error: unknown): GenerationError {
+/**
+ * 生成 API の例外を API_ERROR（取れれば HTTP ステータス付き）へ畳む。generateText を通さずに
+ * client を直接呼ぶ消費者（survey-web の structured Realizer）も、同じ分類でログへ出せるよう公開する。
+ */
+export function toApiError(error: unknown): GenerationError {
   const status = getHttpStatus(error);
   return status === undefined ? { kind: 'API_ERROR' } : { kind: 'API_ERROR', status };
 }

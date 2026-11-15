@@ -203,6 +203,9 @@ importers:
       '@fwlm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@fwlm/gemini':
+        specifier: workspace:*
+        version: link:../../packages/gemini
       '@fwlm/observability':
         specifier: workspace:*
         version: link:../../packages/observability
