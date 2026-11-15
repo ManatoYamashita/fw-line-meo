@@ -117,9 +117,11 @@ describe('handleOwnersList', () => {
           onboardingStatus: 'pending',
           createdAt: '2026-07-01T12:34:56.000Z',
           inviteCode: null,
+          agencyId: 'ag1',
           agencyName: '代理店A',
           lineLink: 'linked',
           menuUnlinkPending: false,
+          stores: [],
           storeNames: [],
           takenOverBy: null,
         },
@@ -134,6 +136,10 @@ describe('handleOwnersList', () => {
       agencyName: '代理店B',
       lineLink: 'unlinked',
       menuUnlinkPending: true,
+      stores: [
+        { id: 'a1111111-1111-1111-1111-111111111111', name: '店舗1' },
+        { id: 'a2222222-2222-2222-2222-222222222222', name: '店舗2' },
+      ],
       storeNames: ['店舗1', '店舗2'],
       takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: '新オーナー' },
     });
@@ -153,9 +159,14 @@ describe('handleOwnersList', () => {
       onboardingStatus: 'pending',
       createdAt: '2026-07-01T12:34:56.000Z',
       inviteCode: null,
+      agencyId: 'ag1',
       agencyName: '代理店B',
       lineLink: 'unlinked',
       menuUnlinkPending: true,
+      stores: [
+        { id: 'a1111111-1111-1111-1111-111111111111', name: '店舗1' },
+        { id: 'a2222222-2222-2222-2222-222222222222', name: '店舗2' },
+      ],
       storeNames: ['店舗1', '店舗2'],
       takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: '新オーナー' },
     });
@@ -188,6 +199,7 @@ describe('handleOwnersList', () => {
     const body = JSON.parse(text) as { owners: Record<string, unknown>[] };
     expect(Object.keys(body.owners[0] ?? {}).sort()).toEqual(
       [
+        'agencyId',
         'agencyName',
         'createdAt',
         'displayName',
@@ -197,6 +209,7 @@ describe('handleOwnersList', () => {
         'menuUnlinkPending',
         'onboardingStatus',
         'storeNames',
+        'stores',
         'takenOverBy',
       ].sort(),
     );

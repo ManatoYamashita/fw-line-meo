@@ -264,7 +264,7 @@
   - _Requirements: 10.1, 11.1, 11.6, 11.7, 11.9, 11.10_
   - _Boundary: ts/packages/db（stores.ts・owners.ts・types.ts・index.ts）_
 
-- [ ] 9.2 dashboard-api: GET /stores/:id・GET /owners/:id と GET /owners の項目の追加
+- [x] 9.2 dashboard-api: GET /stores/:id・GET /owners/:id と GET /owners の項目の追加
   - `src/store-detail.ts`・`src/owner-detail.ts`: 認証 → UUID の形の検査（形でなければ DB を呼ばずに 404）→ `resolveAgencyScope(user, undefined)` → 取得 → `null` なら 404。404 の本文は、形の不正・不存在・範囲外のどれでも同じにする（店舗は「店舗が見つかりません」、オーナーは「オーナーが見つかりません」）。GET /owners/:id は、オーナーが見つかったときだけ `listStoresWithStatus({ ownerId })` を呼ぶ
   - `src/owners-list.ts`: 応答の各オーナーに `agencyId` と `stores` を足す。`storeNames` は残す
   - `src/app.ts`・`src/index.ts`（または `composition.ts`）: ルートの配線と依存の注入。既存の `/stores/:storeId/qr.png`・`/stores/:storeId/review-funnel`・`POST /stores/:id/suspend` などと経路が衝突しないことを確かめる
