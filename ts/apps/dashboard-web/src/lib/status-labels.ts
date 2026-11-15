@@ -45,3 +45,15 @@ export const OWNER_LINE_LINK_LABEL: Readonly<Record<OwnerLineLink, string>> = {
   linked: '連携中',
   unlinked: '解除済み',
 };
+
+// 競合設定の状態（agency-dashboard Req 4.3）。店舗一覧が直接書いていた語を、店舗の詳細とオーナーの詳細でも
+// 同じ語で読ませるためにここへ移した（Issue #526）。変更の手段は持たない（Req 4.5）。
+export const COMPETITOR_STATUS_LABEL = {
+  configured: '競合設定済み',
+  unconfigured: '競合未設定',
+} as const;
+
+/** 競合が設定済みか（competitorConfigured）から表示語を引く。 */
+export function competitorStatusLabel(configured: boolean): string {
+  return configured ? COMPETITOR_STATUS_LABEL.configured : COMPETITOR_STATUS_LABEL.unconfigured;
+}

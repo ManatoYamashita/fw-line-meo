@@ -78,6 +78,8 @@ function owner(overrides: Partial<OwnerListItem> & Pick<OwnerListItem, 'id'>): O
     agencyName: '代理店アルファ',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    agencyId: 'a1',
+    stores: [],
     storeNames: [],
     takenOverBy: null,
     ...overrides,
@@ -87,6 +89,10 @@ function owner(overrides: Partial<OwnerListItem> & Pick<OwnerListItem, 'id'>): O
 const linked = owner({
   id: 'o1',
   displayName: '連携中のオーナー',
+  stores: [
+    { id: 's1', name: '鳥貴族 渋谷店' },
+    { id: 's2', name: '鳥貴族 新宿店' },
+  ],
   storeNames: ['鳥貴族 渋谷店', '鳥貴族 新宿店'],
 });
 const unlinked = owner({ id: 'o2', displayName: '解除済みのオーナー', lineLink: 'unlinked' });
@@ -95,6 +101,7 @@ const pending = owner({
   displayName: 'メニュー未解除のオーナー',
   lineLink: 'unlinked',
   menuUnlinkPending: true,
+  agencyId: 'a2',
   agencyName: '代理店ベータ',
 });
 const takenOver = owner({

@@ -274,7 +274,7 @@
   - _Boundary: ts/apps/dashboard-api_
   - _Depends: 9.1_
 
-- [ ] 9.3 (P) dashboard-web の土台: 経路・リンク部品・API クライアント・表示語
+- [x] 9.3 (P) dashboard-web の土台: 経路・リンク部品・API クライアント・表示語
   - `lib/entity-paths.ts`: `toEntityId`（`agency-detail.ts` の `toAgencyId` をここへ移し、代理店詳細もこれを使う）・`storePath`・`ownerPath`・`agencyPath`
   - `components/entity-link.tsx`: `EntityLink`（`next/link`＋`textLinkVariants()`）と `AgencyName`（運営のときだけ `EntityLink`、それ以外は素の文字）
   - `lib/api.ts`・`lib/types.ts`: `getStore(id)`・`getOwner(id)` と応答の型を足し、`OwnerListItem` に `agencyId`・`stores` を足す（HTTP の契約が正典。9.2 の実装を待たずに型から進めてよい）
@@ -389,3 +389,4 @@
 - 8.3: **「判定まで描かない」は、判定の取得を保留した状態で試験する。** 最後の状態（見つかりません）まで `findBy` で待つ試験は、判定の前に区分を描いて後で消す退行を捕まえない（レビューで発見）。`getAgencies` を解決しない約束で保留し、他の 4 本が届いた後に区分が無いことを表明した。また**件数を並べる面の fixture は各件数を互いに違う値にする**（2・2・2 だと、ある件数を別の区分から数える取り違えが緑で通る）。
 - 8.5: **面ごとに要る状態は、共有の fixture を変えずにスタブの引数で注入する**（`stubDashboardApi` の `suspendedStoreIds`）。注入した状態が画面まで届いたことは、面を開く手順の前提の表明で確かめる。当初は共有の `STORES` を汚すのを避けて停止中の店舗を省き、「単体試験が覆う」と説明していたが、単体試験は値を置くだけで表明していなかった（レビューで発見）。`mustOverflow` は部分集合の主張なので、空のままにせず、全表を宣言して失敗させ、実測（`label=scrollWidth/clientWidth`）を取ってから決める。手元の E2E はシェルの `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`（Aside）を外して流す。Aside のままだと全件緑でもワーカーの終了で止まって exit 1 になり（docs/testing/e2e.md #381）、途中の試験も 13〜17 分止まった。付属の Chromium では 116 件を 40 秒で流せた。
 - 9.2: dashboard-api は `@fwlm/db` の **dist** を読む。共有パッケージの公開面を足した・取り消したときは `rm -rf ts/packages/db/dist && pnpm -C ts/packages/db build` で作り直してから試験する（取り消した `isUuid` が古い dist に残り、作り直さないと緑に見えた）。API のハンドラの UUID の判定は `@fwlm/db` から借りず、`store-suspension.ts` と同じくモジュール内の `UUID_RE` を持つ（9.2 のレビューで境界の外と判定された）
+- 9.3: 型に必須の id の項目を足して既存のスタブへ値を補うときは、同じファイルにある実体の定数（e2e の `AGENCIES[0].id`・`STORES[0].id`、単体試験の `AGENCY`・`'a1'` など）を参照する。仮の文字列（`agency-fixture` など）を置くと、型検査も単体試験も緑のまま、後のタスクでリンク先が存在しない経路として固定される（9.3 のレビューで検出）

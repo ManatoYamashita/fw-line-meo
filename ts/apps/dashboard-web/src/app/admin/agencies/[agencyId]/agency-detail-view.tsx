@@ -24,10 +24,10 @@ import { OwnerRosterTable, ownerDistinctLabel } from '../../../../components/own
 import { groupStoresByOwner } from '../../../../lib/agency-roster';
 import {
   ownersByInviteCode,
-  toAgencyId,
   unrecordedOwnerCount,
   usersOfAgency,
 } from '../../../../lib/agency-detail';
+import { toEntityId } from '../../../../lib/entity-paths';
 import {
   getAgencies,
   getDashboardUsers,
@@ -164,7 +164,7 @@ export function AgencyDetailView({ agencyId: rawAgencyId }: { agencyId: string }
   const { me } = useAuth();
   const isOperator = me?.role === 'operator';
   // 経路の値を小文字の id へ正規化し、取得・存在判定・絞り込みのすべてでこの値を使う（大小で割れない）。
-  const normalizedId = toAgencyId(rawAgencyId);
+  const normalizedId = toEntityId(rawAgencyId);
   const validId = normalizedId !== null;
   const agencyId = normalizedId ?? '';
   // 代理店ロールと形の不正な id では 1 本も取得しない（9.6・9.9）。

@@ -32,7 +32,7 @@ import { TopNav } from '../../components/top-nav';
 import { notifyActionWarning } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
 import { getStores } from '../../lib/api';
-import { PLACE_STATUS_LABEL } from '../../lib/status-labels';
+import { PLACE_STATUS_LABEL, competitorStatusLabel } from '../../lib/status-labels';
 import type { StoreListItem } from '../../lib/types';
 import { StoreSuspensionControl } from './store-suspension-control';
 
@@ -222,7 +222,7 @@ function StoresView() {
                       </TableCell>
                       {/* 競合設定バッジ（Req 4.3・変更手段は提供しない = 表示のみ Req 4.5） */}
                       <TableCell wrap="none">
-                        {store.competitorConfigured ? '競合設定済み' : '競合未設定'}
+                        {competitorStatusLabel(store.competitorConfigured)}
                       </TableCell>
                       {isOperator && <TableCell wrap="prose">{store.agencyName}</TableCell>}
                       {/* 利用状況は札と押しボタンを 1 行に並べ、その下に結果の文言を出す。札と押しボタンは

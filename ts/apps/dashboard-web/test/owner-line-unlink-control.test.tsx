@@ -49,6 +49,8 @@ function owner(overrides: Partial<OwnerListItem> = {}): OwnerListItem {
     agencyName: '代理店アルファ',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    agencyId: 'a1',
+    stores: [{ id: 's1', name: '炭火焼肉 やました' }],
     storeNames: ['炭火焼肉 やました'],
     takenOverBy: null,
     ...overrides,

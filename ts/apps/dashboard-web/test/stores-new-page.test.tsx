@@ -59,6 +59,8 @@ const owner = {
   agencyName: '代理店A',
   lineLink: 'linked',
   menuUnlinkPending: false,
+  agencyId: 'a1',
+  stores: [],
   storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;
@@ -975,6 +977,8 @@ const owner2 = {
   agencyName: '代理店A',
   lineLink: 'linked',
   menuUnlinkPending: false,
+  agencyId: 'a1',
+  stores: [],
   storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;

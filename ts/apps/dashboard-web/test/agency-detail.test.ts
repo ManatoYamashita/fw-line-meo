@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   ownersByInviteCode,
-  toAgencyId,
   unrecordedOwnerCount,
   usersOfAgency,
 } from '../src/lib/agency-detail';
+import { toEntityId } from '../src/lib/entity-paths';
 import type { DashboardUserItem, OwnerListItem } from '../src/lib/types';
 
 // 代理店詳細（Issue #486・agency-dashboard Req 9）が取得した値から計算する純粋関数。
@@ -37,28 +37,17 @@ function owner(id: string, inviteCodeId: string | null): OwnerListItem {
     agencyName: '代理店A',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    agencyId: AGENCY,
+    stores: [],
     storeNames: [],
     takenOverBy: null,
   };
 }
 
-describe('toAgencyId（Req 9.6）', () => {
-  const MIXED = 'AbCdEf00-1111-2222-3333-444455556666';
-
-  it('UUID の形なら小文字へ正規化して返す（大小を問わず同じ代理店を指す）', () => {
-    expect(toAgencyId(AGENCY)).toBe(AGENCY);
-    expect(toAgencyId(AGENCY.toUpperCase())).toBe(AGENCY);
-    expect(toAgencyId(MIXED)).toBe(MIXED.toLowerCase());
-  });
-
-  it('UUID の形でない値は null（API を呼ばずに「見つかりません」へ回す）', () => {
-    for (const value of ['', 'abc', `${AGENCY}x`, ` ${AGENCY}`, AGENCY.replaceAll('-', ''), '../stores']) {
-      expect(toAgencyId(value), value).toBeNull();
-    }
-  });
-
+describe('経路の値の正規化と代理店の利用者（Req 9.6）', () => {
+  // 形の判定と小文字化そのものは entity-paths.test.ts が試す（代理店詳細の正規化を toEntityId へ移した・Issue #526）。
   it('大文字の経路の値でも、正規化した id で利用者を取りこぼさない', () => {
-    const id = toAgencyId(AGENCY.toUpperCase());
+    const id = toEntityId(AGENCY.toUpperCase());
     expect(id).not.toBeNull();
     expect(usersOfAgency([user({ id: 'mine' })], id!).map((u) => u.id)).toEqual(['mine']);
   });
