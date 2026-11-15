@@ -582,6 +582,24 @@ jobs:
         # この穴は緑のまま静かに開き直るため）。
         run: node perf/verify-lhr.mjs
 
+  temp-db-no-locale:
+    # with-test-db.sh が LANG / LC_ALL の両方が未設定の macOS で起動できることの検証。
+    # 未設定だと postmaster が起動中にマルチスレッド化して FATAL になる
+    # （"postmaster became multithreaded during startup"）。この故障は macOS 固有で、
+    # ubuntu では再現しないため runner を macOS に固定する。ローカル開発者の
+    # 環境（macOS）で `env -u LANG -u LC_ALL ts/scripts/with-test-db.sh ...` が落ちたことが発端。
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: 'postgres をインストール'
+        run: |
+          brew install postgresql@16
+          echo "$(brew --prefix postgresql@16)/bin" >> "$GITHUB_PATH"
+      - name: 'ロケール未設定で一時 postgres を起動し migrations を適用する'
+        # 起動後に実際に問い合わせて、サーバーが応答することまで確かめる。
+        run: env -u LANG -u LC_ALL ts/scripts/with-test-db.sh psql -v ON_ERROR_STOP=1 -c 'select 1'
+
   docker-build:
     # Issue #33/#35 再発防止: Dockerfile の腐敗（pnpm workspace 追従漏れ等）が deploy-prod で
     # 初めて発覚する穴を塞ぎ、PR 段階で 7 イメージの実ビルドを検証する。
@@ -613,7 +631,7 @@ jobs:
     # **docker-build を needs に入れない。** PR イベント限定のジョブで main push では常に
     # skipped になる。入れると判定が none（通知しない）へ倒れ、通知が永久に飛ばなくなる。
     # needs と下の --job 引数の食い違いは scripts/test/cases/73-ts-ci-notify.sh が機械照合する。
-    needs: [lint-build-test, e2e, e2e-surfaces, lighthouse, go-test, cross-runtime]
+    needs: [lint-build-test, e2e, e2e-surfaces, lighthouse, go-test, cross-runtime, temp-db-no-locale]
     # main への push だけを見る。PR のレビュー中の赤で追跡 Issue を立てない。
     # always() が無いと needs の失敗でこのジョブごと skip され、赤のときに限って黙る。
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -641,6 +659,7 @@ jobs:
           R_LIGHTHOUSE: ${{ needs.lighthouse.result }}
           R_GO_TEST: ${{ needs.go-test.result }}
           R_CROSS_RUNTIME: ${{ needs.cross-runtime.result }}
+          R_TEMP_DB_NO_LOCALE: ${{ needs.temp-db-no-locale.result }}
         run: |
           set -euo pipefail
           # 引数列は 1 度だけ組んで判定と本文の両方で使い回す。2 箇所へ書くと片方だけが腐り、
@@ -652,7 +671,8 @@ jobs:
             --job "e2e-surfaces=${R_E2E_SURFACES}" \
             --job "lighthouse=${R_LIGHTHOUSE}" \
             --job "go-test=${R_GO_TEST}" \
-            --job "cross-runtime=${R_CROSS_RUNTIME}"
+            --job "cross-runtime=${R_CROSS_RUNTIME}" \
+            --job "temp-db-no-locale=${R_TEMP_DB_NO_LOCALE}"
 
           # 判定も本文の組み立ても scripts/ts-ci-notify.sh が持つ（Issue #109 の決定）。
           # yml の run ブロックへ書くと、検証の器が yml からの sed 抽出へ逆戻りし、
