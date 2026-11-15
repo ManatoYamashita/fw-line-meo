@@ -18,11 +18,13 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../components/auth-guard';
+import { AgencyName, EntityLink } from '../../components/entity-link';
 import { ListLoading } from '../../components/list-loading';
 import { ownerDistinctLabel, ownerLineLinkLabel } from '../../components/owner-roster-table';
 import { TopNav } from '../../components/top-nav';
 import { notifyActionWarning } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
+import { ownerPath, storePath } from '../../lib/entity-paths';
 import { getOwners } from '../../lib/api';
 import type { OwnerListItem } from '../../lib/types';
 import { OwnerLineUnlinkControl } from '../../components/owner-line-unlink-control';
@@ -47,16 +49,18 @@ const OWNER_LIST_ERROR_TEXT =
 // 全ロール共通の列数（オーナー名・店舗・LINE の連携・操作）。operator のみ担当代理店列が加わる。
 const BASE_COLUMN_COUNT = 4;
 
-function OwnerStoreNames({ storeNames }: { storeNames: readonly string[] }) {
-  if (storeNames.length === 0) {
+function OwnerStores({ stores }: { stores: OwnerListItem['stores'] }) {
+  if (stores.length === 0) {
     return <span className="text-muted-foreground">確定済みの店舗はありません</span>;
   }
   return (
     // Preflight が list-style を消すため、一部のブラウザは一覧の意味論を落とす。明示する。
     <ul role="list" className="flex flex-col gap-1">
-      {storeNames.map((storeName, index) => (
-        // 店名は一意とは限らない（同名の別店舗がありうる）ので、並び順を添えて key にする。
-        <li key={`${index}:${storeName}`}>{storeName}</li>
+      {stores.map((store) => (
+        // 店舗の詳細への導線（agency-dashboard Req 10.1・Issue #526）。店名は一意とは限らないので、id を key にする。
+        <li key={store.id}>
+          <EntityLink href={storePath(store.id)}>{store.name}</EntityLink>
+        </li>
       ))}
     </ul>
   );
@@ -166,12 +170,20 @@ function OwnersView() {
               {state.owners.map((owner) => (
                 <TableRow key={owner.id}>
                   {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。 */}
-                  <TableCell wrap="prose">{ownerDistinctLabel(owner)}</TableCell>
-                  {isOperator && <TableCell wrap="prose">{owner.agencyName}</TableCell>}
                   <TableCell wrap="prose">
-                    <OwnerStoreNames storeNames={owner.storeNames} />
+                    {/* 解除済みのオーナーも同じリンクにする。状態は詳細で示す（Req 10.6）。 */}
+                    <EntityLink href={ownerPath(owner.id)}>{ownerDistinctLabel(owner)}</EntityLink>
                   </TableCell>
-                  {/* 状態は文字で示し、色だけで伝えない。引継ぎ先の名前は長くなりうるので折り返させる。 */}
+                  {isOperator && (
+                    <TableCell wrap="prose">
+                      <AgencyName agencyId={owner.agencyId} name={owner.agencyName} />
+                    </TableCell>
+                  )}
+                  <TableCell wrap="prose">
+                    <OwnerStores stores={owner.stores} />
+                  </TableCell>
+                  {/* 状態は文字で示し、色だけで伝えない。引継ぎ先の名前は長くなりうるので折り返させる。
+                    * 引継ぎ先は文中の名前なので、リンクにしない（Req 10.7）。 */}
                   <TableCell wrap="prose">{ownerLineLinkLabel(owner)}</TableCell>
                   {/* 押しボタンの下に結果の文言を出す。結果の文言だけが折り返すよう、自由記述の規則にする
                     * （折り返さない規則にすると失敗の文言が 1 行に伸び、表の幅を押し広げる）。 */}

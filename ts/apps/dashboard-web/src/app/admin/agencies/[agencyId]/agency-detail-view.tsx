@@ -19,6 +19,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@fwlm/ui/components/table';
+import { EntityLink } from '../../../../components/entity-link';
 import { ListLoading } from '../../../../components/list-loading';
 import { OwnerRosterTable, ownerDistinctLabel } from '../../../../components/owner-roster-table';
 import { groupStoresByOwner } from '../../../../lib/agency-roster';
@@ -27,7 +28,7 @@ import {
   unrecordedOwnerCount,
   usersOfAgency,
 } from '../../../../lib/agency-detail';
-import { toEntityId } from '../../../../lib/entity-paths';
+import { ownerPath, storePath, toEntityId } from '../../../../lib/entity-paths';
 import {
   getAgencies,
   getDashboardUsers,
@@ -326,7 +327,7 @@ export function AgencyDetailView({ agencyId: rawAgencyId }: { agencyId: string }
           </EmptyState>
         )}
         {owners.kind === 'ready' && stores.kind !== 'loading' && owners.value.length > 0 && (
-          <OwnerRosterTable label="オーナー" owners={owners.value} stores={storesForRoster} showInviteCode />
+          <OwnerRosterTable label="オーナー" owners={owners.value} stores={storesForRoster} showInviteCode linkNames />
         )}
       </Section>
 
@@ -354,8 +355,12 @@ export function AgencyDetailView({ agencyId: rawAgencyId }: { agencyId: string }
               <TableBody>
                 {stores.value.map((store) => (
                   <TableRow key={store.id}>
-                    <TableCell wrap="prose">{store.name}</TableCell>
-                    <TableCell wrap="prose">{store.ownerDisplayName ?? NO_DISPLAY_NAME}</TableCell>
+                    <TableCell wrap="prose">
+                      <EntityLink href={storePath(store.id)}>{store.name}</EntityLink>
+                    </TableCell>
+                    <TableCell wrap="prose">
+                      <EntityLink href={ownerPath(store.ownerId)}>{store.ownerDisplayName ?? NO_DISPLAY_NAME}</EntityLink>
+                    </TableCell>
                     <TableCell wrap="none">{PLACE_STATUS_LABEL[store.placeStatus]}</TableCell>
                     <TableCell wrap="none">{storeSuspensionLabel(store.suspendedAt)}</TableCell>
                   </TableRow>
@@ -437,7 +442,9 @@ function RegisteredOwners({
     <ul role="list" className="flex flex-col gap-1">
       {registered.map((owner) => (
         // 表示名の無いオーナー同士も作成日で区別できる名前にする。
-        <li key={owner.id}>{ownerDistinctLabel(owner)}</li>
+        <li key={owner.id}>
+          <EntityLink href={ownerPath(owner.id)}>{ownerDistinctLabel(owner)}</EntityLink>
+        </li>
       ))}
     </ul>
   );

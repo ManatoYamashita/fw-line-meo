@@ -26,11 +26,14 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../components/auth-guard';
+import { AgencyName, EntityLink } from '../../components/entity-link';
 import { ListLoading } from '../../components/list-loading';
+import { ownerDisplayLabel } from '../../components/owner-roster-table';
 import { StoreQrPanel } from '../../components/store-qr-panel';
 import { TopNav } from '../../components/top-nav';
 import { notifyActionWarning } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
+import { ownerPath, storePath } from '../../lib/entity-paths';
 import { getStores } from '../../lib/api';
 import { PLACE_STATUS_LABEL, competitorStatusLabel } from '../../lib/status-labels';
 import type { StoreListItem } from '../../lib/types';
@@ -56,8 +59,8 @@ const LIST_SCOPE_TEXT = {
   agency: 'この一覧には、あなたの代理店が担当する店舗が表示されます。',
 } as const;
 
-// 全ロール共通の列数（店名・店舗特定・競合設定・利用状況・QR）。operator のみ担当代理店列が加わる。
-const BASE_COLUMN_COUNT = 5;
+// 全ロール共通の列数（店名・オーナー・店舗特定・競合設定・利用状況・QR）。operator のみ担当代理店列が加わる。
+const BASE_COLUMN_COUNT = 6;
 
 // 店舗一覧本体。AuthGuard 配下でのみ描画されるため me は非 null 前提だが、防御的に optional 参照する。
 //
@@ -197,6 +200,8 @@ function StoresView() {
               <TableHead>
                 <TableRow>
                   <TableHeaderCell>店名</TableHeaderCell>
+                  {/* オーナーの詳細への導線（agency-dashboard Req 10.2・10.5・Issue #526） */}
+                  <TableHeaderCell>オーナー</TableHeaderCell>
                   <TableHeaderCell>店舗特定</TableHeaderCell>
                   <TableHeaderCell>競合設定</TableHeaderCell>
                   {/* operator は全店舗を担当代理店が識別できる形で見る（Req 4.2） */}
@@ -212,7 +217,16 @@ function StoresView() {
                     <TableRow key={store.id}>
                       {/* 折り返しの規則は列の中身の種類で選ぶ（design-language.md 7.18）。
                         * 面の側は語彙を選ぶだけで、幅も折り返しのクラスも書かない。 */}
-                      <TableCell wrap="prose">{store.name}</TableCell>
+                      <TableCell wrap="prose">
+                        {/* 停止中・未確定の店舗も同じリンクにする。状態は店舗の詳細で示す（Req 10.6）。 */}
+                        <EntityLink href={storePath(store.id)}>{store.name}</EntityLink>
+                      </TableCell>
+                      <TableCell wrap="prose">
+                        {/* 表示名が無いオーナーも「（表示名なし）」のままリンクにする（Req 10.5・10.6） */}
+                        <EntityLink href={ownerPath(store.ownerId)}>
+                          {ownerDisplayLabel({ displayName: store.ownerDisplayName })}
+                        </EntityLink>
+                      </TableCell>
                       {/* 店舗特定バッジ（Req 4.3） */}
                       <TableCell wrap="none">
                         {/* 表示語は状態語の対応表から引く（Issue #485）。判定はここに残し、停止の述語ガード
@@ -224,7 +238,11 @@ function StoresView() {
                       <TableCell wrap="none">
                         {competitorStatusLabel(store.competitorConfigured)}
                       </TableCell>
-                      {isOperator && <TableCell wrap="prose">{store.agencyName}</TableCell>}
+                      {isOperator && (
+                        <TableCell wrap="prose">
+                          <AgencyName agencyId={store.agencyId} name={store.agencyName} />
+                        </TableCell>
+                      )}
                       {/* 利用状況は札と押しボタンを 1 行に並べ、その下に結果の文言を出す。札と押しボタンは
                         * 部品側で折り返さないので、この列は自由記述の規則にして結果の文言だけを折り返させる
                         * （折り返さない規則にすると失敗の文言が 1 行に伸び、表の幅を押し広げる）。

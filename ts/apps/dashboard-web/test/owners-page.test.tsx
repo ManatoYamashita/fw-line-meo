@@ -450,3 +450,47 @@ describe('オーナー一覧: 解除の操作（1.4, 1.7, 2.4, 3.2）', () => {
     expect(screen.getByRole('table')).toBeTruthy();
   });
 });
+
+describe('オーナー一覧の名前のリンク（Issue #526・agency-dashboard Req 10.1・10.2・10.3・10.4・10.6・10.7）', () => {
+  it('運営: オーナー名はオーナーの詳細へ、店舗は店舗の詳細へ、担当代理店は代理店の詳細へのリンクにする', async () => {
+    ready('operator');
+    api.getOwners.mockResolvedValue({ ok: true, value: [linked] });
+    render(<OwnersPage />);
+    const owner = await screen.findByRole('link', { name: '連携中のオーナー' });
+    expect(owner.getAttribute('href')).toBe('/owners/o1');
+    const row = within(owner.closest('tr')!);
+    expect(row.getByRole('link', { name: '鳥貴族 渋谷店' }).getAttribute('href')).toBe('/stores/s1');
+    expect(row.getByRole('link', { name: '鳥貴族 新宿店' }).getAttribute('href')).toBe('/stores/s2');
+    expect(row.getByRole('link', { name: '代理店アルファ' }).getAttribute('href')).toBe('/admin/agencies/a1');
+  });
+
+  it('代理店ロール: オーナーと店舗はリンクで、担当代理店の列もリンクも出さない（10.4）', async () => {
+    ready('agency');
+    api.getOwners.mockResolvedValue({ ok: true, value: [linked] });
+    render(<OwnersPage />);
+    await screen.findByRole('link', { name: '連携中のオーナー' });
+    expect(screen.getByRole('link', { name: '鳥貴族 渋谷店' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '代理店アルファ' })).toBeNull();
+  });
+
+  it('解除済みのオーナーの名前もリンクにし、引継ぎ先の名前は文のままでリンクにしない（10.6・10.7）', async () => {
+    ready('operator');
+    api.getOwners.mockResolvedValue({ ok: true, value: [takenOver] });
+    render(<OwnersPage />);
+    const owner = await screen.findByRole('link', { name: '引き継がれたオーナー' });
+    expect(owner.getAttribute('href')).toBe('/owners/o4');
+    const row = owner.closest('tr')!;
+    expect(row.textContent).toContain('引継ぎ先: 新しい担当者');
+    expect(within(row).queryByRole('link', { name: /新しい担当者/ })).toBeNull();
+  });
+
+  it('見出し・既存の操作は残る（10.9）', async () => {
+    ready('operator');
+    api.getOwners.mockResolvedValue({ ok: true, value: [linked] });
+    render(<OwnersPage />);
+    await screen.findByRole('link', { name: '連携中のオーナー' });
+    const h1 = screen.getByRole('heading', { level: 1, name: 'オーナー一覧' });
+    expect(h1.querySelector('a')).toBeNull();
+    expect(screen.getByRole('button', { name: /LINE の連携を解除/ })).toBeTruthy();
+  });
+});
