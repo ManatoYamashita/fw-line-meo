@@ -1080,3 +1080,54 @@ describe('店舗一覧ページ: 利用状況', () => {
     expect(screen.queryByRole('link', { name: /鳥貴族 渋谷店/ })).toBeNull();
   });
 });
+
+describe('店舗一覧ページ: 用語の説明（Issue #525）', () => {
+  const TERMS = ['オーナー', '代理店'];
+  const DEFINITIONS = [
+    'LINE 公式アカウントに友だち登録し、店舗を持つ飲食店の経営者です。',
+    'オーナーの店舗登録と運用を担当する事業者です。',
+  ];
+  const SCOPE_TEXT = {
+    operator: 'この一覧には、全代理店の店舗が表示されます。',
+    agency: 'この一覧には、あなたの代理店が担当する店舗が表示されます。',
+  } as const;
+
+  for (const [role, other] of [
+    ['operator', 'agency'],
+    ['agency', 'operator'],
+  ] as const) {
+    it(`${role} には共通の定義 2 つと ${role} 向けの 1 文を出す`, async () => {
+      ready(role);
+      api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+      render(<StoresPage />);
+      const scope = within(await screen.findByRole('main'));
+      await scope.findByText('鳥貴族 渋谷店');
+      // 並びまで完全一致で固定する。定義を 1 つ足す・落とす改変を包含判定は捕まえない。
+      expect(scope.getAllByRole('term').map((el) => el.textContent)).toEqual(TERMS);
+      expect(scope.getAllByRole('definition').map((el) => el.textContent)).toEqual(DEFINITIONS);
+      expect(scope.getByText(SCOPE_TEXT[role])).toBeTruthy();
+      expect(scope.queryByText(SCOPE_TEXT[other])).toBeNull();
+    });
+  }
+
+  it('どの分岐でも説明を見出しの直後・一覧の状態表示より前に置く', async () => {
+    let visited = 0;
+    for (const branch of SURFACE_BRANCHES) {
+      ready(branch.role);
+      branch.arrange();
+      render(<StoresPage />);
+      const stateElement = (await branch.settle()) as Node;
+
+      const heading = screen.getByRole('heading', { level: 1, name: '店舗一覧' });
+      const terms = screen.getAllByRole('term');
+      expect(terms.map((el) => el.textContent), branch.name).toEqual(TERMS);
+      const scopeText = screen.getByText(SCOPE_TEXT[branch.role]);
+      const following = Node.DOCUMENT_POSITION_FOLLOWING;
+      expect(heading.compareDocumentPosition(terms[0]!) & following, branch.name).toBeTruthy();
+      expect(scopeText.compareDocumentPosition(stateElement) & following, branch.name).toBeTruthy();
+      visited += 1;
+      cleanup();
+    }
+    expect(visited).toBe(5);
+  });
+});
