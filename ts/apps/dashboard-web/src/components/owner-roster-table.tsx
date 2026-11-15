@@ -34,7 +34,7 @@ import type { OwnerListItem } from '../lib/types';
 const NO_DISPLAY_NAME = '（表示名なし）';
 const UNKNOWN_DATE = '不明';
 // 招待コードの記録が無いオーナー（記録を始める前の登録）。推定のコードで埋めない（agency-dashboard Req 8.4・9.4）。
-const NO_INVITE_CODE_RECORD = '記録なし（この機能より前の登録）';
+export const NO_INVITE_CODE_RECORD = '記録なし（この機能より前の登録）';
 
 /** 表に出すオーナーの名前。表示名が無ければ「（表示名なし）」（id は利用者に意味が無いので出さない）。 */
 export function ownerDisplayLabel(owner: Pick<OwnerListItem, 'displayName'>): string {
