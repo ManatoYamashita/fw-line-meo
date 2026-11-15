@@ -34,6 +34,7 @@
 - migration `0005_agency_dashboard.sql`（`dashboard_users` への列追加）と関連ドキュメント（ERD・write-boundary）・DB テスト
 - migration `0017_owner_invite_code.sql`（`owners.invite_code_id` の追加・Requirement 8・Issue #486）と、それを書く・読むための契約変更（`@fwlm/db` の `createOwner` / `findActiveInviteCode` / `listOwnersByAgency`（`owner-line-unlink` 4.4 で `listOwners` へ置き換え）、line-webhook の `createOwner` 呼び出し 1 箇所への id の受け渡し）
 - 代理店詳細画面（`/admin/agencies/[agencyId]`・Requirement 9・Issue #486）と、そのために共用部品（`OwnerRosterTable`・`TopNav`・状態の表示語）へ足す変更
+- 一覧の名前から詳細への遷移、店舗の詳細（`/stores/[storeId]`）・オーナーの詳細（`/owners/[ownerId]`）、1 件を返す GET /stores/:id・GET /owners/:id と、そのために共用部品（`StoreQrPanel`・`OwnerRosterTable`・停止と連携解除の操作部品）へ足す変更（Requirement 10・11・Issue #526）
 - 自サービスの CI/デプロイ配線（`push-images.sh`・`deploy.yml`・`infra/envs/prod/main.tf` への dashboard-web / dashboard-api エントリ追加）
 
 ### Out of Boundary
@@ -62,6 +63,9 @@
 - `agency_invite_codes` の物理削除の導入 → Requirement 8.3 の再検証必須（記録が参照するコードは `ON DELETE RESTRICT` で消せない）
 - `OwnerRosterTable` の列・引数の変更 → 店舗登録（3.12）と代理店詳細（9.2）の両方の再検証必須（同じ部品を 2 面が使う）
 - GET /owners・GET /stores・GET /invite-codes が、存在しない代理店の指定に空配列以外（404 など）を返すようにする変更 → 代理店詳細の存在判定（9.6）の再検証
+- `listStoresWithStatus` の列・判定の変更 → GET /stores/:id とオーナーの詳細の店舗の表（11.1・11.7）の再検証（同じ列の定義を共有する）
+- `StoreSuspensionControl`・`OwnerLineUnlinkControl`・`StoreQrPanel` の条件・引数の変更 → 一覧と詳細の両方の再検証必須（同じ部品を 2 面が使う・11.2・11.5・11.8）
+- GET /stores/:id・GET /owners/:id が担当外と不存在を区別する応答（403 と 404 など）を返すようにする変更 → 11.9 に反する。応答は 404 の 1 通りに保つ
 
 ## Architecture
 
@@ -200,6 +204,7 @@ db/test/assertions/50_agency_dashboard.sql # 0005 の制約検証
 - `infra/envs/prod/main.tf`（+ `variables.tf`） — `dashboard-web` サービス追加・dashboard-api の env（`DASHBOARD_WEB_ORIGIN`・`PLACES_API_KEY` secret）追加
 
 - **代理店詳細（Requirement 9・Issue #486）**: 新規 `ts/apps/dashboard-web/src/app/admin/agencies/[agencyId]/page.tsx`・`agency-detail-view.tsx`・`src/lib/agency-detail.ts`。変更 `src/app/admin/agencies/page.tsx`（代理店名をリンクに）・`src/components/owner-roster-table.tsx`（`showInviteCode`）・`src/components/top-nav.tsx`（下位の経路の現在地）・`src/lib/status-labels.ts`（有効／無効）と、その語を使う `src/app/invite-codes/page.tsx`・`src/app/admin/users/page.tsx`・E2E の `e2e/fixtures/api.ts`。API・DB は変えない
+- **名前からの遷移と店舗・オーナーの詳細（Requirement 10・11・Issue #526）**: 新規 `ts/apps/dashboard-api/src/store-detail.ts`・`owner-detail.ts`、`ts/apps/dashboard-web/src/app/stores/[storeId]/page.tsx`・`store-detail-view.tsx`、`src/app/owners/[ownerId]/page.tsx`・`owner-detail-view.tsx`、`src/lib/entity-paths.ts`（UUID の判定と経路）、`src/components/entity-link.tsx`。変更 `@fwlm/db` の `stores.ts`（`findStoreWithStatus`・`listStoresWithStatus` の絞り込みに `ownerId`）・`owners.ts`（`findOwner`）、dashboard-api の `app.ts`・`index.ts`・`owners-list.ts`（GET /owners に `agencyId`・`stores` を足す）、dashboard-web の `stores/page.tsx`・`owners/page.tsx`・`admin/users/page.tsx`・`admin/agencies/[agencyId]/agency-detail-view.tsx`・`components/owner-roster-table.tsx`・`components/store-qr-panel.tsx`・`lib/api.ts`・`lib/types.ts`・`lib/status-labels.ts`（競合設定の語）、`owners/owner-line-unlink-control.tsx` と `stores/store-suspension-control.tsx` を `components/` へ移す、E2E の `e2e/fixtures/api.ts`・`dashboard-surfaces.spec.ts`・`mobile-layout.spec.ts`。新しい表・migration は無い
 
 > `db/write-boundary.md` は新テーブルなしのため表の変更不要（`dashboard_users` 等は TS 層登録済み）。`make db-verify-docs` の通過は必須。
 
@@ -334,6 +339,29 @@ sequenceDiagram
 | 9.8 | 0 件の区分 | AgencyDetailView（`EmptyState`） | — |
 | 9.9 | 代理店ロールに管理情報を出さない | AgencyDetailView の operator 判定（API を呼ばない）, admin.ts の operator 限定（GET /dashboard-users・/agencies） | 6.5・2.3 |
 | 9.10 | 閲覧のみ | AgencyDetailView に書込の API 呼び出しを置かない | — |
+| 10.1 | 表の店舗名から店舗の詳細へ | EntityLink（`storePath`）: stores/page・owners/page・AgencyDetailView の店舗の区分・OwnerRosterTable（`linkNames`） | GET /owners の `stores: { id, name }[]` |
+| 10.2 | 表のオーナー名からオーナーの詳細へ | EntityLink（`ownerPath`）: stores/page の「オーナー」列・owners/page・AgencyDetailView の店舗の区分と招待コードの区分・OwnerRosterTable（`linkNames`） | GET /stores の `ownerId`（既存） |
+| 10.3 | 運営は代理店名から代理店の詳細へ | AgencyName（operator のときだけ `agencyPath`）: stores/page・owners/page・admin/users/page | GET /owners の `agencyId`（追加） |
+| 10.4 | 代理店ロールに代理店名の導線を出さない | AgencyName の role 判定 | 代理店ロールの画面には担当代理店の列がもともと無い |
+| 10.5 | 店舗一覧にオーナー | stores/page の「オーナー」列（表示名なしは「（表示名なし）」） | GET /stores の `ownerDisplayName`（既存） |
+| 10.6 | 特殊な状態の名前も導線 | EntityLink は状態を引数に取らない | 状態は詳細で示す（11.1・11.6） |
+| 10.7 | 導線にしない名前 | 見出し・QR パネルの題・引継ぎ先の文・詳細自身・店舗登録（OwnerRosterTable は `linkNames` を渡さない） | — |
+| 10.8 | 操作できるリンク | EntityLink（`next/link`＋`textLinkVariants`・§7.21） | `text-link-usage.test.ts` の数を更新 |
+| 10.9 | 既存の情報と操作を欠かさない | stores/page・owners/page の既存の列と操作部品は残す | 既存試験が緑のまま |
+| 11.1 | 店舗の基本情報 | StoreDetailView の概要（`dl`） | GET /stores/:id |
+| 11.2 | 店舗の詳細の QR | StoreDetailView が StoreQrPanel を開いた状態で置く（`onClose` なし） | GET /stores/:id/qr.png・review-funnel（既存） |
+| 11.3 | 停止中は QR なし | StoreDetailView（停止を先に判定） | serviceable-predicate ガード |
+| 11.4 | 未確定は QR なし | StoreDetailView | 同上 |
+| 11.5 | 停止・再開 | StoreSuspensionControl（`components/` へ移設）→ GET /stores/:id で読み直し | POST /stores/:id/suspend・resume（既存） |
+| 11.6 | オーナーの基本情報 | OwnerDetailView の概要（`dl`） | GET /owners/:id |
+| 11.7 | オーナーの店舗の表（操作なし） | OwnerDetailView の店舗の表 | GET /owners/:id の `stores` |
+| 11.8 | 連携の解除 | OwnerLineUnlinkControl（`components/` へ移設）→ GET /owners/:id で読み直し | POST /owners/:id/unlink（既存） |
+| 11.9 | 担当外と不存在を区別しない | store-detail.ts・owner-detail.ts（範囲つき 1 文の取得・同じ本文の 404）, 画面の `not_found` | QR・実績の取得は変えない |
+| 11.10 | 閲覧できない情報を送らない | 1 件の取得（範囲は SQL の WHERE） | 全件を端末で絞り込まない |
+| 11.11 | 取得失敗の表示 | 詳細の `error` 状態（危険の通知＋再読み込み） | 404 以外の失敗はすべて `error` |
+| 11.12 | 戻る導線と現在地 | 詳細の「店舗一覧へ戻る」「オーナー一覧へ戻る」, TopNav（既存の前方一致の `aria-current="true"`） | — |
+| 11.13 | ほかの変更手段を置かない | 詳細から呼ぶ書込は suspend・resume・unlink だけ | — |
+| 11.14 | 新しい集計を加えない | StoreQrPanel の実績をそのまま使う | 新しい API・SQL の集計なし |
 
 ## Components and Interfaces
 
@@ -430,6 +458,8 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 | GET | /me | — | `{ user: { role, agencyId, agencyName, displayName } }` | 401, 403(unregistered/disabled) |
 | GET | /stores | `?agencyId=`（operator のみ有効） | `{ stores: StoreListItem[] }` | 401, 403 |
 | GET | /owners | `?agencyId=`（operator は任意・未指定は全代理店。agency は自代理店に束縛） | `{ owners: OwnerListItem[] }`（各オーナーに登録に用いた招待コード `inviteCode: { id, code, disabled } \| null`・null = 記録なし・Issue #486。連携状態などの項目は下の注記） | 401, 403 |
+| GET | /stores/:id | — | `{ store: StoreListItem }`（GET /stores の 1 行と同じ形・Issue #526） | 401, 403(unregistered/disabled), 404(形の不正・不存在・担当外を区別しない) |
+| GET | /owners/:id | — | `{ owner: OwnerListItem, stores: StoreListItem[] }`（`owner` は GET /owners の 1 行と同じ形。`stores` は当該オーナーの全店舗で未確定を含む・Issue #526） | 401, 403(unregistered/disabled), 404(同上) |
 | GET | /categories | — | `{ categories: { code, label }[] }` | 401, 403 |
 | POST | /stores/search | `{ query: string }` | `{ candidates: (StoreCandidate & { alreadyRegistered: boolean })[] }`（最大10・0件は空配列で 200。`alreadyRegistered` は `stores.place_id` に同値があれば true で停止中の店舗を含む。どの店舗・オーナー・代理店かは返さない・Issue #485） | 400, 401, 403, 500(internal・登録済みの照合の失敗), 502(places_error) |
 | POST | /stores | `{ ownerId, candidate: StoreCandidate, categoryCode? }` | `{ storeId }` | 400, 401, 403, 409(place_already_registered) |
@@ -548,6 +578,48 @@ export interface OwnerListItem {
 - **推定で埋めない（8.4）**: アクセサにも migration にも、既存行の `invite_code_id` を書く処理を置かない。`null` を「この機能より前の登録」以外の意味で使わない（コードは消せないので、記録の後で `null` に戻る経路は無い）
 - 監査ログ `owner_created` は変えない（対象はオーナーのまま。コードは `owners` の列で辿れる）
 
+#### 店舗の詳細・オーナーの詳細の取得（Requirement 11・Issue #526）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 店舗 1 件・オーナー 1 人を、利用者の範囲に限って返す。範囲外と不存在を区別しない |
+| Requirements | 11.1, 11.6, 11.7, 11.9, 11.10（GET /owners の変更は 10.1–10.3） |
+
+**Contracts**: API [x] / Service [x]
+
+```typescript
+// @fwlm/db stores.ts
+export async function findStoreWithStatus(
+  db: Queryable,
+  input: { storeId: string; agencyId: string | null }, // null = 全代理店（運営）
+): Promise<StoreListItem | null>;
+// listStoresWithStatus の絞り込みに ownerId を足す（オーナーの詳細の店舗の表）
+export async function listStoresWithStatus(
+  db: Queryable,
+  filter: { agencyId?: string; ownerId?: string },
+): Promise<StoreListItem[]>;
+
+// @fwlm/db owners.ts
+export async function findOwner(
+  db: Queryable,
+  input: { ownerId: string; agencyId: string | null },
+): Promise<OwnerListItem | null>;
+```
+
+- **範囲の判定と取得を 1 文で行う。** `setStoreSuspension` と同じく、`WHERE s.id = $1::uuid AND ($2::uuid IS NULL OR o.agency_id = $2::uuid)` の形で範囲を SQL に含める。先に行を取ってから所属を比べる 2 段の作りにしない（範囲外の行を API のプロセスへ運ばない・比べ忘れの余地を作らない）
+- **列の定義は一覧と共有する。** `findStoreWithStatus` は `listStoresWithStatus` と同じ SELECT 句・JOIN を使う（SQL の断片をモジュール内の定数にして両方から使う）。`findOwner` も `listOwners` と同じ。一覧と詳細で同じ店舗の状態が食い違う余地を作らない。並びの句だけが違う
+- ハンドラ（`store-detail.ts`・`owner-detail.ts`）: 認証 → UUID の形の検査（形でなければ DB を呼ばずに 404）→ `resolveAgencyScope(user, undefined)`（運営 = null、代理店 = 自代理店）→ 取得 → `null` なら 404。404 の本文は形の不正・不存在・範囲外で同じ `{ error: { code: 'not_found', message: '店舗が見つかりません' } }`（オーナーは「オーナーが見つかりません」）にする（11.9）。応答時間の差による推測は対象にしない（`setStoreSuspension` と同じ水準）
+- GET /owners/:id は `findOwner` が `null` でなかったときだけ `listStoresWithStatus({ ownerId })` を呼ぶ（範囲外のオーナーの店舗を読まない）。オーナーの範囲内なら店舗も同じ代理店に属する（`stores.owner_id` → `owners.agency_id` の構造・2.4）ので、店舗側で範囲を重ねて判定しない
+- 店舗の表は未確定の店舗も含める（11.7 は場所の確定状態を列に持つ）。GET /owners の `stores` は従来の `storeNames` と同じく確定済みだけ（オーナー一覧の表示を変えない）
+- `serviceable-predicate` のガード: 新しい SQL は `place_status = 'confirmed'` の判定を持たない（`findStoreWithStatus` は状態を列として返すだけ）。`listOwners` の確定済みの絞り込みは既存の印の行をそのまま使う
+- 読み出しだけで、新しい表・列は無い。書込境界（`db/write-boundary.md`）は変わらない
+
+**GET /owners の契約の追加（10.1–10.3）**
+
+- 各オーナーに `agencyId`（代理店の詳細への経路に使う・運営だけが使う）と `stores: { id, name }[]`（確定済みの店舗・作成順・`storeNames` と同じ並び）を足す。DAL の `listOwners` は `agencyId` を既に返しており、店舗は `array_agg` を `json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)` に置き換える
+- **`storeNames` はこの段では消さない。** dashboard-api と dashboard-web は別々にデプロイされる。応答から先に消すと、旧い画面が `storeNames` を読んで描画に失敗する。画面を `stores` へ切り替えて本番へ出した後のタスクで `storeNames` を応答と型から消す
+- 店舗の id を足しても、利用者が見られる範囲は変わらない（同じオーナーの同じ店舗の名前を既に返している）
+
 ### dashboard-web
 
 #### AuthProvider / api client（`src/lib/`）
@@ -615,6 +687,54 @@ export interface OwnerListItem {
 - `components/top-nav.tsx`: 現在地の判定を「完全一致は `aria-current="page"`。どの項目にも完全一致しないときは、`href + '/'` で始まる最も長い項目に `aria-current="true"`」に変える。`/stores/new` は自分の項目に完全一致するので、`/stores` の項目は現在地にならない（印が 1 つの一意性を保つ）。下線は `aria-[current=page]` と `aria-[current=true]` の両方から出し、全リンクの class は同一のまま（正典 §7.8）
 - `lib/status-labels.ts`: 「有効／無効」の表示語を足す。招待コード・利用者管理の画面が直接書いている同じ語もここから引くように置き換える（語は変えない）
 - `app/admin/agencies/page.tsx`: 代理店名のセルを詳細へのリンクにする。行全体は押せるようにしない（§7.2）
+
+#### 名前からの遷移と店舗・オーナーの詳細（Requirement 10・11・Issue #526）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 表の名前から詳細へ進めるようにし、店舗 1 件・オーナー 1 人の状態とつながりと操作を 1 画面にまとめる |
+| Requirements | 10.1–10.9, 11.1–11.14 |
+
+**経路とファイル**
+
+- `app/stores/[storeId]/page.tsx`・`app/owners/[ownerId]/page.tsx`（サーバー部品）: 代理店詳細と同じく `PageProps` の `params` を `await` して文字列で `AuthGuard`・`TopNav`・各 View へ渡す。`/stores/new` は静的な経路なので `[storeId]` より優先される（`new` は UUID の形でもない）
+- `store-detail-view.tsx`・`owner-detail-view.tsx`（クライアント部品）: 取得・状態・描画
+- `lib/entity-paths.ts`（純粋関数）: `toEntityId`（UUID の形なら小文字へ正規化、形でなければ null。`agency-detail.ts` の `toAgencyId` をここへ移し、代理店詳細もこれを使う）・`storePath(id)`・`ownerPath(id)`・`agencyPath(id)`
+- `components/entity-link.tsx`: `EntityLink`（`next/link`＋`textLinkVariants()`。子に名前、`href` に経路）と `AgencyName`（`me.role === 'operator'` なら `EntityLink`、そうでなければ素の文字・10.3・10.4）。名前の表示（「（表示名なし）」など）は呼び出し側が決める
+
+**取得と状態（11.9–11.11）**
+
+- 状態は `'loading' | 'error' | 'not_found' | 'ready'`。経路の id が UUID の形でなければ API を呼ばずに `not_found`
+- API の 404 は `not_found`、それ以外の失敗（401 を除く通信・5xx・403）は `error`。`not_found` は「店舗が見つかりません」（「オーナーが見つかりません」）と一覧へ戻るリンクだけを描き、概要・表・操作を描かない（11.9）。`error` は危険の通知と「もう一度読み込む」（11.11）。どちらも 0 件や空の画面に見せない
+- 停止・再開、連携の解除の後は、その 1 件だけを読み直す（11.5・11.8）。店舗一覧と同じく、読み直しの間も表示を読み込み中へ置き換えない（押した操作部品の焦点と結果のライブリージョンを残す）。読み直しの失敗は表示を古いまま残し、失敗だけを上に示す。続けて操作されたときは最後の要求の応答だけを採る（店舗一覧の `refreshSeq` と同じ）
+
+**店舗の詳細の描画（11.1–11.5）**
+
+- 構造: 「店舗一覧へ戻る」のリンク → h1（店名）→ 概要（`dl`: 店舗特定・競合設定・オーナー（`EntityLink`）・担当代理店（運営だけ・`AgencyName`）・登録日（`formatJstDate`）・利用状況）→ 利用状況の操作（`StoreSuspensionControl`）→ h2「QR」の区分
+- QR の区分の分岐は店舗一覧と同じ順にする: 停止中 →「停止中のため発行できません」（11.3）、そうでなく場所が確定済み → `StoreQrPanel`、そうでなく未確定 →「場所の確定が必要です」（11.4）。停止の判定を先に置くのは店舗一覧と同じ理由（場所が未確定でも先に要るのは再開）で、`serviceable-predicate` のガードの数え方（同じファイルに停止の判定が確定の判定以上）にも合う
+- `StoreQrPanel` は店舗の詳細では開いた状態で置く（押して開く形にしない）。店舗一覧の Drawer は閉じる操作を持つが、詳細には閉じる先が無いので、`onClose` を省略可能にし、省略したときは閉じる押しボタンを描かない。`showHeader={false}` で題を描かず、区分の h2「QR」を題にする（10.7: パネルの題は導線にしない）。停止に切り替わったときはパネルを外し、停止前の画像と保存の導線を残さない（店舗一覧の Requirement 5.6 と同じ）
+- 店舗の詳細では店名・オーナー名以外の名前を導線にしない。h1 の店名は導線にしない（10.7）
+
+**オーナーの詳細の描画（11.6–11.8）**
+
+- 構造: 「オーナー一覧へ戻る」のリンク → h1（表示名、無ければ「（表示名なし）」）→ 概要（`dl`: オンボーディングの状態・登録日・招待コード（記録なしは `OwnerRosterTable` と同じ「記録なし（この機能より前の登録）」・8.5）・担当代理店（運営だけ・`AgencyName`）・LINE の連携（連携中／解除済み）・店舗の引き継ぎ先（文中の名前なので導線にしない・10.7。無ければ項目を出さない））→ 連携の解除の操作（`OwnerLineUnlinkControl`）→ h2「店舗」の区分
+- 店舗の表: 列は店名（`EntityLink`）・店舗特定・競合設定・利用状況。表示語は `status-labels.ts` から引く。競合設定の語（競合設定済み／競合未設定）は店舗一覧が直接書いているので、`status-labels.ts` に `COMPETITOR_STATUS_LABEL` として移し、店舗一覧・店舗の詳細・この表の 3 か所から引く（語は変えない）。停止・再開と QR の操作の列を置かない（11.7）。0 件は `EmptyState`「このオーナーの店舗はありません。」。`TableContainer` の `label` は「店舗」
+- 表示語・折り返しの語彙（§7.18）は店舗一覧に揃える
+
+**一覧の名前の導線（10.1–10.9）**
+
+- `stores/page.tsx`: 店名のセルを `EntityLink`（店舗の詳細）にする。店名の隣に「オーナー」列を足し（10.5）、`EntityLink`（オーナーの詳細）で表示名（無ければ「（表示名なし）」）を置く。担当代理店のセルは `AgencyName`。QR の発行・停止の列はそのまま（10.9）。`BASE_COLUMN_COUNT` を 6 にする（読み込み中の骨組みの列数）
+- `owners/page.tsx`: オーナー名のセル・店舗のセル（`stores` の各店）を `EntityLink`、担当代理店を `AgencyName`。引き継ぎ先の文は導線にしない（10.7）
+- `admin/users/page.tsx`: 所属代理店のセルを `AgencyName` にする（画面が運営専用なので常にリンクになる）。運営ロールの利用者の「—」はそのまま
+- `agency-detail-view.tsx`: 店舗の区分の店名・オーナー、招待コードの区分の「このコードで登録したオーナー」を `EntityLink` にする。見出しの代理店名は導線にしない
+- `components/owner-roster-table.tsx`: 省略可能な `linkNames?: boolean` を足す。`true` のときだけ表示名と登録済みの店舗名を `EntityLink` にする。代理店詳細は `true`、店舗登録は渡さない（10.7: 登録の手順の中の名前は導線にしない）。列ごとの引数がこれで 2 つになる（3 つ目に達したら列の定義を受ける形を検討する、の判断は据え置き）
+- `OwnerRosterTable` の店舗名の導線に店舗の id が要るので、`stores` の振り分け（`groupStoresByOwner`）が持つ GET /stores の行から id を使う（新しい取得は無い）
+- 行全体は押せるようにしない（§7.2）。下線は `textLinkVariants` の 1 か所で決まる（§7.21・`text-link-usage.test.ts` の `EXPECTED` を新しいリンクの数へ更新する）
+
+**共用部品の移設**
+
+- `app/stores/store-suspension-control.tsx`・`app/owners/owner-line-unlink-control.tsx` を `components/` へ移す（2 つの経路から使うため）。引数と振る舞いは変えない。`OwnerLineUnlinkControl` は `OwnerListItem` を受けるので、GET /owners/:id の `owner` を同じ形にしてそのまま渡す
+- `TopNav` は変えない。代理店詳細で入れた「完全一致が無ければ `href + '/'` で始まる最も長い項目に `aria-current="true"`」により、`/stores/{id}` で「店舗一覧」、`/owners/{id}` で「オーナー一覧」が現在地になる（11.12）。`/stores/new` は完全一致で従来どおり
 
 ## Data Models
 
@@ -721,6 +841,16 @@ ALTER TABLE owners
 5. 代理店管理の一覧: 代理店名がリンクになり、行全体は押せない
 6. E2E: スタブの応答に、記録あり・記録なしのオーナー、無効のコード、停止中の店舗、無効の利用者を含める。詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足し、捲れる領域は表の容器 4 件として宣言する
 
+### 名前からの遷移と店舗・オーナーの詳細の試験（Requirement 10・11・Issue #526）
+
+1. `@fwlm/db`（`*.db.test.ts`・実 postgres）: `findStoreWithStatus`・`findOwner` が範囲内は 1 件、範囲外と不存在はどちらも `null`。列の値が一覧の同じ行と一致する。`listStoresWithStatus({ ownerId })` が当該オーナーの店舗だけ（未確定を含む）。`listOwners` の `stores` が `storeNames` と同じ並びで id を持つ
+2. dashboard-api（単体）: GET /stores/:id・GET /owners/:id の 401・403(未登録・無効)・形の不正・不存在・範囲外の 404 の本文が同一（11.9）・範囲外で `listStoresWithStatus` を呼ばない。GET /owners の応答に `agencyId`・`stores` が載り、`storeNames` も残る
+3. `lib/entity-paths.ts`（単体）: `toEntityId` の形の判定と小文字化、経路の組み立て
+4. `StoreDetailView`・`OwnerDetailView`（描画）: 4 状態の区別（形の不正は API を呼ばない・404 は概要と操作を描かない・失敗は再読み込みで取り直す）／運営だけ担当代理店がリンク、代理店ロールは文字（10.3・10.4）／停止中・未確定・確定済みの QR の区分の分岐（停止を先に判定）／`StoreQrPanel` に閉じる押しボタンが無い／停止・再開・連携の解除の後に 1 件を読み直し、表示を読み込み中へ置き換えない／オーナーの店舗の表に操作が無い・0 件の案内（11.7）／書込の API は suspend・resume・unlink だけ（11.13）
+5. 一覧（描画）: 店舗一覧・オーナー一覧・利用者管理・代理店詳細の対象の名前がリンクで経路が正しい（10.1–10.3）／代理店ロールで代理店名がリンクでない（10.4）／店舗一覧のオーナー列（表示名なしを含む・10.5）／停止中・表示名なし・連携解除済みもリンク（10.6）／見出し・QR パネルの題・引継ぎ先・店舗登録のオーナー選択はリンクでない（10.7）／既存の列と操作が残る（10.9）。`OwnerRosterTable` は `linkNames` を渡さないとき描画が変わらない
+6. `TopNav`: `/stores/{id}` で「店舗一覧」、`/owners/{id}` で「オーナー一覧」に `"true"`
+7. E2E: スタブに GET /stores/:id・GET /owners/:id（範囲外を 404 で返す id を含む）を足す。店舗の詳細とオーナーの詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足す。店舗一覧は列が 1 つ増えても捲れる領域が表の容器 1 件のままであることを宣言し、`mobile-layout.spec.ts` の `measuredCells` を実測の literal へ更新する。店舗の詳細の捲れる領域は QR パネルの実績の表、オーナーの詳細は店舗の表として宣言する
+
 ### E2E / 手動検証（validation hooks）
 
 1. gmail アカウントでの初回ログイン→リンク→再ログイン（UID 安定）
@@ -749,6 +879,8 @@ ALTER TABLE owners
 - **デプロイが先だと、オーナー登録がすべて失敗する**（存在しない列への INSERT）。招待コードを送ったオーナーが登録されない。dashboard-api の GET /owners も JOIN する列が無く 500 になる
 - migration の本番適用は自動ではない（`deploy.yml` はイメージを差し替えるだけで migration を流さない）。マージの前に適用し、`information_schema.columns` と `pg_constraint` で列と 2 つの制約の存在を確かめてからマージする。`prod-schema-drift`（6 時間ごと）も適用漏れを検出するが、デプロイを止めないので、気づくのは登録が壊れた後になりうる
 - ロールバック: イメージを戻しても列は残ってよい（旧イメージは NULL で書く）。`0017` の巻き戻しは不要
+
+**Requirement 10・11（Issue #526）の順序**: migration は無い。dashboard-api（GET /stores/:id・GET /owners/:id・GET /owners の `agencyId`・`stores` の追加）を先にデプロイし、その後に dashboard-web を出す。逆順だと、新しい画面が無い API を呼んで詳細が「読み込めませんでした」になり、オーナー一覧の店舗が `stores` を読めない。GET /owners は項目を足すだけなので、旧い画面は API の先行デプロイの影響を受けない。`storeNames` の削除は新しい画面が本番に出た後の別タスクで行う
 
 ## Open Questions / Risks
 
