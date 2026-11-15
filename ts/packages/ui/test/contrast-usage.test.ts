@@ -372,7 +372,8 @@ const USAGE_PAIRS: readonly UsagePair[] = [
     utility: 'text-muted-foreground',
     source:
       'alert.tsx AlertDescription ／ card.tsx CardDescription ／ field.tsx FieldDescription・' +
-      '区切りラベル ／ input.tsx / textarea.tsx の placeholder ／ badge.tsx の hover の文字',
+      '区切りラベル ／ input.tsx / textarea.tsx の placeholder ／ badge.tsx の hover の文字 ／ ' +
+      'credit-footer.tsx の表記',
     foreground: 'muted-foreground',
     surface: 'muted',
     kind: 'text',

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { CreditFooter } from '@fwlm/ui/components/credit-footer';
 import './globals.css';
 import { AppToaster } from '../components/app-toaster';
 import { AuthProvider } from '../lib/auth-context';
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="bg-background text-foreground font-sans text-base leading-relaxed antialiased">
         <AuthProvider>
           {children}
+          <CreditFooter />
           <AppToaster />
         </AuthProvider>
       </body>
