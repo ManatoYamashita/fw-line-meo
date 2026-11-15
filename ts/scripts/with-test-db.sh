@@ -97,7 +97,11 @@ trap cleanup EXIT
 # 任せる（C のままだと upper('ä') や ORDER BY が CI の postgres:16＝en_US.utf8 とずれる）。
 as_server_user initdb -D "$PGDATA" -U postgres --auth=trust \
   --encoding=UTF8 --locale=C --locale-provider=icu --icu-locale=und >/dev/null
-as_server_user pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
+# macOS の postmaster は LANG も LC_ALL も無いと起動中にスレッドが立ち、自身を FATAL で止める
+# （"postmaster became multithreaded during startup"）。LC_ALL が空のときだけ、initdb の --locale と
+# 同じ C を補う。DB のロケールは initdb が固定済みなので、ここで与える値は起動処理にしか効かない。
+as_server_user env LC_ALL="${LC_ALL:-C}" \
+  pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
 
 createdb -h "$SOCKDIR" -U postgres "$DBNAME"
 for f in "$MIGRATIONS_DIR"/*.sql; do
