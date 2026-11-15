@@ -256,7 +256,7 @@
 > 共用部品（`StoreQrPanel`・`OwnerRosterTable`・停止と連携解除の操作部品）は、店舗一覧・オーナー一覧・店舗登録・代理店詳細も使う。それらを変えるタスクは、既存の面の描画を変えないことを完了状態に含める。
 > 停止の述語ガード（`check-store-serviceable-predicate.sh`）: 確定の比較は `store-detail-view.tsx` の QR の分岐の 1 か所だけに書く。表示語は添字と関数で引き、`EXPECTED_DISPLAY_ONLY_MARKERS` は 2 のまま変えない。
 
-- [ ] 9.1 `@fwlm/db`: 1 件の取得と絞り込み
+- [x] 9.1 `@fwlm/db`: 1 件の取得と絞り込み
   - `stores.ts`: `findStoreWithStatus(db, { storeId, agencyId })` を足し、`listStoresWithStatus` の絞り込みに `ownerId` を足す。SELECT 句と JOIN はモジュール内の定数にして、一覧と 1 件の取得の両方から使う。範囲は `WHERE s.id = $1::uuid AND ($2::uuid IS NULL OR o.agency_id = $2::uuid)` の 1 文に含める（取得した後で所属を比べる 2 段にしない）
   - `owners.ts`: `findOwner(db, { ownerId, agencyId })` を足し、`listOwners` と SELECT 句を共有する。店舗の集約を `array_agg(s.name …)` から `json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)` へ置き換え、`OwnerListItem` に `stores: { id, name }[]` を足す。`storeNames` は `stores` の名前から作って残す。表示だけの判定の印（`serviceable-predicate: display-only`）は、確定の判定の行と同じ行か直前の行に残す
   - UUID の形でない id は DB へ問い合わせずに `null` を返す（既存の `UUID_RE` を使う）

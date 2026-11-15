@@ -19,6 +19,7 @@ function owner(over: Partial<OwnerListItem> = {}): OwnerListItem {
     agencyName: '代理店A',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    stores: [],
     storeNames: [],
     takenOverBy: null,
     ...over,

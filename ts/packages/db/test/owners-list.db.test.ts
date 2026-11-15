@@ -52,6 +52,7 @@ const OWNER_LIST_ITEM_KEYS = [
   'menuUnlinkPending',
   'onboardingStatus',
   'storeNames',
+  'stores',
   'takenOverBy',
 ].sort();
 
@@ -207,6 +208,11 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
       lineLink: 'linked',
       menuUnlinkPending: false,
       // 未確定の店舗は含めず、停止中でも確定済みなら含める
+      stores: [
+        { id: ST_LINKED_FIRST, name: 'e7店舗あ' },
+        { id: ST_LINKED_SECOND, name: 'e7店舗い' },
+        { id: ST_SUSPENDED, name: 'e7停止中の店舗' },
+      ],
       storeNames: ['e7店舗あ', 'e7店舗い', 'e7停止中の店舗'],
       takenOverBy: null,
       inviteCode: null,
