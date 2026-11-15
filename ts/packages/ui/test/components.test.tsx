@@ -27,7 +27,12 @@ import userEvent from '@testing-library/user-event';
 import { Alert, AlertDescription, AlertTitle } from '../src/components/alert';
 import { Button } from '../src/components/button';
 import { Checkbox } from '../src/components/checkbox';
-import { CREDIT_COPYRIGHT, CREDIT_DEVELOPER, CreditFooter } from '../src/components/credit-footer';
+import {
+  CREDIT_COPYRIGHT_PREFIX,
+  CREDIT_DEVELOPER,
+  CREDIT_GOURMET,
+  CreditFooter,
+} from '../src/components/credit-footer';
 import { EmptyState } from '../src/components/empty-state';
 import {
   Field,
@@ -1995,18 +2000,26 @@ describe('文字のリンクの見た目（Issue #503・design-language.md 7.21�
 });
 
 describe('クレジット表記（Issue #523・design-language.md 7.22）', () => {
-  it('main の外の footer として、著作権者と開発者のリンクを 1 行で出す', () => {
+  it('main の外の footer として、著作権者と開発者の表記を 1 行で出し、新卒グルメと開発者だけがリンクを持つ', () => {
     render(<CreditFooter />);
     const footer = screen.getByRole('contentinfo');
-    expect(footer.textContent).toBe(`${CREDIT_COPYRIGHT} ・ 開発 ${CREDIT_DEVELOPER.label}`);
-    const link = within(footer).getByRole('link', { name: 'yamashitamana.to' });
-    expect(link.getAttribute('href')).toBe('https://www.yamashitamana.to/');
+    expect(footer.textContent).toBe(
+      `${CREDIT_COPYRIGHT_PREFIX} ${CREDIT_GOURMET.label} ・ 開発 ${CREDIT_DEVELOPER.label}`,
+    );
+    const links = within(footer).getAllByRole('link');
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['新卒グルメ', 'https://www.instagram.com/syokufun_gen/'],
+      ['yamashitamana.to', 'https://www.yamashitamana.to/'],
+    ]);
     // 文字のリンクの見た目は 7.21 の部品で付ける（直書きの下線にしない）。
-    expect([...link.classList]).toEqual(expect.arrayContaining(textLinkVariants().split(' ')));
+    for (const link of links) {
+      expect([...link.classList]).toEqual(expect.arrayContaining(textLinkVariants().split(' ')));
+    }
   });
 
   it('表記の正典は決めた文言のまま', () => {
-    expect(CREDIT_COPYRIGHT).toBe('© 2026 Firstweb / 新卒グルメ');
+    expect(`${CREDIT_COPYRIGHT_PREFIX} ${CREDIT_GOURMET.label}`).toBe('© 2026 Firstweb / 新卒グルメ');
+    expect(CREDIT_GOURMET).toEqual({ label: '新卒グルメ', href: 'https://www.instagram.com/syokufun_gen/' });
     expect(CREDIT_DEVELOPER).toEqual({ label: 'yamashitamana.to', href: 'https://www.yamashitamana.to/' });
   });
 

@@ -764,8 +764,8 @@ Tailwind の Preflight はリンクの下線を消し、色も周りの文から
 新設の画面のように書き忘れた画面だけ表記が欠ける。文言とリンク先は部品の中の定数を正典にする。
 
 **本文より弱く見せる。** 大きさは `text-xs`、色は補足の色にする。店舗詳細の Google の帰属表示は `text-sm`
-でポリシーの色を持つので、クレジットがそれより目立つことは無い。開発者の表記は文字のリンクなので
-§7.21 の下線を付ける。
+でポリシーの色を持つので、クレジットがそれより目立つことは無い。リンクは新卒グルメ（Instagram のアカウント）と
+開発者（yamashitamana.to）の 2 つで、どちらも文字のリンクなので §7.21 の下線を付ける。
 
 **main の外の footer は 1 ページに 1 つに保つ。** `CreditFooter` は main の外の footer として
 contentinfo の目印を担う。面の側で main の外に別の footer を置かない（公開 LP の運営情報のリンク群は
@@ -811,7 +811,7 @@ div で組む）。main の内側の footer（店舗詳細の帰属表示）は�
 | `button.tsx` | `Button`, `buttonVariants` | 押しボタン |
 | `card.tsx` | `Card`, `CardAction`, `CardContent`, `CardDescription`, `CardFooter`, `CardHeader`, `CardTitle` | 情報の容器 |
 | `checkbox.tsx` | `Checkbox` | 複数選択 |
-| `credit-footer.tsx` | `CREDIT_COPYRIGHT`, `CREDIT_DEVELOPER`, `CreditFooter` | 全画面の末尾のクレジット表記。3 アプリの root layout が 1 回だけ描画する（§7.22） |
+| `credit-footer.tsx` | `CREDIT_COPYRIGHT_PREFIX`, `CREDIT_DEVELOPER`, `CREDIT_GOURMET`, `CreditFooter` | 全画面の末尾のクレジット表記。3 アプリの root layout が 1 回だけ描画する（§7.22） |
 | `dialog.tsx` | `Dialog`, `DialogBackdrop`, `DialogClose`, `DialogContent`, `DialogDescription`, `DialogPortal`, `DialogTitle`, `DialogTrigger` | modal ダイアログ（Escape・背面押下で閉じ、閉じた後は起点へ焦点を戻す） |
 | `empty-state.tsx` | `EmptyState` | 一覧が空のときの案内。押しボタンを内包しない |
 | `field.tsx` | `Field`, `FieldContent`, `FieldDescription`, `FieldError`, `FieldGroup`, `FieldLabel`, `FieldLegend`, `FieldSeparator`, `FieldSet`, `FieldTitle` | フォームの構造と検証状態 |

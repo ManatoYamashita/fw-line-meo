@@ -70,7 +70,7 @@ const structuredData = {
       publisher: { '@type': 'Organization', name: 'Firstweb', url: 'https://firstweb-works.com/' },
       copyrightHolder: [
         { '@type': 'Organization', name: 'Firstweb', url: 'https://firstweb-works.com/' },
-        { '@type': 'Organization', name: '新卒グルメ' },
+        { '@type': 'Organization', name: '新卒グルメ', url: 'https://www.instagram.com/syokufun_gen/' },
       ],
       creator: { '@type': 'Person', name: 'yamashitamana.to', url: 'https://www.yamashitamana.to/' },
     },

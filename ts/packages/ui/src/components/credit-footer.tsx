@@ -18,8 +18,14 @@ import * as React from "react"
 import { cn } from "../lib/utils"
 import { textLinkVariants } from "./text-link"
 
-/** 著作権者の表記。 */
-const CREDIT_COPYRIGHT = "© 2026 Firstweb / 新卒グルメ" as const
+/** 著作権者の表記のうち、リンクを持たない前半。後半の新卒グルメは CREDIT_GOURMET が持つ。 */
+const CREDIT_COPYRIGHT_PREFIX = "© 2026 Firstweb /" as const
+
+/** 新卒グルメの表記と、そのリンク先（Instagram のアカウント）。 */
+const CREDIT_GOURMET = {
+  label: "新卒グルメ",
+  href: "https://www.instagram.com/syokufun_gen/",
+} as const
 
 /** 開発者の表記と、そのリンク先。表記は利用者が読むドメイン名、リンク先は転送後の正規の URL。 */
 const CREDIT_DEVELOPER = {
@@ -36,7 +42,12 @@ function CreditFooter({ className, ...props }: React.ComponentProps<"footer">) {
     >
       {/* 狭い画面では区切りの位置で折り返す。著作権者と開発者の表記の途中では切らない。 */}
       <p>
-        <span className="inline-block">{CREDIT_COPYRIGHT}</span>
+        <span className="inline-block">
+          {CREDIT_COPYRIGHT_PREFIX}{" "}
+          <a href={CREDIT_GOURMET.href} className={textLinkVariants()}>
+            {CREDIT_GOURMET.label}
+          </a>
+        </span>
         {" ・ "}
         <span className="inline-block">
           開発{" "}
@@ -49,4 +60,4 @@ function CreditFooter({ className, ...props }: React.ComponentProps<"footer">) {
   )
 }
 
-export { CREDIT_COPYRIGHT, CREDIT_DEVELOPER, CreditFooter }
+export { CREDIT_COPYRIGHT_PREFIX, CREDIT_DEVELOPER, CREDIT_GOURMET, CreditFooter }

@@ -101,6 +101,7 @@ test('検索用情報とクレジット表記がJavaScriptなしのHTMLに含ま
     const credit = page.getByRole('contentinfo');
     await expect(credit).toHaveCount(1);
     await expect(credit.getByText('© 2026 Firstweb / 新卒グルメ', { exact: true })).toBeVisible();
+    await expect(credit.getByRole('link', { name: '新卒グルメ' })).toHaveAttribute('href', 'https://www.instagram.com/syokufun_gen/');
     await expect(credit.getByRole('link', { name: 'yamashitamana.to' })).toHaveAttribute('href', 'https://www.yamashitamana.to/');
     const schema = JSON.parse((await page.locator('script[type="application/ld+json"]').textContent())!);
     expect(schema['@context']).toBe('https://schema.org');
@@ -111,7 +112,7 @@ test('検索用情報とクレジット表記がJavaScriptなしのHTMLに含ま
         publisher: expect.objectContaining({ name: 'Firstweb' }),
         copyrightHolder: [
           expect.objectContaining({ name: 'Firstweb' }),
-          expect.objectContaining({ name: '新卒グルメ' }),
+          expect.objectContaining({ name: '新卒グルメ', url: 'https://www.instagram.com/syokufun_gen/' }),
         ],
         creator: expect.objectContaining({ name: 'yamashitamana.to', url: 'https://www.yamashitamana.to/' }),
       }),
