@@ -1,9 +1,9 @@
 {
   "feature_name": "agency-dashboard",
   "created_at": "2026-07-14T15:48:44+09:00",
-  "updated_at": "2026-10-28T23:30:00+09:00",
+  "updated_at": "2026-11-15T13:30:00+09:00",
   "language": "ja",
-  "phase": "tasks-generated",
+  "phase": "requirements-generated",
   "approvals": {
     "requirements": {
       "generated": true,
@@ -11,12 +11,12 @@
     },
     "design": {
       "generated": true,
-      "approved": true
+      "approved": false
     },
     "tasks": {
       "generated": true,
-      "approved": true
+      "approved": false
     }
   },
-  "ready_for_implementation": true
+  "ready_for_implementation": false
 }

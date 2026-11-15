@@ -45,6 +45,17 @@ type LoadState =
 const STORE_LIST_ERROR_TEXT =
   '店舗一覧を読み込めませんでした。通信状況を確認して、画面を再読み込みしてください。';
 
+// 4 階層のデータモデルを知らない利用者が、列（担当代理店など）の指す相手を読み取れるようにする用語の説明。
+// 定義は運営と代理店で共通にし、一覧の範囲を述べる最後の 1 文だけをロールで変える。
+const ROLE_TERMS = [
+  { term: 'オーナー', description: 'LINE 公式アカウントに友だち登録し、店舗を持つ飲食店の経営者です。' },
+  { term: '代理店', description: 'オーナーの店舗登録と運用を担当する事業者です。' },
+] as const;
+const LIST_SCOPE_TEXT = {
+  operator: 'この一覧には、全代理店の店舗が表示されます。',
+  agency: 'この一覧には、あなたの代理店が担当する店舗が表示されます。',
+} as const;
+
 // 全ロール共通の列数（店名・店舗特定・競合設定・利用状況・QR）。operator のみ担当代理店列が加わる。
 const BASE_COLUMN_COUNT = 5;
 
@@ -135,7 +146,21 @@ function StoresView() {
     <Dialog open={selectedStore !== null} onOpenChange={handleDialogOpenChange}>
       {/* 一覧が主の面なので版面は広い側を使う。既存の main を **置換** する（入れ子にしない）。 */}
       <PageShell width="lg" className="flex flex-col gap-6">
-        <Heading level={1}>店舗一覧</Heading>
+        {/* 説明は取得の状態に依らず見出しの直下・表の上に置く。 */}
+        <div className="flex flex-col gap-1">
+          <Heading level={1}>店舗一覧</Heading>
+          <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+            <dl className="flex flex-col gap-1">
+              {ROLE_TERMS.map((item) => (
+                <div key={item.term} className="flex flex-wrap gap-x-2">
+                  <dt className="font-medium">{item.term}</dt>
+                  <dd>{item.description}</dd>
+                </div>
+              ))}
+            </dl>
+            <p>{LIST_SCOPE_TEXT[isOperator ? 'operator' : 'agency']}</p>
+          </div>
+        </div>
         {state.kind === 'loading' && (
           // 行の操作として末尾の列に QR 発行の押しボタンが 1 つ並ぶ。
           <ListLoading columns={columnCount} actions={1} />
