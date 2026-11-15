@@ -619,6 +619,7 @@ export async function findOwner(
 - 各オーナーに `agencyId`（代理店の詳細への経路に使う・運営だけが使う）と `stores: { id, name }[]`（確定済みの店舗・作成順・`storeNames` と同じ並び）を足す。DAL の `listOwners` は `agencyId` を既に返しており、店舗は `array_agg` を `json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)` に置き換える
 - **`storeNames` はこの段では消さない。** dashboard-api と dashboard-web は別々にデプロイされる。応答から先に消すと、旧い画面が `storeNames` を読んで描画に失敗する。画面を `stores` へ切り替えて本番へ出した後のタスクで `storeNames` を応答と型から消す
 - 店舗の id を足しても、利用者が見られる範囲は変わらない（同じオーナーの同じ店舗の名前を既に返している）
+- GET /owners の契約の正典は `.kiro/specs/owner-line-unlink/design.md` のままとし、その応答の型と項目の列挙の箇所に、Issue #526 で `agencyId`・`stores` を足したことと本節への参照を書き添える
 
 ### dashboard-web
 
@@ -711,7 +712,9 @@ export async function findOwner(
 **店舗の詳細の描画（11.1–11.5）**
 
 - 構造: 「店舗一覧へ戻る」のリンク → h1（店名）→ 概要（`dl`: 店舗特定・競合設定・オーナー（`EntityLink`）・担当代理店（運営だけ・`AgencyName`）・登録日（`formatJstDate`）・利用状況）→ 利用状況の操作（`StoreSuspensionControl`）→ h2「QR」の区分
-- QR の区分の分岐は店舗一覧と同じ順にする: 停止中 →「停止中のため発行できません」（11.3）、そうでなく場所が確定済み → `StoreQrPanel`、そうでなく未確定 →「場所の確定が必要です」（11.4）。停止の判定を先に置くのは店舗一覧と同じ理由（場所が未確定でも先に要るのは再開）で、`serviceable-predicate` のガードの数え方（同じファイルに停止の判定が確定の判定以上）にも合う
+- QR の区分の分岐は店舗一覧と同じ順にする: 停止中 →「停止中のため発行できません」（11.3）、そうでなく場所が確定済み → `StoreQrPanel`、そうでなく未確定 →「場所の確定が必要です」（11.4）。停止の判定を先に置くのは店舗一覧と同じ理由（場所が未確定でも先に要るのは再開）
+- **確定の比較（`placeStatus === 'confirmed'`）は、この QR の分岐の 1 か所だけに書く。** `serviceable-predicate` のガードは、ファイルごとに停止の判定の数が確定の判定の数以上であることを求める。QR の分岐で確定 1・停止 1 になるので、概要の「店舗特定」・「利用状況」は比較を書かず、`PLACE_STATUS_LABEL[store.placeStatus]`・`storeSuspensionLabel(store.suspendedAt)` のように表示語を添字・関数で引く（代理店詳細・`OwnerRosterTable` と同じ形）。表示だけの判定を数えから外す印（`EXPECTED_DISPLAY_ONLY_MARKERS`）は置き場所がガード本体に固定されており、新しいファイルには置けないので使わない。オーナーの詳細の店舗の表も同じく比較を書かない
+- **印刷は掲示面だけを刷る（意図した挙動）。** `globals.css` の印刷の規則は `body:has([data-print-region])` を鍵に、掲示面がページにあれば掲示面だけを刷る。店舗の詳細は `StoreQrPanel` を常に置くので、詳細のページを印刷すると概要・操作・実績の表は刷られず、掲示面だけが刷られる。店舗の詳細を刷る用途は掲示物の印刷だけと判断し、規則は変えない（`store-qr-issuance-ui` 9.8 を詳細にも当てる）。停止中・未確定の店舗の詳細には掲示面が無いので、印刷の規則は効かず通常どおり刷られる
 - `StoreQrPanel` は店舗の詳細では開いた状態で置く（押して開く形にしない）。店舗一覧の Drawer は閉じる操作を持つが、詳細には閉じる先が無いので、`onClose` を省略可能にし、省略したときは閉じる押しボタンを描かない。`showHeader={false}` で題を描かず、区分の h2「QR」を題にする（10.7: パネルの題は導線にしない）。停止に切り替わったときはパネルを外し、停止前の画像と保存の導線を残さない（店舗一覧の Requirement 5.6 と同じ）
 - 店舗の詳細では店名・オーナー名以外の名前を導線にしない。h1 の店名は導線にしない（10.7）
 
@@ -733,7 +736,7 @@ export async function findOwner(
 
 **共用部品の移設**
 
-- `app/stores/store-suspension-control.tsx`・`app/owners/owner-line-unlink-control.tsx` を `components/` へ移す（2 つの経路から使うため）。引数と振る舞いは変えない。`OwnerLineUnlinkControl` は `OwnerListItem` を受けるので、GET /owners/:id の `owner` を同じ形にしてそのまま渡す
+- `app/stores/store-suspension-control.tsx`・`app/owners/owner-line-unlink-control.tsx` を `components/` へ移す（2 つの経路から使うため）。引数と振る舞いは変えない。**ただし失敗時の文言の「一覧」を、どちらの面でも通じる語に改める**（「店舗が見つかりません。一覧を更新しました。」→「店舗が見つかりません。表示を更新しました。」、「〜一覧の表示を確認してください。」→「〜画面の表示を確認してください。」。オーナー側も同じ）。詳細の画面で「一覧」と出すと誤りになるためで、語を面ごとに切り替える引数は足さない。文言を固定している既存の試験（`store-suspension-control.test.tsx`・`owner-line-unlink-control.test.tsx`・一覧の試験）も合わせて直す。`OwnerLineUnlinkControl` は `OwnerListItem` を受けるので、GET /owners/:id の `owner` を同じ形にしてそのまま渡す
 - `TopNav` は変えない。代理店詳細で入れた「完全一致が無ければ `href + '/'` で始まる最も長い項目に `aria-current="true"`」により、`/stores/{id}` で「店舗一覧」、`/owners/{id}` で「オーナー一覧」が現在地になる（11.12）。`/stores/new` は完全一致で従来どおり
 
 ## Data Models
@@ -846,10 +849,11 @@ ALTER TABLE owners
 1. `@fwlm/db`（`*.db.test.ts`・実 postgres）: `findStoreWithStatus`・`findOwner` が範囲内は 1 件、範囲外と不存在はどちらも `null`。列の値が一覧の同じ行と一致する。`listStoresWithStatus({ ownerId })` が当該オーナーの店舗だけ（未確定を含む）。`listOwners` の `stores` が `storeNames` と同じ並びで id を持つ
 2. dashboard-api（単体）: GET /stores/:id・GET /owners/:id の 401・403(未登録・無効)・形の不正・不存在・範囲外の 404 の本文が同一（11.9）・範囲外で `listStoresWithStatus` を呼ばない。GET /owners の応答に `agencyId`・`stores` が載り、`storeNames` も残る
 3. `lib/entity-paths.ts`（単体）: `toEntityId` の形の判定と小文字化、経路の組み立て
-4. `StoreDetailView`・`OwnerDetailView`（描画）: 4 状態の区別（形の不正は API を呼ばない・404 は概要と操作を描かない・失敗は再読み込みで取り直す）／運営だけ担当代理店がリンク、代理店ロールは文字（10.3・10.4）／停止中・未確定・確定済みの QR の区分の分岐（停止を先に判定）／`StoreQrPanel` に閉じる押しボタンが無い／停止・再開・連携の解除の後に 1 件を読み直し、表示を読み込み中へ置き換えない／オーナーの店舗の表に操作が無い・0 件の案内（11.7）／書込の API は suspend・resume・unlink だけ（11.13）
+4. `StoreDetailView`・`OwnerDetailView`（描画）: 4 状態の区別（形の不正は API を呼ばない・404 は概要と操作を描かない・失敗は再読み込みで取り直す）／運営だけ担当代理店がリンク、代理店ロールは文字（10.3・10.4）／停止中・未確定・確定済みの QR の区分の分岐（停止を先に判定）／`StoreQrPanel` に閉じる押しボタンが無い／停止・再開・連携の解除の後に 1 件を読み直し、表示を読み込み中へ置き換えない／オーナーの店舗の表に操作が無い・0 件の案内（11.7）／書込の API は suspend・resume・unlink だけ（11.13）。操作部品の失敗の文言に「一覧」が出ない（一覧と詳細の両方）
 5. 一覧（描画）: 店舗一覧・オーナー一覧・利用者管理・代理店詳細の対象の名前がリンクで経路が正しい（10.1–10.3）／代理店ロールで代理店名がリンクでない（10.4）／店舗一覧のオーナー列（表示名なしを含む・10.5）／停止中・表示名なし・連携解除済みもリンク（10.6）／見出し・QR パネルの題・引継ぎ先・店舗登録のオーナー選択はリンクでない（10.7）／既存の列と操作が残る（10.9）。`OwnerRosterTable` は `linkNames` を渡さないとき描画が変わらない
 6. `TopNav`: `/stores/{id}` で「店舗一覧」、`/owners/{id}` で「オーナー一覧」に `"true"`
-7. E2E: スタブに GET /stores/:id・GET /owners/:id（範囲外を 404 で返す id を含む）を足す。店舗の詳細とオーナーの詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足す。店舗一覧は列が 1 つ増えても捲れる領域が表の容器 1 件のままであることを宣言し、`mobile-layout.spec.ts` の `measuredCells` を実測の literal へ更新する。店舗の詳細の捲れる領域は QR パネルの実績の表、オーナーの詳細は店舗の表として宣言する
+7. E2E: スタブに GET /stores/:id・GET /owners/:id（範囲外を 404 で返す id を含む）を足す。店舗の詳細とオーナーの詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足す。店舗一覧は列が 1 つ増えても捲れる領域が表の容器 1 件のままであることを宣言し、`mobile-layout.spec.ts` の `measuredCells` を実測の literal へ更新する。店舗の詳細の捲れる領域は QR パネルの実績の表、オーナーの詳細は店舗の表として宣言する。`dashboard-surfaces.spec.ts` の印刷の検査と同じ型で、店舗の詳細（確定済み・利用中）を印刷すると掲示面だけが刷られ、概要・操作が刷られないことを確かめる
+8. `check-store-serviceable-predicate.sh` が緑のまま（`store-detail-view.tsx` は確定の判定 1・停止の判定 1、`EXPECTED_DISPLAY_ONLY_MARKERS` は 2 のまま）
 
 ### E2E / 手動検証（validation hooks）
 
@@ -880,7 +884,7 @@ ALTER TABLE owners
 - migration の本番適用は自動ではない（`deploy.yml` はイメージを差し替えるだけで migration を流さない）。マージの前に適用し、`information_schema.columns` と `pg_constraint` で列と 2 つの制約の存在を確かめてからマージする。`prod-schema-drift`（6 時間ごと）も適用漏れを検出するが、デプロイを止めないので、気づくのは登録が壊れた後になりうる
 - ロールバック: イメージを戻しても列は残ってよい（旧イメージは NULL で書く）。`0017` の巻き戻しは不要
 
-**Requirement 10・11（Issue #526）の順序**: migration は無い。dashboard-api（GET /stores/:id・GET /owners/:id・GET /owners の `agencyId`・`stores` の追加）を先にデプロイし、その後に dashboard-web を出す。逆順だと、新しい画面が無い API を呼んで詳細が「読み込めませんでした」になり、オーナー一覧の店舗が `stores` を読めない。GET /owners は項目を足すだけなので、旧い画面は API の先行デプロイの影響を受けない。`storeNames` の削除は新しい画面が本番に出た後の別タスクで行う
+**Requirement 10・11（Issue #526）の順序**: migration は無い。dashboard-api（GET /stores/:id・GET /owners/:id・GET /owners の `agencyId`・`stores` の追加）を dashboard-web より先に出す必要がある。逆順だと、新しい画面が無い API を呼んで詳細が「読み込めませんでした」になり、オーナー一覧の店舗が `stores` を読めない。**この順は 1 回のデプロイの中で成り立つ。** `deploy.yml` は同じステップの中で `dashboard-api` を更新してから `dashboard-web` を更新するので、API と画面を同じ PR でマージしてよく、順のために PR を分けない。更新の合間（数十秒）だけ新しい API と旧い画面が並ぶが、GET /owners は項目を足すだけなので旧い画面は影響を受けない。`storeNames` の削除だけは、新しい画面が本番に出たことを確かめた後の別タスクで行う（同じデプロイで消すと、合間に旧い画面が `storeNames` を読めない）
 
 ## Open Questions / Risks
 
