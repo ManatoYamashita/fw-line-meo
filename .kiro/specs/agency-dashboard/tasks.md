@@ -250,6 +250,110 @@
   - _Requirements: 9.1–9.10_
   - _Depends: 8.1, 8.2, 8.3, 8.4, 8.5_
 
+## 9. 名前からの遷移と店舗・オーナーの詳細（Requirement 10・11・Issue #526）
+
+> 前提: migration は無く、書込境界も変わらない（読み出しの追加だけ）。API と画面は同じ PR でマージしてよい。`deploy.yml` は 1 回のデプロイの中で dashboard-api を更新してから dashboard-web を更新するためである（design.md「Requirement 10・11 の順序」）。`storeNames` の削除（9.10）だけは、新しい画面が本番に出たことを確かめた後の別 PR にする。
+> 共用部品（`StoreQrPanel`・`OwnerRosterTable`・停止と連携解除の操作部品）は、店舗一覧・オーナー一覧・店舗登録・代理店詳細も使う。それらを変えるタスクは、既存の面の描画を変えないことを完了状態に含める。
+> 停止の述語ガード（`check-store-serviceable-predicate.sh`）: 確定の比較は `store-detail-view.tsx` の QR の分岐の 1 か所だけに書く。表示語は添字と関数で引き、`EXPECTED_DISPLAY_ONLY_MARKERS` は 2 のまま変えない。
+
+- [ ] 9.1 `@fwlm/db`: 1 件の取得と絞り込み
+  - `stores.ts`: `findStoreWithStatus(db, { storeId, agencyId })` を足し、`listStoresWithStatus` の絞り込みに `ownerId` を足す。SELECT 句と JOIN はモジュール内の定数にして、一覧と 1 件の取得の両方から使う。範囲は `WHERE s.id = $1::uuid AND ($2::uuid IS NULL OR o.agency_id = $2::uuid)` の 1 文に含める（取得した後で所属を比べる 2 段にしない）
+  - `owners.ts`: `findOwner(db, { ownerId, agencyId })` を足し、`listOwners` と SELECT 句を共有する。店舗の集約を `array_agg(s.name …)` から `json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)` へ置き換え、`OwnerListItem` に `stores: { id, name }[]` を足す。`storeNames` は `stores` の名前から作って残す。表示だけの判定の印（`serviceable-predicate: display-only`）は、確定の判定の行と同じ行か直前の行に残す
+  - UUID の形でない id は DB へ問い合わせずに `null` を返す（既存の `UUID_RE` を使う）
+  - 完了状態: `*.db.test.ts` で design.md「名前からの遷移と店舗・オーナーの詳細の試験」1 の各項目が緑（範囲内は 1 件、範囲外と不存在はどちらも `null`、列の値が一覧の同じ行と一致、`ownerId` の絞り込みは未確定の店舗を含む、`stores` と `storeNames` の並びが一致）。`check-store-serviceable-predicate.sh` が緑。`findStoreWithStatus` から代理店の条件を外す変異で、範囲外の試験が赤になることを実測する
+  - _Requirements: 10.1, 11.1, 11.6, 11.7, 11.9, 11.10_
+  - _Boundary: ts/packages/db（stores.ts・owners.ts・types.ts・index.ts）_
+
+- [ ] 9.2 dashboard-api: GET /stores/:id・GET /owners/:id と GET /owners の項目の追加
+  - `src/store-detail.ts`・`src/owner-detail.ts`: 認証 → UUID の形の検査（形でなければ DB を呼ばずに 404）→ `resolveAgencyScope(user, undefined)` → 取得 → `null` なら 404。404 の本文は、形の不正・不存在・範囲外のどれでも同じにする（店舗は「店舗が見つかりません」、オーナーは「オーナーが見つかりません」）。GET /owners/:id は、オーナーが見つかったときだけ `listStoresWithStatus({ ownerId })` を呼ぶ
+  - `src/owners-list.ts`: 応答の各オーナーに `agencyId` と `stores` を足す。`storeNames` は残す
+  - `src/app.ts`・`src/index.ts`（または `composition.ts`）: ルートの配線と依存の注入。既存の `/stores/:storeId/qr.png`・`/stores/:storeId/review-funnel`・`POST /stores/:id/suspend` などと経路が衝突しないことを確かめる
+  - 既存の QR と実績の取得の応答（不在に 404、担当外に 403）は変えない（11.9 の範囲外）
+  - 完了状態: 単体テストで design.md の試験 2 の各項目が緑（401・未登録と無効の 403・3 通りの 404 の本文が同一・範囲外で店舗を読まない・GET /owners に `agencyId`・`stores`・`storeNames` が載る）。`app-routes.db.test.ts` の認可の表に 2 本を足して緑。範囲外を 403 で返す変異で、本文が同一であることの試験が赤になることを実測する
+  - _Requirements: 10.1, 10.2, 10.3, 11.9, 11.10_
+  - _Boundary: ts/apps/dashboard-api_
+  - _Depends: 9.1_
+
+- [ ] 9.3 (P) dashboard-web の土台: 経路・リンク部品・API クライアント・表示語
+  - `lib/entity-paths.ts`: `toEntityId`（`agency-detail.ts` の `toAgencyId` をここへ移し、代理店詳細もこれを使う）・`storePath`・`ownerPath`・`agencyPath`
+  - `components/entity-link.tsx`: `EntityLink`（`next/link`＋`textLinkVariants()`）と `AgencyName`（運営のときだけ `EntityLink`、それ以外は素の文字）
+  - `lib/api.ts`・`lib/types.ts`: `getStore(id)`・`getOwner(id)` と応答の型を足し、`OwnerListItem` に `agencyId`・`stores` を足す（HTTP の契約が正典。9.2 の実装を待たずに型から進めてよい）
+  - `lib/status-labels.ts`: `COMPETITOR_STATUS_LABEL`（競合設定済み／競合未設定）を足し、店舗一覧が直接書いている語をここから引くように置き換える（語は変えない）
+  - 完了状態: `entity-paths` の単体テスト（design.md の試験 3）が緑。`EntityLink`・`AgencyName` の単体テストで、運営ではリンク、代理店ロールでは文字になること。代理店詳細の既存の試験（`agency-detail.test.ts` ほか）が、`toEntityId` への置き換えの後も緑。`stores-page.test.tsx` が変更なしで緑
+  - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.8_
+  - _Boundary: dashboard-web lib・components/entity-link.tsx_
+
+- [ ] 9.4 共用部品の変更（操作部品の移設・QR パネル・オーナーの表）
+  - `app/stores/store-suspension-control.tsx`・`app/owners/owner-line-unlink-control.tsx` を `components/` へ移す。失敗時の文言の「一覧」を、どちらの面でも通じる語に改める（「表示を更新しました」「画面の表示を確認してください」）。引数と、それ以外の振る舞いは変えない
+  - `components/store-qr-panel.tsx`: `onClose` を省略可能にし、省略したときは閉じる押しボタンを描かない
+  - `components/owner-roster-table.tsx`: 省略可能な `linkNames?: boolean` を足し、`true` のときだけ表示名と登録済みの店舗名を `EntityLink` にする
+  - 完了状態: 移設した 2 部品の試験を新しい場所で緑にし、失敗の文言に「一覧」が出ないことを assert する。`StoreQrPanel` は、`onClose` を省略すると閉じる押しボタンが無く、店舗一覧の Drawer では従来どおり閉じられる。`OwnerRosterTable` は、`linkNames` のときだけリンクになり、渡さないときの描画は変わらない（`stores-new-page.test.tsx` が変更なしで緑・10.7）
+  - _Requirements: 10.7, 11.2, 11.5, 11.8_
+  - _Boundary: dashboard-web components（store-suspension-control・owner-line-unlink-control・store-qr-panel・owner-roster-table）と、その import 元（stores/page・owners/page）_
+  - _Depends: 9.3_
+
+- [ ] 9.5 店舗の詳細の画面（`/stores/[storeId]`）
+  - `app/stores/[storeId]/page.tsx`（サーバー部品・`PageProps` の `params` を `await`）と `store-detail-view.tsx`（クライアント部品）。取得・状態・描画は design.md「名前からの遷移と店舗・オーナーの詳細」に従う
+    - 状態は 4 つ（読み込み中・失敗・見つからない・表示）。形の不正な id は API を呼ばない。404 は概要・操作・QR を描かない
+    - 概要の `dl`。担当代理店は運営だけで、`AgencyName` を使う。表示語は添字と関数で引く
+    - 停止・再開の操作。成功の後は 1 件だけを読み直し、表示を読み込み中へ置き換えない。最後の要求の応答だけを採る
+    - QR の区分は、停止中 → 未確定 → 確定済みの順で判定する。確定済みなら `StoreQrPanel` を `onClose` なし・`showHeader={false}` で置き、停止に切り替わったら外す
+    - 戻るリンクを置き、h1 の店名はリンクにしない
+  - 完了状態: 描画の単体テストで、design.md の試験 4 のうち店舗の詳細の項目が緑。`check-store-serviceable-predicate.sh` が緑（このファイルは確定の判定 1・停止の判定 1）。次の 2 つの変異で赤になることを実測する: (1) 停止の判定と確定の判定の順を入れ替える（停止中かつ未確定の店舗で「場所の確定が必要です」が出る）、(2) 404 でも概要を描く
+  - _Requirements: 10.7, 11.1, 11.2, 11.3, 11.4, 11.5, 11.9, 11.11, 11.12, 11.13, 11.14_
+  - _Boundary: dashboard-web app/stores/[storeId]_
+  - _Depends: 9.3, 9.4_
+
+- [ ] 9.6 (P) オーナーの詳細の画面（`/owners/[ownerId]`）
+  - `app/owners/[ownerId]/page.tsx` と `owner-detail-view.tsx`。状態と読み直しは 9.5 と同じ
+    - 概要の `dl`: 招待コードの記録なしは「記録なし（この機能より前の登録）」、担当代理店は運営だけ、店舗の引き継ぎ先は文字のまま（リンクにしない）
+    - 連携の解除の操作（`OwnerLineUnlinkControl`。GET /owners/:id の `owner` をそのまま渡す）
+    - 店舗の表: 店名（`EntityLink`）・店舗特定・競合設定・利用状況の 4 列で、操作の列は置かない。0 件は `EmptyState`。表示語は添字と関数で引き、比較を書かない
+  - 完了状態: 描画の単体テストで、design.md の試験 4 のうちオーナーの詳細の項目が緑（操作の列が無い・0 件の案内・引き継ぎ先がリンクでない）。`check-store-serviceable-predicate.sh` が緑（このファイルに確定の判定を書かない）。店舗の表に停止の操作を置く変異で、11.7 の試験が赤になることを実測する
+  - _Requirements: 10.7, 11.6, 11.7, 11.8, 11.9, 11.11, 11.12, 11.13_
+  - _Boundary: dashboard-web app/owners/[ownerId]_
+  - _Depends: 9.3, 9.4_
+
+- [ ] 9.7 (P) 一覧の名前のリンク
+  - `app/stores/page.tsx`: 店名を `EntityLink` にし、店名の隣に「オーナー」列を足す（表示名が無ければ「（表示名なし）」）。担当代理店は `AgencyName`。`BASE_COLUMN_COUNT` を 6 にする。QR と停止の列はそのまま
+  - `app/owners/page.tsx`: オーナー名と店舗（`stores` の各店）を `EntityLink`、担当代理店を `AgencyName` にする。引き継ぎ先の文はリンクにしない
+  - `app/admin/users/page.tsx`: 所属代理店を `AgencyName` にする
+  - `app/admin/agencies/[agencyId]/agency-detail-view.tsx`: 店舗の区分の店名とオーナー、招待コードの区分の「このコードで登録したオーナー」を `EntityLink` にし、`OwnerRosterTable` に `linkNames` を渡す。見出しの代理店名はリンクにしない
+  - `text-link-usage.test.ts` の `EXPECTED` を新しいリンクの数へ更新する。`top-nav.test.tsx` に、`/stores/<id>` で「店舗一覧」、`/owners/<id>` で「オーナー一覧」が `"true"` になる試験を足す（`TopNav` 本体は変えない）
+  - 完了状態: 描画の単体テストで、design.md の試験 5・6 の各項目が緑（対象の名前がリンクで経路が正しい・代理店ロールでは代理店名が文字・オーナー列・特殊な状態もリンク・対象外はリンクでない・既存の列と操作が残る）。代理店名のリンクを役割で切り替えない変異で、10.4 の試験が赤になることを実測する
+  - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.12_
+  - _Boundary: dashboard-web app/stores/page・app/owners/page・app/admin/users/page・agency-detail-view・test/text-link-usage・test/top-nav_
+  - _Depends: 9.3, 9.4_
+
+- [ ] 9.8 E2E の面の追加
+  - `e2e/fixtures/api.ts` のスタブに GET /stores/:id・GET /owners/:id を足す。範囲外として 404 を返す id と、停止中・未確定・確定済みの店舗、表示名の無いオーナー・連携を解除したオーナーを含める
+  - 店舗の詳細とオーナーの詳細を `DASHBOARD_SURFACES`（横の溢れ・携帯の幅・a11y 監査）へ足す。面を開く手順では、概要が実際に描けたことを前提として assert する。捲れる領域は、店舗の詳細では QR パネルの実績の表、オーナーの詳細では店舗の表として宣言する
+  - 店舗一覧は、列が増えても捲れる領域が表の容器 1 件のままであることを宣言し、`mobile-layout.spec.ts` の `measuredCells` を実測の値へ更新する
+  - `dashboard-surfaces.spec.ts` の印刷の検査と同じ型で、確定済み・利用中の店舗の詳細を印刷すると掲示面だけが刷られ、概要と操作は刷られないことを確かめる
+  - 完了状態: `bash scripts/run-e2e-local.sh --only surfaces` が緑（シェルの `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` を外して付属の Chromium で流す）。次の 2 つの変異で赤になることを実測する: (1) 捲れる領域の宣言の件数を変える、(2) 店舗の詳細で掲示面の外側に `data-print-region` を付ける（概要が刷られる）
+  - _Requirements: 10.1, 10.2, 10.8, 11.2, 11.9, 11.12_
+  - _Boundary: dashboard-web e2e_
+  - _Depends: 9.5, 9.6, 9.7_
+
+- [ ] 9.9 全体検証とデプロイの確認
+  - 次をすべて実行し、緑を確認する
+    - `make ts-lint`・`make ts-test`・`make ts-test-db`
+    - dashboard-web の型検査（`next typegen` を含む）
+    - `bash scripts/run-e2e-local.sh --only surfaces`
+    - ts-ci が回す静的ガード（`check-store-serviceable-predicate.sh`・`check-design-tokens.sh`・`check-compliance-wording.sh`・`check-run-env-wiring.sh` ほか）
+  - マージの後、自分のマージコミットの SHA に対する ts-ci と deploy-prod の結果を確かめる（dashboard-api と dashboard-web のイメージの差し替え）
+  - 本番で運営として、店舗の詳細（確定済み・停止中のそれぞれ）とオーナーの詳細を開き、一覧の名前から遷移できることを確かめる。代理店ロールのアカウントで確かめられない場合は、その旨と追跡先を Issue #526 に記録する
+  - 完了状態: 上記コマンドがすべて終了コード 0、本番での確認結果が PR / Issue #526 に記録されている
+  - _Requirements: 10.1–10.9, 11.1–11.14_
+  - _Depends: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8_
+
+- [ ] 9.10 `storeNames` の削除（別 PR・9.9 の本番確認の後）
+  - `@fwlm/db` の `OwnerListItem`、dashboard-api の GET /owners の応答、dashboard-web の型、試験と E2E のスタブから `storeNames` を消す。`.kiro/specs/owner-line-unlink/design.md` の該当する注記（「画面の切り替え後に消す」）を、消した事実に合わせて改める
+  - 完了状態: `git grep -n storeNames -- ts` が 0 件、`make ts-test`・`make ts-test-db`・`bash scripts/run-e2e-local.sh --only surfaces` が緑。マージの後、本番のオーナー一覧で店舗名が表示されることを確かめる
+  - _Requirements: 10.1_
+  - _Boundary: ts/packages/db・dashboard-api owners-list・dashboard-web lib/types と試験・owner-line-unlink design.md_
+  - _Depends: 9.9_
+
 ## Implementation Notes
 <!-- 実装中に得られた横断的な知見をここに追記する -->
 - 環境: docker/apple-container 不在。DB スキーマ検証（`make db-migrate`/`db-test`/`db-verify-docs` 相当）は native postgres で代替する。正典レシピ: `ts/scripts/with-test-db.sh bash -c 'for f in db/test/assertions/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done; MANAGE_CONTAINER=0 PSQL_EXEC="psql" db/test/check_docs.sh'`（with-test-db.sh が native postgres 起動＋全 migrations 適用＋PG 環境変数 export を行う）。TS の `*.db.test.ts` は `make ts-test-db` でそのまま可。
