@@ -145,6 +145,15 @@ expect_red '.kiro/steering/product.md は外部審査で読まれる正典です
 expect_absent '.kiro/steering/product.md は外部審査で読まれる正典ですが、検知器の名前が書かれています'
 t_end
 
+t_begin 'check-compliance-wording: 規則1b の判定がロケールで変わらない（POSIX でも「検知の回避」を赤にする）'
+# CI は UTF-8 ロケールで走るので、直前のケースだけではこの回帰を捕らえられない。
+# POSIX の grep は角括弧の文字クラスをバイト単位で読み、多バイトの助詞に一致しない。
+cw_fixture
+printf '%s\n' '_updated_at: 2026-09-06（目的を「検知の回避」から書き直した）_' >> "${FX}/.kiro/steering/product.md"
+LC_ALL=C LANG=C fx_run check-compliance-wording
+expect_red '.kiro/steering/product.md は外部審査で読まれる正典ですが、検知の回避を目的として述べる語形があります'
+t_end
+
 t_begin 'check-compliance-wording: 規則1b は正典の外へは課さない（禁じる側が対象を名指しできる）'
 cw_fixture
 # ガード本体と ts-ci のステップ注記は「何を禁じるか」を書くために同じ語形を必ず含む。
