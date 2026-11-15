@@ -25,7 +25,7 @@ import { notifyActionWarning } from '../../lib/action-feedback';
 import { useAuth } from '../../lib/auth-context';
 import { getOwners } from '../../lib/api';
 import type { OwnerListItem } from '../../lib/types';
-import { OwnerLineUnlinkControl } from './owner-line-unlink-control';
+import { OwnerLineUnlinkControl } from '../../components/owner-line-unlink-control';
 
 // オーナー一覧（owner-line-unlink tasks 5.2 / Requirements 2.1–2.4, 2.6, 3.3 / design.md
 // 「OwnersPage・OwnerLineUnlinkControl」）。型紙は店舗一覧（stores/page.tsx）で、取得状態・読み直し・

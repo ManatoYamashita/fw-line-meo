@@ -2,7 +2,7 @@
 
 // 1 オーナー分の LINE の解除・メニューの外し直しの操作部品（owner-line-unlink tasks 5.2 /
 // Requirements 1.4, 1.7, 2.2, 2.3, 3.2, 3.3 / design.md「OwnersPage・OwnerLineUnlinkControl」）。
-// 型紙は stores/store-suspension-control.tsx で、焦点・ライブリージョン・二重送信の扱いを揃えている。
+// 型紙は store-suspension-control.tsx（同じ components/）で、焦点・ライブリージョン・二重送信の扱いを揃えている。
 //
 // 連携中は「LINE の連携を解除」、解除済みでメニューを外せていなければ「メニューを外し直す」を出し、
 // どちらでもない解除済みには操作を出さない（2.2, 2.3, 3.3）。解除は確認ダイアログで 3 点を示してから
@@ -10,7 +10,7 @@
 // へ送る（解除済みへ送るとサーバーはメニューだけを外し直す）。
 //
 // **押しボタンは解除と外し直しで同じ 1 つの要素にする。** メニューを外せずに解除が終わると、
-// 読み直した一覧でこの行の操作は外し直しへ変わる。別の要素で描くと押した要素が消え、焦点が文書の
+// 読み直した表示でこの操作は外し直しへ変わる。別の要素で描くと押した要素が消え、焦点が文書の
 // 先頭へ落ちる。文言だけを差し替えれば焦点は押した位置に留まる。
 //
 // **操作そのものが消えるときは、焦点を結果の文言へ移す。** 解除に成功して読み直すと、解除済みの
@@ -24,7 +24,7 @@
 // メニューを外せなかったときは解除自体は完了しているが（3.2）、利用者に次の操作（外し直し）が要るので
 // 見落とされにくい側で示し、解除の成功だけを告げる文言は出さない。
 //
-// 一覧の読み直し（onChanged）は結果によらず呼ぶ。画面は推測で行を書き換えず、読み直した一覧に
+// 表示の読み直し（onChanged）は結果によらず呼ぶ。画面は推測で行を書き換えず、読み直した表示に
 // 実際の状態を示させる。要求が失敗したときサーバーは解除前のまま保つので（1.7）、行は連携中のまま残る。
 
 import { useEffect, useRef, useState } from 'react';
@@ -42,18 +42,18 @@ import { Alert, AlertDescription } from '@fwlm/ui/components/alert';
 import { Button } from '@fwlm/ui/components/button';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import { SuccessIcon } from '@fwlm/ui/components/success-icon';
-import { ownerDistinctLabel } from '../../components/owner-roster-table';
+import { ownerDistinctLabel } from './owner-roster-table';
 import {
   notifyActionError,
   notifyActionSuccess,
   notifyActionWarning,
-} from '../../lib/action-feedback';
-import { unlinkOwnerLine, type ApiResult } from '../../lib/api';
-import type { OwnerLineUnlinkResult, OwnerListItem } from '../../lib/types';
+} from '../lib/action-feedback';
+import { unlinkOwnerLine, type ApiResult } from '../lib/api';
+import type { OwnerLineUnlinkResult, OwnerListItem } from '../lib/types';
 
 export interface OwnerLineUnlinkControlProps {
   owner: OwnerListItem;
-  // 一覧を読み直す。成功・失敗のどちらでも呼ぶ。
+  // 呼び出し側の表示（オーナー一覧・オーナーの詳細）を読み直す。成功・失敗のどちらでも呼ぶ。
   onChanged: () => Promise<void>;
 }
 
@@ -84,15 +84,15 @@ const MENU_FAILED_AFTER_RETRY =
 // 不存在・範囲外は同じ 404 に写されるので、どちらの場合も「見つからない」とだけ伝える（Req 1.3）。
 // 認証・権限の失敗も固定の利用者向け文言へ写し、サーバの内部文言は表示しない。
 // 応答が返った失敗（500 など）はサーバーが解除前のまま保っているので、できなかったと言い切る（1.7）。
-// 通信できなかったときだけは要求が届いたかを判別できないので、一覧を確かめるよう促す。
+// 通信できなかったときだけは要求が届いたかを判別できないので、画面の表示を確かめるよう促す。
 function failureMessage(action: Action, result: { code: string }): string {
-  if (result.code === 'not_found') return 'オーナーが見つかりません。一覧を更新しました。';
+  if (result.code === 'not_found') return 'オーナーが見つかりません。表示を更新しました。';
   if (result.code === 'unauthenticated') return 'ログインの有効期限が切れています。再度ログインしてください。';
   if (result.code === 'forbidden') return 'このオーナーを変更する権限がありません。';
   if (result.code === 'network') {
     return action === 'unlink'
-      ? '解除できたか確認できませんでした。一覧の表示を確認してください。'
-      : 'メニューを外し直せたか確認できませんでした。一覧の表示を確認してください。';
+      ? '解除できたか確認できませんでした。画面の表示を確認してください。'
+      : 'メニューを外し直せたか確認できませんでした。画面の表示を確認してください。';
   }
   return action === 'unlink'
     ? 'LINE の連携を解除できませんでした。時間をおいてもう一度お試しください。'
@@ -141,7 +141,7 @@ export function OwnerLineUnlinkControl({ owner, onChanged }: OwnerLineUnlinkCont
     try {
       await onChanged();
     } catch {
-      // swallowed-exception: intentional — 読み直しの失敗は一覧の側が示す。この部品は要求の結果だけを告げる。
+      // swallowed-exception: intentional — 読み直しの失敗は呼び出し側の画面が示す。この部品は要求の結果だけを告げる。
     }
 
     // 読み直しの後に告げる。表示が新しい状態へ変わってから結果を読み上げ、両者を食い違わせない。

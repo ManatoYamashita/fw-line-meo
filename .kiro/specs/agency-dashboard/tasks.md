@@ -283,7 +283,7 @@
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.8_
   - _Boundary: dashboard-web lib・components/entity-link.tsx_
 
-- [ ] 9.4 共用部品の変更（操作部品の移設・QR パネル・オーナーの表）
+- [x] 9.4 共用部品の変更（操作部品の移設・QR パネル・オーナーの表）
   - `app/stores/store-suspension-control.tsx`・`app/owners/owner-line-unlink-control.tsx` を `components/` へ移す。失敗時の文言の「一覧」を、どちらの面でも通じる語に改める（「表示を更新しました」「画面の表示を確認してください」）。引数と、それ以外の振る舞いは変えない
   - `components/store-qr-panel.tsx`: `onClose` を省略可能にし、省略したときは閉じる押しボタンを描かない
   - `components/owner-roster-table.tsx`: 省略可能な `linkNames?: boolean` を足し、`true` のときだけ表示名と登録済みの店舗名を `EntityLink` にする
@@ -390,3 +390,4 @@
 - 8.5: **面ごとに要る状態は、共有の fixture を変えずにスタブの引数で注入する**（`stubDashboardApi` の `suspendedStoreIds`）。注入した状態が画面まで届いたことは、面を開く手順の前提の表明で確かめる。当初は共有の `STORES` を汚すのを避けて停止中の店舗を省き、「単体試験が覆う」と説明していたが、単体試験は値を置くだけで表明していなかった（レビューで発見）。`mustOverflow` は部分集合の主張なので、空のままにせず、全表を宣言して失敗させ、実測（`label=scrollWidth/clientWidth`）を取ってから決める。手元の E2E はシェルの `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`（Aside）を外して流す。Aside のままだと全件緑でもワーカーの終了で止まって exit 1 になり（docs/testing/e2e.md #381）、途中の試験も 13〜17 分止まった。付属の Chromium では 116 件を 40 秒で流せた。
 - 9.2: dashboard-api は `@fwlm/db` の **dist** を読む。共有パッケージの公開面を足した・取り消したときは `rm -rf ts/packages/db/dist && pnpm -C ts/packages/db build` で作り直してから試験する（取り消した `isUuid` が古い dist に残り、作り直さないと緑に見えた）。API のハンドラの UUID の判定は `@fwlm/db` から借りず、`store-suspension.ts` と同じくモジュール内の `UUID_RE` を持つ（9.2 のレビューで境界の外と判定された）
 - 9.3: 型に必須の id の項目を足して既存のスタブへ値を補うときは、同じファイルにある実体の定数（e2e の `AGENCIES[0].id`・`STORES[0].id`、単体試験の `AGENCY`・`'a1'` など）を参照する。仮の文字列（`agency-fixture` など）を置くと、型検査も単体試験も緑のまま、後のタスクでリンク先が存在しない経路として固定される（9.3 のレビューで検出）
+- 9.4: dashboard-web のファイルを移す・改名するときは、旧パスを `git grep` でリポジトリ全体から探し、`pnpm -r test` で全パッケージを流す。`ts/packages/ui/test/success-cue.test.tsx` の `SUCCESS_DISPLAYS` がアプリの成功表示をパスで持っており、dashboard-web の試験だけでは赤に気づけない（9.4 のレビューで検出）。店舗登録の面の 10.7 は `OwnerRosterTable` の既定値に頼っているので、9.7 で「店舗登録のオーナー選択はリンクにならない」を stores/new の試験として assert する

@@ -10,6 +10,8 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { storesOfOwner, type OwnerStoresLoad } from '../lib/agency-roster';
+import { ownerPath, storePath } from '../lib/entity-paths';
+import { EntityLink } from './entity-link';
 import { formatJstDate } from '../lib/jst-date';
 import {
   ENABLED_STATE_LABEL,
@@ -67,7 +69,15 @@ export function ownerDistinctLabel(owner: Pick<OwnerListItem, 'displayName' | 'c
   return `（表示名なし・${formatJstDate(owner.createdAt) ?? UNKNOWN_DATE} 作成）`;
 }
 
-function OwnerStoresCell({ owner, stores }: { owner: OwnerListItem; stores: OwnerStoresLoad }) {
+function OwnerStoresCell({
+  owner,
+  stores,
+  linkNames,
+}: {
+  owner: OwnerListItem;
+  stores: OwnerStoresLoad;
+  linkNames: boolean;
+}) {
   // 店舗だけの取得に失敗したときは件数を出さない。「登録済みの店舗はありません」と出すと
   // 失敗を 0 件に化けさせる（Req 7.4）。失敗そのものは表の上の通知が伝える。
   if (stores.kind === 'error') {
@@ -83,7 +93,9 @@ function OwnerStoresCell({ owner, stores }: { owner: OwnerListItem; stores: Owne
       {owned.map((store) => (
         <li key={store.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {/* 横並びの子なので、長い店名がセルを押し広げないよう縮められるようにする（正典 §6）。 */}
-          <span className="min-w-0">{store.name}</span>
+          <span className="min-w-0">
+            {linkNames ? <EntityLink href={storePath(store.id)}>{store.name}</EntityLink> : store.name}
+          </span>
           <Badge variant="outline">{PLACE_STATUS_LABEL[store.placeStatus]}</Badge>
           {store.suspendedAt !== null && (
             <Badge variant="secondary">{STORE_SUSPENSION_LABEL.suspended}</Badge>
@@ -115,6 +127,7 @@ export function OwnerRosterTable({
   owners,
   stores,
   showInviteCode = false,
+  linkNames = false,
   renderAction,
 }: {
   /** 表の捲れる領域の名前（支援技術へ領域として公開する）。 */
@@ -126,6 +139,11 @@ export function OwnerRosterTable({
    * 列ごとの引数が 3 つ目に達したら、列の定義を配列で受ける形への置き換えを検討する。
    */
   showInviteCode?: boolean;
+  /**
+   * 表示名をオーナーの詳細へ、登録済みの店舗名を店舗の詳細へのリンクにする（代理店詳細・Issue #526・Req 10.1・10.2）。
+   * 既定はリンクにしない。店舗登録の手順の中では、離れると入力途中の手順が失われるので渡さない（Req 10.7）。
+   */
+  linkNames?: boolean;
   /** 行の末尾に置く操作。渡したときだけ「操作」の列を描く。 */
   renderAction?: (owner: OwnerListItem) => ReactNode;
 }) {
@@ -146,12 +164,18 @@ export function OwnerRosterTable({
         <TableBody>
           {owners.map((owner) => (
             <TableRow key={owner.id}>
-              <TableCell wrap="prose">{ownerDisplayLabel(owner)}</TableCell>
+              <TableCell wrap="prose">
+                {linkNames ? (
+                  <EntityLink href={ownerPath(owner.id)}>{ownerDisplayLabel(owner)}</EntityLink>
+                ) : (
+                  ownerDisplayLabel(owner)
+                )}
+              </TableCell>
               <TableCell wrap="none">
                 <Badge variant="secondary">{ONBOARDING_STATUS_LABEL[owner.onboardingStatus]}</Badge>
               </TableCell>
               <TableCell wrap="prose">
-                <OwnerStoresCell owner={owner} stores={stores} />
+                <OwnerStoresCell owner={owner} stores={stores} linkNames={linkNames} />
               </TableCell>
               <TableCell wrap="none">{formatJstDate(owner.createdAt) ?? UNKNOWN_DATE}</TableCell>
               {showInviteCode && (

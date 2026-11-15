@@ -22,7 +22,7 @@ import type { OwnerLineUnlinkResult, OwnerListItem } from '../src/lib/types';
 const api = vi.hoisted(() => ({ unlinkOwnerLine: vi.fn() }));
 vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
-import { OwnerLineUnlinkControl } from '../src/app/owners/owner-line-unlink-control';
+import { OwnerLineUnlinkControl } from '../src/components/owner-line-unlink-control';
 
 // jsdom 25 は PointerEvent を実装していない（store-suspension-control.test.tsx と同じ理由の最小互換）。
 if (!('PointerEvent' in window)) {
@@ -285,14 +285,14 @@ describe('OwnerLineUnlinkControl — 要求の失敗（1.7）', () => {
     expect(unlinkButton().getAttribute('aria-disabled')).not.toBe('true');
   });
 
-  it('通信できなかったときは、成否を言い切らずに一覧を確かめるよう促す', async () => {
+  it('通信できなかったときは、成否を言い切らずに画面の表示を確かめるよう促す', async () => {
     unlinkMock.mockResolvedValue(failure('network', 'ネットワークエラー'));
     renderControl(LINKED);
     fireEvent.click(within(await openConfirm()).getByRole('button', { name: '解除する' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(
-      '解除できたか確認できませんでした。一覧の表示を確認してください。',
+      '解除できたか確認できませんでした。画面の表示を確認してください。',
     );
     expect(statusText()).toBe('');
   });
@@ -303,7 +303,7 @@ describe('OwnerLineUnlinkControl — 要求の失敗（1.7）', () => {
     fireEvent.click(within(await openConfirm()).getByRole('button', { name: '解除する' }));
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('オーナーが見つかりません。一覧を更新しました。');
+    expect(alert.textContent).toBe('オーナーが見つかりません。表示を更新しました。');
   });
 
   it('権限の失敗は固定の文言へ写し、サーバーの文言を出さない', async () => {

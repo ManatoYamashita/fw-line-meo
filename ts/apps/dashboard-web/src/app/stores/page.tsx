@@ -34,7 +34,7 @@ import { useAuth } from '../../lib/auth-context';
 import { getStores } from '../../lib/api';
 import { PLACE_STATUS_LABEL, competitorStatusLabel } from '../../lib/status-labels';
 import type { StoreListItem } from '../../lib/types';
-import { StoreSuspensionControl } from './store-suspension-control';
+import { StoreSuspensionControl } from '../../components/store-suspension-control';
 
 // 店舗一覧の取得状態。ローディング/エラー/取得済みを判別共用体で表す（7.4: 失敗時にデータを偽装しない）。
 type LoadState =
