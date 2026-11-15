@@ -91,7 +91,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
-as_server_user initdb -D "$PGDATA" -U postgres --auth=trust >/dev/null
+# initdb は文字コードとロケールを呼び出し元の LANG / LC_* から決める。POSIX だと SQL_ASCII になり
+# char_length がバイト数を返して日本語の CHECK が正しい値を拒否し、未導入のロケールだと initdb が
+# 失敗する。CI の postgres:16（UTF8・en_US.utf8）に揃えるため、ここで明示する。
+# C ではなく UTF-8 のロケールを選ぶのは、C だと upper / lower が非 ASCII を変換せず CI と結果が変わるため。
+# ロケール名は OS ごとに綴りが違う（glibc は C.utf8、macOS は C.UTF-8 または en_US.UTF-8）。
+resolve_utf8_locale() {
+  local available cand
+  available="$(locale -a 2>/dev/null)" || available=''
+  for cand in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+    if grep -qxF "$cand" <<<"$available"; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+DB_LOCALE="$(resolve_utf8_locale)" || {
+  echo "ERROR: UTF-8 のロケール（C.UTF-8 / C.utf8 / en_US.UTF-8 / en_US.utf8）がありません（locale -a で確認）" >&2
+  exit 1
+}
+
+as_server_user initdb -D "$PGDATA" -U postgres --auth=trust --encoding=UTF8 --locale="$DB_LOCALE" >/dev/null
 as_server_user pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
 
 createdb -h "$SOCKDIR" -U postgres "$DBNAME"
