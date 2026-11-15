@@ -97,7 +97,10 @@ trap cleanup EXIT
 # 任せる（C のままだと upper('ä') や ORDER BY が CI の postgres:16＝en_US.utf8 とずれる）。
 as_server_user initdb -D "$PGDATA" -U postgres --auth=trust \
   --encoding=UTF8 --locale=C --locale-provider=icu --icu-locale=und >/dev/null
-as_server_user pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
+# サーバーの起動だけは LC_ALL=C を明示する。LANG / LC_ALL が両方未設定だと macOS の postmaster が
+# 起動中にマルチスレッド化して FATAL で落ちる（"postmaster became multithreaded during startup"）。
+# 照合・文字分類は上の initdb で ICU に固定済みなので、ここで C を渡しても結果は変わらない。
+as_server_user env LC_ALL=C pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
 
 createdb -h "$SOCKDIR" -U postgres "$DBNAME"
 for f in "$MIGRATIONS_DIR"/*.sql; do
