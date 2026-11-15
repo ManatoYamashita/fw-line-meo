@@ -26,6 +26,19 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export PATH=\"${NODE_BIN}:\${PATH}\"" >> "${CLAUDE_ENV_FILE}"
 fi
 
+# クラウドの既定ロケールは POSIX で、with-test-db.sh の initdb がそれを継ぐと DB が SQL_ASCII になる。
+# SQL_ASCII では char_length がバイト数を返し、日本語の文字数 CHECK（store_survey_targets.label 等）が
+# 正しい値を拒否する。CI の postgres:16 イメージと同じ UTF8 で作らせる。
+case "${LANG:-}" in
+  *.UTF-8 | *.utf8) ;;
+  *)
+    export LANG=C.UTF-8
+    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+      echo "export LANG=C.UTF-8" >> "${CLAUDE_ENV_FILE}"
+    fi
+    ;;
+esac
+
 PNPM_VERSION="$(node -p "require('${TS_DIR}/package.json').packageManager.split('@')[1]")"
 if [ "$(pnpm -v 2>/dev/null || true)" != "${PNPM_VERSION}" ] || [ "$(dirname "$(command -v pnpm)")" != "${NODE_BIN}" ]; then
   npm install -g "pnpm@${PNPM_VERSION}" >/dev/null
