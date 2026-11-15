@@ -377,7 +377,7 @@ interface OwnerListItem {
   agencyName: string;
   lineLink: OwnerLineLink;
   menuUnlinkPending: boolean;
-  /** 確定済み店舗の名前（作成順） */
+  /** 確定済み店舗の名前（作成順）。Issue #526 で同じ並びの `stores: { id, name }[]` を足し、画面の切り替え後に消す（agency-dashboard design の「店舗の詳細・オーナーの詳細の取得」） */
   storeNames: readonly string[];
   /** 店舗を引き継いだオーナー（2.6）。引継ぎが無ければ null */
   takenOverBy: { ownerId: string; displayName: string | null } | null;
@@ -490,6 +490,7 @@ interface OwnerLineUnlinkResponse {
 #### OwnersListHandler（`owners-list.ts` の変更）
 - 運営が `agencyId` を指定しないとき、400 ではなく全オーナーを返す。代理店の利用者は従来どおり自代理店に束縛され、他の代理店の指定は 403
 - 応答の各行に `agencyName`・`lineLink`・`menuUnlinkPending`・`storeNames`・`takenOverBy` を足す
+- Issue #526 で、応答の各行に `agencyId`・`stores: { id, name }[]`（確定済みの店舗・`storeNames` と同じ並び）をさらに足した。`storeNames` は新しい画面が本番に出た後に消す。詳細は `.kiro/specs/agency-dashboard/design.md` の「店舗の詳細・オーナーの詳細の取得（Requirement 11・Issue #526）」
 
 ### dashboard-web
 
