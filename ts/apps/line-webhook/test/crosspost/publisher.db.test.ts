@@ -6,6 +6,7 @@ import {
   beginCrosspostReview,
   closePool,
   createCrosspostDraft,
+  crosspostInputStateOf,
   getCrosspostDelivery,
   getPool,
   listCrosspostDeliveries,
@@ -63,6 +64,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost publisher (DB)', () => {
       ownerId: f.owner,
       draftId: draft.id,
       expectedRevision: draft.revision,
+      expectedInput: crosspostInputStateOf(draft),
       texts: { instagram: 'IGの文', google: 'Googleの文' },
       expiresAt: later(),
     }))!;

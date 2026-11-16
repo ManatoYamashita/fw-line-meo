@@ -36,6 +36,11 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
   let pilot: string[];
   let jpeg: Buffer;
   let seq = 0;
+  /**
+   * 試験の待機点: 文の保存（saveCrosspostTexts の UPDATE）が DB に届く直前に 1 回だけ実行する操作。
+   * 「古い状態を読んだ処理」と「状態を変える別の操作」の順序を、偶然のタイミングに頼らず固定する。
+   */
+  let beforeTextSave: (() => Promise<unknown>) | null = null;
 
   function build(): void {
     messenger = fakeMessenger();
@@ -43,8 +48,18 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
     prompts = fakePrompts();
     const logger = recordingLogger();
     publisher = createCrosspostPublisher({ db: pool, pool, adapters: { instagram, google }, mediaStore: store, logger });
+    const savingDb = {
+      query: async (text: string, values?: unknown[]) => {
+        if (beforeTextSave !== null && text.includes('SET instagram_text = CASE')) {
+          const action = beforeTextSave;
+          beforeTextSave = null;
+          await action();
+        }
+        return pool.query(text, values);
+      },
+    } as unknown as Pool;
     flows = createCrosspostFlows({
-      db: pool,
+      db: savingDb,
       pool,
       messenger,
       prompts,
@@ -95,6 +110,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
   });
 
   beforeEach(async () => {
+    beforeTextSave = null;
     await clearCrosspost(pool, [f.owner, f.otherOwner]);
     pilot = [f.store];
     instagram = fakeAdapter('instagram', { kind: 'not_ready' });
@@ -972,6 +988,121 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
       const current = (await openDraft())!;
       expect(current.input_mode).toBe('none');
       expect(current.input_mode_event_at?.getTime()).toBe(endAt);
+    });
+  });
+
+  describe('文の保存と編集の状態の競合（Codex レビュー 4 回目）', () => {
+    // 順序は待機点で固定する（偶然のタイミングに依存しない）:
+    //   1. 文の処理が下書き（編集の状態）を読む  2. 保存の UPDATE が DB に届く直前に、割り込んだ操作が確定する
+    //   3. 古い状態で読んだ保存が届く  4. 保存は拒否され、割り込んだ操作の状態が残る
+    const notApplied = '反映しませんでした';
+    const interruptSave = (action: () => Promise<unknown>) => {
+      beforeTextSave = action;
+    };
+    const inputOf = async () => {
+      const d = (await openDraft())!;
+      return [d.input_mode, d.input_destination];
+    };
+
+    it.each([
+      ['google', 'instagram', 'Instagram'],
+      ['instagram', 'google', 'Google'],
+    ] as const)('%s の AI 修正の生成中に %s の手動編集が確定したら、古い AI 修正を保存せず、新しい編集を待つ', async (aiDest, manualDest, manualLabel) => {
+      const draft = await reviewingDraft();
+      const aiAt = nextLineTime();
+      const manualAt = nextLineTime(); // 手動編集は修正の指示より前に押したが、処理は後になった
+      const instructionAt = nextLineTime();
+      await postSentAt({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: aiDest }, aiAt);
+      interruptSave(() => postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: manualDest }, manualAt));
+      await textSentAt('もっと短く', instructionAt);
+      expect(beforeTextSave).toBeNull(); // 割り込みが実際に起きた
+      const after = (await openDraft())!;
+      expect([after.input_mode, after.input_destination]).toEqual(['manual', manualDest]);
+      expect([after.instagram_text, after.google_text, after.revision]).toEqual([draft.instagram_text, draft.google_text, draft.revision]);
+      expect(lastReply()).toContain(notApplied);
+      expect(lastReply()).toContain(`${manualLabel} に投稿する文を、そのまま送ってください`);
+      // 送り直した文は、新しい編集（手動・manualDest）として保存される。
+      await textSentAt('送り直した文', nextLineTime());
+      expect((await openDraft())![manualDest === 'google' ? 'google_text' : 'instagram_text']).toBe('送り直した文');
+    });
+
+    it('手動編集の文の保存中に AI 修正（別の投稿先）へ切り替わったら、文を保存せず、新しいモードを残す', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      const switchAt = nextLineTime();
+      interruptSave(() => postSentAt({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: 'instagram' }, switchAt));
+      await textSentAt('手で直した Google の文', nextLineTime());
+      expect(beforeTextSave).toBeNull();
+      expect(await inputOf()).toEqual(['ai_revision', 'instagram']);
+      expect((await openDraft())!.google_text).toBe(draft.google_text);
+      expect(lastReply()).toContain(notApplied);
+    });
+
+    it('同じ投稿先・同じモードを選び直したら、前の状態で読んだ保存はせず、送り直した文を保存する', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      const reselectAt = nextLineTime();
+      interruptSave(() => postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' }, reselectAt));
+      await textSentAt('手で直した文', nextLineTime());
+      expect(beforeTextSave).toBeNull();
+      const after = (await openDraft())!;
+      expect([after.input_mode, after.input_destination, after.input_mode_set_at?.getTime()]).toEqual(['manual', 'google', reselectAt]);
+      expect(after.google_text).toBe(draft.google_text);
+      await textSentAt('手で直した文', nextLineTime());
+      expect((await openDraft())!.google_text).toBe('手で直した文');
+    });
+
+    it('AI 修正の生成中に「直すのをやめる」が確定したら、生成した文を保存しない', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      const endAt = nextLineTime();
+      interruptSave(() => postSentAt({ action: 'x_end_edit', draftId: draft.id }, endAt));
+      await textSentAt('やわらかく', nextLineTime());
+      expect(beforeTextSave).toBeNull();
+      const after = (await openDraft())!;
+      expect([after.input_mode, after.google_text, after.input_mode_event_at?.getTime()]).toEqual(['none', draft.google_text, endAt]);
+      expect(lastReply()).toContain(notApplied);
+    });
+
+    it('手動編集の文の保存中に、後から押した作り直しが確定したら、文を保存せず、作り直しの結果を残す', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      const regenAt = nextLineTime();
+      interruptSave(() => postSentAt({ action: 'x_regen', draftId: draft.id, revision: draft.revision, destination: 'instagram' }, regenAt));
+      await textSentAt('手で直した Google の文', nextLineTime());
+      expect(beforeTextSave).toBeNull();
+      const after = (await openDraft())!;
+      expect(after.revision).toBe(draft.revision + 1); // 作り直しの 1 回だけ
+      expect(after.google_text).toBe(draft.google_text);
+      expect(after.instagram_text).toContain('instagramの文');
+      expect(after.input_mode).toBe('none');
+    });
+
+    it('手動編集の文の保存中に、前に送った写真の差し替えが確定したら、文を保存せず、編集のモードを残す', async () => {
+      const draft = await reviewingDraft();
+      const photoAt = nextLineTime(); // 写真は編集より前に送った（処理が遅れた）
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      interruptSave(() => photoSentAt('mid-save', photoAt));
+      await textSentAt('手で直した Google の文', nextLineTime());
+      expect(beforeTextSave).toBeNull();
+      const after = (await openDraft())!;
+      expect([after.input_mode, after.input_destination, after.revision]).toEqual(['manual', 'google', draft.revision + 1]);
+      expect(after.google_text).toBe(draft.google_text);
+      expect(lastReply()).toContain('Google に投稿する文を、そのまま送ってください');
+      await textSentAt('手で直した Google の文', nextLineTime());
+      expect((await openDraft())!.google_text).toBe('手で直した Google の文');
+    });
+
+    it('編集の状態が変わらなければ、AI 修正・手動編集とも保存する', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      await textSentAt('短く', nextLineTime());
+      const ai = (await openDraft())!;
+      expect([ai.google_text, ai.input_mode]).toEqual(['googleの直した文（短く）', 'none']);
+      await post({ action: 'x_edit', draftId: ai.id, revision: ai.revision, destination: 'instagram' });
+      await textSentAt('手で書いた文', nextLineTime());
+      const manual = (await openDraft())!;
+      expect([manual.instagram_text, manual.input_mode]).toEqual(['手で書いた文', 'none']);
     });
   });
 
