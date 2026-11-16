@@ -65,9 +65,9 @@ PR の単位ごとに、マージしてよい条件を書く。**どの PR も�
 
 ## PR 4: Google の発信先アダプタ（既定 OFF）
 
-- [ ] 4.1 `gbp/client.ts` に `publishLocalPost`（写真の `media[]`・時間制限・送信後の失敗を「結果不明」に分類）を足す。既存の `createLocalPost` は変えない
+- [x] 4.1 `gbp/client.ts` に `publishLocalPost`（写真の `media[]`・時間制限・送信後の失敗を「結果不明」に分類）を足す。既存の `createLocalPost` は変えない
   - _Requirements: 6.3, 6.10, 9.1_
-- [ ] 4.2 `adapters/google.ts`（availability・写真の条件・分類表。5xx は 503 を含めて結果不明。送信後の 429 も結果不明）
+- [x] 4.2 `adapters/google.ts`（availability・写真の条件・分類表。5xx は 503 を含めて結果不明。送信後の 429 も結果不明）
   - _Requirements: 5.2, 6.2, 6.3, 6.7_
   - マージ条件: 分類表の全行の試験が緑。**GBP API の実疎通は未実施**（#146 の承認待ち）であることを PR に明記
 

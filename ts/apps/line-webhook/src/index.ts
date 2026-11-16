@@ -31,7 +31,9 @@ import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flow
 import { createDefaultGbpPrompts } from './gbp/prompts.js';
 import { createDefaultGbpLogger } from './gbp/logger.js';
 import type { CrosspostConfig } from './crosspost/config.js';
+import { createGoogleAdapter } from './crosspost/adapters/google.js';
 import { createInstagramAdapter, createNotReadyAdapter } from './crosspost/adapters/instagram.js';
+import { getGbpLocation } from '@fwlm/db';
 import { createCrosspostFlows } from './crosspost/flows.js';
 import { createPhotoIntake } from './crosspost/intake.js';
 import { createDefaultCrosspostLogger } from './crosspost/logger.js';
@@ -133,7 +135,7 @@ async function buildGbp(gbpConfig: GbpConfig) {
     owners: { findOwnerById },
     logger,
   });
-  return { flowHandlers, oauthCallback };
+  return { flowHandlers, oauthCallback, gbpClient, tokenStore };
 }
 
 // LINE 起点の一括発信（line-crosspost・Issue #494）。**既定 OFF**。CROSSPOST_* の env が無ければ何も組み立てず、
@@ -150,12 +152,22 @@ async function buildCrosspost(crosspostConfig: CrosspostConfig) {
   const logger = createDefaultCrosspostLogger();
   const mediaStore = createGcsMediaStore({ bucket: crosspostConfig.mediaBucket, fetch });
   const prompts = await createDefaultCrosspostPrompts();
-  // Google の投稿先は、投稿先ごとの有効化（CROSSPOST_GOOGLE_ENABLED）と GBP の連携の両方が揃うまで「準備中」。
-  // 接続のアダプタは別の PR（tasks 4.x）で足す。
+  // Google の投稿先は、投稿先ごとの有効化（CROSSPOST_GOOGLE_ENABLED）と GBP の連携（GBP_* の env）の両方が
+  // 揃うまで「準備中」（Req 10.2）。GBP の連携・トークン・ロケーションは gbp-post-review-reply のものを読むだけ。
+  const google =
+    gbp !== null && crosspostConfig.googleEnabled
+      ? createGoogleAdapter({
+          db: pool,
+          enabled: true,
+          isLinked: (db, key) => gbp.tokenStore.isLinked(db, key),
+          getLocation: getGbpLocation,
+          client: gbp.gbpClient,
+        })
+      : createNotReadyAdapter('google');
   const publisher = createCrosspostPublisher({
     db: pool,
     pool,
-    adapters: { instagram: createInstagramAdapter(), google: createNotReadyAdapter('google') },
+    adapters: { instagram: createInstagramAdapter(), google },
     mediaStore,
     logger,
   });

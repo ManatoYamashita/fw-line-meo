@@ -126,6 +126,36 @@ export interface GbpClientService {
   upsertReviewReply(db: Queryable, input: UpsertReviewReplyInput): Promise<Result<void, GbpApiError>>;
 }
 
+/**
+ * 一括発信（line-crosspost・Issue #494）の Google 投稿の結果。`createLocalPost` と違い、**送信の後の失敗を
+ * 「失敗」と「結果不明」に分ける**（投稿の作成は非冪等で、応答を失った後に再送すると同じ投稿が 2 件になる）。
+ * - not_sent: 送信の前に止めた（未連携・失効・ロケーション未解決・トークンの取得の失敗）。投稿されていないことは確か
+ * - rejected: Google が非 2xx を返した（状態コードの解釈は呼び出し側の分類表が持つ）
+ * - indeterminate: 送信の後に通信が切れた・時間切れ（投稿されたかどうか分からない）
+ * - created: 2xx。本文を読めなくても作成は成功している（name・searchUrl は読めたときだけ）
+ */
+export type LocalPostPublishResult =
+  | { kind: 'created'; postName: string | null; searchUrl: string | null }
+  | { kind: 'not_sent'; error: GbpApiError }
+  | { kind: 'rejected'; status: number }
+  | { kind: 'indeterminate'; aborted: boolean };
+
+export interface PublishLocalPostInput extends StoreKey {
+  /** 1500 文字以内であることは呼び出し側（一括発信の検証）で保証済み。 */
+  summary: string;
+  /** 写真の取得用 URL（Google が取りに来る）。写真なしは null。 */
+  photoUrl: string | null;
+}
+
+/** 一括発信が使う、写真付きのローカル投稿（既存の createLocalPost は変えない）。 */
+export interface GbpLocalPostPublisher {
+  publishLocalPost(
+    db: Queryable,
+    input: PublishLocalPostInput,
+    options: { signal: AbortSignal },
+  ): Promise<LocalPostPublishResult>;
+}
+
 export interface GbpClientDeps {
   /** アクセストークンの唯一の供給元。refresh grant はこの内側に閉じる（Req 2.1）。 */
   tokenStore: Pick<TokenStoreService, 'getAccessTokenForStore'>;
@@ -386,7 +416,7 @@ async function resolveV4LocationPath(
   return { ok: true, value: path };
 }
 
-export function createGbpClient(deps: GbpClientDeps): GbpClientService {
+export function createGbpClient(deps: GbpClientDeps): GbpClientService & GbpLocalPostPublisher {
   const send = createRequester(deps);
 
   /**
@@ -483,6 +513,51 @@ export function createGbpClient(deps: GbpClientDeps): GbpClientService {
       // 作成は成功しているが name を読めない = 応答形式の想定外。
       if (postName === null) return { ok: false, error: { kind: 'upstream_error', status: 0 } };
       return { ok: true, value: { postName } };
+    },
+
+    async publishLocalPost(db, input, options) {
+      // 送信の前の失敗（ここまで）は not_sent。投稿されていないことが確か。
+      const pathRes = await resolveV4LocationPath(db, input);
+      if (!pathRes.ok) return { kind: 'not_sent', error: pathRes.error };
+      const tokenRes = await resolveAccessToken(deps, db, input);
+      if (!tokenRes.ok) return { kind: 'not_sent', error: tokenRes.error };
+
+      const body: Record<string, unknown> = {
+        languageCode: LOCAL_POST_LANGUAGE_CODE,
+        summary: input.summary,
+        topicType: LOCAL_POST_TOPIC_TYPE,
+        // 写真は v4 の LocalPost.media（MediaItem・mediaFormat=PHOTO・sourceUrl）。GBP API は未承認のため
+        // 実測していない（一括発信の tasks 6.2・前提資料 §4.5）。
+        ...(input.photoUrl === null ? {} : { media: [{ mediaFormat: 'PHOTO', sourceUrl: input.photoUrl }] }),
+      };
+
+      let response: Response;
+      try {
+        // 非冪等なので 1 回だけ送る（429・5xx でも再送しない）。
+        response = await deps.fetch(`${V4_BASE}/${pathRes.value}/localPosts`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${tokenRes.value}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+          signal: options.signal,
+        });
+      } catch {
+        // 送信の前に切れたのか後に切れたのかは区別できない。再送で重複を作らない側（結果不明）へ倒す。
+        return { kind: 'indeterminate', aborted: options.signal.aborted };
+      }
+      if (!response.ok) return { kind: 'rejected', status: response.status };
+
+      let parsed: unknown = null;
+      try {
+        parsed = await response.json();
+      } catch {
+        // swallowed-exception: intentional — 2xx で作成は成功している。本文を読めないことは成功を覆さない。
+        parsed = null;
+      }
+      return { kind: 'created', postName: readString(parsed, 'name'), searchUrl: readString(parsed, 'searchUrl') };
     },
 
     async listReviews(db, input) {
