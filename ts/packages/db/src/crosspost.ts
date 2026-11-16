@@ -493,11 +493,39 @@ export async function beginCrosspostReview(
   return res.rows[0] ?? null;
 }
 
+/**
+ * 下書きの編集の状態（入力モード・投稿先・モードを選んだ時刻・最後に反映した編集の操作の時刻）。文の保存は、
+ * 処理の初めに読んだこの状態が保存の時点の状態と一致するときだけ行う（`saveCrosspostTexts` の `expectedInput`）。
+ */
+export interface CrosspostInputState {
+  mode: CrosspostInputMode;
+  destination: CrosspostDestination | null;
+  setAt: Date | null;
+  eventAt: Date | null;
+}
+
+/** 読んだ下書きの行から、編集の状態を写す。 */
+export function crosspostInputStateOf(draft: CrosspostDraftRow): CrosspostInputState {
+  return {
+    mode: draft.input_mode,
+    destination: draft.input_destination,
+    setAt: draft.input_mode_set_at,
+    eventAt: draft.input_mode_event_at,
+  };
+}
+
 export interface SaveCrosspostTextsInput {
   ownerId: string;
   draftId: string;
   /** この版のときだけ保存する（生成の間に別の変更が入ったら保存しない）。 */
   expectedRevision: number;
+  /**
+   * 処理の初めに読んだ編集の状態（`crosspostInputStateOf` で読んだ行から写す）。保存の時点の状態と 4 項目すべてが
+   * 一致するときだけ保存する（NULL どうしも一致とみなす）。版は文・写真の変化しか表さず、編集のモードの切り替えでは
+   * 進まないので、版だけでは「古い編集の状態で始めた保存が、処理の間に確定した新しいモードを解除する・別の投稿先の
+   * 文として保存する」ことを防げない。どの経路（初回の生成・作り直し・AI 修正・手動編集）も必須。
+   */
+  expectedInput: CrosspostInputState;
   /** 渡した投稿先の文だけを置き換える。undefined の投稿先は変えない。 */
   texts: Partial<Record<CrosspostDestination, string>>;
   /** 修正指示を素材へ足すとき（AI への修正指示は素材として扱う・Req 4.3）。 */
@@ -516,7 +544,8 @@ export interface SaveCrosspostTextsInput {
 }
 
 /**
- * 確認中の下書きの文を保存し、版を 1 進め、入力モードを戻す。版が一致しなければ null（何も変えない）。
+ * 確認中の下書きの文を保存し、版を 1 進め、入力モードを戻す。版と、処理の初めに読んだ編集の状態
+ * （`expectedInput`）の両方が保存の時点で一致しなければ null（何も変えない）。照合と更新は 1 文の CAS。
  */
 export async function saveCrosspostTexts(
   db: Queryable,
@@ -526,6 +555,8 @@ export async function saveCrosspostTexts(
   // 渡された時刻が不正なら、順序を判定できないので保存しない（欠落した時刻を推測で補わない）。
   if (input.inputSentAt !== undefined && !isValidLineTime(input.inputSentAt)) return null;
   if (input.operationAt !== undefined && !isValidLineTime(input.operationAt)) return null;
+  const expected = input.expectedInput;
+  if ((expected.mode === 'none') !== (expected.destination === null)) return null;
   const instagram = input.texts.instagram;
   const google = input.texts.google;
   const res = await db.query<CrosspostDraftRow>(
@@ -548,6 +579,10 @@ export async function saveCrosspostTexts(
       WHERE id = $1 AND owner_id = $2 AND status = 'reviewing' AND revision = $3
         AND ($10::timestamptz IS NULL OR (input_mode_set_at IS NOT NULL AND input_mode_set_at < $10::timestamptz))
         AND ($11::timestamptz IS NULL OR $11::timestamptz > COALESCE(input_mode_event_at, line_started_at))
+        AND input_mode = $12::crosspost_input_mode
+        AND input_destination IS NOT DISTINCT FROM $13::crosspost_destination
+        AND input_mode_set_at IS NOT DISTINCT FROM $14::timestamptz
+        AND input_mode_event_at IS NOT DISTINCT FROM $15::timestamptz
         AND ($8::text IS NULL
              OR char_length(material_text) + 1 + char_length($8::text) <= ${CROSSPOST_MATERIAL_MAX_CHARS})
       RETURNING ${DRAFT_COLUMNS}`,
@@ -563,6 +598,10 @@ export async function saveCrosspostTexts(
       input.expiresAt,
       input.inputSentAt ?? null,
       input.operationAt ?? null,
+      expected.mode,
+      expected.destination,
+      expected.setAt,
+      expected.eventAt,
     ],
   );
   return res.rows[0] ?? null;

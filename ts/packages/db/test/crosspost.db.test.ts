@@ -28,6 +28,7 @@ import {
   saveCrosspostCheckpoint,
   saveCrosspostTexts,
   setCrosspostInputMode,
+  crosspostInputStateOf,
   type CrosspostDraftRow,
   type CrosspostMediaInput,
 } from '../src/crosspost.js';
@@ -113,6 +114,7 @@ async function newReviewingDraft(
     ownerId,
     draftId: draft.id,
     expectedRevision: reviewing.revision,
+    expectedInput: crosspostInputStateOf(reviewing),
     texts,
     expiresAt: later(),
   });
@@ -288,6 +290,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
           ownerId: OWNER_A,
           draftId: draft.id,
           expectedRevision: draft.revision - 1,
+          expectedInput: crosspostInputStateOf(moded!),
           texts: { google: '古い版から' },
           expiresAt: later(),
         }),
@@ -297,6 +300,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         ownerId: OWNER_A,
         draftId: draft.id,
         expectedRevision: draft.revision,
+        expectedInput: crosspostInputStateOf(moded!),
         texts: { google: '書き直した文' },
         appendMaterial: '修正指示',
         expiresAt: later(),
@@ -317,6 +321,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
           ownerId: OWNER_B,
           draftId: draft.id,
           expectedRevision: draft.revision,
+          expectedInput: crosspostInputStateOf(draft),
           texts: { google: '乗っ取り' },
           expiresAt: later(),
         }),
@@ -513,6 +518,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
           ownerId: OWNER_A,
           draftId: draft.id,
           expectedRevision: revision,
+          expectedInput: crosspostInputStateOf(draft),
           texts: { google: '承認後の変更' },
           expiresAt: later(),
         }),
@@ -955,6 +961,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
             ownerId: OWNER_A,
             draftId: draft.id,
             expectedRevision: draft.revision,
+            expectedInput: crosspostInputStateOf(moded!),
             texts: { google: '切り替えの前に送った文' },
             inputSentAt,
             expiresAt: later(),
@@ -965,6 +972,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         ownerId: OWNER_A,
         draftId: draft.id,
         expectedRevision: draft.revision,
+        expectedInput: crosspostInputStateOf(moded!),
         texts: { google: '切り替えの後に送った文' },
         inputSentAt: lineAt(101),
         expiresAt: later(),
@@ -1249,6 +1257,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         ownerId: OWNER_A,
         draftId: draft.id,
         expectedRevision: reviewing!.revision,
+        expectedInput: crosspostInputStateOf(reviewing!),
         texts: { google: 'Google本文' },
         operationAt: t(33),
         expiresAt: later(),
@@ -1381,19 +1390,25 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         lineEventAt: t(20),
         expiresAt: later(),
       });
-      const save = (operationAt: Date) =>
+      // 作り直しの処理は、押した時点の下書き（read）を読んでから生成し、その状態を前提に保存する。
+      const save = (operationAt: Date, read: CrosspostDraftRow) =>
         saveCrosspostTexts(pool, {
           ownerId: OWNER_A,
           draftId: draft.id,
           expectedRevision: draft.revision,
+          expectedInput: crosspostInputStateOf(read),
           texts: { instagram: '作り直した文' },
           operationAt,
           expiresAt: later(),
         });
-      expect(await save(t(15))).toBeNull(); // 作り直しを押した後に「自分で書き直す」を押した
-      expect(await save(t(20))).toBeNull(); // 同時刻
+      // 編集の前に読んだ状態での保存は、状態の照合で拒否する。
+      expect(await save(t(25), draft)).toBeNull();
+      // 編集の後に処理が始まった（Webhook の順不同）が、押したのは編集より前・同時刻の作り直しは、時刻で拒否する。
+      const edited = (await getOpenCrosspostDraft(pool, OWNER_A))!.draft;
+      expect(await save(t(15), edited)).toBeNull(); // 作り直しを押した後に「自分で書き直す」を押した
+      expect(await save(t(20), edited)).toBeNull(); // 同時刻
       expect((await getOpenCrosspostDraft(pool, OWNER_A))!.draft.input_mode).toBe('manual');
-      const saved = await save(t(25));
+      const saved = await save(t(25), edited);
       expect([saved?.instagram_text, saved?.input_mode]).toEqual(['作り直した文', 'none']);
     });
 
@@ -1415,6 +1430,140 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       expect([older.draft.revision, older.draft.input_mode, older.draft.input_destination]).toEqual([draft.revision + 1, 'manual', 'google']);
       const newer = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('after-edit', t(30)), expiresAt: later() });
       expect(newer.kind === 'attached' && newer.draft.input_mode).toBe('none');
+    });
+  });
+
+  describe('文の保存と編集の状態の競合（読んだ編集の状態と一致するときだけ保存・Codex レビュー 4 回目）', () => {
+    // 試験の順序はすべて逐次の呼び出しで固定する（偶然のタイミングに依存しない）:
+    //   1. 保存する処理が下書き（編集の状態）を読む  2. 別の操作が編集の状態を確定する  3. 古い状態で保存する
+    const t = (sec: number): Date => new Date(Date.UTC(2026, 10, 12, 0, 0, 0) + sec * 1000);
+    type Mode = 'none' | 'manual' | 'ai_revision';
+    type Dest = 'instagram' | 'google';
+    const current = async (): Promise<CrosspostDraftRow> => (await getOpenCrosspostDraft(await getPool(), OWNER_A))!.draft;
+    const setMode = async (revision: number, mode: Mode, destination: Dest | null, at: Date) =>
+      setCrosspostInputMode(await getPool(), {
+        ownerId: OWNER_A,
+        draftId: (await current()).id,
+        expectedRevision: revision,
+        mode,
+        destination,
+        lineEventAt: at,
+        expiresAt: later(),
+      });
+    /** 読んだ下書き（read）を前提にした保存。 */
+    const save = async (
+      read: CrosspostDraftRow,
+      texts: Partial<Record<Dest, string>>,
+      timing: { inputSentAt?: Date; operationAt?: Date },
+    ) =>
+      saveCrosspostTexts(await getPool(), {
+        ownerId: OWNER_A,
+        draftId: read.id,
+        expectedRevision: read.revision,
+        expectedInput: crosspostInputStateOf(read),
+        texts,
+        ...timing,
+        expiresAt: later(),
+      });
+    const inputOf = (d: CrosspostDraftRow) => [d.input_mode, d.input_destination, d.input_mode_set_at?.getTime() ?? null];
+
+    it.each([
+      ['google', 'instagram'],
+      ['instagram', 'google'],
+    ] as const)('%s の AI 修正を始めた後、%s の手動編集に切り替わると、古い AI 修正の保存は拒否し、新しい編集を残す', async (aiDest, manualDest) => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'ai_revision', aiDest, t(5));
+      const read = await current(); // AI 修正の指示（t(9) に送った）の処理が、ここで状態を読む
+      // 処理の間に、t(7) に押した手動編集が遅れて確定する（送った順と処理の順が一致しない）
+      expect((await setMode(draft.revision, 'manual', manualDest, t(7)))?.input_destination).toBe(manualDest);
+      expect(await save(read, { [aiDest]: 'AI が直した古い前提の文' }, { inputSentAt: t(9) })).toBeNull();
+      const after = await current();
+      expect(inputOf(after)).toEqual(['manual', manualDest, t(7).getTime()]);
+      expect([after.instagram_text, after.google_text, after.revision]).toEqual([draft.instagram_text, draft.google_text, draft.revision]);
+    });
+
+    it('手動編集の文の保存中に別の編集モードへ切り替わると、保存を拒否し、新しいモードと本文を残す', async () => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'manual', 'google', t(5));
+      const read = await current();
+      await setMode(draft.revision, 'ai_revision', 'instagram', t(7));
+      expect(await save(read, { google: '手で直した文' }, { inputSentAt: t(9) })).toBeNull();
+      const after = await current();
+      expect(inputOf(after)).toEqual(['ai_revision', 'instagram', t(7).getTime()]);
+      expect(after.google_text).toBe(draft.google_text);
+    });
+
+    it('同じ投稿先・同じモードを選び直したら、前の状態で読んだ保存は拒否する（選び直した後の状態で読み直せば保存できる）', async () => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'manual', 'google', t(5));
+      const read = await current();
+      await setMode(draft.revision, 'manual', 'google', t(7));
+      expect(await save(read, { google: '手で直した文' }, { inputSentAt: t(9) })).toBeNull();
+      expect(inputOf(await current())).toEqual(['manual', 'google', t(7).getTime()]);
+      const saved = await save(await current(), { google: '手で直した文' }, { inputSentAt: t(9) });
+      expect([saved?.google_text, saved?.input_mode]).toEqual(['手で直した文', 'none']);
+    });
+
+    it('AI 修正の生成中に編集を終えたら、生成の保存を拒否し、終えた状態を残す', async () => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'ai_revision', 'google', t(5));
+      const read = await current();
+      await setMode(draft.revision, 'none', null, t(7));
+      expect(await save(read, { google: 'AI が直した文' }, { inputSentAt: t(6) })).toBeNull();
+      const after = await current();
+      expect(inputOf(after)).toEqual(['none', null, null]);
+      expect(after.input_mode_event_at?.getTime()).toBe(t(7).getTime());
+      expect(after.google_text).toBe(draft.google_text);
+    });
+
+    it('作り直しの生成中に、作り直しより前に押された編集が遅れて確定したら、作り直しの保存を拒否し、編集を残す', async () => {
+      const draft = await newReviewingDraft();
+      const read = await current(); // t(10) に押した作り直しが状態（モードなし）を読む
+      await setMode(draft.revision, 'manual', 'google', t(8)); // t(8) に押した手動編集が後から確定する
+      expect(await save(read, { instagram: '作り直した文' }, { operationAt: t(10) })).toBeNull();
+      const after = await current();
+      expect(inputOf(after)).toEqual(['manual', 'google', t(8).getTime()]);
+      expect(after.instagram_text).toBe(draft.instagram_text);
+    });
+
+    it('手動編集中の作り直しは、編集の状態が変わっていなければ保存し、モードを戻す', async () => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'manual', 'google', t(5));
+      const read = await current();
+      const saved = await save(read, { instagram: '作り直した文' }, { operationAt: t(10) });
+      expect([saved?.instagram_text, saved?.input_mode, saved?.revision]).toEqual(['作り直した文', 'none', draft.revision + 1]);
+    });
+
+    it('手動編集の文の保存中に写真が差し替わったら（版が進む）、保存を拒否し、編集のモードと本文を残す', async () => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'manual', 'google', t(10));
+      const read = await current();
+      // 編集より前（t(8)）に送った写真の処理が遅れて確定する。版は進むが、後に押した編集のモードは残る。
+      const attached = await attachCrosspostMedia(await getPool(), { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('mid-save', t(8)), expiresAt: later() });
+      expect(attached.kind).toBe('attached');
+      expect(await save(read, { google: '手で直した文' }, { inputSentAt: t(12) })).toBeNull();
+      const after = await current();
+      expect(inputOf(after)).toEqual(['manual', 'google', t(10).getTime()]);
+      expect([after.google_text, after.revision]).toEqual([draft.google_text, draft.revision + 1]);
+    });
+
+    it('編集の状態が変わっていなければ、AI 修正・手動編集・初回の生成のどれも保存できる', async () => {
+      const draft = await newReviewingDraft();
+      await setMode(draft.revision, 'ai_revision', 'google', t(5));
+      const ai = await save(await current(), { google: 'AI が直した文' }, { inputSentAt: t(6) });
+      expect([ai?.google_text, ai?.input_mode]).toEqual(['AI が直した文', 'none']);
+      await setMode(ai!.revision, 'manual', 'instagram', t(7));
+      const manual = await save(await current(), { instagram: '手で直した文' }, { inputSentAt: t(8) });
+      expect([manual?.instagram_text, manual?.input_mode]).toEqual(['手で直した文', 'none']);
+
+      // 初回の生成（確認中へ進めた直後・モードなし）。
+      await resetCrosspost();
+      const pool = await getPool();
+      const created = unwrap(await createCrosspostDraft(pool, { ownerId: OWNER_A, storeId: STORE_A1, allowedStoreIds: ALLOWED, expiresAt: later(), purgeAfter: purgeLater(), lineStartedAt: t(20) }));
+      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: created.id, text: '素材', sentAt: t(21), expiresAt: later() }));
+      const reviewing = await beginCrosspostReview(pool, { ownerId: OWNER_A, draftId: created.id, expiresAt: later(), lineEventAt: t(22) });
+      const first = await save(reviewing!, { instagram: 'IG', google: 'GG' }, { operationAt: t(22) });
+      expect([first?.instagram_text, first?.google_text]).toEqual(['IG', 'GG']);
     });
   });
 
