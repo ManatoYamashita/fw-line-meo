@@ -70,6 +70,7 @@ TEST_DIR="${ROOT}/db/test"
 # 宣言と挙動の乖離はこのスクリプト自身が禁じている当のものなので、env は下の case が唯一の
 # 情報源とし、表は「呼ぶか呼ばないか」だけを宣言する（PR #159 レビュー指摘 1）。
 RUN_SCRIPTS=(
+    'check_crosspost_privileges.sh'
     'check_docs.sh'
     'check_no_optional_capabilities.sh'
     'check_owner_line_privileges.sh'
@@ -185,6 +186,10 @@ for sh_path in "${TEST_DIR}"/*.sh; do
     # RUN するスクリプトごとの env はここが唯一の情報源である。追加時はここへ 1 節足すこと。
     run_env=()
     case "$sh_name" in
+        check_crosspost_privileges.sh)
+            # 追加の env は要らない（DATABASE_URL は export 済み）。ロールを作って infra/sql/grants.sql を
+            # 当てるので CREATEROLE が要り、ロールは終了時にスクリプトが片付ける（line-crosspost・#494）。
+            ;;
         check_docs.sh)
             # 既定のコンテナ起動を止め、CI / with-test-db.sh が用意済みの postgres へ繋がせる。
             run_env=(MANAGE_CONTAINER=0 "PSQL_EXEC=psql ${DATABASE_URL}")

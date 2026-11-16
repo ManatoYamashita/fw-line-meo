@@ -17,6 +17,9 @@ BEGIN
         'daily_summaries','summary_deliveries',
         'agency_invite_codes','onboarding_sessions','line_webhook_events','audit_logs',
         'gbp_locations','gbp_sessions',
+        -- line-crosspost（0019・Issue #494）: 店主が自店の発信のために送った写真の鍵と文・投稿先の状態。
+        -- 来店客の情報ではない（素材は店主の業務の内容で、来店客の回答・識別子を入れる列を持たない）。
+        'crosspost_drafts','crosspost_media','crosspost_deliveries',
         -- structured survey（Issue #436・0015）。taxonomy 3 表・店舗別の設定 3 表・構造化の匿名集計 1 表。
         -- 回答 1 件を表す表は無い（構造化の回答も個別には保存しない）。
         'survey_categories','survey_facets','survey_category_facets',

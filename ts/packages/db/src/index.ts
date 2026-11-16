@@ -20,3 +20,4 @@ export * from './report-reads.js';
 export * from './oauth-tokens.js';
 export * from './gbp-locations.js';
 export * from './gbp-sessions.js';
+export * from './crosspost.js';

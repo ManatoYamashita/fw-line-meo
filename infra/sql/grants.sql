@@ -39,6 +39,9 @@
 --     （閲覧画面・design.md「書込操作を一切持たない」）。**例外は店舗オーナーのアンケート設定だけ**
 --     （Issue #437）: store_survey_configs / store_survey_category_settings / store_survey_targets へ
 --     列を絞った INSERT・UPDATE と、audit_logs への列を絞った INSERT。DELETE は無い
+--   TS LINE Webhook（line_webhook）だけ → DML on crosspost_drafts, crosspost_media, crosspost_deliveries
+--     （line-crosspost 0019・LINE 起点の一括発信。店主の LINE の会話だけが書く・Issue #494）
+--     例外は保存期間の削除で、TS 配信ジョブ（delivery）に crosspost_drafts・crosspost_media の DELETE だけを与える
 --   TS 客向けアンケート Web（survey_web）だけ → 列を絞った INSERT と UPDATE (count) on
 --     survey_structured_material_tallies（structured survey 0015・素材の厚みの匿名集計・Issue #436）。
 --     **既存の tallies の 3 SA 一律付与を写さない。** 書くのは客向けアンケート Web だけで、加算は UPSERT
@@ -190,6 +193,22 @@ GRANT
   INSERT (actor_type, actor_id, action, target_type, target_id, occurred_at)
   ON audit_logs
   TO :"detail";
+
+-- LINE 起点の一括発信（line-crosspost・Issue #494・0019）。書くのは店主の LINE の会話（line-webhook）だけ。
+-- 下書き・写真・投稿先の状態は店主の承認と投稿の実行に直結するので、客向け Web・ダッシュボード・店舗詳細には
+-- 何も与えない（ほかの面から店主の投稿を承認・変更できる経路を DB の側でも塞ぐ）。
+-- 既存の TS 3 SA の一律付与へは入れない（新しい表では最小権限を優先する）。
+-- DELETE は、取り消し・写真の差し替え・保存期間を過ぎた行の削除に使う。
+GRANT INSERT, UPDATE, DELETE ON
+  crosspost_drafts, crosspost_media, crosspost_deliveries
+  TO :"line_webhook";
+-- 保存期間の削除は利用者の操作に依存してはならない（Req 8.8）。毎時の配信ジョブが、保存期間を過ぎた下書き
+-- （投稿先の行は CASCADE）と古い写真の行を消す。**DELETE だけ**を与え、INSERT・UPDATE は与えない（配信ジョブ
+-- から下書きの内容・承認・投稿先の状態を変えられない）。crosspost_deliveries は CASCADE で消えるので直接の
+-- DELETE は要らない（参照の動作は表の所有者の権限で行われる）。
+GRANT DELETE ON
+  crosspost_drafts, crosspost_media
+  TO :"delivery";
 
 -- store_detail は、上の SELECT ON ALL TABLES と、アンケート設定 3 表・監査記録への列を絞った書込の
 -- ほかに DML を一切付与しない（詳細データの閲覧面は引き続き読取専用）。
