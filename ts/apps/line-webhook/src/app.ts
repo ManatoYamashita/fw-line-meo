@@ -43,6 +43,9 @@ export interface AppDeps {
   // LINE Push は gbp/callback.ts が所有し、本境界は HTTP の受け渡しのみを行う。
   // 既定 OFF（Issue #323）。GBP の env が無ければ undefined で、経路そのものを登録しない。
   gbpOauthCallback?: GbpOauthCallbackRoute;
+  // 一括発信（line-crosspost・Issue #494）が有効なときだけ true。画像の message.id を会話層へ渡す。
+  // 既定（省略）は従来どおり、画像の内容を一切持ち回らない。
+  acceptImages?: boolean;
 }
 
 /**
@@ -135,6 +138,7 @@ export function createApp(deps: AppDeps): Hono {
     // イベント単位で捕捉が完結する本設計では不要になったため廃止した）。
     const dispatcher = createEventDispatcher({
       recordWebhookEventOnce: deps.recordWebhookEventOnce,
+      acceptImages: deps.acceptImages === true,
       onEvent: async (event: InboundEvent) => {
         // 処理中であることを示す入力中アニメーション（Issue #307）。本処理の一部ではなく
         // 補助的な UX なので、失敗しても本処理（下の try）は止めない。別の try で捕捉し、

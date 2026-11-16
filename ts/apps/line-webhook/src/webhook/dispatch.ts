@@ -12,11 +12,32 @@
 
 export type InboundEvent =
   | { kind: 'follow'; lineUserId: string; replyToken: string }
-  | { kind: 'text'; lineUserId: string; replyToken: string; text: string }
-  | { kind: 'postback'; lineUserId: string; replyToken: string; data: string }
+  // sentAt: イベントの timestamp（UNIX ミリ秒）。一括発信が下書きの境界（始めた後に送られた文か）を判定する。
+  // 無ければ null。省略可能（会話のほかの経路は使わない）。
+  | { kind: 'text'; lineUserId: string; replyToken: string; text: string; sentAt?: number | null }
+  | { kind: 'postback'; lineUserId: string; replyToken: string; data: string; sentAt?: number | null }
   // Requirement 5.3: text 以外の message（スタンプ・画像等）。メッセージ内容自体は
   // 会話層で一切使用しないため保持しない（客・オーナーの送信内容を不必要に持ち回らない）。
-  | { kind: 'unsupported'; lineUserId: string; replyToken: string };
+  // 例外は一括発信（line-crosspost・Issue #494）が有効なときの画像だけで、そのときに限り本体を取得するための
+  // message.id と、まとめて送られた画像の並び（imageSet）を `image` に載せる。本体（画像のバイト列）は持たない。
+  // 一括発信が無効なら `image` は付かず、従来と同じく内容を一切持たない。
+  | { kind: 'unsupported'; lineUserId: string; replyToken: string; image?: InboundImage };
+
+/** 一括発信が有効なときだけ付く、画像メッセージの取得の手掛かり。 */
+export interface InboundImage {
+  messageId: string;
+  /** line = LINE のサーバーにある（Content API で取得できる）。external = 送信者の指定した外部 URL。 */
+  contentProvider: 'line' | 'external';
+  /** まとめて送られたときの並び（index は 1 始まり）。単独なら null。 */
+  imageSet: { id: string; index: number; total: number } | null;
+  /** このメッセージの引用の手掛かり（最終確認で店主が送った写真を引用する）。無ければ null。 */
+  quoteToken: string | null;
+  /**
+   * 店主が写真を送った時刻（イベントの timestamp・UNIX ミリ秒）。LINE は「イベントの順序は timestamp で判定する。
+   * 届く順は異なりうる。再配信でも元の時刻を保つ」とする（references/webhook-events.md）。無ければ null。
+   */
+  sentAt: number | null;
+}
 
 export interface EventDispatcher {
   dispatch(rawWebhookBody: string): Promise<void>;
@@ -27,6 +48,9 @@ export interface EventDispatcherDeps {
   // `ts/packages/db/src/webhook-events.ts` の recordWebhookEventOnce を pool 束縛した関数を注入する想定
   // （実配線はタスク 4.1）。
   recordWebhookEventOnce: (webhookEventId: string) => Promise<boolean>;
+  // 一括発信（line-crosspost）が有効なときだけ true。画像の message.id を `unsupported.image` に載せる。
+  // 省略・false のときは従来どおり（画像の内容を一切持ち回らない）。
+  acceptImages?: boolean;
   // follow/message(text)/postback を委譲する先（ConversationHandlers、タスク 3.x/4.1 で実体を配線）。
   onEvent: (event: InboundEvent) => Promise<void>;
 }
@@ -41,6 +65,10 @@ interface RawLineSource {
 interface RawLineMessage {
   type?: string;
   text?: string;
+  id?: string;
+  quoteToken?: string;
+  contentProvider?: { type?: string };
+  imageSet?: { id?: string; index?: number; total?: number };
 }
 
 interface RawLinePostback {
@@ -49,6 +77,7 @@ interface RawLinePostback {
 
 interface RawLineEvent {
   type?: string;
+  timestamp?: number;
   replyToken?: string;
   source?: RawLineSource;
   webhookEventId?: string;
@@ -68,7 +97,50 @@ interface ParsedInboundEvent {
 
 // 生イベントを InboundEvent に正規化する。冪等化キー（webhookEventId）も併せて返す。
 // 必須フィールド（source.userId・replyToken・webhookEventId）欠落や未知/未対応の型は null。
-function parseEvent(raw: RawLineEvent): ParsedInboundEvent | null {
+const MESSAGE_ID_PATTERN = /^\d{1,32}$/;
+
+/** 時刻があるときだけ sentAt を載せる（無いときは項目ごと省く・従来のイベントの形を変えない）。 */
+function withSentAt<T extends object>(event: T, timestamp: number | undefined): T & { sentAt?: number } {
+  const at = eventTime(timestamp);
+  return at === null ? event : { ...event, sentAt: at };
+}
+
+/** イベントの timestamp（UNIX ミリ秒）。形が正しくなければ null（推測で補わない）。 */
+function eventTime(timestamp: number | undefined): number | null {
+  return typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function parseImage(message: RawLineMessage | undefined, timestamp: number | undefined): InboundImage | undefined {
+  if (message?.type !== 'image' || typeof message.id !== 'string' || !MESSAGE_ID_PATTERN.test(message.id)) {
+    return undefined;
+  }
+  const set = message.imageSet;
+  const index = set?.index;
+  const total = set?.total;
+  const imageSet =
+    set !== undefined &&
+    typeof set.id === 'string' &&
+    typeof index === 'number' &&
+    typeof total === 'number' &&
+    Number.isSafeInteger(index) &&
+    Number.isSafeInteger(total) &&
+    index >= 1 &&
+    total >= index
+      ? { id: set.id, index, total }
+      : null;
+  return {
+    messageId: message.id,
+    contentProvider: message.contentProvider?.type === 'external' ? 'external' : 'line',
+    imageSet,
+    quoteToken:
+      typeof message.quoteToken === 'string' && message.quoteToken.length > 0 && message.quoteToken.length <= 512
+        ? message.quoteToken
+        : null,
+    sentAt: eventTime(timestamp),
+  };
+}
+
+function parseEvent(raw: RawLineEvent, acceptImages: boolean): ParsedInboundEvent | null {
   const webhookEventId = raw.webhookEventId;
   const lineUserId = raw.source?.userId;
   const replyToken = raw.replyToken;
@@ -86,13 +158,20 @@ function parseEvent(raw: RawLineEvent): ParsedInboundEvent | null {
         // Requirement 5.3: スタンプ・画像等のテキスト以外の message は、黙殺せず
         // unsupported として会話層へ渡す（会話層が現在の段階の案内を再送する）。
         // replyToken 等の欠落は本関数冒頭のガードで既に除外済み（reply 不能な入力は無視）。
-        return { webhookEventId, event: { kind: 'unsupported', lineUserId, replyToken } };
+        const image = acceptImages ? parseImage(raw.message, raw.timestamp) : undefined;
+        return {
+          webhookEventId,
+          event:
+            image === undefined
+              ? { kind: 'unsupported', lineUserId, replyToken }
+              : { kind: 'unsupported', lineUserId, replyToken, image },
+        };
       }
       const text = raw.message.text;
       if (typeof text !== 'string') {
         return null;
       }
-      return { webhookEventId, event: { kind: 'text', lineUserId, replyToken, text } };
+      return { webhookEventId, event: withSentAt({ kind: 'text', lineUserId, replyToken, text }, raw.timestamp) };
     }
 
     case 'postback': {
@@ -100,7 +179,7 @@ function parseEvent(raw: RawLineEvent): ParsedInboundEvent | null {
       if (typeof data !== 'string') {
         return null;
       }
-      return { webhookEventId, event: { kind: 'postback', lineUserId, replyToken, data } };
+      return { webhookEventId, event: withSentAt({ kind: 'postback', lineUserId, replyToken, data }, raw.timestamp) };
     }
 
     default:
@@ -115,7 +194,7 @@ export function createEventDispatcher(deps: EventDispatcherDeps): EventDispatche
       const events = body.events ?? [];
 
       for (const raw of events) {
-        const parsed = parseEvent(raw);
+        const parsed = parseEvent(raw, deps.acceptImages === true);
         if (!parsed) {
           continue;
         }

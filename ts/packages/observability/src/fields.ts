@@ -104,6 +104,12 @@ export interface LogFields {
   readonly skippedMenuUnavailable?: number;
   /** 完了後メニューの準備判定の結果。**対象が 1 件も無い実行でも出す。** */
   readonly reportMenuReady?: boolean;
+  /** 一括発信の保存期間の削除（line-crosspost・Issue #494）。保存期間を過ぎて消した下書きの件数。 */
+  readonly crosspostPurgedDrafts?: number;
+  /** 期限切れのまま残っていた作成中の下書きを消した件数。 */
+  readonly crosspostExpiredDrafts?: number;
+  /** 写真の保存期間を過ぎて消した写真の行の件数。 */
+  readonly crosspostPurgedMedia?: number;
   readonly exitCode?: number;
   /** 終了時に残っていた資源の種別。閉じ忘れの検知に使う。 */
   readonly activeResources?: readonly string[];

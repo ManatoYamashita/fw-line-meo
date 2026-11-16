@@ -30,6 +30,15 @@ import { createGbpOauthCallbackRoute } from './gbp/callback.js';
 import { createDefaultGbpFlowAccessors, createGbpFlowHandlers } from './gbp/flows.js';
 import { createDefaultGbpPrompts } from './gbp/prompts.js';
 import { createDefaultGbpLogger } from './gbp/logger.js';
+import type { CrosspostConfig } from './crosspost/config.js';
+import { createInstagramAdapter, createNotReadyAdapter } from './crosspost/adapters/instagram.js';
+import { createCrosspostFlows } from './crosspost/flows.js';
+import { createPhotoIntake } from './crosspost/intake.js';
+import { createDefaultCrosspostLogger } from './crosspost/logger.js';
+import { createGcsMediaStore } from './crosspost/media-store-gcs.js';
+import { createDefaultCrosspostPrompts } from './crosspost/prompts.js';
+import { createCrosspostPublisher } from './crosspost/publisher.js';
+import type { StoreIdentifiedOwnerRouterScope } from './owner/router.js';
 
 // Cloud Run エントリ。必須 env を検証してから起動する。
 //
@@ -127,6 +136,49 @@ async function buildGbp(gbpConfig: GbpConfig) {
   return { flowHandlers, oauthCallback };
 }
 
+// LINE 起点の一括発信（line-crosspost・Issue #494）。**既定 OFF**。CROSSPOST_* の env が無ければ何も組み立てず、
+// 会話からの委譲も、画像の message.id の受け渡しもしない（Req 10.1, 10.3）。3 表（migration 0019）を読むので、
+// migration と grants が本番に当たる前に有効にしてはならない。
+const crosspost = config.crosspost === null ? null : await buildCrosspost(config.crosspost);
+if (crosspost === null) {
+  writeStructuredLog('info', 'line-webhook.crosspost_disabled');
+} else {
+  writeStructuredLog('info', 'line-webhook.crosspost_enabled');
+}
+
+async function buildCrosspost(crosspostConfig: CrosspostConfig) {
+  const logger = createDefaultCrosspostLogger();
+  const mediaStore = createGcsMediaStore({ bucket: crosspostConfig.mediaBucket, fetch });
+  const prompts = await createDefaultCrosspostPrompts();
+  // Google の投稿先は、投稿先ごとの有効化（CROSSPOST_GOOGLE_ENABLED）と GBP の連携の両方が揃うまで「準備中」。
+  // 接続のアダプタは別の PR（tasks 4.x）で足す。
+  const publisher = createCrosspostPublisher({
+    db: pool,
+    pool,
+    adapters: { instagram: createInstagramAdapter(), google: createNotReadyAdapter('google') },
+    mediaStore,
+    logger,
+  });
+  return ({ messenger }: StoreIdentifiedOwnerRouterScope) =>
+    createCrosspostFlows({
+      db: pool,
+      pool,
+      messenger,
+      prompts,
+      publisher,
+      intake: createPhotoIntake({
+        pool,
+        mediaStore,
+        fetchContent: (messageId, maxBytes) => lineMessenger.getMessageContent(messageId, maxBytes),
+        logger,
+      }),
+      mediaStore,
+      logger,
+      pilotStoreIds: crosspostConfig.pilotStoreIds,
+      googleConnectAvailable: gbp !== null,
+    });
+}
+
 const conversationHandlers = createConversationHandlers({
   db: pool,
   pool,
@@ -158,6 +210,8 @@ const conversationHandlers = createConversationHandlers({
     liffStoreDetailUrl: config.liffStoreDetailUrl,
     // GBP の会話へは振り分け口が渡す（店舗特定済みのオーナーだけが GBP を使う）。OFF のときは渡さない。
     ...(gbp ? { gbp: gbp.flowHandlers } : {}),
+    // 一括発信の会話も振り分け口が渡す（店舗特定済みのオーナーだけが使う）。OFF のときは渡さない。
+    ...(crosspost ? { createCrosspost: crosspost } : {}),
   }),
 });
 
@@ -171,6 +225,8 @@ const deps: AppDeps = {
   messenger: lineMessenger,
   // GBP が OFF のときは経路そのものを登録しない（項目を持たなければ createApp は登録を飛ばす）。
   ...(gbp ? { gbpOauthCallback: gbp.oauthCallback } : {}),
+  // 一括発信が OFF のときは、画像の message.id を会話層へ渡さない（従来どおり内容を持ち回らない）。
+  acceptImages: crosspost !== null,
   logger: {
     // LINE はログを提供しないため自前で記録する。出力は共有経路が担う。
     error: (event, fields) => {

@@ -39,6 +39,23 @@ describe('writeStructuredLog', () => {
     );
   });
 
+  it('一括発信の保存期間の削除の件数を出す（line-crosspost・配信ジョブ）', () => {
+    const line = captureOutput('info', () => {
+      writeStructuredLog('info', 'delivery-job.crosspost_retention', {
+        crosspostPurgedDrafts: 2,
+        crosspostExpiredDrafts: 1,
+        crosspostPurgedMedia: 3,
+      });
+    });
+    expect(JSON.parse(line)).toEqual({
+      severity: 'INFO',
+      event: 'delivery-job.crosspost_retention',
+      crosspostPurgedDrafts: 2,
+      crosspostExpiredDrafts: 1,
+      crosspostPurgedMedia: 3,
+    });
+  });
+
   it('lineRequestId は許可された形だけを出す', () => {
     const line = captureOutput('warn', () => {
       writeStructuredLog('warn', 'webhook_signature_verification_failed', {

@@ -35,6 +35,7 @@ describe('loadConfig', () => {
       lineRichMenuCompletedId: 'richmenu-completed',
       liffStoreDetailUrl: 'https://liff.line.me/test-liff-id',
       gbp: null,
+      crosspost: null,
       port: 8080,
     });
   });

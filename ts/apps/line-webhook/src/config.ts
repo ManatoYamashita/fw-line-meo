@@ -1,5 +1,7 @@
 // line-webhook の実行時設定。必須 env を起動時に検証する（欠落は明示エラーで fail-fast）。
 
+import { loadCrosspostConfig, type CrosspostConfig } from './crosspost/config.js';
+
 export interface LineWebhookConfig {
   lineChannelId: string;
   lineChannelSecret: string;
@@ -12,6 +14,9 @@ export interface LineWebhookConfig {
   // GBP の経路（OAuth callback・GBP の postback・会話からの委譲）を一切登録しない。本番は GBP API の利用承認と
   // OAuth クライアントの作成が済むまでこの状態で動く。
   gbp: GbpConfig | null;
+  // LINE 起点の一括発信（line-crosspost・Issue #494）。**既定 OFF**。env が無ければ null で、会話からの委譲・
+  // 画像の受け取りを一切組み立てない（crosspost/config.ts）。
+  crosspost: CrosspostConfig | null;
   port: number;
 }
 
@@ -76,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LineWebhookCon
     lineRichMenuCompletedId: required(env, 'LINE_RICHMENU_COMPLETED_ID'),
     liffStoreDetailUrl: required(env, 'LIFF_STORE_DETAIL_URL'),
     gbp: loadGbpConfig(env),
+    crosspost: loadCrosspostConfig(env),
     port: Number(env.PORT ?? '8080'),
   };
 }
