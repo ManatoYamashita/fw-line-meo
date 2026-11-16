@@ -144,20 +144,22 @@ export function buildStartMessage(input: { draftId: string; storeName: string; a
   return plain(lines.join('\n'), collectingReplies(input.draftId));
 }
 
-export function buildStorePickerMessage(stores: readonly { id: string; name: string }[]): LineMessage {
+export function buildStorePickerMessage(stores: readonly { id: string; name: string }[], previousDraftId?: string): LineMessage {
   return flex(
     '投稿を作る店舗を選んでください。',
     bubble({
       title: 'どの店舗の投稿を作りますか',
       lines: [text('投稿を作る店舗を選んでください。', { color: lineColors.description })],
       buttons: stores.map((store) =>
-        button(postback(truncateLabel(store.name, 40), { action: 'x_start', storeId: store.id }, `${store.name}の投稿を作る`)),
+        button(postback(truncateLabel(store.name, 40), previousDraftId
+          ? { action: 'x_new', storeId: store.id, draftId: previousDraftId }
+          : { action: 'x_start', storeId: store.id }, `${store.name}の投稿を作る`)),
       ),
     }),
   );
 }
 
-export function buildOpenDraftExistsMessage(input: { storeName: string; requestedStoreId: string | null }): LineMessage {
+export function buildOpenDraftExistsMessage(input: { storeName: string; requestedStoreId: string | null; draftId: string }): LineMessage {
   return flex(
     '作成中の投稿があります。続けるか、新しく作るかを選んでください。',
     bubble({
@@ -168,7 +170,7 @@ export function buildOpenDraftExistsMessage(input: { storeName: string; requeste
       ],
       buttons: [
         button(postback('続きから', { action: 'x_resume' }), 'primary'),
-        button(postback('新しく作る', { action: 'x_new', storeId: input.requestedStoreId })),
+        button(postback('新しく作る', { action: 'x_new', storeId: input.requestedStoreId, draftId: input.draftId })),
       ],
     }),
   );
@@ -240,7 +242,7 @@ export function buildTextBeforeDraftMessage(draftId: string): LineMessage {
 export function buildTextBeforeInputModeMessage(draftId: string): LineMessage {
   return plain(
     'この文は「自分で書き直す」「AI に直してもらう」を押す前に送られたものとして届いたため、使っていません。直す内容を、もう一度送ってください。',
-    [postback('直すのをやめる', { action: 'x_view', draftId })],
+    [postback('直すのをやめる', { action: 'x_end_edit', draftId })],
   );
 }
 
@@ -395,7 +397,7 @@ export function buildInputModeMessage(input: {
     input.mode === 'ai_revision'
       ? `${label} の文をどう直したいかを送ってください。\n例:「もっと短く」「絵文字を減らして」「やわらかい言い方に」\n伝えた内容は事実として使います。書いていないことは加えません。`
       : `${label} に投稿する文を、そのまま送ってください。送った文を AI で書き換えずに使います。\n「文をコピー」で写した下書きを直して送ることもできます。`;
-  return plain(body, [postback('直すのをやめる', { action: 'x_view', draftId: input.draftId })]);
+  return plain(body, [postback('直すのをやめる', { action: 'x_end_edit', draftId: input.draftId })]);
 }
 
 export function buildReviewHintMessage(draftId: string): LineMessage {
@@ -417,7 +419,7 @@ export function buildManualTextRejectedMessage(input: {
       : input.issue === 'too_many_hashtags'
         ? `${label} のハッシュタグは 30 個までです。減らして送ってください。`
         : '文が空です。投稿する文を送ってください。';
-  return plain(reason, [postback('直すのをやめる', { action: 'x_view', draftId: input.draftId })]);
+  return plain(reason, [postback('直すのをやめる', { action: 'x_end_edit', draftId: input.draftId })]);
 }
 
 export function buildGenerationFailedMessage(draftId: string): LineMessage {
@@ -523,6 +525,16 @@ export function buildStaleMessage(draftId: string | null): LineMessage {
   return plain(
     '内容が変わったか、投稿先の状況が変わったため、このボタンでは投稿できません。最新の内容で確認してください。',
     draftId === null ? [] : [postback('最新の下書きを見る', { action: 'x_view', draftId })],
+  );
+}
+
+/**
+ * 古い操作（後から行った操作より前に押された・別の下書きのカード・時刻の分からない操作）を反映しなかった。
+ * 下書きは変えていない。続けて、いまの状態のメッセージを送る（ボタンはそちらに付く）。
+ */
+export function buildActionNotAppliedMessage(): LineMessage {
+  return plain(
+    'この操作は、後から行った操作より前のものとして届いたか、前のカードからの操作だったため、反映しませんでした。作成中の投稿はそのまま残しています。いまの状態を表示します。',
   );
 }
 

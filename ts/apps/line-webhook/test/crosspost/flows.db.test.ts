@@ -295,7 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
     await photo('900');
     await post({ action: 'x_start', storeId: f.store2 });
     expect(lastReply()).toContain('作成中の投稿があります');
-    await post({ action: 'x_new', storeId: f.store2 });
+    await post({ action: 'x_new', storeId: f.store2, draftId: (await openDraft())!.id });
     expect((await openDraft())!.store_id).toBe(f.store2);
     expect(store.objects.size).toBe(0);
     await post({ action: 'x_cancel', draftId: (await openDraft())!.id });
@@ -797,6 +797,8 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
     });
   };
   const textSentAt = (text: string, sentAt: number | null) => flows.handleText({ ...event(), sentAt, text });
+  const postSentAt = (data: CrosspostPostback, sentAt: number | null) =>
+    flows.handlePostback({ ...event(), sentAt, data: encodeCrosspostPostback(data) });
 
   describe('別の下書きへの写真・文の混入（Webhook の遅延・順不同・重複）', () => {
     it('店舗 A の下書きに送った写真の処理が遅れ、A を取り消して店舗 B の下書きを始めた後に届いても、B に付けない', async () => {
@@ -825,7 +827,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
       const first = (await openDraft())!;
       const lateText = nextLineTime();
       const latePhoto = nextLineTime();
-      await post({ action: 'x_new', storeId: f.store });
+      await post({ action: 'x_new', storeId: f.store, draftId: first.id });
       const second = (await openDraft())!;
       expect(second.id).not.toBe(first.id);
 
@@ -881,6 +883,219 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost flows (DB)', () => {
       expect((await openDraft())!.google_text).toBe(draft.google_text);
       await say('押した後に送った文');
       expect((await openDraft())!.google_text).toBe('押した後に送った文');
+    });
+
+    it('連続タップと逆順処理で、古い「新しく作る」は新しい下書きと素材を消さない', async () => {
+      pilot = [f.store, f.store2]; build();
+      await post({ action: 'x_start', storeId: f.store });
+      const first = (await openDraft())!;
+      const early = nextLineTime();
+      const late = nextLineTime();
+      const action = { action: 'x_new', draftId: first.id, storeId: f.store2 } as const;
+      await postSentAt(action, late);
+      const second = (await openDraft())!;
+      await textSentAt('新しい店舗の文', nextLineTime());
+      await photoSentAt('new-store-photo', nextLineTime());
+      await postSentAt(action, early);
+      await postSentAt(action, late); // 再配信
+      expect((await openDraft())!.id).toBe(second.id);
+      expect((await openDraft())!.store_id).toBe(f.store2);
+      expect((await openDraft())!.material_text).toBe('新しい店舗の文');
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: second.id }))?.line_message_id).toBe('new-store-photo');
+      expect(store.objects.size).toBe(1);
+    });
+
+    it('時刻不明・同時刻・無権限の店舗では、元の下書きと写真を保持する', async () => {
+      await say('投稿');
+      const first = (await openDraft())!;
+      await say('残す文'); await photo('900');
+      const action = { action: 'x_new', draftId: first.id, storeId: f.store } as const;
+      await postSentAt(action, null);
+      await postSentAt(action, Number.NaN);
+      await postSentAt(action, Number.MAX_SAFE_INTEGER);
+      await postSentAt(action, first.line_started_at.getTime());
+      await postSentAt({ ...action, storeId: f.otherStore }, nextLineTime());
+      expect((await openDraft())!.id).toBe(first.id);
+      expect((await openDraft())!.material_text).toBe('残す文');
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: first.id }))?.line_message_id).toBe('900');
+      expect(store.objects.size).toBe(1);
+    });
+
+    it('同じ下書きへの並行した作り直しは一方だけ成功する', async () => {
+      await say('投稿');
+      const first = (await openDraft())!;
+      const action = { action: 'x_new', draftId: first.id, storeId: f.store } as const;
+      const earlier = nextLineTime(); const later = nextLineTime();
+      await Promise.all([postSentAt(action, earlier), postSentAt(action, later)]);
+      const current = (await openDraft())!;
+      expect(current.id).not.toBe(first.id);
+      expect([earlier, later]).toContain(current.line_started_at.getTime());
+      const rows = await pool.query(`SELECT count(*)::int AS n FROM crosspost_drafts WHERE owner_id = $1 AND status IN ('collecting', 'reviewing')`, [f.owner]);
+      expect(rows.rows[0].n).toBe(1);
+    });
+
+    it.each([['instagram', 'google'], ['google', 'instagram']] as const)(
+      '%s から %s への編集が逆順で届いても、後の編集先にだけ保存する', async (firstDestination, lastDestination) => {
+        const draft = await reviewingDraft();
+        const earlier = nextLineTime(); const later = nextLineTime();
+        await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: lastDestination }, later);
+        await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: firstDestination }, earlier);
+        expect((await openDraft())!.input_destination).toBe(lastDestination);
+        await textSentAt('正しい編集先の文', nextLineTime());
+        expect((await openDraft())![lastDestination === 'google' ? 'google_text' : 'instagram_text']).toBe('正しい編集先の文');
+      },
+    );
+
+    it('古い編集終了・同時刻・再配信は後の編集モードを解除しない', async () => {
+      const draft = await reviewingDraft();
+      const earlier = nextLineTime(); const later = nextLineTime();
+      await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' }, later);
+      await postSentAt({ action: 'x_end_edit', draftId: draft.id }, earlier);
+      await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' }, later);
+      await postSentAt({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: 'instagram' }, null);
+      expect((await openDraft())!.input_destination).toBe('google');
+      await postSentAt({ action: 'x_view', draftId: draft.id }, earlier);
+      expect((await openDraft())!.input_mode).toBe('manual');
+      await postSentAt({ action: 'x_end_edit', draftId: draft.id }, nextLineTime());
+      expect((await openDraft())!.input_mode).toBe('none');
+      await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'instagram' }, earlier);
+      expect((await openDraft())!.input_mode).toBe('none');
+    });
+
+    it('編集開始と終了が同時実行されても、後に押した終了が確定する', async () => {
+      const draft = await reviewingDraft();
+      const startAt = nextLineTime(); const endAt = nextLineTime();
+      await Promise.all([
+        postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' }, startAt),
+        postSentAt({ action: 'x_end_edit', draftId: draft.id }, endAt),
+      ]);
+      const current = (await openDraft())!;
+      expect(current.input_mode).toBe('none');
+      expect(current.input_mode_event_at?.getTime()).toBe(endAt);
+    });
+  });
+
+  describe('古いボタン・Webhook の順不同（Codex レビュー 3 回目の横展開）', () => {
+    const notApplied = '反映しませんでした';
+
+    it('「新しく作る」を押した後に送った写真・文が先に届いたら、遅れて届いた「新しく作る」は反映せず、写真・文を消さない', async () => {
+      await say('投稿');
+      const first = (await openDraft())!;
+      const pressedAt = nextLineTime();
+      await textSentAt('押した後に送った文', nextLineTime());
+      await photoSentAt('after-press', nextLineTime());
+      await postSentAt({ action: 'x_new', draftId: first.id, storeId: null }, pressedAt);
+      const current = (await openDraft())!;
+      expect(current.id).toBe(first.id);
+      expect(current.material_text).toBe('押した後に送った文');
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: first.id }))?.line_message_id).toBe('after-press');
+      expect(store.objects.size).toBe(1);
+      expect(lastReply()).toContain(notApplied);
+      // 店主が改めて押した「新しく作る」は通る。
+      await postSentAt({ action: 'x_new', draftId: first.id, storeId: null }, nextLineTime());
+      expect((await openDraft())!.id).not.toBe(first.id);
+      expect(store.objects.size).toBe(0);
+    });
+
+    it('写真の取り込みの間に「新しく作る」で下書きが置き換わったら、押した後に送った写真は新しい下書きに付ける（どこにも入らず消えない）', async () => {
+      await say('投稿');
+      const first = (await openDraft())!;
+      const pressedAt = nextLineTime();
+      const sentAt = nextLineTime();
+      const originalGet = contents.get.bind(contents);
+      let raced = false;
+      // 写真の内容を取得している間に、先に押した「新しく作る」の処理が終わる（並行した Webhook）。
+      (contents as unknown as { get: (id: string) => unknown }).get = (id: string) => {
+        if (id !== 'race-photo' || raced) return originalGet(id);
+        raced = true;
+        return (async () => {
+          await postSentAt({ action: 'x_new', draftId: first.id, storeId: null }, pressedAt);
+          return { kind: 'ok', bytes: jpeg, contentType: 'image/jpeg' };
+        })();
+      };
+      expect(await photoSentAt('race-photo', sentAt)).toBe('handled');
+      const current = (await openDraft())!;
+      expect(current.id).not.toBe(first.id);
+      expect((await getCrosspostMedia(pool, { ownerId: f.owner, draftId: current.id }))?.line_message_id).toBe('race-photo');
+      expect(store.objects.size).toBe(1);
+    });
+
+    it('取り消しより前に押された開始が遅れて届いても、下書きを作らない（開始時刻を巻き戻さない）', async () => {
+      await say('投稿');
+      const draft = (await openDraft())!;
+      const oldStart = nextLineTime();
+      await post({ action: 'x_cancel', draftId: draft.id });
+      await postSentAt({ action: 'x_start', storeId: f.store }, oldStart);
+      expect(await openDraft()).toBeNull();
+      expect(lastReply()).toContain(notApplied);
+      expect(lastReply()).toContain('作成中の投稿はありません');
+      await post({ action: 'x_start', storeId: f.store });
+      expect(await openDraft()).not.toBeNull();
+    });
+
+    it('前のカードの「やめる」は、今の別の下書きを取り消さず、今の状態を示す', async () => {
+      await say('投稿');
+      const first = (await openDraft())!;
+      await post({ action: 'x_new', draftId: first.id, storeId: null });
+      const second = (await openDraft())!;
+      await say('残す文');
+      await post({ action: 'x_cancel', draftId: first.id });
+      expect((await openDraft())!.id).toBe(second.id);
+      expect((await openDraft())!.material_text).toBe('残す文');
+      expect(lastReply()).toContain(notApplied);
+    });
+
+    it('作り直しの後に押した「自分で書き直す」が先に届いたら、遅れて届いた作り直しは保存せず、編集のモードを残す', async () => {
+      const draft = await reviewingDraft();
+      const regenAt = nextLineTime();
+      const editAt = nextLineTime();
+      await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' }, editAt);
+      await postSentAt({ action: 'x_regen', draftId: draft.id, revision: draft.revision, destination: 'instagram' }, regenAt);
+      const current = (await openDraft())!;
+      expect([current.input_mode, current.input_destination, current.revision]).toEqual(['manual', 'google', draft.revision]);
+      expect(current.instagram_text).toBe(draft.instagram_text);
+      expect(lastReply()).toContain(notApplied);
+      expect(lastReply()).toContain('Google に投稿する文を、そのまま送ってください');
+      await textSentAt('書き直した Google の文', nextLineTime());
+      expect((await openDraft())!.google_text).toBe('書き直した Google の文');
+    });
+
+    it('時刻の分からない作り直し・編集の開始と終了は、下書きを変えない', async () => {
+      const draft = await reviewingDraft();
+      await postSentAt({ action: 'x_regen', draftId: draft.id, revision: draft.revision, destination: 'instagram' }, null);
+      await postSentAt({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' }, null);
+      let current = (await openDraft())!;
+      expect([current.revision, current.input_mode, current.instagram_text]).toEqual([draft.revision, 'none', draft.instagram_text]);
+      await post({ action: 'x_edit', draftId: draft.id, revision: draft.revision, destination: 'google' });
+      await postSentAt({ action: 'x_end_edit', draftId: draft.id }, null);
+      current = (await openDraft())!;
+      expect(current.input_mode).toBe('manual');
+      expect(lastReply()).toContain(notApplied);
+    });
+
+    it('「下書きを見る」（x_view）は表示だけで、編集のモードを解除しない', async () => {
+      const draft = await reviewingDraft();
+      await post({ action: 'x_ai', draftId: draft.id, revision: draft.revision, destination: 'instagram' });
+      await post({ action: 'x_view', draftId: draft.id });
+      expect((await openDraft())!.input_mode).toBe('ai_revision');
+      await post({ action: 'x_end_edit', draftId: draft.id });
+      expect((await openDraft())!.input_mode).toBe('none');
+    });
+
+    it('同じ「新しく作る」の連続タップは、作成中の下書きを 1 つだけにする（並行・繰り返し）', async () => {
+      for (let i = 0; i < 5; i += 1) {
+        await clearCrosspost(pool, [f.owner, f.otherOwner]);
+        await say('投稿');
+        const first = (await openDraft())!;
+        const action = { action: 'x_new', draftId: first.id, storeId: null } as const;
+        await Promise.all([postSentAt(action, nextLineTime()), postSentAt(action, nextLineTime())]);
+        const rows = await pool.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM crosspost_drafts WHERE owner_id = $1 AND status IN ('collecting', 'reviewing')`,
+          [f.owner],
+        );
+        expect(rows.rows[0]!.n).toBe(1);
+        expect((await openDraft())!.id).not.toBe(first.id);
+      }
     });
   });
 

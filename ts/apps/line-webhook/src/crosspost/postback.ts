@@ -13,12 +13,13 @@ export type DestinationChoice = 'instagram' | 'google' | 'both';
 export type CrosspostPostback =
   | { action: 'x_start'; storeId: string | null }
   | { action: 'x_resume' }
-  | { action: 'x_new'; storeId: string | null }
+  | { action: 'x_new'; storeId: string | null; draftId: string }
   | { action: 'x_gen'; draftId: string }
   | { action: 'x_regen'; draftId: string; revision: number; destination: CrosspostDestination }
   | { action: 'x_ai'; draftId: string; revision: number; destination: CrosspostDestination }
   | { action: 'x_edit'; draftId: string; revision: number; destination: CrosspostDestination }
   | { action: 'x_view'; draftId: string }
+  | { action: 'x_end_edit'; draftId: string }
   | { action: 'x_conf'; draftId: string; revision: number; choice: DestinationChoice }
   | { action: 'x_ok'; draftId: string; revision: number; choice: DestinationChoice }
   | { action: 'x_cancel'; draftId: string }
@@ -52,9 +53,11 @@ export function encodeCrosspostPostback(postback: CrosspostPostback): string {
       break;
     case 'x_new':
       if (postback.storeId !== null) params.set('s', postback.storeId);
+      params.set('d', postback.draftId);
       break;
     case 'x_gen':
     case 'x_view':
+    case 'x_end_edit':
     case 'x_cancel':
       params.set('d', postback.draftId);
       break;
@@ -118,15 +121,18 @@ export function decodeCrosspostPostback(data: string): CrosspostPostback | null 
     case 'x_resume':
       return { action: 'x_resume' };
     case 'x_new': {
+      if (draftId === null) return null;
       const raw = params.get('s');
-      if (raw === null) return { action: 'x_new', storeId: null };
+      if (raw === null) return { action: 'x_new', storeId: null, draftId };
       const storeId = uuid(raw);
-      return storeId === null ? null : { action: 'x_new', storeId };
+      return storeId === null ? null : { action: 'x_new', storeId, draftId };
     }
     case 'x_gen':
       return draftId === null ? null : { action: 'x_gen', draftId };
     case 'x_view':
       return draftId === null ? null : { action: 'x_view', draftId };
+    case 'x_end_edit':
+      return draftId === null ? null : { action: 'x_end_edit', draftId };
     case 'x_cancel':
       return draftId === null ? null : { action: 'x_cancel', draftId };
     case 'x_regen':

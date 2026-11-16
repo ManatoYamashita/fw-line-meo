@@ -17,6 +17,7 @@ import {
   beginCrosspostReview,
   closeCrosspostDraft,
   createCrosspostDraft,
+  replaceCrosspostDraft,
   getCrosspostDelivery,
   getCrosspostDraft,
   getCrosspostMedia,
@@ -67,6 +68,7 @@ import {
   buildTextBeforeDraftMessage,
   buildTextBeforeInputModeMessage,
   buildAmbiguousPhotoMessage,
+  buildActionNotAppliedMessage,
   buildPhotoSetNoticeMessage,
   buildReceivedMessage,
   buildResultMessage,
@@ -132,6 +134,14 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
   const replySafeMs = deps.replySafeMs ?? DEFAULT_REPLY_SAFE_MS;
   const expiresAt = (): Date => new Date(now().getTime() + DRAFT_TTL_MS);
 
+  /**
+   * イベントの LINE の時刻（Date）。欠落・不正（安全な整数でない・0 以下）なら null。null のとき、順序で守る操作
+   * （開始・新しく作る・編集の開始と終了・作り直し）は下書きを変えない（推測で補わない）。
+   */
+  function lineTimeOf(event: CrosspostEventBase): Date | null {
+    const at = event.sentAt;
+    return typeof at === 'number' && Number.isSafeInteger(at) && at > 0 ? new Date(at) : null;
+  }
 
   async function eligibleStores(ownerId: string): Promise<CrosspostStoreSummary[]> {
     const stores = await listCrosspostEligibleStores(deps.db, ownerId, deps.pilotStoreIds);
@@ -227,8 +237,33 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       : reviewMessage(ownerId, open.draft, open.storeName);
   }
 
+  /** 古い編集操作を断った後、実際に待っている入力先を示す。 */
+  async function currentEditOrDraftMessage(ownerId: string, open: OpenCrosspostDraft): Promise<LineMessage> {
+    const draft = open.draft;
+    if (draft.status === 'reviewing' && draft.input_mode !== 'none' && draft.input_destination !== null) {
+      return buildInputModeMessage({ draftId: draft.id, destination: draft.input_destination, mode: draft.input_mode });
+    }
+    return currentStateMessage(ownerId, open);
+  }
+
   function closedMessage(reason: 'expired' | 'unserviceable'): LineMessage {
     return reason === 'expired' ? buildExpiredMessage() : buildStaleMessage(null);
+  }
+
+  /** いまの状態（作成中の下書き・入力を待っている編集・作成中の下書きが無い）を示すメッセージ。 */
+  async function currentStateOrNone(ownerId: string): Promise<LineMessage> {
+    const state = await loadOpen(ownerId);
+    if (state.kind === 'open') return currentEditOrDraftMessage(ownerId, state.open);
+    if (state.kind === 'closed') return closedMessage(state.reason);
+    return buildNoOpenDraftMessage();
+  }
+
+  /**
+   * 古い操作（後から行った操作より前に押された・別の下書きのカード）・時刻の分からない操作を反映しなかったことと、
+   * いまの状態を示す。下書きは何も変えていない。
+   */
+  async function sayNotApplied(event: CrosspostEventBase): Promise<void> {
+    await say(event, buildActionNotAppliedMessage(), await currentStateOrNone(event.ownerId));
   }
 
   // ===================================================================
@@ -250,7 +285,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       }
       await say(
         event,
-        buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId }),
+        buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId, draftId: state.open.draft.id }),
       );
       return;
     }
@@ -279,23 +314,29 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
 
     // 下書きを始めた操作の LINE の時刻。これより後に送られた写真・文だけをこの下書きの素材にする（Req 2.11）。
     // 時刻が分からなければ、別の下書きの写真・文と区別できないので始めない。
-    if (event.sentAt === null) {
-      await say(event, buildStaleMessage(null));
+    const startedAt = lineTimeOf(event);
+    if (startedAt === null) {
+      await sayNotApplied(event);
       return;
     }
-    const created = await createCrosspostDraft(deps.db, {
+    const created = await createCrosspostDraft(deps.pool, {
       ownerId: event.ownerId,
       storeId: store.id,
       allowedStoreIds: deps.pilotStoreIds,
       expiresAt: expiresAt(),
       purgeAfter: new Date(now().getTime() + DRAFT_RETENTION_MS),
-      lineStartedAt: new Date(event.sentAt),
+      lineStartedAt: startedAt,
     });
     if (!created.ok) {
+      // 後から行った操作（取り消し・承認など）より前に押された開始が遅れて届いた。開始時刻を巻き戻さない。
+      if (created.error === 'SUPERSEDED' || created.error === 'INVALID_TIME') {
+        await sayNotApplied(event);
+        return;
+      }
       if (created.error === 'OPEN_DRAFT_EXISTS') {
         const state = await loadOpen(event.ownerId);
         if (state.kind === 'open') {
-          await say(event, buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId: store.id }));
+          await say(event, buildOpenDraftExistsMessage({ storeName: state.open.storeName, requestedStoreId: store.id, draftId: state.open.draft.id }));
           return;
         }
       }
@@ -330,12 +371,18 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       await say(event, await reviewMessage(event.ownerId, open.draft, open.storeName));
       return;
     }
-    const reviewing = await beginCrosspostReview(deps.db, { ownerId: event.ownerId, draftId, expiresAt: expiresAt() });
+    const operationAt = lineTimeOf(event);
+    const reviewing = await beginCrosspostReview(deps.db, {
+      ownerId: event.ownerId,
+      draftId,
+      expiresAt: expiresAt(),
+      lineEventAt: operationAt,
+    });
     if (reviewing === null) {
       await say(event, buildNeedMaterialMessage(draftId));
       return;
     }
-    await generateAndSave(event, reviewing, open.storeName, [...DESTINATION_ORDER]);
+    await generateAndSave(event, reviewing, open.storeName, [...DESTINATION_ORDER], undefined, operationAt ?? undefined);
   }
 
   async function generateAndSave(
@@ -344,6 +391,8 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     storeName: string,
     destinations: CrosspostDestination[],
     revision?: { destination: CrosspostDestination; instruction: string; inputSentAt: Date },
+    /** 生成・作り直しを押した LINE の時刻。これより後に押された編集のモードを、保存で解除しない。 */
+    operationAt?: Date,
   ): Promise<void> {
     const generated = await deps.prompts.generate({
       material: { storeName, materialText: draft.material_text },
@@ -370,11 +419,12 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       expectedRevision: draft.revision,
       texts: generated.value,
       ...(revision === undefined ? {} : { inputSentAt: revision.inputSentAt }),
+      ...(operationAt === undefined ? {} : { operationAt }),
       expiresAt: expiresAt(),
     });
     if (saved === null) {
-      // 生成の間に、写真の差し替えなど別の変更が入った。古い前提で作った文は保存しない。
-      await say(event, buildStaleMessage(draft.id));
+      // 生成の間に、写真の差し替え・後から押した編集など別の変更が入った。古い前提で作った文は保存しない。
+      await sayNotApplied(event);
       return;
     }
     await say(event, await reviewMessage(event.ownerId, saved, storeName));
@@ -425,6 +475,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       draftId: open.draft.id,
       revision: postback.revision,
       destinations,
+      lineEventAt: lineTimeOf(event),
     });
     if (approved.kind !== 'approved') {
       // 並行した同じ承認が先に通った場合は、上と同じく再開の扱いにする（待ちが無ければ結果を示すだけ）。
@@ -690,12 +741,46 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       }
 
       case 'x_new': {
-        const state = await loadOpen(event.ownerId);
-        if (state.kind === 'open') {
-          const closed = await closeCrosspostDraft(deps.db, { ownerId: event.ownerId, draftId: state.open.draft.id });
-          if (closed !== null) await deleteMedia(closed.removedStorageKeys, event.ownerId);
+        // 「新しく作る」は、そのボタンを出した下書き（d）だけを取り消して作り直す。取り消しと作成は 1 つの
+        // トランザクションで、作成中の行を固定してから「表示元の下書きが今も作成中か」「押した時刻が、この
+        // オーナーの最後の操作より後か」「店舗が対象か」を確かめる。どれかを満たさなければ何も変えない
+        // （古いカード・遅れて届いた操作・時刻の分からない操作・対象外の店舗で、今の下書きと写真・文を失わない）。
+        const startedAt = lineTimeOf(event);
+        if (startedAt === null) {
+          await sayNotApplied(event);
+          return;
         }
-        await createAndStart(event, stores, postback.storeId);
+        const store =
+          postback.storeId === null
+            ? stores.length === 1
+              ? stores[0]
+              : undefined
+            : stores.find((candidate) => candidate.id === postback.storeId);
+        if (store === undefined) {
+          // 店舗の指定が無く複数店舗なら、同じ表示元の下書きに結び付けた店舗の選択を出す（まだ何も変えない）。
+          const open = await getOpenCrosspostDraft(deps.db, event.ownerId);
+          if (postback.storeId === null && open?.draft.id === postback.draftId) {
+            await say(event, buildStorePickerMessage(stores, postback.draftId));
+            return;
+          }
+          await sayNotApplied(event);
+          return;
+        }
+        const replaced = await replaceCrosspostDraft(deps.pool, {
+          ownerId: event.ownerId,
+          previousDraftId: postback.draftId,
+          storeId: store.id,
+          allowedStoreIds: deps.pilotStoreIds,
+          expiresAt: expiresAt(),
+          purgeAfter: new Date(now().getTime() + DRAFT_RETENTION_MS),
+          lineStartedAt: startedAt,
+        });
+        if (!replaced.ok) {
+          await sayNotApplied(event);
+          return;
+        }
+        await deleteMedia(replaced.value.removedStorageKeys, event.ownerId);
+        await say(event, await collectingMessage(event.ownerId, replaced.value.draft, store.name));
         return;
       }
 
@@ -706,7 +791,14 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       case 'x_regen': {
         const open = await requireReviewing(event, postback.draftId, postback.revision);
         if (open === null) return;
-        await generateAndSave(event, open.draft, open.storeName, [postback.destination]);
+        // 作り直しの保存は入力モードを戻す。押した時刻が分からなければ、後から押した編集のモードを解除しうるので
+        // 作り直さない。
+        const operationAt = lineTimeOf(event);
+        if (operationAt === null) {
+          await sayNotApplied(event);
+          return;
+        }
+        await generateAndSave(event, open.draft, open.storeName, [postback.destination], undefined, operationAt);
         return;
       }
 
@@ -714,17 +806,19 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       case 'x_edit': {
         const open = await requireReviewing(event, postback.draftId, postback.revision);
         if (open === null) return;
+        // 版（r）に加えて、押した LINE の時刻で順序を判定する（DB の 1 文の CAS）。前に押した編集の操作が後から
+        // 届いても、後に押した編集のモード（別の投稿先を含む）を上書きしない。時刻が欠落・不正・同時刻なら変えない。
         const updated = await setCrosspostInputMode(deps.db, {
           ownerId: event.ownerId,
           draftId: postback.draftId,
           expectedRevision: postback.revision,
           mode: postback.action === 'x_ai' ? 'ai_revision' : 'manual',
           destination: postback.destination,
-          lineEventAt: event.sentAt === null ? null : new Date(event.sentAt),
+          lineEventAt: lineTimeOf(event),
           expiresAt: expiresAt(),
         });
         if (updated === null) {
-          await say(event, buildStaleMessage(postback.draftId));
+          await sayNotApplied(event);
           return;
         }
         await say(
@@ -741,21 +835,7 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       case 'x_view': {
         const state = await loadOpen(event.ownerId);
         if (state.kind === 'open' && state.open.draft.id === postback.draftId) {
-          let draft = state.open.draft;
-          if (draft.status === 'reviewing' && draft.input_mode !== 'none') {
-            // 「直すのをやめる」: 入力モードを戻す（版は変わらない）。
-            draft =
-              (await setCrosspostInputMode(deps.db, {
-                ownerId: event.ownerId,
-                draftId: draft.id,
-                expectedRevision: draft.revision,
-                mode: 'none',
-                destination: null,
-                lineEventAt: null,
-                expiresAt: expiresAt(),
-              })) ?? draft;
-          }
-          await say(event, await currentStateMessage(event.ownerId, { ...state.open, draft }));
+          await say(event, await currentStateMessage(event.ownerId, state.open));
           return;
         }
         // 作成中でなければ、承認済みの下書きの結果を出す（他のオーナーの下書きは読めない）。
@@ -765,6 +845,32 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
           return;
         }
         await say(event, state.kind === 'closed' ? closedMessage(state.reason) : buildNoOpenDraftMessage());
+        return;
+      }
+
+      case 'x_end_edit': {
+        // 「直すのをやめる」。下書きの表示（x_view・モードを変えない）とは分け、押した時刻で順序を判定する。
+        // 後に押した編集の開始・終了より前に押された終了が遅れて届いても、後のモードを解除しない。
+        const open = await requireOpen(event, postback.draftId);
+        if (open === null) return;
+        if (open.draft.status !== 'reviewing') {
+          await sayNotApplied(event);
+          return;
+        }
+        const updated = await setCrosspostInputMode(deps.db, {
+          ownerId: event.ownerId,
+          draftId: open.draft.id,
+          expectedRevision: open.draft.revision,
+          mode: 'none',
+          destination: null,
+          lineEventAt: lineTimeOf(event),
+          expiresAt: expiresAt(),
+        });
+        if (updated === null) {
+          await sayNotApplied(event);
+          return;
+        }
+        await say(event, await currentStateMessage(event.ownerId, { ...open, draft: updated }));
         return;
       }
 
@@ -802,8 +908,20 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         return;
 
       case 'x_cancel': {
-        const closed = await closeCrosspostDraft(deps.db, { ownerId: event.ownerId, draftId: postback.draftId });
+        // 取り消すのはボタンを出した下書き（d）だけ（古いカードで今の別の下書きを消さない）。押した時刻は、
+        // オーナーの最後の操作として残す（これより前に押された開始が遅れて届いても、下書きを作らない）。
+        const closed = await closeCrosspostDraft(deps.db, {
+          ownerId: event.ownerId,
+          draftId: postback.draftId,
+          lineEventAt: lineTimeOf(event),
+        });
         if (closed === null) {
+          // 既に閉じた下書きのカード。別の下書きが作成中なら、それを消さずに今の状態を示す。
+          const state = await loadOpen(event.ownerId);
+          if (state.kind === 'open') {
+            await sayNotApplied(event);
+            return;
+          }
           await say(event, buildNoOpenDraftMessage());
           return;
         }
@@ -879,7 +997,21 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
   // テキスト・画像
   // ===================================================================
 
-  async function handleOpenText(event: CrosspostEventBase & { text: string }, open: OpenCrosspostDraft): Promise<void> {
+  /**
+   * 文・写真の処理の間に、並行した操作（「新しく作る」など）が作成中の下書きを別の下書きへ置き換えていたら、
+   * 置き換わった後の下書きを返す（その下書きで 1 回だけやり直す。素材にするかは、その下書きを始めた時刻と
+   * 送った時刻で改めて判定する）。置き換わっていなければ null。
+   */
+  async function replacedOpen(ownerId: string, previousDraftId: string): Promise<OpenCrosspostDraft | null> {
+    const state = await loadOpen(ownerId);
+    return state.kind === 'open' && state.open.draft.id !== previousDraftId ? state.open : null;
+  }
+
+  async function handleOpenText(
+    event: CrosspostEventBase & { text: string },
+    open: OpenCrosspostDraft,
+    retried = false,
+  ): Promise<void> {
     // 応答は say() が未通知の結果を前に添えて送る（下書きの操作は妨げない・Req 7.2）。
     const replyDraft = (...messages: LineMessage[]): Promise<void> => say(event, ...messages);
     const draft = open.draft;
@@ -898,6 +1030,13 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         expiresAt: expiresAt(),
       });
       if (!appended.ok) {
+        if (appended.error === 'NOT_COLLECTING' && !retried) {
+          const next = await replacedOpen(event.ownerId, draft.id);
+          if (next !== null) {
+            await handleOpenText(event, next, true);
+            return;
+          }
+        }
         await replyDraft(
           appended.error === 'TOO_LONG'
             ? buildMaterialTooLongMessage(draft.id)
@@ -962,7 +1101,11 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
     await generateAndSave(event, draft, open.storeName, [destination], { destination, instruction: value, inputSentAt });
   }
 
-  async function handleOpenImage(event: CrosspostEventBase & { image: InboundImage }, open: OpenCrosspostDraft): Promise<void> {
+  async function handleOpenImage(
+    event: CrosspostEventBase & { image: InboundImage },
+    open: OpenCrosspostDraft,
+    retried = false,
+  ): Promise<void> {
     const replyDraft = (...messages: LineMessage[]): Promise<void> => say(event, ...messages);
     const set = event.image.imageSet;
     if (set !== null && set.index !== 1) {
@@ -981,9 +1124,17 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       case 'rejected':
         await replyDraft(buildPhotoRejectedMessage({ draftId: open.draft.id, reason: result.reason }));
         return;
-      case 'not_open':
+      case 'not_open': {
+        if (!retried) {
+          const next = await replacedOpen(event.ownerId, open.draft.id);
+          if (next !== null) {
+            await handleOpenImage(event, next, true);
+            return;
+          }
+        }
         await replyDraft(buildNoOpenDraftMessage());
         return;
+      }
       case 'duplicate':
         await replyDraft(await currentStateMessage(event.ownerId, open));
         return;
