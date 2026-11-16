@@ -363,11 +363,11 @@ export interface DestinationAdapter {
 | data | 意味 |
 |---|---|
 | `a=x_start[&s=<storeId>]` | 開始（店舗の指定は任意。所有と有効の検証は flows） |
-| `a=x_resume` / `a=x_new[&s=<storeId>]` | 作成中を続ける／捨てて新しく作る（店舗の指定が無く複数店舗なら店舗の選択へ） |
+| `a=x_resume` / `a=x_new&d=<表示元draftId>[&s=<storeId>]` | 作成中を続ける／表示元の下書き（d）だけを取り消して新しく作る（店舗の指定が無く複数店舗なら、同じ d に結び付けた店舗の選択へ）。順序の規則は下の「古い操作と Webhook の順不同」 |
 | `a=x_gen&d=<draftId>` | 下書きを作る |
-| `a=x_regen&d&r&k=<ig\|gg>` | k の文を作り直す |
+| `a=x_regen&d&r&k=<ig\|gg>` | k の文を作り直す（押した LINE の時刻が必要） |
 | `a=x_ai&d&r&k` / `a=x_edit&d&r&k` | AI に直してもらう／自分で書き直す（入力モードへ） |
-| `a=x_view&d` | 確認のカードを出し直す |
+| `a=x_view&d` / `a=x_end_edit&d` | 下書きを表示する（モードを変えない・読むだけ）／編集を終了する（「直すのをやめる」）。表示と終了を分けるのは、表示のボタン（「最新の下書きを見る」など）が遅れて届いても編集を解除しないため |
 | `a=x_conf&d&r&t=<ig\|gg\|both>` | 最終確認を出す（投稿しない） |
 | `a=x_ok&d&r&t` | **承認して投稿**（唯一の承認） |
 | `a=x_cancel&d` | やめる |
@@ -379,6 +379,24 @@ export interface DestinationAdapter {
 | `a=x_seen&v&y=<1\|0>` | 店主の確認（投稿されていた／いなかった） |
 
 ID は UUID の形・版は非負整数・k と t は列挙に限る。300 字以内。**所有の検証は flows と SQL の責務**（GBP の postback と同じ分界）。
+
+### 古い操作と Webhook の順不同
+
+LINE の Webhook は、店主が操作した順に届くとは限らない（並行の処理・再配信・処理時間の差）。古いカードのボタンも、後から押せる。どの操作も「押した（送った）LINE の時刻」と「どの下書き・どの版のボタンか」で、反映してよいかを DB の 1 文の CAS か、作成中の行を `FOR UPDATE` で固定したトランザクションの中で判定する。判定に使う時刻はすべて Webhook のイベントの時刻（同じ LINE の時計）で、DB の時計と比べない。時刻が欠落・不正（安全な整数でない・0 以下）なら、順序で守る操作は下書きを変えない。反映しなかったときは「反映しませんでした」と、いまの状態（作成中の下書き・入力を待っている編集・作成中の下書きが無い）を示す。
+
+| 操作 | 守り方 | 古い・順不同の操作の扱い |
+|---|---|---|
+| 開始（「投稿」・`x_start`） | 作成中の行を固定し、`line_started_at` が**オーナーの下書きのどれかの `line_last_event_at` より後**のときだけ作る（部分一意索引と併用） | 取り消し・承認・素材などより前に押された開始は作らない（開始時刻を巻き戻さない・前の下書きへ送った写真・文を新しい下書きへ混ぜない） |
+| 再開（`x_resume`）・表示（`x_view`）・最終確認（`x_conf`） | 読むだけ（下書きを変えない）。`x_conf` は版（r）と、選べる投稿先を確かめて出す | 変えないので順序の影響を受けない。古い版の `x_conf` は出さない |
+| 新しく作る（`x_new`） | 表示元の下書き（d）が今の作成中の下書きで、押した時刻がオーナーの `line_last_event_at` より後で、店舗が対象のときだけ、取り消しと作成を 1 トランザクションで行う（作成中の行を固定） | 古いカード（d が今の下書きでない）・押した後（同時刻を含む）に送った写真・文が先に入っている・対象外の店舗・時刻不明は、何も変えない（写真・文を消さない）。連続タップ・並行は一方だけが通る |
+| 素材の文・写真 | 下書きを始めた時刻より後に送ったものだけ（既存・Req 2.11）。写真は送った時刻の順（既存）。処理の間に「新しく作る」で下書きが置き換わったら、置き換わった後の下書きで 1 回だけやり直す | どこにも入らずに消えない。置き換わった後の下書きより前に送ったものは、そこにも入れない |
+| 生成（`x_gen`） | `status = 'collecting'` の CAS（既存）。押した時刻を `line_last_event_at` に残す | 2 回目以降は確認中の下書きを示すだけ |
+| 作り直し（`x_regen`） | 版（r）の CAS に加えて、押した時刻が `input_mode_event_at`（無ければ `line_started_at`）より後のときだけ保存する | 作り直しを押した後に押した編集のモードを、作り直しの保存で解除しない。時刻不明なら作り直さない |
+| 編集の開始・終了（`x_ai`・`x_edit`・`x_end_edit`） | 版（r）の CAS に加えて、押した時刻が `input_mode_event_at`（無ければ `line_started_at`）より**後**のときだけ切り替える（同時刻は反映しない）。`input_mode_event_at` はモードを戻した後も残す | 前に押した別の投稿先の編集・前に押した終了が後から届いても、後のモードを上書き・解除しない。並行した開始と終了は後に押した方が残る |
+| 編集の文 | 入力モードを切り替えた時刻より後に送った文だけ（既存・Req 4.7）。保存は版の CAS（既存） | 切り替えの前に送った文を、書き直し・修正指示にしない |
+| 写真の差し替え（確認中） | 版を進める（既存・Req 4.5）。入力モードは、写真より後に押された編集なら戻さない | 前に送った写真の処理が遅れても、後に押した編集を解除しない |
+| 承認（`x_ok`） | 版（r）・状態・店舗の CAS の 1 文（既存・Req 5.4）。押した時刻を `line_last_event_at` に残す | 古い版のカードでは承認しない。同じ版の二重タップは再開として扱う（既存） |
+| 取り消し（`x_cancel`） | 表示元の下書き（d）だけを取り消す CAS。押した時刻を `line_last_event_at` に残す | 古いカードで今の別の下書きを取り消さない（今の状態を示す）。取り消しの後に、取り消しより前に送った文・写真が届いても、どこにも入れない |
 
 ## Data Models
 
@@ -398,10 +416,14 @@ crosspost_drafts(
   approved_revision int NULL, approved_at timestamptz NULL,
   result_notified_at timestamptz NULL,   -- 結果を届けた（示した行の finished_at の最大）
   input_mode_set_at timestamptz NULL,   -- 書き直し・修正指示を選んだ LINE の時刻（Req 4.7）
+  input_mode_event_at timestamptz NULL, -- 編集の開始・終了・編集の文・作り直しの最後の LINE の時刻（終了後も残す）
   line_started_at timestamptz NOT NULL, -- 下書きを始めた LINE の時刻（Req 2.11）
+  line_last_event_at timestamptz NULL,  -- この下書きに反映した LINE の操作の最後の時刻（NULL = 開始のまま）
   expires_at, purge_after, created_at, updated_at
   CHECK: approved ⇔ approved_at・approved_revision が非 NULL
-  CHECK: input_mode = 'none' ⇔ input_destination IS NULL ⇔ input_mode_set_at IS NULL
+  CHECK: input_mode = 'none' ⇔ input_destination IS NULL ⇔ input_mode_set_at IS NULL;
+         input_mode_set_at があれば input_mode_event_at と一致し、input_mode_event_at は line_started_at より後
+  CHECK: line_last_event_at IS NULL OR line_last_event_at >= line_started_at
 )
 UNIQUE INDEX (owner_id) WHERE status IN ('collecting','reviewing')
 

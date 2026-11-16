@@ -81,6 +81,8 @@ export interface CrosspostPublisher {
     draftId: string;
     revision: number;
     destinations: readonly CrosspostDestination[];
+    /** 承認を押した LINE の時刻（オーナーの最後の操作の時刻として残す）。 */
+    lineEventAt?: Date | null;
   }): Promise<ApproveResult>;
   /**
    * 待ち（queued）の投稿先をすべて実行する。結果の行（表示順）を返す。承認の直後と、承認の後に処理が止まった
@@ -312,7 +314,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
       return availabilityFor(ownerId, storeId, await contentOf(ownerId, draftId));
     },
 
-    async approve({ ownerId, storeId, draftId, revision, destinations }) {
+    async approve({ ownerId, storeId, draftId, revision, destinations, lineEventAt }) {
       const availability = await availabilityFor(ownerId, storeId, await contentOf(ownerId, draftId));
       if (destinations.length === 0 || destinations.some((d) => availability[d].kind !== 'available')) {
         return { kind: 'unavailable', availability };
@@ -322,6 +324,7 @@ export function createCrosspostPublisher(deps: PublisherDeps): CrosspostPublishe
         draftId,
         expectedRevision: revision,
         destinations,
+        lineEventAt: lineEventAt ?? null,
       });
       if (approved.kind === 'stale') return { kind: 'stale' };
       return { kind: 'approved', deliveries: approved.deliveries };
