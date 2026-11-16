@@ -68,8 +68,18 @@ export interface CrosspostDraftRow {
   input_destination: CrosspostDestination | null;
   /** 入力モードを切り替えた操作の LINE の時刻（モードが none なら NULL）。 */
   input_mode_set_at: Date | null;
+  /**
+   * 編集の開始・終了・編集の文の保存・作り直しのうち、最後に反映した操作の LINE の時刻（none に戻した後も残す）。
+   * これより前に押された編集の操作は反映しない。
+   */
+  input_mode_event_at: Date | null;
   /** 下書きを始めた操作の LINE の時刻。これより後に送られた写真・文だけを素材にする。 */
   line_started_at: Date;
+  /**
+   * この下書きに反映した LINE の操作の最後の時刻（NULL は開始のまま）。オーナーの下書きのどれかのこの時刻より前に
+   * 押された開始・「新しく作る」は、遅れて届いた古い操作として扱う。
+   */
+  line_last_event_at: Date | null;
   revision: number;
   material_text: string;
   instagram_text: string | null;
@@ -130,8 +140,8 @@ export interface CrosspostStoreSummary {
   name: string;
 }
 
-const DRAFT_COLUMNS = `id, owner_id, store_id, status, input_mode, input_destination, input_mode_set_at, line_started_at,
-  revision, material_text,
+const DRAFT_COLUMNS = `id, owner_id, store_id, status, input_mode, input_destination, input_mode_set_at, input_mode_event_at, line_started_at,
+  line_last_event_at, revision, material_text,
   instagram_text, google_text, approved_revision, approved_at, result_notified_at, expires_at, purge_after, created_at, updated_at`;
 
 const MEDIA_COLUMNS = `id, draft_id, line_message_id, line_quote_token, line_sent_at, storage_key, content_type, width, height, byte_size, sha256, created_at`;
@@ -151,6 +161,20 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
+}
+
+/** LINE のイベントの時刻として使える Date か（欠落・不正な時刻では、下書きを変えない）。 */
+function isValidLineTime(value: Date | null | undefined): value is Date {
+  return value instanceof Date && Number.isFinite(value.getTime()) && value.getTime() > 0;
+}
+
+/**
+ * `line_last_event_at` を、渡した LINE の時刻（パラメータ番号 `param`）まで進める SQL の式（戻さない）。
+ * パラメータが NULL なら変えない（GREATEST は NULL を無視する）。
+ */
+function advanceLastEvent(param: number, alias = ''): string {
+  const p = alias === '' ? '' : `${alias}.`;
+  return `GREATEST(COALESCE(${p}line_last_event_at, ${p}line_started_at), $${param}::timestamptz)`;
 }
 
 // =====================================================================
@@ -244,35 +268,107 @@ export interface CreateCrosspostDraftInput {
 /**
  * 下書きを作る。店舗がそのオーナーの、本機能の対象にできる店舗でなければ作らない（STORE_NOT_ELIGIBLE）。
  * 作成中の下書きが既にあれば作らない（OPEN_DRAFT_EXISTS・部分一意索引）。黙って置き換えない（Req 1.5）。
+ * 開始の時刻が、オーナーの下書きに反映した最後の LINE の操作の時刻より後でなければ作らない（SUPERSEDED・遅れて
+ * 届いた古い開始の操作で、開始時刻を巻き戻さない）。時刻が欠落・不正なら作らない（INVALID_TIME）。
  */
 export async function createCrosspostDraft(
-  db: Queryable,
+  pool: TransactionCapable,
   input: CreateCrosspostDraftInput,
-): Promise<Result<CrosspostDraftRow, 'STORE_NOT_ELIGIBLE' | 'OPEN_DRAFT_EXISTS'>> {
+): Promise<Result<CrosspostDraftRow, 'STORE_NOT_ELIGIBLE' | 'OPEN_DRAFT_EXISTS' | 'SUPERSEDED' | 'INVALID_TIME'>> {
+  const started = await startCrosspostDraft(pool, input, null);
+  if (!started.ok) return { ok: false, error: started.error === 'STALE' ? 'OPEN_DRAFT_EXISTS' : started.error };
+  return { ok: true, value: started.value.draft };
+}
+
+export type ReplaceCrosspostDraftError = 'STALE' | 'SUPERSEDED' | 'STORE_NOT_ELIGIBLE' | 'INVALID_TIME';
+
+/**
+ * 「新しく作る」: ボタンを出した下書き（`previousDraftId`）だけを取り消し、同じトランザクションで次の下書きを作る。
+ * - 表示元の下書きが今の作成中の下書きでなければ、何も変えない（STALE・古いカードから今の別の下書きを消さない）
+ * - 押した時刻が、オーナーの下書きに反映した最後の LINE の操作の時刻より後でなければ、何も変えない（SUPERSEDED・
+ *   押した後に送った写真・文が先に届いて元の下書きへ入っていても、それを消さない。同時刻も推測で決めない）
+ * - 店舗が対象外なら、何も変えない（STORE_NOT_ELIGIBLE・元の下書きと写真を失わない）
+ * - 時刻が欠落・不正なら、何も変えない（INVALID_TIME）
+ * 作成中の行を FOR UPDATE で固定してから比べるので、並行した「新しく作る」・素材の追記・写真の付け替え・取り消しとは
+ * 直列になる。作成が失敗したら取り消しも巻き戻る。消した写真の置き場の名前（実体の削除は呼び出し側）を返す。
+ */
+export async function replaceCrosspostDraft(
+  pool: TransactionCapable,
+  input: CreateCrosspostDraftInput & { previousDraftId: string },
+): Promise<Result<{ draft: CrosspostDraftRow; removedStorageKeys: string[] }, ReplaceCrosspostDraftError>> {
+  if (!isUuid(input.previousDraftId)) return { ok: false, error: 'STALE' };
+  return startCrosspostDraft(pool, input, input.previousDraftId);
+}
+
+async function startCrosspostDraft(
+  pool: TransactionCapable,
+  input: CreateCrosspostDraftInput,
+  previousDraftId: string | null,
+): Promise<Result<{ draft: CrosspostDraftRow; removedStorageKeys: string[] }, ReplaceCrosspostDraftError>> {
   const allowed = input.allowedStoreIds.filter(isUuid);
   if (!isUuid(input.ownerId) || !isUuid(input.storeId) || !allowed.includes(input.storeId)) {
     return { ok: false, error: 'STORE_NOT_ELIGIBLE' };
   }
+  if (!isValidLineTime(input.lineStartedAt)) return { ok: false, error: 'INVALID_TIME' };
   try {
-    const res = await db.query<CrosspostDraftRow>(
-      `INSERT INTO crosspost_drafts (owner_id, store_id, expires_at, purge_after, line_started_at)
-       SELECT s.owner_id, s.id, $3, $4, $5
-         FROM stores s
-        WHERE s.id = $2
-          AND s.owner_id = $1
-          AND s.place_status = 'confirmed'
-          AND s.place_id IS NOT NULL
-          AND s.suspended_at IS NULL
-       RETURNING ${DRAFT_COLUMNS}`,
-      [input.ownerId, input.storeId, input.expiresAt, input.purgeAfter, input.lineStartedAt],
-    );
-    const row = res.rows[0];
-    if (!row) return { ok: false, error: 'STORE_NOT_ELIGIBLE' };
-    return { ok: true, value: row };
+    return await inTransaction(pool, async (client) => {
+      // 作成中の下書きを固定する。並行した取り消し・追記・写真・別の作成は、ここで先に終わるのを待つ
+      // （待った後は、その結果を見て判定する）。
+      const open = await client.query<{ id: string }>(
+        `SELECT id FROM crosspost_drafts
+          WHERE owner_id = $1 AND status IN ('collecting', 'reviewing')
+          FOR UPDATE`,
+        [input.ownerId],
+      );
+      const openId = open.rows[0]?.id ?? null;
+      if (openId !== previousDraftId) return { ok: false, error: 'STALE' } as const;
+
+      // オーナーの下書きに反映した最後の LINE の操作より後に押された開始だけを受け付ける（取り消し・承認の済んだ
+      // 下書きも含める。遅れて届いた古い開始で、開始時刻を巻き戻さない）。上の固定の後の新しい文なので、
+      // 待っていた操作の結果も含めて比べる。
+      const latest = await client.query<{ superseded: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM crosspost_drafts
+            WHERE owner_id = $1 AND COALESCE(line_last_event_at, line_started_at) >= $2::timestamptz
+         ) AS superseded`,
+        [input.ownerId, input.lineStartedAt],
+      );
+      if (latest.rows[0]?.superseded) return { ok: false, error: 'SUPERSEDED' } as const;
+
+      const eligible = await client.query<{ id: string }>(
+        `SELECT id FROM stores
+          WHERE id = $1 AND owner_id = $2 AND place_status = 'confirmed' AND place_id IS NOT NULL
+            AND suspended_at IS NULL`,
+        [input.storeId, input.ownerId],
+      );
+      if (!eligible.rows[0]) return { ok: false, error: 'STORE_NOT_ELIGIBLE' } as const;
+
+      let removedStorageKeys: string[] = [];
+      if (previousDraftId !== null) {
+        await client.query(
+          `UPDATE crosspost_drafts
+              SET status = 'canceled', input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL,
+                  line_last_event_at = ${advanceLastEvent(3)}, updated_at = now()
+            WHERE id = $1 AND owner_id = $2`,
+          [previousDraftId, input.ownerId, input.lineStartedAt],
+        );
+        const removed = await client.query<{ storage_key: string }>(
+          'DELETE FROM crosspost_media WHERE draft_id = $1 RETURNING storage_key',
+          [previousDraftId],
+        );
+        removedStorageKeys = removed.rows.map((row) => row.storage_key);
+      }
+      const inserted = await client.query<CrosspostDraftRow>(
+        `INSERT INTO crosspost_drafts (owner_id, store_id, expires_at, purge_after, line_started_at)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING ${DRAFT_COLUMNS}`,
+        [input.ownerId, input.storeId, input.expiresAt, input.purgeAfter, input.lineStartedAt],
+      );
+      return { ok: true, value: { draft: inserted.rows[0]!, removedStorageKeys } } as const;
+    });
   } catch (err) {
-    if (isUniqueViolation(err, 'ux_crosspost_drafts_open_owner')) {
-      return { ok: false, error: 'OPEN_DRAFT_EXISTS' };
-    }
+    // 作成中の下書きが無いときの並行した作成どうしは、部分一意索引で一方だけが通る。
+    if (isUniqueViolation(err, 'ux_crosspost_drafts_open_owner')) return { ok: false, error: 'STALE' };
     throw err;
   }
 }
@@ -293,17 +389,19 @@ export interface ClosedCrosspostDraft {
  * 作成中の下書きを取り消す（canceled）。写真の行も消し、置き場の名前を返す。
  * `onlyIfExpiredAt` を渡すと、その時刻で期限切れのときだけ取り消す（期限切れの片付け）。
  * 0 行（作成中でない・他のオーナーの下書き・期限内）は null。
+ * `lineEventAt`（取り消しを押した LINE の時刻）を渡すと、オーナーの最後の操作の時刻として残す（これより前に
+ * 押された開始が遅れて届いても、下書きを作らない）。
  */
 export async function closeCrosspostDraft(
   db: Queryable,
-  key: { ownerId: string; draftId: string; onlyIfExpiredAt?: Date },
+  key: { ownerId: string; draftId: string; onlyIfExpiredAt?: Date; lineEventAt?: Date | null },
 ): Promise<ClosedCrosspostDraft | null> {
   if (!isUuid(key.ownerId) || !isUuid(key.draftId)) return null;
   const res = await db.query<{ draft_id: string; storage_key: string | null }>(
     `WITH closed AS (
        UPDATE crosspost_drafts
           SET status = 'canceled', input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL,
-              updated_at = now()
+              line_last_event_at = ${advanceLastEvent(4)}, updated_at = now()
         WHERE id = $1 AND owner_id = $2
           AND status IN ('collecting', 'reviewing')
           AND ($3::timestamptz IS NULL OR expires_at <= $3::timestamptz)
@@ -316,7 +414,7 @@ export async function closeCrosspostDraft(
      SELECT c.id AS draft_id, r.storage_key
        FROM closed c
        LEFT JOIN removed r ON true`,
-    [key.draftId, key.ownerId, key.onlyIfExpiredAt ?? null],
+    [key.draftId, key.ownerId, key.onlyIfExpiredAt ?? null, isValidLineTime(key.lineEventAt) ? key.lineEventAt : null],
   );
   const first = res.rows[0];
   if (!first) return null;
@@ -339,7 +437,7 @@ export async function appendCrosspostMaterial(
   input: { ownerId: string; draftId: string; text: string; sentAt: Date | null; expiresAt: Date },
 ): Promise<Result<CrosspostDraftRow, AppendMaterialError>> {
   if (!isUuid(input.ownerId) || !isUuid(input.draftId)) return { ok: false, error: 'NOT_COLLECTING' };
-  if (input.sentAt === null) return { ok: false, error: 'NOT_AFTER_START' };
+  if (!isValidLineTime(input.sentAt)) return { ok: false, error: 'NOT_AFTER_START' };
   const started = await db.query<{ ok: boolean }>(
     `SELECT line_started_at < $3 AS ok FROM crosspost_drafts WHERE id = $1 AND owner_id = $2`,
     [input.draftId, input.ownerId, input.sentAt],
@@ -354,7 +452,8 @@ export async function appendCrosspostMaterial(
           FOR UPDATE
      ), updated AS (
        UPDATE crosspost_drafts d
-          SET material_text = t.next_text, expires_at = $4, updated_at = now()
+          SET material_text = t.next_text, expires_at = $4, line_last_event_at = ${advanceLastEvent(5, 'd')},
+              updated_at = now()
          FROM target t
         WHERE d.id = t.id AND char_length(t.next_text) <= ${CROSSPOST_MATERIAL_MAX_CHARS}
        RETURNING ${prefixed(DRAFT_COLUMNS, 'd')}
@@ -364,7 +463,7 @@ export async function appendCrosspostMaterial(
      SELECT ${prefixed(DRAFT_COLUMNS, 'd')}, false AS appended
        FROM crosspost_drafts d JOIN target t ON t.id = d.id
       WHERE NOT EXISTS (SELECT 1 FROM updated)`,
-    [input.draftId, input.ownerId, input.text, input.expiresAt],
+    [input.draftId, input.ownerId, input.text, input.expiresAt, input.sentAt],
   );
   const row = res.rows[0];
   if (!row) return { ok: false, error: 'NOT_COLLECTING' };
@@ -379,15 +478,17 @@ export async function appendCrosspostMaterial(
  */
 export async function beginCrosspostReview(
   db: Queryable,
-  input: { ownerId: string; draftId: string; expiresAt: Date },
+  /** `lineEventAt`: 「下書きを作る」を押した LINE の時刻（オーナーの最後の操作の時刻として残す。無ければ変えない）。 */
+  input: { ownerId: string; draftId: string; expiresAt: Date; lineEventAt?: Date | null },
 ): Promise<CrosspostDraftRow | null> {
   if (!isUuid(input.ownerId) || !isUuid(input.draftId)) return null;
   const res = await db.query<CrosspostDraftRow>(
     `UPDATE crosspost_drafts
-        SET status = 'reviewing', revision = revision + 1, expires_at = $3, updated_at = now()
+        SET status = 'reviewing', revision = revision + 1, expires_at = $3,
+            line_last_event_at = ${advanceLastEvent(4)}, updated_at = now()
       WHERE id = $1 AND owner_id = $2 AND status = 'collecting' AND btrim(material_text) <> ''
       RETURNING ${DRAFT_COLUMNS}`,
-    [input.draftId, input.ownerId, input.expiresAt],
+    [input.draftId, input.ownerId, input.expiresAt, isValidLineTime(input.lineEventAt) ? input.lineEventAt : null],
   );
   return res.rows[0] ?? null;
 }
@@ -406,6 +507,11 @@ export interface SaveCrosspostTextsInput {
    * 時刻より後でなければ保存しない（切り替えの前に送った文を、書き直しの文にしない）。
    */
   inputSentAt?: Date;
+  /**
+   * 生成・作り直しを押した操作（postback）の LINE の時刻。最後に反映した編集の操作（`input_mode_event_at`）より
+   * 後でなければ保存しない（作り直しを押した後に押した「自分で書き直す」などのモードを、生成の保存で解除しない）。
+   */
+  operationAt?: Date;
   expiresAt: Date;
 }
 
@@ -417,6 +523,9 @@ export async function saveCrosspostTexts(
   input: SaveCrosspostTextsInput,
 ): Promise<CrosspostDraftRow | null> {
   if (!isUuid(input.ownerId) || !isUuid(input.draftId)) return null;
+  // 渡された時刻が不正なら、順序を判定できないので保存しない（欠落した時刻を推測で補わない）。
+  if (input.inputSentAt !== undefined && !isValidLineTime(input.inputSentAt)) return null;
+  if (input.operationAt !== undefined && !isValidLineTime(input.operationAt)) return null;
   const instagram = input.texts.instagram;
   const google = input.texts.google;
   const res = await db.query<CrosspostDraftRow>(
@@ -432,10 +541,13 @@ export async function saveCrosspostTexts(
             input_mode = 'none',
             input_destination = NULL,
             input_mode_set_at = NULL,
+            input_mode_event_at = GREATEST(input_mode_event_at, $10::timestamptz, $11::timestamptz),
+            line_last_event_at = GREATEST(COALESCE(line_last_event_at, line_started_at), $10::timestamptz, $11::timestamptz),
             expires_at = $9,
             updated_at = now()
       WHERE id = $1 AND owner_id = $2 AND status = 'reviewing' AND revision = $3
         AND ($10::timestamptz IS NULL OR (input_mode_set_at IS NOT NULL AND input_mode_set_at < $10::timestamptz))
+        AND ($11::timestamptz IS NULL OR $11::timestamptz > COALESCE(input_mode_event_at, line_started_at))
         AND ($8::text IS NULL
              OR char_length(material_text) + 1 + char_length($8::text) <= ${CROSSPOST_MATERIAL_MAX_CHARS})
       RETURNING ${DRAFT_COLUMNS}`,
@@ -450,6 +562,7 @@ export async function saveCrosspostTexts(
       input.appendMaterial ?? null,
       input.expiresAt,
       input.inputSentAt ?? null,
+      input.operationAt ?? null,
     ],
   );
   return res.rows[0] ?? null;
@@ -458,6 +571,9 @@ export async function saveCrosspostTexts(
 /**
  * 確認中の入力モードを切り替える（AI への修正指示・店主の書き直し・解除）。版は進めない
  * （文は変わらないので、最終確認のカードは有効のまま）。版が一致しなければ null。
+ * 押した時刻（`lineEventAt`）が、最後に反映した編集の操作（開始・終了・編集の文の保存・作り直し）の時刻より後で
+ * なければ null（遅れて届いた古い操作で、後のモードを上書き・解除しない。同時刻も推測で決めない）。時刻が欠落・
+ * 不正でも null。判定と更新は 1 文（CAS）なので、並行した開始・終了でも後に押した方だけが残る。
  */
 export async function setCrosspostInputMode(
   db: Queryable,
@@ -468,7 +584,7 @@ export async function setCrosspostInputMode(
     mode: CrosspostInputMode;
     destination: CrosspostDestination | null;
     /**
-     * 切り替えた操作（postback）の LINE の時刻。モードが none 以外では必須。これより後に送られた文だけを
+     * 切り替えた操作（postback）の LINE の時刻。開始・終了のどちらでも必須。これより後に送られた文だけを
      * 修正指示・書き直しの文として扱う（`saveCrosspostTexts` の `inputSentAt`）。
      */
     lineEventAt: Date | null;
@@ -477,11 +593,14 @@ export async function setCrosspostInputMode(
 ): Promise<CrosspostDraftRow | null> {
   if (!isUuid(input.ownerId) || !isUuid(input.draftId)) return null;
   if ((input.mode === 'none') !== (input.destination === null)) return null;
-  if (input.mode !== 'none' && input.lineEventAt === null) return null;
+  if (!isValidLineTime(input.lineEventAt)) return null;
   const res = await db.query<CrosspostDraftRow>(
     `UPDATE crosspost_drafts
-        SET input_mode = $4, input_destination = $5, input_mode_set_at = $7, expires_at = $6, updated_at = now()
+        SET input_mode = $4::crosspost_input_mode, input_destination = $5,
+            input_mode_set_at = CASE WHEN $4::crosspost_input_mode = 'none' THEN NULL ELSE $7 END,
+            input_mode_event_at = $7, line_last_event_at = ${advanceLastEvent(7)}, expires_at = $6, updated_at = now()
       WHERE id = $1 AND owner_id = $2 AND status = 'reviewing' AND revision = $3
+        AND $7::timestamptz > COALESCE(input_mode_event_at, line_started_at)
       RETURNING ${DRAFT_COLUMNS}`,
     [
       input.draftId,
@@ -490,7 +609,7 @@ export async function setCrosspostInputMode(
       input.mode,
       input.destination,
       input.expiresAt,
-      input.mode === 'none' ? null : input.lineEventAt,
+      input.lineEventAt,
     ],
   );
   return res.rows[0] ?? null;
@@ -570,7 +689,7 @@ export async function attachCrosspostMedia(
     if (!locked.rows[0]) return { kind: 'not_open' } as const;
     // 下書きを始めた時刻と、写真を送った時刻を同じ LINE の時計で比べる。始める前・同じ時刻の写真は、別の下書き
     // （取り消した下書き・別の店舗の下書き）へ送ったものが遅れて届いた可能性を否定できないので付けない。
-    if (input.media.lineSentAt.getTime() <= locked.rows[0].line_started_at.getTime()) {
+    if (!isValidLineTime(input.media.lineSentAt) || input.media.lineSentAt.getTime() <= locked.rows[0].line_started_at.getTime()) {
       return { kind: 'before_draft', draft: locked.rows[0] } as const;
     }
 
@@ -613,13 +732,23 @@ export async function attachCrosspostMedia(
         input.media.lineSentAt,
       ],
     );
+    // 確認中の写真の差し替えは入力モードを戻す。ただし、写真より後に押された編集のモード（写真の処理が遅れて
+    // 後から届いた）は戻さない（後に押した操作を、前に送った写真で解除しない）。行は上で固定している。
+    const lockedDraft = locked.rows[0];
+    const keepInputMode =
+      lockedDraft.input_mode_set_at !== null &&
+      lockedDraft.input_mode_set_at.getTime() >= input.media.lineSentAt.getTime();
     const bumped = await client.query<CrosspostDraftRow>(
       `UPDATE crosspost_drafts
-          SET revision = revision + 1, input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL,
+          SET revision = revision + 1,
+              input_mode = CASE WHEN $3::boolean THEN input_mode ELSE 'none'::crosspost_input_mode END,
+              input_destination = CASE WHEN $3::boolean THEN input_destination ELSE NULL END,
+              input_mode_set_at = CASE WHEN $3::boolean THEN input_mode_set_at ELSE NULL END,
+              line_last_event_at = ${advanceLastEvent(4)},
               expires_at = $2, updated_at = now()
         WHERE id = $1
         RETURNING ${DRAFT_COLUMNS}`,
-      [input.draftId, input.expiresAt],
+      [input.draftId, input.expiresAt, keepInputMode, input.media.lineSentAt],
     );
     return {
       kind: 'attached',
@@ -667,6 +796,8 @@ export async function approveCrosspostDraft(
     draftId: string;
     expectedRevision: number;
     destinations: readonly CrosspostDestination[];
+    /** 承認を押した LINE の時刻（オーナーの最後の操作の時刻として残す。無ければ変えない）。 */
+    lineEventAt?: Date | null;
   },
 ): Promise<ApproveCrosspostOutcome> {
   const destinations = [...new Set(input.destinations)];
@@ -678,7 +809,8 @@ export async function approveCrosspostDraft(
     const approved = await client.query<CrosspostDraftRow>(
       `UPDATE crosspost_drafts d
           SET status = 'approved', approved_revision = d.revision, approved_at = now(),
-              input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL, updated_at = now()
+              input_mode = 'none', input_destination = NULL, input_mode_set_at = NULL,
+              line_last_event_at = ${advanceLastEvent(6, 'd')}, updated_at = now()
          FROM stores s
         WHERE d.id = $1 AND d.owner_id = $2
           AND d.status = 'reviewing' AND d.revision = $3
@@ -690,7 +822,14 @@ export async function approveCrosspostDraft(
           AND s.place_id IS NOT NULL
           AND s.suspended_at IS NULL
         RETURNING ${prefixed(DRAFT_COLUMNS, 'd')}`,
-      [input.draftId, input.ownerId, input.expectedRevision, wantsInstagram, wantsGoogle],
+      [
+        input.draftId,
+        input.ownerId,
+        input.expectedRevision,
+        wantsInstagram,
+        wantsGoogle,
+        isValidLineTime(input.lineEventAt) ? input.lineEventAt : null,
+      ],
     );
     const draft = approved.rows[0];
     if (!draft) return { kind: 'stale' } as const;
