@@ -30,10 +30,18 @@ CREATE TABLE crosspost_drafts (
     -- 入力モードを切り替えた操作（postback）の LINE のイベントの時刻。これより後に送られた文だけを、修正指示・書き直しの
     -- 文として扱う（切り替えの前に送った文が遅れて届いても、書き直しの文にしない）
     input_mode_set_at timestamptz,
+    -- 編集の開始・終了・編集の文の保存・作り直しのうち、最後に反映した操作の LINE のイベントの時刻。モードを戻した後
+    -- （none）も残し、これより前に押された編集の操作が遅れて届いても、後のモードを上書き・解除させない
+    input_mode_event_at timestamptz,
     -- 下書きを始めた操作（「投稿」の文・開始の postback）の LINE のイベントの時刻。これより後に送られた写真・文だけを
     -- この下書きの素材にする（前の下書きの写真・文が遅れて届いても、新しい下書きへ混ぜない）。写真・文の送った時刻と
     -- 同じ LINE の時計で比べる（DB の時計とは比べない）
     line_started_at   timestamptz NOT NULL,
+    -- この下書きに反映した LINE の操作（開始・素材の文・写真・編集・作り直し・取り消し・承認）の最後の時刻。NULL は
+    -- 開始のまま（line_started_at と同じ）。オーナーの下書きのどれかのこの時刻より前に押された開始・「新しく作る」は、
+    -- 遅れて届いた古い操作として扱い、下書きを作らない・置き換えない（後に送った写真・文を消さない・開始時刻を
+    -- 巻き戻さない）
+    line_last_event_at timestamptz,
     -- 文・写真が変わるたびに +1。最終確認と承認の postback はこの値で縛る（古いカードから投稿させない）
     revision          integer NOT NULL DEFAULT 0,
     -- 店主が送った伝えたいこと（生成の素材）。店主自身の業務の内容で、来店客の情報ではない
@@ -62,7 +70,12 @@ CREATE TABLE crosspost_drafts (
     CONSTRAINT ck_crosspost_drafts_input CHECK (
         (input_mode = 'none') = (input_destination IS NULL)
         AND (input_mode = 'none') = (input_mode_set_at IS NULL)
+        AND (input_mode_set_at IS NULL OR input_mode_event_at = input_mode_set_at)
+        AND (input_mode_event_at IS NULL OR input_mode_event_at > line_started_at)
         AND (input_mode = 'none' OR status = 'reviewing')
+    ),
+    CONSTRAINT ck_crosspost_drafts_last_event CHECK (
+        line_last_event_at IS NULL OR line_last_event_at >= line_started_at
     ),
     CONSTRAINT ck_crosspost_drafts_purge CHECK (purge_after > created_at)
 );

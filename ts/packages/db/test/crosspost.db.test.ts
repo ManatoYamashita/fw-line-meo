@@ -8,6 +8,7 @@ import {
   claimCrosspostDelivery,
   closeCrosspostDraft,
   createCrosspostDraft,
+  replaceCrosspostDraft,
   getCrosspostDelivery,
   getCrosspostDraft,
   getCrosspostMedia,
@@ -88,6 +89,11 @@ async function newReviewingDraft(
   ownerId = OWNER_A,
   storeId = STORE_A1,
   texts: { instagram?: string; google?: string } = { instagram: 'IG本文', google: 'Google本文' },
+  /**
+   * 下書きを始めた LINE の時刻。同じオーナーの 2 つ目以降の下書きは、前の下書きの最後の操作より後の時刻で
+   * 始める必要がある（それより前の開始は遅れて届いた古い操作として扱われる）。
+   */
+  lineStartedAt: Date = DRAFT_STARTED,
 ): Promise<CrosspostDraftRow> {
   const pool = await getPool();
   const draft = unwrap(
@@ -97,7 +103,7 @@ async function newReviewingDraft(
       allowedStoreIds: ALLOWED,
       expiresAt: later(),
       purgeAfter: purgeLater(),
-      lineStartedAt: DRAFT_STARTED,
+      lineStartedAt,
     }),
   );
   unwrap(await appendCrosspostMaterial(pool, { ownerId, draftId: draft.id, text: '新メニューの告知', sentAt: textAt(), expiresAt: later() }));
@@ -189,6 +195,25 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       expect(open?.serviceable).toBe(true);
       // 他のオーナーからは見えない
       expect(await getOpenCrosspostDraft(pool, OWNER_B)).toBeNull();
+    });
+
+    it('置換先の作成に失敗したら、元の下書きと写真をトランザクションで保持する', async () => {
+      const pool = await getPool();
+      const draft = unwrap(await createCrosspostDraft(pool, {
+        ownerId: OWNER_A, storeId: STORE_A1, allowedStoreIds: ALLOWED,
+        expiresAt: later(), purgeAfter: purgeLater(), lineStartedAt: DRAFT_STARTED,
+      }));
+      await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('rollback'), expiresAt: later() });
+      // 写真（2026-11-07）より後に押した「新しく作る」。
+      const replacement = {
+        ownerId: OWNER_A, previousDraftId: draft.id, storeId: STORE_A2, allowedStoreIds: ALLOWED,
+        expiresAt: later(), purgeAfter: purgeLater(), lineStartedAt: new Date(Date.UTC(2026, 10, 8, 0, 0, 0)),
+      };
+      await expect(replaceCrosspostDraft(pool, { ...replacement, purgeAfter: new Date(0) })).rejects.toThrow();
+      expect((await getOpenCrosspostDraft(pool, OWNER_A))?.draft.id).toBe(draft.id);
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('rollback');
+      expect(await replaceCrosspostDraft(pool, { ...replacement, storeId: STORE_B1 })).toEqual({ ok: false, error: 'STORE_NOT_ELIGIBLE' });
+      expect((await getOpenCrosspostDraft(pool, OWNER_A))?.draft.id).toBe(draft.id);
     });
 
     it('素材は受け取った順に改行でつなぐ。2,000 字を超える追記は TOO_LONG で何も変えない', async () => {
@@ -946,6 +971,7 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
       });
       expect(saved?.google_text).toBe('切り替えの後に送った文');
       expect(saved?.input_mode_set_at).toBeNull();
+      expect(saved?.input_mode_event_at?.getTime()).toBe(lineAt(101).getTime());
     });
 
     it('入力モードの切り替えは操作の時刻を要する（時刻不明では切り替えない）', async () => {
@@ -968,7 +994,8 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
   describe('外部 API へ送る直前の期限（承認から 24 時間・安全余裕 2 分）', () => {
     async function claimedAt(approvedAgo: string): Promise<{ deliveryId: string; draftId: string }> {
       const pool = await getPool();
-      const draft = await newReviewingDraft();
+      // 1 つの試験で同じオーナーの下書きを続けて作るので、前の下書きの操作より後に始める。
+      const draft = await newReviewingDraft(OWNER_A, STORE_A1, undefined, textAt());
       const approved = await approveCrosspostDraft(pool, { ownerId: OWNER_A, draftId: draft.id, expectedRevision: draft.revision, destinations: ['google'] });
       if (approved.kind !== 'approved') throw new Error('not approved');
       const deliveryId = approved.deliveries[0]!.id;
@@ -1124,6 +1151,270 @@ describe.skipIf(!process.env.DATABASE_URL)('crosspost accessors (DB)', () => {
         [deliveryId],
       );
       expect(await listUnnotifiedCrosspostResults(pool, { ownerId: OWNER_A, limit: 5 })).toHaveLength(1);
+    });
+  });
+
+  describe('順不同・同時実行（古い操作で今の下書き・編集を変えない・Codex レビュー 3 回目）', () => {
+    /** 並行の試験を繰り返す回数（どちらが先に行を固定しても結果の不変条件が成り立つことを確かめる）。 */
+    const REPEAT = 10;
+    /** この節の LINE の時刻（他の節の既定の時刻より後）。 */
+    const t = (sec: number): Date => new Date(Date.UTC(2026, 10, 10, 0, 0, 0) + sec * 1000);
+    const base = () => ({ ownerId: OWNER_A, allowedStoreIds: ALLOWED, expiresAt: later(), purgeAfter: purgeLater() });
+    const openCount = async (): Promise<number> => {
+      const pool = await getPool();
+      const res = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM crosspost_drafts WHERE owner_id = $1 AND status IN ('collecting', 'reviewing')`,
+        [OWNER_A],
+      );
+      return res.rows[0]!.n;
+    };
+
+    it('表示元の下書きが今の作成中の下書きでなければ（古いカード）STALE で、今の下書きを変えない', async () => {
+      const pool = await getPool();
+      const first = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(0) }));
+      const second = unwrap(
+        await replaceCrosspostDraft(pool, { ...base(), previousDraftId: first.id, storeId: STORE_A2, lineStartedAt: t(10) }),
+      ).draft;
+      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: second.id, text: '後の下書きの文', sentAt: t(11), expiresAt: later() }));
+      // 前のカード（表示元 = first）を後から押し直しても、今の下書き（second）は消えない。
+      expect(
+        await replaceCrosspostDraft(pool, { ...base(), previousDraftId: first.id, storeId: STORE_A1, lineStartedAt: t(20) }),
+      ).toEqual({ ok: false, error: 'STALE' });
+      const open = await getOpenCrosspostDraft(pool, OWNER_A);
+      expect(open?.draft.id).toBe(second.id);
+      expect(open?.draft.store_id).toBe(STORE_A2);
+      expect(open?.draft.material_text).toBe('後の下書きの文');
+      expect(open?.draft.line_started_at.getTime()).toBe(t(10).getTime());
+    });
+
+    it('押した後（・同時刻）に送った文・写真が先に元の下書きへ入っていたら SUPERSEDED で、文と写真を消さない', async () => {
+      const pool = await getPool();
+      const draft = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(0) }));
+      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '押した後に送った文', sentAt: t(10), expiresAt: later() }));
+      for (const pressedAt of [t(5), t(10)]) {
+        expect(
+          await replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A2, lineStartedAt: pressedAt }),
+        ).toEqual({ ok: false, error: 'SUPERSEDED' });
+      }
+      const attached = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('after-press', t(20)), expiresAt: later() });
+      expect(attached.kind).toBe('attached');
+      expect(
+        await replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A2, lineStartedAt: t(15) }),
+      ).toEqual({ ok: false, error: 'SUPERSEDED' });
+      const open = await getOpenCrosspostDraft(pool, OWNER_A);
+      expect(open?.draft.id).toBe(draft.id);
+      expect(open?.draft.material_text).toBe('押した後に送った文');
+      expect((await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id }))?.line_message_id).toBe('after-press');
+
+      // すべての操作より後に押した「新しく作る」は通り、元の下書きの写真の名前を返す（実体の削除は呼び出し側）。
+      const replaced = unwrap(
+        await replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A2, lineStartedAt: t(21) }),
+      );
+      expect(replaced.removedStorageKeys).toHaveLength(1);
+      expect(replaced.draft.material_text).toBe('');
+      expect(await getCrosspostMedia(pool, { ownerId: OWNER_A, draftId: replaced.draft.id })).toBeNull();
+      expect((await getCrosspostDraft(pool, { ownerId: OWNER_A, draftId: draft.id }))?.draft.status).toBe('canceled');
+    });
+
+    it('時刻が欠落・不正なら INVALID_TIME で、作らない・置き換えない', async () => {
+      const pool = await getPool();
+      expect(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: new Date(Number.NaN) })).toEqual({
+        ok: false,
+        error: 'INVALID_TIME',
+      });
+      const draft = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(0) }));
+      expect(
+        await replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A2, lineStartedAt: new Date(Number.NaN) }),
+      ).toEqual({ ok: false, error: 'INVALID_TIME' });
+      expect((await getOpenCrosspostDraft(pool, OWNER_A))?.draft.id).toBe(draft.id);
+    });
+
+    it('取り消し・承認より前に押された開始は SUPERSEDED（遅れて届いた開始で、開始時刻を巻き戻さない）', async () => {
+      const pool = await getPool();
+      const canceled = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(0) }));
+      expect(await closeCrosspostDraft(pool, { ownerId: OWNER_A, draftId: canceled.id, lineEventAt: t(30) })).not.toBeNull();
+      for (const pressedAt of [t(20), t(30)]) {
+        expect(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: pressedAt })).toEqual({
+          ok: false,
+          error: 'SUPERSEDED',
+        });
+      }
+      expect(await getOpenCrosspostDraft(pool, OWNER_A)).toBeNull();
+
+      const draft = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(31) }));
+      expect(draft.line_started_at.getTime()).toBe(t(31).getTime());
+      unwrap(await appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '素材', sentAt: t(32), expiresAt: later() }));
+      const reviewing = await beginCrosspostReview(pool, { ownerId: OWNER_A, draftId: draft.id, expiresAt: later(), lineEventAt: t(33) });
+      const saved = await saveCrosspostTexts(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: reviewing!.revision,
+        texts: { google: 'Google本文' },
+        operationAt: t(33),
+        expiresAt: later(),
+      });
+      const approved = await approveCrosspostDraft(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: saved!.revision,
+        destinations: ['google'],
+        lineEventAt: t(40),
+      });
+      expect(approved.kind).toBe('approved');
+      expect(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(35) })).toEqual({
+        ok: false,
+        error: 'SUPERSEDED',
+      });
+      expect(unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(41) })).line_started_at.getTime()).toBe(
+        t(41).getTime(),
+      );
+    });
+
+    it('同じ下書きへの並行した「新しく作る」は一方だけが通り、作成中の下書きは 1 つ（繰り返し）', async () => {
+      const pool = await getPool();
+      for (let i = 0; i < REPEAT; i += 1) {
+        await resetCrosspost();
+        const draft = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(0) }));
+        await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput(`race-${i}`, t(1)), expiresAt: later() });
+        const pair = [
+          replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A1, lineStartedAt: t(10) }),
+          replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A2, lineStartedAt: t(11) }),
+        ];
+        const results = await Promise.all(i % 2 === 0 ? pair : pair.reverse());
+        const won = results.filter((r) => r.ok);
+        expect(won).toHaveLength(1);
+        expect(results.filter((r) => !r.ok).map((r) => (r.ok ? null : r.error))).toEqual(['STALE']);
+        expect(await openCount()).toBe(1);
+        const open = await getOpenCrosspostDraft(pool, OWNER_A);
+        expect(open?.draft.id).toBe(won[0]!.ok ? won[0]!.value.draft.id : null);
+        // 元の写真の名前は、通った 1 回だけが返す（二重に消さない・取りこぼさない）。
+        expect(won[0]!.ok && won[0]!.value.removedStorageKeys).toHaveLength(1);
+      }
+    });
+
+    it('「新しく作る」と、押した後に送った文の追記が並行しても、両方が通ることはない（繰り返し）', async () => {
+      const pool = await getPool();
+      for (let i = 0; i < REPEAT; i += 1) {
+        await resetCrosspost();
+        const draft = unwrap(await createCrosspostDraft(pool, { ...base(), storeId: STORE_A1, lineStartedAt: t(0) }));
+        const [replaced, appended] = await Promise.all([
+          replaceCrosspostDraft(pool, { ...base(), previousDraftId: draft.id, storeId: STORE_A2, lineStartedAt: t(10) }),
+          appendCrosspostMaterial(pool, { ownerId: OWNER_A, draftId: draft.id, text: '押した後の文', sentAt: t(11), expiresAt: later() }),
+        ]);
+        // 追記が先: 置き換えない（文は元の下書きに残る）。置き換えが先: 取り消した下書きには追記しない。
+        expect(replaced.ok && appended.ok).toBe(false);
+        const open = await getOpenCrosspostDraft(pool, OWNER_A);
+        if (appended.ok) {
+          expect(replaced).toEqual({ ok: false, error: 'SUPERSEDED' });
+          expect(open?.draft.id).toBe(draft.id);
+          expect(open?.draft.material_text).toBe('押した後の文');
+        } else {
+          expect(appended).toEqual({ ok: false, error: 'NOT_COLLECTING' });
+          expect(open?.draft.id).not.toBe(draft.id);
+          expect(open?.draft.material_text).toBe('');
+        }
+        expect(await openCount()).toBe(1);
+      }
+    });
+
+    it('編集の開始・終了: 前に押した操作・同時刻・時刻の欠落と不正は反映しない（別の投稿先へも切り替えない）', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      const mode = (m: 'none' | 'manual' | 'ai_revision', destination: 'instagram' | 'google' | null, lineEventAt: Date | null) =>
+        setCrosspostInputMode(pool, {
+          ownerId: OWNER_A,
+          draftId: draft.id,
+          expectedRevision: draft.revision,
+          mode: m,
+          destination,
+          lineEventAt,
+          expiresAt: later(),
+        });
+      expect((await mode('manual', 'google', t(10)))?.input_destination).toBe('google');
+      expect(await mode('ai_revision', 'instagram', t(5))).toBeNull(); // 前に押した別の投稿先の編集
+      expect(await mode('none', null, t(9))).toBeNull(); // 前に押した「直すのをやめる」
+      expect(await mode('manual', 'instagram', t(10))).toBeNull(); // 同時刻（どちらが後か決められない）
+      expect(await mode('manual', 'instagram', null)).toBeNull();
+      expect(await mode('manual', 'instagram', new Date(Number.NaN))).toBeNull();
+      let current = (await getOpenCrosspostDraft(pool, OWNER_A))!.draft;
+      expect([current.input_mode, current.input_destination, current.input_mode_set_at?.getTime()]).toEqual(['manual', 'google', t(10).getTime()]);
+
+      // 後に押した終了は通り、終了の時刻を残す（その後に届いた、前に押した開始で戻らない）。
+      expect((await mode('none', null, t(11)))?.input_mode).toBe('none');
+      expect(await mode('manual', 'google', t(10.5))).toBeNull();
+      current = (await getOpenCrosspostDraft(pool, OWNER_A))!.draft;
+      expect([current.input_mode, current.input_mode_set_at, current.input_mode_event_at?.getTime()]).toEqual(['none', null, t(11).getTime()]);
+    });
+
+    it('編集の開始と終了が並行しても、後に押した方だけが残る（繰り返し・両方の順）', async () => {
+      const pool = await getPool();
+      for (let i = 0; i < REPEAT; i += 1) {
+        await resetCrosspost();
+        const draft = await newReviewingDraft();
+        const mode = (m: 'none' | 'manual', destination: 'google' | null, lineEventAt: Date) =>
+          setCrosspostInputMode(pool, {
+            ownerId: OWNER_A,
+            draftId: draft.id,
+            expectedRevision: draft.revision,
+            mode: m,
+            destination,
+            lineEventAt,
+            expiresAt: later(),
+          });
+        const endLater = i % 2 === 0;
+        await Promise.all([mode('manual', 'google', endLater ? t(10) : t(11)), mode('none', null, endLater ? t(11) : t(10))]);
+        const current = (await getOpenCrosspostDraft(pool, OWNER_A))!.draft;
+        expect(current.input_mode).toBe(endLater ? 'none' : 'manual');
+        expect(current.input_mode_event_at?.getTime()).toBe(t(11).getTime());
+      }
+    });
+
+    it('作り直しの保存は、作り直しより後に押した編集のモードを解除しない', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      await setCrosspostInputMode(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        mode: 'manual',
+        destination: 'google',
+        lineEventAt: t(20),
+        expiresAt: later(),
+      });
+      const save = (operationAt: Date) =>
+        saveCrosspostTexts(pool, {
+          ownerId: OWNER_A,
+          draftId: draft.id,
+          expectedRevision: draft.revision,
+          texts: { instagram: '作り直した文' },
+          operationAt,
+          expiresAt: later(),
+        });
+      expect(await save(t(15))).toBeNull(); // 作り直しを押した後に「自分で書き直す」を押した
+      expect(await save(t(20))).toBeNull(); // 同時刻
+      expect((await getOpenCrosspostDraft(pool, OWNER_A))!.draft.input_mode).toBe('manual');
+      const saved = await save(t(25));
+      expect([saved?.instagram_text, saved?.input_mode]).toEqual(['作り直した文', 'none']);
+    });
+
+    it('前に送った写真の処理が遅れて届いても、写真より後に押した編集のモードは残す（版は進める）', async () => {
+      const pool = await getPool();
+      const draft = await newReviewingDraft();
+      await setCrosspostInputMode(pool, {
+        ownerId: OWNER_A,
+        draftId: draft.id,
+        expectedRevision: draft.revision,
+        mode: 'manual',
+        destination: 'google',
+        lineEventAt: t(20),
+        expiresAt: later(),
+      });
+      const older = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('before-edit', t(15)), expiresAt: later() });
+      expect(older.kind).toBe('attached');
+      if (older.kind !== 'attached') return;
+      expect([older.draft.revision, older.draft.input_mode, older.draft.input_destination]).toEqual([draft.revision + 1, 'manual', 'google']);
+      const newer = await attachCrosspostMedia(pool, { ownerId: OWNER_A, draftId: draft.id, media: mediaInput('after-edit', t(30)), expiresAt: later() });
+      expect(newer.kind === 'attached' && newer.draft.input_mode).toBe('none');
     });
   });
 
