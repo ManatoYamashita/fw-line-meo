@@ -17,6 +17,7 @@ import {
   beginCrosspostReview,
   closeCrosspostDraft,
   createCrosspostDraft,
+  crosspostInputStateOf,
   replaceCrosspostDraft,
   getCrosspostDelivery,
   getCrosspostDraft,
@@ -413,10 +414,14 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
       await say(event, buildGenerationFailedMessage(draft.id));
       return;
     }
+    // 生成を始めたときに読んだ下書き（draft）の版と編集の状態が、保存の時点でも同じときだけ保存する（1 文の CAS）。
+    // 生成の間に編集のモード・投稿先が切り替わったら、古い前提で作った文で新しいモードを解除しない・別の投稿先の
+    // 文として保存しない。
     const saved = await saveCrosspostTexts(deps.db, {
       ownerId: event.ownerId,
       draftId: draft.id,
       expectedRevision: draft.revision,
+      expectedInput: crosspostInputStateOf(draft),
       texts: generated.value,
       ...(revision === undefined ? {} : { inputSentAt: revision.inputSentAt }),
       ...(operationAt === undefined ? {} : { operationAt }),
@@ -1077,16 +1082,19 @@ export function createCrosspostFlows(deps: CrosspostFlowDeps): CrosspostFlows {
         await replyDraft(buildManualTextRejectedMessage({ draftId: draft.id, destination, issue }));
         return;
       }
+      // 文を受け取ったときに読んだ編集の状態（manual・この投稿先・選んだ時刻）のままのときだけ保存する。
       const saved = await saveCrosspostTexts(deps.db, {
         ownerId: event.ownerId,
         draftId: draft.id,
         expectedRevision: draft.revision,
+        expectedInput: crosspostInputStateOf(draft),
         texts: { [destination]: value },
         inputSentAt,
         expiresAt: expiresAt(),
       });
       if (saved === null) {
-        await replyDraft(buildStaleMessage(draft.id));
+        // 読んだ後に編集の状態・版が変わった。今の状態（待っている編集の入力先など）を示す。
+        await sayNotApplied(event);
         return;
       }
       await replyDraft(await reviewMessage(event.ownerId, saved, open.storeName));
