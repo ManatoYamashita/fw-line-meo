@@ -14,7 +14,7 @@ ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジショ�
 
 ## ビルド／テスト
 
-最初に確立した成果物は **DB スキーマ**（`four-tier-data-model` spec, `db/`）。コマンド（ランタイムは apple/container 既定・`CONTAINER_CMD` で差替可。ローカルに Docker/apple/container が無い場合は native postgres + `db/test/run.sh` 相当で代替検証可）:
+最初に確立した成果物は **DB スキーマ**（`four-tier-data-model` spec, `db/`）。コマンド（ランタイムは apple/container 既定・`CONTAINER_CMD` で差替可。`container` が入っていても apiserver が止まっていると失敗するので、先に `container system start` で起動する（`container system stop` で戻せる）。ローカルに Docker/apple/container が無い場合は native postgres + `db/test/run.sh` 相当で代替検証可）:
 - `make db-migrate` — 一時 postgres へ `db/migrations/*.sql` をクリーン適用（BUILD）
 - `make db-smoke` — 適用後 `db/test/smoke/*.sql` を実行（観察可能完了の証明）
 - `make db-test` — 適用後 `db/test/assertions/*.sql` を実行（網羅スイート）
@@ -25,7 +25,7 @@ ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジショ�
 Go 層（`go/`・日次バッチ、`competitive-daily-summary` spec task 2.1 で新設。`go.mod` はリポジトリ初導入・モジュールパス `github.com/ManatoYamashita/fw-line-meo/go`）:
 - `make go-build` — `go/` 配下の全パッケージをビルド（`cd go && go build ./...`）
 - `make go-test` — `go/` 配下の全パッケージのテストを実行（`cd go && go test ./...`）
-- コンテナイメージは `go/Dockerfile`（multi-stage・distroless/static-debian12:nonroot 実行時）。このマシンには docker/apple-container が無いため実ビルド検証は CI/デプロイ時に行う
+- コンテナイメージは `go/Dockerfile`（multi-stage・distroless/static-debian12:nonroot 実行時）。ローカルで docker/apple-container を使えない環境では、実ビルド検証は CI に任せる（PR では ts-ci の `docker-build` が全イメージを実ビルドし、デプロイ時には `push-images.sh` が行う）
 - **CI では `ts-ci` の `go-test` ジョブが `go build ./...` / `go vet ./...` / `go test ./...` を実行する**（Issue #163 で新設。それ以前は Go が CI に一切載っておらず `make go-test` は main で赤いまま気づかれていなかった）。DB を使うテストは `go/internal/testdb` の `Isolated` が**テストごとに専用データベース**を作って migrations を適用する。共有 DB（`DATABASE_URL`）へ直接つないでよいのは、言語をまたいで同じ行を見る cross-runtime 契約テスト（`testdb.Shared`）だけである
 
 E2E（Issue #257・手順書は `docs/testing/e2e.md`。自動層・本番の読み取り確認・本番の実機確認の 3 層）:
