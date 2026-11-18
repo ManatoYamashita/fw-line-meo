@@ -6,8 +6,12 @@ import {
   DASHBOARD_SURFACES,
   OWNERS,
   STORES,
+  openListSurface,
   openLoginStorageFailureToast,
+  openMissingOwnerDetail,
+  openMissingStoreDetail,
   openOwnerList,
+  openStoreDetail,
   openStoreQrPanelWithToast,
   ownerRetryButtonName,
   ownerRow,
@@ -74,8 +78,21 @@ const TABLE_SCROLL_REGIONS = 1;
 
 test('モバイルビューポートの店舗一覧で横スクロールが発生しない', async ({ page }) => {
   await surfaceByName('店舗一覧').open(page);
-  // 表の容器 1 件（帯は捲れる領域を持たない）。
+  // 表の容器 1 件（帯は捲れる領域を持たない）。「オーナー」列を足しても（Issue #526）、捲れる領域は
+  // 表の容器 1 件のままで、ページ全体は溢れない。
   await expectNoHorizontalScroll(page, '店舗一覧', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
+});
+
+// 店舗の詳細・オーナーの詳細（Issue #526）。捲れる領域は、店舗の詳細では 0 件（QR パネルの実績の表は
+// `TableContainer` を持たない素の表）、オーナーの詳細では店舗の表の 1 件。
+test('モバイルビューポートの店舗の詳細で横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('店舗の詳細').open(page);
+  await expectNoHorizontalScroll(page, '店舗の詳細', NAV_SCROLL_REGIONS);
+});
+
+test('モバイルビューポートのオーナーの詳細で横スクロールが発生しない', async ({ page }) => {
+  await surfaceByName('オーナーの詳細').open(page);
+  await expectNoHorizontalScroll(page, 'オーナーの詳細', NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS);
 });
 
 // --- 店舗の停止と再開（store-suspension Issue #252） -----------------------------------
@@ -326,6 +343,59 @@ test.describe('オーナー一覧の LINE の連携の解除', () => {
   });
 });
 
+// --- 店舗の詳細・オーナーの詳細（agency-dashboard Requirement 10・11・Issue #526）------------
+//
+// 面の監査・横の溢れ・幅の実測は `DASHBOARD_SURFACES` が回す。ここは、その面に**どう着くか**と、
+// 区分（見つからない・停止中・未確定）の描画を実ブラウザで通す。単体試験（jsdom）は経路も印刷も
+// 実際には解決しないので、リンクが本当に詳細へ着くことと、見つからない区分がここまで届くことを測る。
+test.describe('店舗の詳細・オーナーの詳細', () => {
+  test('店舗一覧の店名を押すと、その店舗の詳細へ進む（10.1）', async ({ page }) => {
+    await openListSurface(page, '/stores', '店舗一覧', 3);
+    await page
+      .getByRole('main')
+      .getByRole('link', { name: STORES[0].name, exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/stores/${STORES[0].id}$`));
+    await expect(page.getByRole('heading', { level: 1, name: STORES[0].name })).toBeVisible();
+    // 現在地は上部ナビの「店舗一覧」（完全一致する項目が無い下位の経路・11.12）
+    await expect(page.getByRole('navigation').locator('[aria-current="true"]')).toHaveText('店舗一覧');
+  });
+
+  test('オーナー一覧のオーナー名を押すと、そのオーナーの詳細へ進む（10.2）', async ({ page }) => {
+    const owner = OWNERS[0];
+    await openOwnerList(page);
+    await ownerRow(page, owner.displayName).getByRole('link', { name: owner.displayName, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/owners/${owner.id}$`));
+    await expect(page.getByRole('heading', { level: 1, name: owner.displayName })).toBeVisible();
+    await expect(page.getByRole('navigation').locator('[aria-current="true"]')).toHaveText('オーナー一覧');
+  });
+
+  test('存在しない店舗は「見つかりません」と一覧へ戻る導線だけを出す（11.9）', async ({ page }) => {
+    await openMissingStoreDetail(page);
+    await expect(page.locator('dl')).toHaveCount(0);
+    await expect(page.locator('[data-print-region]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /を停止|を再開/ })).toHaveCount(0);
+  });
+
+  test('存在しないオーナーは「見つかりません」と一覧へ戻る導線だけを出す（11.9）', async ({ page }) => {
+    await openMissingOwnerDetail(page);
+    await expect(page.getByRole('table')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /LINE の連携を解除/ })).toHaveCount(0);
+  });
+
+  test('停止中の店舗の詳細は QR を出さず、再開の操作を持つ（11.3・11.5）', async ({ page }) => {
+    await openStoreDetail(page, { suspendedStoreIds: [STORES[0].id] });
+    await expect(page.locator('[data-print-region]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: `${STORES[0].name} を再開` })).toBeVisible();
+  });
+
+  test('場所が未確定の店舗の詳細は QR を出さず、停止の操作を持つ（11.4）', async ({ page }) => {
+    await openStoreDetail(page, { storeId: STORES[1].id });
+    await expect(page.locator('[data-print-region]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: `${STORES[1].name} を停止` })).toBeVisible();
+  });
+});
+
 // --- 店頭掲示の印刷（Issue #179・Requirement 7） --------------------------------------
 //
 // 印刷の体裁は **CSS が実行時に解決する**ため、クラス名の検証では届かない。`@media print` は
@@ -375,6 +445,39 @@ test.describe('店頭掲示の印刷', () => {
     }
     await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeVisible();
     await expect(funnel, '実績が画面にも出ていません').toBeVisible();
+  });
+
+  // 店舗の詳細（Issue #526・agency-dashboard Req 11.2）。QR パネルを常に置くので、詳細のページを印刷すると
+  // 掲示面だけが紙に残り、概要・操作・実績の表は刷られない（設計の「印刷は掲示面だけを刷る」・store-qr-issuance-ui 9.8）。
+  test('店舗の詳細を印刷すると掲示面だけが刷られ、概要と操作は紙に出ない', async ({ page }) => {
+    await surfaceByName('店舗の詳細').open(page);
+    const funnel = page.getByRole('region', { name: 'アンケートの実績' });
+    const heading = page.getByRole('heading', { level: 1, name: STORES[0].name });
+    const suspendButton = page.getByRole('button', { name: `${STORES[0].name} を停止` });
+    const ownerLink = page.getByRole('link', { name: STORES[0].ownerDisplayName });
+    await expect(funnel).toBeVisible();
+
+    await page.emulateMedia({ media: 'print' });
+
+    // 残るもの: 掲示面と、その中の依頼文。掲示面が 2 つ以上あっても最初の 1 つで足りる（数は最後に固定する。
+    // 先に数えると、概要が掲示面へ巻き込まれた退行が「掲示面の数」で止まり、何が紙に出たかが読めない）。
+    await expect(page.locator('[data-print-region]').first()).toBeVisible();
+    await expect(page.getByText(POSTER_INVITATION)).toBeVisible();
+    // 消えるもの: 概要（見出し・オーナー）・停止の操作・実績の表・パネルの操作要素。
+    await expect(heading, '概要の見出しが紙に出ています').toBeHidden();
+    await expect(ownerLink, '概要のオーナーが紙に出ています').toBeHidden();
+    await expect(suspendButton, '停止の操作が紙に出ています').toBeHidden();
+    await expect(funnel, '実績の件数が紙に出ています').toBeHidden();
+    await expect(page.getByRole('button', { name: /掲示物を印刷/ })).toBeHidden();
+
+    // **対照。** 画面へ戻すと同じ要素が見える（印刷で隠れたのではなく、そもそも描画されていない状態と区別する）。
+    await page.emulateMedia({ media: 'screen' });
+    await expect(heading).toBeVisible();
+    await expect(ownerLink).toBeVisible();
+    await expect(suspendButton).toBeVisible();
+    await expect(funnel).toBeVisible();
+    // 掲示面はちょうど 1 つ（店舗の詳細が掲示面を増やしていない）。
+    await expect(page.locator('[data-print-region]')).toHaveCount(1);
   });
 
   // **この規則は全ルートへ効く。** globals.css は app/layout.tsx 経由で読み込まれるため、
@@ -780,12 +883,16 @@ test.describe('幅 320 でもページ全体が横へはみ出さない', () => 
     店舗登録: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
     店舗登録の検索結果: NAV_SCROLL_REGIONS,
     オーナー一覧: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
+    // Issue #526: 店舗の詳細は捲れる領域を持たない（QR パネルの実績の表は `TableContainer` を持たない素の表で、
+    // 実測は 0 件。tasks.md 9.8 の「実績の表が捲れる領域」は誤りだった）。オーナーの詳細は店舗の表 1 件。
+    店舗の詳細: NAV_SCROLL_REGIONS,
+    オーナーの詳細: NAV_SCROLL_REGIONS + TABLE_SCROLL_REGIONS,
   };
 
   test('宣言が検証面の一覧と一致する', () => {
     expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(REGIONS));
     // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-    expect(Object.keys(REGIONS)).toHaveLength(11);
+    expect(Object.keys(REGIONS)).toHaveLength(13);
   });
 
   for (const surface of DASHBOARD_SURFACES) {
@@ -808,22 +915,32 @@ test.describe('本文中の文字のリンクに下線が描かれる', () => {
   // 下線を確かめた文字のリンクの数。0 件の面で緑になっても、それは何も測っていない。
   // 実測へ合わせて宣言を書き換える改変を素通りさせないため、合計を literal で持つ。
   const TEXT_LINKS: Readonly<Record<string, number>> = {
-    店舗一覧: 0,
+    // Issue #526: 一覧の名前が詳細へのリンクになった。店舗一覧は 2 店 × （店名・オーナー・担当代理店）。
+    // QR パネルを開いた面は、modal が背面（main）を支援技術から外すので 0 件のまま（開く前の 6 は「店舗一覧」が測る）。
+    店舗一覧: 6,
     '店舗一覧の QR パネル': 0,
     代理店管理: AGENCIES.length,
-    代理店詳細: 2,
+    // 戻る 1 ＋ 招待コードの案内 1 に、店舗の区分の店名 2・オーナー 2、オーナーの表の表示名 5・登録済みの店舗名 2、
+    // 招待コードで登録したオーナー 3 を足した 16。
+    代理店詳細: 16,
     ログイン: 0,
     招待コード: 0,
-    利用者管理: 0,
-    '利用者管理の編集パネル': 0,
+    // 所属代理店を持つ利用者 1 人ぶんの代理店名。運営ロールの利用者の「—」はリンクにしない。
+    利用者管理: 1,
+    '利用者管理の編集パネル': 1,
+    // 店舗登録のオーナー選択は、詳細へのリンクを 1 つも持たない（Req 10.7）。
     店舗登録: 0,
     店舗登録の検索結果: 0,
-    オーナー一覧: 0,
+    // 5 人のオーナー名・店舗 1・担当代理店 5。
+    オーナー一覧: 11,
+    // 戻る 1・オーナー 1・担当代理店 1 / 戻る 1・担当代理店 1・店舗 1。
+    店舗の詳細: 3,
+    オーナーの詳細: 3,
   };
 
   test('宣言が検証面の一覧と一致する', () => {
     expect(DASHBOARD_SURFACES.map((surface) => surface.where)).toEqual(Object.keys(TEXT_LINKS));
-    expect(Object.values(TEXT_LINKS).reduce((sum, count) => sum + count, 0)).toBe(3);
+    expect(Object.values(TEXT_LINKS).reduce((sum, count) => sum + count, 0)).toBe(42);
   });
 
   for (const surface of DASHBOARD_SURFACES) {

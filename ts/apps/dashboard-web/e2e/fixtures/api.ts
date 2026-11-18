@@ -249,6 +249,17 @@ export const CATEGORIES = [
   { code: 'ramen', label: 'ラーメン' },
 ] as const;
 
+/**
+ * どこにも作らない店舗・オーナーの id（形は UUID）。詳細の取得は、不存在も範囲外も同じ 404 を返す
+ * （agency-dashboard Requirement 11.9）。スタブは「STORES・OWNERS に無い id」を 404 にするので、
+ * この値でその経路を画面まで通せる。
+ */
+export const MISSING_ID = '99999999-9999-9999-9999-999999999999';
+
+/** 店舗の詳細・オーナーの詳細の 1 件の取得（agency-dashboard Requirement 11・Issue #526）。 */
+const STORE_DETAIL_PATH = /^\/stores\/([^/]+)$/;
+const OWNER_DETAIL_PATH = /^\/owners\/([^/]+)$/;
+
 /** パス（クエリを除く）ごとの 200 応答。ここに無いパスは 404 で返し、黙って素通りさせない。 */
 const RESPONSES: Record<string, unknown> = {
   '/me': { user: ME },
@@ -416,6 +427,53 @@ export async function stubDashboardApi(page: Page, options: StubOptions = {}): P
         contentType: 'application/json',
         body: JSON.stringify({ owner: { id, ...next }, menu }),
       });
+      return;
+    }
+    // 店舗の詳細・オーナーの詳細。停止・連携の状態は一覧と同じ表から返す（一覧と詳細で同じ店舗・オーナーの
+    // 状態が食い違わない）。不存在は 404 の封筒で返し、fixture の取りこぼし（e2e_fixture_missing）と区別する。
+    const storeDetail = STORE_DETAIL_PATH.exec(path);
+    if (storeDetail !== null && storeDetail[1] !== 'search' && request.method() === 'GET') {
+      const id = decodeURIComponent(storeDetail[1]!);
+      const store = STORES.find((candidate) => candidate.id === id);
+      await route.fulfill(
+        store === undefined
+          ? {
+              status: 404,
+              contentType: 'application/json',
+              body: JSON.stringify({ error: { code: 'not_found', message: '店舗が見つかりません' } }),
+            }
+          : {
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({ store: { ...store, suspendedAt: suspendedAt.get(store.id) } }),
+            },
+      );
+      return;
+    }
+    const ownerDetail = OWNER_DETAIL_PATH.exec(path);
+    if (ownerDetail !== null && request.method() === 'GET') {
+      const id = decodeURIComponent(ownerDetail[1]!);
+      const owner = OWNERS.find((candidate) => candidate.id === id);
+      await route.fulfill(
+        owner === undefined
+          ? {
+              status: 404,
+              contentType: 'application/json',
+              body: JSON.stringify({ error: { code: 'not_found', message: 'オーナーが見つかりません' } }),
+            }
+          : {
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                owner: { ...owner, ...lineLinks.get(owner.id) },
+                // オーナーの全店舗（未確定を含む）。停止の状態は一覧と同じ表から返す。
+                stores: STORES.filter((store) => store.ownerId === owner.id).map((store) => ({
+                  ...store,
+                  suspendedAt: suspendedAt.get(store.id),
+                })),
+              }),
+            },
+      );
       return;
     }
     const body =
@@ -843,6 +901,75 @@ export async function openAgencyDetail(page: Page): Promise<void> {
 }
 
 /**
+ * 店舗の詳細を開き、**概要と QR の区分が実際に描けている**ことを先に固定する（agency-dashboard Req 11.1・11.2）。
+ *
+ * 既定は確定済み・利用中の店舗（STORES[0]）。`storeId` と `suspendedStoreIds` で、停止中・未確定の
+ * 区分も開ける。前提 assert は区分ごとに、その区分にしか無い要素（確定済みなら掲示面と実績の表、
+ * 停止中・未確定なら案内の文）で置く。取得の失敗や存在判定の待ちの画面を測って緑にしないためである。
+ */
+export async function openStoreDetail(
+  page: Page,
+  options: { readonly storeId?: string; readonly suspendedStoreIds?: readonly string[] } = {},
+): Promise<void> {
+  const store = STORES.find((candidate) => candidate.id === (options.storeId ?? STORES[0].id))!;
+  await stubDashboardApi(page, {
+    ...(options.suspendedStoreIds === undefined ? {} : { suspendedStoreIds: options.suspendedStoreIds }),
+  });
+  await page.goto(`/stores/${store.id}`);
+  await expect(page.getByRole('heading', { level: 1, name: store.name })).toBeVisible();
+  await expect(page.getByRole('link', { name: '店舗一覧へ戻る' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'QR' })).toBeVisible();
+  const suspended = options.suspendedStoreIds?.includes(store.id) === true;
+  if (suspended) {
+    await expect(page.getByText('停止中のため発行できません')).toBeVisible();
+  } else if (store.placeStatus === 'confirmed') {
+    await expect(page.locator('[data-print-region]')).toBeVisible();
+    await expect(page.getByRole('table', { name: `${store.name} のアンケートの実績` })).toBeVisible();
+  } else {
+    await expect(page.getByText('場所の確定が必要です')).toBeVisible();
+  }
+}
+
+/**
+ * オーナーの詳細を開き、**概要と店舗の表が実際に描けている**ことを先に固定する（agency-dashboard Req 11.6・11.7）。
+ *
+ * 既定は連携中で店舗を 1 件持つオーナー（OWNERS[0]）。店舗の表は、見出し行 ＋ そのオーナーの店舗の行数が
+ * 出るまで待つ（0 件の案内や取得失敗の画面を監査しない）。
+ */
+export async function openOwnerDetail(page: Page, options: StubOptions = {}): Promise<void> {
+  const owner = OWNERS[0];
+  await stubDashboardApi(page, options);
+  await page.goto(`/owners/${owner.id}`);
+  await expect(page.getByRole('heading', { level: 1, name: owner.displayName })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'オーナー一覧へ戻る' })).toBeVisible();
+  const owned = STORES.filter((store) => store.ownerId === owner.id);
+  expect(owned.length, 'オーナーの詳細の店舗の表が空になる').toBeGreaterThan(0);
+  await expect(page.getByRole('region', { name: '店舗' }).getByRole('row')).toHaveCount(owned.length + 1);
+  await expect(
+    page.getByRole('button', { name: ownerUnlinkButtonName(owner.displayName), exact: true }),
+  ).toBeVisible();
+}
+
+/**
+ * 存在しない店舗の詳細を開き、**「見つかりません」の区分が実際に描けている**ことを先に固定する
+ * （agency-dashboard Req 11.9）。不存在も範囲外も同じ 404 になるので、`MISSING_ID` で通す。
+ */
+export async function openMissingStoreDetail(page: Page): Promise<void> {
+  await stubDashboardApi(page);
+  await page.goto(`/stores/${MISSING_ID}`);
+  await expect(page.getByText('店舗が見つかりません。店舗一覧から選び直してください。')).toBeVisible();
+  await expect(page.getByRole('link', { name: '店舗一覧へ戻る' })).toBeVisible();
+}
+
+/** 存在しないオーナーの詳細を開き、「見つかりません」の区分が描けていることを先に固定する（Req 11.9）。 */
+export async function openMissingOwnerDetail(page: Page): Promise<void> {
+  await stubDashboardApi(page);
+  await page.goto(`/owners/${MISSING_ID}`);
+  await expect(page.getByText('オーナーが見つかりません。オーナー一覧から選び直してください。')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'オーナー一覧へ戻る' })).toBeVisible();
+}
+
+/**
  * 自動 a11y 監査だけが回す、一覧の上に重なる後続状態（store-suspension Issue #252）。
  *
  * **`DASHBOARD_SURFACES` へは入れない。** あの一覧は横スクロールと携帯端末の幅の配置の実測も
@@ -904,7 +1031,7 @@ export const ACTION_RESULT_SURFACES: readonly OverlaySurface[] = [
 ];
 
 /**
- * 管理ダッシュボードの検証対象 10 面。**面を足したらここへ足す。**
+ * 管理ダッシュボードの検証対象 13 面。**面を足したらここへ足す。**
  *
  * 自動で拾うのは自動 a11y 監査（`a11y-audit.spec.ts`）と携帯端末の幅の配置の実測
  * （`mobile-layout.spec.ts`。面ごとの宣言 `LAYOUT` にも足すこと）である。横スクロールの実測
@@ -985,5 +1112,20 @@ export const DASHBOARD_SURFACES: readonly DashboardSurface[] = [
     // メニュー未解除かつ引継ぎ済み・解除済みで操作なし、の 3 つの行の形を同時に描く。
     where: 'オーナー一覧',
     open: openOwnerList,
+  },
+  {
+    // 店舗一覧から進む詳細（agency-dashboard Req 11・Issue #526）。確定済み・利用中の店舗で、概要・停止の操作・
+    // QR パネル（実績の表を 1 つ持つ）を同時に描く。停止中・未確定の区分は dashboard-surfaces.spec.ts が開く。
+    where: '店舗の詳細',
+    open: async (page) => {
+      await openStoreDetail(page);
+    },
+  },
+  {
+    // オーナー一覧から進む詳細（Req 11・Issue #526）。概要・連携の解除の操作・店舗の表（表を 1 つ）を描く。
+    where: 'オーナーの詳細',
+    open: async (page) => {
+      await openOwnerDetail(page);
+    },
   },
 ];
