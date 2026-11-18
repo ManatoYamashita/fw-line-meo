@@ -100,7 +100,17 @@ as_server_user initdb -D "$PGDATA" -U postgres --auth=trust \
 # サーバーの起動だけは LC_ALL=C を明示する。LANG / LC_ALL が両方未設定だと macOS の postmaster が
 # 起動中にマルチスレッド化して FATAL で落ちる（"postmaster became multithreaded during startup"）。
 # 照合・文字分類は上の initdb で ICU に固定済みなので、ここで C を渡しても結果は変わらない。
-as_server_user env LC_ALL=C pg_ctl -D "$PGDATA" -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null
+#
+# サーバーのログは一時領域の中へ出し、**起動に失敗したときだけ**中身を stderr へ出す。pg_ctl が自分で
+# 言うのは「ログ出力を確認してください」だけで、ログは下の trap が一時領域ごと消すため、原因の行
+# （上の FATAL など）が誰にも読めなくなる。成功時は何も出さない。
+SERVERLOG="$WORKDIR/server.log"
+if ! as_server_user env LC_ALL=C pg_ctl -D "$PGDATA" -l "$SERVERLOG" \
+  -o "-k $SOCKDIR -c listen_addresses=''" -w -t 60 start >/dev/null; then
+  echo "ERROR: 一時 postgres を起動できませんでした。サーバーログ:" >&2
+  cat "$SERVERLOG" >&2 || echo "（サーバーログがありません）" >&2
+  exit 1
+fi
 
 createdb -h "$SOCKDIR" -U postgres "$DBNAME"
 for f in "$MIGRATIONS_DIR"/*.sql; do
