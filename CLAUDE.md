@@ -14,7 +14,7 @@ ITに不慣れな飲食店オーナーが **LINE だけで** 市場ポジショ�
 
 ## ビルド／テスト
 
-最初に確立した成果物は **DB スキーマ**（`four-tier-data-model` spec, `db/`）。コマンド（ランタイムは apple/container 既定・`CONTAINER_CMD` で差替可。`container` が入っていても apiserver が止まっていると失敗するので、先に `container system start` で起動する（`container system stop` で戻せる）。ローカルに Docker/apple/container が無い場合は native postgres + `db/test/run.sh` 相当で代替検証可）:
+最初に確立した成果物は **DB スキーマ**（`four-tier-data-model` spec, `db/`）。コマンド（ランタイムは apple/container 既定・`CONTAINER_CMD` で差替可。`container` が入っていても apiserver が止まっていると失敗するので、先に `container system start` で起動し、戻すときは `container system stop` を使う。ローカルに Docker/apple/container が無い場合は native postgres + `db/test/run.sh` 相当で代替検証可）:
 - `make db-migrate` — 一時 postgres へ `db/migrations/*.sql` をクリーン適用（BUILD）
 - `make db-smoke` — 適用後 `db/test/smoke/*.sql` を実行（観察可能完了の証明）
 - `make db-test` — 適用後 `db/test/assertions/*.sql` を実行（網羅スイート）
