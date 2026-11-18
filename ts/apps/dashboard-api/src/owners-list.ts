@@ -30,13 +30,17 @@ export interface OwnerListItemJson {
   createdAt: string; // ISO 8601
   // 登録に用いた招待コード。null = 記録なし（0017 より前の登録）で、推定で埋めない（agency-dashboard Req 8.4, 8.5）。
   inviteCode: OwnerInviteCodeRecord | null;
+  // 担当代理店の id（運営の画面が代理店の詳細への経路に使う・agency-dashboard Req 10.3・Issue #526）。
+  agencyId: string;
   // 担当代理店の名前（運営が全代理店を見るときに区別する・owner-line-unlink Req 2.1）。
   agencyName: string;
   // LINE との連携状態（Req 2.1, 2.5）。LINE ユーザー ID そのものは応答に含めない。
   lineLink: OwnerLineLink;
   // 解除した元の LINE アカウントから完了後メニューをまだ外せていない（Req 3.2, 3.3）。
   menuUnlinkPending: boolean;
-  // 確定済み店舗の名前（作成順）。
+  // 確定済み店舗の id と名前（作成順）。画面が店舗の詳細への経路に使う（agency-dashboard Req 10.1・Issue #526）。
+  stores: { id: string; name: string }[];
+  // 確定済み店舗の名前（作成順・stores と同じ並び）。画面を stores へ切り替えて本番に出した後に消す（Issue #526）。
   storeNames: string[];
   // 店舗を引き継いだオーナー（Req 2.6）。引継ぎが無ければ null。
   takenOverBy: { ownerId: string; displayName: string | null } | null;
@@ -66,14 +70,15 @@ export async function handleOwnersList(
   //    0 件は 200 + 空配列（UI が agency-dashboard 3.3 の「招待コード先行」案内を出す）。
   const owners = await deps.listOwners(scope.scope.kind === 'all' ? null : scope.scope.agencyId);
 
-  return new Response(JSON.stringify({ owners: owners.map(toJson) }), {
+  return new Response(JSON.stringify({ owners: owners.map(toOwnerListItemJson) }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
 // OwnerListItem（DAL 型・Date 含む）→ JSON 形（ISO 文字列）への明示的シリアライズ。
-function toJson(item: OwnerListItem): OwnerListItemJson {
+// オーナーの詳細（GET /owners/:id）も同じ形で返すため公開する（Issue #526）。
+export function toOwnerListItemJson(item: OwnerListItem): OwnerListItemJson {
   return {
     id: item.id,
     displayName: item.displayName,
@@ -84,9 +89,12 @@ function toJson(item: OwnerListItem): OwnerListItemJson {
       item.inviteCode === null
         ? null
         : { id: item.inviteCode.id, code: item.inviteCode.code, disabled: item.inviteCode.disabled },
+    agencyId: item.agencyId,
     agencyName: item.agencyName,
     lineLink: item.lineLink,
     menuUnlinkPending: item.menuUnlinkPending,
+    // 店舗も id と名前だけを写す
+    stores: item.stores.map((store) => ({ id: store.id, name: store.name })),
     storeNames: [...item.storeNames],
     // 引継ぎ先も id と表示名だけを写す（LINE ユーザー ID などを応答へ混ぜない）。
     takenOverBy:

@@ -89,19 +89,20 @@ interface SurfaceLayout {
  * 見える幅に収まらなくなり、帯の案内リストは捲れる領域ではなくなる。
  */
 const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
+  // Issue #526: 「オーナー」列を足したので、見出し行＋2 店 × 7 列 = 21（6 列のとき 18）。
   店舗一覧: {
     navControls: 7,
-    measuredCells: 18,
+    measuredCells: 21,
     panelCells: 0,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
   '店舗一覧の QR パネル': {
     modalOverlay: true,
     navControls: 7,
-    // 店舗一覧の 18 件に、パネルの中の実績の表（Issue #401）の 8 件を足した数。内訳は列見出し 2
+    // 店舗一覧の 21 件に、パネルの中の実績の表（Issue #401）の 8 件を足した数。内訳は列見出し 2
     // （今月・先月）・行見出し 2（回答・投稿画面へ進んだ回数）・データセル 4。角の見出し「項目」は
     // 読み上げ専用で描かれないので、空のセルへ数える。Drawer は Portal 内にあり行内セルは無い。
-    measuredCells: 26,
+    measuredCells: 29,
     panelCells: 0,
     mustOverflow: { 393: ['店舗一覧'], 320: ['店舗一覧'] },
   },
@@ -171,6 +172,20 @@ const LAYOUT: Readonly<Record<string, SurfaceLayout>> = {
     panelCells: 0,
     mustOverflow: { 393: ['オーナー一覧'], 320: ['オーナー一覧'] },
   },
+  // Issue #526: 店舗の詳細は表を持たず、QR パネルの中の実績の表（見出し 2 列・行見出し 2・データ 4 の 8 件）だけを持つ。
+  店舗の詳細: {
+    navControls: 7,
+    measuredCells: 8,
+    panelCells: 0,
+    mustOverflow: { 393: [], 320: [] },
+  },
+  // Issue #526: オーナーの詳細は店舗の表（4 列 × 見出し＋1 店 = 8 件）を持つ。
+  オーナーの詳細: {
+    navControls: 7,
+    measuredCells: 8,
+    panelCells: 0,
+    mustOverflow: { 393: [], 320: [] },
+  },
 };
 
 test('宣言の面が検証面の一覧と一致する', () => {
@@ -179,7 +194,7 @@ test('宣言の面が検証面の一覧と一致する', () => {
     '面を足したら LAYOUT にも足す（宣言の無い面は beforeEach で止まる）',
   ).toEqual(Object.keys(LAYOUT));
   // 面の数は literal で持つ。配列の長さどうしを比べると、両方が空でも緑になる。
-  expect(Object.keys(LAYOUT)).toHaveLength(11);
+  expect(Object.keys(LAYOUT)).toHaveLength(13);
 });
 
 for (const surface of DASHBOARD_SURFACES) {

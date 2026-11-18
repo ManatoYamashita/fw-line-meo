@@ -49,13 +49,17 @@ export interface OwnerListItem {
   createdAt: string;
   /** null = 記録なし（招待コードを記録し始める前の登録）。推定で埋めない（Req 8.4）。 */
   inviteCode: OwnerInviteCodeRecord | null;
+  // 担当代理店の id（運営の画面が代理店の詳細への経路に使う・agency-dashboard Req 10.3・Issue #526）。
+  agencyId: string;
   // 担当代理店の名前（運営が全代理店のオーナーを見るときに区別する・owner-line-unlink Req 2.1）。
   agencyName: string;
   // LINE との連携状態（owner-line-unlink Req 2.1, 2.5）。
   lineLink: OwnerLineLink;
   // 解除した元の LINE アカウントから完了後メニューをまだ外せていない（owner-line-unlink Req 3.2, 3.3）。
   menuUnlinkPending: boolean;
-  // 確定済み店舗の名前（作成順）。
+  // 確定済み店舗の id と名前（作成順）。店舗の詳細への経路に使う（agency-dashboard Req 10.1・Issue #526）。
+  stores: { id: string; name: string }[];
+  // 確定済み店舗の名前（作成順・stores と同じ並び）。画面を stores へ切り替えた後に API から消す（Issue #526）。
   storeNames: string[];
   // 店舗を引き継いだオーナー（owner-line-unlink Req 2.6）。引継ぎが無ければ null。
   takenOverBy: { ownerId: string; displayName: string | null } | null;
@@ -128,4 +132,12 @@ export interface DashboardUserItem {
   displayName: string | null;
   disabled: boolean;
   createdAt: string;
+}
+
+// GET /owners/:id の 200 応答（agency-dashboard Req 11.6・11.7・Issue #526）。
+// owner は GET /owners の 1 件と同じ形、stores は当該オーナーの全店舗（未確定を含む・GET /stores の行と同じ形）。
+// 契約の正典は dashboard-api の owner-detail.ts。
+export interface OwnerDetail {
+  owner: OwnerListItem;
+  stores: StoreListItem[];
 }

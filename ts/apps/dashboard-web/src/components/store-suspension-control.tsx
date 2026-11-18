@@ -7,7 +7,7 @@
 // 停止は確認ダイアログで止まるものを示してから実行し、再開は確認なしで実行する（Req 1.6 は停止だけを
 // 確認の対象にしている）。
 //
-// **押しボタンは状態によらず同じ 1 つの要素にする。** 停止が成功して一覧を読み直すと、この部品は
+// **押しボタンは状態によらず同じ 1 つの要素にする。** 停止が成功して表示を読み直すと、この部品は
 // 停止中の表示へ切り替わる。停止と再開を別の要素で描くと、押した要素が消えて焦点が文書の先頭へ
 // 落ちる。同じ要素の文言だけを差し替えれば、焦点は押した位置に留まる。確認ダイアログは起点の
 // Trigger を持たずに開閉を自前で持ち、閉じたときの焦点の戻り先（finalFocus）をこの要素に向ける。
@@ -21,8 +21,8 @@
 // 領域を挿入すると読み上げられないことがあるためである。失敗は Alert の destructive 変種
 // （role="alert"）で示す（1.8）。処理中の「実行中…」は読み上げない（情報を持たない中間状態のため）。
 //
-// 一覧の読み直し（onChanged）は結果によらず呼ぶ。監査の書込が失敗して 500 になっても停止は成立して
-// いるので、画面は推測で状態を書き換えず、読み直した一覧に実際の状態を示させる（design「停止の操作」）。
+// 表示の読み直し（onChanged）は結果によらず呼ぶ。監査の書込が失敗して 500 になっても停止は成立して
+// いるので、画面は推測で状態を書き換えず、読み直した表示に実際の状態を示させる（design「停止の操作」）。
 
 import { useRef, useState } from 'react';
 import {
@@ -40,14 +40,14 @@ import { Badge } from '@fwlm/ui/components/badge';
 import { Button } from '@fwlm/ui/components/button';
 import { Spinner } from '@fwlm/ui/components/spinner';
 import { SuccessIcon } from '@fwlm/ui/components/success-icon';
-import { notifyActionError, notifyActionSuccess } from '../../lib/action-feedback';
-import { resumeStore, suspendStore, type ApiResult } from '../../lib/api';
-import type { StoreSuspensionState } from '../../lib/types';
-import { STORE_SUSPENSION_LABEL } from '../../lib/status-labels';
+import { notifyActionError, notifyActionSuccess } from '../lib/action-feedback';
+import { resumeStore, suspendStore, type ApiResult } from '../lib/api';
+import type { StoreSuspensionState } from '../lib/types';
+import { STORE_SUSPENSION_LABEL } from '../lib/status-labels';
 
 export interface StoreSuspensionControlProps {
   store: { id: string; name: string; suspendedAt: string | null };
-  // 一覧を読み直す。成功・失敗のどちらでも呼ぶ。
+  // 呼び出し側の表示（店舗一覧・店舗の詳細）を読み直す。成功・失敗のどちらでも呼ぶ。
   onChanged: () => Promise<void>;
 }
 
@@ -59,12 +59,12 @@ const ACTION_LABEL: Record<Action, string> = { suspend: '停止', resume: '再�
 // 不存在・範囲外は同じ 404 に写されるので、どちらの場合も「見つからない」とだけ伝える（Req 1.4）。
 // 認証・権限の失敗も固定の利用者向け文言へ写し、サーバの内部文言は表示しない。
 // それ以外（監査の失敗・DB 障害・通信不能）は、要求が届いて成立したかどうかを画面から判別できない。
-// 成功したかのようにも失敗したかのようにも言い切らず、読み直した一覧を確かめるよう促す（1.8）。
+// 成功したかのようにも失敗したかのようにも言い切らず、読み直した画面の表示を確かめるよう促す（1.8）。
 function failureMessage(action: Action, result: { code: string }): string {
-  if (result.code === 'not_found') return '店舗が見つかりません。一覧を更新しました。';
+  if (result.code === 'not_found') return '店舗が見つかりません。表示を更新しました。';
   if (result.code === 'unauthenticated') return 'ログインの有効期限が切れています。再度ログインしてください。';
   if (result.code === 'forbidden') return 'この店舗を変更する権限がありません。';
-  return `${ACTION_LABEL[action]}できたか確認できませんでした。一覧の表示を確認してください。`;
+  return `${ACTION_LABEL[action]}できたか確認できませんでした。画面の表示を確認してください。`;
 }
 
 export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionControlProps) {
@@ -101,7 +101,7 @@ export function StoreSuspensionControl({ store, onChanged }: StoreSuspensionCont
     try {
       await onChanged();
     } catch {
-      // swallowed-exception: intentional — 読み直しの失敗は一覧の側が示す。この部品は要求の結果だけを告げる。
+      // swallowed-exception: intentional — 読み直しの失敗は呼び出し側の画面が示す。この部品は要求の結果だけを告げる。
     }
 
     // 読み直しの後に告げる。表示が新しい状態へ変わってから結果を読み上げ、両者を食い違わせない。

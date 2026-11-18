@@ -5,6 +5,7 @@ import type {
   DashboardUserItem,
   InviteCodeItem,
   OwnerLineUnlinkResult,
+  OwnerDetail,
   OwnerListItem,
   StoreCandidate,
   StoreListItem,
@@ -155,6 +156,28 @@ export async function getStores(
   );
   if (!result.ok) return result;
   return { ok: true, value: result.value.stores };
+}
+
+// GET /stores/:id: 店舗の詳細の 1 件（agency-dashboard Req 11.1・Issue #526）。{ store } をアンラップする。
+// 形の不正・不存在・範囲外は、どれも 404（code: not_found）の失敗として返る（Req 11.9）。
+export async function getStore(
+  storeId: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<StoreListItem>> {
+  const result = await apiFetch<{ store: StoreListItem }>(`/stores/${encodeURIComponent(storeId)}`, options);
+  if (!result.ok) return result;
+  return { ok: true, value: result.value.store };
+}
+
+// GET /owners/:id: オーナーの詳細の 1 人と、そのオーナーの全店舗（agency-dashboard Req 11.6・11.7・Issue #526）。
+// 404（code: not_found）の扱いは getStore と同じ。
+export async function getOwner(
+  ownerId: string,
+  options: ApiClientOptions = {},
+): Promise<ApiResult<OwnerDetail>> {
+  const result = await apiFetch<OwnerDetail>(`/owners/${encodeURIComponent(ownerId)}`, options);
+  if (!result.ok) return result;
+  return { ok: true, value: { owner: result.value.owner, stores: result.value.stores } };
 }
 
 // POST /stores/:id/suspend・/resume の共通窓口（store-suspension tasks 5.2）。本文は送らない。

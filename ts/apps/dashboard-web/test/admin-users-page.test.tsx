@@ -463,8 +463,9 @@ describe('利用者管理ページ: 着手前から在った契約（意匠の�
       'user-role',
       'user-agency',
     ]);
-    // 主要領域にリンクは無い（帯の 5 件は main の外にある）。
-    expect(scope.queryAllByRole('link')).toHaveLength(0);
+    // 主要領域のリンクは、所属代理店の名前から代理店の詳細へ進む 1 件だけ（Issue #526・Req 10.3）。
+    // 帯の 5 件は main の外にある。運営ロールの利用者の行にはリンクが無い。
+    expect(scope.queryAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/admin/agencies/a1']);
   });
 });
 
@@ -1874,5 +1875,21 @@ describe('利用者管理ページ: 代理店一覧の取得状態', () => {
       '代理店を選択してください',
     ]);
     expect(within(main).queryAllByRole('alert')).toHaveLength(0);
+  });
+});
+
+describe('利用者管理の所属代理店のリンク（Issue #526・agency-dashboard Req 10.3・10.7）', () => {
+  it('所属代理店の名前を、代理店の詳細へのリンクにする。運営ロールの利用者の「—」はリンクにしない', async () => {
+    ready('operator');
+    api.getDashboardUsers.mockResolvedValue({ ok: true, value: [operatorUser, agencyUser] });
+    api.getAgencies.mockResolvedValue({ ok: true, value: [agencyAlpha] });
+    render(<AdminUsersPage />);
+    const scope = within(await screen.findByRole('main'));
+    const link = await scope.findByRole('link', { name: '代理店アルファ' });
+    expect(link.getAttribute('href')).toBe('/admin/agencies/a1');
+    expect(link.closest('tr')!.textContent).toContain('agency@example.com');
+    const operatorRow = scope.getByText('op@example.com').closest('tr')!;
+    expect(within(operatorRow).queryByRole('link')).toBeNull();
+    expect(operatorRow.textContent).toContain('—');
   });
 });

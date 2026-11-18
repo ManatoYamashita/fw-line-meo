@@ -297,6 +297,8 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       [`/dashboard-users/${DUMMY_UUID}/enable`, { method: 'POST' }],
       [`/stores/${DUMMY_UUID}/suspend`, { method: 'POST' }],
       [`/stores/${DUMMY_UUID}/resume`, { method: 'POST' }],
+      [`/stores/${DUMMY_UUID}`, { method: 'GET' }],
+      [`/owners/${DUMMY_UUID}`, { method: 'GET' }],
       [
         `/dashboard-users/${DUMMY_UUID}/update`,
         { method: 'POST', body: JSON.stringify({ displayName: 'x' }) },
@@ -701,6 +703,79 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
 
       const other = await app.request(`/owners?agencyId=${AG2}`, { method: 'GET', headers: h(AG1_TOKEN) });
       expect(other.status).toBe(403);
+    });
+  });
+
+  // --- GET /stores/:id・GET /owners/:id と GET /owners の項目（agency-dashboard Req 10.1–10.3・11.9・11.10・Issue #526）---
+  // 本番と同じ合成根から実物の findStoreWithStatus・findOwner・listStoresWithStatus を通す。
+  describe('店舗の詳細・オーナーの詳細の取得（Issue #526）', () => {
+    it('運営は他代理店の店舗も読め、代理店は自代理店の店舗だけを読める。範囲外と不存在は同じ本文の 404', async () => {
+      const app = buildApp();
+      const op = await app.request(`/stores/${S2}`, { method: 'GET', headers: h(OP_TOKEN) });
+      expect(op.status).toBe(200);
+      expect(((await op.json()) as { store: { id: string; agencyName: string } }).store).toMatchObject({
+        id: S2,
+        agencyName: 'ルート代理店2',
+      });
+
+      const mine = await app.request(`/stores/${S1}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      expect(mine.status).toBe(200);
+
+      const outOfScope = await app.request(`/stores/${S2}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      const missing = await app.request(`/stores/${DUMMY_UUID}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      const malformed = await app.request('/stores/not-a-uuid', { method: 'GET', headers: h(AG1_TOKEN) });
+      expect([outOfScope.status, missing.status, malformed.status]).toEqual([404, 404, 404]);
+      const bodies = [await outOfScope.text(), await missing.text(), await malformed.text()];
+      expect(new Set(bodies).size).toBe(1);
+    });
+
+    it('オーナーの詳細はオーナーと店舗を返し、代理店の範囲外は同じ本文の 404', async () => {
+      const app = buildApp();
+      const res = await app.request(`/owners/${OW1}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).not.toContain('U-routes-');
+      const body = JSON.parse(text) as {
+        owner: { id: string; agencyId: string; stores: { id: string; name: string }[] };
+        stores: { id: string; ownerId: string }[];
+      };
+      expect(body.owner).toMatchObject({ id: OW1, agencyId: AG1, stores: [{ id: S1, name: '店1' }] });
+      expect(body.stores.map((s) => s.id)).toEqual([S1]);
+
+      const outOfScope = await app.request(`/owners/${OW2}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      const missing = await app.request(`/owners/${DUMMY_UUID}`, { method: 'GET', headers: h(AG1_TOKEN) });
+      expect([outOfScope.status, missing.status]).toEqual([404, 404]);
+      expect(await outOfScope.text()).toBe(await missing.text());
+
+      const op = await app.request(`/owners/${OW2}`, { method: 'GET', headers: h(OP_TOKEN) });
+      expect(op.status).toBe(200);
+    });
+
+    it('無効化された利用者は、実在する店舗・オーナーの詳細でも 403 で、情報を返さない', async () => {
+      const app = buildApp();
+      for (const path of [`/stores/${S1}`, `/owners/${OW1}`]) {
+        const res = await app.request(path, { method: 'GET', headers: h(DU_DISABLED_LOGIN_TOKEN) });
+        expect(res.status, path).toBe(403);
+        const text = await res.text();
+        expect(text, path).not.toContain('店1');
+        expect(text, path).not.toContain(OW1);
+      }
+    });
+
+    it('GET /owners は各オーナーに agencyId と stores を載せ、storeNames も残す（10.1–10.3）', async () => {
+      const app = buildApp();
+      const res = await app.request(`/owners?agencyId=${AG1}`, { method: 'GET', headers: h(OP_TOKEN) });
+      expect(res.status).toBe(200);
+      const owners = (
+        (await res.json()) as {
+          owners: { id: string; agencyId: string; stores: { id: string; name: string }[]; storeNames: string[] }[];
+        }
+      ).owners;
+      expect(owners.find((o) => o.id === OW1)).toMatchObject({
+        agencyId: AG1,
+        stores: [{ id: S1, name: '店1' }],
+        storeNames: ['店1'],
+      });
     });
   });
 

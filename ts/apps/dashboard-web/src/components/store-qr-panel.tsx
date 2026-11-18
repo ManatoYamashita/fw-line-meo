@@ -35,8 +35,11 @@ import { StoreReviewFunnel } from './store-review-funnel';
 export interface StoreQrPanelProps {
   readonly storeId: string;
   readonly storeName: string;
-  /** 閉じる操作。開閉状態は呼び出し側（店舗一覧）が所有する。 */
-  readonly onClose: () => void;
+  /**
+   * 閉じる操作。開閉状態は呼び出し側（店舗一覧）が所有する。店舗の詳細のように閉じる先が無い面では渡さず、
+   * そのときは閉じる押しボタンを描かない（Issue #526）。
+   */
+  readonly onClose?: () => void;
   /** 親 Dialog が題名と閉じる操作を表示する場合は false にする。 */
   readonly showHeader?: boolean;
   /** 取得手続きの注入（既定は getStoreQr）。テストでネットワークを発火させないために持つ。 */
@@ -218,15 +221,17 @@ export function StoreQrPanel({
           <Heading level={2} size="base">
             {storeName} の QR
           </Heading>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="print:hidden"
-            onClick={onClose}
-            aria-label={`${storeName} の QR を閉じる`}
-          >
-            閉じる
-          </Button>
+          {onClose !== undefined ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="print:hidden"
+              onClick={onClose}
+              aria-label={`${storeName} の QR を閉じる`}
+            >
+              閉じる
+            </Button>
+          ) : null}
         </CardHeader>
       ) : null}
       <CardContent className="flex flex-col gap-3">

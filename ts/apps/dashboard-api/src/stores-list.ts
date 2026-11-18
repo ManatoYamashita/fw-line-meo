@@ -59,14 +59,15 @@ export async function handleStoresList(
   const filter = scope.scope.kind === 'all' ? {} : { agencyId: scope.scope.agencyId };
   const stores = await deps.listStores(filter);
 
-  return new Response(JSON.stringify({ stores: stores.map(toJson) }), {
+  return new Response(JSON.stringify({ stores: stores.map(toStoreListItemJson) }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
 // StoreListItem（DAL 型・Date 含む）→ JSON 形（ISO 文字列）への明示的シリアライズ。
-function toJson(item: StoreListItem): StoreListItemJson {
+// 店舗の詳細（GET /stores/:id）とオーナーの詳細（GET /owners/:id）も同じ形で返すため公開する（Issue #526）。
+export function toStoreListItemJson(item: StoreListItem): StoreListItemJson {
   return {
     id: item.id,
     name: item.name,

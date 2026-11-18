@@ -6,12 +6,14 @@ import {
   readStoreReviewFunnel,
   linkAuthSubjectByEmail,
   listStoresWithStatus,
+  findStoreWithStatus,
   listRegisteredPlaceIds,
   setStoreCategory,
   setStoreSuspension,
   findAgencyName,
   findDashboardUserDisplayName,
   listOwners,
+  findOwner,
   unlinkOwnerLine,
   clearOwnerMenuPending,
   findOwnerWithAgency,
@@ -151,6 +153,15 @@ export function buildAppDeps({ config, verifier, lineFetch, structuredLog }: Com
     owners: {
       auth: authDeps,
       listOwners: async (agencyId) => listOwners(await getPool(), agencyId),
+    },
+    storeDetail: {
+      auth: authDeps,
+      findStore: async (input) => findStoreWithStatus(await getPool(), input),
+    },
+    ownerDetail: {
+      auth: authDeps,
+      findOwner: async (input) => findOwner(await getPool(), input),
+      listStores: async (ownerId) => listStoresWithStatus(await getPool(), { ownerId }),
     },
     categories: {
       auth: authDeps,

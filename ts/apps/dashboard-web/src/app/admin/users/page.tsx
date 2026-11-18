@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@fwlm/ui/components/table';
 import { AuthGuard } from '../../../components/auth-guard';
+import { AgencyName } from '../../../components/entity-link';
 import { ListLoading } from '../../../components/list-loading';
 import { DashboardUserEditPanel } from '../../../components/dashboard-user-edit-panel';
 import { TopNav } from '../../../components/top-nav';
@@ -510,7 +511,13 @@ function UsersView() {
                     <TableCell wrap="anywhere">{user.email ?? '—'}</TableCell>
                     {/* 運営ロールは所属代理店を持たない（agencyId=null）。 */}
                     <TableCell wrap="prose">
-                      {user.agencyId === null ? '—' : agencyNameById.get(user.agencyId) ?? user.agencyId}
+                      {/* 所属代理店は代理店の詳細へのリンクにする。この画面は運営専用なので常にリンクになる（Req 10.3）。
+                        * 運営ロールの利用者の「—」は別の実体を指さないので、リンクにしない。 */}
+                      {user.agencyId === null ? (
+                        '—'
+                      ) : (
+                        <AgencyName agencyId={user.agencyId} name={agencyNameById.get(user.agencyId) ?? user.agencyId} />
+                      )}
                     </TableCell>
                     {/* 有効/無効の状態（Req 6.4）。招待コードの同じ列と同じく素の語のまま置く。
                       * 装飾で包むと同一役割が面をまたいで 2 通りに描かれ、Req 1.2 が壊れる。 */}

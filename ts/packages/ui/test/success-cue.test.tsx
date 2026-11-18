@@ -72,8 +72,8 @@ const SUCCESS_DISPLAYS: ReadonlyArray<{ readonly file: string; readonly cues: re
   { file: 'apps/dashboard-web/src/lib/action-feedback.ts', cues: [{ kind: 'toast' }] },
   { file: 'apps/store-detail/app/store/survey-settings/survey-settings-editor.tsx', cues: [{ kind: 'toast' }] },
   {
-    // 店舗一覧の行に置く小さな文言。Alert の枠を行へ持ち込まないため、印を自前で添える。
-    file: 'apps/dashboard-web/src/app/stores/store-suspension-control.tsx',
+    // 店舗一覧の行と店舗の詳細（Issue #526）に置く小さな文言。Alert の枠を行へ持ち込まないため、印を自前で添える。
+    file: 'apps/dashboard-web/src/components/store-suspension-control.tsx',
     cues: [
       {
         kind: 'own',
@@ -83,8 +83,8 @@ const SUCCESS_DISPLAYS: ReadonlyArray<{ readonly file: string; readonly cues: re
     ],
   },
   {
-    // オーナー一覧の行に置く小さな文言（owner-line-unlink）。店舗の停止と同じく、印を自前で添える。
-    file: 'apps/dashboard-web/src/app/owners/owner-line-unlink-control.tsx',
+    // オーナー一覧の行とオーナーの詳細（Issue #526）に置く小さな文言（owner-line-unlink）。店舗の停止と同じく、印を自前で添える。
+    file: 'apps/dashboard-web/src/components/owner-line-unlink-control.tsx',
     cues: [
       {
         kind: 'own',

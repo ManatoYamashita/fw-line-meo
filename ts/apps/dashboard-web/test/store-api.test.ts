@@ -13,6 +13,8 @@ vi.mock('firebase/auth', () => ({
 
 import {
   getStores,
+  getStore,
+  getOwner,
   getOwners,
   getAgencies,
   getCategories,
@@ -32,6 +34,70 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe('店舗系 API クライアント', () => {
+  // 店舗の詳細・オーナーの詳細の 1 件の取得（agency-dashboard Requirement 11・Issue #526・tasks 9.3）
+  const STORE_JSON = {
+    id: 'abcdef44-4444-4444-4444-444444444444',
+    name: '店A',
+    placeStatus: 'confirmed',
+    suspendedAt: null,
+    competitorConfigured: true,
+    ownerId: 'abcdef55-5555-5555-5555-555555555555',
+    ownerDisplayName: 'オーナー1',
+    agencyId: 'abcdef11-1111-1111-1111-111111111111',
+    agencyName: '代理店A',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+
+  it('getStore は GET /stores/:id の { store } をアンラップし Bearer を付与する', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { store: STORE_JSON }));
+    const result = await getStore(STORE_JSON.id, { getToken: async () => 'tok', fetchImpl });
+    expect(result).toEqual({ ok: true, value: STORE_JSON });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(String(url).endsWith(`/stores/${STORE_JSON.id}`)).toBe(true);
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
+
+  it('getStore の 404 は not_found の失敗として返す（画面が「見つかりません」と出し分ける・11.9）', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(404, { error: { code: 'not_found', message: '店舗が見つかりません' } }));
+    const result = await getStore(STORE_JSON.id, { getToken: async () => 't', fetchImpl });
+    expect(result).toMatchObject({ ok: false, code: 'not_found' });
+  });
+
+  it('getStore・getOwner は id を経路の 1 段に閉じ込める（区切りを含む値が別の経路へ化けない）', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(404, { error: { code: 'not_found', message: '見つかりません' } }));
+    await getStore('a/b', { getToken: async () => 't', fetchImpl });
+    await getOwner('../x', { getToken: async () => 't', fetchImpl });
+    const urls = fetchImpl.mock.calls.map((call) => String((call as [string])[0]));
+    expect(urls[0]?.endsWith('/stores/a%2Fb')).toBe(true);
+    expect(urls[1]?.endsWith('/owners/..%2Fx')).toBe(true);
+  });
+
+  it('getOwner は GET /owners/:id の { owner, stores } をそのまま返す', async () => {
+    const owner = {
+      id: STORE_JSON.ownerId,
+      displayName: 'オーナー1',
+      onboardingStatus: 'store_identified',
+      createdAt: '2026-01-01T00:00:00Z',
+      inviteCode: null,
+      agencyId: STORE_JSON.agencyId,
+      agencyName: '代理店A',
+      lineLink: 'linked',
+      menuUnlinkPending: false,
+      stores: [{ id: STORE_JSON.id, name: '店A' }],
+      storeNames: ['店A'],
+      takenOverBy: null,
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { owner, stores: [STORE_JSON] }));
+    const result = await getOwner(owner.id, { getToken: async () => 't', fetchImpl });
+    expect(result).toEqual({ ok: true, value: { owner, stores: [STORE_JSON] } });
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(String(url).endsWith(`/owners/${owner.id}`)).toBe(true);
+  });
+
   it('getStores は { stores } を配列へアンラップし Bearer を付与する', async () => {
     const stores = [
       {
@@ -219,6 +285,11 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
       agencyName: '代理店A',
       lineLink: 'linked',
       menuUnlinkPending: false,
+      agencyId: 'a1',
+      stores: [
+        { id: 's1', name: '店A' },
+        { id: 's2', name: '店B' },
+      ],
       storeNames: ['店A', '店B'],
       takenOverBy: null,
     },
@@ -231,6 +302,8 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
       agencyName: '代理店B',
       lineLink: 'unlinked',
       menuUnlinkPending: true,
+      agencyId: 'a1',
+      stores: [],
       storeNames: [],
       takenOverBy: null,
     },
@@ -243,6 +316,8 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
       agencyName: '代理店A',
       lineLink: 'unlinked',
       menuUnlinkPending: false,
+      agencyId: 'a1',
+      stores: [],
       storeNames: [],
       takenOverBy: { ownerId: 'o4', displayName: null },
     },
@@ -327,6 +402,8 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
     expectTypeOf<OwnerListItem['menuUnlinkPending']>().toEqualTypeOf<boolean>();
     expectTypeOf<OwnerListItem['agencyName']>().toEqualTypeOf<string>();
     expectTypeOf<OwnerListItem['storeNames']>().toEqualTypeOf<string[]>();
+    expectTypeOf<OwnerListItem['stores']>().toEqualTypeOf<{ id: string; name: string }[]>();
+    expectTypeOf<OwnerListItem['agencyId']>().toEqualTypeOf<string>();
     expectTypeOf<OwnerListItem['takenOverBy']>().toEqualTypeOf<{
       ownerId: string;
       displayName: string | null;

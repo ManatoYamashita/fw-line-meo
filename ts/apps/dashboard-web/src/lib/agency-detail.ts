@@ -3,25 +3,10 @@ import type { DashboardUserItem, OwnerListItem } from './types';
 // 代理店詳細（Issue #486・agency-dashboard Req 9）が、取得した値から計算する純粋関数。
 // 画面の部品から切り離して単体で試験する。
 
-// UUID の形（大小を問わない）。dashboard-api の UUID 検査（store-registration.ts の UUID_RE）と同じ形である。
-const AGENCY_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * 経路の値を代理店 id として正規化する。UUID の形なら小文字にして返し、形でなければ null を返す（Req 9.6）。
- *
- * **形の判定で大小を許すなら、比べる側も同じ正規化済みの値を使う。** API が返す id は PostgreSQL 由来で
- * 常に小文字である。大文字の経路の値を素のまま厳密一致で比べると、API は大小を無視して実データを返すのに
- * 画面の側の絞り込み（usersOfAgency・代理店の存在判定）だけが一致せず、偽の 0 件や「見つかりません」になる
- * （dashboard-api の admin.ts が toLowerCase() で避けている罠と同じ型）。
- */
-export function toAgencyId(value: string): string | null {
-  return AGENCY_ID_RE.test(value) ? value.toLowerCase() : null;
-}
-
 /**
  * GET /dashboard-users の全件から、その代理店に属する代理店ロールの利用者だけを取り出す（Req 9.2）。
  * 運営の利用者（agencyId が null）は含めない。並びは API の順のまま保つ。
- * `agencyId` は toAgencyId で正規化した値を渡す（API の id は小文字）。
+ * `agencyId` は toEntityId（lib/entity-paths.ts）で正規化した値を渡す（API の id は小文字）。
  */
 export function usersOfAgency(
   users: readonly DashboardUserItem[],
