@@ -1,7 +1,7 @@
 # daily-batch の Cloud Run Job 用イメージ（go.mod は go/ ルート・multi-stage・distroless 実行時）。
 # ビルドコンテキストはリポジトリの go/。
 #   docker build -t daily-batch go/
-# 注記: このマシンには docker/apple-container が無いため、本 Dockerfile の実ビルドは CI/デプロイ時に検証する。
+# 注記: ローカルで docker/apple-container を使えない環境では、本 Dockerfile の実ビルドは CI（ts-ci の docker-build）とデプロイ時に検証する。
 
 FROM golang:1.25-alpine AS build
 WORKDIR /src

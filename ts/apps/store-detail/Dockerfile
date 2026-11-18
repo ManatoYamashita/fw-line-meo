@@ -2,7 +2,7 @@
 # LIFF からの読取専用 Web サービス（survey-web と同系の Next.js standalone 構成）。
 # ビルドコンテキストはリポジトリの ts/（pnpm workspace ルート）。
 #   docker build -f apps/store-detail/Dockerfile -t store-detail ts/
-# 注記: このマシンには docker が無いため本 Dockerfile は CI/デプロイ時に検証する。
+# 注記: ローカルで docker を使えない環境では、本 Dockerfile の検証は CI（ts-ci の docker-build）とデプロイ時に行う。
 
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
