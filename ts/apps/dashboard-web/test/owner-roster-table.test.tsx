@@ -1,8 +1,22 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import type { ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
+
+vi.mock('next/link', () => ({
+  default: ({
+    href,
+    children,
+    ...rest
+  }: { href: string; children: ReactNode } & import('react').ComponentProps<'a'>) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
 import { OwnerRosterTable } from '../src/components/owner-roster-table';
-import type { OwnerListItem } from '../src/lib/types';
+import type { OwnerListItem, StoreListItem } from '../src/lib/types';
 
 // オーナーの表（Issue #485）を代理店詳細（Issue #486・agency-dashboard Req 9.2・9.4）でも使う。
 // 招待コードの列は `showInviteCode` を渡したときだけ描き、渡さない呼び出し（店舗登録）の描画は変えない。
@@ -19,6 +33,8 @@ const OWNERS: OwnerListItem[] = [
     agencyName: '代理店A',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    agencyId: 'a1',
+    stores: [],
     storeNames: [],
     takenOverBy: null,
   },
@@ -31,6 +47,8 @@ const OWNERS: OwnerListItem[] = [
     agencyName: '代理店A',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    agencyId: 'a1',
+    stores: [],
     storeNames: [],
     takenOverBy: null,
   },
@@ -43,6 +61,8 @@ const OWNERS: OwnerListItem[] = [
     agencyName: '代理店A',
     lineLink: 'linked',
     menuUnlinkPending: false,
+    agencyId: 'a1',
+    stores: [],
     storeNames: [],
     takenOverBy: null,
   },
@@ -103,3 +123,39 @@ describe('OwnerRosterTable の招待コードの列（Issue #486・Req 9.2・9.4
     expect(headerNames()).toEqual(['表示名', '状態', '登録済みの店舗', '作成日', '招待コード', '操作']);
   });
 });
+
+describe('OwnerRosterTable の名前のリンク（Issue #526・Req 10.1・10.2・10.7）', () => {
+  const STORE: StoreListItem = {
+    id: 'abcdef44-4444-4444-4444-444444444444',
+    name: '炭火焼 あいう',
+    placeStatus: 'confirmed',
+    suspendedAt: null,
+    competitorConfigured: false,
+    ownerId: 'o-recorded',
+    ownerDisplayName: null,
+    agencyId: 'a1',
+    agencyName: '代理店A',
+    createdAt: '2026-10-01T00:00:00.000Z',
+  };
+  const WITH_STORE = { kind: 'loaded', byOwner: new Map([['o-recorded', [STORE]]]) } as const;
+
+  it('linkNames を渡すと、表示名をオーナーの詳細へ、登録済みの店舗名を店舗の詳細へのリンクにする', () => {
+    render(<OwnerRosterTable label="オーナー" owners={OWNERS} stores={WITH_STORE} linkNames />);
+    const row = rowOf('炭火焼 あいう');
+    const owner = within(row).getByRole('link', { name: ownerName(OWNERS[0]!) });
+    expect(owner.getAttribute('href')).toBe('/owners/o-recorded');
+    const store = within(row).getByRole('link', { name: '炭火焼 あいう' });
+    expect(store.getAttribute('href')).toBe(`/stores/${STORE.id}`);
+    // 店舗の無いオーナーの表示名もリンクにする
+    expect(screen.getByRole('link', { name: '記録なし次郎' }).getAttribute('href')).toBe('/owners/o-unrecorded');
+  });
+
+  it('linkNames を渡さないときはリンクを 1 つも描かない（店舗登録の手順の中の名前・10.7）', () => {
+    render(<OwnerRosterTable label="オーナー" owners={OWNERS} stores={WITH_STORE} />);
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+});
+
+function ownerName(owner: OwnerListItem): string {
+  return owner.displayName ?? '（表示名なし）';
+}

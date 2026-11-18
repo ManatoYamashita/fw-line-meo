@@ -265,7 +265,8 @@ describe('店舗一覧ページ: 着手前に無検証だった契約', () => {
     // カード化すればこの 3 本が同時に赤くなる。
     expect(scope.getAllByRole('table')).toHaveLength(1);
     expect(scope.getAllByRole('row')).toHaveLength(3);
-    expect(scope.getAllByRole('cell')).toHaveLength(10);
+    // agency の 6 列 × 店舗 2 件（Issue #526 でオーナー列を足した）
+    expect(scope.getAllByRole('cell')).toHaveLength(12);
   });
 });
 
@@ -312,10 +313,11 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     await scope.findByText('鳥貴族 渋谷店');
 
     const headers = scope.getAllByRole('columnheader').map((h) => h.textContent);
-    expect(headers).toEqual(['店名', '店舗特定', '競合設定', '担当代理店', '利用状況', 'QR']);
+    // 「オーナー」は店名の隣に足した列（Issue #526・Req 10.5）。既存の列は 1 つも欠けない。
+    expect(headers).toEqual(['店名', 'オーナー', '店舗特定', '競合設定', '担当代理店', '利用状況', 'QR']);
   });
 
-  it('agency では担当代理店列を除いた 5 列になる（1.4）', async () => {
+  it('agency では担当代理店列を除いた 6 列になる（1.4）', async () => {
     ready('agency');
     api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
     render(<StoresPage />);
@@ -323,7 +325,7 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     await scope.findByText('鳥貴族 渋谷店');
 
     const headers = scope.getAllByRole('columnheader').map((h) => h.textContent);
-    expect(headers).toEqual(['店名', '店舗特定', '競合設定', '利用状況', 'QR']);
+    expect(headers).toEqual(['店名', 'オーナー', '店舗特定', '競合設定', '利用状況', 'QR']);
   });
 
   it('発行操作で対象店舗の右側 Dialog が開く（8.1）', async () => {
@@ -353,7 +355,7 @@ describe('店舗一覧ページ: QR 発行導線', () => {
     fireEvent.click(within(rowOf('鳥貴族 渋谷店')).getByRole('button', { name: /鳥貴族 渋谷店 の QR 発行/ }));
     await screen.findByRole('dialog', { name: '鳥貴族 渋谷店 の QR' });
 
-    expect(document.querySelectorAll('th')).toHaveLength(6);
+    expect(document.querySelectorAll('th')).toHaveLength(7);
     expect(document.getElementById('store-qr-drawer')?.closest('[data-slot="table-container"]')).toBeNull();
   });
 
@@ -489,7 +491,12 @@ describe('店舗一覧ページ: 行と取得対象の対応', () => {
     fireEvent.click(
       within(rowOf('競合未設定の確定店')).getByRole('button', { name: /競合未設定の確定店 の QR 発行/ }),
     );
-    const link = await screen.findByRole('link', { name: /競合未設定の確定店/ });
+    // 店名も同じ文字を持つリンク（店舗の詳細へ・Issue #526）になったので、保存リンクは download 属性で特定する。
+    const link = await waitFor(() => {
+      const saved = document.querySelector('a[download]');
+      if (saved === null) throw new Error('保存リンクがまだありません');
+      return saved;
+    });
     expect(link.getAttribute('download')).toBe('qr-競合未設定の確定店-s3.png');
   });
 });
@@ -738,14 +745,14 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     // 列見出しは全件が部品を通り、列見出しとしての scope を持つ（素の <th> は scope を欠いていた）。
     const headers = scope.getAllByRole('columnheader');
     expect(headers.map((header) => header.getAttribute('data-slot'))).toEqual(
-      Array.from({ length: 6 }, () => 'table-header-cell'),
+      Array.from({ length: 7 }, () => 'table-header-cell'),
     );
     expect(headers.map((header) => header.getAttribute('scope'))).toEqual(
-      Array.from({ length: 6 }, () => 'col'),
+      Array.from({ length: 7 }, () => 'col'),
     );
     // データセルも同様。1 つでも素の <td> が混ざれば余白と行の高さが揃わない。
     expect(scope.getAllByRole('cell').map((cell) => cell.getAttribute('data-slot'))).toEqual(
-      Array.from({ length: 12 }, () => 'table-cell'),
+      Array.from({ length: 14 }, () => 'table-cell'),
     );
   });
 
@@ -764,8 +771,8 @@ describe('店舗一覧ページ: 意匠の適用', () => {
     for (const row of rows) {
       expect(
         Array.from(row.children).map((cell) => cell.getAttribute('data-wrap')),
-        '店名と担当代理店は自由記述、状態と QR の列は折り返さない',
-      ).toEqual(['prose', 'none', 'none', 'prose', 'prose', 'none']);
+        '店名・オーナー・担当代理店は自由記述、状態と QR の列は折り返さない',
+      ).toEqual(['prose', 'prose', 'none', 'none', 'prose', 'prose', 'none']);
     }
   });
 
@@ -1077,7 +1084,8 @@ describe('店舗一覧ページ: 利用状況', () => {
 
     await waitFor(() => expect(within(statusCell).getByText('停止中')).toBeTruthy());
     expect(screen.queryByRole('img')).toBeNull();
-    expect(screen.queryByRole('link', { name: /鳥貴族 渋谷店/ })).toBeNull();
+    // 停止前の QR の保存リンク（download 属性を持つ）が残らない。店名は店舗の詳細へのリンクとして残る（Issue #526）。
+    expect(document.querySelector('a[download]')).toBeNull();
   });
 });
 
@@ -1129,5 +1137,65 @@ describe('店舗一覧ページ: 用語の説明（Issue #525）', () => {
       cleanup();
     }
     expect(visited).toBe(5);
+  });
+});
+
+describe('店舗一覧の名前のリンク（Issue #526・agency-dashboard Req 10.1・10.2・10.3・10.4・10.5・10.6・10.9）', () => {
+  function rowByStore(name: string): HTMLTableRowElement {
+    const row = screen.getByRole('link', { name }).closest('tr');
+    if (row === null) throw new Error(`row not found for ${name}`);
+    return row;
+  }
+
+  it('運営: 店名は店舗の詳細へ、オーナーはオーナーの詳細へ、担当代理店は代理店の詳細へのリンクにする', async () => {
+    ready('operator');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    render(<StoresPage />);
+    const scope = within(await screen.findByRole('main'));
+    await scope.findByRole('link', { name: '鳥貴族 渋谷店' });
+    const row = within(rowByStore('鳥貴族 渋谷店'));
+    expect(row.getByRole('link', { name: '鳥貴族 渋谷店' }).getAttribute('href')).toBe('/stores/s1');
+    expect(row.getByRole('link', { name: 'オーナー1' }).getAttribute('href')).toBe('/owners/o1');
+    expect(row.getByRole('link', { name: '代理店アルファ' }).getAttribute('href')).toBe('/admin/agencies/a1');
+  });
+
+  it('「オーナー」列を店名の隣に足し、表示名が無いオーナーは「（表示名なし）」のままリンクにする（10.5・10.6）', async () => {
+    ready('operator');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed, storeConfirmedNoCompetitor] });
+    render(<StoresPage />);
+    await screen.findByRole('link', { name: '競合未設定の確定店' });
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers).toEqual(['店名', 'オーナー', '店舗特定', '競合設定', '担当代理店', '利用状況', 'QR']);
+    const row = within(rowByStore('競合未設定の確定店'));
+    expect(row.getByRole('link', { name: '（表示名なし）' }).getAttribute('href')).toBe('/owners/o3');
+  });
+
+  it('代理店ロール: 店名とオーナーはリンクで、代理店の列もリンクも出さない（10.4）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeConfirmed] });
+    render(<StoresPage />);
+    await screen.findByRole('link', { name: '鳥貴族 渋谷店' });
+    expect(screen.getByRole('link', { name: 'オーナー1' }).getAttribute('href')).toBe('/owners/o1');
+    expect(screen.queryByText('代理店アルファ')).toBeNull();
+    expect(screen.queryByRole('link', { name: '代理店アルファ' })).toBeNull();
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
+      '店名',
+      'オーナー',
+      '店舗特定',
+      '競合設定',
+      '利用状況',
+      'QR',
+    ]);
+  });
+
+  it('停止中の店舗も店名をリンクにし、既存の停止・QR の操作を残す（10.6・10.9）', async () => {
+    ready('agency');
+    api.getStores.mockResolvedValue({ ok: true, value: [storeSuspended] });
+    render(<StoresPage />);
+    await screen.findByRole('link', { name: '停止中の確定店' });
+    const row = within(rowByStore('停止中の確定店'));
+    expect(row.getByRole('link', { name: '停止中の確定店' }).getAttribute('href')).toBe('/stores/s4');
+    expect(row.getByRole('button', { name: '停止中の確定店 を再開' })).toBeTruthy();
+    expect(row.getByText('停止中のため発行できません')).toBeTruthy();
   });
 });

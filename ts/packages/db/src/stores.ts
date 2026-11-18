@@ -1,5 +1,6 @@
 import type { Queryable } from './pool.js';
 import type { PlaceStatus, StoreListItem, StoreRow } from './types.js';
+import { UUID_RE } from './uuid.js';
 
 const STORE_COLUMNS =
   'id, owner_id, category_code, name, latitude, longitude, place_id, place_status, created_at';
@@ -19,9 +20,6 @@ export interface StoreWithAgency extends SurveyStore {
   ownerId: string;
   agencyId: string;
 }
-
-// UUID 形式でない storeId は DB を叩かず not-found 扱い（無効 URL → エラーページ用・Req 2.7）。
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** アンケート用に店舗を取得（不在・無効 ID は null）。 */
 export async function findStoreForSurvey(
@@ -178,19 +176,10 @@ interface StoreListRow {
   created_at: Date;
 }
 
-/**
- * ダッシュボードの店舗一覧を取得する（agency-dashboard spec）。
- * stores×owners×agencies を JOIN し、competitors(active) の EXISTS で competitorConfigured を導出する
- * （Req 4.1, 4.2, 4.3）。competitors は read のみ（本アクセサは競合を変更しない・Req 4.5）。
- * filter.agencyId 指定時は当該代理店の店舗のみ（agency スコープ・Req 2.1）、未指定時は全代理店（Req 2.2）。
- * 来店客系テーブルには一切触れない（Req 7.2）。
- */
-export async function listStoresWithStatus(
-  db: Queryable,
-  filter: { agencyId?: string },
-): Promise<StoreListItem[]> {
-  const res = await db.query<StoreListRow>(
-    `SELECT s.id,
+// 店舗一覧と店舗の詳細が共有する SELECT 句と JOIN（agency-dashboard Req 4.1–4.3・11.1・Issue #526）。
+// 一覧と 1 件の取得で同じ店舗の状態が食い違わないよう、列の定義は 1 か所にだけ書く。WHERE と並びは各関数が足す。
+// 確定・停止は列として返すだけで、行の絞り込みには使わない（停止の述語ガードの数えの対象にならない）。
+const STORE_LIST_SELECT = `SELECT s.id,
             s.name,
             s.place_status,
             s.suspended_at,
@@ -204,12 +193,10 @@ export async function listStoresWithStatus(
             s.created_at
        FROM stores s
        JOIN owners o   ON o.id = s.owner_id
-       JOIN agencies a ON a.id = o.agency_id
-      WHERE $1::uuid IS NULL OR a.id = $1
-      ORDER BY s.created_at DESC`,
-    [filter.agencyId ?? null],
-  );
-  return res.rows.map((row) => ({
+       JOIN agencies a ON a.id = o.agency_id`;
+
+function toStoreListItem(row: StoreListRow): StoreListItem {
+  return {
     id: row.id,
     name: row.name,
     placeStatus: row.place_status,
@@ -220,7 +207,54 @@ export async function listStoresWithStatus(
     agencyId: row.agency_id,
     agencyName: row.agency_name,
     createdAt: row.created_at,
-  }));
+  };
+}
+
+/**
+ * ダッシュボードの店舗一覧を取得する（agency-dashboard spec）。
+ * stores×owners×agencies を JOIN し、competitors(active) の EXISTS で competitorConfigured を導出する
+ * （Req 4.1, 4.2, 4.3）。competitors は read のみ（本アクセサは競合を変更しない・Req 4.5）。
+ * filter.agencyId 指定時は当該代理店の店舗のみ（agency スコープ・Req 2.1）、未指定時は全代理店（Req 2.2）。
+ * filter.ownerId 指定時は当該オーナーの店舗のみ（オーナーの詳細の店舗の表・Req 11.7・Issue #526）。
+ * 確定・停止で行を除かないので、未確定・停止中の店舗も返す。両方を指定すると両方を満たす店舗だけを返す。
+ * 来店客系テーブルには一切触れない（Req 7.2）。
+ */
+export async function listStoresWithStatus(
+  db: Queryable,
+  filter: { agencyId?: string; ownerId?: string },
+): Promise<StoreListItem[]> {
+  // UUID の形でない ownerId は uuid への変換で SQL が失敗するので、問い合わせずに空を返す。
+  if (filter.ownerId !== undefined && !UUID_RE.test(filter.ownerId)) return [];
+  const res = await db.query<StoreListRow>(
+    `${STORE_LIST_SELECT}
+      WHERE ($1::uuid IS NULL OR a.id = $1)
+        AND ($2::uuid IS NULL OR s.owner_id = $2)
+      ORDER BY s.created_at DESC`,
+    [filter.agencyId ?? null, filter.ownerId ?? null],
+  );
+  return res.rows.map(toStoreListItem);
+}
+
+/**
+ * 店舗の詳細の 1 件を、利用者の範囲に限って取得する（agency-dashboard Req 11.1・11.9・11.10・Issue #526）。
+ * agencyId が null なら全代理店（運営）、値があればその代理店の店舗だけを対象にする。
+ * 範囲外と不存在はどちらも null で、呼び出し側が区別できない。範囲は取得と同じ 1 文の WHERE に含め、
+ * 範囲外の行をプロセスへ運ばない（取得してから所属を比べる 2 段にしない）。
+ * UUID の形でない id は DB へ問い合わせずに null を返す。
+ */
+export async function findStoreWithStatus(
+  db: Queryable,
+  input: { storeId: string; agencyId: string | null },
+): Promise<StoreListItem | null> {
+  if (!UUID_RE.test(input.storeId)) return null;
+  const res = await db.query<StoreListRow>(
+    `${STORE_LIST_SELECT}
+      WHERE s.id = $1::uuid
+        AND ($2::uuid IS NULL OR o.agency_id = $2::uuid)`,
+    [input.storeId, input.agencyId],
+  );
+  const row = res.rows[0];
+  return row === undefined ? null : toStoreListItem(row);
 }
 
 /**

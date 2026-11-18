@@ -116,7 +116,7 @@ ts/apps/dashboard-api/test/owner-line-unlink.test.ts
 ts/apps/dashboard-api/test/owner-line-unlink.db.test.ts
 ts/apps/dashboard-api/test/line-richmenu.test.ts
 ts/apps/dashboard-web/src/app/owners/page.tsx     # オーナー一覧（連携状態と操作）
-ts/apps/dashboard-web/src/app/owners/owner-line-unlink-control.tsx  # 解除・外し直しの操作と確認ダイアログ
+ts/apps/dashboard-web/src/components/owner-line-unlink-control.tsx  # 解除・外し直しの操作と確認ダイアログ（Issue #526 で app/owners/ から移した。オーナー一覧とオーナーの詳細が使う）
 ts/apps/dashboard-web/test/owners-page.test.tsx
 ts/apps/dashboard-web/test/owner-line-unlink-control.test.tsx
 ```
@@ -497,7 +497,7 @@ interface OwnerLineUnlinkResponse {
 #### OwnersPage・OwnerLineUnlinkControl（summary-only）
 - `/owners`: オーナー名・担当代理店（運営のみ）・店舗・LINE の連携（「連携中」「解除済み」「解除済み（メニュー未解除）」「解除済み（引継ぎ先: 表示名）」）・操作の列。解除済みのオーナーも一覧に残す（2.3, 2.6）
 - 操作は、連携中なら「LINE の連携を解除」、メニュー未解除なら「メニューを外し直す」。解除済みで未解除の印が無ければ操作を出さない（2.2, 2.3, 3.3）
-- 解除のダイアログは 1.4 の 3 点（元の LINE に通知が届かず店舗も見られなくなる／店舗と履歴は残る／同じ店舗を LINE で確定し直すと引き継げる）を示し、確定ボタンでだけ送信する。型紙は `stores/store-suspension-control.tsx`
+- 解除のダイアログは 1.4 の 3 点（元の LINE に通知が届かず店舗も見られなくなる／店舗と履歴は残る／同じ店舗を LINE で確定し直すと引き継げる）を示し、確定ボタンでだけ送信する。型紙は `components/store-suspension-control.tsx`（Issue #526 で `app/stores/` から移した）
 - 結果: `menu: 'failed'` なら「解除しました。LINE のメニューは外せませんでした。『メニューを外し直す』から再試行してください」を示す（3.2）。失敗（4xx・5xx）は成功表示をせず、行の状態を変えない（1.7）。成功後は一覧を取り直し、画面を再読み込みしない（2.4）
 - 文言の最終形は `better-writing` の規律と既存の Toast（`app-toaster.tsx`）に揃える
 

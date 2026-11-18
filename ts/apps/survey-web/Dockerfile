@@ -1,7 +1,7 @@
 # survey-web の Cloud Run 用 standalone イメージ（pnpm workspace・multi-stage）。
 # ビルドコンテキストはリポジトリの ts/（pnpm workspace ルート）。
 #   docker build -f apps/survey-web/Dockerfile -t survey-web ts/
-# 注記: このマシンには docker が無いため本 Dockerfile は CI/デプロイ時に検証する。
+# 注記: ローカルで docker を使えない環境では、本 Dockerfile の検証は CI（ts-ci の docker-build）とデプロイ時に行う。
 
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm

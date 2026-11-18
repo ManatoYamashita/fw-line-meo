@@ -181,6 +181,22 @@ describe('トップナビの現在地とロールの提示（Req 1.1, 3.2, 3.3�
       expect(marked[0]?.getAttribute('aria-current')).toBe('true');
     });
 
+    it('店舗の詳細では「店舗一覧」が、オーナーの詳細では「オーナー一覧」が現在地（"true"）で、印はそれ 1 つだけ（Issue #526・Req 11.12）', () => {
+      for (const [path, label] of [
+        ['/stores/abcdef44-4444-4444-4444-444444444444', '店舗一覧'],
+        ['/owners/abcdef55-5555-5555-5555-555555555555', 'オーナー一覧'],
+      ] as const) {
+        ready('agency');
+        at(path);
+        const { unmount } = render(<TopNav />);
+        const marked = markedLinks();
+        expect(marked, path).toHaveLength(1);
+        expect(marked[0]?.textContent, path).toBe(label);
+        expect(marked[0]?.getAttribute('aria-current'), path).toBe('true');
+        unmount();
+      }
+    });
+
     it('代理店管理の一覧そのものでは従来どおり "page"', () => {
       ready('operator');
       at('/admin/agencies');

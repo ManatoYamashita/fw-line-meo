@@ -218,6 +218,16 @@ describe('StoreQrPanel: 取得・表示・保存', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('onClose を渡さないときは閉じる押しボタンを描かない（店舗の詳細に置く形・Issue #526）', async () => {
+    const fetchQr = vi.fn().mockResolvedValue(okPayload());
+    render(<StoreQrPanel storeId={STORE_ID} storeName={STORE_NAME} fetchQr={fetchQr} />);
+
+    await screen.findByRole('img');
+    expect(screen.queryByRole('button', { name: /閉じる/ })).toBeNull();
+    // 題は残る（閉じる先が無いだけで、パネルの名前は変わらない）
+    expect(screen.getByRole('heading', { name: `${STORE_NAME} の QR` })).toBeTruthy();
+  });
+
   it('取得完了前にアンマウントされた場合は資源を作らない', async () => {
     const pending = deferred<ApiResult<BinaryPayload>>();
     const fetchQr = vi.fn().mockReturnValue(pending.promise);

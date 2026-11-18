@@ -53,6 +53,8 @@ const OWNER = {
   agencyName: '代理店A',
   lineLink: 'linked',
   menuUnlinkPending: false,
+  agencyId: 'a1',
+  stores: [],
   storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;

@@ -59,6 +59,8 @@ const owner = {
   agencyName: '代理店A',
   lineLink: 'linked',
   menuUnlinkPending: false,
+  agencyId: 'a1',
+  stores: [],
   storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;
@@ -975,6 +977,8 @@ const owner2 = {
   agencyName: '代理店A',
   lineLink: 'linked',
   menuUnlinkPending: false,
+  agencyId: 'a1',
+  stores: [],
   storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;
@@ -1034,6 +1038,17 @@ describe('店舗登録ウィザード: オーナー選択の一覧（Issue #485�
     expect(scope.getByRole('button', { name: '（表示名なし・2026-03-01 作成）を選ぶ' })).toBeTruthy();
     expect(within(table).getByText('（表示名なし）')).toBeTruthy();
     expect(within(table).getByText('2026-03-01')).toBeTruthy();
+  });
+
+  it('オーナー選択の表の名前は、オーナーの詳細・店舗の詳細へのリンクにしない（登録の手順を離れない・Issue #526・Req 10.7）', async () => {
+    api.getOwners.mockResolvedValue({ ok: true, value: [owner, owner2] });
+    render(<StoreRegisterPage />);
+    const table = await within(await screen.findByRole('main')).findByRole('table');
+    const detailLinks = [...document.querySelectorAll('a')].filter((a) =>
+      /^\/(owners|stores)\/(?!new$)/.test(a.getAttribute('href') ?? ''),
+    );
+    expect(detailLinks).toEqual([]);
+    expect(within(table).queryAllByRole('link')).toHaveLength(0);
   });
 
   it('オーナーと店舗を並行に読む（オーナーの応答を待たずに店舗を要求する）', async () => {

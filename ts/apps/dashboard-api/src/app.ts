@@ -6,6 +6,8 @@ import { handleMe, type MeDeps } from './me.js';
 import { handleStoresList, type StoresListDeps } from './stores-list.js';
 import { handleStoreSuspension, type StoreSuspensionDeps } from './store-suspension.js';
 import { handleOwnersList, type OwnersListDeps } from './owners-list.js';
+import { handleStoreDetail, type StoreDetailDeps } from './store-detail.js';
+import { handleOwnerDetail, type OwnerDetailDeps } from './owner-detail.js';
 import { handleOwnerLineUnlink, type OwnerLineUnlinkDeps } from './owner-line-unlink.js';
 import { handleCategories, type CategoriesDeps } from './categories.js';
 import {
@@ -52,6 +54,9 @@ export interface AppDeps {
   me: MeDeps;
   stores: StoresListDeps;
   owners: OwnersListDeps;
+  // 店舗の詳細・オーナーの詳細の 1 件の取得（agency-dashboard Requirement 11・Issue #526）。読み出し専用。
+  storeDetail: StoreDetailDeps;
+  ownerDetail: OwnerDetailDeps;
   categories: CategoriesDeps;
   storeRegistration: {
     search: StoreSearchDeps;
@@ -168,6 +173,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: { correlationLog: Si
       authorization: authHeader(c),
       agencyId: normalizeAgencyId(c.req.query('agencyId')),
     }),
+  );
+
+  // 店舗 1 件・オーナー 1 人（Issue #526）。経路の段の数が違うので、`/stores/:storeId/qr.png`・
+  // `/stores/:storeId/review-funnel`（GET）と `/stores/:id/suspend`（POST）は奪わない。
+  app.get('/stores/:id', (c) =>
+    handleStoreDetail(deps.storeDetail, { authorization: authHeader(c), id: c.req.param('id') }),
+  );
+
+  app.get('/owners/:id', (c) =>
+    handleOwnerDetail(deps.ownerDetail, { authorization: authHeader(c), id: c.req.param('id') }),
   );
 
   app.get('/categories', (c) => handleCategories(deps.categories, { authorization: authHeader(c) }));

@@ -45,6 +45,8 @@ function fakeAppDeps(): AppDeps {
     me: { auth, findAgencyName: notCalled, findDisplayName: notCalled },
     stores: { auth, listStores: notCalled },
     owners: { auth, listOwners: notCalled },
+    storeDetail: { auth, findStore: notCalled },
+    ownerDetail: { auth, findOwner: notCalled, listStores: notCalled },
     categories: { auth, listCategories: notCalled },
     storeRegistration: {
       search: { auth, searchCandidates: notCalled, listRegisteredPlaceIds: notCalled },
@@ -113,6 +115,38 @@ describe('dashboard-api app', () => {
       });
       expect(res.status, action).toBe(401);
     }
+  });
+
+  it('店舗の詳細・オーナーの詳細のルートが GET で配線され、認証なしは 401 を返す（Issue #526）', async () => {
+    const a = app();
+    for (const path of ['/stores/44444444-4444-4444-4444-44444444444a', '/owners/55555555-5555-5555-5555-55555555555b']) {
+      const res = await a.request(path);
+      expect(res.status).toBe(401);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe('unauthenticated');
+    }
+  });
+
+  it('店舗の詳細のルートは、QR・実績・停止の既存ルートを奪わない（Issue #526）', async () => {
+    const a = app();
+    // QR は既存の QR ハンドラが答える（大文字のコード体系）。詳細のハンドラなら小文字になる
+    const qr = await a.request('/stores/44444444-4444-4444-4444-44444444444a/qr.png');
+    expect(qr.status).toBe(401);
+    expect(((await qr.json()) as { error: { code: string } }).error.code).toBe('UNAUTHENTICATED');
+    // 実績のルートも残る（奪われて未配線になれば 404 になる）
+    const funnel = await a.request('/stores/44444444-4444-4444-4444-44444444444a/review-funnel');
+    expect(funnel.status).toBe(401);
+    // 停止・再開・解除は POST のまま。GET の詳細のルートは POST を受けない
+    for (const path of [
+      '/stores/44444444-4444-4444-4444-44444444444a/suspend',
+      '/stores/44444444-4444-4444-4444-44444444444a/resume',
+      '/owners/55555555-5555-5555-5555-55555555555b/unlink',
+    ]) {
+      const res = await a.request(path, { method: 'POST' });
+      expect(res.status, path).toBe(401);
+    }
+    // 店舗の詳細のハンドラは POST を受けない（POST /stores/:id のルートは無い）
+    const postDetail = await a.request('/stores/44444444-4444-4444-4444-44444444444a', { method: 'POST' });
+    expect(postDetail.status).toBe(404);
   });
 
   it('オーナーの解除のルートが POST で配線され、認証なしは 401 を返す', async () => {

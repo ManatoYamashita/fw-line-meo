@@ -21,7 +21,7 @@ import type { ApiResult } from '../src/lib/api';
 const api = vi.hoisted(() => ({ suspendStore: vi.fn(), resumeStore: vi.fn() }));
 vi.mock('../src/lib/api', async () => (await import('./deferred-mocks')).deferResolution(api));
 
-import { StoreSuspensionControl } from '../src/app/stores/store-suspension-control';
+import { StoreSuspensionControl } from '../src/components/store-suspension-control';
 
 // jsdom 25 は PointerEvent を実装していない（ui の alert-dialog.test.tsx と同じ理由の最小互換）。
 if (!('PointerEvent' in window)) {
@@ -242,7 +242,7 @@ describe('StoreSuspensionControl — 失敗の表示（1.8）', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain(
-      '停止できたか確認できませんでした。一覧の表示を確認してください',
+      '停止できたか確認できませんでした。画面の表示を確認してください',
     );
     expect(onChanged).toHaveBeenCalledTimes(1);
     expect(statusText()).not.toContain('停止しました');
@@ -256,7 +256,7 @@ describe('StoreSuspensionControl — 失敗の表示（1.8）', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain(
-      '再開できたか確認できませんでした。一覧の表示を確認してください',
+      '再開できたか確認できませんでした。画面の表示を確認してください',
     );
     expect(onChanged).toHaveBeenCalledTimes(1);
     expect(statusText()).not.toContain('再開しました');
@@ -269,7 +269,9 @@ describe('StoreSuspensionControl — 失敗の表示（1.8）', () => {
     fireEvent.click(resumeButton());
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('店舗が見つかりません。一覧を更新しました');
+    expect(alert.textContent).toContain('店舗が見つかりません。表示を更新しました');
+    // 店舗一覧と店舗の詳細の両方で使うので、面の名前（一覧）を出さない（Issue #526）
+    expect(alert.textContent).not.toContain('一覧');
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 

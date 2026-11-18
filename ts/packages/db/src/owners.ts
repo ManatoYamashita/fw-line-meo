@@ -1,5 +1,6 @@
 import type { Queryable } from './pool.js';
 import type { OnboardingStatus, OwnerListItem, OwnerRow } from './types.js';
+import { UUID_RE } from './uuid.js';
 
 const OWNER_COLUMNS =
   'id, agency_id, line_user_id, display_name, onboarding_status, created_at, invite_code_id, ' +
@@ -76,7 +77,8 @@ export async function markOwnerStoreIdentified(db: Queryable, ownerId: string): 
  * 連携状態は line_unlinked_at の有無で判定する（ck_owner_line_link により line_user_id の有無と同値）。
  * LINE ユーザー ID は運営・代理店の画面にも出さないため、line_user_id・menu_pending_line_user_id を
  * SELECT しない（メニュー未解除は IS NOT NULL の真偽だけを読む）。
- * 店舗名は確定済み（place_status='confirmed'）の店舗だけを作成順で返す。停止中の店舗も確定済みなら含める。
+ * 店舗は確定済み（place_status='confirmed'）の店舗だけを作成順で、{ id, name } の配列（stores）と名前の配列
+ * （storeNames・画面の切り替え後に消す・Issue #526）の両方で返す。停止中の店舗も確定済みなら含める。
  * 引継ぎ先は taken_over_by_owner_id が指すオーナーの id と表示名を返す。
  *
  * 登録に用いられた招待コードを inviteCode として添える（agency-dashboard Req 8.3–8.5）。記録の無い
@@ -87,45 +89,78 @@ export async function listOwners(
   db: Queryable,
   agencyId: string | null,
 ): Promise<OwnerListItem[]> {
-  const res = await db.query<{
-    id: string;
-    display_name: string | null;
-    onboarding_status: OnboardingStatus;
-    created_at: Date;
-    invite_code_id: string | null;
-    invite_code: string | null;
-    invite_code_disabled_at: Date | null;
-    agency_id: string;
-    agency_name: string;
-    linked: boolean;
-    menu_unlink_pending: boolean;
-    store_names: string[];
-    taken_over_by_owner_id: string | null;
-    taken_over_by_display_name: string | null;
-  }>(
-    `SELECT o.id, o.display_name, o.onboarding_status, o.created_at,
+  const res = await db.query<OwnerListRow>(
+    `${OWNER_LIST_SELECT}
+      WHERE $1::uuid IS NULL OR o.agency_id = $1::uuid
+      ORDER BY o.created_at DESC, o.id DESC`,
+    [agencyId],
+  );
+  return res.rows.map(toOwnerListItem);
+}
+
+/**
+ * オーナーの詳細の 1 人を、利用者の範囲に限って取得する（agency-dashboard Req 11.6・11.9・11.10・Issue #526）。
+ * 返す形はオーナー一覧の 1 行と同じ（SELECT 句を共有する）。agencyId が null なら全代理店（運営）、
+ * 値があればその代理店のオーナーだけを対象にする。範囲外と不存在はどちらも null で、呼び出し側が区別できない。
+ * 範囲は取得と同じ 1 文の WHERE に含める。UUID の形でない id は DB へ問い合わせずに null を返す。
+ */
+export async function findOwner(
+  db: Queryable,
+  input: { ownerId: string; agencyId: string | null },
+): Promise<OwnerListItem | null> {
+  if (!UUID_RE.test(input.ownerId)) return null;
+  const res = await db.query<OwnerListRow>(
+    `${OWNER_LIST_SELECT}
+      WHERE o.id = $1::uuid
+        AND ($2::uuid IS NULL OR o.agency_id = $2::uuid)`,
+    [input.ownerId, input.agencyId],
+  );
+  const row = res.rows[0];
+  return row === undefined ? null : toOwnerListItem(row);
+}
+
+interface OwnerListRow {
+  id: string;
+  display_name: string | null;
+  onboarding_status: OnboardingStatus;
+  created_at: Date;
+  invite_code_id: string | null;
+  invite_code: string | null;
+  invite_code_disabled_at: Date | null;
+  agency_id: string;
+  agency_name: string;
+  linked: boolean;
+  menu_unlink_pending: boolean;
+  stores: { id: string; name: string }[];
+  taken_over_by_owner_id: string | null;
+  taken_over_by_display_name: string | null;
+}
+
+// オーナー一覧とオーナーの詳細が共有する SELECT 句と JOIN（Issue #526）。WHERE と並びは各関数が足す。
+// 確定済み店舗は { id, name } の配列で作成順に集める（Issue #526 で店舗名の配列から置き換えた。
+// storeNames はこの配列の名前から作る）。
+const OWNER_LIST_SELECT = `SELECT o.id, o.display_name, o.onboarding_status, o.created_at,
             o.invite_code_id, c.code AS invite_code, c.disabled_at AS invite_code_disabled_at,
             o.agency_id, a.name AS agency_name,
             (o.line_unlinked_at IS NULL) AS linked,
             (o.menu_pending_line_user_id IS NOT NULL) AS menu_unlink_pending,
             COALESCE(
-              (SELECT array_agg(s.name ORDER BY s.created_at, s.id)
+              (SELECT json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)
                  FROM stores s
                 -- serviceable-predicate: display-only（オーナー一覧に店舗名を示すだけで、取得・配信・発行の可否を決めない。停止中の店舗も確定済みなら名前を出す）
                 WHERE s.owner_id = o.id AND s.place_status = 'confirmed'),
-              ARRAY[]::text[]
-            ) AS store_names,
+              '[]'::json
+            ) AS stores,
             o.taken_over_by_owner_id,
             t.display_name AS taken_over_by_display_name
        FROM owners o
        JOIN agencies a ON a.id = o.agency_id
        LEFT JOIN agency_invite_codes c ON c.id = o.invite_code_id
-       LEFT JOIN owners t ON t.id = o.taken_over_by_owner_id
-      WHERE $1::uuid IS NULL OR o.agency_id = $1::uuid
-      ORDER BY o.created_at DESC, o.id DESC`,
-    [agencyId],
-  );
-  return res.rows.map((row) => ({
+       LEFT JOIN owners t ON t.id = o.taken_over_by_owner_id`;
+
+function toOwnerListItem(row: OwnerListRow): OwnerListItem {
+  const stores = row.stores.map((store) => ({ id: store.id, name: store.name }));
+  return {
     id: row.id,
     displayName: row.display_name,
     onboardingStatus: row.onboarding_status,
@@ -142,12 +177,13 @@ export async function listOwners(
     agencyName: row.agency_name,
     lineLink: row.linked ? 'linked' : 'unlinked',
     menuUnlinkPending: row.menu_unlink_pending,
-    storeNames: row.store_names,
+    stores,
+    storeNames: stores.map((store) => store.name),
     takenOverBy:
       row.taken_over_by_owner_id === null
         ? null
         : { ownerId: row.taken_over_by_owner_id, displayName: row.taken_over_by_display_name },
-  }));
+  };
 }
 
 /**

@@ -334,7 +334,9 @@ export interface OwnerListItem {
   lineLink: OwnerLineLink;
   /** 解除した元の LINE アカウントから完了後メニューをまだ外せていない（menu_pending_line_user_id あり） */
   menuUnlinkPending: boolean;
-  /** 確定済み店舗（place_status='confirmed'）の名前（作成順）。停止中の店舗も含む */
+  /** 確定済み店舗（place_status='confirmed'）の id と名前（作成順）。停止中の店舗も含む（Issue #526） */
+  stores: readonly { id: string; name: string }[];
+  /** stores の名前だけの配列（同じ並び）。画面を stores へ切り替えて本番に出した後に消す（Issue #526） */
   storeNames: readonly string[];
   /** 店舗を引き継いだオーナー（owner-line-unlink Req 2.6）。引継ぎが無ければ null */
   takenOverBy: { ownerId: string; displayName: string | null } | null;

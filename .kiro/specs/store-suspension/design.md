@@ -132,7 +132,7 @@ ts/apps/dashboard-api/test/store-suspension.test.ts     # handler の単体試�
 ts/apps/dashboard-api/test/store-suspension.db.test.ts  # 実 DB での範囲外 404・冪等・監査 1 件の試験
 ts/packages/db/test/store-suspension.db.test.ts         # setStoreSuspension と各読み出しの除外の試験
 ts/packages/ui/src/components/alert-dialog.tsx     # Base UI AlertDialog をトークンで包んだ確認ダイアログの部品
-ts/apps/dashboard-web/src/app/stores/store-suspension-control.tsx  # 1 店舗分の状態バッジ・停止/再開ボタン・確認ダイアログ
+ts/apps/dashboard-web/src/components/store-suspension-control.tsx  # 1 店舗分の状態バッジ・停止/再開ボタン・確認ダイアログ（Issue #526 で app/stores/ から移した。店舗一覧と店舗の詳細が使う）
 ts/apps/dashboard-web/test/store-suspension-control.test.tsx       # 確認・失敗表示・再読込の試験
 ```
 
@@ -528,8 +528,8 @@ ALTER TABLE stores ADD COLUMN suspended_at timestamptz NULL;
 |---|---|---|
 | 未認証 | 401 `unauthenticated` | 既存のログイン誘導 |
 | 未登録・無効な利用者 | 403 `forbidden` | 既存の権限エラー |
-| 不存在・範囲外・不正な id | 404 `not_found` | 「店舗が見つかりません。一覧を更新しました」 |
-| 監査の失敗・DB 障害（監査の失敗は Issue #250 の決定後は 500 にならない） | 500 | 「停止（再開）できたか確認できませんでした。一覧の表示を確認してください」 |
+| 不存在・範囲外・不正な id | 404 `not_found` | 「店舗が見つかりません。表示を更新しました」（Issue #526 で店舗の詳細でも使うため「一覧」を改めた） |
+| 監査の失敗・DB 障害（監査の失敗は Issue #250 の決定後は 500 にならない） | 500 | 「停止（再開）できたか確認できませんでした。画面の表示を確認してください」（同上） |
 | 停止中の QR 発行 | 409 `STORE_SUSPENDED` | 「停止中の店舗の QR は発行できません」 |
 | 停止中のアンケート表示 | `unavailable` | 既存の「現在利用できません」 |
 | 停止中の回答・下書き | 404 `STORE_NOT_AVAILABLE` | 既存の「このアンケートは現在利用できません」 |

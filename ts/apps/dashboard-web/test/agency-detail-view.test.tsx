@@ -498,3 +498,29 @@ async function waitSection(title: string): Promise<HTMLElement> {
   await screen.findByRole('heading', { level: 2, name: title });
   return section(title);
 }
+
+describe('代理店詳細の名前のリンク（Issue #526・agency-dashboard Req 10.1・10.2・10.7）', () => {
+  it('店舗の区分の店名とオーナー、オーナーの表の表示名と登録済みの店舗名をリンクにし、見出しの代理店名はリンクにしない', async () => {
+    ready('operator');
+    resolveAll();
+    render(<AgencyDetailView agencyId={AGENCY_ID} />);
+    const h1 = await screen.findByRole('heading', { level: 1, name: '代理店アルファ' });
+    expect(h1.querySelector('a')).toBeNull();
+    // 店舗の区分: 店名は店舗の詳細へ（店名は表の中に 1 回ずつ出る）
+    const storeLinks = await screen.findAllByRole('link', { name: '太郎食堂' });
+    expect(storeLinks.map((l) => l.getAttribute('href'))).toContain('/stores/s1');
+    // オーナーの表の表示名はオーナーの詳細へ
+    const owner = screen.getAllByRole('link', { name: '記録あり太郎' });
+    expect(owner.map((l) => l.getAttribute('href'))).toContain('/owners/o-recorded');
+  });
+
+  it('招待コードの区分の「このコードで登録したオーナー」もオーナーの詳細へのリンクにする', async () => {
+    ready('operator');
+    resolveAll();
+    render(<AgencyDetailView agencyId={AGENCY_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '代理店アルファ' });
+    const codeRow = (await screen.findByText('ABCD-EFGH-JKLM', { selector: 'td' })).closest('tr')!;
+    const registered = within(codeRow).getByRole('link', { name: '記録あり太郎' });
+    expect(registered.getAttribute('href')).toBe('/owners/o-recorded');
+  });
+});
