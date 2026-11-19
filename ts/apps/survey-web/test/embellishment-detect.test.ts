@@ -88,6 +88,10 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     { text: 'タイミング次第で居心地が変わるお店だと思います。', category: 'overlapReason' },
     { text: 'その時々で感じ方が違う空間でした。', category: 'overlapReason' },
     { text: '印象は訪れる時間帯によって変わりそうです。', category: 'overlapReason' },
+    { text: '訪れるタイミングで印象が変わりそうです。', category: 'overlapReason' },
+    { text: '時間帯で雰囲気が大きく変わるお店です。', category: 'overlapReason' },
+    { text: '利用シーンによって印象が変わるお店です。', category: 'overlapReason' },
+    { text: '評価は場面次第で分かれそうです。', category: 'overlapReason' },
     { text: '開放感のある店内でした。', category: 'attribute:atmosphere' },
     { text: '洗練されたお店でした。', category: 'attribute:atmosphere' },
     { text: 'おしゃれな空間でした。', category: 'attribute:atmosphere' },
@@ -161,6 +165,8 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     '最初の印象が大きく変わりました。',
     // 「より」は比較にも使うので、「日より」を「日によって」と数えない。
     '印象が前日より良くなりました。',
+    // 「時間帯で」は利用した時間帯を述べるだけの文にも現れる。違いの述語が続かなければ数えない。
+    '夜の時間帯で雰囲気が良く、印象に残りました。',
   ];
 
   it.each(NEGATIVE)('拾ってはならない形を拾わない: %s', (text) => {
@@ -175,6 +181,7 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
       { draft: 'スープは濃厚でした。', comment: '濃い味でした', category: 'attribute:taste' },
       { draft: '時間帯によって印象が変わるお店です。', comment: '夜は少し騒がしかった', category: 'overlapReason' },
       { draft: 'タイミング次第で居心地が変わるお店です。', comment: '週末は混雑していました', category: 'overlapReason' },
+      { draft: '時間帯によって印象が変わるお店です。', comment: '来るたびに印象が違います', category: 'overlapReason' },
     ];
     for (const { draft, comment, category } of cases) {
       // 対照: 一言が無ければ拾う（除外が「常に 0」へ化けていないことの確認）。
@@ -184,8 +191,8 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
   });
 
   it('一言が時間帯や状況に触れていなければ、時間帯・状況による推し量りは除外しない', () => {
-    // 「最初」「時々」は時間帯の違いを述べていない。これで除外すると、両群の素材で一言ありのケースを過小に数える。
-    for (const comment of ['最初の一杯が美味しかった', '時々来ます', '雰囲気が良かった']) {
+    // 「最初」「時々」「食べ進めるうちに印象が変わった」は時間帯の違いを述べていない。これで除外すると、両群の素材で一言ありのケースを過小に数える。
+    for (const comment of ['最初の一杯が美味しかった', '時々来ます', '雰囲気が良かった', '食べ進めるうちに印象が変わりました']) {
       expect(categoriesOf('利用するタイミングによって印象が変わるような場所でした。', { ...PLAIN, comment })).toEqual(['overlapReason']);
     }
   });
