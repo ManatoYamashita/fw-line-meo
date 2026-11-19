@@ -328,6 +328,14 @@ describe('createDraftGenerator', () => {
       expect(calls).toHaveLength(1);
     });
 
+    it('時間帯・状況による推し量り（overlapReason）でも作り直さない（前後の頻度を測るまでは eval だけで数える）', async () => {
+      const { client, calls } = fakeClient([draftResponse('利用するタイミングによって印象が変わるような場所でした。')]);
+      const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });
+      const res = await gen.generate(PLAIN, VARIATION);
+      expect(calls).toHaveLength(1);
+      expect(res).toEqual({ ok: true, value: '利用するタイミングによって印象が変わるような場所でした。' });
+    });
+
     it('客が一言に書いた事情は数えない（一言「期待していたほどではありませんでした」）', async () => {
       const { client, calls } = fakeClient([draftResponse('期待していたほどではありませんでした。')]);
       const gen = createDraftGenerator(client, { backoff: NOOP_BACKOFF });

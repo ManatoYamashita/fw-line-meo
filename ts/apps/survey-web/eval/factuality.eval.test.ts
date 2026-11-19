@@ -416,7 +416,11 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       // 属性は、その観点を客が選んだ（良かった点か気になった点に入れた）素材かどうかで分ける。選んだ観点の属性は
       // 未選択の観点の軸（detectAspectMentions）が構造的に見ない型で、#339 が問題にしたのはこちらである。
       console.log('\n--- 素材の外から補った属性・事前の期待・再訪の意向（Issue #339）---');
-      const embellishing = samples.filter((s) => s.embellishments.length > 0);
+      // 「いずれか」と合計は #339 の分類だけで数える。overlapReason（#418）を混ぜると、#339 の基準値（69/126 → 15/126）と
+      // 同じ物差しで比べられなくなり、既存の軸が悪化したように見える。overlapReason は下の別の行と列で出す。
+      const isAxis339 = (c: EmbellishmentClaim) => c.category !== 'overlapReason';
+      const hasAxis339 = (s: Sample) => s.embellishments.some(isAxis339);
+      const embellishing = samples.filter(hasAxis339);
       console.log(`  補完を含むサンプル: ${embellishing.length} / ${samples.length}（${pct(embellishing.length, samples.length)}）`);
       const chosenOf = (s: Sample) => new Set([...s.selected, ...s.concerns]);
       const categoryLabel = (s: Sample, category: string) => {
@@ -443,12 +447,17 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
       const expectation = (s: Sample) => hasEmbellishment(s, (c) => c.category === 'expectation');
       const intention = (s: Sample) => hasEmbellishment(s, (c) => c.category === 'intention');
       const overlapReason = (s: Sample) => hasEmbellishment(s, (c) => c.category === 'overlapReason');
-      console.log('  素材別（いずれか / 選んだ観点の属性 / 事前の期待 / 再訪の意向 / 両面の理由）:');
+      // 素材を問わず数える（同じ観点を両群に選んだ素材に限らない）ので、列名は「両面の理由」とせず形で呼ぶ。
+      const overlapReasoning = samples.filter(overlapReason);
+      console.log(
+        `  時間帯・状況による推し量りを含むサンプル（Issue #418・上の合計とは別）: ${overlapReasoning.length} / ${samples.length}（${pct(overlapReasoning.length, samples.length)}）`,
+      );
+      console.log('  素材別（いずれか / 選んだ観点の属性 / 事前の期待 / 再訪の意向 ｜ 時間帯・状況の推し量り）:');
       for (const m of datasetRaw.materials) {
         const mine = samples.filter((s) => s.materialId === m.id);
         if (mine.length === 0) continue;
         const cells = [
-          mine.filter((s) => s.embellishments.length > 0).length,
+          mine.filter(hasAxis339).length,
           mine.filter(selectedAttr).length,
           mine.filter(expectation).length,
           mine.filter(intention).length,
@@ -461,12 +470,12 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
         ['切り口', 'angle', VARIATION_CANDIDATES.angles.map((c) => c.text)],
         ['文体', 'tone', [...VARIATION_CANDIDATES.tones]],
       ] as const) {
-        console.log(`  ${title}の候補ごと（いずれか / 選んだ観点の属性 / 事前の期待 / 再訪の意向 / 両面の理由）:`);
+        console.log(`  ${title}の候補ごと（いずれか / 選んだ観点の属性 / 事前の期待 / 再訪の意向 ｜ 時間帯・状況の推し量り）:`);
         for (const candidate of candidates) {
           const mine = samples.filter((s) => s.variation[key] === candidate);
           if (mine.length === 0) continue;
           const cells = [
-            mine.filter((s) => s.embellishments.length > 0).length,
+            mine.filter(hasAxis339).length,
             mine.filter(selectedAttr).length,
             mine.filter(expectation).length,
             mine.filter(intention).length,
@@ -479,6 +488,14 @@ describe.skipIf(!hasKey)('AI 下書きの事実性（実 Gemini・Requirement 3.
         console.log('  実例（先頭 3 件）:');
         for (const s of embellishing.slice(0, 3)) {
           console.log(`    [${s.materialId}] 補完=${s.embellishments.map((c) => `${c.category}(${c.matchedText})`).join(', ')}`);
+          console.log(`      ${s.draft}`);
+        }
+      }
+      if (overlapReasoning.length > 0) {
+        console.log('  時間帯・状況による推し量りの実例（先頭 3 件）:');
+        for (const s of overlapReasoning.slice(0, 3)) {
+          const hit = s.embellishments.find((c) => c.category === 'overlapReason');
+          console.log(`    [${s.materialId}] ${hit?.matchedText ?? ''}`);
           console.log(`      ${s.draft}`);
         }
       }
