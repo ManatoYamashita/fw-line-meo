@@ -473,7 +473,7 @@ export function requireOperator(user: DashboardUserIdentity): boolean; // admin 
 | POST | /dashboard-users/:id/disable | — | `{ user: DashboardUserItem }` | 401, 403, 404 |
 
 - エラー封筒は既存 `jsonError` の `{ error: { code, message } }` に統一。message は日本語（7.3, 7.4）。
-- **GET /owners の契約変更（`owner-line-unlink` 4.4・Issue #487）**: 当初は operator の `agencyId` 未指定を 400 としていた（tasks.md 2.3 の決定）。オーナー一覧の画面で運営が全代理店のオーナーを見るため、未指定は全代理店のオーナーを返すように改めた。agency の扱い（自代理店に束縛・他代理店の指定は 403）と、スコープ拒否をデータアクセスより前に行うこと（2.3）は変えない。応答の各オーナーには `agencyName`（担当代理店の名前）・`lineLink`（`linked` / `unlinked`）・`menuUnlinkPending`（解除した元の LINE アカウントから完了後メニューをまだ外せていない）・`storeNames`（確定済み店舗の名前・停止中を含む）・`takenOverBy`（店舗を引き継いだオーナーの `{ ownerId, displayName }` または null）を足した。LINE ユーザー ID は応答に含めない。既存の項目は変えていないので、店舗登録のオーナー選択（3.1・3.2）は従来どおり呼べる（運営は代理店を選んだ後にその `agencyId` を指定し、agency は無指定で自代理店）。DAL は `listOwnersByAgency(db, agencyId)` を `listOwners(db, agencyId | null)`（`null` = 全代理店）へ置き換えた。契約の正典は `.kiro/specs/owner-line-unlink/design.md` の dashboard-api の節にある
+- **GET /owners の契約変更（`owner-line-unlink` 4.4・Issue #487）**: 当初は operator の `agencyId` 未指定を 400 としていた（tasks.md 2.3 の決定）。オーナー一覧の画面で運営が全代理店のオーナーを見るため、未指定は全代理店のオーナーを返すように改めた。agency の扱い（自代理店に束縛・他代理店の指定は 403）と、スコープ拒否をデータアクセスより前に行うこと（2.3）は変えない。応答の各オーナーには `agencyName`（担当代理店の名前）・`lineLink`（`linked` / `unlinked`）・`menuUnlinkPending`（解除した元の LINE アカウントから完了後メニューをまだ外せていない）・`storeNames`（確定済み店舗の名前・停止中を含む。Issue #526 の `stores` に置き換え、9.10 で削除した）・`takenOverBy`（店舗を引き継いだオーナーの `{ ownerId, displayName }` または null）を足した。LINE ユーザー ID は応答に含めない。既存の項目は変えていないので、店舗登録のオーナー選択（3.1・3.2）は従来どおり呼べる（運営は代理店を選んだ後にその `agencyId` を指定し、agency は無指定で自代理店）。DAL は `listOwnersByAgency(db, agencyId)` を `listOwners(db, agencyId | null)`（`null` = 全代理店）へ置き換えた。契約の正典は `.kiro/specs/owner-line-unlink/design.md` の dashboard-api の節にある
 - 検索の `empty`（0件）は 200＋空配列で返す（UI が 3.5 の再検索案内を出す）。`error` のみ 502。
 - 検索の `found` だけ、候補の placeId を 1 回の問い合わせ（`listRegisteredPlaceIds`・読み取りのみで書込境界は不変）で照合する。照合に失敗したら未登録で埋めずに 500 を返す。`empty`・`error` では照合しない（Issue #485）。
 - POST /stores のサーバー側検証: `ownerId` がスコープ内 agency 配下であること（2.3, 2.4）、`candidate` の形状検証、`categoryCode` は categories に存在するコードのみ（無指定可）。
@@ -523,7 +523,7 @@ export function listStoresWithStatus(db: Queryable, filter: { agencyId?: string 
 export interface OwnerListItem { id: string; displayName: string | null; onboardingStatus: OnboardingStatus; createdAt: Date; inviteCode: OwnerInviteCodeRecord | null; } // inviteCode は Issue #486（Requirement 8.5）
 export function listOwnersByAgency(db: Queryable, agencyId: string): Promise<OwnerListItem[]>;
 // owner-line-unlink 4.4（Issue #487）で listOwnersByAgency は listOwners(db, agencyId: string | null)（null = 全代理店）へ置き換え、
-// OwnerListItem に agencyId・agencyName・lineLink・menuUnlinkPending・storeNames・takenOverBy を足した（正典は owner-line-unlink/design.md）
+// OwnerListItem に agencyId・agencyName・lineLink・menuUnlinkPending・stores・takenOverBy を足した（storeNames は stores に置き換えて 9.10 で削除・正典は owner-line-unlink/design.md）
 export function findOwnerWithAgency(db: Queryable, ownerId: string): Promise<{ id: string; agencyId: string } | null>;
 
 // dashboard-users.ts
@@ -610,14 +610,14 @@ export async function findOwner(
 - **列の定義は一覧と共有する。** `findStoreWithStatus` は `listStoresWithStatus` と同じ SELECT 句・JOIN を使う（SQL の断片をモジュール内の定数にして両方から使う）。`findOwner` も `listOwners` と同じ。一覧と詳細で同じ店舗の状態が食い違う余地を作らない。並びの句だけが違う
 - ハンドラ（`store-detail.ts`・`owner-detail.ts`）: 認証 → UUID の形の検査（形でなければ DB を呼ばずに 404）→ `resolveAgencyScope(user, undefined)`（運営 = null、代理店 = 自代理店）→ 取得 → `null` なら 404。404 の本文は形の不正・不存在・範囲外で同じ `{ error: { code: 'not_found', message: '店舗が見つかりません' } }`（オーナーは「オーナーが見つかりません」）にする（11.9）。応答時間の差による推測は対象にしない（`setStoreSuspension` と同じ水準）
 - GET /owners/:id は `findOwner` が `null` でなかったときだけ `listStoresWithStatus({ ownerId })` を呼ぶ（範囲外のオーナーの店舗を読まない）。オーナーの範囲内なら店舗も同じ代理店に属する（`stores.owner_id` → `owners.agency_id` の構造・2.4）ので、店舗側で範囲を重ねて判定しない
-- 店舗の表は未確定の店舗も含める（11.7 は場所の確定状態を列に持つ）。GET /owners の `stores` は従来の `storeNames` と同じく確定済みだけ（オーナー一覧の表示を変えない）
+- 店舗の表は未確定の店舗も含める（11.7 は場所の確定状態を列に持つ）。GET /owners の `stores` は従来の `storeNames`（9.10 で削除）と同じく確定済みだけ（オーナー一覧の表示を変えない）
 - `serviceable-predicate` のガード: 新しい SQL は `place_status = 'confirmed'` の判定を持たない（`findStoreWithStatus` は状態を列として返すだけ）。`listOwners` の確定済みの絞り込みは既存の印の行をそのまま使う
 - 読み出しだけで、新しい表・列は無い。書込境界（`db/write-boundary.md`）は変わらない
 
 **GET /owners の契約の追加（10.1–10.3）**
 
-- 各オーナーに `agencyId`（代理店の詳細への経路に使う・運営だけが使う）と `stores: { id, name }[]`（確定済みの店舗・作成順・`storeNames` と同じ並び）を足す。DAL の `listOwners` は `agencyId` を既に返しており、店舗は `array_agg` を `json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)` に置き換える
-- **`storeNames` はこの段では消さない。** dashboard-api と dashboard-web は別々にデプロイされる。応答から先に消すと、旧い画面が `storeNames` を読んで描画に失敗する。画面を `stores` へ切り替えて本番へ出した後のタスクで `storeNames` を応答と型から消す
+- 各オーナーに `agencyId`（代理店の詳細への経路に使う・運営だけが使う）と `stores: { id, name }[]`（確定済みの店舗・作成順）を足す。DAL の `listOwners` は `agencyId` を既に返しており、店舗は `array_agg` を `json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.created_at, s.id)` に置き換える
+- **`storeNames` は `stores` の導入と同じ段では消さなかった（消したのは 9.10）。** dashboard-api と dashboard-web は別々にデプロイされる。応答から先に消すと、旧い画面が `storeNames` を読んで描画に失敗する。画面を `stores` へ切り替えて本番へ出したことを確かめた後の 9.10 で、応答と型から消した
 - 店舗の id を足しても、利用者が見られる範囲は変わらない（同じオーナーの同じ店舗の名前を既に返している）
 - GET /owners の契約の正典は `.kiro/specs/owner-line-unlink/design.md` のままとし、その応答の型と項目の列挙の箇所に、Issue #526 で `agencyId`・`stores` を足したことと本節への参照を書き添える
 
@@ -846,8 +846,8 @@ ALTER TABLE owners
 
 ### 名前からの遷移と店舗・オーナーの詳細の試験（Requirement 10・11・Issue #526）
 
-1. `@fwlm/db`（`*.db.test.ts`・実 postgres）: `findStoreWithStatus`・`findOwner` が範囲内は 1 件、範囲外と不存在はどちらも `null`。列の値が一覧の同じ行と一致する。`listStoresWithStatus({ ownerId })` が当該オーナーの店舗だけ（未確定を含む）。`listOwners` の `stores` が `storeNames` と同じ並びで id を持つ
-2. dashboard-api（単体）: GET /stores/:id・GET /owners/:id の 401・403(未登録・無効)・形の不正・不存在・範囲外の 404 の本文が同一（11.9）・範囲外で `listStoresWithStatus` を呼ばない。GET /owners の応答に `agencyId`・`stores` が載り、`storeNames` も残る
+1. `@fwlm/db`（`*.db.test.ts`・実 postgres）: `findStoreWithStatus`・`findOwner` が範囲内は 1 件、範囲外と不存在はどちらも `null`。列の値が一覧の同じ行と一致する。`listStoresWithStatus({ ownerId })` が当該オーナーの店舗だけ（未確定を含む）。`listOwners` の `stores` が作成順で id を持つ
+2. dashboard-api（単体）: GET /stores/:id・GET /owners/:id の 401・403(未登録・無効)・形の不正・不存在・範囲外の 404 の本文が同一（11.9）・範囲外で `listStoresWithStatus` を呼ばない。GET /owners の応答に `agencyId`・`stores` が載る（`storeNames` は 9.10 で削除し、応答のキー一覧の厳密一致が不在を守る）
 3. `lib/entity-paths.ts`（単体）: `toEntityId` の形の判定と小文字化、経路の組み立て
 4. `StoreDetailView`・`OwnerDetailView`（描画）: 4 状態の区別（形の不正は API を呼ばない・404 は概要と操作を描かない・失敗は再読み込みで取り直す）／運営だけ担当代理店がリンク、代理店ロールは文字（10.3・10.4）／停止中・未確定・確定済みの QR の区分の分岐（停止を先に判定）／`StoreQrPanel` に閉じる押しボタンが無い／停止・再開・連携の解除の後に 1 件を読み直し、表示を読み込み中へ置き換えない／オーナーの店舗の表に操作が無い・0 件の案内（11.7）／書込の API は suspend・resume・unlink だけ（11.13）。操作部品の失敗の文言に「一覧」が出ない（一覧と詳細の両方）
 5. 一覧（描画）: 店舗一覧・オーナー一覧・利用者管理・代理店詳細の対象の名前がリンクで経路が正しい（10.1–10.3）／代理店ロールで代理店名がリンクでない（10.4）／店舗一覧のオーナー列（表示名なしを含む・10.5）／停止中・表示名なし・連携解除済みもリンク（10.6）／見出し・QR パネルの題・引継ぎ先・店舗登録のオーナー選択はリンクでない（10.7）／既存の列と操作が残る（10.9）。`OwnerRosterTable` は `linkNames` を渡さないとき描画が変わらない
@@ -884,7 +884,7 @@ ALTER TABLE owners
 - migration の本番適用は自動ではない（`deploy.yml` はイメージを差し替えるだけで migration を流さない）。マージの前に適用し、`information_schema.columns` と `pg_constraint` で列と 2 つの制約の存在を確かめてからマージする。`prod-schema-drift`（6 時間ごと）も適用漏れを検出するが、デプロイを止めないので、気づくのは登録が壊れた後になりうる
 - ロールバック: イメージを戻しても列は残ってよい（旧イメージは NULL で書く）。`0017` の巻き戻しは不要
 
-**Requirement 10・11（Issue #526）の順序**: migration は無い。dashboard-api（GET /stores/:id・GET /owners/:id・GET /owners の `agencyId`・`stores` の追加）を dashboard-web より先に出す必要がある。逆順だと、新しい画面が無い API を呼んで詳細が「読み込めませんでした」になり、オーナー一覧の店舗が `stores` を読めない。**この順は 1 回のデプロイの中で成り立つ。** `deploy.yml` は同じステップの中で `dashboard-api` を更新してから `dashboard-web` を更新するので、API と画面を同じ PR でマージしてよく、順のために PR を分けない。更新の合間（数十秒）だけ新しい API と旧い画面が並ぶが、GET /owners は項目を足すだけなので旧い画面は影響を受けない。`storeNames` の削除だけは、新しい画面が本番に出たことを確かめた後の別タスクで行う（同じデプロイで消すと、合間に旧い画面が `storeNames` を読めない）
+**Requirement 10・11（Issue #526）の順序**: migration は無い。dashboard-api（GET /stores/:id・GET /owners/:id・GET /owners の `agencyId`・`stores` の追加）を dashboard-web より先に出す必要がある。逆順だと、新しい画面が無い API を呼んで詳細が「読み込めませんでした」になり、オーナー一覧の店舗が `stores` を読めない。**この順は 1 回のデプロイの中で成り立つ。** `deploy.yml` は同じステップの中で `dashboard-api` を更新してから `dashboard-web` を更新するので、API と画面を同じ PR でマージしてよく、順のために PR を分けない。更新の合間（数十秒）だけ新しい API と旧い画面が並ぶが、GET /owners は項目を足すだけなので旧い画面は影響を受けない。`storeNames` の削除だけは、新しい画面が本番に出たことを確かめた後の別タスク（9.10）で行った（同じデプロイで消すと、合間に旧い画面が `storeNames` を読めない）
 
 ## Open Questions / Risks
 

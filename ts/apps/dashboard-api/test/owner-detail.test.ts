@@ -24,7 +24,6 @@ function owner(over: Partial<OwnerListItem> = {}): OwnerListItem {
     lineLink: 'linked',
     menuUnlinkPending: false,
     stores: [{ id: STORE_ID, name: '確定の店' }],
-    storeNames: ['確定の店'],
     takenOverBy: null,
     ...over,
   };
@@ -102,7 +101,6 @@ describe('handleOwnerDetail', () => {
         lineLink: 'linked',
         menuUnlinkPending: false,
         stores: [{ id: STORE_ID, name: '確定の店' }],
-        storeNames: ['確定の店'],
         takenOverBy: null,
       },
       stores: [

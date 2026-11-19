@@ -122,7 +122,7 @@ ts/apps/dashboard-web/test/owner-line-unlink-control.test.tsx
 ```
 
 ### Modified Files
-- `ts/packages/db/src/types.ts` — `OwnerRow.line_user_id: string | null`、`line_unlinked_at`・`menu_pending_line_user_id` を追加。`OwnerListItem` に `agencyName`・`lineLink`・`menuUnlinkPending`・`storeNames` を追加
+- `ts/packages/db/src/types.ts` — `OwnerRow.line_user_id: string | null`、`line_unlinked_at`・`menu_pending_line_user_id` を追加。`OwnerListItem` に `agencyName`・`lineLink`・`menuUnlinkPending`・`storeNames` を追加（`storeNames` は Issue #526 で `stores: { id, name }[]` へ置き換え、agency-dashboard の 9.10 で削除した）
 - `ts/packages/db/src/owners.ts` — `OWNER_COLUMNS` に新しい列。`listOwnersByAgency` を `listOwners(db, agencyId | null)` に改め、連携状態・代理店名・店舗名を返す
 - `ts/packages/db/src/audit-logs.ts` — `AUDIT_LOG_ACTIONS` に 3 値
 - `ts/packages/db/src/index.ts` — `owner-line-link.ts` の公開
@@ -377,8 +377,8 @@ interface OwnerListItem {
   agencyName: string;
   lineLink: OwnerLineLink;
   menuUnlinkPending: boolean;
-  /** 確定済み店舗の名前（作成順）。Issue #526 で同じ並びの `stores: { id, name }[]` を足し、画面の切り替え後に消す（agency-dashboard design の「店舗の詳細・オーナーの詳細の取得」） */
-  storeNames: readonly string[];
+  /** 確定済み店舗の id と名前（作成順・停止中を含む）。Issue #526 で、当初の店舗名の配列 `storeNames` から置き換えた（agency-dashboard design の「店舗の詳細・オーナーの詳細の取得」） */
+  stores: readonly { id: string; name: string }[];
   /** 店舗を引き継いだオーナー（2.6）。引継ぎが無ければ null */
   takenOverBy: { ownerId: string; displayName: string | null } | null;
 }
@@ -489,8 +489,8 @@ interface OwnerLineUnlinkResponse {
 
 #### OwnersListHandler（`owners-list.ts` の変更）
 - 運営が `agencyId` を指定しないとき、400 ではなく全オーナーを返す。代理店の利用者は従来どおり自代理店に束縛され、他の代理店の指定は 403
-- 応答の各行に `agencyName`・`lineLink`・`menuUnlinkPending`・`storeNames`・`takenOverBy` を足す
-- Issue #526 で、応答の各行に `agencyId`・`stores: { id, name }[]`（確定済みの店舗・`storeNames` と同じ並び）をさらに足した。`storeNames` は新しい画面が本番に出た後に消す。詳細は `.kiro/specs/agency-dashboard/design.md` の「店舗の詳細・オーナーの詳細の取得（Requirement 11・Issue #526）」
+- 応答の各行に `agencyName`・`lineLink`・`menuUnlinkPending`・`takenOverBy` を足す（店舗は下の Issue #526 の `stores`。当初は店舗名の配列 `storeNames` を足していた）
+- Issue #526 で、応答の各行に `agencyId`・`stores: { id, name }[]`（確定済みの店舗・作成順）をさらに足し、新しい画面が本番に出たことを確かめた後（agency-dashboard の 9.10）に `storeNames` を消した。詳細は `.kiro/specs/agency-dashboard/design.md` の「店舗の詳細・オーナーの詳細の取得（Requirement 11・Issue #526）」
 
 ### dashboard-web
 

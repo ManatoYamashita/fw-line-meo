@@ -77,8 +77,8 @@ export async function markOwnerStoreIdentified(db: Queryable, ownerId: string): 
  * 連携状態は line_unlinked_at の有無で判定する（ck_owner_line_link により line_user_id の有無と同値）。
  * LINE ユーザー ID は運営・代理店の画面にも出さないため、line_user_id・menu_pending_line_user_id を
  * SELECT しない（メニュー未解除は IS NOT NULL の真偽だけを読む）。
- * 店舗は確定済み（place_status='confirmed'）の店舗だけを作成順で、{ id, name } の配列（stores）と名前の配列
- * （storeNames・画面の切り替え後に消す・Issue #526）の両方で返す。停止中の店舗も確定済みなら含める。
+ * 店舗は確定済み（place_status='confirmed'）の店舗だけを作成順で、{ id, name } の配列（stores）で返す。
+ * 停止中の店舗も確定済みなら含める。
  * 引継ぎ先は taken_over_by_owner_id が指すオーナーの id と表示名を返す。
  *
  * 登録に用いられた招待コードを inviteCode として添える（agency-dashboard Req 8.3–8.5）。記録の無い
@@ -137,8 +137,7 @@ interface OwnerListRow {
 }
 
 // オーナー一覧とオーナーの詳細が共有する SELECT 句と JOIN（Issue #526）。WHERE と並びは各関数が足す。
-// 確定済み店舗は { id, name } の配列で作成順に集める（Issue #526 で店舗名の配列から置き換えた。
-// storeNames はこの配列の名前から作る）。
+// 確定済み店舗は { id, name } の配列で作成順に集める（Issue #526 で店舗名の配列から置き換えた）。
 const OWNER_LIST_SELECT = `SELECT o.id, o.display_name, o.onboarding_status, o.created_at,
             o.invite_code_id, c.code AS invite_code, c.disabled_at AS invite_code_disabled_at,
             o.agency_id, a.name AS agency_name,
@@ -178,7 +177,6 @@ function toOwnerListItem(row: OwnerListRow): OwnerListItem {
     lineLink: row.linked ? 'linked' : 'unlinked',
     menuUnlinkPending: row.menu_unlink_pending,
     stores,
-    storeNames: stores.map((store) => store.name),
     takenOverBy:
       row.taken_over_by_owner_id === null
         ? null

@@ -150,7 +150,6 @@ export const OWNERS = [
     agencyId: AGENCIES[0].id,
     // STORES[0]（確定済み・ownerId がこのオーナー）を指す。
     stores: [{ id: STORES[0].id, name: STORES[0].name }],
-    storeNames: [LONG_STORE_NAME],
     takenOverBy: null,
   },
   {
@@ -166,7 +165,6 @@ export const OWNERS = [
     // STORES[1] は店舗特定の前（pending）なので、確定済み店舗の名前には載らない。
     agencyId: AGENCIES[0].id,
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   },
   {
@@ -181,7 +179,6 @@ export const OWNERS = [
     menuUnlinkPending: false,
     agencyId: AGENCIES[0].id,
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   },
   {
@@ -198,7 +195,6 @@ export const OWNERS = [
     menuUnlinkPending: true,
     agencyId: AGENCIES[0].id,
     stores: [],
-    storeNames: [],
     takenOverBy: { ownerId: '33333333-3333-3333-3333-333333333333', displayName: 'オーナー太郎' },
   },
   {
@@ -213,7 +209,6 @@ export const OWNERS = [
     menuUnlinkPending: false,
     agencyId: AGENCIES[0].id,
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   },
 ] as const;

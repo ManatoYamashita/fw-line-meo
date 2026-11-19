@@ -955,12 +955,10 @@ describe.skipIf(!process.env.DATABASE_URL)('line-webhook app-level flow (DB)', (
         const ownersListed = await listOwners(pool, AG);
         expect(ownersListed.find((o) => o.id === previous.id)).toMatchObject({
           lineLink: 'unlinked',
-          storeNames: [],
           takenOverBy: { ownerId: successor.id, displayName: '再登録太郎' },
         });
         expect(ownersListed.find((o) => o.id === successor.id)).toMatchObject({
           lineLink: 'linked',
-          storeNames: ['再登録食堂 本店', '再登録食堂 支店'],
           takenOverBy: null,
         });
 

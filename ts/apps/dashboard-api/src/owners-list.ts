@@ -40,8 +40,6 @@ export interface OwnerListItemJson {
   menuUnlinkPending: boolean;
   // 確定済み店舗の id と名前（作成順）。画面が店舗の詳細への経路に使う（agency-dashboard Req 10.1・Issue #526）。
   stores: { id: string; name: string }[];
-  // 確定済み店舗の名前（作成順・stores と同じ並び）。画面を stores へ切り替えて本番に出した後に消す（Issue #526）。
-  storeNames: string[];
   // 店舗を引き継いだオーナー（Req 2.6）。引継ぎが無ければ null。
   takenOverBy: { ownerId: string; displayName: string | null } | null;
 }
@@ -95,7 +93,6 @@ export function toOwnerListItemJson(item: OwnerListItem): OwnerListItemJson {
     menuUnlinkPending: item.menuUnlinkPending,
     // 店舗も id と名前だけを写す
     stores: item.stores.map((store) => ({ id: store.id, name: store.name })),
-    storeNames: [...item.storeNames],
     // 引継ぎ先も id と表示名だけを写す（LINE ユーザー ID などを応答へ混ぜない）。
     takenOverBy:
       item.takenOverBy === null

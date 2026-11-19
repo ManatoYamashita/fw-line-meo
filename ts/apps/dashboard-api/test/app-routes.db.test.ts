@@ -633,7 +633,6 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       agencyName: string;
       lineLink: string;
       menuUnlinkPending: boolean;
-      storeNames: string[];
       takenOverBy: { ownerId: string; displayName: string | null } | null;
     }
 
@@ -665,15 +664,13 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
         agencyName: 'ルート代理店1',
         lineLink: 'linked',
         menuUnlinkPending: false,
-        storeNames: ['店1'],
         takenOverBy: null,
       });
-      expect(byId.get(OW2)).toMatchObject({ agencyName: 'ルート代理店2', lineLink: 'linked', storeNames: ['店2'] });
+      expect(byId.get(OW2)).toMatchObject({ agencyName: 'ルート代理店2', lineLink: 'linked' });
       expect(byId.get(UNLINKED_OWNER)).toMatchObject({
         agencyName: 'ルート代理店2',
         lineLink: 'unlinked',
         menuUnlinkPending: true,
-        storeNames: [],
         takenOverBy: { ownerId: OW2, displayName: null },
       });
     });
@@ -762,19 +759,18 @@ describe.skipIf(!process.env.DATABASE_URL)('dashboard-api routes integration (DB
       }
     });
 
-    it('GET /owners は各オーナーに agencyId と stores を載せ、storeNames も残す（10.1–10.3）', async () => {
+    it('GET /owners は各オーナーに agencyId と stores を載せる（10.1–10.3）', async () => {
       const app = buildApp();
       const res = await app.request(`/owners?agencyId=${AG1}`, { method: 'GET', headers: h(OP_TOKEN) });
       expect(res.status).toBe(200);
       const owners = (
         (await res.json()) as {
-          owners: { id: string; agencyId: string; stores: { id: string; name: string }[]; storeNames: string[] }[];
+          owners: { id: string; agencyId: string; stores: { id: string; name: string }[] }[];
         }
       ).owners;
       expect(owners.find((o) => o.id === OW1)).toMatchObject({
         agencyId: AG1,
         stores: [{ id: S1, name: '店1' }],
-        storeNames: ['店1'],
       });
     });
   });
