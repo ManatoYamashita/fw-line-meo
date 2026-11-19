@@ -1,4 +1,4 @@
-import { toApiError, type DraftError, type GenAiClient, type GenAiResponse } from '../generator';
+import { toApiError, type GenAiClient, type GenAiResponse, type GenerationError as DraftError } from '@fwlm/gemini';
 import type { StructuredDraftMaterial, StructuredDraftPort, StructuredDraftResult } from '../structured-draft';
 import { compileStructuredClaims, type StructuredClaim } from './claims';
 import {

@@ -13,7 +13,6 @@ import absenceLexiconRaw from './absence-lexicon.json';
 // 呼び出し・安全設定・再試行・エラー分類は @fwlm/gemini の generateText に任せる（line-webhook と同じ実行核）。
 
 export type { GenAiClient, GenAiRequest, GenAiResponse } from '@fwlm/gemini';
-export { toApiError } from '@fwlm/gemini';
 
 export type DraftError = GenerationError;
 export type DraftErrorKind = DraftError['kind'];
