@@ -47,7 +47,6 @@ function owner(over: Record<string, unknown> = {}) {
     lineLink: 'linked',
     menuUnlinkPending: false,
     stores: [],
-    storeNames: [],
     takenOverBy: null,
     ...over,
   };

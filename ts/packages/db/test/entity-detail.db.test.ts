@@ -182,22 +182,20 @@ describe.skipIf(!process.env.DATABASE_URL)('1 件の取得と絞り込み (DB)',
   });
 
   describe('listOwners の stores', () => {
-    it('確定済みの店舗を { id, name } で、storeNames と同じ並び（作成順）で返す（10.1）', async () => {
+    it('確定済みの店舗を { id, name } で作成順に返す（10.1）', async () => {
       const pool = await getPool();
       const owner = (await listOwners(pool, AG1)).find((o) => o.id === OW1);
-      // 未確定の店舗は含めず、停止中でも確定済みなら含める（storeNames と同じ集合）
+      // 未確定の店舗は含めず、停止中でも確定済みなら含める
       expect(owner?.stores).toEqual([
         { id: ST_CONFIRMED, name: 'ea確定の店' },
         { id: ST_SUSPENDED, name: 'ea停止中の店' },
       ]);
-      expect(owner?.storeNames).toEqual(owner?.stores.map((s) => s.name));
     });
 
-    it('店舗の無いオーナーは stores も storeNames も空配列', async () => {
+    it('店舗の無いオーナーは stores が空配列', async () => {
       const pool = await getPool();
       const owner = (await listOwners(pool, AG1)).find((o) => o.id === OW_EMPTY);
       expect(owner?.stores).toEqual([]);
-      expect(owner?.storeNames).toEqual([]);
     });
   });
 });

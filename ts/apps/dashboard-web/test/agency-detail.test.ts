@@ -39,7 +39,6 @@ function owner(id: string, inviteCodeId: string | null): OwnerListItem {
     menuUnlinkPending: false,
     agencyId: AGENCY,
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   };
 }

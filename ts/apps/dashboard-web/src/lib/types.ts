@@ -59,8 +59,6 @@ export interface OwnerListItem {
   menuUnlinkPending: boolean;
   // 確定済み店舗の id と名前（作成順）。店舗の詳細への経路に使う（agency-dashboard Req 10.1・Issue #526）。
   stores: { id: string; name: string }[];
-  // 確定済み店舗の名前（作成順・stores と同じ並び）。画面を stores へ切り替えた後に API から消す（Issue #526）。
-  storeNames: string[];
   // 店舗を引き継いだオーナー（owner-line-unlink Req 2.6）。引継ぎが無ければ null。
   takenOverBy: { ownerId: string; displayName: string | null } | null;
 }

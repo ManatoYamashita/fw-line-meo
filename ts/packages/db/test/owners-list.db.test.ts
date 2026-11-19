@@ -51,7 +51,6 @@ const OWNER_LIST_ITEM_KEYS = [
   'lineLink',
   'menuUnlinkPending',
   'onboardingStatus',
-  'storeNames',
   'stores',
   'takenOverBy',
 ].sort();
@@ -213,7 +212,6 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
         { id: ST_LINKED_SECOND, name: 'e7店舗い' },
         { id: ST_SUSPENDED, name: 'e7停止中の店舗' },
       ],
-      storeNames: ['e7店舗あ', 'e7店舗い', 'e7停止中の店舗'],
       takenOverBy: null,
       inviteCode: null,
     });
@@ -224,7 +222,7 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
     const pending = byId(await listOwners(pool, AG1), OW_PENDING);
     expect(pending.lineLink).toBe('unlinked');
     expect(pending.menuUnlinkPending).toBe(true);
-    expect(pending.storeNames).toEqual(['e7メニュー未解除の店舗']);
+    expect(pending.stores.map((s) => s.name)).toEqual(['e7メニュー未解除の店舗']);
     expect(pending.takenOverBy).toBeNull();
   });
 
@@ -233,7 +231,7 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
     const plain = byId(await listOwners(pool, AG1), OW_PLAIN);
     expect(plain.lineLink).toBe('unlinked');
     expect(plain.menuUnlinkPending).toBe(false);
-    expect(plain.storeNames).toEqual([]);
+    expect(plain.stores).toEqual([]);
     expect(plain.takenOverBy).toBeNull();
   });
 
@@ -243,7 +241,7 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
     const taken = byId(items, OW_TAKEN);
     expect(taken.lineLink).toBe('unlinked');
     expect(taken.menuUnlinkPending).toBe(false);
-    expect(taken.storeNames).toEqual([]);
+    expect(taken.stores).toEqual([]);
     expect(taken.takenOverBy).toEqual({ ownerId: OW_NEW, displayName: 'e7新担当' });
 
     // 引継ぎ先が表示名を持たなければ displayName は null
@@ -255,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)('listOwners (DB)', () => {
     // 引き継いだ側は連携中で、引き継いだ店舗を自分の店舗として返す
     const taker = byId(items, OW_NEW);
     expect(taker.lineLink).toBe('linked');
-    expect(taker.storeNames).toEqual(['e7引き継いだ店舗']);
+    expect(taker.stores.map((s) => s.name)).toEqual(['e7引き継いだ店舗']);
     expect(taker.takenOverBy).toBeNull();
   });
 

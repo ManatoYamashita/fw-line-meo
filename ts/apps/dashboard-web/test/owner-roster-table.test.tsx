@@ -35,7 +35,6 @@ const OWNERS: OwnerListItem[] = [
     menuUnlinkPending: false,
     agencyId: 'a1',
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   },
   {
@@ -49,7 +48,6 @@ const OWNERS: OwnerListItem[] = [
     menuUnlinkPending: false,
     agencyId: 'a1',
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   },
   {
@@ -63,7 +61,6 @@ const OWNERS: OwnerListItem[] = [
     menuUnlinkPending: false,
     agencyId: 'a1',
     stores: [],
-    storeNames: [],
     takenOverBy: null,
   },
 ];

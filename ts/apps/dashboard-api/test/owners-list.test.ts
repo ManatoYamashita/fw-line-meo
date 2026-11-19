@@ -20,7 +20,6 @@ function owner(over: Partial<OwnerListItem> = {}): OwnerListItem {
     lineLink: 'linked',
     menuUnlinkPending: false,
     stores: [],
-    storeNames: [],
     takenOverBy: null,
     ...over,
   };
@@ -122,7 +121,6 @@ describe('handleOwnersList', () => {
           lineLink: 'linked',
           menuUnlinkPending: false,
           stores: [],
-          storeNames: [],
           takenOverBy: null,
         },
       ],
@@ -140,7 +138,6 @@ describe('handleOwnersList', () => {
         { id: 'a1111111-1111-1111-1111-111111111111', name: '店舗1' },
         { id: 'a2222222-2222-2222-2222-222222222222', name: '店舗2' },
       ],
-      storeNames: ['店舗1', '店舗2'],
       takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: '新オーナー' },
     });
     const takenOverWithoutName = owner({
@@ -167,7 +164,6 @@ describe('handleOwnersList', () => {
         { id: 'a1111111-1111-1111-1111-111111111111', name: '店舗1' },
         { id: 'a2222222-2222-2222-2222-222222222222', name: '店舗2' },
       ],
-      storeNames: ['店舗1', '店舗2'],
       takenOverBy: { ownerId: '99999999-9999-9999-9999-999999999999', displayName: '新オーナー' },
     });
     expect(body.owners[1]?.['takenOverBy']).toEqual({
@@ -208,7 +204,6 @@ describe('handleOwnersList', () => {
         'lineLink',
         'menuUnlinkPending',
         'onboardingStatus',
-        'storeNames',
         'stores',
         'takenOverBy',
       ].sort(),

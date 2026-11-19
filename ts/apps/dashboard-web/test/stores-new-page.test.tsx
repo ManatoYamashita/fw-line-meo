@@ -61,7 +61,6 @@ const owner = {
   menuUnlinkPending: false,
   agencyId: 'a1',
   stores: [],
-  storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;
 const candidate = {
@@ -979,7 +978,6 @@ const owner2 = {
   menuUnlinkPending: false,
   agencyId: 'a1',
   stores: [],
-  storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;
 

@@ -55,7 +55,6 @@ const OWNER = {
   menuUnlinkPending: false,
   agencyId: 'a1',
   stores: [],
-  storeNames: [],
   takenOverBy: null,
 } satisfies OwnerListItem;
 

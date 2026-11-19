@@ -88,7 +88,6 @@ describe('店舗系 API クライアント', () => {
       lineLink: 'linked',
       menuUnlinkPending: false,
       stores: [{ id: STORE_JSON.id, name: '店A' }],
-      storeNames: ['店A'],
       takenOverBy: null,
     };
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { owner, stores: [STORE_JSON] }));
@@ -290,7 +289,6 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
         { id: 's1', name: '店A' },
         { id: 's2', name: '店B' },
       ],
-      storeNames: ['店A', '店B'],
       takenOverBy: null,
     },
     {
@@ -304,7 +302,6 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
       menuUnlinkPending: true,
       agencyId: 'a1',
       stores: [],
-      storeNames: [],
       takenOverBy: null,
     },
     {
@@ -318,7 +315,6 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
       menuUnlinkPending: false,
       agencyId: 'a1',
       stores: [],
-      storeNames: [],
       takenOverBy: { ownerId: 'o4', displayName: null },
     },
   ] satisfies OwnerListItem[];
@@ -401,7 +397,6 @@ describe('オーナーの一覧と LINE の解除の API クライアント', ()
     expectTypeOf<OwnerListItem['lineLink']>().toEqualTypeOf<'linked' | 'unlinked'>();
     expectTypeOf<OwnerListItem['menuUnlinkPending']>().toEqualTypeOf<boolean>();
     expectTypeOf<OwnerListItem['agencyName']>().toEqualTypeOf<string>();
-    expectTypeOf<OwnerListItem['storeNames']>().toEqualTypeOf<string[]>();
     expectTypeOf<OwnerListItem['stores']>().toEqualTypeOf<{ id: string; name: string }[]>();
     expectTypeOf<OwnerListItem['agencyId']>().toEqualTypeOf<string>();
     expectTypeOf<OwnerListItem['takenOverBy']>().toEqualTypeOf<{
