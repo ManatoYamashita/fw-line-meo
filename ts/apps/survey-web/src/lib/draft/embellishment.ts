@@ -11,7 +11,9 @@
 //
 // この関数は実 API を呼ばない。評価（eval/）と、本番の事後検証（generator.ts）の両方から使う。
 // 本番で作り直しの引き金にするのは `expectation`（来店前の期待）の分類だけである（Issue #413）。再訪の意向と
-// 観点の属性は発生が多く、属性は言い換えとの境界が曖昧なので、eval で測るだけにしている。検出器自身の正しさは
+// 観点の属性は発生が多く、属性は言い換えとの境界が曖昧なので、eval で測るだけにしている。両面の共存の理由
+// （`overlapReason`・Issue #418）も、前後の頻度を測るまでは eval だけで数える。structured の gate はこの分類を使わず、
+// 自前の overlapReason（主題の文に絞った照合）で数える。検出器自身の正しさは
 // test/embellishment-detect.test.ts が検証する（実 API 不要・CI で常時実行）。
 
 import { detectVisitContextClaims, readVisitContextLexicon, type VisitContextLexicon } from './visit-context';
@@ -19,7 +21,10 @@ import { detectVisitContextClaims, readVisitContextLexicon, type VisitContextLex
 export type EmbellishmentLexicon = VisitContextLexicon;
 
 export interface EmbellishmentClaim {
-  /** expectation（事前の期待）／ intention（再訪の意向）／ attribute:<観点の code>（観点の具体的な属性） */
+  /**
+   * expectation（事前の期待）／ intention（再訪の意向）／ overlapReason（良い面と気になる面が両方あった理由の推し量り）／
+   * attribute:<観点の code>（観点の具体的な属性）
+   */
   readonly category: string;
   /** 実際に本文へ現れた箇所（証拠として残す） */
   readonly matchedText: string;
@@ -32,7 +37,7 @@ export interface EmbellishmentSource {
 }
 
 const ATTRIBUTE_PREFIX = 'attribute:';
-const FIXED_CATEGORIES = ['expectation', 'intention'] as const;
+const FIXED_CATEGORIES = ['expectation', 'intention', 'overlapReason'] as const;
 
 /** 属性の分類が指す観点の code を返す（属性の分類でなければ undefined）。 */
 export function attributeAspectOf(category: string): string | undefined {
@@ -62,7 +67,7 @@ export function detectEmbellishments(
 }
 
 /**
- * 語彙の JSON を読み込む。分類は expectation / intention / attribute:<code> だけを許す
+ * 語彙の JSON を読み込む。分類は expectation / intention / overlapReason / attribute:<code> だけを許す
  * （綴りの誤りで、属性の分類が観点に結びつかないまま黙って数えられることを防ぐ）。
  */
 export function readEmbellishmentLexicon(raw: unknown): EmbellishmentLexicon {
@@ -72,7 +77,7 @@ export function readEmbellishmentLexicon(raw: unknown): EmbellishmentLexicon {
     const aspect = attributeAspectOf(category);
     if (!fixed && (aspect === undefined || !/^[a-z]+$/.test(aspect))) {
       throw new Error(
-        `embellishment lexicon の分類 ${category} は expectation / intention / attribute:<観点の code> のいずれかである必要があります`,
+        `embellishment lexicon の分類 ${category} は expectation / intention / overlapReason / attribute:<観点の code> のいずれかである必要があります`,
       );
     }
   }

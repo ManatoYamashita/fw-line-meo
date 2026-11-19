@@ -44,6 +44,17 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     expect(categoriesOf(text)).toEqual([...expected].sort());
   });
 
+  // #418 の本番確認（PR #417 の後）で観測した記述。素材は星 1・良かった点「雰囲気」・気になった点「雰囲気」・一言なし。
+  // 客は時間帯や状況の違いを書いていないのに、両面があった理由をそれで説明していた（下書き 4 本中 2 本）。
+  const OBSERVED_418 = [
+    '利用するタイミングによって印象が変わるような場所でした。',
+    'その時々の状況によって印象が大きく異なる空間であり、評価が難しいところです。',
+  ];
+
+  it.each(OBSERVED_418)('#418 の観測を拾う: %s', (text) => {
+    expect(categoriesOf(text)).toEqual(['overlapReason']);
+  });
+
   it('#339 の観測「今回の滞在」は意図して拾わない（来店したことから滞在は導けるため）', () => {
     expect(categoriesOf('今回の滞在では、雰囲気に気になる点がありました。')).toEqual([]);
   });
@@ -74,6 +85,13 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     // 否定側の意向（#339 のベースラインの実測で、低評価の素材に足されていた形）。
     { text: '再訪については慎重に考えたいと思います。', category: 'intention' },
     { text: 'あえてまた行こうという気持ちにはなれないかもしれない。', category: 'intention' },
+    { text: 'タイミング次第で居心地が変わるお店だと思います。', category: 'overlapReason' },
+    { text: 'その時々で感じ方が違う空間でした。', category: 'overlapReason' },
+    { text: '印象は訪れる時間帯によって変わりそうです。', category: 'overlapReason' },
+    { text: '訪れるタイミングで印象が変わりそうです。', category: 'overlapReason' },
+    { text: '時間帯で雰囲気が大きく変わるお店です。', category: 'overlapReason' },
+    { text: '利用シーンによって印象が変わるお店です。', category: 'overlapReason' },
+    { text: '評価は場面次第で分かれそうです。', category: 'overlapReason' },
     { text: '開放感のある店内でした。', category: 'attribute:atmosphere' },
     { text: '洗練されたお店でした。', category: 'attribute:atmosphere' },
     { text: 'おしゃれな空間でした。', category: 'attribute:atmosphere' },
@@ -139,6 +157,16 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
     // （「洗練された味わい」は味の属性として数えるべきだが、雰囲気の分類へ入れないことをここで固定する）
     '洗練された味わいでした。',
     '一口食べるごとに思わず笑顔になるような美味しさでした。',
+    // 両面があったことだけを述べる文は、#418 の規則（bothSidesRule）が求める形そのもの。理由を足していない。
+    '雰囲気には良い面と気になる面の両方がありました。',
+    '良いところも気になるところもあり、印象に残るお店でした。',
+    // 「〜によって」だけ、「印象が変わる」だけでは数えない（両方がそろった形だけを数える）。
+    '素材によって調理法を変えているそうです。',
+    '最初の印象が大きく変わりました。',
+    // 「より」は比較にも使うので、「日より」を「日によって」と数えない。
+    '印象が前日より良くなりました。',
+    // 「時間帯で」は利用した時間帯を述べるだけの文にも現れる。違いの述語が続かなければ数えない。
+    '夜の時間帯で雰囲気が良く、印象に残りました。',
   ];
 
   it.each(NEGATIVE)('拾ってはならない形を拾わない: %s', (text) => {
@@ -151,11 +179,21 @@ describe('素材の外から補った属性・事前の期待・再訪の意向�
       { draft: '期待していた通りではありませんでした。', comment: '期待していたほどではありませんでした', category: 'expectation' },
       { draft: 'またぜひ伺いたいです。', comment: 'また来たい', category: 'intention' },
       { draft: 'スープは濃厚でした。', comment: '濃い味でした', category: 'attribute:taste' },
+      { draft: '時間帯によって印象が変わるお店です。', comment: '夜は少し騒がしかった', category: 'overlapReason' },
+      { draft: 'タイミング次第で居心地が変わるお店です。', comment: '週末は混雑していました', category: 'overlapReason' },
+      { draft: '時間帯によって印象が変わるお店です。', comment: '来るたびに印象が違います', category: 'overlapReason' },
     ];
     for (const { draft, comment, category } of cases) {
       // 対照: 一言が無ければ拾う（除外が「常に 0」へ化けていないことの確認）。
       expect(categoriesOf(draft), draft).toEqual([category]);
       expect(categoriesOf(draft, { storeName: 'あおば', comment }), `${draft} / 一言: ${comment}`).toEqual([]);
+    }
+  });
+
+  it('一言が時間帯や状況に触れていなければ、時間帯・状況による推し量りは除外しない', () => {
+    // 「最初」「時々」「食べ進めるうちに印象が変わった」は時間帯の違いを述べていない。これで除外すると、両群の素材で一言ありのケースを過小に数える。
+    for (const comment of ['最初の一杯が美味しかった', '時々来ます', '雰囲気が良かった', '食べ進めるうちに印象が変わりました']) {
+      expect(categoriesOf('利用するタイミングによって印象が変わるような場所でした。', { ...PLAIN, comment })).toEqual(['overlapReason']);
     }
   });
 
@@ -192,6 +230,7 @@ describe('語彙の読み込み', () => {
     const categories = Object.keys(lexicon.patterns);
     expect(categories).toContain('expectation');
     expect(categories).toContain('intention');
+    expect(categories).toContain('overlapReason');
     expect(categories.filter((c) => attributeAspectOf(c) !== undefined).length).toBeGreaterThan(0);
   });
 
