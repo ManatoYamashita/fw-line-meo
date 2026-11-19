@@ -1,5 +1,5 @@
 import type { StructuredDraftPort } from '../structured-draft';
-import { createDefaultGenAiClient } from '../gemini-client';
+import { createDefaultGenAiClient } from '@fwlm/gemini';
 import { logStructuredDraftFailed, logStructuredDraftResult, logStructuredDraftRetry, writeStructuredLog } from '../../structured-log';
 import { createNaturalRealizer } from './realizer';
 

@@ -135,7 +135,7 @@ ts/
 │   │       ├── app/api/drafts/route.ts      # POST: token 検証→再生成→attempt+1
 │   │       ├── app/api/review-link-opened/route.ts  # POST: token 検証→投稿導線の押下を記録（DB 非接触・Issue #137）
 │   │       └── lib/
-│   │           ├── draft/generator.ts       # Gemini 呼出（schema/safety/backoff/出力検証）
+│   │           ├── draft/generator.ts       # 下書き生成（schema/出力検証/作り直し。呼出・safety・再試行は @fwlm/gemini）
 │   │           ├── draft/prompt.ts          # systemInstruction・素材デリミタ・変動注入
 │   │           ├── session-token.ts         # HMAC sign/verify（Node crypto）
 │   │           ├── validate.ts              # 入力検証（手書き）

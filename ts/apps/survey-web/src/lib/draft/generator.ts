@@ -1,5 +1,6 @@
+import { createDefaultGenAiClient, generateText, type GenAiClient, type GenerationError } from '@fwlm/gemini';
 import type { DraftMaterial } from '../domain';
-import { ok, err, type Result } from '../result';
+import { ok, type Result } from '../result';
 import { buildPrompt, type VariationSeed } from './prompt';
 import { detectAspectMentions, readLexicon, type AspectLexicon } from './factuality';
 import { detectEmbellishments, readEmbellishmentLexicon, type EmbellishmentLexicon } from './embellishment';
@@ -8,13 +9,12 @@ import lexiconRaw from './aspect-lexicon.json';
 import embellishmentLexiconRaw from './embellishment-lexicon.json';
 import absenceLexiconRaw from './absence-lexicon.json';
 
-// 下書き生成（Gemini）。Gemini 呼出の全パラメータ（モデル・スキーマ・安全設定・再試行・出力検証）を単一所有。
-// @google/genai の ai.models.generateContent を GenAiClient 面で抽象化し、テストでモック可能にする。
+// 口コミ下書きの生成。モデル・スキーマ・生成パラメータ・出力検証・事後検証による作り直しをここが持ち、
+// 呼び出し・安全設定・再試行・エラー分類は @fwlm/gemini の generateText に任せる（line-webhook と同じ実行核）。
 
-export type DraftError =
-  | { kind: 'SAFETY_BLOCKED' }
-  | { kind: 'API_ERROR'; status?: number }
-  | { kind: 'INVALID_OUTPUT' };
+export type { GenAiClient, GenAiRequest, GenAiResponse } from '@fwlm/gemini';
+
+export type DraftError = GenerationError;
 export type DraftErrorKind = DraftError['kind'];
 
 export interface DraftGenerator {
@@ -25,31 +25,6 @@ export interface DraftGenerator {
     onClaimResidual?: (categories: string[]) => void,
   ): Promise<Result<string, DraftError>>;
 }
-
-// @google/genai の応答が構造的に満たす最小面。
-export interface GenAiResponse {
-  text?: string;
-  promptFeedback?: { blockReason?: string };
-  candidates?: Array<{ finishReason?: string }>;
-}
-
-export interface GenAiRequest {
-  model: string;
-  contents: string;
-  config: Record<string, unknown>;
-}
-
-export interface GenAiClient {
-  models: { generateContent(req: GenAiRequest): Promise<GenAiResponse> };
-}
-
-// safetySettings は Gemini 2.5/3 系でデフォルト Off のため、口コミ用途では明示必須（Req 3.4）。
-const SAFETY_SETTINGS = [
-  { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-  { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-] as const;
 
 // 構造化出力: {draft: string} を強制。
 const RESPONSE_SCHEMA = {
@@ -129,7 +104,6 @@ export function createDraftGenerator(
   // （cap なので短出力では無駄がなく、truncation による誤 INVALID_OUTPUT を避ける）。
   const maxOutputTokens = options.maxOutputTokens ?? 1024;
   const maxDraftChars = options.maxDraftChars ?? 400;
-  const backoff = options.backoff ?? ((attempt) => delay(200 * 2 ** attempt));
   const factualityCheck = options.factualityCheck ?? true;
   const lexicon = options.lexicon ?? DEFAULT_LEXICON;
   const embellishmentLexicon = options.embellishmentLexicon ?? DEFAULT_EMBELLISHMENT_LEXICON;
@@ -140,49 +114,26 @@ export function createDraftGenerator(
   return {
     async generate(material, variation, requestOnResidual, requestOnClaimResidual) {
       const { systemInstruction, userContent } = buildPrompt(material, variation);
-      const req: GenAiRequest = {
-        model,
-        contents: userContent,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-          // seed は固定しない（同一素材から毎回異なる文面・Req 3.3）。
-          temperature,
-          maxOutputTokens,
-          safetySettings: SAFETY_SETTINGS,
-        },
+      // safetySettings は generateText が既定（DEFAULT_SAFETY_SETTINGS）を付ける。Gemini 2.5/3 系は既定で Off のため、
+      // 口コミ用途では明示が必須（Req 3.4）。上書きしないこと。
+      const config = {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+        // seed は固定しない（同一素材から毎回異なる文面・Req 3.3）。
+        temperature,
+        maxOutputTokens,
       };
 
-      // 1 回分の生成（呼出 → 安全性 → 出力検証）。事後検証で作り直すため関数へ括る。
-      const attempt = async (): Promise<Result<string, DraftError>> => {
-        // 呼出（429/5xx・ネットワーク断は指数バックオフで 1 回だけ再試行）。
-        let res: GenAiResponse;
-        try {
-          res = await client.models.generateContent(req);
-        } catch (firstError) {
-          if (!isRetryable(firstError)) return err(toApiError(firstError));
-          await backoff(0);
-          try {
-            res = await client.models.generateContent(req);
-          } catch (retryError) {
-            return err(toApiError(retryError));
-          }
-        }
-
-        // 安全性ブロック（prompt レベル・候補の finishReason=SAFETY）。
-        if (
-          res.promptFeedback?.blockReason != null ||
-          res.candidates?.some((c) => c.finishReason === 'SAFETY')
-        ) {
-          return err({ kind: 'SAFETY_BLOCKED' });
-        }
-
-        // 出力検証（非空・maxDraftChars 以内・スキーマ準拠）。
-        const draft = extractDraft(res.text, maxDraftChars);
-        if (draft === null) return err({ kind: 'INVALID_OUTPUT' });
-        return ok(draft);
-      };
+      // 1 回分の生成（呼出・429/5xx とネットワーク断の 1 回再試行・安全性ブロック・出力検証）。事後検証で作り直すため関数へ括る。
+      const attempt = (): Promise<Result<string, DraftError>> =>
+        generateText(client, {
+          model,
+          contents: userContent,
+          config,
+          backoff: options.backoff,
+          validateOutput: (text) => extractDraft(text, maxDraftChars),
+        });
 
       const first = await attempt();
       if (!first.ok) return first;
@@ -221,16 +172,7 @@ export function createDraftGenerator(
 export async function createDefaultDraftGenerator(
   options: DraftGeneratorOptions = {},
 ): Promise<DraftGenerator> {
-  const { GoogleGenAI } = await import('@google/genai');
-  const ai = new GoogleGenAI({});
-  const client: GenAiClient = {
-    models: {
-      generateContent: (req) =>
-        ai.models.generateContent(
-          req as Parameters<typeof ai.models.generateContent>[0],
-        ) as Promise<GenAiResponse>,
-    },
-  };
+  const client = await createDefaultGenAiClient();
   return createDraftGenerator(client, { model: process.env.GEMINI_MODEL, ...options });
 }
 
@@ -248,37 +190,4 @@ function extractDraft(text: string | undefined, maxChars: number): string | null
   const trimmed = draft.trim();
   if (trimmed.length === 0 || [...trimmed].length > maxChars) return null;
   return trimmed;
-}
-
-function isRetryable(error: unknown): boolean {
-  const e = asErrorShape(error);
-  const status = getHttpStatus(error) ?? (typeof e?.code === 'number' ? e.code : undefined);
-  if (status === undefined) return true; // ネットワーク断等は 1 回だけ再試行
-  return status === 429 || (status >= 500 && status < 600);
-}
-
-/**
- * 生成 API の例外を DraftError（API_ERROR・取れれば HTTP ステータス）へ畳む。structured の Realizer
- * （structured/realizer.ts）も同じ分類で記録するので export する（generation_failed の errorKind・status を揃える）。
- */
-export function toApiError(error: unknown): DraftError {
-  const status = getHttpStatus(error);
-  return status === undefined ? { kind: 'API_ERROR' } : { kind: 'API_ERROR', status };
-}
-
-function getHttpStatus(error: unknown): number | undefined {
-  const status = asErrorShape(error)?.status;
-  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
-    ? status
-    : undefined;
-}
-
-function asErrorShape(error: unknown): { status?: unknown; code?: unknown } | undefined {
-  return typeof error === 'object' && error !== null
-    ? (error as { status?: unknown; code?: unknown })
-    : undefined;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
