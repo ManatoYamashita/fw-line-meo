@@ -26,11 +26,14 @@ for (const failed of [false, true]) {
       await expect(button).toBeDisabled();
       await expect(button.locator('[data-slot="spinner"]')).toBeVisible();
       await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
-      expect(requests).toBe(1);
+      // ボタンは fetch を出す前に処理中へ変わるので、上の確認が通った時点ではリクエストがまだ route に届いていないことがある。
+      await expect.poll(() => requests).toBe(1);
     } finally { release(); }
     const toast = page.locator('[data-sonner-toast]').filter({ hasText: failed ? '下書きの生成に失敗しました' : '口コミ文を作成しました' });
     await expect(toast).toBeVisible();
     await expect(toast).toHaveAttribute('data-type', failed ? 'error' : 'success');
+    // poll は 1 件目の到着で通るので、二重送信が無いことは応答が返り切った後でもう一度確かめる。
+    expect(requests).toBe(1);
     await expect(page.getByRole('link', { name: 'Google のクチコミ欄を開く' })).toBeVisible();
     if (!failed) {
       await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } }));
