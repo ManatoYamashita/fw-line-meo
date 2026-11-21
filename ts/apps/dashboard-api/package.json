@@ -14,7 +14,7 @@
     "@fwlm/db": "workspace:*",
     "@fwlm/observability": "workspace:*",
     "@fwlm/store-identification": "workspace:*",
-    "@hono/node-server": "^1",
+    "@hono/node-server": "^2.1.11",
     "firebase-admin": "^13",
     "hono": "^4",
     "qrcode": "^1.5"
