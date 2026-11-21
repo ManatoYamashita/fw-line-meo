@@ -1,3 +1,6 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+# Security: raise vulnerable transitive dependencies within their major versions.
+overrides:
+  'hono': '^4.13.16'
