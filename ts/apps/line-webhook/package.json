@@ -20,7 +20,7 @@
     "@fwlm/line-report": "workspace:*",
     "@fwlm/observability": "workspace:*",
     "@fwlm/store-identification": "workspace:*",
-    "@hono/node-server": "^1",
+    "@hono/node-server": "^2",
     "@line/bot-sdk": "^11",
     "google-auth-library": "^10",
     "hono": "^4"
