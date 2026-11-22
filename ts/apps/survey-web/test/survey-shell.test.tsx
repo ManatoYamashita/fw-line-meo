@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { Alert } from '@fwlm/ui/components/alert';
 import { buttonVariants } from '@fwlm/ui/components/button';
@@ -58,7 +58,7 @@ interface RouteResp {
   body: unknown;
 }
 
-function stubFetch(routes: Record<string, RouteResp>): ReturnType<typeof vi.fn> {
+function stubFetch(routes: Record<string, RouteResp>): Mock {
   const fn = vi.fn((url: string) => {
     const r = routes[url];
     return Promise.resolve({ ok: r?.ok ?? true, json: () => Promise.resolve(r?.body ?? {}) });

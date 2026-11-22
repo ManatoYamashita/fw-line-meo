@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import { surveyDefinitionFingerprint, type StructuredSurveyDefinition } from '@fwlm/db';
 import { handleDrafts, type DraftsDeps } from '../src/app/api/drafts/handler';
 import { handleResponses, type ResponsesDeps } from '../src/app/api/responses/handler';
@@ -43,7 +43,7 @@ const DEFINITION: StructuredSurveyDefinition = {
 
 const STORE_VIEW = { id: STORE, name: 'テスト店', placeId: 'ChIJ', placeStatus: 'confirmed' as const, suspendedAt: null };
 
-function port(draft = '刺身盛り合わせがおいしかったです。'): StructuredDraftPort & { prepare: ReturnType<typeof vi.fn> } {
+function port(draft = '刺身盛り合わせがおいしかったです。'): StructuredDraftPort & { prepare: Mock } {
   return { prepare: vi.fn(async () => ({ kind: 'draft' as const, draft, source: 'llm' as const, attempts: 1 })) };
 }
 
@@ -63,7 +63,7 @@ function responsesDeps(structuredDrafts: StructuredDraftPort): ResponsesDeps {
   };
 }
 
-function draftsDeps(structuredDrafts: StructuredDraftPort): DraftsDeps & { generator: { generate: ReturnType<typeof vi.fn> } } {
+function draftsDeps(structuredDrafts: StructuredDraftPort): DraftsDeps & { generator: { generate: Mock } } {
   return {
     tokens,
     generator: { generate: vi.fn(() => Promise.resolve(ok('legacy の再生成'))) },
@@ -332,7 +332,7 @@ describe('structured の生成失敗の監視（generation_failed / generation_s
     );
     return { body: (await res.json()) as Record<string, unknown>, log };
   }
-  const events = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[1] as string);
+  const events = (log: Mock) => log.mock.calls.map((c) => c[1] as string);
 
   for (const [name, run] of [
     ['受付', submit],

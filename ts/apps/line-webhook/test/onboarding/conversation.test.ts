@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import type {
   ActiveInviteCode,
   AuditLogInput,
@@ -315,7 +315,7 @@ function buildDeps(overrides: {
   identificationFake: ReturnType<typeof createFakeIdentificationService>;
   messenger: ReturnType<typeof createFakeMessenger>;
   poolFake: ReturnType<typeof createFakePool>;
-  logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
+  logger: { info: Mock; warn: Mock };
   routerFake: ReturnType<typeof createFakeRouterFactory>;
 } {
   const sessionsFake = createFakeSessionsAccessor(overrides.session);

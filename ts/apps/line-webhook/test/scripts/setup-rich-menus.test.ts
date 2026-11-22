@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,7 +64,7 @@ function emptyResponse(status: number): Response {
 function createFetchMock(
   richMenuIds: readonly string[] = ['richmenu-onboarding-1', 'richmenu-completed-1'],
 ): {
-  fetchMock: ReturnType<typeof vi.fn>;
+  fetchMock: Mock;
   createCalls: Array<{ url: string; body: Record<string, unknown> }>;
   uploadCalls: Array<{ url: string; contentType: string; body: unknown }>;
   defaultCalls: string[];

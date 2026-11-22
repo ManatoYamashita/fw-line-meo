@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { createLineMessenger, LineRequestTimeoutError, type LineMessage } from '../../src/line/client.js';
 
 const TOKEN_URL = 'https://api.line.me/oauth2/v3/token';
@@ -27,7 +27,7 @@ function emptyResponse(status: number): Response {
 // 素朴に検証できるようにするための小道具。
 function routingFetchMock(
   handleOther: (url: string, init?: RequestInit) => Response | Promise<Response>,
-): ReturnType<typeof vi.fn> {
+): Mock {
   return vi.fn(async (rawUrl: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = String(rawUrl);
     if (url === TOKEN_URL) {
@@ -37,7 +37,7 @@ function routingFetchMock(
   });
 }
 
-function fakeLogger(): { warn: ReturnType<typeof vi.fn> } {
+function fakeLogger(): { warn: Mock } {
   return { warn: vi.fn() };
 }
 
@@ -367,7 +367,7 @@ describe('createLineMessenger', () => {
     // LINE のユーザー ID の形（U に続く 16 進 32 桁）。形に合わない値は通信せずに拒む（下の試験）。
     const LINE_USER_ID = `U${'0123456789abcdef'.repeat(2)}`;
 
-    function unlinkCallsOf(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit][] {
+    function unlinkCallsOf(fetchMock: Mock): [string, RequestInit][] {
       return fetchMock.mock.calls.filter(([url]) => url !== TOKEN_URL) as [string, RequestInit][];
     }
 
@@ -548,7 +548,7 @@ describe('createLineMessenger', () => {
   describe('通信の時間制限（Issue #499）', () => {
     // 呼び出し先の URL が一致したら、打ち切られるまで応答しない fetch。打ち切られたときは、実際の fetch と同じく
     // AbortError で reject する（LineRequestTimeoutError への変換は client.ts の責務）。
-    function hangingFetch(hangs: (url: string) => boolean): ReturnType<typeof vi.fn> {
+    function hangingFetch(hangs: (url: string) => boolean): Mock {
       return vi.fn(async (rawUrl: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const url = String(rawUrl);
         if (hangs(url)) {

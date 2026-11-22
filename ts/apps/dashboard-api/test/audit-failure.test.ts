@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import type {
   AuditLogAction,
   AuditLogInput,
@@ -71,7 +71,7 @@ const auth = 'Bearer tok';
 interface AuditPath {
   name: string;
   // 業務の書込（1 回だけ呼ばれることを確かめる）と監査を受け取り、応答を返す。
-  run: (write: ReturnType<typeof vi.fn>, auditLog: AuditLogger, log: Sink) => Promise<Response>;
+  run: (write: Mock, auditLog: AuditLogger, log: Sink) => Promise<Response>;
   // 業務の書込の依存が返す値。
   writeResult: unknown;
   status: number;

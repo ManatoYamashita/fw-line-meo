@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import {
   auditActionsForUserUpdate,
   handleAgenciesList,
@@ -74,7 +74,7 @@ function authDeps(user: DashboardUserIdentity | null, disabled = false): AuthDep
 // --- 横断ガード（Req 6.5, 7.1）: 全ハンドラで一様に検証する ---
 // 各エントリは共有スパイ dep を持つ deps を組み立て、認証結果に応じた封筒を返す。
 
-type Spy = ReturnType<typeof vi.fn>;
+type Spy = Mock;
 interface GuardCase {
   name: string;
   invoke: (opts: {

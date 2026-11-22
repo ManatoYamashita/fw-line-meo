@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import { toast } from '@fwlm/ui/components/app-toaster';
 import { Alert } from '@fwlm/ui/components/alert';
@@ -27,7 +27,7 @@ function props(over: Partial<DraftPanelProps> = {}): DraftPanelProps {
   };
 }
 
-function stubClipboard(writeText: ReturnType<typeof vi.fn>): void {
+function stubClipboard(writeText: Mock): void {
   vi.stubGlobal('navigator', { clipboard: { writeText } });
 }
 
