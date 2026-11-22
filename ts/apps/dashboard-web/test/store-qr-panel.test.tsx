@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 
 import { buttonVariants } from '@fwlm/ui/components/button';
@@ -440,12 +440,12 @@ describe('StoreQrPanel: 失敗経路の堅牢性', () => {
 describe('StoreQrPanel: 焦点の引き取り', () => {
   /** 1 回失敗させたあと、2 回目の応答を呼び出し側から制御できる取得手続きを作る。 */
   function failThenControlled(): {
-    fetchQr: ReturnType<typeof vi.fn>;
+    fetchQr: Mock<(storeId: string) => Promise<ApiResult<BinaryPayload>>>;
     resolveSecond: (value: ApiResult<BinaryPayload>) => void;
   } {
     const pending = deferred<ApiResult<BinaryPayload>>();
     const fetchQr = vi
-      .fn()
+      .fn<(storeId: string) => Promise<ApiResult<BinaryPayload>>>()
       .mockResolvedValueOnce(errorResult('network', 'ネットワークエラー'))
       .mockReturnValueOnce(pending.promise);
     return { fetchQr, resolveSecond: pending.resolve };

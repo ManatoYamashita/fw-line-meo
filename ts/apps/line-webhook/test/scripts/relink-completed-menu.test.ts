@@ -6,7 +6,7 @@
 // 「張り替え先が 3 導線を持たなければ誰にも張らない」を固定する。
 // 実 LINE・実 DB には一切つながない。
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import type { Queryable } from '@fwlm/db';
 import { buildCompletedRichMenu } from '../../scripts/rich-menu-definitions.js';
 import {
@@ -51,7 +51,7 @@ const DEFAULT_SCRIPTS: Readonly<Record<string, UserScript>> = {
 };
 
 interface FakeLine {
-  readonly fetchMock: ReturnType<typeof vi.fn>;
+  readonly fetchMock: Mock;
   readonly linkedUsers: string[];
   readonly deletedMenus: string[];
 }

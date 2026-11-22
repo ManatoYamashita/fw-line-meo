@@ -35,7 +35,7 @@
 //
 // 期待する文言・日付・説明文・行は、リテラルで書く。窓の計算をテストの中で組み立て直すと、実装と同じ誤りを
 // 期待値へ写しうるためである。
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { StoreDetailResponse } from '../lib/contract';
@@ -61,7 +61,7 @@ installPointerEventPolyfill();
 
 // --- fetch のスタブ（store-page.test.tsx の stubFetch と同じ形） ------------------------------
 
-function stubFetch(body: StoreDetailResponse): ReturnType<typeof vi.fn> {
+function stubFetch(body: StoreDetailResponse): Mock {
   const fn = vi.fn(() =>
     Promise.resolve({
       ok: true,
@@ -304,7 +304,7 @@ function otherSurfaceText(): readonly string[] {
     .map((child) => announcedText(child));
 }
 
-async function renderPage(body: StoreDetailResponse): Promise<ReturnType<typeof vi.fn>> {
+async function renderPage(body: StoreDetailResponse): Promise<Mock> {
   const fetchMock = stubFetch(body);
   render(<StorePage />);
   await waitFor(() => {
@@ -1040,6 +1040,33 @@ function track<S extends { mockRestore(): void }>(restorers: Restorers, spy: S):
   return spy;
 }
 
+/** jsdom の VirtualConsole のうち、ここで使う部分。 */
+interface JsdomVirtualConsole {
+  on(event: 'jsdomError', listener: (error: Error & { detail?: unknown }) => void): unknown;
+  off(event: 'jsdomError', listener: (error: Error & { detail?: unknown }) => void): unknown;
+}
+
+/**
+ * jsdom が実装していない操作の通知（jsdomError）を、その時点の console.error へ流す。
+ *
+ * vitest 4 の jsdom 環境では、jsdom が通知を書き出す console と、テストから見える console が別のオブジェクトに
+ * なり、vi.spyOn(console, 'error') では捕まらない。jsdom の VirtualConsole に直接つないで、console.error の
+ * 記録へ戻す（引数は jsdom の sendTo と同じ形）。見つからなければ、記録が空振りで 0 件になるのを避けるため投げる。
+ */
+function forwardJsdomErrors(restorers: Restorers): void {
+  const virtualConsole = (globalThis as { jsdom?: { virtualConsole?: JsdomVirtualConsole } }).jsdom?.virtualConsole;
+  if (!virtualConsole) {
+    throw new Error('jsdom の VirtualConsole が見つからない（jsdom 環境で実行しているか確かめる）');
+  }
+  const forward = (error: Error & { detail?: unknown }): void => {
+    console.error(error.stack, error.detail);
+  };
+  virtualConsole.on('jsdomError', forward);
+  restorers.push(() => {
+    virtualConsole.off('jsdomError', forward);
+  });
+}
+
 /**
  * 端末の保存領域・クッキー・閲覧履歴を書き換える API の見張り。元の働きはそのまま通し、呼ばれた記録だけを取る。
  * jsdom はこれらを各 interface の prototype に定義している（localStorage と sessionStorage は同じ
@@ -1106,6 +1133,7 @@ describe('操作の無副作用（store-detail-trend-dashboard task 4.3・Issue 
       // ページの遷移を捕まえるための記録（consoleErrorLines の説明を参照）。元の働きは通すので、想定外の出力も
       // そのまま表に出る。
       const consoleError = track(restorers, vi.spyOn(console, 'error'));
+      forwardJsdomErrors(restorers);
 
       // 各段で操作し、操作が効いたこと（対照）と、帰属表示が同じ 1 箇所に残っていることを確かめる。
       // 操作が効かないまま無副作用を確かめると、空振りで緑になるためである。

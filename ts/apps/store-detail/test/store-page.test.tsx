@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import type { StoreDetailResponse, StoreRef } from '../lib/contract';
 import { announcedText, ownText } from './live-region';
@@ -40,7 +40,7 @@ interface RouteResp {
   readonly body: unknown;
 }
 
-function stubFetch(resp: RouteResp): ReturnType<typeof vi.fn> {
+function stubFetch(resp: RouteResp): Mock {
   const fn = vi.fn(() =>
     Promise.resolve({
       ok: resp.ok,
