@@ -466,7 +466,9 @@ jobs:
       - name: 'go test（DB 込み・パッケージ並列のまま）'
         # **`-p 1` を付けない。** 付けると Issue #163 の根治（テストごとの隔離データベース）が
         # 効いているかを検証できなくなる。並列のまま緑であることがこの修正の観察可能な完了条件。
-        run: cd go && go test ./...
+        # **`-count=1` で結果キャッシュを使わない。** setup-go が復元する GOCACHE に同じ入力の結果があると、
+        # DB を使うテストが実行されずに PASS が再生される（cross-runtime で実際に起きた・db/test/cross_runtime_steps.sh）。
+        run: cd go && go test -count=1 ./...
 
   cross-runtime:
     # Issue #158 (b): 「言語間の結合は SQL スキーマのみ」（design.md）をモックではなく

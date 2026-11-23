@@ -35,7 +35,11 @@ echo "=================================================================="
 # Go の test バイナリが完全終了（＝全 t.Cleanup 完了）してから逐次シェルで 2〜4 段が起動するため、
 # 抑制しても TS 側が読むタイミングとの競合は生じない。
 export CROSS_RUNTIME_SKIP_CLEANUP=1
-(cd "$ROOT/go" && go test ./internal/batch/... -run '^TestCrossRuntimeContract_GoWritesReadableSummaries$' -v)
+# **`-count=1` で go test の結果キャッシュを使わない。** キャッシュの判定はコードとテストが読む環境変数だけで、
+# DB の状態を含まない。CI は setup-go が GOCACHE を保存・復元するため、前回と入力が同じだと Go 側は
+# 実行されずに前回の PASS が再生され（`ok ... (cached)`）、行が 1 件も書かれないまま 2 段目以降の TS が
+# 空の DB を読んで落ちる（2026-11-23 に main で発生。前日に保存されたキャッシュが復元された）。
+(cd "$ROOT/go" && go test -count=1 ./internal/batch/... -run '^TestCrossRuntimeContract_GoWritesReadableSummaries$' -v)
 
 echo "=================================================================="
 echo ">> [cross-runtime 2/5] TS: 実配信オーケストレーション（runDeliveryJob）を"
